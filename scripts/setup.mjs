@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import * as clackPrompts from "@clack/prompts";
 
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
@@ -198,7 +199,7 @@ function isDirectExecution(moduleUrl, argvPath) {
 
 if (isDirectExecution(import.meta.url, process.argv[1])) {
   await runSetup().catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });
 }

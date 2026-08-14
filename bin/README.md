@@ -11,7 +11,7 @@
 
 - `init`、`setup`、`config`：初始化、从统一菜单选择配置模块，或打开交互式配置与设置菜单
   （操作详情、计划更新、按提供商的价格显示方式、调试模式、审批超时、Sandbox、默认工作区与
-  模型、Telegram 消息格式等配置文件参数，以及配置路径）；`config` 在非交互终端仍直接显示
+  模型、WebUI、指标、Telegram 消息格式等配置文件参数，以及配置路径）；`config` 在非交互终端仍直接显示
   用户级 `.codex-connect` 配置路径。
 - `doctor`：诊断当前 TOML 配置、安装、Linux `bubblewrap` 沙箱前置条件、主 App Server 与已配置
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
@@ -21,15 +21,19 @@
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek` 选择隔离实例。
-- `work`：列出、注册或移除 Workspace。
+- `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
 - `agents`：启用或停用 Codex multi_agent_v2 的 DeepSeek 子代理角色（`agents.ds`），并查看当前状态。
+- `update`：统一审查并更新用户配置、状态数据库和指标数据库，然后恢复核心服务。
 - `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
-- `metrics`：只读检查独立模型指标库，或在 Gateway 停止后备份并重建不兼容的指标库。
+- `metrics`：查询、导出、清理或显式维护独立模型指标库；日常兼容升级使用 `update`。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由当前飞书/微信/Telegram
   会话的机器人凭据发送回绑定会话；见 `docs/channel-image.md`。
+- `webui`、`center`：分别启动本机只读指标界面和多设备指标中心；监听参数在读取用户配置前完成校验。
 - `service`：完整校验配置后安装整套后台服务；启停、重启、状态和日志命令使用
-  `gateway`、`app-server` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway。
+  `gateway`、`app-server`、`webui`、`center` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
+  `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
+  WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理；任一受监管组件退出都会共同重建。代理指标通过私有 Unix Socket

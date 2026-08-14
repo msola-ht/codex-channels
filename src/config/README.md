@@ -37,6 +37,9 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
 变化需要重启 Gateway，不需要重启 App Server。
 
+`display.price_currency` 统一控制渠道与指标输出使用人民币或美元。人民币显示依赖 Gateway 持有的
+汇率刷新组件，因此币种变化需要重启 Gateway，不需要重启 App Server。
+
 `logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、
 `error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果，并在
 渠道中展示 `/vision` 接收与 Gateway 处理耗时；消息正文、请求参数、上游响应、凭据和审批内容

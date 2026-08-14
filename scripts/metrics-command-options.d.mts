@@ -35,6 +35,11 @@ export function parseMetricsOptions(
   allowed: Set<string>,
 ): Record<string, string>;
 
+export function validateMetricsCommandArgs(
+  subcommand: string,
+  args: string[],
+): void;
+
 export function parseCleanupOptions(args: string[]): MetricsCleanupOptions;
 
 export function parseMetricsRunArgs(

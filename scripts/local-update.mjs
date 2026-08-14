@@ -20,7 +20,7 @@ import {
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
-import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
+import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   loadConfigDocument,
@@ -41,6 +41,8 @@ import {
   validateStateDatabaseStructure,
 } from "./upgrade-state.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
+
+const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
 export function updateGatewayConfiguration(environment = process.env, options = {}) {
   const { configPath } = requireUserConfig(environment);
@@ -212,10 +214,23 @@ export function validateLocalInstallation(environment = process.env) {
 }
 
 export async function waitForCoreServices(environment = process.env, options = {}) {
+  return waitForCoreServiceTarget("all", environment, options);
+}
+
+export async function waitForCoreServiceTarget(
+  target,
+  environment = process.env,
+  options = {},
+) {
+  if (target !== "gateway" && target !== "app-server" && target !== "all") {
+    throw new Error(`核心服务就绪目标无效：${String(target)}`);
+  }
+  const requiresAppServer = target === "app-server" || target === "all";
+  const requiresGateway = target === "gateway" || target === "all";
   const { configPath, dataDir } = requireUserConfig(environment);
   const document = readGatewayConfig(configPath);
   const descriptor = resolveAppServerRuntime(document, dataDir, environment);
-  const timeoutMs = options.timeoutMs ?? 15_000;
+  const timeoutMs = options.timeoutMs ?? defaultCoreServiceReadinessTimeoutMs;
   const intervalMs = options.intervalMs ?? 100;
   const stableMs = options.stableMs ?? 500;
   const now = options.now ?? Date.now;
@@ -223,17 +238,21 @@ export async function waitForCoreServices(environment = process.env, options = {
     ?? ((milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)));
   const inspectSupervisor = options.inspectSupervisor ?? inspectAppServerSupervisor;
   const socketHealthy = options.socketHealthy ?? appServerSocketAcceptsWebSocket;
-  const gatewayHealthy = options.gatewayHealthy ?? gatewayOwnerIsActive;
+  const gatewayHealthy = options.gatewayHealthy ?? gatewayOwnerIsReady;
   const deadline = now() + timeoutMs;
   let healthySince;
   while (now() < deadline) {
-    const supervisor = await inspectSupervisor(descriptor.primarySocketPath);
-    const socketsHealthy = await Promise.all(
-      descriptor.socketPaths.map((socketPath) => socketHealthy(socketPath)),
-    );
-    const healthy = sameAppServerTopology(supervisor, descriptor.topology)
-      && socketsHealthy.every(Boolean)
-      && await gatewayHealthy(configPath);
+    let appServerReady = true;
+    if (requiresAppServer) {
+      const supervisor = await inspectSupervisor(descriptor.primarySocketPath);
+      const socketsHealthy = await Promise.all(
+        descriptor.socketPaths.map((socketPath) => socketHealthy(socketPath)),
+      );
+      appServerReady = sameAppServerTopology(supervisor, descriptor.topology)
+        && socketsHealthy.every(Boolean);
+    }
+    const gatewayReady = !requiresGateway || await gatewayHealthy(configPath);
+    const healthy = appServerReady && gatewayReady;
     if (healthy) {
       healthySince ??= now();
       if (now() - healthySince >= stableMs) return;
@@ -242,7 +261,15 @@ export async function waitForCoreServices(environment = process.env, options = {
     }
     await sleep(intervalMs);
   }
-  throw new Error("App Server 或 Gateway 在更新后未能及时就绪");
+  const label = target === "all"
+    ? "Codex App Server 与 Gateway"
+    : target === "app-server"
+      ? "Codex App Server"
+      : "Gateway";
+  throw new Error(
+    `${label} 未能及时就绪；请运行 codexc service status ${target}，`
+    + `并查看 codexc service logs ${target}`,
+  );
 }
 
 async function stopCoreServices(stopServices, startServices, waitForServices) {

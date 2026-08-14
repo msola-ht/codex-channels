@@ -176,7 +176,7 @@ case "$action" in
     for label in ${(f)labels}; do
       start_job "$label" "$agents_dir/$label.plist"
     done
-    print_status success "Codex App Server 与 Gateway 已安装并启动。"
+    print_status note "Codex App Server 与 Gateway 已安装，启动操作已完成，正在确认就绪状态。"
     print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
     print_status note "指标中心服务已生成，可执行 codexc service start center 启动。"
     ;;
@@ -189,11 +189,11 @@ case "$action" in
       start_job "$label" "$agents_dir/$label.plist"
     done
     case "$target" in
-      gateway) print_status success "Gateway 已启动。" ;;
-      app-server) print_status success "Codex App Server 已启动。" ;;
+      gateway) print_status note "Gateway 启动操作已完成，正在确认就绪状态。" ;;
+      app-server) print_status note "Codex App Server 启动操作已完成，正在确认就绪状态。" ;;
       webui) print_status success "WebUI 已启动。" ;;
       center) print_status success "指标中心已启动。" ;;
-      all) print_status success "Codex App Server 与 Gateway 已启动。" ;;
+      all) print_status note "Codex App Server 与 Gateway 启动操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
   stop)
@@ -229,11 +229,11 @@ case "$action" in
       start_job "$label" "$agents_dir/$label.plist"
     done
     case "$target" in
-      gateway) print_status success "Gateway 已重启；Codex App Server 保持运行。" ;;
-      app-server) print_status success "Codex App Server 已重启；Gateway 将自动重连。" ;;
+      gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
+      app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
       webui) print_status success "WebUI 已重启。" ;;
       center) print_status success "指标中心已重启。" ;;
-      all) print_status success "Codex App Server 与 Gateway 已重启。" ;;
+      all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
   reload)
@@ -248,16 +248,21 @@ case "$action" in
     else
       print_status note "Gateway 当前没有可接收信号的进程，正在启动..."
       start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-      print_status success "Gateway 已启动并将读取最新配置。"
+      print_status note "Gateway 启动操作已完成，将在进程就绪后读取最新配置。"
     fi
     ;;
   status)
     target="${2:-all}"
     require_target "$target"
     labels=$(service_ids "$target" start)
+    status_code=0
     for label in ${(f)labels}; do
-      launchctl print "$user_domain/$label" 2>/dev/null || true
+      if ! launchctl print "$user_domain/$label" 2>/dev/null; then
+        print_status failure "launchd 服务未加载：$label"
+        status_code=1
+      fi
     done
+    exit "$status_code"
     ;;
   logs)
     shift

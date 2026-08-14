@@ -15,6 +15,8 @@ import {
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runCenterSettings, runConfig } from "../scripts/config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
 
 const roots: string[] = [];
 
@@ -86,7 +88,9 @@ describe("Codex Connect config menu", () => {
       price_currency: "cny",
     });
     expect(output.join("")).toContain("全局价格显示方式已设为 cny");
-    expect(output.join("")).toContain("重启 Gateway 后生效");
+    expect(output.join("")).toContain(
+      "运行中的 Gateway 会自动重新读取配置；需要重建连接时，后台服务会自动重启，前台进程需重新启动；未运行时将在下次启动生效",
+    );
   });
 
   it("sets the global price currency to USD through the menu", async () => {
@@ -293,26 +297,21 @@ describe("Codex Connect config menu", () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
-        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("sandbox")
         .mockResolvedValueOnce("danger-full-access"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
 
-    const result = await runConfig({
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir,
       environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
+      output: { write: (value: string) => output.push(value) },
+      outputIsTTY: true,
       prompts,
     });
 
-    expect(result).toEqual({
-      workspaceId: "codex-connect",
-      sandbox: "danger-full-access",
-      approvalPolicy: undefined,
-      permissions: undefined,
-      configPath: fixture.configPath,
-    });
     expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
       .toMatchObject({ sandbox: "danger-full-access" });
     expect(output.join("")).toContain("已更新");
@@ -324,28 +323,48 @@ describe("Codex Connect config menu", () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
-        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("approval_policy")
         .mockResolvedValueOnce("never"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
 
-    const result = await runConfig({
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir,
       environment: fixture.environment,
-      output: { write: () => {}, isTTY: true },
+      output: { write: () => {} },
+      outputIsTTY: true,
       prompts,
     });
 
-    expect(result).toEqual({
-      workspaceId: "codex-connect",
-      sandbox: undefined,
-      approvalPolicy: "never",
-      permissions: undefined,
-      configPath: fixture.configPath,
-    });
     expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
       .toMatchObject({ approval_policy: "never" });
+  });
+
+  it("returns from Workspace permissions to the work menu", async () => {
+    const fixture = createFixture();
+    const select = vi.fn()
+      .mockResolvedValueOnce("permissions")
+      .mockResolvedValueOnce("back")
+      .mockResolvedValueOnce("cancel");
+    const prompts = {
+      intro: vi.fn(),
+      select,
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir,
+      environment: fixture.environment,
+      output: { write: vi.fn() },
+      outputIsTTY: true,
+      prompts,
+    });
+
+    expect(select).toHaveBeenCalledTimes(3);
+    expect(prompts.cancel).toHaveBeenCalledWith("已取消");
   });
 
   it("rejects a permission profile when workspace sandbox is configured", async () => {
@@ -363,7 +382,7 @@ describe("Codex Connect config menu", () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
-        .mockResolvedValueOnce("workspaces")
+        .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("back")
         .mockResolvedValueOnce("cancel"),
@@ -372,9 +391,11 @@ describe("Codex Connect config menu", () => {
       cancel: vi.fn(),
     };
 
-    await runConfig({
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir,
       environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
+      output: { write: (value: string) => output.push(value) },
+      outputIsTTY: true,
       prompts,
     });
 
@@ -529,6 +550,7 @@ describe("Codex Connect config menu", () => {
     const values = options.map((option: { value: string }) => option.value);
     expect(values).toContain("paths");
     expect(values).toContain("metrics");
+    expect(values).not.toContain("workspaces");
     expect(values).not.toContain("doctor");
   });
 
@@ -576,7 +598,10 @@ describe("Codex Connect config menu", () => {
       token: "view-token",
     });
     expect(output.join("")).toContain("已接入中心");
-    expect(output.join("")).toContain("重启 Gateway 后开始上报");
+    expect(output.join("")).toContain(
+      "运行中的 Gateway 会自动重新读取配置；需要重建连接时，后台服务会自动重启，前台进程需重新启动；未运行时将在下次启动生效",
+    );
+    expect(output.join("")).toContain("WebUI 全局页将在重启 WebUI 后生效");
   });
 
   it("prints the metrics connection status through the menu", async () => {

@@ -7,6 +7,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { validateFeishuApplication } from "./feishu-application.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
@@ -159,7 +160,7 @@ export async function runFeishuSetup({
         + "如有缺失，请重新运行 codexc setup，选择扫码授权并在飞书页面选择当前应用。\n",
       );
     }
-    output.write("运行中的 Gateway 会检测配置变化并重启飞书 Surface。\n");
+    writeGatewayConfigActivationNotice(output);
     return {
       appId: result.appId,
       allowedOpenIds,

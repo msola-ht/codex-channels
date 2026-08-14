@@ -222,10 +222,10 @@ describe("launchd installer", () => {
       { env: environment, encoding: "utf8" },
     );
 
-    expect(started).toContain("已启动");
-    expect(started).toContain("[成功]");
+    expect(started).toContain("启动操作已完成，正在确认就绪状态");
+    expect(started).toContain("[提示]");
     expect(stopped).toContain("已停止");
-    expect(restarted).toContain("Gateway 已重启");
+    expect(restarted).toContain("Gateway 重启操作已完成");
     expect(restarted).toContain("App Server 保持运行");
     expect(startCalls).toContain("bootstrap");
     expect(startCalls).toContain("kickstart -k");
@@ -235,17 +235,17 @@ describe("launchd installer", () => {
     expect(restartCalls).toContain("kickstart -k");
     expect(restartCalls).toContain("com.hegenai.codex-gateway");
     expect(restartCalls).not.toContain("com.hegenai.codex-app-server");
-    expect(appServerRestarted).toContain("Codex App Server 已重启");
+    expect(appServerRestarted).toContain("Codex App Server 重启操作已完成");
     expect(appServerRestartCalls).toContain("com.hegenai.codex-app-server");
     expect(appServerRestartCalls).not.toContain("com.hegenai.codex-gateway");
-    expect(allRestarted).toContain("Codex App Server 与 Gateway 已重启");
+    expect(allRestarted).toContain("Codex App Server 与 Gateway 重启操作已完成");
     expect(allRestartCalls).toContain("com.hegenai.codex-app-server");
     expect(allRestartCalls).toContain("com.hegenai.codex-gateway");
     expect(reloaded).toContain("重新读取配置");
     expect(reloadCalls).toContain("kill SIGHUP");
     expect(reloadCalls).toContain("com.hegenai.codex-gateway");
     expect(reloadCalls).not.toContain("com.hegenai.codex-app-server");
-    expect(recovered).toContain("Gateway 已启动并将读取最新配置");
+    expect(recovered).toContain("Gateway 启动操作已完成，将在进程就绪后读取最新配置");
     expect(recoveryCalls).toContain("kill SIGHUP");
     expect(recoveryCalls).toContain("kickstart -k");
     expect(recoveryCalls).not.toContain("com.hegenai.codex-app-server");
@@ -255,6 +255,34 @@ describe("launchd installer", () => {
     expect(allLogs).toContain("codex-app-server.log");
     expect(allLogs).toContain("app-latest");
     expect(allLogs).not.toContain("app-old");
+  });
+
+  zshIt("returns a failure when a requested launchd service is not loaded", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-launchd-status-"));
+    temporaryDirectories.push(root);
+    const binDir = join(root, "bin");
+    mkdirSync(binDir);
+    const fakeLaunchctl = join(binDir, "launchctl");
+    writeFileSync(fakeLaunchctl, "#!/bin/sh\nexit 1\n");
+    chmodSync(fakeLaunchctl, 0o755);
+
+    const result = spawnSync(
+      "/bin/zsh",
+      [resolve("scripts/launchd-control.sh"), "status", "gateway"],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          PATH: `${binDir}:/usr/bin:/bin`,
+          NODE_BINARY: process.execPath,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("launchd 服务未加载");
+    expect(result.stderr).toContain("com.hegenai.codex-gateway");
   });
 
   zshIt("rejects unsupported launchd jobs without modifying them", () => {

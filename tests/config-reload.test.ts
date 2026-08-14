@@ -113,6 +113,7 @@ describe("Gateway config reload", () => {
     ["surface.telegram.message-format", "telegram", { telegramMessageFormat: "rich" }],
     ["display.operation-updates", "global", { operationUpdateDisplay: "compact" }],
     ["display.plan-updates", "global", { planUpdatesEnabled: true }],
+    ["display.price-currency", "global", { priceCurrency: "usd" }],
     ["experimental.plugin-api", "global", { pluginApiEnabled: false }],
     ["thread-sections.administrators", "global", {
       threadSectionAdministrators: new Set(["telegram:123"]),

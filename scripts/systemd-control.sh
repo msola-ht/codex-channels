@@ -106,7 +106,7 @@ case "$action" in
     set -- $resolved_units
     systemctl_user enable "$@"
     for unit in "$@"; do systemctl_user restart "$unit"; done
-    print_status success "Codex App Server 与 Gateway systemd 用户服务已安装并启动。"
+    print_status note "Codex App Server 与 Gateway systemd 用户服务已安装，启动操作已完成，正在确认就绪状态。"
     print_status note "systemd linger 已启用，未登录时也会随系统启动。"
     print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
     print_status note "指标中心服务已生成，可执行 codexc service start center 启动。"
@@ -117,11 +117,11 @@ case "$action" in
     resolved_units=$(service_ids "$target" start)
     for unit in $resolved_units; do systemctl_user start "$unit"; done
     case "$target" in
-      gateway) print_status success "Gateway 已启动。" ;;
-      app-server) print_status success "Codex App Server 已启动。" ;;
+      gateway) print_status note "Gateway 启动操作已完成，正在确认就绪状态。" ;;
+      app-server) print_status note "Codex App Server 启动操作已完成，正在确认就绪状态。" ;;
       webui) print_status success "WebUI 已启动。" ;;
       center) print_status success "指标中心已启动。" ;;
-      all) print_status success "Codex App Server 与 Gateway 已启动。" ;;
+      all) print_status note "Codex App Server 与 Gateway 启动操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
   stop)
@@ -143,11 +143,11 @@ case "$action" in
     resolved_units=$(service_ids "$target" start)
     for unit in $resolved_units; do systemctl_user restart "$unit"; done
     case "$target" in
-      gateway) print_status success "Gateway 已重启；Codex App Server 保持运行。" ;;
-      app-server) print_status success "Codex App Server 已重启；Gateway 将自动重连。" ;;
+      gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
+      app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
       webui) print_status success "WebUI 已重启。" ;;
       center) print_status success "指标中心已重启。" ;;
-      all) print_status success "Codex App Server 与 Gateway 已重启。" ;;
+      all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
   reload)
@@ -164,7 +164,14 @@ case "$action" in
     require_target "$target"
     resolved_units=$(service_ids "$target" start)
     set -- $resolved_units
-    systemctl_user --no-pager status "$@" || true
+    set +e
+    systemctl_user --no-pager status "$@"
+    status_code=$?
+    set -e
+    if [ "$status_code" -ne 0 ]; then
+      print_status failure "systemd 服务状态异常。"
+      exit "$status_code"
+    fi
     ;;
   logs)
     shift

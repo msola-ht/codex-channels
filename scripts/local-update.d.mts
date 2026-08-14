@@ -19,6 +19,17 @@ export interface LocalUpdateEnvironment {
   [key: string]: string | undefined;
 }
 
+export interface CoreServiceReadinessOptions {
+  gatewayHealthy?: (configPath: string) => boolean | Promise<boolean>;
+  inspectSupervisor?: (socketPath: string) => unknown | Promise<unknown>;
+  intervalMs?: number;
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
+  socketHealthy?: (socketPath: string) => boolean | Promise<boolean>;
+  stableMs?: number;
+  timeoutMs?: number;
+}
+
 export function inspectDatabaseUpdates(
   environment?: LocalUpdateEnvironment,
   options?: {
@@ -88,14 +99,11 @@ export function validateLocalInstallation(
 
 export function waitForCoreServices(
   environment?: LocalUpdateEnvironment,
-  options?: {
-    gatewayHealthy?: (configPath: string) => boolean | Promise<boolean>;
-    inspectSupervisor?: (socketPath: string) => unknown | Promise<unknown>;
-    intervalMs?: number;
-    now?: () => number;
-    sleep?: (milliseconds: number) => Promise<void>;
-    socketHealthy?: (socketPath: string) => boolean | Promise<boolean>;
-    stableMs?: number;
-    timeoutMs?: number;
-  },
+  options?: CoreServiceReadinessOptions,
+): Promise<void>;
+
+export function waitForCoreServiceTarget(
+  target: "gateway" | "app-server" | "all",
+  environment?: LocalUpdateEnvironment,
+  options?: CoreServiceReadinessOptions,
 ): Promise<void>;

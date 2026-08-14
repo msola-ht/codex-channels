@@ -33,7 +33,7 @@ codexc setup
 
 `codexc config` 提供交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：显示设置（操作
 详情、计划更新、参考价人民币换算）、系统设置（调试模式、审批超时、Sandbox、默认工作区与
-渠道新会话模型覆盖）、工作区设置（沙箱、审批策略、权限 Profile）、Telegram 消息格式，以及配置路径查看。
+渠道新会话模型覆盖）、WebUI 设置、指标设置、Telegram 消息格式，以及配置路径查看。
 在脚本或管道中运行时会直接输出用户目录与配置文件路径。
 
 注册需要让 Codex 操作的项目：
@@ -146,7 +146,8 @@ codexc work remove <序号|ID|名称>    # 删除注册，不删除项目文件
 
 聊天客户端只能选择已经注册的 Workspace，不能提交任意本机目录。
 
-Workspace 可单独配置沙箱、审批策略或权限 Profile；聊天中使用 `/workspaceperm` 查看或修改。
+运行 `codexc work` 可为 Workspace 单独配置沙箱、审批策略或权限 Profile；聊天中使用
+`/workspaceperm` 查看或修改。
 
 ### 在终端继续会话
 
@@ -195,10 +196,14 @@ codexc service logs all -n 200        # 查看全部服务最近 200 行日志
 
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
 `codexc service -h` 查看完整用法。WebUI 与指标中心不并入 `all`，需要时单独启动。
+核心服务执行安装、启动或重启后，CLI 会等待 App Server 监管拓扑、WebSocket 与 Gateway
+应用就绪状态稳定；超时会返回失败并提示查看对应状态和日志，不会把服务管理器已接受命令
+直接当作服务健康。
 
-服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口；渠道内
-执行 `codexc service restart app-server` 或 `codexc service restart all` 会被拒绝。需要重启 App
-Server 时必须从本机终端执行。
+服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口。渠道内
+会拒绝安装或卸载服务、停止 Gateway/App Server，以及重启 App Server；对应的 `all` 操作同样拒绝。
+渠道内仍可查看状态和日志、重新加载或启动服务、只重启 Gateway，以及管理独立的 WebUI/指标中心。
+需要执行被拒绝的操作时，按提示复制命令到本机终端运行。
 
 查看、导出或清理脱敏指标：
 

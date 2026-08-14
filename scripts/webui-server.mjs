@@ -10,8 +10,13 @@ import {
   metricsRange,
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { enrichCosts, loadDisplayContext } from "./metrics-export-format.mjs";
 import { userDataDir } from "./runtime-config.mjs";
+import {
+  assertWebuiHost,
+  parseWebuiCliArgs,
+} from "./webui-command-options.mjs";
 import {
   readGatewayConfig,
   validateMetricsViewConfigDocument,
@@ -65,9 +70,7 @@ export function createWebuiServer({
   staticDir = join(PACKAGE_DIR, "webui", "dist"),
   token = null,
 } = {}) {
-  if (!["127.0.0.1", "::1", "0.0.0.0"].includes(host)) {
-    throw new Error("WebUI host 只允许 127.0.0.1、::1 或 0.0.0.0");
-  }
+  assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
     throw new Error(
       "WebUI 绑定非回环地址时必须提供访问令牌（--token 或配置 [webui] token）",
@@ -83,7 +86,7 @@ export function resolveWebuiSettings({
   args = [],
   environment = process.env,
 } = {}) {
-  const cli = parseCliArgs(args);
+  const cli = parseWebuiCliArgs(args);
   const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const configPath = explicitConfigFile
     ? resolve(explicitConfigFile)
@@ -617,7 +620,10 @@ function main() {
       token: settings.token,
     });
     server.on("error", (error) => {
-      console.error(`WebUI 启动失败：${error instanceof Error ? error.message : String(error)}`);
+      writeCliMessage(
+        "failure",
+        `WebUI 启动失败：${error instanceof Error ? error.message : String(error)}`,
+      );
       process.exitCode = 1;
     });
     server.listen(settings.port, host, () => {
@@ -639,51 +645,9 @@ function main() {
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
-}
-
-function parseCliArgs(args) {
-  const settings = {};
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--port") {
-      const raw = args[index + 1];
-      if (raw === undefined || !/^[0-9]+$/u.test(raw)) {
-        throw new Error("用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]");
-      }
-      const port = Number(raw);
-      if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-        throw new Error("端口必须在 1 到 65535 之间");
-      }
-      settings.port = port;
-      index += 1;
-      continue;
-    }
-    if (argument === "--host") {
-      const raw = args[index + 1];
-      if (raw === undefined) {
-        throw new Error("用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]");
-      }
-      settings.host = raw;
-      index += 1;
-      continue;
-    }
-    if (argument === "--token") {
-      const raw = args[index + 1];
-      if (raw === undefined || raw === "") {
-        throw new Error("用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]");
-      }
-      settings.token = raw;
-      index += 1;
-      continue;
-    }
-    throw new Error(
-      `未知参数：${argument}\n用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]`,
-    );
-  }
-  return settings;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -7,6 +7,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import {
   FIXED_WEIXIN_QR_BASE_URL,
   createWeixinQrContractClient,
@@ -106,6 +107,7 @@ export async function runWeixinSetup({
     }
 
     output.write(`\n微信连接已安全保存：${configPath}\n`);
+    writeGatewayConfigActivationNotice(output);
     output.write(
       "如需启用消息接收，请将 weixin.enabled 改为 true，然后运行 codexc service reload。\n",
     );

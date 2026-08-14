@@ -2,6 +2,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 export async function runSystemSettings({
@@ -67,7 +68,7 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
   document.approval = { ...table(document.approval), timeout_seconds: parsed };
   writeConfig(configPath, document);
   output.write(`审批超时已设为 ${parsed} 秒：${configPath}\n`);
-  output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
+  writeGatewayConfigActivationNotice(output);
   return { timeoutSeconds: parsed, configPath };
 }
 
@@ -94,7 +95,7 @@ async function runSandbox({ environment, output, prompts, writeConfig }) {
   document.codex = codex;
   writeConfig(configPath, document);
   output.write(`Codex Sandbox 已设为${selected}：${configPath}\n`);
-  output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
+  writeGatewayConfigActivationNotice(output);
   return { sandbox: selected, configPath };
 }
 
@@ -131,7 +132,7 @@ async function runDefaultWorkspace({ environment, output, prompts, writeConfig }
   document.default_workspace = selected;
   writeConfig(configPath, document);
   output.write(`默认工作区已设为 ${selected}：${configPath}\n`);
-  output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
+  writeGatewayConfigActivationNotice(output);
   return { defaultWorkspace: selected, configPath };
 }
 
@@ -156,7 +157,7 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
       ? `渠道新会话模型已覆盖为 ${normalized}：${configPath}\n`
       : `渠道新会话模型已恢复使用 Codex 全局默认：${configPath}\n`,
   );
-  output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
+  writeGatewayConfigActivationNotice(output);
   return { defaultModel: normalized || null, configPath };
 }
 

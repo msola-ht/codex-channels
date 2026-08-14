@@ -196,6 +196,13 @@ const usage = `用法：codexc agents <enable-deepseek|disable-deepseek|status>
   status            查看当前状态`;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runAgentsCli().catch((error) => {
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
+
+async function runAgentsCli() {
   const command = process.argv[2];
   if (command === undefined || command === "-h" || command === "--help") {
     console.log(usage);

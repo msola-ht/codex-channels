@@ -10,7 +10,9 @@
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
   校验 `config.toml` 和两个数据库的版本、必需结构与明确迁移路径，再在同一个 App Server、Gateway
   停机窗口内分别备份并更新配置和数据库，离线复核后启动并通过 Socket 与监管拓扑确认核心服务稳定
-  就绪。未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭。
+  就绪；公开服务命令复用同一按目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留
+  150 秒默认等待窗口。
+  未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
@@ -29,9 +31,10 @@
   `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek）的全部请求
   行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
-- `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析 `codexc metrics` 的
-  时间范围、分组、格式及维护命令参数；不访问数据库或服务，`metrics-database.mjs` 保留原有
+- `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
+  时间范围、分组、格式及维护命令参数；不访问配置、数据库或服务，`metrics-database.mjs` 保留原有
   公开入口与 `metricsRange` 导出。
+- `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到
   `data/channel-outbox/pending/` 并写入 manifest；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
@@ -40,6 +43,7 @@
   格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
+- `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的只读 HTTP 服务与共享 API 类型。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
@@ -91,7 +95,7 @@
   Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
-- `config-workspace-menu.mjs`：独立管理 Workspace 的 Sandbox、审批策略与 Permission Profile；
+- `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
   保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
@@ -143,6 +147,7 @@
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份、应用权限、
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误。
+- `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单和目录创建，并调用统一的 Workspace 权限设置用例；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `agents.mjs` / `agents.d.mts`：`codexc agents` 的执行脚本与公开声明，在 `~/.codex/config.toml` 中开启或关闭
   `features.multi_agent_v2` 并注册单次 `agents.ds` 角色；角色说明要求主模型以
@@ -259,6 +264,9 @@
   服务入口在每次启动时解析。
 - `service-install-context.mjs`：systemd 与 launchd 安装器共用的配置、默认 Workspace、主 Socket、
   Codex/Node 可执行文件及服务 PATH 解析；运行目录统一创建为 `0700`，平台模板和转义仍各自维护。
+- `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，明确运行中自动重新读取并在必要时
+  自动重启，未运行时由下次启动加载，并统一使用 CLI 提示状态渲染；WebUI、指标中心和 App Server
+  的专属重启要求继续单独提示。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`center`、`all` 目标，
   WebUI 与指标中心独立不并入 `all`，
