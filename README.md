@@ -195,6 +195,9 @@ codexc service logs all -n 200        # 查看全部服务最近 200 行日志
 
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
 `codexc service -h` 查看完整用法。WebUI 与指标中心不并入 `all`，需要时单独启动。
+核心服务执行安装、启动或重启后，CLI 会等待 App Server 监管拓扑、WebSocket 与 Gateway
+应用就绪状态稳定；超时会返回失败并提示查看对应状态和日志，不会把服务管理器已接受命令
+直接当作服务健康。
 
 服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口。渠道内
 会拒绝安装或卸载服务、停止 Gateway/App Server，以及重启 App Server；对应的 `all` 操作同样拒绝。

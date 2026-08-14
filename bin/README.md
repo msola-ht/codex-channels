@@ -32,7 +32,8 @@
 - `webui`、`center`：分别启动本机只读指标界面和多设备指标中心；监听参数在读取用户配置前完成校验。
 - `service`：完整校验配置后安装整套后台服务；启停、重启、状态和日志命令使用
   `gateway`、`app-server`、`webui`、`center` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
-  `all` 只包含 App Server 与 Gateway 两项核心服务。
+  `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
+  WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理；任一受监管组件退出都会共同重建。代理指标通过私有 Unix Socket

@@ -10,7 +10,9 @@
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
   校验 `config.toml` 和两个数据库的版本、必需结构与明确迁移路径，再在同一个 App Server、Gateway
   停机窗口内分别备份并更新配置和数据库，离线复核后启动并通过 Socket 与监管拓扑确认核心服务稳定
-  就绪。未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭。
+  就绪；公开服务命令复用同一按目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留
+  150 秒默认等待窗口。
+  未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
@@ -262,6 +264,9 @@
   服务入口在每次启动时解析。
 - `service-install-context.mjs`：systemd 与 launchd 安装器共用的配置、默认 Workspace、主 Socket、
   Codex/Node 可执行文件及服务 PATH 解析；运行目录统一创建为 `0700`，平台模板和转义仍各自维护。
+- `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，明确运行中自动重新读取并在必要时
+  自动重启，未运行时由下次启动加载，并统一使用 CLI 提示状态渲染；WebUI、指标中心和 App Server
+  的专属重启要求继续单独提示。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`center`、`all` 目标，
   WebUI 与指标中心独立不并入 `all`，

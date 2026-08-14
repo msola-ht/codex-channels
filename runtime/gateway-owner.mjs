@@ -3,11 +3,14 @@ import { createConnection, createServer } from "node:net";
 import { dirname, join } from "node:path";
 
 const connectionTimeoutMs = 1_000;
+const maximumStatusBytes = 4_096;
 
 export class GatewayOwnershipError extends Error {}
 
 export class GatewayOwner {
   #identity;
+  #ready = false;
+  #readinessRevoked = false;
   #server;
   #socketPath;
   #sockets = new Set();
@@ -20,7 +23,11 @@ export class GatewayOwner {
       socket.on("error", () => undefined);
       socket.on("close", () => this.#sockets.delete(socket));
       socket.setTimeout(connectionTimeoutMs, () => socket.destroy());
-      socket.end(`${JSON.stringify({ version: 1, pid: process.pid })}\n`);
+      socket.end(`${JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        ready: this.#ready,
+      })}\n`);
     });
   }
 
@@ -61,6 +68,22 @@ export class GatewayOwner {
     return this.#closePromise;
   }
 
+  markReady() {
+    if (!this.#identity || !this.#server.listening) {
+      throw new Error("Gateway 所有权尚未建立，不能标记就绪");
+    }
+    if (this.#readinessRevoked) return;
+    this.#ready = true;
+  }
+
+  markNotReady() {
+    if (!this.#identity || !this.#server.listening) {
+      throw new Error("Gateway 所有权尚未建立，不能撤销就绪");
+    }
+    this.#readinessRevoked = true;
+    this.#ready = false;
+  }
+
   async #closeInternal() {
     for (const socket of this.#sockets) socket.destroy();
     if (this.#server.listening) {
@@ -82,6 +105,20 @@ export function gatewayOwnerIsActive(configPath) {
     throw new Error(`Gateway 所有权 Socket 路径不安全：${socketPath}`);
   }
   return socketAcceptsConnections(socketPath);
+}
+
+export async function gatewayOwnerIsReady(configPath) {
+  const socketPath = gatewayOwnerSocketPath(configPath);
+  const status = lstatSync(socketPath, { throwIfNoEntry: false });
+  if (!status) return false;
+  if (!status.isSocket() || status.uid !== process.getuid?.()) {
+    throw new Error(`Gateway 所有权 Socket 路径不安全：${socketPath}`);
+  }
+  const owner = await readGatewayOwnerStatus(socketPath);
+  return owner?.version === 1
+    && Number.isSafeInteger(owner.pid)
+    && owner.pid > 0
+    && owner.ready === true;
 }
 
 async function removeStaleGatewaySocket(socketPath) {
@@ -112,6 +149,39 @@ function socketAcceptsConnections(socketPath) {
     socket.setTimeout(connectionTimeoutMs, () => finish(false));
     socket.once("connect", () => finish(true));
     socket.once("error", () => finish(false));
+  });
+}
+
+function readGatewayOwnerStatus(socketPath) {
+  return new Promise((resolveStatus) => {
+    const socket = createConnection(socketPath);
+    const chunks = [];
+    let bytes = 0;
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolveStatus(value);
+    };
+    const timer = setTimeout(() => finish(undefined), connectionTimeoutMs);
+    socket.on("data", (chunk) => {
+      bytes += chunk.length;
+      if (bytes > maximumStatusBytes) {
+        finish(undefined);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    socket.once("end", () => {
+      try {
+        finish(JSON.parse(Buffer.concat(chunks).toString("utf8").trim()));
+      } catch {
+        finish(undefined);
+      }
+    });
+    socket.once("error", () => finish(undefined));
   });
 }
 

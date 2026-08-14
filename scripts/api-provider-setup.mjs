@@ -13,6 +13,7 @@ import {
   readVisionApiKey,
   removeVisionApiKey,
 } from "../runtime/vision-credential.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 export async function runApiProviderSetup({
@@ -128,7 +129,7 @@ export async function runApiProviderSetup({
   }
   output.write(`第三方 API 提供商已保存：${nextProvider.name} (${providerId})\n`);
   output.write(`配置文件：${configPath}\n`);
-  output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
+  writeGatewayConfigActivationNotice(output);
   return { action: existing ? "updated" : "created", provider: nextProvider, configPath };
 }
 
@@ -168,6 +169,7 @@ async function removeProvider(options) {
     throw error;
   }
   options.output.write(`已删除第三方 API 提供商：${provider.name} (${provider.id})\n`);
+  writeGatewayConfigActivationNotice(options.output);
   return { action: "removed", provider: provider.id, configPath: options.configPath };
 }
 

@@ -62,7 +62,8 @@
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存错误原文与分类，不携带任何平台上下文或敏感凭据。
 - `config-lifecycle.ts`：在任何 Surface 或指标组件启动前获取配置级 Gateway 所有权，随后管理配置
-  监听、防抖重载、持久配置事件投递、信号、所有权释放与进程退出。
+  监听、防抖重载、持久配置事件投递、信号、所有权释放与进程退出；只有应用启动完成后才把所有权
+  协议标记为就绪，供服务管理入口区分进程占位和可用 Gateway。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
   `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计总价；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。

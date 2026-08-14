@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   GatewayOwner,
   gatewayOwnerIsActive,
+  gatewayOwnerIsReady,
   gatewayOwnerSocketPath,
 } from "../runtime/gateway-owner.mjs";
 
@@ -32,6 +33,27 @@ describe("Gateway owner", () => {
     expect(await gatewayOwnerIsActive(configPath)).toBe(true);
     await owner.close();
     expect(await gatewayOwnerIsActive(configPath)).toBe(false);
+  });
+
+  it("does not report readiness until application startup is complete", async () => {
+    const dataDir = mkdtempSync(join(unixSocketTmpdir, "codexc-gateway-owner-ready-"));
+    temporaryDirectories.push(dataDir);
+    const configPath = join(dataDir, "config.toml");
+    const owner = new GatewayOwner(configPath);
+
+    expect(() => owner.markReady()).toThrow("Gateway 所有权尚未建立");
+    await owner.start();
+    expect(await gatewayOwnerIsActive(configPath)).toBe(true);
+    expect(await gatewayOwnerIsReady(configPath)).toBe(false);
+
+    owner.markReady();
+    expect(await gatewayOwnerIsReady(configPath)).toBe(true);
+    owner.markNotReady();
+    expect(await gatewayOwnerIsReady(configPath)).toBe(false);
+    owner.markReady();
+    expect(await gatewayOwnerIsReady(configPath)).toBe(false);
+    await owner.close();
+    expect(await gatewayOwnerIsReady(configPath)).toBe(false);
   });
 
   it("allows only one Gateway for the same configuration regardless of Provider", async () => {

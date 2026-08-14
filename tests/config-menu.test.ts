@@ -88,7 +88,12 @@ describe("Codex Connect config menu", () => {
       price_currency: "cny",
     });
     expect(output.join("")).toContain("全局价格显示方式已设为 cny");
-    expect(output.join("")).toContain("重启 Gateway 后生效");
+    expect(output.join("")).toContain(
+      "运行中的 Gateway 会自动重新读取配置；需要重建连接时，后台服务会自动重启，前台进程需重新启动；未运行时将在下次启动生效",
+    );
+    expect(output.join("")).toContain(
+      "[提示] 运行中的 Gateway 会自动重新读取配置",
+    );
   });
 
   it("sets the global price currency to USD through the menu", async () => {
@@ -603,7 +608,10 @@ describe("Codex Connect config menu", () => {
       token: "view-token",
     });
     expect(output.join("")).toContain("已接入中心");
-    expect(output.join("")).toContain("重启 Gateway 后开始上报");
+    expect(output.join("")).toContain(
+      "运行中的 Gateway 会自动重新读取配置；需要重建连接时，后台服务会自动重启，前台进程需重新启动；未运行时将在下次启动生效",
+    );
+    expect(output.join("")).toContain("WebUI 全局页将在重启 WebUI 后生效");
   });
 
   it("prints the metrics connection status through the menu", async () => {

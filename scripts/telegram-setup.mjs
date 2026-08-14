@@ -12,6 +12,7 @@ import {
   resolveHttpProxyUrl,
   resolveProxyEnvironment,
 } from "../runtime/network-proxy.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 
@@ -137,7 +138,7 @@ export async function runTelegramSetup({
     writeGatewayConfig(configPath, document);
     output.write(`\nTelegram 配置已保存：${configPath}\n`);
     output.write("下一步运行：codexc doctor\n");
-    output.write("运行中的 Gateway 会自动热加载；Token 或代理变化时会自动重启。\n");
+    writeGatewayConfigActivationNotice(output);
     return { botUsername: bot.username, allowedUserIds, configPath };
   } finally {
     prompt.close();

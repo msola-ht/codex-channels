@@ -4,6 +4,7 @@ import {
   isPrivateHttpEndpoint,
   readGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 const deviceIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
@@ -128,7 +129,8 @@ async function runMetricsStorage({ environment, output, prompts, writeConfig }) 
   document.metrics = metrics;
   writeConfig(configPath, document);
   output.write(`本地指标保留策略已更新：${configPath}\n`);
-  output.write("配置将在重启 Gateway 后生效。需要立即清理时运行 codexc metrics cleanup。\n");
+  writeGatewayConfigActivationNotice(output);
+  output.write("需要立即清理时运行 codexc metrics cleanup。\n");
   return { storage: next, configPath };
 }
 
@@ -214,7 +216,9 @@ async function runConnectToCenter({
   writeConfig(configPath, document);
   output.write(`已接入中心：${base}\n`);
   output.write(`设备 ID：${normalizedDeviceId || sync.device_id || "自动生成"}\n`);
-  output.write("配置已写入并备份，重启 Gateway 后开始上报，重启 WebUI 后全局页生效。\n");
+  output.write("配置已写入并备份。\n");
+  writeGatewayConfigActivationNotice(output);
+  output.write("WebUI 全局页将在重启 WebUI 后生效。\n");
   return { endpoint: base, deviceId: normalizedDeviceId || null, configPath };
 }
 
@@ -310,7 +314,7 @@ async function runSyncParams({
     document.metrics = metrics;
     writeConfig(configPath, document);
     output.write(`上报参数已更新：${configPath}\n`);
-    output.write("配置在重启 Gateway 后生效。\n");
+    writeGatewayConfigActivationNotice(output);
     return { sync, configPath };
   }
 }
@@ -329,7 +333,8 @@ async function runDisableConnection({ environment, output, writeConfig }) {
   document.metrics = metrics;
   writeConfig(configPath, document);
   output.write("已停用中心接入（配置保留，可在「多设备指标」中重新配置）。\n");
-  output.write("重启 Gateway 与 WebUI 后生效。\n");
+  writeGatewayConfigActivationNotice(output);
+  output.write("WebUI 全局页将在重启 WebUI 后生效。\n");
   return { disabled: true, configPath };
 }
 

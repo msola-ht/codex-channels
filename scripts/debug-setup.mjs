@@ -2,6 +2,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 export async function runDebugSetup({
@@ -47,7 +48,7 @@ export async function runDebugSetup({
   writeConfig(configPath, document);
   const enabled = selected === "enabled";
   output.write(`全局调试模式已${enabled ? "开启" : "关闭"}：${configPath}\n`);
-  output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
+  writeGatewayConfigActivationNotice(output);
   return { enabled, configPath };
 }
 

@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
 import { AppServerSupervisorOwner } from "../runtime/app-server-supervisor.mjs";
+import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import {
   acknowledgeConfigEvents,
@@ -686,7 +687,7 @@ describe("codexc CLI", () => {
     expect(initialized).toContain("Codex Connect 已初始化");
     expect(firstAdded).toContain("Workspace 已添加");
     expect(added).toContain("Workspace 已添加");
-    expect(added).toContain("Gateway 会自动热加载");
+    expect(added).toContain("Gateway 会自动重新读取配置");
     expect(initialized).toContain(`默认 Workspace：${realpathSync(join(home, "workspace"))}`);
     expect(listed).toContain(".codex-connect/workspace · codex-connect ← 默认");
     expect(listed).toContain("First Project · first-project");
@@ -2148,7 +2149,7 @@ describe("codexc CLI", () => {
     expect(invalidTarget.stderr).toContain("服务目标必须是");
   });
 
-  linuxIt("rejects service actions that would disconnect a command running inside App Server", () => {
+  linuxIt("rejects service actions that would disconnect a command running inside App Server", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-role-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -2198,21 +2199,37 @@ describe("codexc CLI", () => {
     }
     expect(existsSync(systemctlLog) ? readFileSync(systemctlLog, "utf8") : "").toBe("");
 
-    const gateway = spawnSync(
-      process.execPath,
-      [cli, "service", "restart", "gateway"],
-      { cwd: workspace, env: environment, encoding: "utf8" },
+    const readiness = await startManagedServiceReadinessFixture(
+      join(home, "config.toml"),
+      environment,
     );
-    expect(gateway.status).toBe(0);
-    expect(readFileSync(systemctlLog, "utf8")).toContain(
-      "--user restart codex-connect-gateway.service",
-    );
-    expect(readFileSync(systemctlLog, "utf8")).not.toContain(
-      "codex-connect-app-server.service",
-    );
+    try {
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [cli, "service", "restart", "gateway"],
+        {
+          cwd: workspace,
+          env: {
+            ...environment,
+            // Retired test overrides must not bypass the production readiness protocol.
+            CODEX_CONNECT_SERVICE_READINESS_BINARY: "/bin/false",
+          },
+          encoding: "utf8",
+        },
+      );
+      expect(stdout).toContain("Gateway 已就绪；Codex App Server 保持运行");
+      expect(readFileSync(systemctlLog, "utf8")).toContain(
+        "--user restart codex-connect-gateway.service",
+      );
+      expect(readFileSync(systemctlLog, "utf8")).not.toContain(
+        "codex-connect-app-server.service",
+      );
+    } finally {
+      await readiness.close();
+    }
   });
 
-  linuxIt("manages WebUI as an independent service target outside all", () => {
+  linuxIt("manages WebUI as an independent service target outside all", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-webui-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -2233,28 +2250,58 @@ describe("codexc CLI", () => {
       SYSTEMCTL_LOG: systemctlLog,
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-
-    const start = spawnSync(
-      process.execPath,
-      [cli, "service", "start", "webui"],
-      { env: environment, encoding: "utf8" },
-    );
-    expect(start.status).toBe(0);
-    expect(readFileSync(systemctlLog, "utf8")).toContain(
-      "--user start codex-connect-webui.service",
+    const readiness = await startManagedServiceReadinessFixture(
+      join(home, "config.toml"),
+      environment,
     );
 
-    writeFileSync(systemctlLog, "");
-    const all = spawnSync(
-      process.execPath,
-      [cli, "service", "start", "all"],
-      { env: environment, encoding: "utf8" },
-    );
-    expect(all.status).toBe(0);
-    const log = readFileSync(systemctlLog, "utf8");
-    expect(log).toContain("codex-connect-app-server.service");
-    expect(log).toContain("codex-connect-gateway.service");
-    expect(log).not.toContain("codex-connect-webui.service");
+    try {
+      const start = spawnSync(
+        process.execPath,
+        [cli, "service", "start", "webui"],
+        { env: environment, encoding: "utf8" },
+      );
+      expect(start.status).toBe(0);
+      expect(readFileSync(systemctlLog, "utf8")).toContain(
+        "--user start codex-connect-webui.service",
+      );
+
+      writeFileSync(systemctlLog, "");
+      const { stdout: allStdout } = await execFileAsync(
+        process.execPath,
+        [cli, "service", "start", "all"],
+        { env: environment, encoding: "utf8" },
+      );
+      expect(allStdout).toContain("Codex App Server 与 Gateway 已就绪");
+      const log = readFileSync(systemctlLog, "utf8");
+      expect(log).toContain("codex-connect-app-server.service");
+      expect(log).toContain("codex-connect-gateway.service");
+      expect(log).not.toContain("codex-connect-webui.service");
+
+      writeFileSync(systemctlLog, "");
+      const { stdout: defaultStartStdout } = await execFileAsync(
+        process.execPath,
+        [cli, "service", "start"],
+        { env: environment, encoding: "utf8" },
+      );
+      expect(defaultStartStdout).toContain("Codex App Server 与 Gateway 已就绪");
+      const defaultStartLog = readFileSync(systemctlLog, "utf8");
+      expect(defaultStartLog).toContain("codex-connect-app-server.service");
+      expect(defaultStartLog).toContain("codex-connect-gateway.service");
+
+      writeFileSync(systemctlLog, "");
+      const { stdout: defaultRestartStdout } = await execFileAsync(
+        process.execPath,
+        [cli, "service", "restart"],
+        { env: environment, encoding: "utf8" },
+      );
+      expect(defaultRestartStdout).toContain("Gateway 已就绪；Codex App Server 保持运行");
+      const defaultRestartLog = readFileSync(systemctlLog, "utf8");
+      expect(defaultRestartLog).toContain("codex-connect-gateway.service");
+      expect(defaultRestartLog).not.toContain("codex-connect-app-server.service");
+    } finally {
+      await readiness.close();
+    }
   });
 
   it("rejects removed Workspace command aliases", () => {
@@ -2351,6 +2398,7 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).not.toContain("[失败] Telegram Token");
     expect(diagnosed.stdout).not.toContain("[失败] Telegram 用户");
     expect(diagnosed.stdout).not.toContain("[通过]");
+    expect(diagnosed.stdout.match(/诊断发现/g)).toHaveLength(1);
     const visibleSections = [
       "=== 通讯渠道 ===",
       "=== 扩展能力 ===",
@@ -2750,6 +2798,61 @@ function updateGatewayConfig(
   const document = readGatewayConfig(configPath);
   update(document);
   writeGatewayConfig(configPath, document);
+}
+
+async function startManagedServiceReadinessFixture(
+  configPath: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<{ close(): Promise<void> }> {
+  const descriptor = resolveAppServerRuntime(
+    readGatewayConfig(configPath),
+    dirname(configPath),
+    environment,
+  );
+  const servers: ReturnType<typeof createServer>[] = [];
+  const webSocketServers: WebSocketServer[] = [];
+  let supervisorOwner: AppServerSupervisorOwner | undefined;
+  let gatewayOwner: GatewayOwner | undefined;
+
+  const close = async (): Promise<void> => {
+    if (gatewayOwner) await gatewayOwner.close();
+    if (supervisorOwner) await supervisorOwner.close();
+    for (const webSocketServer of webSocketServers) {
+      for (const client of webSocketServer.clients) client.terminate();
+      await new Promise<void>((resolveClose) => webSocketServer.close(() => resolveClose()));
+    }
+    for (const server of servers) {
+      if (server.listening) {
+        await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+      }
+    }
+  };
+
+  try {
+    for (const socketPath of descriptor.socketPaths) {
+      const server = createServer();
+      const webSocketServer = new WebSocketServer({ server });
+      await new Promise<void>((resolveListen, rejectListen) => {
+        server.once("error", rejectListen);
+        server.listen(socketPath, resolveListen);
+      });
+      chmodSync(socketPath, 0o600);
+      servers.push(server);
+      webSocketServers.push(webSocketServer);
+    }
+    supervisorOwner = new AppServerSupervisorOwner(
+      descriptor.primarySocketPath,
+      descriptor.topology,
+    );
+    await supervisorOwner.start();
+    gatewayOwner = new GatewayOwner(configPath);
+    await gatewayOwner.start();
+    gatewayOwner.markReady();
+    return { close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }
 
 function table(value: unknown): Record<string, unknown> {

@@ -2,12 +2,13 @@ import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import {
@@ -15,6 +16,7 @@ import {
   updateDatabases,
   updateGatewayConfiguration,
   updateLocalInstallation,
+  waitForCoreServiceTarget,
   waitForCoreServices,
 } from "../scripts/local-update.mjs";
 
@@ -246,6 +248,94 @@ describe("local update", () => {
       timeoutMs: 1_000,
     });
     expect(gatewayChecks).toBeGreaterThanOrEqual(4);
+  });
+
+  it("checks only the requested core service target", async () => {
+    const { environment } = fixture();
+    let nowMs = 0;
+    const inspectSupervisor = vi.fn();
+    const socketHealthy = vi.fn();
+    const gatewayHealthy = vi.fn(async () => true);
+
+    await waitForCoreServiceTarget("gateway", environment, {
+      gatewayHealthy,
+      inspectSupervisor,
+      intervalMs: 100,
+      now: () => nowMs,
+      sleep: async (milliseconds) => {
+        nowMs += milliseconds;
+      },
+      socketHealthy,
+      stableMs: 200,
+      timeoutMs: 1_000,
+    });
+
+    expect(gatewayHealthy).toHaveBeenCalled();
+    expect(inspectSupervisor).not.toHaveBeenCalled();
+    expect(socketHealthy).not.toHaveBeenCalled();
+  });
+
+  it("requires application readiness rather than Gateway ownership alone", async () => {
+    const { configPath, environment } = fixture();
+    const owner = new GatewayOwner(configPath);
+    await owner.start();
+    let nowMs = 0;
+    const timing = {
+      intervalMs: 100,
+      now: () => nowMs,
+      sleep: async (milliseconds: number) => {
+        nowMs += milliseconds;
+      },
+      stableMs: 100,
+      timeoutMs: 300,
+    };
+    try {
+      await expect(
+        waitForCoreServiceTarget("gateway", environment, timing),
+      ).rejects.toThrow("Gateway 未能及时就绪");
+
+      owner.markReady();
+      nowMs = 0;
+      await expect(
+        waitForCoreServiceTarget("gateway", environment, timing),
+      ).resolves.toBeUndefined();
+    } finally {
+      await owner.close();
+    }
+  });
+
+  it("returns target-specific status and log remediation when readiness times out", async () => {
+    const { environment } = fixture();
+    let nowMs = 0;
+
+    await expect(waitForCoreServiceTarget("gateway", environment, {
+      gatewayHealthy: async () => false,
+      intervalMs: 100,
+      now: () => nowMs,
+      sleep: async (milliseconds) => {
+        nowMs += milliseconds;
+      },
+      stableMs: 200,
+      timeoutMs: 300,
+    })).rejects.toThrow(
+      /Gateway 未能及时就绪.*service status gateway.*service logs gateway/u,
+    );
+  });
+
+  it("allows more than the longest normal Surface startup window by default", async () => {
+    const { environment } = fixture();
+    let nowMs = 0;
+
+    await expect(waitForCoreServiceTarget("gateway", environment, {
+      gatewayHealthy: async () => false,
+      intervalMs: 10_000,
+      now: () => nowMs,
+      sleep: async (milliseconds) => {
+        nowMs += milliseconds;
+      },
+    })).rejects.toThrow("Gateway 未能及时就绪");
+
+    expect(nowMs).toBeGreaterThan(120_000);
   });
 });
 

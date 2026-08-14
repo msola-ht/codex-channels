@@ -55,6 +55,7 @@ export async function runGatewayProcess(): Promise<void> {
       return;
     }
     stopping = true;
+    gatewayOwner.markNotReady();
     stopWatching();
     void application
       .stop()
@@ -98,7 +99,7 @@ export async function runGatewayProcess(): Promise<void> {
         logger.info(
           { changes: result.changes.map((change) => change.code), supervised },
           supervised
-            ? "配置需要重建连接，Gateway 将由系统服务自动重启"
+            ? "配置需要重建连接，Gateway 将由监管入口自动重启"
             : "配置需要重建连接，Gateway 将退出，请手动重新启动",
         );
         stop(supervised ? 75 : 0);
@@ -164,6 +165,10 @@ export async function runGatewayProcess(): Promise<void> {
     await gatewayOwner.close();
     throw error;
   }
+  if (stopping) {
+    return;
+  }
+  gatewayOwner.markReady();
   started = true;
   if (watchedPaths.length > 0) {
     for (const path of watchedPaths) {

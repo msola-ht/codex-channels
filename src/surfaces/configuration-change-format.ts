@@ -95,6 +95,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "approval.timeout": "审批超时",
     "display.operation-updates": "操作过程显示",
     "display.plan-updates": "自动计划显示",
+    "display.price-currency": "价格显示币种",
     "experimental.plugin-api": "开发中 Plugin API",
     "thread-sections.administrators": "Thread 分区管理员",
     "api.providers": "第三方 API 提供商",

@@ -2,6 +2,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 export async function runVisionSetup({
@@ -39,7 +40,7 @@ export async function runVisionSetup({
   writeConfig(configPath, document);
 
   output.write(`图片识别配置已保存：${configPath}\n`);
-  output.write("配置将在重启 Gateway 后生效；不需要重启 App Server。\n");
+  writeGatewayConfigActivationNotice(output);
   return { mode: next.config.mode, configPath };
 }
 

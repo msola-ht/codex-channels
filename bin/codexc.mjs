@@ -359,7 +359,7 @@ try {
       await runWorkspaceCommand(args);
       break;
     case "service":
-      service(args);
+      await service(args);
       break;
     case "config":
       if (showRequestedHelp(args, "config")) {
@@ -676,7 +676,7 @@ async function runServiceAppServer(args) {
   });
 }
 
-function service(args) {
+async function service(args) {
   if (showRequestedHelp(args, "service")) {
     return;
   }
@@ -709,9 +709,7 @@ function service(args) {
       undefined,
       { failureReportedByChild: action === "status" },
     );
-    return;
-  }
-  if (process.platform === "linux") {
+  } else if (process.platform === "linux") {
     if (action === "install") {
       runScript("scripts/install-systemd.mjs", [], { failureReportedByChild: true });
     }
@@ -722,9 +720,38 @@ function service(args) {
       undefined,
       { failureReportedByChild: action === "status" },
     );
-    return;
+  } else {
+    throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
   }
-  throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
+  const readinessTarget = coreServiceReadinessTarget(action, serviceArgs);
+  if (readinessTarget) {
+    await waitForManagedServiceReadiness(readinessTarget);
+    printCliMessage("success", coreServiceReadyMessage(readinessTarget));
+  }
+}
+
+function coreServiceReadinessTarget(action, serviceArgs) {
+  if (action === "install") return "all";
+  if (action !== "start" && action !== "restart") return undefined;
+  const target = serviceArgs[0];
+  return target === "gateway" || target === "app-server" || target === "all"
+    ? target
+    : undefined;
+}
+
+async function waitForManagedServiceReadiness(target) {
+  const { waitForCoreServiceTarget } = await import("../scripts/local-update.mjs");
+  await waitForCoreServiceTarget(target, process.env);
+}
+
+function coreServiceReadyMessage(target) {
+  if (target === "gateway") {
+    return "Gateway 已就绪；Codex App Server 保持运行。";
+  }
+  if (target === "app-server") {
+    return "Codex App Server 已就绪；Gateway 将自动重连。";
+  }
+  return "Codex App Server 与 Gateway 已就绪。";
 }
 
 function rejectUnsafeAppServerServiceAction(action, serviceArgs, environment) {

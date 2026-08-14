@@ -6,6 +6,7 @@ import * as clackPrompts from "@clack/prompts";
 import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { gatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { runWorkspaceSettings } from "./config-workspace-menu.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import {
@@ -85,7 +86,7 @@ export async function runWorkspaceCommand(args, {
       writeCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
     }
     if (result.added || result.removedWorkspaces.length > 0 || result.defaultChanged) {
-      writeCliMessage("note", "运行中的 Gateway 会自动热加载配置，必要时重启。");
+      writeCliMessage("note", gatewayConfigActivationNotice);
     }
     return;
   }
@@ -102,7 +103,7 @@ export async function runWorkspaceCommand(args, {
     if (result.defaultChanged) {
       writeCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
     }
-    writeCliMessage("note", "运行中的 Gateway 会自动重新加载配置，必要时重启。");
+    writeCliMessage("note", gatewayConfigActivationNotice);
     return;
   }
   if (outputIsTTY && subcommand !== "list") {
@@ -248,7 +249,7 @@ async function createWorkspaceInteractively({
   if (result.defaultChanged) {
     writeCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
   }
-  writeCliMessage("note", "运行中的 Gateway 会自动热加载配置，必要时重启。");
+  writeCliMessage("note", gatewayConfigActivationNotice);
 }
 
 async function removeWorkspaceInteractively({
@@ -288,7 +289,7 @@ async function removeWorkspaceInteractively({
   if (result.defaultChanged) {
     writeCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
   }
-  writeCliMessage("note", "运行中的 Gateway 会自动重新加载配置，必要时重启。");
+  writeCliMessage("note", gatewayConfigActivationNotice);
 }
 
 function listWorkspaces(configPath) {
