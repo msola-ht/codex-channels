@@ -149,6 +149,36 @@ describe("codexc CLI", () => {
     expect(workHelp.stdout).toContain("权限");
   }, 30_000);
 
+  it("keeps top-level help as a complete first-level command index", () => {
+    const result = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+
+    expect(result.status, result.stderr).toBe(0);
+    for (const command of [
+      "init",
+      "setup",
+      "config",
+      "doctor",
+      "remote",
+      "work",
+      "rules",
+      "agents",
+      "metrics",
+      "channel",
+      "webui",
+      "center",
+      "start",
+      "service",
+      "update",
+      "state",
+      "version",
+    ]) {
+      expect(result.stdout).toContain(`\n  ${command}`);
+    }
+    expect(result.stdout).not.toContain("\n  service install");
+    expect(result.stdout).not.toContain("\n  service restart");
+    expect(result.stderr).toBe("");
+  });
+
   it("keeps service-template entrypoints hidden from public help while retaining scoped diagnostics", () => {
     const main = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
     expect(main.stdout).not.toContain("\n  gateway");
@@ -2110,14 +2140,15 @@ describe("codexc CLI", () => {
     expect(result.stderr).not.toContain("子命令执行失败");
   });
 
-  it("documents the launchd uninstall command", () => {
-    const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+  it("documents service maintenance commands in scoped help", () => {
+    const output = execFileSync(process.execPath, [cli, "service", "--help"], {
+      encoding: "utf8",
+    });
 
-    expect(output).toContain("service uninstall");
-    expect(output).toContain("service reload");
-    expect(output).toContain("service logs");
+    expect(output).toContain("uninstall");
+    expect(output).toContain("reload");
+    expect(output).toContain("logs");
     expect(output).toContain("保留用户数据");
-    expect(output).toContain("setup ");
   });
 
   it("describes Setup by its current model, channel, and skill responsibilities", () => {
