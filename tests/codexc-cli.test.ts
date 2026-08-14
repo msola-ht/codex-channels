@@ -1080,7 +1080,7 @@ describe("codexc CLI", () => {
     const workspace = join(root, "Workspace");
     const fakeCodex = join(root, "fake-codex.mjs");
     mkdirSync(workspace);
-    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(1);\n");
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(7);\n");
     chmodSync(fakeCodex, 0o700);
     const environment = {
       ...process.env,
@@ -1098,8 +1098,8 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Codex TUI 已退出：exit=1");
+    expect(result.status).toBe(7);
+    expect(result.stderr).toContain("Codex TUI 已退出：exit=7");
     expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
     expect(result.stderr).not.toContain("子命令执行失败");
   });

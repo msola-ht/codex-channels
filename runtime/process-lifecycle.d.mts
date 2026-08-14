@@ -3,7 +3,7 @@ import type { EventEmitter } from "node:events";
 
 export class ReportedChildExitError extends Error {
   readonly exitCode: number;
-  constructor(exitCode: number);
+  constructor(exitCode: number, message?: string);
 }
 
 export class ForwardedChildSignalError extends Error {

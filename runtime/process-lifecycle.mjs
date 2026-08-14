@@ -1,6 +1,6 @@
 export class ReportedChildExitError extends Error {
-  constructor(exitCode) {
-    super(`子命令执行失败：exit=${exitCode}`);
+  constructor(exitCode, message = `子命令执行失败：exit=${exitCode}`) {
+    super(message);
     this.exitCode = exitCode;
   }
 }
@@ -24,7 +24,9 @@ export function assertSynchronousChildSuccess(result, {
   }
   if (result.status !== 0) {
     const exitCode = result.status ?? 1;
-    if (failureReportedByChild) throw new ReportedChildExitError(exitCode);
+    if (failureReportedByChild) {
+      throw new ReportedChildExitError(exitCode, failureMessage(exitCode));
+    }
     throw new Error(failureMessage(exitCode));
   }
 }

@@ -13,6 +13,7 @@ import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   assertSynchronousChildSuccess,
   ForwardedChildSignalError,
+  ReportedChildExitError,
 } from "../runtime/process-lifecycle.mjs";
 import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
@@ -21,7 +22,10 @@ import { readWorkspaceConfig } from "./workspace-config.mjs";
 try {
   runRemoteCli();
 } catch (error) {
-  if (!(error instanceof ForwardedChildSignalError)) {
+  if (error instanceof ReportedChildExitError) {
+    writeCliMessage("failure", error.message);
+    process.exitCode = error.exitCode;
+  } else if (!(error instanceof ForwardedChildSignalError)) {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
@@ -71,6 +75,7 @@ function runRemoteCli() {
     { stdio: "inherit" },
   );
   assertSynchronousChildSuccess(result, {
+    failureReportedByChild: true,
     failureMessage: (exitCode) => `Codex TUI 已退出：exit=${exitCode}`,
   });
 }
