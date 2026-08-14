@@ -975,6 +975,97 @@ describe("codexc CLI", () => {
     ]);
   });
 
+  it("reports an invalid remote Workspace exactly once without a Node stack", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-error-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+
+    const result = spawnSync(
+      process.execPath,
+      [cli, "remote", "--workspace", "missing-workspace"],
+      { cwd: workspace, env: environment, encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("找不到 Workspace：missing-workspace");
+    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
+    expect(result.stderr).not.toContain("子命令执行失败");
+    expect(result.stderr).not.toContain("Node.js v");
+    expect(result.stderr).not.toContain("file://");
+  });
+
+  it("propagates the signal that terminates the remote Codex process", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-signal-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    writeFileSync(
+      fakeCodex,
+      "#!/usr/bin/env node\nprocess.kill(process.pid, 'SIGTERM');\n",
+    );
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const result = spawnSync(process.execPath, [cli, "remote"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBeNull();
+    expect(result.signal).toBe("SIGTERM");
+    expect(result.stderr).toBe("");
+  });
+
+  it("reports a silent non-zero remote Codex exit exactly once", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-exit-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(1);\n");
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const result = spawnSync(process.execPath, [cli, "remote"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Codex TUI 已退出：exit=1");
+    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
+    expect(result.stderr).not.toContain("子命令执行失败");
+  });
+
   it("routes the DeepSeek profile to its isolated remote App Server and authenticates the TUI", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-profile-"));
     temporaryDirectories.push(root);
@@ -1967,6 +2058,103 @@ describe("codexc CLI", () => {
       expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(1);
       expect(result.stderr).toContain(expected);
     }
+  });
+
+  it("reads agents status without requiring Gateway initialization", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-agents-status-"));
+    temporaryDirectories.push(root);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: join(root, "missing-gateway-home"),
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: join(root, ".codex"),
+    };
+
+    const result = spawnSync(process.execPath, [cli, "agents", "status"], {
+      cwd: root,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("multi_agent_v2：未启用");
+    expect(result.stdout).toContain("DS 子代理角色：未配置");
+    expect(result.stderr).toBe("");
+  });
+
+  it("reports a foreground start failure exactly once without a Node stack", () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-error-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      const configuredWorkspaces = document.workspaces;
+      if (!Array.isArray(configuredWorkspaces) || configuredWorkspaces.length === 0) {
+        throw new Error("测试配置缺少 Workspace");
+      }
+      const configuredWorkspace = configuredWorkspaces[0];
+      if (!configuredWorkspace || typeof configuredWorkspace !== "object") {
+        throw new Error("测试 Workspace 配置无效");
+      }
+      configuredWorkspaces[0] = {
+        ...configuredWorkspace,
+        cwd: join(root, "Missing Workspace"),
+      };
+    });
+
+    const result = spawnSync(process.execPath, [cli, "start"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("目录不存在或不是目录");
+    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
+    expect(result.stderr).not.toContain("子命令执行失败");
+    expect(result.stderr).not.toContain("Node.js v");
+    expect(result.stderr).not.toContain("file://");
+  });
+
+  it("reports a silent non-zero App Server exit exactly once", () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-exit-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(1);\n");
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const result = spawnSync(process.execPath, [cli, "start"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Codex App Server 进程意外退出：exit=1");
+    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
+    expect(result.stderr).not.toContain("子命令执行失败");
+    expect(result.stderr).not.toContain("Node.js v");
   });
 
   it("does not repeat a managed child command failure", () => {

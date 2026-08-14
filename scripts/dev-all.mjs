@@ -14,78 +14,103 @@ import {
   installProcessSignalHandlers,
   signalChildProcesses,
 } from "../runtime/process-lifecycle.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir, runtimeConfig } from "./runtime-config.mjs";
 
-const projectDir = packageDir;
-const runtime = runtimeConfig();
-const document = readGatewayConfig(runtime.configPath);
-const appServerRuntime = resolveAppServerRuntime(document, runtime.dataDir);
-const socketPath = appServerRuntime.primarySocketPath;
-const runtimeDir = dirname(socketPath);
-const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
-  ? [join(projectDir, "dist/main.js")]
-  : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "src/main.ts"];
-
-mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-chmodSync(runtimeDir, 0o700);
-
-const appServerSupervisors = [];
-try {
-  await ensureAppServerTopology(appServerRuntime.topology);
-} catch (error) {
-  signalChildProcesses(appServerSupervisors, "SIGTERM");
-  throw error;
+class ReportedChildExitError extends Error {
+  constructor(exitCode) {
+    super(`child exited with status ${exitCode}`);
+    this.exitCode = exitCode;
+  }
 }
 
-let stopping = false;
-let gateway;
-const stop = () => {
-  if (stopping) {
-    return;
+await runDevAll().catch((error) => {
+  if (!(error instanceof ReportedChildExitError)) {
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
   }
-  stopping = true;
-  signalChildProcesses(
-    [...(gateway ? [gateway] : []), ...appServerSupervisors],
-    "SIGTERM",
-  );
-};
-installProcessSignalHandlers({ SIGINT: stop, SIGTERM: stop });
+  process.exitCode = error instanceof ReportedChildExitError ? error.exitCode : 1;
+});
 
-for (const supervisor of appServerSupervisors) {
-  supervisor.once("exit", (code, signal) => {
-    if (!stopping) {
-      console.error(`Codex App Server 意外退出：code=${code} signal=${signal}`);
-      stop();
-      process.exitCode = 1;
+async function runDevAll() {
+  const projectDir = packageDir;
+  const runtime = runtimeConfig();
+  const document = readGatewayConfig(runtime.configPath);
+  const appServerRuntime = resolveAppServerRuntime(document, runtime.dataDir);
+  const socketPath = appServerRuntime.primarySocketPath;
+  const runtimeDir = dirname(socketPath);
+  const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
+    ? [join(projectDir, "dist/main.js")]
+    : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "src/main.ts"];
+
+  mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+  chmodSync(runtimeDir, 0o700);
+
+  const appServerSupervisors = [];
+  try {
+    await ensureAppServerTopology({
+      appServerRuntime,
+      appServerSupervisors,
+      runtime,
+      socketPath,
+    });
+  } catch (error) {
+    signalChildProcesses(appServerSupervisors, "SIGTERM");
+    throw error;
+  }
+
+  let stopping = false;
+  let gateway;
+  const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    signalChildProcesses(
+      [...(gateway ? [gateway] : []), ...appServerSupervisors],
+      "SIGTERM",
+    );
+  };
+  installProcessSignalHandlers({ SIGINT: stop, SIGTERM: stop });
+
+  for (const supervisor of appServerSupervisors) {
+    supervisor.once("exit", (code, signal) => {
+      if (!stopping) {
+        writeCliMessage(
+          "failure",
+          `Codex App Server 意外退出：code=${code} signal=${signal}`,
+        );
+        stop();
+        process.exitCode = 1;
+      }
+    });
+  }
+
+  while (!stopping) {
+    gateway = spawn(process.execPath, gatewayEntry, {
+      cwd: runtime.dataDir,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        CODEX_CONNECT_CONFIG_FILE: runtime.configPath,
+        CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
+        CODEX_CONNECT_SERVICE_ROLE: "gateway",
+      },
+    });
+    const result = await waitForGateway(gateway);
+    gateway = undefined;
+    if (stopping) break;
+    if (result.code === 75) {
+      console.log("Gateway 配置需要重建连接，正在保持 App Server 并重启 Gateway...");
+      continue;
     }
-  });
-}
-
-while (!stopping) {
-  gateway = spawn(process.execPath, gatewayEntry, {
-    cwd: runtime.dataDir,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      CODEX_CONNECT_CONFIG_FILE: runtime.configPath,
-      CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
-      CODEX_CONNECT_SERVICE_ROLE: "gateway",
-    },
-  });
-  const result = await waitForGateway(gateway);
-  gateway = undefined;
-  if (stopping) {
-    break;
+    stop();
+    if (result.error) {
+      throw new Error(`Gateway 启动失败：${result.error.message}`);
+    }
+    if (result.code !== 0 || result.signal) {
+      throw new Error(
+        `Gateway 意外退出：code=${result.code} signal=${result.signal}`,
+      );
+    }
   }
-  if (result.code === 75) {
-    console.log("Gateway 配置需要重建连接，正在保持 App Server 并重启 Gateway...");
-    continue;
-  }
-  if (result.error) {
-    console.error(`Gateway 启动失败：${result.error.message}`);
-  }
-  process.exitCode = result.code ?? (result.signal || result.error ? 1 : 0);
-  stop();
 }
 
 function waitForGateway(child) {
@@ -98,7 +123,13 @@ function waitForGateway(child) {
   });
 }
 
-async function ensureAppServerTopology(topology) {
+async function ensureAppServerTopology({
+  appServerRuntime,
+  appServerSupervisors,
+  runtime,
+  socketPath,
+}) {
+  const topology = appServerRuntime.topology;
   const paths = topology.socketPaths;
   const existingSupervisor = await inspectAppServerSupervisor(socketPath);
   if (existingSupervisor) {
@@ -128,7 +159,7 @@ async function ensureAppServerTopology(topology) {
   }
   const supervisor = spawn(
     process.execPath,
-    [join(projectDir, "bin", "codexc.mjs"), "service-app-server"],
+    [join(packageDir, "bin", "codexc.mjs"), "service-app-server"],
     {
       cwd: runtime.dataDir,
       stdio: "inherit",
@@ -149,9 +180,12 @@ async function waitForSocket(child, path, timeoutMs) {
   const startedAt = Date.now();
   while (!(await appServerSocketAcceptsWebSocket(path))) {
     if (child && (child.exitCode !== null || child.signalCode !== null)) {
-      throw new Error(
-        `App Server 在 WebSocket 就绪前退出：exit=${child.exitCode} signal=${child.signalCode}`,
-      );
+      if (child.exitCode === 0 || child.signalCode !== null) {
+        throw new Error(
+          `App Server 在 WebSocket 就绪前退出：exit=${child.exitCode} signal=${child.signalCode}`,
+        );
+      }
+      throw new ReportedChildExitError(child.exitCode ?? 1);
     }
     if (Date.now() - startedAt >= timeoutMs) {
       if (childProcessIsRunning(child)) signalChildProcesses([child], "SIGTERM");

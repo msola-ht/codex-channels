@@ -350,7 +350,10 @@ try {
       if (showRequestedHelp(args, "remote")) {
         break;
       }
-      runScript("scripts/codex-remote.mjs", args, { workingDirectory: process.cwd() });
+      runScript("scripts/codex-remote.mjs", args, {
+        workingDirectory: process.cwd(),
+        failureReportedByChild: true,
+      });
       break;
     case "work":
       await runWorkspaceCommand(args);
@@ -866,6 +869,10 @@ function agents(args) {
   ) {
     throw new Error(helpText.agents);
   }
+  if (args[0] === "status") {
+    runStandaloneScript("scripts/agents.mjs", args);
+    return;
+  }
   runScript("scripts/agents.mjs", args, { failureReportedByChild: true });
 }
 
@@ -886,6 +893,16 @@ function runScript(relativePath, args, {
     { ...runtime.environment, ...additionalEnvironment },
     workingDirectory ?? runtime.dataDir,
     { failureReportedByChild },
+  );
+}
+
+function runStandaloneScript(relativePath, args) {
+  run(
+    process.execPath,
+    [join(packageDir, relativePath), ...args],
+    process.env,
+    process.cwd(),
+    { failureReportedByChild: true },
   );
 }
 
@@ -965,7 +982,7 @@ async function runForegroundScript(
           return;
         }
         if (code !== 0) {
-          rejectChild(new Error(`子命令执行失败：exit=${code ?? 1}`));
+          rejectChild(new ManagedChildExitError(code ?? 1));
           return;
         }
         resolveChild();
@@ -1281,7 +1298,10 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     forward("SIGTERM");
     void Promise.resolve(closeResources()).then(() => {
       if (error) {
-        console.error(error instanceof Error ? error.message : String(error));
+        printCliMessage(
+          "failure",
+          `Codex App Server 进程启动失败：${error instanceof Error ? error.message : String(error)}`,
+        );
         process.exitCode = 1;
         return;
       }
@@ -1289,9 +1309,16 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
         process.kill(process.pid, signal);
         return;
       }
-      process.exitCode = code ?? 1;
+      const exitCode = code ?? 1;
+      if (exitCode !== 0) {
+        printCliMessage("failure", `Codex App Server 进程意外退出：exit=${exitCode}`);
+      }
+      process.exitCode = exitCode;
     }).catch((closeError) => {
-      console.error(closeError instanceof Error ? closeError.message : String(closeError));
+      printCliMessage(
+        "failure",
+        `Codex App Server 资源清理失败：${closeError instanceof Error ? closeError.message : String(closeError)}`,
+      );
       process.exitCode = 1;
     });
   };
