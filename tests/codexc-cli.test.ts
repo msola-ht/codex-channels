@@ -1842,6 +1842,21 @@ describe("codexc CLI", () => {
       [["work", "unknown"], "用法：codexc work"],
       [["agents"], "用法：codexc agents"],
       [["agents", "unknown"], "用法：codexc agents"],
+      [["center", "--help", "unexpected"], "用法：codexc center"],
+      [["center", "info", "--help", "unexpected"], "用法：codexc center info"],
+      [["center", "--unknown"], "未知参数：--unknown"],
+      [["center", "--host", "invalid"], "center host 只允许"],
+      [["webui", "--unknown"], "未知参数：--unknown"],
+      [["webui", "--help", "unexpected"], "用法：codexc webui"],
+      [["webui", "--host", "invalid"], "WebUI host 只允许"],
+      [["channel", "send-image", "--unknown"], "未知参数：--unknown"],
+      [["channel", "send-image", "--help", "unexpected"], "用法：codexc channel send-image"],
+      [["channel", "send-image", "relative.png"], "图片路径必须是绝对路径"],
+      [["metrics", "report", "--unknown"], "未知参数：--unknown"],
+      [["metrics", "report", "--help", "unexpected"], "用法：codexc metrics report"],
+      [["metrics", "report", "--range", "invalid"], "--range 只支持"],
+      [["metrics", "report", "--group", "invalid"], "--group 只支持"],
+      [["metrics", "cleanup", "--before", "invalid"], "日期必须使用 YYYY-MM-DD 格式"],
     ] as const) {
       const result = spawnSync(process.execPath, [cli, ...args], {
         cwd: root,
@@ -1852,7 +1867,7 @@ describe("codexc CLI", () => {
       expect(result.stderr).toContain(expected);
       expect(result.stderr).not.toContain("尚未初始化");
     }
-  });
+  }, 15_000);
 
   it("rejects extra arguments instead of silently executing scoped commands", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-extra-"));

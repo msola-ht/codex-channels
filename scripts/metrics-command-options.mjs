@@ -68,6 +68,63 @@ export function parseMetricsOptions(args, allowed) {
   return result;
 }
 
+export function validateMetricsCommandArgs(subcommand, args) {
+  const withoutStdout = args.filter((argument) => argument !== "--stdout");
+  if (subcommand === "run") {
+    parseMetricsRunArgs(withoutStdout);
+    return;
+  }
+  if (subcommand === "turns") {
+    parseMetricsTurnsArgs(withoutStdout);
+    return;
+  }
+  if (subcommand === "threads") {
+    parseMetricsThreadsArgs(withoutStdout);
+    return;
+  }
+  if (subcommand === "report") {
+    const options = parseMetricsOptions(
+      withoutStdout,
+      new Set(["--range", "--from", "--to", "--group", "--format"]),
+    );
+    assertExportFormat(options.format ?? "markdown", ["markdown", "json", "csv"]);
+    metricsRangeOptions(options, Date.now());
+    if (options.group !== undefined) metricsDimension(options.group);
+    return;
+  }
+  if (subcommand === "export") {
+    const options = parseMetricsOptions(
+      withoutStdout,
+      new Set(["--range", "--from", "--to", "--format", "--thread"]),
+    );
+    assertExportFormat(options.format ?? "json", ["json", "csv", "markdown"]);
+    metricsRangeOptions(options, Date.now());
+    return;
+  }
+  if (subcommand === "cleanup") {
+    const options = parseCleanupOptions(
+      args.filter((argument) => argument !== "--restart-gateway"),
+    );
+    if (options.before !== undefined) parseLocalDate(options.before);
+    return;
+  }
+  if (subcommand === "prune") {
+    if (args.length !== 1 || !new Set(["openai", "deepseek"]).has(args[0])) {
+      throw new Error("用法：codexc metrics prune <openai|deepseek>");
+    }
+    return;
+  }
+  if (subcommand === "upgrade" || subcommand === "sync-reset") {
+    if (args.length > 1 || (args.length === 1 && args[0] !== "--restart-gateway")) {
+      throw new Error(`用法：codexc metrics ${subcommand} [--restart-gateway]`);
+    }
+    return;
+  }
+  if ((subcommand === "status" || subcommand === "reset") && args.length > 0) {
+    throw new Error(`用法：codexc metrics ${subcommand}`);
+  }
+}
+
 export function parseCleanupOptions(args) {
   const options = {};
   for (let index = 0; index < args.length; index += 1) {

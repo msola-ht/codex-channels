@@ -7,7 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +17,11 @@ import {
   locateUserConfig,
   resolveConfiguredPath,
 } from "./runtime-config.mjs";
+import {
+  assertAbsoluteChannelImagePath,
+  CHANNEL_SEND_IMAGE_USAGE,
+  parseChannelSendImageArgs,
+} from "./channel-send-image-options.mjs";
 
 const maximumChannelImageBytes = 10 * 1024 * 1024;
 
@@ -31,9 +36,7 @@ export async function submitChannelImage({
   if (typeof imagePath !== "string" || imagePath.length === 0) {
     throw new Error("请提供要发送的图片路径：codexc channel send-image <图片路径>");
   }
-  if (!isAbsolute(imagePath)) {
-    throw new Error("图片路径必须是绝对路径");
-  }
+  assertAbsoluteChannelImagePath(imagePath);
   if (!existsSync(imagePath) || !statSync(imagePath).isFile()) {
     throw new Error(`图片文件不存在：${imagePath}`);
   }
@@ -154,32 +157,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const args = process.argv.slice(2);
     const help = args.length === 1 && (args[0] === "-h" || args[0] === "--help");
     if (help) {
-      console.log(`用法：codexc channel send-image <图片路径> [--thread <Thread ID>]
+      console.log(`${CHANNEL_SEND_IMAGE_USAGE}
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，由当前渠道机器人凭据发送回绑定会话。
 不指定 --thread 时，只有当前仅存在一个会话绑定才会自动选择目标。`);
       process.exit(0);
     }
-    let threadId;
-    const positional = [];
-    for (let index = 0; index < args.length; index += 1) {
-      if (args[index] === "--thread") {
-        threadId = args[index + 1];
-        if (!threadId) {
-          throw new Error("--thread 缺少值");
-        }
-        index += 1;
-        continue;
-      }
-      if (args[index].startsWith("-")) {
-        throw new Error(`未知参数：${args[index]}`);
-      }
-      positional.push(args[index]);
-    }
-    if (positional.length !== 1) {
-      throw new Error("用法：codexc channel send-image <图片路径> [--thread <Thread ID>]");
-    }
-    printResult(await submitChannelImage({ imagePath: positional[0], threadId }));
+    const parsed = parseChannelSendImageArgs(args);
+    printResult(await submitChannelImage(parsed));
   } catch (error) {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

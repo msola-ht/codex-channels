@@ -14,11 +14,17 @@ export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 8790;
 const CENTER_USAGE = "用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]";
 
+export function assertMetricsCenterHost(value) {
+  if (!["127.0.0.1", "::1", "0.0.0.0"].includes(value)) {
+    throw new Error("center host 只允许 127.0.0.1、::1 或 0.0.0.0");
+  }
+}
+
 export function resolveMetricsCenterSettings({
   args = [],
   environment = process.env,
 } = {}) {
-  const cli = parseCliArgs(args);
+  const cli = parseMetricsCenterCliArgs(args);
   const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const configPath = explicitConfigFile
     ? resolve(explicitConfigFile)
@@ -44,7 +50,7 @@ export function resolveMetricsCenterSettings({
   };
 }
 
-function parseCliArgs(args) {
+export function parseMetricsCenterCliArgs(args) {
   const settings = {};
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -53,6 +59,7 @@ function parseCliArgs(args) {
       if (raw === undefined) {
         throw new Error(CENTER_USAGE);
       }
+      assertMetricsCenterHost(raw);
       settings.host = raw;
       index += 1;
       continue;

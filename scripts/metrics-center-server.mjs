@@ -18,6 +18,7 @@ import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { runCenterSettings } from "./metrics-config-menu.mjs";
 import { parseIngestPayload } from "./metrics-center-payload.mjs";
 import {
+  assertMetricsCenterHost,
   DEFAULT_HOST,
   DEFAULT_PORT,
   resolveMetricsCenterSettings,
@@ -97,9 +98,7 @@ export function createMetricsCenterServer({
   deviceToken = null,
   databasePath,
 } = {}) {
-  if (!["127.0.0.1", "::1", "0.0.0.0"].includes(host)) {
-    throw new Error("center host 只允许 127.0.0.1、::1 或 0.0.0.0");
-  }
+  assertMetricsCenterHost(host);
   if (host === "0.0.0.0" && (token === null || deviceToken === null)) {
     throw new Error(
       "center 绑定非回环地址时必须同时提供查看令牌和设备上报令牌",
