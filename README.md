@@ -184,17 +184,17 @@ codexc channel send-image /tmp/截图.png --thread <Thread ID>  # 指定会话
 
 ```bash
 codexc start                          # 前台启动 App Server 与 Gateway（调试用）
-codexc service status                 # 查看全部服务
+codexc service status                 # 查看全部核心服务
 codexc service reload                 # 重新读取配置
 codexc service restart                # 只重启 Gateway
 codexc service restart all            # 重启 Gateway 和 App Server
 codexc service start webui            # 启动 WebUI 后台服务
 codexc service start center           # 启动指标中心后台服务
 codexc service logs                   # 查看 Gateway 日志
-codexc service logs all -n 200        # 查看全部服务最近 200 行日志
+codexc service logs all -n 200        # 查看全部核心服务最近 200 行日志
 ```
 
-`start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
+`start`、`stop` 和 `status` 默认操作全部核心服务；`restart` 和 `logs` 默认只操作 Gateway。运行
 `codexc service -h` 查看完整用法。WebUI 与指标中心不并入 `all`，需要时单独启动。
 核心服务执行安装、启动或重启后，CLI 会等待 App Server 监管拓扑、WebSocket 与 Gateway
 应用就绪状态稳定；超时会返回失败并提示查看对应状态和日志，不会把服务管理器已接受命令

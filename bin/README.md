@@ -20,10 +20,12 @@
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
-- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek` 选择隔离实例。
+- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek` 选择隔离实例；
+  预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
-- `agents`：启用或停用 Codex multi_agent_v2 的 DeepSeek 子代理角色（`agents.ds`），并查看当前状态。
+- `agents`：启用或停用 Codex multi_agent_v2 的 DeepSeek 子代理角色（`agents.ds`），并查看当前状态；
+  `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化。
 - `update`：统一审查并更新用户配置、状态数据库和指标数据库，然后恢复核心服务。
 - `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
 - `metrics`：查询、导出、清理或显式维护独立模型指标库；日常兼容升级使用 `update`。
@@ -33,7 +35,8 @@
 - `service`：完整校验配置后安装整套后台服务；启停、重启、状态和日志命令使用
   `gateway`、`app-server`、`webui`、`center` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
   `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
-  WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。
+  WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
+  诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理；任一受监管组件退出都会共同重建。代理指标通过私有 Unix Socket

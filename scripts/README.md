@@ -32,8 +32,8 @@
   行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
-  时间范围、分组、格式及维护命令参数；不访问配置、数据库或服务，`metrics-database.mjs` 保留原有
-  公开入口与 `metricsRange` 导出。
+  时间范围、分组、格式及维护命令参数，并向顶层帮助导出规范用法行；不访问配置、数据库或服务，
+  `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
 - `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到
   `data/channel-outbox/pending/` 并写入 manifest；由 Gateway 轮询后按 Thread 绑定
@@ -156,7 +156,7 @@
   显式禁用同样拒绝删除非托管同名角色。App Server 服务启动时原子刷新角色文件为
   本机 DeepSeek 统计代理地址，同时写入禁止
   解析加密正文和等待后续消息的受控指令。普通服务退出保留文件以维持 Codex 配置可解析，显式
-  禁用、改为固定模式或恢复配置时删除。
+  禁用、改为固定模式或恢复配置时删除；只读 `status` 不依赖 Gateway 配置。
 
 ## 开发与协议
 
@@ -164,9 +164,12 @@
   `service-app-server` 入口启动主 App Server、已配置的隔离 Provider App Server 及对应统计代理，
   再启动 Gateway；只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
-  App Server 失败关闭。
+  App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
+- `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
+  `codexc remote` 自有的 Workspace 与 DeepSeek Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  `--profile deepseek`，既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证。
+  `--profile deepseek`，既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证；
+  配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
 - `codex-release-api.mjs`：为稳定版和 Alpha 解析器调用 GitHub Release API；请求或响应正文

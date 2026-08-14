@@ -36,8 +36,9 @@
   Gateway 已完成应用启动且尚未进入关闭流程。
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
   label、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor 复用。
-- `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号和
-  成对安装/移除进程信号监听；具体关闭超时和资源清理仍由各生命周期所有者决定。
+- `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
+  解释同步子进程的启动错误/退出码/终止信号和成对安装/移除进程信号监听；可标记失败已由子命令
+  展示，避免嵌套 CLI 重复报错。具体关闭超时和资源清理仍由各生命周期所有者决定。
 - `cli-presentation.mjs` / `cli-presentation.d.mts`：集中定义公开 CLI 的成功、失败、提示和处理
   状态标签、颜色、输出流路由和换行，Doctor 检查项另用通过；统一遵守 TTY 与 `NO_COLOR`，
   重定向输出保持纯文本。

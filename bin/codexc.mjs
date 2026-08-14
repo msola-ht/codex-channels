@@ -9,7 +9,7 @@ import {
   readFileSync,
   rmSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -39,8 +39,11 @@ import {
   serviceTargetUsage,
 } from "../runtime/service-targets.mjs";
 import {
+  assertSynchronousChildSuccess,
   childProcessIsRunning,
+  ForwardedChildSignalError,
   installProcessSignalHandlers,
+  ReportedChildExitError,
   signalChildProcesses,
 } from "../runtime/process-lifecycle.mjs";
 import {
@@ -52,11 +55,19 @@ import {
   locateOptionalUserConfig,
   packageDir,
   requireUserConfig,
+  userDataDir,
 } from "../scripts/runtime-config.mjs";
 import { checkProjectRules, initializeProjectRules } from "../scripts/codex-rules.mjs";
+import {
+  CODEX_REMOTE_USAGE,
+  parseCodexRemoteOptions,
+} from "../scripts/codex-remote-options.mjs";
 import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options.mjs";
 import { parseMetricsCenterCliArgs } from "../scripts/metrics-center-settings.mjs";
-import { validateMetricsCommandArgs } from "../scripts/metrics-command-options.mjs";
+import {
+  metricsCommandUsage,
+  validateMetricsCommandArgs,
+} from "../scripts/metrics-command-options.mjs";
 import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
 import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
@@ -98,7 +109,7 @@ const helpText = {
   state                        单独维护状态数据库
 
 信息：
-  version                      显示版本
+  version, -v, --version       显示版本
 
 运行 codexc <命令> -h 查看详细用法。`,
   init: `用法：codexc init
@@ -110,7 +121,7 @@ const helpText = {
   start: `用法：codexc start
 
 在前台启动 Codex App Server 与 Gateway。`,
-  remote: `用法：codexc remote [--workspace ID] [Codex 参数...]
+  remote: `${CODEX_REMOTE_USAGE}
 
 连接共享 App Server，并把其余参数传给原生 Codex CLI。
 切换模式下使用 --profile deepseek 连接隔离的 DeepSeek App Server。`,
@@ -125,7 +136,8 @@ const helpText = {
   status [目标]                查看 gateway、app-server、webui、center 或 all
   logs [目标] [-f] [-n 行数]   查看后台日志
 
-目标默认值：start/stop/status 为 all，restart/logs 为 gateway。`,
+目标默认值：start/stop/status 为 all，restart/logs 为 gateway。
+all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "service.install": "用法：codexc service install",
   "service.uninstall": "用法：codexc service uninstall",
   "service.start": `用法：codexc service start [${serviceTargetUsage}]`,
@@ -183,11 +195,11 @@ const helpText = {
   metrics: `用法：codexc metrics
 
 无参数时进入交互菜单。查看与导出模型请求指标：
-  codexc metrics run <Thread ID> [--format markdown|json|csv]   本次运行汇总（最近 Turn + 会话累计）
-  codexc metrics turns <Thread ID> [--format markdown|json|csv]   会话每次对话明细
-  codexc metrics threads [--format markdown|json|csv]   列出有指标的会话
-  codexc metrics report [--range 时间范围 | --from 日期 --to 日期] [--group global|providers|models] [--format markdown|json|csv]   聚合汇报
-  codexc metrics export [--range 时间范围 | --from 日期 --to 日期] [--format json|csv|markdown] [--thread Thread ID]   请求明细导出
+  ${metricsCommandUsage.run.slice("用法：".length)}   本次运行汇总（最近 Turn + 会话累计）
+  ${metricsCommandUsage.turns.slice("用法：".length)}   会话每次对话明细
+  ${metricsCommandUsage.threads.slice("用法：".length)}   列出有指标的会话
+  ${metricsCommandUsage.report.slice("用法：".length)}   聚合汇报
+  ${metricsCommandUsage.export.slice("用法：".length)}   请求明细导出
   codexc metrics status   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
@@ -235,17 +247,18 @@ const helpText = {
   "metrics.status": `用法：codexc metrics status
 
 只读显示指标数据库路径、Schema 兼容性和记录数量。`,
-  "metrics.run": `用法：codexc metrics run <Thread ID> [--format markdown|json|csv]
+  "metrics.run": `${metricsCommandUsage.run}
 
 导出指定 Thread 的本次运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度、费用与耗时，
 以及当前会话累计；默认输出 Markdown 并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
-  "metrics.turns": `用法：codexc metrics turns <Thread ID> [--format markdown|json|csv]
+  "metrics.turns": `${metricsCommandUsage.turns}
 
 导出指定会话每一次对话的汇总（请求次数、Token、费用、速度、耗时）；默认写入
 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
-  "metrics.threads": `用法：codexc metrics threads [--format markdown|json|csv]
+  "metrics.threads": `${metricsCommandUsage.threads}
 
-列出指标库中有记录的所有会话及其对话数、请求数；默认写入 ~/.codex-connect/output/<日期>/。`,
+列出指标库中有记录的所有会话及其对话数、请求数；默认写入 ~/.codex-connect/output/<日期>/，
+加 --stdout 输出到标准输出。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
@@ -267,10 +280,10 @@ provider 当前支持 openai、deepseek。备份并删除本地与中心库中�
 
 按配置 [metrics.storage] 或命令行覆盖值清理最旧请求指标。默认要求 Gateway 已停止；
 加 --restart-gateway 自动停止并重新启动。清理前创建 0600 备份；--vacuum 会立即回收文件空间。`,
-  "metrics.report": `用法：codexc metrics report [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--group <global|providers|models>] [--format markdown|json|csv]
+  "metrics.report": `${metricsCommandUsage.report}
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
-  "metrics.export": `用法：codexc metrics export [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format <json|csv|markdown>] [--thread <Thread ID>]
+  "metrics.export": `${metricsCommandUsage.export}
 
 只读导出脱敏请求记录；默认最近 30 天、JSON 格式并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。--thread 只导出指定 Thread。`,
   version: "用法：codexc version",
@@ -281,13 +294,6 @@ provider 当前支持 openai、deepseek。备份并删除本地与中心库中�
 
 内部 Codex App Server 服务入口。`,
 };
-
-class ManagedChildExitError extends Error {
-  constructor(exitCode) {
-    super(`子命令执行失败：exit=${exitCode}`);
-    this.exitCode = exitCode;
-  }
-}
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -349,7 +355,11 @@ try {
       if (showRequestedHelp(args, "remote")) {
         break;
       }
-      runScript("scripts/codex-remote.mjs", args, { workingDirectory: process.cwd() });
+      parseCodexRemoteOptions(args);
+      runScript("scripts/codex-remote.mjs", args, {
+        workingDirectory: process.cwd(),
+        failureReportedByChild: true,
+      });
       break;
     case "work":
       await runWorkspaceCommand(args);
@@ -367,6 +377,7 @@ try {
         [join(packageDir, "scripts/config.mjs")],
         process.env,
         process.cwd(),
+        { failureReportedByChild: true },
       );
       break;
     case "doctor":
@@ -433,10 +444,17 @@ try {
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
   }
 } catch (error) {
-  if (!(error instanceof ManagedChildExitError)) {
+  if (
+    !(error instanceof ReportedChildExitError)
+    && !(error instanceof ForwardedChildSignalError)
+  ) {
     printCliMessage("failure", error instanceof Error ? error.message : String(error));
   }
-  process.exitCode = error instanceof ManagedChildExitError ? error.exitCode : 1;
+  if (error instanceof ReportedChildExitError) {
+    process.exitCode = error.exitCode;
+  } else if (!(error instanceof ForwardedChildSignalError)) {
+    process.exitCode = 1;
+  }
 }
 
 function initialize(args) {
@@ -689,21 +707,26 @@ async function service(args) {
   if (action === "install") {
     runScript("scripts/validate-config.mjs", [], { failureReportedByChild: true });
   }
+  const controlEnvironment = serviceActionAllowsInvalidConfig(action)
+    ? serviceControlEnvironment()
+    : configuredEnvironment().environment;
   if (process.platform === "darwin") {
     if (action === "install") {
       run(
         "/bin/zsh",
         [join(packageDir, "scripts/launchd-control.sh"), "check-install"],
-        configuredEnvironment().environment,
+        controlEnvironment,
+        undefined,
+        { failureReportedByChild: true },
       );
       runScript("scripts/install-launchd.mjs", [], { failureReportedByChild: true });
     }
     run(
       "/bin/zsh",
       [join(packageDir, "scripts/launchd-control.sh"), action, ...serviceArgs],
-      configuredEnvironment().environment,
+      controlEnvironment,
       undefined,
-      { failureReportedByChild: action === "status" },
+      { failureReportedByChild: serviceControllerReportsFailure(action) },
     );
   } else if (process.platform === "linux") {
     if (action === "install") {
@@ -712,9 +735,9 @@ async function service(args) {
     run(
       "/bin/sh",
       [join(packageDir, "scripts/systemd-control.sh"), action, ...serviceArgs],
-      configuredEnvironment().environment,
+      controlEnvironment,
       undefined,
-      { failureReportedByChild: action === "status" },
+      { failureReportedByChild: serviceControllerReportsFailure(action) },
     );
   } else {
     throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
@@ -724,6 +747,14 @@ async function service(args) {
     await waitForManagedServiceReadiness(readinessTarget);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));
   }
+}
+
+function serviceControllerReportsFailure(action) {
+  return action === "status" || action === "reload";
+}
+
+function serviceActionAllowsInvalidConfig(action) {
+  return new Set(["uninstall", "stop", "reload", "status", "logs"]).has(action);
 }
 
 function coreServiceReadinessTarget(action, serviceArgs) {
@@ -781,14 +812,7 @@ function runDoctor(args) {
     env: process.env,
     cwd: process.cwd(),
   });
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.signal) {
-    process.kill(process.pid, result.signal);
-    return;
-  }
-  process.exitCode = result.status ?? 1;
+  assertSynchronousChildSuccess(result, { failureReportedByChild: true });
 }
 
 function projectRules(args) {
@@ -851,6 +875,10 @@ function agents(args) {
   ) {
     throw new Error(helpText.agents);
   }
+  if (args[0] === "status") {
+    runStandaloneScript("scripts/agents.mjs", args);
+    return;
+  }
   runScript("scripts/agents.mjs", args, { failureReportedByChild: true });
 }
 
@@ -871,6 +899,16 @@ function runScript(relativePath, args, {
     { ...runtime.environment, ...additionalEnvironment },
     workingDirectory ?? runtime.dataDir,
     { failureReportedByChild },
+  );
+}
+
+function runStandaloneScript(relativePath, args) {
+  run(
+    process.execPath,
+    [join(packageDir, relativePath), ...args],
+    process.env,
+    process.cwd(),
+    { failureReportedByChild: true },
   );
 }
 
@@ -950,7 +988,7 @@ async function runForegroundScript(
           return;
         }
         if (code !== 0) {
-          rejectChild(new Error(`子命令执行失败：exit=${code ?? 1}`));
+          rejectChild(new ReportedChildExitError(code ?? 1));
           return;
         }
         resolveChild();
@@ -1039,6 +1077,7 @@ async function metrics(args) {
             [join(packageDir, "scripts/metrics-database.mjs"), "status"],
             process.env,
             process.cwd(),
+            { failureReportedByChild: true },
           );
           return;
         }
@@ -1061,6 +1100,7 @@ async function metrics(args) {
       [join(packageDir, "scripts/metrics-database.mjs"), subcommand],
       process.env,
       process.cwd(),
+      { failureReportedByChild: true },
     );
     return;
   }
@@ -1139,11 +1179,15 @@ function runMetricsCommand(args) {
   } finally {
     closeSync(output.fileDescriptor);
   }
-  if (result.error || result.status !== 0) {
+  if (result.error) {
     rmSync(output.file, { force: true });
-    if (result.error) printCliMessage("failure", `指标导出失败：${result.error.message}`);
-    process.exitCode = result.status ?? 1;
-    return;
+    throw new Error(`指标导出失败：${result.error.message}`);
+  }
+  try {
+    assertSynchronousChildSuccess(result, { failureReportedByChild: true });
+  } catch (error) {
+    rmSync(output.file, { force: true });
+    throw error;
   }
   chmodSync(output.file, 0o600);
   printCliMessage("success", "指标导出完成。");
@@ -1236,6 +1280,18 @@ function configuredEnvironment() {
   };
 }
 
+function serviceControlEnvironment(environment = process.env) {
+  const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  const configPath = explicitConfigFile
+    ? resolve(explicitConfigFile)
+    : join(userDataDir(environment), "config.toml");
+  return {
+    ...environment,
+    CODEX_CONNECT_HOME: dirname(configPath),
+    CODEX_CONNECT_CONFIG_FILE: configPath,
+  };
+}
+
 function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
   let settled = false;
   const forward = (signal) => signalChildProcesses(children, signal);
@@ -1252,7 +1308,10 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     forward("SIGTERM");
     void Promise.resolve(closeResources()).then(() => {
       if (error) {
-        console.error(error instanceof Error ? error.message : String(error));
+        printCliMessage(
+          "failure",
+          `Codex App Server 进程启动失败：${error instanceof Error ? error.message : String(error)}`,
+        );
         process.exitCode = 1;
         return;
       }
@@ -1260,9 +1319,16 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
         process.kill(process.pid, signal);
         return;
       }
-      process.exitCode = code ?? 1;
+      const exitCode = code ?? 1;
+      if (exitCode !== 0) {
+        printCliMessage("failure", `Codex App Server 进程意外退出：exit=${exitCode}`);
+      }
+      process.exitCode = exitCode;
     }).catch((closeError) => {
-      console.error(closeError instanceof Error ? closeError.message : String(closeError));
+      printCliMessage(
+        "failure",
+        `Codex App Server 资源清理失败：${closeError instanceof Error ? closeError.message : String(closeError)}`,
+      );
       process.exitCode = 1;
     });
   };
@@ -1290,19 +1356,7 @@ function run(executable, args, environment, cwd, options = {}) {
       ...(cwd ? { cwd } : {}),
     },
   );
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.signal) {
-    process.kill(process.pid, result.signal);
-    return;
-  }
-  if (result.status !== 0) {
-    if (options.failureReportedByChild) {
-      throw new ManagedChildExitError(result.status ?? 1);
-    }
-    throw new Error(`子命令执行失败：exit=${result.status ?? 1}`);
-  }
+  assertSynchronousChildSuccess(result, options);
 }
 
 function nodeArguments(args) {

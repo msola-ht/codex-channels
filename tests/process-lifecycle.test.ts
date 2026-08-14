@@ -3,8 +3,11 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  assertSynchronousChildSuccess,
   childProcessIsRunning,
+  ForwardedChildSignalError,
   installProcessSignalHandlers,
+  ReportedChildExitError,
   signalChildProcesses,
 } from "../runtime/process-lifecycle.mjs";
 
@@ -27,5 +30,38 @@ describe("process lifecycle primitives", () => {
     cleanup();
     source.emit("SIGTERM");
     expect(terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves child-reported failures without creating a second message", () => {
+    expect(() => assertSynchronousChildSuccess(
+      { signal: null, status: 7 },
+      { failureReportedByChild: true },
+    )).toThrow(ReportedChildExitError);
+
+    try {
+      assertSynchronousChildSuccess(
+        { signal: null, status: 7 },
+        { failureReportedByChild: true },
+      );
+    } catch (error) {
+      expect(error).toMatchObject({ exitCode: 7 });
+    }
+  });
+
+  it("forwards a child termination signal and aborts the current command", () => {
+    const signalTarget = { pid: 123, kill: vi.fn() };
+
+    expect(() => assertSynchronousChildSuccess(
+      { signal: "SIGTERM", status: null },
+      { signalTarget },
+    )).toThrow(ForwardedChildSignalError);
+    expect(signalTarget.kill).toHaveBeenCalledWith(123, "SIGTERM");
+  });
+
+  it("uses the caller's failure context for silent non-zero exits", () => {
+    expect(() => assertSynchronousChildSuccess(
+      { signal: null, status: 3 },
+      { failureMessage: (exitCode) => `维护命令失败：exit=${exitCode}` },
+    )).toThrow("维护命令失败：exit=3");
   });
 });
