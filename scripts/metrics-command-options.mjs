@@ -1,3 +1,11 @@
+export const metricsCommandUsage = Object.freeze({
+  run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
+  turns: "用法：codexc metrics turns <Thread ID> [--format markdown|json|csv] [--stdout]",
+  threads: "用法：codexc metrics threads [--format markdown|json|csv] [--stdout]",
+  report: "用法：codexc metrics report [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--group <global|providers|models>] [--format markdown|json|csv] [--stdout]",
+  export: "用法：codexc metrics export [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format <json|csv|markdown>] [--thread <Thread ID>] [--stdout]",
+});
+
 export function metricsRange(name, nowMs) {
   const duration = {
     "24h": 24 * 60 * 60 * 1_000,
@@ -150,17 +158,11 @@ export function parseCleanupOptions(args) {
 }
 
 export function parseMetricsRunArgs(args) {
-  return parseThreadCommandArgs(
-    args,
-    "用法：codexc metrics run <Thread ID> [--format markdown|json|csv]",
-  );
+  return parseThreadCommandArgs(args, metricsCommandUsage.run);
 }
 
 export function parseMetricsTurnsArgs(args) {
-  return parseThreadCommandArgs(
-    args,
-    "用法：codexc metrics turns <Thread ID> [--format markdown|json|csv]",
-  );
+  return parseThreadCommandArgs(args, metricsCommandUsage.turns);
 }
 
 export function parseMetricsThreadsArgs(args) {

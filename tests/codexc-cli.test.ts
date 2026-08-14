@@ -147,6 +147,20 @@ describe("codexc CLI", () => {
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const workHelp = spawnSync(process.execPath, [cli, "work", "--help"], { encoding: "utf8" });
     expect(workHelp.stdout).toContain("权限");
+    for (const subcommand of ["run", "turns", "threads", "report", "export"]) {
+      const metricsHelp = spawnSync(
+        process.execPath,
+        [cli, "metrics", subcommand, "--help"],
+        { encoding: "utf8" },
+      );
+      expect(metricsHelp.stdout).toContain("--stdout");
+    }
+    const serviceHelp = spawnSync(process.execPath, [cli, "service", "--help"], {
+      encoding: "utf8",
+    });
+    expect(serviceHelp.stdout).toContain("all 只包含 App Server 与 Gateway");
+    const mainHelp = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+    expect(mainHelp.stdout).toContain("version, -v, --version");
   }, 30_000);
 
   it("keeps top-level help as a complete first-level command index", () => {
@@ -540,6 +554,30 @@ describe("codexc CLI", () => {
       "-sb",
     ]);
     expect(output).toContain("项目 Codex 规则检查通过");
+  });
+
+  it("reports a signaled project-rules check without terminating the CLI host", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-signal-"));
+    temporaryDirectories.push(root);
+    const project = join(root, "Project");
+    const rulesPath = join(project, ".codex", "rules", "default.rules");
+    const fakeCodex = join(root, "fake-codex");
+    mkdirSync(dirname(rulesPath), { recursive: true });
+    mkdirSync(join(project, ".git"));
+    writeFileSync(rulesPath, 'prefix_rule(pattern = ["git", "status"], decision = "allow")\n');
+    writeFileSync(fakeCodex, "#!/bin/sh\nkill -TERM $$\n");
+    chmodSync(fakeCodex, 0o700);
+
+    const result = spawnSync(process.execPath, [cli, "rules", "check"], {
+      cwd: project,
+      env: { ...process.env, CODEX_BINARY: fakeCodex },
+      encoding: "utf8",
+    });
+
+    expect(result.signal).toBeNull();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("项目 Codex 规则检查被信号终止：SIGTERM");
+    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
   });
 
   it.each(["check", "init"])(
@@ -1138,6 +1176,30 @@ describe("codexc CLI", () => {
         "resume",
       ]);
     }
+
+    const passthroughCapture = join(root, "capture-passthrough.json");
+    const passthrough = spawnSync(
+      process.execPath,
+      [cli, "remote", "resume", "--", "--profile", "deepseek", "--workspace", "external"],
+      {
+        cwd: workspace,
+        env: { ...environment, CODEX_TEST_CAPTURE: passthroughCapture },
+        encoding: "utf8",
+      },
+    );
+    expect(passthrough.status, passthrough.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(passthroughCapture, "utf8"))).toEqual([
+      "--remote",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      "-C",
+      realpathSync(workspace),
+      "resume",
+      "--",
+      "--profile",
+      "deepseek",
+      "--workspace",
+      "external",
+    ]);
   });
 
   it("starts the App Server through the service entry with effective proxy settings", () => {
@@ -1986,6 +2048,8 @@ describe("codexc CLI", () => {
       [["work", "add", "--id", "--prune-missing"], "--id 缺少值"],
       [["work", "add", "--name", "-Project", "--unknown"], "未知参数：--unknown"],
       [["work", "unknown"], "用法：codexc work"],
+      [["remote", "--workspace"], "用法：codexc remote"],
+      [["remote", "--workspace", "--profile", "deepseek"], "用法：codexc remote"],
       [["agents"], "用法：codexc agents"],
       [["agents", "unknown"], "用法：codexc agents"],
       [["center", "--help", "unexpected"], "用法：codexc center"],
@@ -2290,6 +2354,43 @@ describe("codexc CLI", () => {
     expect(reload.stderr).toContain("Gateway 尚未运行");
     expect(reload.stderr.match(/\[失败\]/g)).toHaveLength(1);
     expect(reload.stderr).not.toContain("子命令执行失败");
+  });
+
+  linuxIt("does not repeat a nested service failure from metrics maintenance", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-service-error-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const fakeSystemctl = join(root, "systemctl");
+    mkdirSync(workspace);
+    writeFileSync(fakeSystemctl, [
+      "#!/bin/sh",
+      "printf '测试 Gateway 停止失败\\n' >&2",
+      "exit 3",
+    ].join("\n"));
+    chmodSync(fakeSystemctl, 0o755);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_CONNECT_SERVICE_ROLE: "",
+      SYSTEMCTL_BINARY: fakeSystemctl,
+    };
+    execFileSync(process.execPath, [cli, "init"], {
+      cwd: workspace,
+      env: environment,
+    });
+
+    const result = spawnSync(
+      process.execPath,
+      [cli, "metrics", "cleanup", "--restart-gateway"],
+      { cwd: workspace, env: environment, encoding: "utf8" },
+    );
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("测试 Gateway 停止失败");
+    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
+    expect(result.stderr).not.toContain("Gateway 停止失败：exit");
   });
 
   linuxIt("keeps service diagnostics and recovery available without a config file", () => {

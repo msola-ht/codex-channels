@@ -250,10 +250,11 @@
   Client 或生成协议，Conversation Turn 测试不得伪装成完整 Client；生产源码只有 Codex Client
   可以导入生成协议，业务模块不得依赖具体 Client。
 - App Server 运行描述统一派生主/Provider Socket 与监管拓扑；服务目录统一 systemd unit、launchd
-  label、核心服务范围、默认目标和启停顺序，平台脚本按规范目标查询标识而不依赖注册顺序；公共进程生命周期只向仍活动的子进程转发信号并成对
-  清理监听；CLI 成功、失败、提示和处理状态使用独立颜色，Doctor 检查项另用通过，并统一遵守
+  label、核心服务范围、默认目标和启停顺序，平台脚本按规范目标查询标识而不依赖注册顺序；公共进程生命周期只向仍活动的子进程转发信号、
+  解释同步子进程结果并成对清理监听；CLI 成功、失败、提示和处理状态使用独立颜色，Doctor 检查项另用通过，并统一遵守
   `NO_COLOR`；状态呈现不改变路径、标识符和其他机器可解析数据；受管子命令失败只展示一次且不输出
-  Node.js 堆栈，Remote TUI 终止信号原样传播，只读 Agent 状态不依赖 Gateway 配置。
+  Node.js 堆栈，Remote TUI 终止信号原样传播，项目规则检查被信号终止时不结束 CLI/Gateway 宿主，
+  只读 Agent 状态不依赖 Gateway 配置。
 - `codexc start` 在仅 DeepSeek 固定模式下复用 `service-app-server`，把主 App Server 的 Provider
   地址指向本机统计代理；监管 Socket 覆盖裸 App Server、后台入口重复启动和 Provider 拓扑不一致
   的失败关闭，配置级所有权 Socket 跨 Provider 覆盖直接入口和前台入口的重复 Gateway，真实

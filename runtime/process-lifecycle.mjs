@@ -1,3 +1,34 @@
+export class ReportedChildExitError extends Error {
+  constructor(exitCode) {
+    super(`子命令执行失败：exit=${exitCode}`);
+    this.exitCode = exitCode;
+  }
+}
+
+export class ForwardedChildSignalError extends Error {
+  constructor(signal) {
+    super(`子命令被信号终止：${signal}`);
+    this.signal = signal;
+  }
+}
+
+export function assertSynchronousChildSuccess(result, {
+  failureMessage = (exitCode) => `子命令执行失败：exit=${exitCode}`,
+  failureReportedByChild = false,
+  signalTarget = process,
+} = {}) {
+  if (result.error) throw result.error;
+  if (result.signal) {
+    signalTarget.kill(signalTarget.pid, result.signal);
+    throw new ForwardedChildSignalError(result.signal);
+  }
+  if (result.status !== 0) {
+    const exitCode = result.status ?? 1;
+    if (failureReportedByChild) throw new ReportedChildExitError(exitCode);
+    throw new Error(failureMessage(exitCode));
+  }
+}
+
 export function childProcessIsRunning(child) {
   return child !== undefined
     && child.exitCode === null

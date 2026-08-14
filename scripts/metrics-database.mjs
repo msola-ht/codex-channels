@@ -14,6 +14,11 @@ import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { providerMetricsSocketPath } from "../runtime/model-provider-runtime.mjs";
+import {
+  assertSynchronousChildSuccess,
+  ForwardedChildSignalError,
+  ReportedChildExitError,
+} from "../runtime/process-lifecycle.mjs";
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
@@ -642,10 +647,7 @@ function runGatewayServiceAction(action, environment) {
     [cli, "service", action, "gateway"],
     { env: environment, stdio: "inherit" },
   );
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`Gateway ${action === "stop" ? "停止" : "启动"}失败`);
-  }
+  assertSynchronousChildSuccess(result, { failureReportedByChild: true });
 }
 
 function runServiceAction(target, action, environment) {
@@ -655,10 +657,7 @@ function runServiceAction(target, action, environment) {
     [cli, "service", action, target],
     { env: environment, stdio: "inherit" },
   );
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`${target} 服务${action === "stop" ? "停止" : "启动"}失败`);
-  }
+  assertSynchronousChildSuccess(result, { failureReportedByChild: true });
 }
 
 function resolveMetricsRuntime(environment) {
@@ -928,7 +927,16 @@ if (
       throw new Error("用法：codexc metrics <status|run|threads|turns|report|export|upgrade|reset>");
     }
   } catch (error) {
-    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
+    if (
+      !(error instanceof ReportedChildExitError)
+      && !(error instanceof ForwardedChildSignalError)
+    ) {
+      writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+    }
+    if (error instanceof ReportedChildExitError) {
+      process.exitCode = error.exitCode;
+    } else if (!(error instanceof ForwardedChildSignalError)) {
+      process.exitCode = 1;
+    }
   }
 }

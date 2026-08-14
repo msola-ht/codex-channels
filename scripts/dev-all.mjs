@@ -12,17 +12,11 @@ import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   childProcessIsRunning,
   installProcessSignalHandlers,
+  ReportedChildExitError,
   signalChildProcesses,
 } from "../runtime/process-lifecycle.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir, runtimeConfig } from "./runtime-config.mjs";
-
-class ReportedChildExitError extends Error {
-  constructor(exitCode) {
-    super(`child exited with status ${exitCode}`);
-    this.exitCode = exitCode;
-  }
-}
 
 await runDevAll().catch((error) => {
   if (!(error instanceof ReportedChildExitError)) {

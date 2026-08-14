@@ -23,6 +23,11 @@ import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
+  assertSynchronousChildSuccess,
+  ForwardedChildSignalError,
+  ReportedChildExitError,
+} from "../runtime/process-lifecycle.mjs";
+import {
   loadConfigDocument,
   loadRuntimeConfig,
 } from "../dist/config/index.js";
@@ -301,10 +306,7 @@ function runCoreServiceAction(action, environment) {
     [cli, "service", action, "all"],
     { env: environment, stdio: "inherit" },
   );
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`核心服务${action === "stop" ? "停止" : "启动"}失败`);
-  }
+  assertSynchronousChildSuccess(result, { failureReportedByChild: true });
 }
 
 function failureLabel(name) {
@@ -412,7 +414,16 @@ if (
     });
     writeCliMessage("success", "本地配置与数据库更新完成，App Server 与 Gateway 已恢复运行。");
   } catch (error) {
-    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
+    if (
+      !(error instanceof ReportedChildExitError)
+      && !(error instanceof ForwardedChildSignalError)
+    ) {
+      writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+    }
+    if (error instanceof ReportedChildExitError) {
+      process.exitCode = error.exitCode;
+    } else if (!(error instanceof ForwardedChildSignalError)) {
+      process.exitCode = 1;
+    }
   }
 }

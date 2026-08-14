@@ -94,8 +94,10 @@ export function checkProjectRulesAtRoot({
     throw result.error;
   }
   if (result.signal) {
-    process.kill(process.pid, result.signal);
-    return { projectRoot: resolvedRoot, rulesPath };
+    throw new ProjectRulesError(
+      "check-signaled",
+      `项目 Codex 规则检查被信号终止：${result.signal}`,
+    );
   }
   if (result.status !== 0) {
     throw new ProjectRulesError(
