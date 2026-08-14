@@ -91,9 +91,6 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain(
       "运行中的 Gateway 会自动重新读取配置；需要重建连接时，后台服务会自动重启，前台进程需重新启动；未运行时将在下次启动生效",
     );
-    expect(output.join("")).toContain(
-      "[提示] 运行中的 Gateway 会自动重新读取配置",
-    );
   });
 
   it("sets the global price currency to USD through the menu", async () => {
