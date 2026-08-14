@@ -60,7 +60,11 @@ describe("Telegram command renderer", () => {
       { reply } as unknown as Context,
       {
         kind: "outcome",
-        outcome: { type: "thread.resumed", threadId: "<unsafe>" },
+        outcome: {
+          type: "thread.resumed",
+          threadId: "<unsafe>",
+          model: { model: "gpt-test", modelProvider: "openai" },
+        },
       },
     );
 
@@ -81,6 +85,7 @@ describe("Telegram command renderer", () => {
           type: "thread.resumed",
           threadId: "thread-1",
           transferredFrom: "feishu",
+          model: { model: "gpt-test", modelProvider: "openai" },
         },
       },
     );

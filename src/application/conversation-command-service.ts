@@ -173,9 +173,24 @@ export type ConversationCommandResult =
   | { kind: "goal"; goal: ThreadGoal | null }
   | { kind: "agents"; roles: Awaited<ReturnType<ConversationUseCases["listAgentRoles"]>> };
 
+export interface ConversationModelSummary {
+  model: string;
+  modelProvider?: string;
+}
+
 export type ConversationCommandOutcome =
-  | { type: "thread.resumed"; threadId: string; backgroundedThreadId?: string; transferredFrom?: string }
-  | { type: "session.new"; backgroundedThreadId?: string }
+  | {
+      type: "thread.resumed";
+      threadId: string;
+      backgroundedThreadId?: string;
+      transferredFrom?: string;
+      model: ConversationModelSummary;
+    }
+  | {
+      type: "session.new";
+      backgroundedThreadId?: string;
+      nextModel: ConversationModelSummary;
+    }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.unarchived"; threadId: string }
   | { type: "thread.pin-updated"; pinned: boolean }
@@ -187,6 +202,7 @@ export type ConversationCommandOutcome =
   | {
       type: "workspace.selected";
       workspace: Awaited<ReturnType<ConversationUseCases["selectWorkspace"]>>;
+      nextModel: ConversationModelSummary;
     }
   | {
       type: "workspace.permissions-updated";
@@ -240,6 +256,7 @@ export class ConversationCommandService {
       case "resume": {
         if (argumentsText) {
           const resumed = await this.conversations.resume(target, argumentsText);
+          const model = toConversationModelSummary(this.conversations.status(target));
           return {
             kind: "outcome",
             outcome: {
@@ -251,6 +268,7 @@ export class ConversationCommandService {
               ...(resumed.transferredFrom
                 ? { transferredFrom: resumed.transferredFrom }
                 : {}),
+              model,
             },
           };
         }
@@ -285,11 +303,13 @@ export class ConversationCommandService {
       }
       case "new": {
         const backgroundedThreadId = await this.conversations.newSession(target);
+        const nextModel = toConversationModelSummary(this.conversations.status(target));
         return {
           kind: "outcome",
           outcome: {
             type: "session.new",
             ...(backgroundedThreadId ? { backgroundedThreadId } : {}),
+            nextModel,
           },
         };
       }
@@ -424,7 +444,11 @@ export class ConversationCommandService {
           const workspace = await this.conversations.selectWorkspace(target, argumentsText);
           return {
             kind: "outcome",
-            outcome: { type: "workspace.selected", workspace },
+            outcome: {
+              type: "workspace.selected",
+              workspace,
+              nextModel: toConversationModelSummary(this.conversations.status(target)),
+            },
           };
         }
         return {
@@ -728,6 +752,15 @@ export class ConversationCommandService {
     const goal = await this.conversations.getGoal(target);
     return { kind: "goal", goal };
   }
+}
+
+function toConversationModelSummary(
+  status: ReturnType<ConversationUseCases["status"]>,
+): ConversationModelSummary {
+  return {
+    model: status.model,
+    ...(status.modelProvider ? { modelProvider: status.modelProvider } : {}),
+  };
 }
 
 function sessionListResult(

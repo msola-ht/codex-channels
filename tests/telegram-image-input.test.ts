@@ -625,6 +625,7 @@ describe("Telegram image input", () => {
           name: "Main",
           cwd: "/workspace",
         }],
+        status: () => ({ model: "gpt-test", modelProvider: "openai" }),
         selectWorkspace,
         resume,
       },
@@ -785,6 +786,7 @@ describe("Telegram image input", () => {
           name: "Docs",
           cwd: "/workspace/docs",
         }],
+        status: () => ({ model: "gpt-test", modelProvider: "openai" }),
         selectWorkspace,
       },
     );

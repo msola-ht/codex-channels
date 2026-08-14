@@ -597,6 +597,7 @@ describe("WeixinConversationAdapter", () => {
       threadId: "thread",
       turnId: null,
       model: "gpt-test",
+      modelProvider: "openai",
       effort: "medium",
       serviceTier: null,
       modelPending: false,
@@ -632,7 +633,10 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).toHaveBeenNthCalledWith(
       2,
       target,
-      "**已退出当前会话，下一条普通消息将创建新的 Codex Thread。**",
+      [
+        "**已退出当前会话，下一条普通消息将创建新的 Codex Thread。**",
+        "- 下一条消息模型：gpt-test · Provider：openai",
+      ].join("\n"),
     );
     expect(notifyText).toHaveBeenNthCalledWith(
       3,

@@ -343,6 +343,10 @@ describe("ConversationCommandService", () => {
         threadId: "thread-shared",
         transferredFrom: "weixin",
       })),
+      status: vi.fn(() => ({
+        model: "gpt-5.6",
+        modelProvider: "openai",
+      })),
     } as unknown as ConversationUseCases);
 
     await expect(commands.execute(target, "resume", "thread-shared"))
@@ -352,6 +356,7 @@ describe("ConversationCommandService", () => {
           type: "thread.resumed",
           threadId: "thread-shared",
           transferredFrom: "weixin",
+          model: { model: "gpt-5.6", modelProvider: "openai" },
         },
       });
   });
@@ -851,6 +856,36 @@ describe("ConversationCommandService", () => {
       .rejects.toMatchObject({ code: "agents.usage" });
   });
 
+  it("reports the model that the next message will use after session and workspace switches", async () => {
+    const status = vi.fn(() => ({
+      workspaceId: "other",
+      model: "gpt-5.6",
+      modelProvider: "openai",
+    }));
+    const workspace = { id: "other", name: "Other", cwd: "/other" };
+    const commands = new ConversationCommandService({
+      newSession: vi.fn(async () => undefined),
+      selectWorkspace: vi.fn(async () => workspace),
+      status,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "new")).resolves.toEqual({
+      kind: "outcome",
+      outcome: {
+        type: "session.new",
+        nextModel: { model: "gpt-5.6", modelProvider: "openai" },
+      },
+    });
+    await expect(commands.execute(target, "workspace", "other")).resolves.toEqual({
+      kind: "outcome",
+      outcome: {
+        type: "workspace.selected",
+        workspace,
+        nextModel: { model: "gpt-5.6", modelProvider: "openai" },
+      },
+    });
+  });
+
   it("covers every registered command through the shared dispatcher", async () => {
     const goal = {
       threadId: "thread-1",
@@ -864,7 +899,11 @@ describe("ConversationCommandService", () => {
     const service = {
       resume: vi.fn(async () => ({ threadId: "thread-resumed" })),
       listSessions: vi.fn(async () => []),
-      status: vi.fn(() => ({ workspaceId: "main" })),
+      status: vi.fn(() => ({
+        workspaceId: "main",
+        model: "gpt-test",
+        modelProvider: "openai",
+      })),
       newSession: vi.fn(async () => undefined),
       archive: vi.fn(async () => "thread-archived"),
       unarchive: vi.fn(async () => "thread-unarchived"),
