@@ -14,7 +14,7 @@ export function parseChannelSendImageArgs(args) {
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === "--thread") {
       threadId = args[index + 1];
-      if (!threadId) {
+      if (!threadId || threadId.startsWith("--")) {
         throw new Error("--thread 缺少值");
       }
       index += 1;

@@ -123,6 +123,37 @@ describe("systemd installer", () => {
     expect(queries[0]).toContain("systemd gateway start");
   });
 
+  it("returns the systemctl status failure to callers", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-status-"));
+    temporaryDirectories.push(root);
+    const binDir = join(root, "bin");
+    mkdirSync(binDir);
+    const fakeSystemctl = join(binDir, "systemctl");
+    writeFileSync(fakeSystemctl, [
+      "#!/bin/sh",
+      "printf 'service is unavailable\\n' >&2",
+      "exit 3",
+    ].join("\n"));
+    chmodSync(fakeSystemctl, 0o755);
+
+    const result = spawnSync(
+      "/bin/sh",
+      [resolve("scripts/systemd-control.sh"), "status", "gateway"],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          NODE_BINARY: process.execPath,
+          SYSTEMCTL_BINARY: fakeSystemctl,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain("service is unavailable");
+  });
+
   it("fails closed when the service catalog query fails", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-query-failure-"));
     temporaryDirectories.push(root);

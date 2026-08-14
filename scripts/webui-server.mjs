@@ -10,6 +10,7 @@ import {
   metricsRange,
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { enrichCosts, loadDisplayContext } from "./metrics-export-format.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -619,7 +620,10 @@ function main() {
       token: settings.token,
     });
     server.on("error", (error) => {
-      console.error(`WebUI 启动失败：${error instanceof Error ? error.message : String(error)}`);
+      writeCliMessage(
+        "failure",
+        `WebUI 启动失败：${error instanceof Error ? error.message : String(error)}`,
+      );
       process.exitCode = 1;
     });
     server.listen(settings.port, host, () => {
@@ -641,7 +645,7 @@ function main() {
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }

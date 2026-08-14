@@ -15,6 +15,8 @@ import {
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runCenterSettings, runConfig } from "../scripts/config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
 
 const roots: string[] = [];
 
@@ -346,6 +348,31 @@ describe("Codex Connect config menu", () => {
     });
     expect((readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0])
       .toMatchObject({ approval_policy: "never" });
+  });
+
+  it("returns from Workspace permissions to the work menu", async () => {
+    const fixture = createFixture();
+    const select = vi.fn()
+      .mockResolvedValueOnce("permissions")
+      .mockResolvedValueOnce("back")
+      .mockResolvedValueOnce("cancel");
+    const prompts = {
+      intro: vi.fn(),
+      select,
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir,
+      environment: fixture.environment,
+      output: { write: vi.fn() },
+      outputIsTTY: true,
+      prompts,
+    });
+
+    expect(select).toHaveBeenCalledTimes(3);
+    expect(prompts.cancel).toHaveBeenCalledWith("已取消");
   });
 
   it("rejects a permission profile when workspace sandbox is configured", async () => {

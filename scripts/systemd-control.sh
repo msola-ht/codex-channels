@@ -164,7 +164,14 @@ case "$action" in
     require_target "$target"
     resolved_units=$(service_ids "$target" start)
     set -- $resolved_units
-    systemctl_user --no-pager status "$@" || true
+    set +e
+    systemctl_user --no-pager status "$@"
+    status_code=$?
+    set -e
+    if [ "$status_code" -ne 0 ]; then
+      print_status failure "systemd 服务状态异常。"
+      exit "$status_code"
+    fi
     ;;
   logs)
     shift

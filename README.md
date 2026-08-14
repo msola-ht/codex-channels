@@ -196,9 +196,10 @@ codexc service logs all -n 200        # 查看全部服务最近 200 行日志
 `start`、`stop` 和 `status` 默认操作全部服务；`restart` 和 `logs` 默认只操作 Gateway。运行
 `codexc service -h` 查看完整用法。WebUI 与指标中心不并入 `all`，需要时单独启动。
 
-服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口；渠道内
-执行 `codexc service restart app-server` 或 `codexc service restart all` 会被拒绝。需要重启 App
-Server 时必须从本机终端执行。
+服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口。渠道内
+会拒绝安装或卸载服务、停止 Gateway/App Server，以及重启 App Server；对应的 `all` 操作同样拒绝。
+渠道内仍可查看状态和日志、重新加载或启动服务、只重启 Gateway，以及管理独立的 WebUI/指标中心。
+需要执行被拒绝的操作时，按提示复制命令到本机终端运行。
 
 查看、导出或清理脱敏指标：
 

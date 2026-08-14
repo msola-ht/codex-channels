@@ -286,6 +286,13 @@ provider 当前支持 openai、deepseek。备份并删除本地与中心库中�
 内部 Codex App Server 服务入口。`,
 };
 
+class ManagedChildExitError extends Error {
+  constructor(exitCode) {
+    super(`子命令执行失败：exit=${exitCode}`);
+    this.exitCode = exitCode;
+  }
+}
+
 const [command, ...args] = process.argv.slice(2);
 
 try {
@@ -346,7 +353,7 @@ try {
       if (showRequestedHelp(args, "remote")) {
         break;
       }
-      runScript("scripts/codex-remote.mjs", args, {}, process.cwd());
+      runScript("scripts/codex-remote.mjs", args, { workingDirectory: process.cwd() });
       break;
     case "work":
       await runWorkspaceCommand(args);
@@ -383,7 +390,7 @@ try {
         break;
       }
       requireNoArguments(args, "用法：codexc update");
-      runScript("scripts/local-update.mjs", []);
+      runScript("scripts/local-update.mjs", [], { failureReportedByChild: true });
       break;
     case "state":
       state(args);
@@ -402,7 +409,7 @@ try {
         throw new Error(helpText.webui);
       }
       parseWebuiCliArgs(args);
-      runScript("scripts/webui-server.mjs", args);
+      runScript("scripts/webui-server.mjs", args, { failureReportedByChild: true });
       break;
     case "center":
       if (showRequestedHelp(args, "center")
@@ -416,18 +423,24 @@ try {
       if (args[0] === "config" && args.length !== 1) {
         throw new Error(helpText["center.config"]);
       }
+      if (args[0] === "info" || args[0] === "config") {
+        runScript("scripts/metrics-center-server.mjs", args, { failureReportedByChild: true });
+        break;
+      }
       if (args.some(isHelpArgument)) {
         throw new Error(helpText.center);
       }
       parseMetricsCenterCliArgs(args);
-      runScript("scripts/metrics-center-server.mjs", args);
+      runScript("scripts/metrics-center-server.mjs", args, { failureReportedByChild: true });
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
   }
 } catch (error) {
-  printCliMessage("failure", error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+  if (!(error instanceof ManagedChildExitError)) {
+    printCliMessage("failure", error instanceof Error ? error.message : String(error));
+  }
+  process.exitCode = error instanceof ManagedChildExitError ? error.exitCode : 1;
 }
 
 function initialize(args) {
@@ -676,9 +689,9 @@ function service(args) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
   const serviceArgs = parseServiceArguments(action, rest);
-  rejectAppServerSelfRestart(action, serviceArgs, process.env);
+  rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
   if (action === "install") {
-    runScript("scripts/validate-config.mjs", []);
+    runScript("scripts/validate-config.mjs", [], { failureReportedByChild: true });
   }
   if (process.platform === "darwin") {
     if (action === "install") {
@@ -687,39 +700,48 @@ function service(args) {
         [join(packageDir, "scripts/launchd-control.sh"), "check-install"],
         configuredEnvironment().environment,
       );
-      runScript("scripts/install-launchd.mjs", []);
+      runScript("scripts/install-launchd.mjs", [], { failureReportedByChild: true });
     }
     run(
       "/bin/zsh",
       [join(packageDir, "scripts/launchd-control.sh"), action, ...serviceArgs],
       configuredEnvironment().environment,
+      undefined,
+      { failureReportedByChild: action === "status" },
     );
     return;
   }
   if (process.platform === "linux") {
     if (action === "install") {
-      runScript("scripts/install-systemd.mjs", []);
+      runScript("scripts/install-systemd.mjs", [], { failureReportedByChild: true });
     }
     run(
       "/bin/sh",
       [join(packageDir, "scripts/systemd-control.sh"), action, ...serviceArgs],
       configuredEnvironment().environment,
+      undefined,
+      { failureReportedByChild: action === "status" },
     );
     return;
   }
   throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
 }
 
-function rejectAppServerSelfRestart(action, serviceArgs, environment) {
+function rejectUnsafeAppServerServiceAction(action, serviceArgs, environment) {
+  if (environment.CODEX_CONNECT_SERVICE_ROLE !== "app-server") return;
   const target = serviceArgs[0];
-  if (
-    environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
-    && action === "restart"
-    && serviceTargetIncludes(target, "app-server")
-  ) {
+  const stopsCoreService = action === "stop"
+    && (
+      serviceTargetIncludes(target, "gateway")
+      || serviceTargetIncludes(target, "app-server")
+    );
+  const restartsAppServer = action === "restart"
+    && serviceTargetIncludes(target, "app-server");
+  if (action === "install" || action === "uninstall" || stopsCoreService || restartsAppServer) {
+    const invocation = ["codexc", "service", action, ...serviceArgs].join(" ");
     throw new Error(
-      "不能在 Codex App Server 内重启 App Server；请在本机终端运行 "
-      + `codexc service restart ${target}。渠道内只能运行 codexc service restart gateway。`,
+      "不能在 Codex App Server 内执行会中断当前渠道的服务操作；"
+      + `请在本机终端运行 ${invocation}。渠道内只允许重启 Gateway 或管理独立的 WebUI、指标中心服务。`,
     );
   }
 }
@@ -806,21 +828,26 @@ function agents(args) {
   ) {
     throw new Error(helpText.agents);
   }
-  runScript("scripts/agents.mjs", args);
+  runScript("scripts/agents.mjs", args, { failureReportedByChild: true });
 }
 
 function runSetup() {
   initializeUserData({ cwd: process.cwd() });
-  runScript("scripts/setup.mjs", []);
+  runScript("scripts/setup.mjs", [], { failureReportedByChild: true });
 }
 
-function runScript(relativePath, args, additionalEnvironment = {}, workingDirectory) {
+function runScript(relativePath, args, {
+  additionalEnvironment = {},
+  workingDirectory,
+  failureReportedByChild = false,
+} = {}) {
   const runtime = configuredEnvironment();
   run(
     process.execPath,
     [join(packageDir, relativePath), ...args],
     { ...runtime.environment, ...additionalEnvironment },
     workingDirectory ?? runtime.dataDir,
+    { failureReportedByChild },
   );
 }
 
@@ -941,7 +968,7 @@ function state(args) {
   if (subcommand !== "upgrade" || rest.length > 0) {
     throw new Error("用法：codexc state upgrade");
   }
-  runScript("scripts/upgrade-state.mjs", []);
+  runScript("scripts/upgrade-state.mjs", [], { failureReportedByChild: true });
 }
 
 async function metrics(args) {
@@ -992,7 +1019,7 @@ async function metrics(args) {
           );
           return;
         }
-        runScript("scripts/metrics-database.mjs", commandArgs);
+        runScript("scripts/metrics-database.mjs", commandArgs, { failureReportedByChild: true });
       },
       runMetricsCommand,
     });
@@ -1015,17 +1042,21 @@ async function metrics(args) {
     return;
   }
   if (subcommand === "upgrade" && rest.length === 1 && rest[0] === "--restart-gateway") {
-    runScript("scripts/metrics-database.mjs", ["upgrade-restart"]);
+    runScript("scripts/metrics-database.mjs", ["upgrade-restart"], { failureReportedByChild: true });
     return;
   }
   if (subcommand === "sync-reset" && rest.length === 1 && rest[0] === "--restart-gateway") {
-    runScript("scripts/metrics-database.mjs", ["sync-reset-restart"]);
+    runScript("scripts/metrics-database.mjs", ["sync-reset-restart"], { failureReportedByChild: true });
     return;
   }
   if (subcommand === "cleanup") {
     const restart = rest.includes("--restart-gateway");
     const cleanupArgs = rest.filter((argument) => argument !== "--restart-gateway");
-    runScript("scripts/metrics-database.mjs", [restart ? "cleanup-restart" : "cleanup", ...cleanupArgs]);
+    runScript(
+      "scripts/metrics-database.mjs",
+      [restart ? "cleanup-restart" : "cleanup", ...cleanupArgs],
+      { failureReportedByChild: true },
+    );
     return;
   }
   if (subcommand === "prune" && rest.length !== 1) {
@@ -1038,7 +1069,7 @@ async function metrics(args) {
     runMetricsCommand([subcommand, ...rest]);
     return;
   }
-  runScript("scripts/metrics-database.mjs", [subcommand, ...rest]);
+  runScript("scripts/metrics-database.mjs", [subcommand, ...rest], { failureReportedByChild: true });
 }
 
 async function channel(args) {
@@ -1058,14 +1089,14 @@ async function channel(args) {
     throw new Error("用法：codexc channel <send-image>");
   }
   parseChannelSendImageArgs(rest);
-  runScript("scripts/channel-send-image.mjs", rest);
+  runScript("scripts/channel-send-image.mjs", rest, { failureReportedByChild: true });
 }
 
 function runMetricsCommand(args) {
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   const writeFile = withoutStdout.length === args.length;
   if (!writeFile) {
-    runScript("scripts/metrics-database.mjs", withoutStdout);
+    runScript("scripts/metrics-database.mjs", withoutStdout, { failureReportedByChild: true });
     return;
   }
   const output = openMetricsExportFile(
@@ -1132,6 +1163,10 @@ function openMetricsExportFile(subcommand, args) {
 function metricsPositionalIdentifier(subcommand, args) {
   if (subcommand !== "run" && subcommand !== "turns" && subcommand !== "export") {
     return undefined;
+  }
+  if (subcommand === "export") {
+    const threadOption = args.findIndex((argument) => argument === "--thread");
+    return threadOption >= 0 ? args[threadOption + 1] : undefined;
   }
   const valueOptions = new Set(["--range", "--group", "--format"]);
   for (let index = 1; index < args.length; index += 1) {
@@ -1222,7 +1257,7 @@ function stringValue(value) {
   return typeof value === "string" ? value : "";
 }
 
-function run(executable, args, environment, cwd) {
+function run(executable, args, environment, cwd, options = {}) {
   const result = spawnSync(
     executable,
     executable === process.execPath ? nodeArguments(args) : args,
@@ -1240,6 +1275,9 @@ function run(executable, args, environment, cwd) {
     return;
   }
   if (result.status !== 0) {
+    if (options.failureReportedByChild) {
+      throw new ManagedChildExitError(result.status ?? 1);
+    }
     throw new Error(`子命令执行失败：exit=${result.status ?? 1}`);
   }
 }

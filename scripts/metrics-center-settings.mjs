@@ -79,7 +79,7 @@ export function parseMetricsCenterCliArgs(args) {
     }
     if (argument === "--token") {
       const raw = args[index + 1];
-      if (raw === undefined || raw === "") {
+      if (raw === undefined || raw === "" || raw.startsWith("--")) {
         throw new Error(CENTER_USAGE);
       }
       settings.token = raw;
@@ -88,7 +88,7 @@ export function parseMetricsCenterCliArgs(args) {
     }
     if (argument === "--device-token") {
       const raw = args[index + 1];
-      if (raw === undefined || raw === "") {
+      if (raw === undefined || raw === "" || raw.startsWith("--")) {
         throw new Error(CENTER_USAGE);
       }
       settings.deviceToken = raw;
@@ -97,7 +97,7 @@ export function parseMetricsCenterCliArgs(args) {
     }
     if (argument === "--database") {
       const raw = args[index + 1];
-      if (raw === undefined || raw === "") {
+      if (raw === undefined || raw === "" || raw.startsWith("--")) {
         throw new Error(CENTER_USAGE);
       }
       settings.database = raw;

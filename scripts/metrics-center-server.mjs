@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import * as clackPrompts from "@clack/prompts";
 
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { runCenterSettings } from "./metrics-config-menu.mjs";
 import { parseIngestPayload } from "./metrics-center-payload.mjs";
@@ -551,7 +552,7 @@ function main() {
     const args = process.argv.slice(2);
     if (args[0] === "info") {
       runCenterInfo().catch((error) => {
-        console.error(error instanceof Error ? error.message : String(error));
+        writeCliMessage("failure", error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
       });
       return;
@@ -569,7 +570,7 @@ function main() {
         prompts: clackPrompts,
         writeConfig: writeGatewayConfig,
       }).catch((error) => {
-        console.error(error instanceof Error ? error.message : String(error));
+        writeCliMessage("failure", error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
       });
       return;
@@ -590,7 +591,10 @@ function main() {
       databasePath: settings.databasePath,
     });
     server.on("error", (error) => {
-      console.error(`中心服务启动失败：${error instanceof Error ? error.message : String(error)}`);
+      writeCliMessage(
+        "failure",
+        `中心服务启动失败：${error instanceof Error ? error.message : String(error)}`,
+      );
       process.exitCode = 1;
     });
     server.listen(settings.port, host, () => {
@@ -611,7 +615,7 @@ function main() {
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }

@@ -64,7 +64,7 @@ export async function runWorkspaceSettings({
           label: "权限 Profile",
           hint: `当前：${entry.permissions ?? "未配置"}`,
         },
-        { value: "back", label: "返回", hint: "返回配置菜单" },
+        { value: "back", label: "返回", hint: "返回上一层" },
       ],
     });
     if (prompts.isCancel(field) || field === "back") {

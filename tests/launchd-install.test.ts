@@ -257,6 +257,34 @@ describe("launchd installer", () => {
     expect(allLogs).not.toContain("app-old");
   });
 
+  zshIt("returns a failure when a requested launchd service is not loaded", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-launchd-status-"));
+    temporaryDirectories.push(root);
+    const binDir = join(root, "bin");
+    mkdirSync(binDir);
+    const fakeLaunchctl = join(binDir, "launchctl");
+    writeFileSync(fakeLaunchctl, "#!/bin/sh\nexit 1\n");
+    chmodSync(fakeLaunchctl, 0o755);
+
+    const result = spawnSync(
+      "/bin/zsh",
+      [resolve("scripts/launchd-control.sh"), "status", "gateway"],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          PATH: `${binDir}:/usr/bin:/bin`,
+          NODE_BINARY: process.execPath,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("launchd 服务未加载");
+    expect(result.stderr).toContain("com.hegenai.codex-gateway");
+  });
+
   zshIt("rejects unsupported launchd jobs without modifying them", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-unsupported-launchd-"));
     temporaryDirectories.push(root);

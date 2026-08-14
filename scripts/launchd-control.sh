@@ -255,9 +255,14 @@ case "$action" in
     target="${2:-all}"
     require_target "$target"
     labels=$(service_ids "$target" start)
+    status_code=0
     for label in ${(f)labels}; do
-      launchctl print "$user_domain/$label" 2>/dev/null || true
+      if ! launchctl print "$user_domain/$label" 2>/dev/null; then
+        print_status failure "launchd 服务未加载：$label"
+        status_code=1
+      fi
     done
+    exit "$status_code"
     ;;
   logs)
     shift

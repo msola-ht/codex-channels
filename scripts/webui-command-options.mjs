@@ -35,7 +35,7 @@ export function parseWebuiCliArgs(args) {
     }
     if (argument === "--token") {
       const raw = args[index + 1];
-      if (raw === undefined || raw === "") {
+      if (raw === undefined || raw === "" || raw.startsWith("--")) {
         throw new Error(WEBUI_USAGE);
       }
       settings.token = raw;
