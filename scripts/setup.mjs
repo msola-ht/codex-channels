@@ -33,8 +33,8 @@ export async function runSetup({
       options: [
         {
           value: "models",
-          label: "模型渠道",
-          hint: "配置 Codex 官方、DeepSeek、第三方 API 与图片识别",
+          label: "模型与提供商",
+          hint: "设置 Codex 官方默认模型与思考等级，以及 DeepSeek、第三方 API 和图片识别",
         },
         {
           value: "channels",
@@ -108,7 +108,7 @@ async function runModelSetup({
   codexDefaultsSetup,
 }) {
   const module = await prompts.select({
-    message: "选择模型渠道设置",
+    message: "选择模型与提供商设置",
     showInstructions: false,
     options: [
       {
@@ -137,7 +137,7 @@ async function runModelSetup({
     return apiProviderSetup({ input, output, prompts });
   }
   if (module === "vision") return visionSetup({ input, output, prompts });
-  throw new Error(`未知模型渠道设置：${String(module)}`);
+  throw new Error(`未知模型与提供商设置：${String(module)}`);
 }
 
 async function runChannelSetup({

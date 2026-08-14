@@ -245,7 +245,12 @@ export class SessionRouter {
       const sessions = await this.list(target);
       const candidate = sessions.find(
         (thread) =>
-          thread.status.type !== "active" && !this.bindings.getByThread(thread.id),
+          thread.status.type !== "active"
+          && !this.bindings.getByThread(thread.id)
+          && (
+            startOptions.modelProvider === undefined
+            || thread.modelProvider === startOptions.modelProvider
+          ),
       );
       if (candidate) {
         const resumed = await this.codex.resumeThread(

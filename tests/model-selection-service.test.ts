@@ -127,6 +127,103 @@ describe("ModelSelectionService", () => {
     expect(service.turnOverrides(target)).toEqual({});
   });
 
+  it("captures the current channel model and restores it after a compatible binding change", () => {
+    let currentSettings = {
+      model: "gpt-deep",
+      modelProvider: "openai",
+      effort: "high",
+      serviceTier: "default",
+    };
+    const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      modelSettings: () => currentSettings,
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService({
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    }, router);
+
+    const preference = service.capturePreference(target);
+    currentSettings = {
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: "default",
+    };
+    service.restorePreference(target, preference);
+
+    expect(service.turnOverrides(target)).toEqual({
+      model: "gpt-deep",
+      modelProvider: "openai",
+      effort: "high",
+      serviceTier: "default",
+    });
+  });
+
+  it("clears a resumed Fast tier when the retained channel preference is standard", () => {
+    let currentSettings = {
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: null as string | null,
+    };
+    const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      modelSettings: () => currentSettings,
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService({
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    }, router);
+
+    const preference = service.capturePreference(target);
+    currentSettings = {
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: "priority",
+    };
+    service.restorePreference(target, preference);
+
+    expect(service.turnOverrides(target)).toEqual({
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: null,
+    });
+  });
+
+  it("keeps an explicitly resumed Thread when its Provider differs from the channel preference", () => {
+    let currentSettings = {
+      model: "gpt-deep",
+      modelProvider: "openai",
+      effort: "high",
+      serviceTier: "default",
+    };
+    const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      modelSettings: () => currentSettings,
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService({
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    }, router);
+
+    const preference = service.capturePreference(target);
+    currentSettings = {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      effort: "high",
+      serviceTier: "default",
+    };
+    service.restorePreference(target, preference);
+
+    expect(service.turnOverrides(target)).toEqual({});
+  });
+
   it("rejects an effort unsupported by the selected model", async () => {
     const service = createService({ model: "gpt-deep", effort: "high", serviceTier: "default" });
 

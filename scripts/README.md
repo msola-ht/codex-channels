@@ -10,8 +10,9 @@
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
   校验 `config.toml`、两个数据库及核心服务定义的完整状态；服务已安装时在同一个 App Server、
   Gateway 停机窗口内分别备份并更新配置和数据库，离线复核后启动并通过 Socket 与监管拓扑确认
-  核心服务稳定就绪；服务未安装时只执行离线更新，不擅自安装或启动。公开服务命令复用同一按目标
-  健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
+  核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线更新，不擅自安装或启动，检测到
+  `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按
+  目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
   未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
@@ -70,8 +71,8 @@
   Worker 共用的上报载荷校验及类型声明。
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
-  “技能”流程委派给具体适配器；模型渠道下区分 Codex 官方、DeepSeek、第三方 API 与图片识别。
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
+  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、第三方 API 与图片识别。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。

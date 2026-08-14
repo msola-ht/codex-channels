@@ -59,7 +59,7 @@ Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务�
 
 ## 配置通讯渠道
 
-运行 `codexc setup`，按菜单配置模型渠道、通讯渠道和技能安装（把项目技能安装到
+运行 `codexc setup`，按菜单配置模型与提供商、通讯渠道和技能安装（把项目技能安装到
 `~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
 
 ```text
@@ -116,20 +116,22 @@ plugin_api = true
 
 ### Codex 官方
 
-在 `codexc setup` 中选择“模型渠道 → Codex 官方”，可从当前 Codex 模型目录设置全局默认模型和
+在 `codexc setup` 中选择“模型与提供商 → Codex 官方”，可从当前 Codex 模型目录设置全局默认模型和
 思考等级。设置通过 App Server 写入 `~/.codex/config.toml`，不修改 Codex 登录状态；完成后运行
 `codexc service restart all`，让新 App Server 会话使用新的默认值。
 
 ### DeepSeek
 
-在 `codexc setup` 中选择“模型渠道”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式
+在 `codexc setup` 中选择“模型与提供商”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式
 或恢复原配置。切换模式会自动启用 `multi_agent_v2` 并注册 `ds` 子代理角色；配置后运行：
 
 ```bash
 codexc service restart all
 ```
 
-聊天中使用 `/model` 切换；终端使用 `codexc remote --profile deepseek`。模型限制、自动压缩、
+聊天中使用 `/model` 切换；当前渠道模型会在切换 Workspace、新会话或同 Provider 历史会话时继续
+用于下一 Turn，显式恢复不同 Provider 的历史会话时仍尊重该 Thread 的 Provider。终端使用
+`codexc remote --profile deepseek`。模型限制、自动压缩、
 子代理和跨 Provider 行为见 [`DeepSeek 使用说明`](docs/deepseek.md)；外部识图见
 [`图片识别代理`](docs/vision.md)。
 
@@ -285,8 +287,9 @@ codexc doctor
 App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema 明确定义的缺失安全参数、分别备份并
 执行受支持的数据库迁移，再次离线校验后恢复核心服务并确认其真实就绪。未知配置字段、结构残缺或
 没有明确迁移路径的数据库版本会失败关闭。该命令不安装 npm 包，也不修改 Codex Thread 或
-`~/.codex/config.toml`。核心后台服务尚未安装时，命令只离线更新配置与数据库，不会安装或启动服务；
-后续需要后台运行时再执行 `codexc service install`。
+`~/.codex/config.toml`。核心后台服务尚未安装且 Gateway 未运行时，命令只离线更新配置与数据库，
+不会安装或启动服务；如果检测到另一个终端通过 `codexc start` 启动的前台 Gateway，会在写入前提示
+先按 Ctrl-C 结束该进程。后续需要后台运行时再执行 `codexc service install`。
 
 该命令必须从本机终端执行，不能在渠道 Turn 或其他运行中的 Codex 服务进程内调用。
 

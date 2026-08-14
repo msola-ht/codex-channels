@@ -137,6 +137,44 @@ describe("SessionRouter", () => {
     }]);
   });
 
+  it("does not auto-resume a Thread from another Provider when a channel model is retained", async () => {
+    const store = new MemoryBindingStore();
+    const resumed: string[] = [];
+    const started: unknown[] = [];
+    const deepseekThread = {
+      ...thread("deepseek-existing", { type: "idle" }),
+      modelProvider: "deepseek",
+    };
+    const client = threadPort({
+      listThreads: async () => [deepseekThread],
+      resumeThread: async (threadId) => {
+        resumed.push(threadId);
+        return session(deepseekThread, {
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          reasoningEffort: "high",
+        });
+      },
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session(thread("openai-new", { type: "idle" }), {
+          model: "gpt-deep",
+          modelProvider: "openai",
+          reasoningEffort: "high",
+        });
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await router.ensure(target, { model: "gpt-deep", modelProvider: "openai" });
+
+    expect(resumed).toEqual([]);
+    expect(started).toEqual([{
+      cwd: "/workspace",
+      options: { model: "gpt-deep", modelProvider: "openai" },
+    }]);
+  });
+
   it("forks the current Thread with provider options before replacing its binding", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });

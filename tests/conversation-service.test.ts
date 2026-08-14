@@ -2396,6 +2396,14 @@ describe("ConversationService model selection", () => {
   });
 
   it("keeps pinned sessions first without changing order inside each group", async () => {
+    const preference = {
+      model: "gpt-deep",
+      modelProvider: "openai",
+      effort: "high",
+      serviceTier: "default",
+    };
+    const capturePreference = vi.fn(() => preference);
+    const restorePreference = vi.fn();
     const resume = vi.fn(async (resumeTarget, threadId: string) => ({
       target: resumeTarget,
       workspaceId: "main",
@@ -2448,7 +2456,7 @@ describe("ConversationService model selection", () => {
         modelSettingsForThread: () => undefined,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined } as unknown as ConversationCore,
-      { clear: vi.fn() } as unknown as ModelSelectionService,
+      { capturePreference, restorePreference } as unknown as ModelSelectionService,
       queryPort(),
     );
 
@@ -2461,6 +2469,7 @@ describe("ConversationService model selection", () => {
       threadId: "pinned-old",
     });
     expect(resume).toHaveBeenCalledWith(target, "pinned-old");
+    expect(restorePreference).toHaveBeenCalledWith(target, preference);
   });
 
   it("moves the active Thread to the background when resuming another session", async () => {
@@ -2760,34 +2769,82 @@ describe("ConversationService model selection", () => {
   });
 
   it("keeps pending settings when selecting the same workspace", async () => {
-    const clear = vi.fn();
-    const service = workspaceService(main, async () => main, clear);
+    const capturePreference = vi.fn();
+    const restorePreference = vi.fn();
+    const service = workspaceService(main, async () => main, {
+      capturePreference,
+      restorePreference,
+    });
 
     await service.selectWorkspace(target, "main");
 
-    expect(clear).not.toHaveBeenCalled();
+    expect(capturePreference).not.toHaveBeenCalled();
+    expect(restorePreference).not.toHaveBeenCalled();
   });
 
-  it("only clears pending settings after a workspace switch succeeds", async () => {
-    const clear = vi.fn();
-    const successful = workspaceService(main, async () => other, clear);
+  it("retains the current channel model when starting a new session", async () => {
+    const preference = {
+      model: "gpt-deep",
+      modelProvider: "openai",
+      effort: "high",
+      serviceTier: "default",
+    };
+    const capturePreference = vi.fn(() => preference);
+    const restorePreference = vi.fn();
+    const newSession = vi.fn(async () => undefined);
+    const service = new ConversationService(
+      turnPort(),
+      {
+        newSession,
+        backgroundBindings: () => [],
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { capturePreference, restorePreference } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await service.newSession(target);
+
+    expect(newSession).toHaveBeenCalledWith(target, false);
+    expect(restorePreference).toHaveBeenCalledWith(target, preference);
+  });
+
+  it("restores the current channel model only after a workspace switch succeeds", async () => {
+    const preference = {
+      model: "gpt-deep",
+      modelProvider: "openai",
+      effort: "high",
+      serviceTier: "default",
+    };
+    const capturePreference = vi.fn(() => preference);
+    const restorePreference = vi.fn();
+    const successful = workspaceService(main, async () => other, {
+      capturePreference,
+      restorePreference,
+    });
 
     await successful.selectWorkspace(target, "other");
-    expect(clear).toHaveBeenCalledWith(target);
+    expect(capturePreference).toHaveBeenCalledWith(target);
+    expect(restorePreference).toHaveBeenCalledWith(target, preference);
 
-    clear.mockClear();
+    capturePreference.mockClear();
+    restorePreference.mockClear();
     const failed = workspaceService(main, async () => {
       throw new Error("switch failed");
-    }, clear);
+    }, { capturePreference, restorePreference });
     await expect(failed.selectWorkspace(target, "other")).rejects.toThrow("switch failed");
-    expect(clear).not.toHaveBeenCalled();
+    expect(capturePreference).toHaveBeenCalledWith(target);
+    expect(restorePreference).not.toHaveBeenCalled();
   });
 });
 
 function workspaceService(
   current: typeof main,
   selectWorkspace: () => Promise<typeof main>,
-  clear: ReturnType<typeof vi.fn>,
+  models: {
+    capturePreference: ReturnType<typeof vi.fn>;
+    restorePreference: ReturnType<typeof vi.fn>;
+  },
 ): ConversationService {
   return new ConversationService(
     turnPort(),
@@ -2797,7 +2854,7 @@ function workspaceService(
       selectWorkspace,
     } as unknown as SessionRouter,
     { activeTurn: () => undefined } as unknown as ConversationCore,
-    { clear } as unknown as ModelSelectionService,
+    models as unknown as ModelSelectionService,
     queryPort(),
   );
 }

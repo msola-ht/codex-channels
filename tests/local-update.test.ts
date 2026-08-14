@@ -228,6 +228,45 @@ describe("local update", () => {
     });
   });
 
+  it("rejects before writing when an uninstalled foreground Gateway is active", async () => {
+    const { configPath, environment: fixtureEnvironment } = fixture();
+    const environment: NodeJS.ProcessEnv = { ...fixtureEnvironment };
+    delete environment.CODEX_CONNECT_SERVICE_ROLE;
+    const owner = new GatewayOwner(configPath);
+    const calls: string[] = [];
+    await owner.start();
+    try {
+      await expect(updateLocalInstallation(environment, {
+        inspectConfig: () => {
+          calls.push("inspect-config");
+          return { configPath, missingSafeDefaults: [] };
+        },
+        inspectDatabases: () => {
+          calls.push("inspect-databases");
+          return { state: {}, metrics: {} };
+        },
+        inspectServices: () => {
+          calls.push("inspect-services");
+          return { installed: false };
+        },
+        stopServices: () => calls.push("stop"),
+        updateConfig: () => calls.push("update-config"),
+        updateDatabases: () => calls.push("update-databases"),
+        startServices: () => calls.push("start"),
+      })).rejects.toThrow(
+        /前台 Gateway 正在运行.*codexc start.*Ctrl-C.*codexc update/u,
+      );
+
+      expect(calls).toEqual([
+        "inspect-config",
+        "inspect-databases",
+        "inspect-services",
+      ]);
+    } finally {
+      await owner.close();
+    }
+  });
+
   it("restores and verifies core services when stopping reports a failure", async () => {
     const calls: string[] = [];
     await expect(updateLocalInstallation(terminalEnvironment(), {
