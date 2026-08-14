@@ -40,6 +40,13 @@ try {
   const rulesHelp = run(command, ["rules", "init", "-h"], temporaryDirectory, environment, true).stdout;
   const serviceHelp = run(
     command,
+    ["service", "-h"],
+    temporaryDirectory,
+    environment,
+    true,
+  ).stdout;
+  const serviceTargetHelp = run(
+    command,
     ["service", "restart", "-h"],
     temporaryDirectory,
     environment,
@@ -55,22 +62,36 @@ try {
   if (version !== packageReport.version) {
     throw new Error(`CLI 版本不匹配：实际 ${version}，期望 ${packageReport.version}`);
   }
-  if (
-    !help.includes("setup ")
-    || !help.includes("config ")
-    || !help.includes("doctor ")
-    || !help.includes("service install")
-    || !help.includes("service reload")
-    || !help.includes("service logs")
-    || !help.includes("rules <init|check>")
-  ) {
+  const publicCommands = [
+    "init",
+    "setup",
+    "config",
+    "doctor",
+    "remote",
+    "work",
+    "rules",
+    "agents",
+    "metrics",
+    "channel",
+    "webui",
+    "center",
+    "start",
+    "service",
+    "update",
+    "state",
+    "version",
+  ];
+  if (publicCommands.some((publicCommand) => !help.includes(`\n  ${publicCommand}`))) {
     throw new Error("CLI 帮助缺少公开命令");
   }
   if (
     !workspaceHelp.includes("用法：codexc work")
     || !metricsHelp.includes("用法：codexc metrics")
     || !rulesHelp.includes("用法：codexc rules init")
-    || !serviceHelp.includes("gateway|app-server|webui|center|all")
+    || !serviceHelp.includes("install")
+    || !serviceHelp.includes("reload")
+    || !serviceHelp.includes("logs")
+    || !serviceTargetHelp.includes("gateway|app-server|webui|center|all")
     || !centerHelp.includes("用法：codexc center")
   ) {
     throw new Error("CLI 分级帮助不完整");

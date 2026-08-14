@@ -73,38 +73,34 @@ const helpText = {
 
 用法：codexc <命令>
 
-初始化与诊断：
+初始化与配置：
   init                         初始化用户目录和配置
   setup                        配置模型、通讯渠道与技能
-  config                       打开配置与设置菜单（显示、系统、WebUI、指标、消息格式）
-  doctor                       检查安装、配置、Codex、Linux 沙箱与服务
+  config                       打开日常设置菜单
+  doctor                       诊断安装、配置和服务
 
-项目与会话：
+项目与 Codex：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  work [list|add|remove]       管理 Workspace（无子命令进入交互菜单）
-  rules <init|check>           生成或检查项目 Codex 命令预设
-  agents status                查看 multi_agent_v2 的 DeepSeek 子代理状态
-  update                       审查并更新本地配置与数据库
-  metrics                      查询、导出或维护模型请求指标
-  channel send-image          提交本地图片，由 Gateway 发送回当前渠道会话
-  webui                        启动本地只读指标 WebUI（默认回环地址）
-  center [config|info]          多设备指标中心：启动服务、交互配置或查看地址
+  work                         管理 Workspace
+  rules                        管理项目 Codex 命令预设
+  agents                       管理 DeepSeek 子代理
 
-后台服务：
-  start                        前台启动 App Server 与 Gateway
-  service install              安装并启动整套后台服务
-  service uninstall            卸载整套后台服务并保留用户数据
-  service start [目标]         启动后台服务
-  service stop [目标]          停止后台服务
-  service reload               重新读取 Gateway 配置
-  service restart [目标]       重启后台服务
-  service status [目标]        查看后台服务状态
-  service logs [目标]          查看后台服务日志
+指标与工具：
+  metrics                      查询、导出和维护模型指标
+  channel                      使用渠道工具
+  webui                        启动指标 WebUI
+  center                       管理多设备指标中心
+
+服务与维护：
+  start                        前台启动核心服务
+  service                      管理后台服务
+  update                       更新配置与数据库
+  state                        单独维护状态数据库
 
 信息：
   version                      显示版本
 
-运行 codexc <命令> -h 查看命令用法。`,
+运行 codexc <命令> -h 查看详细用法。`,
   init: `用法：codexc init
 
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
