@@ -81,6 +81,10 @@ OpenAI `/limits` 在额度响应包含 10,080 分钟周窗口和有效重置时�
 `/diff` 与操作结果保持原文。三渠道分别用飞书卡片 Markdown、Telegram
 HTML 和微信结构化字段渲染。
 
+`/resume` 恢复结果会显示该 Thread 的会话模型和 Provider；`/new` 与 Workspace 切换结果会显示
+下一条普通消息使用的模型和 Provider；`/model` 产生待生效选择时也使用“下一条消息模型”明确
+区分当前 Thread 设置。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
+
 `/mcp login` 在当前会话已绑定 Thread 时返回安全授权地址；浏览器流程结束后，Gateway 只把带有
 该 Thread 的官方 OAuth 完成通知显示为“MCP OAuth”成功或失败状态，无法关联 Thread 的通知不向
 渠道广播。失败原因在 Client 边界先脱敏，Telegram 失败通知会启用声音，成功通知保持静默；飞书

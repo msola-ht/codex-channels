@@ -272,10 +272,12 @@ export function formatConversationCommandOutcome(
         ? toStructuredMarkdownList([
             formatTakeoverSource(outcome.transferredFrom),
             `Thread：${outcome.threadId}`,
+            formatConversationModel("会话模型", outcome.model),
           ].join("\n"))
         : toStructuredMarkdownList([
             "已恢复 Codex Thread",
             `Thread：${outcome.threadId}`,
+            formatConversationModel("会话模型", outcome.model),
             ...(outcome.backgroundedThreadId
               ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
               : []),
@@ -286,9 +288,11 @@ export function formatConversationCommandOutcome(
             "已切换到新会话，原任务继续在后台运行。",
             `后台 Thread：${outcome.backgroundedThreadId}`,
             "下一条普通消息将创建新的 Codex Thread。",
+            formatNextMessageModel(outcome.nextModel),
           ].join("\n"))
         : toStructuredMarkdownList([
             "已退出当前会话，下一条普通消息将创建新的 Codex Thread。",
+            formatNextMessageModel(outcome.nextModel),
           ].join("\n"));
     case "thread.archived":
       return toStructuredMarkdownList([
@@ -344,6 +348,7 @@ export function formatConversationCommandOutcome(
         "已切换 Workspace",
         `Workspace：${outcome.workspace.name}`,
         `工作目录：${outcome.workspace.cwd}`,
+        formatNextMessageModel(outcome.nextModel),
       ].join("\n"));
     case "workspace.permissions-updated":
       return toStructuredMarkdownList([
@@ -1158,7 +1163,7 @@ export function formatConversationModels(
     : [];
   if (result.view === "fast") {
     return toStructuredMarkdownList([
-      `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
+      formatModelStateLine(state),
       `Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
       `模型支持：${current && fastServiceTierId(current) ? "支持 Fast" : "不支持 Fast"}`,
       "",
@@ -1167,7 +1172,7 @@ export function formatConversationModels(
   }
   if (result.view === "effort") {
     return toStructuredMarkdownList([
-      `当前模型：${state.model}`,
+      formatModelStateLine(state),
       `当前思考等级：${state.effort ?? current?.defaultReasoningEffort ?? "模型默认"}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
       ...(current && fastServiceTierId(current)
         ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
@@ -1184,7 +1189,7 @@ export function formatConversationModels(
     ].join("\n"));
   }
   return toStructuredMarkdownList([
-    `当前模型：${state.model}${state.modelPending ? "（下一次 Turn 生效）" : ""}`,
+    formatModelStateLine(state),
     `思考等级：${state.effort ?? "模型默认"}`,
     ...(current && fastServiceTierId(current)
       ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
@@ -1199,6 +1204,25 @@ export function formatConversationModels(
     "",
     "切换：/model <序号、模型 ID 或名称>",
   ].join("\n"));
+}
+
+function formatNextMessageModel(value: { model: string; modelProvider?: string }): string {
+  return formatConversationModel("下一条消息模型", value);
+}
+
+function formatConversationModel(
+  label: string,
+  value: { model: string; modelProvider?: string },
+): string {
+  return `${label}：${value.model}${value.modelProvider ? ` · Provider：${value.modelProvider}` : ""}`;
+}
+
+function formatModelStateLine(
+  state: Extract<ConversationCommandResult, { kind: "models" }>["state"],
+): string {
+  return state.modelPending
+    ? formatNextMessageModel(state)
+    : `当前模型：${state.model}`;
 }
 
 export function formatConversationUsage(

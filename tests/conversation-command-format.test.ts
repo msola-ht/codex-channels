@@ -604,6 +604,28 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("对新建或恢复的 Thread 生效");
   });
 
+  it("shows the model used by the next message after changing session context", () => {
+    const nextModel = { model: "gpt-5.6", modelProvider: "openai" };
+
+    expect(formatConversationCommandOutcome({
+      type: "session.new",
+      nextModel,
+    })).toContain("下一条消息模型：gpt-5.6 · Provider：openai");
+    expect(formatConversationCommandOutcome({
+      type: "workspace.selected",
+      workspace: { id: "other", name: "Other", cwd: "/other" },
+      nextModel,
+    })).toContain("下一条消息模型：gpt-5.6 · Provider：openai");
+  });
+
+  it("shows the model bound to a resumed session", () => {
+    expect(formatConversationCommandOutcome({
+      type: "thread.resumed",
+      threadId: "thread-1",
+      model: { model: "deepseek-v4-pro", modelProvider: "deepseek" },
+    })).toContain("会话模型：deepseek-v4-pro · Provider：deepseek");
+  });
+
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {
     const rendered = formatConversationModels({
       kind: "models",
@@ -635,6 +657,7 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("下一条消息中创建新 Thread");
     expect(rendered).toContain("当前 Thread 会保留");
+    expect(rendered).toContain("下一条消息模型：deepseek-v4-flash · Provider：deepseek");
   });
 
   it("renders DeepSeek balance instead of OpenAI account usage", () => {

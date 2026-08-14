@@ -431,7 +431,11 @@ describe("Feishu output renderer", () => {
       expected: string;
     }> = [
       {
-        outcome: { type: "thread.resumed", threadId: "thread-resumed" },
+        outcome: {
+          type: "thread.resumed",
+          threadId: "thread-resumed",
+          model: { model: "gpt-test", modelProvider: "openai" },
+        },
         expected: "Thread：thread-resumed",
       },
       {
@@ -439,11 +443,15 @@ describe("Feishu output renderer", () => {
           type: "thread.resumed",
           threadId: "thread-transferred",
           transferredFrom: "telegram",
+          model: { model: "gpt-test", modelProvider: "openai" },
         },
         expected: "已从 Telegram 接管 Codex Thread",
       },
       {
-        outcome: { type: "session.new" },
+        outcome: {
+          type: "session.new",
+          nextModel: { model: "gpt-test", modelProvider: "openai" },
+        },
         expected: "下一条普通消息将创建新的 Codex Thread",
       },
       {
@@ -461,6 +469,7 @@ describe("Feishu output renderer", () => {
         outcome: {
           type: "workspace.selected",
           workspace: { id: "main", name: "Main", cwd: "/workspace" },
+          nextModel: { model: "gpt-test", modelProvider: "openai" },
         },
         expected: "工作目录：/workspace",
       },
