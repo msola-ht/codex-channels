@@ -86,7 +86,7 @@ const helpText = {
 
 初始化与配置：
   init                         初始化用户目录和配置
-  setup                        配置模型、通讯渠道与技能
+  setup                        配置模型、提供商、通讯渠道与技能
   config                       打开日常设置菜单
   doctor                       诊断安装、配置和服务
 
@@ -117,7 +117,7 @@ const helpText = {
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
   setup: `用法：codexc setup
 
-打开统一设置菜单。`,
+打开模型与提供商、通讯渠道和技能设置菜单。`,
   start: `用法：codexc start
 
 在前台启动 Codex App Server 与 Gateway。`,

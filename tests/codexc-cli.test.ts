@@ -2535,10 +2535,18 @@ describe("codexc CLI", () => {
     expect(output).toContain("保留用户数据");
   });
 
-  it("describes Setup by its current model, channel, and skill responsibilities", () => {
+  it("describes Setup by its model, provider, channel, and skill responsibilities", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 
-    expect(output).toContain("配置模型、通讯渠道与技能");
+    expect(output).toContain("配置模型、提供商、通讯渠道与技能");
+  });
+
+  it("explains the Setup categories in scoped help", () => {
+    const output = execFileSync(process.execPath, [cli, "setup", "--help"], {
+      encoding: "utf8",
+    });
+
+    expect(output).toContain("模型与提供商、通讯渠道和技能");
   });
 
   it("rejects invalid service log options before reading user configuration", () => {

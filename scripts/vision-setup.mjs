@@ -46,7 +46,7 @@ export async function runVisionSetup({
 
 async function responsesConfig(prompts, existing, providers) {
   if (providers.length === 0) {
-    throw new Error("尚未配置第三方 API 提供商，请先在模型渠道中添加");
+    throw new Error("尚未配置第三方 API 提供商，请先在模型与提供商中添加");
   }
   const provider = await prompts.select({
     message: "选择图片识别 API 提供商",

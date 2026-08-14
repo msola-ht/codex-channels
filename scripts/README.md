@@ -70,8 +70,8 @@
   Worker 共用的上报载荷校验及类型声明。
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型渠道”“通讯渠道”和
-  “技能”流程委派给具体适配器；模型渠道下区分 Codex 官方、DeepSeek、第三方 API 与图片识别。
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
+  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、第三方 API 与图片识别。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。

@@ -24,6 +24,13 @@ export interface ModelSelectionState {
   providerPending?: boolean;
 }
 
+export interface ModelSelectionPreference {
+  model: string;
+  modelProvider: string;
+  effort: string | null;
+  serviceTier: string | null;
+}
+
 const standardServiceTierRequestValue = "default";
 
 export class ModelSelectionService {
@@ -197,6 +204,39 @@ export class ModelSelectionService {
       ...(pending?.model ? { model: pending.model } : {}),
       ...(pending?.modelProvider ? { modelProvider: pending.modelProvider } : {}),
     };
+  }
+
+  capturePreference(target: ConversationTarget): ModelSelectionPreference | undefined {
+    const pending = this.pendingByConversation.get(this.key(target));
+    const current = this.router.modelSettings(target);
+    const model = pending?.model ?? current?.model;
+    if (!model) return undefined;
+    const serviceTierPending = hasServiceTierOverride(pending);
+    return {
+      model,
+      modelProvider: pending?.modelProvider ?? current?.modelProvider ?? "openai",
+      effort: pending?.effort ?? current?.effort ?? null,
+      serviceTier: serviceTierPending
+        ? pending?.serviceTier ?? null
+        : current?.serviceTier ?? null,
+    };
+  }
+
+  restorePreference(
+    target: ConversationTarget,
+    preference: ModelSelectionPreference | undefined,
+  ): void {
+    const key = this.key(target);
+    this.pendingByConversation.delete(key);
+    if (!preference) return;
+    const currentProvider = this.router.modelSettings(target)?.modelProvider ?? "openai";
+    if (this.router.current(target) && currentProvider !== preference.modelProvider) return;
+    this.pendingByConversation.set(key, {
+      model: preference.model,
+      modelProvider: preference.modelProvider,
+      ...(preference.effort ? { effort: preference.effort } : {}),
+      ...(preference.serviceTier === null ? {} : { serviceTier: preference.serviceTier }),
+    });
   }
 
   markApplied(target: ConversationTarget): void {

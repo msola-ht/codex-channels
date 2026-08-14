@@ -17,6 +17,8 @@
   扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile
   均使用稳定结果。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  在 Workspace、新会话或同 Provider 历史 Thread 切换前后捕获并恢复当前模型、思考等级与服务层级，
+  显式恢复不同 Provider 的历史 Thread 时则尊重该 Thread 的 Provider；偏好只保留在运行内存中；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
   `modelProvider` 的 Thread，并采用目标模型目录的默认思考等级，避免把原 Provider 的设置或专属
   历史发送到不兼容的 API；旧 Thread 保持可恢复；

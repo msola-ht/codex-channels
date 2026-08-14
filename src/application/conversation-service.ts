@@ -60,7 +60,11 @@ import {
   type TurnStartIdentity,
   type TurnArtifacts,
 } from "../conversation-core/index.js";
-import type { ModelSelectionService, ModelSelectionState } from "./model-selection-service.js";
+import type {
+  ModelSelectionPreference,
+  ModelSelectionService,
+  ModelSelectionState,
+} from "./model-selection-service.js";
 import type {
   ReviewTarget,
   TurnExecutionPort,
@@ -946,6 +950,7 @@ export class ConversationService implements ConversationUseCases {
       });
     }
     return this.locked(target, async () => {
+      const modelPreference = this.models.capturePreference?.(target);
       const active = this.core.activeTurn(target);
       const currentOwner = this.router.targetForThread(selected.id);
       if (
@@ -978,7 +983,7 @@ export class ConversationService implements ConversationUseCases {
       const binding = preserveCurrent
         ? await this.router.resume(target, selected.id, true)
         : await this.router.resume(target, selected.id);
-      this.clearPendingSelections(target);
+      this.restoreSelectionsAfterBindingChange(target, modelPreference);
       return {
         threadId: binding.threadId,
         ...(preserveCurrent && current ? { backgroundedThreadId: current.threadId } : {}),
@@ -988,6 +993,7 @@ export class ConversationService implements ConversationUseCases {
 
   newSession(target: ConversationTarget): Promise<string | undefined> {
     return this.locked(target, async () => {
+      const modelPreference = this.models.capturePreference?.(target);
       const active = this.core.activeTurn(target);
       if (active && this.hasQueuedFollowUps(target)) {
         throw new UserFacingError(
@@ -1005,7 +1011,7 @@ export class ConversationService implements ConversationUseCases {
         );
       }
       await this.router.newSession(target, active !== undefined);
-      this.clearPendingSelections(target);
+      this.restoreSelectionsAfterBindingChange(target, modelPreference);
       return active?.threadId;
     });
   }
@@ -1052,9 +1058,12 @@ export class ConversationService implements ConversationUseCases {
       }
       const selected = this.router.resolveWorkspace(selector);
       const currentWorkspaceId = this.router.workspace(target).id;
+      const modelPreference = selected.id === currentWorkspaceId
+        ? undefined
+        : this.models.capturePreference?.(target);
       const workspace = await this.router.selectWorkspace(target, selected.id);
       if (workspace.id !== currentWorkspaceId) {
-        this.clearPendingSelections(target);
+        this.restoreSelectionsAfterBindingChange(target, modelPreference);
       }
       return workspace;
     });
@@ -1643,6 +1652,18 @@ export class ConversationService implements ConversationUseCases {
 
   private clearPendingSelections(target: ConversationTarget): void {
     this.models.clear(target);
+    this.collaborationModes?.clear(target);
+  }
+
+  private restoreSelectionsAfterBindingChange(
+    target: ConversationTarget,
+    modelPreference: ModelSelectionPreference | undefined,
+  ): void {
+    if (this.models.restorePreference) {
+      this.models.restorePreference(target, modelPreference);
+    } else {
+      this.models.clear?.(target);
+    }
     this.collaborationModes?.clear(target);
   }
 

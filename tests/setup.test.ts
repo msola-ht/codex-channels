@@ -38,8 +38,8 @@ describe("Codex Connect setup", () => {
       showInstructions: false,
       options: [{
         value: "models",
-        label: "模型渠道",
-        hint: "配置 Codex 官方、DeepSeek、第三方 API 与图片识别",
+        label: "模型与提供商",
+        hint: "设置 Codex 官方默认模型与思考等级，以及 DeepSeek、第三方 API 和图片识别",
       }, {
         value: "channels",
         label: "通讯渠道",
@@ -156,7 +156,7 @@ describe("Codex Connect setup", () => {
     expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts, allowBack: true });
   });
 
-  it("selects official Codex global model settings under model channels", async () => {
+  it("selects official Codex global model settings under models and providers", async () => {
     const input = {};
     const output = {};
     const prompts = {
@@ -190,7 +190,7 @@ describe("Codex Connect setup", () => {
     });
   });
 
-  it("selects image recognition under the model channel category", async () => {
+  it("selects image recognition under the models and providers category", async () => {
     const visionSetup = vi.fn(async () => "vision-configured");
     const prompts = {
       intro: vi.fn(),

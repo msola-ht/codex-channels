@@ -67,6 +67,7 @@ export {
   isFastServiceTier,
   resolveEffort,
   resolveModel,
+  type ModelSelectionPreference,
   type ModelSelectionState,
 } from "./model-selection-service.js";
 export {
