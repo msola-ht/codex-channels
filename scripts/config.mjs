@@ -8,6 +8,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   runDisplaySettings,
   runTelegramMessageFormat,
@@ -119,7 +120,7 @@ if (
   && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
   runConfig().catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });
 }

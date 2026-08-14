@@ -1995,6 +1995,26 @@ describe("codexc CLI", () => {
     expect(result.stderr).not.toContain("子命令执行失败");
   });
 
+  it("does not repeat a metrics status failure reported by the child command", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-status-error-"));
+    temporaryDirectories.push(root);
+    const configPath = join(root, "invalid.toml");
+    writeFileSync(configPath, "[\n");
+
+    const result = spawnSync(process.execPath, [cli, "metrics", "status"], {
+      env: {
+        ...process.env,
+        CODEX_CONNECT_CONFIG_FILE: configPath,
+      },
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("语法无效");
+    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
+    expect(result.stderr).not.toContain("子命令执行失败");
+  });
+
   it("formats a managed WebUI child failure exactly once", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-managed-error-"));
     temporaryDirectories.push(root);
@@ -2071,6 +2091,81 @@ describe("codexc CLI", () => {
     expect(result.stderr).toContain("测试服务未运行");
     expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
     expect(result.stderr).not.toContain("子命令执行失败");
+
+    const reload = spawnSync(
+      process.execPath,
+      [cli, "service", "reload"],
+      { cwd: workspace, env: environment, encoding: "utf8" },
+    );
+
+    expect(reload.status).toBe(1);
+    expect(reload.stderr).toContain("Gateway 尚未运行");
+    expect(reload.stderr.match(/\[失败\]/g)).toHaveLength(1);
+    expect(reload.stderr).not.toContain("子命令执行失败");
+  });
+
+  linuxIt("keeps service diagnostics and recovery available without a config file", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-service-recovery-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const systemctlLog = join(root, "systemctl.log");
+    const journalctlLog = join(root, "journalctl.log");
+    const fakeSystemctl = join(root, "systemctl");
+    const fakeJournalctl = join(root, "journalctl");
+    writeFileSync(fakeSystemctl, [
+      "#!/bin/sh",
+      "printf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"",
+    ].join("\n"));
+    chmodSync(fakeSystemctl, 0o755);
+    writeFileSync(fakeJournalctl, [
+      "#!/bin/sh",
+      "printf '%s\\n' \"$*\" >> \"$JOURNALCTL_LOG\"",
+    ].join("\n"));
+    chmodSync(fakeJournalctl, 0o755);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: join(home, "missing.toml"),
+      CODEX_CONNECT_SERVICE_ROLE: "",
+      XDG_CONFIG_HOME: join(root, "config"),
+      SYSTEMCTL_BINARY: fakeSystemctl,
+      JOURNALCTL_BINARY: fakeJournalctl,
+      SYSTEMCTL_LOG: systemctlLog,
+      JOURNALCTL_LOG: journalctlLog,
+    };
+
+    for (const args of [
+      ["status", "gateway"],
+      ["logs", "gateway", "-n", "1"],
+      ["reload"],
+      ["stop", "gateway"],
+      ["uninstall"],
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [cli, "service", ...args],
+        { env: environment, encoding: "utf8" },
+      );
+      expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(0);
+      expect(result.stderr).not.toContain("ENOENT");
+      expect(result.stderr).not.toContain("尚未初始化");
+    }
+    expect(readFileSync(systemctlLog, "utf8")).toContain(
+      "--user stop codex-connect-gateway.service",
+    );
+    expect(readFileSync(journalctlLog, "utf8")).toContain(
+      "--user-unit=codex-connect-gateway.service --lines=1 --no-pager",
+    );
+
+    const systemctlCallsBeforeStart = readFileSync(systemctlLog, "utf8");
+    const start = spawnSync(
+      process.execPath,
+      [cli, "service", "start", "gateway"],
+      { env: environment, encoding: "utf8" },
+    );
+    expect(start.status).toBe(1);
+    expect(start.stderr).toContain("ENOENT");
+    expect(readFileSync(systemctlLog, "utf8")).toBe(systemctlCallsBeforeStart);
   });
 
   it("runs the metrics center info and non-interactive config subcommands", () => {

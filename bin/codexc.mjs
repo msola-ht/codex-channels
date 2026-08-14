@@ -9,7 +9,7 @@ import {
   readFileSync,
   rmSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -52,6 +52,7 @@ import {
   locateOptionalUserConfig,
   packageDir,
   requireUserConfig,
+  userDataDir,
 } from "../scripts/runtime-config.mjs";
 import { checkProjectRules, initializeProjectRules } from "../scripts/codex-rules.mjs";
 import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options.mjs";
@@ -367,6 +368,7 @@ try {
         [join(packageDir, "scripts/config.mjs")],
         process.env,
         process.cwd(),
+        { failureReportedByChild: true },
       );
       break;
     case "doctor":
@@ -689,21 +691,26 @@ async function service(args) {
   if (action === "install") {
     runScript("scripts/validate-config.mjs", [], { failureReportedByChild: true });
   }
+  const controlEnvironment = serviceActionAllowsInvalidConfig(action)
+    ? serviceControlEnvironment()
+    : configuredEnvironment().environment;
   if (process.platform === "darwin") {
     if (action === "install") {
       run(
         "/bin/zsh",
         [join(packageDir, "scripts/launchd-control.sh"), "check-install"],
-        configuredEnvironment().environment,
+        controlEnvironment,
+        undefined,
+        { failureReportedByChild: true },
       );
       runScript("scripts/install-launchd.mjs", [], { failureReportedByChild: true });
     }
     run(
       "/bin/zsh",
       [join(packageDir, "scripts/launchd-control.sh"), action, ...serviceArgs],
-      configuredEnvironment().environment,
+      controlEnvironment,
       undefined,
-      { failureReportedByChild: action === "status" },
+      { failureReportedByChild: serviceControllerReportsFailure(action) },
     );
   } else if (process.platform === "linux") {
     if (action === "install") {
@@ -712,9 +719,9 @@ async function service(args) {
     run(
       "/bin/sh",
       [join(packageDir, "scripts/systemd-control.sh"), action, ...serviceArgs],
-      configuredEnvironment().environment,
+      controlEnvironment,
       undefined,
-      { failureReportedByChild: action === "status" },
+      { failureReportedByChild: serviceControllerReportsFailure(action) },
     );
   } else {
     throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
@@ -724,6 +731,14 @@ async function service(args) {
     await waitForManagedServiceReadiness(readinessTarget);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));
   }
+}
+
+function serviceControllerReportsFailure(action) {
+  return action === "status" || action === "reload";
+}
+
+function serviceActionAllowsInvalidConfig(action) {
+  return new Set(["uninstall", "stop", "reload", "status", "logs"]).has(action);
 }
 
 function coreServiceReadinessTarget(action, serviceArgs) {
@@ -1039,6 +1054,7 @@ async function metrics(args) {
             [join(packageDir, "scripts/metrics-database.mjs"), "status"],
             process.env,
             process.cwd(),
+            { failureReportedByChild: true },
           );
           return;
         }
@@ -1061,6 +1077,7 @@ async function metrics(args) {
       [join(packageDir, "scripts/metrics-database.mjs"), subcommand],
       process.env,
       process.cwd(),
+      { failureReportedByChild: true },
     );
     return;
   }
@@ -1233,6 +1250,18 @@ function configuredEnvironment() {
       CODEX_BINARY: stringValue(codex.binary) || "codex",
       ...proxyEnvironment,
     },
+  };
+}
+
+function serviceControlEnvironment(environment = process.env) {
+  const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  const configPath = explicitConfigFile
+    ? resolve(explicitConfigFile)
+    : join(userDataDir(environment), "config.toml");
+  return {
+    ...environment,
+    CODEX_CONNECT_HOME: dirname(configPath),
+    CODEX_CONNECT_CONFIG_FILE: configPath,
   };
 }
 
