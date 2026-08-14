@@ -6,7 +6,7 @@ import {
   readFileSync,
   unlinkSync,
 } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -31,6 +31,7 @@ import {
   loadConfigDocument,
   loadRuntimeConfig,
 } from "../dist/config/index.js";
+import { serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import {
   modelRequestMetricsSchemaVersion,
 } from "../dist/observability/index.js";
@@ -99,9 +100,12 @@ export async function updateLocalInstallation(environment = process.env, options
     ?? (() => inspectGatewayConfiguration(environment)))();
   const databaseInspection = (options.inspectDatabases
     ?? (() => inspectDatabaseUpdates(environment)))();
+  const serviceInspection = (options.inspectServices
+    ?? (() => inspectCoreServiceInstallation(environment)))();
   (options.onInspected ?? (() => {}))({
     config: configInspection,
     databases: databaseInspection,
+    services: serviceInspection,
   });
   const stopServices = options.stopServices
     ?? (() => runCoreServiceAction("stop", environment));
@@ -113,7 +117,9 @@ export async function updateLocalInstallation(environment = process.env, options
     ...options.databaseOptions,
     inspect: options.databaseOptions?.inspect ?? (() => databaseInspection),
   };
-  await stopCoreServices(stopServices, startServices, waitForServices);
+  if (serviceInspection.installed) {
+    await stopCoreServices(stopServices, startServices, waitForServices);
+  }
 
   let config;
   let databases;
@@ -130,11 +136,13 @@ export async function updateLocalInstallation(environment = process.env, options
   }
 
   let startError;
-  try {
-    startServices();
-    await waitForServices();
-  } catch (error) {
-    startError = error;
+  if (serviceInspection.installed) {
+    try {
+      startServices();
+      await waitForServices();
+    } catch (error) {
+      startError = error;
+    }
   }
   if (updateError !== undefined && startError !== undefined) {
     throw new AggregateError(
@@ -145,7 +153,44 @@ export async function updateLocalInstallation(environment = process.env, options
   }
   if (updateError !== undefined) throw updateError;
   if (startError !== undefined) throw startError;
-  return { config, databases };
+  return {
+    config,
+    databases,
+    servicesRestored: serviceInspection.installed,
+  };
+}
+
+export function inspectCoreServiceInstallation(
+  environment = process.env,
+  platform = process.platform,
+) {
+  const home = environment.HOME;
+  if (!home) {
+    throw new Error("无法检查后台服务安装状态：HOME 未设置");
+  }
+  let definitionsDirectory;
+  let identifierKey;
+  if (platform === "linux") {
+    const configHome = environment.XDG_CONFIG_HOME?.trim() || join(home, ".config");
+    definitionsDirectory = join(configHome, "systemd", "user");
+    identifierKey = "systemd";
+  } else if (platform === "darwin") {
+    definitionsDirectory = join(home, "Library", "LaunchAgents");
+    identifierKey = "launchd";
+  } else {
+    throw new Error("codexc update 当前支持 macOS launchd 与 Linux systemd");
+  }
+  const paths = serviceDefinitionsForTarget("all").map((definition) =>
+    join(definitionsDirectory, definition[identifierKey])
+  );
+  const existingPaths = paths.filter((path) => existsSync(path));
+  if (existingPaths.length === 0) {
+    return { installed: false };
+  }
+  if (existingPaths.length !== paths.length) {
+    throw new Error("核心后台服务安装不完整；请先运行 codexc service install");
+  }
+  return { installed: true };
 }
 
 export function inspectDatabaseUpdates(environment = process.env, options = {}) {
@@ -387,13 +432,16 @@ if (
   && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
   try {
-    await updateLocalInstallation(process.env, {
-      onInspected: ({ config }) => {
+    const result = await updateLocalInstallation(process.env, {
+      onInspected: ({ config, services }) => {
         writeCliMessage("note", "本地更新预检通过。");
         console.log(`配置：${config.configPath}`);
         console.log(config.missingSafeDefaults.length === 0
           ? "配置参数：已兼容"
           : `待补齐安全参数：${config.missingSafeDefaults.join("、")}`);
+        if (!services.installed) {
+          writeCliMessage("note", "核心后台服务未安装，本次只离线更新配置与数据库。");
+        }
       },
       updateConfig: () => {
         const result = updateGatewayConfiguration(process.env);
@@ -412,7 +460,12 @@ if (
         onUpdated: printDatabaseResult,
       },
     });
-    writeCliMessage("success", "本地配置与数据库更新完成，App Server 与 Gateway 已恢复运行。");
+    writeCliMessage(
+      "success",
+      result.servicesRestored
+        ? "本地配置与数据库更新完成，App Server 与 Gateway 已恢复运行。"
+        : "本地配置与数据库更新完成；核心后台服务未安装，未执行启动。",
+    );
   } catch (error) {
     if (
       !(error instanceof ReportedChildExitError)

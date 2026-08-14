@@ -62,6 +62,15 @@ systemctl_user() {
   "$systemctl_binary" --user "$@"
 }
 
+stop_unit() {
+  unit="$1"
+  load_state=$(systemctl_user show "$unit" --property=LoadState --value 2>/dev/null || true)
+  if [ "$load_state" = "not-found" ]; then
+    return 0
+  fi
+  systemctl_user stop "$unit"
+}
+
 ensure_linger() {
   user_id=$(id -u)
   linger=$(
@@ -128,7 +137,7 @@ case "$action" in
     target=${2:-all}
     require_target "$target"
     resolved_units=$(service_ids "$target" stop)
-    for unit in $resolved_units; do systemctl_user stop "$unit"; done
+    for unit in $resolved_units; do stop_unit "$unit"; done
     case "$target" in
       gateway) print_status success "Gateway 已停止。" ;;
       app-server) print_status success "Codex App Server 已停止。" ;;

@@ -23,6 +23,7 @@ export interface SubscriptionRestoreFailure {
   binding: ConversationBinding;
   error: Error;
   bindingRemoved: boolean;
+  reason: "active-writer" | "unavailable" | "other";
 }
 
 export interface ThreadListOptions {
@@ -195,6 +196,11 @@ export class SessionRouter {
           binding,
           error: normalized,
           bindingRemoved,
+          reason: bindingRemoved
+            ? "unavailable"
+            : isActiveWriterRestoreError(normalized)
+              ? "active-writer"
+              : "other",
         });
         continue;
       }
@@ -208,6 +214,7 @@ export class SessionRouter {
             binding: restoredBinding,
             error: error instanceof Error ? error : new Error(String(error)),
             bindingRemoved: false,
+            reason: "other",
           });
         }
       }
@@ -498,4 +505,8 @@ export class SessionRouter {
 function isUnavailableRestoreError(error: Error): boolean {
   return /(?:thread|session).*(?:not found|deleted|(?:is )?archived)|线程.*(?:不存在|删除|归档)/i
     .test(error.message);
+}
+
+function isActiveWriterRestoreError(error: Error): boolean {
+  return /^thread [^\s]+ already has an active writer$/u.test(error.message);
 }

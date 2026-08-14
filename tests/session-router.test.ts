@@ -518,6 +518,30 @@ describe("SessionRouter", () => {
     expect(router.current(target)?.threadId).toBe("bound");
   });
 
+  it("classifies the fixed-version active writer conflict without removing the binding", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });
+    const client = threadPort({
+      resumeThread: async () => {
+        throw new JsonRpcError(
+          -32600,
+          "thread bound already has an active writer",
+        );
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    const failures = await router.restoreSubscriptions();
+
+    expect(failures).toEqual([
+      expect.objectContaining({
+        bindingRemoved: false,
+        reason: "active-writer",
+      }),
+    ]);
+    expect(router.current(target)?.threadId).toBe("bound");
+  });
+
   it("keeps a binding when subscription restore fails for an unknown reason", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "bound", sessionId: "bound" });

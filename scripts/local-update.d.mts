@@ -30,6 +30,15 @@ export interface CoreServiceReadinessOptions {
   timeoutMs?: number;
 }
 
+export interface CoreServiceInstallation {
+  installed: boolean;
+}
+
+export function inspectCoreServiceInstallation(
+  environment?: LocalUpdateEnvironment,
+  platform?: NodeJS.Platform,
+): CoreServiceInstallation;
+
 export function inspectDatabaseUpdates(
   environment?: LocalUpdateEnvironment,
   options?: {
@@ -76,9 +85,11 @@ export function updateLocalInstallation(
     databaseOptions?: Parameters<typeof updateDatabases>[1];
     inspectConfig?: () => { configPath: string; missingSafeDefaults?: string[] };
     inspectDatabases?: () => { state: DatabaseInspection; metrics: DatabaseInspection };
+    inspectServices?: () => CoreServiceInstallation;
     onInspected?: (inspection: {
       config: { configPath: string; missingSafeDefaults?: string[] };
       databases: { state: DatabaseInspection; metrics: DatabaseInspection };
+      services: CoreServiceInstallation;
     }) => void;
     startServices?: () => void;
     stopServices?: () => void;
@@ -87,7 +98,11 @@ export function updateLocalInstallation(
     validateOffline?: () => unknown;
     waitForServices?: () => Promise<void>;
   },
-): Promise<{ config: unknown; databases: unknown }>;
+): Promise<{
+  config: unknown;
+  databases: unknown;
+  servicesRestored: boolean;
+}>;
 
 export function validateLocalInstallation(
   environment?: LocalUpdateEnvironment,

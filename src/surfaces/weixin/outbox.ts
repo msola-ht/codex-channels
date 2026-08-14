@@ -37,6 +37,7 @@ import {
   formatCliInput,
   formatCodexWarning,
   formatConnectionLost,
+  formatThreadAvailability,
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
@@ -371,6 +372,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
       }
       case "connection.lost":
         return formatConnectionLost(visibleMessage(event.message));
+      case "thread.availability":
+        return formatThreadAvailability(
+          event.availability,
+          event.threadId,
+          event.background,
+        );
       case "warning":
         return formatCodexWarning(visibleMessage(event.message));
       case "account.updated":
