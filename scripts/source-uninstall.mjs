@@ -14,7 +14,13 @@ import { pathToFileURL } from "node:url";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
+import {
+  inferNpmGlobalPrefix,
+  readManagedNpmPrefixes,
+} from "./source-install-metadata.mjs";
 import { removeLegacySourceShellPaths } from "./source-shell-path.mjs";
+
+const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 
 export async function uninstallManagedSourceInstallation(
   environment = process.env,
@@ -27,6 +33,9 @@ export async function uninstallManagedSourceInstallation(
   const legacyLauncher = join(installRoot, "bin", "codexc");
   const launchers = [launcher, legacyLauncher];
   assertManagedSourceInstallation(checkout, launchers, projectDir, environment);
+  const npmPrefixes = new Set(readManagedNpmPrefixes(checkout, environment));
+  const activePrefix = inferNpmGlobalPrefix(projectDir);
+  if (activePrefix) npmPrefixes.add(activePrefix);
 
   await (options.uninstallServices ?? uninstallServices)(checkout, environment);
   for (const commandEntry of launchers) {
@@ -38,7 +47,10 @@ export async function uninstallManagedSourceInstallation(
     }
   }
   removeLegacySourceShellPaths(environment);
-  await (options.uninstallGlobalPackage ?? uninstallGlobalPackage)(environment);
+  await (options.uninstallGlobalPackage ?? uninstallGlobalPackage)(
+    [...npmPrefixes],
+    environment,
+  );
   rmSync(checkout, { recursive: true });
   return { checkout, launcher };
 }
@@ -72,9 +84,35 @@ function assertManagedSourceInstallation(checkout, launchers, projectDir, enviro
     !runsFromCheckout
     && !hasManagedLauncher
     && !hasManagedSourceMarker(checkout, environment)
+    && !isCleanOfficialLegacyCheckout(checkout, environment)
   ) {
     throw new Error(`源码目录与当前 codexc 不一致，拒绝删除：${checkout}`);
   }
+}
+
+function isCleanOfficialLegacyCheckout(checkout, environment) {
+  let metadata;
+  try {
+    metadata = JSON.parse(readFileSync(join(checkout, "package.json"), "utf8"));
+  } catch {
+    return false;
+  }
+  if (metadata.name !== "@hegenai/codexc") return false;
+  const origin = gitOutput(checkout, ["remote", "get-url", "origin"], environment);
+  if (origin !== officialRepository) return false;
+  const branch = gitOutput(checkout, ["branch", "--show-current"], environment);
+  if (branch !== "main") return false;
+  const dirty = gitOutput(checkout, ["status", "--porcelain"], environment);
+  if (dirty) {
+    throw new Error(`源码仓库存在未提交修改，拒绝删除：${checkout}`);
+  }
+  return true;
+}
+
+function gitOutput(checkout, args, environment) {
+  const result = spawnSync("git", args, { cwd: checkout, env: environment, encoding: "utf8" });
+  if (result.error) throw result.error;
+  return result.status === 0 ? result.stdout.trim() : "";
 }
 
 function hasManagedSourceMarker(checkout, environment) {
@@ -86,15 +124,33 @@ function hasManagedSourceMarker(checkout, environment) {
   return !result.error && result.status === 0 && result.stdout.trim() === "true";
 }
 
-function uninstallGlobalPackage(environment) {
-  const result = spawnSync(
-    "npm",
-    ["uninstall", "--global", "--no-audit", "--no-fund", "@hegenai/codexc"],
-    { env: environment, stdio: "inherit" },
-  );
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`npm 全局命令卸载失败：exit=${result.status ?? 1}`);
+function uninstallGlobalPackage(prefixes, environment) {
+  for (const prefix of prefixes) {
+    const packageDirectory = join(
+      prefix,
+      "lib",
+      "node_modules",
+      "@hegenai",
+      "codexc",
+    );
+    if (inferNpmGlobalPrefix(packageDirectory) !== prefix) continue;
+    const result = spawnSync(
+      "npm",
+      [
+        "uninstall",
+        "--global",
+        "--prefix",
+        prefix,
+        "--no-audit",
+        "--no-fund",
+        "@hegenai/codexc",
+      ],
+      { env: environment, stdio: "inherit" },
+    );
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`npm 全局命令卸载失败：${prefix} · exit=${result.status ?? 1}`);
+    }
   }
 }
 

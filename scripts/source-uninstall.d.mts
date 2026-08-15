@@ -10,6 +10,7 @@ export interface SourceUninstallOptions {
     environment: NodeJS.ProcessEnv,
   ) => Promise<void> | void;
   uninstallGlobalPackage?: (
+    prefixes: string[],
     environment: NodeJS.ProcessEnv,
   ) => Promise<void> | void;
 }

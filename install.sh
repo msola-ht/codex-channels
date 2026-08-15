@@ -170,6 +170,8 @@ note "正在安装依赖并构建 WebUI"
 
 git -C "$staging/repository" config --local codex-connect.managed-source true \
   || fail "无法标记受管源码安装"
+git -C "$staging/repository" config --local codex-connect.npm-prefix "$npm_global_prefix" \
+  || fail "无法记录 npm 全局目录"
 mv "$staging/repository" "$checkout"
 package_directory="$staging/package"
 mkdir -p "$package_directory"

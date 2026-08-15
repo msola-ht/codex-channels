@@ -37,7 +37,7 @@ codexc service install
 ```
 
 Git 仓库用于跟踪和构建 `main`，日常命令由构建后的 npm 全局包提供。安装器会给仓库写入仅位于
-`.git/config` 的受管标记，不修改工作树。
+`.git/config` 的受管标记和本次 npm 全局目录，不修改工作树。
 
 ## 更新
 
@@ -66,8 +66,9 @@ codexc update
 codexc uninstall
 ```
 
-该命令先卸载后台服务，再删除受管 Git 仓库及当前 Node.js 环境中的 `@hegenai/codexc` 全局包，并
+该命令先卸载后台服务，再删除受管 Git 仓库及安装、更新时记录的 `@hegenai/codexc` 全局包，并
 清理旧安装写入 `.zshrc`、`.bashrc`、`.bash_profile` 或 `.profile` 的 Codex Connect PATH 配置块。
 `config.toml`、数据库、凭据、日志和输出保留；Codex CLI 不会被删除。命令只接受带受管标记的源码
-安装，遇到符号链接、不匹配的源码目录或非本项目旧入口时会拒绝删除。直接从 npm Registry 安装的
-版本仍使用 `codexc service uninstall` 和 `npm uninstall -g @hegenai/codexc`。
+安装；旧版未标记仓库必须同时满足官方 origin、`main` 分支、正确包名且无未提交修改。遇到符号
+链接、不匹配的源码目录或非本项目旧入口时会拒绝删除。直接从 npm Registry 安装的版本仍使用
+`codexc service uninstall` 和 `npm uninstall -g @hegenai/codexc`。

@@ -111,6 +111,8 @@ try {
     "scripts/setup.mjs",
     "scripts/source-update.d.mts",
     "scripts/source-update.mjs",
+    "scripts/source-install-metadata.d.mts",
+    "scripts/source-install-metadata.mjs",
     "scripts/source-uninstall.d.mts",
     "scripts/source-uninstall.mjs",
     "scripts/source-shell-path.d.mts",

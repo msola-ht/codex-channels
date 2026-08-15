@@ -258,7 +258,7 @@
   只读 Agent 状态不依赖 Gateway 配置。
 - Linux/macOS Git 源码安装覆盖 npm 全局目录与已有版本检测、Codex CLI 缺失时安装精确版本、
   登录状态提示、官方 `main` 克隆、隔离依赖与 Gateway/WebUI 构建、npm 全局命令注册、旧 PATH
-  精确清理、保留用户数据的安全卸载、macOS launchd plist 服务检测及
+  精确清理、旧版官方仓库安全认领、跨 npm prefix 完整卸载、用户数据保留、macOS launchd plist 服务检测及
   构建失败不留半成品；源码更新覆盖同版本新 commit、脏仓库和自定义提交提前拒绝、
   候选仓库先构建后切换、Codex CLI 版本不匹配时不动现有安装、切换失败恢复旧仓库与服务、旧仓库
   成功清理、Git 阶段摘要、构建成功日志收敛、旧源码入口迁移到全局包，以及 Registry 安装继续复用原本地更新路径。
