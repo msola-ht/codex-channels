@@ -17,7 +17,8 @@ Conversation。空闲 Thread 的跨渠道接管在同一个 SQLite 事务中移�
 
 授权操作者通过独立的 Conversation→Actor 关联保存，不从群聊或私聊的 Conversation ID
 推断用户身份。无法确认操作者或已撤权的会话会解除绑定，避免恢复订阅后继续向未授权会话输出。
-Actor 清理和解绑由存储实现原子完成。
+Actor 清理和解绑由存储实现原子完成。存储公开枚举已知 Conversation；`/new` 或跨 Provider
+`/model` 暂时解除 Thread 绑定时，授权身份与 Workspace 仍可用于安全的渠道生命周期通知。
 
 Schema v4 保留原 `conversation_bindings` 前台表，并新增
 `conversation_background_bindings`。Schema v3 只能在 Gateway 停止后通过

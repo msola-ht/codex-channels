@@ -13,6 +13,8 @@ import {
   createTelegramRuntimeModule,
   createWeixinRuntimeModule,
   selectFeishuProxyUrl,
+  authorizedFeishuConversations,
+  authorizedWeixinConversations,
   weixinSurfacePlugin,
   type FeishuRuntimeAdapter,
   type TelegramRuntimeAdapter,
@@ -24,6 +26,7 @@ import {
   type SurfaceRuntimeModule,
 } from "../src/bootstrap/surface-plugin.js";
 import type { GatewayConfig } from "../src/config/index.js";
+import { FeishuAccessPolicy, WeixinAccessPolicy } from "../src/policy/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
 import { EncryptedFileWeixinCredentialStore } from "../src/surfaces/weixin/index.js";
 
@@ -348,6 +351,23 @@ describe("built-in Surface plugin host", () => {
 });
 
 describe("Feishu Surface runtime composition", () => {
+  it("keeps an authorized unbound conversation eligible for startup notifications", () => {
+    const bindings = new MemoryBindingStore();
+    const target = {
+      surface: "feishu",
+      accountId: "cli_0123456789abcdef",
+      conversationId: "oc_allowed",
+    } as const;
+    bindings.selectWorkspace(target, "main");
+    bindings.rememberActor(target, "ou_actor");
+
+    expect(authorizedFeishuConversations(
+      bindings,
+      new FeishuAccessPolicy(new Set(["ou_actor"]), target.accountId),
+      target.accountId,
+    )).toEqual([target.conversationId]);
+  });
+
   it("hot reloads authorization and removes bindings for revoked actors", () => {
     const bindings = new MemoryBindingStore();
     const allowed = {
@@ -399,6 +419,23 @@ describe("Feishu Surface runtime composition", () => {
 });
 
 describe("Weixin Surface runtime composition", () => {
+  it("keeps an authorized unbound conversation eligible for startup notifications", () => {
+    const bindings = new MemoryBindingStore();
+    const target = {
+      surface: "weixin",
+      accountId: "bot-fixture@im.bot",
+      conversationId: "allowed@im.wechat",
+    } as const;
+    bindings.selectWorkspace(target, "main");
+    bindings.rememberActor(target, target.conversationId);
+
+    expect(authorizedWeixinConversations(
+      bindings,
+      new WeixinAccessPolicy(new Set([target.conversationId]), target.accountId),
+      target.accountId,
+    )).toEqual([target]);
+  });
+
   it("hot reloads added authorization without changing bindings", () => {
     const accountId = "bot-fixture@im.bot";
     const replaceAccess = vi.fn();
