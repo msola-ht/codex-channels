@@ -106,7 +106,7 @@ const helpText = {
   start                        前台启动核心服务
   service                      管理后台服务
   update                       更新程序、配置与数据库
-  uninstall                    卸载 Git 源码并保留用户数据
+  uninstall                    卸载受管源码与全局命令并保留用户数据
   state                        单独维护状态数据库
 
 信息：
@@ -189,8 +189,9 @@ App Server 与 Gateway，在停机窗口内更新程序、配置和数据库，�
 npm 安装不会修改程序包。必须从本机终端执行。`,
   uninstall: `用法：codexc uninstall
 
-卸载后台服务、受管 Git 源码仓库与源码命令入口；保留 config.toml、数据库、凭据、日志、输出和
-Shell 配置。仅适用于 Git 源码安装；npm 全局版使用 npm uninstall -g @hegenai/codexc。`,
+卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令，并清理旧安装写入的 Shell PATH 配置；保留
+config.toml、数据库、凭据、日志和输出。直接从 npm Registry 安装的版本使用
+codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   state: `用法：codexc state upgrade
 
 停止 Gateway 后，备份并显式升级状态数据库。`,

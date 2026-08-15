@@ -11,18 +11,24 @@ if (!existsSync(sourceConfig)) {
   throw new Error("install:global 只能在 codexc 源码仓库中运行");
 }
 
-const prepared = run(process.execPath, [
-  join(packageDir, "scripts", "prepare-package.mjs"),
-]);
-const webuiBuilt = prepared === 0 ? buildWebui() : 1;
+const args = process.argv.slice(2);
+if (args.some((arg) => arg !== "--prepared")) {
+  throw new Error("用法：install-global-source.mjs [--prepared]");
+}
+const alreadyPrepared = args.includes("--prepared");
+const prepared = alreadyPrepared
+  ? assertPreparedBuild()
+  : run(process.execPath, [join(packageDir, "scripts", "prepare-package.mjs")]);
+const webuiBuilt = prepared === 0 && !alreadyPrepared ? buildWebui() : prepared;
 if (prepared === 0 && webuiBuilt === 0) {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
   try {
     const tarballPath = packSource(temporaryDirectory);
-    process.exitCode = run("npm", [
+    process.exitCode = runQuiet("npm", [
       "install",
       "--global",
       "--ignore-scripts",
+      "--loglevel=error",
       "--no-audit",
       "--no-fund",
       tarballPath,
@@ -34,10 +40,27 @@ if (prepared === 0 && webuiBuilt === 0) {
   process.exitCode = prepared === 0 ? webuiBuilt : prepared;
 }
 
+function assertPreparedBuild() {
+  if (
+    !existsSync(join(packageDir, "dist", "main.js"))
+    || !existsSync(join(webuiDir, "dist", "index.html"))
+  ) {
+    throw new Error("预构建源码缺少 Gateway 或 WebUI 构建结果");
+  }
+  return 0;
+}
+
 function packSource(destination) {
   const result = spawnSync(
     "npm",
-    ["pack", "--ignore-scripts", "--json", "--pack-destination", destination],
+    [
+      "pack",
+      "--ignore-scripts",
+      "--loglevel=error",
+      "--json",
+      "--pack-destination",
+      destination,
+    ],
     {
       cwd: packageDir,
       encoding: "utf8",
@@ -76,6 +99,19 @@ function run(command, args, cwd = packageDir) {
   });
   if (result.error) {
     throw result.error;
+  }
+  return result.status ?? 1;
+}
+
+function runQuiet(command, args, cwd = packageDir) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
   }
   return result.status ?? 1;
 }

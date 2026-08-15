@@ -31,6 +31,7 @@ afterEach(() => {
 describe("Git 源码更新", () => {
   it("updates to a newer main commit without requiring a version change", async () => {
     const fixture = createInstalledFixture("codexc-source-update-");
+    let globalInstalls = 0;
     let localUpdateCheckout = "";
     const messages: Array<[string, string]> = [];
 
@@ -44,6 +45,7 @@ describe("Git 源码更新", () => {
         writeFileSync(join(candidate, "webui", "dist", "index.html"), "");
       },
       inspectStaged: async () => ({ services: { installed: false } }),
+      installGlobalPackage: () => { globalInstalls += 1; },
       projectDir: fixture.checkout,
       repository: fixture.repository,
       runLocalUpdate: (candidate) => {
@@ -61,16 +63,16 @@ describe("Git 源码更新", () => {
     });
     expect(localUpdateCheckout).toBe(fixture.checkout);
     expect(readFileSync(join(fixture.checkout, "fix.txt"), "utf8")).toBe("fixed");
+    expect(globalInstalls).toBe(1);
     expect(existsSync(fixture.legacyLauncher)).toBe(false);
-    expect(readFileSync(fixture.hiddenLauncher, "utf8")).toContain(
-      "codex-channels/bin/codexc.mjs",
-    );
-    expect(readFileSync(fixture.profile, "utf8")).toContain(
-      'export PATH="$HOME/.codex-connect/.bin:$PATH"',
-    );
-    expect(readFileSync(fixture.profile, "utf8")).not.toContain(
-      'export PATH="$HOME/.codex-connect/bin:$PATH"',
-    );
+    expect(existsSync(fixture.hiddenLauncher)).toBe(false);
+    expect(readFileSync(fixture.profile, "utf8")).toBe("");
+    expect(gitOutput(fixture.checkout, [
+      "config",
+      "--local",
+      "--get",
+      "codex-connect.managed-source",
+    ])).toBe("true");
     expect(readdirSync(fixture.installRoot).filter((name) => name.includes("pre-update")))
       .toEqual([]);
     expect(messages).toEqual([
@@ -81,21 +83,19 @@ describe("Git 源码更新", () => {
       ["note", "正在克隆 Git main 候选源码。"],
       ["note", "正在构建并预检候选源码；详细日志仅在失败时显示。"],
       ["note", "候选源码已通过校验，准备切换。"],
-      ["note", `源码命令入口已迁移到隐藏目录：${fixture.hiddenLauncher}`],
-      [
-        "note",
-        '当前终端请执行：export PATH="$HOME/.codex-connect/.bin:$PATH"',
-      ],
+      ["note", "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。"],
     ]);
   });
 
   it("migrates the legacy launcher even when main is already current", async () => {
     const fixture = createInstalledFixture("codexc-source-launcher-migration-");
     runGit(fixture.checkout, ["reset", "--quiet", "--hard", fixture.latestCommit]);
+    let globalInstalls = 0;
     const messages: Array<[string, string]> = [];
 
     const result = await updateManagedSourceInstallation(fixture.environment, {
       buildCheckout: () => { throw new Error("不应重新构建"); },
+      installGlobalPackage: () => { globalInstalls += 1; },
       projectDir: fixture.checkout,
       repository: fixture.repository,
       writeMessage: (kind, message) => { messages.push([kind, message]); },
@@ -107,12 +107,38 @@ describe("Git 源码更新", () => {
       managed: true,
       version: "0.147.0",
     });
+    expect(globalInstalls).toBe(1);
     expect(existsSync(fixture.legacyLauncher)).toBe(false);
-    expect(existsSync(fixture.hiddenLauncher)).toBe(true);
+    expect(existsSync(fixture.hiddenLauncher)).toBe(false);
     expect(messages).toContainEqual([
       "note",
-      `源码命令入口已迁移到隐藏目录：${fixture.hiddenLauncher}`,
+      "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。",
     ]);
+  });
+
+  it("recognizes a globally installed command through the managed Git marker", () => {
+    const fixture = createInstalledFixture("codexc-source-global-marker-");
+    const globalPackage = join(fixture.installRoot, "npm-global-package");
+    mkdirSync(globalPackage);
+    runGit(fixture.checkout, ["config", "--local", "codex-connect.managed-source", "true"]);
+
+    expect(managedSourceCheckout(fixture.environment, globalPackage)).toBe(fixture.checkout);
+  });
+
+  it("refuses an unrelated legacy command before replacing the global package", async () => {
+    const fixture = createInstalledFixture("codexc-source-unrelated-launcher-");
+    runGit(fixture.checkout, ["reset", "--quiet", "--hard", fixture.latestCommit]);
+    writeFileSync(fixture.legacyLauncher, "#!/bin/sh\nexec unrelated-command\n");
+    let globalInstalls = 0;
+
+    await expect(updateManagedSourceInstallation(fixture.environment, {
+      installGlobalPackage: () => { globalInstalls += 1; },
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+    })).rejects.toThrow("旧命令入口不属于受管源码安装");
+
+    expect(globalInstalls).toBe(0);
+    expect(existsSync(fixture.legacyLauncher)).toBe(true);
   });
 
   it("restores the old checkout and services when switching the candidate fails", async () => {

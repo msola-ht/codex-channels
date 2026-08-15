@@ -2575,7 +2575,7 @@ describe("codexc CLI", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 
     expect(output).toContain("uninstall");
-    expect(output).toContain("卸载 Git 源码并保留用户数据");
+    expect(output).toContain("卸载受管源码与全局命令并保留用户数据");
   });
 
   it("describes Setup by its model, provider, channel, and skill responsibilities", () => {

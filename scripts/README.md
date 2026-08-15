@@ -12,10 +12,13 @@
   版本不匹配；
   候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，之后才停止服务并
   原子切换源码，最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
-  明细，失败时保留对应工具输出；已有可见 `bin/codexc` 入口迁移到 `.bin/codexc`。npm 安装直接
-  委派现有本地更新，不修改程序包。
+  明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
+  `.bin/codexc` 与 Shell PATH。Registry 安装直接委派现有本地更新，不修改程序包。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
-  先卸载后台服务，再删除 Git 仓库与隐藏入口；拒绝符号链接或不匹配路径并保留全部用户数据。
+  先卸载后台服务，再删除 Git 仓库、对应 npm 全局命令和旧 Shell PATH；拒绝符号链接或不匹配路径
+  并保留配置、数据库、凭据、日志和输出。
+- `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
+  精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
   校验 `config.toml`、两个数据库及核心服务定义的完整状态；服务已安装时在同一个 App Server、
   Gateway 停机窗口内分别备份并更新配置和数据库，离线复核后启动并通过 Socket 与监管拓扑确认
@@ -247,12 +250,13 @@
 
 - 根目录 `install.sh`：在 Linux/macOS 上克隆 Codex Connect 官方 `main`，把完整 Git 仓库安装
   到 `~/.codex-connect/codex-channels`，检测 npm 与 Codex CLI，缺少 Codex CLI 时安装项目精确版本，
-  并检查登录状态；随后完成依赖、Gateway/WebUI 构建和稳定用户命令入口。不覆盖现有源码目录、
-  命令入口、配置或数据，也不把 Codex Connect 注册为 npm 全局包。
+  并检查登录状态；随后完成依赖、Gateway/WebUI 构建和 npm 全局命令注册。不覆盖现有源码目录、
+  配置或数据，也不写入 Shell PATH。
 - `clean-dist.mjs`：构建前清理 `dist/`。
 - `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
-  不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建。
+  不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建；源码更新可用内部 `--prepared` 复用已
+  验证的 Gateway/WebUI 构建结果，避免重复构建。
 - `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。

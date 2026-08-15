@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -31,7 +32,7 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(installer).not.toMatch(/\$[A-Za-z_][A-Za-z0-9_]*\P{ASCII}/u);
   });
 
-  it("clones main under .codex-connect and creates a stable launcher", () => {
+  it("clones main under .codex-connect and installs the command globally", () => {
     const root = temporaryDirectory("codexc-source-install-");
     const repository = createFixtureRepository(root);
     const home = join(root, "home");
@@ -44,19 +45,30 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(result.stdout).toContain("已登录");
     const installRoot = join(home, ".codex-connect");
     const checkout = join(installRoot, "codex-channels");
-    const launcher = join(installRoot, ".bin", "codexc");
+    const globalPackage = join(
+      root,
+      "npm-global",
+      "lib",
+      "node_modules",
+      "@hegenai",
+      "codexc",
+    );
+    const launcher = join(root, "npm-global", "bin", "codexc");
     expect(existsSync(join(checkout, ".git"))).toBe(true);
     expect(existsSync(join(checkout, "dist", "main.js"))).toBe(true);
     expect(existsSync(join(checkout, "webui", "dist", "index.html"))).toBe(true);
-    expect(readFileSync(launcher, "utf8")).toContain("codex-channels/bin/codexc.mjs");
+    expect(existsSync(join(globalPackage, "package.json"))).toBe(true);
     expect(execFileSync(launcher, ["--version"], {
       encoding: "utf8",
       env: { ...process.env, HOME: home },
     }).trim()).toBe("0.147.0");
-    expect(readFileSync(join(home, ".profile"), "utf8")).toContain(
-      '$HOME/.codex-connect/.bin',
-    );
+    expect(existsSync(join(installRoot, ".bin"))).toBe(false);
+    expect(existsSync(join(home, ".profile"))).toBe(false);
     expect(existsSync(join(installRoot, "bin"))).toBe(false);
+    expect(execFileSync("git", ["config", "--local", "--get", "codex-connect.managed-source"], {
+      cwd: checkout,
+      encoding: "utf8",
+    }).trim()).toBe("true");
   });
 
   it("removes the partial checkout and launcher when the build fails", () => {
@@ -71,7 +83,7 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(existsSync(join(home, ".codex-connect", ".bin", "codexc"))).toBe(false);
   });
 
-  it("reports an existing global npm installation without removing it", () => {
+  it("replaces an existing global npm package with the built main source", () => {
     const root = temporaryDirectory("codexc-source-install-npm-");
     const repository = createFixtureRepository(root);
     const home = join(root, "home");
@@ -90,10 +102,8 @@ describe("Linux/macOS Git 源码安装", () => {
     const result = runInstaller(root, repository, home);
 
     expect(result.status, result.stderr || result.stdout).toBe(0);
-    expect(result.stdout).toContain(
-      "检测到 npm 全局版 @hegenai/codexc@0.146.1；不会自动卸载",
-    );
-    expect(readFileSync(npmManifest, "utf8")).toContain("0.146.1");
+    expect(result.stdout).toContain("检测到 npm 全局版 @hegenai/codexc@0.146.1");
+    expect(JSON.parse(readFileSync(npmManifest, "utf8")).version).toBe("0.147.0");
   });
 
   it("installs a missing Codex CLI and reports that login is still required", () => {
@@ -114,7 +124,7 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(existsSync(join(root, "fake-bin", "codex"))).toBe(true);
   }, 15_000);
 
-  it("keeps the explicit PATH fallback when no terminal is attached", () => {
+  it("does not modify Shell PATH when no terminal is attached", () => {
     const root = temporaryDirectory("codexc-source-install-no-tty-");
     const repository = createFixtureRepository(root);
     const home = join(root, "home");
@@ -122,10 +132,9 @@ describe("Linux/macOS Git 源码安装", () => {
     const result = runInstaller(root, repository, home, { shell: "/bin/zsh" });
 
     expect(result.status, result.stderr || result.stdout).toBe(0);
-    expect(result.stdout).toContain(
-      '重新打开终端，或执行：export PATH="$HOME/.codex-connect/.bin:$PATH"',
-    );
-    expect(result.stdout).not.toContain("是否立即进入已加载");
+    expect(result.stdout).toContain("npm 全局命令已安装");
+    expect(result.stdout).not.toContain("export PATH");
+    expect(existsSync(join(home, ".zshrc"))).toBe(false);
   });
 
   it("uninstalls the managed source and services while preserving user data", async () => {
@@ -135,6 +144,7 @@ describe("Linux/macOS Git 源码安装", () => {
     const launcher = join(installRoot, ".bin", "codexc");
     const config = join(installRoot, "config.toml");
     const database = join(installRoot, "data", "gateway.sqlite3");
+    const profile = join(root, ".zshrc");
     mkdirSync(join(checkout, ".git"), { recursive: true });
     mkdirSync(resolve(launcher, ".."), { recursive: true });
     mkdirSync(resolve(database, ".."), { recursive: true });
@@ -145,22 +155,32 @@ describe("Linux/macOS Git 源码安装", () => {
     );
     writeFileSync(config, "version = 1\n");
     writeFileSync(database, "preserved");
+    writeFileSync(
+      profile,
+      "export PATH=\"/custom/bin:$PATH\"\n\n"
+        + "# Codex Connect\n"
+        + "export PATH=\"$HOME/.codex-connect/.bin:$PATH\"\n",
+    );
     let serviceUninstalls = 0;
+    let globalUninstalls = 0;
 
     const result = await uninstallManagedSourceInstallation(
-      { ...process.env, CODEX_CONNECT_HOME: installRoot },
+      { ...process.env, CODEX_CONNECT_HOME: installRoot, HOME: root },
       {
         projectDir: checkout,
         uninstallServices: () => { serviceUninstalls += 1; },
+        uninstallGlobalPackage: () => { globalUninstalls += 1; },
       },
     );
 
     expect(result).toEqual({ checkout, launcher });
     expect(serviceUninstalls).toBe(1);
+    expect(globalUninstalls).toBe(1);
     expect(existsSync(checkout)).toBe(false);
     expect(existsSync(launcher)).toBe(false);
     expect(readFileSync(config, "utf8")).toBe("version = 1\n");
     expect(readFileSync(database, "utf8")).toBe("preserved");
+    expect(readFileSync(profile, "utf8")).toBe('export PATH="/custom/bin:$PATH"\n');
   });
 
   it("refuses to remove an unrelated command entry", async () => {
@@ -191,8 +211,10 @@ describe("Linux/macOS Git 源码安装", () => {
     const installRoot = join(root, ".codex-connect");
     const checkout = join(installRoot, "codex-channels");
     const legacyLauncher = join(installRoot, "bin", "codexc");
+    const globalPackage = join(root, "npm-global", "@hegenai", "codexc");
     mkdirSync(join(checkout, ".git"), { recursive: true });
     mkdirSync(resolve(legacyLauncher, ".."), { recursive: true });
+    mkdirSync(globalPackage, { recursive: true });
     writeFileSync(
       legacyLauncher,
       `#!/bin/sh\nexec node "${checkout}/bin/codexc.mjs" "$@"\n`,
@@ -200,12 +222,40 @@ describe("Linux/macOS Git 源码安装", () => {
 
     await uninstallManagedSourceInstallation(
       { ...process.env, CODEX_CONNECT_HOME: installRoot },
-      { projectDir: checkout, uninstallServices: () => undefined },
+      {
+        projectDir: globalPackage,
+        uninstallGlobalPackage: () => undefined,
+        uninstallServices: () => undefined,
+      },
     );
 
     expect(existsSync(checkout)).toBe(false);
     expect(existsSync(legacyLauncher)).toBe(false);
     expect(existsSync(join(installRoot, "bin"))).toBe(false);
+  });
+
+  it("allows the installed global package to uninstall its marked source checkout", async () => {
+    const root = temporaryDirectory("codexc-source-uninstall-global-");
+    const installRoot = join(root, ".codex-connect");
+    const checkout = join(installRoot, "codex-channels");
+    const globalPackage = join(root, "npm-global", "@hegenai", "codexc");
+    mkdirSync(checkout, { recursive: true });
+    mkdirSync(globalPackage, { recursive: true });
+    runGit(checkout, ["init", "--quiet"]);
+    runGit(checkout, ["config", "--local", "codex-connect.managed-source", "true"]);
+    let globalUninstalls = 0;
+
+    await uninstallManagedSourceInstallation(
+      { ...process.env, CODEX_CONNECT_HOME: installRoot },
+      {
+        projectDir: globalPackage,
+        uninstallGlobalPackage: () => { globalUninstalls += 1; },
+        uninstallServices: () => undefined,
+      },
+    );
+
+    expect(globalUninstalls).toBe(1);
+    expect(existsSync(checkout)).toBe(false);
   });
 });
 
@@ -227,6 +277,7 @@ function createFixtureRepository(
     name: "@hegenai/codexc",
     version: "0.147.0",
     type: "module",
+    bin: { codexc: "bin/codexc.mjs" },
     scripts: {
       build: "node scripts/build.mjs",
       check: "node scripts/check.mjs",
@@ -246,6 +297,10 @@ function createFixtureRepository(
         + "writeFileSync('dist/main.js', '');\n",
   );
   writeFileSync(join(repository, "scripts", "check.mjs"), "\n");
+  copyFileSync(
+    resolve("scripts/source-shell-path.mjs"),
+    join(repository, "scripts", "source-shell-path.mjs"),
+  );
   writeFileSync(join(repository, "webui", "package.json"), JSON.stringify({
     name: "codexc-webui-fixture",
     version: "0.147.0",
@@ -307,6 +362,7 @@ function runInstaller(
   const inheritedPath = options.codexInstalled === false
     ? "/usr/bin:/bin"
     : process.env.PATH ?? "";
+  const npmGlobalBin = join(root, "npm-global", "bin");
 
   return spawnSync(
     "/bin/sh",
@@ -323,7 +379,7 @@ function runInstaller(
         GIT_CONFIG_VALUE_0: "https://github.com/msola-ht/codex-channels.git",
         HOME: home,
         npm_config_prefix: join(root, "npm-global"),
-        PATH: `${fakeBin}${delimiter}${inheritedPath}`,
+        PATH: `${fakeBin}${delimiter}${npmGlobalBin}${delimiter}${inheritedPath}`,
         SHELL: options.shell ?? "/bin/sh",
       },
     },
