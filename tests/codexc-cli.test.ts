@@ -12,7 +12,7 @@ import { WebSocketServer } from "ws";
 
 import { AppServerSupervisorOwner } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
-import { GatewayOwner } from "../runtime/gateway-owner.mjs";
+import { gatewayOwnerIsActive, GatewayOwner } from "../runtime/gateway-owner.mjs";
 import {
   acknowledgeConfigEvents,
   configEventQueuePath,
@@ -1948,6 +1948,41 @@ describe("codexc CLI", () => {
     );
     expect(failure?.stderr).not.toContain("至少需要配置一个通讯渠道");
   });
+
+  it("keeps the supervised Gateway waiting while the App Server is not ready", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-gateway-wait-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_CONNECT_SERVICE_ROLE: "gateway",
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.telegram).bot_token = "123456:test-token";
+      table(document.telegram).allowed_user_ids = [123456];
+    });
+
+    const gateway = spawn(process.execPath, [cli, "gateway"], {
+      cwd: root,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const closed = new Promise<void>((resolveClose) => gateway.once("close", () => resolveClose()));
+
+    try {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 1_500));
+      expect(gateway.exitCode).toBeNull();
+      await expect(gatewayOwnerIsActive(join(home, "config.toml"))).resolves.toBe(false);
+    } finally {
+      if (gateway.exitCode === null) gateway.kill("SIGTERM");
+      await closed;
+    }
+  }, 10_000);
 
   it("rejects the removed manual ds_proxy configuration", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-proxy-mode-"));

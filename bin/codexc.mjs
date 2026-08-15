@@ -343,7 +343,7 @@ try {
       if (showRequestedHelp(args, "gateway")) {
         break;
       }
-      runGateway(args);
+      await runGateway(args);
       break;
     case "service-app-server":
       if (showRequestedHelp(args, "service-app-server")) {
@@ -474,11 +474,18 @@ function initialize(args) {
   }
 }
 
-function runGateway(args) {
+async function runGateway(args) {
   if (args.length > 0) {
     throw new Error("用法：codexc gateway");
   }
   const runtime = configuredEnvironment();
+  if (runtime.environment.CODEX_CONNECT_SERVICE_ROLE === "gateway") {
+    await waitForManagedServiceReadiness(
+      "app-server",
+      runtime.environment,
+      { stableMs: 0 },
+    );
+  }
   const child = spawn(process.execPath, nodeArguments([
     join(packageDir, "dist/main.js"),
   ]), {
@@ -766,9 +773,13 @@ function coreServiceReadinessTarget(action, serviceArgs) {
     : undefined;
 }
 
-async function waitForManagedServiceReadiness(target) {
+async function waitForManagedServiceReadiness(
+  target,
+  environment = process.env,
+  options = undefined,
+) {
   const { waitForCoreServiceTarget } = await import("../scripts/local-update.mjs");
-  await waitForCoreServiceTarget(target, process.env);
+  await waitForCoreServiceTarget(target, environment, options);
 }
 
 function coreServiceReadyMessage(target) {
