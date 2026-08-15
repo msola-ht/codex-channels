@@ -14,7 +14,8 @@
 服务入口启动，并在每次启动时按 TOML、标准环境变量和 macOS 系统代理的顺序解析代理，不把
 自动发现的地址固化到 plist。安装流程加载 App Server 与 Gateway 服务，WebUI plist 只生成不
 自动加载；Gateway plist 显式标记为受监管进程，配置要求重启时由 launchd 自动拉起；若检测到
-不支持的其他标签仍在运行则明确拒绝，避免多个 Gateway 同时轮询。卸载时保留
+不支持的其他标签仍在运行则明确拒绝，避免多个 Gateway 同时轮询。Gateway 启动前会等待受监管的
+App Server 与全部私有 WebSocket 就绪，避免登录或开机并发加载时抢跑。卸载时保留
 用户配置与运行数据。不要在模板中写入 Token、用户目录或机器相关绝对路径。Gateway 的停止和重启
 不得终止共享 App Server。
 
