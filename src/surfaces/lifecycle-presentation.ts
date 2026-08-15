@@ -70,6 +70,11 @@ export interface StartupRuntimeInfo {
   transport: string;
   codexUpstreamUserAgent: string | null;
   debugEnabled?: boolean;
+  openAiConnectivity?:
+    | "reachable"
+    | "partial"
+    | "unreachable"
+    | "not-applicable";
 }
 
 type StartupStatus = Pick<
@@ -100,7 +105,15 @@ export function createStartupPresentation(
   }
   return {
     title: "Codex Connect 已上线",
-    fields: [{ label: "App Server", value: "已连接" }],
+    fields: [
+      { label: "App Server", value: "已连接" },
+      ...(runtime.openAiConnectivity === "unreachable"
+        ? [{
+            label: "OpenAI 网络",
+            value: "连接失败；请检查代理设置",
+          }]
+        : []),
+    ],
     sections: [
       ...(runtime.debugEnabled === true
         ? [{

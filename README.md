@@ -92,6 +92,18 @@ Token 缺失或留空时不创建 Telegram 连接，也不要求 `allowed_user_i
 codexc service reload
 ```
 
+无法直连 OpenAI 的网络需要配置 HTTP(S) 代理。Gateway 优先使用 `config.toml`，其次读取
+`HTTPS_PROXY` / `HTTP_PROXY` 等标准环境变量和当前系统代理：
+
+```toml
+[network]
+https_proxy = "http://127.0.0.1:7890"
+```
+
+运行 `codexc doctor` 可确认 OpenAI 请求会走代理还是直连；修改代理后运行
+`codexc service restart all`。Gateway 启动时还会做一次 OpenAI 传输探测；连接失败时会在
+已有授权会话的上线通知中提醒检查代理，但不会停止 Gateway。
+
 ### 可选设置
 
 ```toml

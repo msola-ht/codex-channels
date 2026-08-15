@@ -156,6 +156,7 @@ function createWeixinModule(
           transport: "Unix WebSocket",
           codexUpstreamUserAgent:
             options.codexUpstreamUserAgent() ?? null,
+          openAiConnectivity: options.openAiConnectivity(),
           debugEnabled: isDebugLogLevel(options.config.logLevel),
         },
       ),
@@ -265,6 +266,7 @@ function createFeishuModule(
               transport: "Unix WebSocket",
               codexUpstreamUserAgent:
                 options.codexUpstreamUserAgent() ?? null,
+              openAiConnectivity: options.openAiConnectivity(),
               debugEnabled: isDebugLogLevel(options.config.logLevel),
             },
           ),
@@ -337,6 +339,7 @@ function createTelegramModule(
     priceCurrency: options.priceCurrency,
     gatewayVersion: options.gatewayVersion,
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
+    openAiConnectivity: options.openAiConnectivity,
   });
   return createTelegramRuntimeModule(
     adapter,

@@ -2848,6 +2848,7 @@ describe("codexc CLI", () => {
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
     updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.network).https_proxy = "http://127.0.0.1:7890";
       document.weixin = {
         enabled: true,
         account_id: "bot-fixture@im.bot",
@@ -2866,11 +2867,15 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).toContain(
       "[提示] Plugin API：已关闭",
     );
+    expect(diagnosed.stdout).toContain(
+      "[提示] OpenAI 代理：已检测到代理，官方模型请求将通过代理连接",
+    );
     expect(diagnosed.stdout).not.toContain("[失败] Telegram Token");
     expect(diagnosed.stdout).not.toContain("[失败] Telegram 用户");
     expect(diagnosed.stdout).not.toContain("[通过]");
     expect(diagnosed.stdout.match(/诊断发现/g)).toHaveLength(1);
     const visibleSections = [
+      "=== 网络与代理 ===",
       "=== 通讯渠道 ===",
       "=== 扩展能力 ===",
       "=== Codex 与 App Server ===",
@@ -2910,6 +2915,54 @@ describe("codexc CLI", () => {
     expect(diagnosed.stdout).toContain(
       "[处理] Linux 沙箱：Debian/Ubuntu：sudo apt install bubblewrap；"
       + "Fedora/RHEL：sudo dnf install bubblewrap；安装后重新运行 codexc doctor",
+    );
+  });
+
+  linuxIt("warns when OpenAI will use a direct connection without a proxy", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-proxy-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const emptyPath = join(root, "bin");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    mkdirSync(emptyPath);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      const telegram = table(document.telegram);
+      telegram.bot_token = "doctor-proxy-fixture";
+      telegram.allowed_user_ids = [123456];
+    });
+
+    const diagnosed = spawnSync(process.execPath, [cli, "doctor"], {
+      cwd: workspace,
+      env: {
+        ...environment,
+        PATH: emptyPath,
+        HTTP_PROXY: "",
+        HTTPS_PROXY: "",
+        ALL_PROXY: "",
+        NO_PROXY: "",
+        http_proxy: "",
+        https_proxy: "",
+        all_proxy: "",
+        no_proxy: "",
+      },
+      encoding: "utf8",
+    });
+
+    expect(diagnosed.stdout).toContain(
+      "[提示] OpenAI 代理：未检测到代理，官方模型请求将尝试直连；受限网络中可能无法连接",
+    );
+    expect(diagnosed.stdout).toContain(
+      "[处理] OpenAI 代理：在 config.toml 的 [network] 中设置 https_proxy",
     );
   });
 

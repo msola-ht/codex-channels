@@ -567,6 +567,7 @@ function options(
     logger: pino({ level: "silent" }),
     gatewayVersion: "0.146.0",
     codexUpstreamUserAgent: () => undefined,
+    openAiConnectivity: () => "reachable" as const,
     onFatal: vi.fn(),
     exchangeRate: () => null,
     priceCurrency: () => "usd" as const,
