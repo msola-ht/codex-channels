@@ -26,7 +26,8 @@
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
 - `agents`：启用或停用 Codex multi_agent_v2 的 DeepSeek 子代理角色（`agents.ds`），并查看当前状态；
   `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化。
-- `update`：统一审查并更新用户配置、状态数据库和指标数据库，然后恢复核心服务。
+- `update`：Git 源码安装先在临时仓库构建并预检官方 `main` 最新提交，切换后再统一审查并更新用户
+  配置、状态数据库和指标数据库，然后恢复核心服务；npm 安装不修改程序包。
 - `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
 - `metrics`：查询、导出、清理或显式维护独立模型指标库；日常兼容升级使用 `update`。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由当前飞书/微信/Telegram

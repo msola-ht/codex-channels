@@ -7,6 +7,11 @@
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
   独立项目命令提供不修改配置权限的必需/可选路径定位，可选定位只把文件不存在视为未初始化，
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
+- `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
+  源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
+  版本不匹配；
+  候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，之后才停止服务并
+  原子切换源码，最后由新版本继续执行统一本地更新。npm 安装直接委派现有本地更新，不修改程序包。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
   校验 `config.toml`、两个数据库及核心服务定义的完整状态；服务已安装时在同一个 App Server、
   Gateway 停机窗口内分别备份并更新配置和数据库，离线复核后启动并通过 Socket 与监管拓扑确认
@@ -236,10 +241,13 @@
 
 ## 构建、打包与服务
 
+- 根目录 `install.sh`：在 Linux/macOS 上克隆 Codex Connect 官方 `main`，把完整 Git 仓库安装
+  到 `~/.codex-connect/codex-channels`，完成依赖、Gateway/WebUI 构建和稳定用户命令入口；不覆盖
+  现有源码目录、命令入口、配置或数据，也不注册 npm 全局包。
 - `clean-dist.mjs`：构建前清理 `dist/`。
-- `install-global-source.mjs`：显式准备干净源码并通过禁用隐式生命周期脚本的 npm 全局安装
-  完成开发入口链接，避免 npm 12 脚本策略跳过构建，并自动执行 webui 子项目依赖安装与
-  前端构建（`webui/dist`）。
+- `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
+  （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
+  不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建。
 - `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。

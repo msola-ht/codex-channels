@@ -11,6 +11,7 @@
 - [`docs/webui.md`](docs/webui.md)：本地只读指标 WebUI 的命令、架构、页面、API、边界与安全。
 - [`docs/metrics-sync.md`](docs/metrics-sync.md)：多设备指标增量同步的本地配置、载荷与边界。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
+- [`docs/source-install.md`](docs/source-install.md)：Linux/macOS Git 源码安装、目录、更新和失败边界。
 
 ## 协议与设计
 

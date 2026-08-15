@@ -183,9 +183,9 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 使用当前 Codex CLI 检查项目规则。`,
   update: `用法：codexc update
 
-先只读审查 config.toml 与数据库结构，再自动停止 App Server 与 Gateway，在停机窗口内分别备份并
-更新配置、状态数据库与指标数据库，离线复核后恢复并确认核心服务就绪。必须从本机终端执行；
-不会安装或更新 npm 包。`,
+Git 源码安装会先检查并构建官方 main 的最新提交；随后只读审查 config.toml 与数据库结构，自动停止
+App Server 与 Gateway，在停机窗口内更新程序、配置和数据库，最后恢复并确认核心服务就绪。
+npm 安装不会修改程序包。必须从本机终端执行。`,
   state: `用法：codexc state upgrade
 
 停止 Gateway 后，备份并显式升级状态数据库。`,
@@ -397,7 +397,7 @@ try {
         break;
       }
       requireNoArguments(args, "用法：codexc update");
-      runScript("scripts/local-update.mjs", [], { failureReportedByChild: true });
+      runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
       break;
     case "state":
       state(args);

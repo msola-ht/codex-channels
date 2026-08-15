@@ -108,6 +108,8 @@ try {
     "scripts/feishu-application.mjs",
     "scripts/feishu-setup.mjs",
     "scripts/setup.mjs",
+    "scripts/source-update.d.mts",
+    "scripts/source-update.mjs",
     "scripts/cli-status.mjs",
     "scripts/service-target-query.mjs",
     "scripts/codex-rules.mjs",

@@ -25,6 +25,7 @@ const checks = [
   { name: "完整测试", command: "npm", args: ["test"] },
   { name: "Shell 语法", command: "bash", args: [
     "-n",
+    "install.sh",
     "scripts/launchd-control.sh",
     "scripts/systemd-control.sh",
   ] },

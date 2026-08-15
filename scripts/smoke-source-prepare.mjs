@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -80,6 +81,17 @@ try {
   const command = join(temporaryDirectory, "global", "bin", "codexc");
   if (!existsSync(command)) {
     throw new Error("干净源码全局安装后缺少 codexc 命令");
+  }
+  const installedPackage = join(
+    temporaryDirectory,
+    "global",
+    "lib",
+    "node_modules",
+    "@hegenai",
+    "codexc",
+  );
+  if (!existsSync(installedPackage) || lstatSync(installedPackage).isSymbolicLink()) {
+    throw new Error("干净源码全局安装仍链接到源码目录");
   }
   const invoked = spawnSync(command, ["--version"], {
     cwd: sourceDirectory,

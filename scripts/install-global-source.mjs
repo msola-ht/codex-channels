@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 import { packageDir } from "./package-path.mjs";
 
@@ -15,16 +16,47 @@ const prepared = run(process.execPath, [
 ]);
 const webuiBuilt = prepared === 0 ? buildWebui() : 1;
 if (prepared === 0 && webuiBuilt === 0) {
-  process.exitCode = run("npm", [
-    "install",
-    "--global",
-    "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    packageDir,
-  ]);
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
+  try {
+    const tarballPath = packSource(temporaryDirectory);
+    process.exitCode = run("npm", [
+      "install",
+      "--global",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      tarballPath,
+    ]);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
 } else {
   process.exitCode = prepared === 0 ? webuiBuilt : prepared;
+}
+
+function packSource(destination) {
+  const result = spawnSync(
+    "npm",
+    ["pack", "--ignore-scripts", "--json", "--pack-destination", destination],
+    {
+      cwd: packageDir,
+      encoding: "utf8",
+    },
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `源码打包失败：exit=${result.status ?? 1}\n${result.stderr || result.stdout}`,
+    );
+  }
+  const report = JSON.parse(result.stdout);
+  const packageReport = Array.isArray(report) ? report[0] : Object.values(report)[0];
+  if (!packageReport?.filename) {
+    throw new Error("npm pack 未返回 tarball 文件名");
+  }
+  return resolve(destination, packageReport.filename);
 }
 
 function buildWebui() {
