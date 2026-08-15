@@ -9,7 +9,6 @@ import {
 } from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
 import {
-  conversationTargetKey,
   type ConversationTarget,
 } from "../conversation-core/index.js";
 import {
@@ -436,16 +435,16 @@ export function removeUnauthorizedTelegramBindings(
   accountId = telegramDefaultAccountId,
 ): number {
   let removed = 0;
-  for (const binding of uniqueConversationBindings(bindings)) {
-    if (binding.target.surface !== "telegram" || binding.target.accountId !== accountId) {
+  for (const target of bindings.conversations()) {
+    if (target.surface !== "telegram" || target.accountId !== accountId) {
       continue;
     }
-    const knownActors = bindings.actors(binding.target);
+    const knownActors = bindings.actors(target);
     const allowedActors = new Set(knownActors.filter((actorId) => {
       const userId = Number(actorId);
       return Number.isSafeInteger(userId) && allowedUserIds.has(userId);
     }));
-    if (bindings.retainActors(binding.target, allowedActors)) {
+    if (bindings.retainActors(target, allowedActors)) {
       removed += 1;
     }
   }
@@ -458,17 +457,17 @@ export function removeUnauthorizedFeishuBindings(
   accountId: string,
 ): number {
   let removed = 0;
-  for (const binding of uniqueConversationBindings(bindings)) {
+  for (const target of bindings.conversations()) {
     if (
-      binding.target.surface !== "feishu"
-      || binding.target.accountId !== accountId
+      target.surface !== "feishu"
+      || target.accountId !== accountId
     ) {
       continue;
     }
     const allowedActors = new Set(
-      bindings.actors(binding.target).filter((actorId) => allowedOpenIds.has(actorId)),
+      bindings.actors(target).filter((actorId) => allowedOpenIds.has(actorId)),
     );
-    if (bindings.retainActors(binding.target, allowedActors)) {
+    if (bindings.retainActors(target, allowedActors)) {
       removed += 1;
     }
   }
@@ -481,70 +480,62 @@ export function removeUnauthorizedWeixinBindings(
   accountId: string,
 ): number {
   let removed = 0;
-  for (const binding of uniqueConversationBindings(bindings)) {
+  for (const target of bindings.conversations()) {
     if (
-      binding.target.surface !== "weixin"
-      || binding.target.accountId !== accountId
+      target.surface !== "weixin"
+      || target.accountId !== accountId
     ) {
       continue;
     }
     const allowedActors = new Set(
-      bindings.actors(binding.target).filter((actorId) =>
+      bindings.actors(target).filter((actorId) =>
         allowedUserIds.has(actorId)),
     );
-    if (bindings.retainActors(binding.target, allowedActors)) {
+    if (bindings.retainActors(target, allowedActors)) {
       removed += 1;
     }
   }
   return removed;
 }
 
-function authorizedFeishuConversations(
+export function authorizedFeishuConversations(
   bindings: BindingStore,
   access: FeishuAccessPolicy,
   accountId: string,
 ): string[] {
-  return uniqueConversationBindings(bindings).flatMap((binding) => {
+  return bindings.conversations().flatMap((target) => {
     if (
-      binding.target.surface !== "feishu"
-      || binding.target.accountId !== accountId
-      || !bindings.actors(binding.target).some((actorId) => access.isAllowed({
-        target: binding.target,
+      target.surface !== "feishu"
+      || target.accountId !== accountId
+      || !bindings.actors(target).some((actorId) => access.isAllowed({
+        target,
         actorId,
       }))
     ) {
       return [];
     }
-    return [binding.target.conversationId];
+    return [target.conversationId];
   });
 }
 
-function authorizedWeixinConversations(
+export function authorizedWeixinConversations(
   bindings: BindingStore,
   access: WeixinAccessPolicy,
   accountId: string,
 ): ConversationTarget[] {
-  return uniqueConversationBindings(bindings).flatMap((binding) => {
+  return bindings.conversations().flatMap((target) => {
     if (
-      binding.target.surface !== "weixin"
-      || binding.target.accountId !== accountId
-      || !bindings.actors(binding.target).some((actorId) =>
-        actorId === binding.target.conversationId
+      target.surface !== "weixin"
+      || target.accountId !== accountId
+      || !bindings.actors(target).some((actorId) =>
+        actorId === target.conversationId
         && access.isAllowed({
-          target: binding.target,
+          target,
           actorId,
         }))
     ) {
       return [];
     }
-    return [binding.target];
+    return [target];
   });
-}
-
-function uniqueConversationBindings(bindings: BindingStore) {
-  const unique = new Map<string, ReturnType<BindingStore["list"]>[number]>();
-  for (const binding of bindings.list()) {
-    unique.set(conversationTargetKey(binding.target), binding);
-  }
-  return [...unique.values()];
 }

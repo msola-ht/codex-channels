@@ -65,6 +65,10 @@ export class SqliteBindingStore implements BindingStore {
     }
   }
 
+  conversations(): ConversationTarget[] {
+    return this.memory.conversations();
+  }
+
   actors(target: ConversationTarget): string[] {
     return this.memory.actors(target);
   }

@@ -20,6 +20,7 @@ export interface BindingSwitch {
 }
 
 export interface BindingStore {
+  conversations(): ConversationTarget[];
   actors(target: ConversationTarget): string[];
   rememberActor(target: ConversationTarget, actorId: string): void;
   forgetActor(target: ConversationTarget, actorId: string): void;

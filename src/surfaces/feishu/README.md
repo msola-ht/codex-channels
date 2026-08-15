@@ -242,7 +242,7 @@ Turn 失败或错误、审批和用户输入必须创建新的普通消息或卡
 清理。超过活动流容量时只忽略非关键增量，最终完成事件仍进入静态 CardKit 主路径。
 
 `surface.ts` 在长连接就绪后，从 Bootstrap 注入的 provider 读取启动通知。Bootstrap 只为
-StateStore 中已有绑定且仍有授权 Actor 的精确 Chat 生成消息；Surface 再次校验 Chat ID、去重
+StateStore 中已知且仍有授权 Actor 的精确 Chat 生成消息，不要求当前已有 Thread 绑定；Surface 再次校验 Chat ID、去重
 并通过同一 CardKit Markdown Outbox 入队。生成失败或输出队列关闭只记录受约束诊断，不阻塞长连接。
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管

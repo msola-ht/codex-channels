@@ -173,6 +173,23 @@ describe("SqliteBindingStore", () => {
     second.close();
   });
 
+  it("keeps an authorized conversation discoverable after its Thread is unbound", () => {
+    const { path } = databasePath();
+    const first = new SqliteBindingStore(path);
+    first.selectWorkspace(target, "main");
+    first.rememberActor(target, "123");
+    first.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
+    first.unbind(target);
+
+    expect(first.conversations()).toEqual([target]);
+    first.close();
+
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.conversations()).toEqual([target]);
+    expect(reopened.get(target)).toBeUndefined();
+    reopened.close();
+  });
+
   it("isolates identical conversation IDs across Surface accounts", () => {
     const { path } = databasePath();
     const store = new SqliteBindingStore(path);
