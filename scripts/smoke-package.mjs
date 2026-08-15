@@ -78,6 +78,7 @@ try {
     "start",
     "service",
     "update",
+    "uninstall",
     "state",
     "version",
   ];
@@ -110,6 +111,8 @@ try {
     "scripts/setup.mjs",
     "scripts/source-update.d.mts",
     "scripts/source-update.mjs",
+    "scripts/source-uninstall.d.mts",
+    "scripts/source-uninstall.mjs",
     "scripts/cli-status.mjs",
     "scripts/service-target-query.mjs",
     "scripts/codex-rules.mjs",

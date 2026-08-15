@@ -113,6 +113,7 @@ describe("codexc CLI", () => {
       [["agents", "enable-deepseek", "-h"], "用法：codexc agents enable-deepseek"],
       [["agents", "disable-deepseek", "--help"], "用法：codexc agents disable-deepseek"],
       [["update", "--help"], "用法：codexc update"],
+      [["uninstall", "--help"], "用法：codexc uninstall"],
       [["state", "-h"], "用法：codexc state upgrade"],
       [["state", "upgrade", "--help"], "用法：codexc state upgrade"],
       [["metrics", "-h"], "用法：codexc metrics"],
@@ -2568,6 +2569,13 @@ describe("codexc CLI", () => {
     expect(output).toContain("reload");
     expect(output).toContain("logs");
     expect(output).toContain("保留用户数据");
+  });
+
+  it("documents managed source removal in top-level help", () => {
+    const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+
+    expect(output).toContain("uninstall");
+    expect(output).toContain("卸载 Git 源码并保留用户数据");
   });
 
   it("describes Setup by its model, provider, channel, and skill responsibilities", () => {

@@ -11,7 +11,11 @@
   源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
   版本不匹配；
   候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，之后才停止服务并
-  原子切换源码，最后由新版本继续执行统一本地更新。npm 安装直接委派现有本地更新，不修改程序包。
+  原子切换源码，最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
+  明细，失败时保留对应工具输出；已有可见 `bin/codexc` 入口迁移到 `.bin/codexc`。npm 安装直接
+  委派现有本地更新，不修改程序包。
+- `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
+  先卸载后台服务，再删除 Git 仓库与隐藏入口；拒绝符号链接或不匹配路径并保留全部用户数据。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
   校验 `config.toml`、两个数据库及核心服务定义的完整状态；服务已安装时在同一个 App Server、
   Gateway 停机窗口内分别备份并更新配置和数据库，离线复核后启动并通过 Socket 与监管拓扑确认

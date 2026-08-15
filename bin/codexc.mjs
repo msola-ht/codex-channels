@@ -105,7 +105,8 @@ const helpText = {
 服务与维护：
   start                        前台启动核心服务
   service                      管理后台服务
-  update                       更新配置与数据库
+  update                       更新程序、配置与数据库
+  uninstall                    卸载 Git 源码并保留用户数据
   state                        单独维护状态数据库
 
 信息：
@@ -186,6 +187,10 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 Git 源码安装会先检查并构建官方 main 的最新提交；随后只读审查 config.toml 与数据库结构，自动停止
 App Server 与 Gateway，在停机窗口内更新程序、配置和数据库，最后恢复并确认核心服务就绪。
 npm 安装不会修改程序包。必须从本机终端执行。`,
+  uninstall: `用法：codexc uninstall
+
+卸载后台服务、受管 Git 源码仓库与源码命令入口；保留 config.toml、数据库、凭据、日志、输出和
+Shell 配置。仅适用于 Git 源码安装；npm 全局版使用 npm uninstall -g @hegenai/codexc。`,
   state: `用法：codexc state upgrade
 
 停止 Gateway 后，备份并显式升级状态数据库。`,
@@ -398,6 +403,13 @@ try {
       }
       requireNoArguments(args, "用法：codexc update");
       runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
+      break;
+    case "uninstall":
+      if (showRequestedHelp(args, "uninstall")) {
+        break;
+      }
+      requireNoArguments(args, "用法：codexc uninstall");
+      runScript("scripts/source-uninstall.mjs", [], { failureReportedByChild: true });
       break;
     case "state":
       state(args);

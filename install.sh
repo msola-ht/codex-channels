@@ -86,7 +86,7 @@ case "$install_root" in
   *) fail "CODEX_CONNECT_HOME 必须是绝对路径" ;;
 esac
 checkout="$install_root/codex-channels"
-launcher_dir="$install_root/bin"
+launcher_dir="$install_root/.bin"
 launcher="$launcher_dir/codexc"
 
 if [ -e "$checkout" ] || [ -L "$checkout" ]; then
@@ -193,7 +193,7 @@ mv "$launcher_tmp" "$launcher"
 launcher_tmp=""
 completed=true
 
-profile_line='export PATH="$HOME/.codex-connect/bin:$PATH"'
+profile_line='export PATH="$HOME/.codex-connect/.bin:$PATH"'
 if [ "$install_root" = "$HOME/.codex-connect" ]; then
   case "${SHELL:-}" in
     */zsh) profile="$HOME/.zshrc" ;;
@@ -246,7 +246,7 @@ if [ -n "$activation_shell" ] && [ -x "$activation_shell" ] \
 fi
 
 if [ "$install_root" = "$HOME/.codex-connect" ]; then
-  printf '%s\n' "重新打开终端，或执行：export PATH=\"\$HOME/.codex-connect/bin:\$PATH\""
+  printf '%s\n' "重新打开终端，或执行：export PATH=\"\$HOME/.codex-connect/.bin:\$PATH\""
 else
   printf '%s\n' "请把以下目录加入 PATH：$launcher_dir"
 fi
