@@ -24,6 +24,16 @@ npm install -g @openai/codex@0.147.0
 npm install -g @hegenai/codexc@0.147.0
 ```
 
+也可以在 Linux 或 macOS 上把官方 `main` 分支 Git 仓库安装到
+`~/.codex-connect/codex-channels`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
+```
+
+重新打开终端后继续初始化。目录、环境检测、更新和失败处理见
+[`Git 源码安装`](docs/source-install.md)。
+
 初始化并配置通讯渠道：
 
 ```bash
@@ -286,7 +296,7 @@ codexc doctor
 `codexc update` 会先只读校验 `config.toml` 以及状态库、指标库的版本与必需结构；预检通过后自动停止
 App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema 明确定义的缺失安全参数、分别备份并
 执行受支持的数据库迁移，再次离线校验后恢复核心服务并确认其真实就绪。未知配置字段、结构残缺或
-没有明确迁移路径的数据库版本会失败关闭。该命令不安装 npm 包，也不修改 Codex Thread 或
+没有明确迁移路径的数据库版本会失败关闭。该命令不修改 Codex Thread 或
 `~/.codex/config.toml`。核心后台服务尚未安装且 Gateway 未运行时，命令只离线更新配置与数据库，
 不会安装或启动服务；如果检测到另一个终端通过 `codexc start` 启动的前台 Gateway，会在写入前提示
 先按 Ctrl-C 结束该进程。后续需要后台运行时再执行 `codexc service install`。
@@ -294,7 +304,8 @@ App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema �
 该命令必须从本机终端执行，不能在渠道 Turn 或其他运行中的 Codex 服务进程内调用。
 
 单库排障仍可使用 `codexc state upgrade` 或 `codexc metrics upgrade`，日常版本升级只需运行
-`codexc update`。
+`codexc update`。Git 源码安装还会更新官方 `main`，完整流程和失败条件见
+[`Git 源码安装`](docs/source-install.md)。
 
 npm 包与 Codex CLI 使用相同版本。正式发布时先在发布提交中同步本页版本与安装命令，通过
 `main` CI 后再创建 Tag、发布 npm 和 GitHub Release；Release 不会自动修改 README。

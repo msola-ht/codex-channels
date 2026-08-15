@@ -256,6 +256,11 @@
   `NO_COLOR`；状态呈现不改变路径、标识符和其他机器可解析数据；受管子命令失败只展示一次且不输出
   Node.js 堆栈，Remote TUI 终止信号原样传播，项目规则检查被信号终止时不结束 CLI/Gateway 宿主，
   只读 Agent 状态不依赖 Gateway 配置。
+- Linux/macOS Git 源码安装覆盖 npm 全局目录与已有版本检测、Codex CLI 缺失时安装精确版本、
+  登录状态提示、官方 `main` 克隆、隔离依赖与 Gateway/WebUI 构建、稳定用户入口、PATH 配置及
+  构建失败不留半成品；源码更新覆盖同版本新 commit、脏仓库和自定义提交提前拒绝、
+  候选仓库先构建后切换、Codex CLI 版本不匹配时不动现有安装、切换失败恢复旧仓库与服务、旧仓库
+  成功清理，以及 npm 安装继续复用原本地更新路径。
 - `codexc start` 在仅 DeepSeek 固定模式下复用 `service-app-server`，把主 App Server 的 Provider
   地址指向本机统计代理；监管 Socket 覆盖裸 App Server、后台入口重复启动和 Provider 拓扑不一致
   的失败关闭，配置级所有权 Socket 跨 Provider 覆盖直接入口和前台入口的重复 Gateway，真实
