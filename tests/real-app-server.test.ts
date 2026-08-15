@@ -156,7 +156,7 @@ suite("real Codex App Server over Unix WebSocket", () => {
   });
 
   it("reports the upstream user agent used by Codex", () => {
-    expect(upstreamUserAgent).toContain("codex_connect_gateway/");
+    expect(upstreamUserAgent).toContain("codex_connect/");
   });
 
   it("reads account rate-limit snapshots without starting a turn", async () => {
@@ -405,7 +405,7 @@ suite("real supervised App Server service", () => {
         { sandbox: "read-only" },
       );
       const initialized = await client.connect();
-      expect(initialized.userAgent).toContain("codex_connect_gateway/");
+      expect(initialized.userAgent).toContain("codex_connect/");
     } finally {
       try {
         await client?.close().catch(() => undefined);
@@ -718,7 +718,7 @@ contractSuite("isolated Codex App Server state contract", () => {
             path: skill.path,
           },
         ],
-        "codex_connect_gateway:skill-contract",
+        "codex_connect:skill-contract",
         workdir,
       );
       turnId = turn.turnId;
@@ -867,7 +867,7 @@ contractSuite("isolated Codex App Server state contract", () => {
             path: plugin.path,
           },
         ],
-        "codex_connect_gateway:plugin-contract",
+        "codex_connect:plugin-contract",
         workdir,
       );
       turnId = turn.turnId;
@@ -927,7 +927,7 @@ contractSuite("isolated Codex App Server state contract", () => {
           const turn = await ownerClient.startTurn(
             threadId,
             [{ type: "text", text }],
-            "codex_connect_gateway:thread-section-contract",
+            "codex_connect:thread-section-contract",
             workdir,
           );
           turnId = turn.turnId;
@@ -1147,7 +1147,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       const turn = await ownerClient.startTurn(
         threadId,
         [{ type: "text", text: "contract-only" }],
-        "codex_connect_gateway:contract",
+        "codex_connect:contract",
         workdir,
         {
           collaborationMode: {
@@ -1233,7 +1233,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       const turn = await ownerClient.startTurn(
         threadId,
         [{ type: "localAudio", path: audioPath }],
-        "codex_connect_gateway:contract",
+        "codex_connect:contract",
         workdir,
       );
       turnId = turn.turnId;
@@ -1519,7 +1519,7 @@ deepseekCatalogContractTest(
       await client.startTurn(
         threadId,
         [{ type: "text", text: "Persist the contract fixture." }],
-        "codex_connect_gateway:deepseek-resume-contract",
+        "codex_connect:deepseek-resume-contract",
         workdir,
       );
       await waitFor(() => turnCompleted, 10_000);

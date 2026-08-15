@@ -507,7 +507,7 @@ describe("ConversationService model selection", () => {
     expect(startTurn).toHaveBeenCalledWith(
       "thread-1",
       [{ type: "text", text: "设计发布流程" }],
-      expect.stringMatching(/^codex_connect_gateway:/),
+      expect.stringMatching(/^codex_connect:/),
       main.cwd,
       {
         collaborationMode: {
@@ -586,7 +586,7 @@ describe("ConversationService model selection", () => {
     expect(startTurn).toHaveBeenCalledWith(
       "thread-1",
       [{ type: "text", text: "下一轮再检查测试" }],
-      expect.stringMatching(/^codex_connect_gateway:/),
+      expect.stringMatching(/^codex_connect:/),
       "/workspace/main",
       {},
     );
@@ -921,7 +921,7 @@ describe("ConversationService model selection", () => {
     expect(startTurn).toHaveBeenCalledWith(
       "thread-1",
       expect.any(Array),
-      expect.stringMatching(/^codex_connect_gateway:/),
+      expect.stringMatching(/^codex_connect:/),
       main.cwd,
       {},
     );
@@ -1716,7 +1716,7 @@ describe("ConversationService model selection", () => {
     expect(startTurn).toHaveBeenCalledWith(
       "thread-1",
       [{ type: "text", text: "测试输入" }],
-      expect.stringMatching(/^codex_connect_gateway:/),
+      expect.stringMatching(/^codex_connect:/),
       "/workspace/main",
       { model: "gpt-selected", effort: "high" },
     );
@@ -1784,7 +1784,7 @@ describe("ConversationService model selection", () => {
         { type: "text", text: "补充图片" },
         { type: "localImage", path: "/private/uploads/extra.jpg" },
       ],
-      expect.stringMatching(/^codex_connect_gateway:/),
+      expect.stringMatching(/^codex_connect:/),
     );
     expect(submission.steered).toBe(true);
     expect(requireInputModality).toHaveBeenCalledWith(target, "image");

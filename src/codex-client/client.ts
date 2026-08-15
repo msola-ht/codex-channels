@@ -72,6 +72,7 @@ import type {
   ThreadSectionSnapshot,
 } from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
+import { codexConnectIntegrationId } from "./protocol-info.js";
 import {
   PINNED_THREAD_SECTION_ID,
   toThreadSectionSnapshot,
@@ -216,7 +217,7 @@ export class CodexAppServerClient implements
       params: {
         cwd,
         approvalPolicy: options.approvalPolicy ?? "on-request",
-        serviceName: "codex_connect_gateway",
+        serviceName: codexConnectIntegrationId,
         ...(options.permissions !== undefined
           ? { permissions: options.permissions }
           : { sandbox: options.sandbox ?? this.defaults.sandbox }),

@@ -283,7 +283,7 @@ describe("Weixin command renderer", () => {
         nodeVersion: "v22.23.1",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent:
-          "codex_connect_gateway/0.146.0 (Linux; x64) private-build-token (codex_connect_gateway; 0.146.0)",
+          "codex_connect/0.146.0 (Linux; x64) private-build-token (codex_connect; 0.146.0)",
         debugEnabled: true,
       },
     );

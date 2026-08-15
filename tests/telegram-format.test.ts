@@ -200,7 +200,7 @@ describe("formatStartupNotification", () => {
         gatewayVersion: "0.146.0",
         nodeVersion: "v24.18.0",
         transport: "Unix WebSocket",
-        codexUpstreamUserAgent: "codex_connect_gateway/0.146.0 (Mac OS 15.7.7; arm64) dumb (codex_connect_gateway; 0.146.0)",
+        codexUpstreamUserAgent: "codex_connect/0.146.0 (Mac OS 15.7.7; arm64) dumb (codex_connect; 0.146.0)",
         debugEnabled: true,
       },
     );
@@ -211,7 +211,7 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("- 系统：macOS · arm64");
     expect(text).toContain("版本：Codex Connect 0.146.0 · Node.js v24.18.0");
     expect(text).toContain(
-      "App Server UA：codex_connect_gateway/0.146.0 (Mac OS 15.7.7; arm64) (codex_connect_gateway; 0.146.0)",
+      "App Server UA：codex_connect/0.146.0 (Mac OS 15.7.7; arm64) (codex_connect; 0.146.0)",
     );
     expect(text).toContain("连接：Unix WebSocket");
     expect(text).toContain("### 当前会话");

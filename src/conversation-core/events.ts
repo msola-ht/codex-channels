@@ -177,7 +177,7 @@ export interface ConversationTarget {
   conversationId: string;
 }
 
-export const gatewayUserMessageClientIdPrefix = "codex_connect_gateway:";
+export const gatewayUserMessageClientIdPrefix = "codex_connect:";
 
 export function surfaceAccountKey(surface: SurfaceId, accountId: string): string {
   return JSON.stringify([surface, accountId]);

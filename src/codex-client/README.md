@@ -52,8 +52,8 @@
   Server Request 解码为 Approval 稳定请求；其中按固定版本的空对象 Schema 与
   `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
   精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
-- `protocol-info.ts`：从精确协议基线公开受支持的 Codex CLI 版本和 Gateway 显示版本，供组合根
-  校验并向 Surface 注入纯字符串。
+- `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
+  供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、全局分区 CRUD 与 Thread 分区移动、Turn、模型、权限、Skill、用量及用户级配置
   读取等 App Server 方法的类型化封装；模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过

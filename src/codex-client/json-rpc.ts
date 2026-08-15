@@ -9,6 +9,7 @@ import type {
   RequestId,
 } from "../codex-protocol/index.js";
 import gatewayMetadata from "../version.json" with { type: "json" };
+import { codexConnectIntegrationId } from "./protocol-info.js";
 import type { CodexTransport } from "./transport.js";
 
 const envelopeSchema = z.object({
@@ -99,7 +100,7 @@ export class JsonRpcClient {
         method: "initialize",
         params: {
           clientInfo: {
-            name: "codex_connect_gateway",
+            name: codexConnectIntegrationId,
             title: "Codex Connect Gateway",
             version: gatewayMetadata.version,
           },
