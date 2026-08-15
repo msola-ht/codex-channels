@@ -14,9 +14,12 @@
   原子切换源码，最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
   明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
   `.bin/codexc` 与 Shell PATH。Registry 安装直接委派现有本地更新，不修改程序包。
+- `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
+  prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
-  先卸载后台服务，再删除 Git 仓库、对应 npm 全局命令和旧 Shell PATH；拒绝符号链接或不匹配路径
-  并保留配置、数据库、凭据、日志和输出。
+  先卸载后台服务，再删除 Git 仓库、已记录和当前包所属 npm prefix 中的全局命令及旧 Shell PATH；
+  旧版未标记仓库只有在官方 origin、`main`、包名和干净状态均通过校验时才可认领。拒绝符号链接或
+  不匹配路径，并保留配置、数据库、凭据、日志和输出。
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格

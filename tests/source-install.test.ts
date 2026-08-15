@@ -69,6 +69,10 @@ describe("Linux/macOS Git 源码安装", () => {
       cwd: checkout,
       encoding: "utf8",
     }).trim()).toBe("true");
+    expect(execFileSync("git", ["config", "--local", "--get", "codex-connect.npm-prefix"], {
+      cwd: checkout,
+      encoding: "utf8",
+    }).trim()).toBe(join(root, "npm-global"));
   });
 
   it("removes the partial checkout and launcher when the build fails", () => {
@@ -145,7 +149,7 @@ describe("Linux/macOS Git 源码安装", () => {
     const config = join(installRoot, "config.toml");
     const database = join(installRoot, "data", "gateway.sqlite3");
     const profile = join(root, ".zshrc");
-    mkdirSync(join(checkout, ".git"), { recursive: true });
+    runGit(root, ["init", "--quiet", checkout]);
     mkdirSync(resolve(launcher, ".."), { recursive: true });
     mkdirSync(resolve(database, ".."), { recursive: true });
     writeFileSync(join(checkout, "package.json"), JSON.stringify({ version: "0.147.0" }));
@@ -188,7 +192,7 @@ describe("Linux/macOS Git 源码安装", () => {
     const installRoot = join(root, ".codex-connect");
     const checkout = join(installRoot, "codex-channels");
     const launcher = join(installRoot, ".bin", "codexc");
-    mkdirSync(join(checkout, ".git"), { recursive: true });
+    runGit(root, ["init", "--quiet", checkout]);
     mkdirSync(resolve(launcher, ".."), { recursive: true });
     writeFileSync(launcher, "#!/bin/sh\nexec unrelated-command\n");
     let serviceUninstalls = 0;
@@ -212,7 +216,7 @@ describe("Linux/macOS Git 源码安装", () => {
     const checkout = join(installRoot, "codex-channels");
     const legacyLauncher = join(installRoot, "bin", "codexc");
     const globalPackage = join(root, "npm-global", "@hegenai", "codexc");
-    mkdirSync(join(checkout, ".git"), { recursive: true });
+    runGit(root, ["init", "--quiet", checkout]);
     mkdirSync(resolve(legacyLauncher, ".."), { recursive: true });
     mkdirSync(globalPackage, { recursive: true });
     writeFileSync(
@@ -256,6 +260,135 @@ describe("Linux/macOS Git 源码安装", () => {
 
     expect(globalUninstalls).toBe(1);
     expect(existsSync(checkout)).toBe(false);
+  });
+
+  it("recognizes a clean official legacy checkout and uninstalls the active package prefix", async () => {
+    const root = temporaryDirectory("codexc-source-uninstall-official-legacy-");
+    const installRoot = join(root, ".codex-connect");
+    const checkout = join(installRoot, "codex-channels");
+    const globalPrefix = join(root, "homebrew");
+    const globalPackage = join(
+      globalPrefix,
+      "lib",
+      "node_modules",
+      "@hegenai",
+      "codexc",
+    );
+    mkdirSync(globalPackage, { recursive: true });
+    writeFileSync(join(globalPackage, "package.json"), JSON.stringify({
+      name: "@hegenai/codexc",
+      version: "0.147.0",
+    }));
+    runGit(root, ["init", "--quiet", checkout]);
+    runGit(checkout, ["branch", "-M", "main"]);
+    runGit(checkout, ["config", "user.email", "source-uninstall@example.invalid"]);
+    runGit(checkout, ["config", "user.name", "Source Uninstall Test"]);
+    runGit(checkout, [
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/msola-ht/codex-channels.git",
+    ]);
+    writeFileSync(join(checkout, "package.json"), JSON.stringify({
+      name: "@hegenai/codexc",
+      version: "0.147.0",
+    }));
+    runGit(checkout, ["add", "."]);
+    runGit(checkout, ["commit", "--quiet", "-m", "fixture"]);
+    const removedPrefixes: string[][] = [];
+
+    await uninstallManagedSourceInstallation(
+      { ...process.env, CODEX_CONNECT_HOME: installRoot },
+      {
+        projectDir: globalPackage,
+        uninstallGlobalPackage: (prefixes) => { removedPrefixes.push(prefixes); },
+        uninstallServices: () => undefined,
+      },
+    );
+
+    expect(removedPrefixes).toEqual([[globalPrefix]]);
+    expect(existsSync(checkout)).toBe(false);
+  });
+
+  it("uses the active package prefix instead of the current npm global prefix", async () => {
+    const root = temporaryDirectory("codexc-source-uninstall-other-prefix-");
+    const installRoot = join(root, ".codex-connect");
+    const checkout = join(installRoot, "codex-channels");
+    const globalPrefix = join(root, "homebrew");
+    const globalPackage = join(
+      globalPrefix,
+      "lib",
+      "node_modules",
+      "@hegenai",
+      "codexc",
+    );
+    const globalLauncher = join(globalPrefix, "bin", "codexc");
+    runGit(root, ["init", "--quiet", checkout]);
+    runGit(checkout, ["config", "--local", "codex-connect.managed-source", "true"]);
+    mkdirSync(join(globalPackage, "bin"), { recursive: true });
+    mkdirSync(resolve(globalLauncher, ".."), { recursive: true });
+    writeFileSync(join(globalPackage, "package.json"), JSON.stringify({
+      name: "@hegenai/codexc",
+      version: "0.147.0",
+      bin: { codexc: "bin/codexc.mjs" },
+    }));
+    writeFileSync(join(globalPackage, "bin", "codexc.mjs"), "#!/usr/bin/env node\n");
+    symlinkSync(join(globalPackage, "bin", "codexc.mjs"), globalLauncher);
+
+    await uninstallManagedSourceInstallation(
+      { ...process.env, CODEX_CONNECT_HOME: installRoot },
+      {
+        projectDir: globalPackage,
+        uninstallServices: () => undefined,
+      },
+    );
+
+    expect(existsSync(globalPackage)).toBe(false);
+    expect(existsSync(globalLauncher)).toBe(false);
+    expect(existsSync(checkout)).toBe(false);
+  });
+
+  it("refuses to remove a dirty unmarked legacy checkout", async () => {
+    const root = temporaryDirectory("codexc-source-uninstall-dirty-legacy-");
+    const installRoot = join(root, ".codex-connect");
+    const checkout = join(installRoot, "codex-channels");
+    const globalPackage = join(
+      root,
+      "homebrew",
+      "lib",
+      "node_modules",
+      "@hegenai",
+      "codexc",
+    );
+    mkdirSync(globalPackage, { recursive: true });
+    runGit(root, ["init", "--quiet", checkout]);
+    runGit(checkout, ["branch", "-M", "main"]);
+    runGit(checkout, ["config", "user.email", "source-uninstall@example.invalid"]);
+    runGit(checkout, ["config", "user.name", "Source Uninstall Test"]);
+    runGit(checkout, [
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/msola-ht/codex-channels.git",
+    ]);
+    writeFileSync(join(checkout, "package.json"), JSON.stringify({
+      name: "@hegenai/codexc",
+      version: "0.147.0",
+    }));
+    runGit(checkout, ["add", "."]);
+    runGit(checkout, ["commit", "--quiet", "-m", "fixture"]);
+    writeFileSync(join(checkout, "local-change.txt"), "keep me");
+
+    await expect(uninstallManagedSourceInstallation(
+      { ...process.env, CODEX_CONNECT_HOME: installRoot },
+      {
+        projectDir: globalPackage,
+        uninstallGlobalPackage: () => undefined,
+        uninstallServices: () => undefined,
+      },
+    )).rejects.toThrow("存在未提交修改");
+
+    expect(existsSync(join(checkout, "local-change.txt"))).toBe(true);
   });
 });
 

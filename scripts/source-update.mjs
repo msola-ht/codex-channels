@@ -17,6 +17,11 @@ import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
+import {
+  currentNpmGlobalPrefix,
+  inferNpmGlobalPrefix,
+  recordManagedSourceMetadata,
+} from "./source-install-metadata.mjs";
 import { removeLegacySourceShellPaths } from "./source-shell-path.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
@@ -228,15 +233,11 @@ function installGlobalPackage(checkout, environment, options) {
 }
 
 function markManagedSourceCheckout(checkout, environment) {
-  const result = spawnSync(
-    "git",
-    ["config", "--local", "codex-connect.managed-source", "true"],
-    { cwd: checkout, env: environment, encoding: "utf8" },
+  recordManagedSourceMetadata(
+    checkout,
+    [currentNpmGlobalPrefix(environment), inferNpmGlobalPrefix(packageDir)],
+    environment,
   );
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`无法标记受管源码安装：${result.stderr || result.stdout}`);
-  }
 }
 
 function hasManagedSourceMarker(checkout, environment) {
