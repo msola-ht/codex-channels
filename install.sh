@@ -66,14 +66,14 @@ case "$npm_global_prefix" in
 esac
 npm_codexc_manifest="$npm_global_root/@hegenai/codexc/package.json"
 current_codexc="$(command -v codexc 2>/dev/null || true)"
-note "npm 检测通过：$npm_version；全局目录：$npm_global_root"
+note "npm 检测通过：${npm_version}；全局目录：${npm_global_root}"
 if [ -f "$npm_codexc_manifest" ]; then
   npm_codexc_version="$(node -e '
 import { readFileSync } from "node:fs";
 const metadata = JSON.parse(readFileSync(process.argv[1], "utf8"));
 process.stdout.write(typeof metadata.version === "string" ? metadata.version : "未知");
 ' "$npm_codexc_manifest" 2>/dev/null || printf '%s' '未知')"
-  note "检测到 npm 全局版 @hegenai/codexc@$npm_codexc_version；不会自动卸载。"
+  note "检测到 npm 全局版 @hegenai/codexc@${npm_codexc_version}；不会自动卸载。"
 elif [ -n "$current_codexc" ]; then
   note "未检测到 npm 全局版；当前已有 codexc 命令：$current_codexc"
 else
@@ -90,10 +90,10 @@ launcher_dir="$install_root/bin"
 launcher="$launcher_dir/codexc"
 
 if [ -e "$checkout" ] || [ -L "$checkout" ]; then
-  fail "源码目录已存在：$checkout；已有源码安装请使用 codexc update"
+  fail "源码目录已存在：${checkout}；已有源码安装请使用 codexc update"
 fi
 if [ -e "$launcher" ] || [ -L "$launcher" ]; then
-  fail "命令入口已存在：$launcher；请先确认它是否属于旧安装"
+  fail "命令入口已存在：${launcher}；请先确认它是否属于旧安装"
 fi
 
 mkdir -p "$install_root" "$launcher_dir"
@@ -143,7 +143,7 @@ fi
 codex_version="$($codex_command --version 2>/dev/null | awk '{ print $NF }')"
 codex_version="${codex_version#v}"
 [ "$codex_version" = "$version" ] \
-  || fail "Codex CLI 版本不匹配：main 需要 $version，当前 ${codex_version:-未知}"
+  || fail "Codex CLI 版本不匹配：main 需要 ${version}，当前 ${codex_version:-未知}"
 if "$codex_command" login status >/dev/null 2>&1; then
   codex_logged_in=true
   note "Codex CLI 检测通过：$codex_command · $codex_version · 已登录"
@@ -192,7 +192,7 @@ if [ "$install_root" = "$HOME/.codex-connect" ]; then
   esac
   if [ ! -f "$profile" ] || ! grep -F "$profile_line" "$profile" >/dev/null 2>&1; then
     printf '\n# Codex Connect\n%s\n' "$profile_line" >> "$profile" \
-      || note "无法自动更新 $profile；请手工把 $launcher_dir 加入 PATH。"
+      || note "无法自动更新 ${profile}；请手工把 $launcher_dir 加入 PATH。"
   fi
 fi
 

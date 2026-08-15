@@ -23,6 +23,12 @@ afterEach(() => {
 });
 
 describe("Linux/macOS Git 源码安装", () => {
+  it("braces shell variables before non-ASCII text", () => {
+    const installer = readFileSync(resolve("install.sh"), "utf8");
+
+    expect(installer).not.toMatch(/\$[A-Za-z_][A-Za-z0-9_]*\P{ASCII}/u);
+  });
+
   it("clones main under .codex-connect and creates a stable launcher", () => {
     const root = temporaryDirectory("codexc-source-install-");
     const repository = createFixtureRepository(root);

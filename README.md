@@ -31,9 +31,8 @@ npm install -g @hegenai/codexc@0.147.0
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
 
-重新打开终端后继续初始化。源码安装的目录、更新和失败处理见
+重新打开终端后继续初始化。目录、环境检测、更新和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
-源码安装器会检测 Codex CLI；缺失时自动安装与项目一致的版本，登录状态未通过时提示检查并登录。
 
 初始化并配置通讯渠道：
 
@@ -294,9 +293,7 @@ codexc update
 codexc doctor
 ```
 
-Git 源码安装会比较官方 `main` 的 commit，在临时仓库完成依赖安装、构建和新版本本地预检，全部通过后
-才切换 `~/.codex-connect/codex-channels`。npm 安装不会修改 npm 包。随后 `codexc update` 会只读校验
-`config.toml` 以及状态库、指标库的版本与必需结构；预检通过后自动停止
+`codexc update` 会先只读校验 `config.toml` 以及状态库、指标库的版本与必需结构；预检通过后自动停止
 App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema 明确定义的缺失安全参数、分别备份并
 执行受支持的数据库迁移，再次离线校验后恢复核心服务并确认其真实就绪。未知配置字段、结构残缺或
 没有明确迁移路径的数据库版本会失败关闭。该命令不修改 Codex Thread 或
@@ -307,9 +304,8 @@ App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema �
 该命令必须从本机终端执行，不能在渠道 Turn 或其他运行中的 Codex 服务进程内调用。
 
 单库排障仍可使用 `codexc state upgrade` 或 `codexc metrics upgrade`，日常版本升级只需运行
-`codexc update`。源码安装的仓库存在未提交修改或自定义提交、origin 不是官方地址，或者 `main` 的
-项目版本与本机 Codex CLI 不一致时，程序更新会在切换源码前停止。同一版本下的后续修复提交可以
-直接更新。
+`codexc update`。Git 源码安装还会更新官方 `main`，完整流程和失败条件见
+[`Git 源码安装`](docs/source-install.md)。
 
 npm 包与 Codex CLI 使用相同版本。正式发布时先在发布提交中同步本页版本与安装命令，通过
 `main` CI 后再创建 Tag、发布 npm 和 GitHub Release；Release 不会自动修改 README。
@@ -347,7 +343,7 @@ npm run install:global
 ```
 
 该命令会同时构建 Gateway 与 WebUI 前端（`webui/dist`），之后
-`codexc webui` 可直接启动。安装过程会先生成临时 npm tarball，已安装命令不链接或依赖当前源码目录。
+`codexc webui` 可直接启动。
 
 完整项目文档见 [`index.md`](index.md)。
 
