@@ -193,7 +193,12 @@ export function inspectCoreServiceInstallation(
     throw new Error("codexc update 当前支持 macOS launchd 与 Linux systemd");
   }
   const paths = serviceDefinitionsForTarget("all").map((definition) =>
-    join(definitionsDirectory, definition[identifierKey])
+    join(
+      definitionsDirectory,
+      platform === "darwin"
+        ? `${definition[identifierKey]}.plist`
+        : definition[identifierKey],
+    )
   );
   const existingPaths = paths.filter((path) => existsSync(path));
   if (existingPaths.length === 0) {

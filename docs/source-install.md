@@ -26,7 +26,9 @@ Codex CLI 是 Gateway 的必需运行时。安装器找不到 `codex` 时，会�
 一致的 `@openai/codex`；已有版本不匹配时失败关闭，不自动覆盖。安装器使用固定版本官方
 `codex login status` 检查登录状态；未登录或状态检查错误不阻止源码安装，用户需先运行该命令诊断，
 并在未登录时执行 `codex login`。npm 全局 `bin` 不在 PATH 时，自动安装后会明确停止并提示修正。
-脚本会为当前 Shell 配置 `~/.codex-connect/bin`，重新打开终端后执行：
+脚本会为当前 Shell 配置 `~/.codex-connect/bin`。交互式 Zsh/Bash 安装完成后会询问是否立即进入
+已加载源码命令的新 Shell；确认后无需重新打开终端。拒绝、使用其他 Shell 或在非交互环境安装时，
+按输出提示重新打开终端或手工更新 PATH。随后执行：
 
 ```bash
 codexc init

@@ -152,6 +152,16 @@ else
   note "Codex CLI 检测通过：$codex_command · $codex_version · 未登录或登录状态不可用"
 fi
 
+print_next_steps() {
+  if [ "$codex_logged_in" = true ]; then
+    printf '%s\n' "下一步：codexc init && codexc setup && codexc service install"
+  else
+    printf '%s\n' "下一步：codex login status"
+    printf '%s\n' "如未登录：codex login"
+    printf '%s\n' "登录后执行：codexc init && codexc setup && codexc service install"
+  fi
+}
+
 note "正在安装依赖并构建 Gateway"
 (cd "$staging/repository" \
   && npm ci --no-audit --no-fund \
@@ -201,15 +211,43 @@ staging=""
 success "Codex Connect Git 源码已安装：$checkout"
 printf '%s\n' "分支：main"
 printf '%s\n' "命令入口：$launcher"
+activation_shell=""
+activation_shell_name=""
+if [ "$install_root" = "$HOME/.codex-connect" ] && [ -t 1 ]; then
+  case "${SHELL:-}" in
+    */zsh)
+      activation_shell="$SHELL"
+      activation_shell_name="Zsh"
+      ;;
+    */bash)
+      activation_shell="$SHELL"
+      activation_shell_name="Bash"
+      ;;
+  esac
+fi
+
+if [ -n "$activation_shell" ] && [ -x "$activation_shell" ] \
+  && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  printf '%s' "是否立即进入已加载 Codex Connect 的新 ${activation_shell_name}？ [Y/n] " \
+    > /dev/tty
+  activation_answer="n"
+  if IFS= read -r activation_answer < /dev/tty; then
+    case "$activation_answer" in
+      ""|y|Y|yes|YES)
+        PATH="$launcher_dir:$PATH"
+        export PATH
+        success "源码命令已加载：$launcher"
+        print_next_steps
+        printf '%s\n' "正在进入新的 ${activation_shell_name}；退出后会返回原终端。"
+        exec "$activation_shell" -il < /dev/tty
+        ;;
+    esac
+  fi
+fi
+
 if [ "$install_root" = "$HOME/.codex-connect" ]; then
   printf '%s\n' "重新打开终端，或执行：export PATH=\"\$HOME/.codex-connect/bin:\$PATH\""
 else
   printf '%s\n' "请把以下目录加入 PATH：$launcher_dir"
 fi
-if [ "$codex_logged_in" = true ]; then
-  printf '%s\n' "下一步：codexc init && codexc setup && codexc service install"
-else
-  printf '%s\n' "下一步：codex login status"
-  printf '%s\n' "如未登录：codex login"
-  printf '%s\n' "登录后执行：codexc init && codexc setup && codexc service install"
-fi
+print_next_steps

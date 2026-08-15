@@ -109,6 +109,20 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(result.stdout).toContain("下一步：codex login status");
     expect(result.stdout).toContain("如未登录：codex login");
     expect(existsSync(join(root, "fake-bin", "codex"))).toBe(true);
+  }, 15_000);
+
+  it("keeps the explicit PATH fallback when no terminal is attached", () => {
+    const root = temporaryDirectory("codexc-source-install-no-tty-");
+    const repository = createFixtureRepository(root);
+    const home = join(root, "home");
+
+    const result = runInstaller(root, repository, home, { shell: "/bin/zsh" });
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect(result.stdout).toContain(
+      '重新打开终端，或执行：export PATH="$HOME/.codex-connect/bin:$PATH"',
+    );
+    expect(result.stdout).not.toContain("是否立即进入已加载");
   });
 });
 
@@ -178,7 +192,7 @@ function runInstaller(
   root: string,
   repository: string,
   home: string,
-  options: { codexInstalled?: boolean } = {},
+  options: { codexInstalled?: boolean; shell?: string } = {},
 ) {
   const fakeBin = join(root, "fake-bin");
   mkdirSync(fakeBin, { recursive: true });
@@ -227,7 +241,7 @@ function runInstaller(
         HOME: home,
         npm_config_prefix: join(root, "npm-global"),
         PATH: `${fakeBin}${delimiter}${inheritedPath}`,
-        SHELL: "/bin/sh",
+        SHELL: options.shell ?? "/bin/sh",
       },
     },
   );
