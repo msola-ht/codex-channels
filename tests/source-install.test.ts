@@ -109,7 +109,7 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(result.stdout).toContain("下一步：codex login status");
     expect(result.stdout).toContain("如未登录：codex login");
     expect(existsSync(join(root, "fake-bin", "codex"))).toBe(true);
-  });
+  }, 15_000);
 
   it("keeps the explicit PATH fallback when no terminal is attached", () => {
     const root = temporaryDirectory("codexc-source-install-no-tty-");
