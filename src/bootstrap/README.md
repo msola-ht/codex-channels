@@ -51,6 +51,9 @@
   读取凭据，不把 Token 放入运行配置。
 - `proxy-fetch.ts`：把共享 HTTP(S) 代理选择适配到微信使用的 Fetch 接口；命中 `NO_PROXY`
   时使用直连 Fetch，否则通过按代理 URL 复用的 Undici Dispatcher 发出请求。
+- `openai-connectivity.ts`：在 OpenAI Provider 启动时复用同一代理做一次有界、无凭据的 HTTP
+  传输探测；官方双目标全部不可达时生成脱敏状态供渠道上线通知使用，单目标失败只记录日志，
+  均不阻断 Gateway；自定义 `openai_base_url` 只探测该地址。
 - `deepseek-account-adapter.ts`：通过共享 Provider 运行时按请求读取切换 Profile 或固定基础配置中的
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在共享有界响应读取和严格 Schema 校验后只返回稳定余额；Key、响应正文

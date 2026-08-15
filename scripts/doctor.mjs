@@ -30,8 +30,14 @@ import {
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import {
+  loadOpenAiBaseUrl,
+  loadPrimaryModelProvider,
   validateConfiguredModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
+import {
+  resolveProxyEnvironment,
+  selectHttpProxyUrl,
+} from "../runtime/network-proxy.mjs";
 import { readApiProviderKey } from "../runtime/api-provider-credential.mjs";
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
@@ -101,6 +107,9 @@ if (!existsSync(configPath)) {
 }
 
 if (document) {
+  setSection("网络与代理");
+  checkOpenAiProxy(document);
+
   setSection("通讯渠道");
   const telegram = table(document.telegram);
   const feishu = table(document.feishu);
@@ -542,6 +551,63 @@ function validAllowedWeixinUsers(value) {
 
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function checkOpenAiProxy(document) {
+  try {
+    if (loadPrimaryModelProvider(process.env) !== "openai") {
+      note("OpenAI 代理", "当前主提供商不是 OpenAI，跳过检查");
+      return;
+    }
+    const network = table(document.network);
+    const proxyEnvironment = resolveProxyEnvironment(network, process.env);
+    const configuredBaseUrl = loadOpenAiBaseUrl(process.env);
+    const targets = configuredBaseUrl
+      ? [configuredBaseUrl]
+      : ["https://chatgpt.com/backend-api/codex", "https://api.openai.com/v1"];
+    const proxy = {
+      http: proxyEnvironment.HTTP_PROXY,
+      https: proxyEnvironment.HTTPS_PROXY,
+      all: proxyEnvironment.ALL_PROXY,
+      no: proxyEnvironment.NO_PROXY,
+    };
+    const proxiedTargets = targets.filter((target) =>
+      selectHttpProxyUrl(proxy, target) !== undefined);
+    const hasConfiguredProxy = Boolean(
+      proxyEnvironment.HTTP_PROXY
+      || proxyEnvironment.HTTPS_PROXY
+      || proxyEnvironment.ALL_PROXY,
+    );
+    const remediation = "在 config.toml 的 [network] 中设置 https_proxy，"
+      + "或为服务设置 HTTPS_PROXY；然后运行 codexc service restart all";
+
+    if (proxiedTargets.length === targets.length) {
+      note("OpenAI 代理", "已检测到代理，官方模型请求将通过代理连接");
+      return;
+    }
+    if (hasConfiguredProxy) {
+      note(
+        "OpenAI 代理",
+        proxiedTargets.length === 0
+          ? "代理已配置，但 OpenAI 目标被 NO_PROXY 设为直连"
+          : "部分 OpenAI 目标被 NO_PROXY 设为直连",
+        remediation,
+      );
+      return;
+    }
+    note(
+      "OpenAI 代理",
+      "未检测到代理，官方模型请求将尝试直连；受限网络中可能无法连接",
+      remediation,
+    );
+  } catch (error) {
+    record(
+      "OpenAI 代理",
+      false,
+      errorMessage(error),
+      "修正 config.toml 的 [network] 代理 URL 或 NO_PROXY 后重新运行 codexc doctor",
+    );
+  }
 }
 
 function stringValue(value) {

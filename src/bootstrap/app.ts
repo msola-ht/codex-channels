@@ -14,6 +14,7 @@ import {
 } from "../../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProvider,
+  loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
@@ -84,6 +85,10 @@ import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
 import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
+import {
+  checkOpenAiConnectivity,
+  type OpenAiConnectivityStatus,
+} from "./openai-connectivity.js";
 import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
@@ -144,6 +149,7 @@ export class GatewayApplication {
   private bindingRestoreTask: Promise<void> | undefined;
   private bindingRestoreAttempt = 0;
   private codexUpstreamUserAgent: string | undefined;
+  private openAiConnectivity: OpenAiConnectivityStatus = "not-applicable";
   private stopping = false;
 
   constructor(
@@ -612,6 +618,7 @@ export class GatewayApplication {
       logger,
       gatewayVersion,
       codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
+      openAiConnectivity: () => this.openAiConnectivity,
       onFatal: (surface, accountId, error) => this.handleSurfaceFatal(
         surface,
         accountId,
@@ -801,7 +808,24 @@ export class GatewayApplication {
       this.requireRunning();
       this.codexUpstreamUserAgent = initialized.userAgent;
       if (this.primaryProvider !== deepseekProviderDefinition.id) {
-        await this.refreshRateLimits();
+        const [connectivity] = await Promise.all([
+          this.primaryProvider === undefined
+            ? Promise.resolve<OpenAiConnectivityStatus>("not-applicable")
+            : this.probeOpenAiConnectivity(),
+          this.refreshRateLimits(),
+        ]);
+        this.openAiConnectivity = connectivity;
+        if (connectivity === "unreachable") {
+          this.logger.warn(
+            { connectivity },
+            "OpenAI 启动连通探测失败，渠道启动通知将显示提醒",
+          );
+        } else if (connectivity === "partial") {
+          this.logger.info(
+            { connectivity },
+            "OpenAI 启动连通探测部分通过，不影响渠道启动通知",
+          );
+        }
       }
       this.requireRunning();
       await this.restoreBindings();
@@ -1070,6 +1094,14 @@ export class GatewayApplication {
         clearTimeout(timeout);
       }
     }
+  }
+
+  private async probeOpenAiConnectivity(): Promise<OpenAiConnectivityStatus> {
+    const openAiBaseUrl = loadOpenAiBaseUrl();
+    return await checkOpenAiConnectivity({
+      proxy: this.config.networkProxy,
+      ...(openAiBaseUrl === undefined ? {} : { baseUrl: openAiBaseUrl }),
+    });
   }
 
   private async restoreBindings(

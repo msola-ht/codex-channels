@@ -9,6 +9,8 @@ import type { ConfigChange, GatewayConfig } from "../config/index.js";
 import type { BindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
 
+import type { OpenAiConnectivityStatus } from "./openai-connectivity.js";
+
 export interface SurfaceRuntimeModule {
   readonly adapter: SurfaceAdapter;
   applyHotReload(next: GatewayConfig, changes: readonly ConfigChange[]): void;
@@ -22,6 +24,7 @@ export interface SurfacePluginContext {
   logger: Logger;
   gatewayVersion: string;
   codexUpstreamUserAgent: () => string | undefined;
+  openAiConnectivity: () => OpenAiConnectivityStatus;
   onFatal(surface: string, accountId: string, error: Error): void;
   exchangeRate: () => ExchangeRateSnapshot | null;
   priceCurrency: (

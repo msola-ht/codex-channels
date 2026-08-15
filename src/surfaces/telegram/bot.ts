@@ -45,6 +45,7 @@ import { surfaceCommandAliases } from "../slash-command.js";
 import {
   formatConfigurationChange,
   formatStartupNotification,
+  type StartupRuntimeInfo,
 } from "./format.js";
 import {
   renderTelegramCommandResult,
@@ -109,6 +110,7 @@ export interface TelegramSurfaceOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
+  openAiConnectivity?: () => NonNullable<StartupRuntimeInfo["openAiConnectivity"]>;
   inputQuietWindowMs?: number;
   now?: () => number;
   debugEnabled?: boolean;
@@ -275,6 +277,9 @@ export class TelegramSurface {
               nodeVersion: process.version,
               transport: "Unix WebSocket",
               codexUpstreamUserAgent: options.codexUpstreamUserAgent?.() ?? null,
+              ...(options.openAiConnectivity
+                ? { openAiConnectivity: options.openAiConnectivity() }
+                : {}),
               debugEnabled: this.debugEnabled,
             }),
           };

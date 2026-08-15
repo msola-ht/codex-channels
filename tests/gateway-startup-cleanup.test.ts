@@ -194,6 +194,7 @@ describe("GatewayApplication startup cleanup", () => {
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
       primaryProvider: "openai",
+      probeOpenAiConnectivity: async () => "reachable" as const,
       providerMetrics: {
         start: async () => undefined,
         close: async () => undefined,

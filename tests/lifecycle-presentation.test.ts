@@ -15,6 +15,69 @@ import {
 import { formatOpenAiErrorMessage } from "../src/surfaces/account-format.js";
 
 describe("shared Surface lifecycle presentation", () => {
+  it("adds an actionable OpenAI network warning to the startup notice", () => {
+    const presentation = createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      {
+        workspaceId: "main",
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: null,
+        serviceTier: null,
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
+      },
+      {
+        platform: "linux",
+        architecture: "x64",
+        gatewayVersion: "0.147.0",
+        nodeVersion: "v24.0.0",
+        transport: "Unix WebSocket",
+        codexUpstreamUserAgent: null,
+        openAiConnectivity: "unreachable",
+      },
+    );
+
+    expect(presentation.fields).toEqual([
+      { label: "App Server", value: "已连接" },
+      { label: "OpenAI 网络", value: "连接失败；请检查代理设置" },
+    ]);
+  });
+
+  it("does not warn when at least one official OpenAI route is reachable", () => {
+    const presentation = createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      {
+        workspaceId: "main",
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: null,
+        serviceTier: null,
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
+      },
+      {
+        platform: "linux",
+        architecture: "x64",
+        gatewayVersion: "0.147.0",
+        nodeVersion: "v24.0.0",
+        transport: "Unix WebSocket",
+        codexUpstreamUserAgent: null,
+        openAiConnectivity: "partial",
+      },
+    );
+
+    expect(presentation.fields).toEqual([
+      { label: "App Server", value: "已连接" },
+    ]);
+  });
+
   it("renders a compact subagent start notice without internal IDs", () => {
     const rendered = renderPlainLifecyclePresentation(
       createSubagentStartedPresentation({
