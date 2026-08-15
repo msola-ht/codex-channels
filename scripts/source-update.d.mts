@@ -19,6 +19,7 @@ export interface SourceUpdateOptions {
     args: string[],
     options: Record<string, unknown>,
   ) => void;
+  writeMessage?: (kind: "note" | "success" | "failure" | "remediation", message: string) => void;
   buildCheckout?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,

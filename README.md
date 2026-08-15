@@ -41,10 +41,7 @@ codexc init
 codexc setup
 ```
 
-`codexc config` 提供交互式配置与设置菜单，覆盖配置文件中可安全编辑的参数：显示设置（操作
-详情、计划更新、参考价人民币换算）、系统设置（调试模式、审批超时、Sandbox、默认工作区与
-渠道新会话模型覆盖）、WebUI 设置、指标设置、Telegram 消息格式，以及配置路径查看。
-在脚本或管道中运行时会直接输出用户目录与配置文件路径。
+`codexc config` 可交互调整常用设置；在脚本或管道中运行时会输出用户目录与配置文件路径。
 
 注册需要让 Codex 操作的项目：
 
@@ -208,9 +205,7 @@ codexc service logs all -n 200        # 查看全部核心服务最近 200 行�
 
 `start`、`stop` 和 `status` 默认操作全部核心服务；`restart` 和 `logs` 默认只操作 Gateway。运行
 `codexc service -h` 查看完整用法。WebUI 与指标中心不并入 `all`，需要时单独启动。
-核心服务执行安装、启动或重启后，CLI 会等待 App Server 监管拓扑、WebSocket 与 Gateway
-应用就绪状态稳定；超时会返回失败并提示查看对应状态和日志，不会把服务管理器已接受命令
-直接当作服务健康。
+服务操作会等待目标真正就绪；失败时按提示查看状态和日志。
 
 服务重启建议从本机终端执行。聊天 Turn 内重启 Gateway 可能使过程或完成消息落在重连窗口。渠道内
 会拒绝安装或卸载服务、停止 Gateway/App Server，以及重启 App Server；对应的 `all` 操作同样拒绝。
@@ -283,7 +278,7 @@ codexc service logs -n 100
 分享日志前请人工检查内容。Gateway 会脱敏已知凭据，但 App Server 原始日志可能包含命令、工作内容
 或诊断上下文。
 
-## 升级
+## 升级与卸载
 
 ```bash
 npm install -g @hegenai/codexc@0.147.0
@@ -293,22 +288,20 @@ codexc update
 codexc doctor
 ```
 
-`codexc update` 会先只读校验 `config.toml` 以及状态库、指标库的版本与必需结构；预检通过后自动停止
-App Server 与 Gateway，在停机窗口内备份并补齐当前配置 Schema 明确定义的缺失安全参数、分别备份并
-执行受支持的数据库迁移，再次离线校验后恢复核心服务并确认其真实就绪。未知配置字段、结构残缺或
-没有明确迁移路径的数据库版本会失败关闭。该命令不修改 Codex Thread 或
-`~/.codex/config.toml`。核心后台服务尚未安装且 Gateway 未运行时，命令只离线更新配置与数据库，
-不会安装或启动服务；如果检测到另一个终端通过 `codexc start` 启动的前台 Gateway，会在写入前提示
-先按 Ctrl-C 结束该进程。后续需要后台运行时再执行 `codexc service install`。
-
-该命令必须从本机终端执行，不能在渠道 Turn 或其他运行中的 Codex 服务进程内调用。
-
-单库排障仍可使用 `codexc state upgrade` 或 `codexc metrics upgrade`，日常版本升级只需运行
-`codexc update`。Git 源码安装还会更新官方 `main`，完整流程和失败条件见
+日常升级统一使用 `codexc update`。Git 源码安装会更新官方 `main`，后台服务已安装时会自动停止并
+恢复；未安装时只离线更新配置和数据库。该命令必须从本机终端执行。详细流程和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 
-npm 包与 Codex CLI 使用相同版本。正式发布时先在发布提交中同步本页版本与安装命令，通过
-`main` CI 后再创建 Tag、发布 npm 和 GitHub Release；Release 不会自动修改 README。
+卸载 Git 源码安装并保留用户数据：
+
+```bash
+codexc uninstall
+```
+
+npm 全局版使用 `codexc service uninstall` 卸载后台服务，再执行
+`npm uninstall -g @hegenai/codexc`。
+
+npm 包与 Codex CLI 使用相同版本。
 
 ## 源码开发
 

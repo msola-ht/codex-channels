@@ -14,6 +14,8 @@ import { delimiter, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { uninstallManagedSourceInstallation } from "../scripts/source-uninstall.mjs";
+
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
@@ -42,7 +44,7 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(result.stdout).toContain("已登录");
     const installRoot = join(home, ".codex-connect");
     const checkout = join(installRoot, "codex-channels");
-    const launcher = join(installRoot, "bin", "codexc");
+    const launcher = join(installRoot, ".bin", "codexc");
     expect(existsSync(join(checkout, ".git"))).toBe(true);
     expect(existsSync(join(checkout, "dist", "main.js"))).toBe(true);
     expect(existsSync(join(checkout, "webui", "dist", "index.html"))).toBe(true);
@@ -52,8 +54,9 @@ describe("Linux/macOS Git 源码安装", () => {
       env: { ...process.env, HOME: home },
     }).trim()).toBe("0.147.0");
     expect(readFileSync(join(home, ".profile"), "utf8")).toContain(
-      '$HOME/.codex-connect/bin',
+      '$HOME/.codex-connect/.bin',
     );
+    expect(existsSync(join(installRoot, "bin"))).toBe(false);
   });
 
   it("removes the partial checkout and launcher when the build fails", () => {
@@ -65,7 +68,7 @@ describe("Linux/macOS Git 源码安装", () => {
 
     expect(result.status).not.toBe(0);
     expect(existsSync(join(home, ".codex-connect", "codex-channels"))).toBe(false);
-    expect(existsSync(join(home, ".codex-connect", "bin", "codexc"))).toBe(false);
+    expect(existsSync(join(home, ".codex-connect", ".bin", "codexc"))).toBe(false);
   });
 
   it("reports an existing global npm installation without removing it", () => {
@@ -120,9 +123,89 @@ describe("Linux/macOS Git 源码安装", () => {
 
     expect(result.status, result.stderr || result.stdout).toBe(0);
     expect(result.stdout).toContain(
-      '重新打开终端，或执行：export PATH="$HOME/.codex-connect/bin:$PATH"',
+      '重新打开终端，或执行：export PATH="$HOME/.codex-connect/.bin:$PATH"',
     );
     expect(result.stdout).not.toContain("是否立即进入已加载");
+  });
+
+  it("uninstalls the managed source and services while preserving user data", async () => {
+    const root = temporaryDirectory("codexc-source-uninstall-");
+    const installRoot = join(root, ".codex-connect");
+    const checkout = join(installRoot, "codex-channels");
+    const launcher = join(installRoot, ".bin", "codexc");
+    const config = join(installRoot, "config.toml");
+    const database = join(installRoot, "data", "gateway.sqlite3");
+    mkdirSync(join(checkout, ".git"), { recursive: true });
+    mkdirSync(resolve(launcher, ".."), { recursive: true });
+    mkdirSync(resolve(database, ".."), { recursive: true });
+    writeFileSync(join(checkout, "package.json"), JSON.stringify({ version: "0.147.0" }));
+    writeFileSync(
+      launcher,
+      `#!/bin/sh\nexec node "${checkout}/bin/codexc.mjs" "$@"\n`,
+    );
+    writeFileSync(config, "version = 1\n");
+    writeFileSync(database, "preserved");
+    let serviceUninstalls = 0;
+
+    const result = await uninstallManagedSourceInstallation(
+      { ...process.env, CODEX_CONNECT_HOME: installRoot },
+      {
+        projectDir: checkout,
+        uninstallServices: () => { serviceUninstalls += 1; },
+      },
+    );
+
+    expect(result).toEqual({ checkout, launcher });
+    expect(serviceUninstalls).toBe(1);
+    expect(existsSync(checkout)).toBe(false);
+    expect(existsSync(launcher)).toBe(false);
+    expect(readFileSync(config, "utf8")).toBe("version = 1\n");
+    expect(readFileSync(database, "utf8")).toBe("preserved");
+  });
+
+  it("refuses to remove an unrelated command entry", async () => {
+    const root = temporaryDirectory("codexc-source-uninstall-unsafe-");
+    const installRoot = join(root, ".codex-connect");
+    const checkout = join(installRoot, "codex-channels");
+    const launcher = join(installRoot, ".bin", "codexc");
+    mkdirSync(join(checkout, ".git"), { recursive: true });
+    mkdirSync(resolve(launcher, ".."), { recursive: true });
+    writeFileSync(launcher, "#!/bin/sh\nexec unrelated-command\n");
+    let serviceUninstalls = 0;
+
+    await expect(uninstallManagedSourceInstallation(
+      { ...process.env, CODEX_CONNECT_HOME: installRoot },
+      {
+        projectDir: checkout,
+        uninstallServices: () => { serviceUninstalls += 1; },
+      },
+    )).rejects.toThrow("命令入口不属于当前源码安装");
+
+    expect(serviceUninstalls).toBe(0);
+    expect(existsSync(checkout)).toBe(true);
+    expect(readFileSync(launcher, "utf8")).toContain("unrelated-command");
+  });
+
+  it("removes the legacy visible source launcher", async () => {
+    const root = temporaryDirectory("codexc-source-uninstall-legacy-");
+    const installRoot = join(root, ".codex-connect");
+    const checkout = join(installRoot, "codex-channels");
+    const legacyLauncher = join(installRoot, "bin", "codexc");
+    mkdirSync(join(checkout, ".git"), { recursive: true });
+    mkdirSync(resolve(legacyLauncher, ".."), { recursive: true });
+    writeFileSync(
+      legacyLauncher,
+      `#!/bin/sh\nexec node "${checkout}/bin/codexc.mjs" "$@"\n`,
+    );
+
+    await uninstallManagedSourceInstallation(
+      { ...process.env, CODEX_CONNECT_HOME: installRoot },
+      { projectDir: checkout, uninstallServices: () => undefined },
+    );
+
+    expect(existsSync(checkout)).toBe(false);
+    expect(existsSync(legacyLauncher)).toBe(false);
+    expect(existsSync(join(installRoot, "bin"))).toBe(false);
   });
 });
 

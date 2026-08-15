@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -31,6 +32,7 @@ describe("Git 源码更新", () => {
   it("updates to a newer main commit without requiring a version change", async () => {
     const fixture = createInstalledFixture("codexc-source-update-");
     let localUpdateCheckout = "";
+    const messages: Array<[string, string]> = [];
 
     expect(managedSourceCheckout(fixture.environment, fixture.checkout))
       .toBe(fixture.checkout);
@@ -47,6 +49,7 @@ describe("Git 源码更新", () => {
       runLocalUpdate: (candidate) => {
         localUpdateCheckout = candidate;
       },
+      writeMessage: (kind, message) => { messages.push([kind, message]); },
     });
 
     expect(result).toEqual({
@@ -58,8 +61,58 @@ describe("Git 源码更新", () => {
     });
     expect(localUpdateCheckout).toBe(fixture.checkout);
     expect(readFileSync(join(fixture.checkout, "fix.txt"), "utf8")).toBe("fixed");
+    expect(existsSync(fixture.legacyLauncher)).toBe(false);
+    expect(readFileSync(fixture.hiddenLauncher, "utf8")).toContain(
+      "codex-channels/bin/codexc.mjs",
+    );
+    expect(readFileSync(fixture.profile, "utf8")).toContain(
+      'export PATH="$HOME/.codex-connect/.bin:$PATH"',
+    );
+    expect(readFileSync(fixture.profile, "utf8")).not.toContain(
+      'export PATH="$HOME/.codex-connect/bin:$PATH"',
+    );
     expect(readdirSync(fixture.installRoot).filter((name) => name.includes("pre-update")))
       .toEqual([]);
+    expect(messages).toEqual([
+      [
+        "note",
+        `Git 源码检查：当前 ${fixture.initialCommit.slice(0, 12)} · main ${fixture.latestCommit.slice(0, 12)}`,
+      ],
+      ["note", "正在克隆 Git main 候选源码。"],
+      ["note", "正在构建并预检候选源码；详细日志仅在失败时显示。"],
+      ["note", "候选源码已通过校验，准备切换。"],
+      ["note", `源码命令入口已迁移到隐藏目录：${fixture.hiddenLauncher}`],
+      [
+        "note",
+        '当前终端请执行：export PATH="$HOME/.codex-connect/.bin:$PATH"',
+      ],
+    ]);
+  });
+
+  it("migrates the legacy launcher even when main is already current", async () => {
+    const fixture = createInstalledFixture("codexc-source-launcher-migration-");
+    runGit(fixture.checkout, ["reset", "--quiet", "--hard", fixture.latestCommit]);
+    const messages: Array<[string, string]> = [];
+
+    const result = await updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => { throw new Error("不应重新构建"); },
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      writeMessage: (kind, message) => { messages.push([kind, message]); },
+    });
+
+    expect(result).toEqual({
+      changed: false,
+      commit: fixture.latestCommit,
+      managed: true,
+      version: "0.147.0",
+    });
+    expect(existsSync(fixture.legacyLauncher)).toBe(false);
+    expect(existsSync(fixture.hiddenLauncher)).toBe(true);
+    expect(messages).toContainEqual([
+      "note",
+      `源码命令入口已迁移到隐藏目录：${fixture.hiddenLauncher}`,
+    ]);
   });
 
   it("restores the old checkout and services when switching the candidate fails", async () => {
@@ -176,9 +229,18 @@ function createInstalledFixture(prefix: string) {
   const home = join(root, "home");
   const installRoot = join(home, ".codex-connect");
   const checkout = join(installRoot, "codex-channels");
+  const legacyLauncher = join(installRoot, "bin", "codexc");
+  const hiddenLauncher = join(installRoot, ".bin", "codexc");
+  const profile = join(home, ".zshrc");
   mkdirSync(installRoot, { recursive: true });
   runGit(root, ["clone", "--quiet", "--branch", "main", source.repository, checkout]);
   runGit(checkout, ["reset", "--quiet", "--hard", source.initialCommit]);
+  mkdirSync(join(installRoot, "bin"), { recursive: true });
+  writeFileSync(
+    legacyLauncher,
+    '#!/bin/sh\nexec node "$CODEX_CONNECT_HOME/codex-channels/bin/codexc.mjs" "$@"\n',
+  );
+  writeFileSync(profile, 'export PATH="$HOME/.codex-connect/bin:$PATH"\n');
   const codex = join(root, "codex");
   writeFileSync(codex, "#!/bin/sh\nprintf '%s\\n' 'codex-cli 0.147.0'\n");
   chmodSync(codex, 0o755);
@@ -192,7 +254,11 @@ function createInstalledFixture(prefix: string) {
       HOME: home,
     },
     installRoot,
+    hiddenLauncher,
+    initialCommit: source.initialCommit,
+    legacyLauncher,
     latestCommit: source.latestCommit,
+    profile,
     repository: source.repository,
   };
 }

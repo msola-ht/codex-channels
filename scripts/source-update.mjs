@@ -1,11 +1,17 @@
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -53,11 +59,17 @@ export async function updateManagedSourceInstallation(
     options.captureCommand,
   ).trim();
   const currentVersion = packageVersion(checkout);
+  const writeMessage = options.writeMessage ?? writeCliMessage;
+  writeMessage(
+    "note",
+    `Git 源码检查：当前 ${currentCommit.slice(0, 12)} · main ${remoteCommit.slice(0, 12)}`,
+  );
+  const installRoot = resolve(checkout, "..");
   if (currentCommit === remoteCommit) {
+    migrateManagedSourceLauncher(installRoot, environment, writeMessage);
     return { changed: false, commit: currentCommit, managed: true, version: currentVersion };
   }
 
-  const installRoot = resolve(checkout, "..");
   const stagingRoot = mkdtempSync(join(installRoot, ".codex-channels-update."));
   const stagedCheckout = join(stagingRoot, "codex-channels");
   let switched = false;
@@ -65,7 +77,8 @@ export async function updateManagedSourceInstallation(
   let backupPath;
   const renamePath = options.renamePath ?? renameSync;
   try {
-    run(
+    writeMessage("note", "正在克隆 Git main 候选源码。");
+    runQuiet(
       "git",
       [
         "clone",
@@ -93,11 +106,13 @@ export async function updateManagedSourceInstallation(
       options.captureCommand,
     ).trim();
     assertFastForward(stagedCheckout, currentCommit, targetCommit, environment);
+    writeMessage("note", "正在构建并预检候选源码；详细日志仅在失败时显示。");
     await (options.buildCheckout ?? buildCheckout)(stagedCheckout, environment, options);
     const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(
       stagedCheckout,
       environment,
     );
+    writeMessage("note", "候选源码已通过校验，准备切换。");
     if (inspection.services.installed) {
       await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
       servicesStopped = true;
@@ -123,6 +138,7 @@ export async function updateManagedSourceInstallation(
     }
 
     await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
+    migrateManagedSourceLauncher(installRoot, environment, writeMessage);
     rmSync(backupPath, { recursive: true, force: true });
     backupPath = undefined;
     return {
@@ -156,6 +172,57 @@ export async function updateManagedSourceInstallation(
     if (existsSync(stagingRoot)) {
       rmSync(stagingRoot, { recursive: true, force: true });
     }
+  }
+}
+
+function migrateManagedSourceLauncher(installRoot, environment, writeMessage) {
+  const legacyDirectory = join(installRoot, "bin");
+  const legacyLauncher = join(legacyDirectory, "codexc");
+  if (!existsSync(legacyLauncher)) return;
+  const hiddenDirectory = join(installRoot, ".bin");
+  const hiddenLauncher = join(hiddenDirectory, "codexc");
+  const launcherStat = lstatSync(legacyLauncher);
+  const launcherContent = launcherStat.isFile() && !launcherStat.isSymbolicLink()
+    ? readFileSync(legacyLauncher, "utf8")
+    : "";
+  if (!launcherContent.includes('"$CODEX_CONNECT_HOME/codex-channels/bin/codexc.mjs"')) {
+    throw new Error(`旧命令入口不属于受管源码安装，拒绝迁移：${legacyLauncher}`);
+  }
+  if (existsSync(hiddenLauncher)) {
+    throw new Error(`隐藏命令入口已存在，拒绝覆盖：${hiddenLauncher}`);
+  }
+
+  mkdirSync(hiddenDirectory, { recursive: true, mode: 0o700 });
+  chmodSync(hiddenDirectory, 0o700);
+  const temporaryLauncher = `${hiddenLauncher}.tmp.${process.pid}`;
+  try {
+    writeFileSync(temporaryLauncher, launcherContent, { mode: launcherStat.mode & 0o777 });
+    chmodSync(temporaryLauncher, launcherStat.mode & 0o777);
+    renameSync(temporaryLauncher, hiddenLauncher);
+  } finally {
+    rmSync(temporaryLauncher, { force: true });
+  }
+  updateManagedShellPaths(environment);
+  rmSync(legacyLauncher);
+  if (readdirSync(legacyDirectory).length === 0) rmdirSync(legacyDirectory);
+  writeMessage("note", `源码命令入口已迁移到隐藏目录：${hiddenLauncher}`);
+  writeMessage(
+    "note",
+    '当前终端请执行：export PATH="$HOME/.codex-connect/.bin:$PATH"',
+  );
+}
+
+function updateManagedShellPaths(environment) {
+  const home = environment.HOME;
+  if (!home) return;
+  const oldLine = 'export PATH="$HOME/.codex-connect/bin:$PATH"';
+  const newLine = 'export PATH="$HOME/.codex-connect/.bin:$PATH"';
+  for (const profileName of [".zshrc", ".bashrc", ".profile"]) {
+    const profile = join(home, profileName);
+    if (!existsSync(profile)) continue;
+    const content = readFileSync(profile, "utf8");
+    if (!content.includes(oldLine)) continue;
+    writeFileSync(profile, content.replaceAll(oldLine, newLine));
   }
 }
 
@@ -247,7 +314,7 @@ async function buildCheckout(checkout, environment, options) {
     [join(checkout, "webui"), ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],
     [join(checkout, "webui"), ["run", "build"]],
   ]) {
-    run("npm", args, cwd, environment, options.runCommand);
+    runQuiet("npm", args, cwd, environment, options.runCommand);
   }
   if (
     !existsSync(join(checkout, "dist", "main.js"))
@@ -255,6 +322,24 @@ async function buildCheckout(checkout, environment, options) {
   ) {
     throw new Error("候选源码构建结果不完整");
   }
+}
+
+function runQuiet(command, args, cwd, environment, implementation) {
+  if (implementation) {
+    implementation(command, args, { cwd, environment, quiet: true });
+    return;
+  }
+  const result = spawnSync(command, args, {
+    cwd,
+    env: environment,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status === 0) return;
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  throw new Error(`${command} 执行失败：exit=${result.status ?? 1}`);
 }
 
 async function inspectStagedInstallation(checkout, environment) {
@@ -357,7 +442,7 @@ async function main() {
   if (!result.changed) {
     writeCliMessage(
       "note",
-      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}）。`,
+      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），跳过依赖安装与构建；继续检查本地配置和数据库。`,
     );
     await runLocalUpdate(checkout, process.env, {});
     return;
