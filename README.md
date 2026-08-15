@@ -31,7 +31,7 @@ npm install -g @hegenai/codexc@0.147.0
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
 
-按安装器提示进入已加载的新 Shell 或重新打开终端后继续初始化。目录、环境检测、更新和失败处理见
+安装器会从源码构建并注册 npm 全局 `codexc` 命令，不修改 Shell PATH。目录、环境检测、更新和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 
 初始化并配置通讯渠道：
@@ -288,11 +288,11 @@ codexc update
 codexc doctor
 ```
 
-日常升级统一使用 `codexc update`。Git 源码安装会更新官方 `main`，后台服务已安装时会自动停止并
-恢复；未安装时只离线更新配置和数据库。该命令必须从本机终端执行。详细流程和失败处理见
+日常升级统一使用 `codexc update`。Git 源码安装会更新官方 `main` 并刷新 npm 全局命令，后台服务
+已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。该命令必须从本机终端执行。详细流程和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 
-卸载 Git 源码安装并保留用户数据：
+卸载 Git 源码、对应 npm 全局命令和旧 Shell PATH 配置，并保留用户数据：
 
 ```bash
 codexc uninstall

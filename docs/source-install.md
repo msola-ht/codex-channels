@@ -19,16 +19,16 @@ curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/instal
 
 安装器先在 `~/.codex-connect` 的私有临时目录完成克隆、依赖安装、Gateway 与 WebUI 构建和版本
 校验；`main` 中 `package.json` 的版本必须与本机 Codex CLI 一致。成功后才移动为
-`codex-channels`。已有同名目录或 `~/.codex-connect/.bin/codexc` 时不会覆盖。
-安装前会显示 npm 版本和全局目录，并检测已有的 npm 全局版 `@hegenai/codexc` 及当前 `codexc`
-命令来源；检测只用于提示，不会自动卸载或修改已有 npm 包。
+`codex-channels`。已有同名目录时不会覆盖。安装前会显示 npm 版本和全局目录，并检测已有的 npm
+全局版 `@hegenai/codexc` 及当前 `codexc` 命令来源；源码构建完成后会用当前 `main` 构建结果替换
+当前 Node.js 环境中的同名全局包。
 Codex CLI 是 Gateway 的必需运行时。安装器找不到 `codex` 时，会通过 npm 安装与 `main` 项目版本
 一致的 `@openai/codex`；已有版本不匹配时失败关闭，不自动覆盖。安装器使用固定版本官方
 `codex login status` 检查登录状态；未登录或状态检查错误不阻止源码安装，用户需先运行该命令诊断，
 并在未登录时执行 `codex login`。npm 全局 `bin` 不在 PATH 时，自动安装后会明确停止并提示修正。
-脚本会为当前 Shell 配置隐藏目录 `~/.codex-connect/.bin`。交互式 Zsh/Bash 安装完成后会询问是否立即进入
-已加载源码命令的新 Shell；确认后无需重新打开终端。拒绝、使用其他 Shell 或在非交互环境安装时，
-按输出提示重新打开终端或手工更新 PATH。随后执行：
+安装器把构建产物打成临时 npm 包并安装到 `npm prefix --global`，因此不会把源码路径显示为 npm
+依赖，也不会写入 `.zshrc`、`.bashrc` 或 `.profile`。安装使用当前 Node.js 环境的全局目录；使用
+fnm、nvm 等版本管理器时，切换 Node.js 版本也会切换对应的全局命令。随后执行：
 
 ```bash
 codexc init
@@ -36,8 +36,8 @@ codexc setup
 codexc service install
 ```
 
-源码入口直接运行仓库内 `bin/codexc.mjs`，不会注册 npm 全局包。安装前已有的 npm 全局版不会被
-自动卸载；需要清理时由用户显式执行 `npm uninstall -g @hegenai/codexc`。
+Git 仓库用于跟踪和构建 `main`，日常命令由构建后的 npm 全局包提供。安装器会给仓库写入仅位于
+`.git/config` 的受管标记，不修改工作树。
 
 ## 更新
 
@@ -57,8 +57,8 @@ codexc update
 消息给出的 `codex-channels.pre-update-*` 路径，避免自动回退到可能不兼容新 Schema 的旧程序。
 
 更新会显示当前与远程 `main` 提交、候选源码克隆、构建预检和切换结果。依赖安装与构建成功时只显示
-阶段摘要；失败时输出对应工具的完整错误。旧版可见入口 `~/.codex-connect/bin/codexc` 会迁移到
-`.bin/codexc`，并替换安装器写入的 Shell PATH；按提示在当前终端重新加载 PATH 即可。
+阶段摘要；失败时输出对应工具的完整错误。源码切换后会重新打包并刷新 npm 全局命令。旧版
+`~/.codex-connect/bin/codexc`、`.bin/codexc` 入口及其 Shell PATH 配置会在首次更新时清理。
 
 ## 卸载
 
@@ -66,6 +66,8 @@ codexc update
 codexc uninstall
 ```
 
-该命令先卸载后台服务，再删除受管 Git 仓库和 `.bin/codexc` 入口。`config.toml`、数据库、凭据、
-日志、输出与 Shell 配置保留；Codex CLI 也不会被删除。命令只接受当前受管源码安装，遇到符号链接、
-不匹配的源码目录或非本项目入口时会拒绝删除。npm 全局版仍使用 npm 自己的卸载命令。
+该命令先卸载后台服务，再删除受管 Git 仓库及当前 Node.js 环境中的 `@hegenai/codexc` 全局包，并
+清理旧安装写入 `.zshrc`、`.bashrc`、`.bash_profile` 或 `.profile` 的 Codex Connect PATH 配置块。
+`config.toml`、数据库、凭据、日志和输出保留；Codex CLI 不会被删除。命令只接受带受管标记的源码
+安装，遇到符号链接、不匹配的源码目录或非本项目旧入口时会拒绝删除。直接从 npm Registry 安装的
+版本仍使用 `codexc service uninstall` 和 `npm uninstall -g @hegenai/codexc`。

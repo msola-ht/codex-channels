@@ -73,7 +73,7 @@ import { readFileSync } from "node:fs";
 const metadata = JSON.parse(readFileSync(process.argv[1], "utf8"));
 process.stdout.write(typeof metadata.version === "string" ? metadata.version : "未知");
 ' "$npm_codexc_manifest" 2>/dev/null || printf '%s' '未知')"
-  note "检测到 npm 全局版 @hegenai/codexc@${npm_codexc_version}；不会自动卸载。"
+  note "检测到 npm 全局版 @hegenai/codexc@${npm_codexc_version}；将由当前 main 构建替换。"
 elif [ -n "$current_codexc" ]; then
   note "未检测到 npm 全局版；当前已有 codexc 命令：$current_codexc"
 else
@@ -86,30 +86,20 @@ case "$install_root" in
   *) fail "CODEX_CONNECT_HOME 必须是绝对路径" ;;
 esac
 checkout="$install_root/codex-channels"
-launcher_dir="$install_root/.bin"
-launcher="$launcher_dir/codexc"
+global_launcher="$npm_global_prefix/bin/codexc"
 
 if [ -e "$checkout" ] || [ -L "$checkout" ]; then
   fail "源码目录已存在：${checkout}；已有源码安装请使用 codexc update"
 fi
-if [ -e "$launcher" ] || [ -L "$launcher" ]; then
-  fail "命令入口已存在：${launcher}；请先确认它是否属于旧安装"
-fi
-
-mkdir -p "$install_root" "$launcher_dir"
-chmod 700 "$install_root" "$launcher_dir"
+mkdir -p "$install_root"
+chmod 700 "$install_root"
 staging="$(mktemp -d "$install_root/.codex-channels-install.XXXXXX")"
 completed=false
-launcher_tmp=""
 cleanup() {
   if [ -n "${staging:-}" ] && [ -d "$staging" ]; then
     rm -rf "$staging"
   fi
   if [ "$completed" != true ]; then
-    if [ -n "${launcher_tmp:-}" ]; then
-      rm -f "$launcher_tmp"
-    fi
-    rm -f "$launcher"
     if [ -d "$checkout" ]; then
       rm -rf "$checkout"
     fi
@@ -178,76 +168,30 @@ note "正在安装依赖并构建 WebUI"
 [ -f "$staging/repository/webui/dist/index.html" ] \
   || fail "构建结果缺少 webui/dist/index.html"
 
+git -C "$staging/repository" config --local codex-connect.managed-source true \
+  || fail "无法标记受管源码安装"
 mv "$staging/repository" "$checkout"
-
-launcher_tmp="$launcher.tmp.$$"
-cat > "$launcher_tmp" <<'EOF'
-#!/bin/sh
-set -eu
-CODEX_CONNECT_HOME="$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
-export CODEX_CONNECT_HOME
-exec node "$CODEX_CONNECT_HOME/codex-channels/bin/codexc.mjs" "$@"
-EOF
-chmod 755 "$launcher_tmp"
-mv "$launcher_tmp" "$launcher"
-launcher_tmp=""
+package_directory="$staging/package"
+mkdir -p "$package_directory"
+pack_report="$(cd "$checkout" && npm pack --ignore-scripts --loglevel=error --json --pack-destination "$package_directory")" \
+  || fail "Codex Connect 源码打包失败"
+tarball="$(node -e '
+const report = JSON.parse(process.argv[1]);
+const entry = Array.isArray(report) ? report[0] : Object.values(report)[0];
+if (!entry?.filename) process.exit(1);
+process.stdout.write(entry.filename);
+' "$pack_report")" || fail "npm pack 未返回 tarball 文件名"
+npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$package_directory/$tarball" \
+  >/dev/null || fail "Codex Connect npm 全局命令安装失败；请检查 npm 全局目录权限"
+[ -x "$global_launcher" ] \
+  || fail "npm 全局命令入口不存在：$global_launcher"
 completed=true
-
-profile_line='export PATH="$HOME/.codex-connect/.bin:$PATH"'
-if [ "$install_root" = "$HOME/.codex-connect" ]; then
-  case "${SHELL:-}" in
-    */zsh) profile="$HOME/.zshrc" ;;
-    */bash) profile="$HOME/.bashrc" ;;
-    *) profile="$HOME/.profile" ;;
-  esac
-  if [ ! -f "$profile" ] || ! grep -F "$profile_line" "$profile" >/dev/null 2>&1; then
-    printf '\n# Codex Connect\n%s\n' "$profile_line" >> "$profile" \
-      || note "无法自动更新 ${profile}；请手工把 $launcher_dir 加入 PATH。"
-  fi
-fi
+node "$checkout/scripts/source-shell-path.mjs" remove \
+  || note "旧 Shell PATH 配置清理失败；可手工删除 Codex Connect 配置块。"
 
 rm -rf "$staging"
 staging=""
 success "Codex Connect Git 源码已安装：$checkout"
 printf '%s\n' "分支：main"
-printf '%s\n' "命令入口：$launcher"
-activation_shell=""
-activation_shell_name=""
-if [ "$install_root" = "$HOME/.codex-connect" ] && [ -t 1 ]; then
-  case "${SHELL:-}" in
-    */zsh)
-      activation_shell="$SHELL"
-      activation_shell_name="Zsh"
-      ;;
-    */bash)
-      activation_shell="$SHELL"
-      activation_shell_name="Bash"
-      ;;
-  esac
-fi
-
-if [ -n "$activation_shell" ] && [ -x "$activation_shell" ] \
-  && [ -r /dev/tty ] && [ -w /dev/tty ]; then
-  printf '%s' "是否立即进入已加载 Codex Connect 的新 ${activation_shell_name}？ [Y/n] " \
-    > /dev/tty
-  activation_answer="n"
-  if IFS= read -r activation_answer < /dev/tty; then
-    case "$activation_answer" in
-      ""|y|Y|yes|YES)
-        PATH="$launcher_dir:$PATH"
-        export PATH
-        success "源码命令已加载：$launcher"
-        print_next_steps
-        printf '%s\n' "正在进入新的 ${activation_shell_name}；退出后会返回原终端。"
-        exec "$activation_shell" -il < /dev/tty
-        ;;
-    esac
-  fi
-fi
-
-if [ "$install_root" = "$HOME/.codex-connect" ]; then
-  printf '%s\n' "重新打开终端，或执行：export PATH=\"\$HOME/.codex-connect/.bin:\$PATH\""
-else
-  printf '%s\n' "请把以下目录加入 PATH：$launcher_dir"
-fi
+success "npm 全局命令已安装：$global_launcher"
 print_next_steps

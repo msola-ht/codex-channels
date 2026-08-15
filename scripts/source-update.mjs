@@ -1,9 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync,
   existsSync,
   lstatSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -11,7 +9,6 @@ import {
   renameSync,
   rmdirSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,6 +17,7 @@ import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
+import { removeLegacySourceShellPaths } from "./source-shell-path.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const stableVersionPattern = /^\d+\.\d+\.\d+$/u;
@@ -28,7 +26,8 @@ const commitPattern = /^[0-9a-f]{40}$/u;
 export function managedSourceCheckout(environment = process.env, projectDir = packageDir) {
   const expected = join(userDataDir(environment), "codex-channels");
   if (!existsSync(expected) || !existsSync(join(expected, ".git"))) return undefined;
-  return realpathSync(expected) === realpathSync(projectDir) ? expected : undefined;
+  if (realpathSync(expected) === realpathSync(projectDir)) return expected;
+  return hasManagedSourceMarker(expected, environment) ? expected : undefined;
 }
 
 export async function updateManagedSourceInstallation(
@@ -66,7 +65,9 @@ export async function updateManagedSourceInstallation(
   );
   const installRoot = resolve(checkout, "..");
   if (currentCommit === remoteCommit) {
-    migrateManagedSourceLauncher(installRoot, environment, writeMessage);
+    if (hasManagedSourceLauncher(installRoot)) {
+      await installManagedSourceCommand(checkout, installRoot, environment, writeMessage, options);
+    }
     return { changed: false, commit: currentCommit, managed: true, version: currentVersion };
   }
 
@@ -137,8 +138,8 @@ export async function updateManagedSourceInstallation(
       throw error;
     }
 
+    await installManagedSourceCommand(checkout, installRoot, environment, writeMessage, options);
     await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
-    migrateManagedSourceLauncher(installRoot, environment, writeMessage);
     rmSync(backupPath, { recursive: true, force: true });
     backupPath = undefined;
     return {
@@ -175,55 +176,76 @@ export async function updateManagedSourceInstallation(
   }
 }
 
-function migrateManagedSourceLauncher(installRoot, environment, writeMessage) {
+function hasManagedSourceLauncher(installRoot) {
+  return [join(installRoot, "bin", "codexc"), join(installRoot, ".bin", "codexc")]
+    .some((launcher) => existsSync(launcher));
+}
+
+async function installManagedSourceCommand(
+  checkout,
+  installRoot,
+  environment,
+  writeMessage,
+  options,
+) {
   const legacyDirectory = join(installRoot, "bin");
   const legacyLauncher = join(legacyDirectory, "codexc");
-  if (!existsSync(legacyLauncher)) return;
   const hiddenDirectory = join(installRoot, ".bin");
   const hiddenLauncher = join(hiddenDirectory, "codexc");
-  const launcherStat = lstatSync(legacyLauncher);
-  const launcherContent = launcherStat.isFile() && !launcherStat.isSymbolicLink()
-    ? readFileSync(legacyLauncher, "utf8")
-    : "";
-  if (!launcherContent.includes('"$CODEX_CONNECT_HOME/codex-channels/bin/codexc.mjs"')) {
-    throw new Error(`旧命令入口不属于受管源码安装，拒绝迁移：${legacyLauncher}`);
-  }
-  if (existsSync(hiddenLauncher)) {
-    throw new Error(`隐藏命令入口已存在，拒绝覆盖：${hiddenLauncher}`);
+  for (const launcher of [legacyLauncher, hiddenLauncher]) {
+    if (!existsSync(launcher)) continue;
+    const launcherStat = lstatSync(launcher);
+    const launcherContent = launcherStat.isFile() && !launcherStat.isSymbolicLink()
+      ? readFileSync(launcher, "utf8")
+      : "";
+    if (!launcherContent.includes('"$CODEX_CONNECT_HOME/codex-channels/bin/codexc.mjs"')) {
+      throw new Error(`旧命令入口不属于受管源码安装，拒绝迁移：${launcher}`);
+    }
   }
 
-  mkdirSync(hiddenDirectory, { recursive: true, mode: 0o700 });
-  chmodSync(hiddenDirectory, 0o700);
-  const temporaryLauncher = `${hiddenLauncher}.tmp.${process.pid}`;
-  try {
-    writeFileSync(temporaryLauncher, launcherContent, { mode: launcherStat.mode & 0o777 });
-    chmodSync(temporaryLauncher, launcherStat.mode & 0o777);
-    renameSync(temporaryLauncher, hiddenLauncher);
-  } finally {
-    rmSync(temporaryLauncher, { force: true });
+  markManagedSourceCheckout(checkout, environment);
+  await (options.installGlobalPackage ?? installGlobalPackage)(checkout, environment, options);
+
+  for (const launcher of [legacyLauncher, hiddenLauncher]) {
+    if (!existsSync(launcher)) continue;
+    rmSync(launcher);
   }
-  updateManagedShellPaths(environment);
-  rmSync(legacyLauncher);
-  if (readdirSync(legacyDirectory).length === 0) rmdirSync(legacyDirectory);
-  writeMessage("note", `源码命令入口已迁移到隐藏目录：${hiddenLauncher}`);
-  writeMessage(
-    "note",
-    '当前终端请执行：export PATH="$HOME/.codex-connect/.bin:$PATH"',
+  for (const directory of [legacyDirectory, hiddenDirectory]) {
+    if (existsSync(directory) && readdirSync(directory).length === 0) rmdirSync(directory);
+  }
+  removeLegacySourceShellPaths(environment);
+  writeMessage("note", "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。");
+}
+
+function installGlobalPackage(checkout, environment, options) {
+  runQuiet(
+    process.execPath,
+    [join(checkout, "scripts", "install-global-source.mjs"), "--prepared"],
+    checkout,
+    environment,
+    options.runCommand,
   );
 }
 
-function updateManagedShellPaths(environment) {
-  const home = environment.HOME;
-  if (!home) return;
-  const oldLine = 'export PATH="$HOME/.codex-connect/bin:$PATH"';
-  const newLine = 'export PATH="$HOME/.codex-connect/.bin:$PATH"';
-  for (const profileName of [".zshrc", ".bashrc", ".profile"]) {
-    const profile = join(home, profileName);
-    if (!existsSync(profile)) continue;
-    const content = readFileSync(profile, "utf8");
-    if (!content.includes(oldLine)) continue;
-    writeFileSync(profile, content.replaceAll(oldLine, newLine));
+function markManagedSourceCheckout(checkout, environment) {
+  const result = spawnSync(
+    "git",
+    ["config", "--local", "codex-connect.managed-source", "true"],
+    { cwd: checkout, env: environment, encoding: "utf8" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`无法标记受管源码安装：${result.stderr || result.stdout}`);
   }
+}
+
+function hasManagedSourceMarker(checkout, environment) {
+  const result = spawnSync(
+    "git",
+    ["config", "--local", "--get", "codex-connect.managed-source"],
+    { cwd: checkout, env: environment, encoding: "utf8" },
+  );
+  return !result.error && result.status === 0 && result.stdout.trim() === "true";
 }
 
 function assertFastForward(checkout, currentCommit, targetCommit, environment) {

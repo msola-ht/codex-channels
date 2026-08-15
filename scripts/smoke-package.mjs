@@ -113,6 +113,8 @@ try {
     "scripts/source-update.mjs",
     "scripts/source-uninstall.d.mts",
     "scripts/source-uninstall.mjs",
+    "scripts/source-shell-path.d.mts",
+    "scripts/source-shell-path.mjs",
     "scripts/cli-status.mjs",
     "scripts/service-target-query.mjs",
     "scripts/codex-rules.mjs",

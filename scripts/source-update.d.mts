@@ -44,6 +44,11 @@ export interface SourceUpdateOptions {
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,
   ) => Promise<void> | void;
+  installGlobalPackage?: (
+    checkout: string,
+    environment: NodeJS.ProcessEnv,
+    options: SourceUpdateOptions,
+  ) => Promise<void> | void;
   renamePath?: (oldPath: string, newPath: string) => void;
 }
 

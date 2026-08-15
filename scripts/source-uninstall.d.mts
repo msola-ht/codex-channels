@@ -9,6 +9,9 @@ export interface SourceUninstallOptions {
     checkout: string,
     environment: NodeJS.ProcessEnv,
   ) => Promise<void> | void;
+  uninstallGlobalPackage?: (
+    environment: NodeJS.ProcessEnv,
+  ) => Promise<void> | void;
 }
 
 export function uninstallManagedSourceInstallation(
