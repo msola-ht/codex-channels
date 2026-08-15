@@ -47,12 +47,38 @@ esac
 for command in git node npm; do
   command -v "$command" >/dev/null 2>&1 || fail "缺少必需命令：$command"
 done
-command -v codex >/dev/null 2>&1 || fail "缺少 Codex CLI；请先安装并登录配套版本"
 
 node -e '
 const [major, minor] = process.versions.node.split(".").map(Number);
 if (major < 22 || (major === 22 && minor < 13)) process.exit(1);
 ' || fail "Node.js 版本过低；需要 22.13.0 或更高版本"
+
+npm_version="$(npm --version 2>/dev/null)" || fail "无法读取 npm 版本"
+npm_global_root="$(npm root --global 2>/dev/null)" || fail "无法读取 npm 全局安装目录"
+npm_global_prefix="$(npm prefix --global 2>/dev/null)" || fail "无法读取 npm 全局安装前缀"
+case "$npm_global_root" in
+  /*) ;;
+  *) fail "npm 全局安装目录不是绝对路径：$npm_global_root" ;;
+esac
+case "$npm_global_prefix" in
+  /*) ;;
+  *) fail "npm 全局安装前缀不是绝对路径：$npm_global_prefix" ;;
+esac
+npm_codexc_manifest="$npm_global_root/@hegenai/codexc/package.json"
+current_codexc="$(command -v codexc 2>/dev/null || true)"
+note "npm 检测通过：$npm_version；全局目录：$npm_global_root"
+if [ -f "$npm_codexc_manifest" ]; then
+  npm_codexc_version="$(node -e '
+import { readFileSync } from "node:fs";
+const metadata = JSON.parse(readFileSync(process.argv[1], "utf8"));
+process.stdout.write(typeof metadata.version === "string" ? metadata.version : "未知");
+' "$npm_codexc_manifest" 2>/dev/null || printf '%s' '未知')"
+  note "检测到 npm 全局版 @hegenai/codexc@$npm_codexc_version；不会自动卸载。"
+elif [ -n "$current_codexc" ]; then
+  note "未检测到 npm 全局版；当前已有 codexc 命令：$current_codexc"
+else
+  note "未检测到 npm 全局版 @hegenai/codexc。"
+fi
 
 install_root="${CODEX_CONNECT_HOME:-$HOME/.codex-connect}"
 case "$install_root" in
@@ -104,10 +130,27 @@ if (!/^\d+\.\d+\.\d+$/u.test(version)) process.exit(1);
 process.stdout.write(version);
 ' "$staging/repository/package.json")"
 version="$package_version"
-codex_version="$(codex --version 2>/dev/null | awk '{ print $NF }')"
+codex_command="$(command -v codex 2>/dev/null || true)"
+if [ -z "$codex_command" ]; then
+  note "未检测到 Codex CLI，正在安装 @openai/codex@$version"
+  npm install --global --no-audit --no-fund "@openai/codex@$version" \
+    || fail "Codex CLI 安装失败；请检查 npm 全局目录权限"
+  codex_command="$(command -v codex 2>/dev/null || true)"
+  [ -n "$codex_command" ] \
+    || fail "Codex CLI 已安装到 $npm_global_prefix/bin，但该目录不在 PATH；请加入 PATH 后重新运行"
+  success "Codex CLI $version 已安装。"
+fi
+codex_version="$($codex_command --version 2>/dev/null | awk '{ print $NF }')"
 codex_version="${codex_version#v}"
 [ "$codex_version" = "$version" ] \
   || fail "Codex CLI 版本不匹配：main 需要 $version，当前 ${codex_version:-未知}"
+if "$codex_command" login status >/dev/null 2>&1; then
+  codex_logged_in=true
+  note "Codex CLI 检测通过：$codex_command · $codex_version · 已登录"
+else
+  codex_logged_in=false
+  note "Codex CLI 检测通过：$codex_command · $codex_version · 未登录或登录状态不可用"
+fi
 
 note "正在安装依赖并构建 Gateway"
 (cd "$staging/repository" \
@@ -158,12 +201,15 @@ staging=""
 success "Codex Connect Git 源码已安装：$checkout"
 printf '%s\n' "分支：main"
 printf '%s\n' "命令入口：$launcher"
-if npm list --global --depth=0 @hegenai/codexc >/dev/null 2>&1; then
-  note "检测到已有 npm 全局版；源码入口会优先使用，但 npm 包不会被自动卸载。"
-fi
 if [ "$install_root" = "$HOME/.codex-connect" ]; then
   printf '%s\n' "重新打开终端，或执行：export PATH=\"\$HOME/.codex-connect/bin:\$PATH\""
 else
   printf '%s\n' "请把以下目录加入 PATH：$launcher_dir"
 fi
-printf '%s\n' "下一步：codexc init && codexc setup && codexc service install"
+if [ "$codex_logged_in" = true ]; then
+  printf '%s\n' "下一步：codexc init && codexc setup && codexc service install"
+else
+  printf '%s\n' "下一步：codex login status"
+  printf '%s\n' "如未登录：codex login"
+  printf '%s\n' "登录后执行：codexc init && codexc setup && codexc service install"
+fi

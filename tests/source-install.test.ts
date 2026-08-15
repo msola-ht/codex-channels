@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +30,10 @@ describe("Linux/macOS Git 源码安装", () => {
     const result = runInstaller(root, repository, home);
 
     expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect(result.stdout).toContain("npm 检测通过");
+    expect(result.stdout).toContain("未检测到 npm 全局版");
+    expect(result.stdout).toContain("Codex CLI 检测通过");
+    expect(result.stdout).toContain("已登录");
     const installRoot = join(home, ".codex-connect");
     const checkout = join(installRoot, "codex-channels");
     const launcher = join(installRoot, "bin", "codexc");
@@ -55,6 +60,49 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(result.status).not.toBe(0);
     expect(existsSync(join(home, ".codex-connect", "codex-channels"))).toBe(false);
     expect(existsSync(join(home, ".codex-connect", "bin", "codexc"))).toBe(false);
+  });
+
+  it("reports an existing global npm installation without removing it", () => {
+    const root = temporaryDirectory("codexc-source-install-npm-");
+    const repository = createFixtureRepository(root);
+    const home = join(root, "home");
+    const npmManifest = join(
+      root,
+      "npm-global",
+      "lib",
+      "node_modules",
+      "@hegenai",
+      "codexc",
+      "package.json",
+    );
+    mkdirSync(resolve(npmManifest, ".."), { recursive: true });
+    writeFileSync(npmManifest, JSON.stringify({ version: "0.146.1" }));
+
+    const result = runInstaller(root, repository, home);
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect(result.stdout).toContain(
+      "检测到 npm 全局版 @hegenai/codexc@0.146.1；不会自动卸载",
+    );
+    expect(readFileSync(npmManifest, "utf8")).toContain("0.146.1");
+  });
+
+  it("installs a missing Codex CLI and reports that login is still required", () => {
+    const root = temporaryDirectory("codexc-source-install-codex-");
+    const repository = createFixtureRepository(root);
+    const home = join(root, "home");
+
+    const result = runInstaller(root, repository, home, { codexInstalled: false });
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect(result.stdout).toContain(
+      "未检测到 Codex CLI，正在安装 @openai/codex@0.147.0",
+    );
+    expect(result.stdout).toContain("Codex CLI 0.147.0 已安装");
+    expect(result.stdout).toContain("0.147.0 · 未登录或登录状态不可用");
+    expect(result.stdout).toContain("下一步：codex login status");
+    expect(result.stdout).toContain("如未登录：codex login");
+    expect(existsSync(join(root, "fake-bin", "codex"))).toBe(true);
   });
 });
 
@@ -120,12 +168,42 @@ function createFixtureRepository(
   return repository;
 }
 
-function runInstaller(root: string, repository: string, home: string) {
+function runInstaller(
+  root: string,
+  repository: string,
+  home: string,
+  options: { codexInstalled?: boolean } = {},
+) {
   const fakeBin = join(root, "fake-bin");
   mkdirSync(fakeBin, { recursive: true });
   const codex = join(fakeBin, "codex");
-  writeFileSync(codex, "#!/bin/sh\nprintf '%s\\n' 'codex-cli 0.147.0'\n");
-  chmodSync(codex, 0o755);
+  if (options.codexInstalled !== false) {
+    writeFileSync(codex, fakeCodexScript(true));
+    chmodSync(codex, 0o755);
+  } else {
+    symlinkSync(process.execPath, join(fakeBin, "node"));
+    const realNpm = execFileSync("which", ["npm"], { encoding: "utf8" }).trim();
+    const npm = join(fakeBin, "npm");
+    writeFileSync(
+      npm,
+      `#!${process.execPath}\n`
+        + "import { chmodSync, writeFileSync } from 'node:fs';\n"
+        + "import { spawnSync } from 'node:child_process';\n"
+        + "const args = process.argv.slice(2);\n"
+        + `if (args.includes('@openai/codex@0.147.0')) {\n`
+        + `  writeFileSync(${JSON.stringify(codex)}, ${JSON.stringify(fakeCodexScript(false))});\n`
+        + `  chmodSync(${JSON.stringify(codex)}, 0o755);\n`
+        + "  process.exit(0);\n"
+        + "}\n"
+        + `const result = spawnSync(${JSON.stringify(realNpm)}, args, { env: process.env, stdio: 'inherit' });\n`
+        + "if (result.error) throw result.error;\n"
+        + "process.exit(result.status ?? 1);\n",
+    );
+    chmodSync(npm, 0o755);
+  }
+  const inheritedPath = options.codexInstalled === false
+    ? "/usr/bin:/bin"
+    : process.env.PATH ?? "";
 
   return spawnSync(
     "/bin/sh",
@@ -141,11 +219,20 @@ function runInstaller(root: string, repository: string, home: string) {
         GIT_CONFIG_KEY_0: `url.${repository}.insteadOf`,
         GIT_CONFIG_VALUE_0: "https://github.com/msola-ht/codex-channels.git",
         HOME: home,
-        PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+        npm_config_prefix: join(root, "npm-global"),
+        PATH: `${fakeBin}${delimiter}${inheritedPath}`,
         SHELL: "/bin/sh",
       },
     },
   );
+}
+
+function fakeCodexScript(loggedIn: boolean): string {
+  return "#!/bin/sh\n"
+    + "if [ \"${1:-}\" = '--version' ]; then printf '%s\\n' 'codex-cli 0.147.0'; exit 0; fi\n"
+    + "if [ \"${1:-}\" = 'login' ] && [ \"${2:-}\" = 'status' ]; then "
+    + `exit ${loggedIn ? 0 : 1}; fi\n`
+    + "exit 1\n";
 }
 
 function fixtureLock(name: string): string {

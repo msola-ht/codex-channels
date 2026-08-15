@@ -33,6 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/instal
 
 重新打开终端后继续初始化。源码安装的目录、更新和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
+源码安装器会检测 Codex CLI；缺失时自动安装与项目一致的版本，登录状态未通过时提示检查并登录。
 
 初始化并配置通讯渠道：
 

@@ -11,8 +11,7 @@ Linux 与 macOS 可以把 Codex Connect 官方 `main` 分支作为完整 Git 仓
 
 ## 安装
 
-先安装 Node.js 22.13 或更高版本、Git、npm，以及与 Codex Connect 版本一致并已登录的 Codex CLI。
-然后运行：
+先安装 Node.js 22.13 或更高版本、Git 和 npm，然后运行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
@@ -21,6 +20,12 @@ curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/instal
 安装器先在 `~/.codex-connect` 的私有临时目录完成克隆、依赖安装、Gateway 与 WebUI 构建和版本
 校验；`main` 中 `package.json` 的版本必须与本机 Codex CLI 一致。成功后才移动为
 `codex-channels`。已有同名目录或 `~/.codex-connect/bin/codexc` 时不会覆盖。
+安装前会显示 npm 版本和全局目录，并检测已有的 npm 全局版 `@hegenai/codexc` 及当前 `codexc`
+命令来源；检测只用于提示，不会自动卸载或修改已有 npm 包。
+Codex CLI 是 Gateway 的必需运行时。安装器找不到 `codex` 时，会通过 npm 安装与 `main` 项目版本
+一致的 `@openai/codex`；已有版本不匹配时失败关闭，不自动覆盖。安装器使用固定版本官方
+`codex login status` 检查登录状态；未登录或状态检查错误不阻止源码安装，用户需先运行该命令诊断，
+并在未登录时执行 `codex login`。npm 全局 `bin` 不在 PATH 时，自动安装后会明确停止并提示修正。
 脚本会为当前 Shell 配置 `~/.codex-connect/bin`，重新打开终端后执行：
 
 ```bash
