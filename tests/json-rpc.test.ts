@@ -613,7 +613,7 @@ describe("JsonRpcClient", () => {
     expect(transport.sent[0]).toMatchObject({
       params: {
         clientInfo: {
-          name: "codex_connect_gateway",
+          name: "codex_connect",
           title: "Codex Connect Gateway",
         },
         capabilities: {
@@ -2007,14 +2007,14 @@ describe("JsonRpcClient", () => {
           path: "plugin://github@local",
         },
       ],
-      "codex_connect_gateway:request-1",
+      "codex_connect:request-1",
       "/tmp/project",
       { model: "gpt-selected", effort: "high", serviceTier: null },
     );
     await client.startTurn(
       "thread-1",
       [{ type: "text", text: "开启 Fast" }],
-      "codex_connect_gateway:request-fast",
+      "codex_connect:request-fast",
       "/tmp/project",
       { serviceTier: "priority" },
     );
@@ -2022,12 +2022,12 @@ describe("JsonRpcClient", () => {
       "thread-1",
       "turn-1",
       [{ type: "text", text: "补充输入" }],
-      "codex_connect_gateway:request-2",
+      "codex_connect:request-2",
     );
 
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .toMatchObject({
-        clientUserMessageId: "codex_connect_gateway:request-1",
+        clientUserMessageId: "codex_connect:request-1",
         input: [
           { type: "text", text: "测试输入", text_elements: [] },
           { type: "localImage", path: "/tmp/screenshot.png" },
@@ -2050,11 +2050,11 @@ describe("JsonRpcClient", () => {
       });
     expect(transport.sent.filter((message) => message.method === "turn/start")[1]?.params)
       .toMatchObject({
-        clientUserMessageId: "codex_connect_gateway:request-fast",
+        clientUserMessageId: "codex_connect:request-fast",
         serviceTier: "priority",
       });
     expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
-      .toMatchObject({ clientUserMessageId: "codex_connect_gateway:request-2" });
+      .toMatchObject({ clientUserMessageId: "codex_connect:request-2" });
   });
 
   it("lists official collaboration presets and sends the selected mode on turn/start", async () => {
@@ -2071,7 +2071,7 @@ describe("JsonRpcClient", () => {
     await client.startTurn(
       "thread-1",
       [{ type: "text", text: "设计发布流程" }],
-      "codex_connect_gateway:plan-1",
+      "codex_connect:plan-1",
       "/tmp/project",
       {
         collaborationMode: {
@@ -2181,7 +2181,7 @@ describe("JsonRpcClient", () => {
 
     const starts = transport.sent.filter((message) => message.method === "thread/start");
     expect(starts[0]?.params)
-      .toMatchObject({ model: "gpt-configured" });
+      .toMatchObject({ model: "gpt-configured", serviceName: "codex_connect" });
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .not.toHaveProperty("model");
   });

@@ -2995,6 +2995,7 @@ describe("codexc CLI", () => {
     const configPath = join(home, "config.toml");
     const socketPath = join(root, "app.sock");
     let initializedReceived = false;
+    const initializedClientNames: unknown[] = [];
     let appServerVersion = expectedAppServerVersion;
     const secret = "123456:test-secret-token";
     updateGatewayConfig(configPath, (document) => {
@@ -3012,6 +3013,7 @@ describe("codexc CLI", () => {
       client.on("message", (data) => {
         const message = JSON.parse(data.toString());
         if (message.method === "initialize") {
+          initializedClientNames.push(message.params?.clientInfo?.name);
           client.send(JSON.stringify({
             jsonrpc: "2.0",
             id: message.id,
@@ -3075,6 +3077,8 @@ describe("codexc CLI", () => {
       expect(stdout).toContain("诊断通过");
       expect(stdout).not.toContain(secret);
       expect(initializedReceived).toBe(true);
+      expect(initializedClientNames.length).toBeGreaterThan(0);
+      expect(initializedClientNames.every((name) => name === "codex_connect")).toBe(true);
 
       appServerVersion = "0.0.0";
       const mismatched = await execFileAsync(

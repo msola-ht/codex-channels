@@ -591,7 +591,7 @@ async function initializeUnixWebSocket(socketPath) {
           method: "initialize",
           params: {
             clientInfo: {
-              name: "codexc_doctor",
+              name: "codex_connect",
               title: "Codex Connect Doctor",
               version: packageMetadata.version,
             },

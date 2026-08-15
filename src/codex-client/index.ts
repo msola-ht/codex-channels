@@ -23,6 +23,7 @@ export {
   toOperationUpdate,
 } from "./operation-adapter.js";
 export {
+  codexConnectIntegrationId,
   gatewayVersion,
   supportedCodexCliVersion,
 } from "./protocol-info.js";
