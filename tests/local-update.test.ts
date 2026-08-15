@@ -54,6 +54,18 @@ describe("local update", () => {
     );
   });
 
+  it("recognizes installed macOS launchd plist definitions", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-local-update-launchd-"));
+    temporaryDirectories.push(home);
+    const agentsDirectory = join(home, "Library", "LaunchAgents");
+    mkdirSync(agentsDirectory, { recursive: true });
+    writeFileSync(join(agentsDirectory, "com.hegenai.codex-app-server.plist"), "plist");
+    writeFileSync(join(agentsDirectory, "com.hegenai.codex-gateway.plist"), "plist");
+
+    expect(inspectCoreServiceInstallation({ ...process.env, HOME: home }, "darwin"))
+      .toEqual({ installed: true });
+  });
+
   it("materializes only missing safe config defaults and keeps a private backup", () => {
     const { environment, configPath } = fixture();
     const document = readGatewayConfig(configPath);

@@ -31,7 +31,7 @@ npm install -g @hegenai/codexc@0.147.0
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
 
-重新打开终端后继续初始化。目录、环境检测、更新和失败处理见
+按安装器提示进入已加载的新 Shell 或重新打开终端后继续初始化。目录、环境检测、更新和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 
 初始化并配置通讯渠道：
