@@ -234,6 +234,8 @@ codexc service logs all -n 200        # 查看全部核心服务最近 200 行�
 会拒绝安装或卸载服务、停止 Gateway/App Server，以及重启 App Server；对应的 `all` 操作同样拒绝。
 渠道内仍可查看状态和日志、重新加载或启动服务、只重启 Gateway，以及管理独立的 WebUI/指标中心。
 需要执行被拒绝的操作时，按提示复制命令到本机终端运行。
+Gateway 会自动监听第三方 Provider 的模型目录与 Profile 变化，校验通过并在无活动 Turn 时自动
+重启 App Server；该自动重启由服务自身触发，渠道内手动重启 App Server 仍被拒绝。
 
 查看、导出或清理脱敏指标：
 

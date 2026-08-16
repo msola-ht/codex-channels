@@ -731,6 +731,10 @@ export class GatewayApplication {
       handleApprovalServerRequest(request, this.approval));
   }
 
+  hasActiveTurns(): boolean {
+    return this.core.hasActiveTurns();
+  }
+
   start(): Promise<void> {
     this.startTask ??= this.startInternal().finally(() => {
       this.startupSettled = true;

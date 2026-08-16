@@ -1,5 +1,7 @@
+import { spawn } from "node:child_process";
 import { unwatchFile, watchFile } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { Logger } from "pino";
 
@@ -14,6 +16,9 @@ import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { createLogger } from "../observability/index.js";
 import { GatewayApplication } from "./app.js";
+import { ProviderSettingsWatcher } from "./provider-settings-watcher.js";
+
+const packageDir = fileURLToPath(new URL("../../", import.meta.url));
 
 export async function runGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
@@ -40,7 +45,56 @@ export async function runGatewayProcess(): Promise<void> {
   let reloadPending = false;
   let reloadTimer: NodeJS.Timeout | undefined;
 
+  const restartAppServerService = (): Promise<void> => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      join(packageDir, "bin", "codexc.mjs"),
+      "service",
+      "restart",
+      "app-server",
+    ], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout = `${stdout}${chunk}`.slice(-4_000);
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr = `${stderr}${chunk}`.slice(-4_000);
+    });
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("codexc service restart app-server 超时"));
+    }, 180_000);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const detail = stderr.trim() || stdout.trim();
+      reject(new Error(
+        `codexc service restart app-server 失败：exit=${code ?? "?"}`
+        + (detail ? ` ${detail}` : ""),
+      ));
+    });
+  });
+  const providerSettingsWatcher = new ProviderSettingsWatcher({
+    logger,
+    hasActiveTurns: () => application.hasActiveTurns(),
+    restartAppServer: restartAppServerService,
+    environment: process.env,
+  });
+
   const stopWatching = (): void => {
+    providerSettingsWatcher.stop();
     if (reloadTimer) {
       clearTimeout(reloadTimer);
       reloadTimer = undefined;
@@ -170,6 +224,7 @@ export async function runGatewayProcess(): Promise<void> {
   }
   gatewayOwner.markReady();
   started = true;
+  providerSettingsWatcher.start();
   if (watchedPaths.length > 0) {
     for (const path of watchedPaths) {
       watchFile(path, { interval: 500, persistent: false }, (current, previous) => {
