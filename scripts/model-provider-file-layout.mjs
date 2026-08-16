@@ -22,8 +22,13 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
   const paths = migrationPaths(codexHome);
   const existingLegacy = paths.filter(({ legacy }) => existsSync(legacy));
   if (existingLegacy.length === 0) return { changed: false, layoutVersion, moved: [] };
+  const seenTargets = new Set();
   for (const { legacy, current } of existingLegacy) {
     assertPrivateRegularFile(legacy);
+    if (seenTargets.has(current)) {
+      throw new Error(`多个旧版文件指向同一目标，拒绝迁移：${current}`);
+    }
+    seenTargets.add(current);
     if (existsSync(current)) {
       throw new Error(`第三方 Provider 新旧文件同时存在，拒绝迁移：${legacy}、${current}`);
     }
@@ -37,6 +42,7 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
     const newCatalogPath = join(codexHome, "sf-deepseek.models.json");
     const oldRolePath = join(codexHome, "codex-connect-third-party-subagent.config.toml");
     const newRolePath = join(codexHome, "sf-agent.config.toml");
+    const legacyDsRolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
     for (const { legacy, current } of existingLegacy) {
       const content = rewriteManagedTomlReferences(
         readFileSync(legacy, "utf8"),
@@ -51,6 +57,7 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
       newCatalogPath,
       oldRolePath,
       newRolePath,
+      legacyDsRolePath,
     );
     for (const { legacy } of existingLegacy) unlinkSync(legacy);
     return {
@@ -286,6 +293,7 @@ function migrationPaths(codexHome) {
     ["deepseek.models.manifest.json", "sf-deepseek.models.manifest.json"],
     ["codex-connect-deepseek.config.toml", "sf-deepseek.managed.toml"],
     ["codex-connect-opencode-go.config.toml", "sf-opencode-go.managed.toml"],
+    ["codex-connect-ds-subagent.config.toml", "sf-agent.config.toml"],
     ["codex-connect-third-party-subagent.config.toml", "sf-agent.config.toml"],
   ].map(([legacy, current]) => ({
     legacy: join(codexHome, legacy),
@@ -298,6 +306,10 @@ function migrationPaths(codexHome) {
     {
       legacy: join(deepseekBackup, "codex-connect-deepseek.config.toml"),
       current: join(deepseekBackup, "sf-deepseek.managed.toml"),
+    },
+    {
+      legacy: join(deepseekBackup, "codex-connect-ds-subagent.config.toml"),
+      current: join(deepseekBackup, "sf-agent.config.toml"),
     },
     {
       legacy: join(deepseekBackup, "codex-connect-third-party-subagent.config.toml"),
@@ -336,6 +348,7 @@ function rewriteRootConfigReferences(
   newCatalogPath,
   oldRolePath,
   newRolePath,
+  legacyDsRolePath,
 ) {
   if (!existsSync(configPath)) return;
   assertPrivateRegularFile(configPath, { allowGroupRead: true });
@@ -355,6 +368,23 @@ function rewriteRootConfigReferences(
   if (external.config_file === oldRolePath) {
     external.config_file = newRolePath;
     agents.external = external;
+    document.agents = agents;
+    changed = true;
+  }
+  const legacyDs = record(agents.ds);
+  if (legacyDs.config_file === legacyDsRolePath) {
+    if (record(agents.external).config_file === undefined) {
+      agents.external = {
+        ...(typeof legacyDs.description === "string"
+          ? { description: legacyDs.description }
+          : {}),
+        ...(Array.isArray(legacyDs.nickname_candidates)
+          ? { nickname_candidates: legacyDs.nickname_candidates }
+          : {}),
+        config_file: newRolePath,
+      };
+    }
+    delete agents.ds;
     document.agents = agents;
     changed = true;
   }

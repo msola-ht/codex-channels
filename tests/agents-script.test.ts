@@ -141,6 +141,38 @@ describe("codexc agents script", () => {
     }
   });
 
+  it("reports and disables the legacy managed ds role", async () => {
+    const fixture = createFixture();
+    const legacyPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
+    try {
+      writeFileSync(legacyPath, 'model_provider = "deepseek"\n', { mode: 0o600 });
+      writeFileSync(fixture.configPath, [
+        "[features]",
+        "multi_agent_v2 = true",
+        "[agents.ds]",
+        'description = "Old managed role"',
+        `config_file = ${JSON.stringify(legacyPath)}`,
+        "",
+      ].join("\n"), { mode: 0o600 });
+
+      expect(agentsStatus(fixture.environment)).toMatchObject({
+        multiAgentV2Enabled: true,
+        externalRoleConfigured: false,
+        legacyDsRoleConfigured: true,
+      });
+
+      await disableThirdPartyRole(fixture.environment, { updateConfig: applyConfigUpdate });
+
+      expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
+        features: { multi_agent_v2: false },
+        agents: {},
+      });
+      expect(existsSync(legacyPath)).toBe(false);
+    } finally {
+      fixture.remove();
+    }
+  });
+
   it("supports a provider configured as the fixed primary", async () => {
     const fixture = createFixture();
     try {

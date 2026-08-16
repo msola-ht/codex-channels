@@ -1148,7 +1148,7 @@ export class ConversationCore {
 }
 
 function supportsDetailedModelTiming(modelProvider: string | undefined): boolean {
-  return modelProvider === "deepseek";
+  return modelProvider === "deepseek" || modelProvider === "opencode-go";
 }
 
 function rateLimitNoticeFingerprint(snapshot: RateLimitSnapshot): string | undefined {

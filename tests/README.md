@@ -16,7 +16,7 @@
   以及 Routing 不再解析原始协议信封。
 - 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理；项目输入
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
-- 图片识别结果的严格数量、顺序、长度和提示注入隔离；双 Provider 与仅 DeepSeek Setup 均为
+- 图片识别结果的严格数量、顺序、长度和提示注入隔离；第三方 Provider Setup 均为
   外部视觉接口分离保存 Key；模型不支持图片时使用单次 Responses 请求、私有 Key 和稳定响应裁剪，
   外部视觉模型只做客观观察和文字提取，原 Thread 默认不额外搜索、核实或调用工具；
   三渠道只在外部请求发起后发送一次包含图片数量与本条要求的视觉 API 识别提示；`/vision`
@@ -269,7 +269,7 @@
   构建失败不留半成品；源码更新覆盖同版本新 commit、脏仓库和自定义提交提前拒绝、
   候选仓库先构建后切换、Codex CLI 版本不匹配时不动现有安装、切换失败恢复旧仓库与服务、旧仓库
   成功清理、Git 阶段摘要、构建成功日志收敛、旧源码入口迁移到全局包，以及 Registry 安装继续复用原本地更新路径。
-- `codexc start` 在仅 DeepSeek 固定模式下复用 `service-app-server`，把主 App Server 的 Provider
+- `codexc start` 在第三方固定模式下复用 `service-app-server`，把主 App Server 的 Provider
   地址指向本机统计代理；监管 Socket 覆盖裸 App Server、后台入口重复启动和 Provider 拓扑不一致
   的失败关闭，配置级所有权 Socket 跨 Provider 覆盖直接入口和前台入口的重复 Gateway，真实
   WebSocket 健康检查阻止仅创建 Socket 文件的未就绪实例提前启动 Gateway；监管入口关闭会主动

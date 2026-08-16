@@ -26,14 +26,18 @@ const roleDescription =
 export function agentsStatus(environment = process.env) {
   const configPath = agentRolesConfigPath(environment);
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
+  const legacyRoleConfigPath = join(dirname(roleConfigPath), legacyManagedRoleConfigFileName);
   let multiAgentV2Enabled = false;
   let externalRoleConfigured = false;
+  let legacyDsRoleConfigured = false;
   if (existsSync(configPath)) {
     try {
       const document = parse(readFileSync(configPath, "utf8"));
       const feature = document.features?.multi_agent_v2;
       multiAgentV2Enabled = feature === true || feature?.enabled === true;
       externalRoleConfigured = document.agents?.[managedRoleName] !== undefined;
+      legacyDsRoleConfigured = record(document.agents?.[legacyManagedRoleName]).config_file
+        === legacyRoleConfigPath;
     } catch {
       // 配置无法解析时按未配置处理，错误由 configure 命令显式提示。
     }
@@ -49,6 +53,7 @@ export function agentsStatus(environment = process.env) {
     roleConfigPath,
     multiAgentV2Enabled,
     externalRoleConfigured,
+    legacyDsRoleConfigured,
     provider: selection?.provider,
     model: selection?.model,
   };
@@ -136,13 +141,22 @@ export async function removeManagedThirdPartyRole(
   if (!existsSync(configPath)) return;
   const selection = provider ? loadManagedModelProviderRole(environment) : undefined;
   if (provider && selection?.provider !== provider) return;
+  const legacyRoleConfigPath = join(
+    dirname(managedModelProviderRoleConfigPath(environment)),
+    legacyManagedRoleConfigFileName,
+  );
   let removed = false;
   await updateConfig(environment, (config) => {
-    if (!isManagedThirdPartyRole(config, environment)) return [];
+    const managedExternal = isManagedThirdPartyRole(config, environment);
+    const managedLegacyDs = isLegacyManagedRole(config, legacyRoleConfigPath);
+    if (!managedExternal && !managedLegacyDs) return [];
     removed = true;
-    const otherRoles = Object.keys(record(config.agents)).filter((name) => name !== managedRoleName);
+    const otherRoles = Object.keys(record(config.agents)).filter(
+      (name) => name !== managedRoleName && name !== legacyManagedRoleName,
+    );
     return [
-      { keyPath: `agents.${managedRoleName}`, value: null },
+      ...(managedExternal ? [{ keyPath: `agents.${managedRoleName}`, value: null }] : []),
+      ...(managedLegacyDs ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }] : []),
       ...(disableFeature && otherRoles.length === 0
         ? [{ keyPath: "features.multi_agent_v2", value: false }]
         : []),
@@ -150,6 +164,7 @@ export async function removeManagedThirdPartyRole(
   });
   if (!removed) return;
   removeManagedModelProviderRoleConfig(environment);
+  removeLegacyRoleConfig(legacyRoleConfigPath);
 }
 
 function providerDefinition(provider) {
@@ -236,6 +251,7 @@ function printStatus(environment) {
   console.log(`配置：${status.configPath}`);
   console.log(`multi_agent_v2：${status.multiAgentV2Enabled ? "已启用" : "未启用"}`);
   console.log(`第三方子代理：${status.externalRoleConfigured ? "已配置" : "未配置"}`);
+  console.log(`旧版 DS 子代理角色：${status.legacyDsRoleConfigured ? "已配置（迁移前状态）" : "未配置"}`);
   if (status.provider) console.log(`Provider：${status.provider}`);
   if (status.model) console.log(`模型：${status.model}`);
   console.log(`角色配置文件：${status.roleConfigPath}`);

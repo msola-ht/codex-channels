@@ -99,6 +99,58 @@ describe("managed model provider file layout", () => {
     expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(true);
   });
 
+  it("migrates the original managed ds role file and agents.ds entry", () => {
+    const codexHome = fixtureHome();
+    const oldCatalogPath = join(codexHome, "deepseek.models.json");
+    const legacyDsRolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
+    writePrivate(join(codexHome, "deepseek.config.toml"), [
+      'model = "deepseek-v4-pro"',
+      'model_provider = "deepseek"',
+      `model_catalog_json = ${JSON.stringify(oldCatalogPath)}`,
+      "",
+    ].join("\n"));
+    writePrivate(oldCatalogPath, '{"models":[]}\n');
+    writePrivate(
+      join(codexHome, "codex-connect-deepseek.config.toml"),
+      'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+    );
+    writePrivate(legacyDsRolePath, [
+      'model = "deepseek-v4-pro"',
+      'model_provider = "deepseek"',
+      'model_reasoning_effort = "high"',
+      `model_catalog_json = ${JSON.stringify(oldCatalogPath)}`,
+      "",
+    ].join("\n"));
+    writePrivate(join(codexHome, "config.toml"), [
+      "[agents.ds]",
+      'description = "Old managed role"',
+      `config_file = ${JSON.stringify(legacyDsRolePath)}`,
+      "[agents.reviewer]",
+      'description = "User role"',
+      "",
+    ].join("\n"));
+
+    const result = migrateManagedModelProviderFiles({ CODEX_HOME: codexHome });
+
+    expect(result.changed).toBe(true);
+    expect(existsSync(legacyDsRolePath)).toBe(false);
+    const migratedRole = parse(
+      readFileSync(join(codexHome, "sf-agent.config.toml"), "utf8"),
+    );
+    expect(migratedRole.model_catalog_json).toBe(
+      join(codexHome, "sf-deepseek.models.json"),
+    );
+    const rootConfig = parse(readFileSync(join(codexHome, "config.toml"), "utf8"));
+    expect(rootConfig.agents).toMatchObject({
+      external: {
+        description: "Old managed role",
+        config_file: join(codexHome, "sf-agent.config.toml"),
+      },
+      reviewer: { description: "User role" },
+    });
+    expect((rootConfig.agents as Record<string, unknown> | undefined)?.ds).toBeUndefined();
+  });
+
   it("fails closed when a legacy file conflicts with its sf- target", () => {
     const codexHome = fixtureHome();
     writePrivate(join(codexHome, "deepseek.config.toml"), 'model = "legacy"\n');
@@ -110,6 +162,26 @@ describe("managed model provider file layout", () => {
       .toBe('model = "legacy"\n');
     expect(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8"))
       .toBe('model = "current"\n');
+  });
+
+  it("fails closed when two legacy role files target the same sf-agent name", () => {
+    const codexHome = fixtureHome();
+    writePrivate(
+      join(codexHome, "codex-connect-ds-subagent.config.toml"),
+      'model_provider = "deepseek"\n',
+    );
+    writePrivate(
+      join(codexHome, "codex-connect-third-party-subagent.config.toml"),
+      'model_provider = "deepseek"\n',
+    );
+
+    expect(() => migrateManagedModelProviderFiles({ CODEX_HOME: codexHome }))
+      .toThrow(/多个旧版文件指向同一目标/u);
+    expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "codex-connect-ds-subagent.config.toml"))).toBe(true);
+    expect(
+      existsSync(join(codexHome, "codex-connect-third-party-subagent.config.toml")),
+    ).toBe(true);
   });
 
   it("rejects a legacy file that is not private", () => {

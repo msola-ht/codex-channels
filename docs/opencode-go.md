@@ -45,6 +45,20 @@ Responses Provider 配置；当前 Flash/Pro 已通过 `/responses` 流式文本
 OpenCode Go 当前没有接入独立账户用量接口，`/usage` 会明确显示不支持；Thread Token、请求速度和
 本机请求指标仍正常记录。
 
+### 能力边界
+
+- 当前受控模型只声明文字输入。未启用外部图片识别时，Gateway 在 Turn 前拒绝图片，可配置
+  [`图片识别代理`](vision.md) 走外部视觉接口；音频输入同样在 Turn 前拒绝。
+- OpenCode Go 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
+- 网页搜索未实测：OpenCode Go 是否像 DeepSeek 一样通过 `/responses` 提供 `search` 工具尚未
+  验证，会话中出现 `web_search` item 前不视为已支持。
+- 当前按 HTTP/SSE 接入（`supports_websockets = false`），流式文本、工具调用和上下文压缩走
+  HTTP/SSE，不建立 Responses WebSocket。
+- API Key 没有官方账户接口可用于预检，Setup 只校验格式；首次请求失败时从模型指标和日志中
+  查看错误分类。
+- 运行统计与 DeepSeek 一致：调试模式展示最后一次请求的可观测首事件延迟，完成卡片展示整轮
+  综合思考速度与含推理生成速度；`/usage` 明确显示不支持账户用量。
+
 ## 价格维护
 
 运行时价格来自随包发布的 `runtime/opencode-go-pricing-baseline.json`，与 DeepSeek 官方人民币峰谷

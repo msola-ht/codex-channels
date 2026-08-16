@@ -11,9 +11,10 @@ export async function runCodexDefaultsSetup({
   createClient = createCodexUserConfigClient,
   primaryProvider = loadPrimaryModelProvider,
 } = {}) {
-  if (primaryProvider(environment) !== "openai") {
+  const provider = primaryProvider(environment);
+  if (provider !== "openai") {
     throw new Error(
-      "当前是仅 DeepSeek 固定模式；请先恢复 OpenAI 默认配置，再设置 Codex 官方模型",
+      `当前是第三方固定模式（${provider}）；请先恢复 OpenAI 默认配置，再设置 Codex 官方模型`,
     );
   }
   const client = await createClient({ environment });

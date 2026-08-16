@@ -124,7 +124,7 @@
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
   提供商，非敏感元数据写入主配置，API Key 按提供商隔离；拒绝删除仍被调用方引用的提供商，
   并可经确认显式转换旧单视觉配置。
-- `vision-setup.mjs` / `vision-setup.d.mts`：为双 Provider 与仅 DeepSeek 模式选择已登记的第三方
+- `vision-setup.mjs` / `vision-setup.d.mts`：为 OpenAI + 第三方 Provider 模式选择已登记的第三方
   API 提供商和视觉模型；不复制 Endpoint 或 API Key，禁用视觉不删除共享提供商。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
