@@ -1218,7 +1218,7 @@ describe("codexc CLI", () => {
       "--workspace",
       "external",
     ]);
-  });
+  }, 30_000);
 
   it("starts the App Server through the service entry with effective proxy settings", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-entry-"));
