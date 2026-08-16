@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 
 import { registerApp } from "@larksuiteoapi/node-sdk";
-import qrcode from "qrcode-terminal";
+import qrcode from "qrcode";
 
 import {
   readGatewayConfig,
@@ -309,7 +309,11 @@ function registrationError(error) {
 }
 
 function renderTerminalQRCode(url, output) {
-  qrcode.generate(url, { small: true }, (rendered) => {
+  qrcode.toString(url, { type: "terminal", small: true }, (error, rendered) => {
+    if (error) {
+      output.write(`二维码渲染失败：${error.message}\n`);
+      return;
+    }
     output.write(`${rendered}\n`);
   });
 }

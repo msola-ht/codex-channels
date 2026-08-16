@@ -638,8 +638,10 @@ async function main(argv) {
       baseUrl: FIXED_WEIXIN_QR_BASE_URL,
       signal: controller.signal,
       displayQr: async (value) => {
-        const qrterm = await import("qrcode-terminal");
-        qrterm.default.generate(value, { small: true });
+        const { default: qrcode } = await import("qrcode");
+        process.stdout.write(
+          `${await qrcode.toString(value, { type: "terminal", small: true })}\n`,
+        );
       },
       readVerifyCode: async () =>
         prompt.question("请输入手机微信显示的数字："),
