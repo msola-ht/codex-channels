@@ -38,8 +38,17 @@ export interface ManagedModelProviderSettings {
   provider: ManagedModelProviderId;
   displayName: string;
   model: string;
+  reasoningEffort: string;
   mode: "switching" | "exclusive";
-  models: string[];
+  models: Array<{
+    model: string;
+    displayName: string;
+    contextWindow: number;
+    reasoningEffort: string;
+    reasoningEfforts: Array<{ effort: string; description: string }>;
+    autoCompactLimit?: number;
+    autoCompactPercent?: number;
+  }>;
 }
 
 export function loadManagedModelProviderSettings(
@@ -48,9 +57,53 @@ export function loadManagedModelProviderSettings(
 
 export function writeManagedModelProviderProfileDefault(
   provider: ManagedModelProviderId,
-  model: string,
+  settings: {
+    model: string;
+    reasoningEffort: string;
+    autoCompactLimit?: number;
+  },
   environment?: NodeJS.ProcessEnv,
-): { provider: ManagedModelProviderId; model: string; mode: "switching" };
+): {
+  provider: ManagedModelProviderId;
+  model: string;
+  reasoningEffort: string;
+  autoCompactLimit?: number;
+  mode: "switching";
+};
+
+export function writeManagedModelProviderCatalogSettings(
+  provider: ManagedModelProviderId,
+  settings: {
+    model: string;
+    reasoningEffort: string;
+    autoCompactLimit?: number;
+  },
+  environment?: NodeJS.ProcessEnv,
+): {
+  model: string;
+  displayName: string;
+  contextWindow: number;
+  reasoningEffort: string;
+  reasoningEfforts: Array<{ effort: string; description: string }>;
+  autoCompactLimit?: number;
+  autoCompactPercent?: number;
+};
+
+export function withManagedModelCatalogSettings(
+  catalog: Record<string, unknown>,
+  definition: import("./model-provider-definitions.mjs").ModelProviderDefinition,
+  settings: {
+    model: string;
+    reasoningEffort: string;
+    autoCompactLimit?: number;
+  },
+): Record<string, unknown>;
+
+export function withPreservedManagedModelCatalogSettings(
+  catalog: Record<string, unknown>,
+  definition: import("./model-provider-definitions.mjs").ModelProviderDefinition,
+  previousModels?: ManagedModelProviderSettings["models"],
+): Record<string, unknown>;
 
 export function loadDeepseekAccountCredential(
   environment?: NodeJS.ProcessEnv,

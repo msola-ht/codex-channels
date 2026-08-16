@@ -1124,7 +1124,6 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1139,6 +1138,11 @@ describe("codexc CLI", () => {
     writeFileSync(
       join(codexHome, "sf-deepseek.managed.toml"),
       'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-deepseek.models.json"),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1305,7 +1309,6 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1327,8 +1330,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "opencode-go"',
-        'model_reasoning_effort = "high"',
-        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
         "[model_providers.opencode-go]",
         'name = "opencode-go"',
         'base_url = "https://opencode.ai/zen/go/v1"',
@@ -1347,7 +1349,12 @@ describe("codexc CLI", () => {
     );
     writeFileSync(
       join(codexHome, "sf-deepseek.models.json"),
-      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      managedModelCatalog(),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-opencode-go.models.json"),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     writeFileSync(
@@ -1439,8 +1446,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "opencode-go"',
-        'model_reasoning_effort = "high"',
-        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
         "[model_providers.opencode-go]",
         'name = "opencode-go"',
         'base_url = "https://opencode.ai/zen/go/v1"',
@@ -1458,8 +1464,8 @@ describe("codexc CLI", () => {
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "sf-deepseek.models.json"),
-      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      join(codexHome, "sf-opencode-go.models.json"),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1538,7 +1544,6 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1557,14 +1562,7 @@ describe("codexc CLI", () => {
     );
     writeFileSync(
       join(codexHome, "sf-deepseek.models.json"),
-      JSON.stringify({
-        models: [{
-          slug: "deepseek-v4-flash",
-          display_name: "DeepSeek-V4-Flash",
-          default_reasoning_level: "high",
-          supported_reasoning_levels: [{ effort: "high", description: "High" }],
-        }],
-      }),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1671,7 +1669,6 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1690,7 +1687,7 @@ describe("codexc CLI", () => {
     );
     writeFileSync(
       join(codexHome, "sf-deepseek.models.json"),
-      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1746,7 +1743,6 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1765,7 +1761,7 @@ describe("codexc CLI", () => {
     );
     writeFileSync(
       join(codexHome, "sf-deepseek.models.json"),
-      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -3412,6 +3408,21 @@ function table(value: unknown): Record<string, unknown> {
     throw new Error("测试配置表无效");
   }
   return value as Record<string, unknown>;
+}
+
+function managedModelCatalog(): string {
+  return `${JSON.stringify({
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+      slug,
+      display_name: slug,
+      context_window: 1_048_576,
+      default_reasoning_level: "high",
+      supported_reasoning_levels: [
+        { effort: "high", description: "High" },
+        { effort: "max", description: "Max" },
+      ],
+    })),
+  })}\n`;
 }
 
 function exportedMetricsPath(output: string): string {

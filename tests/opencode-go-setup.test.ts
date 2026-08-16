@@ -6,6 +6,7 @@ import { parse } from "smol-toml";
 import { describe, expect, it, vi } from "vitest";
 
 import { runOpenCodeGoSetup } from "../scripts/opencode-go-setup.mjs";
+import { writeManagedModelProviderProfileDefault } from "../runtime/model-provider-runtime.mjs";
 
 describe("OpenCode Go setup", () => {
   it.each(["switching", "exclusive"] as const)(
@@ -35,7 +36,6 @@ describe("OpenCode Go setup", () => {
       expect(config).toMatchObject({
         model: "deepseek-v4-flash",
         model_provider: "opencode-go",
-        model_auto_compact_token_limit: 600_000,
         model_providers: {
           "opencode-go": {
             base_url: "https://opencode.ai/zen/go/v1",
@@ -44,6 +44,15 @@ describe("OpenCode Go setup", () => {
             experimental_bearer_token: "sk-opencode-test",
           },
         },
+      });
+      const catalog = JSON.parse(readFileSync(
+        join(codexHome, "sf-opencode-go.models.json"),
+        "utf8",
+      ));
+      expect(catalog.models[0]).toMatchObject({
+        slug: "deepseek-v4-flash",
+        default_reasoning_level: "high",
+        auto_compact_token_limit: 600_000,
       });
       expect(parse(readFileSync(
         join(codexHome, "sf-opencode-go.managed.toml"),
@@ -108,7 +117,100 @@ describe("OpenCode Go setup", () => {
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
     expect(existsSync(join(codexHome, "sf-opencode-go.managed.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, "sf-deepseek.models.json"))).toBe(true);
+    expect(existsSync(join(codexHome, "sf-opencode-go.models.json"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go.models.manifest.json"))).toBe(false);
+  });
+
+  it("restores a legacy backup state created before catalog files were provider-owned", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-legacy-restore-"));
+    await runOpenCodeGoSetup({
+      environment: { CODEX_HOME: codexHome },
+      output: { write: () => undefined },
+      prompter: prompt("switching"),
+      configureRole: vi.fn(async () => undefined),
+      downloadCatalog: successfulCatalog,
+    });
+    const statePath = join(codexHome, "backup-codex-connect-opencode-go", "state.json");
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    delete state.catalog;
+    delete state.manifest;
+    writeFileSync(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+
+    await expect(runOpenCodeGoSetup({
+      environment: { CODEX_HOME: codexHome },
+      output: { write: () => undefined },
+      prompter: prompt("restore"),
+    })).resolves.toMatchObject({ action: "restored" });
+
+    expect(existsSync(join(codexHome, "sf-opencode-go.models.json"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go.models.manifest.json"))).toBe(false);
+  });
+
+  it("validates the complete backup state before restoring any file", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-invalid-restore-"));
+    writeFileSync(join(codexHome, "config.toml"), "custom = true\n", { mode: 0o600 });
+    await runOpenCodeGoSetup({
+      environment: { CODEX_HOME: codexHome },
+      output: { write: () => undefined },
+      prompter: prompt("switching"),
+      configureRole: vi.fn(async () => undefined),
+      downloadCatalog: successfulCatalog,
+    });
+    const configPath = join(codexHome, "config.toml");
+    const configBefore = readFileSync(configPath, "utf8");
+    const statePath = join(codexHome, "backup-codex-connect-opencode-go", "state.json");
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    delete state.manifest;
+    writeFileSync(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+
+    await expect(runOpenCodeGoSetup({
+      environment: { CODEX_HOME: codexHome },
+      output: { write: () => undefined },
+      prompter: prompt("restore"),
+    })).rejects.toThrow("备份状态无效");
+
+    expect(readFileSync(configPath, "utf8")).toBe(configBefore);
+    expect(existsSync(join(codexHome, "sf-opencode-go.models.json"))).toBe(true);
+  });
+
+  it("preserves the selected model and per-model settings when setup is repeated", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-repeat-"));
+    const environment = { CODEX_HOME: codexHome };
+    await runOpenCodeGoSetup({
+      environment,
+      output: { write: () => undefined },
+      prompter: prompt("switching"),
+      configureRole: vi.fn(async () => undefined),
+      downloadCatalog: successfulCatalog,
+    });
+    writeManagedModelProviderProfileDefault("opencode-go", {
+      model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+      autoCompactLimit: 750_000,
+    }, environment);
+    const configureRole = vi.fn(async () => undefined);
+
+    await runOpenCodeGoSetup({
+      environment,
+      output: { write: () => undefined },
+      prompter: prompt("switching"),
+      configureRole,
+      downloadCatalog: async () => updatedCatalog(2_000_000),
+    });
+
+    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
+      .toMatchObject({ model: "deepseek-v4-pro" });
+    const catalog = JSON.parse(readFileSync(
+      join(codexHome, "sf-opencode-go.models.json"),
+      "utf8",
+    ));
+    expect(catalog.models[1]).toMatchObject({
+      slug: "deepseek-v4-pro",
+      context_window: 2_000_000,
+      default_reasoning_level: "max",
+      auto_compact_token_limit: 1_500_000,
+    });
+    expect(configureRole).toHaveBeenCalledWith("opencode-go", "deepseek-v4-pro", environment);
   });
 
   it("refuses to overwrite an unmanaged OpenCode Go Profile", async () => {
@@ -152,14 +254,21 @@ function prompt(action: "switching" | "exclusive" | "restore") {
 }
 
 async function successfulCatalog() {
+  return updatedCatalog(1_000_000);
+}
+
+function updatedCatalog(contextWindow: number) {
   return {
     catalog: {
-      models: [{
-        slug: "deepseek-v4-flash",
-        context_window: 1_000_000,
+      models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+        slug,
+        context_window: contextWindow,
         default_reasoning_level: "high",
-        supported_reasoning_levels: [{ effort: "high", description: "High" }],
-      }],
+        supported_reasoning_levels: [
+          { effort: "high", description: "High" },
+          { effort: "max", description: "Max" },
+        ],
+      })),
     },
     sha256: "a".repeat(64),
   };

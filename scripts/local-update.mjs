@@ -50,7 +50,10 @@ import {
   validateStateDatabaseStructure,
 } from "./upgrade-state.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
-import { migrateManagedModelProviderFiles } from "./model-provider-file-layout.mjs";
+import {
+  migrateManagedModelProviderFiles,
+  migrateManagedModelProviderModelSettings,
+} from "./model-provider-file-layout.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
@@ -139,7 +142,10 @@ export async function updateLocalInstallation(environment = process.env, options
   let updateError;
   try {
     (options.updateProviderFiles
-      ?? (() => migrateManagedModelProviderFiles(environment)))();
+      ?? (() => ({
+        layout: migrateManagedModelProviderFiles(environment),
+        settings: migrateManagedModelProviderModelSettings(environment),
+      })))();
     config = (options.updateConfig
       ?? (() => updateGatewayConfiguration(environment)))();
     databases = (options.updateDatabases
@@ -474,11 +480,18 @@ if (
         return result;
       },
       updateProviderFiles: () => {
-        const result = migrateManagedModelProviderFiles(process.env);
-        if (result.changed) {
-          writeCliMessage("success", `第三方 Provider 文件已统一为 sf- 前缀（${result.moved.length} 项）。`);
+        const layout = migrateManagedModelProviderFiles(process.env);
+        const settings = migrateManagedModelProviderModelSettings(process.env);
+        if (layout.changed) {
+          writeCliMessage("success", `第三方 Provider 文件已统一为 sf- 前缀（${layout.moved.length} 项）。`);
         }
-        return result;
+        if (settings.changed) {
+          writeCliMessage(
+            "success",
+            `第三方模型设置已迁移为逐模型配置（${settings.updated.length} 个文件）。`,
+          );
+        }
+        return { layout, settings };
       },
       databaseOptions: {
         onInspected: printInspection,

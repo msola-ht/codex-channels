@@ -4,9 +4,6 @@ export function createManagedProviderProfile(definition, {
   apiKey,
   catalogPath,
   model = definition.defaultModel,
-  reasoningEffort = definition.defaultReasoningEffort,
-  autoCompactLimit,
-  autoCompactScope = "total",
 } = {}) {
   assertDefinition(definition);
   if (!definition.models.some((candidate) => candidate.available && candidate.slug === model)) {
@@ -21,15 +18,8 @@ export function createManagedProviderProfile(definition, {
   return {
     model,
     model_provider: definition.id,
-    model_reasoning_effort: reasoningEffort,
     service_tier: "default",
     model_catalog_json: catalogPath,
-    ...(autoCompactLimit === undefined
-      ? {}
-      : {
-          model_auto_compact_token_limit: autoCompactLimit,
-          model_auto_compact_token_limit_scope: autoCompactScope,
-        }),
     model_providers: {
       [definition.id]: createModelProviderConfig(definition, apiKey),
     },

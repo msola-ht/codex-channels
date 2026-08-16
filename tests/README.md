@@ -101,8 +101,9 @@
   思考等级和 Fast 的 Thread 覆盖、Codex 用户级模型/思考等级/Fast 默认值及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；渠道当前模型在 Workspace、新会话及同 Provider
   历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；按第三方 Provider
-  独立设置新会话默认模型、固定模式官方配置事务，以及旧受管文件到 `sf-` 前缀的冲突检测、权限校验
-  与引用迁移；DeepSeek 官方脚本目录提取、两种 Setup 模式、
+  和模型独立设置新会话默认值、目录上下文、思考等级与自动压缩阈值，固定模式清除根级覆盖并使用
+  官方配置事务，以及旧受管文件到 `sf-` 前缀、独立模型目录和按模型设置的冲突检测、权限校验与
+  引用迁移；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash 与 Pro 可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。

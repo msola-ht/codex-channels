@@ -185,7 +185,7 @@ describe("codexc agents script", () => {
         "deepseek-v4-pro",
         fixture.environment,
         { updateConfig: applyConfigUpdate },
-      )).rejects.toThrow("模型目录无效");
+      )).rejects.toThrow("模型目录无法安全读取");
     } finally {
       fixture.remove();
     }
@@ -277,7 +277,18 @@ function writeProviderFixture(
   const catalogPath = join(home, definition.catalogFileName);
   writeFileSync(
     catalogPath,
-    JSON.stringify({ models: definition.models.map(({ slug }: { slug: string }) => ({ slug })) }),
+    JSON.stringify({
+      models: definition.models.map(({ slug }: { slug: string }) => ({
+        slug,
+        display_name: slug,
+        context_window: 1_048_576,
+        default_reasoning_level: definition.defaultReasoningEffort,
+        supported_reasoning_levels: [
+          { effort: "high", description: "High" },
+          { effort: "max", description: "Max" },
+        ],
+      })),
+    }),
     { mode: 0o600 },
   );
   const profile = createManagedProviderProfile(definition, {

@@ -18,16 +18,40 @@ describe("managed model provider default setup", () => {
       prompter: {
         selectProvider: async () => "deepseek",
         selectModel: async () => "deepseek-v4-pro",
+        selectReasoningEffort: async () => "max",
+        selectAutoCompactPercent: async () => 75,
       },
     })).resolves.toEqual({
       action: "configured",
       provider: "deepseek",
       model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+      autoCompactPercent: 75,
       mode: "switching",
     });
 
-    expect(parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8")))
-      .toMatchObject({ model: "deepseek-v4-pro", model_provider: "deepseek" });
+    const profile = parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8"));
+    expect(profile).toMatchObject({
+      model: "deepseek-v4-pro",
+      model_provider: "deepseek",
+    });
+    expect(profile.model_reasoning_effort).toBeUndefined();
+    const catalog = JSON.parse(readFileSync(
+      join(codexHome, "sf-deepseek.models.json"),
+      "utf8",
+    ));
+    expect(catalog.models).toEqual([
+      expect.objectContaining({
+        slug: "deepseek-v4-flash",
+        default_reasoning_level: "high",
+        auto_compact_token_limit: 629_146,
+      }),
+      expect.objectContaining({
+        slug: "deepseek-v4-pro",
+        default_reasoning_level: "max",
+        auto_compact_token_limit: 786_432,
+      }),
+    ]);
     expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8")))
       .toMatchObject({ model: "gpt-5.6-sol", model_provider: "openai" });
     expect(output.write).toHaveBeenCalledWith(
@@ -45,13 +69,21 @@ describe("managed model provider default setup", () => {
       prompter: {
         selectProvider: async () => "deepseek",
         selectModel: async () => "deepseek-v4-pro",
+        selectReasoningEffort: async () => "low",
+        selectAutoCompactPercent: async () => 40,
       },
       writeConfigEdits,
     })).resolves.toMatchObject({ mode: "exclusive", model: "deepseek-v4-pro" });
 
     expect(writeConfigEdits).toHaveBeenCalledWith(
       expect.objectContaining({ CODEX_HOME: codexHome }),
-      [{ keyPath: "model", value: "deepseek-v4-pro" }],
+      [
+        { keyPath: "model", value: "deepseek-v4-pro" },
+        { keyPath: "model_reasoning_effort", value: null },
+        { keyPath: "model_context_window", value: null },
+        { keyPath: "model_auto_compact_token_limit", value: null },
+        { keyPath: "model_auto_compact_token_limit_scope", value: null },
+      ],
     );
   });
 
@@ -64,6 +96,8 @@ describe("managed model provider default setup", () => {
       prompter: {
         selectProvider: vi.fn(),
         selectModel: vi.fn(),
+        selectReasoningEffort: vi.fn(),
+        selectAutoCompactPercent: vi.fn(),
       },
     })).rejects.toThrow("尚未配置第三方 Provider");
   });
@@ -75,7 +109,6 @@ function providerFixture(mode: "switching" | "exclusive") {
   const providerLines = [
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
-    'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
     "[model_providers.deepseek]",
     'name = "deepseek"',
@@ -91,7 +124,18 @@ function providerFixture(mode: "switching" | "exclusive") {
     { mode: 0o600 },
   );
   writeFileSync(catalogPath, JSON.stringify({
-    models: [{ slug: "deepseek-v4-flash" }, { slug: "deepseek-v4-pro" }],
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+      slug,
+      display_name: slug,
+      context_window: 1_048_576,
+      default_reasoning_level: "high",
+      supported_reasoning_levels: [
+        { effort: "low", description: "Low" },
+        { effort: "high", description: "High" },
+        { effort: "max", description: "Max" },
+      ],
+      auto_compact_token_limit: 629_146,
+    })),
   }), { mode: 0o600 });
   if (mode === "switching") {
     writeFileSync(join(codexHome, "sf-deepseek.config.toml"), providerLines, { mode: 0o600 });

@@ -1,4 +1,3 @@
-import type { CodexUserConfigEdit } from "./codex-user-config.mjs";
 import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
 
 export const deepseekSetupScriptUrl: string;
@@ -30,10 +29,6 @@ export interface DeepseekSetupOptions {
     model: string | undefined,
     environment: NodeJS.ProcessEnv,
   ) => unknown | Promise<unknown>;
-  writeConfigEdits?: (
-    environment: NodeJS.ProcessEnv,
-    edits: CodexUserConfigEdit[],
-  ) => Promise<void>;
 }
 
 export interface DeepseekSetupResult {
@@ -50,16 +45,9 @@ export interface DeepseekSetupBackResult {
   mode?: never;
 }
 
-export interface DeepseekSetupAutoCompactResult {
-  action: "auto-compact";
-  autoCompactPercent: number | undefined;
-  mode?: never;
-}
-
 export function runDeepseekSetup(options?: DeepseekSetupOptions): Promise<
   | DeepseekSetupResult
   | DeepseekSetupBackResult
-  | DeepseekSetupAutoCompactResult
   | undefined
 >;
 export function downloadDeepseekCatalog(

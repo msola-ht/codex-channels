@@ -12,9 +12,26 @@ export interface ModelProviderDefaultSetupOptions {
       provider: ManagedModelProviderId;
       displayName: string;
       model: string;
+      reasoningEffort: string;
       mode: "switching" | "exclusive";
-      models: string[];
+      models: Array<{
+        model: string;
+        displayName: string;
+        contextWindow: number;
+        reasoningEffort: string;
+        reasoningEfforts: Array<{ effort: string; description: string }>;
+        autoCompactLimit?: number;
+        autoCompactPercent?: number;
+      }>;
     }): Promise<string>;
+    selectReasoningEffort(
+      provider: Record<string, unknown>,
+      model: Record<string, unknown>,
+    ): Promise<string>;
+    selectAutoCompactPercent(
+      provider: Record<string, unknown>,
+      model: Record<string, unknown>,
+    ): Promise<number>;
   };
   writeConfigEdits?: (
     environment: NodeJS.ProcessEnv,
@@ -30,6 +47,8 @@ export function runModelProviderDefaultSetup(
       action: "configured";
       provider: ManagedModelProviderId;
       model: string;
+      reasoningEffort: string;
+      autoCompactPercent: number;
       mode: "switching" | "exclusive";
     }
 >;

@@ -9,6 +9,10 @@ import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import {
+  deepseekProviderDefinition,
+  managedModelProviderDefinitions,
+} from "../runtime/model-provider-definitions.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 const layoutVersion = 1;
@@ -58,6 +62,218 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
     restoreSnapshots(snapshots);
     throw error;
   }
+}
+
+export function migrateManagedModelProviderModelSettings(environment = process.env) {
+  const codexHome = codexHomePath(environment);
+  const configured = managedModelProviderDefinitions.flatMap((definition) => {
+    const markerPath = join(codexHome, definition.managedMarkerFileName);
+    if (!existsSync(markerPath)) return [];
+    assertPrivateRegularFile(markerPath);
+    let marker;
+    try {
+      marker = parse(readFileSync(markerPath, "utf8"));
+    } catch {
+      throw new Error(`第三方 Provider 管理标记无法安全解析：${markerPath}`);
+    }
+    if (
+      marker.version !== 1
+      || marker.provider !== definition.id
+      || !["switching", "exclusive"].includes(marker.mode)
+    ) {
+      throw new Error(`第三方 Provider 管理标记无效：${markerPath}`);
+    }
+    return [{ definition, mode: marker.mode }];
+  });
+  if (configured.length === 0) {
+    return { changed: false, layoutVersion: 2, updated: [] };
+  }
+  const rolePath = join(codexHome, "sf-agent.config.toml");
+  const paths = [
+    ...configured.flatMap(({ definition, mode }) => [
+      join(codexHome, mode === "exclusive" ? "config.toml" : definition.profileFileName),
+      join(codexHome, definition.catalogFileName),
+      join(codexHome, definition.catalogManifestFileName),
+    ]),
+    rolePath,
+  ];
+  const snapshots = snapshotPaths(paths);
+  const updated = [];
+  try {
+    for (const item of configured) {
+      updated.push(...prepareIndependentProviderCatalog(codexHome, item));
+    }
+    for (const item of configured) {
+      updated.push(...migrateProviderModelSettings(codexHome, item));
+    }
+    if (existsSync(rolePath)) {
+      updated.push(...migrateRoleModelSettings(codexHome, rolePath));
+    }
+    const uniqueUpdated = [...new Set(updated)];
+    return { changed: uniqueUpdated.length > 0, layoutVersion: 2, updated: uniqueUpdated };
+  } catch (error) {
+    restoreSnapshots(snapshots);
+    throw error;
+  }
+}
+
+function prepareIndependentProviderCatalog(codexHome, { definition, mode }) {
+  const configPath = join(
+    codexHome,
+    mode === "exclusive" ? "config.toml" : definition.profileFileName,
+  );
+  assertPrivateRegularFile(configPath, { allowGroupRead: mode === "exclusive" });
+  const document = parseManagedToml(configPath);
+  const sourceCatalogPath = typeof document.model_catalog_json === "string"
+    ? document.model_catalog_json
+    : undefined;
+  if (sourceCatalogPath === undefined || !existsSync(sourceCatalogPath)) {
+    throw new Error(`第三方 Provider 模型目录缺失：${configPath}`);
+  }
+  const updated = [];
+  const expectedCatalogPath = join(codexHome, definition.catalogFileName);
+  if (!existsSync(expectedCatalogPath)) {
+    assertPrivateRegularFile(sourceCatalogPath);
+    writePrivateFileAtomicSync(expectedCatalogPath, readFileSync(sourceCatalogPath));
+    updated.push(expectedCatalogPath);
+  }
+  const expectedManifestPath = join(codexHome, definition.catalogManifestFileName);
+  const sharedManifestPath = join(
+    codexHome,
+    deepseekProviderDefinition.catalogManifestFileName,
+  );
+  if (!existsSync(expectedManifestPath) && existsSync(sharedManifestPath)) {
+    assertPrivateRegularFile(sharedManifestPath);
+    writePrivateFileAtomicSync(expectedManifestPath, readFileSync(sharedManifestPath));
+    updated.push(expectedManifestPath);
+  }
+  return updated;
+}
+
+function migrateProviderModelSettings(codexHome, { definition, mode }) {
+  const configPath = join(
+    codexHome,
+    mode === "exclusive" ? "config.toml" : definition.profileFileName,
+  );
+  assertPrivateRegularFile(configPath, { allowGroupRead: mode === "exclusive" });
+  const document = parseManagedToml(configPath);
+  if (document.model_provider !== definition.id || typeof document.model !== "string") {
+    throw new Error(`第三方 Provider 配置与管理标记不一致：${configPath}`);
+  }
+  const expectedCatalogPath = join(codexHome, definition.catalogFileName);
+  const sourceCatalogPath = typeof document.model_catalog_json === "string"
+    ? document.model_catalog_json
+    : undefined;
+  if (sourceCatalogPath === undefined || !existsSync(sourceCatalogPath)) {
+    throw new Error(`第三方 Provider 模型目录缺失：${configPath}`);
+  }
+  assertPrivateRegularFile(expectedCatalogPath);
+  const catalog = parseModelCatalog(expectedCatalogPath);
+  applyLegacyRootSettings(catalog, document, definition, configPath);
+  const nextCatalog = `${JSON.stringify(catalog, null, 2)}\n`;
+  const nextDocument = { ...document, model_catalog_json: expectedCatalogPath };
+  delete nextDocument.model_reasoning_effort;
+  delete nextDocument.model_context_window;
+  delete nextDocument.model_auto_compact_token_limit;
+  delete nextDocument.model_auto_compact_token_limit_scope;
+  const updated = [];
+  if (readFileSync(expectedCatalogPath, "utf8") !== nextCatalog) {
+    writePrivateFileAtomicSync(expectedCatalogPath, nextCatalog);
+    updated.push(expectedCatalogPath);
+  }
+  const nextConfig = stringify(nextDocument);
+  if (readFileSync(configPath, "utf8") !== nextConfig) {
+    writePrivateFileAtomicSync(configPath, nextConfig);
+    updated.push(configPath);
+  }
+  return updated;
+}
+
+function migrateRoleModelSettings(codexHome, rolePath) {
+  assertPrivateRegularFile(rolePath);
+  const document = parseManagedToml(rolePath);
+  const definition = managedModelProviderDefinitions.find(
+    (candidate) => candidate.id === document.model_provider,
+  );
+  if (!definition || typeof document.model !== "string") {
+    throw new Error(`第三方子代理配置无效：${rolePath}`);
+  }
+  const catalogPath = join(codexHome, definition.catalogFileName);
+  const catalog = parseModelCatalog(catalogPath);
+  const model = modelEntry(catalog, document.model, rolePath);
+  const next = {
+    ...document,
+    model_reasoning_effort: model.default_reasoning_level,
+    model_catalog_json: catalogPath,
+  };
+  delete next.model_context_window;
+  delete next.model_auto_compact_token_limit;
+  delete next.model_auto_compact_token_limit_scope;
+  const content = stringify(next);
+  if (content === readFileSync(rolePath, "utf8")) return [];
+  writePrivateFileAtomicSync(rolePath, content);
+  return [rolePath];
+}
+
+function applyLegacyRootSettings(catalog, document, definition, configPath) {
+  const model = modelEntry(catalog, document.model, configPath);
+  const levels = Array.isArray(model.supported_reasoning_levels)
+    ? model.supported_reasoning_levels
+    : [];
+  const efforts = levels.map((entry) => record(entry).effort).filter((value) =>
+    typeof value === "string");
+  const reasoning = document.model_reasoning_effort ?? model.default_reasoning_level;
+  if (typeof reasoning !== "string" || !efforts.includes(reasoning)) {
+    throw new Error(`${definition.displayName} 模型思考等级无效：${configPath}`);
+  }
+  const contextWindow = document.model_context_window ?? model.context_window;
+  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
+    throw new Error(`${definition.displayName} 模型上下文窗口无效：${configPath}`);
+  }
+  model.context_window = contextWindow;
+  const configuredLimit = document.model_auto_compact_token_limit;
+  if (
+    configuredLimit !== undefined
+    && (!Number.isSafeInteger(configuredLimit) || configuredLimit <= 0)
+  ) {
+    throw new Error(`${definition.displayName} 自动压缩阈值无效：${configPath}`);
+  }
+  model.default_reasoning_level = reasoning;
+  if (configuredLimit !== undefined) {
+    model.auto_compact_token_limit = Math.min(
+      configuredLimit,
+      Math.floor(contextWindow * 0.9),
+    );
+  }
+}
+
+function parseManagedToml(path) {
+  try {
+    return parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error(`第三方 Provider 配置无法安全解析：${path}`);
+  }
+}
+
+function parseModelCatalog(path) {
+  let catalog;
+  try {
+    catalog = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error(`第三方 Provider 模型目录无法安全解析：${path}`);
+  }
+  if (!Array.isArray(catalog?.models)) {
+    throw new Error(`第三方 Provider 模型目录无效：${path}`);
+  }
+  return catalog;
+}
+
+function modelEntry(catalog, model, sourcePath) {
+  const entry = catalog.models.find((candidate) => record(candidate).slug === model);
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error(`第三方 Provider 模型目录缺少 ${model}：${sourcePath}`);
+  }
+  return entry;
 }
 
 function migrationPaths(codexHome) {

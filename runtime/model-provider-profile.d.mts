@@ -6,9 +6,6 @@ export function createManagedProviderProfile(
     apiKey: string;
     catalogPath: string;
     model?: string;
-    reasoningEffort?: string;
-    autoCompactLimit?: number;
-    autoCompactScope?: "total" | "body_after_prefix";
   },
 ): Record<string, unknown>;
 

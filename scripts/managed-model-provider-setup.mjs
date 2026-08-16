@@ -8,6 +8,7 @@ const managedRootKeys = Object.freeze([
   "model_provider",
   "model_reasoning_effort",
   "model_catalog_json",
+  "model_context_window",
   "model_auto_compact_token_limit",
   "model_auto_compact_token_limit_scope",
   "profile",
@@ -18,19 +19,19 @@ const managedRootKeys = Object.freeze([
 export function createSwitchingProviderProfile(definition, {
   apiKey,
   catalogPath,
-  autoCompactLimit,
+  model,
 }) {
   return createManagedProviderProfile(definition, {
     apiKey,
     catalogPath,
-    ...(autoCompactLimit === undefined ? {} : { autoCompactLimit }),
+    ...(model === undefined ? {} : { model }),
   });
 }
 
 export function applyExclusiveProviderConfig(current, definition, {
   apiKey,
   catalogPath,
-  autoCompactLimit,
+  model = definition.defaultModel,
 }) {
   const document = { ...current };
   const modelProviders = { ...table(document.model_providers) };
@@ -45,18 +46,14 @@ export function applyExclusiveProviderConfig(current, definition, {
     document.profiles = profiles;
   }
   Object.assign(document, {
-    model: definition.defaultModel,
+    model,
     model_provider: definition.id,
-    model_reasoning_effort: definition.defaultReasoningEffort,
     model_catalog_json: catalogPath,
   });
-  if (autoCompactLimit === undefined) {
-    delete document.model_auto_compact_token_limit;
-    delete document.model_auto_compact_token_limit_scope;
-  } else {
-    document.model_auto_compact_token_limit = autoCompactLimit;
-    document.model_auto_compact_token_limit_scope = "total";
-  }
+  delete document.model_reasoning_effort;
+  delete document.model_context_window;
+  delete document.model_auto_compact_token_limit;
+  delete document.model_auto_compact_token_limit_scope;
   delete document.preferred_auth_method;
   delete document.forced_login_method;
   return document;

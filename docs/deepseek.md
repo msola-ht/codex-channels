@@ -31,10 +31,10 @@ DeepSeek Provider。
 
 ### 自动压缩阈值
 
-安装流程在填写 API Key 后会询问自动压缩阈值，也可以在 Setup 菜单中选择“修改自动压缩阈值”
-随时调整。支持按上下文窗口百分比（10–95%，默认 60%）设置，或选择关闭；Setup 会按当前模型
-上下文窗口换算成 token 数，写入 `model_auto_compact_token_limit` 与
-`model_auto_compact_token_limit_scope = "total"`。修改后需要重启 App Server 生效。
+安装流程在填写 API Key 后会为初始 Flash 模型询问自动压缩阈值。后续在“第三方模型设置”中按
+Provider 和模型分别选择默认思考等级与自动压缩百分比（10–90%）；该百分比按模型自己的
+`context_window` 换算为模型目录中的 `auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖
+其他模型。选择模型默认值时使用 Codex 的 90% 上下文窗口阈值。修改后需要重启 App Server 生效。
 
 ## 管理的文件
 
@@ -46,17 +46,18 @@ DeepSeek Provider。
 | `~/.codex/sf-agent.config.toml` | 不含凭据的共享第三方子代理配置 |
 | `~/.codex/backup-codex-connect-deepseek/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
 
-这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式；
+这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式，
+并保留仍受支持的默认模型及逐模型思考、自动压缩设置；上下文窗口采用新目录值，压缩阈值按原百分比
+重新计算。
 恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
 的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
-OpenCode Go 也使用这份经审查的模型元数据；其管理标记存在时，恢复 DeepSeek 初始配置会保留共享
-目录和清单，不影响 OpenCode Go。
+OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或修改任一 Provider 不影响另一方设置。
 从旧版文件布局升级时，运行 `codexc update` 会在核心服务停止期间把受管文件迁移为以上 `sf-`
 名称；新旧文件同时存在时不会猜测覆盖关系，而是明确报错。
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
-`/model` 选择。初次配置默认使用 Flash；之后可在 `codexc setup` 的“模型与提供商 → 第三方默认模型”
-中设置 DeepSeek 新会话的默认模型。历史 Thread 仍保留自身模型。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
+`/model` 选择。初次配置默认使用 Flash；之后可在 `codexc setup` 的“模型与提供商 → 第三方模型设置”
+中按模型设置 DeepSeek 新会话的默认模型、思考等级和自动压缩阈值。历史 Thread 仍保留自身模型。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
 还会比较模型完整指纹与关键审查字段；发现变化时只创建 Draft PR，不会自动开放未知模型、发布或部署。
 
 当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此

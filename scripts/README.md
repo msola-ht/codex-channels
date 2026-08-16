@@ -90,13 +90,13 @@
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
   “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、OpenCode Go、
-  第三方默认模型、第三方 API 与图片识别。
+  第三方模型设置、第三方 API 与图片识别。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：按已配置的第三方 Provider
-  设置新会话默认模型；切换模式只更新对应私有 Profile，固定模式复用官方用户配置事务，历史 Thread
-  仍保留创建时的模型。
+  和模型设置新会话默认模型、目录声明的上下文、默认思考等级及自动压缩阈值；切换模式同步更新
+  私有 Profile，固定模式复用官方用户配置事务并清除根级覆盖，历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
   受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
@@ -134,12 +134,12 @@
   管理标记，并自动开启 `features.multi_agent_v2`、把共享 `agents.external` 子代理切换到 DeepSeek；
   首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
-  生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改；退出固定模式时只还原 Setup
+  生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改，并保留仍受支持的默认模型、
+  逐模型思考等级和自动压缩百分比；目录上下文更新时按原百分比重算阈值。退出固定模式时只还原 Setup
   管理的字段（含自动压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
   角色配置事务失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
-  安装与“修改自动压缩阈值”入口支持按上下文窗口百分比（10–95%，默认 60%）写入
-  `model_auto_compact_token_limit` 或关闭自动压缩；固定模式的日常阈值修改使用官方键级配置事务，
-  完整安装与备份恢复才执行文件级替换。
+  安装时为初始模型设置自动压缩阈值；后续统一由“第三方模型设置”按模型维护 10–90% 阈值，写入
+  模型目录的 `auto_compact_token_limit`，不再使用会覆盖全部模型的 Profile 顶层阈值。
 - `prepare-deepseek-catalog-proposal.mjs` / `prepare-deepseek-catalog-proposal.d.mts` /
   `deepseek-catalog-baseline.json`：复用 Setup 的官方
   下载器，比较排序后的模型完整指纹与上下文、输入模态、思考等级、搜索、并行工具、最低客户端版本
@@ -153,7 +153,10 @@
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   切换 Profile、固定配置与受管字段恢复逻辑。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：配置 OpenCode Go 切换/固定模式或恢复首次
-  配置前状态，复用受控 DeepSeek 模型目录和共享子代理机制，但不复用凭据、Provider 身份或价格。
+  配置前状态，从同一受审查来源生成自己的模型目录并复用共享子代理机制，但不复用凭据、Provider
+  身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的默认模型与逐模型设置。
+- `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一
+  `sf-` 前缀，并把 Provider 根级上下文、思考等级和自动压缩阈值迁入各自模型目录。
 - `semantic-html-table.mjs` / `semantic-html-table.d.mts`：为受控官方价格提案提供有界、无脚本的
   语义化 HTML 表格解析，不进入 Gateway 运行路径。
 - `prepare-opencode-go-pricing-proposal.mjs` / `prepare-opencode-go-pricing-proposal.d.mts`：从

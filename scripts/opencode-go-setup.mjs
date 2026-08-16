@@ -9,7 +9,10 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
   loadPrimaryModelProvider,
+  loadManagedModelProviderSettings,
   managedModelProviderRoleConfigPath,
+  withManagedModelCatalogSettings,
+  withPreservedManagedModelCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
@@ -47,7 +50,7 @@ export async function runOpenCodeGoSetup({
         return undefined;
       }
       await restoreInitialFiles(paths);
-      output.write("已恢复配置 OpenCode Go 前的文件；共享模型目录已保留。\n");
+      output.write("已恢复配置 OpenCode Go 前的文件。\n");
       output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
       return { action: "restored", ...publicPaths(paths) };
     }
@@ -68,15 +71,33 @@ export async function runOpenCodeGoSetup({
     if (!/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
       throw new Error("OpenCode Go API Key 无效");
     }
+    const previous = loadManagedModelProviderSettings(environment).find(
+      (candidate) => candidate.provider === definition.id,
+    );
+    const selectedModel = previous?.model ?? definition.defaultModel;
     const downloaded = await downloadCatalog(fetchImpl);
     const model = downloaded.catalog.models.find(
       (candidate) => candidate?.slug === definition.defaultModel,
     );
     const contextWindow = model?.context_window;
     if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
-      throw new Error("OpenCode Go 共享模型目录缺少上下文窗口");
+      throw new Error("OpenCode Go 模型目录缺少上下文窗口");
     }
     const autoCompactLimit = Math.round(contextWindow * defaultAutoCompactPercent / 100);
+    const defaultCatalog = withManagedModelCatalogSettings(
+      downloaded.catalog,
+      definition,
+      {
+        model: definition.defaultModel,
+        reasoningEffort: definition.defaultReasoningEffort,
+        autoCompactLimit,
+      },
+    );
+    const managedCatalog = withPreservedManagedModelCatalogSettings(
+      defaultCatalog,
+      definition,
+      previous?.models,
+    );
     const trackedPaths = Object.entries(paths)
       .filter(([name]) => name !== "codexHome")
       .map(([, path]) => path);
@@ -97,18 +118,18 @@ export async function runOpenCodeGoSetup({
         profileContent = stringify(createSwitchingProviderProfile(definition, {
           apiKey,
           catalogPath: paths.catalogPath,
-          autoCompactLimit,
+          model: selectedModel,
         }));
       } else {
         nextConfig = applyExclusiveProviderConfig(currentConfig, definition, {
           apiKey,
           catalogPath: paths.catalogPath,
-          autoCompactLimit,
+          model: selectedModel,
         });
       }
       await writePrivateFileAtomic(
         paths.catalogPath,
-        `${JSON.stringify(downloaded.catalog, null, 2)}\n`,
+        `${JSON.stringify(managedCatalog, null, 2)}\n`,
       );
       await writePrivateFileAtomic(paths.manifestPath, `${JSON.stringify({
         source: deepseekSetupScriptUrl,
@@ -125,7 +146,7 @@ export async function runOpenCodeGoSetup({
         stringify(createManagedProviderMarker(definition, mode)),
       );
       guards = await snapshotFiles(trackedPaths);
-      await configureRole(definition.id, definition.defaultModel, environment);
+      await configureRole(definition.id, selectedModel, environment);
     } catch (error) {
       if (guards === undefined) throw error;
       await restoreSnapshots(snapshots, guards).catch((rollbackError) => {
@@ -165,6 +186,8 @@ function providerPaths(environment) {
     profileBackupPath: join(backupDirectory, definition.profileFileName),
     markerBackupPath: join(backupDirectory, definition.managedMarkerFileName),
     roleConfigBackupPath: join(backupDirectory, "sf-agent.config.toml"),
+    catalogBackupPath: join(backupDirectory, definition.catalogFileName),
+    manifestBackupPath: join(backupDirectory, definition.catalogManifestFileName),
   };
 }
 
@@ -184,6 +207,8 @@ async function preserveInitialFiles(paths) {
     profile: await backupOptional(paths.profilePath, paths.profileBackupPath),
     marker: await backupOptional(paths.markerPath, paths.markerBackupPath),
     roleConfig: await backupOptional(paths.roleConfigPath, paths.roleConfigBackupPath),
+    catalog: await backupOptional(paths.catalogPath, paths.catalogBackupPath),
+    manifest: await backupOptional(paths.manifestPath, paths.manifestBackupPath),
   };
   await writePrivateFileAtomic(paths.backupStatePath, `${JSON.stringify(state)}\n`);
 }
@@ -195,10 +220,36 @@ async function restoreInitialFiles(paths) {
   } catch {
     throw new Error("未找到可恢复的 OpenCode Go 初始配置");
   }
-  await restoreBackup(paths.configPath, paths.configBackupPath, state.config);
-  await restoreBackup(paths.profilePath, paths.profileBackupPath, state.profile);
-  await restoreBackup(paths.markerPath, paths.markerBackupPath, state.marker);
-  await restoreBackup(paths.roleConfigPath, paths.roleConfigBackupPath, state.roleConfig);
+  const legacyCatalogState = state.catalog === undefined && state.manifest === undefined;
+  const restoredState = {
+    config: state.config,
+    profile: state.profile,
+    marker: state.marker,
+    roleConfig: state.roleConfig,
+    catalog: legacyCatalogState ? false : state.catalog,
+    manifest: legacyCatalogState ? false : state.manifest,
+  };
+  if (Object.values(restoredState).some((value) => typeof value !== "boolean")) {
+    throw new Error("OpenCode Go 初始配置备份状态无效");
+  }
+  await restoreBackup(paths.configPath, paths.configBackupPath, restoredState.config);
+  await restoreBackup(paths.profilePath, paths.profileBackupPath, restoredState.profile);
+  await restoreBackup(paths.markerPath, paths.markerBackupPath, restoredState.marker);
+  await restoreBackup(
+    paths.roleConfigPath,
+    paths.roleConfigBackupPath,
+    restoredState.roleConfig,
+  );
+  await restoreBackup(
+    paths.catalogPath,
+    paths.catalogBackupPath,
+    restoredState.catalog,
+  );
+  await restoreBackup(
+    paths.manifestPath,
+    paths.manifestBackupPath,
+    restoredState.manifest,
+  );
 }
 
 async function backupOptional(source, target) {

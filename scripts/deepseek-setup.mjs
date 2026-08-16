@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -9,11 +8,13 @@ import * as clackPrompts from "@clack/prompts";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   deepseekProviderDefinition,
-  managedModelProviderDefinitions,
 } from "../runtime/model-provider-definitions.mjs";
 import {
+  loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
   managedModelProviderRoleConfigPath,
+  withManagedModelCatalogSettings,
+  withPreservedManagedModelCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
 import {
@@ -23,7 +24,6 @@ import {
   assertThirdPartyRoleAvailable,
   configureThirdPartyRole,
 } from "./agents.mjs";
-import { writeCodexUserConfigEdits } from "./codex-user-config.mjs";
 import {
   applyExclusiveProviderConfig,
   createSwitchingProviderProfile,
@@ -40,7 +40,7 @@ const defaultDownloadAttempts = 3;
 const defaultDownloadTimeoutMs = 30_000;
 const defaultAutoCompactPercent = 60;
 const minimumAutoCompactPercent = 10;
-const maximumAutoCompactPercent = 95;
+const maximumAutoCompactPercent = 90;
 
 class DeepseekSetupCancelled extends Error {}
 
@@ -52,7 +52,6 @@ export async function runDeepseekSetup({
   prompter,
   prompts = clackPrompts,
   configureRole = configureThirdPartyRole,
-  writeConfigEdits = writeCodexUserConfigEdits,
 } = {}) {
   const prompt = prompter ?? createHiddenPrompter(prompts, { allowBack });
   try {
@@ -60,14 +59,13 @@ export async function runDeepseekSetup({
     output.write("1. OpenAI + DeepSeek 切换模式（保留 OpenAI 默认）\n");
     output.write("2. 仅 DeepSeek 固定模式（原生 Codex 也默认使用 DeepSeek）\n");
     output.write("3. 恢复安装前的 Codex 配置\n");
-    output.write("4. 修改自动压缩阈值\n");
-    if (allowBack) output.write("5. 返回上一级\n");
+    if (allowBack) output.write("4. 返回上一级\n");
     const choice = await askChoice(
       prompt,
-      allowBack ? "请选择 [1-5]" : "请选择 [1-4]",
-      allowBack ? 5 : 4,
+      allowBack ? "请选择 [1-4]" : "请选择 [1-3]",
+      allowBack ? 4 : 3,
     );
-    if (choice === "5") return { action: "back" };
+    if (choice === "4") return { action: "back" };
     const codexHome = codexHomePath(environment);
     const configPath = join(codexHome, "config.toml");
     const roleConfigPath = managedModelProviderRoleConfigPath(environment);
@@ -114,23 +112,7 @@ export async function runDeepseekSetup({
         gatewayProfileBackupPath,
         roleConfigBackupPath,
         backupStatePath,
-        preserveSharedCatalog: managedModelProviderDefinitions.some((definition) =>
-          definition.id !== deepseekProviderDefinition.id
-          && definition.catalogFileName === deepseekProviderDefinition.catalogFileName
-          && existsSync(join(codexHome, definition.managedMarkerFileName))),
         output,
-      });
-    }
-    if (choice === "4") {
-      return runAutoCompactSetting({
-        codexHome,
-        configPath,
-        environment,
-        profilePath,
-        gatewayProfilePath,
-        output,
-        prompt,
-        writeConfigEdits,
       });
     }
     const mode = choice === "1" ? "switching" : "exclusive";
@@ -164,6 +146,21 @@ export async function runDeepseekSetup({
     ) {
       throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
     }
+    const defaultCatalog = withManagedModelCatalogSettings(
+      downloaded.catalog,
+      deepseekProviderDefinition,
+      {
+        model: supportedModel,
+        reasoningEffort: deepseekProviderDefinition.defaultReasoningEffort,
+        ...(autoCompactPercent === undefined
+          ? {}
+          : {
+              autoCompactLimit: Math.round(
+                contextWindow * autoCompactPercent / 100,
+              ),
+            }),
+      },
+    );
     const installationPaths = [
       configPath,
       profilePath,
@@ -192,6 +189,18 @@ export async function runDeepseekSetup({
         roleConfigBackupPath,
         backupStatePath,
       });
+      const previous = await loadPreviousManagedSettings({
+        environment,
+        gatewayProfilePath,
+        gatewayProfileBackupPath,
+        backupStatePath,
+      });
+      const selectedModel = previous?.model ?? supportedModel;
+      const managedCatalog = withPreservedManagedModelCatalogSettings(
+        defaultCatalog,
+        deepseekProviderDefinition,
+        previous?.models,
+      );
       const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
         configPath,
         gatewayProfilePath,
@@ -201,12 +210,11 @@ export async function runDeepseekSetup({
         catalogPath,
         apiKey,
         mode,
-        autoCompactPercent,
-        contextWindow,
+        model: selectedModel,
       });
       await writePrivateFileAtomic(
         catalogPath,
-        `${JSON.stringify(downloaded.catalog, null, 2)}\n`,
+        `${JSON.stringify(managedCatalog, null, 2)}\n`,
       );
       await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
         source: deepseekSetupScriptUrl,
@@ -218,7 +226,7 @@ export async function runDeepseekSetup({
       await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
       await setBackupRestoredState(backupStatePath, false);
       rollbackGuards = await snapshotFiles(installationPaths);
-      await configureRole(providerId, supportedModel, environment);
+      await configureRole(providerId, selectedModel, environment);
       if (mode === "switching") {
         output.write(`\nOpenAI 默认模型与认证保持不变：${configPath}\n`);
         output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
@@ -395,8 +403,7 @@ async function buildCodexConfig({
   catalogPath,
   apiKey,
   mode,
-  autoCompactPercent,
-  contextWindow,
+  model,
 }) {
   let initialDocument = {};
   let originalContent;
@@ -429,13 +436,10 @@ async function buildCodexConfig({
     && backupState !== undefined
     && backupState.restored !== true
     && hasProviderBaseConfig(document, deepseekProviderDefinition);
-  const autoCompactLimit = autoCompactPercent === undefined
-    ? undefined
-    : autoCompactFields(autoCompactPercent, contextWindow).model_auto_compact_token_limit;
   const profile = createSwitchingProviderProfile(deepseekProviderDefinition, {
     apiKey,
     catalogPath,
-    ...(autoCompactLimit === undefined ? {} : { autoCompactLimit }),
+    model,
   });
   if (mode === "switching") {
     if (managedMode === "exclusive" || legacyManagedLayout) {
@@ -467,7 +471,7 @@ async function buildCodexConfig({
   document = applyExclusiveProviderConfig(document, deepseekProviderDefinition, {
     apiKey,
     catalogPath,
-    ...(autoCompactLimit === undefined ? {} : { autoCompactLimit }),
+    model,
   });
   return {
     configContent: stringify(document),
@@ -514,6 +518,23 @@ async function readCurrentManagedMode(gatewayProfilePath, originalGatewayProfile
     // eslint-disable-next-line preserve-caught-error
     throw new Error("Codex Connect DeepSeek 管理标记无效，未修改配置");
   }
+}
+
+async function loadPreviousManagedSettings({
+  environment,
+  gatewayProfilePath,
+  gatewayProfileBackupPath,
+  backupStatePath,
+}) {
+  const state = JSON.parse(await readFile(backupStatePath, "utf8"));
+  const mode = await readCurrentManagedMode(
+    gatewayProfilePath,
+    state.originalGatewayProfileExisted === true ? gatewayProfileBackupPath : undefined,
+  );
+  if (mode === undefined) return undefined;
+  return loadManagedModelProviderSettings(environment).find(
+    (candidate) => candidate.provider === providerId,
+  );
 }
 
 async function preserveInitialConfig({
@@ -595,7 +616,6 @@ async function restoreInitialConfig({
   gatewayProfileBackupPath,
   roleConfigBackupPath,
   backupStatePath,
-  preserveSharedCatalog,
   output,
 }) {
   let state;
@@ -627,10 +647,8 @@ async function restoreInitialConfig({
   } else if (state.originalGatewayProfileExisted === false) {
     await removeFile(gatewayProfilePath);
   }
-  if (!preserveSharedCatalog) {
-    await removeFile(catalogPath);
-    await removeFile(manifestPath);
-  }
+  await removeFile(catalogPath);
+  await removeFile(manifestPath);
   if (state.originalRoleConfigExisted === true) {
     await writePrivateFileAtomic(roleConfigPath, await readFile(roleConfigBackupPath));
   } else if (
@@ -735,7 +753,7 @@ async function askApiKey(prompt) {
 async function askAutoCompact(prompt) {
   const choice = await askChoice(
     prompt,
-    "自动压缩阈值：1 关闭 · 2 60% · 3 自定义",
+    "自动压缩阈值：1 模型默认（90%） · 2 60% · 3 自定义",
     3,
   );
   if (choice === "1") return undefined;
@@ -756,99 +774,13 @@ async function askAutoCompact(prompt) {
   }
 }
 
-function autoCompactFields(autoCompactPercent, contextWindow) {
-  if (autoCompactPercent === undefined) return {};
-  return {
-    model_auto_compact_token_limit: Math.round(
-      contextWindow * autoCompactPercent / 100,
-    ),
-    model_auto_compact_token_limit_scope: "total",
-  };
-}
-
-async function readContextWindow(codexHome) {
-  try {
-    const catalog = JSON.parse(await readFile(
-      join(codexHome, deepseekProviderDefinition.catalogFileName),
-      "utf8",
-    ));
-    const window = catalog.models?.find(
-      (model) => model?.slug === supportedModel,
-    )?.context_window;
-    return Number.isSafeInteger(window) && window > 0 ? window : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function runAutoCompactSetting({
-  codexHome,
-  configPath,
-  environment,
-  profilePath,
-  gatewayProfilePath,
-  output,
-  prompt,
-  writeConfigEdits,
-}) {
-  let managedMode;
-  try {
-    const marker = parse(await readFile(gatewayProfilePath, "utf8"));
-    managedMode = marker.mode === "exclusive" ? "exclusive" : "switching";
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      // 原管理标记可能包含用户私有配置，不能把解析内容作为 cause 暴露。
-      // eslint-disable-next-line preserve-caught-error
-      throw new Error("Codex Connect DeepSeek 管理标记无效，未修改配置");
-    }
-    managedMode = undefined;
-  }
-  const targetPath = managedMode === "exclusive" ? configPath : profilePath;
-  const { document } = await readCurrentConfig(targetPath);
-  if (document.model_provider !== providerId) {
-    output.write("未找到 DeepSeek 配置，请先完成 DeepSeek 安装。\n");
-    return { action: "auto-compact" };
-  }
-  const autoCompactPercent = await askAutoCompact(prompt);
-  const contextWindow = await readContextWindow(codexHome);
-  if (autoCompactPercent !== undefined && contextWindow === undefined) {
-    throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
-  }
-  if (managedMode === "exclusive") {
-    const fields = autoCompactPercent === undefined
-      ? {
-        model_auto_compact_token_limit: null,
-        model_auto_compact_token_limit_scope: null,
-      }
-      : autoCompactFields(autoCompactPercent, contextWindow);
-    await writeConfigEdits(environment, Object.entries(fields).map(([keyPath, value]) => ({
-      keyPath,
-      value,
-    })));
-  } else {
-    if (autoCompactPercent === undefined) {
-      delete document.model_auto_compact_token_limit;
-      delete document.model_auto_compact_token_limit_scope;
-    } else {
-      Object.assign(document, autoCompactFields(autoCompactPercent, contextWindow));
-    }
-    await writePrivateFileAtomic(targetPath, stringify(document));
-  }
-  output.write(autoCompactPercent === undefined
-    ? "已关闭自动压缩。请重启 App Server 生效。\n"
-    : `自动压缩阈值已设为 ${autoCompactPercent}%（约 ${
-        Math.round(contextWindow * autoCompactPercent / 100)
-      } tokens）。请重启 App Server 生效。\n`);
-  return { action: "auto-compact", autoCompactPercent };
-}
-
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 function createHiddenPrompter(prompts, { allowBack }) {
   const autoCompactOptions = [
-    { value: "1", label: "关闭自动压缩" },
+    { value: "1", label: "使用模型默认（90%）" },
     { value: "2", label: `按 ${defaultAutoCompactPercent}% 上下文窗口压缩` },
     { value: "3", label: "自定义百分比" },
   ];
@@ -856,8 +788,7 @@ function createHiddenPrompter(prompts, { allowBack }) {
     { value: "1", label: "OpenAI + DeepSeek 切换模式" },
     { value: "2", label: "仅 DeepSeek 固定模式" },
     { value: "3", label: "恢复安装前配置" },
-    { value: "4", label: "修改自动压缩阈值" },
-    ...(allowBack ? [{ value: "5", label: "返回上一级" }] : []),
+    ...(allowBack ? [{ value: "4", label: "返回上一级" }] : []),
   ];
   return {
     ask: async (label) => {

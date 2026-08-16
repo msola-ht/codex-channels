@@ -128,8 +128,8 @@ async function runModelSetup({
       { value: "opencode-go", label: "OpenCode Go", hint: "安装或移除独立 Go Provider" },
       {
         value: "provider_default",
-        label: "第三方默认模型",
-        hint: "按 Provider 设置新会话使用的默认模型",
+        label: "第三方模型设置",
+        hint: "按 Provider 和模型设置默认值、思考等级与自动压缩",
       },
       {
         value: "api_provider",

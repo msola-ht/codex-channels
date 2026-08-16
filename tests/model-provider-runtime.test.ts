@@ -179,10 +179,10 @@ describe("model provider runtime topology", () => {
     expect(managed.arguments).toContain(
       "model_providers.deepseek.base_url=\"https://api.deepseek.com/\"",
     );
-    expect(managed.arguments).toContain("model_auto_compact_token_limit=629146");
-    expect(managed.arguments).toContain(
-      'model_auto_compact_token_limit_scope="total"',
-    );
+    expect(managed.arguments.some((argument) =>
+      argument.startsWith("model_reasoning_effort=")
+    )).toBe(false);
+    expect(managed.arguments).not.toContain("model_auto_compact_token_limit=629146");
 
     const overridden = withProviderBaseUrl(
       managed.arguments,
@@ -202,11 +202,14 @@ describe("model provider runtime topology", () => {
     )).toBe(false);
   });
 
-  it("rejects a switching profile that cannot launch the managed App Server", async () => {
+  it("rejects a switching profile with a root context override", async () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
       join(codexHome, "sf-deepseek.config.toml"),
-      providerProfile(codexHome).replace('model_reasoning_effort = "high"\n', ""),
+      providerProfile(codexHome).replace(
+        'model_provider = "deepseek"\n',
+        'model_provider = "deepseek"\nmodel_context_window = 1048576\n',
+      ),
       { mode: 0o600 },
     );
     const environment = { CODEX_HOME: codexHome };
@@ -229,6 +232,7 @@ describe("model provider runtime topology", () => {
     const content = readFileSync(rolePath, "utf8");
     expect(content).toContain('model = "deepseek-v4-flash"');
     expect(content).toContain('model_provider = "deepseek"');
+    expect(content).toContain('model_reasoning_effort = "high"');
     expect(content).toContain(
       'developer_instructions = "你是第三方模型单次子代理。',
     );
@@ -237,7 +241,8 @@ describe("model provider runtime topology", () => {
     expect(content).toContain("不等待或请求后续消息");
     expect(content).toContain('base_url = "http://127.0.0.1:39491/"');
     expect(content).toContain('env_key = "CODEX_CONNECT_DEEPSEEK_API_KEY"');
-    expect(content).toContain("model_auto_compact_token_limit = 629146");
+    expect(content).not.toContain("model_context_window");
+    expect(content).not.toContain("model_auto_compact_token_limit");
     expect(content).not.toContain("experimental_bearer_token");
     expect(content).not.toContain("sk-test-secret");
 
@@ -245,12 +250,15 @@ describe("model provider runtime topology", () => {
     const firstRoleInode = statSync(rolePath).ino;
     writeManagedModelProviderRoleConfig(environment, {
       provider: "deepseek",
+      model: "deepseek-v4-pro",
       baseUrl: "http://127.0.0.1:39492/",
     });
     expect(statSync(rolePath).ino).not.toBe(firstRoleInode);
     expect(readFileSync(rolePath, "utf8")).toContain(
       'base_url = "http://127.0.0.1:39492/"',
     );
+    expect(readFileSync(rolePath, "utf8")).toContain('model = "deepseek-v4-pro"');
+    expect(readFileSync(rolePath, "utf8")).toContain('model_reasoning_effort = "low"');
     expect(() => writeManagedModelProviderRoleConfig(environment, {
       provider: "deepseek",
       baseUrl: "not-a-url",
@@ -280,11 +288,14 @@ describe("model provider runtime topology", () => {
       .toThrow("模型目录");
   });
 
-  it("rejects an exclusive configuration that cannot launch the primary App Server", async () => {
+  it("rejects an exclusive configuration with a root reasoning override", async () => {
     const codexHome = await configuredHome("exclusive");
     writeFileSync(
       join(codexHome, "config.toml"),
-      providerProfile(codexHome).replace('model_reasoning_effort = "high"\n', ""),
+      providerProfile(codexHome).replace(
+        'model_provider = "deepseek"\n',
+        'model_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      ),
       { mode: 0o600 },
     );
 
@@ -305,7 +316,7 @@ async function configuredHome(mode: "switching" | "exclusive"): Promise<string> 
   writeFileSync(join(codexHome, profilePath), providerProfile(codexHome), { mode: 0o600 });
   writeFileSync(
     join(codexHome, "sf-deepseek.models.json"),
-    '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+    providerCatalog(),
     { mode: 0o600 },
   );
   return codexHome;
@@ -315,10 +326,7 @@ function providerProfile(codexHome: string): string {
   return [
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
-    'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
-    "model_auto_compact_token_limit = 629146",
-    'model_auto_compact_token_limit_scope = "total"',
     "[model_providers.deepseek]",
     'name = "deepseek"',
     'base_url = "https://api.deepseek.com/"',
@@ -338,13 +346,15 @@ function configureOpenCodeGo(
     `version = 1\nprovider = "opencode-go"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
+  writeFileSync(
+    join(codexHome, "sf-opencode-go.models.json"),
+    providerCatalog(),
+    { mode: 0o600 },
+  );
   writeFileSync(join(codexHome, mode === "exclusive" ? "config.toml" : "sf-opencode-go.config.toml"), [
     'model = "deepseek-v4-flash"',
     'model_provider = "opencode-go"',
-    'model_reasoning_effort = "high"',
-    `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
-    "model_auto_compact_token_limit = 629146",
-    'model_auto_compact_token_limit_scope = "total"',
+    `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
     "[model_providers.opencode-go]",
     'name = "opencode-go"',
     'base_url = "https://opencode.ai/zen/go/v1"',
@@ -354,4 +364,34 @@ function configureOpenCodeGo(
     'experimental_bearer_token = "sk-opencode-test-secret"',
     "",
   ].join("\n"), { mode: 0o600 });
+}
+
+function providerCatalog(): string {
+  return `${JSON.stringify({
+    models: [
+      {
+        slug: "deepseek-v4-flash",
+        display_name: "DeepSeek V4 Flash",
+        context_window: 1_048_576,
+        default_reasoning_level: "high",
+        supported_reasoning_levels: [
+          { effort: "low", description: "Low" },
+          { effort: "high", description: "High" },
+          { effort: "max", description: "Max" },
+        ],
+        auto_compact_token_limit: 629_146,
+      },
+      {
+        slug: "deepseek-v4-pro",
+        display_name: "DeepSeek V4 Pro",
+        context_window: 900_000,
+        default_reasoning_level: "low",
+        supported_reasoning_levels: [
+          { effort: "low", description: "Low" },
+          { effort: "high", description: "High" },
+        ],
+        auto_compact_token_limit: 540_000,
+      },
+    ],
+  })}\n`;
 }

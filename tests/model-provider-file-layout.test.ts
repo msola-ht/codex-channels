@@ -13,7 +13,10 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { migrateManagedModelProviderFiles } from "../scripts/model-provider-file-layout.mjs";
+import {
+  migrateManagedModelProviderFiles,
+  migrateManagedModelProviderModelSettings,
+} from "../scripts/model-provider-file-layout.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -119,7 +122,127 @@ describe("managed model provider file layout", () => {
       .toThrow(/权限或类型不安全/u);
     expect(existsSync(join(codexHome, "sf-deepseek.config.toml"))).toBe(false);
   });
+
+  it("migrates Provider-wide defaults into independent per-model catalogs", () => {
+    const codexHome = fixtureHome();
+    const sharedCatalog = join(codexHome, "sf-deepseek.models.json");
+    writePrivate(sharedCatalog, modelCatalog());
+    writePrivate(
+      join(codexHome, "sf-deepseek.models.manifest.json"),
+      '{"source":"deepseek"}\n',
+    );
+    writeManagedProvider(
+      codexHome,
+      "deepseek",
+      sharedCatalog,
+      "deepseek-v4-flash",
+      419_430,
+    );
+    writeManagedProvider(
+      codexHome,
+      "opencode-go",
+      sharedCatalog,
+      "deepseek-v4-pro",
+      629_146,
+    );
+    writePrivate(join(codexHome, "sf-agent.config.toml"), [
+      'model = "deepseek-v4-flash"',
+      'model_provider = "opencode-go"',
+      'model_reasoning_effort = "high"',
+      `model_catalog_json = ${JSON.stringify(sharedCatalog)}`,
+      "model_context_window = 1048576",
+      "model_auto_compact_token_limit = 629146",
+      'model_auto_compact_token_limit_scope = "total"',
+      "",
+    ].join("\n"));
+
+    const result = migrateManagedModelProviderModelSettings({ CODEX_HOME: codexHome });
+
+    expect(result.changed).toBe(true);
+    const deepseekCatalog = JSON.parse(readFileSync(sharedCatalog, "utf8"));
+    const openCodeCatalogPath = join(codexHome, "sf-opencode-go.models.json");
+    const openCodeCatalog = JSON.parse(readFileSync(openCodeCatalogPath, "utf8"));
+    expect(readFileSync(
+      join(codexHome, "sf-opencode-go.models.manifest.json"),
+      "utf8",
+    )).toBe('{"source":"deepseek"}\n');
+    const deepseekFlash = deepseekCatalog.models.find(
+      ({ slug }: { slug: string }) => slug === "deepseek-v4-flash",
+    );
+    const deepseekPro = deepseekCatalog.models.find(
+      ({ slug }: { slug: string }) => slug === "deepseek-v4-pro",
+    );
+    const openCodeFlash = openCodeCatalog.models.find(
+      ({ slug }: { slug: string }) => slug === "deepseek-v4-flash",
+    );
+    const openCodePro = openCodeCatalog.models.find(
+      ({ slug }: { slug: string }) => slug === "deepseek-v4-pro",
+    );
+    expect(deepseekFlash.auto_compact_token_limit).toBe(419_430);
+    expect(deepseekFlash.context_window).toBe(1_048_576);
+    expect(deepseekPro.auto_compact_token_limit).toBeNull();
+    expect(openCodeFlash.auto_compact_token_limit).toBeNull();
+    expect(openCodePro.auto_compact_token_limit).toBe(629_146);
+    expect(openCodePro.context_window).toBe(900_000);
+    for (const [provider, catalogPath] of [
+      ["deepseek", sharedCatalog],
+      ["opencode-go", openCodeCatalogPath],
+    ]) {
+      const profile = parse(readFileSync(
+        join(codexHome, `sf-${provider}.config.toml`),
+        "utf8",
+      ));
+      expect(profile.model_catalog_json).toBe(catalogPath);
+      expect(profile.model_context_window).toBeUndefined();
+      expect(profile.model_auto_compact_token_limit).toBeUndefined();
+      expect(profile.model_auto_compact_token_limit_scope).toBeUndefined();
+    }
+    const role = parse(readFileSync(join(codexHome, "sf-agent.config.toml"), "utf8"));
+    expect(role.model_catalog_json).toBe(openCodeCatalogPath);
+    expect(role.model_context_window).toBeUndefined();
+    expect(role.model_auto_compact_token_limit).toBeUndefined();
+  });
 });
+
+function writeManagedProvider(
+  codexHome: string,
+  provider: "deepseek" | "opencode-go",
+  catalogPath: string,
+  model: "deepseek-v4-flash" | "deepseek-v4-pro",
+  autoCompactLimit: number,
+) {
+  writePrivate(
+    join(codexHome, `sf-${provider}.managed.toml`),
+    `version = 1\nprovider = "${provider}"\nmode = "switching"\n`,
+  );
+  writePrivate(join(codexHome, `sf-${provider}.config.toml`), [
+    `model = "${model}"`,
+    `model_provider = "${provider}"`,
+    'model_reasoning_effort = "high"',
+    `model_context_window = ${provider === "opencode-go" ? 900_000 : 1_048_576}`,
+    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+    `model_auto_compact_token_limit = ${autoCompactLimit}`,
+    'model_auto_compact_token_limit_scope = "total"',
+    "",
+  ].join("\n"));
+}
+
+function modelCatalog() {
+  return `${JSON.stringify({
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+      slug,
+      display_name: slug,
+      context_window: 1_048_576,
+      default_reasoning_level: "high",
+      supported_reasoning_levels: [
+        { effort: "low", description: "Low" },
+        { effort: "high", description: "High" },
+        { effort: "max", description: "Max" },
+      ],
+      auto_compact_token_limit: null,
+    })),
+  })}\n`;
+}
 
 function fixtureHome() {
   const root = mkdtempSync(join(tmpdir(), "codex-provider-layout-"));

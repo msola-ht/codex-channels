@@ -9,7 +9,7 @@ Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用。当前�
 运行 `codexc setup`，依次选择“模型与提供商”和“OpenCode Go”，输入 OpenCode Go API Key。
 Setup 提供保留 OpenAI 默认的切换模式，以及让原生 Codex 和 Gateway 默认使用 OpenCode Go 的
 固定模式。切换模式创建私有 `sf-opencode-go.config.toml`；固定模式会先备份再修改
-`~/.codex/config.toml`。两种模式都复用经审查的 DeepSeek 模型目录，并把共享
+`~/.codex/config.toml`。两种模式都从相同的经审查上游内容生成 OpenCode Go 独立模型目录，并把共享
 `agents.external` 子代理切换到 OpenCode Go，不修改 DeepSeek Provider 配置。
 
 配置完成后运行：
@@ -18,9 +18,11 @@ Setup 提供保留 OpenAI 默认的切换模式，以及让原生 Codex 和 Gate
 codexc service restart all
 ```
 
-初次配置默认使用 Flash。需要改为 Pro 时，在 `codexc setup` 中选择“模型与提供商 → 第三方默认模型
-→ OpenCode Go”；该默认值只影响之后的新会话，恢复历史 Thread 仍使用原模型。修改后需重启
-App Server。
+初次配置默认使用 Flash。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方模型设置
+→ OpenCode Go”，再按模型设置默认思考等级和自动压缩百分比；每个模型按自己的上下文窗口计算
+阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
+仍使用原模型。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；目录更新后的压缩阈值按原
+百分比和新上下文窗口重新计算。修改后需重启 App Server。
 
 聊天中使用 `/model` 选择带“OpenCode Go”前缀的模型。终端共享会话使用：
 

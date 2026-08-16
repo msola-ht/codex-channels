@@ -2,13 +2,21 @@ import type { ModelProviderDefinition } from "../runtime/model-provider-definiti
 
 export function createSwitchingProviderProfile(
   definition: ModelProviderDefinition,
-  options: { apiKey: string; catalogPath: string; autoCompactLimit?: number },
+  options: {
+    apiKey: string;
+    catalogPath: string;
+    model?: string;
+  },
 ): Record<string, unknown>;
 
 export function applyExclusiveProviderConfig(
   current: Record<string, unknown>,
   definition: ModelProviderDefinition,
-  options: { apiKey: string; catalogPath: string; autoCompactLimit?: number },
+  options: {
+    apiKey: string;
+    catalogPath: string;
+    model?: string;
+  },
 ): Record<string, unknown>;
 
 export function restoreProviderBaseConfig(
