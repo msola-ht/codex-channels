@@ -14,6 +14,24 @@ import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { createLogger } from "../observability/index.js";
 import { GatewayApplication } from "./app.js";
+import {
+  ProviderSettingsWatcher,
+  type ProviderSettingsStateKind,
+} from "./provider-settings-watcher.js";
+import { restartAppServerService } from "./service-restart-runner.js";
+
+const providerSettingsAction: Record<
+  ProviderSettingsStateKind,
+  | "provider-settings-scheduled"
+  | "provider-settings-restarting"
+  | "provider-settings-applied"
+  | "provider-settings-failed"
+> = {
+  scheduled: "provider-settings-scheduled",
+  restarting: "provider-settings-restarting",
+  applied: "provider-settings-applied",
+  failed: "provider-settings-failed",
+};
 
 export async function runGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
@@ -40,7 +58,20 @@ export async function runGatewayProcess(): Promise<void> {
   let reloadPending = false;
   let reloadTimer: NodeJS.Timeout | undefined;
 
+  const providerSettingsWatcher = new ProviderSettingsWatcher({
+    logger,
+    hasActiveTurns: () => application.hasActiveTurns(),
+    restartAppServer: () => restartAppServerService({ environment: process.env }),
+    onStateChange: (change) =>
+      application.notifyProviderSettingsChange(
+        providerSettingsAction[change.kind],
+        change.providers,
+      ),
+    environment: process.env,
+  });
+
   const stopWatching = (): void => {
+    providerSettingsWatcher.stop();
     if (reloadTimer) {
       clearTimeout(reloadTimer);
       reloadTimer = undefined;
@@ -170,6 +201,7 @@ export async function runGatewayProcess(): Promise<void> {
   }
   gatewayOwner.markReady();
   started = true;
+  providerSettingsWatcher.start();
   if (watchedPaths.length > 0) {
     for (const path of watchedPaths) {
       watchFile(path, { interval: 500, persistent: false }, (current, previous) => {

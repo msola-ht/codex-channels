@@ -731,6 +731,26 @@ export class GatewayApplication {
       handleApprovalServerRequest(request, this.approval));
   }
 
+  hasActiveTurns(): boolean {
+    return this.core.hasActiveTurns();
+  }
+
+  notifyProviderSettingsChange(
+    action:
+      | "provider-settings-scheduled"
+      | "provider-settings-restarting"
+      | "provider-settings-applied"
+      | "provider-settings-failed",
+    providers: readonly string[],
+  ): void {
+    this.surfaceManager.configurationChanged({
+      action,
+      changes: [configChange("provider.settings")],
+      addedWorkspaces: [],
+      providers,
+    });
+  }
+
   start(): Promise<void> {
     this.startTask ??= this.startInternal().finally(() => {
       this.startupSettled = true;
