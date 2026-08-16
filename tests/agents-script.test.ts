@@ -173,6 +173,28 @@ describe("codexc agents script", () => {
     }
   });
 
+  it("reports when there is no managed role to disable", async () => {
+    const fixture = createFixture();
+    try {
+      writeFileSync(fixture.configPath, [
+        "[features]",
+        "multi_agent_v2 = true",
+        "",
+      ].join("\n"), { mode: 0o600 });
+
+      const removed = await disableThirdPartyRole(fixture.environment, {
+        updateConfig: applyConfigUpdate,
+      });
+
+      expect(removed).toBe(false);
+      expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
+        features: { multi_agent_v2: true },
+      });
+    } finally {
+      fixture.remove();
+    }
+  });
+
   it("supports a provider configured as the fixed primary", async () => {
     const fixture = createFixture();
     try {

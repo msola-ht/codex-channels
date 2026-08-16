@@ -16,6 +16,7 @@ export interface AgentsStatus {
   roleConfigPath: string;
   multiAgentV2Enabled: boolean;
   externalRoleConfigured: boolean;
+  legacyDsRoleConfigured: boolean;
   provider?: ManagedModelProviderId;
   model?: string;
 }
@@ -31,7 +32,7 @@ export function configureThirdPartyRole(
 export function disableThirdPartyRole(
   environment?: NodeJS.ProcessEnv,
   dependencies?: { updateConfig?: CodexUserConfigWriter },
-): Promise<void>;
+): Promise<boolean>;
 export function removeManagedThirdPartyRole(
   environment?: NodeJS.ProcessEnv,
   dependencies?: {
@@ -39,4 +40,4 @@ export function removeManagedThirdPartyRole(
     provider?: ManagedModelProviderId;
     disableFeature?: boolean;
   },
-): Promise<void>;
+): Promise<boolean>;

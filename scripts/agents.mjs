@@ -130,7 +130,7 @@ export async function disableThirdPartyRole(
   { updateConfig = updateCodexUserConfig } = {},
 ) {
   assertThirdPartyRoleAvailable(environment);
-  await removeManagedThirdPartyRole(environment, { updateConfig, disableFeature: true });
+  return removeManagedThirdPartyRole(environment, { updateConfig, disableFeature: true });
 }
 
 export async function removeManagedThirdPartyRole(
@@ -138,9 +138,9 @@ export async function removeManagedThirdPartyRole(
   { updateConfig = updateCodexUserConfig, provider, disableFeature = false } = {},
 ) {
   const configPath = agentRolesConfigPath(environment);
-  if (!existsSync(configPath)) return;
+  if (!existsSync(configPath)) return false;
   const selection = provider ? loadManagedModelProviderRole(environment) : undefined;
-  if (provider && selection?.provider !== provider) return;
+  if (provider && selection?.provider !== provider) return false;
   const legacyRoleConfigPath = join(
     dirname(managedModelProviderRoleConfigPath(environment)),
     legacyManagedRoleConfigFileName,
@@ -162,9 +162,10 @@ export async function removeManagedThirdPartyRole(
         : []),
     ];
   });
-  if (!removed) return;
+  if (!removed) return false;
   removeManagedModelProviderRoleConfig(environment);
   removeLegacyRoleConfig(legacyRoleConfigPath);
+  return true;
 }
 
 function providerDefinition(provider) {
@@ -286,9 +287,13 @@ async function runAgentsCli() {
     writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
     printStatus(process.env);
   } else if (command === "disable" && provider === undefined) {
-    await disableThirdPartyRole(process.env);
-    writeCliMessage("success", "已移除共享第三方子代理。");
-    writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+    const removed = await disableThirdPartyRole(process.env);
+    if (removed) {
+      writeCliMessage("success", "已移除共享第三方子代理。");
+      writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+    } else {
+      writeCliMessage("note", "当前没有本项目管理的第三方子代理，无需处理。");
+    }
   } else if (command === "status" && provider === undefined) {
     printStatus(process.env);
   } else {
