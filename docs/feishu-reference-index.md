@@ -8,7 +8,7 @@
 固定版本源码已按 [`本地上游源码工作流`](upstream-sources.md) 保存；本地基线存在且匹配时优先
 查阅本地仓库，不重复联网读取相同提交。
 
-项目精确锁定 `@larksuiteoapi/node-sdk@1.71.1`。本页记录资料、实现和验证入口；当前真实平台
+项目精确锁定 `@larksuiteoapi/node-sdk@1.73.0`。本页记录资料、实现和验证入口；当前真实平台
 验收状态只以 [`通讯渠道验收矩阵`](channel-acceptance-matrix.md) 为准。
 
 ## 资料优先级
@@ -29,11 +29,11 @@
 
 | 项目 | 当前记录 |
 | --- | --- |
-| 查阅日期 | 2026-07-26 |
+| 查阅日期 | 2026-08-16 |
 | npm 包 | `@larksuiteoapi/node-sdk` |
-| npm 当日采用正式版 | `1.71.1` |
-| 项目锁定版本 | `1.71.1` |
-| 固定官方源码 | [`8b3e0df`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc) |
+| npm 当日采用正式版 | `1.73.0` |
+| 项目锁定版本 | `1.73.0` |
+| 固定官方源码 | [`f54b49f`](https://github.com/larksuite/node-sdk/tree/f54b49f3566c52b54c598194b7ed3015e3e24224) |
 | 项目依赖状态 | 已安装并由 `package-lock.json` 精确锁定 |
 | 目标应用类型 | 飞书企业自建应用 |
 | 当前传输 | WebSocket 长连接 |
@@ -41,14 +41,16 @@
 | Lark 海外版 | 未支持 |
 
 依赖升级时不得只修改版本数字；还要复核下方资料、已知约束、支持矩阵、实现映射和验证结果。
+`1.73.0` 相对 `1.71.1` 只重新生成官方 OpenAPI 代码（3 个 code-gen 提交，2026-07-30 与
+2026-08-07）；SDK 运行时、依赖以及本项目使用的符号与端点保持不变。
 
 ## 官方资料
 
 | 查询目标 | 官方资料 | 当前用途 |
 | --- | --- | --- |
 | SDK 包与版本 | [npm 包版本](https://www.npmjs.com/package/@larksuiteoapi/node-sdk?activeTab=versions) | 发现正式版本，不作为锁定证据 |
-| SDK 源码 | [固定 `1.71.1` 提交](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc) | 当前实现和测试的源码基线 |
-| Client、事件和长连接示例 | [固定版本中文说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/README.zh.md) | 核对 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
+| SDK 源码 | [固定 `1.73.0` 提交](https://github.com/larksuite/node-sdk/tree/f54b49f3566c52b54c598194b7ed3015e3e24224) | 当前实现和测试的源码基线 |
+| Client、事件和长连接示例 | [固定版本中文说明](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/README.zh.md) | 核对 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
 | 官方 OpenClaw 飞书插件 | [固定提交 `dde0be3`](https://github.com/larksuite/openclaw-lark/tree/dde0be3680d6fd5443cab426c8f4b3216266346a) | 参考手动凭据输入、保留已有配置、Bot 身份探测和允许名单交互；不引入其 OpenClaw 运行时或宽权限工具 |
 | OpenClaw Doctor | [`doctor.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/commands/doctor.ts) | 参考通过/警告/失败分组、已有应用权限检查和缺失 Scope 精确申请链接；不复制其面向完整工具集的长报告与用户权限表 |
 | OpenClaw 应用权限查询 | [`app-scope-checker.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/app-scope-checker.ts) | 区分应用 Scope 与用户 OAuth，并确认完整远端 Scope 查询需要额外自管理权限 |
@@ -56,9 +58,9 @@
 | OpenClaw Device Flow | [`device-flow.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/device-flow.ts)、[`oauth.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/tools/oauth.ts) | 核对现有 Token 与 Scope 覆盖检测、缺失 Scope 增量授权、飞书端点、`offline_access`、有限轮询、账号校验、取消和卡片结果更新 |
 | OpenClaw OAuth 卡片 | [`oauth-cards.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/tools/oauth-cards.ts) | 核对 Device Flow 地址通过飞书 AppLink 在客户端侧边栏打开，不把外部 URL 直接作为普通文本 |
 | OpenClaw Token Store | [`token-store.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/token-store.ts) | 参考 macOS Keychain 和 Linux AES-256-GCM 分离后端；项目使用自己的 Gateway 数据目录和严格载荷验证 |
-| WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/8b3e0df3af9401c263dc96026e1c7f17460a21cc/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
-| 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
-| SDK 原生流式实现 | [`card-stream.ts`](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/channel/outbound/streaming/card-stream.ts)、[`markdown-stream.ts`](https://github.com/larksuite/node-sdk/blob/8b3e0df3af9401c263dc96026e1c7f17460a21cc/channel/outbound/streaming/markdown-stream.ts) | 核对 CardKit 2.0 实体创建、消息引用、元素增量、递增序列、UUID、结束设置和滚动语义；终态正文完整性另对照固定 OpenClaw 插件的 `card.update` 全量终态更新；项目只复用低层协议，不采用整套 Channel |
+| WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/f54b49f3566c52b54c598194b7ed3015e3e24224/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
+| 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
+| SDK 原生流式实现 | [`card-stream.ts`](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/channel/outbound/streaming/card-stream.ts)、[`markdown-stream.ts`](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/channel/outbound/streaming/markdown-stream.ts) | 核对 CardKit 2.0 实体创建、消息引用、元素增量、递增序列、UUID、结束设置和滚动语义；终态正文完整性另对照固定 OpenClaw 插件的 `card.update` 全量终态更新；项目只复用低层协议，不采用整套 Channel |
 | 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
 | 文本消息发送 | [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create) | 核对 `chat_id` 接收目标、文本消息体和机器人可用性 |
@@ -137,7 +139,7 @@ EventDispatcher`。
 当前 SDK `main` 的 Channel 会在缺少 `open_id` 时向 `user_id` 或 `union_id` 回退；本项目当前实现不
 采用该回退，只接受明确的 `sender.open_id`。
 
-锁定 SDK `1.71.1` 的 `registerApp()` 已确认返回应用凭据和可选的扫码用户 `open_id`，并支持
+锁定 SDK `1.73.0` 的 `registerApp()` 已确认返回应用凭据和可选的扫码用户 `open_id`，并支持
 `addons.preset = false` 的最小机器人基座。Setup 提供手动输入和扫码授权两种方式；扫码时不传
 `createOnly` 或 `appId`，由飞书授权页让用户选择新建或已有企业自建应用，只增量声明
 `application:application:self_manage`、`application:application:patch`、
@@ -156,7 +158,7 @@ EventDispatcher`。
 
 | 能力 | 官方入口 | 项目状态 | 当前边界 |
 | --- | --- | --- | --- |
-| Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.71.1` | 研究基线 |
+| Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.73.0` | 研究基线 |
 | WebSocket 握手和重连 | `WSClient` | 生命周期封装、统一 HTTP/HTTPS 代理注入、离线合同和真实首次握手已完成；真实断线恢复与代理待验证 | 已接入 |
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 已接入 |
 | 私聊文本事件 | `im.message.receive_v1` | 普通 `text`、由官方 `text`/`a` 元素组成的纯文字 `post`、`code_block` 代码块与 `md` Markdown 富文本均经过平台本地筛选、有界入队、Access Policy 和 Application 提交；富文本链接保留可见文字与目标 URL，`code_block`/`md` 抽取文本内容，其余未知元素失败关闭并提示用户。真实普通文本与纯文字富文本主路径已通过，代码块与 Markdown 富文本待真实验收 | 已接入 |
@@ -202,7 +204,7 @@ EventDispatcher`。
 | 私聊文本文件输入 | [`src/surfaces/feishu/file-input.ts`](../src/surfaces/feishu/file-input.ts)、[`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-file-input.test.ts`](../tests/feishu-file-input.test.ts)、[`tests/feishu-inbox.test.ts`](../tests/feishu-inbox.test.ts)、[`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：独立文件事件、授权后精确 `type=file` 下载、文件名、1,000,000 字节、UTF-8、控制字符、内存提交、错误脱敏和 Surface 生命周期；真实文件待验收 |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts)、[`src/surfaces/lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts) | [`tests/feishu-renderer.test.ts`](../tests/feishu-renderer.test.ts)、[`tests/lifecycle-presentation.test.ts`](../tests/lifecycle-presentation.test.ts)：共享上线、Turn 开始和结束字段、启动环境与脱敏 UA、每轮上下文和设置、全部 `ConversationCommandResult` 顶层种类、全部命令 Outcome、模型视图、非空集合、用量 Token 百万 `M` 格式、会话列表最多 20 条及 48 字符规范预览、Diff、Plan、Goal、关键事件、非关键进度和脱敏错误详情展示 |
 | 权限中心 | [`src/surfaces/feishu/permissions.ts`](../src/surfaces/feishu/permissions.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) | [`tests/feishu-adapter.test.ts`](../tests/feishu-adapter.test.ts)、[`tests/feishu-surface.test.ts`](../tests/feishu-surface.test.ts)：当前进程连接/事件/回调观测、Gateway 已用能力清单、精确 App ID 申请入口、未知参数失败关闭和不泄露凭据 |
-| 用户 OAuth | [`src/surfaces/feishu/oauth-device-flow.ts`](../src/surfaces/feishu/oauth-device-flow.ts)、[`src/surfaces/feishu/oauth-card.ts`](../src/surfaces/feishu/oauth-card.ts)、[`src/surfaces/feishu/oauth-token-store.ts`](../src/surfaces/feishu/oauth-token-store.ts)、[`src/surfaces/feishu/oauth.ts`](../src/surfaces/feishu/oauth.ts) | [`tests/feishu-oauth-device-flow.test.ts`](../tests/feishu-oauth-device-flow.test.ts)、[`tests/feishu-oauth.test.ts`](../tests/feishu-oauth.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：严格用户 Scope、能力需求与应用已开通权限交集、空需求不授权、精确授权 Origin 与完整 URL、有界 Device Flow 请求/轮询、飞书 AppLink、`offline_access` 展示、有效 Token 覆盖与缺失差集授权、统一 HTTP 代理、显式直连与无效代理失败关闭、Actor 身份匹配、进行中状态、重复流、限时停止/撤销竞态、损坏凭据明确撤销、写入错误/取消回滚、Token 不进入消息、Keychain 原地更新与命令超时，以及 Linux 原子密文替换与私有权限；真实 Device Flow、身份校验、安全写入和 Token 重启恢复已通过，代理待验收 |
+| 用户 OAuth | [`src/surfaces/feishu/oauth-device-flow.ts`](../src/surfaces/feishu/oauth-device-flow.ts)、[`src/surfaces/feishu/oauth-card.ts`](../src/surfaces/feishu/oauth-card.ts)、[`src/surfaces/feishu/oauth-token-store.ts`](../src/surfaces/feishu/oauth-token-store.ts)、[`src/surfaces/feishu/oauth.ts`](../src/surfaces/feishu/oauth.ts) | [`tests/feishu-oauth-device-flow.test.ts`](../tests/feishu-oauth-device-flow.test.ts)、[`tests/feishu-oauth.test.ts`](../tests/feishu-oauth.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：严格用户 Scope、能力需求与应用已开通权限交集、空需求不授权、精确授权 Origin 与完整 URL、有界 Device Flow 请求/轮询、飞书 AppLink、`offline_access` 展示、有效 Token 覆盖与缺失差集授权、统一 HTTP 代理、显式直连与无效代理失败关闭、Actor 身份匹配、进行中状态、重复流、限时停止/撤销竞态、损坏凭据明确撤销、写入错误/取消回滚、Token 不进入消息、Keychain 原地更新与命令超时，以及 Linux 原子密文替换与私有权限；真实 Device Flow、身份校验、安全写入、Token 重启恢复和 Token 自动刷新（含 refresh_token 轮换）已通过真实复验，代理待验收 |
 | 卡片动作裁剪 | [`src/surfaces/feishu/card-action.ts`](../src/surfaces/feishu/card-action.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) | [`tests/feishu-card-action.test.ts`](../tests/feishu-card-action.test.ts)、[`tests/feishu-client.test.ts`](../tests/feishu-client.test.ts)：稳定路由字段、受限字符串动作值与 `form_value`、CardKit `form_submit` 按钮名归一化（交互与命令中心）、六个有界表单字段、畸形输入失败关闭、活动连接门控和独立诊断 |
 | 卡片交互 | [`src/surfaces/feishu/approval-card.ts`](../src/surfaces/feishu/approval-card.ts)、[`src/surfaces/feishu/input-card.ts`](../src/surfaces/feishu/input-card.ts)、[`src/surfaces/feishu/interactions.ts`](../src/surfaces/feishu/interactions.ts) | [`tests/feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)：有界审批、CardKit 2.0 原生选择与文本表单、秘密输入、其他内容优先规则、MCP JSON/工具审批/URL、不可预测一次性令牌、Actor/Chat/消息绑定、请求原值决定、越权与重复动作、重复请求失败关闭、过期、卡片创建悬挂时的有限停止、结果更新失败隔离和跨客户端失效；命令审批一次批准、原生用户输入和 MCP 工具审批一次批准的真实主路径已通过，MCP form/URL 卡片仍待真实验收 |
 | 配置 | [`runtime/gateway-config.mjs`](../runtime/gateway-config.mjs)、[`src/config/`](../src/config/README.md) | [`tests/config.test.ts`](../tests/config.test.ts)、[`tests/config-reload.test.ts`](../tests/config-reload.test.ts)：启用映射、禁用、畸形输入、未知字段、凭据/启用重启和允许名单热加载 |

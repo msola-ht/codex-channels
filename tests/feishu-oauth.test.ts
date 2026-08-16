@@ -27,6 +27,9 @@ import type {
   FeishuOAuthApi,
 } from "../src/surfaces/feishu/oauth-device-flow.js";
 import {
+  FeishuOAuthRefreshError,
+} from "../src/surfaces/feishu/oauth-device-flow.js";
+import {
   EncryptedFileFeishuUserTokenStore,
   feishuTokenStatus,
   MacKeychainFeishuUserTokenStore,
@@ -299,6 +302,134 @@ describe("Feishu OAuth controller", () => {
     );
   });
 
+  it("refreshes a refreshable token during status and rotates stored credentials", async () => {
+    const tokens = new MemoryTokenStore();
+    tokens.value = storedToken({
+      expiresAt: Date.now() - 1_000,
+      refreshExpiresAt: Date.now() + 7 * 24 * 60 * 60_000,
+    });
+    const fixture = createController({ tokens });
+
+    await expect(fixture.controller.status("ou_actor"))
+      .resolves.toBe("valid");
+    expect(fixture.api.refreshUserToken).toHaveBeenCalledWith(
+      "refresh-secret",
+      expect.any(AbortSignal),
+    );
+    expect(tokens.value).toMatchObject({
+      userOpenId: "ou_actor",
+      accessToken: "access-refreshed",
+      refreshToken: "refresh-rotated",
+    });
+    expect(tokens.value!.scopes).toEqual(["drive:file:download"]);
+    expect(tokens.value!.grantedAt).toBe(1_000_000);
+  });
+
+  it("runs only one refresh at a time per user", async () => {
+    const tokens = new MemoryTokenStore();
+    tokens.value = storedToken({
+      expiresAt: Date.now() - 1_000,
+      refreshExpiresAt: Date.now() + 60_000,
+    });
+    const fixture = createController({ tokens });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fixture.api.refreshUserToken.mockImplementation(async () => {
+      await gate;
+      return {
+        accessToken: "access-refreshed",
+        refreshToken: "refresh-rotated",
+        expiresInSeconds: 7_200,
+        refreshExpiresInSeconds: 604_800,
+        openId: "ou_actor",
+      };
+    });
+
+    const first = fixture.controller.status("ou_actor");
+    const second = fixture.controller.status("ou_actor");
+    release();
+    await expect(Promise.all([first, second]))
+      .resolves.toEqual(["valid", "valid"]);
+    expect(fixture.api.refreshUserToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the stored token and reports expired when refresh is terminally rejected", async () => {
+    const tokens = new MemoryTokenStore();
+    tokens.value = storedToken({
+      expiresAt: Date.now() - 1_000,
+      refreshExpiresAt: Date.now() + 60_000,
+    });
+    const fixture = createController({ tokens });
+    fixture.api.refreshUserToken.mockRejectedValue(
+      new FeishuOAuthRefreshError(20_037),
+    );
+
+    await expect(fixture.controller.status("ou_actor"))
+      .resolves.toBe("expired");
+    expect(tokens.value).not.toBeNull();
+    expect(tokens.value!.accessToken).toBe("access-secret");
+  });
+
+  it("keeps a refreshable status when refresh fails without a terminal code", async () => {
+    const tokens = new MemoryTokenStore();
+    tokens.value = storedToken({
+      expiresAt: Date.now() - 1_000,
+      refreshExpiresAt: Date.now() + 60_000,
+    });
+    const fixture = createController({ tokens });
+    fixture.api.refreshUserToken.mockRejectedValue(new Error("network"));
+
+    await expect(fixture.controller.status("ou_actor"))
+      .resolves.toBe("refreshable");
+    expect(tokens.value!.accessToken).toBe("access-secret");
+  });
+
+  it("rejects a refreshed token whose identity does not match the stored actor", async () => {
+    const tokens = new MemoryTokenStore();
+    tokens.value = storedToken({
+      expiresAt: Date.now() - 1_000,
+      refreshExpiresAt: Date.now() + 60_000,
+    });
+    const fixture = createController({ tokens });
+    fixture.api.refreshUserToken.mockResolvedValue({
+      accessToken: "access-refreshed",
+      refreshToken: "refresh-rotated",
+      expiresInSeconds: 7_200,
+      refreshExpiresInSeconds: 604_800,
+      openId: "ou_other",
+    });
+
+    await expect(fixture.controller.status("ou_actor"))
+      .resolves.toBe("expired");
+    expect(tokens.value!.accessToken).toBe("access-secret");
+  });
+
+  it("refreshes before deciding that authorization is already covered", async () => {
+    const tokens = new MemoryTokenStore();
+    tokens.value = storedToken({
+      expiresAt: Date.now() - 1_000,
+      refreshExpiresAt: Date.now() + 7 * 24 * 60 * 60_000,
+    });
+    const fixture = createController({ tokens });
+
+    fixture.controller.beginAuthorization(
+      "oc_chat",
+      "ou_actor",
+      ["drive:file:download"],
+    );
+    await vi.waitFor(() => {
+      expect(fixture.deliverText).toHaveBeenCalledWith(
+        "oc_chat",
+        "当前飞书账号已具备此能力需要的权限，无需重复授权。",
+      );
+    });
+
+    expect(fixture.api.refreshUserToken).toHaveBeenCalled();
+    expect(fixture.api.requestDeviceAuthorization).not.toHaveBeenCalled();
+  });
+
   it("reports an authorization that is currently in progress", async () => {
     const fixture = createController({
       poll: (_authorization, signal) => new Promise((resolve) => {
@@ -534,13 +665,13 @@ describe("Feishu encrypted token store", () => {
       .resolves.toBeNull();
   });
 
-  it("round-trips one hundred application scopes plus offline access", async () => {
+  it("round-trips a granted scope list beyond one hundred entries", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-feishu-token-"));
     temporaryDirectories.push(directory);
     const store = new EncryptedFileFeishuUserTokenStore(directory);
     const token = storedToken({
       scopes: [
-        ...Array.from({ length: 100 }, (_, index) => `scope:${index}`),
+        ...Array.from({ length: 137 }, (_, index) => `scope:${index}`),
         "offline_access",
       ],
     });
@@ -737,6 +868,13 @@ function createController({
   const listGrantedUserScopes = vi.fn(
     listScopes ?? (async () => ["drive:file:download"]),
   );
+  const refreshUserToken = vi.fn(async () => ({
+    accessToken: "access-refreshed",
+    refreshToken: "refresh-rotated",
+    expiresInSeconds: 7_200,
+    refreshExpiresInSeconds: 604_800,
+    openId: "ou_actor",
+  }));
   const api: FeishuOAuthApi = {
     listGrantedUserScopes,
     requestDeviceAuthorization: vi.fn(async () => ({
@@ -759,8 +897,9 @@ function createController({
             refreshExpiresInSeconds: 604_800,
             scopes: ["drive:file:download"],
           },
-        })),
+      })),
     ),
+    refreshUserToken,
     readAuthorizedUser,
   };
   const controller = new FeishuOAuthController(
@@ -782,6 +921,7 @@ function createController({
       readAuthorizedUser,
       listGrantedUserScopes,
       requestDeviceAuthorization: api.requestDeviceAuthorization,
+      refreshUserToken,
     },
     tokens,
     deliverCard,

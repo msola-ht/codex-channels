@@ -6,16 +6,25 @@ import {
   renderFeishuOAuthCard,
   renderFeishuOAuthOutcomeCard,
 } from "./oauth-card.js";
-import type {
-  FeishuOAuthApi,
+import {
+  FeishuOAuthRefreshError,
+  type FeishuOAuthApi,
+  type FeishuRefreshTokenResult,
 } from "./oauth-device-flow.js";
 import {
   feishuTokenStatus,
+  type StoredFeishuUserToken,
   type FeishuUserTokenStore,
 } from "./oauth-token-store.js";
 
 const maximumScopesPerAuthorization = 100;
 const defaultCloseTimeoutMs = 5_000;
+const refreshTimeoutMs = 15_000;
+
+type FeishuRefreshOutcome =
+  | { kind: "ok"; token: StoredFeishuUserToken }
+  | { kind: "retry-later" }
+  | { kind: "terminal" };
 
 export type FeishuUserAuthorizationStatus =
   | "pending"
@@ -39,6 +48,10 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     controller: AbortController;
     task: Promise<void>;
   }>();
+  private readonly refreshing = new Map<
+    string,
+    Promise<FeishuRefreshOutcome>
+  >();
   private closed = false;
 
   constructor(
@@ -110,9 +123,16 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     if (this.pending.has(this.key(userOpenId))) {
       return "pending";
     }
-    return feishuTokenStatus(
-      await this.tokens.get(this.appId, userOpenId),
-    );
+    const stored = await this.tokens.get(this.appId, userOpenId);
+    if (feishuTokenStatus(stored) !== "refreshable") {
+      return feishuTokenStatus(stored);
+    }
+    const outcome = await this.refreshOutcome(userOpenId);
+    return outcome.kind === "ok"
+      ? feishuTokenStatus(outcome.token)
+      : outcome.kind === "terminal"
+        ? "expired"
+        : "refreshable";
   }
 
   async revoke(userOpenId: string): Promise<boolean> {
@@ -120,6 +140,10 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     pending?.controller.abort();
     if (pending) {
       await pending.task;
+    }
+    const refreshing = this.refreshing.get(this.key(userOpenId));
+    if (refreshing) {
+      await refreshing.catch(() => {});
     }
     let existing: Awaited<ReturnType<FeishuUserTokenStore["get"]>>;
     try {
@@ -146,10 +170,14 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     for (const entry of entries) {
       entry.controller.abort();
     }
-    if (entries.length === 0) {
+    const refreshTasks = [...this.refreshing.values()];
+    if (entries.length === 0 && refreshTasks.length === 0) {
       return;
     }
-    await this.waitForClose(entries.map((entry) => entry.task));
+    await this.waitForClose([
+      ...entries.map((entry) => entry.task),
+      ...refreshTasks,
+    ]);
   }
 
   private async runAuthorization(
@@ -192,9 +220,15 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
       );
       return;
     }
-    const existingToken = await this.tokens.get(this.appId, userOpenId);
+    let existingToken = await this.tokens.get(this.appId, userOpenId);
     if (signal.aborted) {
       return;
+    }
+    if (feishuTokenStatus(existingToken) === "refreshable") {
+      const outcome = await this.refreshOutcome(userOpenId);
+      if (outcome.kind === "ok") {
+        existingToken = outcome.token;
+      }
     }
     const scopes = feishuTokenStatus(existingToken) === "valid"
       ? requestedScopes.filter(
@@ -308,7 +342,125 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     return `${this.appId}:${userOpenId}`;
   }
 
-  private async waitForClose(tasks: readonly Promise<void>[]): Promise<void> {
+  private refreshOutcome(userOpenId: string): Promise<FeishuRefreshOutcome> {
+    return this.refreshWithLock(userOpenId, false);
+  }
+
+  private refreshWithLock(
+    userOpenId: string,
+    force: boolean,
+  ): Promise<FeishuRefreshOutcome> {
+    const key = this.key(userOpenId);
+    const existing = this.refreshing.get(key);
+    if (existing) {
+      return existing;
+    }
+    const task = this.refreshOnce(userOpenId, force);
+    this.refreshing.set(key, task);
+    void task.finally(() => {
+      if (this.refreshing.get(key) === task) {
+        this.refreshing.delete(key);
+      }
+    });
+    return task;
+  }
+
+  private async refreshOnce(
+    userOpenId: string,
+    force: boolean,
+  ): Promise<FeishuRefreshOutcome> {
+    const stored = await this.tokens.get(this.appId, userOpenId);
+    if (!stored) {
+      return { kind: "retry-later" };
+    }
+    if (
+      !force
+      && feishuTokenStatus(stored) !== "refreshable"
+    ) {
+      return { kind: "ok", token: stored };
+    }
+    if (!stored.refreshToken) {
+      return { kind: "ok", token: stored };
+    }
+    let refreshed: FeishuRefreshTokenResult;
+    try {
+      refreshed = await this.api.refreshUserToken(
+        stored.refreshToken,
+        AbortSignal.timeout(refreshTimeoutMs),
+      );
+    } catch (error) {
+      if (error instanceof FeishuOAuthRefreshError && error.terminal) {
+        this.logger.warn(
+          {
+            surface: "feishu",
+            accountId: this.appId,
+            ...surfaceErrorMetadata(error),
+          },
+          "飞书用户 Token 刷新已失效，需要重新授权",
+        );
+        return { kind: "terminal" };
+      }
+      this.logger.warn(
+        {
+          surface: "feishu",
+          accountId: this.appId,
+          ...surfaceErrorMetadata(error),
+        },
+        "飞书用户 Token 刷新暂不可用，保留原凭据",
+      );
+      return { kind: "retry-later" };
+    }
+    if (
+      refreshed.openId !== undefined
+      && refreshed.openId !== stored.userOpenId
+    ) {
+      this.logger.warn(
+        {
+          surface: "feishu",
+          accountId: this.appId,
+        },
+        "飞书用户 Token 刷新身份不匹配，需要重新授权",
+      );
+      return { kind: "terminal" };
+    }
+    const now = Date.now();
+    const nextToken: StoredFeishuUserToken = {
+      appId: this.appId,
+      userOpenId: stored.userOpenId,
+      accessToken: refreshed.accessToken,
+      refreshToken: refreshed.refreshToken,
+      expiresAt: now + refreshed.expiresInSeconds * 1_000,
+      refreshExpiresAt:
+        now + refreshed.refreshExpiresInSeconds * 1_000,
+      scopes: stored.scopes,
+      grantedAt: stored.grantedAt,
+    };
+    try {
+      await this.tokens.set(nextToken);
+    } catch (error) {
+      this.logger.warn(
+        {
+          surface: "feishu",
+          accountId: this.appId,
+          ...surfaceErrorMetadata(error),
+        },
+        "飞书用户 Token 刷新结果写入失败，原刷新凭据可能已失效",
+      );
+      return { kind: "retry-later" };
+    }
+    this.logger.info(
+      {
+        surface: "feishu",
+        accountId: this.appId,
+      },
+      "飞书用户 Token 已刷新",
+    );
+    return { kind: "ok", token: nextToken };
+  }
+
+  private async waitForClose(
+    tasks: readonly Promise<unknown>[],
+  ): Promise<void> {
     let timer: NodeJS.Timeout | undefined;
     const completed = Promise.allSettled(tasks).then(() => "completed" as const);
     const timedOut = new Promise<"timed-out">((resolve) => {

@@ -17,6 +17,13 @@ const maximumDeviceCodeLength = 4_096;
 const maximumTokenLength = 16_384;
 const maximumOpenIdLength = 256;
 const scopePattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const refreshTokenRetryableCode = 20_050;
+const refreshTokenTerminalCodes = new Set<number>([
+  20_026, // refresh_token 无效
+  20_037, // refresh_token 已过期
+  20_064, // refresh_token 已吊销
+  20_073, // refresh_token 已被使用（单次消费）
+]);
 
 export interface FeishuDeviceAuthorization {
   deviceCode: string;
@@ -34,6 +41,29 @@ export interface FeishuDeviceToken {
   scopes: readonly string[];
 }
 
+export interface FeishuRefreshTokenResult {
+  accessToken: string;
+  refreshToken: string;
+  expiresInSeconds: number;
+  refreshExpiresInSeconds: number;
+  openId?: string;
+}
+
+export class FeishuOAuthRefreshError extends Error {
+  readonly code: number | string | undefined;
+  readonly retryable: boolean;
+  readonly terminal: boolean;
+
+  constructor(code: number | string | undefined) {
+    super("飞书用户 Token 刷新失败");
+    this.name = "FeishuOAuthRefreshError";
+    this.code = code;
+    this.retryable = code === refreshTokenRetryableCode;
+    this.terminal = typeof code === "number"
+      && refreshTokenTerminalCodes.has(code);
+  }
+}
+
 export type FeishuDevicePollResult =
   | { status: "authorized"; token: FeishuDeviceToken }
   | { status: "denied" | "expired" };
@@ -48,6 +78,10 @@ export interface FeishuOAuthApi {
     authorization: FeishuDeviceAuthorization,
     signal: AbortSignal,
   ): Promise<FeishuDevicePollResult>;
+  refreshUserToken(
+    refreshToken: string,
+    signal: AbortSignal,
+  ): Promise<FeishuRefreshTokenResult>;
   readAuthorizedUser(
     accessToken: string,
     signal: AbortSignal,
@@ -104,7 +138,7 @@ export class FeishuOAuthHttpClient implements FeishuOAuthApi {
         ? [name]
         : [];
     }))].sort();
-    validateScopes(scopes, maximumUserScopes);
+    validateScopes(scopes, maximumApplicationScopeEntries);
     return scopes;
   }
 
@@ -252,6 +286,68 @@ export class FeishuOAuthHttpClient implements FeishuOAuthApi {
     return { status: "expired" };
   }
 
+  async refreshUserToken(
+    refreshToken: string,
+    signal: AbortSignal,
+  ): Promise<FeishuRefreshTokenResult> {
+    const attempt = async (): Promise<FeishuRefreshTokenResult> => {
+      const response = await this.dependencies.fetch(tokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: this.appId,
+          client_secret: this.appSecret,
+        }),
+        signal: boundedSignal(signal),
+      });
+      const body = requireRecord(await readJson(response));
+      const code = optionalNumber(body.code);
+      const error = optionalString(body.error);
+      if (!response.ok || (code !== undefined && code !== 0) || error) {
+        throw new FeishuOAuthRefreshError(code ?? error);
+      }
+      const accessToken = requireBoundedString(
+        body.access_token,
+        maximumTokenLength,
+      );
+      const nextRefreshToken = optionalBoundedString(
+        body.refresh_token,
+        maximumTokenLength,
+      ) ?? refreshToken;
+      const openId = optionalBoundedString(
+        body.open_id,
+        maximumOpenIdLength,
+      );
+      return {
+        accessToken,
+        refreshToken: nextRefreshToken,
+        expiresInSeconds: boundedPositiveInteger(
+          body.expires_in,
+          2_678_400,
+          7_200,
+        ),
+        refreshExpiresInSeconds: boundedPositiveInteger(
+          body.refresh_token_expires_in,
+          31_622_400,
+          604_800,
+        ),
+        ...(openId === undefined ? {} : { openId }),
+      };
+    };
+    try {
+      return await attempt();
+    } catch (error) {
+      if (error instanceof FeishuOAuthRefreshError && error.retryable) {
+        return attempt();
+      }
+      throw error;
+    }
+  }
+
   async readAuthorizedUser(
     accessToken: string,
     signal: AbortSignal,
@@ -384,7 +480,7 @@ function parseScopeString(value: unknown): string[] {
     return [];
   }
   const scopes = [...new Set(raw.split(/\s+/u).filter(Boolean))];
-  validateScopes(scopes, maximumAuthorizationScopes);
+  validateScopes(scopes, maximumApplicationScopeEntries);
   return scopes;
 }
 
