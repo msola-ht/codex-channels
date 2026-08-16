@@ -226,6 +226,24 @@ describe("OpenCode Go setup", () => {
     expect(readFileSync(profilePath, "utf8")).toBe('model = "user-managed"\n');
   });
 
+  it("refuses a user-managed OpenCode Go Provider in config.toml", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-config-owner-"));
+    const configPath = join(codexHome, "config.toml");
+    const original = '[model_providers.opencode-go]\nname = "user-managed"\n';
+    writeFileSync(configPath, original, { mode: 0o600 });
+
+    await expect(runOpenCodeGoSetup({
+      environment: { CODEX_HOME: codexHome },
+      output: { write: () => undefined },
+      prompter: prompt("switching"),
+      downloadCatalog: successfulCatalog,
+    })).rejects.toThrow("已占用 OpenCode Go Provider 或 Profile");
+
+    expect(readFileSync(configPath, "utf8")).toBe(original);
+    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go.managed.toml"))).toBe(false);
+  });
+
   it("rolls back every file when shared-role configuration fails", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-rollback-"));
     const original = "custom = true\n";

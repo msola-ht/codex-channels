@@ -21,6 +21,7 @@ import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setu
 import {
   applyExclusiveProviderConfig,
   createSwitchingProviderProfile,
+  hasProviderBaseConfig,
   restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
 
@@ -114,6 +115,11 @@ export async function runOpenCodeGoSetup({
       if (mode === "switching") {
         if (currentMode === "exclusive") {
           nextConfig = restoreProviderBaseConfig(currentConfig, initialConfig, definition);
+        }
+        if (hasProviderBaseConfig(nextConfig, definition)) {
+          throw new Error(
+            `安装前的 Codex config.toml 已占用 ${definition.displayName} Provider 或 Profile；请先手工移除或改名`,
+          );
         }
         profileContent = stringify(createSwitchingProviderProfile(definition, {
           apiKey,
