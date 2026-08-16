@@ -52,8 +52,11 @@ OpenCode Go 当前没有接入独立账户用量接口，`/usage` 会明确显�
 - 当前受控模型只声明文字输入。未启用外部图片识别时，Gateway 在 Turn 前拒绝图片，可配置
   [`图片识别代理`](vision.md) 走外部视觉接口；音频输入同样在 Turn 前拒绝。
 - OpenCode Go 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
-- 网页搜索未实测：OpenCode Go 是否像 DeepSeek 一样通过 `/responses` 提供 `search` 工具尚未
-  验证，会话中出现 `web_search` item 前不视为已支持。
+- 网页搜索已实测：OpenCode Go 与 DeepSeek 一样通过 `/responses` 提供搜索工具，Codex 侧统一
+  以 `web_search` item 回传（`query`、`action` 和结构化 `results`），实测能返回带标题、URL、
+  摘要和发布日期的真实网页结果。验证方式：直接让 OpenCode Go 会话执行搜索任务并观察事件日志
+  中的 `web_search` item；或运行 `codex exec -p sf-opencode-go -C <工作目录>
+  --skip-git-repo-check "请搜索……"` 直连测试。
 - 当前按 HTTP/SSE 接入（`supports_websockets = false`），流式文本、工具调用和上下文压缩走
   HTTP/SSE，不建立 Responses WebSocket。
 - API Key 没有官方账户接口可用于预检，Setup 只校验格式；首次请求失败时从模型指标和日志中
