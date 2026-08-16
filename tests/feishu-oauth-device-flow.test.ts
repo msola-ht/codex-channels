@@ -75,6 +75,29 @@ describe("Feishu OAuth HTTP client", () => {
     )).resolves.toEqual(["drive:file:download"]);
   });
 
+  it("accepts more than one hundred granted user scopes", async () => {
+    const client = createClient({
+      listGrantedUserScopes: async () => ({
+        code: 0,
+        data: {
+          app: {
+            scopes: Array.from(
+              { length: 137 },
+              (_, index) => ({
+                scope: `user:${index}`,
+                token_types: ["user"],
+              }),
+            ),
+          },
+        },
+      }),
+    });
+
+    await expect(client.listGrantedUserScopes(
+      new AbortController().signal,
+    )).resolves.toHaveLength(137);
+  });
+
   it("fails closed on malformed application scope responses", async () => {
     const missingCode = createClient({
       listGrantedUserScopes: async () => ({
@@ -111,13 +134,13 @@ describe("Feishu OAuth HTTP client", () => {
         },
       }),
     });
-    const excessiveUserScopes = createClient({
+    const excessiveApplicationScopes = createClient({
       listGrantedUserScopes: async () => ({
         code: 0,
         data: {
           app: {
             scopes: Array.from(
-              { length: 101 },
+              { length: 1_001 },
               (_, index) => ({
                 scope: `user:${index}`,
                 token_types: ["user"],
@@ -137,7 +160,7 @@ describe("Feishu OAuth HTTP client", () => {
     await expect(oversizedScope.listGrantedUserScopes(
       new AbortController().signal,
     )).rejects.toThrow("飞书 OAuth 响应格式无效");
-    await expect(excessiveUserScopes.listGrantedUserScopes(
+    await expect(excessiveApplicationScopes.listGrantedUserScopes(
       new AbortController().signal,
     )).rejects.toThrow("飞书 OAuth 响应格式无效");
   });
@@ -345,6 +368,34 @@ describe("Feishu OAuth HTTP client", () => {
     expect(sleep).toHaveBeenNthCalledWith(3, 10_000, expect.any(AbortSignal));
   });
 
+  it("accepts the full granted scope list returned by the token endpoint", async () => {
+    const grantedScopes = Array.from(
+      { length: 137 },
+      (_, index) => `scope:${index}`,
+    );
+    const fetch = vi.fn<Fetch>(async () => jsonResponse({
+      access_token: "access-secret",
+      refresh_token: "refresh-secret",
+      expires_in: 7_200,
+      refresh_token_expires_in: 604_800,
+      scope: grantedScopes.join(" "),
+    }));
+    const client = createClient({ fetch });
+
+    await expect(client.pollDeviceToken({
+      deviceCode: "device-secret",
+      verificationUriComplete: "https://accounts.feishu.cn/device",
+      expiresInSeconds: 240,
+      intervalSeconds: 5,
+      scopes: ["drive:file:download", "offline_access"],
+    }, new AbortController().signal)).resolves.toMatchObject({
+      status: "authorized",
+      token: {
+        scopes: grantedScopes,
+      },
+    });
+  });
+
   it("verifies the authorized account without returning any other profile data", async () => {
     const fetch = vi.fn<Fetch>(async () => jsonResponse({
       code: 0,
@@ -362,6 +413,77 @@ describe("Feishu OAuth HTTP client", () => {
       .resolves.toBe("ou_actor");
     const headers = fetch.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer access-secret");
+  });
+
+  it("refreshes a user token with bounded rotation fields", async () => {
+    const fetch = vi.fn<Fetch>(async () => jsonResponse({
+      access_token: "access-refreshed",
+      refresh_token: "refresh-rotated",
+      expires_in: 7_200,
+      refresh_token_expires_in: 604_800,
+      open_id: "ou_actor",
+    }));
+    const client = createClient({ fetch });
+
+    await expect(client.refreshUserToken(
+      "refresh-secret",
+      new AbortController().signal,
+    )).resolves.toEqual({
+      accessToken: "access-refreshed",
+      refreshToken: "refresh-rotated",
+      expiresInSeconds: 7_200,
+      refreshExpiresInSeconds: 604_800,
+      openId: "ou_actor",
+    });
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(String(url))
+      .toBe("https://open.feishu.cn/open-apis/authen/v2/oauth/token");
+    expect(String(init?.body)).toContain("grant_type=refresh_token");
+    expect(String(init?.body)).toContain("refresh_token=refresh-secret");
+  });
+
+  it("retries once when the refresh endpoint reports a transient server error", async () => {
+    const fetch = vi.fn<Fetch>()
+      .mockResolvedValueOnce(jsonResponse({ code: 20_050 }))
+      .mockResolvedValueOnce(jsonResponse({
+        access_token: "access-refreshed",
+        expires_in: 7_200,
+      }));
+    const client = createClient({ fetch });
+
+    await expect(client.refreshUserToken(
+      "refresh-secret",
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      accessToken: "access-refreshed",
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("classifies terminal refresh errors without clearing anything", async () => {
+    const fetch = vi.fn<Fetch>(async () => jsonResponse({ code: 20_037 }));
+    const client = createClient({ fetch });
+
+    await expect(client.refreshUserToken(
+      "refresh-secret",
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      name: "FeishuOAuthRefreshError",
+      terminal: true,
+      retryable: false,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects refresh responses without an access token", async () => {
+    const client = createClient({
+      fetch: vi.fn<Fetch>(async () => jsonResponse({ code: 0 })),
+    });
+
+    await expect(client.refreshUserToken(
+      "refresh-secret",
+      new AbortController().signal,
+    )).rejects.toThrow("飞书 OAuth 响应格式无效");
   });
 });
 

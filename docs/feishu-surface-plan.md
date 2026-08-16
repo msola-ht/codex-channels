@@ -52,7 +52,7 @@ Feishu 有界输出队列
 
 ## 平台与传输决策
 
-- 官方 Node SDK 固定为项目 lockfile 解析的 `1.71.1`；升级前必须更新
+- 官方 Node SDK 固定为项目 lockfile 解析的 `1.73.0`；升级前必须更新
   [`feishu-reference-index.md`](feishu-reference-index.md) 并重新核对真实合同。
 - 使用低层 `Client`、`WSClient` 和事件分发能力，不采用会重复管理授权、队列、重试或会话状态的
   高层 Channel。

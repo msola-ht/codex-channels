@@ -267,8 +267,9 @@ StateStore 中已知且仍有授权 Actor 的精确 Chat 生成消息，不要�
 Token，只用当前能力缺失的差集发起 Device Flow，不提供预授权全部应用 Scope 的公开命令。卡片
 明确加入并展示 `offline_access`；授权地址只接受
 `https://accounts.feishu.cn` 精确 Origin 的完整 URL，外部响应的 Scope、时间和长度均有界。
-原始应用权限条目先按独立安全上限裁剪，再筛选并限制为最多 100 项用户 Scope；授权与凭据载荷
-为其保留额外一项 `offline_access`。完成后校验返回 Token 所属 `open_id` 必须与消息 Actor
+原始应用权限条目与 token 响应返回的完整 Scope 列表均按响应条目与字节安全上限裁剪（不受单次
+授权上限约束）；单次授权请求仍限制为最多 100 项用户 Scope，并自动附加 `offline_access`。
+完成后校验返回 Token 所属 `open_id` 必须与消息 Actor
 一致；`status` 会优先显示当前 Actor 正在进行的授权。未知或畸形斜杠命令失败关闭，
 不能作为普通消息提交给 Codex。新 Turn 的一次启动确认由共享生命周期事件驱动，并保留 Skill、
 Plugin 或子代理的具体类型与名称，
@@ -301,8 +302,10 @@ AES-256-GCM 密文，目录为 `0700`、文件为 `0600`。`revoke` 先取消当
 `NO_PROXY`；
 HTTP 直连会显式关闭 SDK 底层的环境代理再解析，避免覆盖 Bootstrap 决策。仅 SOCKS
 `ALL_PROXY` 尚不支持；目标未命中 `NO_PROXY` 时，无效或不支持的代理会失败关闭而非直连。
-当前仅完成按需授权基础设施，飞书 CLI API 调用与 Token 自动刷新尚未实现；没有用户级能力调用
-授权器，因此不会主动申请用户权限。
+当前完成按需授权基础设施并支持用户 Token 自动刷新：状态查询或授权前发现 access token 进入
+刷新窗口时，用 `refresh_token` 经官方 v2 token 端点刷新并原子回写，刷新失败的非终态错误保留
+原凭据等待下次重试，终态错误（无效、过期、吊销、已消费或身份不匹配）标记为需要重新授权且不
+静默删除；飞书 CLI API 调用尚未实现；没有用户级能力调用授权器，因此不会主动申请用户权限。
 
 `interactions.ts` 只为当前 Conversation 已恢复且恰有一个仍获授权 Actor 的交互请求创建卡片。
 初始审批和用户输入卡片使用 Conversation 优先有序通道创建，会排在等待中的非关键流式或状态

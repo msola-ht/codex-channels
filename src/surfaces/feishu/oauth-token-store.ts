@@ -23,7 +23,7 @@ export interface FeishuUserTokenStore {
 }
 
 const keychainService = "codexc-feishu-uat";
-const maximumStoredScopes = 101;
+const maximumStoredScopes = 1_000;
 const maximumStoredScopeLength = 128;
 const maximumStoredScopeBytes = 8_192;
 const maximumStoredTokenLength = 16_384;
