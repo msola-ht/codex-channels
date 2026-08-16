@@ -1245,7 +1245,21 @@ export function formatConversationUsage(
             `总余额：${balance.totalBalance}`,
             `赠金余额：${balance.grantedBalance}`,
             `充值余额：${balance.toppedUpBalance}`,
-          ])),
+        ])),
+    ].join("\n"));
+  }
+  if (result.result.kind === "quota-windows") {
+    return toStructuredMarkdownList([
+      `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
+      `API 可用：${result.result.available ? "是" : "否"}`,
+      ...(result.result.windows.length === 0
+        ? ["暂无用量数据"]
+        : result.result.windows.map((window) => {
+            const reset = window.resetsAt === null
+              ? "未知"
+              : formatResetTime(window.resetsAt);
+            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)} · 重置 ${reset}`;
+          })),
     ].join("\n"));
   }
   const daily = [...result.result.usage.daily]

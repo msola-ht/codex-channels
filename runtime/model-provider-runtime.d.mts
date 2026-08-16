@@ -109,6 +109,10 @@ export function loadDeepseekAccountCredential(
   environment?: NodeJS.ProcessEnv,
 ): string;
 
+export function loadOpencodeGoAccountCredential(
+  environment?: NodeJS.ProcessEnv,
+): string;
+
 export function loadPrimaryModelProvider(
   environment?: NodeJS.ProcessEnv,
 ): "openai" | ManagedModelProviderId;

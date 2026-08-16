@@ -5,6 +5,7 @@ import type {
   GlobalDevicesResponse,
   GlobalOverviewResponse,
   GlobalRequestsResponse,
+  OpencodeGoUsageResponse,
   OverviewResponse,
   RangeName,
   RequestSortDirection,
@@ -185,6 +186,15 @@ export function fetchDeepseekBalance(
 ): Promise<DeepseekBalanceResponse> {
   return getJson<DeepseekBalanceResponse>(
     `${API_PREFIX}/deepseek-balance`,
+    signal,
+  )
+}
+
+export function fetchOpencodeGoUsage(
+  signal?: AbortSignal,
+): Promise<OpencodeGoUsageResponse> {
+  return getJson<OpencodeGoUsageResponse>(
+    `${API_PREFIX}/opencode-go-usage`,
     signal,
   )
 }

@@ -88,14 +88,27 @@
 | `session.selector.required` | /resume 用法提示 | 未提供会话选择参数 |
 | `session.selector.ambiguous` | 会话选择不唯一 | 选择器匹配多个会话 |
 | `session.selector.not-found` | 找不到指定会话 | 选择器无匹配 |
+| `sessions.usage` | /sessions 用法提示 | 参数格式错误 |
+| `archived-sessions.usage` | /archived 用法提示 | 参数格式错误 |
 | `thread.bound` | 该 Codex Thread 已绑定到其他会话 | 跨会话接管已绑定 Thread |
 | `thread.takeover.busy` | 原渠道或当前渠道仍有任务，暂不能接管 | 接管运行中的 Thread |
 | `thread.takeover.workspace` | 只能接管当前 Workspace 中的 Thread | 跨 Workspace 接管 |
 | `thread.takeover.changed` | 会话绑定刚刚发生变化，请重新打开会话列表后再试 | 接管期间绑定变更 |
+| `thread-section.usage` | /section 用法提示 | 参数格式错误 |
+| `thread-section.name.invalid` | Thread 分区名称必须为 1–64 个字符，且不能包含控制字符 | 创建或重命名分区时名称非法 |
+| `thread-section.selector.ambiguous` | Thread 分区选择不唯一，请使用完整 ID | 分区选择器匹配多个 |
+| `thread-section.selector.not-found` | 找不到指定 Thread 分区 | 分区选择器无匹配 |
+| `thread-section.pinned.immutable` | 内置固定区不能重命名或删除；请使用 /pin 或 /unpin 管理固定状态 | 尝试重命名或删除内置固定区 |
+| `thread-section.before.invalid` | before 指定的会话必须已经位于目标分区 | move 的 before 目标不在目标分区 |
+| `thread-section.delete-confirmation.invalid` | 删除确认必须使用预览返回的完整 Thread 分区 ID | 删除确认文本不匹配 |
+| `thread-section.admin-required` | 当前用户没有 Thread 分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway | 未配置分区管理员时执行分区写操作 |
 | `workspace.missing` | Workspace 不存在或未获授权 | 配置的 Workspace 缺失 |
 | `workspace.selector.required` | /workspace 用法提示 | 未提供 Workspace 选择参数 |
 | `workspace.selector.ambiguous` | Workspace 选择不唯一 | 选择器匹配多个 Workspace |
 | `workspace.selector.not-found` | 找不到指定 Workspace | 选择器无匹配 |
+| `workspace.permission.usage` | /workspaceperm 用法提示 | 参数格式错误 |
+| `workspace.permission.conflict` | permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项 | 同时配置 permissions 与 sandbox |
+| `workspace.permission.unavailable` | 当前 Gateway 不支持修改工作区权限 | Gateway 未装配权限修改能力 |
 
 ### 目标、队列与指标
 
@@ -132,6 +145,26 @@
 | `rules.unsafe-path` | 项目规则路径包含符号链接，已拒绝写入 | 规则路径使用符号链接 |
 | `rules.check-failed` | 项目规则检查失败 | Codex CLI 规则校验失败 |
 | `rules.unavailable` | 项目规则服务当前不可用 | 规则服务未装配 |
+
+### MCP、Plugin 与 Agents
+
+| 错误码 | 用户提示 | 典型触发 |
+| --- | --- | --- |
+| `mcp.usage` | /mcp 用法提示 | 参数格式错误 |
+| `mcp.server.usage` | 需要提供 MCP Server 名称或序号 | 未提供 MCP Server 名称 |
+| `mcp.server.not-found` | 指定的 MCP Server 不存在 | MCP Server 不存在 |
+| `mcp.oauth.unsupported` | 该 MCP Server 不支持 OAuth 登录 | 对不支持 OAuth 的 Server 执行 login |
+| `mcp.thread.required` | 请先发送消息创建 Thread，或使用 /resume 恢复 Thread 后再登录 MCP Server | 未绑定 Thread 时执行 MCP login |
+| `mcp.resource.usage` | 需要提供有效的 MCP Resource URI | MCP resource 参数无效 |
+| `plugin.usage` | /plugin 用法提示 | 参数格式错误 |
+| `plugin.not-found` | 指定的 Plugin 不存在 | Plugin 选择器无匹配 |
+| `plugin.ambiguous` | Plugin 名称不唯一，请使用序号或完整 ID | Plugin 名称匹配多个 |
+| `plugin.unavailable` | 指定的 Plugin 未启用、被管理员禁用或暂不可调用 | Plugin 未启用或被禁用 |
+| `plugin.disabled` | 开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway | plugin_api 开关关闭时调用 Plugin |
+| `plugin.provider.unsupported` | 开发中的 Plugin 调用当前只支持 OpenAI Thread | 非 OpenAI Thread 调用开发中 Plugin |
+| `agents.usage` | 需要提供子代理角色名称或序号及任务内容 | /agents 缺少角色或任务 |
+| `agents.not-found` | 指定的子代理角色不存在；使用 /agents 查看可用角色 | 子代理角色不存在 |
+| `agents.config-unreadable` | Codex 子代理角色配置无法安全读取；请检查 ~/.codex/config.toml | 角色配置无法安全读取 |
 
 ## 排查示例
 

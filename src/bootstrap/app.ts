@@ -87,6 +87,7 @@ import {
 import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
 import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
+import { createOpencodeGoAccountAdapter } from "./opencode-go-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import {
   checkOpenAiConnectivity,
@@ -370,6 +371,9 @@ export class GatewayApplication {
     const providerAccounts = new ProviderAccountService([
       createOpenAiAccountAdapter(this.codex),
       createDeepseekAccountAdapter({
+        fetchImpl: createProxyFetch(config.networkProxy),
+      }),
+      createOpencodeGoAccountAdapter({
         fetchImpl: createProxyFetch(config.networkProxy),
       }),
     ]);

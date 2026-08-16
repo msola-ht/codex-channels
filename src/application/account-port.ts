@@ -98,9 +98,23 @@ export interface ProviderBalance {
   toppedUpBalance: string;
 }
 
+export interface ProviderQuotaWindow {
+  windowId: string;
+  label: string;
+  usedPercent: number;
+  resetsAt: number | null;
+  status: string | null;
+}
+
 export type ProviderAccountUsage =
   | { kind: "token-usage"; provider: "openai"; usage: AccountUsage }
   | { kind: "balance"; provider: string; available: boolean; balances: ProviderBalance[] }
+  | {
+      kind: "quota-windows";
+      provider: string;
+      available: boolean;
+      windows: ProviderQuotaWindow[];
+    }
   | { kind: "unsupported"; provider: string };
 
 export type ProviderAccountLimits =

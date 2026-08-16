@@ -681,6 +681,38 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("累计 Tokens");
   });
 
+  it("renders OpenCode Go quota windows instead of OpenAI account usage", () => {
+    const rendered = formatConversationUsage({
+      kind: "usage",
+      result: {
+        kind: "quota-windows",
+        provider: "opencode-go",
+        available: true,
+        windows: [
+          {
+            windowId: "rolling",
+            label: "5小时",
+            usedPercent: 0,
+            resetsAt: 1_784_800_000,
+            status: "ok",
+          },
+          {
+            windowId: "monthly",
+            label: "月度",
+            usedPercent: 12.5,
+            resetsAt: null,
+            status: "ok",
+          },
+        ],
+      },
+    });
+
+    expect(rendered).toContain("OpenCode Go 账户用量");
+    expect(rendered).toContain("5小时：已用 0%");
+    expect(rendered).toContain("月度：已用 12.5% · 重置 未知");
+    expect(rendered).not.toContain("累计 Tokens");
+  });
+
   it("fails closed for unregistered Provider account capabilities", () => {
     expect(formatConversationUsage({
       kind: "usage",

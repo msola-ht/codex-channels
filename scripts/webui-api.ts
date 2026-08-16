@@ -287,6 +287,19 @@ export interface DeepseekBalanceResponse {
   balances: DeepseekBalance[]
 }
 
+export interface OpencodeGoQuotaWindow {
+  windowId: string
+  label: string
+  usedPercent: number
+  resetsAt: number | null
+  status: string | null
+}
+
+export interface OpencodeGoUsageResponse {
+  available: boolean
+  windows: OpencodeGoQuotaWindow[]
+}
+
 export interface GlobalTotals {
   device_count: number
   request_count: number
