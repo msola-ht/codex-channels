@@ -41,6 +41,7 @@ import type {
   Aggregate,
   DeepseekBalance,
   ErrorsReport,
+  OpencodeGoQuotaWindow,
   ProviderGroup,
 } from "@/lib/types"
 
@@ -235,6 +236,51 @@ export function DeepseekBalanceCard({
               .join(" · ")}
           </p>
         ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function OpencodeGoUsageCard({
+  available,
+  windows,
+}: {
+  available: boolean
+  windows: OpencodeGoQuotaWindow[]
+}) {
+  if (!available || windows.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>OpenCode Go 用量</CardTitle>
+          <CardDescription>OpenCode Go 账户用量暂不可用</CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>OpenCode Go 用量</CardTitle>
+        <CardDescription>OpenCode Go 账户配额</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {windows.map((window) => (
+          <div key={window.windowId} className="flex flex-col gap-1">
+            <div className="flex items-center justify-between text-sm">
+              <span>{window.label}</span>
+              <span className="tabular-nums text-muted-foreground">
+                已用 {window.usedPercent.toFixed(1)}%
+              </span>
+            </div>
+            <Progress value={Math.min(100, window.usedPercent)} />
+            <p className="text-xs text-muted-foreground">
+              {window.resetsAt === null
+                ? "重置时间未知"
+                : `下次重置 ${formatTime(window.resetsAt)}`}
+            </p>
+          </div>
+        ))}
       </CardContent>
     </Card>
   )

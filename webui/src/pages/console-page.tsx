@@ -44,6 +44,7 @@ import {
   DeepseekBalanceCard,
   ErrorsSummary,
   GlobalCards,
+  OpencodeGoUsageCard,
   ProviderTable,
   WeeklyQuotaCard,
 } from "@/components/overview/overview-sections"
@@ -55,6 +56,7 @@ import {
   fetchGlobalDaily,
   fetchGlobalDevices,
   fetchGlobalOverview,
+  fetchOpencodeGoUsage,
   fetchSettings,
 } from "@/lib/api"
 import { formatTime, formatTokens } from "@/lib/format"
@@ -65,6 +67,7 @@ import type {
   GlobalDeviceRow,
   GlobalOverviewResponse,
   GlobalProviderRow,
+  OpencodeGoUsageResponse,
   SettingsResponse,
   RangeName,
 } from "@/lib/types"
@@ -109,6 +112,7 @@ export function ConsolePage() {
   const account = useOverview("24h")
   const settings = useApi((signal) => fetchSettings(signal), [])
   const balance = useApi((signal) => fetchDeepseekBalance(signal), [])
+  const opencodeGoUsage = useApi((signal) => fetchOpencodeGoUsage(signal), [])
   const deviceLabel = (deviceId: string) =>
     devices.data?.devices.find((device) => device.device_id === deviceId)
       ?.display_name ?? deviceId
@@ -162,6 +166,7 @@ export function ConsolePage() {
         overview={account.data}
         settings={settings.data}
         balance={balance.data}
+        opencodeGoUsage={opencodeGoUsage.data}
       />
     </div>
   )
@@ -197,10 +202,12 @@ function AccountStatusCards({
   overview,
   settings,
   balance,
+  opencodeGoUsage,
 }: {
   overview: ReturnType<typeof useOverview>["data"]
   settings: SettingsResponse | null
   balance: DeepseekBalanceResponse | null
+  opencodeGoUsage: OpencodeGoUsageResponse | null
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -221,6 +228,10 @@ function AccountStatusCards({
         <DeepseekBalanceCard
           available={balance?.available ?? false}
           balances={balance?.balances ?? []}
+        />
+        <OpencodeGoUsageCard
+          available={opencodeGoUsage?.available ?? false}
+          windows={opencodeGoUsage?.windows ?? []}
         />
       </div>
     </div>

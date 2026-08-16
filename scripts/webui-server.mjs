@@ -24,6 +24,7 @@ import {
 } from "../runtime/gateway-config.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
+import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
@@ -188,6 +189,10 @@ async function routeApi(environment, url, response) {
     await handleDeepseekBalance(environment, response);
     return;
   }
+  if (apiPath === "/opencode-go-usage") {
+    await handleOpencodeGoUsage(environment, response);
+    return;
+  }
   if (apiPath === "/global/overview") {
     await proxyGlobalCenter(environment, url, response, "/api/overview");
     return;
@@ -272,6 +277,28 @@ async function handleDeepseekBalance(environment, response) {
     sendJson(response, 200, {
       available: false,
       balances: [],
+    });
+  }
+}
+
+async function handleOpencodeGoUsage(environment, response) {
+  const adapter = createOpencodeGoAccountAdapter({ environment });
+  try {
+    const usage = await adapter.accountUsage();
+    sendJson(response, 200, {
+      available: usage.available,
+      windows: usage.windows.map((window) => ({
+        windowId: window.windowId,
+        label: window.label,
+        usedPercent: window.usedPercent,
+        resetsAt: window.resetsAt,
+        status: window.status,
+      })),
+    });
+  } catch {
+    sendJson(response, 200, {
+      available: false,
+      windows: [],
     });
   }
 }

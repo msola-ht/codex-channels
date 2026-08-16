@@ -272,6 +272,20 @@ describe("webui server", () => {
     expect(body.balances).toEqual([]);
   });
 
+  it("reports opencode go usage as unavailable without credentials", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/opencode-go-usage`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      available: boolean;
+      windows: unknown[];
+    };
+    expect(body.available).toBe(false);
+    expect(body.windows).toEqual([]);
+  });
+
   it("lists threads and returns run and turns details", async () => {
     const fixture = createFixture();
     recordSample(fixture.databasePath, {

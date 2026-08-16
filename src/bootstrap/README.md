@@ -60,6 +60,9 @@
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在共享有界响应读取和严格 Schema 校验后只返回稳定余额；Key、响应正文
   和解析异常不进入日志或业务事件。
+- `opencode-go-account-adapter.ts`：通过同一共享 Provider 运行时按请求读取 OpenCode Go Key，调用官方
+  `/zen/go/v1/usage` 接口，把 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与
+  重置时间）；Key、响应正文和解析异常同样不进入日志或业务事件。
 - `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；组合根按
   `vision.provider` 从第三方 API 注册表解析显示名称、精确 Endpoint 和隔离凭据，适配器复用统一
   代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回 Application 的稳定识别结果；

@@ -45,8 +45,11 @@ Responses Provider 配置；当前 Flash/Pro 已通过 `/responses` 流式文本
 页面列出的其他模型使用多种端点协议，不能只因为出现在价格页或 `/models` 中就自动开放；每个新
 模型仍需确认 Codex Responses 兼容性、模型目录字段和真实工具合同后加入编译期受控列表。
 
-OpenCode Go 当前没有接入独立账户用量接口，`/usage` 会明确显示不支持；Thread Token、请求速度和
-本机请求指标仍正常记录。
+OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go 时，`/usage` 会通过官方
+`GET /zen/go/v1/usage` 查询 5 小时（$12）、7 天（$30）和月度（$60）三个配额窗口的已用百分比与
+重置时间。凭据复用 OpenCode Go API Key（切换 Profile 或固定基础配置），未配置、网络失败或官方
+响应无效时明确显示查询失败，不回退或缓存。Thread Token、请求速度和本机请求指标仍正常记录；
+WebUI 控制台在 DeepSeek 余额卡旁展示同样的配额窗口。
 
 ### 能力边界
 

@@ -16,6 +16,8 @@ export type {
   GlobalRequestRow,
   GlobalRequestsResponse,
   GlobalTotals,
+  OpencodeGoQuotaWindow,
+  OpencodeGoUsageResponse,
   OverviewResponse,
   ProviderGroup,
   Range,

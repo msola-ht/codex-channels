@@ -16,6 +16,7 @@ import { codexHomePath } from "./codex-home.mjs";
 import {
   deepseekProviderDefinition,
   managedModelProviderDefinitions,
+  opencodeGoProviderDefinition,
 } from "./model-provider-definitions.mjs";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
@@ -35,6 +36,7 @@ const providerDescriptors = new Map(managedModelProviderDefinitions.map((definit
   }),
 ]));
 const deepseekProvider = providerDescriptors.get(deepseekProviderDefinition.id);
+const opencodeGoProvider = providerDescriptors.get(opencodeGoProviderDefinition.id);
 
 export function loadManagedModelProvider(environment = process.env) {
   return loadManagedModelProviders(environment)[0];
@@ -315,6 +317,16 @@ export function loadDeepseekAccountCredential(environment = process.env) {
   if (managed !== undefined) return managed.apiKey;
   const configPath = join(codexHomePath(environment), "config.toml");
   return readProviderProfile(configPath, deepseekProvider, { requireSelection: false }).apiKey;
+}
+
+export function loadOpencodeGoAccountCredential(environment = process.env) {
+  const managed = loadManagedProviderProfileFor(
+    environment,
+    opencodeGoProviderDefinition,
+  );
+  if (managed !== undefined) return managed.apiKey;
+  const configPath = join(codexHomePath(environment), "config.toml");
+  return readProviderProfile(configPath, opencodeGoProvider, { requireSelection: false }).apiKey;
 }
 
 export function managedModelProviderRoleConfigPath(environment = process.env) {
