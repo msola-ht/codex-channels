@@ -39,7 +39,7 @@ describe("Codex Connect setup", () => {
       options: [{
         value: "models",
         label: "模型与提供商",
-        hint: "设置 Codex 官方默认模型与思考等级，以及 DeepSeek、第三方 API 和图片识别",
+        hint: "设置 Codex 官方默认值、第三方模型、API 与图片识别",
       }, {
         value: "channels",
         label: "通讯渠道",
@@ -187,6 +187,39 @@ describe("Codex Connect setup", () => {
       value: "codex",
       label: "Codex 官方",
       hint: "设置全局默认模型与思考等级",
+    });
+  });
+
+  it("selects managed third-party default model settings", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("provider_default"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const modelProviderDefaultSetup = vi.fn(async () => "provider-default-configured");
+
+    await expect(runSetup({
+      input,
+      output,
+      prompts,
+      modelProviderDefaultSetup,
+    })).resolves.toBe("provider-default-configured");
+
+    expect(modelProviderDefaultSetup).toHaveBeenCalledWith({
+      input,
+      output,
+      prompts,
+      allowBack: true,
+    });
+    expect(prompts.select.mock.calls[1]?.[0]?.options).toContainEqual({
+      value: "provider_default",
+      label: "第三方模型设置",
+      hint: "按 Provider 和模型设置默认值、思考等级与自动压缩",
     });
   });
 

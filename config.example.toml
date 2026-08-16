@@ -31,6 +31,7 @@ no_proxy = "localhost,127.0.0.1"
 [codex]
 binary = "codex"
 socket_path = "runtime/codex-app-server.sock"
+# 仅覆盖当前主 Provider；模型必须存在于该 Provider 的目录中。
 default_model = ""
 sandbox = "workspace-write"
 

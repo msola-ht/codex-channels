@@ -1,3 +1,11 @@
+import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+
+export const metricsProviderIds = Object.freeze([
+  "openai",
+  ...managedModelProviderDefinitions.map(({ id }) => id),
+]);
+export const metricsProviderUsage = metricsProviderIds.join("|");
+
 export const metricsCommandUsage = Object.freeze({
   run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
   turns: "用法：codexc metrics turns <Thread ID> [--format markdown|json|csv] [--stdout]",
@@ -117,8 +125,8 @@ export function validateMetricsCommandArgs(subcommand, args) {
     return;
   }
   if (subcommand === "prune") {
-    if (args.length !== 1 || !new Set(["openai", "deepseek"]).has(args[0])) {
-      throw new Error("用法：codexc metrics prune <openai|deepseek>");
+    if (args.length !== 1 || !new Set(metricsProviderIds).has(args[0])) {
+      throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
     }
     return;
   }

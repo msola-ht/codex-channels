@@ -21,30 +21,30 @@ import {
   type DeepseekSetupOptions,
 } from "../scripts/deepseek-setup.mjs";
 import {
-  enableDeepseekRole,
-  removeManagedDeepseekRole,
+  configureThirdPartyRole,
 } from "../scripts/agents.mjs";
 import type {
   CodexUserConfigEdit,
   CodexUserConfigValue,
 } from "../scripts/codex-user-config.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { writeManagedModelProviderProfileDefault } from "../runtime/model-provider-runtime.mjs";
 
 const script = `#!/bin/sh
 cat > "$TMP_MODELS" <<'CODEX_MODELS_JSON'
-{"models":[{"slug":"deepseek-v4-flash","context_window":1048576},{"slug":"deepseek-v4-pro","context_window":1048576}]}
+{"models":[{"slug":"deepseek-v4-flash","display_name":"DeepSeek V4 Flash","context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-pro","display_name":"DeepSeek V4 Pro","context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]}]}
 CODEX_MODELS_JSON
 `;
 
 function runDeepseekSetup(options: DeepseekSetupOptions = {}) {
   return runDeepseekSetupImplementation({
     ...options,
-    enableRole: (environment: NodeJS.ProcessEnv) => enableDeepseekRole(environment, {
-      updateConfig: applyConfigUpdate,
-    }),
-    removeRole: (environment: NodeJS.ProcessEnv) => removeManagedDeepseekRole(environment, {
-      updateConfig: applyConfigUpdate,
-    }),
+    configureRole: (provider, model, environment) => configureThirdPartyRole(
+      provider,
+      model,
+      environment,
+      { updateConfig: applyConfigUpdate },
+    ),
   });
 }
 
@@ -57,7 +57,7 @@ describe("DeepSeek setup", () => {
   it("returns to the parent setup without reading a key or changing files", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     const fetchImpl = vi.fn();
-    const prompt = prompter(["5"], []);
+    const prompt = prompter(["4"], []);
 
     await expect(runDeepseekSetup({
       allowBack: true,
@@ -73,7 +73,7 @@ describe("DeepSeek setup", () => {
   });
 
   it("shows a return option in the model channel menu", async () => {
-    const select = vi.fn(async () => "5");
+    const select = vi.fn(async () => "4");
 
     await expect(runDeepseekSetup({
       allowBack: true,
@@ -93,8 +93,7 @@ describe("DeepSeek setup", () => {
         { value: "1", label: "OpenAI + DeepSeek 切换模式" },
         { value: "2", label: "仅 DeepSeek 固定模式" },
         { value: "3", label: "恢复安装前配置" },
-        { value: "4", label: "修改自动压缩阈值" },
-        { value: "5", label: "返回上一级" },
+        { value: "4", label: "返回上一级" },
       ],
     });
   });
@@ -186,24 +185,33 @@ describe("DeepSeek setup", () => {
     expect(record(config.profiles).deepseek).toBeUndefined();
     expect(record(config.model_providers).deepseek).toBeUndefined();
     expect(config.features).toMatchObject({ multi_agent_v2: true });
-    expect(record(config.agents).ds).toMatchObject({
+    expect(record(config.agents).external).toMatchObject({
       description:
-        "DeepSeek 单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息",
-      config_file: join(fixture.home, "codex-connect-ds-subagent.config.toml"),
+        "第三方模型单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息",
+      config_file: join(fixture.home, "sf-agent.config.toml"),
       nickname_candidates: ["DeepSeek"],
     });
-    const roleConfigPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
+    const roleConfigPath = join(fixture.home, "sf-agent.config.toml");
     expect(existsSync(roleConfigPath)).toBe(true);
     expect(parse(readFileSync(roleConfigPath, "utf8"))).toMatchObject({
       model: "deepseek-v4-flash",
       model_provider: "deepseek",
     });
     expect(readFileSync(roleConfigPath, "utf8")).not.toContain("sk-secret");
-    const profile = parse(readFileSync(join(fixture.home, "deepseek.config.toml"), "utf8"));
+    const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash");
     expect(profile.model_provider).toBe("deepseek");
-    expect(profile.model_auto_compact_token_limit).toBe(629_146);
-    expect(profile.model_auto_compact_token_limit_scope).toBe("total");
+    expect(profile.model_auto_compact_token_limit).toBeUndefined();
+    expect(profile.model_auto_compact_token_limit_scope).toBeUndefined();
+    const catalog = JSON.parse(readFileSync(
+      join(fixture.home, "sf-deepseek.models.json"),
+      "utf8",
+    ));
+    expect(catalog.models[0]).toMatchObject({
+      slug: "deepseek-v4-flash",
+      default_reasoning_level: "high",
+      auto_compact_token_limit: 629_146,
+    });
     expect(profile.preferred_auth_method).toBeUndefined();
     expect(profile.forced_login_method).toBeUndefined();
     expect(record(record(profile.model_providers).deepseek)).toMatchObject({
@@ -214,17 +222,17 @@ describe("DeepSeek setup", () => {
       experimental_bearer_token: "sk-secret",
     });
     expect(parse(readFileSync(
-      join(fixture.home, "codex-connect-deepseek.config.toml"),
+      join(fixture.home, "sf-deepseek.managed.toml"),
       "utf8",
     ))).toEqual({ version: 1, provider: "deepseek", mode: "switching" });
     expect(readFileSync(join(fixture.home, "auth.json"), "utf8"))
       .toBe('{"tokens":"openai"}\n');
     expect(fixture.text()).not.toContain("sk-secret");
     expect(statSync(join(fixture.home, "config.toml")).mode & 0o777).toBe(0o600);
-    expect(statSync(join(fixture.home, "deepseek.config.toml")).mode & 0o777).toBe(0o600);
-    expect(statSync(join(fixture.home, "codex-connect-deepseek.config.toml")).mode & 0o777)
+    expect(statSync(join(fixture.home, "sf-deepseek.config.toml")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(fixture.home, "sf-deepseek.managed.toml")).mode & 0o777)
       .toBe(0o600);
-    expect(readFileSync(join(fixture.home, "deepseek.models.manifest.json"), "utf8"))
+    expect(readFileSync(join(fixture.home, "sf-deepseek.models.manifest.json"), "utf8"))
       .toContain(deepseekSetupScriptUrl);
   });
 
@@ -253,13 +261,50 @@ describe("DeepSeek setup", () => {
       custom_after: true,
       features: { multi_agent_v2: true },
     });
-    expect(record(updated.agents).ds).toBeDefined();
+    expect(record(updated.agents).external).toBeDefined();
   });
 
-  it("rejects a custom ds role without modifying DeepSeek files", async () => {
+  it("preserves the selected model and per-model settings when setup is repeated", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const environment = { CODEX_HOME: fixture.home };
+    await runDeepseekSetup({
+      environment,
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1", "2"], ["sk-first"]),
+    });
+    writeManagedModelProviderProfileDefault("deepseek", {
+      model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+      autoCompactLimit: 786_432,
+    }, environment);
+
+    await runDeepseekSetup({
+      environment,
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1", "1"], ["sk-second"]),
+    });
+
+    expect(parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8")))
+      .toMatchObject({ model: "deepseek-v4-pro" });
+    const catalog = JSON.parse(readFileSync(
+      join(fixture.home, "sf-deepseek.models.json"),
+      "utf8",
+    ));
+    expect(catalog.models[1]).toMatchObject({
+      slug: "deepseek-v4-pro",
+      default_reasoning_level: "max",
+      auto_compact_token_limit: 786_432,
+    });
+    expect(parse(readFileSync(join(fixture.home, "sf-agent.config.toml"), "utf8")))
+      .toMatchObject({ model: "deepseek-v4-pro", model_reasoning_effort: "max" });
+  });
+
+  it("rejects a custom external role without modifying DeepSeek files", async () => {
     const original = [
       'model = "gpt-5.4"',
-      "[agents.ds]",
+      "[agents.external]",
       'description = "User managed role"',
       'config_file = "/opt/custom/ds.toml"',
       "",
@@ -272,11 +317,11 @@ describe("DeepSeek setup", () => {
       output: fixture.output,
       fetchImpl,
       prompter: prompter(["1", "2"], ["sk-secret"]),
-    })).rejects.toThrow("agents.ds 已由用户配置");
+    })).rejects.toThrow("agents.external 已由用户配置");
 
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
+    expect(existsSync(join(fixture.home, "sf-deepseek.config.toml"))).toBe(false);
   });
 
   it("restores every installation target when the role config transaction fails", async () => {
@@ -288,18 +333,18 @@ describe("DeepSeek setup", () => {
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
-      enableRole: vi.fn(async () => {
+      configureRole: vi.fn(async () => {
         throw new Error("config version conflict");
       }),
     })).rejects.toThrow("config version conflict");
 
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
     for (const name of [
-      "deepseek.config.toml",
-      "codex-connect-deepseek.config.toml",
-      "deepseek.models.json",
-      "deepseek.models.manifest.json",
-      "codex-connect-ds-subagent.config.toml",
+      "sf-deepseek.config.toml",
+      "sf-deepseek.managed.toml",
+      "sf-deepseek.models.json",
+      "sf-deepseek.models.manifest.json",
+      "sf-agent.config.toml",
     ]) {
       expect(existsSync(join(fixture.home, name))).toBe(false);
     }
@@ -314,7 +359,7 @@ describe("DeepSeek setup", () => {
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
-      enableRole: vi.fn(async () => {
+      configureRole: vi.fn(async () => {
         writeFileSync(join(fixture.home, "config.toml"), concurrent, { mode: 0o600 });
         throw new Error("config version conflict");
       }),
@@ -337,11 +382,11 @@ describe("DeepSeek setup", () => {
     expect(config.model_provider).toBe("deepseek");
     expect(config.forced_login_method).toBeUndefined();
     expect(config.preferred_auth_method).toBeUndefined();
-    expect(config.features).toBeUndefined();
-    expect(config.agents).toBeUndefined();
-    expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
+    expect(config.features).toMatchObject({ multi_agent_v2: true });
+    expect(record(config.agents).external).toBeDefined();
+    expect(existsSync(join(fixture.home, "sf-deepseek.config.toml"))).toBe(false);
     expect(parse(readFileSync(
-      join(fixture.home, "codex-connect-deepseek.config.toml"),
+      join(fixture.home, "sf-deepseek.managed.toml"),
       "utf8",
     ))).toEqual({ version: 1, provider: "deepseek", mode: "exclusive" });
     expect(readFileSync(
@@ -350,7 +395,7 @@ describe("DeepSeek setup", () => {
     )).toBe(original);
   });
 
-  it("removes the managed DeepSeek role when switching to exclusive mode", async () => {
+  it("keeps the shared third-party role on DeepSeek when switching to exclusive mode", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home },
@@ -367,7 +412,7 @@ describe("DeepSeek setup", () => {
     });
 
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
-    expect(record(config.agents).ds).toBeUndefined();
+    expect(record(config.agents).external).toBeDefined();
     expect(config.features).toMatchObject({ multi_agent_v2: true });
   });
 
@@ -420,8 +465,8 @@ describe("DeepSeek setup", () => {
     });
     const config = parse(readFileSync(join(home, "config.toml"), "utf8"));
     expect(config.features).toMatchObject({ multi_agent_v2: true });
-    expect(record(config.agents).ds).toBeDefined();
-    const profile = parse(readFileSync(join(home, "deepseek.config.toml"), "utf8"));
+    expect(record(config.agents).external).toBeDefined();
+    const profile = parse(readFileSync(join(home, "sf-deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
       .toBe("sk-switching");
@@ -483,7 +528,7 @@ describe("DeepSeek setup", () => {
     expect(config.model).toBe("gpt-5.4");
     expect(config.model_provider).toBe("openai");
     expect(record(config.model_providers).deepseek).toBeUndefined();
-    const profile = parse(readFileSync(join(fixture.home, "deepseek.config.toml"), "utf8"));
+    const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
       .toBe("sk-migrated");
@@ -494,7 +539,7 @@ describe("DeepSeek setup", () => {
     const polluted = `${original}\n[model_providers.deepseek]\nname = "deepseek"\nbase_url = "https://api.deepseek.com/"\nwire_api = "responses"\nexperimental_bearer_token = "sk-old"\n`;
     const fixture = setupFixture(polluted);
     writeFileSync(
-      join(fixture.home, "deepseek.config.toml"),
+      join(fixture.home, "sf-deepseek.config.toml"),
       'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nforced_login_method = "api"\n',
       { mode: 0o600 },
     );
@@ -525,8 +570,8 @@ describe("DeepSeek setup", () => {
       features: { multi_agent_v2: true },
     });
     expect(record(repaired.model_providers).deepseek).toBeUndefined();
-    expect(record(repaired.agents).ds).toBeDefined();
-    const profile = parse(readFileSync(join(fixture.home, "deepseek.config.toml"), "utf8"));
+    expect(record(repaired.agents).external).toBeDefined();
+    const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
     expect(profile.forced_login_method).toBeUndefined();
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
       .toBe("sk-repaired");
@@ -549,6 +594,11 @@ describe("DeepSeek setup", () => {
     const legacyState = JSON.parse(readFileSync(backupStatePath, "utf8"));
     delete legacyState.originalRoleConfigExisted;
     writeFileSync(backupStatePath, `${JSON.stringify(legacyState)}\n`, { mode: 0o600 });
+    writeFileSync(
+      join(fixture.home, "sf-opencode-go.managed.toml"),
+      'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
     const result = await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
@@ -557,9 +607,10 @@ describe("DeepSeek setup", () => {
     });
     expect(result?.mode).toBe("restored");
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
-    expect(existsSync(join(fixture.home, "codex-connect-ds-subagent.config.toml")))
+    expect(existsSync(join(fixture.home, "sf-deepseek.config.toml"))).toBe(false);
+    expect(existsSync(join(fixture.home, "sf-agent.config.toml")))
       .toBe(false);
+    expect(existsSync(join(fixture.home, "sf-deepseek.models.json"))).toBe(false);
   });
 
   it("does not treat a user DeepSeek provider added after restore as legacy managed config", async () => {
@@ -594,9 +645,9 @@ describe("DeepSeek setup", () => {
     const originalProfile = 'model = "custom-deepseek"\n';
     const originalGatewayProfile = '[model_providers.custom]\nname = "custom"\n';
     const fixture = setupFixture(originalConfig);
-    writeFileSync(join(fixture.home, "deepseek.config.toml"), originalProfile, { mode: 0o600 });
+    writeFileSync(join(fixture.home, "sf-deepseek.config.toml"), originalProfile, { mode: 0o600 });
     writeFileSync(
-      join(fixture.home, "codex-connect-deepseek.config.toml"),
+      join(fixture.home, "sf-deepseek.managed.toml"),
       originalGatewayProfile,
       { mode: 0o600 },
     );
@@ -615,21 +666,21 @@ describe("DeepSeek setup", () => {
     });
 
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(originalConfig);
-    expect(readFileSync(join(fixture.home, "deepseek.config.toml"), "utf8"))
+    expect(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"))
       .toBe(originalProfile);
-    expect(readFileSync(join(fixture.home, "codex-connect-deepseek.config.toml"), "utf8"))
+    expect(readFileSync(join(fixture.home, "sf-deepseek.managed.toml"), "utf8"))
       .toBe(originalGatewayProfile);
-    expect(existsSync(join(fixture.home, "codex-connect-ds-subagent.config.toml")))
+    expect(existsSync(join(fixture.home, "sf-agent.config.toml")))
       .toBe(false);
   });
 
   it("backs up and restores an existing managed-path role file", async () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-deepseek-role-backup-"));
-    const roleConfigPath = join(home, "codex-connect-ds-subagent.config.toml");
+    const roleConfigPath = join(home, "sf-agent.config.toml");
     const originalRole = 'developer_instructions = "User role file"\n';
     const originalConfig = [
       'model = "gpt-5.4"',
-      "[agents.ds]",
+      "[agents.external]",
       'description = "User role"',
       `config_file = ${JSON.stringify(roleConfigPath)}`,
       "",
@@ -664,7 +715,7 @@ describe("DeepSeek setup", () => {
       prompter: prompter(["1", "2"], ["sk-secret"]),
     });
     const configPath = join(fixture.home, "config.toml");
-    const roleConfigPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
+    const roleConfigPath = join(fixture.home, "sf-agent.config.toml");
     const configBeforeRestore = readFileSync(configPath, "utf8");
     const roleBeforeRestore = readFileSync(roleConfigPath, "utf8");
     const backupStatePath = join(
@@ -687,67 +738,6 @@ describe("DeepSeek setup", () => {
     expect(readFileSync(roleConfigPath, "utf8")).toBe(roleBeforeRestore);
   });
 
-  it("modifies and disables the auto-compact threshold of an existing profile", async () => {
-    const home = mkdtempSync(join(tmpdir(), "codexc-deepseek-auto-compact-"));
-    const fixture = outputFixture(home);
-    await runDeepseekSetup({
-      environment: { CODEX_HOME: home },
-      output: fixture.output,
-      fetchImpl: successfulFetch,
-      prompter: prompter(["1", "2"], ["sk-secret"]),
-    });
-
-    const updated = await runDeepseekSetup({
-      environment: { CODEX_HOME: home },
-      output: fixture.output,
-      fetchImpl: vi.fn(),
-      prompter: prompter(["4", "3", "70"], []),
-    });
-    expect(updated).toMatchObject({ action: "auto-compact", autoCompactPercent: 70 });
-    const profile = parse(readFileSync(join(home, "deepseek.config.toml"), "utf8"));
-    expect(profile.model_auto_compact_token_limit).toBe(734_003);
-    expect(profile.model_auto_compact_token_limit_scope).toBe("total");
-
-    await runDeepseekSetup({
-      environment: { CODEX_HOME: home },
-      output: fixture.output,
-      fetchImpl: vi.fn(),
-      prompter: prompter(["4", "1"], []),
-    });
-    const disabled = parse(readFileSync(join(home, "deepseek.config.toml"), "utf8"));
-    expect(disabled.model_auto_compact_token_limit).toBeUndefined();
-    expect(disabled.model_auto_compact_token_limit_scope).toBeUndefined();
-  });
-
-  it("updates exclusive auto-compact settings through one user config transaction", async () => {
-    const fixture = setupFixture('model = "gpt-5.4"\n');
-    await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
-      output: fixture.output,
-      fetchImpl: successfulFetch,
-      prompter: prompter(["2", "2"], ["sk-fixed"], true),
-    });
-    const writeConfigEdits = vi.fn(async () => undefined);
-
-    await runDeepseekSetupImplementation({
-      environment: { CODEX_HOME: fixture.home },
-      output: fixture.output,
-      fetchImpl: vi.fn(),
-      prompter: prompter(["4", "3", "70"], []),
-      writeConfigEdits,
-    });
-
-    expect(writeConfigEdits).toHaveBeenCalledWith(
-      { CODEX_HOME: fixture.home },
-      [{
-        keyPath: "model_auto_compact_token_limit",
-        value: 734_003,
-      }, {
-        keyPath: "model_auto_compact_token_limit_scope",
-        value: "total",
-      }],
-    );
-  });
 });
 
 function setupFixture(config: string) {
@@ -805,12 +795,12 @@ async function applyConfigUpdate(
       document.features = features;
       continue;
     }
-    if (edit.keyPath === "agents.ds") {
+    if (edit.keyPath === "agents.external") {
       const agents = record(document.agents);
       if (edit.value === null) {
-        delete agents.ds;
+        delete agents.external;
       } else {
-        agents.ds = edit.value;
+        agents.external = edit.value;
       }
       if (Object.keys(agents).length === 0) {
         delete document.agents;

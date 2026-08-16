@@ -1,3 +1,4 @@
+import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
 import type {
   CodexUserConfigEdit,
   CodexUserConfigValue,
@@ -14,20 +15,29 @@ export interface AgentsStatus {
   configPath: string;
   roleConfigPath: string;
   multiAgentV2Enabled: boolean;
-  dsRoleConfigured: boolean;
+  externalRoleConfigured: boolean;
+  legacyDsRoleConfigured: boolean;
+  provider?: ManagedModelProviderId;
+  model?: string;
 }
 
 export function agentsStatus(environment?: NodeJS.ProcessEnv): AgentsStatus;
-export function assertDeepseekRoleAvailable(environment?: NodeJS.ProcessEnv): void;
-export function enableDeepseekRole(
+export function assertThirdPartyRoleAvailable(environment?: NodeJS.ProcessEnv): void;
+export function configureThirdPartyRole(
+  provider: ManagedModelProviderId,
+  model?: string,
   environment?: NodeJS.ProcessEnv,
   dependencies?: { updateConfig?: CodexUserConfigWriter },
-): Promise<void>;
-export function disableDeepseekRole(
+): Promise<{ role: "external"; provider: ManagedModelProviderId; model: string }>;
+export function disableThirdPartyRole(
   environment?: NodeJS.ProcessEnv,
   dependencies?: { updateConfig?: CodexUserConfigWriter },
-): Promise<void>;
-export function removeManagedDeepseekRole(
+): Promise<boolean>;
+export function removeManagedThirdPartyRole(
   environment?: NodeJS.ProcessEnv,
-  dependencies?: { updateConfig?: CodexUserConfigWriter },
-): Promise<void>;
+  dependencies?: {
+    updateConfig?: CodexUserConfigWriter;
+    provider?: ManagedModelProviderId;
+    disableFeature?: boolean;
+  },
+): Promise<boolean>;

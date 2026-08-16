@@ -12,21 +12,27 @@
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
   `NO_PROXY`。渠道显式代理优先于共享代理和 `NO_PROXY`。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
-- `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置模型
+- `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
+- `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
+  私有 Profile、Provider 配置和管理标记，避免 DeepSeek 与 OpenCode Go Setup 重复解释同一格式。
 - `deepseek-pricing-baseline.json`：保存从 DeepSeek 官方价格页审查后的人民币每百万 Token 单价、
   北京时间峰谷区间和生效日期；Bootstrap 只读使用，自动检查只能通过 Draft PR 提议更新。
+- `opencode-go-pricing-baseline.json`：保存 OpenCode Go 官方页面全部模型的美元每百万 Token 单价、
+  长上下文档位、套餐包含用量、端点与 SDK 协议；运行时只为已开放模型生成请求价格快照。
 - `model-provider-runtime.mjs`：通过编译期受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
   凭据；读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
-  切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只在子进程环境提供
-  Key；固定模式从基础配置读取。
+  切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
+  共享第三方子代理只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个 Provider 使用独立
+  模型目录，并按模型读取上下文、默认思考等级与自动压缩阈值；受管 Profile、模型目录、管理标记和
+  共享角色统一使用 `sf-` 文件前缀。
 - `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、可选 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用，避免各入口独立解释运行拓扑。
 - `app-server-supervisor.mjs`：以当前用户私有 Unix Socket 持有 App Server 监管入口互斥锁，
-  对前台启动器公开有界、版本化的 Provider 拓扑身份；集中检查真实 WebSocket 健康状态，拒绝
+  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动请求；集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server，并安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。

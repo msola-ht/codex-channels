@@ -14,11 +14,11 @@ DeepSeek 配置写入 `~/.codex`，不写入 Gateway 的 `~/.codex-connect/confi
 
 - OpenAI 继续作为原生 Codex 默认提供商，`~/.codex/config.toml` 的配置内容保持不变。
 - DeepSeek 的模型、Provider 和 API Key 保存在权限为 `0600` 的
-  `~/.codex/deepseek.config.toml`。
+  `~/.codex/sf-deepseek.config.toml`。
 - 聊天渠道使用 `/model` 为当前会话选择模型。
 - `codexc remote` 连接 OpenAI App Server；`codexc remote --profile deepseek` 连接共享的
   DeepSeek App Server。
-- 直接运行 `codex` 或 `codex --profile deepseek` 会启动独立 TUI，不共享 Gateway Thread。
+- 直接运行 `codex` 或 `codex --profile sf-deepseek` 会启动独立 TUI，不共享 Gateway Thread。
 
 ### 仅 DeepSeek 固定模式
 
@@ -31,27 +31,35 @@ DeepSeek Provider。
 
 ### 自动压缩阈值
 
-安装流程在填写 API Key 后会询问自动压缩阈值，也可以在 Setup 菜单中选择“修改自动压缩阈值”
-随时调整。支持按上下文窗口百分比（10–95%，默认 60%）设置，或选择关闭；Setup 会按当前模型
-上下文窗口换算成 token 数，写入 `model_auto_compact_token_limit` 与
-`model_auto_compact_token_limit_scope = "total"`。修改后需要重启 App Server 生效。
+安装流程在填写 API Key 后会为初始 Flash 模型询问自动压缩阈值。后续在“第三方模型设置”中按
+Provider 和模型分别选择默认思考等级与自动压缩百分比（10–90%）；该百分比按模型自己的
+`context_window` 换算为模型目录中的 `auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖
+其他模型。选择模型默认值时使用 Codex 的 90% 上下文窗口阈值。修改后需要重启 App Server 生效。
 
 ## 管理的文件
 
 | 文件 | 用途 |
 | --- | --- |
-| `~/.codex/deepseek.config.toml` | 切换模式的 DeepSeek 模型、Provider 和 API Key |
-| `~/.codex/deepseek.models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
-| `~/.codex/codex-connect-deepseek.config.toml` | 不含凭据的 Gateway 管理标记 |
-| `~/.codex/codex-connect-ds-subagent.config.toml` | 不含凭据的 DeepSeek 子代理角色配置 |
+| `~/.codex/sf-deepseek.config.toml` | 切换模式的 DeepSeek 模型、Provider 和 API Key |
+| `~/.codex/sf-deepseek.models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
+| `~/.codex/sf-deepseek.managed.toml` | 不含凭据的 Gateway 管理标记 |
+| `~/.codex/sf-agent.config.toml` | 不含凭据的共享第三方子代理配置 |
 | `~/.codex/backup-codex-connect-deepseek/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
 
-这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式；
+这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式，
+并保留仍受支持的默认模型及逐模型思考、自动压缩设置；上下文窗口采用新目录值，压缩阈值按原百分比
+重新计算。
 恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
 的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
+OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或修改任一 Provider 不影响另一方设置。
+从旧版文件布局升级时，运行 `codexc update` 会在核心服务停止期间把受管文件迁移为以上 `sf-`
+名称；新旧文件同时存在时不会猜测覆盖关系，而是明确报错。旧版 Profile 顶层的思考等级和自动
+压缩阈值会迁移进对应模型目录；迁移不保留旧的 `body_after_prefix` 压缩作用域，升级后统一按
+`total` 作用域应用。
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
-`/model` 选择，默认模型仍是 Flash。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
+`/model` 选择。初次配置默认使用 Flash；之后可在 `codexc setup` 的“模型与提供商 → 第三方模型设置”
+中按模型设置 DeepSeek 新会话的默认模型、思考等级和自动压缩阈值。历史 Thread 仍保留自身模型。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
 还会比较模型完整指纹与关键审查字段；发现变化时只创建 Draft PR，不会自动开放未知模型、发布或部署。
 
 当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此
@@ -73,15 +81,17 @@ DeepSeek（当前 `deepseek-v4-flash`、`deepseek-v4-pro` + Codex 0.147.0）支�
 - 计费与统计：搜索是模型请求的一部分，按 DeepSeek API 用量计费，计入请求次数、Token
   与费用统计；不消耗 OpenAI 额度。
 - 验证方式：直接让 DeepSeek 会话执行搜索任务，观察事件日志；或运行
-  `codex exec -p deepseek -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
+  `codex exec -p sf-deepseek -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
 - 失效边界：若 DeepSeek API 对该模型关闭搜索、上游工具名称或响应结构变化，或网关代理
   不再透传搜索工具，则搜索不可用；当前不支持把 DeepSeek 搜索路由到 OpenAI 官方搜索。
 
 ## App Server 与 Thread
 
-切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务入口读取并
-校验私有 Profile，通过进程级配置覆盖加载 DeepSeek 模型目录和 Provider，只把 API Key 放入对应
-子进程环境；Key 不进入命令行、服务定义或日志。
+切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务启动时只
+启动主实例；当前共享子代理选择 DeepSeek 时还会预先启动其统计代理。首次选择 DeepSeek 模型、
+恢复其 Thread 或使用 DeepSeek Remote TUI 时，监管入口才读取并校验私有 Profile，按需启动隔离
+App Server。DeepSeek API Key 只进入需要它的 App Server 子进程环境，不进入命令行、服务定义或
+日志；其他 Provider 的 Key 不会随之注入。
 
 Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review、Goal、MCP 和审批请求。
 跨 Provider 不能原地修改正在使用的 Thread，因此 `/model` 的跨 Provider 选择会：
@@ -130,43 +140,32 @@ DeepSeek 模型目录当前只声明文字输入。未启用外部图片识别�
 [`图片识别代理`](vision.md) 从独立第三方 API 注册表选择 Responses 接口。识别结果作为标明来源的不可信
 文字资料进入当前 DeepSeek Thread。
 
-App Server 服务会为每个启用的 Provider 启动独立的本机回环统计代理。代理支持项目当前使用的
+固定模式下，DeepSeek 代理服务于主 App Server；切换模式按需启动，若共享 `agents.external`
+当前选择 DeepSeek，则随服务预先启动统计代理。代理支持项目当前使用的
 HTTP/SSE、Responses WebSocket、压缩和模型目录请求，复用统一网络代理，并保留用户已有的
 `openai_base_url` 上游。认证 Header、请求正文和响应正文只做内存转发，不写入指标或日志。
 Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此中断。
 
-## 子代理角色
+## 共享第三方子代理
 
-切换模式可在 Codex 的 multi_agent_v2 中把 DeepSeek 作为子代理使用，并让子代理请求自动计入
-模型指标。`codexc setup` 在切换模式配置成功后会自动开启 `features.multi_agent_v2` 并注册
-`agents.ds`；无需再单独执行启用命令，运行 `codexc service restart all` 后生效。
-
-以下命令用于查看状态、手动修复或显式关闭：
+DeepSeek 与 OpenCode Go 共用 `agents.external`，不按 Provider 注册重复角色。任一模式配置成功后，
+Setup 会把该角色切换到刚配置的 Provider 与默认模型；也可以手动选择已配置 Provider 和模型：
 
 ```bash
-codexc agents enable-deepseek
+codexc agents configure deepseek deepseek-v4-pro
+codexc agents configure opencode-go deepseek-v4-flash
 codexc agents status
-codexc agents disable-deepseek
+codexc agents disable
 ```
 
-`enable-deepseek` 会幂等地重新开启 `features.multi_agent_v2`，并注册名为 `ds` 的
-`agents.ds` 角色；仅 DeepSeek 固定模式不会自动注册该角色，从切换模式改为固定模式时会移除
-本项目管理的 `agents.ds`，但不会关闭可能仍供其他角色使用的 `multi_agent_v2`。如果已经存在
-非本项目管理的 `agents.ds`，Setup 会在读取 API Key 和下载前明确报错，不覆盖用户角色。
+角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型和 `env_key`
+引用，不保存 API Key。App Server 服务启动时只为当前角色选择的 Provider 启动统计代理并刷新本机
+地址；未选作子代理且尚未用于会话的第三方 Provider 不增加进程。认证密钥只进入 App Server
+子进程环境。
 
-角色文件 `~/.codex/codex-connect-ds-subagent.config.toml` 在启用时先生成，App Server 服务启动时
-再原子刷新为本机 DeepSeek 统计代理地址，因此子代理请求会进入与直接 API 相同的指标、压缩和
-费用统计链路。服务停止后保留该无凭据文件，保证原生 Codex 仍能解析 `config.toml`；此时 DS
-角色不可用，需先重新启动 App Server。角色文件只写模型、Provider 和 `env_key` 引用，不写
-API Key，认证密钥仍只进入 App Server 子进程环境。
-
-`disable-deepseek` 移除 `agents.ds` 角色、关闭 `multi_agent_v2` 并删除角色文件；切换到固定模式
-或恢复安装前配置也会删除该托管文件。需要子代理时，主模型调用 `spawn_agent` 并选择角色 `ds`。
-
-当前 DS 角色采用 V2 单次兼容模式：当前用户消息必须包含完整任务，主模型调用时必须传
-`agent_type="ds"` 和 `fork_turns="1"`。DS 从继承的最近一个 Turn 中读取最后一条用户消息，
-不解析 V2 的加密任务正文。该模式不支持 `followup_task`、`send_message`、多个 DS 并行拆分或
-依赖后续补充信息；这些场景应使用 OpenAI 官方子代理。
+该角色是 V2 单次子代理：主模型必须使用 `agent_type="external"` 和 `fork_turns="1"`，任务必须在
+当前用户消息中完整给出。它不等待后续消息，也不调用子代理通信工具；需要多轮协作时使用 OpenAI
+官方子代理。
 
 子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
 线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads

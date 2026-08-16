@@ -37,8 +37,8 @@ describe("configured Codex agent roles", () => {
         "max_depth = 8",
         "default_subagent_model = \"gpt-test\"",
         "",
-        "[agents.ds]",
-        "description = \"DeepSeek 子代理\"",
+        "[agents.external]",
+        "description = \"第三方模型子代理\"",
         "config_file = \"/tmp/ds.toml\"",
         "",
         "[agents.no-description]",
@@ -49,7 +49,7 @@ describe("configured Codex agent roles", () => {
     expect(agentRolesConfigPath({ CODEX_HOME: root }))
       .toBe(join(root, "config.toml"));
     expect(listConfiguredAgentRoles({ CODEX_HOME: root })).toEqual([
-      { name: "ds", description: "DeepSeek 子代理" },
+      { name: "external", description: "第三方模型子代理" },
     ]);
   });
 

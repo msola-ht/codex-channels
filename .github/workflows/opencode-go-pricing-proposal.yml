@@ -1,0 +1,170 @@
+name: OpenCode Go pricing proposal
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opencode-go-pricing-proposal
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Inspect official pricing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.result.outputs.changed }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Inspect official OpenCode Go pricing
+        id: inspect
+        continue-on-error: true
+        env:
+          REPORT_DIRECTORY: ${{ runner.temp }}/opencode-go-pricing
+        run: |
+          mkdir -p "$REPORT_DIRECTORY/logs"
+          set +e
+          set -o pipefail
+          node scripts/prepare-opencode-go-pricing-proposal.mjs \
+            runtime/opencode-go-pricing-baseline.json \
+            "$REPORT_DIRECTORY" 2>&1 | tee "$REPORT_DIRECTORY/logs/inspect.log"
+          inspection_status="${PIPESTATUS[0]}"
+          set -e
+          exit "$inspection_status"
+
+      - name: Resolve change status
+        id: result
+        if: always()
+        env:
+          REPORT_DIRECTORY: ${{ runner.temp }}/opencode-go-pricing
+        run: |
+          changed=false
+          if [[ -f "$REPORT_DIRECTORY/result.json" ]]; then
+            changed="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).changed' "$REPORT_DIRECTORY/result.json")"
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Publish job summary
+        if: always()
+        env:
+          REPORT_DIRECTORY: ${{ runner.temp }}/opencode-go-pricing
+        run: |
+          if [[ -f "$REPORT_DIRECTORY/summary.md" ]]; then
+            cat "$REPORT_DIRECTORY/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "OpenCode Go 检查未生成预期摘要" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload inspection report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: opencode-go-pricing-${{ github.run_id }}
+          path: ${{ runner.temp }}/opencode-go-pricing/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail when inspection failed
+        if: always() && steps.inspect.outcome != 'success'
+        run: exit 1
+
+  propose:
+    name: Create draft pricing pull request
+    needs: inspect
+    if: needs.inspect.result == 'success' && needs.inspect.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Find existing draft proposal
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TITLE: 更新 OpenCode Go 官方价格基线
+        run: |
+          existing_url="$(
+            gh pr list \
+              --state open \
+              --search "$PR_TITLE in:title" \
+              --json url \
+              --jq '.[0].url // ""'
+          )"
+          echo "url=$existing_url" >> "$GITHUB_OUTPUT"
+
+      - name: Download inspected pricing
+        if: steps.existing.outputs.url == ''
+        uses: actions/download-artifact@v8
+        with:
+          name: opencode-go-pricing-${{ github.run_id }}
+          path: ${{ runner.temp }}/opencode-go-pricing
+
+      - name: Apply candidate baseline
+        if: steps.existing.outputs.url == ''
+        run: >-
+          cp
+          "${{ runner.temp }}/opencode-go-pricing/candidate-baseline.json"
+          runtime/opencode-go-pricing-baseline.json
+
+      - name: Commit and push proposal branch
+        if: steps.existing.outputs.url == ''
+        env:
+          BRANCH_NAME: automation/opencode-go-pricing-${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH_NAME"
+          git add runtime/opencode-go-pricing-baseline.json
+          git commit -m "更新 OpenCode Go 官方价格基线"
+          gh auth setup-git
+          git push --set-upstream origin "$BRANCH_NAME"
+
+      - name: Create draft pull request
+        if: steps.existing.outputs.url == ''
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH_NAME: automation/opencode-go-pricing-${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: |
+            这是由 OpenCode Go 官方全模型价格检查生成的 Draft PR。
+
+            Artifact 保存官方页面 SHA-256、全部模型价格、价格档位、端点、SDK 协议、结构化差异和下载日志。该提案只更新受控基线，不会自动开放新模型。
+
+            合并前仍需审查官方页面、模型对应关系、价格档位，以及端点或 SDK 协议变化对 Responses 兼容性的影响，并复核文档与测试、运行完整提交门禁。本工作流不会自动转为 Ready、合并、发布或部署。
+
+            检查运行：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          gh pr create
+          --draft
+          --base "$BASE_BRANCH"
+          --head "$BRANCH_NAME"
+          --title "更新 OpenCode Go 官方价格基线"
+          --body "$PR_BODY"

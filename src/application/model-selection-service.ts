@@ -41,6 +41,7 @@ export class ModelSelectionService {
     private readonly router: SessionRouter,
     private readonly configuredDefaultModel?: string,
     private readonly supplementaryModels: readonly ModelOption[] = [],
+    private readonly primaryProvider = "openai",
   ) {}
 
   async state(target: ConversationTarget): Promise<ModelSelectionState> {
@@ -53,7 +54,7 @@ export class ModelSelectionService {
     modality: ModelInputModality,
   ): Promise<void> {
     const current = await this.state(target);
-    const model = current.models.find((candidate) => candidate.model === current.model);
+    const model = findModel(current.models, current.model, current.modelProvider);
     if (!model) {
       throw new UserFacingError(
         "model.current.missing",
@@ -120,7 +121,7 @@ export class ModelSelectionService {
     if (providerChanged) {
       delete pending.serviceTier;
     }
-    const currentModel = current.models.find((candidate) => candidate.model === current.model);
+    const currentModel = findModel(current.models, current.model, current.modelProvider);
     const currentFast = isFastServiceTier(current.serviceTier, currentModel);
     this.pendingByConversation.set(this.key(target), {
       ...pending,
@@ -145,7 +146,7 @@ export class ModelSelectionService {
   async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     const models = await this.listModels();
     const current = this.resolveState(target, models);
-    const model = models.find((candidate) => candidate.model === current.model);
+    const model = findModel(models, current.model, current.modelProvider);
     if (!model) {
       throw new UserFacingError(
         "model.current.missing",
@@ -167,7 +168,7 @@ export class ModelSelectionService {
     }
     const models = await this.listModels();
     const current = this.resolveState(target, models);
-    const model = models.find((candidate) => candidate.model === current.model);
+    const model = findModel(models, current.model, current.modelProvider);
     const currentFast = isFastServiceTier(current.serviceTier, model);
     if (normalized === "status") {
       return current;
@@ -268,7 +269,7 @@ export class ModelSelectionService {
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       model: pending?.model ?? current?.model ?? this.configuredDefaultModel ?? "默认模型",
-      modelProvider: pending?.modelProvider ?? current?.modelProvider ?? "openai",
+      modelProvider: pending?.modelProvider ?? current?.modelProvider ?? this.primaryProvider,
       effort: pending?.effort ?? current?.effort ?? null,
       serviceTier: serviceTierPending ? pending?.serviceTier ?? null : current?.serviceTier ?? null,
       pending: pending !== undefined,
@@ -285,11 +286,30 @@ export class ModelSelectionService {
     }
     const pending = this.pendingByConversation.get(this.key(target));
     const current = this.router.modelSettings(target);
-    const fallback = models.find((model) => model.model === this.configuredDefaultModel)
-      ?? models.find((model) => model.isDefault)
+    const configuredDefault = this.configuredDefaultModel
+      ? findModel(models, this.configuredDefaultModel, this.primaryProvider)
+      : undefined;
+    if (this.configuredDefaultModel && !configuredDefault) {
+      throw new UserFacingError(
+        "model.configured-default.missing",
+        `配置的默认模型不属于当前主 Provider ${this.primaryProvider}：${this.configuredDefaultModel}`,
+        {
+          model: this.configuredDefaultModel,
+          provider: this.primaryProvider,
+        },
+      );
+    }
+    const fallback = configuredDefault
+      ?? models.find((model) =>
+        model.isDefault && (model.provider ?? "openai") === this.primaryProvider)
+      ?? models.find((model) => (model.provider ?? "openai") === this.primaryProvider)
       ?? models[0]!;
     const model = pending?.model ?? current?.model ?? fallback.model;
-    const catalogModel = models.find((candidate) => candidate.model === model);
+    const selectedProvider = pending?.modelProvider
+      ?? current?.modelProvider
+      ?? fallback.provider
+      ?? this.primaryProvider;
+    const catalogModel = findModel(models, model, selectedProvider);
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       models,
@@ -297,7 +317,7 @@ export class ModelSelectionService {
       modelProvider: pending?.modelProvider
         ?? current?.modelProvider
         ?? catalogModel?.provider
-        ?? "openai",
+        ?? this.primaryProvider,
       effort: pending?.effort ?? current?.effort ?? catalogModel?.defaultReasoningEffort ?? null,
       serviceTier: serviceTierPending
         ? pending?.serviceTier ?? null
@@ -317,13 +337,30 @@ export class ModelSelectionService {
   }
 
   private async listModels(): Promise<ModelOption[]> {
-    const primary = await this.codex.listModels();
-    const combined = new Map(primary.map((model) => [model.model, model]));
+    const primary = (await this.codex.listModels()).map((model) =>
+      this.primaryProvider === "openai"
+        ? model
+        : { ...model, provider: this.primaryProvider });
+    const combined = new Map(primary.map((model) => [modelKey(model), model]));
     for (const model of this.supplementaryModels) {
-      combined.set(model.model, model);
+      combined.set(modelKey(model), model);
     }
     return [...combined.values()];
   }
+}
+
+function findModel(
+  models: ModelOption[],
+  model: string,
+  provider?: string,
+): ModelOption | undefined {
+  const normalizedProvider = provider ?? "openai";
+  return models.find((candidate) =>
+    candidate.model === model && (candidate.provider ?? "openai") === normalizedProvider);
+}
+
+function modelKey(model: ModelOption): string {
+  return `${model.provider ?? "openai"}\0${model.model}`;
 }
 
 export function fastServiceTierId(model: ModelOption): string | undefined {

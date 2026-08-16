@@ -1,7 +1,10 @@
+export type ManagedModelProviderId = "deepseek" | "opencode-go";
+
 export interface ModelProviderDefinition {
-  readonly id: string;
+  readonly id: ManagedModelProviderId;
   readonly displayName: string;
   readonly profileName: string;
+  readonly codexProfileName: string;
   readonly profileFileName: string;
   readonly catalogFileName: string;
   readonly catalogManifestFileName: string;
@@ -12,6 +15,7 @@ export interface ModelProviderDefinition {
   readonly apiKeyEnvironmentKey: string;
   readonly defaultModel: string;
   readonly defaultReasoningEffort: string;
+  readonly supportsWebsockets?: boolean;
   readonly models: ReadonlyArray<{
     readonly slug: string;
     readonly available: boolean;
@@ -20,3 +24,5 @@ export interface ModelProviderDefinition {
 }
 
 export const deepseekProviderDefinition: ModelProviderDefinition;
+export const opencodeGoProviderDefinition: ModelProviderDefinition;
+export const managedModelProviderDefinitions: readonly ModelProviderDefinition[];

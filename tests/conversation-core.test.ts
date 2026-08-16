@@ -1475,6 +1475,83 @@ describe("ConversationCore", () => {
     expect(completed?.timing?.thinkingTokensPerSecond).toBeUndefined();
     expect(completed?.timing?.generationTokensPerSecond).toBeUndefined();
   });
+
+  it("includes timing-stream fields for OpenCode Go completions", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "100",
+    };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => ({
+        model: "deepseek-v4-flash",
+        modelProvider: "opencode-go",
+        effort: "high",
+        serviceTier: null,
+      }),
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "turn/started",
+      receivedAtMs: 1_000,
+      params: { threadId: "thread-og", turn: { id: "turn-og" } },
+    });
+    core.handle({
+      type: "turn.modelTiming.updated",
+      threadId: "thread-og",
+      turnId: "turn-og",
+      requestStartedAtMs: 1_200,
+      requestDurationMs: 1_000,
+      inputTokens: 100,
+      cachedInputTokens: 80,
+      outputTokens: 40,
+      reasoningOutputTokens: 20,
+      ttftMs: 200,
+      thinkingDurationMs: 400,
+      outputDurationMs: 500,
+      generationDurationMs: 900,
+      pricingCurrency: "USD",
+      totalCostNanos: 100_000,
+      uncachedInputPricePerMillionNanos: 140_000_000,
+      cachedInputPricePerMillionNanos: 2_800_000,
+      outputPricePerMillionNanos: 280_000_000,
+    });
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-og",
+        turn: {
+          id: "turn-og",
+          status: "completed",
+          error: null,
+          durationMs: 3_000,
+        },
+      },
+    });
+
+    await output.close();
+    const completed = events.find(
+      (event) => event.type === "turn.completed",
+    ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
+    expect(completed).toMatchObject({
+      timing: {
+        modelRequestCount: 1,
+        thinkingDurationMs: 400,
+        thinkingSpeedSampleCount: 1,
+        thinkingSpeedTimedCount: 1,
+        generationSpeedSampleCount: 1,
+        generationSpeedTimedCount: 1,
+      },
+    });
+  });
 });
 
 function handleNotification(

@@ -22,9 +22,8 @@
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
   `text/image/audio` 输入能力，过滤不可见项，
   并在缺少模型选择必需字段时失败关闭。
-- `deepseek-catalog.ts`：按 Bootstrap 注入的编译期 DeepSeek 定义，只读取 Setup 下载到用户
-  `CODEX_HOME` 的模型目录，把当前官方
-  支持的 Flash 映射为可选模型，并保留 Pro 为带不可用原因、不能切换的展示项。
+- `model-provider-catalog.ts`：按 Bootstrap 注入的编译期 Provider 定义，只读取 Setup 下载到用户
+  `CODEX_HOME` 的受控模型目录；相同模型 ID 仍按 Provider 独立映射，未列入对应定义的模型不会开放。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；未知枚举或畸形数值失败关闭，不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
@@ -72,7 +71,9 @@
   `thread/section/move` 则按 Thread 的官方 Provider 路由；所有分区写入都不自动重试。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
-  MCP 配置刷新会尝试全部受管实例并传播任一失败，单 Provider 重连只恢复该侧 Thread。第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
+  第三方实例在首次选择对应模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
+  Provider 不增加 App Server 子进程；MCP 配置刷新只尝试当前已连接实例并传播任一失败，单 Provider
+  重连只恢复该侧 Thread。第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
   无法关联 Thread 的 MCP 启动状态与 warning 全局通知携带 Provider 来源，只发送到对应 Provider
   会话；无法关联 Thread 的 OAuth 完成通知不进入渠道。
   模型目录由对应 App Server 启动配置持有。

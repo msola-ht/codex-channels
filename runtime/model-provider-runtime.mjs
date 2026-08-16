@@ -10,70 +10,217 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
-import { parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
-import { deepseekProviderDefinition } from "./model-provider-definitions.mjs";
+import {
+  deepseekProviderDefinition,
+  managedModelProviderDefinitions,
+} from "./model-provider-definitions.mjs";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
-const managedMarkerName = deepseekProviderDefinition.managedMarkerFileName;
-const deepseekApiKeyEnvironmentKey = deepseekProviderDefinition.apiKeyEnvironmentKey;
+const managedThirdPartyRoleName = "external";
+const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
 
-const deepseekProvider = Object.freeze({
-  id: deepseekProviderDefinition.id,
-  profileName: deepseekProviderDefinition.profileFileName,
-  baseUrl: deepseekProviderDefinition.baseUrl,
-  wireApi: deepseekProviderDefinition.wireApi,
-});
+const providerDescriptors = new Map(managedModelProviderDefinitions.map((definition) => [
+  definition.id,
+  Object.freeze({
+    definition,
+    id: definition.id,
+    profileName: definition.profileFileName,
+    baseUrl: definition.baseUrl,
+    wireApi: definition.wireApi,
+  }),
+]));
+const deepseekProvider = providerDescriptors.get(deepseekProviderDefinition.id);
 
 export function loadManagedModelProvider(environment = process.env) {
-  const profile = loadManagedProviderProfile(environment);
-  return profile === undefined ? undefined : { provider: profile.provider };
+  return loadManagedModelProviders(environment)[0];
+}
+
+export function loadManagedModelProviders(environment = process.env) {
+  return loadManagedProviderProfiles(environment)
+    .map((profile) => ({ provider: profile.provider }));
 }
 
 export function loadManagedProviderAppServer(environment = process.env) {
-  const profile = loadManagedProviderProfile(environment, { requireLaunchConfig: true });
-  if (profile === undefined) return undefined;
+  return loadManagedProviderAppServers(environment)[0];
+}
+
+export function loadManagedProviderAppServers(environment = process.env) {
+  return loadManagedProviderProfiles(environment, { requireLaunchConfig: true })
+    .map(providerAppServerRuntime);
+}
+
+function providerAppServerRuntime(profile) {
   return {
     provider: profile.provider,
     arguments: [
       "-c", `model=${JSON.stringify(profile.model)}`,
       "-c", `model_provider=${JSON.stringify(profile.provider)}`,
-      "-c", `model_reasoning_effort=${JSON.stringify(profile.reasoningEffort)}`,
       "-c", 'service_tier="default"',
       "-c", `model_catalog_json=${JSON.stringify(profile.catalogPath)}`,
       "-c", `model_providers.${profile.provider}.name=${JSON.stringify(profile.name)}`,
       "-c", `model_providers.${profile.provider}.base_url=${JSON.stringify(profile.baseUrl)}`,
       "-c", `model_providers.${profile.provider}.wire_api=${JSON.stringify(profile.wireApi)}`,
-      "-c", `model_providers.${profile.provider}.env_key=${JSON.stringify(deepseekApiKeyEnvironmentKey)}`,
+      "-c", `model_providers.${profile.provider}.env_key=${JSON.stringify(profile.apiKeyEnvironmentKey)}`,
       "-c", `model_providers.${profile.provider}.requires_openai_auth=false`,
-      ...(profile.autoCompactLimit === undefined
+      ...(profile.supportsWebsockets === undefined
         ? []
-        : [
-            "-c", `model_auto_compact_token_limit=${JSON.stringify(profile.autoCompactLimit)}`,
-            "-c", `model_auto_compact_token_limit_scope=${JSON.stringify(
-              profile.autoCompactScope ?? "total",
-            )}`,
-          ]),
+        : ["-c", `model_providers.${profile.provider}.supports_websockets=${profile.supportsWebsockets}`]),
     ],
     childEnvironment: {
-      [deepseekApiKeyEnvironmentKey]: profile.apiKey,
+      [profile.apiKeyEnvironmentKey]: profile.apiKey,
     },
   };
 }
 
 export function validateConfiguredModelProvider(environment = process.env) {
-  const configured = loadConfiguredProviderProfile(environment);
-  return configured === undefined
-    ? undefined
-    : { provider: configured.provider, mode: configured.mode };
+  return validateConfiguredModelProviders(environment)[0];
+}
+
+export function validateConfiguredModelProviders(environment = process.env) {
+  const codexHome = codexHomePath(environment);
+  const exclusiveProviders = managedModelProviderDefinitions.filter((definition) =>
+    readManagedMarker(codexHome, definition)?.mode === "exclusive");
+  if (exclusiveProviders.length > 1) {
+    throw new Error("只能有一个受管第三方 Provider 使用固定模式");
+  }
+  return managedModelProviderDefinitions.flatMap((definition) => {
+    const marker = readManagedMarker(codexHome, definition);
+    if (!marker) return [];
+    if (marker.mode === "exclusive") {
+      const configured = loadConfiguredProviderProfile(environment, definition);
+      return [{ provider: configured.provider, mode: configured.mode }];
+    }
+    loadManagedProviderProfileFor(environment, definition, { requireLaunchConfig: true });
+    return [{ provider: definition.id, mode: "switching" }];
+  });
+}
+
+export function loadManagedModelProviderSettings(environment = process.env) {
+  return managedModelProviderDefinitions.flatMap((definition) => {
+    const marker = readManagedMarker(codexHomePath(environment), definition);
+    if (!marker) return [];
+    const profile = loadConfiguredProviderProfile(environment, definition);
+    return [{
+      provider: definition.id,
+      displayName: definition.displayName,
+      model: profile.model,
+      reasoningEffort: profile.reasoningEffort,
+      mode: marker.mode,
+      models: loadModelCatalogSettings(profile.catalogPath, definition),
+    }];
+  });
+}
+
+export function writeManagedModelProviderProfileDefault(
+  provider,
+  settings,
+  environment = process.env,
+) {
+  const definition = managedModelProviderDefinitions.find(
+    (candidate) => candidate.id === provider,
+  );
+  if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+  const model = settings?.model;
+  validateManagedModelSettings(definition, settings);
+  const codexHome = codexHomePath(environment);
+  const marker = readManagedMarker(codexHome, definition);
+  if (!marker) throw new Error(`${definition.displayName} Provider 尚未配置`);
+  if (marker.mode !== "switching") {
+    throw new Error(`${definition.displayName} 固定模式必须通过 Codex 配置事务修改默认模型`);
+  }
+  const descriptor = providerDescriptors.get(definition.id);
+  const profilePath = join(codexHome, definition.profileFileName);
+  const profile = readProviderProfile(profilePath, descriptor, {
+    expectedCatalogPath: join(codexHome, definition.catalogFileName),
+  });
+  const previousCatalog = readPrivateFile(profile.catalogPath, maximumCatalogBytes);
+  const nextCatalog = updateModelCatalogSettings(previousCatalog, definition, settings);
+  const document = record(parse(readPrivateFile(profilePath)));
+  document.model = model;
+  delete document.model_reasoning_effort;
+  delete document.model_context_window;
+  delete document.model_auto_compact_token_limit;
+  delete document.model_auto_compact_token_limit_scope;
+  writePrivateFileAtomicSync(profile.catalogPath, nextCatalog);
+  try {
+    writePrivateFileAtomicSync(profilePath, stringify(document));
+  } catch (error) {
+    writePrivateFileAtomicSync(profile.catalogPath, previousCatalog);
+    throw error;
+  }
+  readProviderProfile(profilePath, descriptor, {
+    expectedCatalogPath: join(codexHome, definition.catalogFileName),
+  });
+  return { provider: definition.id, ...settings, mode: marker.mode };
+}
+
+export function writeManagedModelProviderCatalogSettings(
+  provider,
+  settings,
+  environment = process.env,
+) {
+  const definition = managedModelProviderDefinitions.find(
+    (candidate) => candidate.id === provider,
+  );
+  if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+  validateManagedModelSettings(definition, settings);
+  const catalogPath = join(codexHomePath(environment), definition.catalogFileName);
+  const previousContent = readPrivateFile(catalogPath, maximumCatalogBytes);
+  const previous = modelCatalogSetting(previousContent, definition, settings.model);
+  writePrivateFileAtomicSync(
+    catalogPath,
+    updateModelCatalogSettings(previousContent, definition, settings),
+  );
+  return previous;
+}
+
+export function withManagedModelCatalogSettings(catalog, definition, settings) {
+  validateManagedModelSettings(definition, settings);
+  const content = JSON.stringify(catalog);
+  return JSON.parse(updateModelCatalogSettings(content, definition, settings));
+}
+
+export function withPreservedManagedModelCatalogSettings(
+  catalog,
+  definition,
+  previousModels = [],
+) {
+  let next = catalog;
+  for (const previous of previousModels) {
+    if (!definition.models.some(({ slug, available }) => available && slug === previous.model)) {
+      continue;
+    }
+    const current = modelCatalogSetting(JSON.stringify(next), definition, previous.model);
+    const reasoningEffort = current.reasoningEfforts.some(
+      ({ effort }) => effort === previous.reasoningEffort,
+    )
+      ? previous.reasoningEffort
+      : current.reasoningEffort;
+    const autoCompactLimit = previous.autoCompactPercent === undefined
+      ? undefined
+      : Math.round(current.contextWindow * previous.autoCompactPercent / 100);
+    next = withManagedModelCatalogSettings(next, definition, {
+      model: previous.model,
+      reasoningEffort,
+      ...(autoCompactLimit === undefined ? {} : { autoCompactLimit }),
+    });
+  }
+  return next;
 }
 
 export function loadPrimaryModelProvider(environment = process.env) {
-  const marker = readManagedMarker(codexHomePath(environment));
-  return marker?.mode === "exclusive" ? marker.provider : "openai";
+  const codexHome = codexHomePath(environment);
+  const exclusiveProviders = managedModelProviderDefinitions.filter((definition) =>
+    readManagedMarker(codexHome, definition)?.mode === "exclusive");
+  if (exclusiveProviders.length > 1) {
+    throw new Error("只能有一个受管第三方 Provider 使用固定模式");
+  }
+  return exclusiveProviders[0]?.id ?? "openai";
 }
 
 export function loadOpenAiBaseUrl(environment = process.env) {
@@ -161,59 +308,107 @@ export function withOpenAiBaseUrl(argumentsList, baseUrl) {
 }
 
 export function loadDeepseekAccountCredential(environment = process.env) {
-  const managed = loadManagedProviderProfile(environment);
+  const managed = loadManagedProviderProfileFor(
+    environment,
+    deepseekProviderDefinition,
+  );
   if (managed !== undefined) return managed.apiKey;
   const configPath = join(codexHomePath(environment), "config.toml");
   return readProviderProfile(configPath, deepseekProvider, { requireSelection: false }).apiKey;
 }
 
 export function managedModelProviderRoleConfigPath(environment = process.env) {
-  return join(codexHomePath(environment), "codex-connect-ds-subagent.config.toml");
+  return join(codexHomePath(environment), managedThirdPartyRoleConfigFileName);
 }
 
 export function writeManagedModelProviderRoleConfig(
   environment = process.env,
-  { baseUrl } = {},
+  { provider, model, baseUrl } = {},
 ) {
-  const profile = loadManagedProviderProfile(environment, { requireLaunchConfig: true });
-  if (profile === undefined) {
-    throw new Error("DeepSeek 切换模式配置不存在，无法生成子代理角色");
+  const selectedProvider = provider ?? loadManagedModelProviderRole(environment)?.provider;
+  const definition = managedModelProviderDefinitions.find(
+    (candidate) => candidate.id === selectedProvider,
+  );
+  if (!definition) throw new Error("请先选择已配置的第三方 Provider");
+  const profile = loadConfiguredProviderProfile(environment, definition);
+  if (profile === undefined) throw new Error(`${definition.displayName} Provider 尚未配置`);
+  const selectedModel = model ?? profile.model;
+  if (!definition.models.some((candidate) => candidate.slug === selectedModel && candidate.available)) {
+    throw new Error(`${definition.displayName} 不支持模型：${selectedModel}`);
   }
+  const selectedModelSettings = readModelCatalogSetting(
+    profile.catalogPath,
+    definition,
+    selectedModel,
+  );
   let url;
   try {
     url = new URL(baseUrl ?? profile.baseUrl);
   } catch {
-    throw new Error("DeepSeek 子代理 base_url 无效");
+    throw new Error("第三方子代理 base_url 无效");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("DeepSeek 子代理 base_url 只支持 HTTP(S)");
+    throw new Error("第三方子代理 base_url 只支持 HTTP(S)");
   }
   const lines = [
-    `model = ${tomlString(profile.model)}`,
+    `model = ${tomlString(selectedModel)}`,
     `model_provider = ${tomlString(profile.provider)}`,
-    `model_reasoning_effort = ${tomlString(profile.reasoningEffort)}`,
+    `model_reasoning_effort = ${tomlString(selectedModelSettings.reasoningEffort)}`,
     `developer_instructions = ${tomlString(
-      "你是 DeepSeek 单次子代理。此角色只用于 fork_turns=1 的一次性任务：把继承上下文中最后一条用户消息视为完整任务并直接执行；不要尝试解析 encrypted_content，不等待或请求后续消息，也不要调用子代理通信工具。若最后一条用户消息仍不足以确定任务，只返回一句明确错误。",
+      "你是第三方模型单次子代理。此角色只用于 fork_turns=1 的一次性任务：把继承上下文中最后一条用户消息视为完整任务并直接执行；不要尝试解析 encrypted_content，不等待或请求后续消息，也不要调用子代理通信工具。若最后一条用户消息仍不足以确定任务，只返回一句明确错误。",
     )}`,
     `model_catalog_json = ${tomlString(profile.catalogPath)}`,
-    ...(profile.autoCompactLimit === undefined
-      ? []
-      : [
-          `model_auto_compact_token_limit = ${profile.autoCompactLimit}`,
-          `model_auto_compact_token_limit_scope = ${tomlString(
-            profile.autoCompactScope ?? "total",
-          )}`,
-        ]),
     "",
-    "[model_providers.deepseek]",
+    `[model_providers.${profile.provider}]`,
     `name = ${tomlString(profile.name)}`,
     `base_url = ${tomlString(url.toString())}`,
     `wire_api = ${tomlString(profile.wireApi)}`,
-    `env_key = ${tomlString(deepseekApiKeyEnvironmentKey)}`,
+    `env_key = ${tomlString(profile.apiKeyEnvironmentKey)}`,
+    ...(profile.supportsWebsockets === undefined
+      ? []
+      : [`supports_websockets = ${profile.supportsWebsockets}`]),
     "requires_openai_auth = false",
     "",
   ].join("\n");
   writePrivateFileAtomicSync(managedModelProviderRoleConfigPath(environment), lines);
+  return { role: managedThirdPartyRoleName, provider: definition.id, model: selectedModel };
+}
+
+export function loadManagedModelProviderRole(environment = process.env) {
+  const path = managedModelProviderRoleConfigPath(environment);
+  if (!existsSync(path)) return undefined;
+  const configPath = join(codexHomePath(environment), "config.toml");
+  let document;
+  try {
+    const config = record(parse(readPrivateFile(configPath)));
+    if (record(record(config.agents)[managedThirdPartyRoleName]).config_file !== path) {
+      return undefined;
+    }
+    document = record(parse(readPrivateFile(path)));
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    // TOML 解析错误可能包含用户配置原文，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("第三方子代理角色配置无法安全读取");
+  }
+  const provider = document.model_provider;
+  const model = document.model;
+  const definition = managedModelProviderDefinitions.find((candidate) => candidate.id === provider);
+  if (!definition || typeof model !== "string") {
+    throw new Error("第三方子代理角色配置无效");
+  }
+  return { role: managedThirdPartyRoleName, provider: definition.id, model };
+}
+
+export function loadConfiguredProviderCredential(provider, environment = process.env) {
+  const definition = managedModelProviderDefinitions.find((candidate) => candidate.id === provider);
+  if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+  const profile = loadConfiguredProviderProfile(environment, definition);
+  if (!profile) throw new Error(`${definition.displayName} Provider 尚未配置`);
+  return {
+    environmentKey: profile.apiKeyEnvironmentKey,
+    apiKey: profile.apiKey,
+  };
 }
 
 export function removeManagedModelProviderRoleConfig(environment = process.env) {
@@ -225,32 +420,52 @@ export function removeManagedModelProviderRoleConfig(environment = process.env) 
   }
 }
 
-function loadManagedProviderProfile(environment, { requireLaunchConfig = false } = {}) {
+function loadManagedProviderProfileFor(
+  environment,
+  definition,
+  { requireLaunchConfig = false } = {},
+) {
   const codexHome = codexHomePath(environment);
-  const marker = readManagedMarker(codexHome);
+  const marker = readManagedMarker(codexHome, definition);
   if (!marker || marker.mode === "exclusive") return undefined;
-  const descriptor = deepseekProvider;
+  const descriptor = providerDescriptors.get(definition.id);
   const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
     ...(requireLaunchConfig
-      ? { expectedCatalogPath: join(codexHome, deepseekProviderDefinition.catalogFileName) }
+      ? { expectedCatalogPath: join(codexHome, definition.catalogFileName) }
       : {}),
   });
-  if (requireLaunchConfig) validateModelCatalog(profile.catalogPath);
+  if (requireLaunchConfig) validateModelCatalog(profile.catalogPath, definition);
   return profile;
 }
 
-function loadConfiguredProviderProfile(environment) {
+function loadManagedProviderProfiles(environment, { requireLaunchConfig = false } = {}) {
   const codexHome = codexHomePath(environment);
-  const marker = readManagedMarker(codexHome);
+  return managedModelProviderDefinitions.flatMap((definition) => {
+    const marker = readManagedMarker(codexHome, definition);
+    if (!marker || marker.mode === "exclusive") return [];
+    const descriptor = providerDescriptors.get(definition.id);
+    const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
+      ...(requireLaunchConfig
+        ? { expectedCatalogPath: join(codexHome, definition.catalogFileName) }
+        : {}),
+    });
+    if (requireLaunchConfig) validateModelCatalog(profile.catalogPath, definition);
+    return [profile];
+  });
+}
+
+function loadConfiguredProviderProfile(environment, definition) {
+  const codexHome = codexHomePath(environment);
+  const marker = readManagedMarker(codexHome, definition);
   if (!marker) return undefined;
-  const descriptor = deepseekProvider;
+  const descriptor = providerDescriptors.get(definition.id);
   const profilePath = marker.mode === "exclusive"
     ? join(codexHome, "config.toml")
     : join(codexHome, descriptor.profileName);
   const profile = readProviderProfile(profilePath, descriptor, {
-    expectedCatalogPath: join(codexHome, deepseekProviderDefinition.catalogFileName),
+    expectedCatalogPath: join(codexHome, definition.catalogFileName),
   });
-  validateModelCatalog(profile.catalogPath);
+  validateModelCatalog(profile.catalogPath, definition);
   return { ...profile, mode: marker.mode };
 }
 
@@ -271,29 +486,42 @@ function readProviderProfile(
   if (
     requireSelection
     && (
-      document.model !== deepseekProviderDefinition.defaultModel
+      !descriptor.definition.models.some(({ slug, available }) =>
+        available && slug === document.model)
       || document.model_provider !== descriptor.id
     )
   ) {
-    throw new Error("Codex DeepSeek Profile 未选择受支持模型");
+    throw new Error(`Codex ${descriptor.definition.displayName} Profile 未选择受支持模型`);
   }
   if (
     expectedCatalogPath !== undefined
     && (
-      document.model_reasoning_effort !== deepseekProviderDefinition.defaultReasoningEffort
-      || document.model_catalog_json !== expectedCatalogPath
+      document.model_catalog_json !== expectedCatalogPath
+      || document.model_reasoning_effort !== undefined
+      || document.model_context_window !== undefined
+      || document.model_auto_compact_token_limit !== undefined
+      || document.model_auto_compact_token_limit_scope !== undefined
     )
   ) {
-    throw new Error("Codex DeepSeek Profile 模型目录或思考等级无效");
+    throw new Error(`Codex ${descriptor.definition.displayName} Profile 模型目录或思考等级无效`);
   }
+  const selectedModel = expectedCatalogPath === undefined
+    ? undefined
+    : readModelCatalogSetting(
+        expectedCatalogPath,
+        descriptor.definition,
+        document.model,
+      );
   const provider = record(record(document.model_providers)[descriptor.id]);
   if (
     provider.name !== descriptor.id
     || provider.base_url !== descriptor.baseUrl
     || provider.wire_api !== descriptor.wireApi
     || provider.requires_openai_auth !== false
+    || (descriptor.definition.supportsWebsockets !== undefined
+      && provider.supports_websockets !== descriptor.definition.supportsWebsockets)
   ) {
-    throw new Error("Codex DeepSeek 提供商配置无效");
+    throw new Error(`Codex ${descriptor.definition.displayName} 提供商配置无效`);
   }
   const apiKey = provider.experimental_bearer_token;
   if (
@@ -302,35 +530,25 @@ function readProviderProfile(
     || apiKey.length > 4_096
     || /[\r\n]/u.test(apiKey)
   ) {
-    throw new Error("Codex DeepSeek API Key 缺失或无效");
+    throw new Error(`Codex ${descriptor.definition.displayName} API Key 缺失或无效`);
   }
-  const autoCompactLimit = document.model_auto_compact_token_limit;
-  if (
-    autoCompactLimit !== undefined
-    && (
-      !Number.isSafeInteger(autoCompactLimit)
-      || autoCompactLimit <= 0
-      || autoCompactLimit > 4_000_000_000
-    )
-  ) {
-    throw new Error("Codex DeepSeek 自动压缩阈值无效");
-  }
+  const autoCompactLimit = selectedModel?.autoCompactLimit;
   return {
     provider: descriptor.id,
     model: document.model,
-    reasoningEffort: document.model_reasoning_effort,
+    reasoningEffort: selectedModel?.reasoningEffort,
     catalogPath: document.model_catalog_json,
     name: descriptor.id,
     baseUrl: descriptor.baseUrl,
     wireApi: descriptor.wireApi,
+    apiKeyEnvironmentKey: descriptor.definition.apiKeyEnvironmentKey,
+    supportsWebsockets: descriptor.definition.supportsWebsockets,
     apiKey,
     ...(autoCompactLimit === undefined
       ? {}
       : {
           autoCompactLimit,
-          autoCompactScope: document.model_auto_compact_token_limit_scope === "body_after_prefix"
-            ? "body_after_prefix"
-            : "total",
+          autoCompactScope: "total",
         }),
   };
 }
@@ -374,25 +592,126 @@ function readCodexConfigFile(path) {
   }
 }
 
-function validateModelCatalog(path) {
-  let catalog;
+function validateModelCatalog(path, definition, model = definition.defaultModel) {
+  readModelCatalogSetting(path, definition, model);
+}
+
+function loadModelCatalogSettings(path, definition) {
+  return definition.models.flatMap(({ slug, available }) => {
+    if (!available) return [];
+    return [readModelCatalogSetting(path, definition, slug)];
+  });
+}
+
+function readModelCatalogSetting(path, definition, model) {
   try {
-    catalog = JSON.parse(readPrivateFile(path, maximumCatalogBytes));
+    return modelCatalogSetting(
+      readPrivateFile(path, maximumCatalogBytes),
+      definition,
+      model,
+    );
   } catch {
-    throw new Error("Codex DeepSeek 模型目录无法安全读取");
-  }
-  if (
-    !Array.isArray(catalog?.models)
-    || !catalog.models.some(
-      (model) => record(model).slug === deepseekProviderDefinition.defaultModel,
-    )
-  ) {
-    throw new Error("Codex DeepSeek 模型目录无效");
+    throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
 }
 
-function readManagedMarker(codexHome) {
-  const markerPath = join(codexHome, managedMarkerName);
+function modelCatalogSetting(content, definition, model) {
+  let catalog;
+  try {
+    catalog = JSON.parse(content);
+  } catch {
+    throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
+  }
+  const candidate = Array.isArray(catalog?.models)
+    ? catalog.models.find((entry) => record(entry).slug === model)
+    : undefined;
+  const document = record(candidate);
+  const contextWindow = document.context_window;
+  const levels = Array.isArray(document.supported_reasoning_levels)
+    ? document.supported_reasoning_levels
+    : [];
+  const reasoningEfforts = levels.flatMap((entry) => {
+    const level = record(entry);
+    return typeof level.effort === "string" && typeof level.description === "string"
+      ? [{ effort: level.effort, description: level.description }]
+      : [];
+  });
+  const reasoningEffort = document.default_reasoning_level;
+  const autoCompactLimit = document.auto_compact_token_limit;
+  if (
+    !definition.models.some(({ slug, available }) => available && slug === model)
+    || !Number.isSafeInteger(contextWindow)
+    || contextWindow <= 0
+    || reasoningEfforts.length === 0
+    || typeof reasoningEffort !== "string"
+    || !reasoningEfforts.some(({ effort }) => effort === reasoningEffort)
+    || (autoCompactLimit !== null && autoCompactLimit !== undefined
+      && (!Number.isSafeInteger(autoCompactLimit)
+        || autoCompactLimit <= 0
+        || autoCompactLimit > contextWindow))
+  ) {
+    throw new Error(`Codex ${definition.displayName} 模型目录无效`);
+  }
+  return {
+    model,
+    displayName: typeof document.display_name === "string" ? document.display_name : model,
+    contextWindow,
+    reasoningEffort,
+    reasoningEfforts,
+    ...(autoCompactLimit === null || autoCompactLimit === undefined
+      ? {}
+      : {
+          autoCompactLimit,
+          autoCompactPercent: Math.round(autoCompactLimit * 100 / contextWindow),
+        }),
+  };
+}
+
+function updateModelCatalogSettings(content, definition, settings) {
+  let catalog;
+  try {
+    catalog = JSON.parse(content);
+  } catch {
+    throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
+  }
+  const models = Array.isArray(catalog?.models) ? [...catalog.models] : [];
+  const index = models.findIndex((entry) => record(entry).slug === settings.model);
+  if (index < 0) throw new Error(`Codex ${definition.displayName} 模型目录无效`);
+  const current = modelCatalogSetting(content, definition, settings.model);
+  if (!current.reasoningEfforts.some(({ effort }) => effort === settings.reasoningEffort)) {
+    throw new Error(`${definition.displayName} 模型不支持思考等级：${settings.reasoningEffort}`);
+  }
+  if (
+    settings.autoCompactLimit !== undefined
+    && (!Number.isSafeInteger(settings.autoCompactLimit)
+      || settings.autoCompactLimit <= 0
+      || settings.autoCompactLimit > Math.floor(current.contextWindow * 0.9))
+  ) {
+    throw new Error(`${definition.displayName} 模型自动压缩阈值无效`);
+  }
+  models[index] = {
+    ...record(models[index]),
+    default_reasoning_level: settings.reasoningEffort,
+    auto_compact_token_limit: settings.autoCompactLimit ?? null,
+  };
+  return `${JSON.stringify({ ...catalog, models }, null, 2)}\n`;
+}
+
+function validateManagedModelSettings(definition, settings) {
+  if (
+    !settings
+    || typeof settings.model !== "string"
+    || typeof settings.reasoningEffort !== "string"
+    || !definition.models.some(
+      ({ slug, available }) => available && slug === settings.model,
+    )
+  ) {
+    throw new Error(`${definition.displayName} 模型设置无效`);
+  }
+}
+
+function readManagedMarker(codexHome, definition) {
+  const markerPath = join(codexHome, definition.managedMarkerFileName);
   let marker;
   try {
     marker = record(parse(readPrivateFile(markerPath)));
@@ -404,7 +723,7 @@ function readManagedMarker(codexHome) {
   }
   if (
     marker.version !== 1
-    || marker.provider !== deepseekProviderDefinition.id
+    || marker.provider !== definition.id
     || ![undefined, "switching", "exclusive"].includes(marker.mode)
   ) {
     throw new Error("Codex Connect 模型 Provider 标记无效");

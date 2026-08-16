@@ -360,6 +360,77 @@ describe("ProviderProxy", () => {
     })]);
   });
 
+  it("does not report an expected upstream abort after a completed SSE response", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(sse("response.completed", {
+          type: "response.completed",
+          response: {
+            model: "deepseek-v4-flash",
+            status: "completed",
+            usage: {
+              input_tokens: 120,
+              input_tokens_details: { cached_tokens: 100 },
+              output_tokens: 30,
+              output_tokens_details: { reasoning_tokens: 10 },
+              total_tokens: 150,
+            },
+          },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+
+    const errors: Error[] = [];
+    let resolveMetric: (metric: ProviderProxyMetrics) => void = () => undefined;
+    const metric = new Promise<ProviderProxyMetrics>((resolve) => {
+      resolveMetric = resolve;
+    });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onError: (error) => errors.push(error),
+      onMetrics: (value) => resolveMetric(value),
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.once("data", () => {
+          response.destroy();
+          resolveResponse();
+        });
+        response.on("error", (error) => {
+          if (error.message !== "aborted") rejectResponse(error);
+        });
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    await expect(metric).resolves.toMatchObject({ status: "completed" });
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(errors).toEqual([]);
+  });
+
   it("stops parsing oversized SSE metadata lines without truncating the response", async () => {
     const oversizedEvent = sse("response.completed", {
       type: "response.completed",

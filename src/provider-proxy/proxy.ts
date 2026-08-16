@@ -288,6 +288,10 @@ export class ProviderProxy {
         });
       });
       upstreamResponse.on("error", (error) => {
+        if (metrics.status === "completed" && isExpectedStreamAbort(error)) {
+          response.destroy();
+          return;
+        }
         markMetricsFailed(metrics, "upstream_response_error", error);
         void emitMetrics();
         response.destroy();
@@ -317,8 +321,10 @@ export class ProviderProxy {
     });
     response.on("close", () => {
       if (!response.writableEnded) {
-        markMetricsFailed(metrics, "client_disconnected");
-        void emitMetrics();
+        if (metrics.status !== "completed") {
+          markMetricsFailed(metrics, "client_disconnected");
+          void emitMetrics();
+        }
         upstream.destroy();
       }
     });
@@ -486,6 +492,12 @@ export class ProviderProxy {
       return Promise.resolve();
     }
   }
+}
+
+function isExpectedStreamAbort(error: Error): boolean {
+  return error.message === "aborted"
+    && "code" in error
+    && error.code === "ECONNRESET";
 }
 
 function createMetricsState(

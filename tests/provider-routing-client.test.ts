@@ -9,6 +9,51 @@ import type { ThreadSession, ThreadSnapshot } from "../src/session-routing/index
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("starts and connects an auxiliary Provider only when first selected", async () => {
+    const openai = client();
+    const deepseek = client();
+    const ensureProvider = vi.fn(async () => undefined);
+    deepseek.startThread.mockResolvedValue(session("thread-deepseek", "deepseek", "idle"));
+    const routed = new ProviderRoutingClient("openai", new Map([
+      ["openai", openai],
+      ["deepseek", deepseek],
+    ]), ensureProvider);
+
+    await routed.connect();
+    expect(openai.connect).toHaveBeenCalledOnce();
+    expect(deepseek.connect).not.toHaveBeenCalled();
+
+    await routed.startThread(cwd, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    });
+
+    expect(ensureProvider).toHaveBeenCalledWith("deepseek");
+    expect(deepseek.connect).toHaveBeenCalledOnce();
+  });
+
+  it("keeps managed Provider history visible before its App Server is started", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-openai", "openai", "idle"),
+      snapshot("thread-deepseek", "deepseek", "notLoaded"),
+    ]);
+    const routed = new ProviderRoutingClient("openai", new Map([
+      ["openai", openai],
+      ["deepseek", deepseek],
+    ]), async () => undefined);
+
+    await routed.connect();
+
+    await expect(routed.listThreads(cwd)).resolves.toMatchObject([
+      { id: "thread-openai", modelProvider: "openai" },
+      { id: "thread-deepseek", modelProvider: "deepseek" },
+    ]);
+    expect(deepseek.connect).not.toHaveBeenCalled();
+    expect(deepseek.listThreads).not.toHaveBeenCalled();
+  });
+
   it("routes a new third-party Thread and its Turn to the matching App Server", async () => {
     const openai = client();
     const deepseek = client();
@@ -230,6 +275,29 @@ describe("ProviderRoutingClient", () => {
     expect(disconnected).toEqual(["deepseek"]);
     expect(deepseek.reconnect).toHaveBeenCalledOnce();
     expect(openai.reconnect).not.toHaveBeenCalled();
+  });
+
+  it("asks the supervisor to restore an on-demand Provider before reconnecting", async () => {
+    const openai = client();
+    const deepseek = client();
+    const ensureProvider = vi.fn(async () => undefined);
+    deepseek.startThread.mockResolvedValue(session("thread-deepseek", "deepseek", "idle"));
+    deepseek.reconnect.mockResolvedValue({ userAgent: "codex-cli/0.147.0" });
+    const routed = new ProviderRoutingClient("openai", new Map([
+      ["openai", openai],
+      ["deepseek", deepseek],
+    ]), ensureProvider);
+
+    await routed.connect();
+    await routed.startThread(cwd, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    });
+    await routed.reconnectProvider("deepseek");
+
+    expect(ensureProvider).toHaveBeenNthCalledWith(1, "deepseek");
+    expect(ensureProvider).toHaveBeenNthCalledWith(2, "deepseek");
+    expect(deepseek.reconnect).toHaveBeenCalledOnce();
   });
 
   it("reads the default service tier from the selected Provider App Server", async () => {

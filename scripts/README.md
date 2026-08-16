@@ -28,7 +28,9 @@
   核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线更新，不擅自安装或启动，检测到
   `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按
   目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
-  未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭。
+  未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
+  `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts` 把受管第三方 Provider 的旧文件名
+  原子迁移为统一 `sf-` 前缀，遇到新旧文件冲突或不安全权限时拒绝覆盖。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
@@ -44,7 +46,7 @@
   设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
   Gateway，用于重放修复中心历史数据。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
   备份后清理最旧请求记录，可选 `--vacuum` 立即回收 SQLite 文件空间。
-  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek）的全部请求
+  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、opencode-go）的全部请求
   行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
@@ -87,12 +89,16 @@
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
-  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、第三方 API 与图片识别。
+  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、OpenCode Go、
+  第三方模型设置、第三方 API 与图片识别。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
+- `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：按已配置的第三方 Provider
+  和模型设置新会话默认模型、目录声明的上下文、默认思考等级及自动压缩阈值；切换模式同步更新
+  私有 Profile，固定模式复用官方用户配置事务并清除根级覆盖，历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
-  `multi_agent_v2` / `agents.ds` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
+  `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
   受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
@@ -118,23 +124,22 @@
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
   提供商，非敏感元数据写入主配置，API Key 按提供商隔离；拒绝删除仍被调用方引用的提供商，
   并可经确认显式转换旧单视觉配置。
-- `vision-setup.mjs` / `vision-setup.d.mts`：为双 Provider 与仅 DeepSeek 模式选择已登记的第三方
+- `vision-setup.mjs` / `vision-setup.d.mts`：为 OpenAI + 第三方 Provider 模式选择已登记的第三方
   API 提供商和视觉模型；不复制 Endpoint 或 API Key，禁用视觉不删除共享提供商。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
   `CODEX_HOME`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
-  模型、Provider 与 API Key 写入 CLI 使用的 `deepseek.config.toml`，写入不含凭据的 Gateway
-  管理标记，并自动开启 `features.multi_agent_v2`、注册 `agents.ds` 子代理角色；
-  改为固定模式时只移除本项目管理的 `agents.ds`，不关闭可能供其他角色使用的功能开关；
+  模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，写入不含凭据的 Gateway
+  管理标记，并自动开启 `features.multi_agent_v2`、把共享 `agents.external` 子代理切换到 DeepSeek；
   首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
-  生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改；退出固定模式时只还原 Setup
+  生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改，并保留仍受支持的默认模型、
+  逐模型思考等级和自动压缩百分比；目录上下文更新时按原百分比重算阈值。退出固定模式时只还原 Setup
   管理的字段（含自动压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
   角色配置事务失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
-  安装与“修改自动压缩阈值”入口支持按上下文窗口百分比（10–95%，默认 60%）写入
-  `model_auto_compact_token_limit` 或关闭自动压缩；固定模式的日常阈值修改使用官方键级配置事务，
-  完整安装与备份恢复才执行文件级替换。
+  安装时为初始模型设置自动压缩阈值；后续统一由“第三方模型设置”按模型维护 10–90% 阈值，写入
+  模型目录的 `auto_compact_token_limit`，不再使用会覆盖全部模型的 Profile 顶层阈值。
 - `prepare-deepseek-catalog-proposal.mjs` / `prepare-deepseek-catalog-proposal.d.mts` /
   `deepseek-catalog-baseline.json`：复用 Setup 的官方
   下载器，比较排序后的模型完整指纹与上下文、输入模态、思考等级、搜索、并行工具、最低客户端版本
@@ -145,6 +150,19 @@
   `runtime/deepseek-pricing-baseline.json` 比较后输出候选基线、结构化差异、来源哈希和失败报告；
   页面缺列、重复模型、时间重叠或结构无法确认时失败关闭，不在 Gateway 请求路径抓取网页。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
+- `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
+  切换 Profile、固定配置与受管字段恢复逻辑。
+- `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：配置 OpenCode Go 切换/固定模式或恢复首次
+  配置前状态，从同一受审查来源生成自己的模型目录并复用共享子代理机制，但不复用凭据、Provider
+  身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的默认模型与逐模型设置。
+- `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一
+  `sf-` 前缀，并把 Provider 根级上下文、思考等级和自动压缩阈值迁入各自模型目录。
+- `semantic-html-table.mjs` / `semantic-html-table.d.mts`：为受控官方价格提案提供有界、无脚本的
+  语义化 HTML 表格解析，不进入 Gateway 运行路径。
+- `prepare-opencode-go-pricing-proposal.mjs` / `prepare-opencode-go-pricing-proposal.d.mts`：从
+  OpenCode Go 官方价格表与模型端点表交叉解析全部模型 ID、Token 单价、档位、套餐包含用量、
+  端点和 SDK 协议，
+  输出候选基线、结构化差异和失败现场。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
@@ -166,25 +184,28 @@
 - `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单和目录创建，并调用统一的 Workspace 权限设置用例；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `agents.mjs` / `agents.d.mts`：`codexc agents` 的执行脚本与公开声明，在 `~/.codex/config.toml` 中开启或关闭
-  `features.multi_agent_v2` 并注册单次 `agents.ds` 角色；角色说明要求主模型以
-  `fork_turns=1` 传入当前用户消息；非托管同名角色会失败关闭，不会被覆盖。启用时先原子生成
+  `features.multi_agent_v2` 并注册单次共享 `agents.external` 角色；命令按已配置 Provider 与模型
+  更新同一角色，角色说明要求主模型以 `fork_turns=1` 传入当前用户消息；非托管同名角色会失败关闭，不会被覆盖。启用时先原子生成
   无凭据角色文件，再通过带用户层版本校验的官方键级配置事务更新主配置，事务失败时恢复角色文件；
   显式禁用同样拒绝删除非托管同名角色。App Server 服务启动时原子刷新角色文件为
-  本机 DeepSeek 统计代理地址，同时写入禁止
+  当前 Provider 的本机统计代理地址，同时写入禁止
   解析加密正文和等待后续消息的受控指令。普通服务退出保留文件以维持 Codex 配置可解析，显式
-  禁用、改为固定模式或恢复配置时删除；只读 `status` 不依赖 Gateway 配置。
+  禁用或恢复首次配置时删除；只读 `status` 不依赖 Gateway 配置。
 
 ## 开发与协议
 
 - `dev-all.mjs`：开发模式下复用完整的现有 App Server 拓扑，或通过唯一的内部
-  `service-app-server` 入口启动主 App Server、已配置的隔离 Provider App Server 及对应统计代理，
-  再启动 Gateway；只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
+  `service-app-server` 入口立即启动主 App Server；已配置的隔离 Provider App Server
+  在首次选择模型、恢复 Thread 或使用对应 Remote TUI 时由监管入口按需启动。统计代理也按 Provider
+  使用情况启动；共享 `agents.external` 当前选择的 Provider 会预先启动统计代理以保证子代理可用；
+  随后再启动 Gateway。只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
-  `codexc remote` 自有的 Workspace 与 DeepSeek Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
+  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  `--profile deepseek`，既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证；
+  受管 `--profile`（当前公开为 `deepseek` 与 `opencode-go`），选择隔离实例后映射为磁盘上的
+  `sf-deepseek` 或 `sf-opencode-go` Profile，供 Remote TUI 完成第三方 Provider 认证；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。

@@ -69,6 +69,7 @@
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
 | `model.current.missing` | 当前模型不在可用模型列表中 | 会话模型被目录移除 |
+| `model.configured-default.missing` | 配置的默认模型不属于当前主 Provider | 配置的默认模型不在当前主 Provider 的模型目录中 |
 | `model.unavailable` | 模型暂不可用并附原因 | 模型被上游禁用或不可用 |
 | `model.selector.required` | /model 用法提示 | 未提供模型选择参数 |
 | `model.selector.ambiguous` | 模型选择不唯一 | 选择器匹配多个模型 |

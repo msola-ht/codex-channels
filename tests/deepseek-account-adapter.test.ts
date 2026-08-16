@@ -94,12 +94,12 @@ async function createCodexHome(): Promise<string> {
   temporaryDirectories.push(directory);
   await writeFile(join(directory, "config.toml"), 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
   await writeFile(
-    join(directory, "deepseek.config.toml"),
+    join(directory, "sf-deepseek.config.toml"),
     `model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n${providerConfig("sk-test-secret")}`,
     { mode: 0o600 },
   );
   await writeFile(
-    join(directory, "codex-connect-deepseek.config.toml"),
+    join(directory, "sf-deepseek.managed.toml"),
     'version = 1\nprovider = "deepseek"\n',
     { mode: 0o600 },
   );

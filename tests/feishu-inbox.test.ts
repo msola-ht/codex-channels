@@ -329,6 +329,80 @@ describe("FeishuInbox", () => {
     ]);
   });
 
+  it("accepts a private rich-post code block message", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "post",
+      content: JSON.stringify({
+        zh_cn: {
+          content: [[
+            {
+              tag: "code_block",
+              language: "TYPESCRIPT",
+              text: "const answer = 42;\nconsole.log(answer);",
+            },
+          ]],
+        },
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "text",
+        text: "const answer = 42;\nconsole.log(answer);",
+      }),
+    ]);
+  });
+
+  it("accepts a private rich-post markdown message", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "post",
+      content: JSON.stringify({
+        content: [[
+          {
+            tag: "md",
+            text: "```ts\nconst x = 1;\n```",
+          },
+        ]],
+      }),
+    }))).toEqual({
+      status: "accepted",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([
+      expect.objectContaining({
+        kind: "text",
+        text: "```ts\nconst x = 1;\n```",
+      }),
+    ]);
+  });
+
+  it("rejects rich-post messages with unsupported elements", async () => {
+    const fixture = createFixture();
+
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "post",
+      content: JSON.stringify({
+        content: [[
+          { tag: "emotion", emoji_type: "SMILE" },
+        ]],
+      }),
+    }))).toEqual({
+      status: "ignored",
+      reason: "invalid-content",
+    });
+
+    await fixture.inbox.close();
+    expect(fixture.handled).toHaveLength(0);
+  });
+
   it("accepts multiple rich-post images with their shared caption", async () => {
     const fixture = createFixture();
 

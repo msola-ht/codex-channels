@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
-import { loadDeepseekModelOptions } from "../src/codex-client/deepseek-catalog.js";
+import { loadManagedModelOptions } from "../src/codex-client/model-provider-catalog.js";
 
 describe("DeepSeek model catalog", () => {
   it("keeps every selectable provider model in the reviewed API catalog baseline", () => {
@@ -33,14 +33,14 @@ describe("DeepSeek model catalog", () => {
   it("makes the official Flash and Pro models selectable", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-"));
     mkdirSync(codexHome, { recursive: true });
-    writeFileSync(join(codexHome, "deepseek.models.json"), JSON.stringify({
+    writeFileSync(join(codexHome, "sf-deepseek.models.json"), JSON.stringify({
       models: [
         model("deepseek-v4-flash", "DeepSeek-V4-Flash"),
         model("deepseek-v4-pro", "DeepSeek-V4-Pro"),
       ],
     }));
 
-    const models = loadDeepseekModelOptions(
+    const models = loadManagedModelOptions(
       codexHome,
       true,
       deepseekProviderDefinition,
@@ -54,9 +54,9 @@ describe("DeepSeek model catalog", () => {
 
   it("ignores a leftover catalog when DeepSeek is not configured", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-disabled-"));
-    writeFileSync(join(codexHome, "deepseek.models.json"), "not-json");
+    writeFileSync(join(codexHome, "sf-deepseek.models.json"), "not-json");
 
-    expect(loadDeepseekModelOptions(
+    expect(loadManagedModelOptions(
       codexHome,
       false,
       deepseekProviderDefinition,

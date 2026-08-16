@@ -77,13 +77,24 @@ describe("Codex official defaults setup", () => {
     expect(output.join("")).toContain("未修改 Codex 全局配置");
   });
 
-  it("rejects official defaults setup while DeepSeek is the fixed primary provider", async () => {
+  it("rejects official defaults setup while a third-party provider is the fixed primary", async () => {
     const createClient = vi.fn();
 
     await expect(runCodexDefaultsSetup({
       createClient,
       primaryProvider: () => "deepseek",
-    })).rejects.toThrow("仅 DeepSeek 固定模式");
+    })).rejects.toThrow("第三方固定模式（deepseek）");
+
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it("names the actual provider when OpenCode Go is the fixed primary", async () => {
+    const createClient = vi.fn();
+
+    await expect(runCodexDefaultsSetup({
+      createClient,
+      primaryProvider: () => "opencode-go",
+    })).rejects.toThrow("第三方固定模式（opencode-go）");
 
     expect(createClient).not.toHaveBeenCalled();
   });

@@ -16,7 +16,7 @@
   以及 Routing 不再解析原始协议信封。
 - 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理；项目输入
   到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
-- 图片识别结果的严格数量、顺序、长度和提示注入隔离；双 Provider 与仅 DeepSeek Setup 均为
+- 图片识别结果的严格数量、顺序、长度和提示注入隔离；第三方 Provider Setup 均为
   外部视觉接口分离保存 Key；模型不支持图片时使用单次 Responses 请求、私有 Key 和稳定响应裁剪，
   外部视觉模型只做客观观察和文字提取，原 Thread 默认不额外搜索、核实或调用工具；
   三渠道只在外部请求发起后发送一次包含图片数量与本条要求的视觉 API 识别提示；`/vision`
@@ -100,7 +100,10 @@
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考等级和 Fast 的 Thread 覆盖、Codex 用户级模型/思考等级/Fast 默认值及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；渠道当前模型在 Workspace、新会话及同 Provider
-  历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；DeepSeek 官方脚本目录提取、两种 Setup 模式、
+  历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；按第三方 Provider
+  和模型独立设置新会话默认值、目录上下文、思考等级与自动压缩阈值，固定模式清除根级覆盖并使用
+  官方配置事务，以及旧受管文件到 `sf-` 前缀、独立模型目录和按模型设置的冲突检测、权限校验与
+  引用迁移；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash 与 Pro 可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。
@@ -110,6 +113,8 @@
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
+- OpenCode Go 的切换/固定 Setup、同名模型按 Provider 独立选择、按需 App Server 启动、官方美元价格、
+  长上下文档位、端点与 SDK 协议解析，以及每日价格 Draft PR 的只读检查和最小写权限边界。
 - 全 Provider 同一 Turn 多次模型响应的请求次数、实际产生推理输出的思考次数、聚合模型耗时、
   缓存与文本/函数/自定义工具参数
   不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和
@@ -256,7 +261,7 @@
   label、核心服务范围、默认目标和启停顺序，平台脚本按规范目标查询标识而不依赖注册顺序；公共进程生命周期只向仍活动的子进程转发信号、
   解释同步子进程结果并成对清理监听；CLI 成功、失败、提示和处理状态使用独立颜色，Doctor 检查项另用通过，并统一遵守
   `NO_COLOR`；状态呈现不改变路径、标识符和其他机器可解析数据；受管子命令失败只展示一次且不输出
-  Node.js 堆栈，Remote TUI 终止信号原样传播，项目规则检查被信号终止时不结束 CLI/Gateway 宿主，
+  Node.js 堆栈，Remote TUI 把公开 Provider 别名映射到 `sf-` Profile 且终止信号原样传播，项目规则检查被信号终止时不结束 CLI/Gateway 宿主，
   只读 Agent 状态不依赖 Gateway 配置。
 - Linux/macOS Git 源码安装覆盖 npm 全局目录与已有版本检测、Codex CLI 缺失时安装精确版本、
   登录状态提示、官方 `main` 克隆、隔离依赖与 Gateway/WebUI 构建、npm 全局命令注册、旧 PATH
@@ -264,12 +269,16 @@
   构建失败不留半成品；源码更新覆盖同版本新 commit、脏仓库和自定义提交提前拒绝、
   候选仓库先构建后切换、Codex CLI 版本不匹配时不动现有安装、切换失败恢复旧仓库与服务、旧仓库
   成功清理、Git 阶段摘要、构建成功日志收敛、旧源码入口迁移到全局包，以及 Registry 安装继续复用原本地更新路径。
-- `codexc start` 在仅 DeepSeek 固定模式下复用 `service-app-server`，把主 App Server 的 Provider
+- `codexc start` 在第三方固定模式下复用 `service-app-server`，把主 App Server 的 Provider
   地址指向本机统计代理；监管 Socket 覆盖裸 App Server、后台入口重复启动和 Provider 拓扑不一致
   的失败关闭，配置级所有权 Socket 跨 Provider 覆盖直接入口和前台入口的重复 Gateway，真实
   WebSocket 健康检查阻止仅创建 Socket 文件的未就绪实例提前启动 Gateway；监管入口关闭会主动
   清理保持连接的本地客户端；公开前台入口在子进程忽略优雅停止信号时有界终止并等待自己创建的
   进程组退出，异常强制退出残留的 Gateway 所有权 Socket 由下一所有者确认已失效后安全回收。
+- 开发入口和后台入口只等待主 App Server 就绪；受管 DeepSeek/OpenCode Go Socket 不会阻塞初始
+  启动，并由私有监管请求在首次选择模型、恢复 Thread 或启动对应 Remote TUI 时创建。共享
+  `agents.external` 当前选择的第三方 Provider 会随服务启动统计代理并刷新角色端口，但不提前启动
+  其隔离 App Server；其他第三方 Provider 代理保持按需。
 - 仓库 Git hooks 自动安装与重复执行安全性、完整提交验证工作流先安装 WebUI 锁定依赖，以及
   无本地依赖时的源码安装准备。
 - 协议临时生成失败时保留现有类型目录、生成树逐文件比较和安全替换。

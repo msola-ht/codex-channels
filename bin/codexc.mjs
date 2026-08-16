@@ -24,12 +24,14 @@ import {
 } from "../runtime/network-proxy.mjs";
 import {
   loadOpenAiBaseUrl,
+  loadConfiguredProviderCredential,
+  loadManagedModelProviderRole,
   providerMetricsSocketPath,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
-import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import {
@@ -48,6 +50,7 @@ import {
 } from "../runtime/process-lifecycle.mjs";
 import {
   AppServerSupervisorOwner,
+  appServerSocketAcceptsWebSocket,
   prepareAppServerSocketPaths,
 } from "../runtime/app-server-supervisor.mjs";
 import {
@@ -66,6 +69,7 @@ import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options
 import { parseMetricsCenterCliArgs } from "../scripts/metrics-center-settings.mjs";
 import {
   metricsCommandUsage,
+  metricsProviderUsage,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
@@ -94,7 +98,7 @@ const helpText = {
   remote [参数]                启动共享 App Server 的 Codex TUI
   work                         管理 Workspace
   rules                        管理项目 Codex 命令预设
-  agents                       管理 DeepSeek 子代理
+  agents                       管理共享第三方子代理
 
 指标与工具：
   metrics                      查询、导出和维护模型指标
@@ -161,21 +165,20 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 具体用法：
   codexc rules init [--force]
   codexc rules check`,
-  agents: `用法：codexc agents <enable-deepseek|disable-deepseek|status>
+  agents: `用法：codexc agents <configure|disable|status> [参数]
 
-  enable-deepseek   启用 multi_agent_v2 并在 ~/.codex/config.toml 注册 agents.ds 角色
-  disable-deepseek  移除 agents.ds 角色并关闭 multi_agent_v2
-  status            查看当前状态`,
-  "agents.enable-deepseek": `用法：codexc agents enable-deepseek
+  configure <Provider> [模型]  配置共享第三方子代理（agents.external）
+  disable                    移除共享第三方子代理
+  status                     查看当前状态`,
+  "agents.configure": `用法：codexc agents configure <Provider> [模型]
 
-启用 multi_agent_v2 并在 ~/.codex/config.toml 注册 agents.ds 角色；
-角色配置文件指向 codexc 服务启动时生成的 DeepSeek 子代理配置。`,
-  "agents.disable-deepseek": `用法：codexc agents disable-deepseek
+选择已配置的第三方 Provider 与模型，启用 multi_agent_v2 并注册 agents.external。`,
+  "agents.disable": `用法：codexc agents disable
 
-移除 agents.ds 角色并关闭 multi_agent_v2。`,
+移除本项目管理的 agents.external；没有其他角色时同时关闭 multi_agent_v2。`,
   "agents.status": `用法：codexc agents status
 
-查看 multi_agent_v2 与 agents.ds 角色配置状态。`,
+查看 multi_agent_v2 与共享第三方子代理配置状态。`,
   "rules.init": `用法：codexc rules init [--force]
 
 为当前项目生成安全命令预设；已有文件默认不覆盖。`,
@@ -279,7 +282,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 停止并重新启动 Gateway。`,
   "metrics.prune": `用法：codexc metrics prune <provider>
 
-provider 当前支持 openai、deepseek。备份并删除本地与中心库中该提供商全部请求行，随后
+provider 当前支持 ${metricsProviderUsage.replaceAll("|", "、")}。备份并删除本地与中心库中该提供商全部请求行，随后
 自动重启 Gateway 与中心服务（即使任一步骤失败也会尝试把服务拉起来）。OpenAI 额度重置
 后可用 openai 从零重新统计用量；备份保留在指标库同目录的 *.<provider>-prune-*.bak。`,
   "metrics.cleanup": `用法：codexc metrics cleanup [--before YYYY-MM-DD | --keep-days 天数] [--max-rows 行数] [--vacuum] [--restart-gateway]
@@ -547,8 +550,8 @@ async function runServiceAppServer(args) {
   );
   const {
     primarySocketPath: socketPath,
-    managedProvider,
-    managedSocketPath: providerSocketPath,
+    managedProviders,
+    managedSocketPaths,
     primaryProvider,
   } = appServerRuntime;
   const {
@@ -556,18 +559,9 @@ async function runServiceAppServer(args) {
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
   const providerProxies = [];
+  const providerProxyRuntimes = new Map();
   const upstreamAgents = new Set();
-  const supervisorOwner = new AppServerSupervisorOwner(
-    socketPath,
-    appServerRuntime.topology,
-  );
-  await supervisorOwner.start();
-  try {
-    await prepareAppServerSocketPaths(appServerRuntime.socketPaths);
-  } catch (error) {
-    await supervisorOwner.close();
-    throw error;
-  }
+  let supervisorOwner;
   const upstreamAgentFor = (upstreamUrl) => {
     const proxyUrl = selectHttpProxyUrl({
       http: runtime.environment.HTTP_PROXY,
@@ -581,6 +575,8 @@ async function runServiceAppServer(args) {
     return agent;
   };
   const startProviderProxy = async (provider, options) => {
+    const existing = providerProxyRuntimes.get(provider);
+    if (existing) return { ...existing, created: false };
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...options,
       onMetrics: (metrics) => sendProviderProxyMetrics(
@@ -593,10 +589,39 @@ async function runServiceAppServer(args) {
     });
     await modelProxy.start();
     providerProxies.push(modelProxy);
+    const proxyRuntime = {
+      baseUrl: `http://${modelProxy.address()}`,
+      proxy: modelProxy,
+    };
+    providerProxyRuntimes.set(provider, proxyRuntime);
     console.log(`${provider} 模型统计代理已启动：${modelProxy.address()}`);
-    return `http://${modelProxy.address()}`;
+    return { ...proxyRuntime, created: true };
   };
-  const deepseekUrl = new URL(deepseekProviderDefinition.baseUrl);
+  const closeProviderProxy = async (provider, proxy) => {
+    const active = providerProxyRuntimes.get(provider);
+    if (active?.proxy === proxy) providerProxyRuntimes.delete(provider);
+    const proxyIndex = providerProxies.indexOf(proxy);
+    if (proxyIndex >= 0) providerProxies.splice(proxyIndex, 1);
+    await proxy.close();
+  };
+  const providerDefinitions = new Map(
+    managedModelProviderDefinitions.map((definition) => [definition.id, definition]),
+  );
+  const managedRole = loadManagedModelProviderRole(runtime.environment);
+  const refreshManagedRoleConfig = (provider, baseUrl) => {
+    if (managedRole?.provider !== provider) return;
+    try {
+      writeManagedModelProviderRoleConfig(runtime.environment, {
+        provider,
+        model: managedRole.model,
+        baseUrl,
+      });
+    } catch (error) {
+      console.error(
+        `第三方子代理角色配置生成失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
   const proxyOptionsForUrl = (upstreamUrl) => {
     const upstreamAgent = upstreamAgentFor(upstreamUrl);
     return {
@@ -608,8 +633,72 @@ async function runServiceAppServer(args) {
     };
   };
   let primaryArguments = [];
-  let managedArguments;
+  const managedByProvider = new Map(managedProviders.map((provider, index) => [
+    provider.provider,
+    { runtime: provider, socketPath: managedSocketPaths[index] },
+  ]));
+  const providerLaunches = new Map();
+  const children = [];
+  let watchChild;
+  const launchProvider = (provider) => {
+    const existing = providerLaunches.get(provider);
+    if (existing) return existing;
+    const launch = (async () => {
+      if (!watchChild) {
+        throw new Error("主 App Server 尚未完成启动，请稍后重试");
+      }
+      const managed = managedByProvider.get(provider);
+      const definition = providerDefinitions.get(provider);
+      if (!managed || !definition || !managed.socketPath) {
+        throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
+      }
+      if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
+      await prepareAppServerSocketPaths([managed.socketPath]);
+      const { baseUrl: localBaseUrl, proxy, created: proxyCreated } = await startProviderProxy(
+        provider,
+        proxyOptionsForUrl(new URL(definition.baseUrl)),
+      );
+      let child;
+      try {
+        refreshManagedRoleConfig(provider, localBaseUrl);
+        const argumentsList = withProviderBaseUrl(
+          managed.runtime.arguments,
+          provider,
+          localBaseUrl,
+        );
+        child = spawn(runtime.environment.CODEX_BINARY, [
+          ...argumentsList,
+          "app-server",
+          "--listen",
+          `unix://${managed.socketPath}`,
+        ], {
+          stdio: "inherit",
+          env: {
+            ...withoutManagedProviderApiKeys(runtime.environment),
+            ...managed.runtime.childEnvironment,
+          },
+          cwd: defaultWorkspace.cwd,
+        });
+        children.push(child);
+        await waitForProviderAppServer(managed.socketPath, child, provider);
+        watchChild(child);
+        console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
+      } catch (error) {
+        if (child) {
+          const childIndex = children.indexOf(child);
+          if (childIndex >= 0) children.splice(childIndex, 1);
+          if (childProcessIsRunning(child)) signalChildProcesses([child], "SIGTERM");
+        }
+        if (proxyCreated) await closeProviderProxy(provider, proxy);
+        throw error;
+      }
+    })();
+    providerLaunches.set(provider, launch);
+    launch.finally(() => providerLaunches.delete(provider)).catch(() => undefined);
+    return launch;
+  };
   try {
+    await prepareAppServerSocketPaths(appServerRuntime.socketPaths);
     if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
       let openAiProxyOptions;
@@ -636,77 +725,125 @@ async function runServiceAppServer(args) {
           },
         };
       }
-      const localBaseUrl = await startProviderProxy("openai", openAiProxyOptions);
+      const { baseUrl: localBaseUrl } = await startProviderProxy("openai", openAiProxyOptions);
       primaryArguments = withOpenAiBaseUrl(primaryArguments, localBaseUrl);
-    } else if (primaryProvider === deepseekProviderDefinition.id) {
-      const localBaseUrl = await startProviderProxy(
-        deepseekProviderDefinition.id,
-        proxyOptionsForUrl(deepseekUrl),
+    } else {
+      const definition = providerDefinitions.get(primaryProvider);
+      if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
+      const { baseUrl: localBaseUrl } = await startProviderProxy(
+        definition.id,
+        proxyOptionsForUrl(new URL(definition.baseUrl)),
       );
       primaryArguments = withProviderBaseUrl(
         primaryArguments,
-        deepseekProviderDefinition.id,
+        definition.id,
         localBaseUrl,
       );
+      refreshManagedRoleConfig(definition.id, localBaseUrl);
     }
-    if (managedProvider) {
-      const localBaseUrl = await startProviderProxy(
-        managedProvider.provider,
-        proxyOptionsForUrl(deepseekUrl),
+    if (managedRole && managedByProvider.has(managedRole.provider)) {
+      const provider = managedRole.provider;
+      const definition = providerDefinitions.get(provider);
+      if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+      const { baseUrl: localBaseUrl } = await startProviderProxy(
+        provider,
+        proxyOptionsForUrl(new URL(definition.baseUrl)),
       );
-      try {
-        writeManagedModelProviderRoleConfig(runtime.environment, {
-          baseUrl: localBaseUrl,
-        });
-      } catch (error) {
-        console.error(
-          `DeepSeek 子代理角色配置生成失败：${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      managedArguments = withProviderBaseUrl(
-        managedProvider.arguments,
-        managedProvider.provider,
-        localBaseUrl,
-      );
+      refreshManagedRoleConfig(provider, localBaseUrl);
     }
+    supervisorOwner = new AppServerSupervisorOwner(
+      socketPath,
+      appServerRuntime.topology,
+      { ensureProvider: launchProvider },
+    );
+    await supervisorOwner.start();
   } catch (error) {
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
-    await supervisorOwner.close();
+    await supervisorOwner?.close();
     throw error;
   }
-  const children = [spawn(runtime.environment.CODEX_BINARY, [
+  const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
+  if (managedRole) {
+    const credential = loadConfiguredProviderCredential(
+      managedRole.provider,
+      runtime.environment,
+    );
+    primaryChildEnvironment[credential.environmentKey] = credential.apiKey;
+  }
+  const primaryChild = spawn(runtime.environment.CODEX_BINARY, [
     ...primaryArguments,
     "app-server",
     "--listen",
     `unix://${socketPath}`,
   ], {
     stdio: "inherit",
-    env: {
-      ...runtime.environment,
-      ...(managedProvider ? managedProvider.childEnvironment : {}),
-    },
+    env: primaryChildEnvironment,
     cwd: defaultWorkspace.cwd,
-  })];
-  if (managedProvider && managedArguments) {
-    children.push(spawn(runtime.environment.CODEX_BINARY, [
-      ...managedArguments,
-      "app-server",
-      "--listen",
-      `unix://${providerSocketPath}`,
-    ], {
-      stdio: "inherit",
-      env: {
-        ...runtime.environment,
-        ...managedProvider.childEnvironment,
-      },
-      cwd: defaultWorkspace.cwd,
-    }));
-  }
-  forwardChildrenLifecycle(children, async () => {
+  });
+  children.push(primaryChild);
+  watchChild = forwardChildrenLifecycle(children, async () => {
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
-    await supervisorOwner.close();
+    await supervisorOwner?.close();
+  });
+}
+
+function withoutManagedProviderApiKeys(environment) {
+  const childEnvironment = { ...environment };
+  for (const { apiKeyEnvironmentKey } of managedModelProviderDefinitions) {
+    delete childEnvironment[apiKeyEnvironmentKey];
+  }
+  return childEnvironment;
+}
+
+function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_000) {
+  return new Promise((resolveWait, rejectWait) => {
+    const startedAt = Date.now();
+    let timer;
+    let settled = false;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolveWait();
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectWait(error);
+    };
+    const onError = (error) => fail(new Error(
+      `模型 Provider App Server 启动失败：${provider}（${error instanceof Error ? error.message : String(error)}）`,
+      { cause: error },
+    ));
+    const onExit = (code, signal) => fail(new Error(
+      `模型 Provider App Server 启动失败：${provider}（${signal ? `signal=${signal}` : `exit=${code ?? 1}`}）；请查看 App Server 服务日志`,
+    ));
+    const check = async () => {
+      try {
+        if (await appServerSocketAcceptsWebSocket(socketPath)) {
+          succeed();
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          fail(new Error(`等待模型 Provider App Server 就绪超时：${provider}`));
+          return;
+        }
+        timer = setTimeout(() => void check(), 100);
+      } catch (error) {
+        fail(error);
+      }
+    };
+    child.once("error", onError);
+    child.once("exit", onExit);
+    void check();
   });
 }
 
@@ -889,13 +1026,16 @@ function agents(args) {
     return;
   }
   if (showSubcommandHelp(args, "status", "agents.status") ||
-    showSubcommandHelp(args, "enable-deepseek", "agents.enable-deepseek") ||
-    showSubcommandHelp(args, "disable-deepseek", "agents.disable-deepseek")) {
+    showSubcommandHelp(args, "configure", "agents.configure") ||
+    showSubcommandHelp(args, "disable", "agents.disable")) {
     return;
   }
   if (
-    args.length !== 1
-    || !new Set(["status", "enable-deepseek", "disable-deepseek"]).has(args[0])
+    !(
+      (args[0] === "status" && args.length === 1)
+      || (args[0] === "disable" && args.length === 1)
+      || (args[0] === "configure" && (args.length === 2 || args.length === 3))
+    )
   ) {
     throw new Error(helpText.agents);
   }
@@ -1147,7 +1287,7 @@ async function metrics(args) {
     return;
   }
   if (subcommand === "prune" && rest.length !== 1) {
-    throw new Error("用法：codexc metrics prune <openai|deepseek>");
+    throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
   }
   if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
@@ -1356,10 +1496,16 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
       process.exitCode = 1;
     });
   };
-  for (const child of children) {
+  const watchChild = (child) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      finish(child.exitCode, child.signalCode);
+      return;
+    }
     child.once("error", (error) => finish(1, null, error));
     child.once("exit", (code, signal) => finish(code, signal));
-  }
+  };
+  for (const child of children) watchChild(child);
+  return watchChild;
 }
 
 function table(value) {

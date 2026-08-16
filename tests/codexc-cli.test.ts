@@ -110,8 +110,8 @@ describe("codexc CLI", () => {
       [["rules", "check", "--help"], "用法：codexc rules check"],
       [["agents", "-h"], "用法：codexc agents"],
       [["agents", "status", "--help"], "用法：codexc agents status"],
-      [["agents", "enable-deepseek", "-h"], "用法：codexc agents enable-deepseek"],
-      [["agents", "disable-deepseek", "--help"], "用法：codexc agents disable-deepseek"],
+      [["agents", "configure", "-h"], "用法：codexc agents configure"],
+      [["agents", "disable", "--help"], "用法：codexc agents disable"],
       [["update", "--help"], "用法：codexc update"],
       [["uninstall", "--help"], "用法：codexc uninstall"],
       [["state", "-h"], "用法：codexc state upgrade"],
@@ -1105,8 +1105,8 @@ describe("codexc CLI", () => {
     expect(result.stderr).not.toContain("子命令执行失败");
   });
 
-  it("routes the DeepSeek profile to its isolated remote App Server and authenticates the TUI", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-profile-"));
+  it("routes the DeepSeek profile to its isolated remote App Server and authenticates the TUI", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-remote-profile-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -1120,12 +1120,11 @@ describe("codexc CLI", () => {
     );
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
-      join(codexHome, "deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.config.toml"),
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
-        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
         'base_url = "https://api.deepseek.com/"',
@@ -1137,8 +1136,13 @@ describe("codexc CLI", () => {
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "codex-connect-deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.managed.toml"),
       'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-deepseek.models.json"),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1152,30 +1156,43 @@ describe("codexc CLI", () => {
       table(document.codex).binary = fakeCodex;
     });
 
-    for (const [index, args] of [
-      ["--profile", "deepseek"],
-      ["--profile=deepseek"],
-      ["-p", "deepseek"],
-      ["-p=deepseek"],
-      ["-pdeepseek"],
-    ].entries()) {
-      const capturePath = join(root, `capture-${index}.json`);
-      const result = spawnSync(process.execPath, [cli, "remote", ...args, "resume"], {
-        cwd: workspace,
-        env: { ...environment, CODEX_TEST_CAPTURE: capturePath },
-        encoding: "utf8",
-      });
+    const primarySocketPath = join(home, "runtime", "codex-app-server.sock");
+    const supervisor = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["deepseek"],
+      socketPaths: [
+        primarySocketPath,
+        join(home, "runtime", "codex-app-server-deepseek.sock"),
+      ],
+    }, { ensureProvider: async () => undefined });
+    await supervisor.start();
+    try {
+      for (const [index, args] of [
+        ["--profile", "deepseek"],
+        ["--profile=deepseek"],
+        ["-p", "deepseek"],
+        ["-p=deepseek"],
+        ["-pdeepseek"],
+      ].entries()) {
+        const capturePath = join(root, `capture-${index}.json`);
+        await execFileAsync(process.execPath, [cli, "remote", ...args, "resume"], {
+          cwd: workspace,
+          env: { ...environment, CODEX_TEST_CAPTURE: capturePath },
+          encoding: "utf8",
+        });
 
-      expect(result.status).toBe(0);
-      expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
-        "--remote",
-        `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
-        "-C",
-        realpathSync(workspace),
-        "--profile",
-        "deepseek",
-        "resume",
-      ]);
+        expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
+          "--remote",
+          `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
+          "-C",
+          realpathSync(workspace),
+          "--profile",
+          "sf-deepseek",
+          "resume",
+        ]);
+      }
+    } finally {
+      await supervisor.close();
     }
 
     const passthroughCapture = join(root, "capture-passthrough.json");
@@ -1201,7 +1218,7 @@ describe("codexc CLI", () => {
       "--workspace",
       "external",
     ]);
-  });
+  }, 30_000);
 
   it("starts the App Server through the service entry with effective proxy settings", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-entry-"));
@@ -1266,7 +1283,7 @@ describe("codexc CLI", () => {
     });
   });
 
-  it("starts isolated OpenAI and DeepSeek App Servers without exposing the key", () => {
+  it("starts the DeepSeek proxy for subagents without eagerly starting its App Server", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-provider-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1281,18 +1298,18 @@ describe("codexc CLI", () => {
       "import { appendFileSync } from 'node:fs';",
       "appendFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
       "  args: process.argv.slice(2),",
-      "  apiKey: process.env.CODEX_CONNECT_DEEPSEEK_API_KEY,",
+      "  hasDeepseekApiKey: process.env.CODEX_CONNECT_DEEPSEEK_API_KEY !== undefined,",
+      "  hasOpenCodeApiKey: process.env.CODEX_CONNECT_OPENCODE_GO_API_KEY !== undefined,",
       "}) + '\\n');",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
-      join(codexHome, "deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.config.toml"),
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
-        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
         'base_url = "https://api.deepseek.com/"',
@@ -1304,13 +1321,52 @@ describe("codexc CLI", () => {
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "codex-connect-deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.managed.toml"),
       'version = 1\nprovider = "deepseek"\n',
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "deepseek.models.json"),
-      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      join(codexHome, "sf-opencode-go.config.toml"),
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "opencode-go"',
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
+        "[model_providers.opencode-go]",
+        'name = "opencode-go"',
+        'base_url = "https://opencode.ai/zen/go/v1"',
+        'wire_api = "responses"',
+        "requires_openai_auth = false",
+        "supports_websockets = false",
+        'experimental_bearer_token = "sk-opencode-secret"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-opencode-go.managed.toml"),
+      'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-deepseek.models.json"),
+      managedModelCatalog(),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-opencode-go.models.json"),
+      managedModelCatalog(),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-agent.config.toml"),
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `[agents.external]\nconfig_file = ${JSON.stringify(
+        join(codexHome, "sf-agent.config.toml"),
+      )}\n`,
       { mode: 0o600 },
     );
     const environment = {
@@ -1334,7 +1390,7 @@ describe("codexc CLI", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    expect(captures).toHaveLength(2);
+    expect(captures).toHaveLength(1);
     const openAiCapture = captures.find(({ args }) =>
       args.some((value: string) => value.startsWith("openai_base_url="))
     );
@@ -1348,42 +1404,20 @@ describe("codexc CLI", () => {
       "--listen",
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
     ]);
-    expect(deepseekCapture?.args).toEqual([
-        "-c",
-        'model="deepseek-v4-flash"',
-        "-c",
-        'model_provider="deepseek"',
-        "-c",
-        'model_reasoning_effort="high"',
-        "-c",
-        'service_tier="default"',
-        "-c",
-        `model_catalog_json=${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
-        "-c",
-        'model_providers.deepseek.name="deepseek"',
-        "-c",
-        'model_providers.deepseek.wire_api="responses"',
-        "-c",
-        'model_providers.deepseek.env_key="CODEX_CONNECT_DEEPSEEK_API_KEY"',
-        "-c",
-        "model_providers.deepseek.requires_openai_auth=false",
-        "-c",
-        expect.stringMatching(
-          /^model_providers\.deepseek\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u,
-        ),
-        "app-server",
-        "--listen",
-        `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
-      ]);
-    expect(captures.find(({ args }) => args.includes('model_provider="deepseek"'))?.apiKey)
-      .toBe("sk-service-secret");
+    expect(deepseekCapture).toBeUndefined();
+    expect(openAiCapture).toMatchObject({
+      hasDeepseekApiKey: true,
+      hasOpenCodeApiKey: false,
+    });
     expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-service-secret");
-    const roleConfigPath = join(codexHome, "codex-connect-ds-subagent.config.toml");
-    expect(existsSync(roleConfigPath)).toBe(true);
-    expect(readFileSync(roleConfigPath, "utf8")).not.toContain("sk-service-secret");
+    expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-opencode-secret");
+    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
+    expect(readFileSync(roleConfigPath, "utf8")).toMatch(
+      /base_url = "http:\/\/127\.0\.0\.1:\d+\/"/u,
+    );
   });
 
-  it("owns the automatic provider proxy in the App Server service without a running Gateway", async () => {
+  it("does not start an on-demand Provider proxy before that Provider is used", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-proxy-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1397,7 +1431,7 @@ describe("codexc CLI", () => {
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
       "import { get } from 'node:http';",
-      "const baseUrlArg = process.argv.slice(2).find((value) => value.startsWith('model_providers.deepseek.base_url='));",
+      "const baseUrlArg = process.argv.slice(2).find((value) => value.startsWith('model_providers.opencode-go.base_url='));",
       "if (!baseUrlArg) { await new Promise((resolve) => setTimeout(resolve, 500)); process.exit(0); }",
       "const baseUrl = JSON.parse(baseUrlArg.slice(baseUrlArg.indexOf('=') + 1));",
       "const status = await new Promise((resolve) => {",
@@ -1408,30 +1442,30 @@ describe("codexc CLI", () => {
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
-      join(codexHome, "deepseek.config.toml"),
+      join(codexHome, "sf-opencode-go.config.toml"),
       [
         'model = "deepseek-v4-flash"',
-        'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
-        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
-        "[model_providers.deepseek]",
-        'name = "deepseek"',
-        'base_url = "https://api.deepseek.com/"',
+        'model_provider = "opencode-go"',
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
+        "[model_providers.opencode-go]",
+        'name = "opencode-go"',
+        'base_url = "https://opencode.ai/zen/go/v1"',
         'wire_api = "responses"',
         "requires_openai_auth = false",
+        "supports_websockets = false",
         'experimental_bearer_token = "sk-service-secret"',
         "",
       ].join("\n"),
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "codex-connect-deepseek.config.toml"),
-      'version = 1\nprovider = "deepseek"\n',
+      join(codexHome, "sf-opencode-go.managed.toml"),
+      'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "deepseek.models.json"),
-      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      join(codexHome, "sf-opencode-go.models.json"),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1451,12 +1485,7 @@ describe("codexc CLI", () => {
       env: environment,
     });
 
-    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      baseUrl: string;
-      status: number;
-    };
-    expect(captured.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u);
-    expect(captured.status).toBe(404);
+    expect(existsSync(capturePath)).toBe(false);
   });
 
   it("starts an exclusive DeepSeek Gateway and reclaims ownership after forced shutdown", async () => {
@@ -1515,8 +1544,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
-        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
         'base_url = "https://api.deepseek.com/"',
@@ -1528,20 +1556,13 @@ describe("codexc CLI", () => {
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "codex-connect-deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.managed.toml"),
       'version = 1\nprovider = "deepseek"\nmode = "exclusive"\n',
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "deepseek.models.json"),
-      JSON.stringify({
-        models: [{
-          slug: "deepseek-v4-flash",
-          display_name: "DeepSeek-V4-Flash",
-          default_reasoning_level: "high",
-          supported_reasoning_levels: [{ effort: "high", description: "High" }],
-        }],
-      }),
+      join(codexHome, "sf-deepseek.models.json"),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1644,12 +1665,11 @@ describe("codexc CLI", () => {
     writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(0);\n");
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
-      join(codexHome, "deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.config.toml"),
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
-        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
         'base_url = "https://api.deepseek.com/"',
@@ -1661,13 +1681,13 @@ describe("codexc CLI", () => {
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "codex-connect-deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.managed.toml"),
       'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "deepseek.models.json"),
-      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      join(codexHome, "sf-deepseek.models.json"),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1723,8 +1743,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
-        'model_reasoning_effort = "high"',
-        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
         'base_url = "https://api.deepseek.com/"',
@@ -1736,13 +1755,13 @@ describe("codexc CLI", () => {
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "codex-connect-deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.managed.toml"),
       'version = 1\nprovider = "deepseek"\nmode = "exclusive"\n',
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "deepseek.models.json"),
-      '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      join(codexHome, "sf-deepseek.models.json"),
+      managedModelCatalog(),
       { mode: 0o600 },
     );
     const environment = {
@@ -1997,7 +2016,7 @@ describe("codexc CLI", () => {
     writeFileSync(fakeCodex, "#!/usr/bin/env node\n");
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
-      join(codexHome, "codex-connect-deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.managed.toml"),
       'version = 1\nprovider = "deepseek"\nmode = "exclusive"\n',
       { mode: 0o600 },
     );
@@ -2145,8 +2164,8 @@ describe("codexc CLI", () => {
     for (const [args, expected] of [
       [["work", "list", "unexpected"], "用法：codexc work list"],
       [["agents", "status", "unexpected"], "用法：codexc agents"],
-      [["agents", "enable-deepseek", "unexpected"], "用法：codexc agents"],
-      [["agents", "disable-deepseek", "unexpected"], "用法：codexc agents"],
+      [["agents", "configure"], "用法：codexc agents"],
+      [["agents", "disable", "unexpected"], "用法：codexc agents"],
       [["center", "info", "unexpected"], "用法：codexc center info"],
       [["center", "config", "unexpected"], "用法：codexc center config"],
     ] as const) {
@@ -2178,7 +2197,7 @@ describe("codexc CLI", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("multi_agent_v2：未启用");
-    expect(result.stdout).toContain("DS 子代理角色：未配置");
+    expect(result.stdout).toContain("第三方子代理：未配置");
     expect(result.stderr).toBe("");
   });
 
@@ -3061,7 +3080,7 @@ describe("codexc CLI", () => {
   });
 
   it("diagnoses configuration and a real Unix WebSocket without exposing the Telegram token", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-doctor-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -3132,6 +3151,7 @@ describe("codexc CLI", () => {
     });
     const supervisorOwner = new AppServerSupervisorOwner(socketPath, {
       primaryProvider: "openai",
+      managedProviders: [],
       socketPaths: [socketPath],
     });
 
@@ -3388,6 +3408,21 @@ function table(value: unknown): Record<string, unknown> {
     throw new Error("测试配置表无效");
   }
   return value as Record<string, unknown>;
+}
+
+function managedModelCatalog(): string {
+  return `${JSON.stringify({
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+      slug,
+      display_name: slug,
+      context_window: 1_048_576,
+      default_reasoning_level: "high",
+      supported_reasoning_levels: [
+        { effort: "high", description: "High" },
+        { effort: "max", description: "Max" },
+      ],
+    })),
+  })}\n`;
 }
 
 function exportedMetricsPath(output: string): string {

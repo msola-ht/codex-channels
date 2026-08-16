@@ -11,10 +11,10 @@
   中断、未完整观测和失败数量，同时展示聚合模型耗时、缓存命中、完整运行耗时和不含推理的
   综合输出速度，并显示具有完整 Token 与流式时间窗的请求覆盖率。
 - 会话区保留 Thread 累计上下文、压缩次数、Goal 与 Git 分支。
-- 所有 Provider 都展示 Gateway 实际观察到的首段回复延迟；DeepSeek 还会展示最后一次请求的
-  可观测首事件延迟（调试模式开启时），以及整轮综合思考速度与含推理生成速度。
+- 所有 Provider 都展示 Gateway 实际观察到的首段回复延迟；DeepSeek 与 OpenCode Go 还会展示
+  最后一次请求的可观测首事件延迟（调试模式开启时），以及整轮综合思考速度与含推理生成速度。
 - 推理 Token 计数对所有 Provider 展示；OpenAI 官方只返回计数与用量，不返回推理内容或可靠
-  计时流，因此思考/生成速度等计时字段仍只在 DeepSeek 展示。
+  计时流，因此思考/生成速度等计时字段仍在 DeepSeek 与 OpenCode Go 展示。
 - 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”，与直接 API 的自定义提供商
   区分。
 - 同一 Turn 中模型请求遇到 `429/5xx` 或上游 WebSocket 断流后由 Codex 重试并最终完成时，完成
@@ -56,7 +56,8 @@ failed 请求计入异常记录，避免这类错误完全不可见。
 （元/100M）：总费用 ÷ 总 Token（输入 + 输出，含上下文压缩）× 1 亿，按 `price_currency`
 统一展示（`cny` 时人民币）；只统计有价格快照的请求，覆盖不全时标注计价次数。
 
-- HTTP 与 WebSocket 客户端提前断开都计为中断；上游 WebSocket 断流按可重试失败保留，在 Turn
+- HTTP 与 WebSocket 客户端在完成事件前断开都计为中断；HTTP/SSE 已完成后的正常收尾断开不重复
+  记为失败；上游 WebSocket 断流按可重试失败保留，在 Turn
   完成时归入“自动重试”。
 - HTTP 200 但没有模型、Usage 或完成事件的响应计为“未完整观测”，中断与未完整观测都不冒充
   成功请求或参与计价。
@@ -84,6 +85,9 @@ HTML 和微信结构化字段渲染。
 `/resume` 恢复结果会显示该 Thread 的会话模型和 Provider；`/new` 与 Workspace 切换结果会显示
 下一条普通消息使用的模型和 Provider；`/model` 产生待生效选择时也使用“下一条消息模型”明确
 区分当前 Thread 设置。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
+按需运行的受管 Provider（DeepSeek、OpenCode Go）在首次选择对应模型、恢复其 Thread 或使用对应
+Remote TUI 之前尚未启动，其历史 Thread 不会出现在 `/resume` 会话列表中；对应 Provider 启动后
+即可正常列出和恢复。
 
 `/mcp login` 在当前会话已绑定 Thread 时返回安全授权地址；浏览器流程结束后，Gateway 只把带有
 该 Thread 的官方 OAuth 完成通知显示为“MCP OAuth”成功或失败状态，无法关联 Thread 的通知不向
@@ -91,7 +95,7 @@ HTML 和微信结构化字段渲染。
 使用 Markdown 卡片，微信使用结构化文本。
 
 `/agents` 无参数时列出内置角色（default/explorer/worker）与 `~/.codex/config.toml` 中
-配置的角色（如 `agents.ds`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
+配置的角色（如共享第三方角色 `agents.external`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
 `fork_turns="1"` 的文本指示子代理执行任务，调用结果与普通 Turn 启动一致。
 
 `codexc metrics threads` 的会话列表增加“类型”列：Gateway 在绑定线程中观测到

@@ -43,6 +43,7 @@ const models = [
 
 function createService(settings?: {
   model: string;
+  modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
 }, availableModels: ModelOption[] = models): ModelSelectionService {
@@ -53,6 +54,7 @@ function createService(settings?: {
   } satisfies ModelSelectionPort;
   let currentSettings = settings;
   const router = {
+    newSession: async () => undefined,
     current: () => currentSettings
       ? { target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }
       : undefined,
@@ -65,6 +67,85 @@ function createService(settings?: {
 }
 
 describe("ModelSelectionService", () => {
+  it("keeps identical model IDs from different Providers independently selectable", async () => {
+    const sharedModel = "deepseek-v4-flash";
+    const deepseek = { ...model(sharedModel, ["high"], "high"), provider: "deepseek" };
+    const openCodeGo = {
+      ...model(sharedModel, ["high"], "high"),
+      provider: "opencode-go",
+      displayName: "OpenCode Go · DeepSeek V4 Flash",
+    };
+    const service = createService({
+      model: sharedModel,
+      modelProvider: "deepseek",
+      effort: "high",
+      serviceTier: "default",
+    }, [deepseek, openCodeGo]);
+
+    const state = await service.state(target);
+    expect(state.models).toHaveLength(2);
+    expect(state.modelProvider).toBe("deepseek");
+    await service.selectModel(target, "2");
+    expect(service.turnOverrides(target)).toMatchObject({
+      model: sharedModel,
+      modelProvider: "opencode-go",
+    });
+  });
+
+  it("resolves the configured default model within the primary Provider", async () => {
+    const sharedModel = "deepseek-v4-flash";
+    const openAi = model(sharedModel, ["medium"], "medium", true);
+    const openCodeGo = {
+      ...model(sharedModel, ["high"], "high"),
+      provider: "opencode-go",
+    };
+    const codex = {
+      listModels: async () => [openAi],
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = { modelSettings: () => undefined } as unknown as SessionRouter;
+    const service = new ModelSelectionService(
+      codex,
+      router,
+      sharedModel,
+      [openCodeGo],
+      "opencode-go",
+    );
+
+    const state = await service.state(target);
+    expect(state).toMatchObject({
+      model: sharedModel,
+      modelProvider: "opencode-go",
+      effort: "high",
+    });
+    expect(state.models).toHaveLength(1);
+  });
+
+  it("rejects a configured default model outside the primary Provider", async () => {
+    const deepseek = {
+      ...model("deepseek-v4-flash", ["high"], "high"),
+      provider: "deepseek",
+    };
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = { modelSettings: () => undefined } as unknown as SessionRouter;
+    const service = new ModelSelectionService(
+      codex,
+      router,
+      deepseek.model,
+      [deepseek],
+      "openai",
+    );
+
+    await expect(service.state(target)).rejects.toThrow(
+      "配置的默认模型不属于当前主 Provider openai：deepseek-v4-flash",
+    );
+  });
+
   it("rejects an input modality not supported by the current model", async () => {
     const service = createService({
       model: "gpt-main",

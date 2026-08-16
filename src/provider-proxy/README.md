@@ -13,7 +13,8 @@
   首尾时间；WebSocket 从出站 `response.create` 提前记录有界的模型与服务层级，完成事件再刷新
   最终模型、服务层级、状态、上游时间戳及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
-  状态、超时、上游错误、客户端断开和 WebSocket 提前关闭同样产生受控失败指标，不保留错误正文；
+  状态、超时、上游错误、完成事件前的客户端断开和 WebSocket 提前关闭同样产生受控失败指标，
+  不保留错误正文；HTTP/SSE 已收到完成事件后的正常收尾断开不重复改写为失败或输出误报警；
   WebSocket 上游握手失败（如 429）也会生成 failed 指标并保留 HTTP 状态；即使尚未收到出站
   元数据，也会降级记录为空 Thread 的失败，避免这类错误完全不可见；
   后端在 WS 内返回的包装 error 事件（`status` + `error.type`）与关闭原因（usage limit /
@@ -47,9 +48,11 @@
 模块只依赖 Node 内置 HTTP/HTTPS/Unix Socket 能力，不接触平台 SDK、数据库或协议生成类型；
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
 `observability` 独立指标库和 `conversation-core` 的稳定计时输入事件。
-App Server 服务为主 Provider 和可选切换 Provider 自动创建独立代理，不暴露手工监听配置。
+App Server 服务立即为主 Provider 创建独立代理，并在可选切换 Provider 首次使用时按需创建对应
+代理，不暴露手工监听配置。
 服务通过共享运行时的私有监管 Socket 独占完整 App Server 拓扑；前台只能复用监管身份和
 Provider 拓扑匹配且已完成 WebSocket 握手的实例。Gateway 另以配置级所有权 Socket 全局互斥，
 不把 Provider 指标 Socket 当作进程锁；裸实例与重复 Gateway 均失败关闭。
 OpenAI 保留用户配置的 `openai_base_url`；没有显式上游时，按官方认证请求 Header 选择 ChatGPT
-或 API 上游。代理启动失败时 App Server 服务失败关闭，不以绕过统计代理的方式静默降级。
+或 API 上游。主代理启动失败时 App Server 服务失败关闭；按需 Provider 代理启动失败时本次选择
+明确失败。两者都不会绕过统计代理静默直连上游。

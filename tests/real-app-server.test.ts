@@ -9,6 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import pino from "pino";
@@ -17,10 +18,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   appServerSupervisorSocketPath,
+  ensureAppServerProvider,
   inspectAppServerSupervisor,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { providerAppServerSocketPath } from "../runtime/model-provider-runtime.mjs";
 import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
 import type { ApprovalRequest } from "../src/approval/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
@@ -304,22 +307,26 @@ suite("real Codex App Server over Unix WebSocket", () => {
   });
 });
 
-suite("real supervised App Server service", () => {
-  it("starts the OpenAI metrics proxy and exposes the matching supervised App Server", async () => {
-    const runtimeRoot = resolve(".runtime");
-    mkdirSync(runtimeRoot, { recursive: true });
-    const testRuntime = mkdtempSync(join(runtimeRoot, "service-integration-"));
+contractSuite("real supervised App Server service", () => {
+  it("starts OpenAI and an on-demand OpenCode Go App Server with matching topology", async () => {
+    const testRuntime = mkdtempSync(join(tmpdir(), "codex-contract-"));
     const codexHome = join(testRuntime, "codex-home");
     const workspace = join(testRuntime, "workspace");
     const configPath = join(testRuntime, "config.toml");
     const socketPath = join(testRuntime, "codex-app-server.sock");
+    const openCodeSocketPath = providerAppServerSocketPath(socketPath, "opencode-go");
     const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
-    const roleConfigPath = join(codexHome, "codex-connect-ds-subagent.config.toml");
+    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
     writeFileSync(
       roleConfigPath,
-      'developer_instructions = "Integration fixture role"\n',
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "opencode-go"',
+        'developer_instructions = "Integration fixture role"',
+        "",
+      ].join("\n"),
       { mode: 0o600 },
     );
     writeFileSync(
@@ -328,9 +335,75 @@ suite("real supervised App Server service", () => {
         "[features]",
         "multi_agent_v2 = true",
         "",
-        "[agents.ds]",
+        "[agents.external]",
         'description = "Integration fixture role"',
         `config_file = ${JSON.stringify(roleConfigPath)}`,
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    const catalogPath = join(codexHome, "sf-opencode-go.models.json");
+    const validCatalog = `${JSON.stringify({
+      models: [{
+        slug: "deepseek-v4-flash",
+        display_name: "DeepSeek-V4-Flash",
+        description: "OpenCode Go contract fixture",
+        default_reasoning_level: "high",
+        supported_reasoning_levels: [{
+          effort: "high",
+          description: "OpenCode Go contract fixture",
+        }],
+        shell_type: "shell_command",
+        visibility: "list",
+        supported_in_api: true,
+        priority: 1,
+        availability_nux: null,
+        upgrade: null,
+        base_instructions: "You are a coding agent.",
+        support_verbosity: true,
+        default_verbosity: "low",
+        apply_patch_tool_type: "freeform",
+        truncation_policy: { mode: "tokens", limit: 10_000 },
+        supports_parallel_tool_calls: true,
+        experimental_supported_tools: [],
+      }],
+    })}\n`;
+    // 能通过 Gateway 启动校验、但缺少 codex 要求的 display_name，
+    // 用于验证首次按需启动失败时服务仍然存活。
+    const invalidForCodexCatalog = `${JSON.stringify({
+      models: [{
+        slug: "deepseek-v4-flash",
+        context_window: 200_000,
+        default_reasoning_level: "high",
+        supported_reasoning_levels: [{
+          effort: "high",
+          description: "OpenCode Go contract fixture",
+        }],
+      }],
+    })}\n`;
+    writeFileSync(
+      catalogPath,
+      invalidForCodexCatalog,
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-opencode-go.managed.toml"),
+      'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-opencode-go.config.toml"),
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "opencode-go"',
+        `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+        "[model_providers.opencode-go]",
+        'name = "opencode-go"',
+        'base_url = "https://opencode.ai/zen/go/v1"',
+        'wire_api = "responses"',
+        "requires_openai_auth = false",
+        "supports_websockets = false",
+        'experimental_bearer_token = "sk-integration-placeholder"',
         "",
       ].join("\n"),
       { mode: 0o600 },
@@ -358,6 +431,7 @@ suite("real supervised App Server service", () => {
     let stdout = "";
     let stderr = "";
     let client: CodexAppServerClient | undefined;
+    let openCodeClient: CodexAppServerClient | undefined;
     const service = spawn(
       process.execPath,
       [resolve("bin/codexc.mjs"), "service-app-server"],
@@ -397,7 +471,8 @@ suite("real supervised App Server service", () => {
       const topology = await inspectAppServerSupervisor(socketPath);
       expect(sameAppServerTopology(topology, {
         primaryProvider: "openai",
-        socketPaths: [socketPath],
+        managedProviders: ["opencode-go"],
+        socketPaths: [socketPath, openCodeSocketPath],
       })).toBe(true);
 
       client = new CodexAppServerClient(
@@ -406,8 +481,34 @@ suite("real supervised App Server service", () => {
       );
       const initialized = await client.connect();
       expect(initialized.userAgent).toContain("codex_connect/");
+
+      await expect(ensureAppServerProvider(socketPath, "opencode-go"))
+        .rejects.toThrow("模型 Provider App Server 启动失败：opencode-go（exit=1）");
+      expect(service.exitCode).toBeNull();
+      expect(await client.listModels()).not.toHaveLength(0);
+      expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
+        primaryProvider: "openai",
+      });
+
+      writeFileSync(catalogPath, validCatalog, { mode: 0o600 });
+      await ensureAppServerProvider(socketPath, "opencode-go").catch((error) => {
+        throw new Error(appServerFailure(
+          error instanceof Error ? error.message : String(error),
+          `${stdout}\n${stderr}`,
+        ), { cause: error });
+      });
+      expect(existsSync(openCodeSocketPath)).toBe(true);
+      openCodeClient = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(openCodeSocketPath)),
+        { sandbox: "read-only" },
+      );
+      const openCodeInitialized = await openCodeClient.connect();
+      expect(openCodeInitialized.userAgent).toContain("codex_connect/");
+      const models = await openCodeClient.listModels();
+      expect(models.some(({ model }) => model === "deepseek-v4-flash")).toBe(true);
     } finally {
       try {
+        await openCodeClient?.close().catch(() => undefined);
         await client?.close().catch(() => undefined);
         await stopDetachedTestProcess(service, 10_000);
         await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
@@ -417,7 +518,7 @@ suite("real supervised App Server service", () => {
         rmSync(testRuntime, { recursive: true, force: true });
       }
     }
-  }, 30_000);
+  }, 45_000);
 });
 
 suite("real Codex App Server over stdio", () => {
@@ -1398,7 +1499,7 @@ deepseekCatalogContractTest(
     const testRuntime = mkdtempSync(join(runtimeRoot, "deepseek-resume-contract-"));
     const codexHome = join(testRuntime, "codex-home");
     const resolvedCatalogPath = deepseekCatalogPath
-      ?? join(testRuntime, "deepseek.models.json");
+      ?? join(testRuntime, "sf-deepseek.models.json");
     const socketPath = join(testRuntime, "app-server.sock");
     const apiServer = createServer((_request, response) => {
       response.writeHead(400, { "content-type": "application/json" });

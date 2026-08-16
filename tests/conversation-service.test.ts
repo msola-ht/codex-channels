@@ -966,7 +966,7 @@ describe("ConversationService model selection", () => {
       {
         listAgentRoles: () => [
           { name: "worker", description: "项目专用执行角色" },
-          { name: "ds", description: "DeepSeek 子代理" },
+          { name: "external", description: "第三方模型子代理" },
         ],
       },
     );
@@ -975,7 +975,7 @@ describe("ConversationService model selection", () => {
       { name: "default", description: "默认角色，继承当前模型与配置" },
       { name: "explorer", description: "代码库探查：快速回答具体的代码库问题" },
       { name: "worker", description: "项目专用执行角色" },
-      { name: "ds", description: "DeepSeek 子代理" },
+      { name: "external", description: "第三方模型子代理" },
     ]);
   });
 
@@ -1012,31 +1012,31 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       {
-        listAgentRoles: () => [{ name: "ds", description: "DeepSeek 子代理" }],
+        listAgentRoles: () => [{ name: "external", description: "第三方模型子代理" }],
       },
     );
 
     await expect(service.invokeAgent(
       target,
-      "ds",
+      "external",
       "  审查提交  ",
     )).resolves.toMatchObject({
       threadId: "thread-1",
       turnId: "turn-1",
       steered: false,
-      roleName: "ds",
+      roleName: "external",
     });
     expect(startTurn.mock.calls[0]?.[1]).toEqual([
       {
         type: "text",
-        text: "请使用 agent_type=\"ds\"、fork_turns=\"1\" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n审查提交",
+        text: "请使用 agent_type=\"external\"、fork_turns=\"1\" 的子代理执行以下任务，子代理完成后把最终结果回复给我：\n\n审查提交",
       },
     ]);
     expect(markTurnStarted).toHaveBeenCalledWith(
       target,
       "thread-1",
       "turn-1",
-      { kind: "agent", name: "ds" },
+      { kind: "agent", name: "external" },
     );
   });
 
@@ -1072,16 +1072,16 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       {
-        listAgentRoles: () => [{ name: "ds", description: "DeepSeek 子代理" }],
+        listAgentRoles: () => [{ name: "external", description: "第三方模型子代理" }],
       },
     );
 
     const submission = await service.invokeAgent(target, "4", "执行任务");
 
-    expect(submission.roleName).toBe("ds");
+    expect(submission.roleName).toBe("external");
     expect(startTurn.mock.calls[0]?.[1]?.[0]).toMatchObject({
       type: "text",
-      text: expect.stringContaining("agent_type=\"ds\""),
+      text: expect.stringContaining("agent_type=\"external\""),
     });
   });
 

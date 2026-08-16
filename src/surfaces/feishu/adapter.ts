@@ -1096,7 +1096,9 @@ function renderCommandCenterChoices(
     return undefined;
   }
   const currentModel = result.state.models.find(
-    (model) => model.model === result.state.model,
+    (model) =>
+      model.model === result.state.model
+      && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai"),
   );
   if (action === "model") {
     if (result.state.models.length === 0) {
@@ -1105,10 +1107,10 @@ function renderCommandCenterChoices(
     return {
       title: "选择模型",
       description: `当前：${result.state.model}`,
-      choices: result.state.models.map((model) => ({
-        label: `${model.model === result.state.model ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
+      choices: result.state.models.map((model, index) => ({
+        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
         action: "model",
-        input: model.model,
+        input: String(index + 1),
       })),
     };
   }

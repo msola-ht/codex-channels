@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import type { ModelOption } from "../application/index.js";
 
-interface DeepseekCatalogDefinition {
+interface ManagedCatalogDefinition {
   id: string;
   displayName: string;
   catalogFileName: string;
@@ -16,10 +16,10 @@ interface DeepseekCatalogDefinition {
   }>;
 }
 
-export function loadDeepseekModelOptions(
+export function loadManagedModelOptions(
   codexHome: string,
   enabled: boolean,
-  definition: DeepseekCatalogDefinition,
+  definition: ManagedCatalogDefinition,
 ): ModelOption[] {
   if (!enabled) return [];
   const knownModels = new Map(definition.models.map((model) => [model.slug, model]));
@@ -30,13 +30,13 @@ export function loadDeepseekModelOptions(
     parsed = JSON.parse(readFileSync(catalogPath, "utf8"));
   } catch (error) {
     throw new Error(
-      `DeepSeek 模型目录无效，请重新运行 codexc setup：${catalogPath}`,
+      `${definition.displayName} 模型目录无效，请重新运行 codexc setup：${catalogPath}`,
       { cause: error },
     );
   }
   const models = record(parsed).models;
   if (!Array.isArray(models)) {
-    throw new Error(`DeepSeek 模型目录缺少 models：${catalogPath}`);
+    throw new Error(`${definition.displayName} 模型目录缺少 models：${catalogPath}`);
   }
   return models.flatMap((candidate) => {
     const model = record(candidate);
@@ -53,7 +53,7 @@ export function loadDeepseekModelOptions(
         : [];
     });
     if (efforts.length === 0) {
-      throw new Error(`DeepSeek 模型目录缺少思考等级：${catalogPath}`);
+      throw new Error(`${definition.displayName} 模型目录缺少思考等级：${catalogPath}`);
     }
     return [{
       provider: definition.id,

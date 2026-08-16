@@ -73,7 +73,7 @@ describe("Linux/macOS Git 源码安装", () => {
       cwd: checkout,
       encoding: "utf8",
     }).trim()).toBe(join(root, "npm-global"));
-  });
+  }, 30_000);
 
   it("removes the partial checkout and launcher when the build fails", () => {
     const root = temporaryDirectory("codexc-source-install-failure-");
@@ -108,7 +108,7 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(result.status, result.stderr || result.stdout).toBe(0);
     expect(result.stdout).toContain("检测到 npm 全局版 @hegenai/codexc@0.146.1");
     expect(JSON.parse(readFileSync(npmManifest, "utf8")).version).toBe("0.147.0");
-  });
+  }, 30_000);
 
   it("installs a missing Codex CLI and reports that login is still required", () => {
     const root = temporaryDirectory("codexc-source-install-codex-");

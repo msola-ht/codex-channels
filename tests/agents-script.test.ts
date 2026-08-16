@@ -3,7 +3,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,339 +13,391 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   agentsStatus,
-  disableDeepseekRole,
-  enableDeepseekRole,
-  type CodexUserConfigWriter,
+  configureThirdPartyRole,
+  disableThirdPartyRole,
 } from "../scripts/agents.mjs";
-import {
-  updateCodexUserConfig,
-  type CodexUserConfigEdit,
-  type CodexUserConfigValue,
+import type {
+  CodexUserConfigValue,
 } from "../scripts/codex-user-config.mjs";
+import type { CodexUserConfigWriter } from "../scripts/agents.mjs";
+import {
+  deepseekProviderDefinition,
+  opencodeGoProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
+import type { ModelProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import {
+  createManagedProviderMarker,
+  createManagedProviderProfile,
+} from "../runtime/model-provider-profile.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
-const compatibleUserConfigWriter: CodexUserConfigWriter = updateCodexUserConfig;
-void compatibleUserConfigWriter;
-
 describe("codexc agents script", () => {
-  it("routes managed role changes through one user config transaction", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-transaction-"));
-    const environment = { ...process.env, CODEX_HOME: codexHome };
-    const rolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
-    let requestedEdits: CodexUserConfigEdit[] = [];
-    const updateConfig = vi.fn(async (
-      _environment: NodeJS.ProcessEnv,
-      createEdits: (config: Record<string, CodexUserConfigValue | undefined>) => Array<{
-        keyPath: string;
-        value: CodexUserConfigValue;
-      }>,
-    ) => {
-      requestedEdits = createEdits({});
-    });
+  it.each([
+    [deepseekProviderDefinition.id, deepseekProviderDefinition],
+    [opencodeGoProviderDefinition.id, opencodeGoProviderDefinition],
+  ] as const)("binds the shared role to configured provider %s", async (provider, definition) => {
+    const fixture = createFixture();
     try {
-      writeProviderFixtures(codexHome);
+      writeProviderFixture(fixture.home, definition, "switching");
 
-      await enableDeepseekRole(environment, { updateConfig });
-
-      expect(updateConfig).toHaveBeenCalledWith(environment, expect.any(Function));
-      expect(requestedEdits).toEqual([{
-        keyPath: "features.multi_agent_v2",
-        value: true,
-      }, {
-        keyPath: "agents.ds",
-        value: {
-          description:
-            "DeepSeek 单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息",
-          config_file: rolePath,
-          nickname_candidates: ["DeepSeek"],
-        },
-      }]);
-    } finally {
-      rmSync(codexHome, { recursive: true, force: true });
-    }
-  });
-
-  it("enables multi_agent_v2 with a DeepSeek role and disables it again", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-"));
-    const environment = { ...process.env, CODEX_HOME: codexHome };
-    const configPath = join(codexHome, "config.toml");
-    const rolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
-    try {
-      writeFileSync(
-        join(codexHome, "codex-connect-deepseek.config.toml"),
-        'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
-        { mode: 0o600 },
+      const selected = await configureThirdPartyRole(
+        provider,
+        undefined,
+        fixture.environment,
+        { updateConfig: applyConfigUpdate },
       );
-      writeFileSync(join(codexHome, "deepseek.config.toml"), providerProfile(codexHome), {
-        mode: 0o600,
+
+      expect(selected).toEqual({
+        role: "external",
+        provider,
+        model: definition.defaultModel,
       });
-      writeFileSync(
-        join(codexHome, "deepseek.models.json"),
-        '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
-        { mode: 0o600 },
-      );
-      writeFileSync(configPath, "model = \"gpt-5.6-sol\"\n", { mode: 0o600 });
-      const originalConfigInode = statSync(configPath).ino;
-
-      await enableDeepseekRole(environment, { updateConfig: applyConfigUpdate });
-      const enabledConfig = readFileSync(configPath, "utf8");
-      expect(statSync(configPath).ino).not.toBe(originalConfigInode);
-      expect(parse(enabledConfig)).toMatchObject({
-        model: "gpt-5.6-sol",
+      const config = record(parse(readFileSync(fixture.configPath, "utf8")));
+      expect(config).toMatchObject({
         features: { multi_agent_v2: true },
         agents: {
-          ds: {
-            description:
-              "DeepSeek 单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息",
-            config_file: rolePath,
-            nickname_candidates: ["DeepSeek"],
+          external: {
+            description: expect.stringContaining("第三方模型单次子代理"),
+            config_file: fixture.rolePath,
+            nickname_candidates: [definition.displayName],
           },
         },
       });
-      expect(existsSync(rolePath)).toBe(true);
-      expect(readFileSync(rolePath, "utf8")).not.toContain("sk-test-secret");
-
-      expect(agentsStatus(environment)).toMatchObject({
+      const role = parse(readFileSync(fixture.rolePath, "utf8"));
+      expect(role).toMatchObject({
+        model: definition.defaultModel,
+        model_provider: provider,
+        model_providers: {
+          [provider]: {
+            base_url: definition.baseUrl,
+            wire_api: "responses",
+          },
+        },
+      });
+      expect(readFileSync(fixture.rolePath, "utf8")).not.toContain("sk-test-secret");
+      expect(agentsStatus(fixture.environment)).toMatchObject({
         multiAgentV2Enabled: true,
-        dsRoleConfigured: true,
-      });
-
-      await disableDeepseekRole(environment, { updateConfig: applyConfigUpdate });
-      const disabledConfig = readFileSync(configPath, "utf8");
-      expect(parse(disabledConfig)).toMatchObject({
-        model: "gpt-5.6-sol",
-        features: { multi_agent_v2: false },
-      });
-      expect(record(parse(disabledConfig).agents).ds).toBeUndefined();
-      expect(existsSync(rolePath)).toBe(false);
-
-      expect(agentsStatus(environment)).toMatchObject({
-        multiAgentV2Enabled: false,
-        dsRoleConfigured: false,
+        externalRoleConfigured: true,
+        provider,
+        model: definition.defaultModel,
       });
     } finally {
-      rmSync(codexHome, { recursive: true, force: true });
+      fixture.remove();
     }
   });
 
-  it("turns an existing multi_agent_v2 feature table back on and off", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-table-"));
-    const environment = { ...process.env, CODEX_HOME: codexHome };
-    const configPath = join(codexHome, "config.toml");
+  it("switches the same role between providers and accepts an explicit model", async () => {
+    const fixture = createFixture();
     try {
-      writeFileSync(
-        join(codexHome, "codex-connect-deepseek.config.toml"),
-        'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
-        { mode: 0o600 },
-      );
-      writeFileSync(join(codexHome, "deepseek.config.toml"), providerProfile(codexHome), {
-        mode: 0o600,
+      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture.home, opencodeGoProviderDefinition, "switching");
+      await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
+        updateConfig: applyConfigUpdate,
       });
-      writeFileSync(
-        join(codexHome, "deepseek.models.json"),
-        '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
-        { mode: 0o600 },
-      );
-      writeFileSync(
-        configPath,
-        "[features.multi_agent_v2]\nenabled = false\n",
-        { mode: 0o600 },
-      );
+      await configureThirdPartyRole("opencode-go", "deepseek-v4-pro", fixture.environment, {
+        updateConfig: applyConfigUpdate,
+      });
 
-      await enableDeepseekRole(environment, { updateConfig: applyConfigUpdate });
-      expect(parse(readFileSync(configPath, "utf8"))).toMatchObject({
+      expect(agentsStatus(fixture.environment)).toMatchObject({
+        provider: "opencode-go",
+        model: "deepseek-v4-pro",
+      });
+      expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
+        agents: { external: { nickname_candidates: ["OpenCode Go"] } },
+      });
+    } finally {
+      fixture.remove();
+    }
+  });
+
+  it("replaces the previously managed ds role without touching user roles", async () => {
+    const fixture = createFixture();
+    const legacyPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
+    try {
+      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      writeFileSync(legacyPath, 'model_provider = "deepseek"\n', { mode: 0o600 });
+      writeFileSync(fixture.configPath, [
+        "[features]",
+        "multi_agent_v2 = true",
+        "[agents.ds]",
+        'description = "Old managed role"',
+        `config_file = ${JSON.stringify(legacyPath)}`,
+        "[agents.reviewer]",
+        'description = "User role"',
+        "",
+      ].join("\n"), { mode: 0o600 });
+
+      await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
+        updateConfig: applyConfigUpdate,
+      });
+
+      const agents = record(parse(readFileSync(fixture.configPath, "utf8")).agents);
+      expect(agents.ds).toBeUndefined();
+      expect(agents.external).toBeDefined();
+      expect(agents.reviewer).toEqual({ description: "User role" });
+      expect(existsSync(legacyPath)).toBe(false);
+    } finally {
+      fixture.remove();
+    }
+  });
+
+  it("reports and disables the legacy managed ds role", async () => {
+    const fixture = createFixture();
+    const legacyPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
+    try {
+      writeFileSync(legacyPath, 'model_provider = "deepseek"\n', { mode: 0o600 });
+      writeFileSync(fixture.configPath, [
+        "[features]",
+        "multi_agent_v2 = true",
+        "[agents.ds]",
+        'description = "Old managed role"',
+        `config_file = ${JSON.stringify(legacyPath)}`,
+        "",
+      ].join("\n"), { mode: 0o600 });
+
+      expect(agentsStatus(fixture.environment)).toMatchObject({
+        multiAgentV2Enabled: true,
+        externalRoleConfigured: false,
+        legacyDsRoleConfigured: true,
+      });
+
+      await disableThirdPartyRole(fixture.environment, { updateConfig: applyConfigUpdate });
+
+      expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
+        features: { multi_agent_v2: false },
+        agents: {},
+      });
+      expect(existsSync(legacyPath)).toBe(false);
+    } finally {
+      fixture.remove();
+    }
+  });
+
+  it("reports when there is no managed role to disable", async () => {
+    const fixture = createFixture();
+    try {
+      writeFileSync(fixture.configPath, [
+        "[features]",
+        "multi_agent_v2 = true",
+        "",
+      ].join("\n"), { mode: 0o600 });
+
+      const removed = await disableThirdPartyRole(fixture.environment, {
+        updateConfig: applyConfigUpdate,
+      });
+
+      expect(removed).toBe(false);
+      expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
         features: { multi_agent_v2: true },
       });
-
-      await disableDeepseekRole(environment, { updateConfig: applyConfigUpdate });
-      expect(parse(readFileSync(configPath, "utf8"))).toMatchObject({
-        features: { multi_agent_v2: false },
-      });
     } finally {
-      rmSync(codexHome, { recursive: true, force: true });
+      fixture.remove();
     }
   });
 
-  it("replaces existing feature keys instead of duplicating them", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-inline-"));
-    const environment = { ...process.env, CODEX_HOME: codexHome };
-    const configPath = join(codexHome, "config.toml");
+  it("supports a provider configured as the fixed primary", async () => {
+    const fixture = createFixture();
     try {
-      writeFileSync(
-        join(codexHome, "codex-connect-deepseek.config.toml"),
-        'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
-        { mode: 0o600 },
-      );
-      writeFileSync(join(codexHome, "deepseek.config.toml"), providerProfile(codexHome), {
-        mode: 0o600,
+      writeProviderFixture(fixture.home, opencodeGoProviderDefinition, "exclusive");
+
+      await configureThirdPartyRole("opencode-go", undefined, fixture.environment, {
+        updateConfig: applyConfigUpdate,
       });
+
+      expect(agentsStatus(fixture.environment)).toMatchObject({
+        provider: "opencode-go",
+        model: "deepseek-v4-flash",
+      });
+    } finally {
+      fixture.remove();
+    }
+  });
+
+  it("rejects an unconfigured provider and an unavailable model", async () => {
+    const fixture = createFixture();
+    try {
+      await expect(configureThirdPartyRole(
+        "deepseek",
+        undefined,
+        fixture.environment,
+        { updateConfig: applyConfigUpdate },
+      )).rejects.toThrow("尚未配置");
+      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      await expect(configureThirdPartyRole(
+        "deepseek",
+        "unknown-model",
+        fixture.environment,
+        { updateConfig: applyConfigUpdate },
+      )).rejects.toThrow("不支持模型");
       writeFileSync(
-        join(codexHome, "deepseek.models.json"),
+        join(fixture.home, deepseekProviderDefinition.catalogFileName),
         '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
         { mode: 0o600 },
       );
-      writeFileSync(
-        configPath,
-        "[features]\nmulti_agent_v2 = false\nother_feature = true\n",
-        { mode: 0o600 },
-      );
-
-      await enableDeepseekRole(environment, { updateConfig: applyConfigUpdate });
-      expect(parse(readFileSync(configPath, "utf8"))).toMatchObject({
-        features: { multi_agent_v2: true, other_feature: true },
-      });
-
-      await disableDeepseekRole(environment, { updateConfig: applyConfigUpdate });
-      expect(parse(readFileSync(configPath, "utf8"))).toMatchObject({
-        features: { multi_agent_v2: false, other_feature: true },
-      });
+      await expect(configureThirdPartyRole(
+        "deepseek",
+        "deepseek-v4-pro",
+        fixture.environment,
+        { updateConfig: applyConfigUpdate },
+      )).rejects.toThrow("模型目录无法安全读取");
     } finally {
-      rmSync(codexHome, { recursive: true, force: true });
+      fixture.remove();
     }
   });
 
-  it("refuses to disable a user-managed ds role", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-user-role-"));
-    const environment = { ...process.env, CODEX_HOME: codexHome };
-    const configPath = join(codexHome, "config.toml");
-    const original = [
-      "[features]",
-      "multi_agent_v2 = true",
-      "[agents.ds]",
-      'description = "User role"',
-      'config_file = "/opt/user/ds.toml"',
-      "",
-    ].join("\n");
+  it("does not overwrite a user-managed agents.external role", async () => {
+    const fixture = createFixture();
     try {
-      writeFileSync(configPath, original, { mode: 0o600 });
+      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      writeFileSync(fixture.configPath, [
+        "[features]",
+        "multi_agent_v2 = true",
+        "[agents.external]",
+        'description = "User role"',
+        'config_file = "/opt/user/external.toml"',
+        "",
+      ].join("\n"), { mode: 0o600 });
 
-      await expect(disableDeepseekRole(environment, {
+      await expect(configureThirdPartyRole(
+        "deepseek",
+        undefined,
+        fixture.environment,
+        { updateConfig: applyConfigUpdate },
+      )).rejects.toThrow("agents.external 已由用户配置");
+    } finally {
+      fixture.remove();
+    }
+  });
+
+  it("disables only the managed role and preserves multi_agent_v2 when other roles exist", async () => {
+    const fixture = createFixture();
+    try {
+      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
-      })).rejects.toThrow("agents.ds 已由用户配置");
+      });
+      const config = record(parse(readFileSync(fixture.configPath, "utf8")));
+      const agents = record(config.agents);
+      agents.reviewer = { description: "Reviewer" };
+      config.agents = agents;
+      writeFileSync(fixture.configPath, stringify(config), { mode: 0o600 });
 
-      expect(readFileSync(configPath, "utf8")).toBe(original);
+      await disableThirdPartyRole(fixture.environment, { updateConfig: applyConfigUpdate });
+
+      expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
+        features: { multi_agent_v2: true },
+        agents: { reviewer: { description: "Reviewer" } },
+      });
+      expect(existsSync(fixture.rolePath)).toBe(false);
     } finally {
-      rmSync(codexHome, { recursive: true, force: true });
+      fixture.remove();
     }
   });
 
-  it("restores the managed role file when the config transaction fails", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-rollback-"));
-    const environment = { ...process.env, CODEX_HOME: codexHome };
-    const rolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
+  it("rolls back the role file when the config transaction fails", async () => {
+    const fixture = createFixture();
     try {
-      writeProviderFixtures(codexHome);
-
-      await expect(enableDeepseekRole(environment, {
-        updateConfig: vi.fn(async () => {
-          throw new Error("config version conflict");
-        }),
-      })).rejects.toThrow("config version conflict");
-
-      expect(existsSync(rolePath)).toBe(false);
+      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      await expect(configureThirdPartyRole(
+        "deepseek",
+        undefined,
+        fixture.environment,
+        { updateConfig: vi.fn(async () => { throw new Error("version conflict"); }) },
+      )).rejects.toThrow("version conflict");
+      expect(existsSync(fixture.rolePath)).toBe(false);
     } finally {
-      rmSync(codexHome, { recursive: true, force: true });
+      fixture.remove();
     }
-  });
-
-  it("writes a guarded config transaction with the version read from the same client", async () => {
-    const environment = { ...process.env, CODEX_HOME: "/tmp/codexc-config-version" };
-    const client = {
-      connect: vi.fn(async () => undefined),
-      readUserConfigSnapshot: vi.fn(async () => ({
-        config: { agents: {} },
-        version: "sha256:current",
-      })),
-      writeUserConfigEdits: vi.fn(async () => undefined),
-      close: vi.fn(async () => undefined),
-    };
-
-    await updateCodexUserConfig(
-      environment,
-      () => [{ keyPath: "agents.ds", value: null }],
-      { createClient: vi.fn(async () => client) },
-    );
-
-    expect(client.writeUserConfigEdits).toHaveBeenCalledWith(
-      [{ keyPath: "agents.ds", value: null }],
-      { expectedVersion: "sha256:current" },
-    );
   });
 });
 
-function providerProfile(codexHome: string): string {
-  return [
-    'model = "deepseek-v4-flash"',
-    'model_provider = "deepseek"',
-    'model_reasoning_effort = "high"',
-    `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
-    "model_auto_compact_token_limit = 629146",
-    "model_auto_compact_token_limit_scope = \"total\"",
-    "[model_providers.deepseek]",
-    'name = "deepseek"',
-    'base_url = "https://api.deepseek.com/"',
-    'wire_api = "responses"',
-    "requires_openai_auth = false",
-    'experimental_bearer_token = "sk-test-secret"',
-    "",
-  ].join("\n");
+function createFixture() {
+  const home = mkdtempSync(join(tmpdir(), "codexc-agents-"));
+  const environment = { ...process.env, CODEX_HOME: home };
+  return {
+    home,
+    environment,
+    configPath: join(home, "config.toml"),
+    rolePath: join(home, "sf-agent.config.toml"),
+    remove: () => rmSync(home, { recursive: true, force: true }),
+  };
 }
 
-function writeProviderFixtures(codexHome: string): void {
+function writeProviderFixture(
+  home: string,
+  definition: ModelProviderDefinition,
+  mode: "switching" | "exclusive",
+) {
+  const catalogPath = join(home, definition.catalogFileName);
   writeFileSync(
-    join(codexHome, "codex-connect-deepseek.config.toml"),
-    'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+    catalogPath,
+    JSON.stringify({
+      models: definition.models.map(({ slug }: { slug: string }) => ({
+        slug,
+        display_name: slug,
+        context_window: 1_048_576,
+        default_reasoning_level: definition.defaultReasoningEffort,
+        supported_reasoning_levels: [
+          { effort: "high", description: "High" },
+          { effort: "max", description: "Max" },
+        ],
+      })),
+    }),
     { mode: 0o600 },
   );
-  writeFileSync(join(codexHome, "deepseek.config.toml"), providerProfile(codexHome), {
-    mode: 0o600,
+  const profile = createManagedProviderProfile(definition, {
+    apiKey: "sk-test-secret",
+    catalogPath,
   });
+  const target = mode === "exclusive" ? join(home, "config.toml") : join(home, definition.profileFileName);
+  writeFileSync(target, stringify(profile), { mode: 0o600 });
   writeFileSync(
-    join(codexHome, "deepseek.models.json"),
-    '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+    join(home, definition.managedMarkerFileName),
+    stringify(createManagedProviderMarker(definition, mode)),
     { mode: 0o600 },
   );
 }
 
-async function applyConfigUpdate(
-  environment: NodeJS.ProcessEnv,
-  createEdits: (
-    config: Record<string, CodexUserConfigValue | undefined>,
-  ) => CodexUserConfigEdit[],
-): Promise<void> {
+const applyConfigUpdate: CodexUserConfigWriter = async (environment, createEdits) => {
   const configPath = join(String(environment.CODEX_HOME), "config.toml");
   const document = existsSync(configPath)
     ? record(parse(readFileSync(configPath, "utf8")))
     : {};
-  const edits = createEdits(document as Record<string, CodexUserConfigValue | undefined>);
-  for (const edit of edits) {
-    if (edit.keyPath === "features.multi_agent_v2") {
-      const features = record(document.features);
-      features.multi_agent_v2 = edit.value;
-      document.features = features;
-      continue;
-    }
-    if (edit.keyPath === "agents.ds") {
-      const agents = record(document.agents);
-      if (edit.value === null) {
-        delete agents.ds;
-      } else {
-        agents.ds = edit.value;
-      }
-      if (Object.keys(agents).length === 0) {
-        delete document.agents;
-      } else {
-        document.agents = agents;
-      }
-      continue;
-    }
-    throw new Error(`测试配置事务不支持：${edit.keyPath}`);
-  }
+  const edits = createEdits(document);
+  for (const edit of edits) applyEdit(document, edit);
   writePrivateFileAtomicSync(configPath, stringify(document));
+};
+
+function applyEdit(
+  document: Record<string, CodexUserConfigValue | undefined>,
+  edit: { keyPath: string; value: CodexUserConfigValue },
+) {
+  if (edit.keyPath === "features.multi_agent_v2") {
+    const features = record(document.features);
+    features.multi_agent_v2 = edit.value;
+    document.features = features;
+    return;
+  }
+  if (edit.keyPath === "agents.external") {
+    const agents = record(document.agents);
+    if (edit.value === null) delete agents.external;
+    else agents.external = edit.value;
+    if (Object.keys(agents).length === 0) delete document.agents;
+    else document.agents = agents;
+    return;
+  }
+  if (edit.keyPath === "agents.ds") {
+    const agents = record(document.agents);
+    if (edit.value === null) delete agents.ds;
+    else agents.ds = edit.value;
+    document.agents = agents;
+    return;
+  }
+  throw new Error(`测试配置事务不支持：${edit.keyPath}`);
 }
 
-function record(value: unknown): Record<string, unknown> {
+function record(value: unknown): Record<string, CodexUserConfigValue | undefined> {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? value as Record<string, CodexUserConfigValue | undefined>
     : {};
 }

@@ -39,6 +39,8 @@ import {
 import { resolveConfiguredPath } from "./runtime-config.mjs";
 import {
   assertExportFormat,
+  metricsProviderIds,
+  metricsProviderUsage,
   parseCleanupOptions,
   parseLocalDate,
   parseMetricsOptions,
@@ -635,8 +637,8 @@ function errorMessage(error) {
 }
 
 function assertPruneProvider(provider) {
-  if (provider !== "openai" && provider !== "deepseek") {
-    throw new Error("用法：codexc metrics prune <openai|deepseek>");
+  if (!metricsProviderIds.includes(provider)) {
+    throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
   }
 }
 
@@ -682,7 +684,7 @@ function resolveMetricsRuntime(environment) {
       typeof metricsStorage.max_rows === "number" ? metricsStorage.max_rows : 1_000_000,
       "metrics.storage.max_rows",
     ),
-    metricsSocketPaths: ["openai", "deepseek"].map((provider) =>
+    metricsSocketPaths: metricsProviderIds.map((provider) =>
       providerMetricsSocketPath(appServerSocketPath, provider)
     ),
   };

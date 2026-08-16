@@ -50,6 +50,10 @@ import {
   validateStateDatabaseStructure,
 } from "./upgrade-state.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
+import {
+  migrateManagedModelProviderFiles,
+  migrateManagedModelProviderModelSettings,
+} from "./model-provider-file-layout.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
@@ -137,6 +141,11 @@ export async function updateLocalInstallation(environment = process.env, options
   let databases;
   let updateError;
   try {
+    (options.updateProviderFiles
+      ?? (() => ({
+        layout: migrateManagedModelProviderFiles(environment),
+        settings: migrateManagedModelProviderModelSettings(environment),
+      })))();
     config = (options.updateConfig
       ?? (() => updateGatewayConfiguration(environment)))();
     databases = (options.updateDatabases
@@ -312,11 +321,9 @@ export async function waitForCoreServiceTarget(
     let appServerReady = true;
     if (requiresAppServer) {
       const supervisor = await inspectSupervisor(descriptor.primarySocketPath);
-      const socketsHealthy = await Promise.all(
-        descriptor.socketPaths.map((socketPath) => socketHealthy(socketPath)),
-      );
+      const primarySocketHealthy = await socketHealthy(descriptor.primarySocketPath);
       appServerReady = sameAppServerTopology(supervisor, descriptor.topology)
-        && socketsHealthy.every(Boolean);
+        && primarySocketHealthy;
     }
     const gatewayReady = !requiresGateway || await gatewayHealthy(configPath);
     const healthy = appServerReady && gatewayReady;
@@ -471,6 +478,20 @@ if (
           writeCliMessage("note", "config.toml 已兼容，无需更新。");
         }
         return result;
+      },
+      updateProviderFiles: () => {
+        const layout = migrateManagedModelProviderFiles(process.env);
+        const settings = migrateManagedModelProviderModelSettings(process.env);
+        if (layout.changed) {
+          writeCliMessage("success", `第三方 Provider 文件已统一为 sf- 前缀（${layout.moved.length} 项）。`);
+        }
+        if (settings.changed) {
+          writeCliMessage(
+            "success",
+            `第三方模型设置已迁移为逐模型配置（${settings.updated.length} 个文件）。`,
+          );
+        }
+        return { layout, settings };
       },
       databaseOptions: {
         onInspected: printInspection,

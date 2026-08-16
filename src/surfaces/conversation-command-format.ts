@@ -1156,7 +1156,9 @@ export function formatConversationModels(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
 ): string {
   const { state } = result;
-  const current = state.models.find((model) => model.model === state.model);
+  const current = state.models.find((model) =>
+    model.model === state.model
+    && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
   const fast = isFastServiceTier(state.serviceTier, current) ? "开启" : "关闭";
   const providerSwitchNotice = state.providerPending
     ? ["提供商切换将在下一条消息中创建新 Thread；当前 Thread 会保留，可通过 /resume 恢复。", ""]
@@ -1199,7 +1201,7 @@ export function formatConversationModels(
     `模型列表（${state.models.length}）：`,
     ...state.models.map(
       (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${model.model === state.model ? " ← 当前" : ""}`,
+        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
     ),
     "",
     "切换：/model <序号、模型 ID 或名称>",

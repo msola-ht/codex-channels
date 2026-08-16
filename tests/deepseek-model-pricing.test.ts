@@ -112,7 +112,10 @@ describe("DeepseekModelPricingResolver", () => {
       uncachedInputPricePerMillionNanos: 1,
       outputPricePerMillionNanos: 1,
     })) };
-    const resolver = new ProviderModelPricingResolver(deepseek, fallback);
+    const resolver = new ProviderModelPricingResolver(
+      fallback,
+      new Map([["deepseek", deepseek]]),
+    );
     const lookup = {
       provider: "deepseek",
       model: "deepseek-v4-flash",
