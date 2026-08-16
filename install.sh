@@ -177,12 +177,17 @@ package_directory="$staging/package"
 mkdir -p "$package_directory"
 pack_report="$(cd "$checkout" && npm pack --ignore-scripts --loglevel=error --json --pack-destination "$package_directory")" \
   || fail "Codex Connect 源码打包失败"
-tarball="$(node -e '
-const report = JSON.parse(process.argv[1]);
-const entry = Array.isArray(report) ? report[0] : Object.values(report)[0];
-if (!entry?.filename) process.exit(1);
-process.stdout.write(entry.filename);
-' "$pack_report")" || fail "npm pack 未返回 tarball 文件名"
+tarball="$(printf '%s' "$pack_report" | node -e '
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  const report = JSON.parse(input);
+  const entry = Array.isArray(report) ? report[0] : Object.values(report)[0];
+  if (!entry?.filename) process.exit(1);
+  process.stdout.write(entry.filename);
+});
+')" || fail "npm pack 未返回 tarball 文件名"
 npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$package_directory/$tarball" \
   >/dev/null || fail "Codex Connect npm 全局命令安装失败；请检查 npm 全局目录权限"
 [ -x "$global_launcher" ] \
