@@ -90,21 +90,21 @@ const helpText = {
 
 初始化与配置：
   init                         初始化用户目录和配置
-  setup                        配置模型、提供商、通讯渠道与技能
-  config                       打开日常设置菜单
+  setup                        配置模型、提供商、通讯渠道与技能（交互菜单）
+  config                       打开日常设置菜单（交互菜单）
   doctor                       诊断安装、配置和服务
 
 项目与 Codex：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  work                         管理 Workspace
+  work                         管理 Workspace（交互菜单或子命令）
   rules                        管理项目 Codex 命令预设
   agents                       管理共享第三方子代理
 
 指标与工具：
-  metrics                      查询、导出和维护模型指标
+  metrics                      查询、导出和维护模型指标（交互菜单或子命令）
   channel                      使用渠道工具
   webui                        启动指标 WebUI
-  center                       管理多设备指标中心
+  center                       管理多设备指标中心（交互菜单或子命令）
 
 服务与维护：
   start                        前台启动核心服务
@@ -122,7 +122,14 @@ const helpText = {
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
   setup: `用法：codexc setup
 
-打开模型与提供商、通讯渠道和技能设置菜单。`,
+打开模型与提供商、通讯渠道和技能设置菜单。
+
+常用入口：
+  codexc setup → 模型与提供商 → OpenCode Go → 修改模型设置（思考等级、自动压缩）
+  codexc setup → 模型与提供商 → DeepSeek → 修改模型设置（思考等级、自动压缩）
+  codexc setup → 模型与提供商 → 第三方模型设置（统一按 Provider 修改思考等级与自动压缩）
+  codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
+  codexc setup → 技能（安装或卸载项目技能）`,
   start: `用法：codexc start
 
 在前台启动 Codex App Server 与 Gateway。`,

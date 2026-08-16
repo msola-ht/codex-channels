@@ -101,6 +101,38 @@ describe("managed model provider default setup", () => {
       },
     })).rejects.toThrow("尚未配置第三方 Provider");
   });
+
+  it("skips Provider selection when a Provider is preselected", async () => {
+    const codexHome = providerFixture("switching");
+    const selectProvider = vi.fn();
+
+    await expect(runModelProviderDefaultSetup({
+      provider: "deepseek",
+      environment: { CODEX_HOME: codexHome },
+      output: { write: vi.fn() },
+      prompter: {
+        selectProvider,
+        selectModel: async () => "deepseek-v4-pro",
+        selectReasoningEffort: async () => "max",
+        selectAutoCompactPercent: async () => 55,
+      },
+    })).resolves.toMatchObject({
+      action: "configured",
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      autoCompactPercent: 55,
+    });
+
+    expect(selectProvider).not.toHaveBeenCalled();
+    const catalog = JSON.parse(readFileSync(
+      join(codexHome, "sf-deepseek.models.json"),
+      "utf8",
+    ));
+    expect(catalog.models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4-pro",
+      auto_compact_token_limit: 576_717,
+    }));
+  });
 });
 
 function providerFixture(mode: "switching" | "exclusive") {

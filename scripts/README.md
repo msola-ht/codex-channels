@@ -138,8 +138,9 @@
   逐模型思考等级和自动压缩百分比；目录上下文更新时按原百分比重算阈值。退出固定模式时只还原 Setup
   管理的字段（含自动压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
   角色配置事务失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
-  安装时为初始模型设置自动压缩阈值；后续统一由“第三方模型设置”按模型维护 10–90% 阈值，写入
-  模型目录的 `auto_compact_token_limit`，不再使用会覆盖全部模型的 Profile 顶层阈值。
+  安装时为初始模型设置自动压缩阈值；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
+  模型设置”按模型维护 10–90% 阈值，写入模型目录的 `auto_compact_token_limit`，不再使用会覆盖
+  全部模型的 Profile 顶层阈值。
 - `prepare-deepseek-catalog-proposal.mjs` / `prepare-deepseek-catalog-proposal.d.mts` /
   `deepseek-catalog-baseline.json`：复用 Setup 的官方
   下载器，比较排序后的模型完整指纹与上下文、输入模态、思考等级、搜索、并行工具、最低客户端版本

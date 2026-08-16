@@ -124,8 +124,16 @@ async function runModelSetup({
         label: "Codex 官方",
         hint: "设置全局默认模型与思考等级",
       },
-      { value: "deepseek", label: "DeepSeek", hint: "安装、切换或恢复模型提供商" },
-      { value: "opencode-go", label: "OpenCode Go", hint: "安装或移除独立 Go Provider" },
+      {
+        value: "deepseek",
+        label: "DeepSeek",
+        hint: "安装、切换、恢复或修改模型设置（思考等级、自动压缩）",
+      },
+      {
+        value: "opencode-go",
+        label: "OpenCode Go",
+        hint: "安装、移除或修改模型设置（思考等级、自动压缩）",
+      },
       {
         value: "provider_default",
         label: "第三方模型设置",

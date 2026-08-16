@@ -31,12 +31,13 @@ DeepSeek Provider。
 
 ### 自动压缩阈值
 
-安装流程在填写 API Key 后会为初始 Flash 模型询问自动压缩阈值。后续在“第三方模型设置”中按
-Provider 和模型分别选择默认思考等级与自动压缩百分比（10–90%）；该百分比按模型自己的
-`context_window` 换算为模型目录中的 `auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖
-其他模型。选择模型默认值时使用 Codex 的 90% 上下文窗口阈值。修改后 Gateway 会自动检测设置文件
-变化，校验通过并在无活动 Turn 时自动重启 App Server 生效；如需立即生效，可在终端手动运行
-`codexc service restart app-server`。
+安装流程在填写 API Key 后会为初始 Flash 模型询问自动压缩阈值。后续有两种入口：`codexc setup`
+中选择“模型与提供商 → DeepSeek → 修改模型设置（思考等级、自动压缩）”，或走原有的“模型与
+提供商 → 第三方模型设置 → DeepSeek”，按 Provider 和模型分别选择默认思考等级与自动压缩百分比
+（10–90%）；该百分比按模型自己的 `context_window` 换算为模型目录中的
+`auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖其他模型。选择模型默认值时使用 Codex
+的 90% 上下文窗口阈值。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn 时自动
+重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
 
 ## 管理的文件
 

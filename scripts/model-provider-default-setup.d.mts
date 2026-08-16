@@ -3,6 +3,7 @@ import type { CodexUserConfigEdit } from "./codex-user-config.mjs";
 
 export interface ModelProviderDefaultSetupOptions {
   allowBack?: boolean;
+  provider?: ManagedModelProviderId;
   environment?: NodeJS.ProcessEnv;
   output?: Pick<NodeJS.WriteStream, "write">;
   prompts?: Record<string, unknown>;

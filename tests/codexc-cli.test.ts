@@ -146,6 +146,8 @@ describe("codexc CLI", () => {
 
     const configHelp = spawnSync(process.execPath, [cli, "config", "--help"], { encoding: "utf8" });
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
+    const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
+    expect(setupHelp.stdout).toContain("修改模型设置（思考等级、自动压缩）");
     const workHelp = spawnSync(process.execPath, [cli, "work", "--help"], { encoding: "utf8" });
     expect(workHelp.stdout).toContain("权限");
     for (const subcommand of ["run", "turns", "threads", "report", "export"]) {
