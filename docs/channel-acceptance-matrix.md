@@ -78,6 +78,8 @@ Plan 用户输入已经可以使用；飞书还完成了 0.147.0 Thread 分区�
 6. Telegram 外部视觉代理、`imageGeneration`、超长最终回复文件和限流/断线集中复验。
 7. 渠道图片发送（`codexc channel send-image`）在飞书、微信、Telegram 的实机发送、
    失败归档与微信回复上下文缺失时的失败边界复验。
+8. 飞书命令中心一次性输入表单（Goal、会话搜索/重命名、Review、Plugin 任务等）的“确认”
+   实机复验，覆盖带/不带按钮 value 的 `form_submit` 回调。
 
 ## 记录规则
 

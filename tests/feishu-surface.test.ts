@@ -1069,7 +1069,7 @@ function createFixture(
           open_id: "ou_actor",
         },
         action: {
-          tag: "button",
+          tag: "form_submit",
           value: submit.value,
           form_value: { input },
         },

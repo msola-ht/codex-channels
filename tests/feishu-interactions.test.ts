@@ -672,6 +672,69 @@ describe("Feishu interaction port", () => {
     await fixture.interactions.close();
   });
 
+  it("accepts three bounded questions with custom answers in one form", async () => {
+    const fixture = createConfiguredFixture();
+    const decision = fixture.interactions.request(target, {
+      ...userInputRequest(),
+      questions: [
+        {
+          id: "first",
+          header: "第一题",
+          question: "选择或填写",
+          options: ["A1", "B1"],
+          allowOther: true,
+          secret: false,
+        },
+        {
+          id: "second",
+          header: "第二题",
+          question: "选择或填写",
+          options: ["A2", "B2"],
+          allowOther: true,
+          secret: false,
+        },
+        {
+          id: "third",
+          header: "第三题",
+          question: "选择或填写",
+          options: ["A3", "B3"],
+          allowOther: true,
+          secret: false,
+        },
+      ],
+    });
+    await settle();
+
+    const token = interactionToken(fixture.sentCards[0]!.card, "submit");
+    expect(fixture.interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "form_submit",
+      value: {
+        interaction_token: token,
+        decision: "submit",
+      },
+      formValues: {
+        q0_choice: "A1",
+        q0_other: "",
+        q1_choice: "",
+        q1_other: "自定义第二题",
+        q2_choice: "B3",
+        q2_other: "",
+      },
+    })).toBe("accepted");
+    await expect(decision).resolves.toEqual({
+      type: "user-input",
+      answers: {
+        first: ["A1"],
+        second: ["自定义第二题"],
+        third: ["B3"],
+      },
+    });
+    await fixture.interactions.close();
+  });
+
   it("parses an MCP form as bounded JSON and keeps invalid submissions pending", async () => {
     const fixture = createConfiguredFixture();
     const decision = fixture.interactions.request(target, elicitationRequest());

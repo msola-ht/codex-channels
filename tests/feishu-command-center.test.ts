@@ -262,6 +262,9 @@ describe("Feishu command center", () => {
       form_action_type: "submit",
     });
     expect(submitButton).not.toHaveProperty("action_type");
+    expect(submitButton).toMatchObject({
+      name: expect.stringMatching(/^codexc_command_submit_[A-Za-z0-9_-]+$/u),
+    });
     expect(JSON.stringify(formCard)).toContain("重命名会话");
     const submit = cardAction(cards[2]!, "rename");
     expect(center.handleCardAction({
@@ -285,6 +288,7 @@ describe("Feishu command center", () => {
     })).toBe("invalid");
     expect(center.handleCardAction({
       ...submit,
+      tag: "form_submit",
       formValues: { input: "飞书私聊收口" },
     })).toBe("accepted");
     expect(center.handleCardAction({
@@ -297,6 +301,65 @@ describe("Feishu command center", () => {
       "rename",
       "ou_actor",
       "飞书私聊收口",
+    );
+  });
+
+  it("accepts a command form submit whose button value was dropped", async () => {
+    const cards: Array<{
+      chatId: string;
+      messageId: string;
+      card: FeishuCardDocument;
+    }> = [];
+    const execute = vi.fn(async (
+      _target,
+      action,
+      _actorId,
+      input,
+    ) => input
+      ? undefined
+      : {
+          kind: "form" as const,
+          title: "设置 Thread Goal",
+          action,
+          fieldLabel: "目标",
+          placeholder: "请输入当前 Thread 的目标",
+          inputPrefix: "set ",
+          multiline: true,
+        });
+    const center = new FeishuCommandCenter(
+      {
+        deliverCard: async (chatId, card) => {
+          const messageId = `om_card_${cards.length + 1}`;
+          cards.push({ chatId, messageId, card });
+          return messageId;
+        },
+      },
+      { isAllowed: () => true },
+      execute,
+      pino({ level: "silent" }),
+    );
+    await center.open(target, "ou_actor");
+    expect(center.handleCardAction(
+      cardAction(cards[0]!, "goal"),
+    )).toBe("accepted");
+    await settle();
+
+    const submit = cardAction(cards[1]!, "goal");
+    const token = submit.value.codexc_command_token!;
+    expect(center.handleCardAction({
+      messageId: cards[1]!.messageId,
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "form_submit",
+      value: { codexc_command_token: token },
+      formValues: { input: "完成飞书接入" },
+    })).toBe("accepted");
+    await settle();
+    expect(execute).toHaveBeenLastCalledWith(
+      target,
+      "goal",
+      "ou_actor",
+      "set 完成飞书接入",
     );
   });
 
