@@ -3,12 +3,12 @@ import type { ManagedModelProviderId } from "./model-provider-definitions.mjs";
 
 export interface AppServerRuntimeDescriptor {
   primarySocketPath: string;
-  primaryProvider: "openai" | "deepseek";
+  primaryProvider: "openai" | ManagedModelProviderId;
   managedProviders: ManagedProviderAppServerRuntime[];
   managedSocketPaths: string[];
   socketPaths: string[];
   topology: {
-    primaryProvider: "openai" | "deepseek";
+    primaryProvider: "openai" | ManagedModelProviderId;
     managedProviders: ManagedModelProviderId[];
     socketPaths: string[];
   };

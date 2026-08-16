@@ -36,7 +36,7 @@ export async function runSetup({
         {
           value: "models",
           label: "模型与提供商",
-          hint: "设置 Codex 官方默认模型与思考等级，以及 DeepSeek、第三方 API 和图片识别",
+          hint: "设置 Codex 官方默认值、第三方模型、API 与图片识别",
         },
         {
           value: "channels",

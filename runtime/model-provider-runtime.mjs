@@ -21,7 +21,8 @@ import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
-const deepseekApiKeyEnvironmentKey = deepseekProviderDefinition.apiKeyEnvironmentKey;
+const managedThirdPartyRoleName = "external";
+const managedThirdPartyRoleConfigFileName = "codex-connect-third-party-subagent.config.toml";
 
 const providerDescriptors = new Map(managedModelProviderDefinitions.map((definition) => [
   definition.id,
@@ -91,15 +92,17 @@ export function validateConfiguredModelProvider(environment = process.env) {
 
 export function validateConfiguredModelProviders(environment = process.env) {
   const codexHome = codexHomePath(environment);
+  const exclusiveProviders = managedModelProviderDefinitions.filter((definition) =>
+    readManagedMarker(codexHome, definition)?.mode === "exclusive");
+  if (exclusiveProviders.length > 1) {
+    throw new Error("只能有一个受管第三方 Provider 使用固定模式");
+  }
   return managedModelProviderDefinitions.flatMap((definition) => {
     const marker = readManagedMarker(codexHome, definition);
     if (!marker) return [];
-    if (definition.id === deepseekProviderDefinition.id && marker.mode === "exclusive") {
-      const configured = loadConfiguredProviderProfile(environment);
-      return [{ provider: configured.provider, mode: configured.mode }];
-    }
     if (marker.mode === "exclusive") {
-      throw new Error(`${definition.displayName} 不支持固定模式`);
+      const configured = loadConfiguredProviderProfile(environment, definition);
+      return [{ provider: configured.provider, mode: configured.mode }];
     }
     loadManagedProviderProfileFor(environment, definition, { requireLaunchConfig: true });
     return [{ provider: definition.id, mode: "switching" }];
@@ -107,11 +110,13 @@ export function validateConfiguredModelProviders(environment = process.env) {
 }
 
 export function loadPrimaryModelProvider(environment = process.env) {
-  const marker = readManagedMarker(
-    codexHomePath(environment),
-    deepseekProviderDefinition,
-  );
-  return marker?.mode === "exclusive" ? marker.provider : "openai";
+  const codexHome = codexHomePath(environment);
+  const exclusiveProviders = managedModelProviderDefinitions.filter((definition) =>
+    readManagedMarker(codexHome, definition)?.mode === "exclusive");
+  if (exclusiveProviders.length > 1) {
+    throw new Error("只能有一个受管第三方 Provider 使用固定模式");
+  }
+  return exclusiveProviders[0]?.id ?? "openai";
 }
 
 export function loadOpenAiBaseUrl(environment = process.env) {
@@ -209,36 +214,40 @@ export function loadDeepseekAccountCredential(environment = process.env) {
 }
 
 export function managedModelProviderRoleConfigPath(environment = process.env) {
-  return join(codexHomePath(environment), "codex-connect-ds-subagent.config.toml");
+  return join(codexHomePath(environment), managedThirdPartyRoleConfigFileName);
 }
 
 export function writeManagedModelProviderRoleConfig(
   environment = process.env,
-  { baseUrl } = {},
+  { provider, model, baseUrl } = {},
 ) {
-  const profile = loadManagedProviderProfileFor(
-    environment,
-    deepseekProviderDefinition,
-    { requireLaunchConfig: true },
+  const selectedProvider = provider ?? loadManagedModelProviderRole(environment)?.provider;
+  const definition = managedModelProviderDefinitions.find(
+    (candidate) => candidate.id === selectedProvider,
   );
-  if (profile === undefined) {
-    throw new Error("DeepSeek 切换模式配置不存在，无法生成子代理角色");
+  if (!definition) throw new Error("请先选择已配置的第三方 Provider");
+  const profile = loadConfiguredProviderProfile(environment, definition);
+  if (profile === undefined) throw new Error(`${definition.displayName} Provider 尚未配置`);
+  const selectedModel = model ?? profile.model;
+  if (!definition.models.some((candidate) => candidate.slug === selectedModel && candidate.available)) {
+    throw new Error(`${definition.displayName} 不支持模型：${selectedModel}`);
   }
+  validateModelCatalog(profile.catalogPath, definition, selectedModel);
   let url;
   try {
     url = new URL(baseUrl ?? profile.baseUrl);
   } catch {
-    throw new Error("DeepSeek 子代理 base_url 无效");
+    throw new Error("第三方子代理 base_url 无效");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("DeepSeek 子代理 base_url 只支持 HTTP(S)");
+    throw new Error("第三方子代理 base_url 只支持 HTTP(S)");
   }
   const lines = [
-    `model = ${tomlString(profile.model)}`,
+    `model = ${tomlString(selectedModel)}`,
     `model_provider = ${tomlString(profile.provider)}`,
     `model_reasoning_effort = ${tomlString(profile.reasoningEffort)}`,
     `developer_instructions = ${tomlString(
-      "你是 DeepSeek 单次子代理。此角色只用于 fork_turns=1 的一次性任务：把继承上下文中最后一条用户消息视为完整任务并直接执行；不要尝试解析 encrypted_content，不等待或请求后续消息，也不要调用子代理通信工具。若最后一条用户消息仍不足以确定任务，只返回一句明确错误。",
+      "你是第三方模型单次子代理。此角色只用于 fork_turns=1 的一次性任务：把继承上下文中最后一条用户消息视为完整任务并直接执行；不要尝试解析 encrypted_content，不等待或请求后续消息，也不要调用子代理通信工具。若最后一条用户消息仍不足以确定任务，只返回一句明确错误。",
     )}`,
     `model_catalog_json = ${tomlString(profile.catalogPath)}`,
     ...(profile.autoCompactLimit === undefined
@@ -250,15 +259,56 @@ export function writeManagedModelProviderRoleConfig(
           )}`,
         ]),
     "",
-    "[model_providers.deepseek]",
+    `[model_providers.${profile.provider}]`,
     `name = ${tomlString(profile.name)}`,
     `base_url = ${tomlString(url.toString())}`,
     `wire_api = ${tomlString(profile.wireApi)}`,
-    `env_key = ${tomlString(deepseekApiKeyEnvironmentKey)}`,
+    `env_key = ${tomlString(profile.apiKeyEnvironmentKey)}`,
+    ...(profile.supportsWebsockets === undefined
+      ? []
+      : [`supports_websockets = ${profile.supportsWebsockets}`]),
     "requires_openai_auth = false",
     "",
   ].join("\n");
   writePrivateFileAtomicSync(managedModelProviderRoleConfigPath(environment), lines);
+  return { role: managedThirdPartyRoleName, provider: definition.id, model: selectedModel };
+}
+
+export function loadManagedModelProviderRole(environment = process.env) {
+  const path = managedModelProviderRoleConfigPath(environment);
+  if (!existsSync(path)) return undefined;
+  const configPath = join(codexHomePath(environment), "config.toml");
+  let document;
+  try {
+    const config = record(parse(readPrivateFile(configPath)));
+    if (record(record(config.agents)[managedThirdPartyRoleName]).config_file !== path) {
+      return undefined;
+    }
+    document = record(parse(readPrivateFile(path)));
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    // TOML 解析错误可能包含用户配置原文，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("第三方子代理角色配置无法安全读取");
+  }
+  const provider = document.model_provider;
+  const model = document.model;
+  const definition = managedModelProviderDefinitions.find((candidate) => candidate.id === provider);
+  if (!definition || typeof model !== "string") {
+    throw new Error("第三方子代理角色配置无效");
+  }
+  return { role: managedThirdPartyRoleName, provider: definition.id, model };
+}
+
+export function loadConfiguredProviderCredential(provider, environment = process.env) {
+  const definition = managedModelProviderDefinitions.find((candidate) => candidate.id === provider);
+  if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+  const profile = loadConfiguredProviderProfile(environment, definition);
+  if (!profile) throw new Error(`${definition.displayName} Provider 尚未配置`);
+  return {
+    environmentKey: profile.apiKeyEnvironmentKey,
+    apiKey: profile.apiKey,
+  };
 }
 
 export function removeManagedModelProviderRoleConfig(environment = process.env) {
@@ -304,18 +354,18 @@ function loadManagedProviderProfiles(environment, { requireLaunchConfig = false 
   });
 }
 
-function loadConfiguredProviderProfile(environment) {
+function loadConfiguredProviderProfile(environment, definition) {
   const codexHome = codexHomePath(environment);
-  const marker = readManagedMarker(codexHome, deepseekProviderDefinition);
+  const marker = readManagedMarker(codexHome, definition);
   if (!marker) return undefined;
-  const descriptor = deepseekProvider;
+  const descriptor = providerDescriptors.get(definition.id);
   const profilePath = marker.mode === "exclusive"
     ? join(codexHome, "config.toml")
     : join(codexHome, descriptor.profileName);
   const profile = readProviderProfile(profilePath, descriptor, {
-    expectedCatalogPath: join(codexHome, deepseekProviderDefinition.catalogFileName),
+    expectedCatalogPath: join(codexHome, definition.catalogFileName),
   });
-  validateModelCatalog(profile.catalogPath, deepseekProviderDefinition);
+  validateModelCatalog(profile.catalogPath, definition);
   return { ...profile, mode: marker.mode };
 }
 
@@ -444,7 +494,7 @@ function readCodexConfigFile(path) {
   }
 }
 
-function validateModelCatalog(path, definition) {
+function validateModelCatalog(path, definition, model = definition.defaultModel) {
   let catalog;
   try {
     catalog = JSON.parse(readPrivateFile(path, maximumCatalogBytes));
@@ -454,7 +504,7 @@ function validateModelCatalog(path, definition) {
   if (
     !Array.isArray(catalog?.models)
     || !catalog.models.some(
-      (model) => record(model).slug === definition.defaultModel,
+      (candidate) => record(candidate).slug === model,
     )
   ) {
     throw new Error(`Codex ${definition.displayName} 模型目录无效`);

@@ -21,8 +21,7 @@ import {
   type DeepseekSetupOptions,
 } from "../scripts/deepseek-setup.mjs";
 import {
-  enableDeepseekRole,
-  removeManagedDeepseekRole,
+  configureThirdPartyRole,
 } from "../scripts/agents.mjs";
 import type {
   CodexUserConfigEdit,
@@ -39,12 +38,12 @@ CODEX_MODELS_JSON
 function runDeepseekSetup(options: DeepseekSetupOptions = {}) {
   return runDeepseekSetupImplementation({
     ...options,
-    enableRole: (environment: NodeJS.ProcessEnv) => enableDeepseekRole(environment, {
-      updateConfig: applyConfigUpdate,
-    }),
-    removeRole: (environment: NodeJS.ProcessEnv) => removeManagedDeepseekRole(environment, {
-      updateConfig: applyConfigUpdate,
-    }),
+    configureRole: (provider, model, environment) => configureThirdPartyRole(
+      provider,
+      model,
+      environment,
+      { updateConfig: applyConfigUpdate },
+    ),
   });
 }
 
@@ -186,13 +185,13 @@ describe("DeepSeek setup", () => {
     expect(record(config.profiles).deepseek).toBeUndefined();
     expect(record(config.model_providers).deepseek).toBeUndefined();
     expect(config.features).toMatchObject({ multi_agent_v2: true });
-    expect(record(config.agents).ds).toMatchObject({
+    expect(record(config.agents).external).toMatchObject({
       description:
-        "DeepSeek 单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息",
-      config_file: join(fixture.home, "codex-connect-ds-subagent.config.toml"),
+        "第三方模型单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息",
+      config_file: join(fixture.home, "codex-connect-third-party-subagent.config.toml"),
       nickname_candidates: ["DeepSeek"],
     });
-    const roleConfigPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
+    const roleConfigPath = join(fixture.home, "codex-connect-third-party-subagent.config.toml");
     expect(existsSync(roleConfigPath)).toBe(true);
     expect(parse(readFileSync(roleConfigPath, "utf8"))).toMatchObject({
       model: "deepseek-v4-flash",
@@ -253,13 +252,13 @@ describe("DeepSeek setup", () => {
       custom_after: true,
       features: { multi_agent_v2: true },
     });
-    expect(record(updated.agents).ds).toBeDefined();
+    expect(record(updated.agents).external).toBeDefined();
   });
 
-  it("rejects a custom ds role without modifying DeepSeek files", async () => {
+  it("rejects a custom external role without modifying DeepSeek files", async () => {
     const original = [
       'model = "gpt-5.4"',
-      "[agents.ds]",
+      "[agents.external]",
       'description = "User managed role"',
       'config_file = "/opt/custom/ds.toml"',
       "",
@@ -272,7 +271,7 @@ describe("DeepSeek setup", () => {
       output: fixture.output,
       fetchImpl,
       prompter: prompter(["1", "2"], ["sk-secret"]),
-    })).rejects.toThrow("agents.ds 已由用户配置");
+    })).rejects.toThrow("agents.external 已由用户配置");
 
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
@@ -288,7 +287,7 @@ describe("DeepSeek setup", () => {
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
-      enableRole: vi.fn(async () => {
+      configureRole: vi.fn(async () => {
         throw new Error("config version conflict");
       }),
     })).rejects.toThrow("config version conflict");
@@ -299,7 +298,7 @@ describe("DeepSeek setup", () => {
       "codex-connect-deepseek.config.toml",
       "deepseek.models.json",
       "deepseek.models.manifest.json",
-      "codex-connect-ds-subagent.config.toml",
+      "codex-connect-third-party-subagent.config.toml",
     ]) {
       expect(existsSync(join(fixture.home, name))).toBe(false);
     }
@@ -314,7 +313,7 @@ describe("DeepSeek setup", () => {
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
-      enableRole: vi.fn(async () => {
+      configureRole: vi.fn(async () => {
         writeFileSync(join(fixture.home, "config.toml"), concurrent, { mode: 0o600 });
         throw new Error("config version conflict");
       }),
@@ -337,8 +336,8 @@ describe("DeepSeek setup", () => {
     expect(config.model_provider).toBe("deepseek");
     expect(config.forced_login_method).toBeUndefined();
     expect(config.preferred_auth_method).toBeUndefined();
-    expect(config.features).toBeUndefined();
-    expect(config.agents).toBeUndefined();
+    expect(config.features).toMatchObject({ multi_agent_v2: true });
+    expect(record(config.agents).external).toBeDefined();
     expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
     expect(parse(readFileSync(
       join(fixture.home, "codex-connect-deepseek.config.toml"),
@@ -350,7 +349,7 @@ describe("DeepSeek setup", () => {
     )).toBe(original);
   });
 
-  it("removes the managed DeepSeek role when switching to exclusive mode", async () => {
+  it("keeps the shared third-party role on DeepSeek when switching to exclusive mode", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home },
@@ -367,7 +366,7 @@ describe("DeepSeek setup", () => {
     });
 
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
-    expect(record(config.agents).ds).toBeUndefined();
+    expect(record(config.agents).external).toBeDefined();
     expect(config.features).toMatchObject({ multi_agent_v2: true });
   });
 
@@ -420,7 +419,7 @@ describe("DeepSeek setup", () => {
     });
     const config = parse(readFileSync(join(home, "config.toml"), "utf8"));
     expect(config.features).toMatchObject({ multi_agent_v2: true });
-    expect(record(config.agents).ds).toBeDefined();
+    expect(record(config.agents).external).toBeDefined();
     const profile = parse(readFileSync(join(home, "deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
@@ -525,7 +524,7 @@ describe("DeepSeek setup", () => {
       features: { multi_agent_v2: true },
     });
     expect(record(repaired.model_providers).deepseek).toBeUndefined();
-    expect(record(repaired.agents).ds).toBeDefined();
+    expect(record(repaired.agents).external).toBeDefined();
     const profile = parse(readFileSync(join(fixture.home, "deepseek.config.toml"), "utf8"));
     expect(profile.forced_login_method).toBeUndefined();
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
@@ -563,7 +562,7 @@ describe("DeepSeek setup", () => {
     expect(result?.mode).toBe("restored");
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
-    expect(existsSync(join(fixture.home, "codex-connect-ds-subagent.config.toml")))
+    expect(existsSync(join(fixture.home, "codex-connect-third-party-subagent.config.toml")))
       .toBe(false);
     expect(existsSync(join(fixture.home, "deepseek.models.json"))).toBe(true);
   });
@@ -625,17 +624,17 @@ describe("DeepSeek setup", () => {
       .toBe(originalProfile);
     expect(readFileSync(join(fixture.home, "codex-connect-deepseek.config.toml"), "utf8"))
       .toBe(originalGatewayProfile);
-    expect(existsSync(join(fixture.home, "codex-connect-ds-subagent.config.toml")))
+    expect(existsSync(join(fixture.home, "codex-connect-third-party-subagent.config.toml")))
       .toBe(false);
   });
 
   it("backs up and restores an existing managed-path role file", async () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-deepseek-role-backup-"));
-    const roleConfigPath = join(home, "codex-connect-ds-subagent.config.toml");
+    const roleConfigPath = join(home, "codex-connect-third-party-subagent.config.toml");
     const originalRole = 'developer_instructions = "User role file"\n';
     const originalConfig = [
       'model = "gpt-5.4"',
-      "[agents.ds]",
+      "[agents.external]",
       'description = "User role"',
       `config_file = ${JSON.stringify(roleConfigPath)}`,
       "",
@@ -670,7 +669,7 @@ describe("DeepSeek setup", () => {
       prompter: prompter(["1", "2"], ["sk-secret"]),
     });
     const configPath = join(fixture.home, "config.toml");
-    const roleConfigPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
+    const roleConfigPath = join(fixture.home, "codex-connect-third-party-subagent.config.toml");
     const configBeforeRestore = readFileSync(configPath, "utf8");
     const roleBeforeRestore = readFileSync(roleConfigPath, "utf8");
     const backupStatePath = join(
@@ -811,12 +810,12 @@ async function applyConfigUpdate(
       document.features = features;
       continue;
     }
-    if (edit.keyPath === "agents.ds") {
+    if (edit.keyPath === "agents.external") {
       const agents = record(document.agents);
       if (edit.value === null) {
-        delete agents.ds;
+        delete agents.external;
       } else {
-        agents.ds = edit.value;
+        agents.external = edit.value;
       }
       if (Object.keys(agents).length === 0) {
         delete document.agents;

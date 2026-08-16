@@ -142,7 +142,7 @@ plugin_api = true
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型与提供商”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式
-或恢复原配置。切换模式会自动启用 `multi_agent_v2` 并注册 `ds` 子代理角色；配置后运行：
+或恢复原配置。两种模式都会启用共享第三方子代理 `agents.external`；配置后运行：
 
 ```bash
 codexc service restart all
@@ -157,8 +157,9 @@ codexc service restart all
 ### OpenCode Go
 
 在 `codexc setup` 的“模型与提供商”中可配置独立 OpenCode Go Provider；当前开放
-`deepseek-v4-flash` 和 `deepseek-v4-pro`。它与 DeepSeek 官方配置、凭据和价格独立，首次选择模型
-或恢复对应会话时才按需启动隔离 App Server。聊天使用 `/model`，终端使用
+`deepseek-v4-flash` 和 `deepseek-v4-pro`，支持保留 OpenAI 的切换模式和仅 OpenCode Go 固定模式。
+它与 DeepSeek 官方配置、凭据和价格独立，首次选择模型或恢复对应会话时才按需启动隔离 App Server；
+也可作为共享 `agents.external` 子代理。聊天使用 `/model`，终端使用
 `codexc remote --profile opencode-go`。配置、协议范围和官方全模型价格维护见
 [`OpenCode Go 使用说明`](docs/opencode-go.md)。
 

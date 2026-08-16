@@ -110,8 +110,8 @@ describe("codexc CLI", () => {
       [["rules", "check", "--help"], "用法：codexc rules check"],
       [["agents", "-h"], "用法：codexc agents"],
       [["agents", "status", "--help"], "用法：codexc agents status"],
-      [["agents", "enable-deepseek", "-h"], "用法：codexc agents enable-deepseek"],
-      [["agents", "disable-deepseek", "--help"], "用法：codexc agents disable-deepseek"],
+      [["agents", "configure", "-h"], "用法：codexc agents configure"],
+      [["agents", "disable", "--help"], "用法：codexc agents disable"],
       [["update", "--help"], "用法：codexc update"],
       [["uninstall", "--help"], "用法：codexc uninstall"],
       [["state", "-h"], "用法：codexc state upgrade"],
@@ -1279,7 +1279,7 @@ describe("codexc CLI", () => {
     });
   });
 
-  it("starts OpenAI without exposing the key or eagerly starting DeepSeek", () => {
+  it("starts the DeepSeek proxy for subagents without eagerly starting its App Server", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-provider-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1294,7 +1294,8 @@ describe("codexc CLI", () => {
       "import { appendFileSync } from 'node:fs';",
       "appendFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
       "  args: process.argv.slice(2),",
-      "  apiKey: process.env.CODEX_CONNECT_DEEPSEEK_API_KEY,",
+      "  hasDeepseekApiKey: process.env.CODEX_CONNECT_DEEPSEEK_API_KEY !== undefined,",
+      "  hasOpenCodeApiKey: process.env.CODEX_CONNECT_OPENCODE_GO_API_KEY !== undefined,",
       "}) + '\\n');",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
     ].join("\n"));
@@ -1322,8 +1323,43 @@ describe("codexc CLI", () => {
       { mode: 0o600 },
     );
     writeFileSync(
+      join(codexHome, "opencode-go.config.toml"),
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "opencode-go"',
+        'model_reasoning_effort = "high"',
+        `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+        "[model_providers.opencode-go]",
+        'name = "opencode-go"',
+        'base_url = "https://opencode.ai/zen/go/v1"',
+        'wire_api = "responses"',
+        "requires_openai_auth = false",
+        "supports_websockets = false",
+        'experimental_bearer_token = "sk-opencode-secret"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "codex-connect-opencode-go.config.toml"),
+      'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
       join(codexHome, "deepseek.models.json"),
       '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "codex-connect-third-party-subagent.config.toml"),
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `[agents.external]\nconfig_file = ${JSON.stringify(
+        join(codexHome, "codex-connect-third-party-subagent.config.toml"),
+      )}\n`,
       { mode: 0o600 },
     );
     const environment = {
@@ -1362,12 +1398,19 @@ describe("codexc CLI", () => {
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
     ]);
     expect(deepseekCapture).toBeUndefined();
+    expect(openAiCapture).toMatchObject({
+      hasDeepseekApiKey: true,
+      hasOpenCodeApiKey: false,
+    });
     expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-service-secret");
-    const roleConfigPath = join(codexHome, "codex-connect-ds-subagent.config.toml");
-    expect(existsSync(roleConfigPath)).toBe(false);
+    expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-opencode-secret");
+    const roleConfigPath = join(codexHome, "codex-connect-third-party-subagent.config.toml");
+    expect(readFileSync(roleConfigPath, "utf8")).toMatch(
+      /base_url = "http:\/\/127\.0\.0\.1:\d+\/"/u,
+    );
   });
 
-  it("does not start an optional provider proxy before that Provider is used", async () => {
+  it("does not start an on-demand Provider proxy before that Provider is used", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-proxy-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1381,7 +1424,7 @@ describe("codexc CLI", () => {
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
       "import { get } from 'node:http';",
-      "const baseUrlArg = process.argv.slice(2).find((value) => value.startsWith('model_providers.deepseek.base_url='));",
+      "const baseUrlArg = process.argv.slice(2).find((value) => value.startsWith('model_providers.opencode-go.base_url='));",
       "if (!baseUrlArg) { await new Promise((resolve) => setTimeout(resolve, 500)); process.exit(0); }",
       "const baseUrl = JSON.parse(baseUrlArg.slice(baseUrlArg.indexOf('=') + 1));",
       "const status = await new Promise((resolve) => {",
@@ -1392,25 +1435,26 @@ describe("codexc CLI", () => {
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
-      join(codexHome, "deepseek.config.toml"),
+      join(codexHome, "opencode-go.config.toml"),
       [
         'model = "deepseek-v4-flash"',
-        'model_provider = "deepseek"',
+        'model_provider = "opencode-go"',
         'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
-        "[model_providers.deepseek]",
-        'name = "deepseek"',
-        'base_url = "https://api.deepseek.com/"',
+        "[model_providers.opencode-go]",
+        'name = "opencode-go"',
+        'base_url = "https://opencode.ai/zen/go/v1"',
         'wire_api = "responses"',
         "requires_openai_auth = false",
+        "supports_websockets = false",
         'experimental_bearer_token = "sk-service-secret"',
         "",
       ].join("\n"),
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "codex-connect-deepseek.config.toml"),
-      'version = 1\nprovider = "deepseek"\n',
+      join(codexHome, "codex-connect-opencode-go.config.toml"),
+      'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -2124,8 +2168,8 @@ describe("codexc CLI", () => {
     for (const [args, expected] of [
       [["work", "list", "unexpected"], "用法：codexc work list"],
       [["agents", "status", "unexpected"], "用法：codexc agents"],
-      [["agents", "enable-deepseek", "unexpected"], "用法：codexc agents"],
-      [["agents", "disable-deepseek", "unexpected"], "用法：codexc agents"],
+      [["agents", "configure"], "用法：codexc agents"],
+      [["agents", "disable", "unexpected"], "用法：codexc agents"],
       [["center", "info", "unexpected"], "用法：codexc center info"],
       [["center", "config", "unexpected"], "用法：codexc center config"],
     ] as const) {
@@ -2157,7 +2201,7 @@ describe("codexc CLI", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("multi_agent_v2：未启用");
-    expect(result.stdout).toContain("DS 子代理角色：未配置");
+    expect(result.stdout).toContain("第三方子代理：未配置");
     expect(result.stderr).toBe("");
   });
 

@@ -1879,7 +1879,7 @@ describe("JsonRpcClient", () => {
       keyPath: "features.multi_agent_v2",
       value: true,
     }, {
-      keyPath: "agents.ds",
+      keyPath: "agents.external",
       value: {
         description: "DeepSeek role",
         config_file: "/tmp/ds.toml",
@@ -1897,7 +1897,7 @@ describe("JsonRpcClient", () => {
           value: true,
           mergeStrategy: "replace",
         }, {
-          keyPath: "agents.ds",
+          keyPath: "agents.external",
           value: {
             description: "DeepSeek role",
             config_file: "/tmp/ds.toml",
@@ -1931,7 +1931,7 @@ describe("JsonRpcClient", () => {
       version: "sha256:current",
     });
     await client.writeUserConfigEdits(
-      [{ keyPath: "agents.ds", value: null }],
+      [{ keyPath: "agents.external", value: null }],
       { expectedVersion: "sha256:current" },
     );
 

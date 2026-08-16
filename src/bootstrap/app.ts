@@ -823,7 +823,7 @@ export class GatewayApplication {
       const initialized = await this.codex.connect();
       this.requireRunning();
       this.codexUpstreamUserAgent = initialized.userAgent;
-      if (this.primaryProvider !== deepseekProviderDefinition.id) {
+      if (this.primaryProvider === "openai") {
         const [connectivity] = await Promise.all([
           this.primaryProvider === undefined
             ? Promise.resolve<OpenAiConnectivityStatus>("not-applicable")

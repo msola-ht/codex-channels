@@ -87,7 +87,7 @@ describe("model provider runtime topology", () => {
       { provider: "opencode-go", mode: "switching" },
     ]);
 
-    writeManagedModelProviderRoleConfig(environment);
+    writeManagedModelProviderRoleConfig(environment, { provider: "deepseek" });
     expect(readFileSync(managedModelProviderRoleConfigPath(environment), "utf8"))
       .toContain('model_provider = "deepseek"');
   });
@@ -106,6 +106,30 @@ describe("model provider runtime topology", () => {
 
     expect(loadPrimaryModelProvider(environment)).toBe("deepseek");
     expect(loadManagedModelProvider(environment)).toBeUndefined();
+  });
+
+  it("uses OpenCode Go as the primary server in exclusive mode", async () => {
+    const codexHome = await configuredHome("switching");
+    rmSync(join(codexHome, "codex-connect-deepseek.config.toml"));
+    rmSync(join(codexHome, "deepseek.config.toml"));
+    configureOpenCodeGo(codexHome, "exclusive");
+    const environment = { CODEX_HOME: codexHome };
+
+    expect(loadPrimaryModelProvider(environment)).toBe("opencode-go");
+    expect(loadManagedModelProvider(environment)).toBeUndefined();
+    expect(validateConfiguredModelProvider(environment))
+      .toEqual({ provider: "opencode-go", mode: "exclusive" });
+  });
+
+  it("rejects more than one exclusive third-party Provider", async () => {
+    const codexHome = await configuredHome("exclusive");
+    configureOpenCodeGo(codexHome, "exclusive");
+    const environment = { CODEX_HOME: codexHome };
+
+    expect(() => loadPrimaryModelProvider(environment))
+      .toThrow("只能有一个受管第三方 Provider 使用固定模式");
+    expect(() => validateConfiguredModelProviders(environment))
+      .toThrow("只能有一个受管第三方 Provider 使用固定模式");
   });
 
   it("derives a private sibling socket without changing the configured primary socket", () => {
@@ -198,6 +222,7 @@ describe("model provider runtime topology", () => {
     const rolePath = managedModelProviderRoleConfigPath(environment);
 
     writeManagedModelProviderRoleConfig(environment, {
+      provider: "deepseek",
       baseUrl: "http://127.0.0.1:39491/",
     });
 
@@ -205,7 +230,7 @@ describe("model provider runtime topology", () => {
     expect(content).toContain('model = "deepseek-v4-flash"');
     expect(content).toContain('model_provider = "deepseek"');
     expect(content).toContain(
-      'developer_instructions = "你是 DeepSeek 单次子代理。',
+      'developer_instructions = "你是第三方模型单次子代理。',
     );
     expect(content).toContain("最后一条用户消息");
     expect(content).toContain("不要尝试解析 encrypted_content");
@@ -219,6 +244,7 @@ describe("model provider runtime topology", () => {
     expect(statSync(rolePath).mode & 0o777).toBe(0o600);
     const firstRoleInode = statSync(rolePath).ino;
     writeManagedModelProviderRoleConfig(environment, {
+      provider: "deepseek",
       baseUrl: "http://127.0.0.1:39492/",
     });
     expect(statSync(rolePath).ino).not.toBe(firstRoleInode);
@@ -226,6 +252,7 @@ describe("model provider runtime topology", () => {
       'base_url = "http://127.0.0.1:39492/"',
     );
     expect(() => writeManagedModelProviderRoleConfig(environment, {
+      provider: "deepseek",
       baseUrl: "not-a-url",
     })).toThrow("base_url 无效");
 
@@ -302,13 +329,16 @@ function providerProfile(codexHome: string): string {
   ].join("\n");
 }
 
-function configureOpenCodeGo(codexHome: string): void {
+function configureOpenCodeGo(
+  codexHome: string,
+  mode: "switching" | "exclusive" = "switching",
+): void {
   writeFileSync(
     join(codexHome, "codex-connect-opencode-go.config.toml"),
-    'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+    `version = 1\nprovider = "opencode-go"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
-  writeFileSync(join(codexHome, "opencode-go.config.toml"), [
+  writeFileSync(join(codexHome, mode === "exclusive" ? "config.toml" : "opencode-go.config.toml"), [
     'model = "deepseek-v4-flash"',
     'model_provider = "opencode-go"',
     'model_reasoning_effort = "high"',

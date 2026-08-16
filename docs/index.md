@@ -129,7 +129,9 @@ OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/op
 真实 App Server 按需启动、初始化与模型列表合同验证的模型计价和开放选择。
 
 用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；模型、思考等级、Fast、
-`multi_agent_v2` 与受控 `agents.ds` 的普通键级写入共用一次官方 `config/batchWrite` 事务。
+`multi_agent_v2` 与受控共享第三方角色 `agents.external` 的普通键级写入共用一次官方
+`config/batchWrite` 事务。角色只保存当前选择的 Provider 与模型；DeepSeek、OpenCode Go 的
+切换和固定模式都复用同一角色机制。
 受控角色的读改写从同一 Client 的原始用户层取得版本并传入 `expectedVersion`，版本冲突失败关闭，
 不自动重试或覆盖用户并发修改。
 DeepSeek 完整安装、备份恢复和 App Server 无法管理的专属文件仍由 Setup 执行私有文件级事务。

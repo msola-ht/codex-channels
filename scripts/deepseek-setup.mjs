@@ -11,19 +11,25 @@ import {
   deepseekProviderDefinition,
   managedModelProviderDefinitions,
 } from "../runtime/model-provider-definitions.mjs";
-import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadPrimaryModelProvider,
+  managedModelProviderRoleConfigPath,
+} from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
 import {
   createManagedProviderMarker,
-  createManagedProviderProfile,
-  createModelProviderConfig,
 } from "../runtime/model-provider-profile.mjs";
 import {
-  assertDeepseekRoleAvailable,
-  enableDeepseekRole,
-  removeManagedDeepseekRole,
+  assertThirdPartyRoleAvailable,
+  configureThirdPartyRole,
 } from "./agents.mjs";
 import { writeCodexUserConfigEdits } from "./codex-user-config.mjs";
+import {
+  applyExclusiveProviderConfig,
+  createSwitchingProviderProfile,
+  hasProviderBaseConfig,
+  restoreProviderBaseConfig,
+} from "./managed-model-provider-setup.mjs";
 
 export const deepseekSetupScriptUrl =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
@@ -45,8 +51,7 @@ export async function runDeepseekSetup({
   fetchImpl = globalThis.fetch,
   prompter,
   prompts = clackPrompts,
-  enableRole = enableDeepseekRole,
-  removeRole = removeManagedDeepseekRole,
+  configureRole = configureThirdPartyRole,
   writeConfigEdits = writeCodexUserConfigEdits,
 } = {}) {
   const prompt = prompter ?? createHiddenPrompter(prompts, { allowBack });
@@ -88,7 +93,7 @@ export async function runDeepseekSetup({
     );
     const roleConfigBackupPath = join(
       backupDirectory,
-      "codex-connect-ds-subagent.config.toml",
+      "codex-connect-third-party-subagent.config.toml",
     );
     const backupStatePath = join(backupDirectory, "state.json");
     if (choice === "3") {
@@ -129,13 +134,17 @@ export async function runDeepseekSetup({
       });
     }
     const mode = choice === "1" ? "switching" : "exclusive";
+    assertThirdPartyRoleAvailable(environment);
     if (mode === "switching") {
-      assertDeepseekRoleAvailable(environment);
       output.write(
         "\n切换模式保留 OpenAI 默认；DeepSeek 模型、Provider 与 API Key 全部保存在独立 Profile。\n",
       );
     }
     if (mode === "exclusive") {
+      const primary = loadPrimaryModelProvider(environment);
+      if (primary !== "openai" && primary !== providerId) {
+        throw new Error(`请先恢复当前固定 Provider：${primary}`);
+      }
       output.write("\n固定模式会修改 ~/.codex/config.toml，并将 DeepSeek API Key 写入该 0600 文件。\n");
       if (!await prompt.confirm("确认继续并先备份原配置？", false)) {
         output.write("已取消，未修改任何文件。\n");
@@ -209,14 +218,14 @@ export async function runDeepseekSetup({
       await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
       await setBackupRestoredState(backupStatePath, false);
       rollbackGuards = await snapshotFiles(installationPaths);
+      await configureRole(providerId, supportedModel, environment);
       if (mode === "switching") {
-        await enableRole(environment);
         output.write(`\nOpenAI 默认模型与认证保持不变：${configPath}\n`);
         output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
-        output.write("已自动启用 multi_agent_v2 并注册 DS 子代理角色（agents.ds）。\n");
+        output.write("已将共享第三方子代理（agents.external）切换到 DeepSeek。\n");
       } else {
-        await removeRole(environment);
         output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
+        output.write("已将共享第三方子代理（agents.external）切换到 DeepSeek。\n");
       }
     } catch (error) {
       if (rollbackGuards === undefined) throw error;
@@ -419,18 +428,18 @@ async function buildCodexConfig({
   const legacyManagedLayout = managedMode === undefined
     && backupState !== undefined
     && backupState.restored !== true
-    && hasDeepseekBaseConfig(document);
-  const provider = createModelProviderConfig(deepseekProviderDefinition, apiKey);
-  const profile = createManagedProviderProfile(deepseekProviderDefinition, {
+    && hasProviderBaseConfig(document, deepseekProviderDefinition);
+  const autoCompactLimit = autoCompactPercent === undefined
+    ? undefined
+    : autoCompactFields(autoCompactPercent, contextWindow).model_auto_compact_token_limit;
+  const profile = createSwitchingProviderProfile(deepseekProviderDefinition, {
     apiKey,
     catalogPath,
-    ...(autoCompactPercent === undefined
-      ? {}
-      : { autoCompactLimit: autoCompactFields(autoCompactPercent, contextWindow).model_auto_compact_token_limit }),
+    ...(autoCompactLimit === undefined ? {} : { autoCompactLimit }),
   });
   if (mode === "switching") {
     if (managedMode === "exclusive" || legacyManagedLayout) {
-      document = restoreManagedBaseConfig(document, initialDocument);
+      document = restoreProviderBaseConfig(document, initialDocument, deepseekProviderDefinition);
       configContent = Object.keys(document).length === 0 ? undefined : stringify(document);
     }
     if (
@@ -455,31 +464,11 @@ async function buildCodexConfig({
     };
   }
 
-  document.model_providers = table(document.model_providers);
-  document.model_providers[providerId] = provider;
-  if (document.profile === providerId) {
-    delete document.profile;
-  }
-  const profiles = table(document.profiles);
-  delete profiles[providerId];
-  if (Object.keys(profiles).length === 0) {
-    delete document.profiles;
-  } else {
-    document.profiles = profiles;
-  }
-  if (autoCompactPercent === undefined) {
-    delete document.model_auto_compact_token_limit;
-    delete document.model_auto_compact_token_limit_scope;
-  }
-  Object.assign(document, {
-    model: supportedModel,
-    model_provider: providerId,
-    model_reasoning_effort: deepseekProviderDefinition.defaultReasoningEffort,
-    model_catalog_json: catalogPath,
-    ...autoCompactFields(autoCompactPercent, contextWindow),
+  document = applyExclusiveProviderConfig(document, deepseekProviderDefinition, {
+    apiKey,
+    catalogPath,
+    ...(autoCompactLimit === undefined ? {} : { autoCompactLimit }),
   });
-  delete document.preferred_auth_method;
-  delete document.forced_login_method;
   return {
     configContent: stringify(document),
     profileContent: undefined,
@@ -524,55 +513,6 @@ async function readCurrentManagedMode(gatewayProfilePath, originalGatewayProfile
     // 原同名文件可能包含用户私有配置，不能把解析内容作为 cause 暴露。
     // eslint-disable-next-line preserve-caught-error
     throw new Error("Codex Connect DeepSeek 管理标记无效，未修改配置");
-  }
-}
-
-function hasDeepseekBaseConfig(document) {
-  return document.profile === providerId
-    || table(document.profiles)[providerId] !== undefined
-    || table(document.model_providers)[providerId] !== undefined;
-}
-
-function restoreManagedBaseConfig(current, initial) {
-  const restored = { ...current };
-  for (const key of [
-    "model",
-    "model_provider",
-    "model_reasoning_effort",
-    "model_catalog_json",
-    "model_auto_compact_token_limit",
-    "model_auto_compact_token_limit_scope",
-    "profile",
-    "preferred_auth_method",
-    "forced_login_method",
-  ]) {
-    restoreProperty(restored, initial, key);
-  }
-  restoreTableEntry(restored, initial, "model_providers", providerId);
-  restoreTableEntry(restored, initial, "profiles", providerId);
-  return restored;
-}
-
-function restoreProperty(target, source, key) {
-  if (Object.hasOwn(source, key)) {
-    target[key] = source[key];
-  } else {
-    delete target[key];
-  }
-}
-
-function restoreTableEntry(target, source, tableName, key) {
-  const targetTable = { ...table(target[tableName]) };
-  const sourceTable = table(source[tableName]);
-  if (Object.hasOwn(sourceTable, key)) {
-    targetTable[key] = sourceTable[key];
-  } else {
-    delete targetTable[key];
-  }
-  if (Object.keys(targetTable).length === 0) {
-    delete target[tableName];
-  } else {
-    target[tableName] = targetTable;
   }
 }
 

@@ -56,26 +56,26 @@ describe("provider-aware conversation command formatting", () => {
       kind: "agents",
       roles: [
         { name: "default", description: "默认角色，继承当前模型与配置" },
-        { name: "ds", description: "DeepSeek 子代理" },
+        { name: "external", description: "第三方模型子代理" },
       ],
     });
 
     expect(rendered).toContain("## 子代理角色（2）");
     expect(rendered).toContain("1. default：默认角色，继承当前模型与配置");
-    expect(rendered).toContain("2. ds：DeepSeek 子代理");
+    expect(rendered).toContain("2. external：第三方模型子代理");
     expect(rendered).toContain("- 使用：/agents <角色名称或序号> <任务>");
   });
 
   it("renders agent invocation outcomes", () => {
     expect(formatConversationCommandOutcome({
       type: "agents.started",
-      roleName: "ds",
+      roleName: "external",
       turnId: "turn-1",
       steered: false,
     })).toContain("已使用子代理开始任务");
     expect(formatConversationCommandOutcome({
       type: "agents.started",
-      roleName: "ds",
+      roleName: "external",
       turnId: "turn-1",
       steered: true,
     })).toContain("已把子代理任务追加到当前任务");

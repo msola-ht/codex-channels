@@ -1,14 +1,16 @@
 # OpenCode Go
 
-Codex Connect 可把 OpenCode Go 作为独立的切换 Provider 使用。当前受控模型为
+Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用。当前受控模型为
 `deepseek-v4-flash` 和 `deepseek-v4-pro`；它们与 DeepSeek 官方 Provider 的同名模型仍是两个
 独立选项，分别使用各自的 API Key、上游地址、Thread 路由和价格来源。
 
 ## 配置与使用
 
 运行 `codexc setup`，依次选择“模型与提供商”和“OpenCode Go”，输入 OpenCode Go API Key。
-Setup 会创建私有 `opencode-go.config.toml` 和管理标记，并复用经审查的 DeepSeek 模型目录；不会
-修改 OpenAI 默认配置、DeepSeek 配置或 `~/.codex/config.toml`。
+Setup 提供保留 OpenAI 默认的切换模式，以及让原生 Codex 和 Gateway 默认使用 OpenCode Go 的
+固定模式。切换模式创建私有 `opencode-go.config.toml`；固定模式会先备份再修改
+`~/.codex/config.toml`。两种模式都复用经审查的 DeepSeek 模型目录，并把共享
+`agents.external` 子代理切换到 OpenCode Go，不修改 DeepSeek Provider 配置。
 
 配置完成后运行：
 
@@ -24,7 +26,8 @@ codexc remote --profile opencode-go
 
 受管第三方 Provider 按需运行：服务启动时只登记配置，首次选择对应模型、恢复对应 Thread 或使用
 对应 Remote TUI 时，App Server 监管进程才启动该 Provider 的统计代理和隔离 App Server。同一
-Provider 后续复用该实例；未使用的 Provider 不增加 App Server 子进程。
+Provider 后续复用该实例。当前被 `agents.external` 选择的 Provider 会预先启动统计代理，确保子代理
+随主 App Server 可用；未使用也未选作子代理的 Provider 不增加进程。
 
 ## 协议与模型范围
 

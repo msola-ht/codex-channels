@@ -1,0 +1,23 @@
+import type { ModelProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+
+export function createSwitchingProviderProfile(
+  definition: ModelProviderDefinition,
+  options: { apiKey: string; catalogPath: string; autoCompactLimit?: number },
+): Record<string, unknown>;
+
+export function applyExclusiveProviderConfig(
+  current: Record<string, unknown>,
+  definition: ModelProviderDefinition,
+  options: { apiKey: string; catalogPath: string; autoCompactLimit?: number },
+): Record<string, unknown>;
+
+export function restoreProviderBaseConfig(
+  current: Record<string, unknown>,
+  initial: Record<string, unknown>,
+  definition: ModelProviderDefinition,
+): Record<string, unknown>;
+
+export function hasProviderBaseConfig(
+  document: Record<string, unknown>,
+  definition: ModelProviderDefinition,
+): boolean;

@@ -1,4 +1,5 @@
 import type { CodexUserConfigEdit } from "./codex-user-config.mjs";
+import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
 
 export const deepseekSetupScriptUrl: string;
 
@@ -24,8 +25,11 @@ export interface DeepseekSetupOptions {
   fetchImpl?: typeof fetch;
   prompter?: DeepseekSetupPrompter;
   prompts?: DeepseekSetupPrompts;
-  enableRole?: (environment: NodeJS.ProcessEnv) => void | Promise<void>;
-  removeRole?: (environment: NodeJS.ProcessEnv) => void | Promise<void>;
+  configureRole?: (
+    provider: ManagedModelProviderId,
+    model: string | undefined,
+    environment: NodeJS.ProcessEnv,
+  ) => unknown | Promise<unknown>;
   writeConfigEdits?: (
     environment: NodeJS.ProcessEnv,
     edits: CodexUserConfigEdit[],

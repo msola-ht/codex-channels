@@ -319,10 +319,15 @@ contractSuite("real supervised App Server service", () => {
     const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
-    const roleConfigPath = join(codexHome, "codex-connect-ds-subagent.config.toml");
+    const roleConfigPath = join(codexHome, "codex-connect-third-party-subagent.config.toml");
     writeFileSync(
       roleConfigPath,
-      'developer_instructions = "Integration fixture role"\n',
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "opencode-go"',
+        'developer_instructions = "Integration fixture role"',
+        "",
+      ].join("\n"),
       { mode: 0o600 },
     );
     writeFileSync(
@@ -331,7 +336,7 @@ contractSuite("real supervised App Server service", () => {
         "[features]",
         "multi_agent_v2 = true",
         "",
-        "[agents.ds]",
+        "[agents.external]",
         'description = "Integration fixture role"',
         `config_file = ${JSON.stringify(roleConfigPath)}`,
         "",

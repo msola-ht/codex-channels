@@ -23,7 +23,7 @@ export function runCodexDefaultsSetup(options?: {
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexDefaultsClient>;
-  primaryProvider?: (environment: NodeJS.ProcessEnv) => "openai" | "deepseek";
+  primaryProvider?: (environment: NodeJS.ProcessEnv) => string;
 }): Promise<
   | CodexDefaultsSetupResult
   | CodexDefaultsSetupBackResult

@@ -43,7 +43,7 @@ DeepSeek Provider。
 | `~/.codex/deepseek.config.toml` | 切换模式的 DeepSeek 模型、Provider 和 API Key |
 | `~/.codex/deepseek.models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
 | `~/.codex/codex-connect-deepseek.config.toml` | 不含凭据的 Gateway 管理标记 |
-| `~/.codex/codex-connect-ds-subagent.config.toml` | 不含凭据的 DeepSeek 子代理角色配置 |
+| `~/.codex/codex-connect-third-party-subagent.config.toml` | 不含凭据的共享第三方子代理配置 |
 | `~/.codex/backup-codex-connect-deepseek/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
 
 这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式；
@@ -82,9 +82,10 @@ DeepSeek（当前 `deepseek-v4-flash`、`deepseek-v4-pro` + Codex 0.147.0）支�
 ## App Server 与 Thread
 
 切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务启动时只
-启动主实例；首次选择 DeepSeek 模型、恢复其 Thread 或使用 DeepSeek Remote TUI 时，监管入口才读取
-并校验私有 Profile，按需启动统计代理和隔离 App Server。API Key 只进入对应子进程环境，不进入
-命令行、服务定义或日志。
+启动主实例；当前共享子代理选择 DeepSeek 时还会预先启动其统计代理。首次选择 DeepSeek 模型、
+恢复其 Thread 或使用 DeepSeek Remote TUI 时，监管入口才读取并校验私有 Profile，按需启动隔离
+App Server。DeepSeek API Key 只进入需要它的 App Server 子进程环境，不进入命令行、服务定义或
+日志；其他 Provider 的 Key 不会随之注入。
 
 Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review、Goal、MCP 和审批请求。
 跨 Provider 不能原地修改正在使用的 Thread，因此 `/model` 的跨 Provider 选择会：
@@ -133,43 +134,32 @@ DeepSeek 模型目录当前只声明文字输入。未启用外部图片识别�
 [`图片识别代理`](vision.md) 从独立第三方 API 注册表选择 Responses 接口。识别结果作为标明来源的不可信
 文字资料进入当前 DeepSeek Thread。
 
-App Server 服务会在 Provider 首次使用时启动独立的本机回环统计代理。代理支持项目当前使用的
+固定模式下，DeepSeek 代理服务于主 App Server；切换模式按需启动，若共享 `agents.external`
+当前选择 DeepSeek，则随服务预先启动统计代理。代理支持项目当前使用的
 HTTP/SSE、Responses WebSocket、压缩和模型目录请求，复用统一网络代理，并保留用户已有的
 `openai_base_url` 上游。认证 Header、请求正文和响应正文只做内存转发，不写入指标或日志。
 Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此中断。
 
-## 子代理角色
+## 共享第三方子代理
 
-切换模式可在 Codex 的 multi_agent_v2 中把 DeepSeek 作为子代理使用，并让子代理请求自动计入
-模型指标。`codexc setup` 在切换模式配置成功后会自动开启 `features.multi_agent_v2` 并注册
-`agents.ds`；无需再单独执行启用命令，运行 `codexc service restart all` 后生效。
-
-以下命令用于查看状态、手动修复或显式关闭：
+DeepSeek 与 OpenCode Go 共用 `agents.external`，不按 Provider 注册重复角色。任一模式配置成功后，
+Setup 会把该角色切换到刚配置的 Provider 与默认模型；也可以手动选择已配置 Provider 和模型：
 
 ```bash
-codexc agents enable-deepseek
+codexc agents configure deepseek deepseek-v4-pro
+codexc agents configure opencode-go deepseek-v4-flash
 codexc agents status
-codexc agents disable-deepseek
+codexc agents disable
 ```
 
-`enable-deepseek` 会幂等地重新开启 `features.multi_agent_v2`，并注册名为 `ds` 的
-`agents.ds` 角色；仅 DeepSeek 固定模式不会自动注册该角色，从切换模式改为固定模式时会移除
-本项目管理的 `agents.ds`，但不会关闭可能仍供其他角色使用的 `multi_agent_v2`。如果已经存在
-非本项目管理的 `agents.ds`，Setup 会在读取 API Key 和下载前明确报错，不覆盖用户角色。
+角色文件 `~/.codex/codex-connect-third-party-subagent.config.toml` 只保存 Provider、模型和 `env_key`
+引用，不保存 API Key。App Server 服务启动时只为当前角色选择的 Provider 启动统计代理并刷新本机
+地址；未选作子代理且尚未用于会话的第三方 Provider 不增加进程。认证密钥只进入 App Server
+子进程环境。
 
-角色文件 `~/.codex/codex-connect-ds-subagent.config.toml` 在启用时先生成，App Server 服务启动时
-再原子刷新为本机 DeepSeek 统计代理地址，因此子代理请求会进入与直接 API 相同的指标、压缩和
-费用统计链路。服务停止后保留该无凭据文件，保证原生 Codex 仍能解析 `config.toml`；此时 DS
-角色不可用，需先重新启动 App Server。角色文件只写模型、Provider 和 `env_key` 引用，不写
-API Key，认证密钥仍只进入 App Server 子进程环境。
-
-`disable-deepseek` 移除 `agents.ds` 角色、关闭 `multi_agent_v2` 并删除角色文件；切换到固定模式
-或恢复安装前配置也会删除该托管文件。需要子代理时，主模型调用 `spawn_agent` 并选择角色 `ds`。
-
-当前 DS 角色采用 V2 单次兼容模式：当前用户消息必须包含完整任务，主模型调用时必须传
-`agent_type="ds"` 和 `fork_turns="1"`。DS 从继承的最近一个 Turn 中读取最后一条用户消息，
-不解析 V2 的加密任务正文。该模式不支持 `followup_task`、`send_message`、多个 DS 并行拆分或
-依赖后续补充信息；这些场景应使用 OpenAI 官方子代理。
+该角色是 V2 单次子代理：主模型必须使用 `agent_type="external"` 和 `fork_turns="1"`，任务必须在
+当前用户消息中完整给出。它不等待后续消息，也不调用子代理通信工具；需要多轮协作时使用 OpenAI
+官方子代理。
 
 子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
 线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads

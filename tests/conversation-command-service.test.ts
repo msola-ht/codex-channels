@@ -815,13 +815,13 @@ describe("ConversationCommandService", () => {
 
   it("lists and invokes agent roles through the shared command boundary", async () => {
     const listAgentRoles = vi.fn(() => [
-      { name: "ds", description: "DeepSeek 子代理" },
+      { name: "external", description: "第三方模型子代理" },
     ]);
     const invokeAgent = vi.fn(async () => ({
       threadId: "thread-1",
       turnId: "turn-1",
       steered: false,
-      roleName: "ds",
+      roleName: "external",
     }));
     const commands = new ConversationCommandService({
       listAgentRoles,
@@ -830,22 +830,22 @@ describe("ConversationCommandService", () => {
 
     await expect(commands.execute(target, "agents")).resolves.toEqual({
       kind: "agents",
-      roles: [{ name: "ds", description: "DeepSeek 子代理" }],
+      roles: [{ name: "external", description: "第三方模型子代理" }],
     });
     await expect(commands.execute(
       target,
       "agents",
-      "ds 审查提交",
+      "external 审查提交",
     )).resolves.toEqual({
       kind: "outcome",
       outcome: {
         type: "agents.started",
-        roleName: "ds",
+        roleName: "external",
         turnId: "turn-1",
         steered: false,
       },
     });
-    expect(invokeAgent).toHaveBeenCalledWith(target, "ds", "审查提交");
+    expect(invokeAgent).toHaveBeenCalledWith(target, "external", "审查提交");
   });
 
   it("rejects /agents without both role and task", async () => {

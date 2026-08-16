@@ -40,7 +40,7 @@ export function loadDeepseekAccountCredential(
 
 export function loadPrimaryModelProvider(
   environment?: NodeJS.ProcessEnv,
-): "openai" | "deepseek";
+): "openai" | ManagedModelProviderId;
 
 export function loadOpenAiBaseUrl(
   environment?: NodeJS.ProcessEnv,
@@ -69,8 +69,17 @@ export function managedModelProviderRoleConfigPath(
 
 export function writeManagedModelProviderRoleConfig(
   environment?: NodeJS.ProcessEnv,
-  options?: { baseUrl?: string },
-): void;
+  options?: { provider?: ManagedModelProviderId; model?: string; baseUrl?: string },
+): { role: "external"; provider: ManagedModelProviderId; model: string };
+
+export function loadManagedModelProviderRole(
+  environment?: NodeJS.ProcessEnv,
+): { role: "external"; provider: ManagedModelProviderId; model: string } | undefined;
+
+export function loadConfiguredProviderCredential(
+  provider: ManagedModelProviderId,
+  environment?: NodeJS.ProcessEnv,
+): { environmentKey: string; apiKey: string };
 
 export function removeManagedModelProviderRoleConfig(
   environment?: NodeJS.ProcessEnv,

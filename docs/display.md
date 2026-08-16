@@ -91,7 +91,7 @@ HTML 和微信结构化字段渲染。
 使用 Markdown 卡片，微信使用结构化文本。
 
 `/agents` 无参数时列出内置角色（default/explorer/worker）与 `~/.codex/config.toml` 中
-配置的角色（如 `agents.ds`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
+配置的角色（如共享第三方角色 `agents.external`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
 `fork_turns="1"` 的文本指示子代理执行任务，调用结果与普通 Turn 启动一致。
 
 `codexc metrics threads` 的会话列表增加“类型”列：Gateway 在绑定线程中观测到
