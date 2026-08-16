@@ -63,25 +63,38 @@ function normalizedActionValue(
   }
   const name = optionalString(action.name, "action.name");
   const formName = optionalString(action.form_name, "action.form_name");
-  const prefix = "codexc_submit_";
-  const token = name?.startsWith(prefix)
-    ? name.slice(prefix.length)
+  const interactionPrefix = "codexc_submit_";
+  const commandPrefix = "codexc_command_submit_";
+  const interactionToken = name?.startsWith(interactionPrefix)
+    ? name.slice(interactionPrefix.length)
     : undefined;
+  const commandToken = name?.startsWith(commandPrefix)
+    ? name.slice(commandPrefix.length)
+    : undefined;
+  const token = interactionToken ?? commandToken;
+  const formNameMatches = interactionToken !== undefined
+    ? formName === undefined
+      || formName === "codexc_user_input"
+      || formName === "codexc_mcp_form"
+    : formName === undefined
+      || formName === "codexc_command_form";
   if (
     (tag !== "button" && tag !== "form_submit")
-    || (formName !== undefined
-      && formName !== "codexc_user_input"
-      && formName !== "codexc_mcp_form")
+    || !formNameMatches
     || !token
     || token.length > 64
     || !/^[A-Za-z0-9_-]+$/u.test(token)
   ) {
     throw new FeishuCardActionError("action.value");
   }
-  return {
-    interaction_token: token,
-    decision: "submit",
-  };
+  return interactionToken !== undefined
+    ? {
+        interaction_token: interactionToken,
+        decision: "submit",
+      }
+    : {
+        codexc_command_token: token,
+      };
 }
 
 function requireRecord(
@@ -149,5 +162,5 @@ function optionalStringRecord(
   if (value === undefined) {
     return undefined;
   }
-  return requireStringRecord(value, field, 4, 1_000);
+  return requireStringRecord(value, field, 6, 1_000);
 }
