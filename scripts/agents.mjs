@@ -9,7 +9,7 @@ import { parse } from "smol-toml";
 
 import { agentRolesConfigPath } from "../runtime/agent-roles.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { loadManagedModelProvider } from "../runtime/model-provider-runtime.mjs";
+import { loadManagedModelProviders } from "../runtime/model-provider-runtime.mjs";
 import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
 import { removeManagedModelProviderRoleConfig } from "../runtime/model-provider-runtime.mjs";
 import { writeManagedModelProviderRoleConfig } from "../runtime/model-provider-runtime.mjs";
@@ -46,7 +46,7 @@ export async function enableDeepseekRole(
   environment = process.env,
   { updateConfig = updateCodexUserConfig } = {},
 ) {
-  if (loadManagedModelProvider(environment) === undefined) {
+  if (!loadManagedModelProviders(environment).some(({ provider }) => provider === "deepseek")) {
     throw new Error(
       "DeepSeek 切换模式未配置；请先运行 codexc setup 选择 OpenAI + DeepSeek 切换模式",
     );

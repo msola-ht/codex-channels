@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "source": "https://opencode.ai/docs/go/",
+  "sourceUpdatedAt": "2026-08-14T05:48:32.000Z",
+  "currency": "USD",
+  "unit": "per_million_tokens",
+  "models": {
+    "grok-4.5": { "endpoint": "https://opencode.ai/zen/go/v1/responses", "aiSdkPackage": "@ai-sdk/openai", "input": 2, "output": 6, "cachedRead": 0.3, "cachedWrite": null, "includedUsageUsd": 15 },
+    "gpt-5.6-luna": {
+      "endpoint": "https://opencode.ai/zen/go/v1/responses",
+      "aiSdkPackage": "@ai-sdk/openai",
+      "tiers": [
+        { "maximumInputTokens": 272000, "input": 0.2, "output": 1.2, "cachedRead": 0.02, "cachedWrite": 0.25 },
+        { "maximumInputTokens": null, "input": 0.4, "output": 1.8, "cachedRead": 0.04, "cachedWrite": 0.5 }
+      ],
+      "includedUsageUsd": 15
+    },
+    "glm-5.3": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 1.4, "output": 4.4, "cachedRead": 0.26, "cachedWrite": null, "includedUsageUsd": 15 },
+    "glm-5.2": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 1.4, "output": 4.4, "cachedRead": 0.26, "cachedWrite": null, "includedUsageUsd": 60 },
+    "glm-5.1": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 1.4, "output": 4.4, "cachedRead": 0.26, "cachedWrite": null, "includedUsageUsd": 60 },
+    "kimi-k3": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 3, "output": 15, "cachedRead": 0.3, "cachedWrite": null, "includedUsageUsd": 15 },
+    "kimi-k2.7-code": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 0.95, "output": 4, "cachedRead": 0.19, "cachedWrite": null, "includedUsageUsd": 60 },
+    "kimi-k2.6": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 0.95, "output": 4, "cachedRead": 0.16, "cachedWrite": null, "includedUsageUsd": 60 },
+    "mimo-v2.5": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 0.14, "output": 0.28, "cachedRead": 0.0028, "cachedWrite": null, "includedUsageUsd": 60 },
+    "mimo-v2.5-pro": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 0.435, "output": 0.87, "cachedRead": 0.003625, "cachedWrite": null, "includedUsageUsd": 15 },
+    "minimax-m3": { "endpoint": "https://opencode.ai/zen/go/v1/messages", "aiSdkPackage": "@ai-sdk/anthropic", "input": 0.3, "output": 1.2, "cachedRead": 0.06, "cachedWrite": null, "includedUsageUsd": 60 },
+    "minimax-m2.7": { "endpoint": "https://opencode.ai/zen/go/v1/messages", "aiSdkPackage": "@ai-sdk/anthropic", "input": 0.3, "output": 1.2, "cachedRead": 0.06, "cachedWrite": 0.375, "includedUsageUsd": 60 },
+    "minimax-m2.5": { "endpoint": "https://opencode.ai/zen/go/v1/messages", "aiSdkPackage": "@ai-sdk/anthropic", "input": 0.3, "output": 1.2, "cachedRead": 0.06, "cachedWrite": 0.375, "includedUsageUsd": 60 },
+    "qwen3.8-max": { "endpoint": "https://opencode.ai/zen/go/v1/messages", "aiSdkPackage": "@ai-sdk/anthropic", "input": 2, "output": 6, "cachedRead": 0.25, "cachedWrite": 2.5, "includedUsageUsd": 15 },
+    "qwen3.7-max": { "endpoint": "https://opencode.ai/zen/go/v1/messages", "aiSdkPackage": "@ai-sdk/anthropic", "input": 2.5, "output": 7.5, "cachedRead": 0.5, "cachedWrite": 3.125, "includedUsageUsd": 60 },
+    "qwen3.7-plus": {
+      "endpoint": "https://opencode.ai/zen/go/v1/messages",
+      "aiSdkPackage": "@ai-sdk/anthropic",
+      "tiers": [
+        { "maximumInputTokens": 256000, "input": 0.4, "output": 1.6, "cachedRead": 0.04, "cachedWrite": 0.5 },
+        { "maximumInputTokens": null, "input": 1.2, "output": 4.8, "cachedRead": 0.12, "cachedWrite": 1.5 }
+      ],
+      "includedUsageUsd": 60
+    },
+    "qwen3.6-plus": {
+      "endpoint": "https://opencode.ai/zen/go/v1/messages",
+      "aiSdkPackage": "@ai-sdk/anthropic",
+      "tiers": [
+        { "maximumInputTokens": 256000, "input": 0.5, "output": 3, "cachedRead": 0.05, "cachedWrite": 0.625 },
+        { "maximumInputTokens": null, "input": 2, "output": 6, "cachedRead": 0.2, "cachedWrite": 2.5 }
+      ],
+      "includedUsageUsd": 60
+    },
+    "deepseek-v4-pro": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 0.435, "output": 0.87, "cachedRead": 0.003625, "cachedWrite": null, "includedUsageUsd": 15 },
+    "deepseek-v4-flash": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 0.14, "output": 0.28, "cachedRead": 0.0028, "cachedWrite": null, "includedUsageUsd": 60 },
+    "hy3": { "endpoint": "https://opencode.ai/zen/go/v1/chat/completions", "aiSdkPackage": "@ai-sdk/openai-compatible", "input": 0.14, "output": 0.58, "cachedRead": 0.035, "cachedWrite": null, "includedUsageUsd": 60 }
+  }
+}

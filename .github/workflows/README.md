@@ -30,6 +30,9 @@
   区间和生效日期。两个检查都只读、互不遮蔽失败，并分别保留候选基线、结构化结果、来源哈希、摘要
   和日志。任一检查失败时任务标红；发现变化且两项检查成功后，独立的最小写权限 Job 只创建一个
   Draft PR。未知模型不会自动加入运行时受控列表，工作流也不自动转为 Ready、合并、发布或部署。
+- `opencode-go-pricing-proposal.yml`：每日及手动只读检查 OpenCode Go 官方页面列出的全部模型价格、
+  长上下文档位和套餐包含用量；与模型端点表交叉确认 Model ID、端点和 SDK 协议，变化时由独立
+  最小写权限 Job 创建 Draft PR。新模型不会自动开放，工作流不自动合并、发布或部署。
 - `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，先确认 Tag 所在提交已经把 README
   正式版本与安装命令同步到同一版本并执行完整提交检查，再使用 npm Trusted Publishing 发布公开包，
   不保存长期 npm Token。README 未完成正式发布提交时失败关闭；合并升级 PR 或普通 push 不会发布。
@@ -39,7 +42,7 @@
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
 
-除 Codex 正式升级和 DeepSeek 目录提案的 Draft PR Job 外，工作流只申请 `contents: read`，
+除 Codex 正式升级、DeepSeek 目录提案和 OpenCode Go 价格提案的 Draft PR Job 外，工作流只申请 `contents: read`，
 Checkout 不保留写入凭据。Draft PR Job 单独申请 `contents: write` 和 `pull-requests: write`，
 只用于推送对应自动化分支和创建提案。隔离 App Server 合同测试不读取 Runner
 登录态、不调用模型；依赖账号、模型列表或指定 fixture Thread 的完整真实集成测试仍只在本机按需执行。

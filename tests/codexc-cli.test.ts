@@ -1105,7 +1105,7 @@ describe("codexc CLI", () => {
     expect(result.stderr).not.toContain("子命令执行失败");
   });
 
-  it("routes the DeepSeek profile to its isolated remote App Server and authenticates the TUI", () => {
+  it("routes the DeepSeek profile to its isolated remote App Server and authenticates the TUI", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-profile-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1152,30 +1152,43 @@ describe("codexc CLI", () => {
       table(document.codex).binary = fakeCodex;
     });
 
-    for (const [index, args] of [
-      ["--profile", "deepseek"],
-      ["--profile=deepseek"],
-      ["-p", "deepseek"],
-      ["-p=deepseek"],
-      ["-pdeepseek"],
-    ].entries()) {
-      const capturePath = join(root, `capture-${index}.json`);
-      const result = spawnSync(process.execPath, [cli, "remote", ...args, "resume"], {
-        cwd: workspace,
-        env: { ...environment, CODEX_TEST_CAPTURE: capturePath },
-        encoding: "utf8",
-      });
+    const primarySocketPath = join(home, "runtime", "codex-app-server.sock");
+    const supervisor = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["deepseek"],
+      socketPaths: [
+        primarySocketPath,
+        join(home, "runtime", "codex-app-server-deepseek.sock"),
+      ],
+    }, { ensureProvider: async () => undefined });
+    await supervisor.start();
+    try {
+      for (const [index, args] of [
+        ["--profile", "deepseek"],
+        ["--profile=deepseek"],
+        ["-p", "deepseek"],
+        ["-p=deepseek"],
+        ["-pdeepseek"],
+      ].entries()) {
+        const capturePath = join(root, `capture-${index}.json`);
+        await execFileAsync(process.execPath, [cli, "remote", ...args, "resume"], {
+          cwd: workspace,
+          env: { ...environment, CODEX_TEST_CAPTURE: capturePath },
+          encoding: "utf8",
+        });
 
-      expect(result.status).toBe(0);
-      expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
-        "--remote",
-        `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
-        "-C",
-        realpathSync(workspace),
-        "--profile",
-        "deepseek",
-        "resume",
-      ]);
+        expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
+          "--remote",
+          `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
+          "-C",
+          realpathSync(workspace),
+          "--profile",
+          "deepseek",
+          "resume",
+        ]);
+      }
+    } finally {
+      await supervisor.close();
     }
 
     const passthroughCapture = join(root, "capture-passthrough.json");
@@ -1266,7 +1279,7 @@ describe("codexc CLI", () => {
     });
   });
 
-  it("starts isolated OpenAI and DeepSeek App Servers without exposing the key", () => {
+  it("starts OpenAI without exposing the key or eagerly starting DeepSeek", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-provider-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1334,7 +1347,7 @@ describe("codexc CLI", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    expect(captures).toHaveLength(2);
+    expect(captures).toHaveLength(1);
     const openAiCapture = captures.find(({ args }) =>
       args.some((value: string) => value.startsWith("openai_base_url="))
     );
@@ -1348,42 +1361,13 @@ describe("codexc CLI", () => {
       "--listen",
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
     ]);
-    expect(deepseekCapture?.args).toEqual([
-        "-c",
-        'model="deepseek-v4-flash"',
-        "-c",
-        'model_provider="deepseek"',
-        "-c",
-        'model_reasoning_effort="high"',
-        "-c",
-        'service_tier="default"',
-        "-c",
-        `model_catalog_json=${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
-        "-c",
-        'model_providers.deepseek.name="deepseek"',
-        "-c",
-        'model_providers.deepseek.wire_api="responses"',
-        "-c",
-        'model_providers.deepseek.env_key="CODEX_CONNECT_DEEPSEEK_API_KEY"',
-        "-c",
-        "model_providers.deepseek.requires_openai_auth=false",
-        "-c",
-        expect.stringMatching(
-          /^model_providers\.deepseek\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u,
-        ),
-        "app-server",
-        "--listen",
-        `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
-      ]);
-    expect(captures.find(({ args }) => args.includes('model_provider="deepseek"'))?.apiKey)
-      .toBe("sk-service-secret");
+    expect(deepseekCapture).toBeUndefined();
     expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-service-secret");
     const roleConfigPath = join(codexHome, "codex-connect-ds-subagent.config.toml");
-    expect(existsSync(roleConfigPath)).toBe(true);
-    expect(readFileSync(roleConfigPath, "utf8")).not.toContain("sk-service-secret");
+    expect(existsSync(roleConfigPath)).toBe(false);
   });
 
-  it("owns the automatic provider proxy in the App Server service without a running Gateway", async () => {
+  it("does not start an optional provider proxy before that Provider is used", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-proxy-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1451,12 +1435,7 @@ describe("codexc CLI", () => {
       env: environment,
     });
 
-    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      baseUrl: string;
-      status: number;
-    };
-    expect(captured.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u);
-    expect(captured.status).toBe(404);
+    expect(existsSync(capturePath)).toBe(false);
   });
 
   it("starts an exclusive DeepSeek Gateway and reclaims ownership after forced shutdown", async () => {
@@ -3132,6 +3111,7 @@ describe("codexc CLI", () => {
     });
     const supervisorOwner = new AppServerSupervisorOwner(socketPath, {
       primaryProvider: "openai",
+      managedProviders: [],
       socketPaths: [socketPath],
     });
 

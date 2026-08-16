@@ -125,6 +125,7 @@ async function ensureAppServerTopology({
 }) {
   const topology = appServerRuntime.topology;
   const paths = topology.socketPaths;
+  const primaryPath = appServerRuntime.primarySocketPath;
   const existingSupervisor = await inspectAppServerSupervisor(socketPath);
   if (existingSupervisor) {
     if (!sameAppServerTopology(existingSupervisor, topology)) {
@@ -133,10 +134,8 @@ async function ensureAppServerTopology({
         + "请先运行 codexc service stop all，再重试",
       );
     }
-    for (const path of paths) {
-      await waitForSocket(undefined, path, 10_000);
-      console.log(`检测到现有 App Server Socket，将直接复用：${path}`);
-    }
+    await waitForSocket(undefined, primaryPath, 10_000);
+    console.log(`检测到现有主 App Server Socket，将直接复用：${primaryPath}`);
     return;
   }
   const healthy = await Promise.all(paths.map((path) => appServerSocketAcceptsWebSocket(path)));
@@ -164,9 +163,7 @@ async function ensureAppServerTopology({
     },
   );
   appServerSupervisors.push(supervisor);
-  for (const path of paths) {
-    await waitForSocket(supervisor, path, 10_000);
-  }
+  await waitForSocket(supervisor, primaryPath, 10_000);
   console.log("Codex App Server 与模型统计代理已启动。");
 }
 

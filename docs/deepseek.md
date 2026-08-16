@@ -49,6 +49,8 @@ DeepSeek Provider。
 这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式；
 恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
 的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
+OpenCode Go 也使用这份经审查的模型元数据；其管理标记存在时，恢复 DeepSeek 初始配置会保留共享
+目录和清单，不影响 OpenCode Go。
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
 `/model` 选择，默认模型仍是 Flash。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
@@ -79,9 +81,10 @@ DeepSeek（当前 `deepseek-v4-flash`、`deepseek-v4-pro` + Codex 0.147.0）支�
 
 ## App Server 与 Thread
 
-切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务入口读取并
-校验私有 Profile，通过进程级配置覆盖加载 DeepSeek 模型目录和 Provider，只把 API Key 放入对应
-子进程环境；Key 不进入命令行、服务定义或日志。
+切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务启动时只
+启动主实例；首次选择 DeepSeek 模型、恢复其 Thread 或使用 DeepSeek Remote TUI 时，监管入口才读取
+并校验私有 Profile，按需启动统计代理和隔离 App Server。API Key 只进入对应子进程环境，不进入
+命令行、服务定义或日志。
 
 Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review、Goal、MCP 和审批请求。
 跨 Provider 不能原地修改正在使用的 Thread，因此 `/model` 的跨 Provider 选择会：
@@ -130,7 +133,7 @@ DeepSeek 模型目录当前只声明文字输入。未启用外部图片识别�
 [`图片识别代理`](vision.md) 从独立第三方 API 注册表选择 Responses 接口。识别结果作为标明来源的不可信
 文字资料进入当前 DeepSeek Thread。
 
-App Server 服务会为每个启用的 Provider 启动独立的本机回环统计代理。代理支持项目当前使用的
+App Server 服务会在 Provider 首次使用时启动独立的本机回环统计代理。代理支持项目当前使用的
 HTTP/SSE、Responses WebSocket、压缩和模型目录请求，复用统一网络代理，并保留用户已有的
 `openai_base_url` 上游。认证 Header、请求正文和响应正文只做内存转发，不写入指标或日志。
 Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此中断。

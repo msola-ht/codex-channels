@@ -61,18 +61,25 @@ const SERVER_REQUEST_RESOLVED_METHOD = "serverRequest/resolved";
 
 export class ProviderRoutingClient {
   private readonly threadProviders = new Map<string, string>();
+  private readonly connectedProviders: Set<string>;
+  private readonly providerConnections = new Map<string, Promise<void>>();
 
   constructor(
     private readonly primaryProvider: string,
     private readonly clients: ReadonlyMap<string, ProviderClientInstance>,
+    private readonly ensureProvider?: (provider: string) => Promise<void>,
   ) {
     if (!clients.has(primaryProvider)) {
       throw new Error(`缺少主模型 Provider App Server：${primaryProvider}`);
     }
+    this.connectedProviders = new Set(
+      ensureProvider ? [primaryProvider] : clients.keys(),
+    );
   }
 
   async connect(): ReturnType<ProviderClientInstance["connect"]> {
-    const entries = [...this.clients.entries()];
+    const entries = [...this.clients.entries()].filter(([provider]) =>
+      this.connectedProviders.has(provider));
     try {
       const responses = await Promise.all(entries.map(([, client]) => client.connect()));
       return responses[entries.findIndex(([provider]) => provider === this.primaryProvider)]!;
@@ -85,16 +92,23 @@ export class ProviderRoutingClient {
   async reconnectProvider(
     provider: string,
   ): ReturnType<ProviderClientInstance["reconnect"]> {
+    if (provider !== this.primaryProvider) {
+      await this.ensureProvider?.(provider);
+    }
+    await this.ensureClient(provider);
     return this.clientForProvider(provider).reconnect();
   }
 
   closeProvider(provider: string): ReturnType<ProviderClientInstance["close"]> {
+    this.connectedProviders.delete(provider);
     return this.clientForProvider(provider).close();
   }
 
   async close(): Promise<void> {
     const results = await Promise.allSettled(
-      [...this.clients.values()].map((client) => client.close()),
+      [...this.clients.entries()]
+        .filter(([provider]) => this.connectedProviders.has(provider))
+        .map(([, client]) => client.close()),
     );
     const failure = results.find((result) => result.status === "rejected");
     if (failure?.status === "rejected") {
@@ -140,7 +154,8 @@ export class ProviderRoutingClient {
   async listThreads(
     ...args: Parameters<ProviderClientInstance["listThreads"]>
   ): ReturnType<ProviderClientInstance["listThreads"]> {
-    const entries = [...this.clients.entries()];
+    const entries = [...this.clients.entries()].filter(([provider]) =>
+      this.connectedProviders.has(provider));
     const results = await Promise.allSettled(entries.map(async ([provider, client]) => ({
       provider,
       threads: await client.listThreads(...args),
@@ -169,7 +184,13 @@ export class ProviderRoutingClient {
         }
         if (
           thread.modelProvider === page.provider
-          || (page.provider === this.primaryProvider && !this.clients.has(thread.modelProvider))
+          || (
+            page.provider === this.primaryProvider
+            && (
+              !this.clients.has(thread.modelProvider)
+              || !this.connectedProviders.has(thread.modelProvider)
+            )
+          )
         ) {
           snapshots.set(thread.id, thread);
         }
@@ -191,7 +212,7 @@ export class ProviderRoutingClient {
     const [threadId] = args;
     const provider = this.threadProviders.get(threadId);
     if (provider) {
-      const thread = await this.clientForProvider(provider).readThread(...args);
+      const thread = await (await this.ensureClient(provider)).readThread(...args);
       this.rememberThread(thread);
       return thread;
     }
@@ -200,7 +221,7 @@ export class ProviderRoutingClient {
     if (canonical.modelProvider === this.primaryProvider) {
       return canonical;
     }
-    const thread = await this.clientForProvider(canonical.modelProvider).readThread(...args);
+    const thread = await (await this.ensureClient(canonical.modelProvider)).readThread(...args);
     this.rememberThread(thread);
     return thread;
   }
@@ -209,7 +230,7 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["startThread"]>
   ): ReturnType<ProviderClientInstance["startThread"]> {
     const provider = args[1]?.modelProvider ?? this.primaryProvider;
-    const session = await this.clientForProvider(provider).startThread(...args);
+    const session = await (await this.ensureClient(provider)).startThread(...args);
     this.rememberThread(session.thread);
     return session;
   }
@@ -219,7 +240,7 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["resumeThread"]> {
     const [threadId, cwd] = args;
     const provider = await this.resolveThreadProvider(threadId, cwd);
-    const session = await this.clientForProvider(provider).resumeThread(...args);
+    const session = await (await this.ensureClient(provider)).resumeThread(...args);
     this.rememberThread(session.thread);
     return session;
   }
@@ -328,7 +349,7 @@ export class ProviderRoutingClient {
     if (requestedProvider && requestedProvider !== provider) {
       throw new Error("Codex Thread 分支不能跨模型 Provider");
     }
-    const session = await this.clientForProvider(provider).forkThread(...args);
+    const session = await (await this.ensureClient(provider)).forkThread(...args);
     this.rememberThread(session.thread);
     return session;
   }
@@ -359,7 +380,9 @@ export class ProviderRoutingClient {
 
   async reloadMcpServers(): Promise<void> {
     const results = await Promise.allSettled(
-      [...this.clients.values()].map((client) => client.reloadMcpServers()),
+      [...this.clients.entries()]
+        .filter(([provider]) => this.connectedProviders.has(provider))
+        .map(([, client]) => client.reloadMcpServers()),
     );
     const failure = results.find(
       (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -423,11 +446,11 @@ export class ProviderRoutingClient {
     return this.primaryClient().writeDefaultFastMode(...args);
   }
 
-  readDefaultServiceTier(
+  async readDefaultServiceTier(
     cwd: string,
     modelProvider = this.primaryProvider,
   ): ReturnType<ProviderClientInstance["readDefaultServiceTier"]> {
-    return this.clientForProvider(modelProvider).readDefaultServiceTier(cwd);
+    return (await this.ensureClient(modelProvider)).readDefaultServiceTier(cwd);
   }
 
   listSkills(
@@ -484,6 +507,23 @@ export class ProviderRoutingClient {
     return client;
   }
 
+  private async ensureClient(provider: string): Promise<ProviderClientInstance> {
+    const client = this.clientForProvider(provider);
+    if (this.connectedProviders.has(provider)) return client;
+    let connection = this.providerConnections.get(provider);
+    if (!connection) {
+      connection = (async () => {
+        await this.ensureProvider?.(provider);
+        await client.connect();
+        this.connectedProviders.add(provider);
+      })();
+      this.providerConnections.set(provider, connection);
+      connection.finally(() => this.providerConnections.delete(provider)).catch(() => undefined);
+    }
+    await connection;
+    return client;
+  }
+
   private async resolveThreadProvider(threadId: string, cwd?: string): Promise<string> {
     const known = this.threadProviders.get(threadId);
     if (known) {
@@ -511,7 +551,7 @@ export class ProviderRoutingClient {
     operation: (client: ProviderClientInstance) => Promise<T>,
   ): Promise<T> {
     const provider = await this.resolveThreadProvider(threadId);
-    return operation(this.clientForProvider(provider));
+    return operation(await this.ensureClient(provider));
   }
 
   private rememberThread(thread: ThreadSnapshot): void {

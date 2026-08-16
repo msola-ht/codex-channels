@@ -59,6 +59,7 @@ export type UserFacingErrorCode =
   | "workspace.permission.conflict"
   | "workspace.permission.unavailable"
   | "model.current.missing"
+  | "model.configured-default.missing"
   | "model.unavailable"
   | "model.selector.required"
   | "model.selector.ambiguous"

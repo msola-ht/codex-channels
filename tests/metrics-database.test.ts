@@ -260,11 +260,12 @@ describe("model request metrics database operations", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
     store.record({ ...metricSample(), provider: "deepseek" });
+    store.record({ ...metricSample(), provider: "opencode-go" });
     store.record({ ...metricSample(), provider: "openai" });
     store.close();
     const calls: string[] = [];
 
-    const result = pruneProviderMetrics("deepseek", environment, {
+    const result = pruneProviderMetrics("opencode-go", environment, {
       localDatabasePath: databasePath,
       centerDatabasePath: null,
       stopGateway: () => calls.push("stop:gateway"),
@@ -273,11 +274,14 @@ describe("model request metrics database operations", () => {
       startCenter: () => calls.push("start:center"),
     });
 
-    expect(result.provider).toBe("deepseek");
+    expect(result.provider).toBe("opencode-go");
     expect(result.local.deleted).toBe(1);
     const local = new DatabaseSync(databasePath, { readOnly: true });
     expect(local.prepare(`
       SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 1 });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'deepseek'
     `).get()).toMatchObject({ c: 1 });
     local.close();
   });
@@ -291,7 +295,7 @@ describe("model request metrics database operations", () => {
       startGateway: () => undefined,
       stopCenter: () => undefined,
       startCenter: () => undefined,
-    })).toThrow("codexc metrics prune <openai|deepseek>");
+    })).toThrow("codexc metrics prune <openai|deepseek|opencode-go>");
   });
 
   it("reports a missing database without creating it", () => {

@@ -110,6 +110,8 @@
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
+- OpenCode Go 的隔离 Setup、同名模型按 Provider 独立选择、按需 App Server 启动、官方美元价格、
+  长上下文档位、端点与 SDK 协议解析，以及每日价格 Draft PR 的只读检查和最小写权限边界。
 - 全 Provider 同一 Turn 多次模型响应的请求次数、实际产生推理输出的思考次数、聚合模型耗时、
   缓存与文本/函数/自定义工具参数
   不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和
@@ -270,6 +272,8 @@
   WebSocket 健康检查阻止仅创建 Socket 文件的未就绪实例提前启动 Gateway；监管入口关闭会主动
   清理保持连接的本地客户端；公开前台入口在子进程忽略优雅停止信号时有界终止并等待自己创建的
   进程组退出，异常强制退出残留的 Gateway 所有权 Socket 由下一所有者确认已失效后安全回收。
+- 开发入口和后台入口只等待主 App Server 就绪；受管 DeepSeek/OpenCode Go Socket 不会阻塞初始
+  启动，并由私有监管请求在首次选择模型、恢复 Thread 或启动对应 Remote TUI 时创建。
 - 仓库 Git hooks 自动安装与重复执行安全性、完整提交验证工作流先安装 WebUI 锁定依赖，以及
   无本地依赖时的源码安装准备。
 - 协议临时生成失败时保留现有类型目录、生成树逐文件比较和安全替换。

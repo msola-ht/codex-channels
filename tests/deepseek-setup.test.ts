@@ -549,6 +549,11 @@ describe("DeepSeek setup", () => {
     const legacyState = JSON.parse(readFileSync(backupStatePath, "utf8"));
     delete legacyState.originalRoleConfigExisted;
     writeFileSync(backupStatePath, `${JSON.stringify(legacyState)}\n`, { mode: 0o600 });
+    writeFileSync(
+      join(fixture.home, "codex-connect-opencode-go.config.toml"),
+      'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
     const result = await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home },
       output: fixture.output,
@@ -560,6 +565,7 @@ describe("DeepSeek setup", () => {
     expect(existsSync(join(fixture.home, "deepseek.config.toml"))).toBe(false);
     expect(existsSync(join(fixture.home, "codex-connect-ds-subagent.config.toml")))
       .toBe(false);
+    expect(existsSync(join(fixture.home, "deepseek.models.json"))).toBe(true);
   });
 
   it("does not treat a user DeepSeek provider added after restore as legacy managed config", async () => {

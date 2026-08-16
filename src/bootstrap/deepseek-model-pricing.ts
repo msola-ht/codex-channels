@@ -124,14 +124,12 @@ export class DeepseekModelPricingResolver implements ModelPricingResolver {
 
 export class ProviderModelPricingResolver implements ModelPricingResolver {
   constructor(
-    private readonly deepseek: ModelPricingResolver,
     private readonly fallback: ModelPricingResolver,
+    private readonly providerResolvers: ReadonlyMap<string, ModelPricingResolver>,
   ) {}
 
   resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null {
-    return lookup.provider === "deepseek"
-      ? this.deepseek.resolve(lookup)
-      : this.fallback.resolve(lookup);
+    return (this.providerResolvers.get(lookup.provider) ?? this.fallback).resolve(lookup);
   }
 }
 

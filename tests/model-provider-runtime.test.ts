@@ -18,7 +18,9 @@ import {
 } from "../runtime/app-server-runtime.mjs";
 import {
   loadManagedModelProvider,
+  loadManagedModelProviders,
   loadManagedProviderAppServer,
+  loadManagedProviderAppServers,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   managedModelProviderRoleConfigPath,
@@ -26,6 +28,7 @@ import {
   providerMetricsSocketPath,
   removeManagedModelProviderRoleConfig,
   validateConfiguredModelProvider,
+  validateConfiguredModelProviders,
   withProviderBaseUrl,
   withOpenAiBaseUrl,
   writeManagedModelProviderRoleConfig,
@@ -48,16 +51,45 @@ describe("model provider runtime topology", () => {
     );
 
     expect(descriptor.primaryProvider).toBe("openai");
-    expect(descriptor.managedProvider?.provider).toBe("deepseek");
+    expect(descriptor.managedProviders[0]?.provider).toBe("deepseek");
     expect(descriptor.socketPaths).toEqual([
       "/private/codexc/runtime/codex.sock",
       "/private/codexc/runtime/codex-deepseek.sock",
     ]);
     expect(descriptor.topology).toEqual({
       primaryProvider: "openai",
-      managedProvider: "deepseek",
+      managedProviders: ["deepseek"],
       socketPaths: descriptor.socketPaths,
     });
+  });
+
+  it("keeps DeepSeek and OpenCode Go as independent managed Providers", async () => {
+    const codexHome = await configuredHome("switching");
+    configureOpenCodeGo(codexHome);
+    const environment = { CODEX_HOME: codexHome };
+
+    expect(loadManagedModelProviders(environment)).toEqual([
+      { provider: "deepseek" },
+      { provider: "opencode-go" },
+    ]);
+    expect(loadManagedProviderAppServers(environment).map((provider) => ({
+      provider: provider.provider,
+      environmentKeys: Object.keys(provider.childEnvironment),
+    }))).toEqual([{
+      provider: "deepseek",
+      environmentKeys: ["CODEX_CONNECT_DEEPSEEK_API_KEY"],
+    }, {
+      provider: "opencode-go",
+      environmentKeys: ["CODEX_CONNECT_OPENCODE_GO_API_KEY"],
+    }]);
+    expect(validateConfiguredModelProviders(environment)).toEqual([
+      { provider: "deepseek", mode: "switching" },
+      { provider: "opencode-go", mode: "switching" },
+    ]);
+
+    writeManagedModelProviderRoleConfig(environment);
+    expect(readFileSync(managedModelProviderRoleConfigPath(environment), "utf8"))
+      .toContain('model_provider = "deepseek"');
   });
 
   it("uses OpenAI as primary and exposes DeepSeek as an auxiliary switching server", async () => {
@@ -268,4 +300,28 @@ function providerProfile(codexHome: string): string {
     'experimental_bearer_token = "sk-test-secret"',
     "",
   ].join("\n");
+}
+
+function configureOpenCodeGo(codexHome: string): void {
+  writeFileSync(
+    join(codexHome, "codex-connect-opencode-go.config.toml"),
+    'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+    { mode: 0o600 },
+  );
+  writeFileSync(join(codexHome, "opencode-go.config.toml"), [
+    'model = "deepseek-v4-flash"',
+    'model_provider = "opencode-go"',
+    'model_reasoning_effort = "high"',
+    `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+    "model_auto_compact_token_limit = 629146",
+    'model_auto_compact_token_limit_scope = "total"',
+    "[model_providers.opencode-go]",
+    'name = "opencode-go"',
+    'base_url = "https://opencode.ai/zen/go/v1"',
+    'wire_api = "responses"',
+    "requires_openai_auth = false",
+    "supports_websockets = false",
+    'experimental_bearer_token = "sk-opencode-test-secret"',
+    "",
+  ].join("\n"), { mode: 0o600 });
 }

@@ -19,6 +19,9 @@ export interface MetricsCleanupOptions {
 
 export type MetricsOutputFormat = "markdown" | "json" | "csv";
 
+export const metricsProviderIds: readonly string[];
+export const metricsProviderUsage: string;
+
 export const metricsCommandUsage: Readonly<Record<
   "run" | "turns" | "threads" | "report" | "export",
   string

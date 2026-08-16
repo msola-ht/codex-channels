@@ -1,4 +1,4 @@
-import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 
 export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
 
@@ -6,6 +6,7 @@ export function parseCodexRemoteOptions(args) {
   const passthrough = [];
   let workspaceId;
   let selectedProfile;
+  let hasUnmanagedProfile = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--") {
@@ -23,32 +24,50 @@ export function parseCodexRemoteOptions(args) {
     if (argument.startsWith("--workspace=")) {
       throw new Error(CODEX_REMOTE_USAGE);
     }
-    const consumed = deepseekProfileArgumentLength(args, index);
-    if (consumed > 0) {
-      if (selectedProfile !== undefined) {
-        throw new Error("只能指定一个 DeepSeek --profile");
+    const profileArgument = managedProfileArgument(args, index);
+    if (profileArgument) {
+      if (selectedProfile !== undefined || hasUnmanagedProfile) {
+        throw new Error("受管模型 Provider --profile 不能与其他 --profile 同时使用");
       }
-      selectedProfile = deepseekProviderDefinition.profileName;
-      index += consumed - 1;
+      selectedProfile = profileArgument.profile;
+      index += profileArgument.consumed - 1;
       continue;
+    }
+    if (codexProfileArgument(args, index)) {
+      if (selectedProfile !== undefined) {
+        throw new Error("受管模型 Provider --profile 不能与其他 --profile 同时使用");
+      }
+      hasUnmanagedProfile = true;
     }
     passthrough.push(argument);
   }
   return { passthrough, workspaceId, selectedProfile };
 }
 
-function deepseekProfileArgumentLength(args, index) {
+function codexProfileArgument(args, index) {
   const argument = args[index];
-  const profile = deepseekProviderDefinition.profileName;
-  if (
-    (argument === "--profile" || argument === "-p")
-    && args[index + 1] === profile
-  ) {
-    return 2;
+  if (argument === "--profile" || argument === "-p") {
+    return typeof args[index + 1] === "string" ? { consumed: 2 } : undefined;
   }
-  return [
-    `--profile=${profile}`,
-    `-p=${profile}`,
-    `-p${profile}`,
-  ].includes(argument) ? 1 : 0;
+  if (argument.startsWith("--profile=") || argument.startsWith("-p=")) {
+    return { consumed: 1 };
+  }
+  if (/^-p[^-]/u.test(argument)) return { consumed: 1 };
+  return undefined;
+}
+
+function managedProfileArgument(args, index) {
+  const argument = args[index];
+  for (const { profileName: profile } of managedModelProviderDefinitions) {
+    if (
+      (argument === "--profile" || argument === "-p")
+      && args[index + 1] === profile
+    ) {
+      return { profile, consumed: 2 };
+    }
+    if ([`--profile=${profile}`, `-p=${profile}`, `-p${profile}`].includes(argument)) {
+      return { profile, consumed: 1 };
+    }
+  }
+  return undefined;
 }

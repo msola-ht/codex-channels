@@ -4,9 +4,13 @@ import { basename, dirname, extname, resolve } from "node:path";
 
 import WebSocket from "ws";
 
-const protocolVersion = 1;
+import { managedModelProviderDefinitions } from "./model-provider-definitions.mjs";
+
+const protocolVersion = 2;
 const maximumResponseBytes = 16_384;
+const maximumRequestBytes = 1_024;
 const connectionTimeoutMs = 1_000;
+const managedProviderIds = new Set(managedModelProviderDefinitions.map(({ id }) => id));
 
 export class AppServerSupervisorOwner {
   #identity;
@@ -14,23 +18,75 @@ export class AppServerSupervisorOwner {
   #socketPath;
   #sockets = new Set();
   #closePromise;
+  #ensureProvider;
 
-  constructor(primarySocketPath, topology) {
+  constructor(primarySocketPath, topology, { ensureProvider } = {}) {
     this.#socketPath = appServerSupervisorSocketPath(primarySocketPath);
     const payload = `${JSON.stringify({
       version: protocolVersion,
       pid: process.pid,
       primaryProvider: topology.primaryProvider,
-      managedProvider: topology.managedProvider ?? null,
+      managedProviders: topology.managedProviders,
       socketPaths: topology.socketPaths,
     })}\n`;
+    this.#ensureProvider = ensureProvider;
     this.#server = createServer({ allowHalfOpen: true }, (socket) => {
       this.#sockets.add(socket);
+      const chunks = [];
+      let bytes = 0;
       socket.on("error", () => undefined);
       socket.on("close", () => this.#sockets.delete(socket));
       socket.setTimeout(connectionTimeoutMs, () => socket.destroy());
-      socket.end(payload);
+      socket.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > maximumRequestBytes) {
+          socket.destroy();
+          return;
+        }
+        chunks.push(chunk);
+        if (!chunk.includes(0x0a)) return;
+        socket.pause();
+        void this.#handleRequest(socket, Buffer.concat(chunks).toString("utf8"), payload);
+      });
     });
+  }
+
+  async #handleRequest(socket, requestText, topologyPayload) {
+    let request;
+    try {
+      request = JSON.parse(requestText.trim());
+    } catch {
+      socket.destroy();
+      return;
+    }
+    if (request?.action === "inspect") {
+      socket.end(topologyPayload);
+      return;
+    }
+    if (
+      request?.action !== "ensureProvider"
+      || typeof request.provider !== "string"
+      || !this.#ensureProvider
+    ) {
+      socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
+      return;
+    }
+    socket.setTimeout(15_000, () => socket.destroy());
+    try {
+      await this.#ensureProvider(request.provider);
+      socket.end(`${JSON.stringify({
+        version: protocolVersion,
+        ok: true,
+        provider: request.provider,
+      })}\n`);
+    } catch (error) {
+      socket.end(`${JSON.stringify({
+        version: protocolVersion,
+        ok: false,
+        provider: request.provider,
+        error: error instanceof Error ? error.message.slice(0, 512) : "启动失败",
+      })}\n`);
+    }
   }
 
   async start() {
@@ -85,6 +141,34 @@ export function appServerSupervisorSocketPath(primarySocketPath) {
 
 export async function inspectAppServerSupervisor(primarySocketPath) {
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
+  const status = assertSafeSupervisorSocket(socketPath);
+  if (!status) return undefined;
+  return parseTopology(await readSupervisorResponse(socketPath, { action: "inspect" }));
+}
+
+export async function ensureAppServerProvider(primarySocketPath, provider) {
+  const socketPath = appServerSupervisorSocketPath(primarySocketPath);
+  assertSafeSupervisorSocket(socketPath);
+  const response = await readSupervisorResponse(socketPath, {
+    action: "ensureProvider",
+    provider,
+  }, 15_000);
+  let value;
+  try {
+    value = JSON.parse(response?.trim() ?? "");
+  } catch {
+    throw new Error(`模型 Provider 启动请求没有有效响应：${provider}`);
+  }
+  if (value?.version !== protocolVersion || value.provider !== provider || value.ok !== true) {
+    throw new Error(
+      typeof value?.error === "string" && value.error
+        ? value.error
+        : `模型 Provider 启动失败：${provider}`,
+    );
+  }
+}
+
+function assertSafeSupervisorSocket(socketPath) {
   const status = lstatSync(socketPath, { throwIfNoEntry: false });
   if (!status) return undefined;
   if (
@@ -94,13 +178,15 @@ export async function inspectAppServerSupervisor(primarySocketPath) {
   ) {
     throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
   }
-  return parseTopology(await readSupervisorResponse(socketPath));
+  return status;
 }
 
 export function sameAppServerTopology(actual, expected) {
   return actual?.version === protocolVersion
     && actual.primaryProvider === expected.primaryProvider
-    && actual.managedProvider === (expected.managedProvider ?? null)
+    && actual.managedProviders.length === expected.managedProviders.length
+    && actual.managedProviders.every((provider, index) =>
+      provider === expected.managedProviders[index])
     && actual.socketPaths.length === expected.socketPaths.length
     && actual.socketPaths.every((path, index) => path === expected.socketPaths[index]);
 }
@@ -176,7 +262,7 @@ function socketAcceptsConnections(socketPath) {
   });
 }
 
-function readSupervisorResponse(socketPath) {
+function readSupervisorResponse(socketPath, request, timeoutMs = 1_000) {
   return new Promise((resolveResponse) => {
     const socket = createConnection(socketPath);
     const chunks = [];
@@ -189,7 +275,10 @@ function readSupervisorResponse(socketPath) {
       socket.destroy();
       resolveResponse(value);
     };
-    const timer = setTimeout(() => finish(undefined), 1_000);
+    const timer = setTimeout(() => finish(undefined), timeoutMs);
+    socket.once("connect", () => {
+      socket.write(`${JSON.stringify(request)}\n`);
+    });
     socket.on("data", (chunk) => {
       bytes += chunk.length;
       if (bytes > maximumResponseBytes) {
@@ -216,7 +305,9 @@ function parseTopology(response) {
     || !Number.isSafeInteger(value.pid)
     || value.pid <= 0
     || typeof value.primaryProvider !== "string"
-    || ![null, "deepseek"].includes(value.managedProvider)
+    || !Array.isArray(value.managedProviders)
+    || value.managedProviders.some((provider) => !managedProviderIds.has(provider))
+    || new Set(value.managedProviders).size !== value.managedProviders.length
     || !Array.isArray(value.socketPaths)
     || value.socketPaths.length < 1
     || value.socketPaths.some((path) => typeof path !== "string" || path.length === 0)

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -6,9 +7,17 @@ import { parse, stringify } from "smol-toml";
 import * as clackPrompts from "@clack/prompts";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import {
+  deepseekProviderDefinition,
+  managedModelProviderDefinitions,
+} from "../runtime/model-provider-definitions.mjs";
 import { managedModelProviderRoleConfigPath } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
+import {
+  createManagedProviderMarker,
+  createManagedProviderProfile,
+  createModelProviderConfig,
+} from "../runtime/model-provider-profile.mjs";
 import {
   assertDeepseekRoleAvailable,
   enableDeepseekRole,
@@ -100,6 +109,10 @@ export async function runDeepseekSetup({
         gatewayProfileBackupPath,
         roleConfigBackupPath,
         backupStatePath,
+        preserveSharedCatalog: managedModelProviderDefinitions.some((definition) =>
+          definition.id !== deepseekProviderDefinition.id
+          && definition.catalogFileName === deepseekProviderDefinition.catalogFileName
+          && existsSync(join(codexHome, definition.managedMarkerFileName))),
         output,
       });
     }
@@ -407,24 +420,14 @@ async function buildCodexConfig({
     && backupState !== undefined
     && backupState.restored !== true
     && hasDeepseekBaseConfig(document);
-  const provider = {
-    name: providerId,
-    base_url: deepseekProviderDefinition.baseUrl,
-    wire_api: deepseekProviderDefinition.wireApi,
-    requires_openai_auth: false,
-    experimental_bearer_token: apiKey,
-  };
-  const providerLayer = {
-    model_providers: { [providerId]: provider },
-  };
-  const profile = {
-    model: supportedModel,
-    model_provider: providerId,
-    model_reasoning_effort: deepseekProviderDefinition.defaultReasoningEffort,
-    model_catalog_json: catalogPath,
-    ...autoCompactFields(autoCompactPercent, contextWindow),
-    ...providerLayer,
-  };
+  const provider = createModelProviderConfig(deepseekProviderDefinition, apiKey);
+  const profile = createManagedProviderProfile(deepseekProviderDefinition, {
+    apiKey,
+    catalogPath,
+    ...(autoCompactPercent === undefined
+      ? {}
+      : { autoCompactLimit: autoCompactFields(autoCompactPercent, contextWindow).model_auto_compact_token_limit }),
+  });
   if (mode === "switching") {
     if (managedMode === "exclusive" || legacyManagedLayout) {
       document = restoreManagedBaseConfig(document, initialDocument);
@@ -446,11 +449,9 @@ async function buildCodexConfig({
     return {
       configContent,
       profileContent: stringify(profile),
-      gatewayProfileContent: stringify({
-        version: 1,
-        provider: providerId,
-        mode: "switching",
-      }),
+      gatewayProfileContent: stringify(
+        createManagedProviderMarker(deepseekProviderDefinition, "switching"),
+      ),
     };
   }
 
@@ -482,11 +483,9 @@ async function buildCodexConfig({
   return {
     configContent: stringify(document),
     profileContent: undefined,
-    gatewayProfileContent: stringify({
-      version: 1,
-      provider: providerId,
-      mode: "exclusive",
-    }),
+    gatewayProfileContent: stringify(
+      createManagedProviderMarker(deepseekProviderDefinition, "exclusive"),
+    ),
   };
 }
 
@@ -656,6 +655,7 @@ async function restoreInitialConfig({
   gatewayProfileBackupPath,
   roleConfigBackupPath,
   backupStatePath,
+  preserveSharedCatalog,
   output,
 }) {
   let state;
@@ -687,8 +687,10 @@ async function restoreInitialConfig({
   } else if (state.originalGatewayProfileExisted === false) {
     await removeFile(gatewayProfilePath);
   }
-  await removeFile(catalogPath);
-  await removeFile(manifestPath);
+  if (!preserveSharedCatalog) {
+    await removeFile(catalogPath);
+    await removeFile(manifestPath);
+  }
   if (state.originalRoleConfigExisted === true) {
     await writePrivateFileAtomic(roleConfigPath, await readFile(roleConfigBackupPath));
   } else if (

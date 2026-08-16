@@ -1,13 +1,18 @@
+import type { ManagedModelProviderId } from "./model-provider-definitions.mjs";
+
 export interface ManagedModelProviderRuntime {
-  provider: "deepseek";
+  provider: ManagedModelProviderId;
 }
 
 export function loadManagedModelProvider(
   environment?: NodeJS.ProcessEnv,
 ): ManagedModelProviderRuntime | undefined;
+export function loadManagedModelProviders(
+  environment?: NodeJS.ProcessEnv,
+): ManagedModelProviderRuntime[];
 
 export interface ManagedProviderAppServerRuntime {
-  provider: "deepseek";
+  provider: ManagedModelProviderId;
   arguments: string[];
   childEnvironment: Record<string, string>;
 }
@@ -15,10 +20,19 @@ export interface ManagedProviderAppServerRuntime {
 export function loadManagedProviderAppServer(
   environment?: NodeJS.ProcessEnv,
 ): ManagedProviderAppServerRuntime | undefined;
+export function loadManagedProviderAppServers(
+  environment?: NodeJS.ProcessEnv,
+): ManagedProviderAppServerRuntime[];
 
 export function validateConfiguredModelProvider(
   environment?: NodeJS.ProcessEnv,
-): { provider: "deepseek"; mode: "switching" | "exclusive" } | undefined;
+): { provider: ManagedModelProviderId; mode: "switching" | "exclusive" } | undefined;
+export function validateConfiguredModelProviders(
+  environment?: NodeJS.ProcessEnv,
+): Array<{
+  provider: ManagedModelProviderId;
+  mode: "switching" | "exclusive";
+}>;
 
 export function loadDeepseekAccountCredential(
   environment?: NodeJS.ProcessEnv,

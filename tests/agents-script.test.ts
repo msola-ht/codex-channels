@@ -23,12 +23,45 @@ import {
   type CodexUserConfigEdit,
   type CodexUserConfigValue,
 } from "../scripts/codex-user-config.mjs";
+import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { createManagedProviderProfile } from "../runtime/model-provider-profile.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 const compatibleUserConfigWriter: CodexUserConfigWriter = updateCodexUserConfig;
 void compatibleUserConfigWriter;
 
 describe("codexc agents script", () => {
+  it("does not treat an OpenCode-only profile as DeepSeek configuration", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-opencode-only-"));
+    const environment = { ...process.env, CODEX_HOME: codexHome };
+    try {
+      writeFileSync(
+        join(codexHome, "codex-connect-opencode-go.config.toml"),
+        'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(codexHome, "opencode-go.config.toml"),
+        stringify(createManagedProviderProfile(opencodeGoProviderDefinition, {
+          apiKey: "sk-test-secret",
+          catalogPath: join(codexHome, "deepseek.models.json"),
+        })),
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(codexHome, "deepseek.models.json"),
+        '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
+        { mode: 0o600 },
+      );
+
+      await expect(enableDeepseekRole(environment, {
+        updateConfig: vi.fn(),
+      })).rejects.toThrow("DeepSeek 切换模式未配置");
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
   it("routes managed role changes through one user config transaction", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-agents-transaction-"));
     const environment = { ...process.env, CODEX_HOME: codexHome };

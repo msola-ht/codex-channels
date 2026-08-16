@@ -1,7 +1,7 @@
 import { isAbsolute, join, resolve } from "node:path";
 
 import {
-  loadManagedProviderAppServer,
+  loadManagedProviderAppServers,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
 } from "./model-provider-runtime.mjs";
@@ -15,24 +15,23 @@ export function resolvePrimaryAppServerSocketPath(document, dataDir) {
 
 export function resolveAppServerRuntime(document, dataDir, environment = process.env) {
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
-  const managedProvider = loadManagedProviderAppServer(environment);
-  const managedSocketPath = managedProvider
-    ? providerAppServerSocketPath(primarySocketPath, managedProvider.provider)
-    : undefined;
+  const managedProviders = loadManagedProviderAppServers(environment);
+  const managedSocketPaths = managedProviders.map(({ provider }) =>
+    providerAppServerSocketPath(primarySocketPath, provider));
   const primaryProvider = loadPrimaryModelProvider(environment);
   const socketPaths = [
     primarySocketPath,
-    ...(managedSocketPath ? [managedSocketPath] : []),
+    ...managedSocketPaths,
   ];
   return {
     primarySocketPath,
     primaryProvider,
-    managedProvider,
-    managedSocketPath,
+    managedProviders,
+    managedSocketPaths,
     socketPaths,
     topology: {
       primaryProvider,
-      managedProvider: managedProvider?.provider,
+      managedProviders: managedProviders.map(({ provider }) => provider),
       socketPaths,
     },
   };

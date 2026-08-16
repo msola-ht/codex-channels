@@ -32,7 +32,7 @@ import {
 import {
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
-  validateConfiguredModelProvider,
+  validateConfiguredModelProviders,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   resolveProxyEnvironment,
@@ -356,18 +356,18 @@ if (document) {
 
   const socketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
   let appServerTopology;
-  let managedProvider;
+  let managedProviders = [];
   try {
-    const configuredProvider = validateConfiguredModelProvider(process.env);
-    if (configuredProvider) {
+    const configuredProviders = validateConfiguredModelProviders(process.env);
+    for (const configuredProvider of configuredProviders) {
       record(
-        "模型提供商配置",
+        `${configuredProvider.provider} 模型提供商配置`,
         true,
         `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
       );
     }
     const descriptor = resolveAppServerRuntime(document, dataDir, process.env);
-    managedProvider = descriptor.managedProvider;
+    managedProviders = descriptor.managedProviders;
     appServerTopology = descriptor.topology;
   } catch (error) {
     record("模型提供商配置", false, errorMessage(error));
@@ -376,12 +376,21 @@ if (document) {
     await checkAppServerSupervisor(socketPath, appServerTopology);
   }
   await checkAppServer("Codex App Server", socketPath);
-  if (managedProvider) {
-    await checkAppServer(
+  for (let index = 0; index < managedProviders.length; index += 1) {
+    const managedProvider = managedProviders[index];
+    await checkOptionalAppServer(
       `${managedProvider.provider} App Server`,
-      appServerTopology.socketPaths[1],
+      appServerTopology.socketPaths[index + 1],
     );
   }
+}
+
+async function checkOptionalAppServer(label, socketPath) {
+  if (!existsSync(socketPath)) {
+    record(label, true, "已配置；首次选择该 Provider 或恢复其会话时按需启动");
+    return;
+  }
+  await checkAppServer(label, socketPath);
 }
 
 async function checkAppServerSupervisor(socketPath, expectedTopology) {

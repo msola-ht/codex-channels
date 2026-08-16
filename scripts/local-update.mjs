@@ -312,11 +312,9 @@ export async function waitForCoreServiceTarget(
     let appServerReady = true;
     if (requiresAppServer) {
       const supervisor = await inspectSupervisor(descriptor.primarySocketPath);
-      const socketsHealthy = await Promise.all(
-        descriptor.socketPaths.map((socketPath) => socketHealthy(socketPath)),
-      );
+      const primarySocketHealthy = await socketHealthy(descriptor.primarySocketPath);
       appServerReady = sameAppServerTopology(supervisor, descriptor.topology)
-        && socketsHealthy.every(Boolean);
+        && primarySocketHealthy;
     }
     const gatewayReady = !requiresGateway || await gatewayHealthy(configPath);
     const healthy = appServerReady && gatewayReady;

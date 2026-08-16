@@ -4,11 +4,12 @@ import { isAbsolute } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import { ensureAppServerProvider } from "../runtime/app-server-supervisor.mjs";
 import {
-  loadManagedModelProvider,
+  loadManagedModelProviders,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
-import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   assertSynchronousChildSuccess,
@@ -20,7 +21,7 @@ import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 try {
-  runRemoteCli();
+  await runRemoteCli();
 } catch (error) {
   if (error instanceof ReportedChildExitError) {
     writeCliMessage("failure", error.message);
@@ -31,7 +32,7 @@ try {
   }
 }
 
-function runRemoteCli() {
+async function runRemoteCli() {
   const runtime = runtimeConfig();
   const document = readGatewayConfig(runtime.configPath);
   const codex = table(document.codex);
@@ -49,12 +50,18 @@ function runRemoteCli() {
   }
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
   let socketPath = primarySocketPath;
-  if (selectedProfile === deepseekProviderDefinition.profileName) {
-    const managedProvider = loadManagedModelProvider();
+  const selectedDefinition = managedModelProviderDefinitions.find(
+    ({ profileName }) => profileName === selectedProfile,
+  );
+  if (selectedDefinition) {
+    const managedProvider = loadManagedModelProviders().find(
+      ({ provider }) => provider === selectedDefinition.id,
+    );
     if (!managedProvider) {
-      throw new Error("DeepSeek 切换模式尚未配置，请先运行 codexc setup");
+      throw new Error(`${selectedDefinition.displayName} 尚未配置，请先运行 codexc setup`);
     }
     socketPath = providerAppServerSocketPath(primarySocketPath, managedProvider.provider);
+    await ensureAppServerProvider(primarySocketPath, managedProvider.provider);
   }
   const configuredBinary = stringValue(codex.binary) || "codex";
   const codexBinary = isAbsolute(configuredBinary)
@@ -67,8 +74,8 @@ function runRemoteCli() {
       `unix://${socketPath}`,
       "-C",
       workdir,
-      ...(selectedProfile === deepseekProviderDefinition.profileName
-        ? ["--profile", deepseekProviderDefinition.profileName]
+      ...(selectedDefinition
+        ? ["--profile", selectedDefinition.profileName]
         : []),
       ...passthrough,
     ],

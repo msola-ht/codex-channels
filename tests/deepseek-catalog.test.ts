@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
-import { loadDeepseekModelOptions } from "../src/codex-client/deepseek-catalog.js";
+import { loadManagedModelOptions } from "../src/codex-client/model-provider-catalog.js";
 
 describe("DeepSeek model catalog", () => {
   it("keeps every selectable provider model in the reviewed API catalog baseline", () => {
@@ -40,7 +40,7 @@ describe("DeepSeek model catalog", () => {
       ],
     }));
 
-    const models = loadDeepseekModelOptions(
+    const models = loadManagedModelOptions(
       codexHome,
       true,
       deepseekProviderDefinition,
@@ -56,7 +56,7 @@ describe("DeepSeek model catalog", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-disabled-"));
     writeFileSync(join(codexHome, "deepseek.models.json"), "not-json");
 
-    expect(loadDeepseekModelOptions(
+    expect(loadManagedModelOptions(
       codexHome,
       false,
       deepseekProviderDefinition,

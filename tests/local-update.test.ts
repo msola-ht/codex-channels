@@ -363,9 +363,9 @@ describe("local update", () => {
       inspectSupervisor: () => ({
         pid: process.pid,
         primaryProvider: descriptor.topology.primaryProvider,
-        managedProvider: descriptor.topology.managedProvider ?? null,
+        managedProviders: descriptor.topology.managedProviders,
         socketPaths: descriptor.topology.socketPaths,
-        version: 1,
+        version: 2,
       }),
       intervalMs: 100,
       now: () => nowMs,

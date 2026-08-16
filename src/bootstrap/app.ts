@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { Logger } from "pino";
 
 import { codexHomePath } from "../../runtime/codex-home.mjs";
+import { ensureAppServerProvider } from "../../runtime/app-server-supervisor.mjs";
 import { effectiveCodexBinary } from "../../runtime/executable.mjs";
 import {
   checkProjectRulesAtRoot,
@@ -11,9 +12,11 @@ import {
 } from "../../runtime/project-rules.mjs";
 import {
   deepseekProviderDefinition,
+  managedModelProviderDefinitions,
+  opencodeGoProviderDefinition,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
-  loadManagedModelProvider,
+  loadManagedModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
@@ -27,7 +30,7 @@ import {
   ProviderRoutingClient,
   gatewayVersion,
   handleApprovalServerRequest,
-  loadDeepseekModelOptions,
+  loadManagedModelOptions,
   JsonRpcClient,
   supportedCodexCliVersion,
   toConversationInputEvent,
@@ -98,6 +101,7 @@ import {
   DeepseekModelPricingResolver,
   ProviderModelPricingResolver,
 } from "./deepseek-model-pricing.js";
+import { OpenCodeGoModelPricingResolver } from "./opencode-go-model-pricing.js";
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
@@ -162,13 +166,17 @@ export class GatewayApplication {
       ? undefined
       : new TomlWorkspacePermissionWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
-    const managedProvider = loadManagedModelProvider();
-    const supplementaryModels = loadDeepseekModelOptions(
-      codexHomePath(process.env),
-      primaryProvider === deepseekProviderDefinition.id
-        || managedProvider?.provider === deepseekProviderDefinition.id,
-      deepseekProviderDefinition,
-    );
+    const managedProviders = loadManagedModelProviders();
+    const configuredProviders = new Set<string>([
+      primaryProvider,
+      ...managedProviders.map(({ provider }) => provider),
+    ]);
+    const supplementaryModels = managedModelProviderDefinitions.flatMap((definition) =>
+      loadManagedModelOptions(
+        codexHomePath(process.env),
+        configuredProviders.has(definition.id),
+        definition,
+      ));
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
     const clients = new Map<string, CodexAppServerClient>();
@@ -179,7 +187,7 @@ export class GatewayApplication {
       ...(config.codexModel ? { model: config.codexModel } : {}),
       },
     ));
-    if (managedProvider) {
+    for (const managedProvider of managedProviders) {
       const providerTransport = new UnixWebSocketTransport(
         providerAppServerSocketPath(config.codexSocketPath, managedProvider.provider),
       );
@@ -190,7 +198,11 @@ export class GatewayApplication {
         },
       ));
     }
-    this.codex = new ProviderRoutingClient(primaryProvider, clients);
+    this.codex = new ProviderRoutingClient(
+      primaryProvider,
+      clients,
+      async (provider) => ensureAppServerProvider(config.codexSocketPath, provider),
+    );
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
@@ -258,19 +270,22 @@ export class GatewayApplication {
       logger,
     });
     this.pricingResolver = new ProviderModelPricingResolver(
-      new DeepseekModelPricingResolver({
-        exchangeRate: () => this.exchangeRate.resolve(),
-      }),
       this.modelPricing,
+      new Map<string, ModelPricingResolver>([
+        [deepseekProviderDefinition.id, new DeepseekModelPricingResolver({
+          exchangeRate: () => this.exchangeRate.resolve(),
+        })],
+        [opencodeGoProviderDefinition.id, new OpenCodeGoModelPricingResolver()],
+      ]),
     );
     this.modelPricingNeedsExchangeRate = primaryProvider === deepseekProviderDefinition.id
-      || managedProvider?.provider === deepseekProviderDefinition.id
+      || managedProviders.some(({ provider }) => provider === deepseekProviderDefinition.id)
       || (config.vision.mode === "responses_api"
         && config.vision.provider === deepseekProviderDefinition.id);
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
         primaryProvider,
-        ...(managedProvider ? [managedProvider.provider] : []),
+        ...managedProviders.map(({ provider }) => provider),
       ],
       socketPath: (provider) =>
         providerMetricsSocketPath(config.codexSocketPath, provider),
@@ -345,6 +360,7 @@ export class GatewayApplication {
       this.router,
       config.codexModel,
       supplementaryModels,
+      primaryProvider,
     );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,

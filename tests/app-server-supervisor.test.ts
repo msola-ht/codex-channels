@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AppServerSupervisorOwner,
   appServerSupervisorSocketPath,
+  ensureAppServerProvider,
+  inspectAppServerSupervisor,
 } from "../runtime/app-server-supervisor.mjs";
 
 const temporaryDirectories: string[] = [];
@@ -20,12 +22,53 @@ afterEach(() => {
 });
 
 describe("App Server supervisor", () => {
+  it("refuses an unsafe supervisor path before requesting a Provider", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-unsafe-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
+    writeFileSync(appServerSupervisorSocketPath(primarySocketPath), "not a socket", {
+      mode: 0o600,
+    });
+
+    await expect(ensureAppServerProvider(primarySocketPath, "opencode-go"))
+      .rejects.toThrow("监管 Socket 路径不安全");
+  });
+
+  it("starts a configured Provider through the private supervisor request", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-provider-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
+    const ensured: string[] = [];
+    const owner = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["deepseek", "opencode-go"],
+      socketPaths: [
+        primarySocketPath,
+        join(runtimeDir, "codex-app-server-deepseek.sock"),
+        join(runtimeDir, "codex-app-server-opencode-go.sock"),
+      ],
+    }, {
+      ensureProvider: async (provider) => { ensured.push(provider); },
+    });
+    await owner.start();
+
+    await ensureAppServerProvider(primarySocketPath, "opencode-go");
+
+    expect(ensured).toEqual(["opencode-go"]);
+    await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
+      version: 2,
+      managedProviders: ["deepseek", "opencode-go"],
+    });
+    await owner.close();
+  });
+
   it("closes promptly while a local client keeps its connection open", async () => {
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-close-"));
     temporaryDirectories.push(runtimeDir);
     const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
     const owner = new AppServerSupervisorOwner(primarySocketPath, {
       primaryProvider: "openai",
+      managedProviders: [],
       socketPaths: [primarySocketPath],
     });
     await owner.start();

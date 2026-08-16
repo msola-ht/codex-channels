@@ -13,29 +13,47 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { parse } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
-import { deepseekProviderDefinition } from "./model-provider-definitions.mjs";
+import {
+  deepseekProviderDefinition,
+  managedModelProviderDefinitions,
+} from "./model-provider-definitions.mjs";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
-const managedMarkerName = deepseekProviderDefinition.managedMarkerFileName;
 const deepseekApiKeyEnvironmentKey = deepseekProviderDefinition.apiKeyEnvironmentKey;
 
-const deepseekProvider = Object.freeze({
-  id: deepseekProviderDefinition.id,
-  profileName: deepseekProviderDefinition.profileFileName,
-  baseUrl: deepseekProviderDefinition.baseUrl,
-  wireApi: deepseekProviderDefinition.wireApi,
-});
+const providerDescriptors = new Map(managedModelProviderDefinitions.map((definition) => [
+  definition.id,
+  Object.freeze({
+    definition,
+    id: definition.id,
+    profileName: definition.profileFileName,
+    baseUrl: definition.baseUrl,
+    wireApi: definition.wireApi,
+  }),
+]));
+const deepseekProvider = providerDescriptors.get(deepseekProviderDefinition.id);
 
 export function loadManagedModelProvider(environment = process.env) {
-  const profile = loadManagedProviderProfile(environment);
-  return profile === undefined ? undefined : { provider: profile.provider };
+  return loadManagedModelProviders(environment)[0];
+}
+
+export function loadManagedModelProviders(environment = process.env) {
+  return loadManagedProviderProfiles(environment)
+    .map((profile) => ({ provider: profile.provider }));
 }
 
 export function loadManagedProviderAppServer(environment = process.env) {
-  const profile = loadManagedProviderProfile(environment, { requireLaunchConfig: true });
-  if (profile === undefined) return undefined;
+  return loadManagedProviderAppServers(environment)[0];
+}
+
+export function loadManagedProviderAppServers(environment = process.env) {
+  return loadManagedProviderProfiles(environment, { requireLaunchConfig: true })
+    .map(providerAppServerRuntime);
+}
+
+function providerAppServerRuntime(profile) {
   return {
     provider: profile.provider,
     arguments: [
@@ -47,8 +65,11 @@ export function loadManagedProviderAppServer(environment = process.env) {
       "-c", `model_providers.${profile.provider}.name=${JSON.stringify(profile.name)}`,
       "-c", `model_providers.${profile.provider}.base_url=${JSON.stringify(profile.baseUrl)}`,
       "-c", `model_providers.${profile.provider}.wire_api=${JSON.stringify(profile.wireApi)}`,
-      "-c", `model_providers.${profile.provider}.env_key=${JSON.stringify(deepseekApiKeyEnvironmentKey)}`,
+      "-c", `model_providers.${profile.provider}.env_key=${JSON.stringify(profile.apiKeyEnvironmentKey)}`,
       "-c", `model_providers.${profile.provider}.requires_openai_auth=false`,
+      ...(profile.supportsWebsockets === undefined
+        ? []
+        : ["-c", `model_providers.${profile.provider}.supports_websockets=${profile.supportsWebsockets}`]),
       ...(profile.autoCompactLimit === undefined
         ? []
         : [
@@ -59,20 +80,37 @@ export function loadManagedProviderAppServer(environment = process.env) {
           ]),
     ],
     childEnvironment: {
-      [deepseekApiKeyEnvironmentKey]: profile.apiKey,
+      [profile.apiKeyEnvironmentKey]: profile.apiKey,
     },
   };
 }
 
 export function validateConfiguredModelProvider(environment = process.env) {
-  const configured = loadConfiguredProviderProfile(environment);
-  return configured === undefined
-    ? undefined
-    : { provider: configured.provider, mode: configured.mode };
+  return validateConfiguredModelProviders(environment)[0];
+}
+
+export function validateConfiguredModelProviders(environment = process.env) {
+  const codexHome = codexHomePath(environment);
+  return managedModelProviderDefinitions.flatMap((definition) => {
+    const marker = readManagedMarker(codexHome, definition);
+    if (!marker) return [];
+    if (definition.id === deepseekProviderDefinition.id && marker.mode === "exclusive") {
+      const configured = loadConfiguredProviderProfile(environment);
+      return [{ provider: configured.provider, mode: configured.mode }];
+    }
+    if (marker.mode === "exclusive") {
+      throw new Error(`${definition.displayName} 不支持固定模式`);
+    }
+    loadManagedProviderProfileFor(environment, definition, { requireLaunchConfig: true });
+    return [{ provider: definition.id, mode: "switching" }];
+  });
 }
 
 export function loadPrimaryModelProvider(environment = process.env) {
-  const marker = readManagedMarker(codexHomePath(environment));
+  const marker = readManagedMarker(
+    codexHomePath(environment),
+    deepseekProviderDefinition,
+  );
   return marker?.mode === "exclusive" ? marker.provider : "openai";
 }
 
@@ -161,7 +199,10 @@ export function withOpenAiBaseUrl(argumentsList, baseUrl) {
 }
 
 export function loadDeepseekAccountCredential(environment = process.env) {
-  const managed = loadManagedProviderProfile(environment);
+  const managed = loadManagedProviderProfileFor(
+    environment,
+    deepseekProviderDefinition,
+  );
   if (managed !== undefined) return managed.apiKey;
   const configPath = join(codexHomePath(environment), "config.toml");
   return readProviderProfile(configPath, deepseekProvider, { requireSelection: false }).apiKey;
@@ -175,7 +216,11 @@ export function writeManagedModelProviderRoleConfig(
   environment = process.env,
   { baseUrl } = {},
 ) {
-  const profile = loadManagedProviderProfile(environment, { requireLaunchConfig: true });
+  const profile = loadManagedProviderProfileFor(
+    environment,
+    deepseekProviderDefinition,
+    { requireLaunchConfig: true },
+  );
   if (profile === undefined) {
     throw new Error("DeepSeek 切换模式配置不存在，无法生成子代理角色");
   }
@@ -225,23 +270,43 @@ export function removeManagedModelProviderRoleConfig(environment = process.env) 
   }
 }
 
-function loadManagedProviderProfile(environment, { requireLaunchConfig = false } = {}) {
+function loadManagedProviderProfileFor(
+  environment,
+  definition,
+  { requireLaunchConfig = false } = {},
+) {
   const codexHome = codexHomePath(environment);
-  const marker = readManagedMarker(codexHome);
+  const marker = readManagedMarker(codexHome, definition);
   if (!marker || marker.mode === "exclusive") return undefined;
-  const descriptor = deepseekProvider;
+  const descriptor = providerDescriptors.get(definition.id);
   const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
     ...(requireLaunchConfig
-      ? { expectedCatalogPath: join(codexHome, deepseekProviderDefinition.catalogFileName) }
+      ? { expectedCatalogPath: join(codexHome, definition.catalogFileName) }
       : {}),
   });
-  if (requireLaunchConfig) validateModelCatalog(profile.catalogPath);
+  if (requireLaunchConfig) validateModelCatalog(profile.catalogPath, definition);
   return profile;
+}
+
+function loadManagedProviderProfiles(environment, { requireLaunchConfig = false } = {}) {
+  const codexHome = codexHomePath(environment);
+  return managedModelProviderDefinitions.flatMap((definition) => {
+    const marker = readManagedMarker(codexHome, definition);
+    if (!marker || marker.mode === "exclusive") return [];
+    const descriptor = providerDescriptors.get(definition.id);
+    const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
+      ...(requireLaunchConfig
+        ? { expectedCatalogPath: join(codexHome, definition.catalogFileName) }
+        : {}),
+    });
+    if (requireLaunchConfig) validateModelCatalog(profile.catalogPath, definition);
+    return [profile];
+  });
 }
 
 function loadConfiguredProviderProfile(environment) {
   const codexHome = codexHomePath(environment);
-  const marker = readManagedMarker(codexHome);
+  const marker = readManagedMarker(codexHome, deepseekProviderDefinition);
   if (!marker) return undefined;
   const descriptor = deepseekProvider;
   const profilePath = marker.mode === "exclusive"
@@ -250,7 +315,7 @@ function loadConfiguredProviderProfile(environment) {
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath: join(codexHome, deepseekProviderDefinition.catalogFileName),
   });
-  validateModelCatalog(profile.catalogPath);
+  validateModelCatalog(profile.catalogPath, deepseekProviderDefinition);
   return { ...profile, mode: marker.mode };
 }
 
@@ -271,20 +336,21 @@ function readProviderProfile(
   if (
     requireSelection
     && (
-      document.model !== deepseekProviderDefinition.defaultModel
+      !descriptor.definition.models.some(({ slug, available }) =>
+        available && slug === document.model)
       || document.model_provider !== descriptor.id
     )
   ) {
-    throw new Error("Codex DeepSeek Profile 未选择受支持模型");
+    throw new Error(`Codex ${descriptor.definition.displayName} Profile 未选择受支持模型`);
   }
   if (
     expectedCatalogPath !== undefined
     && (
-      document.model_reasoning_effort !== deepseekProviderDefinition.defaultReasoningEffort
+      document.model_reasoning_effort !== descriptor.definition.defaultReasoningEffort
       || document.model_catalog_json !== expectedCatalogPath
     )
   ) {
-    throw new Error("Codex DeepSeek Profile 模型目录或思考等级无效");
+    throw new Error(`Codex ${descriptor.definition.displayName} Profile 模型目录或思考等级无效`);
   }
   const provider = record(record(document.model_providers)[descriptor.id]);
   if (
@@ -292,8 +358,10 @@ function readProviderProfile(
     || provider.base_url !== descriptor.baseUrl
     || provider.wire_api !== descriptor.wireApi
     || provider.requires_openai_auth !== false
+    || (descriptor.definition.supportsWebsockets !== undefined
+      && provider.supports_websockets !== descriptor.definition.supportsWebsockets)
   ) {
-    throw new Error("Codex DeepSeek 提供商配置无效");
+    throw new Error(`Codex ${descriptor.definition.displayName} 提供商配置无效`);
   }
   const apiKey = provider.experimental_bearer_token;
   if (
@@ -302,7 +370,7 @@ function readProviderProfile(
     || apiKey.length > 4_096
     || /[\r\n]/u.test(apiKey)
   ) {
-    throw new Error("Codex DeepSeek API Key 缺失或无效");
+    throw new Error(`Codex ${descriptor.definition.displayName} API Key 缺失或无效`);
   }
   const autoCompactLimit = document.model_auto_compact_token_limit;
   if (
@@ -313,7 +381,7 @@ function readProviderProfile(
       || autoCompactLimit > 4_000_000_000
     )
   ) {
-    throw new Error("Codex DeepSeek 自动压缩阈值无效");
+    throw new Error(`Codex ${descriptor.definition.displayName} 自动压缩阈值无效`);
   }
   return {
     provider: descriptor.id,
@@ -323,6 +391,8 @@ function readProviderProfile(
     name: descriptor.id,
     baseUrl: descriptor.baseUrl,
     wireApi: descriptor.wireApi,
+    apiKeyEnvironmentKey: descriptor.definition.apiKeyEnvironmentKey,
+    supportsWebsockets: descriptor.definition.supportsWebsockets,
     apiKey,
     ...(autoCompactLimit === undefined
       ? {}
@@ -374,25 +444,25 @@ function readCodexConfigFile(path) {
   }
 }
 
-function validateModelCatalog(path) {
+function validateModelCatalog(path, definition) {
   let catalog;
   try {
     catalog = JSON.parse(readPrivateFile(path, maximumCatalogBytes));
   } catch {
-    throw new Error("Codex DeepSeek 模型目录无法安全读取");
+    throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
   if (
     !Array.isArray(catalog?.models)
     || !catalog.models.some(
-      (model) => record(model).slug === deepseekProviderDefinition.defaultModel,
+      (model) => record(model).slug === definition.defaultModel,
     )
   ) {
-    throw new Error("Codex DeepSeek 模型目录无效");
+    throw new Error(`Codex ${definition.displayName} 模型目录无效`);
   }
 }
 
-function readManagedMarker(codexHome) {
-  const markerPath = join(codexHome, managedMarkerName);
+function readManagedMarker(codexHome, definition) {
+  const markerPath = join(codexHome, definition.managedMarkerFileName);
   let marker;
   try {
     marker = record(parse(readPrivateFile(markerPath)));
@@ -404,7 +474,7 @@ function readManagedMarker(codexHome) {
   }
   if (
     marker.version !== 1
-    || marker.provider !== deepseekProviderDefinition.id
+    || marker.provider !== definition.id
     || ![undefined, "switching", "exclusive"].includes(marker.mode)
   ) {
     throw new Error("Codex Connect 模型 Provider 标记无效");

@@ -154,6 +154,14 @@ codexc service restart all
 子代理和跨 Provider 行为见 [`DeepSeek 使用说明`](docs/deepseek.md)；外部识图见
 [`图片识别代理`](docs/vision.md)。
 
+### OpenCode Go
+
+在 `codexc setup` 的“模型与提供商”中可配置独立 OpenCode Go Provider；当前开放
+`deepseek-v4-flash` 和 `deepseek-v4-pro`。它与 DeepSeek 官方配置、凭据和价格独立，首次选择模型
+或恢复对应会话时才按需启动隔离 App Server。聊天使用 `/model`，终端使用
+`codexc remote --profile opencode-go`。配置、协议范围和官方全模型价格维护见
+[`OpenCode Go 使用说明`](docs/opencode-go.md)。
+
 ## 日常使用
 
 ### 管理项目

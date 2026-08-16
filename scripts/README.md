@@ -44,7 +44,7 @@
   设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
   Gateway，用于重放修复中心历史数据。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
   备份后清理最旧请求记录，可选 `--vacuum` 立即回收 SQLite 文件空间。
-  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek）的全部请求
+  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、opencode-go）的全部请求
   行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
@@ -87,7 +87,7 @@
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
-  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、第三方 API 与图片识别。
+  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、OpenCode Go、第三方 API 与图片识别。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
@@ -145,6 +145,14 @@
   `runtime/deepseek-pricing-baseline.json` 比较后输出候选基线、结构化差异、来源哈希和失败报告；
   页面缺列、重复模型、时间重叠或结构无法确认时失败关闭，不在 Gateway 请求路径抓取网页。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
+- `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：配置或移除隔离的 OpenCode Go Profile 与管理
+  标记，复用受控 DeepSeek 模型目录但不复用凭据、Provider 身份或价格。
+- `semantic-html-table.mjs` / `semantic-html-table.d.mts`：为受控官方价格提案提供有界、无脚本的
+  语义化 HTML 表格解析，不进入 Gateway 运行路径。
+- `prepare-opencode-go-pricing-proposal.mjs` / `prepare-opencode-go-pricing-proposal.d.mts`：从
+  OpenCode Go 官方价格表与模型端点表交叉解析全部模型 ID、Token 单价、档位、套餐包含用量、
+  端点和 SDK 协议，
+  输出候选基线、结构化差异和失败现场。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
@@ -177,14 +185,15 @@
 ## 开发与协议
 
 - `dev-all.mjs`：开发模式下复用完整的现有 App Server 拓扑，或通过唯一的内部
-  `service-app-server` 入口启动主 App Server、已配置的隔离 Provider App Server 及对应统计代理，
+  `service-app-server` 入口立即启动主 App Server；已配置的隔离 Provider App Server 及对应统计代理
+  在首次选择模型、恢复 Thread 或使用对应 Remote TUI 时由监管入口按需启动，
   再启动 Gateway；只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
-  `codexc remote` 自有的 Workspace 与 DeepSeek Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
+  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  `--profile deepseek`，既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证；
+  受管 `--profile`（当前为 `deepseek` 与 `opencode-go`），既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。

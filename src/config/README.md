@@ -63,8 +63,10 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 重启 Gateway。`danger-full-access` 和 `never` 是显式放开的完全权限选项，仅应在明确可信的
 Workspace 上配置。
 
-模型统计代理由 App Server 服务按已启用 Provider 自动装配，不属于用户配置；其上游网络请求继续
-复用 `network` 与标准代理环境变量。
+模型统计代理由 App Server 服务自动装配：主 Provider 随服务启动，切换 Provider 在首次使用时
+按需启动，不属于用户配置；其上游网络请求继续复用 `network` 与标准代理环境变量。
+`codex.default_model` 只覆盖当前主 Provider 的渠道新会话默认模型；模型不在该 Provider 目录中时
+明确报错，不按同名模型回退到其他 Provider。
 
 `metrics.storage.retention_days` 与 `metrics.storage.max_rows` 控制独立请求指标库的自动清理，
 默认分别为 365 天和 1,000,000 行，允许范围为 1–3650 天、1,000–10,000,000 行；达到任一上限
