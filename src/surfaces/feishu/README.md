@@ -82,8 +82,10 @@ Application 的本地图片输入，同一 Thread 的
   完成裁剪与有界分流，不能在 SDK Reader 中等待业务或平台网络请求。
 - 已注册 `card.action.trigger` 的独立分流并严格裁剪动作；真实命令审批的一次批准已确认当前
   Gateway 长连接可以收到动作。动作必须匹配一次性令牌、Chat、消息、授权 Actor 和当前请求提供的
-  精确选项或表单字段，否则拒绝处理。表单回调只额外保留官方 `action.form_value` 中最多四个、
-  每项最多 1,000 字符的字符串字段。Plugin 列表只把已启用且可调用项变成受令牌约束的选择按钮，
+  精确选项或表单字段，否则拒绝处理。表单回调只额外保留官方 `action.form_value` 中最多六个、
+  每项最多 1,000 字符的字符串字段；命令中心与交互表单按钮名分别使用 `codexc_command_submit_`
+  和 `codexc_submit_` 前缀携带一次性令牌，兼容飞书在部分 SDK 版本丢弃按钮 value 的
+  `form_submit` 回调。Plugin 列表只把已启用且可调用项变成受令牌约束的选择按钮，
   选择后通过一次性表单收集任务，再交回统一 `/plugin` Application 边界。
 - 普通消息发送使用 `im.v1.message.create` 的 `chat_id + text/post/interactive` 窄能力；
   普通 Turn 输入的开始确认和首条最终正文使用官方 `im.v1.message.reply` 回复精确

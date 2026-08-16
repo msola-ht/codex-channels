@@ -232,32 +232,43 @@ export class FeishuCommandCenter {
     const token = action.value.codexc_command_token;
     const command = action.value.codexc_command;
     const input = action.value.codexc_command_input ?? "";
+    const isFormAction = action.formValues !== undefined;
     if (token === undefined && command === undefined) {
       return "ignored";
     }
+    this.prune();
+    const pending = token === undefined
+      ? undefined
+      : this.pending.get(token);
+    const resolvedCommand = command
+      ?? (isFormAction ? pending?.form?.action : undefined);
     if (
       this.closed
-      || action.tag !== "button"
+      || (action.tag !== "button" && action.tag !== "form_submit")
       || token === undefined
-      || command === undefined
+      || resolvedCommand === undefined
       || input.length > 256
-      || !isCommandCenterAction(command)
+      || !isCommandCenterAction(resolvedCommand)
     ) {
       return "invalid";
     }
-    this.prune();
-    const pending = this.pending.get(token);
-    const submittedInput = action.formValues === undefined
+    const submittedInput = !isFormAction
       ? input
-      : resolveFormInput(pending?.form, command, action.formValues);
+      : resolveFormInput(
+          pending?.form,
+          resolvedCommand,
+          action.formValues!,
+        );
     if (
       !pending
       || pending.messageId !== action.messageId
       || pending.target.conversationId !== action.chatId
       || pending.actorId !== action.actorOpenId
       || (
-        action.formValues === undefined
-          ? !pending.allowedSelections.has(selectionKey(command, input))
+        !isFormAction
+          ? !pending.allowedSelections.has(
+              selectionKey(resolvedCommand, input),
+            )
           : submittedInput === undefined
       )
       || !this.access.isAllowed({
@@ -269,12 +280,12 @@ export class FeishuCommandCenter {
     }
     if (
       pending.consumeOnUse
-      || directStateChangingActions.has(command)
+      || directStateChangingActions.has(resolvedCommand)
     ) {
       this.pending.delete(token);
     }
     void this.track(
-      (command === "help"
+      (resolvedCommand === "help"
         ? this.openCard(
             pending.target,
             pending.actorId,
@@ -282,7 +293,7 @@ export class FeishuCommandCenter {
           )
         : this.execute(
             pending.target,
-            command,
+            resolvedCommand,
             pending.actorId,
             submittedInput!,
           ).then((response) =>
@@ -304,7 +315,7 @@ export class FeishuCommandCenter {
             surface: pending.target.surface,
             accountId: pending.target.accountId,
             conversationId: pending.target.conversationId,
-            action: command,
+            action: resolvedCommand,
             ...surfaceErrorMetadata(error),
           },
           "飞书命令中心动作执行失败",
@@ -482,7 +493,7 @@ function renderFeishuCommandFormCard(
                 tag: "plain_text",
                 content: "确认",
               },
-              name: "codexc_command_submit",
+              name: `codexc_command_submit_${token}`,
               form_action_type: "submit",
               value: {
                 codexc_command_token: token,
