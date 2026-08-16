@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import qrcode from "qrcode-terminal";
+import qrcode from "qrcode";
 
 import {
   readGatewayConfig,
@@ -167,7 +167,11 @@ function renderStatus(status, output) {
 }
 
 function renderTerminalQRCode(value, output) {
-  qrcode.generate(value, { small: true }, (rendered) => {
+  qrcode.toString(value, { type: "terminal", small: true }, (error, rendered) => {
+    if (error) {
+      output.write(`二维码渲染失败：${error.message}\n`);
+      return;
+    }
     output.write(`${rendered}\n`);
   });
 }
