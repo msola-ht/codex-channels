@@ -41,10 +41,10 @@ Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不
 独立退避，不通过重启 Gateway 恢复单个渠道。`stop()` 只用于 Gateway 关闭，必须可在部分启动后
 安全调用并保持幂等。首次启动和故障恢复期间的关键输出只保存在 Bootstrap 有界内存中，不写入
 StateStore；临时连接故障只能取消当前交互，不能把可恢复端口永久关闭。
-配置变更通知使用结构化动作区分热加载、自动重启、需要重装和加载失败；Surface 只渲染结果，
-不得接收原始配置值或异常详情。普通生命周期通知可通过可选的 `configurationChanged` 异步入队；
-`deliverConfigurationChange` 必须等待平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留
-尚未确认的持久化配置事件。
+配置变更通知使用结构化动作区分热加载、自动重启、需要重装、加载失败，以及第三方模型设置的
+等待重启、重启中、已生效和失败；Surface 只渲染结果，不得接收原始配置值或异常详情。普通
+生命周期通知可通过可选的 `configurationChanged` 异步入队；`deliverConfigurationChange` 必须等待
+平台 API 实际发送成功，失败时抛出错误，以便 Bootstrap 保留尚未确认的持久化配置事件。
 全局变更投递给所有 Surface；平台作用域变更只投递给匹配 Surface。进程重启和重装会影响所有
 Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台私有原因的生命周期通知。
 

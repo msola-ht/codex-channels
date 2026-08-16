@@ -69,6 +69,38 @@ export function formatSurfaceConfigurationChange(
         "Gateway 配置热加载失败",
         "当前有效配置继续运行。请检查配置后再次保存。",
       ].join("\n"));
+    case "provider-settings-scheduled":
+      return toStructuredMarkdownList([
+        "第三方模型设置已更新",
+        ...(change.providers && change.providers.length > 0
+          ? [`Provider：${change.providers.join("、")}`]
+          : []),
+        "等待当前任务完成后自动重启 App Server 生效。",
+      ].join("\n"));
+    case "provider-settings-restarting":
+      return toStructuredMarkdownList([
+        "第三方模型设置已更新",
+        ...(change.providers && change.providers.length > 0
+          ? [`Provider：${change.providers.join("、")}`]
+          : []),
+        "正在重启 App Server。",
+      ].join("\n"));
+    case "provider-settings-applied":
+      return toStructuredMarkdownList([
+        "第三方模型设置已生效",
+        ...(change.providers && change.providers.length > 0
+          ? [`Provider：${change.providers.join("、")}`]
+          : []),
+        "App Server 已重启。",
+      ].join("\n"));
+    case "provider-settings-failed":
+      return toStructuredMarkdownList([
+        "第三方模型设置更新后 App Server 重启失败",
+        ...(change.providers && change.providers.length > 0
+          ? [`Provider：${change.providers.join("、")}`]
+          : []),
+        "Gateway 将自动重试；请查看服务日志。",
+      ].join("\n"));
   }
 }
 
@@ -105,6 +137,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "observability.log-level": "日志级别",
     "workspace.default": "默认 Workspace",
     "workspace.registry": "Workspace",
+    "provider.settings": "第三方模型设置",
     "surface.telegram.enabled": "Telegram 启用状态",
     "surface.telegram.token": "Telegram Bot Token",
     "surface.telegram.proxy": "Telegram 代理",

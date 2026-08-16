@@ -7,9 +7,18 @@ import type { OutputEvent, SurfaceId } from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
 
 export interface SurfaceConfigurationChange {
-  action: "reloaded" | "restarting" | "reinstall-required" | "reload-failed";
+  action:
+    | "reloaded"
+    | "restarting"
+    | "reinstall-required"
+    | "reload-failed"
+    | "provider-settings-scheduled"
+    | "provider-settings-restarting"
+    | "provider-settings-applied"
+    | "provider-settings-failed";
   changes: readonly ConfigChange[];
   addedWorkspaces: readonly Workspace[];
+  providers?: readonly string[];
 }
 
 export interface SurfaceOutputPort {

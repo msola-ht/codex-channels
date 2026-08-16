@@ -182,6 +182,10 @@ export class ConversationCore {
     return this.activeByThread.get(threadId);
   }
 
+  hasActiveTurns(): boolean {
+    return this.activeByThread.size > 0;
+  }
+
   tokenUsage(threadId: string): ThreadTokenUsage | undefined {
     return this.usageByThread.get(threadId);
   }

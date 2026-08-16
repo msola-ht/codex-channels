@@ -24,7 +24,8 @@ codexc service restart all
 → OpenCode Go”，再按模型设置默认思考等级和自动压缩百分比；每个模型按自己的上下文窗口计算
 阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；目录更新后的压缩阈值按原
-百分比和新上下文窗口重新计算。修改后需重启 App Server。
+百分比和新上下文窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
+时自动重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
 
 聊天中使用 `/model` 选择带“OpenCode Go”前缀的模型。终端共享会话使用：
 

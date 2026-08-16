@@ -17,7 +17,8 @@ export type GlobalConfigChangeCode =
   | "metrics.storage"
   | "observability.log-level"
   | "workspace.default"
-  | "workspace.registry";
+  | "workspace.registry"
+  | "provider.settings";
 
 export type TelegramConfigChangeCode =
   | "surface.telegram.enabled"
