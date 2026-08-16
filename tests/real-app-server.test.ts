@@ -343,7 +343,7 @@ contractSuite("real supervised App Server service", () => {
       ].join("\n"),
       { mode: 0o600 },
     );
-    const catalogPath = join(codexHome, "sf-deepseek.models.json");
+    const catalogPath = join(codexHome, "sf-opencode-go.models.json");
     const validCatalog = `${JSON.stringify({
       models: [{
         slug: "deepseek-v4-flash",
@@ -369,9 +369,22 @@ contractSuite("real supervised App Server service", () => {
         experimental_supported_tools: [],
       }],
     })}\n`;
+    // 能通过 Gateway 启动校验、但缺少 codex 要求的 display_name，
+    // 用于验证首次按需启动失败时服务仍然存活。
+    const invalidForCodexCatalog = `${JSON.stringify({
+      models: [{
+        slug: "deepseek-v4-flash",
+        context_window: 200_000,
+        default_reasoning_level: "high",
+        supported_reasoning_levels: [{
+          effort: "high",
+          description: "OpenCode Go contract fixture",
+        }],
+      }],
+    })}\n`;
     writeFileSync(
       catalogPath,
-      `${JSON.stringify({ models: [{ slug: "deepseek-v4-flash" }] })}\n`,
+      invalidForCodexCatalog,
       { mode: 0o600 },
     );
     writeFileSync(
@@ -384,7 +397,6 @@ contractSuite("real supervised App Server service", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "opencode-go"',
-        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(catalogPath)}`,
         "[model_providers.opencode-go]",
         'name = "opencode-go"',

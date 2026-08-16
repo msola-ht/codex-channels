@@ -85,6 +85,9 @@ HTML 和微信结构化字段渲染。
 `/resume` 恢复结果会显示该 Thread 的会话模型和 Provider；`/new` 与 Workspace 切换结果会显示
 下一条普通消息使用的模型和 Provider；`/model` 产生待生效选择时也使用“下一条消息模型”明确
 区分当前 Thread 设置。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
+按需运行的受管 Provider（DeepSeek、OpenCode Go）在首次选择对应模型、恢复其 Thread 或使用对应
+Remote TUI 之前尚未启动，其历史 Thread 不会出现在 `/resume` 会话列表中；对应 Provider 启动后
+即可正常列出和恢复。
 
 `/mcp login` 在当前会话已绑定 Thread 时返回安全授权地址；浏览器流程结束后，Gateway 只把带有
 该 Thread 的官方 OAuth 完成通知显示为“MCP OAuth”成功或失败状态，无法关联 Thread 的通知不向
