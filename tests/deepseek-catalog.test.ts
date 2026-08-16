@@ -33,7 +33,7 @@ describe("DeepSeek model catalog", () => {
   it("makes the official Flash and Pro models selectable", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-"));
     mkdirSync(codexHome, { recursive: true });
-    writeFileSync(join(codexHome, "deepseek.models.json"), JSON.stringify({
+    writeFileSync(join(codexHome, "sf-deepseek.models.json"), JSON.stringify({
       models: [
         model("deepseek-v4-flash", "DeepSeek-V4-Flash"),
         model("deepseek-v4-pro", "DeepSeek-V4-Pro"),
@@ -54,7 +54,7 @@ describe("DeepSeek model catalog", () => {
 
   it("ignores a leftover catalog when DeepSeek is not configured", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-disabled-"));
-    writeFileSync(join(codexHome, "deepseek.models.json"), "not-json");
+    writeFileSync(join(codexHome, "sf-deepseek.models.json"), "not-json");
 
     expect(loadManagedModelOptions(
       codexHome,

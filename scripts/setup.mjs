@@ -12,6 +12,7 @@ import { runApiProviderSetup } from "./api-provider-setup.mjs";
 import { runSkillSetup } from "./skill-setup.mjs";
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 import { runOpenCodeGoSetup } from "./opencode-go-setup.mjs";
+import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -26,6 +27,7 @@ export async function runSetup({
   skillSetup = runSkillSetup,
   codexDefaultsSetup = runCodexDefaultsSetup,
   openCodeGoSetup = runOpenCodeGoSetup,
+  modelProviderDefaultSetup = runModelProviderDefaultSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -82,6 +84,7 @@ export async function runSetup({
           visionSetup,
           codexDefaultsSetup,
           openCodeGoSetup,
+          modelProviderDefaultSetup,
         });
         if (isBackResult(result)) continue;
         return result;
@@ -110,6 +113,7 @@ async function runModelSetup({
   visionSetup,
   codexDefaultsSetup,
   openCodeGoSetup,
+  modelProviderDefaultSetup,
 }) {
   const module = await prompts.select({
     message: "选择模型与提供商设置",
@@ -122,6 +126,11 @@ async function runModelSetup({
       },
       { value: "deepseek", label: "DeepSeek", hint: "安装、切换或恢复模型提供商" },
       { value: "opencode-go", label: "OpenCode Go", hint: "安装或移除独立 Go Provider" },
+      {
+        value: "provider_default",
+        label: "第三方默认模型",
+        hint: "按 Provider 设置新会话使用的默认模型",
+      },
       {
         value: "api_provider",
         label: "第三方 API",
@@ -140,6 +149,9 @@ async function runModelSetup({
   }
   if (module === "opencode-go") {
     return openCodeGoSetup({ input, output, prompts, allowBack: true });
+  }
+  if (module === "provider_default") {
+    return modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
   }
   if (module === "api_provider") {
     return apiProviderSetup({ input, output, prompts });

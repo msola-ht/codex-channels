@@ -142,7 +142,8 @@ plugin_api = true
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型与提供商”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式
-或恢复原配置。两种模式都会启用共享第三方子代理 `agents.external`；配置后运行：
+或恢复原配置；选择“第三方默认模型”可按 Provider 设置新会话默认使用 Flash 或 Pro。两种模式都会
+启用共享第三方子代理 `agents.external`；配置后运行：
 
 ```bash
 codexc service restart all
@@ -159,7 +160,8 @@ codexc service restart all
 在 `codexc setup` 的“模型与提供商”中可配置独立 OpenCode Go Provider；当前开放
 `deepseek-v4-flash` 和 `deepseek-v4-pro`，支持保留 OpenAI 的切换模式和仅 OpenCode Go 固定模式。
 它与 DeepSeek 官方配置、凭据和价格独立，首次选择模型或恢复对应会话时才按需启动隔离 App Server；
-也可作为共享 `agents.external` 子代理。聊天使用 `/model`，终端使用
+也可作为共享 `agents.external` 子代理。默认模型同样在“第三方默认模型”中独立设置；聊天使用
+`/model`，终端使用
 `codexc remote --profile opencode-go`。配置、协议范围和官方全模型价格维护见
 [`OpenCode Go 使用说明`](docs/opencode-go.md)。
 
@@ -188,7 +190,7 @@ codexc remote resume
 codexc remote --profile deepseek resume
 ```
 
-`codexc remote` 连接 Gateway 使用的 App Server。直接运行 `codex` 或 `codex --profile deepseek`
+`codexc remote` 连接 Gateway 使用的 App Server。直接运行 `codex` 或 `codex --profile sf-deepseek`
 会启动独立 TUI，不共享 Gateway Thread。
 
 ### 查看指标 WebUI
@@ -310,7 +312,8 @@ codexc doctor
 ```
 
 日常升级统一使用 `codexc update`。Git 源码安装会更新官方 `main` 并刷新 npm 全局命令，后台服务
-已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。该命令必须从本机终端执行。详细流程和失败处理见
+已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。旧版第三方 Provider 文件会同时整理为
+统一的 `sf-` 前缀。该命令必须从本机终端执行。详细流程和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 
 卸载 Git 源码、对应 npm 全局命令和旧 Shell PATH 配置，并保留用户数据：

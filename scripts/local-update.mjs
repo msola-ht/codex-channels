@@ -50,6 +50,7 @@ import {
   validateStateDatabaseStructure,
 } from "./upgrade-state.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
+import { migrateManagedModelProviderFiles } from "./model-provider-file-layout.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
@@ -137,6 +138,8 @@ export async function updateLocalInstallation(environment = process.env, options
   let databases;
   let updateError;
   try {
+    (options.updateProviderFiles
+      ?? (() => migrateManagedModelProviderFiles(environment)))();
     config = (options.updateConfig
       ?? (() => updateGatewayConfiguration(environment)))();
     databases = (options.updateDatabases
@@ -467,6 +470,13 @@ if (
           console.log(`更新前备份：${result.backupPath}`);
         } else {
           writeCliMessage("note", "config.toml 已兼容，无需更新。");
+        }
+        return result;
+      },
+      updateProviderFiles: () => {
+        const result = migrateManagedModelProviderFiles(process.env);
+        if (result.changed) {
+          writeCliMessage("success", `第三方 Provider 文件已统一为 sf- 前缀（${result.moved.length} 项）。`);
         }
         return result;
       },

@@ -30,7 +30,7 @@ describe("OpenCode Go setup", () => {
       });
 
       expect(result).toMatchObject({ action: "configured", mode });
-      const target = mode === "switching" ? "opencode-go.config.toml" : "config.toml";
+      const target = mode === "switching" ? "sf-opencode-go.config.toml" : "config.toml";
       const config = parse(readFileSync(join(codexHome, target), "utf8"));
       expect(config).toMatchObject({
         model: "deepseek-v4-flash",
@@ -46,7 +46,7 @@ describe("OpenCode Go setup", () => {
         },
       });
       expect(parse(readFileSync(
-        join(codexHome, "codex-connect-opencode-go.config.toml"),
+        join(codexHome, "sf-opencode-go.managed.toml"),
         "utf8",
       ))).toEqual({ version: 1, provider: "opencode-go", mode });
       expect(configureRole).toHaveBeenCalledWith(
@@ -55,7 +55,7 @@ describe("OpenCode Go setup", () => {
         expect.objectContaining({ CODEX_HOME: codexHome }),
       );
       if (mode === "exclusive") {
-        expect(existsSync(join(codexHome, "opencode-go.config.toml"))).toBe(false);
+        expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
       }
     },
   );
@@ -81,7 +81,7 @@ describe("OpenCode Go setup", () => {
     expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8"))).toEqual({
       custom: true,
     });
-    expect(parse(readFileSync(join(codexHome, "opencode-go.config.toml"), "utf8")))
+    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
       .toMatchObject({ model_provider: "opencode-go" });
   });
 
@@ -106,14 +106,14 @@ describe("OpenCode Go setup", () => {
 
     expect(result).toMatchObject({ action: "restored" });
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, "codex-connect-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, "deepseek.models.json"))).toBe(true);
+    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go.managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-deepseek.models.json"))).toBe(true);
   });
 
   it("refuses to overwrite an unmanaged OpenCode Go Profile", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-unmanaged-"));
-    const profilePath = join(codexHome, "opencode-go.config.toml");
+    const profilePath = join(codexHome, "sf-opencode-go.config.toml");
     writeFileSync(profilePath, 'model = "user-managed"\n', { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
@@ -138,8 +138,8 @@ describe("OpenCode Go setup", () => {
     })).rejects.toThrow("config conflict");
 
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, "codex-connect-opencode-go.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go.managed.toml"))).toBe(false);
   });
 });
 

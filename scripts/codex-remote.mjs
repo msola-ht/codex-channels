@@ -75,7 +75,7 @@ async function runRemoteCli() {
       "-C",
       workdir,
       ...(selectedDefinition
-        ? ["--profile", selectedDefinition.profileName]
+        ? ["--profile", selectedDefinition.codexProfileName]
         : []),
       ...passthrough,
     ],

@@ -14,11 +14,11 @@ DeepSeek 配置写入 `~/.codex`，不写入 Gateway 的 `~/.codex-connect/confi
 
 - OpenAI 继续作为原生 Codex 默认提供商，`~/.codex/config.toml` 的配置内容保持不变。
 - DeepSeek 的模型、Provider 和 API Key 保存在权限为 `0600` 的
-  `~/.codex/deepseek.config.toml`。
+  `~/.codex/sf-deepseek.config.toml`。
 - 聊天渠道使用 `/model` 为当前会话选择模型。
 - `codexc remote` 连接 OpenAI App Server；`codexc remote --profile deepseek` 连接共享的
   DeepSeek App Server。
-- 直接运行 `codex` 或 `codex --profile deepseek` 会启动独立 TUI，不共享 Gateway Thread。
+- 直接运行 `codex` 或 `codex --profile sf-deepseek` 会启动独立 TUI，不共享 Gateway Thread。
 
 ### 仅 DeepSeek 固定模式
 
@@ -40,10 +40,10 @@ DeepSeek Provider。
 
 | 文件 | 用途 |
 | --- | --- |
-| `~/.codex/deepseek.config.toml` | 切换模式的 DeepSeek 模型、Provider 和 API Key |
-| `~/.codex/deepseek.models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
-| `~/.codex/codex-connect-deepseek.config.toml` | 不含凭据的 Gateway 管理标记 |
-| `~/.codex/codex-connect-third-party-subagent.config.toml` | 不含凭据的共享第三方子代理配置 |
+| `~/.codex/sf-deepseek.config.toml` | 切换模式的 DeepSeek 模型、Provider 和 API Key |
+| `~/.codex/sf-deepseek.models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
+| `~/.codex/sf-deepseek.managed.toml` | 不含凭据的 Gateway 管理标记 |
+| `~/.codex/sf-agent.config.toml` | 不含凭据的共享第三方子代理配置 |
 | `~/.codex/backup-codex-connect-deepseek/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
 
 这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式；
@@ -51,9 +51,12 @@ DeepSeek Provider。
 的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
 OpenCode Go 也使用这份经审查的模型元数据；其管理标记存在时，恢复 DeepSeek 初始配置会保留共享
 目录和清单，不影响 OpenCode Go。
+从旧版文件布局升级时，运行 `codexc update` 会在核心服务停止期间把受管文件迁移为以上 `sf-`
+名称；新旧文件同时存在时不会猜测覆盖关系，而是明确报错。
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
-`/model` 选择，默认模型仍是 Flash。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
+`/model` 选择。初次配置默认使用 Flash；之后可在 `codexc setup` 的“模型与提供商 → 第三方默认模型”
+中设置 DeepSeek 新会话的默认模型。历史 Thread 仍保留自身模型。Setup 每次安装时下载最新官方目录，项目的每日目录提案工作流
 还会比较模型完整指纹与关键审查字段；发现变化时只创建 Draft PR，不会自动开放未知模型、发布或部署。
 
 当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此
@@ -75,7 +78,7 @@ DeepSeek（当前 `deepseek-v4-flash`、`deepseek-v4-pro` + Codex 0.147.0）支�
 - 计费与统计：搜索是模型请求的一部分，按 DeepSeek API 用量计费，计入请求次数、Token
   与费用统计；不消耗 OpenAI 额度。
 - 验证方式：直接让 DeepSeek 会话执行搜索任务，观察事件日志；或运行
-  `codex exec -p deepseek -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
+  `codex exec -p sf-deepseek -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
 - 失效边界：若 DeepSeek API 对该模型关闭搜索、上游工具名称或响应结构变化，或网关代理
   不再透传搜索工具，则搜索不可用；当前不支持把 DeepSeek 搜索路由到 OpenAI 官方搜索。
 
@@ -152,7 +155,7 @@ codexc agents status
 codexc agents disable
 ```
 
-角色文件 `~/.codex/codex-connect-third-party-subagent.config.toml` 只保存 Provider、模型和 `env_key`
+角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型和 `env_key`
 引用，不保存 API Key。App Server 服务启动时只为当前角色选择的 Provider 启动统计代理并刷新本机
 地址；未选作子代理且尚未用于会话的第三方 Provider 不增加进程。认证密钥只进入 App Server
 子进程环境。

@@ -319,7 +319,7 @@ contractSuite("real supervised App Server service", () => {
     const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
-    const roleConfigPath = join(codexHome, "codex-connect-third-party-subagent.config.toml");
+    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
     writeFileSync(
       roleConfigPath,
       [
@@ -343,7 +343,7 @@ contractSuite("real supervised App Server service", () => {
       ].join("\n"),
       { mode: 0o600 },
     );
-    const catalogPath = join(codexHome, "deepseek.models.json");
+    const catalogPath = join(codexHome, "sf-deepseek.models.json");
     const validCatalog = `${JSON.stringify({
       models: [{
         slug: "deepseek-v4-flash",
@@ -375,12 +375,12 @@ contractSuite("real supervised App Server service", () => {
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "codex-connect-opencode-go.config.toml"),
+      join(codexHome, "sf-opencode-go.managed.toml"),
       'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "opencode-go.config.toml"),
+      join(codexHome, "sf-opencode-go.config.toml"),
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "opencode-go"',
@@ -1488,7 +1488,7 @@ deepseekCatalogContractTest(
     const testRuntime = mkdtempSync(join(runtimeRoot, "deepseek-resume-contract-"));
     const codexHome = join(testRuntime, "codex-home");
     const resolvedCatalogPath = deepseekCatalogPath
-      ?? join(testRuntime, "deepseek.models.json");
+      ?? join(testRuntime, "sf-deepseek.models.json");
     const socketPath = join(testRuntime, "app-server.sock");
     const apiServer = createServer((_request, response) => {
       response.writeHead(400, { "content-type": "application/json" });

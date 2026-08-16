@@ -674,7 +674,7 @@ async function runServiceAppServer(args) {
         ], {
           stdio: "inherit",
           env: {
-            ...runtime.environment,
+            ...withoutManagedProviderApiKeys(runtime.environment),
             ...managed.runtime.childEnvironment,
           },
           cwd: defaultWorkspace.cwd,
@@ -763,7 +763,7 @@ async function runServiceAppServer(args) {
     await supervisorOwner?.close();
     throw error;
   }
-  const primaryChildEnvironment = { ...runtime.environment };
+  const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
   if (managedRole) {
     const credential = loadConfiguredProviderCredential(
       managedRole.provider,
@@ -787,6 +787,14 @@ async function runServiceAppServer(args) {
     for (const agent of upstreamAgents) agent.destroy();
     await supervisorOwner?.close();
   });
+}
+
+function withoutManagedProviderApiKeys(environment) {
+  const childEnvironment = { ...environment };
+  for (const { apiKeyEnvironmentKey } of managedModelProviderDefinitions) {
+    delete childEnvironment[apiKeyEnvironmentKey];
+  }
+  return childEnvironment;
 }
 
 function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_000) {

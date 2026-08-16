@@ -110,8 +110,8 @@ describe("model provider runtime topology", () => {
 
   it("uses OpenCode Go as the primary server in exclusive mode", async () => {
     const codexHome = await configuredHome("switching");
-    rmSync(join(codexHome, "codex-connect-deepseek.config.toml"));
-    rmSync(join(codexHome, "deepseek.config.toml"));
+    rmSync(join(codexHome, "sf-deepseek.managed.toml"));
+    rmSync(join(codexHome, "sf-deepseek.config.toml"));
     configureOpenCodeGo(codexHome, "exclusive");
     const environment = { CODEX_HOME: codexHome };
 
@@ -205,7 +205,7 @@ describe("model provider runtime topology", () => {
   it("rejects a switching profile that cannot launch the managed App Server", async () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
-      join(codexHome, "deepseek.config.toml"),
+      join(codexHome, "sf-deepseek.config.toml"),
       providerProfile(codexHome).replace('model_reasoning_effort = "high"\n', ""),
       { mode: 0o600 },
     );
@@ -272,7 +272,7 @@ describe("model provider runtime topology", () => {
 
   it("rejects a managed configuration whose actual model catalog is missing", async () => {
     const codexHome = await configuredHome("switching");
-    rmSync(join(codexHome, "deepseek.models.json"));
+    rmSync(join(codexHome, "sf-deepseek.models.json"));
 
     expect(() => loadManagedProviderAppServer({ CODEX_HOME: codexHome }))
       .toThrow("模型目录");
@@ -297,14 +297,14 @@ async function configuredHome(mode: "switching" | "exclusive"): Promise<string> 
   const codexHome = await mkdtemp(join(tmpdir(), "codexc-provider-runtime-"));
   mkdirSync(codexHome, { recursive: true, mode: 0o700 });
   writeFileSync(
-    join(codexHome, "codex-connect-deepseek.config.toml"),
+    join(codexHome, "sf-deepseek.managed.toml"),
     `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
-  const profilePath = mode === "exclusive" ? "config.toml" : "deepseek.config.toml";
+  const profilePath = mode === "exclusive" ? "config.toml" : "sf-deepseek.config.toml";
   writeFileSync(join(codexHome, profilePath), providerProfile(codexHome), { mode: 0o600 });
   writeFileSync(
-    join(codexHome, "deepseek.models.json"),
+    join(codexHome, "sf-deepseek.models.json"),
     '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
     { mode: 0o600 },
   );
@@ -316,7 +316,7 @@ function providerProfile(codexHome: string): string {
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
     'model_reasoning_effort = "high"',
-    `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+    `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
     "model_auto_compact_token_limit = 629146",
     'model_auto_compact_token_limit_scope = "total"',
     "[model_providers.deepseek]",
@@ -334,15 +334,15 @@ function configureOpenCodeGo(
   mode: "switching" | "exclusive" = "switching",
 ): void {
   writeFileSync(
-    join(codexHome, "codex-connect-opencode-go.config.toml"),
+    join(codexHome, "sf-opencode-go.managed.toml"),
     `version = 1\nprovider = "opencode-go"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
-  writeFileSync(join(codexHome, mode === "exclusive" ? "config.toml" : "opencode-go.config.toml"), [
+  writeFileSync(join(codexHome, mode === "exclusive" ? "config.toml" : "sf-opencode-go.config.toml"), [
     'model = "deepseek-v4-flash"',
     'model_provider = "opencode-go"',
     'model_reasoning_effort = "high"',
-    `model_catalog_json = ${JSON.stringify(join(codexHome, "deepseek.models.json"))}`,
+    `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
     "model_auto_compact_token_limit = 629146",
     'model_auto_compact_token_limit_scope = "total"',
     "[model_providers.opencode-go]",

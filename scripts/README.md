@@ -28,7 +28,9 @@
   核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线更新，不擅自安装或启动，检测到
   `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按
   目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
-  未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭。
+  未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
+  `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts` 把受管第三方 Provider 的旧文件名
+  原子迁移为统一 `sf-` 前缀，遇到新旧文件冲突或不安全权限时拒绝覆盖。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
@@ -87,10 +89,14 @@
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
-  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、OpenCode Go、第三方 API 与图片识别。
+  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、OpenCode Go、
+  第三方默认模型、第三方 API 与图片识别。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
+- `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：按已配置的第三方 Provider
+  设置新会话默认模型；切换模式只更新对应私有 Profile，固定模式复用官方用户配置事务，历史 Thread
+  仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
   受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
@@ -124,7 +130,7 @@
   仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
   `CODEX_HOME`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
-  模型、Provider 与 API Key 写入 CLI 使用的 `deepseek.config.toml`，写入不含凭据的 Gateway
+  模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，写入不含凭据的 Gateway
   管理标记，并自动开启 `features.multi_agent_v2`、把共享 `agents.external` 子代理切换到 DeepSeek；
   首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
@@ -195,7 +201,8 @@
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  受管 `--profile`（当前为 `deepseek` 与 `opencode-go`），既选择隔离实例，也保留 Profile 供 Remote TUI 完成第三方 Provider 认证；
+  受管 `--profile`（当前公开为 `deepseek` 与 `opencode-go`），选择隔离实例后映射为磁盘上的
+  `sf-deepseek` 或 `sf-opencode-go` Profile，供 Remote TUI 完成第三方 Provider 认证；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。

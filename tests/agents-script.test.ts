@@ -264,7 +264,7 @@ function createFixture() {
     home,
     environment,
     configPath: join(home, "config.toml"),
-    rolePath: join(home, "codex-connect-third-party-subagent.config.toml"),
+    rolePath: join(home, "sf-agent.config.toml"),
     remove: () => rmSync(home, { recursive: true, force: true }),
   };
 }

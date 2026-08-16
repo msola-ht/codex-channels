@@ -190,6 +190,39 @@ describe("Codex Connect setup", () => {
     });
   });
 
+  it("selects managed third-party default model settings", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("provider_default"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const modelProviderDefaultSetup = vi.fn(async () => "provider-default-configured");
+
+    await expect(runSetup({
+      input,
+      output,
+      prompts,
+      modelProviderDefaultSetup,
+    })).resolves.toBe("provider-default-configured");
+
+    expect(modelProviderDefaultSetup).toHaveBeenCalledWith({
+      input,
+      output,
+      prompts,
+      allowBack: true,
+    });
+    expect(prompts.select.mock.calls[1]?.[0]?.options).toContainEqual({
+      value: "provider_default",
+      label: "第三方默认模型",
+      hint: "按 Provider 设置新会话使用的默认模型",
+    });
+  });
+
   it("selects image recognition under the models and providers category", async () => {
     const visionSetup = vi.fn(async () => "vision-configured");
     const prompts = {

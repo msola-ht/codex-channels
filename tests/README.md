@@ -100,7 +100,9 @@
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
   思考等级和 Fast 的 Thread 覆盖、Codex 用户级模型/思考等级/Fast 默认值及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；渠道当前模型在 Workspace、新会话及同 Provider
-  历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；DeepSeek 官方脚本目录提取、两种 Setup 模式、
+  历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；按第三方 Provider
+  独立设置新会话默认模型、固定模式官方配置事务，以及旧受管文件到 `sf-` 前缀的冲突检测、权限校验
+  与引用迁移；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash 与 Pro 可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。
@@ -258,7 +260,7 @@
   label、核心服务范围、默认目标和启停顺序，平台脚本按规范目标查询标识而不依赖注册顺序；公共进程生命周期只向仍活动的子进程转发信号、
   解释同步子进程结果并成对清理监听；CLI 成功、失败、提示和处理状态使用独立颜色，Doctor 检查项另用通过，并统一遵守
   `NO_COLOR`；状态呈现不改变路径、标识符和其他机器可解析数据；受管子命令失败只展示一次且不输出
-  Node.js 堆栈，Remote TUI 终止信号原样传播，项目规则检查被信号终止时不结束 CLI/Gateway 宿主，
+  Node.js 堆栈，Remote TUI 把公开 Provider 别名映射到 `sf-` Profile 且终止信号原样传播，项目规则检查被信号终止时不结束 CLI/Gateway 宿主，
   只读 Agent 状态不依赖 Gateway 配置。
 - Linux/macOS Git 源码安装覆盖 npm 全局目录与已有版本检测、Codex CLI 缺失时安装精确版本、
   登录状态提示、官方 `main` 克隆、隔离依赖与 Gateway/WebUI 构建、npm 全局命令注册、旧 PATH

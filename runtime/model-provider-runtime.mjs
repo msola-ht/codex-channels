@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
-import { parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import {
@@ -22,7 +22,7 @@ import { writePrivateFileAtomicSync } from "./private-file.mjs";
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
 const managedThirdPartyRoleName = "external";
-const managedThirdPartyRoleConfigFileName = "codex-connect-third-party-subagent.config.toml";
+const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
 
 const providerDescriptors = new Map(managedModelProviderDefinitions.map((definition) => [
   definition.id,
@@ -107,6 +107,54 @@ export function validateConfiguredModelProviders(environment = process.env) {
     loadManagedProviderProfileFor(environment, definition, { requireLaunchConfig: true });
     return [{ provider: definition.id, mode: "switching" }];
   });
+}
+
+export function loadManagedModelProviderSettings(environment = process.env) {
+  return managedModelProviderDefinitions.flatMap((definition) => {
+    const marker = readManagedMarker(codexHomePath(environment), definition);
+    if (!marker) return [];
+    const profile = loadConfiguredProviderProfile(environment, definition);
+    return [{
+      provider: definition.id,
+      displayName: definition.displayName,
+      model: profile.model,
+      mode: marker.mode,
+      models: definition.models.filter(({ available }) => available).map(({ slug }) => slug),
+    }];
+  });
+}
+
+export function writeManagedModelProviderProfileDefault(
+  provider,
+  model,
+  environment = process.env,
+) {
+  const definition = managedModelProviderDefinitions.find(
+    (candidate) => candidate.id === provider,
+  );
+  if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+  if (!definition.models.some((candidate) => candidate.available && candidate.slug === model)) {
+    throw new Error(`${definition.displayName} 不支持模型：${model}`);
+  }
+  const codexHome = codexHomePath(environment);
+  const marker = readManagedMarker(codexHome, definition);
+  if (!marker) throw new Error(`${definition.displayName} Provider 尚未配置`);
+  if (marker.mode !== "switching") {
+    throw new Error(`${definition.displayName} 固定模式必须通过 Codex 配置事务修改默认模型`);
+  }
+  const descriptor = providerDescriptors.get(definition.id);
+  const profilePath = join(codexHome, definition.profileFileName);
+  const profile = readProviderProfile(profilePath, descriptor, {
+    expectedCatalogPath: join(codexHome, definition.catalogFileName),
+  });
+  validateModelCatalog(profile.catalogPath, definition, model);
+  const document = record(parse(readPrivateFile(profilePath)));
+  document.model = model;
+  writePrivateFileAtomicSync(profilePath, stringify(document));
+  readProviderProfile(profilePath, descriptor, {
+    expectedCatalogPath: join(codexHome, definition.catalogFileName),
+  });
+  return { provider: definition.id, model, mode: marker.mode };
 }
 
 export function loadPrimaryModelProvider(environment = process.env) {

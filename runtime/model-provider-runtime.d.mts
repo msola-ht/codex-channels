@@ -34,6 +34,24 @@ export function validateConfiguredModelProviders(
   mode: "switching" | "exclusive";
 }>;
 
+export interface ManagedModelProviderSettings {
+  provider: ManagedModelProviderId;
+  displayName: string;
+  model: string;
+  mode: "switching" | "exclusive";
+  models: string[];
+}
+
+export function loadManagedModelProviderSettings(
+  environment?: NodeJS.ProcessEnv,
+): ManagedModelProviderSettings[];
+
+export function writeManagedModelProviderProfileDefault(
+  provider: ManagedModelProviderId,
+  model: string,
+  environment?: NodeJS.ProcessEnv,
+): { provider: ManagedModelProviderId; model: string; mode: "switching" };
+
 export function loadDeepseekAccountCredential(
   environment?: NodeJS.ProcessEnv,
 ): string;

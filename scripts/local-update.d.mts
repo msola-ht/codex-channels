@@ -93,6 +93,7 @@ export function updateLocalInstallation(
     }) => void;
     startServices?: () => void;
     stopServices?: () => void;
+    updateProviderFiles?: () => unknown;
     updateConfig?: () => unknown;
     updateDatabases?: () => unknown;
     validateOffline?: () => unknown;

@@ -164,7 +164,7 @@ function providerPaths(environment) {
     configBackupPath: join(backupDirectory, "config.toml"),
     profileBackupPath: join(backupDirectory, definition.profileFileName),
     markerBackupPath: join(backupDirectory, definition.managedMarkerFileName),
-    roleConfigBackupPath: join(backupDirectory, "codex-connect-third-party-subagent.config.toml"),
+    roleConfigBackupPath: join(backupDirectory, "sf-agent.config.toml"),
   };
 }
 
