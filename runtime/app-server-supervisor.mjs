@@ -115,6 +115,12 @@ export class AppServerSupervisorOwner {
       chmodSync(this.#socketPath, 0o600);
     } catch (error) {
       await this.close();
+      if (error?.code === "ENOENT") {
+        throw new Error(
+          `App Server 监管 Socket 无法创建（路径可能超过平台长度限制）：${this.#socketPath}`,
+          { cause: error },
+        );
+      }
       throw error;
     }
   }

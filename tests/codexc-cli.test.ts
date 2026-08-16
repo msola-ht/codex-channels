@@ -1106,7 +1106,7 @@ describe("codexc CLI", () => {
   });
 
   it("routes the DeepSeek profile to its isolated remote App Server and authenticates the TUI", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-profile-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-remote-profile-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");
@@ -3080,7 +3080,7 @@ describe("codexc CLI", () => {
   });
 
   it("diagnoses configuration and a real Unix WebSocket without exposing the Telegram token", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-"));
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-doctor-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const codexHome = join(root, ".codex");

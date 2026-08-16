@@ -9,6 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import pino from "pino";
@@ -308,9 +309,7 @@ suite("real Codex App Server over Unix WebSocket", () => {
 
 contractSuite("real supervised App Server service", () => {
   it("starts OpenAI and an on-demand OpenCode Go App Server with matching topology", async () => {
-    const runtimeRoot = resolve(".runtime");
-    mkdirSync(runtimeRoot, { recursive: true });
-    const testRuntime = mkdtempSync(join(runtimeRoot, "service-integration-"));
+    const testRuntime = mkdtempSync(join(tmpdir(), "codex-contract-"));
     const codexHome = join(testRuntime, "codex-home");
     const workspace = join(testRuntime, "workspace");
     const configPath = join(testRuntime, "config.toml");

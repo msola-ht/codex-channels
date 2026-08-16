@@ -62,6 +62,19 @@ describe("App Server supervisor", () => {
     await owner.close();
   });
 
+  it("rejects a supervisor socket path that exceeds the platform length limit", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-long-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, `${"a".repeat(110)}.sock`);
+    const owner = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: [],
+      socketPaths: [primarySocketPath],
+    });
+
+    await expect(owner.start()).rejects.toThrow("路径可能超过平台长度限制");
+  });
+
   it("closes promptly while a local client keeps its connection open", async () => {
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-close-"));
     temporaryDirectories.push(runtimeDir);

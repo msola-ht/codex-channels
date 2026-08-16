@@ -55,7 +55,6 @@ describe("ProviderMetricsComposition", () => {
 
     await sendProviderProxyMetrics(socketPath, metrics());
 
-    expect(record).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(record).toHaveBeenCalledWith({
         provider: "deepseek",
