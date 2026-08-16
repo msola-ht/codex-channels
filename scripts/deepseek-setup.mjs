@@ -24,6 +24,7 @@ import {
   assertThirdPartyRoleAvailable,
   configureThirdPartyRole,
 } from "./agents.mjs";
+import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import {
   applyExclusiveProviderConfig,
   createSwitchingProviderProfile,
@@ -59,13 +60,23 @@ export async function runDeepseekSetup({
     output.write("1. OpenAI + DeepSeek 切换模式（保留 OpenAI 默认）\n");
     output.write("2. 仅 DeepSeek 固定模式（原生 Codex 也默认使用 DeepSeek）\n");
     output.write("3. 恢复安装前的 Codex 配置\n");
-    if (allowBack) output.write("4. 返回上一级\n");
+    output.write("4. 修改模型设置（思考等级、自动压缩）\n");
+    if (allowBack) output.write("5. 返回上一级\n");
     const choice = await askChoice(
       prompt,
-      allowBack ? "请选择 [1-4]" : "请选择 [1-3]",
-      allowBack ? 4 : 3,
+      allowBack ? "请选择 [1-5]" : "请选择 [1-4]",
+      allowBack ? 5 : 4,
     );
-    if (choice === "4") return { action: "back" };
+    if (choice === "5") return { action: "back" };
+    if (choice === "4") {
+      return runModelProviderDefaultSetup({
+        allowBack: true,
+        provider: providerId,
+        environment,
+        output,
+        prompts,
+      });
+    }
     const codexHome = codexHomePath(environment);
     const configPath = join(codexHome, "config.toml");
     const roleConfigPath = managedModelProviderRoleConfigPath(environment);
@@ -788,7 +799,8 @@ function createHiddenPrompter(prompts, { allowBack }) {
     { value: "1", label: "OpenAI + DeepSeek 切换模式" },
     { value: "2", label: "仅 DeepSeek 固定模式" },
     { value: "3", label: "恢复安装前配置" },
-    ...(allowBack ? [{ value: "4", label: "返回上一级" }] : []),
+    { value: "4", label: "修改模型设置（思考等级、自动压缩）" },
+    ...(allowBack ? [{ value: "5", label: "返回上一级" }] : []),
   ];
   return {
     ask: async (label) => {

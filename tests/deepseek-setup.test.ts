@@ -57,7 +57,7 @@ describe("DeepSeek setup", () => {
   it("returns to the parent setup without reading a key or changing files", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     const fetchImpl = vi.fn();
-    const prompt = prompter(["4"], []);
+    const prompt = prompter(["5"], []);
 
     await expect(runDeepseekSetup({
       allowBack: true,
@@ -73,7 +73,7 @@ describe("DeepSeek setup", () => {
   });
 
   it("shows a return option in the model channel menu", async () => {
-    const select = vi.fn(async () => "4");
+    const select = vi.fn(async () => "5");
 
     await expect(runDeepseekSetup({
       allowBack: true,
@@ -93,9 +93,48 @@ describe("DeepSeek setup", () => {
         { value: "1", label: "OpenAI + DeepSeek 切换模式" },
         { value: "2", label: "仅 DeepSeek 固定模式" },
         { value: "3", label: "恢复安装前配置" },
-        { value: "4", label: "返回上一级" },
+        { value: "4", label: "修改模型设置（思考等级、自动压缩）" },
+        { value: "5", label: "返回上一级" },
       ],
     });
+  });
+
+  it("opens model settings from the DeepSeek menu when configured", async () => {
+    const codexHome = deepseekFixture();
+    const select = vi.fn()
+      .mockResolvedValueOnce("4")
+      .mockResolvedValueOnce("deepseek-v4-pro")
+      .mockResolvedValueOnce("max");
+    const text = vi.fn(async () => "60");
+
+    const result = await runDeepseekSetup({
+      allowBack: true,
+      environment: { CODEX_HOME: codexHome },
+      output: { write: vi.fn() },
+      prompts: {
+        select,
+        text,
+        password: vi.fn(),
+        confirm: vi.fn(),
+        isCancel: () => false,
+      } as never,
+    });
+
+    expect(result).toMatchObject({
+      action: "configured",
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+      autoCompactPercent: 60,
+    });
+    const catalog = JSON.parse(readFileSync(
+      join(codexHome, "sf-deepseek.models.json"),
+      "utf8",
+    ));
+    expect(catalog.models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4-pro",
+      auto_compact_token_limit: 629_146,
+    }));
   });
 
   it("returns to the parent setup when a nested auto-compact prompt is cancelled", async () => {
@@ -744,6 +783,53 @@ function setupFixture(config: string) {
   const home = mkdtempSync(join(tmpdir(), "codexc-deepseek-"));
   writeFileSync(join(home, "config.toml"), config, { mode: 0o600 });
   return outputFixture(home);
+}
+
+function deepseekFixture(): string {
+  const home = mkdtempSync(join(tmpdir(), "codexc-deepseek-menu-"));
+  const catalogPath = join(home, "sf-deepseek.models.json");
+  const providerLines = [
+    'model = "deepseek-v4-flash"',
+    'model_provider = "deepseek"',
+    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+    "[model_providers.deepseek]",
+    'name = "deepseek"',
+    'base_url = "https://api.deepseek.com/"',
+    'wire_api = "responses"',
+    "requires_openai_auth = false",
+    'experimental_bearer_token = "sk-test-secret"',
+    "",
+  ].join("\n");
+  writeFileSync(
+    join(home, "sf-deepseek.managed.toml"),
+    'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+    { mode: 0o600 },
+  );
+  writeFileSync(catalogPath, JSON.stringify({
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+      slug,
+      display_name: slug,
+      context_window: 1_048_576,
+      default_reasoning_level: "high",
+      supported_reasoning_levels: [
+        { effort: "low", description: "Low" },
+        { effort: "high", description: "High" },
+        { effort: "max", description: "Max" },
+      ],
+      auto_compact_token_limit: 629_146,
+    })),
+  }), { mode: 0o600 });
+  writeFileSync(
+    join(home, "sf-deepseek.config.toml"),
+    providerLines,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(home, "config.toml"),
+    'model = "gpt-5.6-sol"\nmodel_provider = "openai"\n',
+    { mode: 0o600 },
+  );
+  return home;
 }
 
 function outputFixture(home: string) {

@@ -20,7 +20,8 @@ Setup 提供保留 OpenAI 默认的切换模式，以及让原生 Codex 和 Gate
 codexc service restart all
 ```
 
-初次配置默认使用 Flash。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方模型设置
+初次配置默认使用 Flash。需要调整时，有两种入口：在 `codexc setup` 中选择“模型与提供商 →
+OpenCode Go → 修改模型设置（思考等级、自动压缩）”，或走原有的“模型与提供商 → 第三方模型设置
 → OpenCode Go”，再按模型设置默认思考等级和自动压缩百分比；每个模型按自己的上下文窗口计算
 阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；目录更新后的压缩阈值按原

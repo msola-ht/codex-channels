@@ -188,6 +188,16 @@ describe("Codex Connect setup", () => {
       label: "Codex 官方",
       hint: "设置全局默认模型与思考等级",
     });
+    expect(modelOptions).toContainEqual({
+      value: "deepseek",
+      label: "DeepSeek",
+      hint: "安装、切换、恢复或修改模型设置（思考等级、自动压缩）",
+    });
+    expect(modelOptions).toContainEqual({
+      value: "opencode-go",
+      label: "OpenCode Go",
+      hint: "安装、移除或修改模型设置（思考等级、自动压缩）",
+    });
   });
 
   it("selects managed third-party default model settings", async () => {

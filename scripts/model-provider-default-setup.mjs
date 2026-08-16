@@ -11,6 +11,7 @@ class ModelProviderDefaultSetupCancelled extends Error {}
 
 export async function runModelProviderDefaultSetup({
   allowBack = false,
+  provider: preselectedProvider,
   environment = process.env,
   output = process.stdout,
   prompts = clackPrompts,
@@ -23,7 +24,8 @@ export async function runModelProviderDefaultSetup({
   }
   const prompt = prompter ?? createPrompter(prompts, configured, { allowBack });
   try {
-    const provider = await prompt.selectProvider();
+    const provider = preselectedProvider
+      ?? await prompt.selectProvider();
     if (provider === "back") return { action: "back" };
     const selected = configured.find((candidate) => candidate.provider === provider);
     if (!selected) throw new Error(`第三方 Provider 未配置：${provider}`);

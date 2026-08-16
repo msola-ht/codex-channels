@@ -9,6 +9,43 @@ import { runOpenCodeGoSetup } from "../scripts/opencode-go-setup.mjs";
 import { writeManagedModelProviderProfileDefault } from "../runtime/model-provider-runtime.mjs";
 
 describe("OpenCode Go setup", () => {
+  it("opens model settings from the OpenCode Go menu when configured", async () => {
+    const codexHome = opencodeFixture();
+    const select = vi.fn()
+      .mockResolvedValueOnce("model-settings")
+      .mockResolvedValueOnce("deepseek-v4-pro")
+      .mockResolvedValueOnce("max");
+    const text = vi.fn(async () => "60");
+
+    const result = await runOpenCodeGoSetup({
+      environment: { CODEX_HOME: codexHome },
+      output: { write: vi.fn() },
+      prompts: {
+        select,
+        text,
+        password: vi.fn(),
+        confirm: vi.fn(),
+        isCancel: () => false,
+      } as never,
+    });
+
+    expect(result).toMatchObject({
+      action: "configured",
+      provider: "opencode-go",
+      model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+      autoCompactPercent: 60,
+    });
+    const catalog = JSON.parse(readFileSync(
+      join(codexHome, "sf-opencode-go.models.json"),
+      "utf8",
+    ));
+    expect(catalog.models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4-pro",
+      auto_compact_token_limit: 629_146,
+    }));
+  });
+
   it.each(["switching", "exclusive"] as const)(
     "configures %s mode and selects the shared third-party role",
     async (mode) => {
@@ -269,6 +306,54 @@ function prompt(action: "switching" | "exclusive" | "restore") {
     secret: async () => "sk-opencode-test",
     confirm: async () => true,
   };
+}
+
+function opencodeFixture(): string {
+  const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-menu-"));
+  const catalogPath = join(codexHome, "sf-opencode-go.models.json");
+  const providerLines = [
+    'model = "deepseek-v4-flash"',
+    'model_provider = "opencode-go"',
+    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+    "[model_providers.opencode-go]",
+    'name = "opencode-go"',
+    'base_url = "https://opencode.ai/zen/go/v1"',
+    'wire_api = "responses"',
+    "supports_websockets = false",
+    "requires_openai_auth = false",
+    'experimental_bearer_token = "sk-test-secret"',
+    "",
+  ].join("\n");
+  writeFileSync(
+    join(codexHome, "sf-opencode-go.managed.toml"),
+    'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+    { mode: 0o600 },
+  );
+  writeFileSync(catalogPath, JSON.stringify({
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+      slug,
+      display_name: slug,
+      context_window: 1_048_576,
+      default_reasoning_level: "high",
+      supported_reasoning_levels: [
+        { effort: "low", description: "Low" },
+        { effort: "high", description: "High" },
+        { effort: "max", description: "Max" },
+      ],
+      auto_compact_token_limit: 629_146,
+    })),
+  }), { mode: 0o600 });
+  writeFileSync(
+    join(codexHome, "sf-opencode-go.config.toml"),
+    providerLines,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(codexHome, "config.toml"),
+    'model = "gpt-5.6-sol"\nmodel_provider = "openai"\n',
+    { mode: 0o600 },
+  );
+  return codexHome;
 }
 
 async function successfulCatalog() {

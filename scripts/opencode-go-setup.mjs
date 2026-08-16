@@ -17,6 +17,7 @@ import {
 import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import { configureThirdPartyRole } from "./agents.mjs";
+import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
   applyExclusiveProviderConfig,
@@ -40,10 +41,23 @@ export async function runOpenCodeGoSetup({
   prompter,
   configureRole = configureThirdPartyRole,
 } = {}) {
-  const prompt = prompter ?? createPrompter(prompts, { allowBack });
+  const prompt = prompter ?? createPrompter(prompts, {
+    allowBack,
+    hasModelSettings: loadManagedModelProviderSettings(environment)
+      .some((candidate) => candidate.provider === definition.id),
+  });
   try {
     const action = await prompt.select(allowBack);
     if (action === "back") return { action: "back" };
+    if (action === "model-settings") {
+      return runModelProviderDefaultSetup({
+        allowBack: true,
+        provider: definition.id,
+        environment,
+        output,
+        prompts,
+      });
+    }
     const paths = providerPaths(environment);
     if (action === "restore") {
       if (!await prompt.confirm("确认恢复首次配置 OpenCode Go 前的文件？", false)) {
@@ -369,12 +383,18 @@ function sameOptionalContent(left, right) {
   return left.equals(right);
 }
 
-function createPrompter(prompts, { allowBack }) {
+function createPrompter(prompts, { allowBack, hasModelSettings }) {
   return {
     select: async () => {
       const value = await prompts.select({
         message: "OpenCode Go Provider",
         options: [
+          ...(hasModelSettings
+            ? [{
+                value: "model-settings",
+                label: "修改模型设置（思考等级、自动压缩）",
+              }]
+            : []),
           { value: "switching", label: "OpenAI + OpenCode Go 切换模式" },
           { value: "exclusive", label: "仅 OpenCode Go 固定模式" },
           { value: "restore", label: "恢复配置前状态" },
