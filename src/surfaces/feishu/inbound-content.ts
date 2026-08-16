@@ -126,7 +126,6 @@ export function parseFeishuAudioContent(
 
 export function parseFeishuPostContent(
   value: string,
-  options: { allowMarkdown?: boolean } = {},
 ): Exclude<FeishuParsedContent, { kind: "file" }> | undefined {
   let parsed: unknown;
   try {
@@ -160,7 +159,8 @@ export function parseFeishuPostContent(
       const item = element as Record<string, unknown>;
       if (
         item.tag === "text"
-        || (options.allowMarkdown === true && item.tag === "md")
+        || item.tag === "md"
+        || item.tag === "code_block"
       ) {
         if (typeof item.text !== "string") {
           return undefined;
@@ -215,7 +215,7 @@ export function extractFeishuQuotedText(
   if (messageType !== "post") {
     return undefined;
   }
-  const parsed = parseFeishuPostContent(content, { allowMarkdown: true });
+  const parsed = parseFeishuPostContent(content);
   return parsed?.kind === "text" || parsed?.kind === "image"
     ? parsed.text?.trim() || undefined
     : undefined;

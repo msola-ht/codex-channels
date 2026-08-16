@@ -324,6 +324,78 @@ describe("Feishu Surface", () => {
     });
   });
 
+  it("submits a private rich-post code block as text", async () => {
+    const submit = vi.fn(async () => ({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      steered: false,
+    }));
+    const fixture = createFixture({ submit });
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitEvent(0, "post", JSON.stringify({
+      content: [[
+        {
+          tag: "code_block",
+          language: "SHELL",
+          text: "git status --short",
+        },
+      ]],
+    }));
+    await settle();
+    await fixture.surface.stop();
+
+    expect(submit).toHaveBeenCalledWith({
+      surface: "feishu",
+      accountId: "cli_0123456789abcdef",
+      conversationId: "oc_chat",
+    }, "git status --short");
+  });
+
+  it("notifies the user when a message type is unsupported", async () => {
+    const fixture = createFixture();
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitEvent(0, "media", "{\"file_key\":\"file_v2_video\"}");
+    await settle();
+    await fixture.surface.stop();
+
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: [
+        "暂不支持该消息类型，已忽略。",
+        "请发送文本、代码块、图片、文件或语音消息。",
+      ].join("\n"),
+    }]);
+  });
+
+  it("notifies the user when a rich-post message cannot be parsed", async () => {
+    const fixture = createFixture();
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+
+    fixture.emitEvent(0, "post", JSON.stringify({
+      content: [[
+        { tag: "emotion", emoji_type: "SMILE" },
+      ]],
+    }));
+    await settle();
+    await fixture.surface.stop();
+
+    expect(fixture.sent).toEqual([{
+      chatId: "oc_chat",
+      text: [
+        "消息内容无法识别，已忽略。",
+        "请改用普通文本或代码块消息发送。",
+      ].join("\n"),
+    }]);
+  });
+
   it("routes an authorized private text file through the file port", async () => {
     const submit = vi.fn(async () => ({
       threadId: "thread-1",
@@ -1066,6 +1138,33 @@ function createFixture(
           chat_type: "p2p",
           message_type: "image",
           content: "{\"image_key\":\"img_v2_resource\"}",
+        },
+      });
+    },
+    emitEvent(
+      index: number,
+      messageType: string,
+      content: string,
+      chatId = "oc_chat",
+    ) {
+      if (!messageHandler) {
+        throw new Error("飞书 SDK 尚未注册消息处理器");
+      }
+      messageHandler({
+        event_id: `event-${index}`,
+        sender: {
+          sender_id: {
+            open_id: "ou_actor",
+          },
+          sender_type: "user",
+        },
+        message: {
+          message_id: `om_message_${index}`,
+          create_time: String(Date.now()),
+          chat_id: chatId,
+          chat_type: "p2p",
+          message_type: messageType,
+          content,
         },
       });
     },

@@ -68,6 +68,15 @@ import {
 import { createFeishuUserTokenStore } from "./oauth-token-store.js";
 import { renderFeishuConfigurationChange } from "./renderer.js";
 
+const unsupportedFeishuMessageTypeText = [
+  "暂不支持该消息类型，已忽略。",
+  "请发送文本、代码块、图片、文件或语音消息。",
+].join("\n");
+const invalidFeishuMessageContentText = [
+  "消息内容无法识别，已忽略。",
+  "请改用普通文本或代码块消息发送。",
+].join("\n");
+
 interface FeishuEventConnectionPort {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -385,6 +394,24 @@ export class FeishuSurface implements SurfaceAdapter {
               notified,
             },
             "飞书输入队列过载，事件未接收",
+          );
+        } else if (
+          result.status === "ignored"
+          && (result.reason === "unsupported-message"
+            || result.reason === "invalid-content")
+        ) {
+          const notified = this.output.notifyText(
+            event.chatId,
+            result.reason === "unsupported-message"
+              ? unsupportedFeishuMessageTypeText
+              : invalidFeishuMessageContentText,
+          );
+          options.logger.warn(
+            {
+              reason: result.reason,
+              notified,
+            },
+            "飞书消息不受支持，已提示用户",
           );
         }
       },
