@@ -1,5 +1,10 @@
 export type PricingBucket = "peak" | "off-peak";
 
+export const pricingBucketOrder: ReadonlyArray<PricingBucket> = [
+  "off-peak",
+  "peak",
+];
+
 export interface LocalMinuteRange {
   start: number;
   end: number;

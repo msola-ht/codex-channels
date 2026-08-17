@@ -9,6 +9,7 @@ import {
   OpenCodeGoModelPricingResolver,
   isOpenCodeGoPeakMinute,
 } from "./opencode-go-model-pricing.js";
+import { pricingBucketOrder } from "./pricing-bucket.js";
 
 import type {
   ProviderAccountAdapter,
@@ -206,8 +207,7 @@ function readOpencodeGoTokens(
     });
     for (const record of page.records) {
       if (record.provider !== "opencode-go") continue;
-      const requestAtMs = record.requestStartedAtMs ?? record.recordedAtMs;
-      if (requestAtMs < startAtMs || requestAtMs >= endAtMs) continue;
+      if (!requestStartsInWindow(record, startAtMs, endAtMs)) continue;
       const totalTokens = record.totalTokens;
       if (
         totalTokens !== null
@@ -263,6 +263,15 @@ function readModelUsageEstimates(
         });
         for (const record of page.records) {
           if (record.provider !== "opencode-go" || record.model === null) {
+            continue;
+          }
+          if (
+            !requestStartsInWindow(
+              record,
+              windowStartAtMs,
+              windowEndAtMs ?? endAtMs,
+            )
+          ) {
             continue;
           }
           const atMs = record.requestStartedAtMs ?? record.recordedAtMs;
@@ -351,7 +360,7 @@ function readModelUsageEstimates(
       for (const model of modelsWithTotals) {
         const price = baseline.models.get(model);
         if (price?.peakOffPeak === undefined) continue;
-        for (const bucket of ["off-peak", "peak"] as const) {
+        for (const bucket of pricingBucketOrder) {
           if (!emitted.has(totalKey(model, bucket))) {
             pushEstimate(model, bucket, 0);
           }
@@ -367,6 +376,17 @@ function readModelUsageEstimates(
   } catch {
     return [];
   }
+}
+
+function requestStartsInWindow(
+  record: { requestStartedAtMs: number | null; recordedAtMs: number },
+  startAtMs: number,
+  endAtMs: number,
+): boolean {
+  // 窗口按请求开始时间判定（入库时间只用于分页），
+  // 避免跨窗口重置的长请求串入相邻窗口的汇总。
+  const requestAtMs = record.requestStartedAtMs ?? record.recordedAtMs;
+  return requestAtMs >= startAtMs && requestAtMs < endAtMs;
 }
 
 export function opencodeGoMonthlyWindowStartMs(resetsAtSeconds: number): number {

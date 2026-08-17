@@ -9,6 +9,7 @@ import type {
 import {
   isMinuteInLocalRanges,
   localMinuteOf,
+  type LocalMinuteRange,
   type PricingBucket,
 } from "./pricing-bucket.js";
 
@@ -42,11 +43,6 @@ export interface DeepseekPricingBaseline {
   sourceUpdatedAtMs: number;
   timezone: string;
   plans: readonly DeepseekPricingPlan[];
-}
-
-interface LocalMinuteRange {
-  start: number;
-  end: number;
 }
 
 export interface DeepseekModelPricingResolverOptions {

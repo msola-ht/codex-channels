@@ -203,7 +203,9 @@ describe("OpenCode Go account adapter", () => {
       totalTokens: 110_000,
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
-      requestStartedAtMs: 1_000,
+      // 请求开始于月度窗口内、但早于基线源更新时间，
+      // 用于覆盖“快照存在时按快照重新计价”的分支。
+      requestStartedAtMs: Date.parse("2026-08-16T15:00:00.000Z"),
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
       lastReasoningDeltaAtMs: null,
@@ -617,6 +619,83 @@ describe("OpenCode Go account adapter", () => {
       bucket: "peak",
       usedUsdNanos: 0,
     });
+  });
+
+  it("excludes requests started before the monthly window from usage estimates", async () => {
+    const codexHome = await createCodexHome();
+    const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-window-boundary-"));
+    temporaryDirectories.push(directory);
+    const metricsPath = modelRequestMetricsDatabasePath(
+      join(directory, "gateway.sqlite3"),
+    );
+    const store = new SqliteModelRequestMetricsStore(metricsPath);
+    store.record({
+      provider: "opencode-go",
+      pricing: {
+        billingMode: "subscription",
+        currency: "USD",
+        source: "opencode-go-official",
+        effectiveAtMs: 1_785_000_000_000,
+        bucket: "peak",
+        uncachedInputPricePerMillionNanos: 440_000_000,
+        cachedInputPricePerMillionNanos: 14_000_000,
+        outputPricePerMillionNanos: 1_320_000_000,
+      },
+      transport: "http",
+      responseFormat: "sse",
+      operation: "response",
+      threadId: "thread-window-boundary",
+      turnId: "turn-window-boundary",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      reasoningEffort: "high",
+      status: "completed",
+      httpStatus: 200,
+      errorType: null,
+      errorCode: null,
+      errorMessage: null,
+      incompleteReason: null,
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      outputTokens: 10_000,
+      reasoningOutputTokens: 0,
+      totalTokens: 110_000,
+      upstreamCreatedAt: 1_785_640_800,
+      upstreamCompletedAt: 1_785_640_801,
+      // 请求开始于月度窗口（2026-07-20）之前，仅入库时间落在窗口内。
+      requestStartedAtMs: Date.parse("2026-07-19T12:00:00.000Z"),
+      recordedAtMs: Date.parse("2026-08-17T07:00:00.000Z"),
+      firstTokenAtMs: 1_100,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: 1_400,
+      lastOutputDeltaAtMs: 1_600,
+      responseCompletedAtMs: 1_650,
+      weeklyQuota: null,
+    });
+    store.close();
+
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: { CODEX_HOME: codexHome },
+      fetchImpl: async () => new Response(JSON.stringify({
+        usage: {
+          monthly: {
+            status: "ok",
+            percent: 1,
+            resetsAt: "2026-08-20T00:00:00.000Z",
+          },
+        },
+      }), { status: 200 }),
+      metricsDatabasePath: metricsPath,
+      nowMs: () => Date.parse("2026-08-17T08:30:00.000Z"),
+    });
+
+    const usage = await adapter.accountUsage();
+    expect(usage.kind).toBe("quota-windows");
+    if (usage.kind !== "quota-windows") {
+      throw new Error("unexpected usage kind");
+    }
+    expect(usage.modelUsage).toEqual([]);
   });
 
   it("does not report OpenCode Go remaining usage for other providers", async () => {
