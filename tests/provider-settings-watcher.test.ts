@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import pino from "pino";
+import pino, { type Logger } from "pino";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -18,6 +18,7 @@ describe("ProviderSettingsWatcher", () => {
   let stateEvents: string[];
   let active = false;
   let valid = true;
+  let now = 0;
   let watcher: ProviderSettingsWatcher | undefined;
 
   beforeEach(() => {
@@ -26,6 +27,7 @@ describe("ProviderSettingsWatcher", () => {
     stateEvents = [];
     active = false;
     valid = true;
+    now = 0;
   });
 
   afterEach(() => {
@@ -89,6 +91,77 @@ describe("ProviderSettingsWatcher", () => {
     await instance.checkNow();
     expect(restartCalls).toEqual(["restart"]);
     expect(stateEvents).toEqual(["scheduled", "restarting", "applied"]);
+  });
+
+  it("校验失败在冷却窗口内只记录一次，修复后触发重启", async () => {
+    const errors: string[] = [];
+    const instance = createWatcher({
+      logger: {
+        error: (_payload: unknown, message?: string) => {
+          errors.push(message ?? "");
+        },
+        info: () => undefined,
+        warn: () => undefined,
+      } as unknown as Logger,
+      nowMs: () => now,
+      validationCooldownMs: 30_000,
+    });
+    writeFileSync(catalogPath(), '{"models":[]}\n');
+    valid = false;
+    await instance.checkNow();
+    expect(errors).toHaveLength(1);
+
+    now = 1_000;
+    await instance.checkNow();
+    expect(errors).toHaveLength(1);
+
+    valid = true;
+    await instance.checkNow();
+    expect(restartCalls).toEqual(["restart"]);
+  });
+
+  it("重启失败后的重试会先重新校验，配置仍无效时不重启", async () => {
+    const errors: string[] = [];
+    const instance = createWatcher({
+      logger: {
+        error: (_payload: unknown, message?: string) => {
+          errors.push(message ?? "");
+        },
+        info: () => undefined,
+        warn: () => undefined,
+      } as unknown as Logger,
+      nowMs: () => now,
+      validationCooldownMs: 30_000,
+      restartAppServer: async () => {
+        restartCalls.push("restart");
+        if (restartCalls.length === 1) {
+          throw new Error("restart failed");
+        }
+      },
+    });
+    writeFileSync(catalogPath(), '{"models":[{"slug":"deepseek-v4-flash"}]}\n');
+    await instance.checkNow();
+    expect(restartCalls).toEqual(["restart"]);
+    expect(stateEvents).toEqual(["scheduled", "restarting", "failed"]);
+
+    now = 31_000;
+    valid = false;
+    await instance.checkNow();
+    expect(restartCalls).toEqual(["restart"]);
+    expect(stateEvents).toEqual(["scheduled", "restarting", "failed"]);
+    expect(errors.filter((message) => message.includes("校验失败"))).toHaveLength(1);
+
+    valid = true;
+    now = 62_000;
+    await instance.checkNow();
+    expect(restartCalls).toEqual(["restart", "restart"]);
+    expect(stateEvents).toEqual([
+      "scheduled",
+      "restarting",
+      "failed",
+      "restarting",
+      "applied",
+    ]);
   });
 
   it("有活动 Turn 时推迟重启，空闲后自动重启", async () => {
