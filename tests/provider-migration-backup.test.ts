@@ -12,7 +12,10 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
 
-import { backupAndMigrateProviderFiles } from "../scripts/backup-provider-migration.mjs";
+import {
+  backupAndMigrateProviderFiles,
+  resolveBackupTarget,
+} from "../scripts/backup-provider-migration.mjs";
 import {
   deepseekProviderDefinition,
   opencodeGoProviderDefinition,
@@ -20,6 +23,34 @@ import {
 } from "../runtime/model-provider-definitions.mjs";
 
 describe("backup provider migration", () => {
+  it("resolves backup targets inside managed directories and rejects outside paths", () => {
+    const fixture = createFixture();
+    try {
+      const backupRoot = join(fixture.root, "backups", "provider-migration-test");
+      const roots = {
+        codexHome: fixture.codexHome,
+        connectHome: fixture.connectHome,
+      };
+      expect(resolveBackupTarget(
+        backupRoot,
+        roots,
+        join(fixture.codexHome, "sf-deepseek.config.toml"),
+      )).toBe(join(backupRoot, "codex-home", "sf-deepseek.config.toml"));
+      expect(resolveBackupTarget(
+        backupRoot,
+        roots,
+        join(fixture.connectHome, "providers", "deepseek", "models.json"),
+      )).toBe(join(backupRoot, "other", "providers", "deepseek", "models.json"));
+      expect(() => resolveBackupTarget(
+        backupRoot,
+        roots,
+        join(fixture.root, "outside", "secret.toml"),
+      )).toThrow(/不在受管目录内，拒绝迁移/u);
+    } finally {
+      fixture.remove();
+    }
+  });
+
   it("previews the plan without writing anything", () => {
     const fixture = createFixture();
     try {

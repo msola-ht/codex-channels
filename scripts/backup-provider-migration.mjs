@@ -100,10 +100,7 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
     if (providerDirectories.some((directory) => path.startsWith(`${directory}${sep}`))) {
       continue;
     }
-    const target = path.startsWith(`${codexHome}${sep}`)
-      ? join(backupRoot, "codex-home", relative(codexHome, path))
-      : join(backupRoot, "other", relative(connectHome, path));
-    copyFile(path, target);
+    copyFile(path, resolveBackupTarget(backupRoot, { codexHome, connectHome }, path));
   }
   for (const path of referenceFiles) {
     copyFile(path, join(backupRoot, "reference", relative(codexHome, path)));
@@ -160,6 +157,28 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
     settings,
     copied,
   };
+}
+
+export function resolveBackupTarget(
+  backupRoot,
+  { codexHome, connectHome },
+  path,
+) {
+  if (path.startsWith(`${codexHome}${sep}`)) {
+    return join(backupRoot, "codex-home", assertInside(codexHome, path));
+  }
+  if (path.startsWith(`${connectHome}${sep}`)) {
+    return join(backupRoot, "other", assertInside(connectHome, path));
+  }
+  throw new Error(`备份目标不在受管目录内，拒绝迁移：${path}`);
+}
+
+function assertInside(root, path) {
+  const rel = relative(root, path);
+  if (rel === ".." || rel.startsWith(`..${sep}`)) {
+    throw new Error(`备份目标超出受管目录，拒绝迁移：${path}`);
+  }
+  return rel;
 }
 
 function writeManifest(backupDirectory, value) {

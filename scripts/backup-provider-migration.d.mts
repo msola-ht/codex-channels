@@ -47,3 +47,12 @@ export function backupAndMigrateProviderFiles(
     now?: () => Date;
   },
 ): ProviderMigrationResult;
+
+export function resolveBackupTarget(
+  backupRoot: string,
+  roots: {
+    codexHome: string;
+    connectHome: string;
+  },
+  path: string,
+): string;
