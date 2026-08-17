@@ -436,6 +436,7 @@ describe("OpenCode Go account adapter", () => {
       100_000,
       10_000,
       110_000,
+      Date.parse("2026-08-17T07:00:00.000Z"),
     );
     store.record({
       provider: "opencode-go",
@@ -470,6 +471,7 @@ describe("OpenCode Go account adapter", () => {
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
       requestStartedAtMs: Date.parse("2026-08-16T08:00:00.000Z"),
+      recordedAtMs: Date.parse("2026-08-17T07:00:00.000Z"),
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
       lastReasoningDeltaAtMs: null,
@@ -565,6 +567,7 @@ describe("OpenCode Go account adapter", () => {
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
       requestStartedAtMs: Date.parse("2026-08-16T08:00:00.000Z"),
+      recordedAtMs: Date.parse("2026-08-17T07:00:00.000Z"),
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
       lastReasoningDeltaAtMs: null,
@@ -660,6 +663,7 @@ function recordWindowSample(
   inputTokens: number,
   outputTokens: number,
   totalTokens: number | null,
+  recordedAtMs?: number,
 ): void {
   store.record({
     provider: "opencode-go",
@@ -692,6 +696,7 @@ function recordWindowSample(
     firstOutputDeltaAtMs: null,
     lastOutputDeltaAtMs: null,
     responseCompletedAtMs: requestStartedAtMs,
+    ...(recordedAtMs === undefined ? {} : { recordedAtMs }),
     weeklyQuota: null,
   });
 }

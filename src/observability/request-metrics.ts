@@ -127,6 +127,8 @@ export interface ModelRequestMetricSample {
   firstOutputDeltaAtMs: number | null;
   lastOutputDeltaAtMs: number | null;
   responseCompletedAtMs: number;
+  /** 记录入库时刻（毫秒）；缺省为写入时的 Date.now()，测试可显式指定以保证窗口确定性。 */
+  recordedAtMs?: number;
   weeklyQuota: {
     limitId: "codex";
     usedPercentMillionths: number;

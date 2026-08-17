@@ -403,7 +403,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   record(sample: ModelRequestMetricSample): void {
     this.requireOpen();
     if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
-    const recordedAtMs = Date.now();
+    const recordedAtMs = sample.recordedAtMs ?? Date.now();
     this.insert.run(
       sample.provider,
       sample.pricing?.billingMode ?? null,
