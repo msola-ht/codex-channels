@@ -713,6 +713,36 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("累计 Tokens");
   });
 
+  it("renders OpenCode Go model usage estimates from local reference costs", () => {
+    const rendered = formatConversationUsage({
+      kind: "usage",
+      result: {
+        kind: "quota-windows",
+        provider: "opencode-go",
+        available: true,
+        windows: [{
+          windowId: "monthly",
+          label: "月度",
+          usedPercent: 1,
+          resetsAt: null,
+          status: "ok",
+        }],
+        modelUsage: [{
+          model: "deepseek-v4-flash",
+          includedUsageUsd: 15,
+          usedUsdNanos: 1_010_000_000,
+          usedPercent: 1_010_000_000 / 15_000_000_000 * 100,
+          remainingUsdNanos: 13_990_000_000,
+        }],
+      },
+    });
+
+    expect(rendered).toContain("模型本地用量");
+    expect(rendered).toContain(
+      "deepseek-v4-flash：已用 $1.01 / 包含 $15.00（6.7%）· 剩余 $13.99",
+    );
+  });
+
   it("fails closed for unregistered Provider account capabilities", () => {
     expect(formatConversationUsage({
       kind: "usage",

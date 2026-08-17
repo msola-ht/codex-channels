@@ -8,6 +8,7 @@ import {
   inspectMetricsDatabase,
   metricsDatabaseCanUpgrade,
   metricsRange,
+  requireCompatibleMetricsDatabase,
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -282,7 +283,16 @@ async function handleDeepseekBalance(environment, response) {
 }
 
 async function handleOpencodeGoUsage(environment, response) {
-  const adapter = createOpencodeGoAccountAdapter({ environment });
+  let metricsDatabasePath;
+  try {
+    metricsDatabasePath = requireCompatibleMetricsDatabase(environment);
+  } catch {
+    metricsDatabasePath = undefined;
+  }
+  const adapter = createOpencodeGoAccountAdapter({
+    environment,
+    metricsDatabasePath,
+  });
   try {
     const usage = await adapter.accountUsage();
     sendJson(response, 200, {
@@ -294,6 +304,7 @@ async function handleOpencodeGoUsage(environment, response) {
         resetsAt: window.resetsAt,
         status: window.status,
       })),
+      modelUsage: usage.modelUsage ?? [],
     });
   } catch {
     sendJson(response, 200, {

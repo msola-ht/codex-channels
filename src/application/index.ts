@@ -13,6 +13,7 @@ export {
   type ProviderAccountQueryPort,
   type ProviderAccountUsage,
   type ProviderBalance,
+  type ProviderModelUsageEstimate,
   type ProviderQuotaWindow,
 } from "./account-port.js";
 export {

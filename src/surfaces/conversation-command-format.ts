@@ -1249,6 +1249,7 @@ export function formatConversationUsage(
     ].join("\n"));
   }
   if (result.result.kind === "quota-windows") {
+    const modelUsage = result.result.modelUsage ?? [];
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
       `API 可用：${result.result.available ? "是" : "否"}`,
@@ -1260,6 +1261,27 @@ export function formatConversationUsage(
               : formatResetTime(window.resetsAt);
             return `- ${window.label}：已用 ${formatPercent(window.usedPercent)} · 重置 ${reset}`;
           })),
+      ...(modelUsage.length === 0
+        ? []
+        : [
+            "",
+            "模型本地用量（按本机参考价估算，非官方账单）：",
+            ...modelUsage.map((estimate) => {
+              const used = estimate.usedUsdNanos === null
+                ? "未知"
+                : formatUsdAmount(estimate.usedUsdNanos);
+              const included = formatUsdAmount(
+                Math.round(estimate.includedUsageUsd * 1_000_000_000),
+              );
+              const percent = estimate.usedPercent === null
+                ? "未知"
+                : formatPercent(estimate.usedPercent);
+              const remaining = estimate.remainingUsdNanos === null
+                ? "未知"
+                : formatUsdAmount(estimate.remainingUsdNanos);
+              return `- ${estimate.model}：已用 ${used} / 包含 ${included}（${percent}）· 剩余 ${remaining}`;
+            }),
+          ]),
     ].join("\n"));
   }
   const daily = [...result.result.usage.daily]
@@ -1280,6 +1302,13 @@ export function formatConversationUsage(
           (entry) => `- ${entry.startDate}：${formatMillions(entry.tokens)}`,
         )),
   ].join("\n"));
+}
+
+function formatUsdAmount(nanos: number): string {
+  return `$${(nanos / 1_000_000_000).toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 export function formatConversationLimits(

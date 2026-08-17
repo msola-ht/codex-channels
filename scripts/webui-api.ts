@@ -295,9 +295,18 @@ export interface OpencodeGoQuotaWindow {
   status: string | null
 }
 
+export interface OpencodeGoModelUsageEstimate {
+  model: string
+  includedUsageUsd: number
+  usedUsdNanos: number | null
+  usedPercent: number | null
+  remainingUsdNanos: number | null
+}
+
 export interface OpencodeGoUsageResponse {
   available: boolean
   windows: OpencodeGoQuotaWindow[]
+  modelUsage?: OpencodeGoModelUsageEstimate[]
 }
 
 export interface GlobalTotals {

@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createOpencodeGoAccountAdapter } from "../src/bootstrap/opencode-go-account-adapter.js";
+import {
+  SqliteModelRequestMetricsStore,
+  modelRequestMetricsDatabasePath,
+} from "../src/observability/index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -120,6 +124,84 @@ describe("OpenCode Go account adapter", () => {
       code: "provider.account.unavailable",
       message: "OpenCode Go 账户查询失败",
     });
+  });
+
+  it("includes local per-model usage estimates from the metrics database", async () => {
+    const codexHome = await createCodexHome();
+    const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-metrics-"));
+    temporaryDirectories.push(directory);
+    const metricsPath = modelRequestMetricsDatabasePath(
+      join(directory, "gateway.sqlite3"),
+    );
+    const store = new SqliteModelRequestMetricsStore(metricsPath);
+    store.record({
+      provider: "opencode-go",
+      pricing: {
+        billingMode: "subscription",
+        currency: "USD",
+        source: "opencode-go-official",
+        effectiveAtMs: 1_785_640_000_000,
+        uncachedInputPricePerMillionNanos: 1_000_000_000,
+        cachedInputPricePerMillionNanos: 100_000_000,
+        outputPricePerMillionNanos: 3_000_000_000,
+      },
+      transport: "http",
+      responseFormat: "sse",
+      operation: "response",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      reasoningEffort: "high",
+      status: "completed",
+      httpStatus: 200,
+      errorType: null,
+      errorCode: null,
+      errorMessage: null,
+      incompleteReason: null,
+      inputTokens: 500_000,
+      cachedInputTokens: 100_000,
+      outputTokens: 200_000,
+      reasoningOutputTokens: 0,
+      totalTokens: 700_000,
+      upstreamCreatedAt: 1_785_640_800,
+      upstreamCompletedAt: 1_785_640_801,
+      requestStartedAtMs: 1_000,
+      firstTokenAtMs: 1_100,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: 1_400,
+      lastOutputDeltaAtMs: 1_600,
+      responseCompletedAtMs: 1_650,
+      weeklyQuota: null,
+    });
+    store.close();
+
+    const nowMs = Date.now();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      usage: {
+        monthly: { status: "ok", percent: 1 },
+      },
+    }), { status: 200 }));
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: { CODEX_HOME: codexHome },
+      fetchImpl: fetchImpl as typeof fetch,
+      metricsDatabasePath: metricsPath,
+      nowMs: () => nowMs,
+    });
+
+    const usage = await adapter.accountUsage();
+    expect(usage.kind).toBe("quota-windows");
+    if (usage.kind !== "quota-windows") {
+      throw new Error("unexpected usage kind");
+    }
+    expect(usage.modelUsage).toHaveLength(1);
+    const estimate = usage.modelUsage![0]!;
+    expect(estimate.model).toBe("deepseek-v4-flash");
+    expect(estimate.includedUsageUsd).toBe(15);
+    expect(estimate.usedUsdNanos).toBe(1_010_000_000);
+    expect(estimate.usedPercent).toBeCloseTo(1_010_000_000 / 15_000_000_000 * 100, 6);
+    expect(estimate.remainingUsdNanos).toBe(13_990_000_000);
   });
 });
 

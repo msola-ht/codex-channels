@@ -106,6 +106,14 @@ export interface ProviderQuotaWindow {
   status: string | null;
 }
 
+export interface ProviderModelUsageEstimate {
+  model: string;
+  includedUsageUsd: number;
+  usedUsdNanos: number | null;
+  usedPercent: number | null;
+  remainingUsdNanos: number | null;
+}
+
 export type ProviderAccountUsage =
   | { kind: "token-usage"; provider: "openai"; usage: AccountUsage }
   | { kind: "balance"; provider: string; available: boolean; balances: ProviderBalance[] }
@@ -114,6 +122,7 @@ export type ProviderAccountUsage =
       provider: string;
       available: boolean;
       windows: ProviderQuotaWindow[];
+      modelUsage?: ProviderModelUsageEstimate[];
     }
   | { kind: "unsupported"; provider: string };
 

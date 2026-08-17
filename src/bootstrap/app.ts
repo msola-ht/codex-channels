@@ -375,6 +375,9 @@ export class GatewayApplication {
       }),
       createOpencodeGoAccountAdapter({
         fetchImpl: createProxyFetch(config.networkProxy),
+        metricsDatabasePath: modelRequestMetricsDatabasePath(
+          config.stateDatabasePath,
+        ),
       }),
     ]);
     const visionConfig = config.vision;

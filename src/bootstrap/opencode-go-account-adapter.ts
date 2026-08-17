@@ -1,8 +1,11 @@
 import { loadOpencodeGoAccountCredential } from "../../runtime/model-provider-runtime.mjs";
+import { SqliteModelRequestMetricsStore } from "../observability/index.js";
 import { readBoundedFetchBody } from "./bounded-fetch-body.js";
+import { loadOpenCodeGoPricingBaseline } from "./opencode-go-model-pricing.js";
 
 import type {
   ProviderAccountAdapter,
+  ProviderModelUsageEstimate,
   ProviderAccountUsage,
   ProviderQuotaWindow,
 } from "../application/index.js";
@@ -44,7 +47,16 @@ export function createOpencodeGoAccountAdapter(
           tooLarge: () => new Error("OpenCode Go usage response is too large"),
           missingBody: () => new Error("OpenCode Go usage response is empty"),
         });
-        return parseUsageResponse(JSON.parse(body.toString("utf8")) as unknown);
+        const usage = parseUsageResponse(JSON.parse(body.toString("utf8")) as unknown);
+        const modelUsage = options.metricsDatabasePath === undefined
+          ? undefined
+          : readModelUsageEstimates(
+              options.metricsDatabasePath,
+              options.nowMs?.() ?? Date.now(),
+            );
+        return modelUsage === undefined
+          ? usage
+          : { ...usage, modelUsage };
       } catch {
         throw new UserFacingError(
           "provider.account.unavailable",
@@ -59,6 +71,59 @@ export function createOpencodeGoAccountAdapter(
 export interface OpencodeGoAccountAdapterOptions {
   environment?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
+  metricsDatabasePath?: string;
+  nowMs?: () => number;
+}
+
+function readModelUsageEstimates(
+  metricsDatabasePath: string,
+  nowMs: number,
+): ProviderModelUsageEstimate[] {
+  try {
+    const now = new Date(nowMs);
+    const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    const store = new SqliteModelRequestMetricsStore(
+      metricsDatabasePath,
+      nowMs,
+      { readOnly: true },
+    );
+    try {
+      const report = store.aggregate({
+        dimension: "model",
+        startAtMs: monthStart,
+        endAtMs: nowMs,
+      });
+      const baseline = loadOpenCodeGoPricingBaseline();
+      return report.groups
+        .filter((group) =>
+          group.provider === "opencode-go"
+          && group.model !== null
+          && group.aggregate.totalCostNanos !== null
+          && group.aggregate.totalCostNanos > 0)
+        .map((group) => {
+          const model = group.model!;
+          const includedUsageUsd = baseline.models.get(model)?.includedUsageUsd;
+          const usedUsdNanos = group.aggregate.totalCostNanos!;
+          if (includedUsageUsd === undefined) return null;
+          const includedUsdNanos = Math.round(includedUsageUsd * 1_000_000_000);
+          const estimate: ProviderModelUsageEstimate | null = {
+            model,
+            includedUsageUsd,
+            usedUsdNanos,
+            usedPercent: usedUsdNanos / includedUsdNanos * 100,
+            remainingUsdNanos: includedUsdNanos - usedUsdNanos,
+          };
+          return estimate;
+        })
+        .filter((estimate): estimate is ProviderModelUsageEstimate =>
+          estimate !== null)
+        .sort((left, right) => right.usedUsdNanos! - left.usedUsdNanos!);
+    } finally {
+      store.close();
+    }
+  } catch {
+    return [];
+  }
 }
 
 function parseUsageResponse(value: unknown): ProviderAccountUsage {
