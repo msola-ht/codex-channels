@@ -396,6 +396,7 @@ contractSuite("real supervised App Server service", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "opencode-go"',
+        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(catalogPath)}`,
         "[model_providers.opencode-go]",
         'name = "opencode-go"',
