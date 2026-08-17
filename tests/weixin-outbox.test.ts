@@ -86,6 +86,46 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("asks for and renders the OpenCode Go remaining usage on completion", async () => {
+    const requestStartedAtMs = Date.parse("2026-08-17T03:30:00.000Z");
+    const opencodeGoUsage = vi.fn<NonNullable<WeixinOutboxOptions["opencodeGoUsage"]>>(async () => ({
+      model: "deepseek-v4-flash",
+      bucket: "peak",
+      includedUsageUsd: 15,
+      usedUsdNanos: 2_813_173_642,
+      usedPercent: 2_813_173_642 / 15_000_000_000 * 100,
+      remainingUsdNanos: 12_186_826_358,
+      windowStartAtMs: 1_786_803_727_000,
+      windowEndAtMs: 1_789_482_127_000,
+    }));
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { opencodeGoUsage },
+    );
+
+    await outbox.handle({
+      type: "turn.completed",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      status: "completed",
+      model: "deepseek-v4-flash",
+      modelProvider: "opencode-go",
+      effort: "high",
+      serviceTier: null,
+      timing: { modelRequestCount: 1, modelRequestStartedAtMs: requestStartedAtMs },
+    });
+    await outbox.close();
+
+    expect(opencodeGoUsage).toHaveBeenCalledWith(
+      "deepseek-v4-flash",
+      requestStartedAtMs,
+    );
+    const text = sendText.mock.calls.at(-1)?.[0].text ?? "";
+    expect(text).toContain("**账户状态**");
+    expect(text).toContain("剩余用量（Peak）：剩余 $12.19 · 包含 $15.00 · 已用 18.8%");
+  });
+
   it("identifies the Plugin in the unified Turn start reply", async () => {
     const { outbox, sendText } = outboxFixture();
 
