@@ -49,7 +49,7 @@ describe("model provider runtime topology", () => {
     const descriptor = resolveAppServerRuntime(
       { codex: { socket_path: "runtime/codex.sock" } },
       "/private/codexc",
-      { CODEX_HOME: codexHome },
+      testEnvironment(codexHome),
     );
 
     expect(descriptor.primaryProvider).toBe("openai");
@@ -68,7 +68,7 @@ describe("model provider runtime topology", () => {
   it("keeps DeepSeek and OpenCode Go as independent managed Providers", async () => {
     const codexHome = await configuredHome("switching");
     configureOpenCodeGo(codexHome);
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(loadManagedModelProviders(environment)).toEqual([
       { provider: "deepseek" },
@@ -96,7 +96,7 @@ describe("model provider runtime topology", () => {
 
   it("uses OpenAI as primary and exposes DeepSeek as an auxiliary switching server", async () => {
     const codexHome = await configuredHome("switching");
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(loadPrimaryModelProvider(environment)).toBe("openai");
     expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
@@ -104,7 +104,7 @@ describe("model provider runtime topology", () => {
 
   it("uses the native DeepSeek configuration as the only primary server in exclusive mode", async () => {
     const codexHome = await configuredHome("exclusive");
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(loadPrimaryModelProvider(environment)).toBe("deepseek");
     expect(loadManagedModelProvider(environment)).toBeUndefined();
@@ -112,10 +112,10 @@ describe("model provider runtime topology", () => {
 
   it("uses OpenCode Go as the primary server in exclusive mode", async () => {
     const codexHome = await configuredHome("switching");
-    rmSync(join(codexHome, "sf-deepseek.managed.toml"));
+    rmSync(join(connectHomeFor(codexHome), "providers", "deepseek", "managed.toml"));
     rmSync(join(codexHome, "sf-deepseek.config.toml"));
     configureOpenCodeGo(codexHome, "exclusive");
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(loadPrimaryModelProvider(environment)).toBe("opencode-go");
     expect(loadManagedModelProvider(environment)).toBeUndefined();
@@ -126,7 +126,7 @@ describe("model provider runtime topology", () => {
   it("rejects more than one exclusive third-party Provider", async () => {
     const codexHome = await configuredHome("exclusive");
     configureOpenCodeGo(codexHome, "exclusive");
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(() => loadPrimaryModelProvider(environment))
       .toThrow("只能有一个受管第三方 Provider 使用固定模式");
@@ -156,7 +156,7 @@ describe("model provider runtime topology", () => {
       { mode: 0o600 },
     );
 
-    expect(loadOpenAiBaseUrl({ CODEX_HOME: codexHome }))
+    expect(loadOpenAiBaseUrl(testEnvironment(codexHome)))
       .toBe("https://regional.example.test/codex");
     expect(withOpenAiBaseUrl([], "http://127.0.0.1:45678"))
       .toEqual(["-c", 'openai_base_url="http://127.0.0.1:45678"']);
@@ -168,12 +168,12 @@ describe("model provider runtime topology", () => {
       mode: 0o600,
     });
 
-    expect(loadOpenAiBaseUrl({ CODEX_HOME: codexHome })).toBeUndefined();
+    expect(loadOpenAiBaseUrl(testEnvironment(codexHome))).toBeUndefined();
   });
 
   it("replaces the managed provider base URL with a local proxy address", async () => {
     const codexHome = await configuredHome("switching");
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
     const managed = loadManagedProviderAppServer(environment);
     if (!managed) {
       throw new Error("测试环境缺少 DeepSeek 托管配置");
@@ -206,13 +206,13 @@ describe("model provider runtime topology", () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
       join(codexHome, "sf-deepseek.config.toml"),
-      providerProfile(codexHome, "switching").replace(
+      providerProfile("switching", providerCatalogPath(codexHome)).replace(
         'model_provider = "deepseek"\n',
         'model_provider = "deepseek"\nmodel_context_window = 1048576\n',
       ),
       { mode: 0o600 },
     );
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
     expect(() => loadManagedProviderAppServer(environment))
@@ -223,13 +223,13 @@ describe("model provider runtime topology", () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
       join(codexHome, "sf-deepseek.config.toml"),
-      providerProfile(codexHome, "switching").replace(
+      providerProfile("switching", providerCatalogPath(codexHome)).replace(
         'model_reasoning_effort = "high"\n',
         "",
       ),
       { mode: 0o600 },
     );
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(() => loadManagedProviderAppServer(environment))
       .toThrow("模型目录或思考等级无效");
@@ -239,13 +239,13 @@ describe("model provider runtime topology", () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
       join(codexHome, "sf-deepseek.config.toml"),
-      providerProfile(codexHome, "switching").replace(
+      providerProfile("switching", providerCatalogPath(codexHome)).replace(
         'model_reasoning_effort = "high"\n',
         'model_reasoning_effort = "low"\n',
       ),
       { mode: 0o600 },
     );
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(() => loadManagedProviderAppServer(environment))
       .toThrow("模型目录或思考等级无效");
@@ -255,13 +255,13 @@ describe("model provider runtime topology", () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
       join(codexHome, "sf-deepseek.config.toml"),
-      providerProfile(codexHome, "switching").replace(
+      providerProfile("switching", providerCatalogPath(codexHome)).replace(
         'model_reasoning_effort = "high"\n',
         "",
       ),
       { mode: 0o600 },
     );
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
 
     expect(writeManagedModelProviderProfileDefault("deepseek", {
       model: "deepseek-v4-flash",
@@ -281,7 +281,7 @@ describe("model provider runtime topology", () => {
 
   it("writes and removes the DeepSeek subagent role configuration without the API key", async () => {
     const codexHome = await configuredHome("switching");
-    const environment = { CODEX_HOME: codexHome };
+    const environment = testEnvironment(codexHome);
     const rolePath = managedModelProviderRoleConfigPath(environment);
 
     writeManagedModelProviderRoleConfig(environment, {
@@ -332,19 +332,19 @@ describe("model provider runtime topology", () => {
     const switchingHome = await configuredHome("switching");
     const exclusiveHome = await configuredHome("exclusive");
 
-    expect(validateConfiguredModelProvider({ CODEX_HOME: switchingHome }))
+    expect(validateConfiguredModelProvider(testEnvironment(switchingHome)))
       .toEqual({ provider: "deepseek", mode: "switching" });
-    expect(validateConfiguredModelProvider({ CODEX_HOME: exclusiveHome }))
+    expect(validateConfiguredModelProvider(testEnvironment(exclusiveHome)))
       .toEqual({ provider: "deepseek", mode: "exclusive" });
   });
 
   it("rejects a managed configuration whose actual model catalog is missing", async () => {
     const codexHome = await configuredHome("switching");
-    rmSync(join(codexHome, "sf-deepseek.models.json"));
+    rmSync(join(connectHomeFor(codexHome), "providers", "deepseek", "models.json"));
 
-    expect(() => loadManagedProviderAppServer({ CODEX_HOME: codexHome }))
+    expect(() => loadManagedProviderAppServer(testEnvironment(codexHome)))
       .toThrow("模型目录");
-    expect(() => validateConfiguredModelProvider({ CODEX_HOME: codexHome }))
+    expect(() => validateConfiguredModelProvider(testEnvironment(codexHome)))
       .toThrow("模型目录");
   });
 
@@ -352,42 +352,64 @@ describe("model provider runtime topology", () => {
     const codexHome = await configuredHome("exclusive");
     writeFileSync(
       join(codexHome, "config.toml"),
-      providerProfile(codexHome, "exclusive").replace(
+      providerProfile("exclusive", providerCatalogPath(codexHome)).replace(
         'model_provider = "deepseek"\n',
         'model_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       ),
       { mode: 0o600 },
     );
 
-    expect(() => validateConfiguredModelProvider({ CODEX_HOME: codexHome }))
+    expect(() => validateConfiguredModelProvider(testEnvironment(codexHome)))
       .toThrow("模型目录或思考等级无效");
   });
 });
 
+function connectHomeFor(codexHome: string): string {
+  return join(codexHome, ".codex-connect");
+}
+
+function providerCatalogPath(codexHome: string): string {
+  return join(connectHomeFor(codexHome), "providers", "deepseek", "models.json");
+}
+
+function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
+  return { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: connectHomeFor(codexHome) };
+}
+
 async function configuredHome(mode: "switching" | "exclusive"): Promise<string> {
   const codexHome = await mkdtemp(join(tmpdir(), "codexc-provider-runtime-"));
   mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+  const providerDirectory = join(connectHomeFor(codexHome), "providers", "deepseek");
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
   writeFileSync(
-    join(codexHome, "sf-deepseek.managed.toml"),
+    join(providerDirectory, "managed.toml"),
     `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
   const profilePath = mode === "exclusive" ? "config.toml" : "sf-deepseek.config.toml";
-  writeFileSync(join(codexHome, profilePath), providerProfile(codexHome, mode), { mode: 0o600 });
+  const catalogPath = join(providerDirectory, "models.json");
   writeFileSync(
-    join(codexHome, "sf-deepseek.models.json"),
+    join(codexHome, profilePath),
+    providerProfile(mode, catalogPath),
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    catalogPath,
     providerCatalog(),
     { mode: 0o600 },
   );
   return codexHome;
 }
 
-function providerProfile(codexHome: string, mode: "switching" | "exclusive"): string {
+function providerProfile(
+  mode: "switching" | "exclusive",
+  catalogPath: string,
+): string {
   return [
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
     ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
-    `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
+    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
     "[model_providers.deepseek]",
     'name = "deepseek"',
     'base_url = "https://api.deepseek.com/"',
@@ -402,13 +424,20 @@ function configureOpenCodeGo(
   codexHome: string,
   mode: "switching" | "exclusive" = "switching",
 ): void {
+  const providerDirectory = join(
+    connectHomeFor(codexHome),
+    "providers",
+    "opencode-go",
+  );
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
   writeFileSync(
-    join(codexHome, "sf-opencode-go.managed.toml"),
+    join(providerDirectory, "managed.toml"),
     `version = 1\nprovider = "opencode-go"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
+  const catalogPath = join(providerDirectory, "models.json");
   writeFileSync(
-    join(codexHome, "sf-opencode-go.models.json"),
+    catalogPath,
     providerCatalog(),
     { mode: 0o600 },
   );
@@ -416,7 +445,7 @@ function configureOpenCodeGo(
     'model = "deepseek-v4-flash"',
     'model_provider = "opencode-go"',
     ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
-    `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
+    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
     "[model_providers.opencode-go]",
     'name = "opencode-go"',
     'base_url = "https://opencode.ai/zen/go/v1"',

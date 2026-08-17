@@ -17,3 +17,13 @@ export interface ModelProviderModelSettingsMigrationResult {
 export function migrateManagedModelProviderModelSettings(
   environment?: NodeJS.ProcessEnv,
 ): ModelProviderModelSettingsMigrationResult;
+
+export interface ModelProviderFileMigrationPath {
+  legacy: string;
+  current: string;
+  definition?: import("../runtime/model-provider-definitions.mjs").ModelProviderDefinition;
+}
+
+export function migrationPaths(
+  environment?: NodeJS.ProcessEnv,
+): ModelProviderFileMigrationPath[];

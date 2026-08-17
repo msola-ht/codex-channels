@@ -29,8 +29,9 @@
   `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按
   目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
   未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
-  `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts` 把受管第三方 Provider 的旧文件名
-  原子迁移为统一 `sf-` 前缀，遇到新旧文件冲突或不安全权限时拒绝覆盖。
+  `backup-provider-migration.mjs` 先完整备份旧布局、现有新目录与被改写引用文件，再把受管
+  第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
+  不安全权限时拒绝覆盖，迁移失败时恢复原有目录。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
@@ -128,10 +129,11 @@
   API 提供商和视觉模型；不复制 Endpoint 或 API Key，禁用视觉不删除共享提供商。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
-  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入用户
-  `CODEX_HOME`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
-  模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，写入不含凭据的 Gateway
-  管理标记，并自动开启 `features.multi_agent_v2`、把共享 `agents.external` 子代理切换到 DeepSeek；
+  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入
+  `~/.codex-connect/providers/deepseek/`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
+  模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，模型目录与管理标记写入
+  `~/.codex-connect/providers/deepseek/`，并自动开启 `features.multi_agent_v2`、把共享
+  `agents.external` 子代理切换到 DeepSeek；
   首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
   生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改，并保留仍受支持的默认模型、
@@ -157,8 +159,13 @@
   配置前状态，从同一受审查来源生成自己的模型目录并复用共享子代理机制，但不复用凭据、Provider
   身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的默认模型与逐模型设置。
 - `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一
-  `sf-` 前缀，并把 Provider 根级上下文、思考等级和自动压缩阈值迁入各自模型目录，切换模式
-  Profile 再镜像所选模型的默认思考等级。
+  `~/.codex-connect/providers/<id>/` 布局，并把 Provider 根级上下文、思考等级和自动压缩阈值
+  迁入各自模型目录，切换模式 Profile 再镜像所选模型的默认思考等级。
+- `backup-provider-migration.mjs` / `backup-provider-migration.d.mts`：在迁移前把旧布局文件、
+  现有新布局 Provider 目录与被改写引用文件完整复制到 `~/.codex-connect/backups/` 下带时间戳的
+  备份目录，再执行文件布局与模型设置迁移；遇到新旧并存时先把现有 Provider 目录移到备份内
+  的 `original-providers/`，迁移失败时恢复原目录。默认只预演，需显式 `--apply` 才写入；
+  `codexc update` 的停机窗口会自动以 `--apply` 方式调用。
 - `semantic-html-table.mjs` / `semantic-html-table.d.mts`：为受控官方价格提案提供有界、无脚本的
   语义化 HTML 表格解析，不进入 Gateway 运行路径。
 - `prepare-opencode-go-pricing-proposal.mjs` / `prepare-opencode-go-pricing-proposal.d.mts`：从

@@ -13,6 +13,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
+import { providerStorageRoot } from "./connect-home.mjs";
 import {
   deepseekProviderDefinition,
   managedModelProviderDefinitions,
@@ -37,6 +38,10 @@ const providerDescriptors = new Map(managedModelProviderDefinitions.map((definit
 ]));
 const deepseekProvider = providerDescriptors.get(deepseekProviderDefinition.id);
 const opencodeGoProvider = providerDescriptors.get(opencodeGoProviderDefinition.id);
+
+export function managedProviderDirectory(environment, definition) {
+  return join(providerStorageRoot(environment), definition.id);
+}
 
 export function loadManagedModelProvider(environment = process.env) {
   return loadManagedModelProviders(environment)[0];
@@ -87,14 +92,13 @@ export function validateConfiguredModelProvider(environment = process.env) {
 }
 
 export function validateConfiguredModelProviders(environment = process.env) {
-  const codexHome = codexHomePath(environment);
   const exclusiveProviders = managedModelProviderDefinitions.filter((definition) =>
-    readManagedMarker(codexHome, definition)?.mode === "exclusive");
+    readManagedMarker(environment, definition)?.mode === "exclusive");
   if (exclusiveProviders.length > 1) {
     throw new Error("只能有一个受管第三方 Provider 使用固定模式");
   }
   return managedModelProviderDefinitions.flatMap((definition) => {
-    const marker = readManagedMarker(codexHome, definition);
+    const marker = readManagedMarker(environment, definition);
     if (!marker) return [];
     if (marker.mode === "exclusive") {
       const configured = loadConfiguredProviderProfile(environment, definition);
@@ -107,7 +111,7 @@ export function validateConfiguredModelProviders(environment = process.env) {
 
 export function loadManagedModelProviderSettings(environment = process.env) {
   return managedModelProviderDefinitions.flatMap((definition) => {
-    const marker = readManagedMarker(codexHomePath(environment), definition);
+    const marker = readManagedMarker(environment, definition);
     if (!marker) return [];
     const profile = loadConfiguredProviderProfile(environment, definition);
     return [{
@@ -133,15 +137,19 @@ export function writeManagedModelProviderProfileDefault(
   const model = settings?.model;
   validateManagedModelSettings(definition, settings);
   const codexHome = codexHomePath(environment);
-  const marker = readManagedMarker(codexHome, definition);
+  const marker = readManagedMarker(environment, definition);
   if (!marker) throw new Error(`${definition.displayName} Provider 尚未配置`);
   if (marker.mode !== "switching") {
     throw new Error(`${definition.displayName} 固定模式必须通过 Codex 配置事务修改默认模型`);
   }
   const descriptor = providerDescriptors.get(definition.id);
   const profilePath = join(codexHome, definition.profileFileName);
+  const expectedCatalogPath = join(
+    managedProviderDirectory(environment, definition),
+    definition.catalogFileName,
+  );
   const profile = readProviderProfile(profilePath, descriptor, {
-    expectedCatalogPath: join(codexHome, definition.catalogFileName),
+    expectedCatalogPath,
     reasoningEffortPolicy: "ignore",
   });
   const previousCatalog = readPrivateFile(profile.catalogPath, maximumCatalogBytes);
@@ -160,7 +168,7 @@ export function writeManagedModelProviderProfileDefault(
     throw error;
   }
   readProviderProfile(profilePath, descriptor, {
-    expectedCatalogPath: join(codexHome, definition.catalogFileName),
+    expectedCatalogPath,
     reasoningEffortPolicy: "mirror",
   });
   return { provider: definition.id, ...settings, mode: marker.mode };
@@ -176,7 +184,10 @@ export function writeManagedModelProviderCatalogSettings(
   );
   if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
   validateManagedModelSettings(definition, settings);
-  const catalogPath = join(codexHomePath(environment), definition.catalogFileName);
+  const catalogPath = join(
+    managedProviderDirectory(environment, definition),
+    definition.catalogFileName,
+  );
   const previousContent = readPrivateFile(catalogPath, maximumCatalogBytes);
   const previous = modelCatalogSetting(previousContent, definition, settings.model);
   writePrivateFileAtomicSync(
@@ -221,9 +232,8 @@ export function withPreservedManagedModelCatalogSettings(
 }
 
 export function loadPrimaryModelProvider(environment = process.env) {
-  const codexHome = codexHomePath(environment);
   const exclusiveProviders = managedModelProviderDefinitions.filter((definition) =>
-    readManagedMarker(codexHome, definition)?.mode === "exclusive");
+    readManagedMarker(environment, definition)?.mode === "exclusive");
   if (exclusiveProviders.length > 1) {
     throw new Error("只能有一个受管第三方 Provider 使用固定模式");
   }
@@ -443,13 +453,17 @@ function loadManagedProviderProfileFor(
   { requireLaunchConfig = false } = {},
 ) {
   const codexHome = codexHomePath(environment);
-  const marker = readManagedMarker(codexHome, definition);
+  const marker = readManagedMarker(environment, definition);
   if (!marker || marker.mode === "exclusive") return undefined;
   const descriptor = providerDescriptors.get(definition.id);
+  const expectedCatalogPath = join(
+    managedProviderDirectory(environment, definition),
+    definition.catalogFileName,
+  );
   const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
     ...(requireLaunchConfig
       ? {
-          expectedCatalogPath: join(codexHome, definition.catalogFileName),
+          expectedCatalogPath,
           reasoningEffortPolicy: "mirror",
         }
       : {}),
@@ -461,13 +475,17 @@ function loadManagedProviderProfileFor(
 function loadManagedProviderProfiles(environment, { requireLaunchConfig = false } = {}) {
   const codexHome = codexHomePath(environment);
   return managedModelProviderDefinitions.flatMap((definition) => {
-    const marker = readManagedMarker(codexHome, definition);
+    const marker = readManagedMarker(environment, definition);
     if (!marker || marker.mode === "exclusive") return [];
     const descriptor = providerDescriptors.get(definition.id);
+    const expectedCatalogPath = join(
+      managedProviderDirectory(environment, definition),
+      definition.catalogFileName,
+    );
     const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
       ...(requireLaunchConfig
         ? {
-            expectedCatalogPath: join(codexHome, definition.catalogFileName),
+            expectedCatalogPath,
             reasoningEffortPolicy: "mirror",
           }
         : {}),
@@ -479,14 +497,18 @@ function loadManagedProviderProfiles(environment, { requireLaunchConfig = false 
 
 function loadConfiguredProviderProfile(environment, definition) {
   const codexHome = codexHomePath(environment);
-  const marker = readManagedMarker(codexHome, definition);
+  const marker = readManagedMarker(environment, definition);
   if (!marker) return undefined;
   const descriptor = providerDescriptors.get(definition.id);
+  const expectedCatalogPath = join(
+    managedProviderDirectory(environment, definition),
+    definition.catalogFileName,
+  );
   const profilePath = marker.mode === "exclusive"
     ? join(codexHome, "config.toml")
     : join(codexHome, descriptor.profileName);
   const profile = readProviderProfile(profilePath, descriptor, {
-    expectedCatalogPath: join(codexHome, definition.catalogFileName),
+    expectedCatalogPath,
     reasoningEffortPolicy: marker.mode === "switching" ? "mirror" : "absent",
   });
   validateModelCatalog(profile.catalogPath, definition);
@@ -754,8 +776,11 @@ function validateManagedModelSettings(definition, settings) {
   }
 }
 
-function readManagedMarker(codexHome, definition) {
-  const markerPath = join(codexHome, definition.managedMarkerFileName);
+function readManagedMarker(environment, definition) {
+  const markerPath = join(
+    managedProviderDirectory(environment, definition),
+    definition.managedMarkerFileName,
+  );
   let marker;
   try {
     marker = record(parse(readPrivateFile(markerPath)));

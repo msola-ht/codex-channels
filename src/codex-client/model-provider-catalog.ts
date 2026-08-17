@@ -17,13 +17,13 @@ interface ManagedCatalogDefinition {
 }
 
 export function loadManagedModelOptions(
-  codexHome: string,
+  providerDirectory: string,
   enabled: boolean,
   definition: ManagedCatalogDefinition,
 ): ModelOption[] {
   if (!enabled) return [];
   const knownModels = new Map(definition.models.map((model) => [model.slug, model]));
-  const catalogPath = join(codexHome, definition.catalogFileName);
+  const catalogPath = join(providerDirectory, definition.catalogFileName);
   if (!existsSync(catalogPath)) return [];
   let parsed: unknown;
   try {

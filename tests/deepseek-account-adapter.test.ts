@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,7 +27,7 @@ describe("DeepSeek account adapter", () => {
       }],
     }), { status: 200, headers: { "content-type": "application/json" } }));
     const adapter = createDeepseekAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
     });
 
@@ -54,7 +54,7 @@ describe("DeepSeek account adapter", () => {
   it("fails with a stable user error without exposing malformed responses", async () => {
     const codexHome = await createCodexHome();
     const adapter = createDeepseekAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: async () => new Response("secret-upstream-body", { status: 200 }),
     });
 
@@ -77,7 +77,7 @@ describe("DeepSeek account adapter", () => {
       balance_infos: [],
     }), { status: 200 }));
     const adapter = createDeepseekAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
     });
 
@@ -93,6 +93,13 @@ describe("DeepSeek account adapter", () => {
 async function createCodexHome(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "codexc-deepseek-account-"));
   temporaryDirectories.push(directory);
+  const providerDirectory = join(
+    directory,
+    ".codex-connect",
+    "providers",
+    "deepseek",
+  );
+  await mkdir(providerDirectory, { recursive: true, mode: 0o700 });
   await writeFile(join(directory, "config.toml"), 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
   await writeFile(
     join(directory, "sf-deepseek.config.toml"),
@@ -100,11 +107,18 @@ async function createCodexHome(): Promise<string> {
     { mode: 0o600 },
   );
   await writeFile(
-    join(directory, "sf-deepseek.managed.toml"),
+    join(providerDirectory, "managed.toml"),
     'version = 1\nprovider = "deepseek"\n',
     { mode: 0o600 },
   );
   return directory;
+}
+
+function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
+  return {
+    CODEX_HOME: codexHome,
+    CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+  };
 }
 
 function providerConfig(apiKey: string): string {

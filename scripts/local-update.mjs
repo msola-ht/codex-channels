@@ -50,10 +50,7 @@ import {
   validateStateDatabaseStructure,
 } from "./upgrade-state.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
-import {
-  migrateManagedModelProviderFiles,
-  migrateManagedModelProviderModelSettings,
-} from "./model-provider-file-layout.mjs";
+import { backupAndMigrateProviderFiles } from "./backup-provider-migration.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
@@ -142,10 +139,7 @@ export async function updateLocalInstallation(environment = process.env, options
   let updateError;
   try {
     (options.updateProviderFiles
-      ?? (() => ({
-        layout: migrateManagedModelProviderFiles(environment),
-        settings: migrateManagedModelProviderModelSettings(environment),
-      })))();
+      ?? (() => backupAndMigrateProviderFiles(environment, { apply: true })))();
     config = (options.updateConfig
       ?? (() => updateGatewayConfiguration(environment)))();
     databases = (options.updateDatabases
@@ -480,18 +474,23 @@ if (
         return result;
       },
       updateProviderFiles: () => {
-        const layout = migrateManagedModelProviderFiles(process.env);
-        const settings = migrateManagedModelProviderModelSettings(process.env);
-        if (layout.changed) {
-          writeCliMessage("success", `第三方 Provider 文件已统一为 sf- 前缀（${layout.moved.length} 项）。`);
+        const result = backupAndMigrateProviderFiles(process.env, { apply: true });
+        if (result.status === "migrated") {
+          if (result.layout.changed) {
+            writeCliMessage(
+              "success",
+              `第三方 Provider 文件已迁移（${result.layout.moved.length} 项）。`,
+            );
+          }
+          if (result.settings.changed) {
+            writeCliMessage(
+              "success",
+              `第三方模型设置已迁移为逐模型配置（${result.settings.updated.length} 个文件）。`,
+            );
+          }
+          console.log(`迁移前备份：${result.backupDirectory}`);
         }
-        if (settings.changed) {
-          writeCliMessage(
-            "success",
-            `第三方模型设置已迁移为逐模型配置（${settings.updated.length} 个文件）。`,
-          );
-        }
-        return { layout, settings };
+        return result;
       },
       databaseOptions: {
         onInspected: printInspection,

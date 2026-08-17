@@ -1,4 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,7 +24,7 @@ describe("OpenCode Go setup", () => {
     const text = vi.fn(async () => "60");
 
     const result = await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: vi.fn() },
       prompts: {
         select,
@@ -37,7 +43,7 @@ describe("OpenCode Go setup", () => {
       autoCompactPercent: 60,
     });
     const catalog = JSON.parse(readFileSync(
-      join(codexHome, "sf-opencode-go.models.json"),
+      join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"),
       "utf8",
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
@@ -56,7 +62,7 @@ describe("OpenCode Go setup", () => {
         model: "deepseek-v4-flash",
       }));
       const result = await runOpenCodeGoSetup({
-        environment: { CODEX_HOME: codexHome },
+        environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
         output: { write: vi.fn() },
         prompter: {
           select: async () => mode,
@@ -88,7 +94,7 @@ describe("OpenCode Go setup", () => {
         expect(config.model_reasoning_effort).toBeUndefined();
       }
       const catalog = JSON.parse(readFileSync(
-        join(codexHome, "sf-opencode-go.models.json"),
+        join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"),
         "utf8",
       ));
       expect(catalog.models[0]).toMatchObject({
@@ -97,7 +103,7 @@ describe("OpenCode Go setup", () => {
         auto_compact_token_limit: 600_000,
       });
       expect(parse(readFileSync(
-        join(codexHome, "sf-opencode-go.managed.toml"),
+        join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"),
         "utf8",
       ))).toEqual({ version: 1, provider: "opencode-go", mode });
       expect(configureRole).toHaveBeenCalledWith(
@@ -115,7 +121,7 @@ describe("OpenCode Go setup", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-transition-"));
     writeFileSync(join(codexHome, "config.toml"), "custom = true\n", { mode: 0o600 });
     const base = {
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
@@ -141,7 +147,7 @@ describe("OpenCode Go setup", () => {
     const original = 'model = "gpt-5.6-sol"\n';
     writeFileSync(join(codexHome, "config.toml"), original, { mode: 0o600 });
     await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("exclusive"),
       configureRole: vi.fn(async () => undefined),
@@ -149,7 +155,7 @@ describe("OpenCode Go setup", () => {
     });
 
     const result = await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("restore"),
       configureRole: vi.fn(async () => undefined),
@@ -158,41 +164,41 @@ describe("OpenCode Go setup", () => {
     expect(result).toMatchObject({ action: "restored" });
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, "sf-opencode-go.managed.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, "sf-opencode-go.models.json"))).toBe(false);
-    expect(existsSync(join(codexHome, "sf-opencode-go.models.manifest.json"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
   });
 
   it("restores a legacy backup state created before catalog files were provider-owned", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-legacy-restore-"));
     await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("switching"),
       configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     });
-    const statePath = join(codexHome, "backup-codex-connect-opencode-go", "state.json");
+    const statePath = join(codexHome, ".codex-connect", "providers", "opencode-go", "backup", "state.json");
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     delete state.catalog;
     delete state.manifest;
     writeFileSync(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("restore"),
     })).resolves.toMatchObject({ action: "restored" });
 
-    expect(existsSync(join(codexHome, "sf-opencode-go.models.json"))).toBe(false);
-    expect(existsSync(join(codexHome, "sf-opencode-go.models.manifest.json"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
   });
 
   it("validates the complete backup state before restoring any file", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-invalid-restore-"));
     writeFileSync(join(codexHome, "config.toml"), "custom = true\n", { mode: 0o600 });
     await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("switching"),
       configureRole: vi.fn(async () => undefined),
@@ -200,24 +206,24 @@ describe("OpenCode Go setup", () => {
     });
     const configPath = join(codexHome, "config.toml");
     const configBefore = readFileSync(configPath, "utf8");
-    const statePath = join(codexHome, "backup-codex-connect-opencode-go", "state.json");
+    const statePath = join(codexHome, ".codex-connect", "providers", "opencode-go", "backup", "state.json");
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     delete state.manifest;
     writeFileSync(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("restore"),
     })).rejects.toThrow("备份状态无效");
 
     expect(readFileSync(configPath, "utf8")).toBe(configBefore);
-    expect(existsSync(join(codexHome, "sf-opencode-go.models.json"))).toBe(true);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(true);
   });
 
   it("preserves the selected model and per-model settings when setup is repeated", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-repeat-"));
-    const environment = { CODEX_HOME: codexHome };
+    const environment = { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") };
     await runOpenCodeGoSetup({
       environment,
       output: { write: () => undefined },
@@ -246,7 +252,7 @@ describe("OpenCode Go setup", () => {
         model_reasoning_effort: "max",
       });
     const catalog = JSON.parse(readFileSync(
-      join(codexHome, "sf-opencode-go.models.json"),
+      join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"),
       "utf8",
     ));
     expect(catalog.models[1]).toMatchObject({
@@ -264,7 +270,7 @@ describe("OpenCode Go setup", () => {
     writeFileSync(profilePath, 'model = "user-managed"\n', { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("switching"),
     })).rejects.toThrow("管理标记不存在");
@@ -278,7 +284,7 @@ describe("OpenCode Go setup", () => {
     writeFileSync(configPath, original, { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("switching"),
       downloadCatalog: successfulCatalog,
@@ -286,7 +292,7 @@ describe("OpenCode Go setup", () => {
 
     expect(readFileSync(configPath, "utf8")).toBe(original);
     expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, "sf-opencode-go.managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
   });
 
   it("rolls back every file when shared-role configuration fails", async () => {
@@ -295,7 +301,7 @@ describe("OpenCode Go setup", () => {
     writeFileSync(join(codexHome, "config.toml"), original, { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("switching"),
       configureRole: vi.fn(async () => { throw new Error("config conflict"); }),
@@ -304,7 +310,7 @@ describe("OpenCode Go setup", () => {
 
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, "sf-opencode-go.managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
   });
 });
 
@@ -318,7 +324,14 @@ function prompt(action: "switching" | "exclusive" | "restore") {
 
 function opencodeFixture(): string {
   const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-menu-"));
-  const catalogPath = join(codexHome, "sf-opencode-go.models.json");
+  const providerDirectory = join(
+    codexHome,
+    ".codex-connect",
+    "providers",
+    "opencode-go",
+  );
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
     'model_provider = "opencode-go"',
@@ -334,7 +347,7 @@ function opencodeFixture(): string {
     "",
   ].join("\n");
   writeFileSync(
-    join(codexHome, "sf-opencode-go.managed.toml"),
+    join(providerDirectory, "managed.toml"),
     'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
     { mode: 0o600 },
   );

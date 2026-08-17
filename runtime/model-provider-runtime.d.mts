@@ -55,6 +55,11 @@ export function loadManagedModelProviderSettings(
   environment?: NodeJS.ProcessEnv,
 ): ManagedModelProviderSettings[];
 
+export function managedProviderDirectory(
+  environment: NodeJS.ProcessEnv | undefined,
+  definition: import("./model-provider-definitions.mjs").ModelProviderDefinition,
+): string;
+
 export function writeManagedModelProviderProfileDefault(
   provider: ManagedModelProviderId,
   settings: {

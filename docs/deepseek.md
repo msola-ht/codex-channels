@@ -3,8 +3,9 @@
 本页说明 `codexc setup` 管理的 DeepSeek 配置、终端使用方式和 Provider 切换边界。一般用户只需
 完成 Setup，并在配置变化后运行 `codexc service restart all`。
 
-DeepSeek 配置写入 `~/.codex`，不写入 Gateway 的 `~/.codex-connect/config.toml`；后者只保存
-通讯渠道、Workspace、显示和 Gateway 运行配置。
+DeepSeek Profile 写入 `~/.codex`，模型目录与管理标记写入 `~/.codex-connect/providers/deepseek/`，
+均不写入 Gateway 的 `~/.codex-connect/config.toml`；后者只保存通讯渠道、Workspace、显示和
+Gateway 运行配置。
 
 ## 配置模式
 
@@ -47,21 +48,24 @@ DeepSeek Provider。
 | 文件 | 用途 |
 | --- | --- |
 | `~/.codex/sf-deepseek.config.toml` | 切换模式的 DeepSeek 模型、默认思考等级镜像、Provider 和 API Key |
-| `~/.codex/sf-deepseek.models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
-| `~/.codex/sf-deepseek.managed.toml` | 不含凭据的 Gateway 管理标记 |
+| `~/.codex-connect/providers/deepseek/models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
+| `~/.codex-connect/providers/deepseek/models.manifest.json` | 模型目录下载校验清单 |
+| `~/.codex-connect/providers/deepseek/managed.toml` | 不含凭据的 Gateway 管理标记 |
+| `~/.codex-connect/providers/deepseek/backup/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
 | `~/.codex/sf-agent.config.toml` | 不含凭据的共享第三方子代理配置 |
-| `~/.codex/backup-codex-connect-deepseek/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
 
-这些文件位于 Codex 用户目录，不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或切换模式，
-并保留仍受支持的默认模型及逐模型思考、自动压缩设置；上下文窗口采用新目录值，压缩阈值按原百分比
-重新计算。
+Profile 位于 Codex 用户目录（原生 `--profile` 只识别这里），模型目录与管理标记位于 Gateway 数据
+目录 `~/.codex-connect/providers/`，均不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或
+切换模式，并保留仍受支持的默认模型及逐模型思考、自动压缩设置；上下文窗口采用新目录值，压缩阈值
+按原百分比重新计算。
 恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
 的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
 OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或修改任一 Provider 不影响另一方设置。
-从旧版文件布局升级时，运行 `codexc update` 会在核心服务停止期间把受管文件迁移为以上 `sf-`
-名称；新旧文件同时存在时不会猜测覆盖关系，而是明确报错。旧版 Profile 顶层的思考等级和自动
-压缩阈值会迁移进对应模型目录，切换模式 Profile 再镜像所选模型的默认思考等级；迁移不保留旧的
-`body_after_prefix` 压缩作用域，升级后统一按 `total` 作用域应用。
+从旧版文件布局升级时，运行 `codexc update` 会在核心服务停止期间把受管模型目录、清单、管理标记
+和备份迁移到 `~/.codex-connect/providers/deepseek/`；新旧文件同时存在时不会猜测覆盖关系，而是
+明确报错。旧版 Profile 顶层的思考等级和自动压缩阈值会迁移进对应模型目录，切换模式 Profile 再
+镜像所选模型的默认思考等级；迁移不保留旧的 `body_after_prefix` 压缩作用域，升级后统一按
+`total` 作用域应用。
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
 `/model` 选择。初次配置默认使用 Flash；之后可在 `codexc setup` 的“模型与提供商 → 第三方模型设置”

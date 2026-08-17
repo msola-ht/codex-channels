@@ -8,6 +8,7 @@ import { parse, stringify } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
+  managedProviderDirectory,
   loadPrimaryModelProvider,
   loadManagedModelProviderSettings,
   managedModelProviderRoleConfigPath,
@@ -114,7 +115,7 @@ export async function runOpenCodeGoSetup({
       previous?.models,
     );
     const trackedPaths = Object.entries(paths)
-      .filter(([name]) => name !== "codexHome")
+      .filter(([name]) => name !== "codexHome" && name !== "providerDirectory")
       .map(([, path]) => path);
     const snapshots = await snapshotFiles(trackedPaths);
     let guards;
@@ -200,14 +201,16 @@ export async function runOpenCodeGoSetup({
 
 function providerPaths(environment) {
   const codexHome = codexHomePath(environment);
-  const backupDirectory = join(codexHome, definition.backupDirectoryName);
+  const providerDirectory = managedProviderDirectory(environment, definition);
+  const backupDirectory = join(providerDirectory, definition.backupDirectoryName);
   return {
     codexHome,
+    providerDirectory,
     configPath: join(codexHome, "config.toml"),
     profilePath: join(codexHome, definition.profileFileName),
-    markerPath: join(codexHome, definition.managedMarkerFileName),
-    catalogPath: join(codexHome, definition.catalogFileName),
-    manifestPath: join(codexHome, definition.catalogManifestFileName),
+    markerPath: join(providerDirectory, definition.managedMarkerFileName),
+    catalogPath: join(providerDirectory, definition.catalogFileName),
+    manifestPath: join(providerDirectory, definition.catalogManifestFileName),
     roleConfigPath: managedModelProviderRoleConfigPath(environment),
     backupStatePath: join(backupDirectory, "state.json"),
     configBackupPath: join(backupDirectory, "config.toml"),
