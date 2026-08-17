@@ -212,6 +212,47 @@ describe("OpenCode Go account adapter", () => {
       responseCompletedAtMs: 1_650,
       weeklyQuota: null,
     });
+    store.record({
+      provider: "opencode-go",
+      pricing: {
+        billingMode: "subscription",
+        currency: "USD",
+        source: "opencode-go-official",
+        effectiveAtMs: 1_785_000_000_000,
+        uncachedInputPricePerMillionNanos: 440_000_000,
+        cachedInputPricePerMillionNanos: 14_000_000,
+        outputPricePerMillionNanos: 1_320_000_000,
+      },
+      transport: "http",
+      responseFormat: "sse",
+      operation: "response",
+      threadId: "thread-3",
+      turnId: "turn-3",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      reasoningEffort: "high",
+      status: "completed",
+      httpStatus: 200,
+      errorType: null,
+      errorCode: null,
+      errorMessage: null,
+      incompleteReason: null,
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      outputTokens: 50_000,
+      reasoningOutputTokens: 0,
+      totalTokens: 150_000,
+      upstreamCreatedAt: 1_785_640_800,
+      upstreamCompletedAt: 1_785_640_801,
+      requestStartedAtMs: Date.parse("2026-08-16T08:00:00.000Z"),
+      firstTokenAtMs: 1_100,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: 1_400,
+      lastOutputDeltaAtMs: 1_600,
+      responseCompletedAtMs: 1_650,
+      weeklyQuota: null,
+    });
     store.close();
 
     const nowMs = Date.now();
@@ -236,15 +277,38 @@ describe("OpenCode Go account adapter", () => {
     if (usage.kind !== "quota-windows") {
       throw new Error("unexpected usage kind");
     }
-    expect(usage.modelUsage).toHaveLength(1);
-    const estimate = usage.modelUsage![0]!;
-    expect(estimate.model).toBe("deepseek-v4-flash");
-    expect(estimate.includedUsageUsd).toBe(15);
-    expect(estimate.usedUsdNanos).toBe(237_500_000);
-    expect(estimate.usedPercent).toBeCloseTo(237_500_000 / 15_000_000_000 * 100, 6);
-    expect(estimate.remainingUsdNanos).toBe(14_762_500_000);
-    expect(estimate.windowEndAtMs).toBe(Date.parse("2026-08-20T00:00:00.000Z"));
-    expect(estimate.windowStartAtMs).toBe(
+    expect(usage.modelUsage).toHaveLength(2);
+    const offPeak = usage.modelUsage!.find(
+      (estimate) => estimate.bucket === "off-peak",
+    );
+    const peak = usage.modelUsage!.find(
+      (estimate) => estimate.bucket === "peak",
+    );
+    expect(offPeak).toMatchObject({
+      model: "deepseek-v4-flash",
+      bucket: "off-peak",
+      includedUsageUsd: 15,
+      usedUsdNanos: 237_500_000,
+      remainingUsdNanos: 14_762_500_000,
+      windowEndAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+    });
+    expect(offPeak!.usedPercent).toBeCloseTo(
+      237_500_000 / 15_000_000_000 * 100,
+      6,
+    );
+    expect(peak).toMatchObject({
+      model: "deepseek-v4-flash",
+      bucket: "peak",
+      includedUsageUsd: 15,
+      usedUsdNanos: 110_000_000,
+      remainingUsdNanos: 14_890_000_000,
+      windowEndAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
+    });
+    expect(peak!.usedPercent).toBeCloseTo(
+      110_000_000 / 15_000_000_000 * 100,
+      6,
+    );
+    expect(offPeak!.windowStartAtMs).toBe(
       opencodeGoMonthlyWindowStartMs(Date.parse("2026-08-20T00:00:00.000Z") / 1_000),
     );
   });
@@ -356,6 +420,98 @@ describe("OpenCode Go account adapter", () => {
 
     await expect(reader("deepseek-v4-flash")).resolves.toBeNull();
     await expect(reader("deepseek-v4-pro")).resolves.toBeNull();
+  });
+
+  it("picks the OpenCode Go peak or off-peak bucket matching the current time", async () => {
+    const codexHome = await createCodexHome();
+    const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-reader-"));
+    temporaryDirectories.push(directory);
+    const metricsPath = modelRequestMetricsDatabasePath(
+      join(directory, "gateway.sqlite3"),
+    );
+    const store = new SqliteModelRequestMetricsStore(metricsPath);
+    recordWindowSample(
+      store,
+      Date.parse("2026-08-16T17:00:00.000Z"),
+      100_000,
+      10_000,
+      110_000,
+    );
+    store.record({
+      provider: "opencode-go",
+      pricing: {
+        billingMode: "subscription",
+        currency: "USD",
+        source: "opencode-go-official",
+        effectiveAtMs: 1_785_000_000_000,
+        uncachedInputPricePerMillionNanos: 440_000_000,
+        cachedInputPricePerMillionNanos: 14_000_000,
+        outputPricePerMillionNanos: 1_320_000_000,
+      },
+      transport: "http",
+      responseFormat: "sse",
+      operation: "response",
+      threadId: "thread-peak",
+      turnId: "turn-peak",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      reasoningEffort: "high",
+      status: "completed",
+      httpStatus: 200,
+      errorType: null,
+      errorCode: null,
+      errorMessage: null,
+      incompleteReason: null,
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      outputTokens: 50_000,
+      reasoningOutputTokens: 0,
+      totalTokens: 150_000,
+      upstreamCreatedAt: 1_785_640_800,
+      upstreamCompletedAt: 1_785_640_801,
+      requestStartedAtMs: Date.parse("2026-08-16T08:00:00.000Z"),
+      firstTokenAtMs: 1_100,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: 1_400,
+      lastOutputDeltaAtMs: 1_600,
+      responseCompletedAtMs: 1_650,
+      weeklyQuota: null,
+    });
+    store.close();
+
+    const fetchImpl = async () => new Response(JSON.stringify({
+      usage: {
+        monthly: {
+          status: "ok",
+          percent: 1,
+          resetsAt: "2026-08-20T00:00:00.000Z",
+        },
+      },
+    }), { status: 200 });
+    const peakReader = createOpencodeGoRemainingUsageReader({
+      environment: { CODEX_HOME: codexHome },
+      fetchImpl: fetchImpl as typeof fetch,
+      metricsDatabasePath: metricsPath,
+      nowMs: () => Date.parse("2026-08-17T08:30:00.000Z"),
+    });
+    const offPeakReader = createOpencodeGoRemainingUsageReader({
+      environment: { CODEX_HOME: codexHome },
+      fetchImpl: fetchImpl as typeof fetch,
+      metricsDatabasePath: metricsPath,
+      nowMs: () => Date.parse("2026-08-17T17:30:00.000Z"),
+    });
+
+    await expect(peakReader("deepseek-v4-flash")).resolves.toMatchObject({
+      model: "deepseek-v4-flash",
+      bucket: "peak",
+      usedUsdNanos: 110_000_000,
+    });
+    await expect(offPeakReader("deepseek-v4-flash")).resolves.toMatchObject({
+      model: "deepseek-v4-flash",
+      bucket: "off-peak",
+      usedUsdNanos: 28_600_000,
+    });
   });
 });
 

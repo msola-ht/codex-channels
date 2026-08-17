@@ -68,7 +68,7 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
     const model = this.baseline.models.get(lookup.model);
     if (!model) return null;
     if (model.peakOffPeak) {
-      const price = this.isPeakMinute(new Date(lookup.atMs))
+      const price = isOpenCodeGoPeakMinute(new Date(lookup.atMs), this.baseline)
         ? model.peakOffPeak.peak
         : model.peakOffPeak.offPeak;
       return {
@@ -96,12 +96,15 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
       outputPricePerMillionNanos: usdPerMillionToNanos(tier.output),
     };
   }
+}
 
-  private isPeakMinute(date: Date): boolean {
-    const minute = date.getUTCHours() * 60 + date.getUTCMinutes();
-    return this.baseline.peakRanges.some(({ start, end }) =>
-      minute >= start && minute < end);
-  }
+export function isOpenCodeGoPeakMinute(
+  date: Date,
+  baseline = loadOpenCodeGoPricingBaseline(),
+): boolean {
+  const minute = date.getUTCHours() * 60 + date.getUTCMinutes();
+  return baseline.peakRanges.some(({ start, end }) =>
+    minute >= start && minute < end);
 }
 
 export function loadOpenCodeGoPricingBaseline(

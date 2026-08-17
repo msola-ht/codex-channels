@@ -298,6 +298,7 @@ export interface OpencodeGoQuotaWindow {
 
 export interface OpencodeGoModelUsageEstimate {
   model: string
+  bucket?: "off-peak" | "peak"
   includedUsageUsd: number
   usedUsdNanos: number | null
   usedPercent: number | null

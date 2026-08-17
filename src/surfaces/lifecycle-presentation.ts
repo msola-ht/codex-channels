@@ -13,6 +13,7 @@ import type {
 import { usesOpenAiAccount } from "../conversation-core/index.js";
 
 import {
+  formatModelUsageBucket,
   formatOpenAiErrorMessage,
   formatPercent,
   formatRemainingRateLimitWindow,
@@ -449,7 +450,9 @@ export function createTurnCompletedPresentation(
   }
   if (remainingUsage && event.modelProvider === "opencode-go") {
     accountFields.push({
-      label: "剩余用量",
+      label: `剩余用量${remainingUsage.bucket === undefined
+        ? ""
+        : `（${formatModelUsageBucket(remainingUsage.bucket)}）`}`,
       value: [
         `剩余 ${remainingUsage.remainingUsdNanos === null
           ? "未知"

@@ -541,6 +541,7 @@ describe("shared Surface lifecycle presentation", () => {
         false,
         {
           model: "deepseek-v4-flash",
+          bucket: "off-peak",
           includedUsageUsd: 15,
           usedUsdNanos: 1_010_000_000,
           usedPercent: 6.733333333333333,
@@ -551,7 +552,7 @@ describe("shared Surface lifecycle presentation", () => {
       ),
     );
 
-    expect(rendered).toContain("剩余用量");
+    expect(rendered).toContain("剩余用量（Off-Peak）");
     expect(rendered).toContain("剩余 $13.99 · 包含 $15.00 · 已用 6.7%");
   });
 

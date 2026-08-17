@@ -7,6 +7,7 @@ import { readBoundedFetchBody } from "./bounded-fetch-body.js";
 import {
   loadOpenCodeGoPricingBaseline,
   OpenCodeGoModelPricingResolver,
+  isOpenCodeGoPeakMinute,
 } from "./opencode-go-model-pricing.js";
 
 import type {
@@ -125,8 +126,17 @@ export function createOpencodeGoRemainingUsageReader(
     try {
       const usage = await adapter.accountUsage();
       if (usage.kind !== "quota-windows") return null;
-      return usage.modelUsage?.find((estimate) => estimate.model === model)
-        ?? null;
+      const baseline = loadOpenCodeGoPricingBaseline();
+      const bucket = baseline.models.get(model)?.peakOffPeak === undefined
+        ? undefined
+        : isOpenCodeGoPeakMinute(
+            new Date(options.nowMs?.() ?? Date.now()),
+            baseline,
+          )
+          ? "peak"
+          : "off-peak";
+      return usage.modelUsage?.find((estimate) =>
+        estimate.model === model && estimate.bucket === bucket) ?? null;
     } catch {
       return null;
     }
@@ -225,7 +235,14 @@ function readModelUsageEstimates(
       const resolver = new OpenCodeGoModelPricingResolver();
       const baseline = loadOpenCodeGoPricingBaseline();
       const priceEffectiveAtMs = baseline.sourceUpdatedAtMs;
-      const totals = new Map<string, number>();
+      type ModelBucket = "off-peak" | "peak";
+      const totals = new Map<string, {
+        model: string;
+        bucket: ModelBucket | null;
+        usedUsdNanos: number;
+      }>();
+      const totalKey = (model: string, bucket: ModelBucket | null) =>
+        bucket === null ? model : `${model}:${bucket}`;
       let offset = 0;
       do {
         const page = store.page({
@@ -264,42 +281,78 @@ function readModelUsageEstimates(
               ? null
               : calculateModelRequestCostComponents(usage, record.pricing);
           if (cost === null) continue;
-          totals.set(
-            record.model,
-            (totals.get(record.model) ?? 0) + cost.totalCostNanos,
-          );
+          const bucket = baseline.models.get(record.model)?.peakOffPeak === undefined
+            ? null
+            : isOpenCodeGoPeakMinute(new Date(atMs), baseline)
+              ? "peak"
+              : "off-peak";
+          const key = totalKey(record.model, bucket);
+          const existing = totals.get(key);
+          totals.set(key, {
+            model: record.model,
+            bucket,
+            usedUsdNanos: (existing?.usedUsdNanos ?? 0) + cost.totalCostNanos,
+          });
         }
         offset = page.nextOffset ?? -1;
       } while (offset >= 0);
       const estimates: ProviderModelUsageEstimate[] = [];
-      for (const [model, usedUsdNanos] of totals) {
+      const pushEstimate = (
+        model: string,
+        bucket: ModelBucket | null,
+        usedUsdNanos: number,
+      ): void => {
         const includedUsageUsd = baseline.models.get(model)?.includedUsageUsd;
-        if (includedUsageUsd === undefined) continue;
+        if (includedUsageUsd === undefined) return;
         const includedUsdNanos = Math.round(includedUsageUsd * 1_000_000_000);
+        const common = {
+          model,
+          ...(bucket === null ? {} : { bucket }),
+          includedUsageUsd,
+          windowStartAtMs,
+          windowEndAtMs,
+        };
         if (includedUsdNanos <= 0) {
           estimates.push({
-            model,
-            includedUsageUsd,
+            ...common,
             usedUsdNanos,
             usedPercent: null,
             remainingUsdNanos: null,
-            windowStartAtMs,
-            windowEndAtMs,
           });
-          continue;
+          return;
         }
         estimates.push({
-          model,
-          includedUsageUsd,
+          ...common,
           usedUsdNanos,
           usedPercent: usedUsdNanos / includedUsdNanos * 100,
           remainingUsdNanos: includedUsdNanos - usedUsdNanos,
-          windowStartAtMs,
-          windowEndAtMs,
         });
+      };
+      const emitted = new Set<string>();
+      const modelsWithTotals = new Set<string>();
+      for (const { model, bucket, usedUsdNanos } of totals.values()) {
+        modelsWithTotals.add(model);
+        emitted.add(totalKey(model, bucket));
+        if (bucket !== null) {
+          pushEstimate(model, bucket, usedUsdNanos);
+          continue;
+        }
+        pushEstimate(model, null, usedUsdNanos);
+      }
+      // 有本地请求的 DeepSeek 模型按官方表格展示 Off-Peak / Peak 两档，未使用的一档计 0。
+      for (const model of modelsWithTotals) {
+        const price = baseline.models.get(model);
+        if (price?.peakOffPeak === undefined) continue;
+        for (const bucket of ["off-peak", "peak"] as const) {
+          if (!emitted.has(totalKey(model, bucket))) {
+            pushEstimate(model, bucket, 0);
+          }
+        }
       }
       return estimates.sort((left, right) =>
-        right.usedUsdNanos! - left.usedUsdNanos!);
+        right.usedUsdNanos! - left.usedUsdNanos!
+        || left.model.localeCompare(right.model)
+        || (left.bucket ?? "").localeCompare(right.bucket ?? ""));
     } finally {
       store.close();
     }

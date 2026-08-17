@@ -302,9 +302,17 @@ export function OpencodeGoUsageCard({
               （按当前价格基线重算）
             </p>
             {modelUsage.map((estimate) => (
-              <div key={estimate.model} className="flex flex-col gap-1">
+              <div
+                key={`${estimate.model}:${estimate.bucket ?? "default"}`}
+                className="flex flex-col gap-1"
+              >
                 <div className="flex items-center justify-between text-sm">
-                  <span>{estimate.model}</span>
+                  <span>
+                    {estimate.model}
+                    {estimate.bucket === undefined
+                      ? ""
+                      : `（${estimate.bucket === "peak" ? "Peak" : "Off-Peak"}）`}
+                  </span>
                   <span className="tabular-nums text-muted-foreground">
                     {estimate.usedPercent === null
                       ? "未知"

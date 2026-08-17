@@ -109,6 +109,8 @@ export interface ProviderQuotaWindow {
 
 export interface ProviderModelUsageEstimate {
   model: string;
+  /** OpenCode Go DeepSeek 模型按官方口径拆分的峰谷档位 */
+  bucket?: "off-peak" | "peak";
   includedUsageUsd: number;
   usedUsdNanos: number | null;
   usedPercent: number | null;

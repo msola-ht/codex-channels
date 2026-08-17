@@ -14,6 +14,7 @@ import {
 } from "../conversation-core/index.js";
 
 import {
+  formatModelUsageBucket,
   formatPercent,
   formatPlanType,
   formatRateLimitState,
@@ -1290,7 +1291,10 @@ export function formatConversationUsage(
               const remaining = estimate.remainingUsdNanos === null
                 ? "未知"
                 : formatUsdAmount(estimate.remainingUsdNanos);
-              return `- ${estimate.model}：已用 ${used} / 包含 ${included}（${percent}）· 剩余 ${remaining}`;
+              const bucket = estimate.bucket === undefined
+                ? ""
+                : `（${formatModelUsageBucket(estimate.bucket)}）`;
+              return `- ${estimate.model}${bucket}：已用 ${used} / 包含 ${included}（${percent}）· 剩余 ${remaining}`;
             }),
           ]),
     ].join("\n"));
