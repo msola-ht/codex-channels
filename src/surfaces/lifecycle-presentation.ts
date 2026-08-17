@@ -3,6 +3,7 @@ import {
   type ConversationStatus,
   type DisplayPriceCurrency,
   type ExchangeRateSnapshot,
+  type ProviderModelUsageEstimate,
 } from "../application/index.js";
 import type {
   OutputEvent,
@@ -12,6 +13,7 @@ import type {
 import { usesOpenAiAccount } from "../conversation-core/index.js";
 
 import {
+  formatModelUsageBucket,
   formatOpenAiErrorMessage,
   formatPercent,
   formatRemainingRateLimitWindow,
@@ -383,6 +385,7 @@ export function createTurnCompletedPresentation(
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
+  remainingUsage?: ProviderModelUsageEstimate | null,
 ): LifecyclePresentation {
   const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const sessionFields: LifecyclePresentationField[] = event.background
@@ -443,6 +446,24 @@ export function createTurnCompletedPresentation(
     accountFields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
+    });
+  }
+  if (remainingUsage && event.modelProvider === "opencode-go") {
+    accountFields.push({
+      label: `剩余用量${remainingUsage.bucket === undefined
+        ? ""
+        : `（${formatModelUsageBucket(remainingUsage.bucket)}）`}`,
+      value: [
+        `剩余 ${remainingUsage.remainingUsdNanos === null
+          ? "未知"
+          : formatUsdAmount(remainingUsage.remainingUsdNanos)}`,
+        `包含 ${formatUsdAmount(
+          Math.round(remainingUsage.includedUsageUsd * 1_000_000_000),
+        )}`,
+        ...(remainingUsage.usedPercent === null
+          ? []
+          : [`已用 ${formatPercent(remainingUsage.usedPercent)}`]),
+      ].join(" · "),
     });
   }
   if (event.goal) {
@@ -810,6 +831,13 @@ function formatUpstreamUserAgent(userAgent: string | null): string {
     /(\([^)]*\))\s+\S+\s+(\([^)]*\))$/u,
     "$1 $2",
   );
+}
+
+function formatUsdAmount(nanos: number): string {
+  return `$${(nanos / 1_000_000_000).toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function formatWeeklyLimit(

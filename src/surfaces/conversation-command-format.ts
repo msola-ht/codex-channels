@@ -14,6 +14,7 @@ import {
 } from "../conversation-core/index.js";
 
 import {
+  formatModelUsageBucket,
   formatPercent,
   formatPlanType,
   formatRateLimitState,
@@ -1249,6 +1250,14 @@ export function formatConversationUsage(
     ].join("\n"));
   }
   if (result.result.kind === "quota-windows") {
+    const modelUsage = result.result.modelUsage ?? [];
+    const firstEstimate = modelUsage[0];
+    const windowRange = firstEstimate?.windowStartAtMs === null
+      || firstEstimate?.windowStartAtMs === undefined
+      || firstEstimate?.windowEndAtMs === null
+      || firstEstimate?.windowEndAtMs === undefined
+      ? ""
+      : `（月度窗口 ${formatResetTime(Math.floor(firstEstimate.windowStartAtMs / 1_000))} – ${formatResetTime(Math.floor(firstEstimate.windowEndAtMs / 1_000))}）`;
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
       `API 可用：${result.result.available ? "是" : "否"}`,
@@ -1258,8 +1267,36 @@ export function formatConversationUsage(
             const reset = window.resetsAt === null
               ? "未知"
               : formatResetTime(window.resetsAt);
-            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)} · 重置 ${reset}`;
+            const localTokens = window.localTokens === undefined
+              || window.localTokens === null
+              ? ""
+              : ` · 本地 Token 约 ${formatTokenCount(window.localTokens)}`;
+            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)}${localTokens} · 重置 ${reset}`;
           })),
+      ...(modelUsage.length === 0
+        ? []
+        : [
+            "",
+            `模型本地用量${windowRange}（按当前价格基线按请求时间重算，非官方账单）：`,
+            ...modelUsage.map((estimate) => {
+              const used = estimate.usedUsdNanos === null
+                ? "未知"
+                : formatUsdAmount(estimate.usedUsdNanos);
+              const included = formatUsdAmount(
+                Math.round(estimate.includedUsageUsd * 1_000_000_000),
+              );
+              const percent = estimate.usedPercent === null
+                ? "未知"
+                : formatPercent(estimate.usedPercent);
+              const remaining = estimate.remainingUsdNanos === null
+                ? "未知"
+                : formatUsdAmount(estimate.remainingUsdNanos);
+              const bucket = estimate.bucket === undefined
+                ? ""
+                : `（${formatModelUsageBucket(estimate.bucket)}）`;
+              return `- ${estimate.model}${bucket}：已用 ${used} / 包含 ${included}（${percent}）· 剩余 ${remaining}`;
+            }),
+          ]),
     ].join("\n"));
   }
   const daily = [...result.result.usage.daily]
@@ -1280,6 +1317,13 @@ export function formatConversationUsage(
           (entry) => `- ${entry.startDate}：${formatMillions(entry.tokens)}`,
         )),
   ].join("\n"));
+}
+
+function formatUsdAmount(nanos: number): string {
+  return `$${(nanos / 1_000_000_000).toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 export function formatConversationLimits(

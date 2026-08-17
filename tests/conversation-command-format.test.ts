@@ -695,6 +695,7 @@ describe("provider-aware conversation command formatting", () => {
             usedPercent: 0,
             resetsAt: 1_784_800_000,
             status: "ok",
+            localTokens: 123_400,
           },
           {
             windowId: "monthly",
@@ -708,9 +709,55 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain("OpenCode Go 账户用量");
-    expect(rendered).toContain("5小时：已用 0%");
+    expect(rendered).toContain("5小时：已用 0% · 本地 Token 约 123.4 K");
     expect(rendered).toContain("月度：已用 12.5% · 重置 未知");
     expect(rendered).not.toContain("累计 Tokens");
+  });
+
+  it("renders OpenCode Go model usage estimates from local reference costs", () => {
+    const rendered = formatConversationUsage({
+      kind: "usage",
+      result: {
+        kind: "quota-windows",
+        provider: "opencode-go",
+        available: true,
+        windows: [{
+          windowId: "monthly",
+          label: "月度",
+          usedPercent: 1,
+          resetsAt: null,
+          status: "ok",
+        }],
+        modelUsage: [{
+          model: "deepseek-v4-flash",
+          bucket: "off-peak",
+          includedUsageUsd: 15,
+          usedUsdNanos: 1_010_000_000,
+          usedPercent: 1_010_000_000 / 15_000_000_000 * 100,
+          remainingUsdNanos: 13_990_000_000,
+          windowStartAtMs: Date.parse("2026-08-15T14:22:07.934Z"),
+          windowEndAtMs: Date.parse("2026-09-15T14:22:07.934Z"),
+        }, {
+          model: "deepseek-v4-flash",
+          bucket: "peak",
+          includedUsageUsd: 15,
+          usedUsdNanos: 2_020_000_000,
+          usedPercent: 2_020_000_000 / 15_000_000_000 * 100,
+          remainingUsdNanos: 12_980_000_000,
+          windowStartAtMs: Date.parse("2026-08-15T14:22:07.934Z"),
+          windowEndAtMs: Date.parse("2026-09-15T14:22:07.934Z"),
+        }],
+      },
+    });
+
+    expect(rendered).toContain("模型本地用量");
+    expect(rendered).toContain("月度窗口");
+    expect(rendered).toContain(
+      "deepseek-v4-flash（Off-Peak）：已用 $1.01 / 包含 $15.00（6.7%）· 剩余 $13.99",
+    );
+    expect(rendered).toContain(
+      "deepseek-v4-flash（Peak）：已用 $2.02 / 包含 $15.00（13.5%）· 剩余 $12.98",
+    );
   });
 
   it("fails closed for unregistered Provider account capabilities", () => {

@@ -45,6 +45,10 @@ export function formatPercent(value: number): string {
   })}%`;
 }
 
+export function formatModelUsageBucket(bucket: "off-peak" | "peak"): string {
+  return bucket === "peak" ? "Peak" : "Off-Peak";
+}
+
 export function formatPlanType(value: string): string {
   const names: Record<string, string> = {
     free: "Free",

@@ -3,6 +3,7 @@ import type {
   ConversationStatus,
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -214,6 +215,7 @@ export function renderFeishuOutput(
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
+  remainingUsage?: ProviderModelUsageEstimate | null,
 ): string | null {
   switch (event.type) {
     case "vision.started":
@@ -247,7 +249,13 @@ export function renderFeishuOutput(
     case "subagent.completed":
       return renderFeishuSubagentCompleted(event, priceCurrency, exchangeRate, debug);
     case "turn.completed":
-      return renderFeishuTurnCompleted(event, priceCurrency, exchangeRate, debug);
+      return renderFeishuTurnCompleted(
+        event,
+        priceCurrency,
+        exchangeRate,
+        debug,
+        remainingUsage,
+      );
     case "thread.status":
       return `Thread 状态：${threadStatusLabel(event.status)}`;
     case "thread.availability":
@@ -291,9 +299,16 @@ function renderFeishuTurnCompleted(
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
+  remainingUsage?: ProviderModelUsageEstimate | null,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createTurnCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+    createTurnCompletedPresentation(
+      event,
+      priceCurrency,
+      exchangeRate,
+      debug,
+      remainingUsage,
+    ),
   );
 }
 

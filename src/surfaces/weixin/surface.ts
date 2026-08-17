@@ -4,6 +4,7 @@ import type { ConversationUseCases } from "../../application/index.js";
 import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import type {
   ConversationTarget,
@@ -79,6 +80,9 @@ export interface WeixinSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  opencodeGoUsage?: (
+    model: string,
+  ) => Promise<ProviderModelUsageEstimate | null>;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
 }
@@ -160,6 +164,9 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        ...(options.opencodeGoUsage === undefined
+          ? {}
+          : { opencodeGoUsage: options.opencodeGoUsage }),
         debugEnabled: options.debugEnabled ?? false,
         ...(options.replyContextPersistence === undefined
           ? {}

@@ -293,11 +293,24 @@ export interface OpencodeGoQuotaWindow {
   usedPercent: number
   resetsAt: number | null
   status: string | null
+  localTokens?: number | null
+}
+
+export interface OpencodeGoModelUsageEstimate {
+  model: string
+  bucket?: "off-peak" | "peak"
+  includedUsageUsd: number
+  usedUsdNanos: number | null
+  usedPercent: number | null
+  remainingUsdNanos: number | null
+  windowStartAtMs: number | null
+  windowEndAtMs: number | null
 }
 
 export interface OpencodeGoUsageResponse {
   available: boolean
   windows: OpencodeGoQuotaWindow[]
+  modelUsage?: OpencodeGoModelUsageEstimate[]
 }
 
 export interface GlobalTotals {

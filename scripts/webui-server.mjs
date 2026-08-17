@@ -8,6 +8,7 @@ import {
   inspectMetricsDatabase,
   metricsDatabaseCanUpgrade,
   metricsRange,
+  requireCompatibleMetricsDatabase,
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -282,7 +283,16 @@ async function handleDeepseekBalance(environment, response) {
 }
 
 async function handleOpencodeGoUsage(environment, response) {
-  const adapter = createOpencodeGoAccountAdapter({ environment });
+  let metricsDatabasePath;
+  try {
+    metricsDatabasePath = requireCompatibleMetricsDatabase(environment);
+  } catch {
+    metricsDatabasePath = undefined;
+  }
+  const adapter = createOpencodeGoAccountAdapter({
+    environment,
+    metricsDatabasePath,
+  });
   try {
     const usage = await adapter.accountUsage();
     sendJson(response, 200, {
@@ -291,9 +301,12 @@ async function handleOpencodeGoUsage(environment, response) {
         windowId: window.windowId,
         label: window.label,
         usedPercent: window.usedPercent,
-        resetsAt: window.resetsAt,
+        // 指标/账户接口统一使用秒级重置时间，WebUI 前端使用毫秒时间戳。
+        resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
         status: window.status,
+        localTokens: window.localTokens ?? null,
       })),
+      modelUsage: usage.modelUsage ?? [],
     });
   } catch {
     sendJson(response, 200, {

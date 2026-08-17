@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+# git commit -a 会把待写入的临时索引通过 GIT_INDEX_FILE 传给 hook（绝对路径）；
+# 校验脚本及其测试子进程必须使用各自的仓库上下文，不能继承该路径，
+# 否则临时仓库里的 git 命令会错误读写正在提交的索引。
+unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
 repository_root="$(git rev-parse --show-toplevel)"
 cd "$repository_root"
 

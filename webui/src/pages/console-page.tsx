@@ -232,6 +232,7 @@ function AccountStatusCards({
         <OpencodeGoUsageCard
           available={opencodeGoUsage?.available ?? false}
           windows={opencodeGoUsage?.windows ?? []}
+          modelUsage={opencodeGoUsage?.modelUsage ?? []}
         />
       </div>
     </div>

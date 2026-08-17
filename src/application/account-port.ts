@@ -104,6 +104,19 @@ export interface ProviderQuotaWindow {
   usedPercent: number;
   resetsAt: number | null;
   status: string | null;
+  localTokens?: number | null;
+}
+
+export interface ProviderModelUsageEstimate {
+  model: string;
+  /** OpenCode Go DeepSeek 模型按官方口径拆分的峰谷档位 */
+  bucket?: "off-peak" | "peak";
+  includedUsageUsd: number;
+  usedUsdNanos: number | null;
+  usedPercent: number | null;
+  remainingUsdNanos: number | null;
+  windowStartAtMs: number | null;
+  windowEndAtMs: number | null;
 }
 
 export type ProviderAccountUsage =
@@ -114,6 +127,7 @@ export type ProviderAccountUsage =
       provider: string;
       available: boolean;
       windows: ProviderQuotaWindow[];
+      modelUsage?: ProviderModelUsageEstimate[];
     }
   | { kind: "unsupported"; provider: string };
 

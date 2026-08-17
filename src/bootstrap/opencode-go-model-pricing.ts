@@ -12,6 +12,7 @@ const baselineUrl = new URL(
 );
 const source = "https://opencode.ai/docs/go/";
 const modelPattern = /^[a-z0-9][a-z0-9._-]{0,119}$/u;
+const localRangePattern = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/u;
 const allowedEndpointPaths = new Set([
   "/zen/go/v1/responses",
   "/zen/go/v1/chat/completions",
@@ -30,15 +31,28 @@ interface PriceTier {
   cachedRead: number;
 }
 
+interface PeakOffPeakPrice {
+  offPeak: PriceTier;
+  peak: PriceTier;
+}
+
 interface ModelPrice {
   endpoint: string;
   aiSdkPackage: string;
   tiers: readonly PriceTier[];
+  peakOffPeak?: PeakOffPeakPrice;
   includedUsageUsd: number;
+}
+
+interface LocalMinuteRange {
+  start: number;
+  end: number;
 }
 
 export interface OpenCodeGoPricingBaseline {
   sourceUpdatedAtMs: number;
+  timezone: "UTC";
+  peakRanges: readonly LocalMinuteRange[];
   models: ReadonlyMap<string, ModelPrice>;
 }
 
@@ -53,6 +67,20 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
     if (lookup.provider !== "opencode-go" || lookup.model === null) return null;
     const model = this.baseline.models.get(lookup.model);
     if (!model) return null;
+    if (model.peakOffPeak) {
+      const price = isOpenCodeGoPeakMinute(new Date(lookup.atMs), this.baseline)
+        ? model.peakOffPeak.peak
+        : model.peakOffPeak.offPeak;
+      return {
+        billingMode: "subscription",
+        currency: "USD",
+        source: "opencode-go-official",
+        effectiveAtMs: this.baseline.sourceUpdatedAtMs,
+        uncachedInputPricePerMillionNanos: usdPerMillionToNanos(price.input),
+        cachedInputPricePerMillionNanos: usdPerMillionToNanos(price.cachedRead),
+        outputPricePerMillionNanos: usdPerMillionToNanos(price.output),
+      };
+    }
     const inputTokens = lookup.inputTokens;
     const tier = model.tiers.find(({ maximumInputTokens }) =>
       maximumInputTokens === null
@@ -70,6 +98,15 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
   }
 }
 
+export function isOpenCodeGoPeakMinute(
+  date: Date,
+  baseline = loadOpenCodeGoPricingBaseline(),
+): boolean {
+  const minute = date.getUTCHours() * 60 + date.getUTCMinutes();
+  return baseline.peakRanges.some(({ start, end }) =>
+    minute >= start && minute < end);
+}
+
 export function loadOpenCodeGoPricingBaseline(
   content = readFileSync(baselineUrl, "utf8"),
 ): OpenCodeGoPricingBaseline {
@@ -80,14 +117,19 @@ export function loadOpenCodeGoPricingBaseline(
     throw new Error("OpenCode Go 官方价格基线不是有效 JSON");
   }
   if (!isRecord(value)
-    || value.schemaVersion !== 1
+    || value.schemaVersion !== 2
     || value.source !== source
     || value.currency !== "USD"
     || value.unit !== "per_million_tokens"
+    || value.timezone !== "UTC"
+    || !Array.isArray(value.peakHours)
+    || value.peakHours.length === 0
+    || !value.peakHours.every(isValidLocalRange)
     || !isRecord(value.models)
     || Object.keys(value.models).length === 0) {
     throw new Error("OpenCode Go 官方价格基线格式无效");
   }
+  const peakRanges = value.peakHours.map(parseLocalRange);
   const sourceUpdatedAtMs = Date.parse(String(value.sourceUpdatedAt));
   if (!Number.isFinite(sourceUpdatedAtMs)) {
     throw new Error("OpenCode Go 官方价格基线更新时间无效");
@@ -102,11 +144,29 @@ export function loadOpenCodeGoPricingBaseline(
     const includedUsageUsd = positivePrice(candidate.includedUsageUsd);
     const tiers = Array.isArray(candidate.tiers)
       ? candidate.tiers.map(parseTier)
-      : [parseTier({ ...candidate, maximumInputTokens: null })];
-    validateTiers(tiers);
-    models.set(model, { endpoint, aiSdkPackage, tiers, includedUsageUsd });
+      : [];
+    const peakOffPeak = candidate.peakOffPeak === undefined
+      ? undefined
+      : parsePeakOffPeak(candidate.peakOffPeak);
+    if (tiers.length > 0 && peakOffPeak !== undefined) {
+      throw new Error("OpenCode Go 官方价格档位与峰谷档位不能混用");
+    }
+    if (tiers.length > 0) {
+      validateTiers(tiers);
+    } else if (peakOffPeak !== undefined) {
+      validatePeakOffPeak(peakOffPeak);
+    } else {
+      tiers.push(parseTier({ ...candidate, maximumInputTokens: null }));
+    }
+    models.set(model, {
+      endpoint,
+      aiSdkPackage,
+      tiers,
+      ...(peakOffPeak === undefined ? {} : { peakOffPeak }),
+      includedUsageUsd,
+    });
   }
-  return { sourceUpdatedAtMs, models };
+  return { sourceUpdatedAtMs, timezone: "UTC", peakRanges, models };
 }
 
 function parseTier(value: unknown): PriceTier {
@@ -137,6 +197,52 @@ function validateTiers(tiers: readonly PriceTier[]): void {
       previous = tier.maximumInputTokens;
     }
   }
+}
+
+function parsePeakOffPeak(value: unknown): PeakOffPeakPrice {
+  if (!isRecord(value) || !isRecord(value.offPeak) || !isRecord(value.peak)) {
+    throw new Error("OpenCode Go 官方价格峰谷档位无效");
+  }
+  return {
+    offPeak: parseTier({ ...value.offPeak, maximumInputTokens: null }),
+    peak: parseTier({ ...value.peak, maximumInputTokens: null }),
+  };
+}
+
+function validatePeakOffPeak(price: PeakOffPeakPrice): void {
+  if (
+    price.offPeak.maximumInputTokens !== null
+    || price.peak.maximumInputTokens !== null
+  ) {
+    throw new Error("OpenCode Go 官方价格峰谷档位无效");
+  }
+}
+
+function parseLocalRange(value: string): LocalMinuteRange {
+  const match = localRangePattern.exec(value);
+  if (!match) throw new Error("OpenCode Go 官方价格 Peak 时段无效");
+  const startHour = Number(match[1]);
+  const startMinute = Number(match[2]);
+  const endHour = Number(match[3]);
+  const endMinute = Number(match[4]);
+  return {
+    start: startHour * 60 + startMinute,
+    end: endHour * 60 + endMinute,
+  };
+}
+
+function isValidLocalRange(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const match = localRangePattern.exec(value);
+  if (!match) return false;
+  const startHour = Number(match[1]);
+  const startMinute = Number(match[2]);
+  const endHour = Number(match[3]);
+  const endMinute = Number(match[4]);
+  if (startHour > 23 || endHour > 23 || startMinute > 59 || endMinute > 59) {
+    return false;
+  }
+  return startHour * 60 + startMinute < endHour * 60 + endMinute;
 }
 
 function positivePrice(value: unknown): number {

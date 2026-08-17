@@ -22,7 +22,7 @@ export interface SurfaceConfigurationChange {
 }
 
 export interface SurfaceOutputPort {
-  handle(event: OutputEvent): void;
+  handle(event: OutputEvent): Promise<void> | void;
 }
 
 export type { OperationUpdateDisplay };

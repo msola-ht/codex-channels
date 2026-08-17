@@ -3,6 +3,7 @@ import {
   type ConversationStatus,
   type DisplayPriceCurrency,
   type ExchangeRateSnapshot,
+  type ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -111,9 +112,16 @@ export function renderWeixinTurnCompleted(
   ) => DisplayPriceCurrency,
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
+  remainingUsage?: ProviderModelUsageEstimate | null,
 ): string {
   return renderWeixinLifecyclePresentation(
-    createTurnCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+    createTurnCompletedPresentation(
+      event,
+      priceCurrency,
+      exchangeRate,
+      debug,
+      remainingUsage,
+    ),
   );
 }
 
