@@ -296,7 +296,7 @@ export interface OpencodeGoQuotaWindow {
   localTokens?: number | null
 }
 
-export interface OpencodeGoModelUsageEstimate {
+export interface ModelUsageEstimate {
   model: string
   bucket?: "off-peak" | "peak"
   includedUsageUsd: number
@@ -307,10 +307,12 @@ export interface OpencodeGoModelUsageEstimate {
   windowEndAtMs: number | null
 }
 
+export type OpencodeGoModelUsageEstimate = ModelUsageEstimate
+
 export interface OpencodeGoUsageResponse {
   available: boolean
   windows: OpencodeGoQuotaWindow[]
-  modelUsage?: OpencodeGoModelUsageEstimate[]
+  modelUsage?: ModelUsageEstimate[]
 }
 
 export interface GlobalTotals {

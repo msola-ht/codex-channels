@@ -6,6 +6,11 @@ import type {
   ModelPricingResolver,
   ModelRequestPricingSnapshot,
 } from "../observability/index.js";
+import {
+  isMinuteInLocalRanges,
+  localMinuteOf,
+  type PricingBucket,
+} from "./pricing-bucket.js";
 
 const baselineUrl = new URL(
   "../../runtime/deepseek-pricing-baseline.json",
@@ -50,33 +55,20 @@ export interface DeepseekModelPricingResolverOptions {
 }
 
 export class DeepseekModelPricingResolver implements ModelPricingResolver {
-  private readonly formatter: Intl.DateTimeFormat;
   private readonly baseline: DeepseekPricingBaseline;
 
   constructor(private readonly options: DeepseekModelPricingResolverOptions) {
     this.baseline = options.baseline ?? loadDeepseekPricingBaseline();
-    this.formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: this.baseline.timezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    });
   }
 
   resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null {
     if (lookup.provider !== "deepseek" || lookup.model === null) return null;
-    const plan = this.baseline.plans.find((candidate) =>
-      (candidate.effectiveFromMs === null || lookup.atMs >= candidate.effectiveFromMs)
-      && (candidate.effectiveUntilMs === null || lookup.atMs < candidate.effectiveUntilMs));
+    const plan = selectDeepseekPlan(this.baseline, lookup.atMs);
     if (!plan) return null;
-    const localMinute = this.localMinute(lookup.atMs);
-    const peak = plan.windows.find((window) =>
-      window.kind === "peak"
-      && window.localRanges.some(({ start, end }) =>
-        localMinute >= start && localMinute < end));
-    const window = peak
-      ?? plan.windows.find((candidate) => candidate.kind === "all_day")
-      ?? plan.windows.find((candidate) => candidate.kind === "off_peak");
+    const window = selectDeepseekWindow(
+      plan,
+      localMinuteOf(new Date(lookup.atMs), this.baseline.timezone),
+    );
     const price = window?.models.get(lookup.model);
     if (!price) return null;
     const exchangeRate = this.options.exchangeRate();
@@ -105,20 +97,42 @@ export class DeepseekModelPricingResolver implements ModelPricingResolver {
       currency: "USD",
       source: `deepseek-official:${exchangeRate.source}`,
       effectiveAtMs: plan.effectiveFromMs ?? this.baseline.sourceUpdatedAtMs,
+      bucket: deepseekWindowBucket(window),
       cachedInputPricePerMillionNanos,
       uncachedInputPricePerMillionNanos,
       outputPricePerMillionNanos,
     };
   }
+}
 
-  private localMinute(atMs: number): number {
-    const parts = this.formatter.formatToParts(new Date(atMs));
-    const hour = Number(parts.find(({ type }) => type === "hour")?.value);
-    const minute = Number(parts.find(({ type }) => type === "minute")?.value);
-    if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
-      throw new Error("DeepSeek 价格时区无法转换");
-    }
-    return hour * 60 + minute;
+function selectDeepseekPlan(
+  baseline: DeepseekPricingBaseline,
+  atMs: number,
+): DeepseekPricingPlan | undefined {
+  return baseline.plans.find((candidate) =>
+    (candidate.effectiveFromMs === null || atMs >= candidate.effectiveFromMs)
+    && (candidate.effectiveUntilMs === null || atMs < candidate.effectiveUntilMs));
+}
+
+function selectDeepseekWindow(
+  plan: DeepseekPricingPlan,
+  localMinute: number,
+): DeepseekPricingWindow | undefined {
+  const peak = plan.windows.find((window) =>
+    window.kind === "peak"
+    && isMinuteInLocalRanges(localMinute, window.localRanges));
+  return peak
+    ?? plan.windows.find((candidate) => candidate.kind === "all_day")
+    ?? plan.windows.find((candidate) => candidate.kind === "off_peak");
+}
+
+function deepseekWindowBucket(
+  window: DeepseekPricingWindow | undefined,
+): PricingBucket | null {
+  switch (window?.kind) {
+    case "peak": return "peak";
+    case "off_peak": return "off-peak";
+    default: return null;
   }
 }
 

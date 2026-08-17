@@ -29,12 +29,17 @@
   参考价格快照，支持缓存输入、Priority 与已声明的长上下文价格，不把网络刷新放入请求路径；
   有界响应读取复用 Bootstrap 基础设施，私有缓存替换复用共享 Runtime。
 - `deepseek-model-pricing.ts`：严格读取随包发布的 DeepSeek 官方人民币价格基线，按请求开始时间和
-  `Asia/Shanghai` 半开峰谷区间选价，再用当前 USD/CNY 汇率生成统一 USD 快照；没有汇率、精确模型
-  或有效计划时不回退通用目录。Provider 路由器保持该专属解析器优先，不改变历史快照或数据库格式。
+  `Asia/Shanghai` 半开峰谷区间选价，再用当前 USD/CNY 汇率生成统一 USD 快照，并把请求时段对应的
+  峰谷档位写入快照；没有汇率、精确模型或有效计划时不回退通用目录。Provider 路由器保持该专属
+  解析器优先，不改变历史价格。
 - `opencode-go-model-pricing.ts`：严格读取随包发布的 OpenCode Go 官方美元价格基线，按请求 Provider、
-  精确模型和输入 Token 选择普通或长上下文档位；不回退 DeepSeek 官方价格或通用远程目录。
+  精确模型和输入 Token 选择普通或长上下文档位，支持 Peak/Off-Peak 的模型同时写入请求时段对应的
+  峰谷档位；不回退 DeepSeek 官方价格或通用远程目录。
+- `pricing-bucket.ts`：Provider 无关的峰谷档位判定工具，按时区把请求开始时间转换为本地分钟并
+  在半开区间内选择 Peak/Off-Peak；DeepSeek 与 OpenCode Go 的价格解析、账户用量重算共用同一实现。
 - `reference-cost-summary.ts`：在 Turn 完成时把指标库中的 Thread 历史计价与当前实时 Turn 计价
-  合并；若当前 Turn 已部分延迟写入，先扣除该部分再加入完整实时值，避免累计总价重复或遗漏。
+  合并，并把历史与当前出现的峰谷档位集合一并合并；若当前 Turn 已部分延迟写入，先扣除该部分再
+  加入完整实时值，避免累计总价重复或遗漏。
 - `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 自动订阅后发送的
   子线程 `turn/completed` 作为正常终态，并接受官方中断活动与旧版
   `collabAgentToolCall.agentsStates` 终态；极快子线程先完成后登记时只在有界短期缓存中保留终态。
@@ -59,11 +64,12 @@
 - `deepseek-account-adapter.ts`：通过共享 Provider 运行时按请求读取切换 Profile 或固定基础配置中的
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在共享有界响应读取和严格 Schema 校验后只返回稳定余额；Key、响应正文
-  和解析异常不进入日志或业务事件。
+  和解析异常不进入日志或业务事件。官方账户只有余额接口，没有用量窗口，不展示本地用量估算。
 - `opencode-go-account-adapter.ts`：通过同一共享 Provider 运行时按请求读取 OpenCode Go Key，调用官方
   `/zen/go/v1/usage` 接口，把 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与
   重置时间），并按官方价格基线从本机指标库重算模型本地用量；DeepSeek 模型按请求时间拆分
-  Off-Peak / Peak 两档、各自对照官方包含额度；Key、响应正文和解析异常同样不进入日志或业务事件。
+  Off-Peak / Peak 两档、各自对照官方包含额度；重算优先使用请求保存的价格快照档位，缺失时才按
+  当前基线判定；Key、响应正文和解析异常同样不进入日志或业务事件。
 - `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；组合根按
   `vision.provider` 从第三方 API 注册表解析显示名称、精确 Endpoint 和隔离凭据，适配器复用统一
   代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回 Application 的稳定识别结果；

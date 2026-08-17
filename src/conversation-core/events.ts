@@ -111,7 +111,7 @@ export interface TurnOutputTiming {
   generationTokensPerSecond?: number;
   generationSpeedSampleCount?: number;
   generationSpeedTimedCount?: number;
-  /** Turn 内最后一次模型请求的开始时间（毫秒），用于按请求时段选择 OpenCode Go 峰谷档位 */
+  /** Turn 内最后一次模型请求的开始时间（毫秒），用于按请求时段选择峰谷档位 */
   modelRequestStartedAtMs?: number;
   referenceCost?: ReferenceCostSummary;
   compact?: CompactRequestMetricsSummary;
@@ -131,6 +131,8 @@ export interface ReferenceCostSummary {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  /** 本 Turn 已计价请求出现过的峰谷档位（去重、稳定排序） */
+  pricingBuckets?: Array<"peak" | "off-peak">;
 }
 
 export interface RateLimitWindow {

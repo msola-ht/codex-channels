@@ -42,9 +42,10 @@ export interface CreateWeixinSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
-  opencodeGoUsage?: (
+  remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
+    modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
   fetchImpl?: typeof fetch;
   logger: Logger;
@@ -107,9 +108,9 @@ export function createWeixinSurface(
     ...(options.priceCurrency === undefined
       ? {}
       : { priceCurrency: options.priceCurrency }),
-    ...(options.opencodeGoUsage === undefined
+    ...(options.remainingUsage === undefined
       ? {}
-      : { opencodeGoUsage: options.opencodeGoUsage }),
+      : { remainingUsage: options.remainingUsage }),
     logger: options.logger,
     onFatal: (error) => options.onFatal(error),
   });

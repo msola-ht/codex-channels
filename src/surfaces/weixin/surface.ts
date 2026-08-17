@@ -80,9 +80,10 @@ export interface WeixinSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
-  opencodeGoUsage?: (
+  remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
+    modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
@@ -165,9 +166,9 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
-        ...(options.opencodeGoUsage === undefined
+        ...(options.remainingUsage === undefined
           ? {}
-          : { opencodeGoUsage: options.opencodeGoUsage }),
+          : { remainingUsage: options.remainingUsage }),
         debugEnabled: options.debugEnabled ?? false,
         ...(options.replyContextPersistence === undefined
           ? {}

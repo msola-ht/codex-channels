@@ -123,9 +123,10 @@ export interface FeishuSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
-  opencodeGoUsage?: (
+  remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
+    modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
@@ -219,9 +220,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
-        ...(options.opencodeGoUsage === undefined
+        ...(options.remainingUsage === undefined
           ? {}
-          : { opencodeGoUsage: options.opencodeGoUsage }),
+          : { remainingUsage: options.remainingUsage }),
         ...(options.threadSectionAccess === undefined
           ? {}
           : { threadSectionAccess: options.threadSectionAccess }),

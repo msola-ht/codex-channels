@@ -88,7 +88,7 @@ describe("WeixinOutbox", () => {
 
   it("asks for and renders the OpenCode Go remaining usage on completion", async () => {
     const requestStartedAtMs = Date.parse("2026-08-17T03:30:00.000Z");
-    const opencodeGoUsage = vi.fn<NonNullable<WeixinOutboxOptions["opencodeGoUsage"]>>(async () => ({
+    const remainingUsage = vi.fn<NonNullable<WeixinOutboxOptions["remainingUsage"]>>(async () => ({
       model: "deepseek-v4-flash",
       bucket: "peak",
       includedUsageUsd: 15,
@@ -100,7 +100,7 @@ describe("WeixinOutbox", () => {
     }));
     const { outbox, sendText } = outboxFixture(
       { value: true },
-      { opencodeGoUsage },
+      { remainingUsage },
     );
 
     await outbox.handle({
@@ -117,13 +117,46 @@ describe("WeixinOutbox", () => {
     });
     await outbox.close();
 
-    expect(opencodeGoUsage).toHaveBeenCalledWith(
+    expect(remainingUsage).toHaveBeenCalledWith(
       "deepseek-v4-flash",
       requestStartedAtMs,
+      "opencode-go",
     );
     const text = sendText.mock.calls.at(-1)?.[0].text ?? "";
     expect(text).toContain("**账户状态**");
     expect(text).toContain("剩余用量（Peak）：剩余 $12.19 · 包含 $15.00 · 已用 18.8%");
+  });
+
+  it("does not ask for remaining usage on non-OpenCode Go completions", async () => {
+    const remainingUsage = vi.fn<NonNullable<WeixinOutboxOptions["remainingUsage"]>>(
+      async () => null,
+    );
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { remainingUsage },
+    );
+
+    await outbox.handle({
+      type: "turn.completed",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      status: "completed",
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      effort: "high",
+      serviceTier: null,
+    });
+    await outbox.close();
+
+    expect(remainingUsage).toHaveBeenCalledWith(
+      "deepseek-v4-flash",
+      undefined,
+      "deepseek",
+    );
+    const text = sendText.mock.calls.at(-1)?.[0].text ?? "";
+    expect(text).not.toContain("账户状态");
+    expect(text).not.toContain("剩余用量");
   });
 
   it("identifies the Plugin in the unified Turn start reply", async () => {

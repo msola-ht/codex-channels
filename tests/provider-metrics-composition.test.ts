@@ -128,6 +128,7 @@ describe("ProviderMetricsComposition", () => {
       currency: "USD",
       source: "future-setup",
       effectiveAtMs: 1_700_000_000_000,
+      bucket: "peak" as const,
       uncachedInputPricePerMillionNanos: 2_000_000_000,
       cachedInputPricePerMillionNanos: 1_000_000_000,
       outputPricePerMillionNanos: 3_000_000_000,
@@ -177,6 +178,7 @@ describe("ProviderMetricsComposition", () => {
       uncachedInputPricePerMillionNanos: 2_000_000_000,
       cachedInputPricePerMillionNanos: 1_000_000_000,
       outputPricePerMillionNanos: 3_000_000_000,
+      pricingBucket: "peak",
     }));
     await composition.close();
   });

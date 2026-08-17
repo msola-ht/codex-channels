@@ -5,6 +5,10 @@ import type {
   ModelPricingResolver,
   ModelRequestPricingSnapshot,
 } from "../observability/index.js";
+import {
+  isMinuteInLocalRanges,
+  localMinuteOf,
+} from "./pricing-bucket.js";
 
 const baselineUrl = new URL(
   "../../runtime/opencode-go-pricing-baseline.json",
@@ -68,14 +72,14 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
     const model = this.baseline.models.get(lookup.model);
     if (!model) return null;
     if (model.peakOffPeak) {
-      const price = isOpenCodeGoPeakMinute(new Date(lookup.atMs), this.baseline)
-        ? model.peakOffPeak.peak
-        : model.peakOffPeak.offPeak;
+      const peak = isOpenCodeGoPeakMinute(new Date(lookup.atMs), this.baseline);
+      const price = peak ? model.peakOffPeak.peak : model.peakOffPeak.offPeak;
       return {
         billingMode: "subscription",
         currency: "USD",
         source: "opencode-go-official",
         effectiveAtMs: this.baseline.sourceUpdatedAtMs,
+        bucket: peak ? "peak" : "off-peak",
         uncachedInputPricePerMillionNanos: usdPerMillionToNanos(price.input),
         cachedInputPricePerMillionNanos: usdPerMillionToNanos(price.cachedRead),
         outputPricePerMillionNanos: usdPerMillionToNanos(price.output),
@@ -91,6 +95,7 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
       currency: "USD",
       source: "opencode-go-official",
       effectiveAtMs: this.baseline.sourceUpdatedAtMs,
+      bucket: null,
       uncachedInputPricePerMillionNanos: usdPerMillionToNanos(tier.input),
       cachedInputPricePerMillionNanos: usdPerMillionToNanos(tier.cachedRead),
       outputPricePerMillionNanos: usdPerMillionToNanos(tier.output),
@@ -102,9 +107,10 @@ export function isOpenCodeGoPeakMinute(
   date: Date,
   baseline = loadOpenCodeGoPricingBaseline(),
 ): boolean {
-  const minute = date.getUTCHours() * 60 + date.getUTCMinutes();
-  return baseline.peakRanges.some(({ start, end }) =>
-    minute >= start && minute < end);
+  return isMinuteInLocalRanges(
+    localMinuteOf(date, "UTC"),
+    baseline.peakRanges,
+  );
 }
 
 export function loadOpenCodeGoPricingBaseline(

@@ -556,6 +556,122 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("剩余 $13.99 · 包含 $15.00 · 已用 6.7%");
   });
 
+  it("shows the remaining usage account state for any provider when data is injected", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation(
+        {
+          type: "turn.completed",
+          target: {
+            surface: "feishu",
+            accountId: "default",
+            conversationId: "chat",
+          },
+          threadId: "thread-deepseek",
+          turnId: "turn-deepseek",
+          status: "completed",
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          effort: "high",
+          serviceTier: null,
+        },
+        () => "usd",
+        null,
+        false,
+        {
+          model: "deepseek-v4-flash",
+          bucket: "peak",
+          includedUsageUsd: 0,
+          usedUsdNanos: 97_500_000,
+          usedPercent: null,
+          remainingUsdNanos: null,
+          windowStartAtMs: 1,
+          windowEndAtMs: 2,
+        },
+      ),
+    );
+
+    expect(rendered).toContain("剩余用量（Peak）");
+    expect(rendered).toContain("剩余 未知 · 包含 $0.00");
+  });
+
+  it("marks a single pricing bucket on the completion cost", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "chat",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: null,
+        timing: {
+          modelRequestCount: 1,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 350_000,
+            inputCostNanos: 150_000,
+            cachedInputCostNanos: 50_000,
+            outputCostNanos: 150_000,
+            pricedRequestCount: 1,
+            requestCount: 1,
+            uncachedInputPricePerMillionNanos: null,
+            cachedInputPricePerMillionNanos: null,
+            outputPricePerMillionNanos: null,
+            hasMixedPrices: false,
+            pricingBuckets: ["peak"],
+          },
+        },
+      }),
+    );
+
+    expect(rendered).toContain("费用：$0.000350（Peak）");
+  });
+
+  it("marks mixed pricing buckets on the completion cost", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "chat",
+        },
+        threadId: "thread-deepseek",
+        turnId: "turn-deepseek",
+        status: "completed",
+        model: "deepseek-v4-flash",
+        modelProvider: "deepseek",
+        effort: "high",
+        serviceTier: null,
+        timing: {
+          modelRequestCount: 2,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 350_000,
+            inputCostNanos: 150_000,
+            cachedInputCostNanos: 50_000,
+            outputCostNanos: 150_000,
+            pricedRequestCount: 2,
+            requestCount: 2,
+            uncachedInputPricePerMillionNanos: null,
+            cachedInputPricePerMillionNanos: null,
+            outputPricePerMillionNanos: null,
+            hasMixedPrices: false,
+            pricingBuckets: ["off-peak", "peak"],
+          },
+        },
+      }),
+    );
+
+    expect(rendered).toContain("费用：$0.000350（多档）");
+  });
+
   it("shows output, thinking and combined generation speeds", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({

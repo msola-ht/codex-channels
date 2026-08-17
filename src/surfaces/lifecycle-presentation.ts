@@ -448,7 +448,7 @@ export function createTurnCompletedPresentation(
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
-  if (remainingUsage && event.modelProvider === "opencode-go") {
+  if (remainingUsage) {
     accountFields.push({
       label: `剩余用量${remainingUsage.bucket === undefined
         ? ""

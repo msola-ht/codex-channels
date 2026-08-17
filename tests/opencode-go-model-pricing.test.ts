@@ -19,6 +19,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
       billingMode: "subscription",
       currency: "USD",
       source: "opencode-go-official",
+      bucket: "off-peak",
       uncachedInputPricePerMillionNanos: 220_000_000,
       cachedInputPricePerMillionNanos: 7_000_000,
       outputPricePerMillionNanos: 660_000_000,
@@ -42,6 +43,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
       inputTokens: 1_000,
       atMs: Date.parse("2026-08-16T02:00:00.000Z"),
     })).toMatchObject({
+      bucket: "peak",
       uncachedInputPricePerMillionNanos: 440_000_000,
       cachedInputPricePerMillionNanos: 14_000_000,
       outputPricePerMillionNanos: 1_320_000_000,

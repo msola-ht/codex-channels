@@ -31,9 +31,10 @@ export interface SurfacePluginContext {
   priceCurrency: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
-  opencodeGoUsage?: (
+  remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
+    modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
 }
 

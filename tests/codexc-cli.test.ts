@@ -80,7 +80,7 @@ describe("codexc CLI", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("Schema：7");
+    expect(result.stdout).toContain("Schema：8");
     expect(result.stderr).toBe("");
   });
 

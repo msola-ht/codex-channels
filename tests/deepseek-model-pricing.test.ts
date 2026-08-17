@@ -37,6 +37,7 @@ describe("DeepseekModelPricingResolver", () => {
         currency: "USD",
         source: "deepseek-official:open-er-api",
         effectiveAtMs: Date.parse("2026-08-13T10:49:16.000Z"),
+        bucket: null,
         cachedInputPricePerMillionNanos: 10_000_000,
         uncachedInputPricePerMillionNanos: 500_000_000,
         outputPricePerMillionNanos: 1_000_000_000,
@@ -61,6 +62,11 @@ describe("DeepseekModelPricingResolver", () => {
         .toMatchObject({
           effectiveAtMs: Date.parse("2026-08-17T00:00:00+08:00"),
           outputPricePerMillionNanos: expectedOutput,
+          bucket: at === "2026-08-17T08:59:59+08:00"
+            || at === "2026-08-17T12:00:00+08:00"
+            || at === "2026-08-17T18:00:00+08:00"
+            ? "off-peak"
+            : "peak",
         });
     }
   });

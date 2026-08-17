@@ -44,6 +44,7 @@ const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
 const metricStorageColumnsSql = `
   provider, billing_mode, pricing_currency, pricing_source, pricing_effective_at_ms,
+  pricing_bucket,
   uncached_input_price_per_million_nanos,
   cached_input_price_per_million_nanos, output_price_per_million_nanos,
   transport, response_format, operation, thread_id, turn_id, model, service_tier,
@@ -90,6 +91,11 @@ const successfulCostAggregateSql = `
   COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
       AND total_cost_nanos IS NOT NULL
     THEN pricing_currency END) AS pricing_currency_count,
+  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
+      AND total_cost_nanos IS NOT NULL
+    THEN COALESCE(pricing_bucket, '') END) AS pricing_bucket_count,
+  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
+    THEN pricing_bucket END) AS pricing_bucket,
   COUNT(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
     AS priced_request_count,
   SUM(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
@@ -174,6 +180,7 @@ interface MetricRow {
   pricing_currency: string | null;
   pricing_source: string | null;
   pricing_effective_at_ms: number | null;
+  pricing_bucket: "peak" | "off-peak" | null;
   uncached_input_price_per_million_nanos: number | null;
   cached_input_price_per_million_nanos: number | null;
   output_price_per_million_nanos: number | null;
@@ -266,6 +273,8 @@ interface TurnSummaryRow extends CompactSummaryRow {
   output_speed_timed_count: number;
   pricing_currency: string | null;
   pricing_currency_count: number;
+  pricing_bucket: "peak" | "off-peak" | null;
+  pricing_bucket_count: number;
   priced_request_count: number;
   priced_input_tokens: number | null;
   priced_output_tokens: number | null;
@@ -369,7 +378,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           ${metricStorageColumnsSql}
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
@@ -401,6 +410,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.pricing?.currency ?? null,
       sample.pricing?.source ?? null,
       sample.pricing?.effectiveAtMs ?? null,
+      sample.pricing?.bucket ?? null,
       sample.pricing?.uncachedInputPricePerMillionNanos ?? null,
       sample.pricing?.cachedInputPricePerMillionNanos ?? null,
       sample.pricing?.outputPricePerMillionNanos ?? null,
@@ -1253,6 +1263,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             pricing_currency TEXT,
             pricing_source TEXT,
             pricing_effective_at_ms INTEGER,
+            pricing_bucket TEXT CHECK (
+              pricing_bucket IS NULL OR pricing_bucket IN ('peak', 'off-peak')
+            ),
             uncached_input_price_per_million_nanos INTEGER CHECK (
               uncached_input_price_per_million_nanos IS NULL
               OR uncached_input_price_per_million_nanos >= 0
@@ -1534,7 +1547,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const remedy = options?.cause === undefined
       && actualVersion >= 3
       && actualVersion < expectedVersion
-      ? "codexc update 检查可用迁移路径"
+      ? "codexc metrics upgrade 备份并升级指标库"
       : "codexc metrics reset 重建指标库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
@@ -1682,6 +1695,7 @@ function toStoredThreadAggregate(
       summary.cachedInputPricePerMillionNanos,
     outputPricePerMillionNanos: summary.outputPricePerMillionNanos,
     hasMixedPrices: summary.hasMixedPrices,
+    pricingBuckets: summary.pricingBuckets,
     compact: summary.compact,
   };
 }
@@ -1933,12 +1947,19 @@ function toStoredAggregatePricing(row: TurnSummaryRow | AggregateRow): Pick<
   | "cachedInputPricePerMillionNanos"
   | "outputPricePerMillionNanos"
   | "hasMixedPrices"
+  | "pricingBuckets"
 > {
   const hasMixedPrices = row.pricing_currency_count > 1
     || row.uncached_input_price_count > 1
     || row.cached_input_price_count > 1
     || row.output_price_count > 1;
   const hasSinglePrice = row.pricing_currency_count === 1 && !hasMixedPrices;
+  const pricingBuckets: Array<"peak" | "off-peak"> =
+    row.pricing_bucket_count >= 2
+      ? ["off-peak", "peak"]
+      : row.pricing_bucket_count === 1 && row.pricing_bucket !== null
+        ? [row.pricing_bucket]
+        : [];
   return {
     pricingCurrency: row.pricing_currency_count === 1
       ? row.pricing_currency
@@ -1966,6 +1987,7 @@ function toStoredAggregatePricing(row: TurnSummaryRow | AggregateRow): Pick<
       ? row.output_price_per_million_nanos
       : null,
     hasMixedPrices,
+    pricingBuckets,
   };
 }
 
@@ -1979,6 +2001,7 @@ function toPricingSnapshot(row: MetricRow): ModelRequestPricingSnapshot | null {
     currency: row.pricing_currency,
     source: row.pricing_source,
     effectiveAtMs: row.pricing_effective_at_ms,
+    bucket: row.pricing_bucket,
     uncachedInputPricePerMillionNanos:
       row.uncached_input_price_per_million_nanos,
     cachedInputPricePerMillionNanos:

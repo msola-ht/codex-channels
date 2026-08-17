@@ -38,6 +38,7 @@ export interface TurnRequestMetricsSummary {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets?: Array<"peak" | "off-peak">;
   compact?: CompactRequestMetricsSummary | null;
 }
 
@@ -63,6 +64,7 @@ export interface ThreadRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets?: Array<"peak" | "off-peak">;
   compact?: CompactRequestMetricsSummary | null;
 }
 
@@ -86,6 +88,7 @@ export interface DirectApiRequestMetricsSummary {
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
+  pricingBucket?: "peak" | "off-peak";
 }
 
 export interface ThreadRequestMetricsSummary {
@@ -151,6 +154,7 @@ export interface RequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets?: Array<"peak" | "off-peak">;
   compact?: CompactRequestMetricsSummary | null;
 }
 

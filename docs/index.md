@@ -120,7 +120,8 @@
 
 模型价格实现补充：DeepSeek 不使用上述通用远程目录，[`deepseek-model-pricing.ts`](../src/bootstrap/deepseek-model-pricing.ts)
 严格读取随包发布的官方人民币基线，按请求开始时的北京时间和生效计划选择峰谷价，再用当前
-USD/CNY 汇率固化为统一 USD 快照；汇率、精确模型或计划缺失时不回退通用目录。官方价格页由
+USD/CNY 汇率固化为统一 USD 快照，并把请求时段对应的 Peak/Off-Peak 档位写入快照；汇率、精确
+模型或计划缺失时不回退通用目录。官方价格页由
 [`prepare-deepseek-pricing-proposal.mjs`](../scripts/prepare-deepseek-pricing-proposal.mjs) 每日检查，
 只通过 Draft PR 提议更新，不进入 Gateway 请求路径。
 OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/opencode-go-model-pricing.ts)
@@ -129,8 +130,14 @@ OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/op
 真实 App Server 按需启动、初始化与模型列表合同验证的模型计价和开放选择。`/usage` 与 WebUI
 在官方账户窗口外，还用当前官方价格基线按请求开始时间重新计价（峰谷对齐）当前官方月度窗口
 （由 `resetsAt` 倒推开始时间）内各模型已用金额；价格更新生效时间（基线 `sourceUpdatedAt`）之前
-的请求使用当时保存的价格快照，之后的请求按当前基线重算。对照基线中的模型包含用量（如
+的请求使用当时保存的价格快照，之后的请求按当前基线重算；档位优先沿用请求时保存的
+`pricing_bucket`，快照缺失时才按当前基线判定。对照基线中的模型包含用量（如
 DeepSeek V4 Pro/Flash 每月 $15）计算已用百分比与剩余额度。
+
+指标库 Schema v8 为价格快照新增 `pricing_bucket` 列（`peak`/`off-peak`），旧库由
+`codexc metrics upgrade` 显式备份迁移；完成卡片与 `/metrics` 费用区对支持峰谷的 Provider 标注
+单档（Peak/Off-Peak）或跨档（多档），展示层只认注入数据不识别具体 Provider。DeepSeek 官方账户
+保持纯余额展示（官方无用量窗口）；OpenCode Go 的本地模型用量重算继续按官方月度窗口执行。
 
 用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；模型、思考等级、Fast、
 `multi_agent_v2` 与受控共享第三方角色 `agents.external` 的普通键级写入共用一次官方

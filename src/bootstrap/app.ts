@@ -496,6 +496,10 @@ export class GatewayApplication {
                     direct.pricing?.cachedInputPricePerMillionNanos ?? null,
                   outputPricePerMillionNanos:
                     direct.pricing?.outputPricePerMillionNanos ?? null,
+                  ...(direct.pricing?.bucket === undefined
+                    || direct.pricing.bucket === null
+                    ? {}
+                    : { pricingBucket: direct.pricing.bucket }),
                 },
           };
         },
@@ -652,7 +656,7 @@ export class GatewayApplication {
       ),
       exchangeRate: () => this.exchangeRate.resolve(),
       priceCurrency: () => this.config.priceCurrency,
-      opencodeGoUsage: createOpencodeGoRemainingUsageReader({
+      remainingUsage: createOpencodeGoRemainingUsageReader({
         fetchImpl: createProxyFetch(config.networkProxy),
         metricsDatabasePath: modelRequestMetricsDatabasePath(
           config.stateDatabasePath,

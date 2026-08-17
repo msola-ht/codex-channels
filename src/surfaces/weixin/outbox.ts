@@ -102,9 +102,10 @@ export interface WeixinOutboxOptions {
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
   debugEnabled?: boolean;
-  opencodeGoUsage?: (
+  remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
+    modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
@@ -365,10 +366,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
               `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
             );
       case "turn.completed": {
-        const remainingUsage = event.modelProvider === "opencode-go" && event.model
-          ? (await this.options.opencodeGoUsage?.(
+        const remainingUsage = event.model && this.options.remainingUsage
+          ? (await this.options.remainingUsage?.(
               event.model,
               event.timing?.modelRequestStartedAtMs,
+              event.modelProvider,
             )) ?? null
           : null;
         return formatWeixinCommandText(
