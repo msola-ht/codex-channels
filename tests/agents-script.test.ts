@@ -1,5 +1,6 @@
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -38,7 +39,7 @@ describe("codexc agents script", () => {
   ] as const)("binds the shared role to configured provider %s", async (provider, definition) => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture.home, definition, "switching");
+      writeProviderFixture(fixture, definition, "switching");
 
       const selected = await configureThirdPartyRole(
         provider,
@@ -89,8 +90,8 @@ describe("codexc agents script", () => {
   it("switches the same role between providers and accepts an explicit model", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
-      writeProviderFixture(fixture.home, opencodeGoProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, opencodeGoProviderDefinition, "switching");
       await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
@@ -114,7 +115,7 @@ describe("codexc agents script", () => {
     const fixture = createFixture();
     const legacyPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
     try {
-      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
       writeFileSync(legacyPath, 'model_provider = "deepseek"\n', { mode: 0o600 });
       writeFileSync(fixture.configPath, [
         "[features]",
@@ -198,7 +199,7 @@ describe("codexc agents script", () => {
   it("supports a provider configured as the fixed primary", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture.home, opencodeGoProviderDefinition, "exclusive");
+      writeProviderFixture(fixture, opencodeGoProviderDefinition, "exclusive");
 
       await configureThirdPartyRole("opencode-go", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
@@ -222,7 +223,7 @@ describe("codexc agents script", () => {
         fixture.environment,
         { updateConfig: applyConfigUpdate },
       )).rejects.toThrow("尚未配置");
-      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
       await expect(configureThirdPartyRole(
         "deepseek",
         "unknown-model",
@@ -230,7 +231,10 @@ describe("codexc agents script", () => {
         { updateConfig: applyConfigUpdate },
       )).rejects.toThrow("不支持模型");
       writeFileSync(
-        join(fixture.home, deepseekProviderDefinition.catalogFileName),
+        join(
+          fixture.providerDirectory(deepseekProviderDefinition),
+          deepseekProviderDefinition.catalogFileName,
+        ),
         '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
         { mode: 0o600 },
       );
@@ -248,7 +252,7 @@ describe("codexc agents script", () => {
   it("does not overwrite a user-managed agents.external role", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
       writeFileSync(fixture.configPath, [
         "[features]",
         "multi_agent_v2 = true",
@@ -272,7 +276,7 @@ describe("codexc agents script", () => {
   it("disables only the managed role and preserves multi_agent_v2 when other roles exist", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
       await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
@@ -297,7 +301,7 @@ describe("codexc agents script", () => {
   it("rolls back the role file when the config transaction fails", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture.home, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
       await expect(configureThirdPartyRole(
         "deepseek",
         undefined,
@@ -313,22 +317,28 @@ describe("codexc agents script", () => {
 
 function createFixture() {
   const home = mkdtempSync(join(tmpdir(), "codexc-agents-"));
-  const environment = { ...process.env, CODEX_HOME: home };
+  const connectHome = join(home, ".codex-connect");
+  const environment = { ...process.env, CODEX_HOME: home, CODEX_CONNECT_HOME: connectHome };
   return {
     home,
+    connectHome,
     environment,
     configPath: join(home, "config.toml"),
     rolePath: join(home, "sf-agent.config.toml"),
+    providerDirectory: (definition: ModelProviderDefinition) =>
+      join(connectHome, "providers", definition.id),
     remove: () => rmSync(home, { recursive: true, force: true }),
   };
 }
 
 function writeProviderFixture(
-  home: string,
+  fixture: ReturnType<typeof createFixture>,
   definition: ModelProviderDefinition,
   mode: "switching" | "exclusive",
 ) {
-  const catalogPath = join(home, definition.catalogFileName);
+  const providerDirectory = fixture.providerDirectory(definition);
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  const catalogPath = join(providerDirectory, definition.catalogFileName);
   writeFileSync(
     catalogPath,
     JSON.stringify({
@@ -350,10 +360,12 @@ function writeProviderFixture(
     catalogPath,
   });
   if (mode === "exclusive") delete profile.model_reasoning_effort;
-  const target = mode === "exclusive" ? join(home, "config.toml") : join(home, definition.profileFileName);
+  const target = mode === "exclusive"
+    ? join(fixture.home, "config.toml")
+    : join(fixture.home, definition.profileFileName);
   writeFileSync(target, stringify(profile), { mode: 0o600 });
   writeFileSync(
-    join(home, definition.managedMarkerFileName),
+    join(providerDirectory, definition.managedMarkerFileName),
     stringify(createManagedProviderMarker(definition, mode)),
     { mode: 0o600 },
   );

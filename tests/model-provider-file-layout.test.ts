@@ -27,8 +27,8 @@ afterEach(() => {
 });
 
 describe("managed model provider file layout", () => {
-  it("moves legacy Provider files to sf- names and updates managed references", () => {
-    const codexHome = fixtureHome();
+  it("moves legacy Provider files into the unified provider storage and updates references", () => {
+    const { codexHome, connectHome } = fixtureHome();
     const oldCatalogPath = join(codexHome, "deepseek.models.json");
     const oldRolePath = join(codexHome, "codex-connect-third-party-subagent.config.toml");
     writePrivate(join(codexHome, "deepseek.config.toml"), [
@@ -62,7 +62,10 @@ describe("managed model provider file layout", () => {
       "",
     ].join("\n"));
 
-    const result = migrateManagedModelProviderFiles({ CODEX_HOME: codexHome });
+    const result = migrateManagedModelProviderFiles({
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    });
 
     expect(result.changed).toBe(true);
     expect(result.moved).toHaveLength(7);
@@ -78,7 +81,9 @@ describe("managed model provider file layout", () => {
       expect(existsSync(join(codexHome, legacy))).toBe(false);
     }
     const profile = parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8"));
-    expect(profile.model_catalog_json).toBe(join(codexHome, "sf-deepseek.models.json"));
+    expect(profile.model_catalog_json).toBe(
+      join(connectHome, "providers", "deepseek", "models.json"),
+    );
     const rootConfig = parse(readFileSync(join(codexHome, "config.toml"), "utf8"));
     expect(rootConfig.model).toBe("gpt-5.6-sol");
     expect(rootConfig.agents).toMatchObject({
@@ -87,20 +92,26 @@ describe("managed model provider file layout", () => {
         description: "共享第三方子代理",
       },
     });
-    expect(existsSync(join(codexHome, "sf-deepseek.managed.toml"))).toBe(true);
+    expect(existsSync(
+      join(connectHome, "providers", "deepseek", "managed.toml"),
+    )).toBe(true);
     const openCodeProfile = parse(
       readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8"),
     );
     expect(openCodeProfile.model_catalog_json).toBe(
-      join(codexHome, "sf-deepseek.models.json"),
+      join(connectHome, "providers", "deepseek", "models.json"),
     );
-    expect(existsSync(join(codexHome, "sf-opencode-go.managed.toml"))).toBe(true);
-    expect(existsSync(join(codexHome, "sf-deepseek.models.manifest.json"))).toBe(true);
+    expect(existsSync(
+      join(connectHome, "providers", "opencode-go", "managed.toml"),
+    )).toBe(true);
+    expect(existsSync(
+      join(connectHome, "providers", "deepseek", "models.manifest.json"),
+    )).toBe(true);
     expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(true);
   });
 
   it("migrates the original managed ds role file and agents.ds entry", () => {
-    const codexHome = fixtureHome();
+    const { codexHome, connectHome } = fixtureHome();
     const oldCatalogPath = join(codexHome, "deepseek.models.json");
     const legacyDsRolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
     writePrivate(join(codexHome, "deepseek.config.toml"), [
@@ -130,7 +141,10 @@ describe("managed model provider file layout", () => {
       "",
     ].join("\n"));
 
-    const result = migrateManagedModelProviderFiles({ CODEX_HOME: codexHome });
+    const result = migrateManagedModelProviderFiles({
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    });
 
     expect(result.changed).toBe(true);
     expect(existsSync(legacyDsRolePath)).toBe(false);
@@ -138,7 +152,7 @@ describe("managed model provider file layout", () => {
       readFileSync(join(codexHome, "sf-agent.config.toml"), "utf8"),
     );
     expect(migratedRole.model_catalog_json).toBe(
-      join(codexHome, "sf-deepseek.models.json"),
+      join(connectHome, "providers", "deepseek", "models.json"),
     );
     const rootConfig = parse(readFileSync(join(codexHome, "config.toml"), "utf8"));
     expect(rootConfig.agents).toMatchObject({
@@ -152,11 +166,14 @@ describe("managed model provider file layout", () => {
   });
 
   it("fails closed when a legacy file conflicts with its sf- target", () => {
-    const codexHome = fixtureHome();
+    const { codexHome, connectHome } = fixtureHome();
     writePrivate(join(codexHome, "deepseek.config.toml"), 'model = "legacy"\n');
     writePrivate(join(codexHome, "sf-deepseek.config.toml"), 'model = "current"\n');
 
-    expect(() => migrateManagedModelProviderFiles({ CODEX_HOME: codexHome }))
+    expect(() => migrateManagedModelProviderFiles({
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    }))
       .toThrow(/新旧文件同时存在/u);
     expect(readFileSync(join(codexHome, "deepseek.config.toml"), "utf8"))
       .toBe('model = "legacy"\n');
@@ -165,7 +182,7 @@ describe("managed model provider file layout", () => {
   });
 
   it("fails closed when two legacy role files target the same sf-agent name", () => {
-    const codexHome = fixtureHome();
+    const { codexHome, connectHome } = fixtureHome();
     writePrivate(
       join(codexHome, "codex-connect-ds-subagent.config.toml"),
       'model_provider = "deepseek"\n',
@@ -175,7 +192,10 @@ describe("managed model provider file layout", () => {
       'model_provider = "deepseek"\n',
     );
 
-    expect(() => migrateManagedModelProviderFiles({ CODEX_HOME: codexHome }))
+    expect(() => migrateManagedModelProviderFiles({
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    }))
       .toThrow(/多个旧版文件指向同一目标/u);
     expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(false);
     expect(existsSync(join(codexHome, "codex-connect-ds-subagent.config.toml"))).toBe(true);
@@ -185,26 +205,33 @@ describe("managed model provider file layout", () => {
   });
 
   it("rejects a legacy file that is not private", () => {
-    const codexHome = fixtureHome();
+    const { codexHome, connectHome } = fixtureHome();
     const legacy = join(codexHome, "deepseek.config.toml");
     writePrivate(legacy, 'model = "legacy"\n');
     chmodSync(legacy, 0o644);
 
-    expect(() => migrateManagedModelProviderFiles({ CODEX_HOME: codexHome }))
+    expect(() => migrateManagedModelProviderFiles({
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    }))
       .toThrow(/权限或类型不安全/u);
     expect(existsSync(join(codexHome, "sf-deepseek.config.toml"))).toBe(false);
   });
 
   it("migrates Provider-wide defaults into independent per-model catalogs", () => {
-    const codexHome = fixtureHome();
-    const sharedCatalog = join(codexHome, "sf-deepseek.models.json");
+    const { codexHome, connectHome } = fixtureHome();
+    const deepseekDirectory = join(connectHome, "providers", "deepseek");
+    const openCodeDirectory = join(connectHome, "providers", "opencode-go");
+    mkdirSync(deepseekDirectory, { recursive: true, mode: 0o700 });
+    const sharedCatalog = join(deepseekDirectory, "models.json");
     writePrivate(sharedCatalog, modelCatalog());
     writePrivate(
-      join(codexHome, "sf-deepseek.models.manifest.json"),
+      join(deepseekDirectory, "models.manifest.json"),
       '{"source":"deepseek"}\n',
     );
     writeManagedProvider(
       codexHome,
+      connectHome,
       "deepseek",
       sharedCatalog,
       "deepseek-v4-flash",
@@ -212,6 +239,7 @@ describe("managed model provider file layout", () => {
     );
     writeManagedProvider(
       codexHome,
+      connectHome,
       "opencode-go",
       sharedCatalog,
       "deepseek-v4-pro",
@@ -228,14 +256,17 @@ describe("managed model provider file layout", () => {
       "",
     ].join("\n"));
 
-    const result = migrateManagedModelProviderModelSettings({ CODEX_HOME: codexHome });
+    const result = migrateManagedModelProviderModelSettings({
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    });
 
     expect(result.changed).toBe(true);
     const deepseekCatalog = JSON.parse(readFileSync(sharedCatalog, "utf8"));
-    const openCodeCatalogPath = join(codexHome, "sf-opencode-go.models.json");
+    const openCodeCatalogPath = join(openCodeDirectory, "models.json");
     const openCodeCatalog = JSON.parse(readFileSync(openCodeCatalogPath, "utf8"));
     expect(readFileSync(
-      join(codexHome, "sf-opencode-go.models.manifest.json"),
+      join(openCodeDirectory, "models.manifest.json"),
       "utf8",
     )).toBe('{"source":"deepseek"}\n');
     const deepseekFlash = deepseekCatalog.models.find(
@@ -279,13 +310,16 @@ describe("managed model provider file layout", () => {
 
 function writeManagedProvider(
   codexHome: string,
+  connectHome: string,
   provider: "deepseek" | "opencode-go",
   catalogPath: string,
   model: "deepseek-v4-flash" | "deepseek-v4-pro",
   autoCompactLimit: number,
 ) {
+  const providerDirectory = join(connectHome, "providers", provider);
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
   writePrivate(
-    join(codexHome, `sf-${provider}.managed.toml`),
+    join(providerDirectory, "managed.toml"),
     `version = 1\nprovider = "${provider}"\nmode = "switching"\n`,
   );
   writePrivate(join(codexHome, `sf-${provider}.config.toml`), [
@@ -317,12 +351,14 @@ function modelCatalog() {
   })}\n`;
 }
 
-function fixtureHome() {
+function fixtureHome(): { codexHome: string; connectHome: string } {
   const root = mkdtempSync(join(tmpdir(), "codex-provider-layout-"));
   temporaryDirectories.push(root);
   const codexHome = join(root, ".codex");
+  const connectHome = join(root, ".codex-connect");
   mkdirSync(codexHome, { mode: 0o700 });
-  return codexHome;
+  mkdirSync(connectHome, { mode: 0o700 });
+  return { codexHome, connectHome };
 }
 
 function writePrivate(path: string, content: string) {

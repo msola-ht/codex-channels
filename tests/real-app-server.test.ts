@@ -316,7 +316,9 @@ contractSuite("real supervised App Server service", () => {
     const socketPath = join(testRuntime, "codex-app-server.sock");
     const openCodeSocketPath = providerAppServerSocketPath(socketPath, "opencode-go");
     const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
+    const providerDirectory = join(testRuntime, "providers", "opencode-go");
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
     const roleConfigPath = join(codexHome, "sf-agent.config.toml");
     writeFileSync(
@@ -342,7 +344,7 @@ contractSuite("real supervised App Server service", () => {
       ].join("\n"),
       { mode: 0o600 },
     );
-    const catalogPath = join(codexHome, "sf-opencode-go.models.json");
+    const catalogPath = join(providerDirectory, "models.json");
     const validCatalog = `${JSON.stringify({
       models: [{
         slug: "deepseek-v4-flash",
@@ -387,7 +389,7 @@ contractSuite("real supervised App Server service", () => {
       { mode: 0o600 },
     );
     writeFileSync(
-      join(codexHome, "sf-opencode-go.managed.toml"),
+      join(providerDirectory, "managed.toml"),
       'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
       { mode: 0o600 },
     );
@@ -1499,8 +1501,9 @@ deepseekCatalogContractTest(
     mkdirSync(runtimeRoot, { recursive: true });
     const testRuntime = mkdtempSync(join(runtimeRoot, "deepseek-resume-contract-"));
     const codexHome = join(testRuntime, "codex-home");
+    const providerDirectory = join(testRuntime, "providers", "deepseek");
     const resolvedCatalogPath = deepseekCatalogPath
-      ?? join(testRuntime, "sf-deepseek.models.json");
+      ?? join(providerDirectory, "models.json");
     const socketPath = join(testRuntime, "app-server.sock");
     const apiServer = createServer((_request, response) => {
       response.writeHead(400, { "content-type": "application/json" });
@@ -1517,6 +1520,7 @@ deepseekCatalogContractTest(
       throw new Error("DeepSeek 冷恢复合同无法创建本机 API 夹具");
     }
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
     if (!deepseekCatalogPath) {
       writeFileSync(
         resolvedCatalogPath,

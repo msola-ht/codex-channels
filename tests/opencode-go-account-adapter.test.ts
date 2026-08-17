@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,7 +33,7 @@ describe("OpenCode Go account adapter", () => {
       },
     }), { status: 200, headers: { "content-type": "application/json" } }));
     const adapter = createOpencodeGoAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
     });
 
@@ -77,7 +77,7 @@ describe("OpenCode Go account adapter", () => {
   it("fails with a stable user error without exposing malformed responses", async () => {
     const codexHome = await createCodexHome();
     const adapter = createOpencodeGoAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: async () => new Response("secret-upstream-body", { status: 200 }),
     });
 
@@ -101,7 +101,7 @@ describe("OpenCode Go account adapter", () => {
       },
     }), { status: 200 }));
     const adapter = createOpencodeGoAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
     });
 
@@ -116,7 +116,7 @@ describe("OpenCode Go account adapter", () => {
   it("skips invalid windows and rejects when none remain", async () => {
     const codexHome = await createCodexHome();
     const adapter = createOpencodeGoAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: async () => new Response(JSON.stringify({
         usage: {
           rolling: { status: "ok", percent: "broken", resetsAt: "not-a-date" },
@@ -268,7 +268,7 @@ describe("OpenCode Go account adapter", () => {
       },
     }), { status: 200 }));
     const adapter = createOpencodeGoAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
       nowMs: () => nowMs,
@@ -375,7 +375,7 @@ describe("OpenCode Go account adapter", () => {
       },
     }), { status: 200 }));
     const adapter = createOpencodeGoAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
       nowMs: () => nowMs,
@@ -408,7 +408,7 @@ describe("OpenCode Go account adapter", () => {
   it("exposes a remaining usage reader that matches the requested model", async () => {
     const codexHome = await createCodexHome();
     const reader = createOpencodeGoRemainingUsageReader({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: async () => new Response(JSON.stringify({
         usage: {
           monthly: {
@@ -494,13 +494,13 @@ describe("OpenCode Go account adapter", () => {
       },
     }), { status: 200 });
     const peakReader = createOpencodeGoRemainingUsageReader({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
       nowMs: () => Date.parse("2026-08-17T08:30:00.000Z"),
     });
     const offPeakReader = createOpencodeGoRemainingUsageReader({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
       nowMs: () => Date.parse("2026-08-17T17:30:00.000Z"),
@@ -591,7 +591,7 @@ describe("OpenCode Go account adapter", () => {
       },
     }), { status: 200 });
     const adapter = createOpencodeGoAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
       nowMs: () => nowMs,
@@ -676,7 +676,7 @@ describe("OpenCode Go account adapter", () => {
     store.close();
 
     const adapter = createOpencodeGoAccountAdapter({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: async () => new Response(JSON.stringify({
         usage: {
           monthly: {
@@ -702,7 +702,7 @@ describe("OpenCode Go account adapter", () => {
     const codexHome = await createCodexHome();
     const fetchImpl = vi.fn();
     const reader = createOpencodeGoRemainingUsageReader({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
     });
 
@@ -718,6 +718,13 @@ describe("OpenCode Go account adapter", () => {
 async function createCodexHome(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-account-"));
   temporaryDirectories.push(directory);
+  const providerDirectory = join(
+    directory,
+    ".codex-connect",
+    "providers",
+    "opencode-go",
+  );
+  await mkdir(providerDirectory, { recursive: true, mode: 0o700 });
   await writeFile(join(directory, "config.toml"), 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
   await writeFile(
     join(directory, "sf-opencode-go.config.toml"),
@@ -725,11 +732,18 @@ async function createCodexHome(): Promise<string> {
     { mode: 0o600 },
   );
   await writeFile(
-    join(directory, "sf-opencode-go.managed.toml"),
+    join(providerDirectory, "managed.toml"),
     'version = 1\nprovider = "opencode-go"\n',
     { mode: 0o600 },
   );
   return directory;
+}
+
+function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
+  return {
+    CODEX_HOME: codexHome,
+    CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+  };
 }
 
 function providerConfig(apiKey: string): string {

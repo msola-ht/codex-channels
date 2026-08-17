@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -244,6 +245,89 @@ describe("local update", () => {
       databases: "databases",
       servicesRestored: false,
     });
+  });
+
+  it("backs up and migrates legacy provider files by default", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-local-update-provider-migration-"));
+    temporaryDirectories.push(root);
+    const codexHome = join(root, ".codex");
+    const connectHome = join(root, ".codex-connect");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(join(connectHome, "providers"), { recursive: true, mode: 0o700 });
+    const catalogPath = join(codexHome, "sf-deepseek.models.json");
+    writeFileSync(
+      catalogPath,
+      `${JSON.stringify({
+        models: [{
+          slug: "deepseek-v4-flash",
+          display_name: "DeepSeek-V4-Flash",
+          context_window: 1_048_576,
+          default_reasoning_level: "high",
+          supported_reasoning_levels: [{ effort: "high", description: "High" }],
+        }],
+      })}\n`,
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-deepseek.models.manifest.json"),
+      JSON.stringify({ sha256: "legacy" }),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-deepseek.managed.toml"),
+      'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "sf-deepseek.config.toml"),
+      [
+        'model = "deepseek-v4-flash"',
+        'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
+        `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+        "[model_providers.deepseek]",
+        'name = "deepseek"',
+        'base_url = "https://api.deepseek.com/"',
+        'wire_api = "responses"',
+        "requires_openai_auth = false",
+        'experimental_bearer_token = "sk-test-secret"',
+        "",
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    };
+    delete environment.CODEX_CONNECT_SERVICE_ROLE;
+
+    const result = await updateLocalInstallation(environment, {
+      inspectConfig: () => ({
+        configPath: join(connectHome, "config.toml"),
+        missingSafeDefaults: [],
+      }),
+      inspectDatabases: () => ({ state: {}, metrics: {} }),
+      inspectServices: () => ({ installed: false }),
+      updateConfig: () => "config",
+      updateDatabases: () => "databases",
+      validateOffline: () => undefined,
+      startServices: () => undefined,
+      waitForServices: async () => undefined,
+    });
+
+    expect(result).toEqual({
+      config: "config",
+      databases: "databases",
+      servicesRestored: false,
+    });
+    const providerDirectory = join(connectHome, "providers", "deepseek");
+    expect(existsSync(join(providerDirectory, "models.json"))).toBe(true);
+    expect(existsSync(join(providerDirectory, "models.manifest.json"))).toBe(true);
+    expect(existsSync(join(providerDirectory, "managed.toml"))).toBe(true);
+    expect(existsSync(catalogPath)).toBe(false);
+    expect(readdirSync(join(connectHome, "backups")).some((name) =>
+      name.startsWith("provider-migration-"))).toBe(true);
   });
 
   it("rejects before writing when an uninstalled foreground Gateway is active", async () => {
@@ -494,7 +578,13 @@ function fixture() {
 }
 
 function terminalEnvironment() {
-  const environment = { ...process.env };
+  const root = mkdtempSync(join(tmpdir(), "codexc-local-update-terminal-"));
+  temporaryDirectories.push(root);
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    CODEX_HOME: join(root, ".codex"),
+    CODEX_CONNECT_HOME: join(root, ".codex-connect"),
+  };
   delete environment.CODEX_CONNECT_SERVICE_ROLE;
   return environment;
 }

@@ -3,7 +3,6 @@ import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
-import { codexHomePath } from "../../runtime/codex-home.mjs";
 import { ensureAppServerProvider } from "../../runtime/app-server-supervisor.mjs";
 import { effectiveCodexBinary } from "../../runtime/executable.mjs";
 import {
@@ -19,6 +18,7 @@ import {
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
+  managedProviderDirectory,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
@@ -177,7 +177,7 @@ export class GatewayApplication {
     ]);
     const supplementaryModels = managedModelProviderDefinitions.flatMap((definition) =>
       loadManagedModelOptions(
-        codexHomePath(process.env),
+        managedProviderDirectory(process.env, definition),
         configuredProviders.has(definition.id),
         definition,
       ));

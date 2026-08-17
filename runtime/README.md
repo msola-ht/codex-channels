@@ -27,7 +27,8 @@
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
   共享第三方子代理只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个 Provider 使用独立
   模型目录，并按模型读取上下文、默认思考等级与自动压缩阈值；受管 Profile 镜像所选模型的默认
-  思考等级，校验必须与模型目录一致；Profile、模型目录、管理标记和共享角色统一使用 `sf-` 文件前缀。
+  思考等级，校验必须与模型目录一致；Profile 与共享角色使用 `~/.codex` 下的 `sf-` 前缀文件，
+  模型目录、清单与管理标记存放在 `~/.codex-connect/providers/<id>/`。
 - `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、可选 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
@@ -60,7 +61,10 @@
 - `agent-roles.d.mts`：声明共享子代理角色配置模块的 TypeScript 接口。
 - `codex-home.mjs` / `codex-home.d.mts`：统一解析 Codex 用户目录（`CODEX_HOME` 或
   `~/.codex`），供 CLI、脚本、Runtime 与 Bootstrap 复用。
-- `private-file.mjs` / `private-file.d.mts`：为 Codex Home 内 App Server 无法管理的 Profile、模型目录、
+- `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
+  或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
+  `providers/`，供 Setup、迁移脚本与 Runtime 复用。
+- `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记、子代理配置和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。

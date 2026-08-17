@@ -61,7 +61,7 @@ describe("DeepSeek setup", () => {
 
     await expect(runDeepseekSetup({
       allowBack: true,
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl,
       prompter: prompt,
@@ -109,7 +109,7 @@ describe("DeepSeek setup", () => {
 
     const result = await runDeepseekSetup({
       allowBack: true,
-      environment: { CODEX_HOME: codexHome },
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: vi.fn() },
       prompts: {
         select,
@@ -128,7 +128,7 @@ describe("DeepSeek setup", () => {
       autoCompactPercent: 60,
     });
     const catalog = JSON.parse(readFileSync(
-      join(codexHome, "sf-deepseek.models.json"),
+      join(codexHome, ".codex-connect", "providers", "deepseek", "models.json"),
       "utf8",
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
@@ -147,7 +147,7 @@ describe("DeepSeek setup", () => {
 
     await expect(runDeepseekSetup({
       allowBack: true,
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl,
       prompts: {
@@ -209,7 +209,7 @@ describe("DeepSeek setup", () => {
     const fixture = setupFixture(original);
     writeFileSync(join(fixture.home, "auth.json"), '{"tokens":"openai"}\n', { mode: 0o600 });
     const result = await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
@@ -244,7 +244,7 @@ describe("DeepSeek setup", () => {
     expect(profile.model_auto_compact_token_limit).toBeUndefined();
     expect(profile.model_auto_compact_token_limit_scope).toBeUndefined();
     const catalog = JSON.parse(readFileSync(
-      join(fixture.home, "sf-deepseek.models.json"),
+      join(fixture.connectHome, "providers", "deepseek", "models.json"),
       "utf8",
     ));
     expect(catalog.models[0]).toMatchObject({
@@ -262,7 +262,7 @@ describe("DeepSeek setup", () => {
       experimental_bearer_token: "sk-secret",
     });
     expect(parse(readFileSync(
-      join(fixture.home, "sf-deepseek.managed.toml"),
+      join(fixture.connectHome, "providers", "deepseek", "managed.toml"),
       "utf8",
     ))).toEqual({ version: 1, provider: "deepseek", mode: "switching" });
     expect(readFileSync(join(fixture.home, "auth.json"), "utf8"))
@@ -270,9 +270,9 @@ describe("DeepSeek setup", () => {
     expect(fixture.text()).not.toContain("sk-secret");
     expect(statSync(join(fixture.home, "config.toml")).mode & 0o777).toBe(0o600);
     expect(statSync(join(fixture.home, "sf-deepseek.config.toml")).mode & 0o777).toBe(0o600);
-    expect(statSync(join(fixture.home, "sf-deepseek.managed.toml")).mode & 0o777)
+    expect(statSync(join(fixture.connectHome, "providers", "deepseek", "managed.toml")).mode & 0o777)
       .toBe(0o600);
-    expect(readFileSync(join(fixture.home, "sf-deepseek.models.manifest.json"), "utf8"))
+    expect(readFileSync(join(fixture.connectHome, "providers", "deepseek", "models.manifest.json"), "utf8"))
       .toContain(deepseekSetupScriptUrl);
   });
 
@@ -280,7 +280,7 @@ describe("DeepSeek setup", () => {
     const original = 'model = "gpt-5.4"\ncustom_before = true\n';
     const fixture = setupFixture(original);
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-first"]),
@@ -289,7 +289,7 @@ describe("DeepSeek setup", () => {
     writeFileSync(join(fixture.home, "config.toml"), current, { mode: 0o600 });
 
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-second"]),
@@ -306,7 +306,7 @@ describe("DeepSeek setup", () => {
 
   it("preserves the selected model and per-model settings when setup is repeated", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
-    const environment = { CODEX_HOME: fixture.home };
+    const environment = { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome };
     await runDeepseekSetup({
       environment,
       output: fixture.output,
@@ -332,7 +332,7 @@ describe("DeepSeek setup", () => {
         model_reasoning_effort: "max",
       });
     const catalog = JSON.parse(readFileSync(
-      join(fixture.home, "sf-deepseek.models.json"),
+      join(fixture.connectHome, "providers", "deepseek", "models.json"),
       "utf8",
     ));
     expect(catalog.models[1]).toMatchObject({
@@ -356,7 +356,7 @@ describe("DeepSeek setup", () => {
     const fetchImpl = vi.fn(successfulFetch);
 
     await expect(runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl,
       prompter: prompter(["1", "2"], ["sk-secret"]),
@@ -372,7 +372,7 @@ describe("DeepSeek setup", () => {
     const fixture = setupFixture(original);
 
     await expect(runDeepseekSetupImplementation({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
@@ -382,14 +382,20 @@ describe("DeepSeek setup", () => {
     })).rejects.toThrow("config version conflict");
 
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
-    for (const name of [
-      "sf-deepseek.config.toml",
-      "sf-deepseek.managed.toml",
-      "sf-deepseek.models.json",
-      "sf-deepseek.models.manifest.json",
-      "sf-agent.config.toml",
-    ]) {
+    for (const name of ["sf-deepseek.config.toml", "sf-agent.config.toml"]) {
       expect(existsSync(join(fixture.home, name))).toBe(false);
+    }
+    for (const name of [
+      "managed.toml",
+      "models.json",
+      "models.manifest.json",
+    ]) {
+      expect(existsSync(join(
+        fixture.connectHome,
+        "providers",
+        "deepseek",
+        name,
+      ))).toBe(false);
     }
   });
 
@@ -398,7 +404,7 @@ describe("DeepSeek setup", () => {
     const concurrent = 'model = "gpt-5.6-sol"\nconcurrent = true\n';
 
     await expect(runDeepseekSetupImplementation({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
@@ -415,7 +421,7 @@ describe("DeepSeek setup", () => {
     const original = 'model = "gpt-5.4"\n';
     const fixture = setupFixture(original);
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["2", "2"], ["sk-fixed"], true),
@@ -429,11 +435,11 @@ describe("DeepSeek setup", () => {
     expect(record(config.agents).external).toBeDefined();
     expect(existsSync(join(fixture.home, "sf-deepseek.config.toml"))).toBe(false);
     expect(parse(readFileSync(
-      join(fixture.home, "sf-deepseek.managed.toml"),
+      join(fixture.connectHome, "providers", "deepseek", "managed.toml"),
       "utf8",
     ))).toEqual({ version: 1, provider: "deepseek", mode: "exclusive" });
     expect(readFileSync(
-      join(fixture.home, "backup-codex-connect-deepseek", "config.toml"),
+      join(fixture.connectHome, "providers", "deepseek", "backup", "config.toml"),
       "utf8",
     )).toBe(original);
   });
@@ -441,14 +447,14 @@ describe("DeepSeek setup", () => {
   it("keeps the shared third-party role on DeepSeek when switching to exclusive mode", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-switching"]),
     });
 
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["2", "2"], ["sk-exclusive"], true),
@@ -462,13 +468,13 @@ describe("DeepSeek setup", () => {
   it("removes stale auto-compact fields when exclusive mode is reinstalled disabled", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["2", "2"], ["sk-first"], true),
     });
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["2", "1"], ["sk-second"], true),
@@ -483,7 +489,7 @@ describe("DeepSeek setup", () => {
     const original = 'model = "gpt-5.4"\n';
     const fixture = setupFixture(original);
     await expect(runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: vi.fn(async () => new Response("failed", { status: 404 })),
       prompter: prompter(["1", "2"], ["sk-secret"]),
@@ -495,13 +501,13 @@ describe("DeepSeek setup", () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-deepseek-empty-"));
     const fixture = outputFixture(home);
     await runDeepseekSetup({
-      environment: { CODEX_HOME: home },
+      environment: { CODEX_HOME: home, CODEX_CONNECT_HOME: join(home, ".codex-connect") },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     await runDeepseekSetup({
-      environment: { CODEX_HOME: home },
+      environment: { CODEX_HOME: home, CODEX_CONNECT_HOME: join(home, ".codex-connect") },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-switching"]),
@@ -519,7 +525,7 @@ describe("DeepSeek setup", () => {
     const original = 'model = "gpt-5.4"\nmodel_provider = "openai"\n';
     const fixture = setupFixture(original);
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["2", "2"], ["sk-fixed"], true),
@@ -532,7 +538,7 @@ describe("DeepSeek setup", () => {
     );
 
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-switching"]),
@@ -550,8 +556,8 @@ describe("DeepSeek setup", () => {
   it("migrates the legacy managed profile created by an earlier setup", async () => {
     const original = 'model = "gpt-5.4"\nmodel_provider = "openai"\n';
     const fixture = setupFixture(`${original}\n[profiles.deepseek]\nmodel = "deepseek-v4-flash"\n`);
-    const backupDirectory = join(fixture.home, "backup-codex-connect-deepseek");
-    mkdirSync(backupDirectory);
+    const backupDirectory = join(fixture.connectHome, "providers", "deepseek", "backup");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(join(backupDirectory, "config.toml"), original, { mode: 0o600 });
     writeFileSync(
       join(backupDirectory, "state.json"),
@@ -560,7 +566,7 @@ describe("DeepSeek setup", () => {
     );
 
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-migrated"]),
@@ -586,8 +592,8 @@ describe("DeepSeek setup", () => {
       'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nforced_login_method = "api"\n',
       { mode: 0o600 },
     );
-    const backupDirectory = join(fixture.home, "backup-codex-connect-deepseek");
-    mkdirSync(backupDirectory);
+    const backupDirectory = join(fixture.connectHome, "providers", "deepseek", "backup");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(join(backupDirectory, "config.toml"), original, { mode: 0o600 });
     writeFileSync(
       join(backupDirectory, "state.json"),
@@ -600,7 +606,7 @@ describe("DeepSeek setup", () => {
     );
 
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-repaired"]),
@@ -624,26 +630,32 @@ describe("DeepSeek setup", () => {
     const original = 'model = "gpt-5.4"\n# keep me\n';
     const fixture = setupFixture(original);
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     const backupStatePath = join(
-      fixture.home,
-      "backup-codex-connect-deepseek",
+      fixture.connectHome,
+      "providers",
+      "deepseek",
+      "backup",
       "state.json",
     );
     const legacyState = JSON.parse(readFileSync(backupStatePath, "utf8"));
     delete legacyState.originalRoleConfigExisted;
     writeFileSync(backupStatePath, `${JSON.stringify(legacyState)}\n`, { mode: 0o600 });
+    mkdirSync(
+      join(fixture.connectHome, "providers", "opencode-go"),
+      { recursive: true, mode: 0o700 },
+    );
     writeFileSync(
-      join(fixture.home, "sf-opencode-go.managed.toml"),
+      join(fixture.connectHome, "providers", "opencode-go", "managed.toml"),
       'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
       { mode: 0o600 },
     );
     const result = await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: vi.fn(),
       prompter: prompter(["3"], [], true),
@@ -653,20 +665,20 @@ describe("DeepSeek setup", () => {
     expect(existsSync(join(fixture.home, "sf-deepseek.config.toml"))).toBe(false);
     expect(existsSync(join(fixture.home, "sf-agent.config.toml")))
       .toBe(false);
-    expect(existsSync(join(fixture.home, "sf-deepseek.models.json"))).toBe(false);
+    expect(existsSync(join(fixture.connectHome, "providers", "deepseek", "models.json"))).toBe(false);
   });
 
   it("does not treat a user DeepSeek provider added after restore as legacy managed config", async () => {
     const original = 'model = "gpt-5.4"\n';
     const fixture = setupFixture(original);
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: vi.fn(),
       prompter: prompter(["3"], [], true),
@@ -675,7 +687,7 @@ describe("DeepSeek setup", () => {
     writeFileSync(join(fixture.home, "config.toml"), userConfig, { mode: 0o600 });
 
     await expect(runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-second"]),
@@ -689,20 +701,24 @@ describe("DeepSeek setup", () => {
     const originalGatewayProfile = '[model_providers.custom]\nname = "custom"\n';
     const fixture = setupFixture(originalConfig);
     writeFileSync(join(fixture.home, "sf-deepseek.config.toml"), originalProfile, { mode: 0o600 });
+    mkdirSync(
+      join(fixture.connectHome, "providers", "deepseek"),
+      { recursive: true, mode: 0o700 },
+    );
     writeFileSync(
-      join(fixture.home, "sf-deepseek.managed.toml"),
+      join(fixture.connectHome, "providers", "deepseek", "managed.toml"),
       originalGatewayProfile,
       { mode: 0o600 },
     );
 
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
     });
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: vi.fn(),
       prompter: prompter(["3"], [], true),
@@ -711,7 +727,7 @@ describe("DeepSeek setup", () => {
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(originalConfig);
     expect(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"))
       .toBe(originalProfile);
-    expect(readFileSync(join(fixture.home, "sf-deepseek.managed.toml"), "utf8"))
+    expect(readFileSync(join(fixture.connectHome, "providers", "deepseek", "managed.toml"), "utf8"))
       .toBe(originalGatewayProfile);
     expect(existsSync(join(fixture.home, "sf-agent.config.toml")))
       .toBe(false);
@@ -733,13 +749,13 @@ describe("DeepSeek setup", () => {
     const fixture = outputFixture(home);
 
     await runDeepseekSetup({
-      environment: { CODEX_HOME: home },
+      environment: { CODEX_HOME: home, CODEX_CONNECT_HOME: join(home, ".codex-connect") },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
     });
     await runDeepseekSetup({
-      environment: { CODEX_HOME: home },
+      environment: { CODEX_HOME: home, CODEX_CONNECT_HOME: join(home, ".codex-connect") },
       output: fixture.output,
       fetchImpl: vi.fn(),
       prompter: prompter(["3"], [], true),
@@ -752,7 +768,7 @@ describe("DeepSeek setup", () => {
   it("rejects an invalid role backup state before restoring files", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     await runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
@@ -762,8 +778,10 @@ describe("DeepSeek setup", () => {
     const configBeforeRestore = readFileSync(configPath, "utf8");
     const roleBeforeRestore = readFileSync(roleConfigPath, "utf8");
     const backupStatePath = join(
-      fixture.home,
-      "backup-codex-connect-deepseek",
+      fixture.connectHome,
+      "providers",
+      "deepseek",
+      "backup",
       "state.json",
     );
     const state = JSON.parse(readFileSync(backupStatePath, "utf8"));
@@ -771,7 +789,7 @@ describe("DeepSeek setup", () => {
     writeFileSync(backupStatePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
 
     await expect(runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home },
+      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: vi.fn(),
       prompter: prompter(["3"], [], true),
@@ -791,7 +809,10 @@ function setupFixture(config: string) {
 
 function deepseekFixture(): string {
   const home = mkdtempSync(join(tmpdir(), "codexc-deepseek-menu-"));
-  const catalogPath = join(home, "sf-deepseek.models.json");
+  const connectHome = join(home, ".codex-connect");
+  const providerDirectory = join(connectHome, "providers", "deepseek");
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
@@ -806,7 +827,7 @@ function deepseekFixture(): string {
     "",
   ].join("\n");
   writeFileSync(
-    join(home, "sf-deepseek.managed.toml"),
+    join(providerDirectory, "managed.toml"),
     'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
     { mode: 0o600 },
   );
@@ -838,9 +859,11 @@ function deepseekFixture(): string {
 }
 
 function outputFixture(home: string) {
+  const connectHome = join(home, ".codex-connect");
+  mkdirSync(connectHome, { recursive: true, mode: 0o700 });
   let value = "";
   const output = new Writable({ write(chunk, _encoding, callback) { value += chunk; callback(); } });
-  return { home, output, text: () => value };
+  return { home, connectHome, output, text: () => value };
 }
 
 function successfulFetch() {

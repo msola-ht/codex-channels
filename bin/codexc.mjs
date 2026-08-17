@@ -647,6 +647,9 @@ async function runServiceAppServer(args) {
   const providerLaunches = new Map();
   const children = [];
   let watchChild;
+  const primaryChildCredential = managedRole
+    ? loadConfiguredProviderCredential(managedRole.provider, runtime.environment)
+    : undefined;
   const launchProvider = (provider) => {
     const existing = providerLaunches.get(provider);
     if (existing) return existing;
@@ -771,12 +774,9 @@ async function runServiceAppServer(args) {
     throw error;
   }
   const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
-  if (managedRole) {
-    const credential = loadConfiguredProviderCredential(
-      managedRole.provider,
-      runtime.environment,
-    );
-    primaryChildEnvironment[credential.environmentKey] = credential.apiKey;
+  if (primaryChildCredential) {
+    primaryChildEnvironment[primaryChildCredential.environmentKey] =
+      primaryChildCredential.apiKey;
   }
   const primaryChild = spawn(runtime.environment.CODEX_BINARY, [
     ...primaryArguments,

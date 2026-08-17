@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,7 +13,7 @@ describe("managed model provider default setup", () => {
     const output = { write: vi.fn() };
 
     await expect(runModelProviderDefaultSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       output,
       prompter: {
         selectProvider: async () => "deepseek",
@@ -37,7 +37,7 @@ describe("managed model provider default setup", () => {
     });
     expect(profile.model_reasoning_effort).toBe("max");
     const catalog = JSON.parse(readFileSync(
-      join(codexHome, "sf-deepseek.models.json"),
+      catalogPath(codexHome),
       "utf8",
     ));
     expect(catalog.models).toEqual([
@@ -64,7 +64,7 @@ describe("managed model provider default setup", () => {
     const writeConfigEdits = vi.fn(async () => undefined);
 
     await expect(runModelProviderDefaultSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       output: { write: vi.fn() },
       prompter: {
         selectProvider: async () => "deepseek",
@@ -91,7 +91,7 @@ describe("managed model provider default setup", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-provider-default-empty-"));
 
     await expect(runModelProviderDefaultSetup({
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       output: { write: vi.fn() },
       prompter: {
         selectProvider: vi.fn(),
@@ -108,7 +108,7 @@ describe("managed model provider default setup", () => {
 
     await expect(runModelProviderDefaultSetup({
       provider: "deepseek",
-      environment: { CODEX_HOME: codexHome },
+      environment: testEnvironment(codexHome),
       output: { write: vi.fn() },
       prompter: {
         selectProvider,
@@ -125,7 +125,7 @@ describe("managed model provider default setup", () => {
 
     expect(selectProvider).not.toHaveBeenCalled();
     const catalog = JSON.parse(readFileSync(
-      join(codexHome, "sf-deepseek.models.json"),
+      catalogPath(codexHome),
       "utf8",
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
@@ -137,7 +137,14 @@ describe("managed model provider default setup", () => {
 
 function providerFixture(mode: "switching" | "exclusive") {
   const codexHome = mkdtempSync(join(tmpdir(), "codexc-provider-default-"));
-  const catalogPath = join(codexHome, "sf-deepseek.models.json");
+  const providerDirectory = join(
+    codexHome,
+    ".codex-connect",
+    "providers",
+    "deepseek",
+  );
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
@@ -152,7 +159,7 @@ function providerFixture(mode: "switching" | "exclusive") {
     "",
   ].join("\n");
   writeFileSync(
-    join(codexHome, "sf-deepseek.managed.toml"),
+    join(providerDirectory, "managed.toml"),
     `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
@@ -181,4 +188,15 @@ function providerFixture(mode: "switching" | "exclusive") {
     writeFileSync(join(codexHome, "config.toml"), providerLines, { mode: 0o600 });
   }
   return codexHome;
+}
+
+function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
+  return {
+    CODEX_HOME: codexHome,
+    CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+  };
+}
+
+function catalogPath(codexHome: string): string {
+  return join(codexHome, ".codex-connect", "providers", "deepseek", "models.json");
 }

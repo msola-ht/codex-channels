@@ -1,14 +1,18 @@
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
+  readdirSync,
   readFileSync,
+  rmdirSync,
   unlinkSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import { providerStorageRoot } from "../runtime/connect-home.mjs";
 import {
   deepseekProviderDefinition,
   managedModelProviderDefinitions,
@@ -19,7 +23,7 @@ const layoutVersion = 1;
 
 export function migrateManagedModelProviderFiles(environment = process.env) {
   const codexHome = codexHomePath(environment);
-  const paths = migrationPaths(codexHome);
+  const paths = migrationPaths(environment);
   const existingLegacy = paths.filter(({ legacy }) => existsSync(legacy));
   if (existingLegacy.length === 0) return { changed: false, layoutVersion, moved: [] };
   const seenTargets = new Set();
@@ -36,30 +40,35 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
   const snapshots = snapshotPaths([
     ...paths.flatMap(({ legacy, current }) => [legacy, current]),
     join(codexHome, "config.toml"),
+    ...managedModelProviderDefinitions.map((definition) =>
+      join(codexHome, definition.profileFileName)),
+    join(codexHome, "sf-agent.config.toml"),
   ]);
   try {
-    const oldCatalogPath = join(codexHome, "deepseek.models.json");
-    const newCatalogPath = join(codexHome, "sf-deepseek.models.json");
-    const oldRolePath = join(codexHome, "codex-connect-third-party-subagent.config.toml");
-    const newRolePath = join(codexHome, "sf-agent.config.toml");
-    const legacyDsRolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
-    for (const { legacy, current } of existingLegacy) {
-      const content = rewriteManagedTomlReferences(
-        readFileSync(legacy, "utf8"),
-        oldCatalogPath,
-        newCatalogPath,
-      );
+    for (const { legacy, current, definition } of existingLegacy) {
+      mkdirSync(dirname(current), { recursive: true, mode: 0o700 });
+      const raw = readFileSync(legacy, "utf8");
+      const content = definition === undefined
+        ? raw
+        : rewriteManagedTomlReferences(
+            raw,
+            legacyCatalogPaths(codexHome, definition),
+            providerCatalogPath(environment, definition),
+          );
       writePrivateFileAtomicSync(current, content);
+      unlinkSync(legacy);
     }
-    rewriteRootConfigReferences(
-      join(codexHome, "config.toml"),
-      oldCatalogPath,
-      newCatalogPath,
-      oldRolePath,
-      newRolePath,
-      legacyDsRolePath,
-    );
-    for (const { legacy } of existingLegacy) unlinkSync(legacy);
+    rewriteManagedFileReferences(environment);
+    for (const definition of managedModelProviderDefinitions) {
+      const legacyBackup = join(codexHome, `backup-codex-connect-${definition.id}`);
+      if (existsSync(legacyBackup)) {
+        try {
+          rmdirSync(legacyBackup);
+        } catch {
+          // 备份目录仍有未知文件时保留，不阻断迁移。
+        }
+      }
+    }
     return {
       changed: true,
       layoutVersion,
@@ -74,7 +83,10 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
 export function migrateManagedModelProviderModelSettings(environment = process.env) {
   const codexHome = codexHomePath(environment);
   const configured = managedModelProviderDefinitions.flatMap((definition) => {
-    const markerPath = join(codexHome, definition.managedMarkerFileName);
+    const markerPath = join(
+      providerStorage(environment, definition),
+      definition.managedMarkerFileName,
+    );
     if (!existsSync(markerPath)) return [];
     assertPrivateRegularFile(markerPath);
     let marker;
@@ -99,8 +111,8 @@ export function migrateManagedModelProviderModelSettings(environment = process.e
   const paths = [
     ...configured.flatMap(({ definition, mode }) => [
       join(codexHome, mode === "exclusive" ? "config.toml" : definition.profileFileName),
-      join(codexHome, definition.catalogFileName),
-      join(codexHome, definition.catalogManifestFileName),
+      join(providerStorage(environment, definition), definition.catalogFileName),
+      join(providerStorage(environment, definition), definition.catalogManifestFileName),
     ]),
     rolePath,
   ];
@@ -108,13 +120,13 @@ export function migrateManagedModelProviderModelSettings(environment = process.e
   const updated = [];
   try {
     for (const item of configured) {
-      updated.push(...prepareIndependentProviderCatalog(codexHome, item));
+      updated.push(...prepareIndependentProviderCatalog(environment, item));
     }
     for (const item of configured) {
-      updated.push(...migrateProviderModelSettings(codexHome, item));
+      updated.push(...migrateProviderModelSettings(environment, item));
     }
     if (existsSync(rolePath)) {
-      updated.push(...migrateRoleModelSettings(codexHome, rolePath));
+      updated.push(...migrateRoleModelSettings(environment, rolePath));
     }
     const uniqueUpdated = [...new Set(updated)];
     return { changed: uniqueUpdated.length > 0, layoutVersion: 2, updated: uniqueUpdated };
@@ -124,7 +136,8 @@ export function migrateManagedModelProviderModelSettings(environment = process.e
   }
 }
 
-function prepareIndependentProviderCatalog(codexHome, { definition, mode }) {
+function prepareIndependentProviderCatalog(environment, { definition, mode }) {
+  const codexHome = codexHomePath(environment);
   const configPath = join(
     codexHome,
     mode === "exclusive" ? "config.toml" : definition.profileFileName,
@@ -138,15 +151,21 @@ function prepareIndependentProviderCatalog(codexHome, { definition, mode }) {
     throw new Error(`第三方 Provider 模型目录缺失：${configPath}`);
   }
   const updated = [];
-  const expectedCatalogPath = join(codexHome, definition.catalogFileName);
+  const expectedCatalogPath = join(
+    providerStorage(environment, definition),
+    definition.catalogFileName,
+  );
   if (!existsSync(expectedCatalogPath)) {
     assertPrivateRegularFile(sourceCatalogPath);
     writePrivateFileAtomicSync(expectedCatalogPath, readFileSync(sourceCatalogPath));
     updated.push(expectedCatalogPath);
   }
-  const expectedManifestPath = join(codexHome, definition.catalogManifestFileName);
+  const expectedManifestPath = join(
+    providerStorage(environment, definition),
+    definition.catalogManifestFileName,
+  );
   const sharedManifestPath = join(
-    codexHome,
+    providerStorage(environment, deepseekProviderDefinition),
     deepseekProviderDefinition.catalogManifestFileName,
   );
   if (!existsSync(expectedManifestPath) && existsSync(sharedManifestPath)) {
@@ -157,7 +176,8 @@ function prepareIndependentProviderCatalog(codexHome, { definition, mode }) {
   return updated;
 }
 
-function migrateProviderModelSettings(codexHome, { definition, mode }) {
+function migrateProviderModelSettings(environment, { definition, mode }) {
+  const codexHome = codexHomePath(environment);
   const configPath = join(
     codexHome,
     mode === "exclusive" ? "config.toml" : definition.profileFileName,
@@ -167,7 +187,10 @@ function migrateProviderModelSettings(codexHome, { definition, mode }) {
   if (document.model_provider !== definition.id || typeof document.model !== "string") {
     throw new Error(`第三方 Provider 配置与管理标记不一致：${configPath}`);
   }
-  const expectedCatalogPath = join(codexHome, definition.catalogFileName);
+  const expectedCatalogPath = join(
+    providerStorage(environment, definition),
+    definition.catalogFileName,
+  );
   const sourceCatalogPath = typeof document.model_catalog_json === "string"
     ? document.model_catalog_json
     : undefined;
@@ -201,7 +224,7 @@ function migrateProviderModelSettings(codexHome, { definition, mode }) {
   return updated;
 }
 
-function migrateRoleModelSettings(codexHome, rolePath) {
+function migrateRoleModelSettings(environment, rolePath) {
   assertPrivateRegularFile(rolePath);
   const document = parseManagedToml(rolePath);
   const definition = managedModelProviderDefinitions.find(
@@ -210,7 +233,10 @@ function migrateRoleModelSettings(codexHome, rolePath) {
   if (!definition || typeof document.model !== "string") {
     throw new Error(`第三方子代理配置无效：${rolePath}`);
   }
-  const catalogPath = join(codexHome, definition.catalogFileName);
+  const catalogPath = join(
+    providerStorage(environment, definition),
+    definition.catalogFileName,
+  );
   const catalog = parseModelCatalog(catalogPath);
   const model = modelEntry(catalog, document.model, rolePath);
   const next = {
@@ -288,112 +314,201 @@ function modelEntry(catalog, model, sourcePath) {
   return entry;
 }
 
-function migrationPaths(codexHome) {
-  const deepseekBackup = join(codexHome, "backup-codex-connect-deepseek");
-  const openCodeBackup = join(codexHome, "backup-codex-connect-opencode-go");
-  return [
-    ["deepseek.config.toml", "sf-deepseek.config.toml"],
-    ["opencode-go.config.toml", "sf-opencode-go.config.toml"],
-    ["deepseek.models.json", "sf-deepseek.models.json"],
-    ["deepseek.models.manifest.json", "sf-deepseek.models.manifest.json"],
-    ["codex-connect-deepseek.config.toml", "sf-deepseek.managed.toml"],
-    ["codex-connect-opencode-go.config.toml", "sf-opencode-go.managed.toml"],
-    ["codex-connect-ds-subagent.config.toml", "sf-agent.config.toml"],
-    ["codex-connect-third-party-subagent.config.toml", "sf-agent.config.toml"],
-  ].map(([legacy, current]) => ({
-    legacy: join(codexHome, legacy),
-    current: join(codexHome, current),
-  })).concat([
-    {
-      legacy: join(deepseekBackup, "deepseek.config.toml"),
-      current: join(deepseekBackup, "sf-deepseek.config.toml"),
-    },
-    {
-      legacy: join(deepseekBackup, "codex-connect-deepseek.config.toml"),
-      current: join(deepseekBackup, "sf-deepseek.managed.toml"),
-    },
-    {
-      legacy: join(deepseekBackup, "codex-connect-ds-subagent.config.toml"),
-      current: join(deepseekBackup, "sf-agent.config.toml"),
-    },
-    {
-      legacy: join(deepseekBackup, "codex-connect-third-party-subagent.config.toml"),
-      current: join(deepseekBackup, "sf-agent.config.toml"),
-    },
-    {
-      legacy: join(openCodeBackup, "opencode-go.config.toml"),
-      current: join(openCodeBackup, "sf-opencode-go.config.toml"),
-    },
-    {
-      legacy: join(openCodeBackup, "codex-connect-opencode-go.config.toml"),
-      current: join(openCodeBackup, "sf-opencode-go.managed.toml"),
-    },
-    {
-      legacy: join(openCodeBackup, "codex-connect-third-party-subagent.config.toml"),
-      current: join(openCodeBackup, "sf-agent.config.toml"),
-    },
-  ]);
+function providerStorage(environment, definition) {
+  return join(providerStorageRoot(environment), definition.id);
 }
 
-function rewriteManagedTomlReferences(content, oldCatalogPath, newCatalogPath) {
+function providerCatalogPath(environment, definition) {
+  return join(
+    providerStorage(environment, definition),
+    definition.catalogFileName,
+  );
+}
+
+function legacyCatalogPaths(codexHome, definition) {
+  return [
+    join(codexHome, `${definition.id}.models.json`),
+    join(codexHome, `sf-${definition.id}.models.json`),
+  ];
+}
+
+export function migrationPaths(environment) {
+  const codexHome = codexHomePath(environment);
+  const roleTarget = join(codexHome, "sf-agent.config.toml");
+  const entries = [];
+  for (const definition of managedModelProviderDefinitions) {
+    const directory = providerStorage(environment, definition);
+    const backup = join(directory, definition.backupDirectoryName);
+    entries.push(
+      {
+        definition,
+        legacy: join(codexHome, `${definition.id}.config.toml`),
+        current: join(codexHome, definition.profileFileName),
+      },
+      {
+        definition,
+        legacy: join(codexHome, `${definition.id}.models.json`),
+        current: join(directory, definition.catalogFileName),
+      },
+      {
+        definition,
+        legacy: join(codexHome, `sf-${definition.id}.models.json`),
+        current: join(directory, definition.catalogFileName),
+      },
+      {
+        definition,
+        legacy: join(codexHome, `${definition.id}.models.manifest.json`),
+        current: join(directory, definition.catalogManifestFileName),
+      },
+      {
+        definition,
+        legacy: join(codexHome, `sf-${definition.id}.models.manifest.json`),
+        current: join(directory, definition.catalogManifestFileName),
+      },
+      {
+        definition,
+        legacy: join(codexHome, `codex-connect-${definition.id}.config.toml`),
+        current: join(directory, definition.managedMarkerFileName),
+      },
+      {
+        definition,
+        legacy: join(codexHome, `sf-${definition.id}.managed.toml`),
+        current: join(directory, definition.managedMarkerFileName),
+      },
+    );
+    const legacyBackup = join(codexHome, `backup-codex-connect-${definition.id}`);
+    if (existsSync(legacyBackup)) {
+      for (const name of readdirSync(legacyBackup)) {
+        entries.push({
+          definition,
+          legacy: join(legacyBackup, name),
+          current: join(backup, backupFileName(definition, name)),
+        });
+      }
+    }
+  }
+  entries.push(
+    {
+      legacy: join(codexHome, "codex-connect-ds-subagent.config.toml"),
+      current: roleTarget,
+    },
+    {
+      legacy: join(codexHome, "codex-connect-third-party-subagent.config.toml"),
+      current: roleTarget,
+    },
+  );
+  return entries;
+}
+
+function backupFileName(definition, name) {
+  if (name === `${definition.id}.config.toml`) return definition.profileFileName;
+  if (
+    name === `${definition.id}.models.json`
+    || name === `sf-${definition.id}.models.json`
+  ) {
+    return definition.catalogFileName;
+  }
+  if (
+    name === `${definition.id}.models.manifest.json`
+    || name === `sf-${definition.id}.models.manifest.json`
+  ) {
+    return definition.catalogManifestFileName;
+  }
+  if (
+    name === `codex-connect-${definition.id}.config.toml`
+    || name === `sf-${definition.id}.managed.toml`
+  ) {
+    return definition.managedMarkerFileName;
+  }
+  if (
+    name === "codex-connect-ds-subagent.config.toml"
+    || name === "codex-connect-third-party-subagent.config.toml"
+  ) {
+    return "sf-agent.config.toml";
+  }
+  return name;
+}
+
+function rewriteManagedTomlReferences(content, oldCatalogPaths, newCatalogPath) {
   let document;
   try {
     document = parse(content);
   } catch {
     return content;
   }
-  if (document.model_catalog_json !== oldCatalogPath) return content;
+  if (!oldCatalogPaths.includes(document.model_catalog_json)) return content;
+  if (document.model_catalog_json === newCatalogPath) return content;
   document.model_catalog_json = newCatalogPath;
   return stringify(document);
 }
 
-function rewriteRootConfigReferences(
-  configPath,
-  oldCatalogPath,
-  newCatalogPath,
-  oldRolePath,
-  newRolePath,
-  legacyDsRolePath,
-) {
-  if (!existsSync(configPath)) return;
-  assertPrivateRegularFile(configPath, { allowGroupRead: true });
-  let document;
-  try {
-    document = parse(readFileSync(configPath, "utf8"));
-  } catch {
-    throw new Error("Codex config.toml 无法安全解析，未迁移第三方 Provider 文件");
-  }
-  let changed = false;
-  if (document.model_catalog_json === oldCatalogPath) {
-    document.model_catalog_json = newCatalogPath;
-    changed = true;
-  }
-  const agents = record(document.agents);
-  const external = record(agents.external);
-  if (external.config_file === oldRolePath) {
-    external.config_file = newRolePath;
-    agents.external = external;
-    document.agents = agents;
-    changed = true;
-  }
-  const legacyDs = record(agents.ds);
-  if (legacyDs.config_file === legacyDsRolePath) {
-    if (record(agents.external).config_file === undefined) {
-      agents.external = {
-        ...(typeof legacyDs.description === "string"
-          ? { description: legacyDs.description }
-          : {}),
-        ...(Array.isArray(legacyDs.nickname_candidates)
-          ? { nickname_candidates: legacyDs.nickname_candidates }
-          : {}),
-        config_file: newRolePath,
-      };
+function rewriteManagedFileReferences(environment) {
+  const codexHome = codexHomePath(environment);
+  const rolePath = join(codexHome, "sf-agent.config.toml");
+  const targets = [
+    join(codexHome, "config.toml"),
+    ...managedModelProviderDefinitions.map((definition) =>
+      join(codexHome, definition.profileFileName)),
+    rolePath,
+  ];
+  for (const target of [...new Set(targets)]) {
+    if (!existsSync(target)) continue;
+    assertPrivateRegularFile(target, {
+      allowGroupRead: target === join(codexHome, "config.toml"),
+    });
+    let document;
+    try {
+      document = parse(readFileSync(target, "utf8"));
+    } catch {
+      throw new Error(`${target} 无法安全解析，未迁移第三方 Provider 文件`);
     }
-    delete agents.ds;
-    document.agents = agents;
-    changed = true;
+    let changed = false;
+    for (const definition of managedModelProviderDefinitions) {
+      const newCatalogPath = providerCatalogPath(environment, definition);
+      if (
+        document.model_catalog_json !== newCatalogPath
+        && legacyCatalogPaths(codexHome, definition).includes(
+          document.model_catalog_json,
+        )
+      ) {
+        document.model_catalog_json = newCatalogPath;
+        changed = true;
+      }
+    }
+    if (target === join(codexHome, "config.toml")) {
+      const agents = record(document.agents);
+      const external = record(agents.external);
+      const oldRolePath = join(
+        codexHome,
+        "codex-connect-third-party-subagent.config.toml",
+      );
+      const legacyDsRolePath = join(codexHome, "codex-connect-ds-subagent.config.toml");
+      if (external.config_file === oldRolePath) {
+        external.config_file = rolePath;
+        agents.external = external;
+        document.agents = agents;
+        changed = true;
+      }
+      const legacyDs = record(agents.ds);
+      if (legacyDs.config_file === legacyDsRolePath) {
+        if (record(agents.external).config_file === undefined) {
+          agents.external = {
+            ...(typeof legacyDs.description === "string"
+              ? { description: legacyDs.description }
+              : {}),
+            ...(Array.isArray(legacyDs.nickname_candidates)
+              ? { nickname_candidates: legacyDs.nickname_candidates }
+              : {}),
+            config_file: rolePath,
+          };
+        }
+        delete agents.ds;
+        document.agents = agents;
+        changed = true;
+      }
+    }
+    if (changed) writePrivateFileAtomicSync(target, stringify(document));
   }
-  if (changed) writePrivateFileAtomicSync(configPath, stringify(document));
 }
 
 function assertPrivateRegularFile(path, { allowGroupRead = false } = {}) {

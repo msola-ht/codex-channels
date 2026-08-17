@@ -10,6 +10,7 @@ import {
   deepseekProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import {
+  managedProviderDirectory,
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
   managedModelProviderRoleConfigPath,
@@ -81,16 +82,26 @@ export async function runDeepseekSetup({
     const configPath = join(codexHome, "config.toml");
     const roleConfigPath = managedModelProviderRoleConfigPath(environment);
     const profilePath = join(codexHome, deepseekProviderDefinition.profileFileName);
+    const providerDirectory = managedProviderDirectory(
+      environment,
+      deepseekProviderDefinition,
+    );
     const gatewayProfilePath = join(
-      codexHome,
+      providerDirectory,
       deepseekProviderDefinition.managedMarkerFileName,
     );
-    const catalogPath = join(codexHome, deepseekProviderDefinition.catalogFileName);
+    const catalogPath = join(
+      providerDirectory,
+      deepseekProviderDefinition.catalogFileName,
+    );
     const manifestPath = join(
-      codexHome,
+      providerDirectory,
       deepseekProviderDefinition.catalogManifestFileName,
     );
-    const backupDirectory = join(codexHome, deepseekProviderDefinition.backupDirectoryName);
+    const backupDirectory = join(
+      providerDirectory,
+      deepseekProviderDefinition.backupDirectoryName,
+    );
     const backupPath = join(backupDirectory, "config.toml");
     const profileBackupPath = join(
       backupDirectory,

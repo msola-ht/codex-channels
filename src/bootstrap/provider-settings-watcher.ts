@@ -6,7 +6,10 @@ import type { Logger } from "pino";
 
 import { codexHomePath } from "../../runtime/codex-home.mjs";
 import { managedModelProviderDefinitions } from "../../runtime/model-provider-definitions.mjs";
-import { validateConfiguredModelProviders } from "../../runtime/model-provider-runtime.mjs";
+import {
+  managedProviderDirectory,
+  validateConfiguredModelProviders,
+} from "../../runtime/model-provider-runtime.mjs";
 
 export interface ProviderSettingsWatcherOptions {
   logger: Logger;
@@ -83,9 +86,15 @@ export class ProviderSettingsWatcher {
     this.filesByProvider = managedModelProviderDefinitions.map((definition) => ({
       provider: definition.id,
       paths: [
-        join(codexHome, definition.catalogFileName),
+        join(
+          managedProviderDirectory(this.environment, definition),
+          definition.catalogFileName,
+        ),
         join(codexHome, definition.profileFileName),
-        join(codexHome, definition.managedMarkerFileName),
+        join(
+          managedProviderDirectory(this.environment, definition),
+          definition.managedMarkerFileName,
+        ),
       ],
     }));
   }
