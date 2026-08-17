@@ -128,8 +128,9 @@ OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/op
 每日核对官方页面全部模型的价格、时段、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.147.0
 真实 App Server 按需启动、初始化与模型列表合同验证的模型计价和开放选择。`/usage` 与 WebUI
 在官方账户窗口外，还用当前官方价格基线按请求开始时间重新计价（峰谷对齐）当前官方月度窗口
-（由 `resetsAt` 倒推开始时间）内各模型已用金额，对照基线中的模型包含用量（如 DeepSeek V4
-Pro/Flash 每月 $15）计算已用百分比与剩余额度。
+（由 `resetsAt` 倒推开始时间）内各模型已用金额；价格更新生效时间（基线 `sourceUpdatedAt`）之前
+的请求使用当时保存的价格快照，之后的请求按当前基线重算。对照基线中的模型包含用量（如
+DeepSeek V4 Pro/Flash 每月 $15）计算已用百分比与剩余额度。
 
 用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；模型、思考等级、Fast、
 `multi_agent_v2` 与受控共享第三方角色 `agents.external` 的普通键级写入共用一次官方

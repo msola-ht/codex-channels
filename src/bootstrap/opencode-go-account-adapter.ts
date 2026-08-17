@@ -115,6 +115,7 @@ function readModelUsageEstimates(
     try {
       const resolver = new OpenCodeGoModelPricingResolver();
       const baseline = loadOpenCodeGoPricingBaseline();
+      const priceEffectiveAtMs = baseline.sourceUpdatedAtMs;
       const totals = new Map<string, number>();
       let offset = 0;
       do {
@@ -132,22 +133,27 @@ function readModelUsageEstimates(
             continue;
           }
           const atMs = record.requestStartedAtMs ?? record.recordedAtMs;
-          const pricing = resolver.resolve({
-            provider: "opencode-go",
-            model: record.model,
-            serviceTier: record.serviceTier,
+          const usage = {
             inputTokens: record.inputTokens,
-            atMs,
-          });
-          if (pricing === null) continue;
-          const cost = calculateModelRequestCostComponents(
-            {
-              inputTokens: record.inputTokens,
-              cachedInputTokens: record.cachedInputTokens,
-              outputTokens: record.outputTokens,
-            },
-            pricing,
-          );
+            cachedInputTokens: record.cachedInputTokens,
+            outputTokens: record.outputTokens,
+          };
+          const cost = atMs >= priceEffectiveAtMs
+            ? (() => {
+                const pricing = resolver.resolve({
+                  provider: "opencode-go",
+                  model: record.model,
+                  serviceTier: record.serviceTier,
+                  inputTokens: record.inputTokens,
+                  atMs,
+                });
+                return pricing === null
+                  ? null
+                  : calculateModelRequestCostComponents(usage, pricing);
+              })()
+            : record.pricing === null
+              ? null
+              : calculateModelRequestCostComponents(usage, record.pricing);
           if (cost === null) continue;
           totals.set(
             record.model,

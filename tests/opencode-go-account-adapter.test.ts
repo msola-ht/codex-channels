@@ -161,6 +161,47 @@ describe("OpenCode Go account adapter", () => {
       totalTokens: 700_000,
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
+      requestStartedAtMs: Date.parse("2026-08-16T17:00:00.000Z"),
+      firstTokenAtMs: 1_100,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: 1_400,
+      lastOutputDeltaAtMs: 1_600,
+      responseCompletedAtMs: 1_650,
+      weeklyQuota: null,
+    });
+    store.record({
+      provider: "opencode-go",
+      pricing: {
+        billingMode: "subscription",
+        currency: "USD",
+        source: "opencode-go-official",
+        effectiveAtMs: 1_785_000_000_000,
+        uncachedInputPricePerMillionNanos: 140_000_000,
+        cachedInputPricePerMillionNanos: 2_800_000,
+        outputPricePerMillionNanos: 280_000_000,
+      },
+      transport: "http",
+      responseFormat: "sse",
+      operation: "response",
+      threadId: "thread-2",
+      turnId: "turn-2",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      reasoningEffort: "high",
+      status: "completed",
+      httpStatus: 200,
+      errorType: null,
+      errorCode: null,
+      errorMessage: null,
+      incompleteReason: null,
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      outputTokens: 10_000,
+      reasoningOutputTokens: 0,
+      totalTokens: 110_000,
+      upstreamCreatedAt: 1_785_640_800,
+      upstreamCompletedAt: 1_785_640_801,
       requestStartedAtMs: 1_000,
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
@@ -198,9 +239,9 @@ describe("OpenCode Go account adapter", () => {
     const estimate = usage.modelUsage![0]!;
     expect(estimate.model).toBe("deepseek-v4-flash");
     expect(estimate.includedUsageUsd).toBe(15);
-    expect(estimate.usedUsdNanos).toBe(220_700_000);
-    expect(estimate.usedPercent).toBeCloseTo(220_700_000 / 15_000_000_000 * 100, 6);
-    expect(estimate.remainingUsdNanos).toBe(14_779_300_000);
+    expect(estimate.usedUsdNanos).toBe(237_500_000);
+    expect(estimate.usedPercent).toBeCloseTo(237_500_000 / 15_000_000_000 * 100, 6);
+    expect(estimate.remainingUsdNanos).toBe(14_762_500_000);
     expect(estimate.windowEndAtMs).toBe(Date.parse("2026-08-20T00:00:00.000Z"));
     expect(estimate.windowStartAtMs).toBe(
       opencodeGoMonthlyWindowStartMs(Date.parse("2026-08-20T00:00:00.000Z") / 1_000),
