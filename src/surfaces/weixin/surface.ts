@@ -82,6 +82,7 @@ export interface WeixinSurfaceOptions {
   ) => DisplayPriceCurrency;
   opencodeGoUsage?: (
     model: string,
+    requestStartedAtMs?: number,
   ) => Promise<ProviderModelUsageEstimate | null>;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;

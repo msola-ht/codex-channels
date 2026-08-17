@@ -111,6 +111,8 @@ export interface TurnOutputTiming {
   generationTokensPerSecond?: number;
   generationSpeedSampleCount?: number;
   generationSpeedTimedCount?: number;
+  /** Turn 内最后一次模型请求的开始时间（毫秒），用于按请求时段选择 OpenCode Go 峰谷档位 */
+  modelRequestStartedAtMs?: number;
   referenceCost?: ReferenceCostSummary;
   compact?: CompactRequestMetricsSummary;
 }

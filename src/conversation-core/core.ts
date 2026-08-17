@@ -913,6 +913,9 @@ export class ConversationCore {
     const result: TurnOutputTiming = {};
     if (timing.modelRequestCount > 0) {
       result.modelRequestCount = timing.modelRequestCount;
+      if (timing.modelRequestStartedAtMs !== undefined) {
+        result.modelRequestStartedAtMs = timing.modelRequestStartedAtMs;
+      }
       if (
         timing.interruptedModelRequestCount > 0
         || timing.incompleteModelRequestCount > 0

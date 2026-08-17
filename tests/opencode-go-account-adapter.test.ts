@@ -512,6 +512,15 @@ describe("OpenCode Go account adapter", () => {
       bucket: "off-peak",
       usedUsdNanos: 28_600_000,
     });
+    // 传入请求开始时间优先于当前时间：当前处于 Off-Peak，但请求开始于 Peak 时段。
+    await expect(offPeakReader(
+      "deepseek-v4-flash",
+      Date.parse("2026-08-17T08:30:00.000Z"),
+    )).resolves.toMatchObject({
+      model: "deepseek-v4-flash",
+      bucket: "peak",
+      usedUsdNanos: 110_000_000,
+    });
   });
 });
 
