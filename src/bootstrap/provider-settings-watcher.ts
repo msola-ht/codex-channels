@@ -16,6 +16,8 @@ export interface ProviderSettingsWatcherOptions {
   environment?: NodeJS.ProcessEnv;
   pollIntervalMs?: number;
   restartCooldownMs?: number;
+  validationCooldownMs?: number;
+  nowMs?: () => number;
   validate?: () => void;
 }
 
@@ -37,6 +39,7 @@ interface ManagedProviderFiles {
 
 const defaultPollIntervalMs = 2_000;
 const defaultRestartCooldownMs = 30_000;
+const defaultValidationCooldownMs = 30_000;
 
 export class ProviderSettingsWatcher {
   private readonly logger: Logger;
@@ -48,9 +51,12 @@ export class ProviderSettingsWatcher {
   private readonly environment: NodeJS.ProcessEnv;
   private readonly pollIntervalMs: number;
   private readonly restartCooldownMs: number;
+  private readonly validationCooldownMs: number;
+  private readonly nowMs: () => number;
   private readonly validate: () => void;
   private readonly filesByProvider: ManagedProviderFiles[];
   private fingerprints = new Map<string, string>();
+  private lastValidationFailureAt = Number.NEGATIVE_INFINITY;
   private timer: NodeJS.Timeout | undefined;
   private stopping = false;
   private initialized = false;
@@ -67,6 +73,9 @@ export class ProviderSettingsWatcher {
     this.environment = options.environment ?? process.env;
     this.pollIntervalMs = options.pollIntervalMs ?? defaultPollIntervalMs;
     this.restartCooldownMs = options.restartCooldownMs ?? defaultRestartCooldownMs;
+    this.validationCooldownMs =
+      options.validationCooldownMs ?? defaultValidationCooldownMs;
+    this.nowMs = options.nowMs ?? Date.now;
     this.validate = options.validate ?? (() => {
       validateConfiguredModelProviders(this.environment);
     });
@@ -108,13 +117,7 @@ export class ProviderSettingsWatcher {
         .filter(({ paths }) => paths.some((path) =>
           this.fingerprints.get(path) !== nextFingerprints.get(path)))
         .map(({ provider }) => provider);
-      try {
-        this.validate();
-      } catch (error) {
-        this.logger.error(
-          { err: error, providers },
-          "第三方模型设置变化校验失败，继续使用现有配置并等待修复",
-        );
+      if (!this.validateSettings(providers)) {
         return;
       }
       this.fingerprints = nextFingerprints;
@@ -147,7 +150,11 @@ export class ProviderSettingsWatcher {
       this.restartPending = true;
       return;
     }
-    if (Date.now() - this.lastRestartAttemptAt < this.restartCooldownMs) {
+    if (this.nowMs() - this.lastRestartAttemptAt < this.restartCooldownMs) {
+      this.restartPending = true;
+      return;
+    }
+    if (!this.validateSettings(this.pendingProviders)) {
       this.restartPending = true;
       return;
     }
@@ -162,7 +169,7 @@ export class ProviderSettingsWatcher {
       return;
     }
     this.restartInFlight = true;
-    this.lastRestartAttemptAt = Date.now();
+    this.lastRestartAttemptAt = this.nowMs();
     this.emitState("restarting", providers);
     this.logger.info(
       { providers },
@@ -202,6 +209,23 @@ export class ProviderSettingsWatcher {
         { err: error, kind, providers },
         "第三方模型设置状态通知失败",
       );
+    }
+  }
+
+  private validateSettings(providers: readonly string[]): boolean {
+    try {
+      this.validate();
+      return true;
+    } catch (error) {
+      const now = this.nowMs();
+      if (now - this.lastValidationFailureAt >= this.validationCooldownMs) {
+        this.lastValidationFailureAt = now;
+        this.logger.error(
+          { err: error, providers },
+          "第三方模型设置变化校验失败，继续使用现有配置并等待修复",
+        );
+      }
+      return false;
     }
   }
 
