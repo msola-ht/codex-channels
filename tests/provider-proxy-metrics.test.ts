@@ -75,7 +75,7 @@ describe("Provider proxy metrics channel", () => {
   });
 
   it("forwards quota window snapshots and tolerates their absence", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-quota-windows-"));
+    const directory = mkdtempSync(join(tmpdir(), "codexc-mq-windows-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "metrics.sock");
     let resolveMetrics: (metrics: ProviderProxyMetrics) => void = () => undefined;
@@ -100,7 +100,7 @@ describe("Provider proxy metrics channel", () => {
   });
 
   it("accepts legacy metrics without a quota window snapshot", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-quota-legacy-"));
+    const directory = mkdtempSync(join(tmpdir(), "codexc-mq-legacy-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "metrics.sock");
     let resolveMetrics: (metrics: ProviderProxyMetrics) => void = () => undefined;
