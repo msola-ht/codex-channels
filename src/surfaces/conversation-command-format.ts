@@ -1271,7 +1271,7 @@ export function formatConversationUsage(
         ? []
         : [
             "",
-            `模型本地用量${windowRange}（按本机参考价估算，非官方账单）：`,
+            `模型本地用量${windowRange}（按当前价格基线按请求时间重算，非官方账单）：`,
             ...modelUsage.map((estimate) => {
               const used = estimate.usedUsdNanos === null
                 ? "未知"

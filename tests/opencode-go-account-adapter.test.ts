@@ -139,15 +139,7 @@ describe("OpenCode Go account adapter", () => {
     const store = new SqliteModelRequestMetricsStore(metricsPath);
     store.record({
       provider: "opencode-go",
-      pricing: {
-        billingMode: "subscription",
-        currency: "USD",
-        source: "opencode-go-official",
-        effectiveAtMs: 1_785_640_000_000,
-        uncachedInputPricePerMillionNanos: 1_000_000_000,
-        cachedInputPricePerMillionNanos: 100_000_000,
-        outputPricePerMillionNanos: 3_000_000_000,
-      },
+      pricing: null,
       transport: "http",
       responseFormat: "sse",
       operation: "response",
@@ -206,9 +198,9 @@ describe("OpenCode Go account adapter", () => {
     const estimate = usage.modelUsage![0]!;
     expect(estimate.model).toBe("deepseek-v4-flash");
     expect(estimate.includedUsageUsd).toBe(15);
-    expect(estimate.usedUsdNanos).toBe(1_010_000_000);
-    expect(estimate.usedPercent).toBeCloseTo(1_010_000_000 / 15_000_000_000 * 100, 6);
-    expect(estimate.remainingUsdNanos).toBe(13_990_000_000);
+    expect(estimate.usedUsdNanos).toBe(220_700_000);
+    expect(estimate.usedPercent).toBeCloseTo(220_700_000 / 15_000_000_000 * 100, 6);
+    expect(estimate.remainingUsdNanos).toBe(14_779_300_000);
     expect(estimate.windowEndAtMs).toBe(Date.parse("2026-08-20T00:00:00.000Z"));
     expect(estimate.windowStartAtMs).toBe(
       opencodeGoMonthlyWindowStartMs(Date.parse("2026-08-20T00:00:00.000Z") / 1_000),

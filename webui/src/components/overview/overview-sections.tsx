@@ -293,7 +293,7 @@ export function OpencodeGoUsageCard({
               modelUsage[0]?.windowEndAtMs !== null
                 ? `（月度窗口 ${formatTime(Math.floor(modelUsage[0].windowStartAtMs / 1_000))} – ${formatTime(Math.floor(modelUsage[0].windowEndAtMs / 1_000))}）`
                 : ""}
-              （按本机参考价估算）
+              （按当前价格基线重算）
             </p>
             {modelUsage.map((estimate) => (
               <div key={estimate.model} className="flex flex-col gap-1">

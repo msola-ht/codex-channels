@@ -1,7 +1,13 @@
 import { loadOpencodeGoAccountCredential } from "../../runtime/model-provider-runtime.mjs";
-import { SqliteModelRequestMetricsStore } from "../observability/index.js";
+import {
+  calculateModelRequestCostComponents,
+  SqliteModelRequestMetricsStore,
+} from "../observability/index.js";
 import { readBoundedFetchBody } from "./bounded-fetch-body.js";
-import { loadOpenCodeGoPricingBaseline } from "./opencode-go-model-pricing.js";
+import {
+  loadOpenCodeGoPricingBaseline,
+  OpenCodeGoModelPricingResolver,
+} from "./opencode-go-model-pricing.js";
 
 import type {
   ProviderAccountAdapter,
@@ -107,38 +113,66 @@ function readModelUsageEstimates(
       { readOnly: true },
     );
     try {
-      const report = store.aggregate({
-        dimension: "model",
-        startAtMs: windowStartAtMs,
-        endAtMs,
-      });
+      const resolver = new OpenCodeGoModelPricingResolver();
       const baseline = loadOpenCodeGoPricingBaseline();
-      return report.groups
-        .filter((group) =>
-          group.provider === "opencode-go"
-          && group.model !== null
-          && group.aggregate.totalCostNanos !== null
-          && group.aggregate.totalCostNanos > 0)
-        .map((group) => {
-          const model = group.model!;
-          const includedUsageUsd = baseline.models.get(model)?.includedUsageUsd;
-          const usedUsdNanos = group.aggregate.totalCostNanos!;
-          if (includedUsageUsd === undefined) return null;
-          const includedUsdNanos = Math.round(includedUsageUsd * 1_000_000_000);
-          const estimate: ProviderModelUsageEstimate | null = {
-            model,
-            includedUsageUsd,
-            usedUsdNanos,
-            usedPercent: usedUsdNanos / includedUsdNanos * 100,
-            remainingUsdNanos: includedUsdNanos - usedUsdNanos,
-            windowStartAtMs,
-            windowEndAtMs,
-          };
-          return estimate;
-        })
-        .filter((estimate): estimate is ProviderModelUsageEstimate =>
-          estimate !== null)
-        .sort((left, right) => right.usedUsdNanos! - left.usedUsdNanos!);
+      const totals = new Map<string, number>();
+      let offset = 0;
+      do {
+        const page = store.page({
+          startAtMs: windowStartAtMs,
+          endAtMs,
+          offset,
+          limit: 500,
+          sortKey: "recordedAtMs",
+          sortDirection: "asc",
+          filter: "opencode-go",
+        });
+        for (const record of page.records) {
+          if (record.provider !== "opencode-go" || record.model === null) {
+            continue;
+          }
+          const atMs = record.requestStartedAtMs ?? record.recordedAtMs;
+          const pricing = resolver.resolve({
+            provider: "opencode-go",
+            model: record.model,
+            serviceTier: record.serviceTier,
+            inputTokens: record.inputTokens,
+            atMs,
+          });
+          if (pricing === null) continue;
+          const cost = calculateModelRequestCostComponents(
+            {
+              inputTokens: record.inputTokens,
+              cachedInputTokens: record.cachedInputTokens,
+              outputTokens: record.outputTokens,
+            },
+            pricing,
+          );
+          if (cost === null) continue;
+          totals.set(
+            record.model,
+            (totals.get(record.model) ?? 0) + cost.totalCostNanos,
+          );
+        }
+        offset = page.nextOffset ?? -1;
+      } while (offset >= 0);
+      const estimates: ProviderModelUsageEstimate[] = [];
+      for (const [model, usedUsdNanos] of totals) {
+        const includedUsageUsd = baseline.models.get(model)?.includedUsageUsd;
+        if (includedUsageUsd === undefined) continue;
+        const includedUsdNanos = Math.round(includedUsageUsd * 1_000_000_000);
+        estimates.push({
+          model,
+          includedUsageUsd,
+          usedUsdNanos,
+          usedPercent: usedUsdNanos / includedUsdNanos * 100,
+          remainingUsdNanos: includedUsdNanos - usedUsdNanos,
+          windowStartAtMs,
+          windowEndAtMs,
+        });
+      }
+      return estimates.sort((left, right) =>
+        right.usedUsdNanos! - left.usedUsdNanos!);
     } finally {
       store.close();
     }
