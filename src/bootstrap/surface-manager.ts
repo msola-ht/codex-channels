@@ -245,7 +245,7 @@ export class SurfaceManager {
     }
   }
 
-  private routeOutput(event: OutputEvent): void {
+  private async routeOutput(event: OutputEvent): Promise<void> {
     if (!this.acceptingOutput) {
       return;
     }
@@ -306,7 +306,7 @@ export class SurfaceManager {
       }
       return;
     }
-    this.deliverOutput(surface, routedEvent);
+    await this.deliverOutput(surface, routedEvent);
   }
 
   private async startSurface(surface: SurfaceAdapter): Promise<void> {
@@ -351,7 +351,7 @@ export class SurfaceManager {
     this.active.add(surface);
     const pending = runtime.pendingCriticalOutput.splice(0);
     for (const event of pending) {
-      this.deliverOutput(surface, event);
+      void this.deliverOutput(surface, event);
     }
     this.logger.info(
       {
@@ -381,9 +381,12 @@ export class SurfaceManager {
     runtime.retryTimer.unref();
   }
 
-  private deliverOutput(surface: SurfaceAdapter, event: OutputEvent): void {
+  private async deliverOutput(
+    surface: SurfaceAdapter,
+    event: OutputEvent,
+  ): Promise<void> {
     try {
-      surface.output.handle(event);
+      await surface.output.handle(event);
       if (event.type !== "text.delta") {
         this.logger.debug(
           {

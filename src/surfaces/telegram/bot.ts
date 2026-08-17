@@ -11,6 +11,7 @@ import {
   type ConversationUseCases,
   type DisplayPriceCurrency,
   type ExchangeRateSnapshot,
+  type ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -118,6 +119,9 @@ export interface TelegramSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  opencodeGoUsage?: (
+    model: string,
+  ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
@@ -234,6 +238,9 @@ export class TelegramSurface {
       ...(options.priceCurrency === undefined
         ? {}
         : { priceCurrency: options.priceCurrency }),
+      ...(options.opencodeGoUsage === undefined
+        ? {}
+        : { opencodeGoUsage: options.opencodeGoUsage }),
       debugEnabled: this.debugEnabled,
     });
     this.output = this.outbox;

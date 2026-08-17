@@ -518,6 +518,43 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("周限");
   });
 
+  it("shows the remaining OpenCode Go usage on completion", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation(
+        {
+          type: "turn.completed",
+          target: {
+            surface: "feishu",
+            accountId: "default",
+            conversationId: "chat",
+          },
+          threadId: "thread-opencode-go",
+          turnId: "turn-opencode-go",
+          status: "completed",
+          model: "deepseek-v4-flash",
+          modelProvider: "opencode-go",
+          effort: "high",
+          serviceTier: null,
+        },
+        () => "usd",
+        null,
+        false,
+        {
+          model: "deepseek-v4-flash",
+          includedUsageUsd: 15,
+          usedUsdNanos: 1_010_000_000,
+          usedPercent: 6.733333333333333,
+          remainingUsdNanos: 13_990_000_000,
+          windowStartAtMs: Date.parse("2026-08-15T14:22:07.934Z"),
+          windowEndAtMs: Date.parse("2026-09-15T14:22:07.934Z"),
+        },
+      ),
+    );
+
+    expect(rendered).toContain("剩余用量");
+    expect(rendered).toContain("剩余 $13.99 · 包含 $15.00 · 已用 6.7%");
+  });
+
   it("shows output, thinking and combined generation speeds", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({

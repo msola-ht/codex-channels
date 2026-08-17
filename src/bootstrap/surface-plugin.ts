@@ -4,6 +4,7 @@ import type {
   ConversationUseCases,
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ProviderModelUsageEstimate,
 } from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
 import type { BindingStore } from "../storage/index.js";
@@ -30,6 +31,9 @@ export interface SurfacePluginContext {
   priceCurrency: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  opencodeGoUsage?: (
+    model: string,
+  ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
 export interface BuiltInSurfacePlugin {

@@ -24,6 +24,7 @@ import {
 import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import {
   formatVisionCompleted,
@@ -111,6 +112,9 @@ export interface TelegramOutboxOptions {
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
   debugEnabled?: boolean;
+  opencodeGoUsage?: (
+    model: string,
+  ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
 export class TelegramOutbox {
@@ -169,7 +173,7 @@ export class TelegramOutbox {
     this.replyTargets.set(this.turnKey(threadId, turnId), messageId);
   }
 
-  handle(event: OutputEvent): void {
+  async handle(event: OutputEvent): Promise<void> {
     if (
       this.closed
       || event.target.surface !== "telegram"
@@ -454,6 +458,9 @@ export class TelegramOutbox {
           }
         }
         this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
+        const remainingUsage = event.modelProvider === "opencode-go" && event.model
+          ? (await this.options.opencodeGoUsage?.(event.model)) ?? null
+          : null;
         this.enqueue(chatId, async () => {
           for (const key of keys) {
             await this.flush(chatId, key, true);
@@ -467,6 +474,7 @@ export class TelegramOutbox {
                 this.options.priceCurrency,
                 this.options.exchangeRate?.() ?? null,
                 this.options.debugEnabled ?? false,
+                remainingUsage,
               ),
             ),
             replyTo,

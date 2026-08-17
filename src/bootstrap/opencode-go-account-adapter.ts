@@ -100,6 +100,22 @@ export interface OpencodeGoAccountAdapterOptions {
   nowMs?: () => number;
 }
 
+export function createOpencodeGoRemainingUsageReader(
+  options: OpencodeGoAccountAdapterOptions = {},
+): (model: string) => Promise<ProviderModelUsageEstimate | null> {
+  const adapter = createOpencodeGoAccountAdapter(options);
+  return async (model) => {
+    try {
+      const usage = await adapter.accountUsage();
+      if (usage.kind !== "quota-windows") return null;
+      return usage.modelUsage?.find((estimate) => estimate.model === model)
+        ?? null;
+    } catch {
+      return null;
+    }
+  };
+}
+
 function readModelUsageEstimates(
   metricsDatabasePath: string,
   endAtMs: number,

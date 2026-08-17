@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createOpencodeGoAccountAdapter,
+  createOpencodeGoRemainingUsageReader,
   opencodeGoMonthlyWindowStartMs,
 } from "../src/bootstrap/opencode-go-account-adapter.js";
 import {
@@ -257,6 +258,25 @@ describe("OpenCode Go account adapter", () => {
     )).toBe(Date.parse("2026-02-28T00:00:00.000Z"));
     expect(() => opencodeGoMonthlyWindowStartMs(Number.NaN))
       .toThrow("月度窗口重置时间无效");
+  });
+
+  it("exposes a remaining usage reader that matches the requested model", async () => {
+    const codexHome = await createCodexHome();
+    const reader = createOpencodeGoRemainingUsageReader({
+      environment: { CODEX_HOME: codexHome },
+      fetchImpl: async () => new Response(JSON.stringify({
+        usage: {
+          monthly: {
+            status: "ok",
+            percent: 1,
+            resetsAt: "2026-08-20T00:00:00.000Z",
+          },
+        },
+      }), { status: 200 }),
+    });
+
+    await expect(reader("deepseek-v4-flash")).resolves.toBeNull();
+    await expect(reader("deepseek-v4-pro")).resolves.toBeNull();
   });
 });
 

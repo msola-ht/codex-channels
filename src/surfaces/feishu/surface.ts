@@ -4,6 +4,7 @@ import type {
   ConversationUseCases,
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
@@ -122,6 +123,9 @@ export interface FeishuSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  opencodeGoUsage?: (
+    model: string,
+  ) => Promise<ProviderModelUsageEstimate | null>;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -214,6 +218,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        ...(options.opencodeGoUsage === undefined
+          ? {}
+          : { opencodeGoUsage: options.opencodeGoUsage }),
         ...(options.threadSectionAccess === undefined
           ? {}
           : { threadSectionAccess: options.threadSectionAccess }),

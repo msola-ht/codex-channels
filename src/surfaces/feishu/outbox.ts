@@ -9,6 +9,7 @@ import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
 import {
@@ -128,6 +129,9 @@ export interface FeishuOutboxOptions {
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
   debugEnabled?: boolean;
+  opencodeGoUsage?: (
+    model: string,
+  ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -164,7 +168,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     });
   }
 
-  handle(event: OutputEvent): void {
+  async handle(event: OutputEvent): Promise<void> {
     if (
       this.closed
       || event.target.surface !== "feishu"
@@ -295,11 +299,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
         event.target.conversationId,
         turnKey(event.threadId, event.turnId),
       );
+      const remainingUsage = event.modelProvider === "opencode-go" && event.model
+        ? (await this.options.opencodeGoUsage?.(event.model)) ?? null
+        : null;
       const completion = renderFeishuOutput(
         event,
         this.options.priceCurrency,
         this.options.exchangeRate?.() ?? null,
         this.options.debugEnabled ?? false,
+        remainingUsage,
       );
       if (
         completion !== null

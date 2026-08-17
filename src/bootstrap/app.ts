@@ -87,7 +87,10 @@ import {
 import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
 import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
-import { createOpencodeGoAccountAdapter } from "./opencode-go-account-adapter.js";
+import {
+  createOpencodeGoAccountAdapter,
+  createOpencodeGoRemainingUsageReader,
+} from "./opencode-go-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import {
   checkOpenAiConnectivity,
@@ -649,6 +652,12 @@ export class GatewayApplication {
       ),
       exchangeRate: () => this.exchangeRate.resolve(),
       priceCurrency: () => this.config.priceCurrency,
+      opencodeGoUsage: createOpencodeGoRemainingUsageReader({
+        fetchImpl: createProxyFetch(config.networkProxy),
+        metricsDatabasePath: modelRequestMetricsDatabasePath(
+          config.stateDatabasePath,
+        ),
+      }),
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(

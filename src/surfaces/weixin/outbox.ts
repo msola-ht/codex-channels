@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import {
   isCriticalOutputEvent,
@@ -101,6 +102,9 @@ export interface WeixinOutboxOptions {
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
   debugEnabled?: boolean;
+  opencodeGoUsage?: (
+    model: string,
+  ) => Promise<ProviderModelUsageEstimate | null>;
   onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
@@ -137,7 +141,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     });
   }
 
-  handle(event: OutputEvent): void {
+  async handle(event: OutputEvent): Promise<void> {
     if (
       this.closed
       || event.target.surface !== "weixin"
@@ -240,7 +244,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         turnKey(event.threadId, event.turnId),
       );
     }
-    const rendered = this.render(event);
+    const rendered = await this.render(event);
     if (rendered === null) {
       return;
     }
@@ -331,7 +335,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     );
   }
 
-  private render(event: OutputEvent): string | null {
+  private async render(event: OutputEvent): Promise<string | null> {
     switch (event.type) {
       case "vision.started":
         return formatWeixinCommandText(
@@ -360,12 +364,16 @@ export class WeixinOutbox implements SurfaceOutputPort {
               `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
             );
       case "turn.completed": {
+        const remainingUsage = event.modelProvider === "opencode-go" && event.model
+          ? (await this.options.opencodeGoUsage?.(event.model)) ?? null
+          : null;
         return formatWeixinCommandText(
           renderWeixinTurnCompleted(
             event,
             this.options.priceCurrency,
             this.options.exchangeRate?.() ?? null,
             this.options.debugEnabled ?? false,
+            remainingUsage,
           ),
           { structuredFields: true },
         );
