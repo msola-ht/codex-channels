@@ -129,9 +129,10 @@ export interface FeishuOutboxOptions {
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
   debugEnabled?: boolean;
-  opencodeGoUsage?: (
+  remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
+    modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
@@ -300,10 +301,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
         event.target.conversationId,
         turnKey(event.threadId, event.turnId),
       );
-      const remainingUsage = event.modelProvider === "opencode-go" && event.model
-        ? (await this.options.opencodeGoUsage?.(
+      const remainingUsage = event.model && this.options.remainingUsage
+        ? (await this.options.remainingUsage?.(
             event.model,
             event.timing?.modelRequestStartedAtMs,
+            event.modelProvider,
           )) ?? null
         : null;
       const completion = renderFeishuOutput(

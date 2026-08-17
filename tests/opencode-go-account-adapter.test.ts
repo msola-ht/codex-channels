@@ -436,6 +436,7 @@ describe("OpenCode Go account adapter", () => {
       100_000,
       10_000,
       110_000,
+      Date.parse("2026-08-17T07:00:00.000Z"),
     );
     store.record({
       provider: "opencode-go",
@@ -470,6 +471,7 @@ describe("OpenCode Go account adapter", () => {
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
       requestStartedAtMs: Date.parse("2026-08-16T08:00:00.000Z"),
+      recordedAtMs: Date.parse("2026-08-17T07:00:00.000Z"),
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
       lastReasoningDeltaAtMs: null,
@@ -522,6 +524,116 @@ describe("OpenCode Go account adapter", () => {
       usedUsdNanos: 110_000_000,
     });
   });
+
+  it("prefers the stored pricing bucket over the current baseline for historical requests", async () => {
+    const codexHome = await createCodexHome();
+    const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-stored-bucket-"));
+    temporaryDirectories.push(directory);
+    const metricsPath = modelRequestMetricsDatabasePath(
+      join(directory, "gateway.sqlite3"),
+    );
+    const store = new SqliteModelRequestMetricsStore(metricsPath);
+    store.record({
+      provider: "opencode-go",
+      pricing: {
+        billingMode: "subscription",
+        currency: "USD",
+        source: "opencode-go-official",
+        effectiveAtMs: 1_785_000_000_000,
+        bucket: "off-peak",
+        uncachedInputPricePerMillionNanos: 440_000_000,
+        cachedInputPricePerMillionNanos: 14_000_000,
+        outputPricePerMillionNanos: 1_320_000_000,
+      },
+      transport: "http",
+      responseFormat: "sse",
+      operation: "response",
+      threadId: "thread-stored",
+      turnId: "turn-stored",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      reasoningEffort: "high",
+      status: "completed",
+      httpStatus: 200,
+      errorType: null,
+      errorCode: null,
+      errorMessage: null,
+      incompleteReason: null,
+      inputTokens: 100_000,
+      cachedInputTokens: 0,
+      outputTokens: 10_000,
+      reasoningOutputTokens: 0,
+      totalTokens: 110_000,
+      upstreamCreatedAt: 1_785_640_800,
+      upstreamCompletedAt: 1_785_640_801,
+      requestStartedAtMs: Date.parse("2026-08-16T08:00:00.000Z"),
+      recordedAtMs: Date.parse("2026-08-17T07:00:00.000Z"),
+      firstTokenAtMs: 1_100,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: 1_400,
+      lastOutputDeltaAtMs: 1_600,
+      responseCompletedAtMs: 1_650,
+      weeklyQuota: null,
+    });
+    store.close();
+
+    const nowMs = Date.parse("2026-08-17T08:30:00.000Z");
+    const fetchImpl = async () => new Response(JSON.stringify({
+      usage: {
+        monthly: {
+          status: "ok",
+          percent: 1,
+          resetsAt: "2026-08-20T00:00:00.000Z",
+        },
+      },
+    }), { status: 200 });
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: { CODEX_HOME: codexHome },
+      fetchImpl: fetchImpl as typeof fetch,
+      metricsDatabasePath: metricsPath,
+      nowMs: () => nowMs,
+    });
+
+    const usage = await adapter.accountUsage();
+    expect(usage.kind).toBe("quota-windows");
+    if (usage.kind !== "quota-windows") {
+      throw new Error("unexpected usage kind");
+    }
+    const offPeak = usage.modelUsage?.find(
+      (estimate) => estimate.bucket === "off-peak",
+    );
+    const peak = usage.modelUsage?.find(
+      (estimate) => estimate.bucket === "peak",
+    );
+    // 请求开始于 Peak 时段，但快照保存的是 Off-Peak 档位，历史重算必须沿用存档位。
+    expect(offPeak).toMatchObject({
+      model: "deepseek-v4-flash",
+      bucket: "off-peak",
+      usedUsdNanos: 57_200_000,
+    });
+    expect(peak).toMatchObject({
+      model: "deepseek-v4-flash",
+      bucket: "peak",
+      usedUsdNanos: 0,
+    });
+  });
+
+  it("does not report OpenCode Go remaining usage for other providers", async () => {
+    const codexHome = await createCodexHome();
+    const fetchImpl = vi.fn();
+    const reader = createOpencodeGoRemainingUsageReader({
+      environment: { CODEX_HOME: codexHome },
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await expect(reader(
+      "deepseek-v4-flash",
+      Date.parse("2026-08-17T08:30:00.000Z"),
+      "deepseek",
+    )).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
 
 async function createCodexHome(): Promise<string> {
@@ -551,6 +663,7 @@ function recordWindowSample(
   inputTokens: number,
   outputTokens: number,
   totalTokens: number | null,
+  recordedAtMs?: number,
 ): void {
   store.record({
     provider: "opencode-go",
@@ -583,6 +696,7 @@ function recordWindowSample(
     firstOutputDeltaAtMs: null,
     lastOutputDeltaAtMs: null,
     responseCompletedAtMs: requestStartedAtMs,
+    ...(recordedAtMs === undefined ? {} : { recordedAtMs }),
     weeklyQuota: null,
   });
 }

@@ -92,6 +92,9 @@ export function formatConversationMetrics(
           turn.cachedInputPricePerMillionNanos,
         outputPricePerMillionNanos: turn.outputPricePerMillionNanos,
         hasMixedPrices: turn.hasMixedPrices,
+        ...(turn.pricingBuckets === undefined
+          ? {}
+          : { pricingBuckets: turn.pricingBuckets }),
       }, currency, exchangeRate),
       ...[formatAveragePriceValue(turn, currency, exchangeRate)]
         .filter((value): value is string => value !== null)
@@ -188,6 +191,9 @@ export function formatConversationMetrics(
                 direct.cachedInputPricePerMillionNanos,
               outputPricePerMillionNanos: direct.outputPricePerMillionNanos,
               hasMixedPrices: false,
+              pricingBuckets: direct.pricingBucket === undefined
+                ? []
+                : [direct.pricingBucket],
             }, currency, exchangeRate),
           ]),
     );
@@ -358,6 +364,7 @@ function formatMetricsAggregate(
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets?: Array<"peak" | "off-peak">;
   compact?: Parameters<typeof formatCompactMetricsValue>[0] | null;
   },
   currency: DisplayPriceCurrency,
@@ -605,8 +612,9 @@ function toReferenceCostDisplay(value: {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets?: Array<"peak" | "off-peak">;
 }): ReferenceCostDisplay {
-  return {
+  const display: ReferenceCostDisplay = {
     currency: value.pricingCurrency,
     totalCostNanos: value.totalCostNanos,
     inputCostNanos: value.inputCostNanos,
@@ -621,6 +629,9 @@ function toReferenceCostDisplay(value: {
     outputPricePerMillionNanos: value.outputPricePerMillionNanos,
     hasMixedPrices: value.hasMixedPrices,
   };
+  return value.pricingBuckets === undefined
+    ? display
+    : { ...display, pricingBuckets: value.pricingBuckets };
 }
 
 function formatMetricsRange(range: RequestMetricsTimeRange): string {

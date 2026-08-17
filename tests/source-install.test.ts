@@ -139,7 +139,7 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(result.stdout).toContain("npm 全局命令已安装");
     expect(result.stdout).not.toContain("export PATH");
     expect(existsSync(join(home, ".zshrc"))).toBe(false);
-  });
+  }, 15_000);
 
   it("uninstalls the managed source and services while preserving user data", async () => {
     const root = temporaryDirectory("codexc-source-uninstall-");

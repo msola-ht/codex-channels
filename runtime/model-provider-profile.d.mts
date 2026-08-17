@@ -6,6 +6,7 @@ export function createManagedProviderProfile(
     apiKey: string;
     catalogPath: string;
     model?: string;
+    reasoningEffort?: string;
   },
 ): Record<string, unknown>;
 

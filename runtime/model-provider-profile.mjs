@@ -4,6 +4,7 @@ export function createManagedProviderProfile(definition, {
   apiKey,
   catalogPath,
   model = definition.defaultModel,
+  reasoningEffort = definition.defaultReasoningEffort,
 } = {}) {
   assertDefinition(definition);
   if (!definition.models.some((candidate) => candidate.available && candidate.slug === model)) {
@@ -15,9 +16,13 @@ export function createManagedProviderProfile(definition, {
   if (typeof catalogPath !== "string" || catalogPath.length === 0) {
     throw new Error(`${definition.displayName} 模型目录路径无效`);
   }
+  if (typeof reasoningEffort !== "string" || reasoningEffort.length === 0) {
+    throw new Error(`${definition.displayName} 默认思考等级无效`);
+  }
   return {
     model,
     model_provider: definition.id,
+    model_reasoning_effort: reasoningEffort,
     service_tier: "default",
     model_catalog_json: catalogPath,
     model_providers: {

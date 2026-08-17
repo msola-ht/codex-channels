@@ -53,7 +53,7 @@ describe("WeixinSurface", () => {
       mkdirSync(join(directory, name), { recursive: true });
     }
     const requestStartedAtMs = Date.parse("2026-08-17T03:30:00.000Z");
-    const opencodeGoUsage = vi.fn<NonNullable<CreateWeixinSurfaceOptions["opencodeGoUsage"]>>(async () => ({
+    const remainingUsage = vi.fn<NonNullable<CreateWeixinSurfaceOptions["remainingUsage"]>>(async () => ({
       model: "deepseek-v4-flash",
       bucket: "peak",
       includedUsageUsd: 15,
@@ -75,7 +75,7 @@ describe("WeixinSurface", () => {
       startupNotification: { targets: () => [], text: () => "" },
       logger: pino({ level: "silent" }),
       onFatal: vi.fn(),
-      opencodeGoUsage,
+      remainingUsage,
     });
 
     await surface.output.handle({
@@ -91,9 +91,10 @@ describe("WeixinSurface", () => {
         modelRequestStartedAtMs: requestStartedAtMs,
       },
     });
-    expect(opencodeGoUsage).toHaveBeenCalledWith(
+    expect(remainingUsage).toHaveBeenCalledWith(
       "deepseek-v4-flash",
       requestStartedAtMs,
+      "opencode-go",
     );
     await surface.stop();
   });

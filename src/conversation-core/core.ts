@@ -58,6 +58,7 @@ interface TurnTimingState {
   outputPricePerMillionNanos?: number;
   pricingRateSignature?: string;
   pricingRateConflict: boolean;
+  pricingBuckets?: Set<"peak" | "off-peak">;
   pricedRequestCount: number;
   totalCostNanos: number;
   uncachedInputCostNanos: number;
@@ -464,6 +465,10 @@ export class ConversationCore {
             event.pricingCurrency !== undefined
             && event.totalCostNanos !== undefined
           ) {
+            if (event.pricingBucket !== undefined) {
+              timing.pricingBuckets ??= new Set();
+              timing.pricingBuckets.add(event.pricingBucket);
+            }
             const pricingRateSignature = [
               event.uncachedInputPricePerMillionNanos ?? "missing",
               event.cachedInputPricePerMillionNanos ?? "missing",
@@ -978,6 +983,10 @@ export class ConversationCore {
           : timing.outputPricePerMillionNanos ?? null,
         hasMixedPrices: timing.pricingCurrencyConflict
           || timing.pricingRateConflict,
+        ...(timing.pricingBuckets !== undefined
+          && timing.pricingBuckets.size > 0
+          ? { pricingBuckets: sortedPricingBuckets(timing.pricingBuckets) }
+          : {}),
       };
       if (timing.compactRequestCount > 0) {
         result.compact = {
@@ -1206,4 +1215,11 @@ function mergeRateLimitWindow(
         resetsAt: update.resetsAt ?? current?.resetsAt ?? null,
       }
     : current ?? null;
+}
+
+function sortedPricingBuckets(
+  buckets: ReadonlySet<"peak" | "off-peak">,
+): Array<"peak" | "off-peak"> {
+  const order: ReadonlyArray<"peak" | "off-peak"> = ["off-peak", "peak"];
+  return order.filter((bucket) => buckets.has(bucket));
 }

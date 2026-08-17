@@ -30,6 +30,7 @@ function toReferenceCost(value: {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets: Array<"peak" | "off-peak">;
 }): ReferenceCostSummary {
   return {
     currency: value.pricingCurrency,
@@ -47,6 +48,7 @@ function toReferenceCost(value: {
       value.cachedInputPricePerMillionNanos,
     outputPricePerMillionNanos: value.outputPricePerMillionNanos,
     hasMixedPrices: value.hasMixedPrices,
+    pricingBuckets: value.pricingBuckets,
   };
 }
 
@@ -61,9 +63,11 @@ function subtractReferenceCost(
     aggregate.pricedRequestCount - currentStored.pricedRequestCount,
   );
   if (currentStored.pricedRequestCount === 0) {
+    const { pricingBuckets, ...remaining } = aggregate;
     return {
-      ...aggregate,
+      ...remaining,
       requestCount,
+      ...(pricingBuckets === undefined ? {} : { pricingBuckets }),
     };
   }
   const compatibleCurrency = aggregate.currency !== null
@@ -113,6 +117,9 @@ function subtractReferenceCost(
       ? aggregate.outputPricePerMillionNanos
       : null,
     hasMixedPrices: pricedRequestCount > 0 && aggregate.hasMixedPrices,
+    pricingBuckets: pricedRequestCount > 0
+      ? (aggregate.pricingBuckets ?? [])
+      : [],
   };
 }
 
@@ -177,5 +184,21 @@ function combineReferenceCosts(
       ? left.outputPricePerMillionNanos
       : null,
     hasMixedPrices: !sameRates || !sameCurrency,
+    pricingBuckets: mergePricingBuckets(
+      left.pricingBuckets,
+      right.pricingBuckets,
+    ),
   };
+}
+
+function mergePricingBuckets(
+  left: ReadonlyArray<"peak" | "off-peak"> | undefined,
+  right: ReadonlyArray<"peak" | "off-peak"> | undefined,
+): Array<"peak" | "off-peak"> {
+  const buckets = new Set<"peak" | "off-peak">([
+    ...(left ?? []),
+    ...(right ?? []),
+  ]);
+  const order: ReadonlyArray<"peak" | "off-peak"> = ["off-peak", "peak"];
+  return order.filter((bucket) => buckets.has(bucket));
 }

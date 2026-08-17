@@ -2,6 +2,7 @@ import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
 } from "../application/index.js";
+import { formatModelUsageBucket } from "./account-format.js";
 
 export interface ReferenceCostDisplay {
   currency: string | null;
@@ -15,6 +16,7 @@ export interface ReferenceCostDisplay {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets?: ReadonlyArray<"peak" | "off-peak">;
 }
 
 export function formatReferenceCostTotal(
@@ -30,11 +32,12 @@ export function formatReferenceCostTotal(
   const coverage = value.pricedRequestCount === value.requestCount
     ? ""
     : `（计价 ${value.pricedRequestCount}/${value.requestCount}）`;
+  const bucketSuffix = pricingBucketsSuffix(value.pricingBuckets);
   const equivalent = value.currency === "USD" && exchangeRate
     ? formatCnyEquivalent(value.totalCostNanos, exchangeRate)
     : null;
   return `${formatCurrencyNanos(value.currency, value.totalCostNanos)}`
-    + `${equivalent === null ? "" : `（${equivalent}）`}${coverage}`;
+    + `${equivalent === null ? "" : `（${equivalent}）`}${bucketSuffix}${coverage}`;
 }
 
 export function formatReferenceCostBreakdown(
@@ -138,6 +141,16 @@ export function toDisplayReferenceCost(
       value.outputPricePerMillionNanos,
     ),
   };
+}
+
+function pricingBucketsSuffix(
+  buckets: ReadonlyArray<"peak" | "off-peak"> | undefined,
+): string {
+  if (buckets === undefined || buckets.length === 0) return "";
+  if (buckets.length === 1) {
+    return `（${formatModelUsageBucket(buckets[0]!)}）`;
+  }
+  return "（多档）";
 }
 
 export function formatExchangeRateLine(exchangeRate: ExchangeRateSnapshot): string[] {

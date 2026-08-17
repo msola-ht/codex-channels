@@ -52,6 +52,7 @@ describe("mergeSessionReferenceCost", () => {
       outputCostNanos: 260_000,
       ...rates,
       hasMixedPrices: false,
+      pricingBuckets: [],
     });
   });
 
@@ -144,6 +145,7 @@ describe("mergeSessionReferenceCost", () => {
       outputCostNanos: 260_000,
       ...rates,
       hasMixedPrices: false,
+      pricingBuckets: [],
     });
   });
 });
@@ -182,6 +184,7 @@ function turnSummary(
     outputCostNanos: null,
     ...rates,
     hasMixedPrices: false,
+    pricingBuckets: [],
     ...overrides,
     compact: overrides.compact ?? null,
   };

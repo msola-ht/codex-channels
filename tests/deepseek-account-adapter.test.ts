@@ -87,6 +87,7 @@ describe("DeepSeek account adapter", () => {
       available: false,
     });
   });
+
 });
 
 async function createCodexHome(): Promise<string> {

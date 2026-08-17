@@ -488,6 +488,35 @@ setInterval(() => undefined, 1_000);`,
     store.close();
   });
 
+  it("marks an aggregate as mixed buckets when priced requests lack a stored bucket", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const base = {
+      billingMode: "api" as const,
+      currency: "USD",
+      source: "test-catalog",
+      effectiveAtMs: 1_700_000_000_000,
+      uncachedInputPricePerMillionNanos: 2_000_000_000,
+      cachedInputPricePerMillionNanos: 1_000_000_000,
+      outputPricePerMillionNanos: 3_000_000_000,
+    };
+    store.record({ ...sample(), pricing: { ...base, bucket: "off-peak" } });
+    store.record({
+      ...sample(),
+      pricing: base,
+      requestStartedAtMs: 2_000,
+      responseCompletedAtMs: 2_650,
+    });
+
+    expect(store.threadSummary("thread-1").latestTurn).toMatchObject({
+      pricedRequestCount: 2,
+      pricingBuckets: ["off-peak", "peak"],
+    });
+    store.close();
+  });
+
   it("annotates subagent threads in the thread list", () => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");

@@ -80,7 +80,7 @@ describe("codexc CLI", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("Schema：7");
+    expect(result.stdout).toContain("Schema：8");
     expect(result.stderr).toBe("");
   });
 
@@ -1126,6 +1126,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1311,6 +1312,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1332,6 +1334,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "opencode-go"',
+        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
         "[model_providers.opencode-go]",
         'name = "opencode-go"',
@@ -1448,6 +1451,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "opencode-go"',
+        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
         "[model_providers.opencode-go]",
         'name = "opencode-go"',
@@ -1546,6 +1550,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1671,6 +1676,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',
@@ -1745,6 +1751,7 @@ describe("codexc CLI", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "deepseek"',
+        'model_reasoning_effort = "high"',
         `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
         "[model_providers.deepseek]",
         'name = "deepseek"',

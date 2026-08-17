@@ -240,6 +240,7 @@ describe("DeepSeek setup", () => {
     const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash");
     expect(profile.model_provider).toBe("deepseek");
+    expect(profile.model_reasoning_effort).toBe("high");
     expect(profile.model_auto_compact_token_limit).toBeUndefined();
     expect(profile.model_auto_compact_token_limit_scope).toBeUndefined();
     const catalog = JSON.parse(readFileSync(
@@ -326,7 +327,10 @@ describe("DeepSeek setup", () => {
     });
 
     expect(parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8")))
-      .toMatchObject({ model: "deepseek-v4-pro" });
+      .toMatchObject({
+        model: "deepseek-v4-pro",
+        model_reasoning_effort: "max",
+      });
     const catalog = JSON.parse(readFileSync(
       join(fixture.home, "sf-deepseek.models.json"),
       "utf8",
@@ -791,6 +795,7 @@ function deepseekFixture(): string {
   const providerLines = [
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
+    'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
     "[model_providers.deepseek]",
     'name = "deepseek"',

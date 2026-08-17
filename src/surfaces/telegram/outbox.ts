@@ -112,9 +112,10 @@ export interface TelegramOutboxOptions {
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
   debugEnabled?: boolean;
-  opencodeGoUsage?: (
+  remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
+    modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
@@ -459,10 +460,11 @@ export class TelegramOutbox {
           }
         }
         this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
-        const remainingUsage = event.modelProvider === "opencode-go" && event.model
-          ? (await this.options.opencodeGoUsage?.(
+        const remainingUsage = event.model && this.options.remainingUsage
+          ? (await this.options.remainingUsage?.(
               event.model,
               event.timing?.modelRequestStartedAtMs,
+              event.modelProvider,
             )) ?? null
           : null;
         this.enqueue(chatId, async () => {

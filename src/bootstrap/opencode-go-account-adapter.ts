@@ -123,9 +123,13 @@ export function createOpencodeGoRemainingUsageReader(
 ): (
   model: string,
   requestStartedAtMs?: number,
+  modelProvider?: string,
 ) => Promise<ProviderModelUsageEstimate | null> {
   const adapter = createOpencodeGoAccountAdapter(options);
-  return async (model, requestStartedAtMs) => {
+  return async (model, requestStartedAtMs, modelProvider) => {
+    if (modelProvider !== undefined && modelProvider !== "opencode-go") {
+      return null;
+    }
     try {
       const usage = await adapter.accountUsage();
       if (usage.kind !== "quota-windows") return null;
@@ -284,11 +288,12 @@ function readModelUsageEstimates(
               ? null
               : calculateModelRequestCostComponents(usage, record.pricing);
           if (cost === null) continue;
-          const bucket = baseline.models.get(record.model)?.peakOffPeak === undefined
-            ? null
-            : isOpenCodeGoPeakMinute(new Date(atMs), baseline)
-              ? "peak"
-              : "off-peak";
+          const bucket = record.pricing?.bucket
+            ?? (baseline.models.get(record.model)?.peakOffPeak === undefined
+              ? null
+              : isOpenCodeGoPeakMinute(new Date(atMs), baseline)
+                ? "peak"
+                : "off-peak");
           const key = totalKey(record.model, bucket);
           const existing = totals.get(key);
           totals.set(key, {

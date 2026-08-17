@@ -212,6 +212,13 @@ export async function runDeepseekSetup({
         deepseekProviderDefinition,
         previous?.models,
       );
+      const selectedModelEntry = managedCatalog.models?.find(
+        (entry) => entry?.slug === selectedModel,
+      );
+      const selectedModelReasoningEffort = selectedModelEntry?.default_reasoning_level;
+      if (typeof selectedModelReasoningEffort !== "string") {
+        throw new Error("DeepSeek 模型目录缺少默认思考等级，未修改配置");
+      }
       const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
         configPath,
         gatewayProfilePath,
@@ -222,6 +229,7 @@ export async function runDeepseekSetup({
         apiKey,
         mode,
         model: selectedModel,
+        reasoningEffort: selectedModelReasoningEffort,
       });
       await writePrivateFileAtomic(
         catalogPath,
@@ -415,6 +423,7 @@ async function buildCodexConfig({
   apiKey,
   mode,
   model,
+  reasoningEffort,
 }) {
   let initialDocument = {};
   let originalContent;
@@ -451,6 +460,7 @@ async function buildCodexConfig({
     apiKey,
     catalogPath,
     model,
+    reasoningEffort,
   });
   if (mode === "switching") {
     if (managedMode === "exclusive" || legacyManagedLayout) {

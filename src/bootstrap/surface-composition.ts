@@ -166,9 +166,9 @@ function createWeixinModule(
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     exchangeRate: options.exchangeRate,
     priceCurrency: options.priceCurrency,
-    ...(options.opencodeGoUsage === undefined
+    ...(options.remainingUsage === undefined
       ? {}
-      : { opencodeGoUsage: options.opencodeGoUsage }),
+      : { remainingUsage: options.remainingUsage }),
     fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
@@ -228,9 +228,9 @@ function createFeishuModule(
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     exchangeRate: options.exchangeRate,
     priceCurrency: options.priceCurrency,
-    ...(options.opencodeGoUsage === undefined
+    ...(options.remainingUsage === undefined
       ? {}
-      : { opencodeGoUsage: options.opencodeGoUsage }),
+      : { remainingUsage: options.remainingUsage }),
     ...(openApiAgent
       ? {
           openApiAgent,
@@ -343,9 +343,9 @@ function createTelegramModule(
     debugEnabled: isDebugLogLevel(config.logLevel),
     exchangeRate: options.exchangeRate,
     priceCurrency: options.priceCurrency,
-    ...(options.opencodeGoUsage === undefined
+    ...(options.remainingUsage === undefined
       ? {}
-      : { opencodeGoUsage: options.opencodeGoUsage }),
+      : { remainingUsage: options.remainingUsage }),
     gatewayVersion: options.gatewayVersion,
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
     openAiConnectivity: options.openAiConnectivity,

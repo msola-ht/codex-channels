@@ -265,6 +265,7 @@ describe("managed model provider file layout", () => {
         "utf8",
       ));
       expect(profile.model_catalog_json).toBe(catalogPath);
+      expect(profile.model_reasoning_effort).toBe("high");
       expect(profile.model_context_window).toBeUndefined();
       expect(profile.model_auto_compact_token_limit).toBeUndefined();
       expect(profile.model_auto_compact_token_limit_scope).toBeUndefined();

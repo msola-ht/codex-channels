@@ -192,6 +192,9 @@ export function toModelTimingEvent(
                 outputPricePerMillionNanos:
                   pricing.outputPricePerMillionNanos,
               }),
+          ...(pricing.bucket === undefined || pricing.bucket === null
+            ? {}
+            : { pricingBucket: pricing.bucket }),
         }),
   };
   if (firstTokenAtMs === null) return common;

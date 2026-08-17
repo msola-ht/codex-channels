@@ -119,9 +119,10 @@ export interface TelegramSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
-  opencodeGoUsage?: (
+  remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
+    modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
@@ -239,9 +240,9 @@ export class TelegramSurface {
       ...(options.priceCurrency === undefined
         ? {}
         : { priceCurrency: options.priceCurrency }),
-      ...(options.opencodeGoUsage === undefined
+      ...(options.remainingUsage === undefined
         ? {}
-        : { opencodeGoUsage: options.opencodeGoUsage }),
+        : { remainingUsage: options.remainingUsage }),
       debugEnabled: this.debugEnabled,
     });
     this.output = this.outbox;

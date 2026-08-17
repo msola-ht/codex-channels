@@ -3,12 +3,15 @@ export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
 export type ModelBillingMode = "api" | "subscription" | "unknown";
+export type ModelPricingBucket = "peak" | "off-peak";
 
 export interface ModelRequestPricingSnapshot {
   billingMode: ModelBillingMode;
   currency: string | null;
   source: string;
   effectiveAtMs: number;
+  /** 请求开始时段对应的峰谷档位；无峰谷定价或全时段定价为 null，旧快照可为 undefined */
+  bucket?: ModelPricingBucket | null;
   uncachedInputPricePerMillionNanos: number | null;
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
@@ -124,6 +127,8 @@ export interface ModelRequestMetricSample {
   firstOutputDeltaAtMs: number | null;
   lastOutputDeltaAtMs: number | null;
   responseCompletedAtMs: number;
+  /** 记录入库时刻（毫秒）；缺省为写入时的 Date.now()，测试可显式指定以保证窗口确定性。 */
+  recordedAtMs?: number;
   weeklyQuota: {
     limitId: "codex";
     usedPercentMillionths: number;
@@ -227,6 +232,7 @@ export interface StoredTurnRequestMetricsSummary {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets: ModelPricingBucket[];
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
@@ -255,6 +261,7 @@ export interface StoredThreadRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets: ModelPricingBucket[];
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
@@ -331,6 +338,7 @@ export interface StoredModelRequestMetricsAggregate {
   cachedInputPricePerMillionNanos: number | null;
   outputPricePerMillionNanos: number | null;
   hasMixedPrices: boolean;
+  pricingBuckets: ModelPricingBucket[];
   compact: StoredCompactRequestMetricsSummary | null;
 }
 

@@ -64,6 +64,9 @@ function providerAppServerRuntime(profile) {
       "-c", `model_provider=${JSON.stringify(profile.provider)}`,
       "-c", 'service_tier="default"',
       "-c", `model_catalog_json=${JSON.stringify(profile.catalogPath)}`,
+      ...(profile.reasoningEffort === undefined
+        ? []
+        : ["-c", `model_reasoning_effort=${JSON.stringify(profile.reasoningEffort)}`]),
       "-c", `model_providers.${profile.provider}.name=${JSON.stringify(profile.name)}`,
       "-c", `model_providers.${profile.provider}.base_url=${JSON.stringify(profile.baseUrl)}`,
       "-c", `model_providers.${profile.provider}.wire_api=${JSON.stringify(profile.wireApi)}`,
@@ -139,12 +142,13 @@ export function writeManagedModelProviderProfileDefault(
   const profilePath = join(codexHome, definition.profileFileName);
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath: join(codexHome, definition.catalogFileName),
+    reasoningEffortPolicy: "ignore",
   });
   const previousCatalog = readPrivateFile(profile.catalogPath, maximumCatalogBytes);
   const nextCatalog = updateModelCatalogSettings(previousCatalog, definition, settings);
   const document = record(parse(readPrivateFile(profilePath)));
   document.model = model;
-  delete document.model_reasoning_effort;
+  document.model_reasoning_effort = settings.reasoningEffort;
   delete document.model_context_window;
   delete document.model_auto_compact_token_limit;
   delete document.model_auto_compact_token_limit_scope;
@@ -157,6 +161,7 @@ export function writeManagedModelProviderProfileDefault(
   }
   readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath: join(codexHome, definition.catalogFileName),
+    reasoningEffortPolicy: "mirror",
   });
   return { provider: definition.id, ...settings, mode: marker.mode };
 }
@@ -443,7 +448,10 @@ function loadManagedProviderProfileFor(
   const descriptor = providerDescriptors.get(definition.id);
   const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
     ...(requireLaunchConfig
-      ? { expectedCatalogPath: join(codexHome, definition.catalogFileName) }
+      ? {
+          expectedCatalogPath: join(codexHome, definition.catalogFileName),
+          reasoningEffortPolicy: "mirror",
+        }
       : {}),
   });
   if (requireLaunchConfig) validateModelCatalog(profile.catalogPath, definition);
@@ -458,7 +466,10 @@ function loadManagedProviderProfiles(environment, { requireLaunchConfig = false 
     const descriptor = providerDescriptors.get(definition.id);
     const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
       ...(requireLaunchConfig
-        ? { expectedCatalogPath: join(codexHome, definition.catalogFileName) }
+        ? {
+            expectedCatalogPath: join(codexHome, definition.catalogFileName),
+            reasoningEffortPolicy: "mirror",
+          }
         : {}),
     });
     if (requireLaunchConfig) validateModelCatalog(profile.catalogPath, definition);
@@ -476,6 +487,7 @@ function loadConfiguredProviderProfile(environment, definition) {
     : join(codexHome, descriptor.profileName);
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath: join(codexHome, definition.catalogFileName),
+    reasoningEffortPolicy: marker.mode === "switching" ? "mirror" : "absent",
   });
   validateModelCatalog(profile.catalogPath, definition);
   return { ...profile, mode: marker.mode };
@@ -484,7 +496,11 @@ function loadConfiguredProviderProfile(environment, definition) {
 function readProviderProfile(
   path,
   descriptor,
-  { requireSelection = true, expectedCatalogPath } = {},
+  {
+    requireSelection = true,
+    expectedCatalogPath,
+    reasoningEffortPolicy = "absent",
+  } = {},
 ) {
   let document;
   try {
@@ -505,18 +521,6 @@ function readProviderProfile(
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} Profile 未选择受支持模型`);
   }
-  if (
-    expectedCatalogPath !== undefined
-    && (
-      document.model_catalog_json !== expectedCatalogPath
-      || document.model_reasoning_effort !== undefined
-      || document.model_context_window !== undefined
-      || document.model_auto_compact_token_limit !== undefined
-      || document.model_auto_compact_token_limit_scope !== undefined
-    )
-  ) {
-    throw new Error(`Codex ${descriptor.definition.displayName} Profile 模型目录或思考等级无效`);
-  }
   const selectedModel = expectedCatalogPath === undefined
     ? undefined
     : readModelCatalogSetting(
@@ -524,6 +528,18 @@ function readProviderProfile(
         descriptor.definition,
         document.model,
       );
+  if (
+    expectedCatalogPath !== undefined
+    && (
+      document.model_catalog_json !== expectedCatalogPath
+      || reasoningEffortMismatch(document, selectedModel, reasoningEffortPolicy)
+      || document.model_context_window !== undefined
+      || document.model_auto_compact_token_limit !== undefined
+      || document.model_auto_compact_token_limit_scope !== undefined
+    )
+  ) {
+    throw new Error(`Codex ${descriptor.definition.displayName} Profile 模型目录或思考等级无效`);
+  }
   const provider = record(record(document.model_providers)[descriptor.id]);
   if (
     provider.name !== descriptor.id
@@ -548,7 +564,9 @@ function readProviderProfile(
   return {
     provider: descriptor.id,
     model: document.model,
-    reasoningEffort: selectedModel?.reasoningEffort,
+    reasoningEffort: reasoningEffortPolicy === "mirror"
+      ? document.model_reasoning_effort
+      : selectedModel?.reasoningEffort,
     catalogPath: document.model_catalog_json,
     name: descriptor.id,
     baseUrl: descriptor.baseUrl,
@@ -563,6 +581,20 @@ function readProviderProfile(
           autoCompactScope: "total",
         }),
   };
+}
+
+// 切换模式 Profile 必须镜像所选模型的目录默认思考等级（"mirror"）；
+// 固定模式基础配置不得携带该字段（"absent"）；
+// 写入器预读允许暂缺，以便为旧 Profile 补写镜像（"ignore"）。
+function reasoningEffortMismatch(document, selectedModel, reasoningEffortPolicy) {
+  switch (reasoningEffortPolicy) {
+    case "mirror":
+      return document.model_reasoning_effort !== selectedModel.reasoningEffort;
+    case "ignore":
+      return false;
+    default:
+      return document.model_reasoning_effort !== undefined;
+  }
 }
 
 function readPrivateFile(path, maximumBytes = maximumConfigBytes) {

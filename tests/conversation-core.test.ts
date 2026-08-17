@@ -1553,6 +1553,65 @@ describe("ConversationCore", () => {
       },
     });
   });
+
+  it("collects distinct pricing buckets across priced model requests", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "100",
+    };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    core.handle({
+      type: "turn.started",
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    for (const pricingBucket of ["off-peak", "peak", "off-peak"] as const) {
+      core.handle({
+        type: "turn.modelTiming.updated",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        requestStartedAtMs: 1_000,
+        requestDurationMs: 500,
+        pricingCurrency: "USD",
+        totalCostNanos: 10_000,
+        pricingBucket,
+        uncachedInputPricePerMillionNanos: 1_000_000_000,
+        cachedInputPricePerMillionNanos: 500_000_000,
+        outputPricePerMillionNanos: 2_000_000_000,
+      });
+    }
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+    await output.close();
+
+    expect(events.find(
+      (event) => event.type === "turn.completed",
+    )).toMatchObject({
+      timing: {
+        referenceCost: {
+          pricedRequestCount: 3,
+          pricingBuckets: ["off-peak", "peak"],
+        },
+      },
+    });
+  });
 });
 
 function handleNotification(

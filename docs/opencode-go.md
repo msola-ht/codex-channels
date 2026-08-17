@@ -8,7 +8,8 @@ Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用。当前�
 
 运行 `codexc setup`，依次选择“模型与提供商”和“OpenCode Go”，输入 OpenCode Go API Key。
 Setup 提供保留 OpenAI 默认的切换模式，以及让原生 Codex 和 Gateway 默认使用 OpenCode Go 的
-固定模式。切换模式创建私有 `sf-opencode-go.config.toml`；固定模式会先备份再修改
+固定模式。切换模式创建私有 `sf-opencode-go.config.toml`，Profile 镜像所选模型的默认思考等级，
+`codex --profile sf-opencode-go` 与 `codexc remote --profile opencode-go` 一致；固定模式会先备份再修改
 `~/.codex/config.toml`。两种模式都从相同的经审查上游内容生成 OpenCode Go 独立模型目录，并把共享
 `agents.external` 子代理切换到 OpenCode Go，不修改 DeepSeek Provider 配置。如果
 `~/.codex/config.toml` 已存在手工配置的 OpenCode Go Provider 或 Profile，切换模式会明确拒绝，
@@ -52,10 +53,11 @@ OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go
 同时在窗口下方展示模型本地用量估算：按本机指标库汇总当前官方月度窗口（由官方
 `resetsAt` 倒推开始时间）内的请求，用当前官方价格基线按每个请求的开始时间重新计价（峰谷价格
 自动对齐）；价格更新生效时间（基线 `sourceUpdatedAt`）之前的请求使用当时保存的价格快照，
-之后的请求按当前基线重算。合计每个模型的已用金额，对照官方价格基线里的模型包含用量（如
-DeepSeek V4 Pro/Flash 每月 $15）计算已用百分比与剩余额度；官方表格把 DeepSeek 按
-Off-Peak / Peak 拆成两行、各自包含 $15，本地估算也按请求开始时间分档分别展示两行，
-其余模型仍按单档展示。凭据复用 OpenCode Go
+之后的请求按当前基线重算；请求档位优先沿用当时保存的价格快照（`pricing_bucket`），快照缺失时
+才按当前基线判定，官方调整峰谷时段不会让历史请求漂移。合计每个模型的已用金额，对照官方价格
+基线里的模型包含用量（如 DeepSeek V4 Pro/Flash 每月 $15）计算已用百分比与剩余额度；官方表格
+把 DeepSeek 按 Off-Peak / Peak 拆成两行、各自包含 $15，本地估算也按请求开始时间分档分别展示
+两行，其余模型仍按单档展示。凭据复用 OpenCode Go
 API Key（切换 Profile 或固定基础配置），未配置、网络失败或官方
 响应无效时明确显示查询失败，不回退或缓存；模型本地用量只按本机指标库重算，不是官方
 账单，指标库不可用或没有本地请求时该段不展示。Thread Token、请求速度和本机请求指标仍正常记录；

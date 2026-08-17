@@ -349,6 +349,7 @@ function writeProviderFixture(
     apiKey: "sk-test-secret",
     catalogPath,
   });
+  if (mode === "exclusive") delete profile.model_reasoning_effort;
   const target = mode === "exclusive" ? join(home, "config.toml") : join(home, definition.profileFileName);
   writeFileSync(target, stringify(profile), { mode: 0o600 });
   writeFileSync(
