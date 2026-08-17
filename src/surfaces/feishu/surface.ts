@@ -125,6 +125,7 @@ export interface FeishuSurfaceOptions {
   ) => DisplayPriceCurrency;
   opencodeGoUsage?: (
     model: string,
+    requestStartedAtMs?: number,
   ) => Promise<ProviderModelUsageEstimate | null>;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;

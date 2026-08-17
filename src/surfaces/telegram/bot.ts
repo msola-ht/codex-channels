@@ -121,6 +121,7 @@ export interface TelegramSurfaceOptions {
   ) => DisplayPriceCurrency;
   opencodeGoUsage?: (
     model: string,
+    requestStartedAtMs?: number,
   ) => Promise<ProviderModelUsageEstimate | null>;
 }
 

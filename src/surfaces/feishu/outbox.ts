@@ -131,6 +131,7 @@ export interface FeishuOutboxOptions {
   debugEnabled?: boolean;
   opencodeGoUsage?: (
     model: string,
+    requestStartedAtMs?: number,
   ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
@@ -300,7 +301,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
         turnKey(event.threadId, event.turnId),
       );
       const remainingUsage = event.modelProvider === "opencode-go" && event.model
-        ? (await this.options.opencodeGoUsage?.(event.model)) ?? null
+        ? (await this.options.opencodeGoUsage?.(
+            event.model,
+            event.timing?.modelRequestStartedAtMs,
+          )) ?? null
         : null;
       const completion = renderFeishuOutput(
         event,

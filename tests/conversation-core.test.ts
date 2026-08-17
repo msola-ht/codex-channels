@@ -1303,6 +1303,7 @@ describe("ConversationCore", () => {
     expect(completed).toMatchObject({
       timing: {
         modelRequestCount: 5,
+        modelRequestStartedAtMs: 1_500,
         completedModelRequestCount: 2,
         interruptedModelRequestCount: 1,
         incompleteModelRequestCount: 1,

@@ -120,9 +120,12 @@ export interface OpencodeGoAccountAdapterOptions {
 
 export function createOpencodeGoRemainingUsageReader(
   options: OpencodeGoAccountAdapterOptions = {},
-): (model: string) => Promise<ProviderModelUsageEstimate | null> {
+): (
+  model: string,
+  requestStartedAtMs?: number,
+) => Promise<ProviderModelUsageEstimate | null> {
   const adapter = createOpencodeGoAccountAdapter(options);
-  return async (model) => {
+  return async (model, requestStartedAtMs) => {
     try {
       const usage = await adapter.accountUsage();
       if (usage.kind !== "quota-windows") return null;
@@ -130,7 +133,7 @@ export function createOpencodeGoRemainingUsageReader(
       const bucket = baseline.models.get(model)?.peakOffPeak === undefined
         ? undefined
         : isOpenCodeGoPeakMinute(
-            new Date(options.nowMs?.() ?? Date.now()),
+            new Date(requestStartedAtMs ?? options.nowMs?.() ?? Date.now()),
             baseline,
           )
           ? "peak"

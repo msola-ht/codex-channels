@@ -4,6 +4,7 @@ import type {
   ConversationUseCases,
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import type {
   ConversationActorRegistry,
@@ -41,6 +42,10 @@ export interface CreateWeixinSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  opencodeGoUsage?: (
+    model: string,
+    requestStartedAtMs?: number,
+  ) => Promise<ProviderModelUsageEstimate | null>;
   fetchImpl?: typeof fetch;
   logger: Logger;
   onFatal(error: WeixinInputFatalError): void;
@@ -102,6 +107,9 @@ export function createWeixinSurface(
     ...(options.priceCurrency === undefined
       ? {}
       : { priceCurrency: options.priceCurrency }),
+    ...(options.opencodeGoUsage === undefined
+      ? {}
+      : { opencodeGoUsage: options.opencodeGoUsage }),
     logger: options.logger,
     onFatal: (error) => options.onFatal(error),
   });

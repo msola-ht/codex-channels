@@ -114,6 +114,7 @@ export interface TelegramOutboxOptions {
   debugEnabled?: boolean;
   opencodeGoUsage?: (
     model: string,
+    requestStartedAtMs?: number,
   ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
@@ -459,7 +460,10 @@ export class TelegramOutbox {
         }
         this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
         const remainingUsage = event.modelProvider === "opencode-go" && event.model
-          ? (await this.options.opencodeGoUsage?.(event.model)) ?? null
+          ? (await this.options.opencodeGoUsage?.(
+              event.model,
+              event.timing?.modelRequestStartedAtMs,
+            )) ?? null
           : null;
         this.enqueue(chatId, async () => {
           for (const key of keys) {
