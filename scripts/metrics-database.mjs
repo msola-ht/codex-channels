@@ -164,7 +164,7 @@ export function upgradeMetricsDatabase(
     if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6/v7/v8 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
     checkpoint(status.databasePath);
@@ -202,6 +202,11 @@ export function upgradeMetricsDatabase(
         statements.push(`
           ALTER TABLE model_request_metrics ADD COLUMN pricing_bucket TEXT
             CHECK (pricing_bucket IS NULL OR pricing_bucket IN ('peak', 'off-peak'));
+        `);
+      }
+      if (previousSchemaVersion < 9) {
+        statements.push(`
+          ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
         `);
       }
       statements.push(`

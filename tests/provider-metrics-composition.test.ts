@@ -381,6 +381,7 @@ function metrics(): ProviderProxyMetrics {
     lastOutputDeltaAtMs: 1_800,
     responseCompletedAtMs: 1_900,
     weeklyQuota: null,
+    quotaWindows: null,
   };
 }
 

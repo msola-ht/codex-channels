@@ -21,7 +21,7 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
 | 认证 | `sk-` API Key | Key 只进入子进程环境或私有凭据存储，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |
 | 计价形态 | 无 / 通用远程目录 / 固定 USD / GO 式 USD 峰谷 + 包含额度 / DS 式 CNY 计划 + 汇率 | 决定计价器实现与是否需要汇率 |
-| 账户形态 | 无 / 余额 / GO 式用量窗口（5h/7d/月 + 本地重算） | 决定账户适配器实现与 `/usage` 展示 |
+| 账户形态 | 无 / 余额 / GO 式用量窗口（5h/7d/月 + 本地重算 + 请求窗口快照） | 决定账户适配器实现与 `/usage` 展示 |
 | 运行模式 | switching / exclusive | 必须同时支持；marker `mode` 区分 |
 | 能力边界 | 文字 / 图片 / 音频 / 网页搜索 / 上下文压缩 | 按真实工具合同声明，不能只看价格页或 `/models` |
 
@@ -80,7 +80,10 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
   凭据读取、计价器、指标库 provider 过滤），注册进 `ProviderAccountService`；
 - 余额形态：参考 `deepseek-account-adapter.ts`；
 - 无账户：`/usage` 明确显示不支持，不回退 OpenAI；
-- 指标库本地用量与 Token 汇总必须按 Provider 过滤，窗口按请求开始时间判定。
+- 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
+  快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
+  5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9），
+  读取时优先按快照归属窗口，快照缺失或与当前官方窗口不一致时才回退到按请求开始时间判定。
 
 ### 3.5 Setup
 
@@ -97,7 +100,7 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
 - 定义与文件布局（`model-provider-file-layout.test.ts` 风格）；
 - Profile 镜像校验与失败关闭（`model-provider-runtime.test.ts` 风格）；
 - 计价基线 schema、峰谷档位、生效时间与历史快照；
-- 账户适配器：余额或用量窗口、本地用量重算、窗口边界；
+- 账户适配器：余额或用量窗口、本地用量重算、窗口边界、窗口快照归属与缺失回退；
 - Setup：新增、更新、恢复、回滚、角色切换；
 - 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
 

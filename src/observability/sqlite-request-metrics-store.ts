@@ -57,7 +57,7 @@ const metricStorageColumnsSql = `
   first_output_delta_at_ms, last_output_delta_at_ms,
   response_completed_at_ms, recorded_at_ms,
   weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at,
-  weekly_quota_plan_type
+  weekly_quota_plan_type, quota_windows
 `;
 const pageSortSql = {
   recordedAtMs: "recorded_at_ms",
@@ -217,6 +217,7 @@ interface MetricRow {
   weekly_used_percent_millionths: number | null;
   weekly_resets_at: number | null;
   weekly_quota_plan_type: string | null;
+  quota_windows: string | null;
   request_duration_ms: number | null;
   ttft_ms: number | null;
   thinking_duration_ms: number | null;
@@ -378,7 +379,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           ${metricStorageColumnsSql}
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
@@ -447,6 +448,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.weeklyQuota?.usedPercentMillionths ?? null,
       sample.weeklyQuota?.resetsAt ?? null,
       sample.weeklyQuota?.planType ?? null,
+      sample.quotaWindows === undefined || sample.quotaWindows === null
+        ? null
+        : JSON.stringify(sample.quotaWindows),
     );
     this.rowCount += 1;
     this.recordsSinceCleanup += 1;
@@ -1320,6 +1324,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
               weekly_resets_at IS NULL OR weekly_resets_at >= 0
             ),
             weekly_quota_plan_type TEXT,
+            quota_windows TEXT,
             CHECK (
               (
                 billing_mode IS NULL
@@ -1609,6 +1614,7 @@ function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
           resetsAt: row.weekly_resets_at,
           planType: row.weekly_quota_plan_type,
         },
+    quotaWindows: parseQuotaWindows(row.quota_windows),
     recordedAtMs: row.recorded_at_ms,
     requestDurationMs: row.request_duration_ms,
     ttftMs: row.ttft_ms,
@@ -1659,6 +1665,41 @@ function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSumma
     ...pricing,
     compact: toStoredCompactSummary(row),
   };
+}
+
+function parseQuotaWindows(
+  value: string | null,
+): ReadonlyArray<{ windowId: string; resetsAt: number | null }> | null {
+  if (value === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  return parsed.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const window = entry as Record<string, unknown>;
+    if (typeof window.windowId !== "string" || window.windowId.length === 0) {
+      return [];
+    }
+    const resetsAt = window.resetsAt;
+    if (
+      resetsAt !== null
+      && !(
+        typeof resetsAt === "number"
+        && Number.isSafeInteger(resetsAt)
+        && resetsAt >= 0
+      )
+    ) {
+      return [];
+    }
+    return [{
+      windowId: window.windowId,
+      resetsAt,
+    }];
+  });
 }
 
 function toStoredThreadAggregate(

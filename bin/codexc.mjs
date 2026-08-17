@@ -32,6 +32,8 @@ import {
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import { createOpencodeGoQuotaWindowsProvider } from "../runtime/opencode-go-quota-windows.mjs";
+import { createProxyFetch } from "../dist/bootstrap/proxy-fetch.js";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import {
@@ -586,6 +588,9 @@ async function runServiceAppServer(args) {
     if (existing) return { ...existing, created: false };
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...options,
+      ...(provider === "opencode-go"
+        ? { quotaWindowsProvider: opencodeGoQuotaWindows }
+        : {}),
       onMetrics: (metrics) => sendProviderProxyMetrics(
         providerMetricsSocketPath(socketPath, provider),
         metrics,
@@ -614,6 +619,15 @@ async function runServiceAppServer(args) {
   const providerDefinitions = new Map(
     managedModelProviderDefinitions.map((definition) => [definition.id, definition]),
   );
+  const opencodeGoQuotaWindows = createOpencodeGoQuotaWindowsProvider({
+    environment: runtime.environment,
+    fetchImpl: createProxyFetch({
+      http: runtime.environment.HTTP_PROXY,
+      https: runtime.environment.HTTPS_PROXY,
+      all: runtime.environment.ALL_PROXY,
+      no: runtime.environment.NO_PROXY,
+    }),
+  });
   const managedRole = loadManagedModelProviderRole(runtime.environment);
   const refreshManagedRoleConfig = (provider, baseUrl) => {
     if (managedRole?.provider !== provider) return;

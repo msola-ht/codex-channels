@@ -72,8 +72,11 @@ describe("backup provider migration", () => {
 
       expect(existsSync(join(result.backupDirectory, "codex-home", "sf-deepseek.models.json")))
         .toBe(true);
+      expect(existsSync(join(result.backupDirectory, "codex-home", "sf-deepseek.config.toml")))
+        .toBe(true);
       expect(existsSync(join(result.backupDirectory, "reference", "config.toml"))).toBe(true);
       expect(existsSync(join(result.backupDirectory, "backup-manifest.json"))).toBe(true);
+      expect(existsSync(join(result.backupDirectory, "providers", ".codex"))).toBe(false);
     } finally {
       fixture.remove();
     }

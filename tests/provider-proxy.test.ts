@@ -291,6 +291,79 @@ describe("ProviderProxy", () => {
     })]);
   });
 
+  it("attaches quota window snapshots from the injected provider", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(sse("response.completed", {
+          type: "response.completed",
+          response: {
+            model: "deepseek-v4-flash",
+            status: "completed",
+            usage: {
+              input_tokens: 120,
+              input_tokens_details: { cached_tokens: 100 },
+              output_tokens: 30,
+              output_tokens_details: { reasoning_tokens: 10 },
+              total_tokens: 150,
+            },
+          },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const quotaWindows = [
+      { windowId: "rolling", resetsAt: 1_785_700_000 },
+      { windowId: "weekly", resetsAt: 1_785_800_000 },
+      { windowId: "monthly", resetsAt: 1_790_000_000 },
+    ];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      quotaWindowsProvider: async () => quotaWindows,
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", () => resolveResponse());
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({
+      status: "completed",
+      httpStatus: 200,
+      model: "deepseek-v4-flash",
+      quotaWindows,
+    });
+  });
+
   it("recognizes SSE metadata when the upstream omits Content-Type", async () => {
     const upstream = createServer((request, response) => {
       request.resume();

@@ -8,7 +8,7 @@ import {
   rmdirSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -97,13 +97,13 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
     copyDirectory(directory, join(backupRoot, "providers", basename(directory)));
   }
   for (const path of currentFiles) {
-    if (providerDirectories.some((directory) => path.startsWith(`${directory}/`))) {
+    if (providerDirectories.some((directory) => path.startsWith(`${directory}${sep}`))) {
       continue;
     }
-    copyFile(
-      path,
-      join(backupRoot, "providers", basename(dirname(path)), basename(path)),
-    );
+    const target = path.startsWith(`${codexHome}${sep}`)
+      ? join(backupRoot, "codex-home", relative(codexHome, path))
+      : join(backupRoot, "other", relative(connectHome, path));
+    copyFile(path, target);
   }
   for (const path of referenceFiles) {
     copyFile(path, join(backupRoot, "reference", relative(codexHome, path)));

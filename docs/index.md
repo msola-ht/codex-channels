@@ -134,10 +134,12 @@ OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/op
 `pricing_bucket`，快照缺失时才按当前基线判定。对照基线中的模型包含用量（如
 DeepSeek V4 Pro/Flash 每月 $15）计算已用百分比与剩余额度。
 
-指标库 Schema v8 为价格快照新增 `pricing_bucket` 列（`peak`/`off-peak`），旧库由
-`codexc metrics upgrade` 显式备份迁移；完成卡片与 `/metrics` 费用区对支持峰谷的 Provider 标注
+指标库 Schema v8 为价格快照新增 `pricing_bucket` 列（`peak`/`off-peak`），Schema v9 再新增
+`quota_windows` 列保存 OpenCode Go 请求发生时的官方 5 小时/7 天/月度窗口 `resetsAt` 快照，旧库
+由 `codexc metrics upgrade` 显式备份迁移；完成卡片与 `/metrics` 费用区对支持峰谷的 Provider 标注
 单档（Peak/Off-Peak）或跨档（多档），展示层只认注入数据不识别具体 Provider。DeepSeek 官方账户
-保持纯余额展示（官方无用量窗口）；OpenCode Go 的本地模型用量重算继续按官方月度窗口执行。
+保持纯余额展示（官方无用量窗口）；OpenCode Go 的本地模型用量重算按请求记录的官方窗口快照
+归属（缺失时由官方 `resetsAt` 倒推窗口）执行。
 
 用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；模型、思考等级、Fast、
 `multi_agent_v2` 与受控共享第三方角色 `agents.external` 的普通键级写入共用一次官方

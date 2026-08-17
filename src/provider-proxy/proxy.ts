@@ -28,6 +28,11 @@ export interface ProviderWeeklyQuotaSnapshot {
   planType: string | null;
 }
 
+export interface ProviderQuotaWindowSnapshot {
+  windowId: string;
+  resetsAt: number | null;
+}
+
 export interface ProviderProxyMetrics {
   transport: "http" | "websocket";
   responseFormat: "sse" | "json" | "websocket" | "unknown";
@@ -57,6 +62,8 @@ export interface ProviderProxyMetrics {
   lastOutputDeltaAtMs: number | null;
   responseCompletedAtMs: number;
   weeklyQuota: ProviderWeeklyQuotaSnapshot | null;
+  /** 请求完成时对应的官方配额窗口快照（如 OpenCode Go 5h/7d/月），缺省为 null。 */
+  quotaWindows: readonly ProviderQuotaWindowSnapshot[] | null;
 }
 
 export interface ProviderProxyUpstream {
@@ -75,6 +82,7 @@ export interface ProviderProxyOptions {
   upstreamBasePath?: string;
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
   timeoutMs?: number;
+  quotaWindowsProvider?: () => Promise<readonly ProviderQuotaWindowSnapshot[] | null>;
   onMetrics?: (metrics: ProviderProxyMetrics) => void | Promise<void>;
   onError?: (error: Error) => void;
 }
@@ -97,6 +105,9 @@ export class ProviderProxy {
   private readonly resolveUpstream:
     | ((headers: IncomingHttpHeaders) => ProviderProxyUpstream)
     | undefined;
+  private readonly quotaWindowsProvider:
+    | (() => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
+    | undefined;
   private readonly timeoutMs: number;
   private readonly onMetrics:
     | ((metrics: ProviderProxyMetrics) => void | Promise<void>)
@@ -116,6 +127,7 @@ export class ProviderProxy {
         : { basePath: options.upstreamBasePath }),
     };
     this.resolveUpstream = options.resolveUpstream;
+    this.quotaWindowsProvider = options.quotaWindowsProvider;
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.onMetrics = options.onMetrics;
     this.onError = options.onError;
@@ -482,14 +494,19 @@ export class ProviderProxy {
     return this.resolveUpstream?.(headers) ?? this.defaultUpstream;
   }
 
-  private deliverMetrics(metrics: MetricsState): Promise<void> {
-    try {
-      return Promise.resolve(this.onMetrics?.({ ...metrics })).catch((error) => {
+  private async deliverMetrics(metrics: MetricsState): Promise<void> {
+    let quotaWindows: readonly ProviderQuotaWindowSnapshot[] | null = null;
+    if (this.quotaWindowsProvider) {
+      try {
+        quotaWindows = await this.quotaWindowsProvider();
+      } catch (error) {
         this.onError?.(asError(error));
-      });
+      }
+    }
+    try {
+      await this.onMetrics?.({ ...metrics, quotaWindows });
     } catch (error) {
       this.onError?.(asError(error));
-      return Promise.resolve();
     }
   }
 }
@@ -534,6 +551,7 @@ function createMetricsState(
     lastOutputDeltaAtMs: null,
     responseCompletedAtMs: startedAtMs,
     weeklyQuota: null,
+    quotaWindows: null,
   };
 }
 

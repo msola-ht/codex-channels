@@ -179,7 +179,7 @@ codexc agents disable
 
 子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
 线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
-页面显示“子代理 · <代理路径>”。该标注需要指标库 Schema v7 及以上（当前 v8）；从本机终端
+页面显示“子代理 · <代理路径>”。该标注需要指标库 Schema v7 及以上（当前 v9）；从本机终端
 运行 `codexc update` 会统一预检、自动备份升级并恢复 App Server 与 Gateway，也可单独运行
 `codexc metrics upgrade`。
 
