@@ -20,6 +20,11 @@ const pricingHeader = [
   "Cached Write",
   "Usage",
 ];
+const peakHoursPattern = /Peak hours are\s+(.+?)\s+UTC/u;
+const localRangePattern = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/u;
+const localRangeGlobalPattern = /(\d{2}):(\d{2})-(\d{2}):(\d{2})/gu;
+const timeOfDayPattern = /^(.*?)\s*\((Off-Peak|Peak)\)$/u;
+const tierPattern = /^(.*?)\s*\((≤|>)\s*(\d+)K tokens\)$/u;
 const endpointHeader = ["Model", "Model ID", "Endpoint", "AI SDK Package"];
 const allowedEndpointPaths = new Set([
   "/zen/go/v1/responses",
@@ -154,6 +159,7 @@ export function parseOpenCodeGoPricingPage(html) {
   const { tables } = parseSemanticHtmlTables(html, "OpenCode Go 官方页面");
   const pricingTable = findTable(tables, pricingHeader, "价格");
   const endpointTable = findTable(tables, endpointHeader, "模型端点");
+  const peakHours = parsePeakHours(html);
   const endpointsByDisplayName = new Map();
   for (const row of endpointTable.slice(1)) {
     if (row.length !== endpointHeader.length || !modelPattern.test(row[1])) {
@@ -174,7 +180,7 @@ export function parseOpenCodeGoPricingPage(html) {
     if (row.length !== pricingHeader.length) {
       throw new Error("OpenCode Go 官方价格表列数无效");
     }
-    const parsedName = parseTieredDisplayName(row[0]);
+    const parsedName = parsePricingDisplayName(row[0]);
     const endpointRecord = endpointsByDisplayName.get(normalizeModelName(parsedName.displayName));
     if (!endpointRecord) throw new Error(`OpenCode Go 官方价格模型缺少端点 ID：${row[0]}`);
     const price = {
@@ -185,14 +191,44 @@ export function parseOpenCodeGoPricingPage(html) {
       cachedWrite: parseUsd(row[4], true),
       includedUsageUsd: parseUsd(row[5], false),
     };
-    const rows = rowsByModel.get(endpointRecord.model)?.rows ?? [];
-    rows.push(price);
-    rowsByModel.set(endpointRecord.model, { ...endpointRecord, rows });
+    const entry = rowsByModel.get(endpointRecord.model) ?? {
+      ...endpointRecord,
+      rows: [],
+      offPeak: null,
+      peak: null,
+    };
+    if (parsedName.timeOfDay === null) {
+      entry.rows.push(price);
+    } else {
+      if (parsedName.maximumInputTokens !== null || entry[parsedName.timeOfDay] !== null) {
+        throw new Error(`OpenCode Go 官方价格时段条目无效：${row[0]}`);
+      }
+      entry[parsedName.timeOfDay] = price;
+    }
+    rowsByModel.set(endpointRecord.model, entry);
   }
   if (rowsByModel.size === 0) throw new Error("OpenCode Go 官方价格表没有模型");
   const models = {};
   for (const model of [...rowsByModel.keys()].sort()) {
-    const { endpoint, aiSdkPackage, rows } = rowsByModel.get(model);
+    const { endpoint, aiSdkPackage, rows, offPeak, peak } = rowsByModel.get(model);
+    if (offPeak !== null || peak !== null) {
+      if (offPeak === null || peak === null) {
+        throw new Error(`OpenCode Go 官方价格缺少完整峰谷档位：${model}`);
+      }
+      if (rows.length > 0 || offPeak.includedUsageUsd !== peak.includedUsageUsd) {
+        throw new Error(`OpenCode Go 官方价格峰谷档位无效：${model}`);
+      }
+      models[model] = {
+        endpoint,
+        aiSdkPackage,
+        peakOffPeak: {
+          offPeak: withoutMaximumInputTokens(offPeak),
+          peak: withoutMaximumInputTokens(peak),
+        },
+        includedUsageUsd: offPeak.includedUsageUsd,
+      };
+      continue;
+    }
     validatePriceRows(model, rows);
     const includedUsageUsd = rows[0].includedUsageUsd;
     const normalizedRows = rows.map((row) => ({
@@ -212,11 +248,13 @@ export function parseOpenCodeGoPricingPage(html) {
       : { endpoint, aiSdkPackage, tiers: normalizedRows, includedUsageUsd };
   }
   return validateBaseline({
-    schemaVersion: 1,
+    schemaVersion: 2,
     source: openCodeGoPageUrl,
     sourceUpdatedAt,
     currency: "USD",
     unit: "per_million_tokens",
+    timezone: "UTC",
+    peakHours,
     models,
   });
 }
@@ -232,12 +270,16 @@ function withoutMaximumInputTokens(price) {
 
 function validateBaseline(value) {
   if (!isRecord(value)
-    || value.schemaVersion !== 1
+    || value.schemaVersion !== 2
     || value.source !== openCodeGoPageUrl
     || value.currency !== "USD"
     || value.unit !== "per_million_tokens"
     || typeof value.sourceUpdatedAt !== "string"
     || !Number.isFinite(Date.parse(value.sourceUpdatedAt))
+    || value.timezone !== "UTC"
+    || !Array.isArray(value.peakHours)
+    || value.peakHours.length === 0
+    || !value.peakHours.every(isValidLocalRange)
     || !isRecord(value.models)
     || Object.keys(value.models).length === 0) {
     throw new Error("OpenCode Go 官方价格基线格式无效");
@@ -254,14 +296,53 @@ function findTable(tables, expectedHeader, label) {
   return matching[0];
 }
 
-function parseTieredDisplayName(value) {
-  const match = /^(.*?)\s*\((≤|>)\s*(\d+)K tokens\)$/u.exec(value);
-  if (!match) return { displayName: value, maximumInputTokens: null };
+function parsePricingDisplayName(value) {
+  const timeMatch = timeOfDayPattern.exec(value);
+  if (timeMatch) {
+    return {
+      displayName: timeMatch[1],
+      maximumInputTokens: null,
+      timeOfDay: timeMatch[2] === "Off-Peak" ? "offPeak" : "peak",
+    };
+  }
+  const match = tierPattern.exec(value);
+  if (!match) {
+    return { displayName: value, maximumInputTokens: null, timeOfDay: null };
+  }
   const threshold = Number(match[3]) * 1_000;
   return {
     displayName: match[1],
     maximumInputTokens: match[2] === "≤" ? threshold : null,
+    timeOfDay: null,
   };
+}
+
+function parsePeakHours(html) {
+  const match = peakHoursPattern.exec(html);
+  if (!match) throw new Error("OpenCode Go 官方页面缺少 Peak 时段说明");
+  const ranges = match[1].match(localRangeGlobalPattern) ?? [];
+  const unique = [...new Set(ranges)];
+  if (unique.length === 0 || unique.length !== ranges.length) {
+    throw new Error("OpenCode Go 官方页面 Peak 时段无效");
+  }
+  if (!unique.every(isValidLocalRange)) {
+    throw new Error("OpenCode Go 官方页面 Peak 时段无效");
+  }
+  return unique;
+}
+
+function isValidLocalRange(value) {
+  const match = localRangePattern.exec(value);
+  if (!match) return false;
+  const [startHour, startMinute, endHour, endMinute] = match
+    .slice(1)
+    .map((part) => Number(part));
+  if (startHour > 23 || endHour > 23 || startMinute > 59 || endMinute > 59) {
+    return false;
+  }
+  const start = startHour * 60 + startMinute;
+  const end = endHour * 60 + endMinute;
+  return start < end;
 }
 
 function validatePriceRows(model, rows) {
@@ -371,7 +452,7 @@ function renderSummary(result) {
     `- ETag：${escapeMarkdown(result.sourceEtag ?? "无")}`,
     `- 价格变化模型：${result.changedModels.length === 0 ? "无" : result.changedModels.map((model) => `\`${model}\``).join("、")}`,
     "",
-    "候选基线保存官方页面列出的全部模型 Token 单价、价格档位、套餐包含用量、端点和 SDK 协议。",
+    "候选基线保存官方页面列出的全部模型 Token 单价、价格档位（含 Peak/Off-Peak）、套餐包含用量、端点和 SDK 协议。",
     "自动检查不会开放新模型、自动合并、发布或部署。",
     "",
   ].join("\n");

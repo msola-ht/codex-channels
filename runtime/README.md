@@ -19,7 +19,8 @@
 - `deepseek-pricing-baseline.json`：保存从 DeepSeek 官方价格页审查后的人民币每百万 Token 单价、
   北京时间峰谷区间和生效日期；Bootstrap 只读使用，自动检查只能通过 Draft PR 提议更新。
 - `opencode-go-pricing-baseline.json`：保存 OpenCode Go 官方页面全部模型的美元每百万 Token 单价、
-  长上下文档位、套餐包含用量、端点与 SDK 协议；运行时只为已开放模型生成请求价格快照。
+  Peak/Off-Peak 时段（UTC）、长上下文档位、套餐包含用量、端点与 SDK 协议；运行时只为已开放
+  模型按请求时间生成请求价格快照。
 - `model-provider-runtime.mjs`：通过编译期受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
   凭据；读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。

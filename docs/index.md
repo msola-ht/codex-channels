@@ -124,8 +124,8 @@ USD/CNY 汇率固化为统一 USD 快照；汇率、精确模型或计划缺失�
 [`prepare-deepseek-pricing-proposal.mjs`](../scripts/prepare-deepseek-pricing-proposal.mjs) 每日检查，
 只通过 Draft PR 提议更新，不进入 Gateway 请求路径。
 OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/opencode-go-model-pricing.ts)
-读取官方美元价格基线；[`prepare-opencode-go-pricing-proposal.mjs`](../scripts/prepare-opencode-go-pricing-proposal.mjs)
-每日核对官方页面全部模型的价格、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.147.0
+读取官方美元价格基线并按请求开始时间（UTC）选择 Peak/Off-Peak 价；[`prepare-opencode-go-pricing-proposal.mjs`](../scripts/prepare-opencode-go-pricing-proposal.mjs)
+每日核对官方页面全部模型的价格、时段、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.147.0
 真实 App Server 按需启动、初始化与模型列表合同验证的模型计价和开放选择。
 
 用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；模型、思考等级、Fast、
