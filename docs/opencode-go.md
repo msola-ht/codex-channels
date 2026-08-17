@@ -8,7 +8,8 @@ Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用。当前�
 
 运行 `codexc setup`，依次选择“模型与提供商”和“OpenCode Go”，输入 OpenCode Go API Key。
 Setup 提供保留 OpenAI 默认的切换模式，以及让原生 Codex 和 Gateway 默认使用 OpenCode Go 的
-固定模式。切换模式创建私有 `sf-opencode-go.config.toml`；固定模式会先备份再修改
+固定模式。切换模式创建私有 `sf-opencode-go.config.toml`，Profile 镜像所选模型的默认思考等级，
+`codex --profile sf-opencode-go` 与 `codexc remote --profile opencode-go` 一致；固定模式会先备份再修改
 `~/.codex/config.toml`。两种模式都从相同的经审查上游内容生成 OpenCode Go 独立模型目录，并把共享
 `agents.external` 子代理切换到 OpenCode Go，不修改 DeepSeek Provider 配置。如果
 `~/.codex/config.toml` 已存在手工配置的 OpenCode Go Provider 或 Profile，切换模式会明确拒绝，

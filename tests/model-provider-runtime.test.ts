@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
 
+import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -31,6 +32,7 @@ import {
   validateConfiguredModelProviders,
   withProviderBaseUrl,
   withOpenAiBaseUrl,
+  writeManagedModelProviderProfileDefault,
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 
@@ -179,9 +181,7 @@ describe("model provider runtime topology", () => {
     expect(managed.arguments).toContain(
       "model_providers.deepseek.base_url=\"https://api.deepseek.com/\"",
     );
-    expect(managed.arguments.some((argument) =>
-      argument.startsWith("model_reasoning_effort=")
-    )).toBe(false);
+    expect(managed.arguments).toContain('model_reasoning_effort="high"');
     expect(managed.arguments).not.toContain("model_auto_compact_token_limit=629146");
 
     const overridden = withProviderBaseUrl(
@@ -206,7 +206,7 @@ describe("model provider runtime topology", () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
       join(codexHome, "sf-deepseek.config.toml"),
-      providerProfile(codexHome).replace(
+      providerProfile(codexHome, "switching").replace(
         'model_provider = "deepseek"\n',
         'model_provider = "deepseek"\nmodel_context_window = 1048576\n',
       ),
@@ -217,6 +217,66 @@ describe("model provider runtime topology", () => {
     expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
     expect(() => loadManagedProviderAppServer(environment))
       .toThrow("模型目录或思考等级无效");
+  });
+
+  it("rejects a switching profile without the reasoning mirror", async () => {
+    const codexHome = await configuredHome("switching");
+    writeFileSync(
+      join(codexHome, "sf-deepseek.config.toml"),
+      providerProfile(codexHome, "switching").replace(
+        'model_reasoning_effort = "high"\n',
+        "",
+      ),
+      { mode: 0o600 },
+    );
+    const environment = { CODEX_HOME: codexHome };
+
+    expect(() => loadManagedProviderAppServer(environment))
+      .toThrow("模型目录或思考等级无效");
+  });
+
+  it("rejects a switching profile whose reasoning mirror differs from the catalog default", async () => {
+    const codexHome = await configuredHome("switching");
+    writeFileSync(
+      join(codexHome, "sf-deepseek.config.toml"),
+      providerProfile(codexHome, "switching").replace(
+        'model_reasoning_effort = "high"\n',
+        'model_reasoning_effort = "low"\n',
+      ),
+      { mode: 0o600 },
+    );
+    const environment = { CODEX_HOME: codexHome };
+
+    expect(() => loadManagedProviderAppServer(environment))
+      .toThrow("模型目录或思考等级无效");
+  });
+
+  it("repairs a switching profile missing the reasoning mirror when writing defaults", async () => {
+    const codexHome = await configuredHome("switching");
+    writeFileSync(
+      join(codexHome, "sf-deepseek.config.toml"),
+      providerProfile(codexHome, "switching").replace(
+        'model_reasoning_effort = "high"\n',
+        "",
+      ),
+      { mode: 0o600 },
+    );
+    const environment = { CODEX_HOME: codexHome };
+
+    expect(writeManagedModelProviderProfileDefault("deepseek", {
+      model: "deepseek-v4-flash",
+      reasoningEffort: "high",
+      autoCompactLimit: 629_146,
+    }, environment)).toMatchObject({ mode: "switching" });
+    expect(parse(readFileSync(
+      join(codexHome, "sf-deepseek.config.toml"),
+      "utf8",
+    ))).toMatchObject({
+      model: "deepseek-v4-flash",
+      model_reasoning_effort: "high",
+    });
+    expect(validateConfiguredModelProvider(environment))
+      .toEqual({ provider: "deepseek", mode: "switching" });
   });
 
   it("writes and removes the DeepSeek subagent role configuration without the API key", async () => {
@@ -292,7 +352,7 @@ describe("model provider runtime topology", () => {
     const codexHome = await configuredHome("exclusive");
     writeFileSync(
       join(codexHome, "config.toml"),
-      providerProfile(codexHome).replace(
+      providerProfile(codexHome, "exclusive").replace(
         'model_provider = "deepseek"\n',
         'model_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       ),
@@ -313,7 +373,7 @@ async function configuredHome(mode: "switching" | "exclusive"): Promise<string> 
     { mode: 0o600 },
   );
   const profilePath = mode === "exclusive" ? "config.toml" : "sf-deepseek.config.toml";
-  writeFileSync(join(codexHome, profilePath), providerProfile(codexHome), { mode: 0o600 });
+  writeFileSync(join(codexHome, profilePath), providerProfile(codexHome, mode), { mode: 0o600 });
   writeFileSync(
     join(codexHome, "sf-deepseek.models.json"),
     providerCatalog(),
@@ -322,10 +382,11 @@ async function configuredHome(mode: "switching" | "exclusive"): Promise<string> 
   return codexHome;
 }
 
-function providerProfile(codexHome: string): string {
+function providerProfile(codexHome: string, mode: "switching" | "exclusive"): string {
   return [
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
+    ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
     `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-deepseek.models.json"))}`,
     "[model_providers.deepseek]",
     'name = "deepseek"',
@@ -354,6 +415,7 @@ function configureOpenCodeGo(
   writeFileSync(join(codexHome, mode === "exclusive" ? "config.toml" : "sf-opencode-go.config.toml"), [
     'model = "deepseek-v4-flash"',
     'model_provider = "opencode-go"',
+    ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
     `model_catalog_json = ${JSON.stringify(join(codexHome, "sf-opencode-go.models.json"))}`,
     "[model_providers.opencode-go]",
     'name = "opencode-go"',

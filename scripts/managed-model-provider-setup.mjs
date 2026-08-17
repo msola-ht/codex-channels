@@ -20,11 +20,13 @@ export function createSwitchingProviderProfile(definition, {
   apiKey,
   catalogPath,
   model,
+  reasoningEffort,
 }) {
   return createManagedProviderProfile(definition, {
     apiKey,
     catalogPath,
     ...(model === undefined ? {} : { model }),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
   });
 }
 

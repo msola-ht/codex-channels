@@ -26,8 +26,8 @@
   凭据；读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
   共享第三方子代理只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个 Provider 使用独立
-  模型目录，并按模型读取上下文、默认思考等级与自动压缩阈值；受管 Profile、模型目录、管理标记和
-  共享角色统一使用 `sf-` 文件前缀。
+  模型目录，并按模型读取上下文、默认思考等级与自动压缩阈值；受管 Profile 镜像所选模型的默认
+  思考等级，校验必须与模型目录一致；Profile、模型目录、管理标记和共享角色统一使用 `sf-` 文件前缀。
 - `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、可选 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端

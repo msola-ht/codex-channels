@@ -157,7 +157,8 @@
   配置前状态，从同一受审查来源生成自己的模型目录并复用共享子代理机制，但不复用凭据、Provider
   身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的默认模型与逐模型设置。
 - `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一
-  `sf-` 前缀，并把 Provider 根级上下文、思考等级和自动压缩阈值迁入各自模型目录。
+  `sf-` 前缀，并把 Provider 根级上下文、思考等级和自动压缩阈值迁入各自模型目录，切换模式
+  Profile 再镜像所选模型的默认思考等级。
 - `semantic-html-table.mjs` / `semantic-html-table.d.mts`：为受控官方价格提案提供有界、无脚本的
   语义化 HTML 表格解析，不进入 Gateway 运行路径。
 - `prepare-opencode-go-pricing-proposal.mjs` / `prepare-opencode-go-pricing-proposal.d.mts`：从

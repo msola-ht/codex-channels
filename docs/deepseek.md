@@ -18,7 +18,8 @@ DeepSeek 配置写入 `~/.codex`，不写入 Gateway 的 `~/.codex-connect/confi
 - 聊天渠道使用 `/model` 为当前会话选择模型。
 - `codexc remote` 连接 OpenAI App Server；`codexc remote --profile deepseek` 连接共享的
   DeepSeek App Server。
-- 直接运行 `codex` 或 `codex --profile sf-deepseek` 会启动独立 TUI，不共享 Gateway Thread。
+- 直接运行 `codex` 或 `codex --profile sf-deepseek` 会启动独立 TUI，不共享 Gateway Thread；
+  Profile 镜像所选模型的默认思考等级，与 Remote/App Server 一致。
 
 ### 仅 DeepSeek 固定模式
 
@@ -35,15 +36,17 @@ DeepSeek Provider。
 中选择“模型与提供商 → DeepSeek → 修改模型设置（思考等级、自动压缩）”，或走原有的“模型与
 提供商 → 第三方模型设置 → DeepSeek”，按 Provider 和模型分别选择默认思考等级与自动压缩百分比
 （10–90%）；该百分比按模型自己的 `context_window` 换算为模型目录中的
-`auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖其他模型。选择模型默认值时使用 Codex
-的 90% 上下文窗口阈值。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn 时自动
-重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
+`auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖其他模型；切换模式 Profile 顶层只镜像
+所选模型的默认思考等级（校验必须与模型目录一致），上下文与自动压缩仍只由模型目录声明。
+选择模型默认值时使用 Codex 的 90% 上下文窗口阈值。修改后 Gateway 会自动检测设置文件变化，
+校验通过并在无活动 Turn 时自动重启 App Server 生效；如需立即生效，可在终端手动运行
+`codexc service restart app-server`。
 
 ## 管理的文件
 
 | 文件 | 用途 |
 | --- | --- |
-| `~/.codex/sf-deepseek.config.toml` | 切换模式的 DeepSeek 模型、Provider 和 API Key |
+| `~/.codex/sf-deepseek.config.toml` | 切换模式的 DeepSeek 模型、默认思考等级镜像、Provider 和 API Key |
 | `~/.codex/sf-deepseek.models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
 | `~/.codex/sf-deepseek.managed.toml` | 不含凭据的 Gateway 管理标记 |
 | `~/.codex/sf-agent.config.toml` | 不含凭据的共享第三方子代理配置 |
@@ -57,8 +60,8 @@ DeepSeek Provider。
 OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或修改任一 Provider 不影响另一方设置。
 从旧版文件布局升级时，运行 `codexc update` 会在核心服务停止期间把受管文件迁移为以上 `sf-`
 名称；新旧文件同时存在时不会猜测覆盖关系，而是明确报错。旧版 Profile 顶层的思考等级和自动
-压缩阈值会迁移进对应模型目录；迁移不保留旧的 `body_after_prefix` 压缩作用域，升级后统一按
-`total` 作用域应用。
+压缩阈值会迁移进对应模型目录，切换模式 Profile 再镜像所选模型的默认思考等级；迁移不保留旧的
+`body_after_prefix` 压缩作用域，升级后统一按 `total` 作用域应用。
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
 `/model` 选择。初次配置默认使用 Flash；之后可在 `codexc setup` 的“模型与提供商 → 第三方模型设置”

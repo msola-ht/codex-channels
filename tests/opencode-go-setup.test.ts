@@ -82,6 +82,11 @@ describe("OpenCode Go setup", () => {
           },
         },
       });
+      if (mode === "switching") {
+        expect(config.model_reasoning_effort).toBe("high");
+      } else {
+        expect(config.model_reasoning_effort).toBeUndefined();
+      }
       const catalog = JSON.parse(readFileSync(
         join(codexHome, "sf-opencode-go.models.json"),
         "utf8",
@@ -236,7 +241,10 @@ describe("OpenCode Go setup", () => {
     });
 
     expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
-      .toMatchObject({ model: "deepseek-v4-pro" });
+      .toMatchObject({
+        model: "deepseek-v4-pro",
+        model_reasoning_effort: "max",
+      });
     const catalog = JSON.parse(readFileSync(
       join(codexHome, "sf-opencode-go.models.json"),
       "utf8",
@@ -314,6 +322,7 @@ function opencodeFixture(): string {
   const providerLines = [
     'model = "deepseek-v4-flash"',
     'model_provider = "opencode-go"',
+    'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
     "[model_providers.opencode-go]",
     'name = "opencode-go"',

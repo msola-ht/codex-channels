@@ -35,7 +35,7 @@ describe("managed model provider default setup", () => {
       model: "deepseek-v4-pro",
       model_provider: "deepseek",
     });
-    expect(profile.model_reasoning_effort).toBeUndefined();
+    expect(profile.model_reasoning_effort).toBe("max");
     const catalog = JSON.parse(readFileSync(
       join(codexHome, "sf-deepseek.models.json"),
       "utf8",
@@ -141,6 +141,7 @@ function providerFixture(mode: "switching" | "exclusive") {
   const providerLines = [
     'model = "deepseek-v4-flash"',
     'model_provider = "deepseek"',
+    ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
     "[model_providers.deepseek]",
     'name = "deepseek"',

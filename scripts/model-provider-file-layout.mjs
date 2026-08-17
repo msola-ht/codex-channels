@@ -177,9 +177,14 @@ function migrateProviderModelSettings(codexHome, { definition, mode }) {
   assertPrivateRegularFile(expectedCatalogPath);
   const catalog = parseModelCatalog(expectedCatalogPath);
   applyLegacyRootSettings(catalog, document, definition, configPath);
+  const model = modelEntry(catalog, document.model, configPath);
   const nextCatalog = `${JSON.stringify(catalog, null, 2)}\n`;
   const nextDocument = { ...document, model_catalog_json: expectedCatalogPath };
-  delete nextDocument.model_reasoning_effort;
+  if (mode === "switching") {
+    nextDocument.model_reasoning_effort = model.default_reasoning_level;
+  } else {
+    delete nextDocument.model_reasoning_effort;
+  }
   delete nextDocument.model_context_window;
   delete nextDocument.model_auto_compact_token_limit;
   delete nextDocument.model_auto_compact_token_limit_scope;

@@ -135,10 +135,18 @@ export async function runOpenCodeGoSetup({
             `安装前的 Codex config.toml 已占用 ${definition.displayName} Provider 或 Profile；请先手工移除或改名`,
           );
         }
+        const selectedModelEntry = managedCatalog.models?.find(
+          (entry) => entry?.slug === selectedModel,
+        );
+        const selectedModelReasoningEffort = selectedModelEntry?.default_reasoning_level;
+        if (typeof selectedModelReasoningEffort !== "string") {
+          throw new Error("OpenCode Go 模型目录缺少默认思考等级");
+        }
         profileContent = stringify(createSwitchingProviderProfile(definition, {
           apiKey,
           catalogPath: paths.catalogPath,
           model: selectedModel,
+          reasoningEffort: selectedModelReasoningEffort,
         }));
       } else {
         nextConfig = applyExclusiveProviderConfig(currentConfig, definition, {
