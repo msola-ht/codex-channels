@@ -22,6 +22,8 @@ import { UserFacingError } from "../conversation-core/index.js";
 const opencodeGoUsageUrl = "https://opencode.ai/zen/go/v1/usage";
 const maximumResponseBytes = 65_536;
 const requestTimeoutMs = 10_000;
+const fiveHourMs = 5 * 60 * 60 * 1_000;
+const sevenDayMs = 7 * 24 * 60 * 60 * 1_000;
 
 const windowLabels: Readonly<Record<string, string>> = Object.freeze({
   rolling: "5小时",
@@ -89,6 +91,7 @@ export function createOpencodeGoAccountAdapter(
           : readWindowLocalTokens(
               options.metricsDatabasePath,
               nowMs,
+              usage.windows,
               windowStartAtMs,
               windowEndAtMs,
             );
@@ -154,6 +157,7 @@ export function createOpencodeGoRemainingUsageReader(
 function readWindowLocalTokens(
   metricsDatabasePath: string,
   nowMs: number,
+  quotaWindows: readonly ProviderQuotaWindow[],
   monthlyWindowStartAtMs: number,
   monthlyWindowEndAtMs: number | null,
 ): Map<string, number> {
@@ -165,18 +169,48 @@ function readWindowLocalTokens(
       { readOnly: true },
     );
     try {
-      const windows: ReadonlyArray<readonly [string, number, number]> = [
-        ["rolling", nowMs - 5 * 60 * 60 * 1_000, nowMs],
-        ["weekly", nowMs - 7 * 24 * 60 * 60 * 1_000, nowMs],
-        ["monthly", monthlyWindowStartAtMs, monthlyWindowEndAtMs ?? nowMs],
+      const ranges: ReadonlyArray<readonly [string, number | null, number, number]> = [
+        [
+          "rolling",
+          windowResetsAt(quotaWindows, "rolling"),
+          ...quotaWindowRange(
+            quotaWindows.find((window) => window.windowId === "rolling"),
+            nowMs,
+            fiveHourMs,
+          ),
+        ],
+        [
+          "weekly",
+          windowResetsAt(quotaWindows, "weekly"),
+          ...quotaWindowRange(
+            quotaWindows.find((window) => window.windowId === "weekly"),
+            nowMs,
+            sevenDayMs,
+          ),
+        ],
+        [
+          "monthly",
+          monthlyWindowEndAtMs === null ? null : Math.floor(monthlyWindowEndAtMs / 1_000),
+          monthlyWindowStartAtMs,
+          monthlyWindowEndAtMs ?? nowMs,
+        ],
       ];
-      for (const [windowId, startAtMs, endAtMs] of windows) {
+      for (const [windowId, currentResetsAt, startAtMs, endAtMs] of ranges) {
         if (
           Number.isFinite(startAtMs)
           && Number.isFinite(endAtMs)
           && endAtMs > startAtMs
         ) {
-          tokens.set(windowId, readOpencodeGoTokens(store, startAtMs, endAtMs));
+          tokens.set(
+            windowId,
+            readOpencodeGoTokens(
+              store,
+              windowId,
+              currentResetsAt,
+              startAtMs,
+              endAtMs,
+            ),
+          );
         }
       }
     } finally {
@@ -188,8 +222,31 @@ function readWindowLocalTokens(
   return tokens;
 }
 
+function quotaWindowRange(
+  window: ProviderQuotaWindow | undefined,
+  nowMs: number,
+  durationMs: number,
+): [number, number] {
+  if (window?.resetsAt === null || window?.resetsAt === undefined) {
+    return [nowMs - durationMs, nowMs];
+  }
+  const resetsAtMs = window.resetsAt * 1_000;
+  const startAtMs = resetsAtMs - durationMs;
+  const endAtMs = Math.min(nowMs, resetsAtMs);
+  if (
+    Number.isFinite(startAtMs)
+    && Number.isFinite(endAtMs)
+    && endAtMs > startAtMs
+  ) {
+    return [startAtMs, endAtMs];
+  }
+  return [nowMs - durationMs, nowMs];
+}
+
 function readOpencodeGoTokens(
   store: SqliteModelRequestMetricsStore,
+  windowId: string,
+  currentResetsAt: number | null,
   startAtMs: number,
   endAtMs: number,
 ): number {
@@ -207,7 +264,15 @@ function readOpencodeGoTokens(
     });
     for (const record of page.records) {
       if (record.provider !== "opencode-go") continue;
-      if (!requestStartsInWindow(record, startAtMs, endAtMs)) continue;
+      if (!requestInQuotaWindow(
+        record,
+        windowId,
+        currentResetsAt,
+        startAtMs,
+        endAtMs,
+      )) {
+        continue;
+      }
       const totalTokens = record.totalTokens;
       if (
         totalTokens !== null
@@ -224,6 +289,35 @@ function readOpencodeGoTokens(
     offset = page.nextOffset ?? -1;
   } while (offset >= 0);
   return total;
+}
+
+function windowResetsAt(
+  windows: readonly ProviderQuotaWindow[],
+  windowId: string,
+): number | null {
+  return windows.find((window) => window.windowId === windowId)?.resetsAt ?? null;
+}
+
+function requestInQuotaWindow(
+  record: {
+    requestStartedAtMs: number | null;
+    recordedAtMs: number;
+    quotaWindows?: ReadonlyArray<{ windowId: string; resetsAt: number | null }> | null;
+  },
+  windowId: string,
+  currentResetsAt: number | null,
+  startAtMs: number,
+  endAtMs: number,
+): boolean {
+  const snapshot = record.quotaWindows?.find((window) => window.windowId === windowId);
+  if (
+    snapshot?.resetsAt !== null
+    && snapshot?.resetsAt !== undefined
+    && currentResetsAt !== null
+  ) {
+    return snapshot.resetsAt === currentResetsAt;
+  }
+  return requestStartsInWindow(record, startAtMs, endAtMs);
 }
 
 function readModelUsageEstimates(
@@ -265,9 +359,14 @@ function readModelUsageEstimates(
           if (record.provider !== "opencode-go" || record.model === null) {
             continue;
           }
+          const monthlyResetsAt = windowEndAtMs === null
+            ? null
+            : Math.floor(windowEndAtMs / 1_000);
           if (
-            !requestStartsInWindow(
+            !requestInQuotaWindow(
               record,
+              "monthly",
+              monthlyResetsAt,
               windowStartAtMs,
               windowEndAtMs ?? endAtMs,
             )

@@ -314,8 +314,9 @@ codexc doctor
 ```
 
 日常升级统一使用 `codexc update`。Git 源码安装会更新官方 `main` 并刷新 npm 全局命令，后台服务
-已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。旧版第三方 Provider 文件会同时整理为
-统一的 `sf-` 前缀。该命令必须从本机终端执行。详细流程和失败处理见
+已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。旧版第三方 Provider 文件会在停机
+窗口内先自动备份，再迁移到 `~/.codex-connect/providers/<id>/`。该命令必须从本机终端执行。详细
+流程和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 
 卸载 Git 源码、对应 npm 全局命令和旧 Shell PATH 配置，并保留用户数据：

@@ -323,14 +323,14 @@ describe("OpenCode Go account adapter", () => {
       join(directory, "gateway.sqlite3"),
     );
     const store = new SqliteModelRequestMetricsStore(metricsPath);
-    const baseMs = Date.now();
+    const baseMs = Date.parse("2026-08-17T14:00:00.000Z");
     const hourMs = 60 * 60 * 1_000;
     const dayMs = 24 * hourMs;
-    recordWindowSample(store, baseMs - 1 * hourMs, 60_000, 40_000, 100_000);
-    recordWindowSample(store, baseMs - 4 * hourMs, 60_000, 40_000, null);
-    recordWindowSample(store, baseMs - 6 * hourMs, 10_000, 10_000, 20_000);
-    recordWindowSample(store, baseMs - 6 * dayMs, 20_000, 10_000, 30_000);
-    recordWindowSample(store, baseMs - 20 * dayMs, 5_000, 5_000, 10_000);
+    recordWindowSample(store, baseMs - 1 * hourMs, 60_000, 40_000, 100_000, baseMs - 1 * hourMs);
+    recordWindowSample(store, baseMs - 4 * hourMs, 60_000, 40_000, null, baseMs - 4 * hourMs);
+    recordWindowSample(store, baseMs - 6 * hourMs, 10_000, 10_000, 20_000, baseMs - 6 * hourMs);
+    recordWindowSample(store, baseMs - 6 * dayMs, 20_000, 10_000, 30_000, baseMs - 6 * dayMs);
+    recordWindowSample(store, baseMs - 20 * dayMs, 5_000, 5_000, 10_000, baseMs - 20 * dayMs);
     store.record({
       provider: "deepseek",
       pricing: null,
@@ -366,11 +366,13 @@ describe("OpenCode Go account adapter", () => {
     });
     store.close();
 
-    const nowMs = Date.now();
+    const nowMs = baseMs;
+    const rollingResetsAt = new Date(baseMs + 30 * 60 * 1_000).toISOString();
+    const weeklyResetsAt = new Date(baseMs + 12 * hourMs).toISOString();
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       usage: {
-        rolling: { status: "ok", percent: 45, resetsAt: "2026-08-17T01:23:00.000Z" },
-        weekly: { status: "ok", percent: 18, resetsAt: "2026-08-23T20:00:00.000Z" },
+        rolling: { status: "ok", percent: 45, resetsAt: rollingResetsAt },
+        weekly: { status: "ok", percent: 18, resetsAt: weeklyResetsAt },
         monthly: { status: "ok", percent: 15, resetsAt: "2026-09-15T10:22:00.000Z" },
       },
     }), { status: 200 }));
@@ -392,6 +394,176 @@ describe("OpenCode Go account adapter", () => {
     expect(byWindow.get("rolling")).toBe(200_000);
     expect(byWindow.get("weekly")).toBe(250_000);
     expect(byWindow.get("monthly")).toBe(220_000);
+  });
+
+  it("falls back to fixed rolling windows when the official reset time is missing", async () => {
+    const codexHome = await createCodexHome();
+    const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-window-fallback-"));
+    temporaryDirectories.push(directory);
+    const metricsPath = modelRequestMetricsDatabasePath(
+      join(directory, "gateway.sqlite3"),
+    );
+    const store = new SqliteModelRequestMetricsStore(metricsPath);
+    const baseMs = Date.parse("2026-08-17T14:00:00.000Z");
+    const hourMs = 60 * 60 * 1_000;
+    const dayMs = 24 * hourMs;
+    recordWindowSample(store, baseMs - 1 * hourMs, 60_000, 40_000, 100_000, baseMs - 1 * hourMs);
+    recordWindowSample(store, baseMs - 4 * hourMs, 60_000, 40_000, null, baseMs - 4 * hourMs);
+    recordWindowSample(store, baseMs - 6 * hourMs, 10_000, 10_000, 20_000, baseMs - 6 * hourMs);
+    recordWindowSample(store, baseMs - 6 * dayMs, 20_000, 10_000, 30_000, baseMs - 6 * dayMs);
+    store.close();
+
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      usage: {
+        rolling: { status: "ok", percent: 45 },
+        weekly: { status: "ok", percent: 18 },
+        monthly: { status: "ok", percent: 15, resetsAt: "2026-09-15T10:22:00.000Z" },
+      },
+    }), { status: 200 }));
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: fetchImpl as typeof fetch,
+      metricsDatabasePath: metricsPath,
+      nowMs: () => baseMs,
+    });
+
+    const usage = await adapter.accountUsage();
+    expect(usage.kind).toBe("quota-windows");
+    if (usage.kind !== "quota-windows") {
+      throw new Error("unexpected usage kind");
+    }
+    const byWindow = new Map(
+      usage.windows.map((window) => [window.windowId, window.localTokens]),
+    );
+    expect(byWindow.get("rolling")).toBe(200_000);
+    expect(byWindow.get("weekly")).toBe(250_000);
+    expect(byWindow.get("monthly")).toBe(220_000);
+  });
+
+  it("attributes tokens by the recorded quota window snapshot when present", async () => {
+    const codexHome = await createCodexHome();
+    const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-window-snapshot-"));
+    temporaryDirectories.push(directory);
+    const metricsPath = modelRequestMetricsDatabasePath(
+      join(directory, "gateway.sqlite3"),
+    );
+    const store = new SqliteModelRequestMetricsStore(metricsPath);
+    const baseMs = Date.parse("2026-08-17T14:00:00.000Z");
+    const hourMs = 60 * 60 * 1_000;
+    const dayMs = 24 * hourMs;
+    const rollingResetsAt = Math.floor((baseMs + 30 * 60 * 1_000) / 1_000);
+    const weeklyResetsAt = Math.floor((baseMs + 12 * hourMs) / 1_000);
+    const monthlyResetsAt = Math.floor(Date.parse("2026-09-15T10:22:00.000Z") / 1_000);
+    const currentWindows = [
+      { windowId: "rolling", resetsAt: rollingResetsAt },
+      { windowId: "weekly", resetsAt: weeklyResetsAt },
+      { windowId: "monthly", resetsAt: monthlyResetsAt },
+    ];
+    // 请求时间在滚动窗口范围外，但快照属于当前窗口：按快照归属。
+    recordWindowSample(
+      store,
+      baseMs - 6 * hourMs,
+      60_000,
+      40_000,
+      100_000,
+      baseMs,
+      currentWindows,
+    );
+    // 请求时间在当前滚动窗口范围内，但快照属于上一个窗口：按快照排除。
+    recordWindowSample(
+      store,
+      baseMs - 1 * hourMs,
+      60_000,
+      40_000,
+      100_000,
+      baseMs,
+      [
+        { windowId: "rolling", resetsAt: rollingResetsAt - 5 * hourMs / 1_000 },
+        { windowId: "weekly", resetsAt: weeklyResetsAt },
+        { windowId: "monthly", resetsAt: monthlyResetsAt },
+      ],
+    );
+    // 周窗口同理：旧快照排除、匹配快照计入。
+    recordWindowSample(
+      store,
+      baseMs - 7 * dayMs,
+      10_000,
+      10_000,
+      20_000,
+      baseMs,
+      [
+        { windowId: "rolling", resetsAt: rollingResetsAt - 5 * hourMs / 1_000 },
+        { windowId: "weekly", resetsAt: weeklyResetsAt },
+        { windowId: "monthly", resetsAt: monthlyResetsAt },
+      ],
+    );
+    // 请求时间在当前周窗口范围内，但快照属于上一周：按快照排除。
+    recordWindowSample(
+      store,
+      baseMs - 6 * dayMs,
+      10_000,
+      10_000,
+      20_000,
+      baseMs,
+      [
+        { windowId: "rolling", resetsAt: rollingResetsAt - 5 * hourMs / 1_000 },
+        { windowId: "weekly", resetsAt: weeklyResetsAt - 7 * dayMs / 1_000 },
+        { windowId: "monthly", resetsAt: monthlyResetsAt },
+      ],
+    );
+    // 月度快照匹配的请求计入月度窗口，即使请求时间早于倒推起点之外也不受影响。
+    recordWindowSample(
+      store,
+      baseMs - 40 * dayMs,
+      5_000,
+      5_000,
+      10_000,
+      baseMs,
+      [
+        { windowId: "rolling", resetsAt: rollingResetsAt - 5 * hourMs / 1_000 },
+        { windowId: "weekly", resetsAt: weeklyResetsAt - 7 * dayMs / 1_000 },
+        { windowId: "monthly", resetsAt: monthlyResetsAt },
+      ],
+    );
+    store.close();
+
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      usage: {
+        rolling: {
+          status: "ok",
+          percent: 45,
+          resetsAt: new Date(baseMs + 30 * 60 * 1_000).toISOString(),
+        },
+        weekly: {
+          status: "ok",
+          percent: 18,
+          resetsAt: new Date(baseMs + 12 * hourMs).toISOString(),
+        },
+        monthly: {
+          status: "ok",
+          percent: 15,
+          resetsAt: "2026-09-15T10:22:00.000Z",
+        },
+      },
+    }), { status: 200 }));
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: fetchImpl as typeof fetch,
+      metricsDatabasePath: metricsPath,
+      nowMs: () => baseMs + 1,
+    });
+
+    const usage = await adapter.accountUsage();
+    expect(usage.kind).toBe("quota-windows");
+    if (usage.kind !== "quota-windows") {
+      throw new Error("unexpected usage kind");
+    }
+    const byWindow = new Map(
+      usage.windows.map((window) => [window.windowId, window.localTokens]),
+    );
+    expect(byWindow.get("rolling")).toBe(100_000);
+    expect(byWindow.get("weekly")).toBe(220_000);
+    expect(byWindow.get("monthly")).toBe(250_000);
   });
 
   it("back-calculates the monthly window start from the reset time", () => {
@@ -757,6 +929,7 @@ function recordWindowSample(
   outputTokens: number,
   totalTokens: number | null,
   recordedAtMs?: number,
+  quotaWindows?: ReadonlyArray<{ windowId: string; resetsAt: number | null }> | null,
 ): void {
   store.record({
     provider: "opencode-go",
@@ -791,5 +964,6 @@ function recordWindowSample(
     responseCompletedAtMs: requestStartedAtMs,
     ...(recordedAtMs === undefined ? {} : { recordedAtMs }),
     weeklyQuota: null,
+    quotaWindows: quotaWindows ?? null,
   });
 }

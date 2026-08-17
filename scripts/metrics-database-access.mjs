@@ -17,7 +17,7 @@ import {
 } from "./metrics-command-options.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
-export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7]);
+export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8]);
 const baseMetricsColumns = Object.freeze([
   "id", "provider", "billing_mode", "pricing_currency", "pricing_source",
   "pricing_effective_at_ms", "uncached_input_price_per_million_nanos",
@@ -93,6 +93,7 @@ export function validateMetricsDatabaseStructure(
       ...(status.schemaVersion >= 5 ? ["weekly_quota_plan_type"] : []),
       ...(status.schemaVersion >= 6 ? ["error_message"] : []),
       ...(status.schemaVersion >= 8 ? ["pricing_bucket"] : []),
+      ...(status.schemaVersion >= 9 ? ["quota_windows"] : []),
     ];
     requireColumns(database, "model_request_metrics", requiredColumns);
     if (status.compatible) {

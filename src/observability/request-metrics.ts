@@ -135,6 +135,11 @@ export interface ModelRequestMetricSample {
     resetsAt: number;
     planType: string | null;
   } | null;
+  /** 请求发生时对应的官方配额窗口快照（如 OpenCode Go 5h/7d/月），缺省为 null。 */
+  quotaWindows?: ReadonlyArray<{
+    windowId: string;
+    resetsAt: number | null;
+  }> | null;
 }
 
 export interface WeeklyQuotaEstimateQuery {

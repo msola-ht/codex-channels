@@ -8,7 +8,7 @@ import {
   rmdirSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -97,13 +97,10 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
     copyDirectory(directory, join(backupRoot, "providers", basename(directory)));
   }
   for (const path of currentFiles) {
-    if (providerDirectories.some((directory) => path.startsWith(`${directory}/`))) {
+    if (providerDirectories.some((directory) => path.startsWith(`${directory}${sep}`))) {
       continue;
     }
-    copyFile(
-      path,
-      join(backupRoot, "providers", basename(dirname(path)), basename(path)),
-    );
+    copyFile(path, resolveBackupTarget(backupRoot, { codexHome, connectHome }, path));
   }
   for (const path of referenceFiles) {
     copyFile(path, join(backupRoot, "reference", relative(codexHome, path)));
@@ -160,6 +157,28 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
     settings,
     copied,
   };
+}
+
+export function resolveBackupTarget(
+  backupRoot,
+  { codexHome, connectHome },
+  path,
+) {
+  if (path.startsWith(`${codexHome}${sep}`)) {
+    return join(backupRoot, "codex-home", assertInside(codexHome, path));
+  }
+  if (path.startsWith(`${connectHome}${sep}`)) {
+    return join(backupRoot, "other", assertInside(connectHome, path));
+  }
+  throw new Error(`备份目标不在受管目录内，拒绝迁移：${path}`);
+}
+
+function assertInside(root, path) {
+  const rel = relative(root, path);
+  if (rel === ".." || rel.startsWith(`..${sep}`)) {
+    throw new Error(`备份目标超出受管目录，拒绝迁移：${path}`);
+  }
+  return rel;
 }
 
 function writeManifest(backupDirectory, value) {

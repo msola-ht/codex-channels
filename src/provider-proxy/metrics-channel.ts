@@ -223,6 +223,10 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   if (weeklyQuota !== undefined && !nullableWeeklyQuota(weeklyQuota)) {
     return undefined;
   }
+  const quotaWindows = record.quotaWindows;
+  if (quotaWindows !== undefined && !nullableQuotaWindows(quotaWindows)) {
+    return undefined;
+  }
   const quota = weeklyQuota as Record<string, unknown> | null | undefined;
   return {
     ...record,
@@ -232,7 +236,30 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     weeklyQuota: quota === null || quota === undefined
       ? null
       : { ...quota, planType: quota.planType ?? null },
+    quotaWindows: quotaWindows === null || quotaWindows === undefined
+      ? null
+      : quotaWindows,
   } as unknown as ProviderProxyMetrics;
+}
+
+function nullableQuotaWindows(value: unknown): boolean {
+  if (value === null) return true;
+  if (!Array.isArray(value)) return false;
+  return value.every((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const window = entry as Record<string, unknown>;
+    return typeof window.windowId === "string"
+      && window.windowId.length > 0
+      && window.windowId.length <= 64
+      && (
+        window.resetsAt === null
+        || (
+          typeof window.resetsAt === "number"
+          && Number.isSafeInteger(window.resetsAt)
+          && window.resetsAt >= 0
+        )
+      );
+  });
 }
 
 function nullableWeeklyQuota(value: unknown): boolean {

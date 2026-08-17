@@ -583,6 +583,25 @@ setInterval(() => undefined, 1_000);`,
     store.close();
   });
 
+  it("round-trips quota window snapshots through raw records", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const quotaWindows = [
+      { windowId: "rolling", resetsAt: 1_800_000_000 },
+      { windowId: "weekly", resetsAt: 1_900_000_000 },
+      { windowId: "monthly", resetsAt: 2_000_000_000 },
+    ];
+    store.record({ ...sample(), quotaWindows });
+
+    expect(store.requestRowsAfter(0, 10)[0]).toMatchObject({
+      provider: "deepseek",
+      quotaWindows,
+    });
+    store.close();
+  });
+
   it("returns subagent thread records incrementally after recorded time", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
@@ -1658,5 +1677,6 @@ function sample(): ModelRequestMetricSample {
     lastOutputDeltaAtMs: 1_600,
     responseCompletedAtMs: 1_650,
     weeklyQuota: null,
+    quotaWindows: null,
   };
 }

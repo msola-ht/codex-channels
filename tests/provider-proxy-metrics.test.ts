@@ -74,6 +74,50 @@ describe("Provider proxy metrics channel", () => {
     await server.close();
   });
 
+  it("forwards quota window snapshots and tolerates their absence", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-mq-windows-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "metrics.sock");
+    let resolveMetrics: (metrics: ProviderProxyMetrics) => void = () => undefined;
+    const received = new Promise<ProviderProxyMetrics>((resolve) => {
+      resolveMetrics = resolve;
+    });
+    const server = new ProviderProxyMetricsServer(socketPath, resolveMetrics);
+    await server.start();
+    const withWindows = {
+      ...metrics(),
+      quotaWindows: [
+        { windowId: "rolling", resetsAt: 1_785_700_000 },
+        { windowId: "weekly", resetsAt: 1_785_800_000 },
+        { windowId: "monthly", resetsAt: 1_790_000_000 },
+      ],
+    };
+
+    await sendProviderProxyMetrics(socketPath, withWindows);
+
+    await expect(received).resolves.toEqual(withWindows);
+    await server.close();
+  });
+
+  it("accepts legacy metrics without a quota window snapshot", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-mq-legacy-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "metrics.sock");
+    let resolveMetrics: (metrics: ProviderProxyMetrics) => void = () => undefined;
+    const received = new Promise<ProviderProxyMetrics>((resolve) => {
+      resolveMetrics = resolve;
+    });
+    const server = new ProviderProxyMetricsServer(socketPath, resolveMetrics);
+    await server.start();
+    const legacy = { ...metrics() } as Partial<ProviderProxyMetrics>;
+    delete legacy.quotaWindows;
+
+    await sendProviderProxyMetrics(socketPath, legacy as ProviderProxyMetrics);
+
+    await expect(received).resolves.toMatchObject({ quotaWindows: null });
+    await server.close();
+  });
+
   it("closes an active listener even when startup did not reach the started state", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-cleanup-"));
     temporaryDirectories.push(directory);
@@ -152,5 +196,6 @@ function metrics(): ProviderProxyMetrics {
     lastOutputDeltaAtMs: 1_800,
     responseCompletedAtMs: 1_900,
     weeklyQuota: null,
+    quotaWindows: null,
   };
 }
