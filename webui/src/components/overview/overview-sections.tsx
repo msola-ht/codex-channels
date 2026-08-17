@@ -282,6 +282,11 @@ export function OpencodeGoUsageCard({
                 ? "重置时间未知"
                 : `下次重置 ${formatTime(window.resetsAt)}`}
             </p>
+            {window.localTokens !== null && window.localTokens !== undefined ? (
+              <p className="text-xs text-muted-foreground">
+                本地 Token 约 {formatTokens(window.localTokens)}
+              </p>
+            ) : null}
           </div>
         ))}
         {modelUsage.length === 0 ? null : (
@@ -292,7 +297,7 @@ export function OpencodeGoUsageCard({
               modelUsage[0]?.windowStartAtMs !== undefined &&
               modelUsage[0]?.windowEndAtMs !== null &&
               modelUsage[0]?.windowEndAtMs !== undefined
-                ? `（月度窗口 ${formatTime(Math.floor(modelUsage[0].windowStartAtMs / 1_000))} – ${formatTime(Math.floor(modelUsage[0].windowEndAtMs / 1_000))}）`
+                ? `（月度窗口 ${formatTime(modelUsage[0].windowStartAtMs)} – ${formatTime(modelUsage[0].windowEndAtMs)}）`
                 : ""}
               （按当前价格基线重算）
             </p>

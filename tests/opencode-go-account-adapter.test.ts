@@ -249,6 +249,85 @@ describe("OpenCode Go account adapter", () => {
     );
   });
 
+  it("reports local token totals for each quota window from the metrics database", async () => {
+    const codexHome = await createCodexHome();
+    const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-window-tokens-"));
+    temporaryDirectories.push(directory);
+    const metricsPath = modelRequestMetricsDatabasePath(
+      join(directory, "gateway.sqlite3"),
+    );
+    const store = new SqliteModelRequestMetricsStore(metricsPath);
+    const baseMs = Date.now();
+    const hourMs = 60 * 60 * 1_000;
+    const dayMs = 24 * hourMs;
+    recordWindowSample(store, baseMs - 1 * hourMs, 60_000, 40_000, 100_000);
+    recordWindowSample(store, baseMs - 4 * hourMs, 60_000, 40_000, null);
+    recordWindowSample(store, baseMs - 6 * hourMs, 10_000, 10_000, 20_000);
+    recordWindowSample(store, baseMs - 6 * dayMs, 20_000, 10_000, 30_000);
+    recordWindowSample(store, baseMs - 20 * dayMs, 5_000, 5_000, 10_000);
+    store.record({
+      provider: "deepseek",
+      pricing: null,
+      transport: "http",
+      responseFormat: "sse",
+      operation: "response",
+      threadId: "thread-other",
+      turnId: "turn-other",
+      model: "deepseek-v4-flash",
+      serviceTier: "default",
+      reasoningEffort: "high",
+      status: "completed",
+      httpStatus: 200,
+      errorType: null,
+      errorCode: null,
+      errorMessage: null,
+      incompleteReason: null,
+      inputTokens: 9_000_000,
+      cachedInputTokens: 0,
+      outputTokens: 9_000_000,
+      reasoningOutputTokens: 0,
+      totalTokens: 18_000_000,
+      upstreamCreatedAt: 0,
+      upstreamCompletedAt: 0,
+      requestStartedAtMs: baseMs - 1 * hourMs,
+      firstTokenAtMs: null,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: null,
+      lastOutputDeltaAtMs: null,
+      responseCompletedAtMs: baseMs - 1 * hourMs,
+      weeklyQuota: null,
+    });
+    store.close();
+
+    const nowMs = Date.now();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      usage: {
+        rolling: { status: "ok", percent: 45, resetsAt: "2026-08-17T01:23:00.000Z" },
+        weekly: { status: "ok", percent: 18, resetsAt: "2026-08-23T20:00:00.000Z" },
+        monthly: { status: "ok", percent: 15, resetsAt: "2026-09-15T10:22:00.000Z" },
+      },
+    }), { status: 200 }));
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: { CODEX_HOME: codexHome },
+      fetchImpl: fetchImpl as typeof fetch,
+      metricsDatabasePath: metricsPath,
+      nowMs: () => nowMs,
+    });
+
+    const usage = await adapter.accountUsage();
+    expect(usage.kind).toBe("quota-windows");
+    if (usage.kind !== "quota-windows") {
+      throw new Error("unexpected usage kind");
+    }
+    const byWindow = new Map(
+      usage.windows.map((window) => [window.windowId, window.localTokens]),
+    );
+    expect(byWindow.get("rolling")).toBe(200_000);
+    expect(byWindow.get("weekly")).toBe(250_000);
+    expect(byWindow.get("monthly")).toBe(220_000);
+  });
+
   it("back-calculates the monthly window start from the reset time", () => {
     expect(opencodeGoMonthlyWindowStartMs(
       Date.parse("2026-09-15T14:22:07.934Z") / 1_000,
@@ -299,4 +378,46 @@ async function createCodexHome(): Promise<string> {
 
 function providerConfig(apiKey: string): string {
   return `[model_providers.opencode-go]\nname = "opencode-go"\nbase_url = "https://opencode.ai/zen/go/v1"\nwire_api = "responses"\nsupports_websockets = false\nrequires_openai_auth = false\nexperimental_bearer_token = "${apiKey}"\n`;
+}
+
+function recordWindowSample(
+  store: SqliteModelRequestMetricsStore,
+  requestStartedAtMs: number,
+  inputTokens: number,
+  outputTokens: number,
+  totalTokens: number | null,
+): void {
+  store.record({
+    provider: "opencode-go",
+    pricing: null,
+    transport: "http",
+    responseFormat: "sse",
+    operation: "response",
+    threadId: "thread-window",
+    turnId: "turn-window",
+    model: "deepseek-v4-flash",
+    serviceTier: "default",
+    reasoningEffort: "high",
+    status: "completed",
+    httpStatus: 200,
+    errorType: null,
+    errorCode: null,
+    errorMessage: null,
+    incompleteReason: null,
+    inputTokens,
+    cachedInputTokens: 0,
+    outputTokens,
+    reasoningOutputTokens: 0,
+    totalTokens,
+    upstreamCreatedAt: 0,
+    upstreamCompletedAt: 0,
+    requestStartedAtMs,
+    firstTokenAtMs: null,
+    firstReasoningDeltaAtMs: null,
+    lastReasoningDeltaAtMs: null,
+    firstOutputDeltaAtMs: null,
+    lastOutputDeltaAtMs: null,
+    responseCompletedAtMs: requestStartedAtMs,
+    weeklyQuota: null,
+  });
 }

@@ -104,6 +104,7 @@ export interface ProviderQuotaWindow {
   usedPercent: number;
   resetsAt: number | null;
   status: string | null;
+  localTokens?: number | null;
 }
 
 export interface ProviderModelUsageEstimate {

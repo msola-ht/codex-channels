@@ -301,8 +301,10 @@ async function handleOpencodeGoUsage(environment, response) {
         windowId: window.windowId,
         label: window.label,
         usedPercent: window.usedPercent,
-        resetsAt: window.resetsAt,
+        // 指标/账户接口统一使用秒级重置时间，WebUI 前端使用毫秒时间戳。
+        resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
         status: window.status,
+        localTokens: window.localTokens ?? null,
       })),
       modelUsage: usage.modelUsage ?? [],
     });

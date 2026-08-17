@@ -1266,7 +1266,11 @@ export function formatConversationUsage(
             const reset = window.resetsAt === null
               ? "未知"
               : formatResetTime(window.resetsAt);
-            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)} · 重置 ${reset}`;
+            const localTokens = window.localTokens === undefined
+              || window.localTokens === null
+              ? ""
+              : ` · 本地 Token 约 ${formatTokenCount(window.localTokens)}`;
+            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)}${localTokens} · 重置 ${reset}`;
           })),
       ...(modelUsage.length === 0
         ? []

@@ -54,10 +54,13 @@ export function createOpencodeGoAccountAdapter(
           missingBody: () => new Error("OpenCode Go usage response is empty"),
         });
         const usage = parseUsageResponse(JSON.parse(body.toString("utf8")) as unknown);
+        if (usage.kind !== "quota-windows") {
+          throw new Error("OpenCode Go usage response schema is invalid");
+        }
         const nowMs = options.nowMs?.() ?? Date.now();
-        const monthlyWindow = usage.kind === "quota-windows"
-          ? usage.windows.find((window) => window.windowId === "monthly")
-          : undefined;
+        const monthlyWindow = usage.windows.find(
+          (window) => window.windowId === "monthly",
+        );
         let windowEndAtMs: number | null = monthlyWindow?.resetsAt === null
           || monthlyWindow?.resetsAt === undefined
           ? null
@@ -79,9 +82,23 @@ export function createOpencodeGoAccountAdapter(
               windowStartAtMs,
               windowEndAtMs,
             );
+        const localTokens = options.metricsDatabasePath === undefined
+          ? null
+          : readWindowLocalTokens(
+              options.metricsDatabasePath,
+              nowMs,
+              windowStartAtMs,
+              windowEndAtMs,
+            );
+        const windows = localTokens === null
+          ? usage.windows
+          : usage.windows.map((window) => ({
+              ...window,
+              localTokens: localTokens.get(window.windowId) ?? null,
+            }));
         return modelUsage === undefined
-          ? usage
-          : { ...usage, modelUsage };
+          ? { ...usage, windows }
+          : { ...usage, windows, modelUsage };
       } catch {
         throw new UserFacingError(
           "provider.account.unavailable",
@@ -114,6 +131,82 @@ export function createOpencodeGoRemainingUsageReader(
       return null;
     }
   };
+}
+
+function readWindowLocalTokens(
+  metricsDatabasePath: string,
+  nowMs: number,
+  monthlyWindowStartAtMs: number,
+  monthlyWindowEndAtMs: number | null,
+): Map<string, number> {
+  const tokens = new Map<string, number>();
+  try {
+    const store = new SqliteModelRequestMetricsStore(
+      metricsDatabasePath,
+      nowMs,
+      { readOnly: true },
+    );
+    try {
+      const windows: ReadonlyArray<readonly [string, number, number]> = [
+        ["rolling", nowMs - 5 * 60 * 60 * 1_000, nowMs],
+        ["weekly", nowMs - 7 * 24 * 60 * 60 * 1_000, nowMs],
+        ["monthly", monthlyWindowStartAtMs, monthlyWindowEndAtMs ?? nowMs],
+      ];
+      for (const [windowId, startAtMs, endAtMs] of windows) {
+        if (
+          Number.isFinite(startAtMs)
+          && Number.isFinite(endAtMs)
+          && endAtMs > startAtMs
+        ) {
+          tokens.set(windowId, readOpencodeGoTokens(store, startAtMs, endAtMs));
+        }
+      }
+    } finally {
+      store.close();
+    }
+  } catch {
+    // 指标库不可用时窗口本地 Token 保持不可用
+  }
+  return tokens;
+}
+
+function readOpencodeGoTokens(
+  store: SqliteModelRequestMetricsStore,
+  startAtMs: number,
+  endAtMs: number,
+): number {
+  let total = 0;
+  let offset = 0;
+  do {
+    const page = store.page({
+      startAtMs,
+      endAtMs,
+      offset,
+      limit: 500,
+      sortKey: "recordedAtMs",
+      sortDirection: "asc",
+      filter: "opencode-go",
+    });
+    for (const record of page.records) {
+      if (record.provider !== "opencode-go") continue;
+      const requestAtMs = record.requestStartedAtMs ?? record.recordedAtMs;
+      if (requestAtMs < startAtMs || requestAtMs >= endAtMs) continue;
+      const totalTokens = record.totalTokens;
+      if (
+        totalTokens !== null
+        && Number.isSafeInteger(totalTokens)
+        && totalTokens >= 0
+      ) {
+        total += totalTokens;
+        continue;
+      }
+      if (record.inputTokens !== null && record.outputTokens !== null) {
+        total += record.inputTokens + record.outputTokens;
+      }
+    }
+    offset = page.nextOffset ?? -1;
+  } while (offset >= 0);
+  return total;
 }
 
 function readModelUsageEstimates(
