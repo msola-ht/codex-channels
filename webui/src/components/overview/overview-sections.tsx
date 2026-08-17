@@ -290,7 +290,8 @@ export function OpencodeGoUsageCard({
               模型本地用量
               {modelUsage[0]?.windowStartAtMs !== null &&
               modelUsage[0]?.windowStartAtMs !== undefined &&
-              modelUsage[0]?.windowEndAtMs !== null
+              modelUsage[0]?.windowEndAtMs !== null &&
+              modelUsage[0]?.windowEndAtMs !== undefined
                 ? `（月度窗口 ${formatTime(Math.floor(modelUsage[0].windowStartAtMs / 1_000))} – ${formatTime(Math.floor(modelUsage[0].windowEndAtMs / 1_000))}）`
                 : ""}
               （按当前价格基线重算）

@@ -1254,6 +1254,7 @@ export function formatConversationUsage(
     const windowRange = firstEstimate?.windowStartAtMs === null
       || firstEstimate?.windowStartAtMs === undefined
       || firstEstimate?.windowEndAtMs === null
+      || firstEstimate?.windowEndAtMs === undefined
       ? ""
       : `（月度窗口 ${formatResetTime(Math.floor(firstEstimate.windowStartAtMs / 1_000))} – ${formatResetTime(Math.floor(firstEstimate.windowEndAtMs / 1_000))}）`;
     return toStructuredMarkdownList([

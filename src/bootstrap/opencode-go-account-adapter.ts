@@ -167,6 +167,18 @@ function readModelUsageEstimates(
         const includedUsageUsd = baseline.models.get(model)?.includedUsageUsd;
         if (includedUsageUsd === undefined) continue;
         const includedUsdNanos = Math.round(includedUsageUsd * 1_000_000_000);
+        if (includedUsdNanos <= 0) {
+          estimates.push({
+            model,
+            includedUsageUsd,
+            usedUsdNanos,
+            usedPercent: null,
+            remainingUsdNanos: null,
+            windowStartAtMs,
+            windowEndAtMs,
+          });
+          continue;
+        }
         estimates.push({
           model,
           includedUsageUsd,
