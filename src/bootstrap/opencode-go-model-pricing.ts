@@ -8,6 +8,7 @@ import type {
 import {
   isMinuteInLocalRanges,
   localMinuteOf,
+  type LocalMinuteRange,
 } from "./pricing-bucket.js";
 
 const baselineUrl = new URL(
@@ -46,11 +47,6 @@ interface ModelPrice {
   tiers: readonly PriceTier[];
   peakOffPeak?: PeakOffPeakPrice;
   includedUsageUsd: number;
-}
-
-interface LocalMinuteRange {
-  start: number;
-  end: number;
 }
 
 export interface OpenCodeGoPricingBaseline {

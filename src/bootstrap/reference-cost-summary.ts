@@ -1,5 +1,6 @@
 import type { ReferenceCostSummary } from "../conversation-core/index.js";
 import type { StoredThreadRequestMetricsSummary } from "../observability/index.js";
+import { pricingBucketOrder } from "./pricing-bucket.js";
 
 export function mergeSessionReferenceCost(
   summary: StoredThreadRequestMetricsSummary,
@@ -199,6 +200,5 @@ function mergePricingBuckets(
     ...(left ?? []),
     ...(right ?? []),
   ]);
-  const order: ReadonlyArray<"peak" | "off-peak"> = ["off-peak", "peak"];
-  return order.filter((bucket) => buckets.has(bucket));
+  return pricingBucketOrder.filter((bucket) => buckets.has(bucket));
 }
