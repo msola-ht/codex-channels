@@ -1250,6 +1250,12 @@ export function formatConversationUsage(
   }
   if (result.result.kind === "quota-windows") {
     const modelUsage = result.result.modelUsage ?? [];
+    const firstEstimate = modelUsage[0];
+    const windowRange = firstEstimate?.windowStartAtMs === null
+      || firstEstimate?.windowStartAtMs === undefined
+      || firstEstimate?.windowEndAtMs === null
+      ? ""
+      : `（月度窗口 ${formatResetTime(Math.floor(firstEstimate.windowStartAtMs / 1_000))} – ${formatResetTime(Math.floor(firstEstimate.windowEndAtMs / 1_000))}）`;
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
       `API 可用：${result.result.available ? "是" : "否"}`,
@@ -1265,7 +1271,7 @@ export function formatConversationUsage(
         ? []
         : [
             "",
-            "模型本地用量（按本机参考价估算，非官方账单）：",
+            `模型本地用量${windowRange}（按本机参考价估算，非官方账单）：`,
             ...modelUsage.map((estimate) => {
               const used = estimate.usedUsdNanos === null
                 ? "未知"

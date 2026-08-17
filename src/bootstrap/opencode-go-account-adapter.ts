@@ -48,11 +48,30 @@ export function createOpencodeGoAccountAdapter(
           missingBody: () => new Error("OpenCode Go usage response is empty"),
         });
         const usage = parseUsageResponse(JSON.parse(body.toString("utf8")) as unknown);
+        const nowMs = options.nowMs?.() ?? Date.now();
+        const monthlyWindow = usage.kind === "quota-windows"
+          ? usage.windows.find((window) => window.windowId === "monthly")
+          : undefined;
+        let windowEndAtMs: number | null = monthlyWindow?.resetsAt === null
+          || monthlyWindow?.resetsAt === undefined
+          ? null
+          : monthlyWindow.resetsAt * 1_000;
+        let windowStartAtMs: number;
+        try {
+          windowStartAtMs = windowEndAtMs === null
+            ? calendarMonthStart(nowMs)
+            : opencodeGoMonthlyWindowStartMs(windowEndAtMs / 1_000);
+        } catch {
+          windowStartAtMs = calendarMonthStart(nowMs);
+          windowEndAtMs = null;
+        }
         const modelUsage = options.metricsDatabasePath === undefined
           ? undefined
           : readModelUsageEstimates(
               options.metricsDatabasePath,
-              options.nowMs?.() ?? Date.now(),
+              nowMs,
+              windowStartAtMs,
+              windowEndAtMs,
             );
         return modelUsage === undefined
           ? usage
@@ -77,21 +96,21 @@ export interface OpencodeGoAccountAdapterOptions {
 
 function readModelUsageEstimates(
   metricsDatabasePath: string,
-  nowMs: number,
+  endAtMs: number,
+  windowStartAtMs: number,
+  windowEndAtMs: number | null,
 ): ProviderModelUsageEstimate[] {
   try {
-    const now = new Date(nowMs);
-    const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
     const store = new SqliteModelRequestMetricsStore(
       metricsDatabasePath,
-      nowMs,
+      endAtMs,
       { readOnly: true },
     );
     try {
       const report = store.aggregate({
         dimension: "model",
-        startAtMs: monthStart,
-        endAtMs: nowMs,
+        startAtMs: windowStartAtMs,
+        endAtMs,
       });
       const baseline = loadOpenCodeGoPricingBaseline();
       return report.groups
@@ -112,6 +131,8 @@ function readModelUsageEstimates(
             usedUsdNanos,
             usedPercent: usedUsdNanos / includedUsdNanos * 100,
             remainingUsdNanos: includedUsdNanos - usedUsdNanos,
+            windowStartAtMs,
+            windowEndAtMs,
           };
           return estimate;
         })
@@ -124,6 +145,32 @@ function readModelUsageEstimates(
   } catch {
     return [];
   }
+}
+
+export function opencodeGoMonthlyWindowStartMs(resetsAtSeconds: number): number {
+  if (!Number.isFinite(resetsAtSeconds) || resetsAtSeconds <= 0) {
+    throw new Error("OpenCode Go 月度窗口重置时间无效");
+  }
+  const date = new Date(resetsAtSeconds * 1_000);
+  const targetMonth = date.getUTCMonth() - 1;
+  const targetYear = date.getUTCFullYear();
+  const lastDayOfTargetMonth = new Date(
+    Date.UTC(targetYear, targetMonth + 1, 0),
+  ).getUTCDate();
+  return Date.UTC(
+    targetYear,
+    targetMonth,
+    Math.min(date.getUTCDate(), lastDayOfTargetMonth),
+    date.getUTCHours(),
+    date.getUTCMinutes(),
+    date.getUTCSeconds(),
+    date.getUTCMilliseconds(),
+  );
+}
+
+function calendarMonthStart(nowMs: number): number {
+  const now = new Date(nowMs);
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
 }
 
 function parseUsageResponse(value: unknown): ProviderAccountUsage {

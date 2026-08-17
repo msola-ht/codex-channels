@@ -733,11 +733,14 @@ describe("provider-aware conversation command formatting", () => {
           usedUsdNanos: 1_010_000_000,
           usedPercent: 1_010_000_000 / 15_000_000_000 * 100,
           remainingUsdNanos: 13_990_000_000,
+          windowStartAtMs: Date.parse("2026-08-15T14:22:07.934Z"),
+          windowEndAtMs: Date.parse("2026-09-15T14:22:07.934Z"),
         }],
       },
     });
 
     expect(rendered).toContain("模型本地用量");
+    expect(rendered).toContain("月度窗口");
     expect(rendered).toContain(
       "deepseek-v4-flash：已用 $1.01 / 包含 $15.00（6.7%）· 剩余 $13.99",
     );

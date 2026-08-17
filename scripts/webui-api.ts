@@ -301,6 +301,8 @@ export interface OpencodeGoModelUsageEstimate {
   usedUsdNanos: number | null
   usedPercent: number | null
   remainingUsdNanos: number | null
+  windowStartAtMs: number | null
+  windowEndAtMs: number | null
 }
 
 export interface OpencodeGoUsageResponse {

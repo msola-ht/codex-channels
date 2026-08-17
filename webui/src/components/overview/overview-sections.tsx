@@ -287,7 +287,13 @@ export function OpencodeGoUsageCard({
         {modelUsage.length === 0 ? null : (
           <div className="flex flex-col gap-2 border-t pt-3">
             <p className="text-xs text-muted-foreground">
-              模型本地用量（按本机参考价估算）
+              模型本地用量
+              {modelUsage[0]?.windowStartAtMs !== null &&
+              modelUsage[0]?.windowStartAtMs !== undefined &&
+              modelUsage[0]?.windowEndAtMs !== null
+                ? `（月度窗口 ${formatTime(Math.floor(modelUsage[0].windowStartAtMs / 1_000))} – ${formatTime(Math.floor(modelUsage[0].windowEndAtMs / 1_000))}）`
+                : ""}
+              （按本机参考价估算）
             </p>
             {modelUsage.map((estimate) => (
               <div key={estimate.model} className="flex flex-col gap-1">

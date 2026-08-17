@@ -4,7 +4,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createOpencodeGoAccountAdapter } from "../src/bootstrap/opencode-go-account-adapter.js";
+import {
+  createOpencodeGoAccountAdapter,
+  opencodeGoMonthlyWindowStartMs,
+} from "../src/bootstrap/opencode-go-account-adapter.js";
 import {
   SqliteModelRequestMetricsStore,
   modelRequestMetricsDatabasePath,
@@ -180,7 +183,11 @@ describe("OpenCode Go account adapter", () => {
     const nowMs = Date.now();
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       usage: {
-        monthly: { status: "ok", percent: 1 },
+        monthly: {
+          status: "ok",
+          percent: 1,
+          resetsAt: "2026-08-20T00:00:00.000Z",
+        },
       },
     }), { status: 200 }));
     const adapter = createOpencodeGoAccountAdapter({
@@ -202,6 +209,21 @@ describe("OpenCode Go account adapter", () => {
     expect(estimate.usedUsdNanos).toBe(1_010_000_000);
     expect(estimate.usedPercent).toBeCloseTo(1_010_000_000 / 15_000_000_000 * 100, 6);
     expect(estimate.remainingUsdNanos).toBe(13_990_000_000);
+    expect(estimate.windowEndAtMs).toBe(Date.parse("2026-08-20T00:00:00.000Z"));
+    expect(estimate.windowStartAtMs).toBe(
+      opencodeGoMonthlyWindowStartMs(Date.parse("2026-08-20T00:00:00.000Z") / 1_000),
+    );
+  });
+
+  it("back-calculates the monthly window start from the reset time", () => {
+    expect(opencodeGoMonthlyWindowStartMs(
+      Date.parse("2026-09-15T14:22:07.934Z") / 1_000,
+    )).toBe(Date.parse("2026-08-15T14:22:07.934Z"));
+    expect(opencodeGoMonthlyWindowStartMs(
+      Date.parse("2026-03-31T00:00:00.000Z") / 1_000,
+    )).toBe(Date.parse("2026-02-28T00:00:00.000Z"));
+    expect(() => opencodeGoMonthlyWindowStartMs(Number.NaN))
+      .toThrow("月度窗口重置时间无效");
   });
 });
 

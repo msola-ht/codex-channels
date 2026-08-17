@@ -112,6 +112,8 @@ export interface ProviderModelUsageEstimate {
   usedUsdNanos: number | null;
   usedPercent: number | null;
   remainingUsdNanos: number | null;
+  windowStartAtMs: number | null;
+  windowEndAtMs: number | null;
 }
 
 export type ProviderAccountUsage =
