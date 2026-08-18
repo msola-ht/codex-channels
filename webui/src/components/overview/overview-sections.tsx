@@ -287,6 +287,11 @@ export function OpencodeGoUsageCard({
                 本地 Token 约 {formatTokens(window.localTokens)}
               </p>
             ) : null}
+            {window.totalUsd !== null && window.totalUsd !== undefined ? (
+              <p className="text-xs text-muted-foreground">
+                总额 ${window.totalUsd.toFixed(2)}
+              </p>
+            ) : null}
           </div>
         ))}
         {modelUsage.length === 0 ? null : (

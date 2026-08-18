@@ -293,6 +293,7 @@ export interface OpencodeGoQuotaWindow {
   usedPercent: number
   resetsAt: number | null
   status: string | null
+  totalUsd?: number
   localTokens?: number | null
 }
 

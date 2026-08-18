@@ -48,6 +48,7 @@ describe("OpenCode Go account adapter", () => {
           usedPercent: 0,
           resetsAt: Math.floor(Date.parse("2026-08-16T18:03:54.934Z") / 1_000),
           status: "ok",
+          totalUsd: 12,
         },
         {
           windowId: "weekly",
@@ -55,6 +56,7 @@ describe("OpenCode Go account adapter", () => {
           usedPercent: 2,
           resetsAt: Math.floor(Date.parse("2026-08-17T00:00:00.934Z") / 1_000),
           status: "ok",
+          totalUsd: 30,
         },
         {
           windowId: "monthly",
@@ -62,6 +64,7 @@ describe("OpenCode Go account adapter", () => {
           usedPercent: 1,
           resetsAt: Math.floor(Date.parse("2026-09-15T14:22:07.934Z") / 1_000),
           status: "ok",
+          totalUsd: 60,
         },
       ],
     });
