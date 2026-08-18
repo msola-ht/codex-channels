@@ -132,7 +132,7 @@ OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/op
 （由 `resetsAt` 倒推开始时间）内各模型已用金额；价格更新生效时间（基线 `sourceUpdatedAt`）之前
 的请求使用当时保存的价格快照，之后的请求按当前基线重算；档位优先沿用请求时保存的
 `pricing_bucket`，快照缺失时才按当前基线判定。对照基线中的模型包含用量（如
-DeepSeek V4 Pro/Flash 每月 $15）计算已用百分比与剩余额度。
+DeepSeek V4 Flash 每月 $30、V4 Pro 每月 $15）计算已用百分比与剩余额度。
 
 指标库 Schema v8 为价格快照新增 `pricing_bucket` 列（`peak`/`off-peak`），Schema v9 再新增
 `quota_windows` 列保存 OpenCode Go 请求发生时的官方 5 小时/7 天/月度窗口 `resetsAt` 快照，旧库

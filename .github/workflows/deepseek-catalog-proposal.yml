@@ -2,7 +2,7 @@ name: DeepSeek upstream proposal
 
 on:
   schedule:
-    - cron: "47 3 * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 permissions:

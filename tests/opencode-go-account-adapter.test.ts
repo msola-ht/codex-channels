@@ -162,7 +162,9 @@ describe("OpenCode Go account adapter", () => {
       totalTokens: 700_000,
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
-      requestStartedAtMs: Date.parse("2026-08-16T17:00:00.000Z"),
+      // 请求时间晚于基线源更新时间，用于覆盖“无快照时按当前基线重算”的分支；
+      // 23:30 UTC 处于 Off-Peak 时段。
+      requestStartedAtMs: Date.parse("2026-08-17T23:30:00.000Z"),
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
       lastReasoningDeltaAtMs: null,
@@ -289,25 +291,25 @@ describe("OpenCode Go account adapter", () => {
     expect(offPeak).toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "off-peak",
-      includedUsageUsd: 15,
+      includedUsageUsd: 30,
       usedUsdNanos: 237_500_000,
-      remainingUsdNanos: 14_762_500_000,
+      remainingUsdNanos: 29_762_500_000,
       windowEndAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
     });
     expect(offPeak!.usedPercent).toBeCloseTo(
-      237_500_000 / 15_000_000_000 * 100,
+      237_500_000 / 30_000_000_000 * 100,
       6,
     );
     expect(peak).toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "peak",
-      includedUsageUsd: 15,
+      includedUsageUsd: 30,
       usedUsdNanos: 110_000_000,
-      remainingUsdNanos: 14_890_000_000,
+      remainingUsdNanos: 29_890_000_000,
       windowEndAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
     });
     expect(peak!.usedPercent).toBeCloseTo(
-      110_000_000 / 15_000_000_000 * 100,
+      110_000_000 / 30_000_000_000 * 100,
       6,
     );
     expect(offPeak!.windowStartAtMs).toBe(
@@ -606,11 +608,11 @@ describe("OpenCode Go account adapter", () => {
     const store = new SqliteModelRequestMetricsStore(metricsPath);
     recordWindowSample(
       store,
-      Date.parse("2026-08-16T17:00:00.000Z"),
+      Date.parse("2026-08-18T04:59:59.000Z"),
       100_000,
       10_000,
       110_000,
-      Date.parse("2026-08-17T07:00:00.000Z"),
+      Date.parse("2026-08-18T05:00:00.000Z"),
     );
     store.record({
       provider: "opencode-go",
@@ -669,13 +671,13 @@ describe("OpenCode Go account adapter", () => {
       environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
-      nowMs: () => Date.parse("2026-08-17T08:30:00.000Z"),
+      nowMs: () => Date.parse("2026-08-18T02:30:00.000Z"),
     });
     const offPeakReader = createOpencodeGoRemainingUsageReader({
       environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
-      nowMs: () => Date.parse("2026-08-17T17:30:00.000Z"),
+      nowMs: () => Date.parse("2026-08-18T05:30:00.000Z"),
     });
 
     await expect(peakReader("deepseek-v4-flash")).resolves.toMatchObject({
@@ -691,7 +693,7 @@ describe("OpenCode Go account adapter", () => {
     // 传入请求开始时间优先于当前时间：当前处于 Off-Peak，但请求开始于 Peak 时段。
     await expect(offPeakReader(
       "deepseek-v4-flash",
-      Date.parse("2026-08-17T08:30:00.000Z"),
+      Date.parse("2026-08-18T02:30:00.000Z"),
     )).resolves.toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "peak",
