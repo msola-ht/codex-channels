@@ -196,7 +196,7 @@ Application 的 `TurnInput` 是只含 `text`、`localImage` 与 `localAudio` 的
 | 各模块如何装配和管理生命周期 | [`bootstrap/`](../src/bootstrap/README.md) | [`gateway-startup-cleanup.test.ts`](../tests/gateway-startup-cleanup.test.ts) |
 | Telegram 如何适配核心事件 | [`surfaces/telegram/`](../src/surfaces/telegram/README.md) | [`tests/README.md`](../tests/README.md) |
 | 新通讯渠道如何按模块接入 | [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)、[`surfaces/`](../src/surfaces/README.md) | [`module-boundaries.test.ts`](../tests/module-boundaries.test.ts)、[`surface-manager.test.ts`](../tests/surface-manager.test.ts) |
-| 新第三方模型 Provider 如何接入 | [`第三方模型 Provider 接入指南`](provider-integration-guide.md)、[`model-provider-runtime.mjs`](../runtime/model-provider-runtime.mjs)、[`app.ts`](../src/bootstrap/app.ts) | [`model-provider-runtime.test.ts`](../tests/model-provider-runtime.test.ts)、[`model-provider-file-layout.test.ts`](../tests/model-provider-file-layout.test.ts)、[`deepseek-setup.test.ts`](../tests/deepseek-setup.test.ts)、[`opencode-go-setup.test.ts`](../tests/opencode-go-setup.test.ts) |
+| 新第三方模型 Provider 如何接入 | [`第三方模型 Provider 接入指南`](provider-integration-guide.md)、[`model-provider-runtime.mjs`](../runtime/model-provider-runtime.mjs)、[`app.ts`](../src/bootstrap/app.ts) | [`model-provider-runtime.test.ts`](../tests/model-provider-runtime.test.ts)、[`codexc-cli.test.ts`](../tests/codexc-cli.test.ts)、[`model-provider-file-layout.test.ts`](../tests/model-provider-file-layout.test.ts)、[`deepseek-setup.test.ts`](../tests/deepseek-setup.test.ts)、[`opencode-go-setup.test.ts`](../tests/opencode-go-setup.test.ts) |
 | 与真实 App Server 的合同是否一致 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) | `RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts` |
 
 ## 当前架构边界

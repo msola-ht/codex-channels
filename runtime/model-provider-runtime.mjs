@@ -25,6 +25,8 @@ const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
 const managedThirdPartyRoleName = "external";
 const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
+const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio"]);
+const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 
 const providerDescriptors = new Map(managedModelProviderDefinitions.map((definition) => [
   definition.id,
@@ -232,12 +234,79 @@ export function withPreservedManagedModelCatalogSettings(
 }
 
 export function loadPrimaryModelProvider(environment = process.env) {
-  const exclusiveProviders = managedModelProviderDefinitions.filter((definition) =>
-    readManagedMarker(environment, definition)?.mode === "exclusive");
+  const exclusiveProviders = exclusiveManagedProviders(environment);
   if (exclusiveProviders.length > 1) {
     throw new Error("只能有一个受管第三方 Provider 使用固定模式");
   }
-  return exclusiveProviders[0]?.id ?? "openai";
+  if (exclusiveProviders[0] !== undefined) return exclusiveProviders[0].id;
+  // Gateway 的主 App Server 始终使用稳定的 openai 路由键；自定义 Provider 只改变其上游。
+  loadConfiguredCustomPrimaryModelProvider(environment);
+  return "openai";
+}
+
+export function loadConfiguredCustomPrimaryModelProvider(environment = process.env) {
+  if (exclusiveManagedProviders(environment).length > 0) return undefined;
+  const path = join(codexHomePath(environment), "config.toml");
+  let document;
+  try {
+    document = record(parse(readCodexConfigFile(path)));
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    // TOML 解析错误可能包含用户配置原文，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("Codex 主模型 Provider 配置无法安全读取");
+  }
+  const providers = record(document.model_providers);
+  let id = document.model_provider;
+  if (id === undefined || id === "openai") {
+    const configuredIds = Object.keys(providers).filter((candidate) => {
+      if (
+        !customProviderIdPattern.test(candidate)
+        || builtInModelProviderIds.has(candidate)
+        || providerDescriptors.has(candidate)
+      ) {
+        return false;
+      }
+      const provider = record(providers[candidate]);
+      return typeof provider.base_url === "string" && provider.wire_api === "responses";
+    });
+    if (configuredIds.length === 0) return undefined;
+    if (configuredIds.length > 1) {
+      throw new Error("Gateway 只能使用一个未选中的自定义主模型 Provider");
+    }
+    [id] = configuredIds;
+  }
+  if (typeof id !== "string" || !customProviderIdPattern.test(id)) {
+    throw new Error("Codex 主模型 Provider ID 无效");
+  }
+  if (builtInModelProviderIds.has(id) || providerDescriptors.has(id)) {
+    throw new Error(`Codex 主模型 Provider 不受 Gateway 支持：${id}`);
+  }
+  const provider = record(providers[id]);
+  const baseUrl = provider.base_url;
+  if (typeof baseUrl !== "string") {
+    throw new Error(`Codex 主模型 Provider ${id} 缺少 base_url`);
+  }
+  const normalizedBaseUrl = validProviderBaseUrl(baseUrl, `Codex 主模型 Provider ${id}`);
+  if (provider.wire_api !== undefined && provider.wire_api !== "responses") {
+    throw new Error(`Codex 主模型 Provider ${id} 只支持 Responses API`);
+  }
+  if (
+    provider.supports_websockets !== undefined
+    && typeof provider.supports_websockets !== "boolean"
+  ) {
+    throw new Error(`Codex 主模型 Provider ${id} 的 supports_websockets 无效`);
+  }
+  if (
+    provider.requires_openai_auth !== undefined
+    && typeof provider.requires_openai_auth !== "boolean"
+  ) {
+    throw new Error(`Codex 主模型 Provider ${id} 的 requires_openai_auth 无效`);
+  }
+  return {
+    id,
+    baseUrl: normalizedBaseUrl,
+  };
 }
 
 export function loadOpenAiBaseUrl(environment = process.env) {
@@ -270,6 +339,30 @@ export function loadOpenAiBaseUrl(environment = process.env) {
     || url.hash !== ""
   ) {
     throw new Error("Codex openai_base_url 必须是无凭据、查询和片段的 HTTP(S) URL");
+  }
+  return url.toString();
+}
+
+function exclusiveManagedProviders(environment) {
+  return managedModelProviderDefinitions.filter((definition) =>
+    readManagedMarker(environment, definition)?.mode === "exclusive");
+}
+
+function validProviderBaseUrl(value, label) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} base_url 必须是 HTTP(S) URL`);
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:")
+    || url.username !== ""
+    || url.password !== ""
+    || url.search !== ""
+    || url.hash !== ""
+  ) {
+    throw new Error(`${label} base_url 必须是无凭据、查询和片段的 HTTP(S) URL`);
   }
   return url.toString();
 }

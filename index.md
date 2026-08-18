@@ -24,7 +24,7 @@
   采用、暂缓和拒绝决策。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
-  Provider 的标准流程、安全边界与验收清单。
+  Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 当前设计决策与停止条件。
 - [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书资料与实现映射。
 - [`docs/weixin-surface-plan.md`](docs/weixin-surface-plan.md)：微信 Surface 当前设计决策与停止条件。

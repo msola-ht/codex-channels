@@ -23,6 +23,7 @@ import {
   selectHttpProxyUrl,
 } from "../runtime/network-proxy.mjs";
 import {
+  loadConfiguredCustomPrimaryModelProvider,
   loadOpenAiBaseUrl,
   loadConfiguredProviderCredential,
   loadManagedModelProviderRole,
@@ -563,6 +564,7 @@ async function runServiceAppServer(args) {
     managedSocketPaths,
     primaryProvider,
   } = appServerRuntime;
+  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
   const {
     ProviderProxy,
     sendProviderProxyMetrics,
@@ -723,7 +725,17 @@ async function runServiceAppServer(args) {
   };
   try {
     await prepareAppServerSocketPaths(appServerRuntime.socketPaths);
-    if (primaryProvider === "openai") {
+    if (customPrimaryProvider) {
+      const { baseUrl: localBaseUrl } = await startProviderProxy(
+        primaryProvider,
+        proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
+      );
+      primaryArguments = withProviderBaseUrl(
+        ["-c", `model_provider=${JSON.stringify(customPrimaryProvider.id)}`],
+        customPrimaryProvider.id,
+        localBaseUrl,
+      );
+    } else if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
       let openAiProxyOptions;
       if (configuredOpenAiBaseUrl) {

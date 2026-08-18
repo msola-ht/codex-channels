@@ -139,6 +139,15 @@ plugin_api = true
 思考等级。设置通过 App Server 写入 `~/.codex/config.toml`，不修改 Codex 登录状态；完成后运行
 `codexc service restart all`，让新 App Server 会话使用新的默认值。
 
+### 自定义第三方 Provider
+
+渠道支持使用 Codex 主配置中选中的 OpenAI 兼容 Responses Provider，不需要模型目录。配置示例和能力边界见
+[`第三方模型 Provider 接入指南`](docs/provider-integration-guide.md)；修改后运行：
+
+```bash
+codexc service restart all
+```
+
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型与提供商”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式

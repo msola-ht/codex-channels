@@ -138,12 +138,43 @@ codexc doctor
 - 峰谷价格按请求开始时间验证：生效时间前后、快照存在与缺失、窗口重置边界；
 - `agents.configure <id> <model>` 能切换共享第三方子代理并保持 Key 隔离。
 
-## 6. 自添加模式现状与边界
+## 6. 用户配置的主 Provider
 
-当前“用户自添加”只覆盖 `api_providers`（视觉代理与直接 API 展示），不进入 App Server、
-`/model`、会话路由和 `/usage`。受管第三方 Provider 仍为编译期注册。若实现完整自添加
-（用户 Provider 注册表），必须满足本指南全部安全与校验要求，并先完成 GO 计价、账户、
-Setup 的参数化，再以严格 Schema 合并用户定义；不支持的组合必须明确报错。
+Gateway 支持 Codex 用户配置中的一个自定义主 Provider，不要求模型目录或 Gateway
+Setup。它读取 `~/.codex/config.toml` 的 `model_provider` 和 `[model_providers.<id>]`；若
+`model_provider` 未配置或仍为 `openai`，则使用唯一一个已定义的自定义 Responses Provider，且只在
+Gateway 监管的 App Server 子进程中选择它。Gateway 在 App Server 前启动本地统计代理；原配置中的认证方式、模型名、
+`supports_websockets` 等字段仍由 Codex 处理。当前只支持 `wire_api = "responses"`，不把该 Provider
+加入 `/model` 的跨 Provider 菜单，也不为它伪造账户余额或用量接口。
+
+示例：
+
+```toml
+model = "gpt-5.6-terra"
+openai_base_url = "https://proxy.example.com/v1"
+
+[model_providers.thirdparty]
+name = "Third-party Responses"
+base_url = "https://proxy.example.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+supports_websockets = false
+```
+
+上例保留当前 Codex CLI 的顶层连接，同时让 Gateway 子进程选择 `thirdparty`。若 Codex CLI 本身也要
+选择该 Provider，可再设置 `model_provider = "thirdparty"`；未选中模式下只能定义一个有效的自定义
+Responses Provider，多个候选会失败关闭。
+
+`requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；也可以按 Codex 官方配置使用
+`env_key`。Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
+和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
+`openai`、`ollama`、`lmstudio` 或项目受管 Provider ID。
+
+修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
+`supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
+
+该模式不支持自定义 Provider 的独立模型目录、`/usage` 账户适配、价格专用计价器、Gateway 内跨 Provider
+切换或 `agents.external` 角色；需要这些能力时必须按本指南前述的编译期受管 Provider 流程接入。
 
 ## 关联文档
 

@@ -22,6 +22,7 @@ import {
   loadManagedModelProviders,
   loadManagedProviderAppServer,
   loadManagedProviderAppServers,
+  loadConfiguredCustomPrimaryModelProvider,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   managedModelProviderRoleConfigPath,
@@ -100,6 +101,65 @@ describe("model provider runtime topology", () => {
 
     expect(loadPrimaryModelProvider(environment)).toBe("openai");
     expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
+  });
+
+  it("keeps an inactive custom Provider on the stable OpenAI primary topology", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-"));
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "gpt-5.6-terra"',
+      "",
+      "[model_providers.thirdparty]",
+      'name = "Third-party Responses"',
+      'base_url = "https://proxy.example.test/v1"',
+      'wire_api = "responses"',
+      "requires_openai_auth = true",
+      "supports_websockets = false",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const environment = testEnvironment(codexHome);
+
+    expect(loadConfiguredCustomPrimaryModelProvider(environment)).toEqual({
+      id: "thirdparty",
+      baseUrl: "https://proxy.example.test/v1",
+    });
+    expect(loadPrimaryModelProvider(environment)).toBe("openai");
+    expect(resolveAppServerRuntime(
+      { codex: { socket_path: "runtime/codex.sock" } },
+      "/private/codexc",
+      environment,
+    ).topology.primaryProvider).toBe("openai");
+  });
+
+  it("rejects a selected custom Provider without a valid Responses endpoint", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-invalid-"));
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model_provider = "thirdparty"',
+      "",
+      "[model_providers.thirdparty]",
+      'base_url = "ftp://proxy.example.test/v1"',
+      'wire_api = "chat_completions"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    expect(() => loadPrimaryModelProvider(testEnvironment(codexHome)))
+      .toThrow("base_url 必须是无凭据、查询和片段的 HTTP(S) URL");
+  });
+
+  it("rejects ambiguous inactive custom Responses Providers", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-ambiguous-"));
+    writeFileSync(join(codexHome, "config.toml"), [
+      "[model_providers.first]",
+      'base_url = "https://first.example.test/v1"',
+      'wire_api = "responses"',
+      "",
+      "[model_providers.second]",
+      'base_url = "https://second.example.test/v1"',
+      'wire_api = "responses"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    expect(() => loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
+      .toThrow("Gateway 只能使用一个未选中的自定义主模型 Provider");
   });
 
   it("uses the native DeepSeek configuration as the only primary server in exclusive mode", async () => {

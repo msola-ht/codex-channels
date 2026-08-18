@@ -122,6 +122,15 @@ export function loadPrimaryModelProvider(
   environment?: NodeJS.ProcessEnv,
 ): "openai" | ManagedModelProviderId;
 
+export interface ConfiguredCustomPrimaryModelProvider {
+  id: string;
+  baseUrl: string;
+}
+
+export function loadConfiguredCustomPrimaryModelProvider(
+  environment?: NodeJS.ProcessEnv,
+): ConfiguredCustomPrimaryModelProvider | undefined;
+
 export function loadOpenAiBaseUrl(
   environment?: NodeJS.ProcessEnv,
 ): string | undefined;

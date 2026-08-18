@@ -1272,6 +1272,61 @@ describe("codexc CLI", () => {
     });
   });
 
+  it("starts a selected custom Responses Provider through the local metrics proxy", () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-custom-provider-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const capturePath = join(root, "capture.json");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { writeFileSync } from 'node:fs';",
+      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(process.argv.slice(2)));",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+      CODEX_TEST_CAPTURE: capturePath,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "gpt-5.6-terra"',
+      "",
+      "[model_providers.thirdparty]",
+      'name = "Third-party Responses"',
+      'base_url = "https://proxy.example.test/v1"',
+      'wire_api = "responses"',
+      "requires_openai_auth = true",
+      "supports_websockets = false",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    execFileSync(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: environment,
+    });
+
+    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
+      "-c",
+      'model_provider="thirdparty"',
+      "-c",
+      expect.stringMatching(/^model_providers\.thirdparty\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
+      "app-server",
+      "--listen",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+    ]);
+  });
+
   it("starts the DeepSeek proxy for subagents without eagerly starting its App Server", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-provider-"));
     temporaryDirectories.push(root);
