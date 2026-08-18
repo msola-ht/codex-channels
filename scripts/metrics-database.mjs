@@ -39,6 +39,7 @@ import {
 import { resolveConfiguredPath } from "./runtime-config.mjs";
 import {
   assertExportFormat,
+  isMetricsProviderId,
   metricsProviderIds,
   metricsProviderUsage,
   parseCleanupOptions,
@@ -645,7 +646,7 @@ function errorMessage(error) {
 }
 
 function assertPruneProvider(provider) {
-  if (!metricsProviderIds.includes(provider)) {
+  if (!isMetricsProviderId(provider)) {
     throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
   }
 }

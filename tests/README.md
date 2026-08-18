@@ -113,8 +113,13 @@
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片。
-- OpenCode Go 的切换/固定 Setup、同名模型按 Provider 独立选择、按需 App Server 启动、官方美元价格、
-  长上下文档位、端点与 SDK 协议解析，以及每日价格 Draft PR 的只读检查和最小写权限边界。
+- OpenCode Go 的账户注册表与旧版单账户迁移、账户 CLI（add/list/remove/default/stop）、切换/固定
+  Setup、同名模型按 Provider 独立选择、按需 App Server 启动、共享统计代理的 `/go/<账户>` 前缀
+  路由与分账户指标、账户适配器按 `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与
+  SDK 协议解析，以及每小时价格 Draft PR 的只读检查和最小写权限边界。
+- OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、无活动 Turn、非 `agents.external` 默认
+  账户且超过空闲阈值时经 supervisor `releaseProvider` 释放，释放后按最近使用过的渠道会话通知一次，
+  正在拉起的账户跳过本轮，失败只记录不阻塞。
 - 全 Provider 同一 Turn 多次模型响应的请求次数、实际产生推理输出的思考次数、聚合模型耗时、
   缓存与文本/函数/自定义工具参数
   不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和

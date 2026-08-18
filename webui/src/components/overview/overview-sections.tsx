@@ -243,20 +243,56 @@ export function DeepseekBalanceCard({
 }
 
 export function OpencodeGoUsageCard({
+  accounts,
+}: {
+  accounts: Array<{
+    account: string
+    default: boolean
+    available: boolean
+    windows: OpencodeGoQuotaWindow[]
+    modelUsage: OpencodeGoModelUsageEstimate[]
+  }>
+}) {
+  if (accounts.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>OpenCode Go 用量</CardTitle>
+          <CardDescription>尚未配置 OpenCode Go 账户</CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      {accounts.map((account) => (
+        <OpencodeGoAccountCard key={account.account} {...account} />
+      ))}
+    </div>
+  )
+}
+
+function OpencodeGoAccountCard({
+  account,
+  default: isDefault,
   available,
   windows,
-  modelUsage = [],
+  modelUsage,
 }: {
+  account: string
+  default: boolean
   available: boolean
   windows: OpencodeGoQuotaWindow[]
-  modelUsage?: OpencodeGoModelUsageEstimate[]
+  modelUsage: OpencodeGoModelUsageEstimate[]
 }) {
   if (!available || windows.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>OpenCode Go 用量</CardTitle>
-          <CardDescription>OpenCode Go 账户用量暂不可用</CardDescription>
+          <CardTitle>OpenCode Go（{account}）</CardTitle>
+          <CardDescription>
+            {isDefault ? "默认账户 · " : ""}账户用量暂不可用
+          </CardDescription>
         </CardHeader>
       </Card>
     )
@@ -264,8 +300,8 @@ export function OpencodeGoUsageCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>OpenCode Go 用量</CardTitle>
-        <CardDescription>OpenCode Go 账户配额</CardDescription>
+        <CardTitle>OpenCode Go（{account}）</CardTitle>
+        <CardDescription>{isDefault ? "默认账户 · " : ""}账户配额</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {windows.map((window) => (

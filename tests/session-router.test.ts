@@ -67,6 +67,22 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it("removes a binding when its Provider was deleted", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "deleted-provider", sessionId: "deleted-provider" });
+    const router = new SessionRouter(threadPort({
+      resumeThread: async () => {
+        throw new Error("模型 Provider 未配置独立 App Server：opencode-go-main");
+      },
+    }), store, registry);
+
+    const failures = await router.restoreSubscriptions();
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ bindingRemoved: true, reason: "unavailable" });
+    expect(store.get(target)).toBeUndefined();
+  });
+
   it("passes workspace permissions to startThread and resumeThread", async () => {
     const store = new MemoryBindingStore();
     const entitledRegistry = new WorkspaceRegistry([

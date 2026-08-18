@@ -5,8 +5,13 @@ import { join } from "node:path";
 import type { Logger } from "pino";
 
 import { codexHomePath } from "../../runtime/codex-home.mjs";
-import { managedModelProviderDefinitions } from "../../runtime/model-provider-definitions.mjs";
 import {
+  deepseekProviderDefinition,
+  loadManagedModelProviderDefinitions,
+  opencodeGoProviderDefinition,
+} from "../../runtime/model-provider-definitions.mjs";
+import {
+  managedProviderMarkerPath,
   managedProviderDirectory,
   validateConfiguredModelProviders,
 } from "../../runtime/model-provider-runtime.mjs";
@@ -83,7 +88,14 @@ export class ProviderSettingsWatcher {
       validateConfiguredModelProviders(this.environment);
     });
     const codexHome = codexHomePath(this.environment);
-    this.filesByProvider = managedModelProviderDefinitions.map((definition) => ({
+    const baseDefinitions = [deepseekProviderDefinition, opencodeGoProviderDefinition];
+    const definitions = [
+      ...baseDefinitions,
+      ...loadManagedModelProviderDefinitions(this.environment).filter(
+        (definition) => !baseDefinitions.some((base) => base.id === definition.id),
+      ),
+    ];
+    this.filesByProvider = definitions.map((definition) => ({
       provider: definition.id,
       paths: [
         join(
@@ -91,10 +103,7 @@ export class ProviderSettingsWatcher {
           definition.catalogFileName,
         ),
         join(codexHome, definition.profileFileName),
-        join(
-          managedProviderDirectory(this.environment, definition),
-          definition.managedMarkerFileName,
-        ),
+        managedProviderMarkerPath(this.environment, definition),
       ],
     }));
   }

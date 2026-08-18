@@ -80,10 +80,19 @@ export interface ProviderProxyOptions {
   upstreamPort?: number;
   upstreamProtocol?: "http" | "https";
   upstreamBasePath?: string;
+  /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
+  accountIds?: readonly string[];
+  /** 无账户前缀请求归属的默认账户（agents.external 等角色请求） */
+  defaultAccountId?: string;
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
   timeoutMs?: number;
-  quotaWindowsProvider?: () => Promise<readonly ProviderQuotaWindowSnapshot[] | null>;
-  onMetrics?: (metrics: ProviderProxyMetrics) => void | Promise<void>;
+  quotaWindowsProvider?: (
+    accountId?: string,
+  ) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>;
+  onMetrics?: (
+    metrics: ProviderProxyMetrics,
+    accountId?: string,
+  ) => void | Promise<void>;
   onError?: (error: Error) => void;
 }
 
@@ -105,12 +114,14 @@ export class ProviderProxy {
   private readonly resolveUpstream:
     | ((headers: IncomingHttpHeaders) => ProviderProxyUpstream)
     | undefined;
+  private readonly accountIds: readonly string[] | undefined;
+  private readonly defaultAccountId: string | undefined;
   private readonly quotaWindowsProvider:
-    | (() => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
+    | ((accountId?: string) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
     | undefined;
   private readonly timeoutMs: number;
   private readonly onMetrics:
-    | ((metrics: ProviderProxyMetrics) => void | Promise<void>)
+    | ((metrics: ProviderProxyMetrics, accountId?: string) => void | Promise<void>)
     | undefined;
   private readonly onError: ((error: Error) => void) | undefined;
   private started = false;
@@ -127,6 +138,8 @@ export class ProviderProxy {
         : { basePath: options.upstreamBasePath }),
     };
     this.resolveUpstream = options.resolveUpstream;
+    this.accountIds = options.accountIds;
+    this.defaultAccountId = options.defaultAccountId;
     this.quotaWindowsProvider = options.quotaWindowsProvider;
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.onMetrics = options.onMetrics;
@@ -175,7 +188,12 @@ export class ProviderProxy {
   }
 
   private handleHttpRequest(request: IncomingMessage, response: ServerResponse): void {
-    if (!isSupportedHttpRequest(request.method, request.url)) {
+    const account = resolveAccountPath(
+      request.url,
+      this.accountIds,
+      this.defaultAccountId,
+    );
+    if (!account || !isSupportedHttpRequest(request.method, account.path)) {
       rejectUnsupportedPath(response);
       return;
     }
@@ -187,12 +205,12 @@ export class ProviderProxy {
       turnMetadata,
       Date.now(),
       "http",
-      responseOperation(request.url, turnMetadata.operation),
+      responseOperation(account.path, turnMetadata.operation),
     );
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
       metrics.responseCompletedAtMs = Math.max(metrics.responseCompletedAtMs, Date.now());
-      metricsDelivery ??= this.deliverMetrics(metrics);
+      metricsDelivery ??= this.deliverMetrics(metrics, account.accountId);
       return metricsDelivery;
     };
     const upstreamRequest = upstreamTarget.protocol === "http"
@@ -202,7 +220,7 @@ export class ProviderProxy {
       agent: upstreamTarget.agent ?? this.upstreamAgent,
       hostname: upstreamTarget.host,
       ...(upstreamTarget.port === undefined ? {} : { port: upstreamTarget.port }),
-      path: upstreamPath(upstreamTarget.basePath, request.url),
+      path: upstreamPath(upstreamTarget.basePath, account.path),
       method: request.method,
       headers: forwardedRequestHeaders(
         request.headers,
@@ -292,7 +310,7 @@ export class ProviderProxy {
             : false;
         finalizeHttpStatus(metrics, endedAtMs);
         forwarding = forwarding.then(async () => {
-          if (completed || isResponsesRequestPath(request.url)) await emitMetrics();
+          if (completed || isResponsesRequestPath(account.path)) await emitMetrics();
           response.end();
         }).catch((error) => {
           this.onError?.(asError(error));
@@ -348,20 +366,37 @@ export class ProviderProxy {
     socket: Duplex,
     head: Buffer,
   ): void {
-    if (!isResponsesPath(request.url)) {
+    const account = resolveAccountPath(
+      request.url,
+      this.accountIds,
+      this.defaultAccountId,
+    );
+    if (!account || !isResponsesPath(account.path)) {
       socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       return;
     }
     this.websocketServer.handleUpgrade(request, socket, head, (client) => {
-      this.proxyWebSocket(request, client);
+      this.proxyWebSocket(request, client, account.accountId);
     });
   }
 
-  private proxyWebSocket(request: IncomingMessage, client: WebSocket): void {
+  private proxyWebSocket(
+    request: IncomingMessage,
+    client: WebSocket,
+    accountId?: string,
+  ): void {
     const target = this.upstreamFor(request.headers);
     const scheme = target.protocol === "https" ? "wss" : "ws";
     const port = target.port === undefined ? "" : `:${target.port}`;
-    const url = `${scheme}://${target.host}${port}${upstreamPath(target.basePath, request.url)}`;
+    const account = resolveAccountPath(
+      request.url,
+      this.accountIds,
+      this.defaultAccountId,
+    );
+    const url = `${scheme}://${target.host}${port}${upstreamPath(
+      target.basePath,
+      account?.path ?? "/responses",
+    )}`;
     const protocols = websocketProtocols(request.headers["sec-websocket-protocol"]);
     const upstream = new WebSocket(url, protocols, {
       ...(target.agent ?? this.upstreamAgent
@@ -404,7 +439,7 @@ export class ProviderProxy {
         activeMetrics.httpStatus = statusCode;
         markMetricsFailed(activeMetrics, "upstream_handshake_error");
         activeMetrics.responseCompletedAtMs = receivedAtMs;
-        void this.deliverMetrics(activeMetrics);
+        void this.deliverMetrics(activeMetrics, accountId);
         activeMetrics = undefined;
       } else {
         const fallback = createMetricsState(
@@ -416,7 +451,7 @@ export class ProviderProxy {
         fallback.httpStatus = statusCode;
         markMetricsFailed(fallback, "upstream_handshake_error");
         fallback.responseCompletedAtMs = receivedAtMs;
-        void this.deliverMetrics(fallback);
+        void this.deliverMetrics(fallback, accountId);
       }
       response.resume();
       client.terminate();
@@ -434,7 +469,7 @@ export class ProviderProxy {
           }
           if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs)) {
             activeMetrics = undefined;
-            await this.deliverMetrics(currentMetrics);
+            await this.deliverMetrics(currentMetrics, accountId);
           }
         }
         if (client.readyState === WebSocket.OPEN) {
@@ -475,7 +510,7 @@ export class ProviderProxy {
       } else {
         markMetricsFailed(activeMetrics, failureType ?? "websocket_closed");
       }
-      void this.deliverMetrics(activeMetrics);
+      void this.deliverMetrics(activeMetrics, accountId);
       activeMetrics = undefined;
     });
     client.on("error", (error) => {
@@ -494,17 +529,20 @@ export class ProviderProxy {
     return this.resolveUpstream?.(headers) ?? this.defaultUpstream;
   }
 
-  private async deliverMetrics(metrics: MetricsState): Promise<void> {
+  private async deliverMetrics(
+    metrics: MetricsState,
+    accountId?: string,
+  ): Promise<void> {
     let quotaWindows: readonly ProviderQuotaWindowSnapshot[] | null = null;
     if (this.quotaWindowsProvider) {
       try {
-        quotaWindows = await this.quotaWindowsProvider();
+        quotaWindows = await this.quotaWindowsProvider(accountId);
       } catch (error) {
         this.onError?.(asError(error));
       }
     }
     try {
-      await this.onMetrics?.({ ...metrics, quotaWindows });
+      await this.onMetrics?.({ ...metrics, quotaWindows }, accountId);
     } catch (error) {
       this.onError?.(asError(error));
     }
@@ -953,6 +991,41 @@ function responseOperation(
   } catch {
     return metadataOperation;
   }
+}
+
+function resolveAccountPath(
+  value: string | undefined,
+  accounts: readonly string[] | undefined,
+  defaultAccountId: string | undefined,
+): { accountId?: string; path: string } | undefined {
+  if (!value) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value, "http://127.0.0.1");
+  } catch {
+    return undefined;
+  }
+  const pathname = url.pathname;
+  if (pathname === "/go" || pathname.startsWith("/go/")) {
+    const segments = pathname.split("/");
+    const accountId = segments[2];
+    if (
+      accountId === undefined
+      || accountId.length === 0
+      || !accounts?.includes(accountId)
+    ) {
+      return undefined;
+    }
+    const rest = `/${segments.slice(3).join("/")}`;
+    return {
+      accountId,
+      path: `${rest === "/" ? "" : rest}${url.search}`,
+    };
+  }
+  return {
+    ...(defaultAccountId === undefined ? {} : { accountId: defaultAccountId }),
+    path: `${pathname}${url.search}`,
+  };
 }
 
 function upstreamPath(basePath: string | undefined, requestPath: string | undefined): string {

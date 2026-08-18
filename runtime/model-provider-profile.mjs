@@ -1,5 +1,3 @@
-import { managedModelProviderDefinitions } from "./model-provider-definitions.mjs";
-
 export function createManagedProviderProfile(definition, {
   apiKey,
   catalogPath,
@@ -54,7 +52,24 @@ export function createManagedProviderMarker(definition, mode = "switching") {
 }
 
 function assertDefinition(definition) {
-  if (!managedModelProviderDefinitions.includes(definition)) {
-    throw new Error("模型 Provider 不在编译期注册表中");
+  if (
+    !definition
+    || typeof definition !== "object"
+    || Array.isArray(definition)
+    || typeof definition.id !== "string"
+    || typeof definition.displayName !== "string"
+    || typeof definition.profileFileName !== "string"
+    || typeof definition.catalogFileName !== "string"
+    || typeof definition.catalogManifestFileName !== "string"
+    || typeof definition.managedMarkerFileName !== "string"
+    || typeof definition.backupDirectoryName !== "string"
+    || typeof definition.baseUrl !== "string"
+    || typeof definition.wireApi !== "string"
+    || typeof definition.apiKeyEnvironmentKey !== "string"
+    || typeof definition.defaultModel !== "string"
+    || typeof definition.defaultReasoningEffort !== "string"
+    || !Array.isArray(definition.models)
+  ) {
+    throw new Error("模型 Provider 定义无效");
   }
 }

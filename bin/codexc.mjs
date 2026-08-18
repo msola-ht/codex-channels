@@ -23,15 +23,26 @@ import {
   selectHttpProxyUrl,
 } from "../runtime/network-proxy.mjs";
 import {
-  loadOpenAiBaseUrl,
   loadConfiguredProviderCredential,
   loadManagedModelProviderRole,
+  loadOpenAiBaseUrl,
   providerMetricsSocketPath,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
-import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import {
+  loadManagedModelProviderDefinitions,
+  opencodeGoProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
+import {
+  loadOpencodeGoDefaultAccount,
+  loadOpencodeGoAccounts,
+  migrateLegacyOpencodeGoAccount,
+  opencodeGoAccountIdFromProvider,
+  opencodeGoProviderId,
+  sharedProviderProxyKey,
+} from "../runtime/opencode-go-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "../runtime/opencode-go-quota-windows.mjs";
 import { createProxyFetch } from "../dist/bootstrap/proxy-fetch.js";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
@@ -101,6 +112,7 @@ const helpText = {
   work                         管理 Workspace（交互菜单或子命令）
   rules                        管理项目 Codex 命令预设
   agents                       管理共享第三方子代理
+  opencode-go                  管理 OpenCode Go 多账户
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
@@ -188,6 +200,21 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "agents.status": `用法：codexc agents status
 
 查看 multi_agent_v2 与共享第三方子代理配置状态。`,
+  opencode_go: `用法：codexc opencode-go account <add|list|remove|default|stop> [id]
+
+管理 OpenCode Go 多账户。Key 只写入 0600 私有 Profile，不进入配置或日志。
+
+  add <id>     新增账户（交互输入 API Key）
+  list         列出账户与默认标记
+  remove <id>  备份后删除账户 Profile 与注册表项
+  default <id> 设置新会话默认账户（agents.external 同步切换）
+  stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）`,
+  "opencode_go.account": `用法：codexc opencode-go account <add|list|remove|default|stop> [id]`,
+  "opencode_go.account.add": "用法：codexc opencode-go account add <id>",
+  "opencode_go.account.list": "用法：codexc opencode-go account list",
+  "opencode_go.account.remove": "用法：codexc opencode-go account remove <id>",
+  "opencode_go.account.default": "用法：codexc opencode-go account default <id>",
+  "opencode_go.account.stop": "用法：codexc opencode-go account stop <id>",
   "rules.init": `用法：codexc rules init [--force]
 
 为当前项目生成安全命令预设；已有文件默认不覆盖。`,
@@ -410,6 +437,9 @@ try {
     case "agents":
       agents(args);
       break;
+    case "opencode-go":
+      opencodeGoAccount(args);
+      break;
     case "update":
       if (showRequestedHelp(args, "update")) {
         break;
@@ -584,13 +614,49 @@ async function runServiceAppServer(args) {
     return agent;
   };
   const startProviderProxy = async (provider, options) => {
+    if (provider === "opencode-go") {
+      const existing = providerProxyRuntimes.get("opencode-go");
+      if (existing) return { ...existing, created: false };
+      const modelProxy = new ProviderProxy("127.0.0.1:0", {
+        ...options,
+        accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
+        ...(goDefaultAccountId === undefined
+          ? {}
+          : { defaultAccountId: goDefaultAccountId }),
+        quotaWindowsProvider: (accountId) => {
+          const quota = opencodeGoQuotaWindows.get(accountId ?? goDefaultAccountId);
+          return quota ? quota() : Promise.resolve(null);
+        },
+        onMetrics: (metrics, accountId) => {
+          const targetProvider = accountId === undefined
+            ? goDefaultAccountId === undefined
+              ? "opencode-go"
+              : opencodeGoProviderId(goDefaultAccountId)
+            : opencodeGoProviderId(accountId);
+          return sendProviderProxyMetrics(
+            providerMetricsSocketPath(socketPath, targetProvider),
+            metrics,
+          );
+        },
+        onError: (error) => console.error(
+          "opencode-go 模型统计代理失败："
+          + (error instanceof Error ? error.message : String(error)),
+        ),
+      });
+      await modelProxy.start();
+      providerProxies.push(modelProxy);
+      const proxyRuntime = {
+        baseUrl: `http://${modelProxy.address()}`,
+        proxy: modelProxy,
+      };
+      providerProxyRuntimes.set("opencode-go", proxyRuntime);
+      console.log(`opencode-go 模型统计代理已启动：${modelProxy.address()}`);
+      return { ...proxyRuntime, created: true };
+    }
     const existing = providerProxyRuntimes.get(provider);
     if (existing) return { ...existing, created: false };
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...options,
-      ...(provider === "opencode-go"
-        ? { quotaWindowsProvider: opencodeGoQuotaWindows }
-        : {}),
       onMetrics: (metrics) => sendProviderProxyMetrics(
         providerMetricsSocketPath(socketPath, provider),
         metrics,
@@ -617,18 +683,33 @@ async function runServiceAppServer(args) {
     await proxy.close();
   };
   const providerDefinitions = new Map(
-    managedModelProviderDefinitions.map((definition) => [definition.id, definition]),
+    loadManagedModelProviderDefinitions(runtime.environment)
+      .map((definition) => [definition.id, definition]),
   );
-  const opencodeGoQuotaWindows = createOpencodeGoQuotaWindowsProvider({
-    environment: runtime.environment,
-    fetchImpl: createProxyFetch({
-      http: runtime.environment.HTTP_PROXY,
-      https: runtime.environment.HTTPS_PROXY,
-      all: runtime.environment.ALL_PROXY,
-      no: runtime.environment.NO_PROXY,
-    }),
-  });
   const managedRole = loadManagedModelProviderRole(runtime.environment);
+  const goAccounts = loadOpencodeGoAccounts(runtime.environment);
+  const goAccountIds = goAccounts.map((account) => account.id);
+  const goDefaultAccount = managedRole
+    && opencodeGoAccountIdFromProvider(managedRole.provider)
+    ? goAccounts.find((account) =>
+        account.id === opencodeGoAccountIdFromProvider(managedRole.provider))
+    : loadOpencodeGoDefaultAccount(runtime.environment);
+  const goDefaultAccountId = goDefaultAccount?.id;
+  const opencodeGoQuotaWindows = new Map(goAccounts.map((account) => [
+    account.id,
+    createOpencodeGoQuotaWindowsProvider({
+      environment: runtime.environment,
+      fetchImpl: createProxyFetch({
+        http: runtime.environment.HTTP_PROXY,
+        https: runtime.environment.HTTPS_PROXY,
+        all: runtime.environment.ALL_PROXY,
+        no: runtime.environment.NO_PROXY,
+      }),
+      provider: opencodeGoProviderId(account.id),
+    }),
+  ]));
+  const isGoProvider = (provider) =>
+    opencodeGoAccountIdFromProvider(provider) !== undefined;
   const refreshManagedRoleConfig = (provider, baseUrl) => {
     if (managedRole?.provider !== provider) return;
     try {
@@ -653,6 +734,7 @@ async function runServiceAppServer(args) {
       upstreamBasePath: upstreamUrl.pathname,
     };
   };
+  const goProxyOptions = proxyOptionsForUrl(new URL(opencodeGoProviderDefinition.baseUrl));
   let primaryArguments = [];
   const managedByProvider = new Map(managedProviders.map((provider, index) => [
     provider.provider,
@@ -660,7 +742,9 @@ async function runServiceAppServer(args) {
   ]));
   const providerLaunches = new Map();
   const children = [];
+  const childrenByProvider = new Map();
   let watchChild;
+  let detachChild;
   const primaryChildCredential = managedRole
     ? loadConfiguredProviderCredential(managedRole.provider, runtime.environment)
     : undefined;
@@ -678,17 +762,23 @@ async function runServiceAppServer(args) {
       }
       if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
       await prepareAppServerSocketPaths([managed.socketPath]);
+      const proxyKey = sharedProviderProxyKey(provider);
       const { baseUrl: localBaseUrl, proxy, created: proxyCreated } = await startProviderProxy(
-        provider,
-        proxyOptionsForUrl(new URL(definition.baseUrl)),
+        proxyKey,
+        isGoProvider(provider)
+          ? goProxyOptions
+          : proxyOptionsForUrl(new URL(definition.baseUrl)),
       );
+      const providerBaseUrl = isGoProvider(provider)
+        ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(provider)}`
+        : localBaseUrl;
       let child;
       try {
-        refreshManagedRoleConfig(provider, localBaseUrl);
+        refreshManagedRoleConfig(provider, providerBaseUrl);
         const argumentsList = withProviderBaseUrl(
           managed.runtime.arguments,
           provider,
-          localBaseUrl,
+          providerBaseUrl,
         );
         child = spawn(runtime.environment.CODEX_BINARY, [
           ...argumentsList,
@@ -704,6 +794,7 @@ async function runServiceAppServer(args) {
           cwd: defaultWorkspace.cwd,
         });
         children.push(child);
+        childrenByProvider.set(provider, child);
         await waitForProviderAppServer(managed.socketPath, child, provider);
         watchChild(child);
         console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
@@ -711,6 +802,7 @@ async function runServiceAppServer(args) {
         if (child) {
           const childIndex = children.indexOf(child);
           if (childIndex >= 0) children.splice(childIndex, 1);
+          childrenByProvider.delete(provider);
           if (childProcessIsRunning(child)) signalChildProcesses([child], "SIGTERM");
         }
         if (proxyCreated) await closeProviderProxy(provider, proxy);
@@ -720,6 +812,38 @@ async function runServiceAppServer(args) {
     providerLaunches.set(provider, launch);
     launch.finally(() => providerLaunches.delete(provider)).catch(() => undefined);
     return launch;
+  };
+  const releaseProvider = async (provider) => {
+    if (providerLaunches.get(provider)) {
+      throw new Error(`模型 Provider 正在启动，稍后重试：${provider}`);
+    }
+    if (!managedByProvider.has(provider)) {
+      throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
+    }
+    const child = childrenByProvider.get(provider);
+    if (!child) return false;
+    detachChild?.(child);
+    childrenByProvider.delete(provider);
+    if (childProcessIsRunning(child)) {
+      signalChildProcesses([child], "SIGTERM");
+      await waitForChildExit(child, 5_000);
+    }
+    if (isGoProvider(provider)) {
+      const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
+      if (!remainingGoChild) {
+        const goProxy = providerProxyRuntimes.get("opencode-go")?.proxy;
+        if (goProxy) await closeProviderProxy("opencode-go", goProxy);
+        if (managedRole && isGoProvider(managedRole.provider)) {
+          const { baseUrl: roleProxyBaseUrl } = await startProviderProxy(
+            "opencode-go",
+            goProxyOptions,
+          );
+          refreshManagedRoleConfig(managedRole.provider, roleProxyBaseUrl);
+        }
+      }
+    }
+    console.log(`${provider} App Server 已释放：${managedByProvider.get(provider).socketPath}`);
+    return true;
   };
   try {
     await prepareAppServerSocketPaths(appServerRuntime.socketPaths);
@@ -754,31 +878,42 @@ async function runServiceAppServer(args) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
+      const providerKey = isGoProvider(definition.id) ? "opencode-go" : definition.id;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
-        definition.id,
-        proxyOptionsForUrl(new URL(definition.baseUrl)),
+        providerKey,
+        isGoProvider(definition.id)
+          ? goProxyOptions
+          : proxyOptionsForUrl(new URL(definition.baseUrl)),
       );
+      const primaryBaseUrl = isGoProvider(definition.id)
+        ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(definition.id)}`
+        : localBaseUrl;
       primaryArguments = withProviderBaseUrl(
         primaryArguments,
         definition.id,
-        localBaseUrl,
+        primaryBaseUrl,
       );
-      refreshManagedRoleConfig(definition.id, localBaseUrl);
+      refreshManagedRoleConfig(definition.id, providerKey === "opencode-go"
+        ? localBaseUrl
+        : primaryBaseUrl);
     }
     if (managedRole && managedByProvider.has(managedRole.provider)) {
       const provider = managedRole.provider;
       const definition = providerDefinitions.get(provider);
       if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+      const providerKey = isGoProvider(provider) ? "opencode-go" : provider;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
-        provider,
-        proxyOptionsForUrl(new URL(definition.baseUrl)),
+        providerKey,
+        isGoProvider(provider)
+          ? goProxyOptions
+          : proxyOptionsForUrl(new URL(definition.baseUrl)),
       );
       refreshManagedRoleConfig(provider, localBaseUrl);
     }
     supervisorOwner = new AppServerSupervisorOwner(
       socketPath,
       appServerRuntime.topology,
-      { ensureProvider: launchProvider },
+      { ensureProvider: launchProvider, releaseProvider },
     );
     await supervisorOwner.start();
   } catch (error) {
@@ -803,19 +938,43 @@ async function runServiceAppServer(args) {
     cwd: defaultWorkspace.cwd,
   });
   children.push(primaryChild);
-  watchChild = forwardChildrenLifecycle(children, async () => {
+  const lifecycle = forwardChildrenLifecycle(children, async () => {
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
     await supervisorOwner?.close();
   });
+  watchChild = lifecycle.watchChild;
+  detachChild = lifecycle.detachChild;
 }
 
 function withoutManagedProviderApiKeys(environment) {
   const childEnvironment = { ...environment };
-  for (const { apiKeyEnvironmentKey } of managedModelProviderDefinitions) {
-    delete childEnvironment[apiKeyEnvironmentKey];
+  const managedKeys = new Set(
+    loadManagedModelProviderDefinitions(environment)
+      .map(({ apiKeyEnvironmentKey }) => apiKeyEnvironmentKey),
+  );
+  // 旧版单账户环境变量在迁移后不再属于动态定义，仍必须从子进程环境剥离。
+  managedKeys.add("CODEX_CONNECT_OPENCODE_GO_API_KEY");
+  for (const key of managedKeys) {
+    delete childEnvironment[key];
   }
   return childEnvironment;
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (!childProcessIsRunning(child)) return Promise.resolve();
+  return new Promise((resolveWait) => {
+    const timer = setTimeout(() => {
+      if (childProcessIsRunning(child)) {
+        signalChildProcesses([child], "SIGKILL");
+      }
+      resolveWait();
+    }, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolveWait();
+    });
+  });
 }
 
 function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_000) {
@@ -1065,6 +1224,46 @@ function agents(args) {
     return;
   }
   runScript("scripts/agents.mjs", args, { failureReportedByChild: true });
+}
+
+function opencodeGoAccount(args) {
+  if (showRequestedHelp(args, "opencode_go")) {
+    return;
+  }
+  if (
+    showSubcommandHelp(args, "account", "opencode_go.account")
+  ) {
+    return;
+  }
+  if (args.some(isHelpArgument)) {
+    const usage = {
+      add: helpText["opencode_go.account.add"],
+      list: helpText["opencode_go.account.list"],
+      remove: helpText["opencode_go.account.remove"],
+      default: helpText["opencode_go.account.default"],
+      stop: helpText["opencode_go.account.stop"],
+    }[args[1]];
+    if (usage !== undefined) {
+      console.log(usage);
+      return;
+    }
+    throw new Error(helpText.opencode_go);
+  }
+  const [subcommand, ...rest] = args;
+  if (subcommand !== "account") {
+    throw new Error(helpText.opencode_go);
+  }
+  const [action, ...accountArgs] = rest;
+  if (
+    !new Set(["add", "list", "remove", "default", "stop"]).has(action)
+    || (action === "list" && accountArgs.length !== 0)
+    || (action !== "list" && accountArgs.length !== 1)
+  ) {
+    throw new Error(helpText.opencode_go);
+  }
+  runScript("scripts/opencode-go-setup.mjs", ["account", action, ...accountArgs], {
+    failureReportedByChild: true,
+  });
 }
 
 function runSetup() {
@@ -1447,18 +1646,22 @@ function metricsTimestamp(date = new Date()) {
 
 function configuredEnvironment() {
   const { configPath, dataDir } = requireUserConfig();
+  const environment = {
+    ...process.env,
+    CODEX_CONNECT_HOME: dataDir,
+    CODEX_CONNECT_CONFIG_FILE: configPath,
+  };
+  migrateLegacyOpencodeGoAccount(environment);
   const document = readGatewayConfig(configPath);
   const network = table(document.network);
   const codex = table(document.codex);
-  const proxyEnvironment = resolveProxyEnvironment(network, process.env);
+  const proxyEnvironment = resolveProxyEnvironment(network, environment);
   return {
     configPath,
     dataDir,
     document,
     environment: {
-      ...process.env,
-      CODEX_CONNECT_HOME: dataDir,
-      CODEX_CONNECT_CONFIG_FILE: configPath,
+      ...environment,
       CODEX_BINARY: stringValue(codex.binary) || "codex",
       ...proxyEnvironment,
     },
@@ -1479,6 +1682,7 @@ function serviceControlEnvironment(environment = process.env) {
 
 function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
   let settled = false;
+  const watchers = new Map();
   const forward = (signal) => signalChildProcesses(children, signal);
   const terminate = () => forward("SIGTERM");
   const interrupt = () => forward("SIGINT");
@@ -1518,15 +1722,28 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     });
   };
   const watchChild = (child) => {
+    if (watchers.has(child)) return;
+    const onError = (error) => finish(1, null, error);
+    const onExit = (code, signal) => finish(code, signal);
+    watchers.set(child, { onError, onExit });
     if (child.exitCode !== null || child.signalCode !== null) {
       finish(child.exitCode, child.signalCode);
       return;
     }
-    child.once("error", (error) => finish(1, null, error));
-    child.once("exit", (code, signal) => finish(code, signal));
+    child.once("error", onError);
+    child.once("exit", onExit);
+  };
+  const detachChild = (child) => {
+    const watcher = watchers.get(child);
+    if (!watcher) return;
+    watchers.delete(child);
+    child.off("error", watcher.onError);
+    child.off("exit", watcher.onExit);
+    const index = children.indexOf(child);
+    if (index >= 0) children.splice(index, 1);
   };
   for (const child of children) watchChild(child);
-  return watchChild;
+  return { watchChild, detachChild };
 }
 
 function table(value) {

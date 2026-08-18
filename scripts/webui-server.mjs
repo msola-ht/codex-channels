@@ -26,6 +26,10 @@ import {
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
+import {
+  loadOpencodeGoAccounts,
+  opencodeGoProviderId,
+} from "../runtime/opencode-go-accounts.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
@@ -289,13 +293,17 @@ async function handleOpencodeGoUsage(environment, response) {
   } catch {
     metricsDatabasePath = undefined;
   }
-  const adapter = createOpencodeGoAccountAdapter({
-    environment,
-    metricsDatabasePath,
-  });
-  try {
+  const accounts = loadOpencodeGoAccounts(environment);
+  const results = await Promise.allSettled(accounts.map(async (account) => {
+    const adapter = createOpencodeGoAccountAdapter({
+      provider: opencodeGoProviderId(account.id),
+      environment,
+      metricsDatabasePath,
+    });
     const usage = await adapter.accountUsage();
-    sendJson(response, 200, {
+    return {
+      account: account.id,
+      default: account.default,
       available: usage.available,
       windows: usage.windows.map((window) => ({
         windowId: window.windowId,
@@ -307,13 +315,25 @@ async function handleOpencodeGoUsage(environment, response) {
         localTokens: window.localTokens ?? null,
       })),
       modelUsage: usage.modelUsage ?? [],
-    });
-  } catch {
-    sendJson(response, 200, {
-      available: false,
-      windows: [],
-    });
+    };
+  }));
+  const accountUsages = accounts.map((account, index) => {
+    const result = results[index];
+    return result?.status === "fulfilled"
+      ? result.value
+      : {
+          account: account.id,
+          default: account.default,
+          available: false,
+          windows: [],
+          modelUsage: [],
+        };
+  });
+  if (accounts.length === 0) {
+    sendJson(response, 200, { accounts: [] });
+    return;
   }
+  sendJson(response, 200, { accounts: accountUsages });
 }
 
 function openMetricsStore(environment, endAtMs = Date.now()) {

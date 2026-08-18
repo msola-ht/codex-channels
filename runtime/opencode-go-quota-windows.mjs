@@ -1,4 +1,7 @@
-import { loadOpencodeGoAccountCredential } from "./model-provider-runtime.mjs";
+import {
+  loadOpencodeGoAccountCredential,
+  loadOpencodeGoAccountCredentialFor,
+} from "./model-provider-runtime.mjs";
 
 const usageUrl = "https://opencode.ai/zen/go/v1/usage";
 const maximumResponseBytes = 65_536;
@@ -9,6 +12,7 @@ const fallbackCacheMs = 60_000;
 export function createOpencodeGoQuotaWindowsProvider(options = {}) {
   const environment = options.environment ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const provider = options.provider;
   let cached = null;
   let inflight = null;
   return async () => {
@@ -19,7 +23,7 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
     if (inflight === null) {
       inflight = (async () => {
         try {
-          const windows = await fetchQuotaWindows(environment, fetchImpl);
+          const windows = await fetchQuotaWindows(environment, fetchImpl, provider);
           if (windows === null) {
             cached = { windows: null, expiresAtMs: nowMs + fallbackCacheMs };
             return null;
@@ -45,10 +49,12 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
   };
 }
 
-async function fetchQuotaWindows(environment, fetchImpl) {
+async function fetchQuotaWindows(environment, fetchImpl, provider) {
   let apiKey;
   try {
-    apiKey = loadOpencodeGoAccountCredential(environment);
+    apiKey = provider === undefined
+      ? loadOpencodeGoAccountCredential(environment)
+      : loadOpencodeGoAccountCredentialFor(provider, environment);
   } catch {
     return null;
   }

@@ -18,7 +18,10 @@ export class AppServerSupervisorOwner {
   constructor(
     primarySocketPath: string,
     topology: AppServerTopology,
-    options?: { ensureProvider?: (provider: string) => Promise<void> },
+    options?: {
+      ensureProvider?: (provider: string) => Promise<void>;
+      releaseProvider?: (provider: string) => Promise<boolean>;
+    },
   );
   start(): Promise<void>;
   close(): Promise<void>;
@@ -32,6 +35,10 @@ export function ensureAppServerProvider(
   primarySocketPath: string,
   provider: string,
 ): Promise<void>;
+export function releaseAppServerProvider(
+  primarySocketPath: string,
+  provider: string,
+): Promise<boolean>;
 export function sameAppServerTopology(
   actual: InspectedAppServerTopology | undefined,
   expected: AppServerTopology,

@@ -1,3 +1,10 @@
+import {
+  loadOpencodeGoAccounts,
+  opencodeGoDefaultAccountId,
+  opencodeGoApiKeyEnvironmentKey,
+  opencodeGoProviderId,
+} from "./opencode-go-accounts.mjs";
+
 export const deepseekProviderDefinition = Object.freeze({
   id: "deepseek",
   displayName: "DeepSeek",
@@ -45,3 +52,42 @@ export const managedModelProviderDefinitions = Object.freeze([
   deepseekProviderDefinition,
   opencodeGoProviderDefinition,
 ]);
+
+export function loadOpencodeGoAccountDefinitions(environment = process.env) {
+  return loadOpencodeGoAccounts(environment).map((account) =>
+    Object.freeze(opencodeGoAccountDefinition(account.id)));
+}
+
+export function loadManagedModelProviderDefinitions(environment = process.env) {
+  return Object.freeze([
+    deepseekProviderDefinition,
+    ...loadOpencodeGoAccountDefinitions(environment),
+  ]);
+}
+
+function opencodeGoAccountDefinition(accountId) {
+  const provider = opencodeGoProviderId(accountId);
+  const isDefaultAccount = accountId === opencodeGoDefaultAccountId;
+  return {
+    id: provider,
+    accountId,
+    storageId: "opencode-go",
+    displayName: isDefaultAccount ? "OpenCode Go" : `OpenCode Go（${accountId}）`,
+    profileName: provider,
+    codexProfileName: isDefaultAccount ? "sf-opencode-go" : `sf-opencode-go-${accountId}`,
+    profileFileName: isDefaultAccount
+      ? "sf-opencode-go.config.toml"
+      : `sf-opencode-go-${accountId}.config.toml`,
+    catalogFileName: opencodeGoProviderDefinition.catalogFileName,
+    catalogManifestFileName: opencodeGoProviderDefinition.catalogManifestFileName,
+    managedMarkerFileName: opencodeGoProviderDefinition.managedMarkerFileName,
+    backupDirectoryName: opencodeGoProviderDefinition.backupDirectoryName,
+    baseUrl: opencodeGoProviderDefinition.baseUrl,
+    wireApi: opencodeGoProviderDefinition.wireApi,
+    apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey(accountId),
+    defaultModel: opencodeGoProviderDefinition.defaultModel,
+    defaultReasoningEffort: opencodeGoProviderDefinition.defaultReasoningEffort,
+    supportsWebsockets: false,
+    models: opencodeGoProviderDefinition.models,
+  };
+}

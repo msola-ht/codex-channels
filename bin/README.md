@@ -20,12 +20,15 @@
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
-- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek` 选择隔离实例；
+- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek` 或
+  `--profile opencode-go-<账户>` 选择隔离实例；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
 - `agents`：选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
   `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化。
+- `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；Key 只写入
+  `0600` 私有 Profile，`stop` 通过 App Server 监管 Socket 释放对应隔离实例。
 - `update`：Git 源码安装先在临时仓库构建并预检官方 `main` 最新提交，切换后再统一审查并更新用户
   配置、状态数据库和指标数据库，然后恢复核心服务；npm 安装不修改程序包。
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
@@ -42,7 +45,9 @@
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
-Provider 的独立回环统计代理；任一受监管组件退出都会共同重建。代理指标通过私有 Unix Socket
+Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一受监管组件退出都会共同重建。
+账户隔离实例空闲超过 5 分钟（无活动 Turn、无绑定、非 `agents.external` 默认账户）由
+`releaseProvider` 释放，再次使用自动拉起。代理指标通过私有 Unix Socket
 发送给 Gateway，Gateway 生命周期不再控制模型数据通路。入口持有独立 `0600` 监管 Socket，
 用于跨进程互斥和向前台启动器证明精确 Provider 拓扑；它同时集中拒绝已被裸进程占用的 App
 Server Socket。
