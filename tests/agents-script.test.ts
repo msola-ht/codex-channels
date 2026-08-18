@@ -41,7 +41,7 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 describe("codexc agents script", () => {
   it.each([
     [deepseekProviderDefinition.id, deepseekProviderDefinition],
-    [opencodeGoProviderId("main"), opencodeGoMainDefinition()],
+    [opencodeGoProviderId("opencode-go"), opencodeGoMainDefinition()],
   ] as const)("binds the shared role to configured provider %s", async (provider, definition) => {
     const fixture = createFixture();
     try {
@@ -101,16 +101,16 @@ describe("codexc agents script", () => {
       await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
-      await configureThirdPartyRole("opencode-go-main", "deepseek-v4-pro", fixture.environment, {
+      await configureThirdPartyRole("opencode-go", "deepseek-v4-pro", fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
 
       expect(agentsStatus(fixture.environment)).toMatchObject({
-        provider: "opencode-go-main",
+        provider: "opencode-go",
         model: "deepseek-v4-pro",
       });
       expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
-        agents: { external: { nickname_candidates: ["OpenCode Go（main）"] } },
+        agents: { external: { nickname_candidates: ["OpenCode Go"] } },
       });
     } finally {
       fixture.remove();
@@ -207,12 +207,12 @@ describe("codexc agents script", () => {
     try {
       writeProviderFixture(fixture, opencodeGoMainDefinition(), "exclusive");
 
-      await configureThirdPartyRole("opencode-go-main", undefined, fixture.environment, {
+      await configureThirdPartyRole("opencode-go", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
 
       expect(agentsStatus(fixture.environment)).toMatchObject({
-        provider: "opencode-go-main",
+        provider: "opencode-go",
         model: "deepseek-v4-flash",
       });
     } finally {
@@ -397,20 +397,20 @@ function writeProviderFixture(
 
 function opencodeGoMainDefinition(): ModelProviderDefinition {
   return {
-    id: opencodeGoProviderId("main") as ManagedModelProviderId,
-    accountId: "main",
+    id: opencodeGoProviderId("opencode-go") as ManagedModelProviderId,
+    accountId: "opencode-go",
     storageId: "opencode-go",
-    displayName: "OpenCode Go（main）",
-    profileName: "opencode-go-main",
-    codexProfileName: "sf-opencode-go-main",
-    profileFileName: "sf-opencode-go-main.config.toml",
+    displayName: "OpenCode Go",
+    profileName: "opencode-go",
+    codexProfileName: "sf-opencode-go",
+    profileFileName: "sf-opencode-go.config.toml",
     catalogFileName: "models.json",
     catalogManifestFileName: "models.manifest.json",
     managedMarkerFileName: "managed.toml",
     backupDirectoryName: "backup",
     baseUrl: "https://opencode.ai/zen/go/v1",
     wireApi: "responses" as const,
-    apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey("main"),
+    apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey("opencode-go"),
     defaultModel: "deepseek-v4-flash",
     defaultReasoningEffort: "high",
     supportsWebsockets: false,

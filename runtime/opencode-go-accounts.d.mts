@@ -9,7 +9,10 @@ export interface OpencodeGoAccountMarker {
   mode: "switching" | "exclusive";
 }
 
+export const opencodeGoDefaultAccountId: "opencode-go";
+
 export function isOpencodeGoProvider(provider: string): boolean;
+export function sharedProviderProxyKey(provider: string): string;
 export function opencodeGoAccountIdFromProvider(provider: string): string | undefined;
 export function opencodeGoProviderId(accountId: string): string;
 export function validateOpencodeGoAccountId(accountId: string): string;

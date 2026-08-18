@@ -14,7 +14,7 @@ describe("ProviderIdleReleaser", () => {
     const now = () => nowMs;
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go-"),
+      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
       listRunningProviders: async () => ["opencode-go-main", "opencode-go-b"],
       releaseProvider: async (provider) => {
         released.push(provider);
@@ -52,7 +52,7 @@ describe("ProviderIdleReleaser", () => {
     };
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go-"),
+      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
       listRunningProviders: async () => [
         "opencode-go-launching",
         "opencode-go-default",
@@ -93,13 +93,13 @@ describe("ProviderIdleReleaser", () => {
     };
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go-"),
-      listRunningProviders: async () => ["opencode-go-main"],
+      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
+      listRunningProviders: async () => ["opencode-go"],
       releaseProvider: async (provider) => {
         released.push(provider);
         return true;
       },
-      providerForThread: () => "opencode-go-main",
+      providerForThread: () => "opencode-go",
       listBindings: () => [binding],
       defaultRoleProvider: () => undefined,
       notify: () => undefined,

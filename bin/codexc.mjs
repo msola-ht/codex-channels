@@ -41,6 +41,7 @@ import {
   migrateLegacyOpencodeGoAccount,
   opencodeGoAccountIdFromProvider,
   opencodeGoProviderId,
+  sharedProviderProxyKey,
 } from "../runtime/opencode-go-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "../runtime/opencode-go-quota-windows.mjs";
 import { createProxyFetch } from "../dist/bootstrap/proxy-fetch.js";
@@ -761,8 +762,9 @@ async function runServiceAppServer(args) {
       }
       if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
       await prepareAppServerSocketPaths([managed.socketPath]);
+      const proxyKey = sharedProviderProxyKey(provider);
       const { baseUrl: localBaseUrl, proxy, created: proxyCreated } = await startProviderProxy(
-        provider,
+        proxyKey,
         isGoProvider(provider)
           ? goProxyOptions
           : proxyOptionsForUrl(new URL(definition.baseUrl)),

@@ -172,7 +172,8 @@ codexc opencode-go account stop <id>
 它与 DeepSeek 官方配置、凭据和价格独立；所有账户共享一个统计代理，每个账户的隔离 App Server
 按需启动、空闲 5 分钟自动释放（释放后会通知渠道一次，再次使用自动拉起）。也可作为共享
 `agents.external` 子代理（只指向默认账户）。聊天使用 `/model` 选择
-“OpenCode Go（账户）”模型，终端使用 `codexc remote --profile opencode-go-<账户>`；`/usage`
+“OpenCode Go（账户）”模型，终端使用 `codexc remote --profile opencode-go`（默认账户）或
+`--profile opencode-go-<账户>`；`/usage`
 只展示当前 Thread 账户的额度，WebUI 按账户分别展示。配置、协议范围和官方全模型价格维护见
 [`OpenCode Go 使用说明`](docs/opencode-go.md) 与
 [`多账户方案`](docs/opencode-go-multi-account.md)。

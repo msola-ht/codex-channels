@@ -17,16 +17,21 @@ codexc opencode-go account default <id>  # 设置新会话默认账户
 codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Server
 ```
 
-旧版单账户配置会在 CLI/服务启动时原地迁移为默认账户 `opencode-go-main`
-（Profile 变为 `sf-opencode-go-main.config.toml`，管理标记迁入
-`~/.codex-connect/providers/opencode-go/accounts/main/`），原有会话与 `agents.external`
-继续可用，无需手工搬移。每个账户拥有独立的 0600 私有 Profile
-`~/.codex/sf-opencode-go-<账户>.config.toml`，Key 只进入该文件与对应 App Server 子进程环境，
+默认账户保持旧版 Provider id `opencode-go`（Profile
+`~/.codex/sf-opencode-go.config.toml`），旧版单账户配置在 CLI/服务启动时只补账户注册表，
+不重命名 Provider、不改写 Profile 与角色文件，因此旧会话、历史统计与 `agents.external`
+继续可用，无需手工搬移。新增账户才使用 `opencode-go-<账户>` 命名，每个账户拥有独立的
+0600 私有 Profile `~/.codex/sf-opencode-go-<账户>.config.toml`（默认账户保持
+`sf-opencode-go.config.toml`），Key 只进入该文件与对应 App Server 子进程环境，
 不进入注册表、配置或日志；模型目录与管理标记共享
 `~/.codex-connect/providers/opencode-go/`。首个账户也可通过 Setup 选择保留 OpenAI 默认的
 切换模式，或让原生 Codex 和 Gateway 默认使用 OpenCode Go 的固定模式；固定模式会先备份再修改
 `~/.codex/config.toml`。如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
 会明确拒绝，不会覆盖用户配置。
+
+早期多账户预发布版本曾把默认账户命名为 `opencode-go-main`。升级时，受管切换模式会保留
+`main` 账户及其历史 Thread 路由，并从同一私有 Profile 创建新的默认 `opencode-go` 账户；已有的
+其他账户不变。固定模式不自动转换，避免在没有可并行账户的配置中覆盖主 Provider。
 
 配置完成后运行：
 
@@ -47,7 +52,8 @@ codexc service restart all
 旧 Thread 仍可通过 `/resume` 恢复。终端共享会话使用：
 
 ```bash
-codexc remote --profile opencode-go-main
+codexc remote --profile opencode-go            # 默认账户
+codexc remote --profile opencode-go-<账户>      # 新增账户
 ```
 
 所有 OpenCode Go 账户共享同一个统计代理（不随账户数量增长）；每个账户的隔离 App Server 按需
@@ -104,14 +110,17 @@ Turn 完成通知也会在“账户状态”区附带当前模型剩余用量（
 - 网页搜索已实测：OpenCode Go 与 DeepSeek 一样通过 `/responses` 提供搜索工具，Codex 侧统一
   以 `web_search` item 回传（`query`、`action` 和结构化 `results`），实测能返回带标题、URL、
   摘要和发布日期的真实网页结果。验证方式：直接让 OpenCode Go 会话执行搜索任务并观察事件日志
-  中的 `web_search` item；或运行 `codex exec -p sf-opencode-go-main -C <工作目录>
+  中的 `web_search` item；或运行 `codex exec -p sf-opencode-go -C <工作目录>
   --skip-git-repo-check "请搜索……"` 直连测试。
 - 当前按 HTTP/SSE 接入（`supports_websockets = false`），流式文本、工具调用和上下文压缩走
   HTTP/SSE，不建立 Responses WebSocket。
 - API Key 没有官方账户接口可用于预检，Setup 只校验格式；首次请求失败时从模型指标和日志中
   查看错误分类。
-- 账户 id 使用小写字母/数字/`-`/`_`（1–32 位），不允许与现有 Provider id 冲突；删除账户前
-  会备份 Profile 与账户目录，删除后该账户历史 Thread 不可恢复。
+- 默认账户固定为 `opencode-go`；其他账户 id 使用小写字母/数字/`-`/`_`
+  （1–32 位），不允许与现有 Provider id 冲突；删除账户前
+  会备份 Profile 与账户目录，删除后该账户历史 Thread 不可恢复；最后一个账户不可通过
+  账户命令删除，需在 Setup 中选择恢复配置。删除后重启 Gateway 会自动解绑已删除账户的
+  外部会话；该会话下一条消息会新建 Thread。
 - 运行统计与 DeepSeek 一致：调试模式展示最后一次请求的可观测首事件延迟，完成卡片展示整轮
   综合思考速度与含推理生成速度；`/usage` 展示官方配额窗口与模型本地用量，见上文。
 

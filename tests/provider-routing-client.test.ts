@@ -155,6 +155,25 @@ describe("ProviderRoutingClient", () => {
     expect(openai.resumeThread).not.toHaveBeenCalled();
   });
 
+  it("routes legacy default-account Threads directly to the opencode-go client", async () => {
+    const openai = client();
+    const opencodeGo = client();
+    const resumed = session("thread-legacy", "opencode-go", "idle");
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-legacy", "opencode-go", "notLoaded"),
+    ]);
+    opencodeGo.resumeThread.mockResolvedValue(resumed);
+    const routed = new ProviderRoutingClient("openai", new Map([
+      ["openai", openai],
+      ["opencode-go", opencodeGo],
+    ]));
+
+    await expect(routed.resumeThread("thread-legacy", cwd)).resolves.toBe(resumed);
+
+    expect(opencodeGo.resumeThread).toHaveBeenCalledWith("thread-legacy", cwd);
+    expect(openai.resumeThread).not.toHaveBeenCalled();
+  });
+
   it("namespaces Server Request and resolution ids by Provider", async () => {
     const openai = client();
     const deepseek = client();

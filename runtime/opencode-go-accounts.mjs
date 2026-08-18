@@ -5,7 +5,6 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   unlinkSync,
 } from "node:fs";
@@ -18,22 +17,38 @@ import { providerStorageRoot } from "./connect-home.mjs";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const accountIdPattern = /^[a-z0-9_-]{1,32}$/u;
-const reservedAccountIds = new Set(["openai", "deepseek", "opencode-go"]);
+const reservedAccountIds = new Set(["openai", "deepseek"]);
 const maximumRegistryBytes = 262_144;
-const defaultAccountId = "main";
+export const opencodeGoDefaultAccountId = "opencode-go";
 const opencodeGoProviderPrefix = "opencode-go-";
+const defaultAccountId = opencodeGoDefaultAccountId;
 
 export function isOpencodeGoProvider(provider) {
-  return typeof provider === "string" && provider.startsWith(opencodeGoProviderPrefix);
+  if (typeof provider !== "string") return false;
+  if (provider === defaultAccountId) return true;
+  if (!provider.startsWith(opencodeGoProviderPrefix)) return false;
+  try {
+    validateOpencodeGoAccountId(provider.slice(opencodeGoProviderPrefix.length));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function sharedProviderProxyKey(provider) {
+  return isOpencodeGoProvider(provider) ? "opencode-go" : provider;
 }
 
 export function opencodeGoAccountIdFromProvider(provider) {
   if (!isOpencodeGoProvider(provider)) return undefined;
-  return provider.slice(opencodeGoProviderPrefix.length);
+  if (provider === defaultAccountId) return defaultAccountId;
+  const accountId = provider.slice(opencodeGoProviderPrefix.length);
+  return accountId.length === 0 ? undefined : accountId;
 }
 
 export function opencodeGoProviderId(accountId) {
   validateOpencodeGoAccountId(accountId);
+  if (accountId === defaultAccountId) return defaultAccountId;
   return `${opencodeGoProviderPrefix}${accountId}`;
 }
 
@@ -44,7 +59,7 @@ export function validateOpencodeGoAccountId(accountId) {
     || reservedAccountIds.has(accountId)
   ) {
     throw new Error(
-      "OpenCode Go 账户 id 必须是小写字母/数字/`-`/`_` 组成的 1-32 位字符串，且不能与现有 Provider id 冲突",
+      "OpenCode Go 账户 id 必须是小写字母/数字/`-`/`_` 组成的 1-32 位字符串，且不能与现有 Provider id 冲突；默认账户使用 opencode-go",
     );
   }
   return accountId;
@@ -169,19 +184,11 @@ export function writeOpencodeGoAccountMarker(environment, accountId, mode) {
 
 export function migrateLegacyOpencodeGoAccount(environment = process.env) {
   if (existsSync(opencodeGoAccountsFilePath(environment))) {
-    return { changed: false, accountId: defaultAccountId };
+    return migratePrMainDefaultAccount(environment);
   }
-  const codexHome = codexHomePath(environment);
   const providerDirectory = join(providerStorageRoot(environment), "opencode-go");
   const legacyMarkerPath = join(providerDirectory, "managed.toml");
-  const legacyProfilePath = join(codexHome, "sf-opencode-go.config.toml");
-  const configPath = join(codexHome, "config.toml");
-  const rolePath = join(codexHome, "sf-agent.config.toml");
-  if (!existsSync(legacyMarkerPath) && !existsSync(legacyProfilePath)) {
-    return { changed: false, accountId: defaultAccountId };
-  }
   if (!existsSync(legacyMarkerPath)) {
-    // 未受管的旧 Profile 不自动迁移，也不阻断其他命令。
     return { changed: false, accountId: defaultAccountId };
   }
   const legacyMarker = parse(readPrivateFile(legacyMarkerPath));
@@ -192,19 +199,21 @@ export function migrateLegacyOpencodeGoAccount(environment = process.env) {
   ) {
     throw new Error("旧版 OpenCode Go 管理标记无效，拒绝迁移");
   }
+  // 迁移前校验旧版 Profile/基础配置仍然存在且可安全读取，保持迁移时失败关闭。
+  const codexHome = codexHomePath(environment);
+  if (legacyMarker.mode === "switching") {
+    readPrivateFile(join(codexHome, "sf-opencode-go.config.toml"));
+  } else {
+    readPrivateFile(join(codexHome, "config.toml"));
+  }
   const accountId = defaultAccountId;
   const accountDirectory = opencodeGoAccountDirectory(environment, accountId);
   const backupDirectory = opencodeGoAccountBackupDirectory(environment, accountId);
   const accountMarkerPath = opencodeGoAccountMarkerPath(environment, accountId);
-  const migratedProfilePath = join(codexHome, "sf-opencode-go-main.config.toml");
   const touched = [
     opencodeGoAccountsFilePath(environment),
     accountMarkerPath,
     legacyMarkerPath,
-    ...(legacyMarker.mode === "switching"
-      ? [legacyProfilePath, migratedProfilePath]
-      : [configPath]),
-    rolePath,
   ];
   const snapshots = snapshotFiles(touched);
   const accountDirectoryExisted = existsSync(accountDirectory);
@@ -212,47 +221,10 @@ export function migrateLegacyOpencodeGoAccount(environment = process.env) {
   try {
     mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
     accountDirectoryCreated = true;
-    backupOptional(legacyProfilePath, join(backupDirectory, "sf-opencode-go-main.config.toml"));
     backupOptional(legacyMarkerPath, join(backupDirectory, "managed.toml"));
-    backupOptional(rolePath, join(backupDirectory, "sf-agent.config.toml"));
     writeOpencodeGoAccounts(environment, [{ id: accountId, default: true }]);
     writeOpencodeGoAccountMarker(environment, accountId, legacyMarker.mode);
-    if (legacyMarker.mode === "switching") {
-      const rewritten = rewriteProviderReferences(
-        readPrivateFile(legacyProfilePath),
-        "opencode-go",
-        accountId,
-      );
-      writePrivateFileAtomicSync(migratedProfilePath, rewritten);
-      unlinkSync(legacyProfilePath);
-    } else {
-      const rewritten = rewriteProviderReferences(
-        readPrivateFile(configPath),
-        "opencode-go",
-        accountId,
-      );
-      writePrivateFileAtomicSync(configPath, rewritten);
-    }
-    if (existsSync(rolePath)) {
-      const rewritten = rewriteRoleReferences(
-        readPrivateFile(rolePath),
-        accountId,
-      );
-      if (rewritten !== undefined) {
-        writePrivateFileAtomicSync(rolePath, rewritten);
-      }
-    }
     unlinkSync(legacyMarkerPath);
-    const legacyBackupState = join(providerDirectory, "backup", "state.json");
-    if (existsSync(legacyBackupState)) {
-      const legacyProfileBackup = join(providerDirectory, "backup", "sf-opencode-go.config.toml");
-      if (existsSync(legacyProfileBackup)) {
-        renameSync(
-          legacyProfileBackup,
-          join(providerDirectory, "backup", "sf-opencode-go-main.config.toml"),
-        );
-      }
-    }
     return { changed: true, accountId };
   } catch (error) {
     restoreSnapshots(snapshots);
@@ -263,62 +235,112 @@ export function migrateLegacyOpencodeGoAccount(environment = process.env) {
   }
 }
 
-function rewriteProviderReferences(content, legacyProvider, accountId) {
+// PR #64 shipped `main` as the default account. Keep it for historical
+// Threads while creating the stable `opencode-go` default account.
+function migratePrMainDefaultAccount(environment) {
+  const accounts = loadOpencodeGoAccounts(environment);
+  const legacyMain = accounts.find((account) => account.id === "main" && account.default);
+  if (!legacyMain || accounts.some((account) => account.id === defaultAccountId)) {
+    return { changed: false, accountId: defaultAccountId };
+  }
+  const mainMarker = readOpencodeGoAccountMarker(environment, "main");
+  if (mainMarker?.mode !== "switching") {
+    return { changed: false, accountId: "main" };
+  }
+  const codexHome = codexHomePath(environment);
+  const legacyProfilePath = join(codexHome, "sf-opencode-go-main.config.toml");
+  const profilePath = join(codexHome, "sf-opencode-go.config.toml");
+  if (existsSync(profilePath)) {
+    throw new Error("OpenCode Go 默认 Profile 已存在，拒绝自动迁移旧 main 账户");
+  }
+  const rolePath = join(codexHome, "sf-agent.config.toml");
+  const accountDirectory = opencodeGoAccountDirectory(environment, defaultAccountId);
+  const markerPath = opencodeGoAccountMarkerPath(environment, defaultAccountId);
+  const snapshots = snapshotFiles([
+    opencodeGoAccountsFilePath(environment),
+    profilePath,
+    markerPath,
+    rolePath,
+  ]);
+  const directoryExisted = existsSync(accountDirectory);
+  try {
+    const migratedProfile = rewriteProviderReferences(
+      readPrivateFile(legacyProfilePath),
+      "opencode-go-main",
+      defaultAccountId,
+    );
+    const nextAccounts = [
+      { id: defaultAccountId, default: true },
+      ...accounts.map((account) => ({ ...account, default: false })),
+    ];
+    writePrivateFileAtomicSync(profilePath, migratedProfile);
+    writeOpencodeGoAccountMarker(environment, defaultAccountId, "switching");
+    if (existsSync(rolePath)) {
+      const rewrittenRole = rewriteRoleReferences(
+        readPrivateFile(rolePath),
+        "opencode-go-main",
+        defaultAccountId,
+      );
+      if (rewrittenRole !== undefined) {
+        writePrivateFileAtomicSync(
+          rolePath,
+          rewrittenRole,
+        );
+      }
+    }
+    writeOpencodeGoAccounts(environment, nextAccounts);
+    return { changed: true, accountId: defaultAccountId };
+  } catch (error) {
+    restoreSnapshots(snapshots);
+    if (!directoryExisted) {
+      rmSync(accountDirectory, { recursive: true, force: true });
+    }
+    throw error;
+  }
+}
+
+function rewriteProviderReferences(content, sourceProvider, targetAccountId) {
   let document;
   try {
     document = parse(content);
   } catch {
-    throw new Error("OpenCode Go 旧版配置文件无法安全解析，拒绝迁移");
+    throw new Error("OpenCode Go 旧 Profile 无法安全解析，拒绝迁移");
   }
-  if (document.model_provider !== legacyProvider) {
-    throw new Error("OpenCode Go 旧版配置文件与管理标记不一致，拒绝迁移");
+  if (document.model_provider !== sourceProvider) {
+    throw new Error("OpenCode Go 旧 Profile 与 Provider 不一致，拒绝迁移");
   }
-  const provider = table(document.model_providers)[legacyProvider];
-  if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
-    throw new Error("OpenCode Go 旧版配置文件缺少 Provider 配置，拒绝迁移");
+  const providers = table(document.model_providers);
+  const provider = table(providers[sourceProvider]);
+  if (Object.keys(provider).length === 0) {
+    throw new Error("OpenCode Go 旧 Profile 缺少 Provider 配置，拒绝迁移");
   }
-  const providers = { ...table(document.model_providers) };
-  delete providers[legacyProvider];
-  providers[opencodeGoProviderId(accountId)] = {
-    ...provider,
-    name: opencodeGoProviderId(accountId),
-  };
+  const targetProvider = opencodeGoProviderId(targetAccountId);
+  const nextProviders = { ...providers };
+  delete nextProviders[sourceProvider];
+  nextProviders[targetProvider] = { ...provider, name: targetProvider };
   return stringify({
     ...document,
-    model_provider: opencodeGoProviderId(accountId),
-    model_providers: providers,
+    model_provider: targetProvider,
+    model_providers: nextProviders,
   });
 }
 
-function rewriteRoleReferences(content, accountId) {
+function rewriteRoleReferences(content, sourceProvider, targetAccountId) {
   let document;
   try {
     document = parse(content);
   } catch {
     throw new Error("OpenCode Go 旧版子代理角色文件无法安全解析，拒绝迁移");
   }
-  const legacyProvider = "opencode-go";
-  if (document.model_provider !== legacyProvider) return undefined;
-  const provider = table(document.model_providers)[legacyProvider];
-  if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
-    throw new Error("OpenCode Go 旧版子代理角色文件缺少 Provider 配置，拒绝迁移");
-  }
-  const providers = { ...table(document.model_providers) };
-  delete providers[legacyProvider];
-  providers[opencodeGoProviderId(accountId)] = {
-    ...provider,
-    name: opencodeGoProviderId(accountId),
-    env_key: `CODEX_CONNECT_OPENCODE_GO_${sanitizeEnvironmentName(accountId)}_API_KEY`,
-  };
-  return stringify({
-    ...document,
-    model_provider: opencodeGoProviderId(accountId),
-    model_providers: providers,
-  });
+  if (document.model_provider !== sourceProvider) return undefined;
+  return rewriteProviderReferences(content, sourceProvider, targetAccountId);
 }
 
 export function opencodeGoApiKeyEnvironmentKey(accountId) {
   validateOpencodeGoAccountId(accountId);
+  if (accountId === defaultAccountId) {
+    return "CODEX_CONNECT_OPENCODE_GO_API_KEY";
+  }
   return `CODEX_CONNECT_OPENCODE_GO_${sanitizeEnvironmentName(accountId)}_API_KEY`;
 }
 

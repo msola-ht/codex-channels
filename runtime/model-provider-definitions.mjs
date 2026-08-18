@@ -1,5 +1,6 @@
 import {
   loadOpencodeGoAccounts,
+  opencodeGoDefaultAccountId,
   opencodeGoApiKeyEnvironmentKey,
   opencodeGoProviderId,
 } from "./opencode-go-accounts.mjs";
@@ -65,14 +66,18 @@ export function loadManagedModelProviderDefinitions(environment = process.env) {
 }
 
 function opencodeGoAccountDefinition(accountId) {
+  const provider = opencodeGoProviderId(accountId);
+  const isDefaultAccount = accountId === opencodeGoDefaultAccountId;
   return {
-    id: opencodeGoProviderId(accountId),
+    id: provider,
     accountId,
     storageId: "opencode-go",
-    displayName: `OpenCode Go（${accountId}）`,
-    profileName: opencodeGoProviderId(accountId),
-    codexProfileName: `sf-opencode-go-${accountId}`,
-    profileFileName: `sf-opencode-go-${accountId}.config.toml`,
+    displayName: isDefaultAccount ? "OpenCode Go" : `OpenCode Go（${accountId}）`,
+    profileName: provider,
+    codexProfileName: isDefaultAccount ? "sf-opencode-go" : `sf-opencode-go-${accountId}`,
+    profileFileName: isDefaultAccount
+      ? "sf-opencode-go.config.toml"
+      : `sf-opencode-go-${accountId}.config.toml`,
     catalogFileName: opencodeGoProviderDefinition.catalogFileName,
     catalogManifestFileName: opencodeGoProviderDefinition.catalogManifestFileName,
     managedMarkerFileName: opencodeGoProviderDefinition.managedMarkerFileName,

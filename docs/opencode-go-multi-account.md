@@ -19,18 +19,18 @@
 
 ## 2. 目标架构
 
-把每个 GO 账户建模为一个“受管 Provider 实例”，Provider id 采用
-`opencode-go-<accountId>`：
+把每个 GO 账户建模为一个“受管 Provider 实例”。默认账户保持旧版单账户的
+Provider id `opencode-go`，新增账户采用 `opencode-go-<accountId>`：
 
 ```text
-opencode-go-main     现有账户（兼容迁移后的默认账户）
+opencode-go          默认账户（旧版单账户直接沿用，无需迁移）
 opencode-go-b        新增账户
 ```
 
 每个实例拥有：
 
-- 独立 Profile（`~/.codex/sf-opencode-go-<account>.config.toml`，0600，只含该账户
-  Key）；
+- 独立 Profile（默认账户 `~/.codex/sf-opencode-go.config.toml`，新增账户
+  `~/.codex/sf-opencode-go-<account>.config.toml`，0600，只含该账户 Key）；
 - 独立管理标记与账户目录（`~/.codex-connect/providers/opencode-go/accounts/<account>/`）；
 - 独立隔离 App Server 子进程（Key 是进程级环境变量，无法在会话内选择）；
 - 独立账户适配器（`/usage` 按当前 `modelProvider` 查该账户官方窗口）；
@@ -52,7 +52,8 @@ opencode-go-b        新增账户
 Key 只写入 `~/.codex/sf-opencode-go-<account>.config.toml`（沿用现有私有 Profile
 机制，`0600`、`O_NOFOLLOW`、属主校验），不进入注册表、配置、日志或平台消息。
 
-账户 id 规则：小写字母/数字/`-`/`_`，1–32 位；不允许与现有 Provider id 冲突。
+账户 id 规则：默认账户固定为 `opencode-go`；其他账户 id 为小写字母/数字/`-`/`_`，
+1–32 位，不允许与现有 Provider id 冲突。
 
 ## 4. CLI / Setup
 
@@ -69,8 +70,12 @@ codexc opencode-go account default <id>      # 设置新会话默认账户
 行为约束：
 
 - 新增账户不修改现有账户的 Profile、模型目录与统计；
-- 首个账户沿用当前 `opencode-go` 配置原地迁移为 `opencode-go-main`，保持兼容；
+- 首个账户沿用当前 `opencode-go` 配置（Provider id、Profile、角色文件均不重命名），
+  只在服务启动时补账户注册表与管理标记；
+- 升级早期预发布的 `opencode-go-main` 默认账户时，保留 `main` 以恢复历史 Thread，
+  并创建新的 `opencode-go` 默认账户；固定模式不自动转换；
 - 删除账户前备份 Profile 与账户目录；删除后该账户历史 Thread 不可恢复，需明确确认；
+  重启后会解除仍指向该 Provider 的外部会话绑定；最后一个账户只能通过 Setup 恢复配置移除；
 - 每次增删账户后校验全部账户 Profile 与共享模型目录，失败关闭并回滚注册表。
 
 ## 5. 共享统计代理
@@ -109,7 +114,8 @@ codexc opencode-go account default <id>      # 设置新会话默认账户
   不复制历史（与现有跨 Provider 行为一致）；
 - `/resume` 按 Provider 过滤 Thread 列表；恢复旧账户 Thread 时若该账户 App Server
   未运行，先按需启动再列出/恢复；
-- `codexc remote --profile opencode-go-<account>` 可直连对应账户隔离实例。
+- `codexc remote --profile opencode-go`（默认账户）或
+  `--profile opencode-go-<account>`（新增账户）可直连对应账户隔离实例。
 
 ## 7. 生命周期策略（避免占用随账户增长）
 
@@ -221,7 +227,7 @@ codexc opencode-go account default <id>      # 设置新会话默认账户
 
 - `scripts/metrics-command-options.mjs`、`scripts/agents.mjs`、
   `scripts/codex-remote-options.mjs`：Provider id 集合改为动态或扩展规则；
-- 现有 `opencode-go` 配置迁移为 `opencode-go-main` 的脚本与测试；
+- 默认账户保持 `opencode-go`、新增账户才使用 `opencode-go-<id>` 的脚本与测试；
 - 文档：本方案、`opencode-go.md`、接入指南、README、WebUI 文档同步更新。
 
 ## 13. 验证
@@ -236,8 +242,9 @@ codexc opencode-go account default <id>      # 设置新会话默认账户
 
 ## 14. 已确认决策
 
-1. 默认账户命名：现有单账户配置原地迁移为 `opencode-go-main`，保留旧 Profile
-   （`sf-opencode-go.config.toml`）不自动迁移的未受管文件仍按未受管处理；
+1. 默认账户命名：现有单账户配置保持 `opencode-go`（Profile
+   `sf-opencode-go.config.toml`），只补注册表不重命名，旧会话与历史统计天然兼容；
+   新增账户才使用 `opencode-go-<id>`；
 2. 账户生命周期：空闲 5 分钟自动释放为默认策略，阈值暂不做配置项；
 3. `/model` 不标注额度不足（第一版不做增强）；
 4. WebUI 展示全部已配置账户的用量卡，便于对比剩余额度。

@@ -5,11 +5,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  isOpencodeGoProvider,
   loadOpencodeGoAccounts,
+  opencodeGoAccountIdFromProvider,
   opencodeGoAccountMarkerPath,
   opencodeGoApiKeyEnvironmentKey,
   opencodeGoProviderId,
   readOpencodeGoAccountMarker,
+  sharedProviderProxyKey,
   validateOpencodeGoAccountId,
   writeOpencodeGoAccountMarker,
   writeOpencodeGoAccounts,
@@ -18,13 +21,35 @@ import {
 describe("OpenCode Go account registry", () => {
   it("validates account ids and derives provider ids", () => {
     expect(opencodeGoProviderId("main")).toBe("opencode-go-main");
+    expect(opencodeGoProviderId("opencode-go")).toBe("opencode-go");
     expect(opencodeGoProviderId("b-2")).toBe("opencode-go-b-2");
+    expect(opencodeGoAccountIdFromProvider("opencode-go")).toBe("opencode-go");
+    expect(opencodeGoAccountIdFromProvider("opencode-go-main")).toBe("main");
+    expect(opencodeGoAccountIdFromProvider("opencode-go-b-2")).toBe("b-2");
+    expect(opencodeGoAccountIdFromProvider("opencode-go-")).toBeUndefined();
+    expect(opencodeGoAccountIdFromProvider("opencode-go-INVALID")).toBeUndefined();
+    expect(opencodeGoAccountIdFromProvider("openai")).toBeUndefined();
+    expect(isOpencodeGoProvider("opencode-go")).toBe(true);
+    expect(isOpencodeGoProvider("opencode-go-lunare")).toBe(true);
+    expect(isOpencodeGoProvider("opencode-go-")).toBe(false);
+    expect(isOpencodeGoProvider("opencode-go-INVALID")).toBe(false);
+    expect(isOpencodeGoProvider("deepseek")).toBe(false);
     expect(opencodeGoApiKeyEnvironmentKey("main")).toBe(
       "CODEX_CONNECT_OPENCODE_GO_MAIN_API_KEY",
     );
-    for (const invalid of ["", "A", "a b", "a".repeat(33), "openai", "deepseek", "opencode-go"]) {
+    expect(opencodeGoApiKeyEnvironmentKey("opencode-go")).toBe(
+      "CODEX_CONNECT_OPENCODE_GO_API_KEY",
+    );
+    for (const invalid of ["", "A", "a b", "a".repeat(33), "openai", "deepseek"]) {
       expect(() => validateOpencodeGoAccountId(invalid)).toThrow("账户 id");
     }
+  });
+
+  it("reuses the shared statistics proxy for every OpenCode Go account", () => {
+    expect(sharedProviderProxyKey("opencode-go-main")).toBe("opencode-go");
+    expect(sharedProviderProxyKey("opencode-go-lunare")).toBe("opencode-go");
+    expect(sharedProviderProxyKey("deepseek")).toBe("deepseek");
+    expect(sharedProviderProxyKey("openai")).toBe("openai");
   });
 
   it("persists the registry with a single default account", () => {

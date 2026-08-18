@@ -8,6 +8,7 @@ export const metricsProviderUsage = metricsProviderIds.join("|");
 
 export function isMetricsProviderId(value) {
   return new Set(metricsProviderIds).has(value)
+    || value === "opencode-go"
     || /^opencode-go-[a-z0-9_-]{1,32}$/u.test(value);
 }
 

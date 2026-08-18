@@ -18,7 +18,7 @@
   `opencode-go-<账户>` 实例。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
   （`accounts.json`）、账户目录与管理标记，以及旧版单账户配置原地迁移为默认账户
-  `opencode-go-main`；Key 不进入注册表。
+  `opencode-go`（新增账户才使用 `opencode-go-<账户>`）；Key 不进入注册表。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，避免 DeepSeek 与 OpenCode Go Setup 重复解释同一格式。
 - `deepseek-pricing-baseline.json`：保存从 DeepSeek 官方价格页审查后的人民币每百万 Token 单价、

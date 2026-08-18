@@ -31,12 +31,15 @@ import {
   withPreservedManagedModelCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
 import {
+  isOpencodeGoProvider,
   loadOpencodeGoAccounts,
   migrateLegacyOpencodeGoAccount,
+  opencodeGoDefaultAccountId,
   opencodeGoAccountBackupDirectory,
   opencodeGoAccountDirectory,
   opencodeGoAccountMarkerPath,
   opencodeGoAccountsFilePath,
+  opencodeGoApiKeyEnvironmentKey,
   opencodeGoProviderId,
   readOpencodeGoAccountMarker,
   validateOpencodeGoAccountId,
@@ -58,7 +61,7 @@ import {
 
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
-const defaultAccountId = "main";
+const defaultAccountId = opencodeGoDefaultAccountId;
 
 class OpenCodeGoSetupCancelled extends Error {}
 
@@ -75,7 +78,7 @@ export async function runOpenCodeGoSetup({
   const accounts = loadOpencodeGoAccounts(environment);
   const defaultAccount = accounts.find((account) => account.default) ?? accounts[0];
   const hasModelSettings = loadManagedModelProviderSettings(environment)
-    .some((candidate) => candidate.provider.startsWith("opencode-go-"));
+    .some((candidate) => isOpencodeGoProvider(candidate.provider));
   const prompt = prompter ?? createPrompter(prompts, {
     allowBack,
     hasModelSettings,
@@ -370,6 +373,9 @@ export async function removeOpencodeGoAccount(accountId, {
   const accounts = loadOpencodeGoAccounts(environment);
   const account = accounts.find((candidate) => candidate.id === accountId);
   if (!account) throw new Error(`OpenCode Go 账户不存在：${accountId}`);
+  if (accounts.length === 1) {
+    throw new Error("不能删除最后一个 OpenCode Go 账户；请在 Setup 中选择恢复配置");
+  }
   const role = loadManagedModelProviderRole(environment);
   if (role?.provider === opencodeGoProviderId(accountId)) {
     throw new Error(
@@ -386,10 +392,10 @@ export async function removeOpencodeGoAccount(accountId, {
   if (existsSync(paths.profilePath)) {
     copyFileSync(
       paths.profilePath,
-      join(paths.backupDirectory, `sf-opencode-go-${accountId}.config.toml`),
+      join(paths.backupDirectory, opencodeGoProfileFileName(accountId)),
     );
     chmodSync(
-      join(paths.backupDirectory, `sf-opencode-go-${accountId}.config.toml`),
+      join(paths.backupDirectory, opencodeGoProfileFileName(accountId)),
       0o600,
     );
   }
@@ -518,7 +524,7 @@ function accountPaths(environment, accountId) {
     accountDirectory,
     backupDirectory,
     configPath: join(codexHome, "config.toml"),
-    profilePath: join(codexHome, `sf-opencode-go-${accountId}.config.toml`),
+    profilePath: join(codexHome, opencodeGoProfileFileName(accountId)),
     markerPath: opencodeGoAccountMarkerPath(environment, accountId),
     catalogPath: join(providerDirectory, definition.catalogFileName),
     manifestPath: join(providerDirectory, definition.catalogManifestFileName),
@@ -527,28 +533,34 @@ function accountPaths(environment, accountId) {
 }
 
 function opencodeGoAccountDefinition(accountId) {
+  const provider = opencodeGoProviderId(accountId);
+  const isDefaultAccount = accountId === defaultAccountId;
   return Object.freeze({
-    id: opencodeGoProviderId(accountId),
+    id: provider,
     accountId,
     storageId: "opencode-go",
-    displayName: `OpenCode Go（${accountId}）`,
-    profileName: opencodeGoProviderId(accountId),
-    codexProfileName: `sf-opencode-go-${accountId}`,
-    profileFileName: `sf-opencode-go-${accountId}.config.toml`,
+    displayName: isDefaultAccount ? "OpenCode Go" : `OpenCode Go（${accountId}）`,
+    profileName: provider,
+    codexProfileName: isDefaultAccount ? "sf-opencode-go" : `sf-opencode-go-${accountId}`,
+    profileFileName: opencodeGoProfileFileName(accountId),
     catalogFileName: definition.catalogFileName,
     catalogManifestFileName: definition.catalogManifestFileName,
     managedMarkerFileName: definition.managedMarkerFileName,
     backupDirectoryName: definition.backupDirectoryName,
     baseUrl: definition.baseUrl,
     wireApi: definition.wireApi,
-    apiKeyEnvironmentKey: `CODEX_CONNECT_OPENCODE_GO_${accountId
-      .replace(/[^a-zA-Z0-9]/gu, "_")
-      .toUpperCase()}_API_KEY`,
+    apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey(accountId),
     defaultModel: definition.defaultModel,
     defaultReasoningEffort: definition.defaultReasoningEffort,
     supportsWebsockets: false,
     models: definition.models,
   });
+}
+
+function opencodeGoProfileFileName(accountId) {
+  return accountId === defaultAccountId
+    ? "sf-opencode-go.config.toml"
+    : `sf-opencode-go-${accountId}.config.toml`;
 }
 
 function publicPaths(paths) {
@@ -591,7 +603,7 @@ async function restoreOpencodeGoSetup(environment) {
   );
   await restoreBackup(
     accountPathsValue.profilePath,
-    join(legacyBackup, "sf-opencode-go-main.config.toml"),
+    join(legacyBackup, opencodeGoProfileFileName(defaultAccountId)),
     state.profile,
   );
   await restoreBackup(
@@ -637,7 +649,11 @@ async function restoreOpencodeGoSetup(environment) {
   } catch {
     // 账户目录清理失败不阻断恢复结果展示。
   }
-  for (const file of ["sf-agent.config.toml", "config.toml", `sf-opencode-go-${defaultAccountId}.config.toml`]) {
+  for (const file of [
+    "sf-agent.config.toml",
+    "config.toml",
+    opencodeGoProfileFileName(defaultAccountId),
+  ]) {
     const target = join(codexHome, file);
     if (existsSync(target) && state[backupKey(file)] === false) {
       try {
@@ -652,7 +668,7 @@ async function restoreOpencodeGoSetup(environment) {
 function backupKey(file) {
   if (file === "config.toml") return "config";
   if (file === "sf-agent.config.toml") return "roleConfig";
-  if (file.startsWith("sf-opencode-go-")) return "profile";
+  if (file.startsWith("sf-opencode-go")) return "profile";
   return file;
 }
 
@@ -684,7 +700,7 @@ async function preserveInitialFiles(paths) {
     config: await backupOptional(paths.configPath, join(legacyBackup, "config.toml")),
     profile: await backupOptional(
       paths.profilePath,
-      join(legacyBackup, `sf-opencode-go-${defaultAccountId}.config.toml`),
+      join(legacyBackup, opencodeGoProfileFileName(defaultAccountId)),
     ),
     marker: await backupOptional(paths.markerPath, join(legacyBackup, "managed.toml")),
     roleConfig: await backupOptional(

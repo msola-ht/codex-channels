@@ -508,7 +508,7 @@ export class SessionRouter {
 }
 
 function isUnavailableRestoreError(error: Error): boolean {
-  return /(?:thread|session).*(?:not found|deleted|(?:is )?archived)|线程.*(?:不存在|删除|归档)/i
+  return /(?:thread|session).*(?:not found|deleted|(?:is )?archived)|线程.*(?:不存在|删除|归档)|模型 Provider 未配置独立 App Server/i
     .test(error.message);
 }
 

@@ -83,14 +83,14 @@ describe("App Server supervisor", () => {
     const released: string[] = [];
     const owner = new AppServerSupervisorOwner(primarySocketPath, {
       primaryProvider: "openai",
-      managedProviders: ["opencode-go-main"],
+      managedProviders: ["opencode-go"],
       socketPaths: [
         primarySocketPath,
-        join(runtimeDir, "codex-app-server-opencode-go-main.sock"),
+        join(runtimeDir, "codex-app-server-opencode-go.sock"),
       ],
     }, {
       releaseProvider: async (provider) => {
-        if (provider !== "opencode-go-main") {
+        if (provider !== "opencode-go") {
           throw new Error("未知 Provider");
         }
         released.push(provider);
@@ -99,9 +99,9 @@ describe("App Server supervisor", () => {
     });
     await owner.start();
 
-    await expect(releaseAppServerProvider(primarySocketPath, "opencode-go-main"))
+    await expect(releaseAppServerProvider(primarySocketPath, "opencode-go"))
       .resolves.toBe(true);
-    expect(released).toEqual(["opencode-go-main"]);
+    expect(released).toEqual(["opencode-go"]);
     await expect(releaseAppServerProvider(primarySocketPath, "unknown-provider"))
       .rejects.toThrow("未知 Provider");
     await owner.close();
