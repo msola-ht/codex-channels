@@ -35,6 +35,11 @@ import {
   writeManagedModelProviderProfileDefault,
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadOpencodeGoAccounts,
+  migrateLegacyOpencodeGoAccount,
+  opencodeGoAccountMarkerPath,
+} from "../runtime/opencode-go-accounts.mjs";
 
 describe("model provider runtime topology", () => {
   it("resolves the primary socket from one shared runtime descriptor", () => {
@@ -72,7 +77,7 @@ describe("model provider runtime topology", () => {
 
     expect(loadManagedModelProviders(environment)).toEqual([
       { provider: "deepseek" },
-      { provider: "opencode-go" },
+      { provider: "opencode-go-main" },
     ]);
     expect(loadManagedProviderAppServers(environment).map((provider) => ({
       provider: provider.provider,
@@ -81,12 +86,12 @@ describe("model provider runtime topology", () => {
       provider: "deepseek",
       environmentKeys: ["CODEX_CONNECT_DEEPSEEK_API_KEY"],
     }, {
-      provider: "opencode-go",
-      environmentKeys: ["CODEX_CONNECT_OPENCODE_GO_API_KEY"],
+      provider: "opencode-go-main",
+      environmentKeys: ["CODEX_CONNECT_OPENCODE_GO_MAIN_API_KEY"],
     }]);
     expect(validateConfiguredModelProviders(environment)).toEqual([
       { provider: "deepseek", mode: "switching" },
-      { provider: "opencode-go", mode: "switching" },
+      { provider: "opencode-go-main", mode: "switching" },
     ]);
 
     writeManagedModelProviderRoleConfig(environment, { provider: "deepseek" });
@@ -117,10 +122,32 @@ describe("model provider runtime topology", () => {
     configureOpenCodeGo(codexHome, "exclusive");
     const environment = testEnvironment(codexHome);
 
-    expect(loadPrimaryModelProvider(environment)).toBe("opencode-go");
+    expect(loadPrimaryModelProvider(environment)).toBe("opencode-go-main");
     expect(loadManagedModelProvider(environment)).toBeUndefined();
     expect(validateConfiguredModelProvider(environment))
-      .toEqual({ provider: "opencode-go", mode: "exclusive" });
+      .toEqual({ provider: "opencode-go-main", mode: "exclusive" });
+  });
+
+  it("migrates the legacy single-account layout to the default account", async () => {
+    const codexHome = await configuredHome("switching");
+    configureLegacyOpenCodeGo(codexHome);
+    const environment = testEnvironment(codexHome);
+
+    expect(migrateLegacyOpencodeGoAccount(environment)).toEqual({
+      changed: true,
+      accountId: "main",
+    });
+    expect(loadOpencodeGoAccounts(environment)).toEqual([
+      { id: "main", default: true },
+    ]);
+    expect(readFileSync(join(codexHome, "sf-opencode-go-main.config.toml"), "utf8"))
+      .toContain('model_provider = "opencode-go-main"');
+    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
+    expect(existsSync(opencodeGoAccountMarkerPath(environment, "main"))).toBe(true);
+    expect(loadManagedModelProviders(environment)).toEqual([
+      { provider: "deepseek" },
+      { provider: "opencode-go-main" },
+    ]);
   });
 
   it("rejects more than one exclusive third-party Provider", async () => {
@@ -421,6 +448,52 @@ function providerProfile(
 }
 
 function configureOpenCodeGo(
+  codexHome: string,
+  mode: "switching" | "exclusive" = "switching",
+): void {
+  const providerDirectory = join(
+    connectHomeFor(codexHome),
+    "providers",
+    "opencode-go",
+  );
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  const accountId = "main";
+  const accountDirectory = join(providerDirectory, "accounts", accountId);
+  mkdirSync(accountDirectory, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    join(providerDirectory, "accounts.json"),
+    `${JSON.stringify([{ id: accountId, default: true }], null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(accountDirectory, "managed.toml"),
+    `version = 1\nprovider = "opencode-go-${accountId}"\nmode = "${mode}"\n`,
+    { mode: 0o600 },
+  );
+  const catalogPath = join(providerDirectory, "models.json");
+  writeFileSync(
+    catalogPath,
+    providerCatalog(),
+    { mode: 0o600 },
+  );
+  const provider = `opencode-go-${accountId}`;
+  writeFileSync(join(codexHome, mode === "exclusive" ? "config.toml" : "sf-opencode-go-main.config.toml"), [
+    'model = "deepseek-v4-flash"',
+    `model_provider = "${provider}"`,
+    ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
+    `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+    `[model_providers.${provider}]`,
+    `name = "${provider}"`,
+    'base_url = "https://opencode.ai/zen/go/v1"',
+    'wire_api = "responses"',
+    "requires_openai_auth = false",
+    "supports_websockets = false",
+    'experimental_bearer_token = "sk-opencode-test-secret"',
+    "",
+  ].join("\n"), { mode: 0o600 });
+}
+
+function configureLegacyOpenCodeGo(
   codexHome: string,
   mode: "switching" | "exclusive" = "switching",
 ): void {

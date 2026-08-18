@@ -37,7 +37,7 @@ describe("OpenCode Go setup", () => {
 
     expect(result).toMatchObject({
       action: "configured",
-      provider: "opencode-go",
+      provider: "opencode-go-main",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
       autoCompactPercent: 60,
@@ -58,7 +58,7 @@ describe("OpenCode Go setup", () => {
       const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-setup-"));
       const configureRole = vi.fn(async () => ({
         role: "external",
-        provider: "opencode-go",
+        provider: "opencode-go-main",
         model: "deepseek-v4-flash",
       }));
       const result = await runOpenCodeGoSetup({
@@ -74,13 +74,13 @@ describe("OpenCode Go setup", () => {
       });
 
       expect(result).toMatchObject({ action: "configured", mode });
-      const target = mode === "switching" ? "sf-opencode-go.config.toml" : "config.toml";
+      const target = mode === "switching" ? "sf-opencode-go-main.config.toml" : "config.toml";
       const config = parse(readFileSync(join(codexHome, target), "utf8"));
       expect(config).toMatchObject({
         model: "deepseek-v4-flash",
-        model_provider: "opencode-go",
+        model_provider: "opencode-go-main",
         model_providers: {
-          "opencode-go": {
+          "opencode-go-main": {
             base_url: "https://opencode.ai/zen/go/v1",
             wire_api: "responses",
             supports_websockets: false,
@@ -103,16 +103,16 @@ describe("OpenCode Go setup", () => {
         auto_compact_token_limit: 600_000,
       });
       expect(parse(readFileSync(
-        join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"),
+        join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"),
         "utf8",
-      ))).toEqual({ version: 1, provider: "opencode-go", mode });
+      ))).toEqual({ version: 1, provider: "opencode-go-main", mode });
       expect(configureRole).toHaveBeenCalledWith(
-        "opencode-go",
+        "opencode-go-main",
         "deepseek-v4-flash",
         expect.objectContaining({ CODEX_HOME: codexHome }),
       );
       if (mode === "exclusive") {
-        expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
+        expect(existsSync(join(codexHome, "sf-opencode-go-main.config.toml"))).toBe(false);
       }
     },
   );
@@ -138,8 +138,8 @@ describe("OpenCode Go setup", () => {
     expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8"))).toEqual({
       custom: true,
     });
-    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
-      .toMatchObject({ model_provider: "opencode-go" });
+    expect(parse(readFileSync(join(codexHome, "sf-opencode-go-main.config.toml"), "utf8")))
+      .toMatchObject({ model_provider: "opencode-go-main" });
   });
 
   it("restores the initial config and provider files", async () => {
@@ -163,8 +163,8 @@ describe("OpenCode Go setup", () => {
 
     expect(result).toMatchObject({ action: "restored" });
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go-main.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(false);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
   });
@@ -231,7 +231,7 @@ describe("OpenCode Go setup", () => {
       configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     });
-    writeManagedModelProviderProfileDefault("opencode-go", {
+    writeManagedModelProviderProfileDefault("opencode-go-main", {
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
       autoCompactLimit: 750_000,
@@ -246,7 +246,7 @@ describe("OpenCode Go setup", () => {
       downloadCatalog: async () => updatedCatalog(2_000_000),
     });
 
-    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
+    expect(parse(readFileSync(join(codexHome, "sf-opencode-go-main.config.toml"), "utf8")))
       .toMatchObject({
         model: "deepseek-v4-pro",
         model_reasoning_effort: "max",
@@ -261,12 +261,12 @@ describe("OpenCode Go setup", () => {
       default_reasoning_level: "max",
       auto_compact_token_limit: 1_500_000,
     });
-    expect(configureRole).toHaveBeenCalledWith("opencode-go", "deepseek-v4-pro", environment);
+    expect(configureRole).toHaveBeenCalledWith("opencode-go-main", "deepseek-v4-pro", environment);
   });
 
   it("refuses to overwrite an unmanaged OpenCode Go Profile", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-unmanaged-"));
-    const profilePath = join(codexHome, "sf-opencode-go.config.toml");
+    const profilePath = join(codexHome, "sf-opencode-go-main.config.toml");
     writeFileSync(profilePath, 'model = "user-managed"\n', { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
@@ -280,7 +280,7 @@ describe("OpenCode Go setup", () => {
   it("refuses a user-managed OpenCode Go Provider in config.toml", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-config-owner-"));
     const configPath = join(codexHome, "config.toml");
-    const original = '[model_providers.opencode-go]\nname = "user-managed"\n';
+    const original = '[model_providers.opencode-go-main]\nname = "user-managed"\n';
     writeFileSync(configPath, original, { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
@@ -288,11 +288,11 @@ describe("OpenCode Go setup", () => {
       output: { write: () => undefined },
       prompter: prompt("switching"),
       downloadCatalog: successfulCatalog,
-    })).rejects.toThrow("已占用 OpenCode Go Provider 或 Profile");
+    })).rejects.toThrow("已占用 opencode-go-main Provider 或 Profile");
 
     expect(readFileSync(configPath, "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go-main.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
   });
 
   it("rolls back every file when shared-role configuration fails", async () => {
@@ -309,8 +309,8 @@ describe("OpenCode Go setup", () => {
     })).rejects.toThrow("config conflict");
 
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go-main.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
   });
 });
 
@@ -331,14 +331,16 @@ function opencodeFixture(): string {
     "opencode-go",
   );
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  const accountDirectory = join(providerDirectory, "accounts", "main");
+  mkdirSync(accountDirectory, { recursive: true, mode: 0o700 });
   const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
-    'model_provider = "opencode-go"',
+    'model_provider = "opencode-go-main"',
     'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-    "[model_providers.opencode-go]",
-    'name = "opencode-go"',
+    "[model_providers.opencode-go-main]",
+    'name = "opencode-go-main"',
     'base_url = "https://opencode.ai/zen/go/v1"',
     'wire_api = "responses"',
     "supports_websockets = false",
@@ -347,8 +349,13 @@ function opencodeFixture(): string {
     "",
   ].join("\n");
   writeFileSync(
-    join(providerDirectory, "managed.toml"),
-    'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+    join(providerDirectory, "accounts.json"),
+    `${JSON.stringify([{ id: "main", default: true }], null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(accountDirectory, "managed.toml"),
+    'version = 1\nprovider = "opencode-go-main"\nmode = "switching"\n',
     { mode: 0o600 },
   );
   writeFileSync(catalogPath, JSON.stringify({
@@ -366,7 +373,7 @@ function opencodeFixture(): string {
     })),
   }), { mode: 0o600 });
   writeFileSync(
-    join(codexHome, "sf-opencode-go.config.toml"),
+    join(codexHome, "sf-opencode-go-main.config.toml"),
     providerLines,
     { mode: 0o600 },
   );

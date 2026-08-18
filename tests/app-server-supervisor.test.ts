@@ -10,6 +10,7 @@ import {
   appServerSupervisorSocketPath,
   ensureAppServerProvider,
   inspectAppServerSupervisor,
+  releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
 
 const temporaryDirectories: string[] = [];
@@ -73,6 +74,37 @@ describe("App Server supervisor", () => {
     });
 
     await expect(owner.start()).rejects.toThrow("路径可能超过平台长度限制");
+  });
+
+  it("releases a Provider through the private supervisor request", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-release-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
+    const released: string[] = [];
+    const owner = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["opencode-go-main"],
+      socketPaths: [
+        primarySocketPath,
+        join(runtimeDir, "codex-app-server-opencode-go-main.sock"),
+      ],
+    }, {
+      releaseProvider: async (provider) => {
+        if (provider !== "opencode-go-main") {
+          throw new Error("未知 Provider");
+        }
+        released.push(provider);
+        return true;
+      },
+    });
+    await owner.start();
+
+    await expect(releaseAppServerProvider(primarySocketPath, "opencode-go-main"))
+      .resolves.toBe(true);
+    expect(released).toEqual(["opencode-go-main"]);
+    await expect(releaseAppServerProvider(primarySocketPath, "unknown-provider"))
+      .rejects.toThrow("未知 Provider");
+    await owner.close();
   });
 
   it("closes promptly while a local client keeps its connection open", async () => {

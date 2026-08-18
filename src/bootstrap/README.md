@@ -67,9 +67,14 @@
   和解析异常不进入日志或业务事件。官方账户只有余额接口，没有用量窗口，不展示本地用量估算。
 - `opencode-go-account-adapter.ts`：通过同一共享 Provider 运行时按请求读取 OpenCode Go Key，调用官方
   `/zen/go/v1/usage` 接口，把 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与
-  重置时间），并按官方价格基线从本机指标库重算模型本地用量；DeepSeek 模型按请求时间拆分
+  重置时间）；参数化工厂按 `modelProvider` 区分 `opencode-go-<账户>`，指标库按账户过滤，并按
+  官方价格基线从本机指标库重算模型本地用量；DeepSeek 模型按请求时间拆分
   Off-Peak / Peak 两档、各自对照官方包含额度；重算优先使用请求保存的价格快照档位，缺失时才按
   当前基线判定；Key、响应正文和解析异常同样不进入日志或业务事件。
+- `provider-idle-releaser.ts`：定期扫描已启动的 OpenCode Go 账户隔离 App Server，无活动 Turn、
+  无 Conversation 绑定、非 `agents.external` 默认账户且空闲超过 5 分钟时通过 supervisor
+  `releaseProvider` 释放，并向最近使用过该账户的渠道会话通知一次；正在拉起的账户跳过本轮，
+  释放失败只记录日志不阻塞请求。
 - `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；组合根按
   `vision.provider` 从第三方 API 注册表解析显示名称、精确 Endpoint 和隔离凭据，适配器复用统一
   代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回 Application 的稳定识别结果；

@@ -1,3 +1,9 @@
+import {
+  loadOpencodeGoAccounts,
+  opencodeGoApiKeyEnvironmentKey,
+  opencodeGoProviderId,
+} from "./opencode-go-accounts.mjs";
+
 export const deepseekProviderDefinition = Object.freeze({
   id: "deepseek",
   displayName: "DeepSeek",
@@ -45,3 +51,38 @@ export const managedModelProviderDefinitions = Object.freeze([
   deepseekProviderDefinition,
   opencodeGoProviderDefinition,
 ]);
+
+export function loadOpencodeGoAccountDefinitions(environment = process.env) {
+  return loadOpencodeGoAccounts(environment).map((account) =>
+    Object.freeze(opencodeGoAccountDefinition(account.id)));
+}
+
+export function loadManagedModelProviderDefinitions(environment = process.env) {
+  return Object.freeze([
+    deepseekProviderDefinition,
+    ...loadOpencodeGoAccountDefinitions(environment),
+  ]);
+}
+
+function opencodeGoAccountDefinition(accountId) {
+  return {
+    id: opencodeGoProviderId(accountId),
+    accountId,
+    storageId: "opencode-go",
+    displayName: `OpenCode Go（${accountId}）`,
+    profileName: opencodeGoProviderId(accountId),
+    codexProfileName: `sf-opencode-go-${accountId}`,
+    profileFileName: `sf-opencode-go-${accountId}.config.toml`,
+    catalogFileName: opencodeGoProviderDefinition.catalogFileName,
+    catalogManifestFileName: opencodeGoProviderDefinition.catalogManifestFileName,
+    managedMarkerFileName: opencodeGoProviderDefinition.managedMarkerFileName,
+    backupDirectoryName: opencodeGoProviderDefinition.backupDirectoryName,
+    baseUrl: opencodeGoProviderDefinition.baseUrl,
+    wireApi: opencodeGoProviderDefinition.wireApi,
+    apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey(accountId),
+    defaultModel: opencodeGoProviderDefinition.defaultModel,
+    defaultReasoningEffort: opencodeGoProviderDefinition.defaultReasoningEffort,
+    supportsWebsockets: false,
+    models: opencodeGoProviderDefinition.models,
+  };
+}

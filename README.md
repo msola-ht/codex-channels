@@ -157,13 +157,25 @@ codexc service restart all
 
 ### OpenCode Go
 
-在 `codexc setup` 的“模型与提供商”中可配置独立 OpenCode Go Provider；当前开放
-`deepseek-v4-flash` 和 `deepseek-v4-pro`，支持保留 OpenAI 的切换模式和仅 OpenCode Go 固定模式。
-它与 DeepSeek 官方配置、凭据和价格独立，首次选择模型或恢复对应会话时才按需启动隔离 App Server；
-也可作为共享 `agents.external` 子代理。模型默认值同样在“第三方模型设置”中独立设置；聊天使用
-`/model`，终端使用
-`codexc remote --profile opencode-go`。配置、协议范围和官方全模型价格维护见
-[`OpenCode Go 使用说明`](docs/opencode-go.md)。
+在 `codexc setup` 的“模型与提供商”中可配置独立 OpenCode Go Provider，并支持同一 Gateway 内
+多个账户（各自 Key、各自套餐额度）；当前开放 `deepseek-v4-flash` 和 `deepseek-v4-pro`，支持保留
+OpenAI 的切换模式和仅 OpenCode Go 固定模式。账户管理命令：
+
+```bash
+codexc opencode-go account add <id>
+codexc opencode-go account list
+codexc opencode-go account remove <id>
+codexc opencode-go account default <id>
+codexc opencode-go account stop <id>
+```
+
+它与 DeepSeek 官方配置、凭据和价格独立；所有账户共享一个统计代理，每个账户的隔离 App Server
+按需启动、空闲 5 分钟自动释放（释放后会通知渠道一次，再次使用自动拉起）。也可作为共享
+`agents.external` 子代理（只指向默认账户）。聊天使用 `/model` 选择
+“OpenCode Go（账户）”模型，终端使用 `codexc remote --profile opencode-go-<账户>`；`/usage`
+只展示当前 Thread 账户的额度，WebUI 按账户分别展示。配置、协议范围和官方全模型价格维护见
+[`OpenCode Go 使用说明`](docs/opencode-go.md) 与
+[`多账户方案`](docs/opencode-go-multi-account.md)。
 
 ## 日常使用
 

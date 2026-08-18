@@ -59,6 +59,10 @@ export function managedProviderDirectory(
   environment: NodeJS.ProcessEnv | undefined,
   definition: import("./model-provider-definitions.mjs").ModelProviderDefinition,
 ): string;
+export function managedProviderMarkerPath(
+  environment: NodeJS.ProcessEnv,
+  definition: import("./model-provider-definitions.mjs").ModelProviderDefinition,
+): string;
 
 export function writeManagedModelProviderProfileDefault(
   provider: ManagedModelProviderId,
@@ -115,6 +119,10 @@ export function loadDeepseekAccountCredential(
 ): string;
 
 export function loadOpencodeGoAccountCredential(
+  environment?: NodeJS.ProcessEnv,
+): string;
+export function loadOpencodeGoAccountCredentialFor(
+  provider: string,
   environment?: NodeJS.ProcessEnv,
 ): string;
 

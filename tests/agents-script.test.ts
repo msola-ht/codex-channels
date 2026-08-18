@@ -23,9 +23,15 @@ import type {
 import type { CodexUserConfigWriter } from "../scripts/agents.mjs";
 import {
   deepseekProviderDefinition,
-  opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
-import type { ModelProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import type {
+  ManagedModelProviderId,
+  ModelProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
+import {
+  opencodeGoApiKeyEnvironmentKey,
+  opencodeGoProviderId,
+} from "../runtime/opencode-go-accounts.mjs";
 import {
   createManagedProviderMarker,
   createManagedProviderProfile,
@@ -35,14 +41,14 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 describe("codexc agents script", () => {
   it.each([
     [deepseekProviderDefinition.id, deepseekProviderDefinition],
-    [opencodeGoProviderDefinition.id, opencodeGoProviderDefinition],
+    [opencodeGoProviderId("main"), opencodeGoMainDefinition()],
   ] as const)("binds the shared role to configured provider %s", async (provider, definition) => {
     const fixture = createFixture();
     try {
       writeProviderFixture(fixture, definition, "switching");
 
       const selected = await configureThirdPartyRole(
-        provider,
+        provider as ManagedModelProviderId,
         undefined,
         fixture.environment,
         { updateConfig: applyConfigUpdate },
@@ -91,20 +97,20 @@ describe("codexc agents script", () => {
     const fixture = createFixture();
     try {
       writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
-      writeProviderFixture(fixture, opencodeGoProviderDefinition, "switching");
+      writeProviderFixture(fixture, opencodeGoMainDefinition(), "switching");
       await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
-      await configureThirdPartyRole("opencode-go", "deepseek-v4-pro", fixture.environment, {
+      await configureThirdPartyRole("opencode-go-main", "deepseek-v4-pro", fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
 
       expect(agentsStatus(fixture.environment)).toMatchObject({
-        provider: "opencode-go",
+        provider: "opencode-go-main",
         model: "deepseek-v4-pro",
       });
       expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
-        agents: { external: { nickname_candidates: ["OpenCode Go"] } },
+        agents: { external: { nickname_candidates: ["OpenCode Go（main）"] } },
       });
     } finally {
       fixture.remove();
@@ -199,14 +205,14 @@ describe("codexc agents script", () => {
   it("supports a provider configured as the fixed primary", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture, opencodeGoProviderDefinition, "exclusive");
+      writeProviderFixture(fixture, opencodeGoMainDefinition(), "exclusive");
 
-      await configureThirdPartyRole("opencode-go", undefined, fixture.environment, {
+      await configureThirdPartyRole("opencode-go-main", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
 
       expect(agentsStatus(fixture.environment)).toMatchObject({
-        provider: "opencode-go",
+        provider: "opencode-go-main",
         model: "deepseek-v4-flash",
       });
     } finally {
@@ -326,7 +332,7 @@ function createFixture() {
     configPath: join(home, "config.toml"),
     rolePath: join(home, "sf-agent.config.toml"),
     providerDirectory: (definition: ModelProviderDefinition) =>
-      join(connectHome, "providers", definition.id),
+      join(connectHome, "providers", definition.storageId ?? definition.id),
     remove: () => rmSync(home, { recursive: true, force: true }),
   };
 }
@@ -364,11 +370,55 @@ function writeProviderFixture(
     ? join(fixture.home, "config.toml")
     : join(fixture.home, definition.profileFileName);
   writeFileSync(target, stringify(profile), { mode: 0o600 });
-  writeFileSync(
-    join(providerDirectory, definition.managedMarkerFileName),
-    stringify(createManagedProviderMarker(definition, mode)),
-    { mode: 0o600 },
-  );
+  if (definition.accountId !== undefined) {
+    const accountsDirectory = join(providerDirectory, "accounts");
+    const accountDirectory = join(accountsDirectory, definition.accountId);
+    mkdirSync(accountDirectory, { recursive: true, mode: 0o700 });
+    if (!existsSync(join(providerDirectory, "accounts.json"))) {
+      writeFileSync(
+        join(providerDirectory, "accounts.json"),
+        `${JSON.stringify([{ id: definition.accountId, default: true }], null, 2)}\n`,
+        { mode: 0o600 },
+      );
+    }
+    writeFileSync(
+      join(accountDirectory, definition.managedMarkerFileName),
+      stringify(createManagedProviderMarker(definition, mode)),
+      { mode: 0o600 },
+    );
+  } else {
+    writeFileSync(
+      join(providerDirectory, definition.managedMarkerFileName),
+      stringify(createManagedProviderMarker(definition, mode)),
+      { mode: 0o600 },
+    );
+  }
+}
+
+function opencodeGoMainDefinition(): ModelProviderDefinition {
+  return {
+    id: opencodeGoProviderId("main") as ManagedModelProviderId,
+    accountId: "main",
+    storageId: "opencode-go",
+    displayName: "OpenCode Go（main）",
+    profileName: "opencode-go-main",
+    codexProfileName: "sf-opencode-go-main",
+    profileFileName: "sf-opencode-go-main.config.toml",
+    catalogFileName: "models.json",
+    catalogManifestFileName: "models.manifest.json",
+    managedMarkerFileName: "managed.toml",
+    backupDirectoryName: "backup",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+    wireApi: "responses" as const,
+    apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey("main"),
+    defaultModel: "deepseek-v4-flash",
+    defaultReasoningEffort: "high",
+    supportsWebsockets: false,
+    models: [
+      { slug: "deepseek-v4-flash", available: true },
+      { slug: "deepseek-v4-pro", available: true },
+    ],
+  };
 }
 
 const applyConfigUpdate: CodexUserConfigWriter = async (environment, createEdits) => {

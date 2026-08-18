@@ -1,4 +1,7 @@
-import { loadOpencodeGoAccountCredential } from "../../runtime/model-provider-runtime.mjs";
+import {
+  loadOpencodeGoAccountCredentialFor,
+} from "../../runtime/model-provider-runtime.mjs";
+import { isOpencodeGoProvider } from "../../runtime/opencode-go-accounts.mjs";
 import {
   calculateModelRequestCostComponents,
   SqliteModelRequestMetricsStore,
@@ -41,11 +44,12 @@ export function createOpencodeGoAccountAdapter(
 ): ProviderAccountAdapter {
   const environment = options.environment ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const provider = options.provider ?? "opencode-go";
   return {
-    provider: "opencode-go",
+    provider,
     async accountUsage() {
       try {
-        const apiKey = loadOpencodeGoAccountCredential(environment);
+        const apiKey = loadOpencodeGoAccountCredentialFor(provider, environment);
         const response = await fetchImpl(opencodeGoUsageUrl, {
           method: "GET",
           headers: {
@@ -62,7 +66,10 @@ export function createOpencodeGoAccountAdapter(
           tooLarge: () => new Error("OpenCode Go usage response is too large"),
           missingBody: () => new Error("OpenCode Go usage response is empty"),
         });
-        const usage = parseUsageResponse(JSON.parse(body.toString("utf8")) as unknown);
+        const usage = parseUsageResponse(
+          JSON.parse(body.toString("utf8")) as unknown,
+          provider,
+        );
         if (usage.kind !== "quota-windows") {
           throw new Error("OpenCode Go usage response schema is invalid");
         }
@@ -90,6 +97,7 @@ export function createOpencodeGoAccountAdapter(
               nowMs,
               windowStartAtMs,
               windowEndAtMs,
+              provider,
             );
         const localTokens = options.metricsDatabasePath === undefined
           ? null
@@ -99,6 +107,7 @@ export function createOpencodeGoAccountAdapter(
               usage.windows,
               windowStartAtMs,
               windowEndAtMs,
+              provider,
             );
         const windows = localTokens === null
           ? usage.windows
@@ -106,9 +115,10 @@ export function createOpencodeGoAccountAdapter(
               ...window,
               localTokens: localTokens.get(window.windowId) ?? null,
             }));
-        return modelUsage === undefined
+        const resolved = modelUsage === undefined
           ? { ...usage, windows }
           : { ...usage, windows, modelUsage };
+        return { ...resolved, provider };
       } catch {
         throw new UserFacingError(
           "provider.account.unavailable",
@@ -125,6 +135,7 @@ export interface OpencodeGoAccountAdapterOptions {
   fetchImpl?: typeof fetch;
   metricsDatabasePath?: string;
   nowMs?: () => number;
+  provider?: string;
 }
 
 export function createOpencodeGoRemainingUsageReader(
@@ -134,13 +145,18 @@ export function createOpencodeGoRemainingUsageReader(
   requestStartedAtMs?: number,
   modelProvider?: string,
 ) => Promise<ProviderModelUsageEstimate | null> {
-  const adapter = createOpencodeGoAccountAdapter(options);
   return async (model, requestStartedAtMs, modelProvider) => {
-    if (modelProvider !== undefined && modelProvider !== "opencode-go") {
+    const resolvedProvider = modelProvider !== undefined && isOpencodeGoProvider(modelProvider)
+      ? modelProvider
+      : options.provider ?? "opencode-go";
+    if (modelProvider !== undefined && !isOpencodeGoProvider(modelProvider)) {
       return null;
     }
     try {
-      const usage = await adapter.accountUsage();
+      const usage = await createOpencodeGoAccountAdapter({
+        ...options,
+        provider: resolvedProvider,
+      }).accountUsage();
       if (usage.kind !== "quota-windows") return null;
       const baseline = loadOpenCodeGoPricingBaseline();
       const bucket = baseline.models.get(model)?.peakOffPeak === undefined
@@ -165,6 +181,7 @@ function readWindowLocalTokens(
   quotaWindows: readonly ProviderQuotaWindow[],
   monthlyWindowStartAtMs: number,
   monthlyWindowEndAtMs: number | null,
+  provider: string,
 ): Map<string, number> {
   const tokens = new Map<string, number>();
   try {
@@ -214,6 +231,7 @@ function readWindowLocalTokens(
               currentResetsAt,
               startAtMs,
               endAtMs,
+              provider,
             ),
           );
         }
@@ -254,6 +272,7 @@ function readOpencodeGoTokens(
   currentResetsAt: number | null,
   startAtMs: number,
   endAtMs: number,
+  provider: string,
 ): number {
   let total = 0;
   let offset = 0;
@@ -265,10 +284,10 @@ function readOpencodeGoTokens(
       limit: 500,
       sortKey: "recordedAtMs",
       sortDirection: "asc",
-      filter: "opencode-go",
+      filter: provider,
     });
     for (const record of page.records) {
-      if (record.provider !== "opencode-go") continue;
+      if (record.provider !== provider) continue;
       if (!requestInQuotaWindow(
         record,
         windowId,
@@ -330,6 +349,7 @@ function readModelUsageEstimates(
   endAtMs: number,
   windowStartAtMs: number,
   windowEndAtMs: number | null,
+  provider: string,
 ): ProviderModelUsageEstimate[] {
   try {
     const store = new SqliteModelRequestMetricsStore(
@@ -358,10 +378,10 @@ function readModelUsageEstimates(
           limit: 500,
           sortKey: "recordedAtMs",
           sortDirection: "asc",
-          filter: "opencode-go",
+          filter: provider,
         });
         for (const record of page.records) {
-          if (record.provider !== "opencode-go" || record.model === null) {
+          if (record.provider !== provider || record.model === null) {
             continue;
           }
           const monthlyResetsAt = windowEndAtMs === null
@@ -387,7 +407,7 @@ function readModelUsageEstimates(
           const cost = atMs >= priceEffectiveAtMs
             ? (() => {
                 const pricing = resolver.resolve({
-                  provider: "opencode-go",
+                  provider,
                   model: record.model,
                   serviceTier: record.serviceTier,
                   inputTokens: record.inputTokens,
@@ -519,7 +539,7 @@ function calendarMonthStart(nowMs: number): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
 }
 
-function parseUsageResponse(value: unknown): ProviderAccountUsage {
+function parseUsageResponse(value: unknown, provider: string): ProviderAccountUsage {
   const response = record(value);
   if (
     response.usage === null
@@ -562,7 +582,7 @@ function parseUsageResponse(value: unknown): ProviderAccountUsage {
   }
   return {
     kind: "quota-windows",
-    provider: "opencode-go",
+    provider,
     available: true,
     windows,
   };

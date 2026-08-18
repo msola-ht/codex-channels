@@ -11,17 +11,22 @@ import {
 } from "../../runtime/project-rules.mjs";
 import {
   deepseekProviderDefinition,
-  managedModelProviderDefinitions,
-  opencodeGoProviderDefinition,
+  loadManagedModelProviderDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
+  loadManagedModelProviderRole,
   loadPrimaryModelProvider,
   managedProviderDirectory,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
+import {
+  inspectAppServerSupervisor,
+  releaseAppServerProvider,
+} from "../../runtime/app-server-supervisor.mjs";
+import { opencodeGoAccountIdFromProvider } from "../../runtime/opencode-go-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { readApiProviderKey } from "../../runtime/api-provider-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
@@ -98,6 +103,7 @@ import {
 } from "./openai-connectivity.js";
 import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
+import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
@@ -138,6 +144,7 @@ export class GatewayApplication {
   private readonly modelPricingNeedsExchangeRate: boolean;
   private readonly exchangeRate: RemoteExchangeRate;
   private readonly metricsSync: MetricsSync;
+  private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly bindings: SqliteBindingStore;
   private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
@@ -171,11 +178,12 @@ export class GatewayApplication {
       : new TomlWorkspacePermissionWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
     const managedProviders = loadManagedModelProviders();
+    const providerDefinitions = loadManagedModelProviderDefinitions();
     const configuredProviders = new Set<string>([
       primaryProvider,
       ...managedProviders.map(({ provider }) => provider),
     ]);
-    const supplementaryModels = managedModelProviderDefinitions.flatMap((definition) =>
+    const supplementaryModels = providerDefinitions.flatMap((definition) =>
       loadManagedModelOptions(
         managedProviderDirectory(process.env, definition),
         configuredProviders.has(definition.id),
@@ -205,7 +213,10 @@ export class GatewayApplication {
     this.codex = new ProviderRoutingClient(
       primaryProvider,
       clients,
-      async (provider) => ensureAppServerProvider(config.codexSocketPath, provider),
+      async (provider) => {
+        this.providerIdleReleaser?.markLaunching(provider);
+        await ensureAppServerProvider(config.codexSocketPath, provider);
+      },
     );
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
@@ -273,14 +284,19 @@ export class GatewayApplication {
       fetchImpl: createProxyFetch(config.networkProxy),
       logger,
     });
+    const pricingResolvers = new Map<string, ModelPricingResolver>([
+      [deepseekProviderDefinition.id, new DeepseekModelPricingResolver({
+        exchangeRate: () => this.exchangeRate.resolve(),
+      })],
+    ]);
+    for (const definition of providerDefinitions) {
+      if (definition.accountId !== undefined) {
+        pricingResolvers.set(definition.id, new OpenCodeGoModelPricingResolver());
+      }
+    }
     this.pricingResolver = new ProviderModelPricingResolver(
       this.modelPricing,
-      new Map<string, ModelPricingResolver>([
-        [deepseekProviderDefinition.id, new DeepseekModelPricingResolver({
-          exchangeRate: () => this.exchangeRate.resolve(),
-        })],
-        [opencodeGoProviderDefinition.id, new OpenCodeGoModelPricingResolver()],
-      ]),
+      pricingResolvers,
     );
     this.modelPricingNeedsExchangeRate = primaryProvider === deepseekProviderDefinition.id
       || managedProviders.some(({ provider }) => provider === deepseekProviderDefinition.id)
@@ -371,18 +387,23 @@ export class GatewayApplication {
       this.router,
       models,
     );
-    const providerAccounts = new ProviderAccountService([
+    const accountAdapters = [
       createOpenAiAccountAdapter(this.codex),
       createDeepseekAccountAdapter({
         fetchImpl: createProxyFetch(config.networkProxy),
       }),
-      createOpencodeGoAccountAdapter({
+    ];
+    for (const definition of providerDefinitions) {
+      if (definition.accountId === undefined) continue;
+      accountAdapters.push(createOpencodeGoAccountAdapter({
+        provider: definition.id,
         fetchImpl: createProxyFetch(config.networkProxy),
         metricsDatabasePath: modelRequestMetricsDatabasePath(
           config.stateDatabasePath,
         ),
-      }),
-    ]);
+      }));
+    }
+    const providerAccounts = new ProviderAccountService(accountAdapters);
     const visionConfig = config.vision;
     const visionProviderName = visionConfig.mode === "disabled"
       ? undefined
@@ -641,6 +662,38 @@ export class GatewayApplication {
         }, true);
       }
     });
+    this.providerIdleReleaser = new ProviderIdleReleaser({
+      logger,
+      isAccountProvider: (provider) =>
+        opencodeGoAccountIdFromProvider(provider) !== undefined,
+      listRunningProviders: async () =>
+        (await inspectAppServerSupervisor(config.codexSocketPath))?.managedProviders ?? [],
+      releaseProvider: (provider) =>
+        releaseAppServerProvider(config.codexSocketPath, provider),
+      providerForThread: (threadId) =>
+        this.router.modelSettingsForThread(threadId)?.modelProvider,
+      listBindings: () => this.bindings.list(),
+      defaultRoleProvider: () => loadManagedModelProviderRole()?.provider,
+      notify: (provider, targets) => {
+        const accountId = opencodeGoAccountIdFromProvider(provider);
+        const label = accountId === undefined
+          ? provider
+          : `OpenCode Go 账户 ${accountId}`;
+        const message = `${label} 已空闲停止；再次选择该账户、恢复 Thread 或使用对应 Remote TUI 时将自动启动。`;
+        if (targets.length === 0) {
+          this.logger.info({ provider }, "OpenCode Go 账户已释放，无渠道会话需要通知");
+          return;
+        }
+        for (const target of targets) {
+          this.output.publish({ type: "warning", target, message }, true);
+        }
+      },
+    });
+    this.output.subscribe("provider-idle-activity", (event) => {
+      if (event.type !== "turn.started" && event.type !== "turn.completed") return;
+      const provider = this.router.modelSettingsForThread(event.threadId)?.modelProvider;
+      this.providerIdleReleaser.touch(provider, event.target);
+    });
     this.surfaceModules = createSurfaceModules({
       config,
       service,
@@ -897,6 +950,7 @@ export class GatewayApplication {
       );
       await this.surfaceManager.start();
       await this.channelImageSpool.start();
+      this.providerIdleReleaser?.start();
       this.scheduleBindingRestore();
       this.requireRunning();
     } catch (error) {
@@ -923,6 +977,7 @@ export class GatewayApplication {
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
+      ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Metrics Sync", () => this.metricsSync.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],

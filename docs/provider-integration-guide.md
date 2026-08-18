@@ -84,8 +84,21 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
   5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9），
   读取时优先按快照归属窗口，快照缺失或与当前官方窗口不一致时才回退到按请求开始时间判定。
+  窗口总额度（如 OpenCode Go 5 小时 $12、7 天 $30、月度 $60）随窗口展示，用于按已用
+  百分比换算金额；总额由 Provider 定义或套餐常量提供，不来自官方用量接口。
 
-### 3.5 Setup
+### 3.5 生命周期与空闲停止
+
+- 受管 Provider 的统计代理与隔离 App Server 按需启动、空闲自动停止，避免使用过的
+  Provider/账户无限常驻；
+- 空闲停止条件（全部满足）：无活动 Turn、无 Conversation 绑定、不是
+  `agents.external` 当前默认 Provider、空闲超过阈值（默认 5 分钟）；
+- 停止只终止隔离 App Server 子进程与启动记录，保留 Profile、模型目录与 Thread
+  持久数据；再次选择模型、恢复 Thread 或使用对应 Remote TUI 时自动按需拉起；
+- **释放通知**：每次成功释放后必须向渠道通知一次，说明该 Provider/账户已空闲停止
+  及自动恢复行为，不静默释放；同一次释放只通知一次。
+
+### 3.6 Setup
 
 - GO 形态优先复用/参数化 `opencode-go-setup.mjs`；否则新建 `scripts/<id>-setup.mjs`；
 - 必须包含：API Key 校验、switching/exclusive 选择、模型目录下载与校验、Profile/
@@ -93,7 +106,7 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
 - 文件权限 `0600`，目录 `0700`，符号链接与越权读取失败关闭；
 - `codexc setup` 菜单同步加入入口。
 
-### 3.6 测试
+### 3.7 测试
 
 至少覆盖：
 
@@ -102,9 +115,10 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
 - 计价基线 schema、峰谷档位、生效时间与历史快照；
 - 账户适配器：余额或用量窗口、本地用量重算、窗口边界、窗口快照归属与缺失回退；
 - Setup：新增、更新、恢复、回滚、角色切换；
+- 生命周期：空闲停止判定、释放后自动拉起、释放通知一次；
 - 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
 
-### 3.7 文档
+### 3.8 文档
 
 - 更新 `docs/index.md` 官方资料、支持矩阵与“本项目实现映射”；
 - 新增 Provider 专题文档（参考 `docs/deepseek.md`、`docs/opencode-go.md`）；

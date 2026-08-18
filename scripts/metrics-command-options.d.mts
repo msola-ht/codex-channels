@@ -21,6 +21,7 @@ export type MetricsOutputFormat = "markdown" | "json" | "csv";
 
 export const metricsProviderIds: readonly string[];
 export const metricsProviderUsage: string;
+export function isMetricsProviderId(value: string): boolean;
 
 export const metricsCommandUsage: Readonly<Record<
   "run" | "turns" | "threads" | "report" | "export",

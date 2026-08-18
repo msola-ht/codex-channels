@@ -1,20 +1,32 @@
 # OpenCode Go
 
-Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用。当前受控模型为
-`deepseek-v4-flash` 和 `deepseek-v4-pro`；它们与 DeepSeek 官方 Provider 的同名模型仍是两个
-独立选项，分别使用各自的 API Key、上游地址、Thread 路由和价格来源。
+Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用，并支持在同一 Gateway 内配置多个
+OpenCode Go 账户（各自 Key、各自套餐额度）。当前受控模型为 `deepseek-v4-flash` 和
+`deepseek-v4-pro`；它们与 DeepSeek 官方 Provider 的同名模型仍是独立选项，分别使用各自的
+API Key、上游地址、Thread 路由和价格来源。
 
 ## 配置与使用
 
-运行 `codexc setup`，依次选择“模型与提供商”和“OpenCode Go”，输入 OpenCode Go API Key。
-Setup 提供保留 OpenAI 默认的切换模式，以及让原生 Codex 和 Gateway 默认使用 OpenCode Go 的
-固定模式。切换模式创建私有 `sf-opencode-go.config.toml`，Profile 镜像所选模型的默认思考等级，
-`codex --profile sf-opencode-go` 与 `codexc remote --profile opencode-go` 一致；固定模式会先备份再修改
-`~/.codex/config.toml`。Profile 位于 `~/.codex`，模型目录与管理标记存放在
-`~/.codex-connect/providers/opencode-go/`；两种模式都从相同的经审查上游内容生成 OpenCode Go
-独立模型目录，并把共享 `agents.external` 子代理切换到 OpenCode Go，不修改 DeepSeek Provider 配置。如果
-`~/.codex/config.toml` 已存在手工配置的 OpenCode Go Provider 或 Profile，切换模式会明确拒绝，
-不会覆盖用户配置。
+运行 `codexc setup`，依次选择“模型与提供商”和“OpenCode Go”，或直接使用账户命令：
+
+```bash
+codexc opencode-go account add <id>      # 新增账户（交互输入 Key）
+codexc opencode-go account list          # 列出账户与默认标记
+codexc opencode-go account remove <id>   # 备份后删除账户
+codexc opencode-go account default <id>  # 设置新会话默认账户
+codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Server
+```
+
+旧版单账户配置会在 CLI/服务启动时原地迁移为默认账户 `opencode-go-main`
+（Profile 变为 `sf-opencode-go-main.config.toml`，管理标记迁入
+`~/.codex-connect/providers/opencode-go/accounts/main/`），原有会话与 `agents.external`
+继续可用，无需手工搬移。每个账户拥有独立的 0600 私有 Profile
+`~/.codex/sf-opencode-go-<账户>.config.toml`，Key 只进入该文件与对应 App Server 子进程环境，
+不进入注册表、配置或日志；模型目录与管理标记共享
+`~/.codex-connect/providers/opencode-go/`。首个账户也可通过 Setup 选择保留 OpenAI 默认的
+切换模式，或让原生 Codex 和 Gateway 默认使用 OpenCode Go 的固定模式；固定模式会先备份再修改
+`~/.codex/config.toml`。如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
+会明确拒绝，不会覆盖用户配置。
 
 配置完成后运行：
 
@@ -22,24 +34,33 @@ Setup 提供保留 OpenAI 默认的切换模式，以及让原生 Codex 和 Gate
 codexc service restart all
 ```
 
-初次配置默认使用 Flash。需要调整时，有两种入口：在 `codexc setup` 中选择“模型与提供商 →
-OpenCode Go → 修改模型设置（思考等级、自动压缩）”，或走原有的“模型与提供商 → 第三方模型设置
-→ OpenCode Go”，再按模型设置默认思考等级和自动压缩百分比；每个模型按自己的上下文窗口计算
+初次配置默认使用 Flash。需要调整时，在 `codexc setup` 中选择“模型与提供商 → OpenCode Go →
+修改模型设置（思考等级、自动压缩）”，或走原有的“模型与提供商 → 第三方模型设置 → OpenCode Go”，
+再按模型设置默认思考等级和自动压缩百分比；每个模型按自己的上下文窗口计算
 阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；目录更新后的压缩阈值按原
 百分比和新上下文窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
 时自动重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
 
-聊天中使用 `/model` 选择带“OpenCode Go”前缀的模型。终端共享会话使用：
+聊天中使用 `/model` 选择带“OpenCode Go（账户）”前缀的模型；同账户内切换模型不新建 Thread，
+跨账户切换会保留并解绑当前 Thread，下一条消息以目标账户默认模型新建 Thread（不复制历史），
+旧 Thread 仍可通过 `/resume` 恢复。终端共享会话使用：
 
 ```bash
-codexc remote --profile opencode-go
+codexc remote --profile opencode-go-main
 ```
 
-受管第三方 Provider 按需运行：服务启动时只登记配置，首次选择对应模型、恢复对应 Thread 或使用
-对应 Remote TUI 时，App Server 监管进程才启动该 Provider 的统计代理和隔离 App Server。同一
-Provider 后续复用该实例。当前被 `agents.external` 选择的 Provider 会预先启动统计代理，确保子代理
-随主 App Server 可用；未使用也未选作子代理的 Provider 不增加进程。
+所有 OpenCode Go 账户共享同一个统计代理（不随账户数量增长）；每个账户的隔离 App Server 按需
+启动。服务启动时只登记配置，首次选择对应账户模型、恢复对应 Thread 或使用对应 Remote TUI 时，
+App Server 监管进程才启动该账户的隔离实例；账户 App Server 的 `base_url` 指向共享代理并带
+`/go/<账户>` 前缀，代理按前缀区分账户、转发时剥离前缀并按账户分开上报指标。当前被
+`agents.external` 选择的默认账户会预先启动共享统计代理，确保子代理随主 App Server 可用；未使用
+也未选作子代理的账户不增加进程。
+
+默认账户的隔离 App Server 空闲超过 5 分钟（无活动 Turn、无 Conversation 绑定、且不是
+`agents.external` 默认账户）会自动释放并移除启动记录；释放后向最近使用过该账户的渠道会话通知
+一次，再次选择账户、恢复 Thread 或使用对应 Remote TUI 时会自动拉起。也可用
+`codexc opencode-go account stop <id>` 手动释放。统计代理始终共享一个，不参与账户释放。
 
 ## 协议与模型范围
 
@@ -66,11 +87,12 @@ OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go
 合计每个模型的已用金额，对照官方价格基线里的模型包含用量（如 DeepSeek V4 Flash 每月 $30、
 V4 Pro 每月 $15）计算已用百分比与剩余额度；官方表格
 把 DeepSeek 按 Off-Peak / Peak 拆成两行、各自包含对应额度（Flash $30、Pro $15），本地估算也按请求开始时间分档分别展示
-两行，其余模型仍按单档展示。凭据复用 OpenCode Go
-API Key（切换 Profile 或固定基础配置），未配置、网络失败或官方
+两行，其余模型仍按单档展示。凭据按当前 Thread 的 `modelProvider` 读取对应账户的私有 Profile
+（固定基础配置或切换 Profile），未配置、网络失败或官方
 响应无效时明确显示查询失败，不回退或缓存；模型本地用量只按本机指标库重算，不是官方
 账单，指标库不可用或没有本地请求时该段不展示。Thread Token、请求速度和本机请求指标仍正常记录；
-WebUI 控制台在 DeepSeek 余额卡旁展示同样的配额窗口与模型本地用量。OpenCode Go Thread 的
+WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示同样的配额窗口与模型本地用量（每个已配置账户
+一张卡）。OpenCode Go Thread 的
 Turn 完成通知也会在“账户状态”区附带当前模型剩余用量（同一口径，DeepSeek 按该 Turn 最后一次
 模型请求开始时间的峰谷档位），官方用量接口或本地指标不可用时自动省略。
 
@@ -82,14 +104,16 @@ Turn 完成通知也会在“账户状态”区附带当前模型剩余用量（
 - 网页搜索已实测：OpenCode Go 与 DeepSeek 一样通过 `/responses` 提供搜索工具，Codex 侧统一
   以 `web_search` item 回传（`query`、`action` 和结构化 `results`），实测能返回带标题、URL、
   摘要和发布日期的真实网页结果。验证方式：直接让 OpenCode Go 会话执行搜索任务并观察事件日志
-  中的 `web_search` item；或运行 `codex exec -p sf-opencode-go -C <工作目录>
+  中的 `web_search` item；或运行 `codex exec -p sf-opencode-go-main -C <工作目录>
   --skip-git-repo-check "请搜索……"` 直连测试。
 - 当前按 HTTP/SSE 接入（`supports_websockets = false`），流式文本、工具调用和上下文压缩走
   HTTP/SSE，不建立 Responses WebSocket。
 - API Key 没有官方账户接口可用于预检，Setup 只校验格式；首次请求失败时从模型指标和日志中
   查看错误分类。
+- 账户 id 使用小写字母/数字/`-`/`_`（1–32 位），不允许与现有 Provider id 冲突；删除账户前
+  会备份 Profile 与账户目录，删除后该账户历史 Thread 不可恢复。
 - 运行统计与 DeepSeek 一致：调试模式展示最后一次请求的可观测首事件延迟，完成卡片展示整轮
-  综合思考速度与含推理生成速度；`/usage` 明确显示不支持账户用量。
+  综合思考速度与含推理生成速度；`/usage` 展示官方配额窗口与模型本地用量，见上文。
 
 ## 价格维护
 
@@ -101,7 +125,7 @@ Peak/Off-Peak 时段（UTC）、长上下文档位、套餐包含用量、端点
 候选基线差异，避免只更新价格而遗漏兼容性复核。套餐包含用量用于 `/usage` 模型本地用量展示与
 提案复核，不参与单次请求的参考费用计算。
 
-每日工作流只读检查官方页面，变化时创建 Draft PR，不会自动开放模型、合并、发布或部署。页面
+每小时工作流只读检查官方页面，变化时创建 Draft PR，不会自动开放模型、合并、发布或部署。页面
 结构、模型 ID、端点、SDK 协议或价格档位无法确认时失败关闭并保留检查 Artifact。
 
 官方来源：[`OpenCode Go`](https://opencode.ai/docs/go/)。

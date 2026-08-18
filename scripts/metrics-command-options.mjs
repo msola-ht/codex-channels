@@ -6,6 +6,11 @@ export const metricsProviderIds = Object.freeze([
 ]);
 export const metricsProviderUsage = metricsProviderIds.join("|");
 
+export function isMetricsProviderId(value) {
+  return new Set(metricsProviderIds).has(value)
+    || /^opencode-go-[a-z0-9_-]{1,32}$/u.test(value);
+}
+
 export const metricsCommandUsage = Object.freeze({
   run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
   turns: "用法：codexc metrics turns <Thread ID> [--format markdown|json|csv] [--stdout]",
@@ -125,7 +130,7 @@ export function validateMetricsCommandArgs(subcommand, args) {
     return;
   }
   if (subcommand === "prune") {
-    if (args.length !== 1 || !new Set(metricsProviderIds).has(args[0])) {
+    if (args.length !== 1 || !isMetricsProviderId(args[0])) {
       throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
     }
     return;

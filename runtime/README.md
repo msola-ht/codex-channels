@@ -14,6 +14,11 @@
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
+  `loadManagedModelProviderDefinitions` 按 OpenCode Go 账户注册表动态生成
+  `opencode-go-<账户>` 实例。
+- `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
+  （`accounts.json`）、账户目录与管理标记，以及旧版单账户配置原地迁移为默认账户
+  `opencode-go-main`；Key 不进入注册表。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，避免 DeepSeek 与 OpenCode Go Setup 重复解释同一格式。
 - `deepseek-pricing-baseline.json`：保存从 DeepSeek 官方价格页审查后的人民币每百万 Token 单价、
@@ -24,7 +29,7 @@
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照；按最早 `resetsAt` 失效前缓存，失败时短时
   退避后重试，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
-- `model-provider-runtime.mjs`：通过编译期受控 Provider 描述读取 Setup 管理标记和私有 Profile；
+- `model-provider-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
   凭据；读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
@@ -37,7 +42,8 @@
   配置一次性派生主 Socket、可选 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用，避免各入口独立解释运行拓扑。
 - `app-server-supervisor.mjs`：以当前用户私有 Unix Socket 持有 App Server 监管入口互斥锁，
-  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动请求；集中检查真实 WebSocket 健康状态，拒绝
+  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动/释放请求
+  （`ensureProvider` / `releaseProvider`）；集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server，并安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。

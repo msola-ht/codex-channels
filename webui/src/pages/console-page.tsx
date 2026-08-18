@@ -230,9 +230,7 @@ function AccountStatusCards({
           balances={balance?.balances ?? []}
         />
         <OpencodeGoUsageCard
-          available={opencodeGoUsage?.available ?? false}
-          windows={opencodeGoUsage?.windows ?? []}
-          modelUsage={opencodeGoUsage?.modelUsage ?? []}
+          accounts={opencodeGoUsage?.accounts ?? []}
         />
       </div>
     </div>
