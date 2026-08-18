@@ -13,6 +13,7 @@ import {
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
+  formatConversationOccupancy,
   isTurnLifecycleAcknowledgedOutcome,
   formatConversationGoal,
   formatConversationLimits,
@@ -172,6 +173,9 @@ export async function renderTelegramCommandResult(
       return;
     case "goal":
       await replyTelegramPanel(context, formatConversationGoal(result));
+      return;
+    case "occupancy":
+      await replyTelegramPanel(context, formatConversationOccupancy(result));
       return;
   }
 }

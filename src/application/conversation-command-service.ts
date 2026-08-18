@@ -20,6 +20,7 @@ import {
 } from "./conversation-command-parser.js";
 import type { ConversationUseCases } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
+import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
 import type { SurfaceAccessPolicy } from "../policy/index.js";
 
 export {
@@ -67,6 +68,7 @@ export const conversationCommandNames = [
   "plan",
   "goal",
   "agents",
+  "release",
 ] as const;
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
@@ -171,7 +173,11 @@ export type ConversationCommandResult =
       artifacts: ReturnType<ConversationUseCases["artifacts"]>;
     }
   | { kind: "goal"; goal: ThreadGoal | null }
-  | { kind: "agents"; roles: Awaited<ReturnType<ConversationUseCases["listAgentRoles"]>> };
+  | { kind: "agents"; roles: Awaited<ReturnType<ConversationUseCases["listAgentRoles"]>> }
+  | {
+      kind: "occupancy";
+      result: ThreadOccupancyReleaseResult;
+    };
 
 export interface ConversationModelSummary {
   model: string;
@@ -717,6 +723,19 @@ export class ConversationCommandService {
         };
       case "goal":
         return this.goal(target, argumentsText);
+      case "release": {
+        const force = argumentsText === "force";
+        if (argumentsText !== "" && !force) {
+          throw new UserFacingError(
+            "release.usage",
+            "Release 参数无效，用法：/release 或 /release force",
+          );
+        }
+        return {
+          kind: "occupancy",
+          result: await this.conversations.releaseThread(target, force),
+        };
+      }
     }
     throw new UserFacingError(
       "command.unsupported",

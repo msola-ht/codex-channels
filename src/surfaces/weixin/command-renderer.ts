@@ -15,6 +15,7 @@ import {
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
+  formatConversationOccupancy,
   isTurnLifecycleAcknowledgedOutcome,
   formatConversationGoal,
   formatConversationLimits,
@@ -203,6 +204,8 @@ export function renderWeixinCommandResult(
       return formatConversationArtifacts(result);
     case "goal":
       return formatConversationGoal(result);
+    case "occupancy":
+      return formatConversationOccupancy(result);
   }
 }
 

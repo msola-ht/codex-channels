@@ -62,6 +62,8 @@
 - `workspace-permission-port.ts`：定义渠道 `/workspaceperm` 使用的工作区权限写入窄端口；
   Application 只按当前 Conversation 绑定的 Workspace 传递沙箱、审批策略或权限 Profile 更新，
   不接触配置文件。
+- `thread-occupancy-port.ts`：定义渠道 `/release` 使用的 Thread 占用查询与释放窄端口；只返回
+  稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
   输入只允许文本、绝对本地图片路径、绝对本地音频路径、已由 Client 从当前 Workspace

@@ -513,5 +513,5 @@ function isUnavailableRestoreError(error: Error): boolean {
 }
 
 function isActiveWriterRestoreError(error: Error): boolean {
-  return /^thread [^\s]+ already has an active writer$/u.test(error.message);
+  return /already has an active writer/u.test(error.message);
 }

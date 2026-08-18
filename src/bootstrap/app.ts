@@ -22,6 +22,10 @@ import {
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
+import {
+  inspectThreadWriterLock,
+  terminateThreadWriterHolder,
+} from "../../runtime/thread-writer-lock.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { readApiProviderKey } from "../../runtime/api-provider-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
@@ -53,12 +57,15 @@ import {
   ProviderAccountService,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
+  type ThreadLockHolder,
+  type ThreadOccupancyReleaseResult,
   type RequestMetricsTimeRange,
 } from "../application/index.js";
 import {
   ConversationCore,
   isCriticalOutputEvent,
   surfaceAccountKey,
+  type ConversationTarget,
   type OutputEvent,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
@@ -111,10 +118,12 @@ import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js"
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 
 const bindingRestoreRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
+const bindingRestoreEscalationAttempts = 3;
 
 interface PendingBindingRestore {
   binding: ConversationBinding;
   occupiedNotified: boolean;
+  failureCount: number;
 }
 
 export class GatewayApplication {
@@ -593,6 +602,9 @@ export class GatewayApplication {
       },
       {
         pluginApiEnabled: config.pluginApiEnabled,
+      },
+      {
+        releaseThread: (target, force) => this.releaseThread(target, force),
       },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
@@ -1261,13 +1273,20 @@ export class GatewayApplication {
         continue;
       }
       const previous = this.pendingBindingRestores.get(failure.binding.threadId);
+      const failureCount = (previous?.failureCount ?? 0) + 1;
+      const shouldNotifyOccupied = failure.reason === "active-writer"
+        || (
+          failure.reason === "other"
+          && failureCount >= bindingRestoreEscalationAttempts
+        );
       const occupiedNotified = previous?.occupiedNotified === true
-        || failure.reason === "active-writer";
+        || shouldNotifyOccupied;
       this.pendingBindingRestores.set(failure.binding.threadId, {
         binding: failure.binding,
         occupiedNotified,
+        failureCount,
       });
-      if (failure.reason === "active-writer" && !previous?.occupiedNotified) {
+      if (shouldNotifyOccupied && !previous?.occupiedNotified) {
         this.publishThreadAvailability(failure.binding, "occupied");
       }
     }
@@ -1293,6 +1312,72 @@ export class GatewayApplication {
       availability,
       background: this.router.isBackgroundThread(binding.threadId),
     }, true);
+  }
+
+  private async releaseThread(
+    target: ConversationTarget,
+    force?: boolean,
+  ): Promise<ThreadOccupancyReleaseResult> {
+    const current = this.router.current(target);
+    if (!current) {
+      return { status: "unbound" };
+    }
+    const threadId = current.threadId;
+    const inspection = inspectThreadWriterLock(threadId);
+    if (!inspection.held) {
+      this.retryPendingBindingRestore(threadId);
+      return { status: "free", threadId };
+    }
+    if (inspection.holder === null) {
+      return { status: "unidentifiable", threadId };
+    }
+    const holder = inspection.holder;
+    const releasable = isReleaseableThreadWriterHolder(holder);
+    const stuck = this.pendingBindingRestores.has(threadId);
+    if (!force || !releasable) {
+      return {
+        status: "held",
+        threadId,
+        holder,
+        releasable,
+        stuck,
+      };
+    }
+    const recheck = inspectThreadWriterLock(threadId);
+    if (!recheck.held) {
+      this.retryPendingBindingRestore(threadId);
+      return { status: "released", threadId, holder };
+    }
+    if (recheck.holder === null || recheck.holder.pid !== holder.pid) {
+      return {
+        status: "held",
+        threadId,
+        holder: recheck.holder ?? holder,
+        releasable: recheck.holder === null
+          ? false
+          : isReleaseableThreadWriterHolder(recheck.holder),
+        stuck,
+      };
+    }
+    const exited = await terminateThreadWriterHolder(holder.pid);
+    if (!exited) {
+      return {
+        status: "held",
+        threadId,
+        holder,
+        releasable,
+        stuck,
+      };
+    }
+    this.retryPendingBindingRestore(threadId);
+    return { status: "released", threadId, holder };
+  }
+
+  private retryPendingBindingRestore(threadId: string): void {
+    if (!this.pendingBindingRestores.has(threadId)) {
+      return;
+    }
+    void this.restoreBindings(undefined, new Set([threadId]));
   }
 
   private scheduleBindingRestore(): void {
@@ -1336,6 +1421,11 @@ export class GatewayApplication {
 
 function isHighFrequencyNotification(method: string): boolean {
   return /\/(?:delta|outputDelta|progress)$/u.test(method);
+}
+
+function isReleaseableThreadWriterHolder(holder: ThreadLockHolder): boolean {
+  return /codex/u.test(holder.command)
+    && !/codexc\.mjs/u.test(holder.command);
 }
 
 function resolveRequestMetricsRange(

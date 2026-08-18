@@ -53,10 +53,47 @@ describe("ConversationCommandService", () => {
     expect(conversationCommandNames).toContain("pin");
     expect(conversationCommandNames).toContain("rules");
     expect(conversationCommandNames).toContain("plugin");
+    expect(conversationCommandNames).toContain("release");
     expect(isConversationCommandName("status")).toBe(true);
     expect(isConversationCommandName("plugins")).toBe(false);
     expect(isConversationCommandName("plugin")).toBe(true);
     expect(isConversationCommandName("whoami")).toBe(false);
+  });
+
+  it("routes release through the application boundary", async () => {
+    const result = {
+      status: "held" as const,
+      threadId: "thread-x",
+      holder: { pid: 4242, command: "codex app-server" },
+      releasable: true,
+      stuck: true,
+    };
+    const releaseThread = vi.fn(async () => result);
+    const commands = new ConversationCommandService({
+      releaseThread,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "release")).resolves.toEqual({
+      kind: "occupancy",
+      result,
+    });
+    expect(releaseThread).toHaveBeenCalledWith(target, false);
+
+    await expect(commands.execute(target, "release", "force")).resolves.toEqual({
+      kind: "occupancy",
+      result,
+    });
+    expect(releaseThread).toHaveBeenCalledWith(target, true);
+  });
+
+  it("rejects invalid release arguments", async () => {
+    const commands = new ConversationCommandService({
+      releaseThread: vi.fn(),
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "release", "bogus")).rejects.toMatchObject({
+      code: "release.usage",
+    });
   });
 
   it("routes project rule generation and checks through the application boundary", async () => {
@@ -952,6 +989,10 @@ describe("ConversationCommandService", () => {
       artifacts: vi.fn(() => undefined),
       togglePlanMode: vi.fn(async () => ({ mode: "plan" as const, pending: true })),
       setGoal: vi.fn(async () => goal),
+      releaseThread: vi.fn(async () => ({
+        status: "free",
+        threadId: "thread-release",
+      })),
     };
     const commands = new ConversationCommandService(
       service as unknown as ConversationUseCases,
@@ -990,6 +1031,7 @@ describe("ConversationCommandService", () => {
       ["plan", "", "togglePlanMode"],
       ["goal", "set ship", "setGoal"],
       ["agents", "", "listAgentRoles"],
+      ["release", "", "releaseThread"],
     ] as const;
 
     expect(cases.map(([command]) => command)).toEqual(conversationCommandNames);

@@ -4,6 +4,7 @@ import {
   conversationCommandHelpLines,
   formatConversationAgents,
   formatConversationCommandOutcome,
+  formatConversationOccupancy,
   formatConversationLimits,
   formatConversationMetrics,
   formatConversationMcp,
@@ -24,6 +25,70 @@ import {
 import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
 
 describe("provider-aware conversation command formatting", () => {
+  it("renders occupancy release results", () => {
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: { status: "unbound" },
+    })).toContain("当前会话没有绑定 Codex Thread");
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: { status: "free", threadId: "thread-free" },
+    })).toContain("未被占用");
+
+    const held = formatConversationOccupancy({
+      kind: "occupancy",
+      result: {
+        status: "held",
+        threadId: "thread-held",
+        holder: { pid: 4242, command: "codex app-server" },
+        releasable: true,
+        stuck: true,
+      },
+    });
+    expect(held).toContain("PID 4242");
+    expect(held).toContain("当前会话恢复失败");
+
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: {
+        status: "held",
+        threadId: "thread-healthy",
+        holder: { pid: 4245, command: "codex app-server" },
+        releasable: true,
+        stuck: false,
+      },
+    })).toContain("通常无需释放");
+
+    const longCommand = formatConversationOccupancy({
+      kind: "occupancy",
+      result: {
+        status: "held",
+        threadId: "thread-long",
+        holder: {
+          pid: 4243,
+          command: `codex ${"-c model=long ".repeat(30)}app-server`,
+        },
+        releasable: true,
+        stuck: true,
+      },
+    });
+    expect(longCommand).toContain("…");
+    expect(longCommand.length).toBeLessThan(400);
+
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: {
+        status: "released",
+        threadId: "thread-held",
+        holder: { pid: 4242, command: "codex app-server" },
+      },
+    })).toContain("已释放 Codex Thread 占用");
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: { status: "unidentifiable", threadId: "thread-x" },
+    })).toContain("无法识别占用");
+  });
+
   it("shows configured workspace permissions in the workspace list", () => {
     const rendered = formatConversationWorkspaces({
       kind: "workspaces",

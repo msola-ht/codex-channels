@@ -41,6 +41,10 @@ import type {
   SessionRouter,
   ThreadSectionSnapshot,
 } from "../session-routing/index.js";
+import type {
+  ThreadOccupancyPort,
+  ThreadOccupancyReleaseResult,
+} from "./thread-occupancy-port.js";
 import type { Workspace } from "../policy/index.js";
 import type {
   WorkspacePermissionPort,
@@ -303,6 +307,10 @@ export interface ConversationUseCases {
   getGoal(target: ConversationTarget): Promise<ThreadGoal | null>;
   setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal>;
   clearGoal(target: ConversationTarget): Promise<void>;
+  releaseThread(
+    target: ConversationTarget,
+    force?: boolean,
+  ): Promise<ThreadOccupancyReleaseResult>;
   status(
     target: ConversationTarget,
     options?: { includeGitBranch?: boolean },
@@ -334,7 +342,21 @@ export class ConversationService implements ConversationUseCases {
     private readonly experimentalFeatures: { pluginApiEnabled: boolean } = {
       pluginApiEnabled: false,
     },
+    private readonly threadOccupancy?: ThreadOccupancyPort,
   ) {}
+
+  releaseThread(
+    target: ConversationTarget,
+    force?: boolean,
+  ): Promise<ThreadOccupancyReleaseResult> {
+    if (!this.threadOccupancy) {
+      return Promise.reject(new UserFacingError(
+        "release.unsupported",
+        "当前环境不支持释放会话占用",
+      ));
+    }
+    return this.threadOccupancy.releaseThread(target, force);
+  }
 
   requestMetrics(
     target: ConversationTarget,

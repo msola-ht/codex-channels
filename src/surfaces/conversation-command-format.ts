@@ -40,6 +40,7 @@ const maximumMcpHealthFindings = 8;
 const maximumMcpDetailSectionCharacters = 5_000;
 const maximumMcpDescriptionCharacters = 240;
 const maximumMcpOutputCharacters = 20_000;
+const maximumProcessCommandCharacters = 160;
 const mcpToolAccessNotice =
   "工具读写属性来自 MCP 上游声明，仅供提示；实际调用仍按审批策略处理。";
 
@@ -77,6 +78,7 @@ export const conversationCommandDescriptions = {
   plan: "切换 Plan 模式或直接开始规划",
   goal: "查看或管理 Goal",
   agents: "查看或调用子代理",
+  release: "查看或释放被占用的 Codex 会话",
 } satisfies Record<ConversationCommandName, string>;
 
 export const conversationCommandHelpSections = [
@@ -100,6 +102,7 @@ export const conversationCommandHelpSections = [
       "/stop · /queue <描述>",
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
+      "/release · /release force",
       "/plan [规划需求] · /goal [set <目标>|clear]",
     ],
   },
@@ -432,6 +435,55 @@ export function formatConversationCommandOutcome(
         `目标：${outcome.goal.objective}`,
       ].join("\n"));
   }
+}
+
+export function formatConversationOccupancy(
+  result: Extract<ConversationCommandResult, { kind: "occupancy" }>,
+): string {
+  const { result: release } = result;
+  switch (release.status) {
+    case "unbound":
+      return toStructuredMarkdownList([
+        "当前会话没有绑定 Codex Thread，无需释放占用。",
+      ].join("\n"));
+    case "free":
+      return toStructuredMarkdownList([
+        "当前会话的 Codex Thread 未被占用。",
+        `Thread：${release.threadId}`,
+      ].join("\n"));
+    case "released":
+      return toStructuredMarkdownList([
+        "已释放 Codex Thread 占用，正在自动恢复订阅。",
+        `Thread：${release.threadId}`,
+        `占用进程：PID ${release.holder.pid}`,
+        formatProcessCommand(release.holder.command),
+      ].join("\n"));
+    case "held":
+      return toStructuredMarkdownList([
+        `Codex Thread 被 PID ${release.holder.pid} 占用。`,
+        `进程：${formatProcessCommand(release.holder.command)}`,
+        release.releasable
+          ? release.stuck
+            ? "当前会话恢复失败，可确认释放：/release force（会向该进程发送结束信号；若是 App Server 子进程，服务会自动重启并重连所有会话）。"
+            : "当前会话运行正常，通常无需释放；如确认需要，/release force 会结束该进程（App Server 子进程会重启并重连所有会话）。"
+          : "该进程无法自动释放，请关闭占用 Thread 的 Codex 客户端，或重启 App Server 服务。",
+        `Thread：${release.threadId}`,
+      ].join("\n"));
+    case "unidentifiable":
+      return toStructuredMarkdownList([
+        "无法识别占用 Codex Thread 的进程（当前平台不支持进程诊断）。",
+        "请关闭占用该 Thread 的 Codex 客户端，或重启 App Server 服务后等待自动恢复。",
+        `Thread：${release.threadId}`,
+      ].join("\n"));
+  }
+}
+
+function formatProcessCommand(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length <= maximumProcessCommandCharacters) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maximumProcessCommandCharacters - 1)}…`;
 }
 
 export function isTurnLifecycleAcknowledgedOutcome(

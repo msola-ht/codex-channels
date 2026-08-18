@@ -122,6 +122,53 @@ describe("ConversationService model selection", () => {
     expect(metrics.forThread).not.toHaveBeenCalled();
   });
 
+  it("delegates thread occupancy release to the injected port", async () => {
+    const result = {
+      status: "held" as const,
+      threadId: "thread-release",
+      holder: { pid: 4242, command: "codex app-server" },
+      releasable: true,
+      stuck: true,
+    };
+    const releaseThread = vi.fn(async () => result);
+    const service = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { releaseThread },
+    );
+
+    await expect(service.releaseThread(target, false)).resolves.toEqual(result);
+    expect(releaseThread).toHaveBeenCalledWith(target, false);
+  });
+
+  it("rejects thread occupancy release without an injected port", async () => {
+    const service = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.releaseThread(target)).rejects.toMatchObject({
+      code: "release.unsupported",
+    });
+  });
+
   it("estimates one percent and remaining weekly allowance from proxy metrics", () => {
     const estimate = estimateWeeklyLimit({
       limitId: "codex",

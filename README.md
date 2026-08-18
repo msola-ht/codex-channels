@@ -264,7 +264,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
 - Workspace：`/workspace`、`/workspaceperm`
-- 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
+- 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`
@@ -281,6 +281,9 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 `/sessions` 与 `/archived` 支持分页和组合筛选；`/pin` 与 `/unpin` 管理当前会话的内置 Pinned 状态，
 `/section` 查看 App Server 原生全局分区，自定义分区写操作需要配置管理员。完整语法以 `/help` 为准，协议与安全边界见
 [`docs/index.md`](docs/index.md)。
+
+`/release` 查看当前会话的 Codex Thread 是否被其他客户端占用；确认后 `/release force` 会结束占用进程并
+自动重试恢复，App Server 子进程被结束时服务会自动重启。
 
 命令、文件修改和额外权限默认不会自动批准。审批、用户输入和 MCP 交互会逐项显示，并绑定当前
 用户、会话和 Turn。
