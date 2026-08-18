@@ -25,12 +25,12 @@
   生成协议，并使用与正式预览相同的独立兼容检查和报告。成功或失败都会上传完整现场，失败后
   任务标红；Release 解析失败同样保留 `unresolved` 报告；结果只作前向兼容预警，不进入正式
   版本基线。
-- `deepseek-catalog-proposal.yml`：每日及手动独立检查 DeepSeek 官方 Codex 安装脚本和官方价格页。
+- `deepseek-catalog-proposal.yml`：每小时及手动独立检查 DeepSeek 官方 Codex 安装脚本和官方价格页。
   模型目录比较完整指纹与有限审查字段；价格检查从语义化 HTML 表格提取人民币单价、北京时间峰谷
   区间和生效日期。两个检查都只读、互不遮蔽失败，并分别保留候选基线、结构化结果、来源哈希、摘要
   和日志。任一检查失败时任务标红；发现变化且两项检查成功后，独立的最小写权限 Job 只创建一个
   Draft PR。未知模型不会自动加入运行时受控列表，工作流也不自动转为 Ready、合并、发布或部署。
-- `opencode-go-pricing-proposal.yml`：每日及手动只读检查 OpenCode Go 官方页面列出的全部模型价格、
+- `opencode-go-pricing-proposal.yml`：每小时及手动只读检查 OpenCode Go 官方页面列出的全部模型价格、
   长上下文档位和套餐包含用量；与模型端点表交叉确认 Model ID、端点和 SDK 协议，变化时由独立
   最小写权限 Job 创建 Draft PR。新模型不会自动开放，工作流不自动合并、发布或部署。
 - `publish.yml`：推送与 Codex CLI 协议版本一致的 `v*` Tag 后，先确认 Tag 所在提交已经把 README
