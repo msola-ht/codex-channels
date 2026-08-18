@@ -695,6 +695,7 @@ describe("provider-aware conversation command formatting", () => {
             usedPercent: 0,
             resetsAt: 1_784_800_000,
             status: "ok",
+            totalUsd: 12,
             localTokens: 123_400,
           },
           {
@@ -703,14 +704,15 @@ describe("provider-aware conversation command formatting", () => {
             usedPercent: 12.5,
             resetsAt: null,
             status: "ok",
+            totalUsd: 60,
           },
         ],
       },
     });
 
     expect(rendered).toContain("OpenCode Go 账户用量");
-    expect(rendered).toContain("5小时：已用 0% · 本地 Token 约 123.4 K");
-    expect(rendered).toContain("月度：已用 12.5% · 重置 未知");
+    expect(rendered).toContain("5小时：已用 0% · 总额 $12.00 · 本地 Token 约 123.4 K");
+    expect(rendered).toContain("月度：已用 12.5% · 总额 $60.00 · 重置 未知");
     expect(rendered).not.toContain("累计 Tokens");
   });
 
