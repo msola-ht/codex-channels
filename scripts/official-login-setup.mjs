@@ -4,7 +4,10 @@ import { isAbsolute } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 
-import { validateCustomPrimaryModelProviderId } from "../runtime/model-provider-runtime.mjs";
+import {
+  listCustomPrimaryProviderCandidates,
+  validateCustomPrimaryModelProviderId,
+} from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 
 function record(value) {
@@ -13,15 +16,6 @@ function record(value) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function customProviderCandidateIds(providers) {
-  const entries = record(providers);
-  return Object.keys(entries).filter((id) => {
-    if (validateCustomPrimaryModelProviderId(id) !== null) return false;
-    const provider = record(entries[id]);
-    return typeof provider.base_url === "string" && provider.wire_api === "responses";
-  });
 }
 
 function resolveCodexBinary(environment) {
@@ -62,7 +56,7 @@ export async function runOfficialLoginSetup({
   }
   const config = record(snapshot.config);
   const customIds = [
-    ...customProviderCandidateIds(record(config.model_providers)),
+    ...listCustomPrimaryProviderCandidates(record(config.model_providers)),
     ...(typeof config.model_provider === "string"
       && validateCustomPrimaryModelProviderId(config.model_provider) === null
       ? [config.model_provider]

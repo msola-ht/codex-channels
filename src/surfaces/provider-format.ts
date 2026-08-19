@@ -1,3 +1,5 @@
+import { usesOpenAiAccount } from "../conversation-core/index.js";
+
 let configuredCustomPrimaryProviderId: string | undefined;
 
 export function setConfiguredCustomPrimaryProviderId(providerId: string | undefined): void {
@@ -21,6 +23,6 @@ export function formatCodexProviderLabel(provider?: string): string {
 }
 
 export function supportsFastMode(modelProvider?: string): boolean {
-  return (modelProvider ?? "openai") === "openai"
+  return usesOpenAiAccount(modelProvider)
     || (modelProvider !== undefined && modelProvider === configuredCustomPrimaryProviderId);
 }

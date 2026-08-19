@@ -35,6 +35,9 @@ export function validateConfiguredModelProviders(
 }>;
 
 export function validateCustomPrimaryModelProviderId(id: unknown): string | null;
+export function listCustomPrimaryProviderCandidates(
+  providers: Record<string, unknown> | undefined,
+): string[];
 export function validProviderBaseUrl(value: string, label: string): string;
 
 export interface ManagedModelProviderSettings {

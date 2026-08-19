@@ -51,6 +51,17 @@ export function validateCustomPrimaryModelProviderId(id) {
   return null;
 }
 
+export function listCustomPrimaryProviderCandidates(providers) {
+  const entries = record(providers);
+  return Object.keys(entries).filter((candidate) => {
+    if (validateCustomPrimaryModelProviderId(candidate) !== null) {
+      return false;
+    }
+    const provider = record(entries[candidate]);
+    return typeof provider.base_url === "string" && provider.wire_api === "responses";
+  });
+}
+
 export function managedProviderDirectory(environment, definition) {
   return join(providerStorageRoot(environment), definition.id);
 }
@@ -267,13 +278,7 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     throw new Error("Codex 主模型 Provider 配置无法安全读取");
   }
   const providers = record(document.model_providers);
-  const configuredIds = Object.keys(providers).filter((candidate) => {
-    if (validateCustomPrimaryModelProviderId(candidate) !== null) {
-      return false;
-    }
-    const provider = record(providers[candidate]);
-    return typeof provider.base_url === "string" && provider.wire_api === "responses";
-  });
+  const configuredIds = listCustomPrimaryProviderCandidates(providers);
   if (configuredIds.length > 1) {
     throw new Error("同一时刻只能配置一个自定义主模型 Provider");
   }

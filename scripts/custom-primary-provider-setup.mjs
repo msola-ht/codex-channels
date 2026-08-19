@@ -1,6 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
 
 import {
+  listCustomPrimaryProviderCandidates,
   validateCustomPrimaryModelProviderId,
   validProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
@@ -12,15 +13,6 @@ function record(value) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function customProviderCandidateIds(providers) {
-  const entries = record(providers);
-  return Object.keys(entries).filter((id) => {
-    if (validateCustomPrimaryModelProviderId(id) !== null) return false;
-    const provider = record(entries[id]);
-    return typeof provider.base_url === "string" && provider.wire_api === "responses";
-  });
 }
 
 function authOptions() {
@@ -190,7 +182,7 @@ export async function runCustomPrimaryProviderSetup({
   const normalizedModel = String(model).trim();
 
   const staleProviderIds = [
-    ...customProviderCandidateIds(currentProviders).filter((id) => id !== normalizedId),
+    ...listCustomPrimaryProviderCandidates(currentProviders).filter((id) => id !== normalizedId),
     ...(currentProviderId !== undefined
       && currentProviderId !== normalizedId
       && validateCustomPrimaryModelProviderId(currentProviderId) === null
