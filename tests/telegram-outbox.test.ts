@@ -1300,6 +1300,33 @@ describe("TelegramOutbox", () => {
     await outbox.close();
   });
 
+  it("sends a connection restore notice without clearing stream output", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(textDelta("commentary", "尚未完成", "commentary"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+
+    outbox.handle({
+      type: "connection.restored",
+      target,
+      threadId: "thread-1",
+      message: "openai App Server 已重新连接",
+    });
+    await settle();
+    await vi.advanceTimersByTimeAsync(8_000);
+    await settle();
+
+    expect(api.sent).toEqual([
+      "尚未完成",
+      "Codex 连接已恢复：openai App Server 已重新连接",
+    ]);
+
+    await outbox.close();
+  });
+
   it("sends non-critical Codex warnings silently", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();

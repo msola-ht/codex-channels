@@ -95,6 +95,7 @@ function createRestoreApplication(options: {
     },
     stopping: false,
     disconnectedProviders: new Set<string>(),
+    disconnectedBindingsByProvider: new Map<string, Set<string>>(),
     pendingBindingRestores: new Map(),
     restoringThreadIds: new Set<string>(),
     bindingRestoreAttempt: 0,
@@ -124,6 +125,7 @@ function createRestoreApplication(options: {
     core: {
       rememberRateLimits: () => undefined,
       connectionLost: () => undefined,
+      connectionRestored: () => undefined,
     },
     router: {
       restoreSubscriptions,
@@ -692,6 +694,7 @@ describe("GatewayApplication startup cleanup", () => {
       },
       stopping: false,
       disconnectedProviders: new Set<string>(),
+      disconnectedBindingsByProvider: new Map<string, Set<string>>(),
       pendingBindingRestores: new Map(),
       restoringThreadIds: new Set<string>(),
       bindingRestoreAttempt: 0,
@@ -725,6 +728,7 @@ describe("GatewayApplication startup cleanup", () => {
       core: {
         rememberRateLimits: () => undefined,
         connectionLost: () => undefined,
+        connectionRestored: () => undefined,
       },
       router: {
         restoreSubscriptions: async () => [],
@@ -801,6 +805,7 @@ describe("GatewayApplication startup cleanup", () => {
       },
       stopping: false,
       disconnectedProviders: new Set<string>(),
+      disconnectedBindingsByProvider: new Map<string, Set<string>>(),
       pendingBindingRestores: new Map(),
       restoringThreadIds: new Set<string>(),
       bindingRestoreAttempt: 0,
@@ -842,6 +847,7 @@ describe("GatewayApplication startup cleanup", () => {
       core: {
         rememberRateLimits: () => undefined,
         connectionLost: () => undefined,
+        connectionRestored: () => undefined,
       },
       router: {
         restoreSubscriptions: async () => [],
@@ -871,5 +877,115 @@ describe("GatewayApplication startup cleanup", () => {
     expect(reconnectAttempts).toBe(1);
     expect(cancelAllCalls).toBe(0);
     expect(cancelledThreadSets).toEqual([new Set()]);
+  });
+
+  it("notifies affected threads after a Provider reconnects", async () => {
+    let disconnect: ((error: Error, provider: string) => void) | undefined;
+    const restoredNotices: Array<{
+      message: string;
+      threadIds: ReadonlySet<string>;
+    }> = [];
+    const application = Object.create(GatewayApplication.prototype);
+    Object.assign(application, {
+      activeCostProviders: [],
+      config: { codexSocketPath: "/tmp/codex.sock" },
+      logger: pino({ level: "silent" }),
+      transport: { kind: "unix-websocket" },
+      providerMetrics: {
+        start: async () => undefined,
+        close: async () => undefined,
+      },
+      modelPricing: {
+        start: () => undefined,
+        close: () => undefined,
+      },
+      exchangeRate: {
+        start: () => undefined,
+        close: () => undefined,
+      },
+      metricsSync: {
+        close: async () => undefined,
+      },
+      stopping: false,
+      disconnectedProviders: new Set<string>(),
+      disconnectedBindingsByProvider: new Map<string, Set<string>>(),
+      pendingBindingRestores: new Map(),
+      restoringThreadIds: new Set<string>(),
+      bindingRestoreAttempt: 0,
+      codex: {
+        onNotification: () => () => undefined,
+        onDisconnect: (handler: (error: Error, provider: string) => void) => {
+          disconnect = handler;
+          return () => undefined;
+        },
+        connect: async () => ({
+          userAgent: "test",
+          platformFamily: "unix",
+          platformOs: "linux",
+        }),
+        reconnectProvider: async () => ({
+          userAgent: "test",
+          platformFamily: "unix",
+          platformOs: "linux",
+        }),
+        knownProvider: () => "openai",
+        closeProvider: async () => undefined,
+        accountRateLimits: async () => emptyRateLimits(),
+        close: async () => undefined,
+      },
+      inbound: {
+        publish: () => undefined,
+        close: async () => undefined,
+      },
+      output: {
+        close: async () => undefined,
+      },
+      interactions: {
+        cancelAll: () => undefined,
+        cancelThreads: () => undefined,
+      },
+      core: {
+        rememberRateLimits: () => undefined,
+        connectionLost: () => undefined,
+        connectionRestored: (message: string, threadIds: ReadonlySet<string>) => {
+          restoredNotices.push({ message, threadIds });
+        },
+      },
+      router: {
+        restoreSubscriptions: async () => [],
+        allBindings: () => [{
+          target: {
+            surface: "feishu",
+            accountId: "default",
+            conversationId: "conversation-1",
+          },
+          threadId: "thread-1",
+        }],
+      },
+      surfaces: [{ surface: "feishu", accountId: "default" }],
+      surfaceManager: {
+        start: async () => undefined,
+        stop: async () => undefined,
+      },
+      channelImageSpool: {
+        start: async () => undefined,
+        stop: async () => undefined,
+      },
+      bindings: {
+        close: () => undefined,
+      },
+    });
+    const gateway = application as unknown as GatewayApplication;
+    await gateway.start();
+
+    disconnect?.(new Error("connection lost"), "openai");
+    await vi.waitFor(() => {
+      expect(restoredNotices).toEqual([{
+        message: "openai App Server 已重新连接",
+        threadIds: new Set(["thread-1"]),
+      }]);
+    });
+
+    await expect(gateway.stop()).resolves.toBeUndefined();
   });
 });

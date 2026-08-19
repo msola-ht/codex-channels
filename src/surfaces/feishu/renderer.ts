@@ -66,6 +66,7 @@ import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import {
   formatCodexWarning,
   formatConnectionLost,
+  formatConnectionRestored,
   formatThreadAvailability,
 } from "../output-copy.js";
 import {
@@ -269,6 +270,8 @@ export function renderFeishuOutput(
       );
     case "connection.lost":
       return formatConnectionLost(visibleUpstreamMessage(event.message));
+    case "connection.restored":
+      return formatConnectionRestored(visibleUpstreamMessage(event.message));
     case "account.updated":
       return formatRuntimeAccountUpdate(event.authMode, event.planType);
     case "account.rateLimits.updated":

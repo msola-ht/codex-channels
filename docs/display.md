@@ -102,6 +102,9 @@ HTML 和微信结构化字段渲染。
 Remote TUI 之前尚未启动，其历史 Thread 不会出现在 `/resume` 会话列表中；对应 Provider 启动后
 即可正常列出和恢复。
 
+App Server 连接断开时，受影响会话会收到“连接已中断，正在恢复”提示；重连成功后会收到
+“连接已恢复”提示。仅当断开时确实存在受影响会话才发送，多个 Provider 各自独立提示。
+
 `/mcp login` 在当前会话已绑定 Thread 时返回安全授权地址；浏览器流程结束后，Gateway 只把带有
 该 Thread 的官方 OAuth 完成通知显示为“MCP OAuth”成功或失败状态，无法关联 Thread 的通知不向
 渠道广播。失败原因在 Client 边界先脱敏，Telegram 失败通知会启用声音，成功通知保持静默；飞书

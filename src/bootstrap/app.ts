@@ -165,6 +165,7 @@ export class GatewayApplication {
   private reconnecting: Promise<void> | undefined;
   private reconnectAbort: AbortController | undefined;
   private readonly disconnectedProviders = new Set<string>();
+  private readonly disconnectedBindingsByProvider = new Map<string, Set<string>>();
   private readonly pendingBindingRestores = new Map<string, PendingBindingRestore>();
   private readonly restoringThreadIds = new Set<string>();
   private bindingRestoreTimer: NodeJS.Timeout | undefined;
@@ -877,6 +878,16 @@ export class GatewayApplication {
             .map((binding) => binding.threadId)
             .filter((threadId) => this.codex.knownProvider(threadId) === provider),
         );
+        if (affectedThreadIds.size > 0) {
+          const existing = this.disconnectedBindingsByProvider.get(provider);
+          if (existing) {
+            for (const threadId of affectedThreadIds) {
+              existing.add(threadId);
+            }
+          } else {
+            this.disconnectedBindingsByProvider.set(provider, affectedThreadIds);
+          }
+        }
         this.interactions.cancelThreads(affectedThreadIds);
         this.core.connectionLost(
           `${provider} App Server 连接已断开，正在恢复连接`,
@@ -1118,6 +1129,14 @@ export class GatewayApplication {
         if (this.stopping || signal.aborted) {
           return;
         }
+        const restoredThreadIds = this.disconnectedBindingsByProvider.get(provider);
+        if (restoredThreadIds !== undefined && restoredThreadIds.size > 0) {
+          this.core.connectionRestored(
+            `${provider} App Server 已重新连接`,
+            restoredThreadIds,
+          );
+        }
+        this.disconnectedBindingsByProvider.delete(provider);
         this.logger.info(
           {
             attempt,
