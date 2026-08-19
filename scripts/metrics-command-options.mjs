@@ -1,4 +1,5 @@
 import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import { loadConfiguredCustomPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 
 export const metricsProviderIds = Object.freeze([
   "openai",
@@ -84,7 +85,7 @@ export function parseMetricsOptions(args, allowed) {
   return result;
 }
 
-export function validateMetricsCommandArgs(subcommand, args) {
+export function validateMetricsCommandArgs(subcommand, args, environment = process.env) {
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   if (subcommand === "run") {
     parseMetricsRunArgs(withoutStdout);
@@ -125,7 +126,12 @@ export function validateMetricsCommandArgs(subcommand, args) {
     return;
   }
   if (subcommand === "prune") {
-    if (args.length !== 1 || !new Set(metricsProviderIds).has(args[0])) {
+    const providers = new Set(metricsProviderIds);
+    const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);
+    if (customPrimaryProvider !== undefined) {
+      providers.add(customPrimaryProvider.id);
+    }
+    if (args.length !== 1 || !providers.has(args[0])) {
       throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
     }
     return;

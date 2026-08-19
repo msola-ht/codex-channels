@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   metricsDimension,
@@ -8,7 +12,16 @@ import {
   parseMetricsRunArgs,
   parseMetricsThreadsArgs,
   parseMetricsTurnsArgs,
+  validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 describe("metrics command options", () => {
   it("resolves explicit local date ranges without exceeding now", () => {
@@ -51,5 +64,25 @@ describe("metrics command options", () => {
       .toEqual({ format: "json" });
     expect(() => parseMetricsThreadsArgs(["thread-1"]))
       .toThrow("未知参数：thread-1");
+  });
+
+  it("accepts a configured custom primary Provider for prune", () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-metrics-prune-custom-"));
+    temporaryDirectories.push(codexHome);
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model_provider = "OpenAI"',
+      "",
+      "[model_providers.OpenAI]",
+      'base_url = "https://zzone.example.test/v1"',
+      'wire_api = "responses"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const environment = { ...process.env, CODEX_HOME: codexHome };
+
+    expect(() => validateMetricsCommandArgs("prune", ["OpenAI"], environment))
+      .not.toThrow();
+    expect(() => validateMetricsCommandArgs("prune", ["unknown"], environment))
+      .toThrow("codexc metrics prune <openai|deepseek|opencode-go>");
   });
 });

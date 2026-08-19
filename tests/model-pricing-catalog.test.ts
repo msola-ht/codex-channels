@@ -116,6 +116,16 @@ describe("RemoteModelPricingCatalog", () => {
       cachedInputPricePerMillionNanos: 2_800_000,
       outputPricePerMillionNanos: 280_000_000,
     });
+    expect(reloaded.resolve({
+      provider: "OpenAI",
+      model: "deepseek-v4-flash",
+      serviceTier: null,
+      inputTokens: 1_000,
+      atMs: 1_700_000_000_100,
+    })).toMatchObject({
+      billingMode: "unknown",
+      currency: "USD",
+    });
     await reloaded.close();
   });
 });

@@ -13,7 +13,10 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { providerMetricsSocketPath } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadConfiguredCustomPrimaryModelProvider,
+  providerMetricsSocketPath,
+} from "../runtime/model-provider-runtime.mjs";
 import {
   assertSynchronousChildSuccess,
   ForwardedChildSignalError,
@@ -644,8 +647,13 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function assertPruneProvider(provider) {
-  if (!metricsProviderIds.includes(provider)) {
+function assertPruneProvider(provider, environment = process.env) {
+  const providers = new Set(metricsProviderIds);
+  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);
+  if (customPrimaryProvider !== undefined) {
+    providers.add(customPrimaryProvider.id);
+  }
+  if (!providers.has(provider)) {
     throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
   }
 }

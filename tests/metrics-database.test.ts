@@ -286,6 +286,46 @@ describe("model request metrics database operations", () => {
     local.close();
   });
 
+  it("prunes rows for a configured custom primary Provider", () => {
+    const { environment, databasePath, home } = fixture();
+    const codexHome = join(home, "codex-home");
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model_provider = "OpenAI"',
+      "",
+      "[model_providers.OpenAI]",
+      'base_url = "https://zzone.example.test/v1"',
+      'wire_api = "responses"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const environmentWithCustomPrimary = {
+      ...environment,
+      CODEX_HOME: codexHome,
+    };
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "OpenAI" });
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const calls: string[] = [];
+
+    const result = pruneProviderMetrics("OpenAI", environmentWithCustomPrimary, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(result.provider).toBe("OpenAI");
+    expect(result.local.deleted).toBe(1);
+    const local = new DatabaseSync(databasePath, { readOnly: true });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 1 });
+    local.close();
+  });
+
   it("rejects an unsupported provider", () => {
     const { environment, databasePath } = fixture();
     expect(() => pruneProviderMetrics("unknown", environment, {

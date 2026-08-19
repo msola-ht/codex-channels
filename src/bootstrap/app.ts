@@ -310,11 +310,14 @@ export class GatewayApplication {
         && config.vision.provider === deepseekProviderDefinition.id);
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
-        primaryProvider,
+        customPrimaryProvider?.id ?? primaryProvider,
         ...managedProviders.map(({ provider }) => provider),
       ],
       socketPath: (provider) =>
-        providerMetricsSocketPath(config.codexSocketPath, provider),
+        providerMetricsSocketPath(
+          config.codexSocketPath,
+          provider === customPrimaryProvider?.id ? primaryProvider : provider,
+        ),
       writer: {
         enqueue: (sample) => {
           metricsWriter.enqueue(sample);
