@@ -19,6 +19,7 @@ import {
   loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
 } from "./model-provider-definitions.mjs";
+import { modelProviderBlockEdits } from "./model-provider-profile.mjs";
 import {
   opencodeGoAccountMarkerPath,
 } from "./opencode-go-accounts.mjs";
@@ -89,22 +90,7 @@ export function backupPrimaryProviderCandidates(providers, environment = process
 export function restorePrimaryProviderCandidateEdits(id, environment = process.env) {
   const provider = record(readPrimaryProviderBackup(environment)[id]);
   if (typeof provider.base_url !== "string") return undefined;
-  return [
-    { keyPath: `model_providers.${id}.name`, value: provider.name ?? id },
-    { keyPath: `model_providers.${id}.base_url`, value: provider.base_url },
-    { keyPath: `model_providers.${id}.wire_api`, value: "responses" },
-    { keyPath: `model_providers.${id}.requires_openai_auth`, value: provider.requires_openai_auth === true },
-    { keyPath: `model_providers.${id}.supports_websockets`, value: provider.supports_websockets === true },
-    ...(typeof provider.env_key === "string"
-      ? [{ keyPath: `model_providers.${id}.env_key`, value: provider.env_key }]
-      : [{ keyPath: `model_providers.${id}.env_key`, value: null }]),
-    ...(typeof provider.experimental_bearer_token === "string"
-      ? [{
-          keyPath: `model_providers.${id}.experimental_bearer_token`,
-          value: provider.experimental_bearer_token,
-        }]
-      : [{ keyPath: `model_providers.${id}.experimental_bearer_token`, value: null }]),
-  ];
+  return modelProviderBlockEdits(id, provider);
 }
 
 export function managedProviderDirectory(environment, definition) {

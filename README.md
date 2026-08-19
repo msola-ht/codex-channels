@@ -142,7 +142,7 @@ plugin_api = true
 ### 自定义第三方 Provider
 
 渠道支持使用 Codex 主配置中选中的 OpenAI 兼容 Responses Provider，不需要模型目录。运行
-`codexc setup`，选择“模型与提供商 → 第三方 → 自定义第三方 → 新增或更新”，按提示填写
+`codexc setup`，选择“模型与提供商 → 第三方 → 自定义 第三方 → 新增或更新”，按提示填写
 上游地址、认证方式与默认模型即可写入配置（Provider ID 固定为 `OpenAI`，不能使用保留的
 `openai`）。认证方式支持“直接写入 API Key”（写入
 `experimental_bearer_token`，明文保存在 0600 的 `~/.codex/config.toml`），第三方主 API 不再依赖

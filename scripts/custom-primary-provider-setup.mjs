@@ -3,6 +3,10 @@ import * as clackPrompts from "@clack/prompts";
 import {
   validProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
+import {
+  createCustomPrimaryProviderConfig,
+  modelProviderBlockEdits,
+} from "../runtime/model-provider-profile.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 
 export const primaryProviderId = "OpenAI";
@@ -198,8 +202,15 @@ export async function runCustomPrimaryProviderSetup({
     }
   }
 
-  const requiresOpenAiAuth = auth !== "none" && auth !== "bearer_token";
   const supportsWebsockets = websockets === "yes";
+  const providerBlock = createCustomPrimaryProviderConfig({
+    name: normalizedName,
+    baseUrl: normalizedBaseUrl,
+    auth,
+    ...(envKey === undefined ? {} : { envKey }),
+    ...(auth === "bearer_token" ? { bearerToken: String(bearerToken).trim() } : {}),
+    supportsWebsockets,
+  });
   output.write("\n将写入 ~/.codex/config.toml：\n");
   output.write([
     `- Provider ID：${normalizedId}`,
@@ -233,26 +244,7 @@ export async function runCustomPrimaryProviderSetup({
       : []),
     { keyPath: "model_provider", value: normalizedId },
     { keyPath: "model", value: normalizedModel },
-    { keyPath: `model_providers.${normalizedId}.name`, value: normalizedName },
-    { keyPath: `model_providers.${normalizedId}.base_url`, value: normalizedBaseUrl },
-    { keyPath: `model_providers.${normalizedId}.wire_api`, value: "responses" },
-    { keyPath: `model_providers.${normalizedId}.requires_openai_auth`, value: requiresOpenAiAuth },
-    { keyPath: `model_providers.${normalizedId}.supports_websockets`, value: supportsWebsockets },
-    ...(envKey === undefined
-      ? []
-      : [{ keyPath: `model_providers.${normalizedId}.env_key`, value: envKey }]),
-    ...(auth !== "env_key" && currentEnvKey !== ""
-      ? [{ keyPath: `model_providers.${normalizedId}.env_key`, value: null }]
-      : []),
-    ...(auth === "bearer_token"
-      ? [{
-          keyPath: `model_providers.${normalizedId}.experimental_bearer_token`,
-          value: String(bearerToken).trim(),
-        }]
-      : []),
-    ...(auth !== "bearer_token" && hasCurrentBearerToken
-      ? [{ keyPath: `model_providers.${normalizedId}.experimental_bearer_token`, value: null }]
-      : []),
+    ...modelProviderBlockEdits(normalizedId, providerBlock),
   ];
   const writer = await createClient({ environment });
   try {

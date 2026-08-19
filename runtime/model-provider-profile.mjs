@@ -43,6 +43,44 @@ export function createModelProviderConfig(definition, apiKey) {
   };
 }
 
+export function createCustomPrimaryProviderConfig({
+  name,
+  baseUrl,
+  auth,
+  envKey,
+  bearerToken,
+  supportsWebsockets,
+}) {
+  return {
+    name,
+    base_url: baseUrl,
+    wire_api: "responses",
+    requires_openai_auth: auth !== "none" && auth !== "bearer_token",
+    supports_websockets: supportsWebsockets,
+    ...(auth === "env_key" ? { env_key: envKey } : {}),
+    ...(auth === "bearer_token" ? { experimental_bearer_token: bearerToken } : {}),
+  };
+}
+
+export function modelProviderBlockEdits(id, provider) {
+  return [
+    { keyPath: `model_providers.${id}.name`, value: provider.name ?? id },
+    { keyPath: `model_providers.${id}.base_url`, value: provider.base_url },
+    { keyPath: `model_providers.${id}.wire_api`, value: provider.wire_api ?? "responses" },
+    { keyPath: `model_providers.${id}.requires_openai_auth`, value: provider.requires_openai_auth === true },
+    { keyPath: `model_providers.${id}.supports_websockets`, value: provider.supports_websockets === true },
+    ...(typeof provider.env_key === "string"
+      ? [{ keyPath: `model_providers.${id}.env_key`, value: provider.env_key }]
+      : [{ keyPath: `model_providers.${id}.env_key`, value: null }]),
+    ...(typeof provider.experimental_bearer_token === "string"
+      ? [{
+          keyPath: `model_providers.${id}.experimental_bearer_token`,
+          value: provider.experimental_bearer_token,
+        }]
+      : [{ keyPath: `model_providers.${id}.experimental_bearer_token`, value: null }]),
+  ];
+}
+
 export function createManagedProviderMarker(definition, mode = "switching") {
   assertDefinition(definition);
   if (mode !== "switching" && mode !== "exclusive") {
