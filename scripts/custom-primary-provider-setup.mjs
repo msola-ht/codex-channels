@@ -1,10 +1,11 @@
 import * as clackPrompts from "@clack/prompts";
 
 import {
-  validateCustomPrimaryModelProviderId,
   validProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+
+export const primaryProviderId = "OpenAI";
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -16,6 +17,11 @@ function optionalString(value) {
 
 function authOptions() {
   return [
+    {
+      value: "bearer_token",
+      label: "直接写入 API Key",
+      hint: "experimental_bearer_token = 密钥（明文写入 config）",
+    },
     {
       value: "apikey",
       label: "使用当前 API Key",
@@ -65,42 +71,29 @@ export async function runCustomPrimaryProviderSetup({
     await client.close().catch(() => undefined);
   }
   const config = record(snapshot.config);
-  const currentProviderId = optionalString(config.model_provider);
+  const activeProviderId = optionalString(config.model_provider);
   const currentProviders = record(config.model_providers);
-  const currentProvider = currentProviderId === undefined
-    ? undefined
-    : record(currentProviders[currentProviderId]);
+  const currentProvider = record(currentProviders[primaryProviderId]);
   const currentModel = optionalString(config.model);
   const currentBaseUrl = optionalString(currentProvider?.base_url) ?? "";
   const currentName = optionalString(currentProvider?.name) ?? "";
   const currentEnvKey = optionalString(currentProvider?.env_key) ?? "";
+  const hasCurrentBearerToken = optionalString(currentProvider?.experimental_bearer_token) !== undefined;
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
-  const currentAuth = currentProvider?.requires_openai_auth === false
-    ? "none"
-    : optionalString(currentProvider?.env_key) !== undefined
-      ? "env_key"
-      : "apikey";
+  const currentAuth = hasCurrentBearerToken
+    ? "bearer_token"
+    : currentProvider?.requires_openai_auth === false
+      ? "none"
+      : optionalString(currentProvider?.env_key) !== undefined
+        ? "env_key"
+        : "apikey";
   const currentWebsockets = currentProvider?.supports_websockets === true ? "yes" : "no";
 
   output.write("\nCodex Connect 自定义主 Provider Setup\n\n");
-  output.write(`当前主 Provider：${currentProviderId ?? "未配置"}\n`);
-  if (currentProviderId !== undefined) {
-    output.write(`当前上游：${currentBaseUrl}\n`);
-  }
-
-  const providerId = await prompts.text({
-    message: "自定义 Provider ID（例如 OpenAI）",
-    initialValue: currentProviderId ?? "OpenAI",
-    validate: (value) => validateCustomPrimaryModelProviderId(String(value).trim()),
-  });
-  if (prompts.isCancel(providerId) || providerId === "back") {
-    return { action: allowBack ? "back" : "cancel" };
-  }
-  const normalizedId = String(providerId).trim();
-  const reservedError = validateCustomPrimaryModelProviderId(normalizedId);
-  if (reservedError !== null) {
-    throw new Error(reservedError);
-  }
+  output.write(`当前主 Provider：${activeProviderId ?? "未配置"}\n`);
+  output.write(`Provider ID 固定为：${primaryProviderId}（不能使用保留的 openai）\n`);
+  output.write(`当前上游：${currentBaseUrl === "" ? "未配置" : currentBaseUrl}\n`);
+  const normalizedId = primaryProviderId;
 
   const baseUrl = await prompts.text({
     message: "上游 base_url（例如 https://zzone.cc.cd/v1）",
@@ -140,6 +133,16 @@ export async function runCustomPrimaryProviderSetup({
   });
   if (prompts.isCancel(auth) || auth === "back") {
     return { action: allowBack ? "back" : "cancel" };
+  }
+  let bearerToken;
+  if (auth === "bearer_token") {
+    bearerToken = await prompts.password({
+      message: "API Key（写入 ~/.codex/config.toml，不回显）",
+      validate: (value) => String(value).trim() === "" ? "API Key 不能为空" : undefined,
+    });
+    if (prompts.isCancel(bearerToken) || bearerToken === "back") {
+      return { action: allowBack ? "back" : "cancel" };
+    }
   }
   let envKey;
   if (auth === "env_key") {
@@ -195,7 +198,7 @@ export async function runCustomPrimaryProviderSetup({
     }
   }
 
-  const requiresOpenAiAuth = auth !== "none";
+  const requiresOpenAiAuth = auth !== "none" && auth !== "bearer_token";
   const supportsWebsockets = websockets === "yes";
   output.write("\n将写入 ~/.codex/config.toml：\n");
   output.write([
@@ -203,7 +206,15 @@ export async function runCustomPrimaryProviderSetup({
     `- 显示名称：${normalizedName}`,
     `- 上游：${normalizedBaseUrl}`,
     `- 默认模型：${normalizedModel}`,
-    `- 认证：${auth === "none" ? "无" : auth === "env_key" ? `环境变量 ${envKey}` : "当前 API Key"}`,
+    `- 认证：${
+      auth === "none"
+        ? "无"
+        : auth === "env_key"
+          ? `环境变量 ${envKey}`
+          : auth === "bearer_token"
+            ? "直接写入 API Key（experimental_bearer_token，不回显）"
+            : "当前 API Key"
+    }`,
     `- WebSocket：${supportsWebsockets ? "是" : "否"}`,
   ].map((line) => `${line}\n`).join(""));
 
@@ -232,6 +243,15 @@ export async function runCustomPrimaryProviderSetup({
       : [{ keyPath: `model_providers.${normalizedId}.env_key`, value: envKey }]),
     ...(auth !== "env_key" && currentEnvKey !== ""
       ? [{ keyPath: `model_providers.${normalizedId}.env_key`, value: null }]
+      : []),
+    ...(auth === "bearer_token"
+      ? [{
+          keyPath: `model_providers.${normalizedId}.experimental_bearer_token`,
+          value: String(bearerToken).trim(),
+        }]
+      : []),
+    ...(auth !== "bearer_token" && hasCurrentBearerToken
+      ? [{ keyPath: `model_providers.${normalizedId}.experimental_bearer_token`, value: null }]
       : []),
   ];
   const writer = await createClient({ environment });

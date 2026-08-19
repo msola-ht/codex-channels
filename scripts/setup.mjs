@@ -123,73 +123,107 @@ async function runModelSetup({
   customPrimarySetup,
   officialLoginSetup,
 }) {
-  const module = await prompts.select({
-    message: "选择模型与提供商设置",
-    showInstructions: false,
-    options: [
-      {
-        value: "official_login",
-        label: "官方登录模式",
-        hint: "运行 codex login 登录 OpenAI 并恢复官方主 Provider",
-      },
-      {
-        value: "codex",
-        label: "Codex 官方",
-        hint: "设置全局默认模型与思考等级",
-      },
-      {
-        value: "deepseek",
-        label: "DeepSeek",
-        hint: "安装、切换、恢复或修改模型设置（思考等级、自动压缩）",
-      },
-      {
-        value: "opencode-go",
-        label: "OpenCode Go",
-        hint: "安装、移除或修改模型设置（思考等级、自动压缩）",
-      },
-      {
-        value: "custom_primary",
-        label: "自定义主 Provider",
-        hint: "新增、列表、切换或删除 OpenAI 兼容中转主 Provider",
-      },
-      {
-        value: "provider_default",
-        label: "第三方模型设置",
-        hint: "按 Provider 和模型设置默认值、思考等级与自动压缩",
-      },
-      {
-        value: "api_provider",
-        label: "第三方 API",
-        hint: "管理供图片识别等功能使用的 Responses 中转接口",
-      },
-      { value: "vision", label: "图片识别", hint: "为不支持图片的模型配置视觉代理" },
-      { value: "back", label: "返回", hint: "返回设置类别" },
-    ],
-  });
-  if (prompts.isCancel(module) || module === "back") return { action: "back" };
-  if (module === "official_login") {
-    return officialLoginSetup({ input, output, prompts });
+  while (true) {
+    const category = await prompts.select({
+      message: "选择模型与提供商设置",
+      showInstructions: false,
+      options: [
+        {
+          value: "official",
+          label: "官方",
+          hint: "OpenAI 官方登录与默认模型",
+        },
+        {
+          value: "third_party",
+          label: "第三方",
+          hint: "自定义第三方、DeepSeek 官方、OpenCode Go 官方等",
+        },
+        { value: "back", label: "返回", hint: "返回设置类别" },
+      ],
+    });
+    if (prompts.isCancel(category) || category === "back") return { action: "back" };
+    if (category === "official") {
+      const module = await prompts.select({
+        message: "官方设置",
+        showInstructions: false,
+        options: [
+          {
+            value: "official_login",
+            label: "登录并恢复官方",
+            hint: "运行 codex login --device-auth，输入终端显示的验证码并停用自定义主 Provider",
+          },
+          {
+            value: "codex",
+            label: "默认模型与思考等级",
+            hint: "设置 Codex 官方全局默认值",
+          },
+          { value: "back", label: "返回", hint: "返回模型与提供商设置" },
+        ],
+      });
+      if (prompts.isCancel(module) || module === "back") continue;
+      if (module === "official_login") {
+        return officialLoginSetup({ input, output, prompts });
+      }
+      if (module === "codex") {
+        return codexDefaultsSetup({ input, output, prompts, allowBack: true });
+      }
+      throw new Error(`未知官方设置：${String(module)}`);
+    }
+    if (category === "third_party") {
+      const module = await prompts.select({
+        message: "第三方设置",
+        showInstructions: false,
+        options: [
+          {
+            value: "custom_primary",
+            label: "自定义第三方",
+            hint: "新增、列表、切换或删除 OpenAI 兼容中转主 Provider",
+          },
+          {
+            value: "deepseek",
+            label: "DeepSeek 官方",
+            hint: "安装、切换、恢复或修改模型设置（思考等级、自动压缩）",
+          },
+          {
+            value: "opencode-go",
+            label: "OpenCode Go 官方",
+            hint: "安装、移除或修改模型设置（思考等级、自动压缩）",
+          },
+          {
+            value: "provider_default",
+            label: "第三方模型设置",
+            hint: "按 Provider 和模型设置默认值、思考等级与自动压缩",
+          },
+          {
+            value: "api_provider",
+            label: "第三方 API",
+            hint: "管理供图片识别等功能使用的 Responses 中转接口",
+          },
+          { value: "vision", label: "图片识别", hint: "为不支持图片的模型配置视觉代理" },
+          { value: "back", label: "返回", hint: "返回模型与提供商设置" },
+        ],
+      });
+      if (prompts.isCancel(module) || module === "back") continue;
+      if (module === "deepseek") {
+        return deepseekSetup({ input, output, prompts, allowBack: true });
+      }
+      if (module === "opencode-go") {
+        return openCodeGoSetup({ input, output, prompts, allowBack: true });
+      }
+      if (module === "custom_primary") {
+        return customPrimarySetup({ input, output, prompts, allowBack: true });
+      }
+      if (module === "provider_default") {
+        return modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
+      }
+      if (module === "api_provider") {
+        return apiProviderSetup({ input, output, prompts });
+      }
+      if (module === "vision") return visionSetup({ input, output, prompts });
+      throw new Error(`未知第三方设置：${String(module)}`);
+    }
+    throw new Error(`未知模型与提供商设置：${String(category)}`);
   }
-  if (module === "codex") {
-    return codexDefaultsSetup({ input, output, prompts, allowBack: true });
-  }
-  if (module === "deepseek") {
-    return deepseekSetup({ input, output, prompts, allowBack: true });
-  }
-  if (module === "opencode-go") {
-    return openCodeGoSetup({ input, output, prompts, allowBack: true });
-  }
-  if (module === "custom_primary") {
-    return customPrimarySetup({ input, output, prompts, allowBack: true });
-  }
-  if (module === "provider_default") {
-    return modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
-  }
-  if (module === "api_provider") {
-    return apiProviderSetup({ input, output, prompts });
-  }
-  if (module === "vision") return visionSetup({ input, output, prompts });
-  throw new Error(`未知模型与提供商设置：${String(module)}`);
 }
 
 async function runChannelSetup({

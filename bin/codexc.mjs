@@ -141,11 +141,8 @@ const helpText = {
 打开模型与提供商、通讯渠道和技能设置菜单。
 
 常用入口：
-  codexc setup → 模型与提供商 → 官方登录模式（运行 codex login 并恢复官方主 Provider）
-  codexc setup → 模型与提供商 → OpenCode Go → 修改模型设置（思考等级、自动压缩）
-  codexc setup → 模型与提供商 → DeepSeek → 修改模型设置（思考等级、自动压缩）
-  codexc setup → 模型与提供商 → 自定义主 Provider（OpenAI 兼容中转的模型、地址与认证）
-  codexc setup → 模型与提供商 → 第三方模型设置（统一按 Provider 修改思考等级与自动压缩）
+  codexc setup → 模型与提供商 → 官方 → 登录并恢复官方 / 默认模型与思考等级
+  codexc setup → 模型与提供商 → 第三方 → 自定义第三方 / DeepSeek 官方 / OpenCode Go 官方等
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 技能（安装或卸载项目技能）`,
   start: `用法：codexc start
@@ -202,9 +199,11 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   codexc primary-provider list
     列出当前激活的主 Provider 与全部自定义候选。
   codexc primary-provider add
-    交互式新增或更新一个自定义主 Provider，并立即激活。
+    交互式新增或更新固定 ID（OpenAI）的主 Provider，并立即激活。
+  codexc primary-provider switch openai
+    切回官方 OpenAI 主 Provider（不运行登录，官方凭据保留；自定义候选移入私有备份）。
   codexc primary-provider switch <Provider ID> [模型]
-    切换到已配置的自定义主 Provider；模型缺省保持当前设置。
+    切换到自定义主 Provider；候选不在 config 时从备份恢复；模型缺省保持当前设置。
   codexc primary-provider remove <Provider ID>
     删除候选；若删除的是当前激活项，将恢复官方 OpenAI 主 Provider。
 

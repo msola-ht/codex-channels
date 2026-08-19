@@ -30,6 +30,7 @@ import {
   providerAppServerSocketPath,
   providerMetricsSocketPath,
   removeManagedModelProviderRoleConfig,
+  validateCustomPrimaryModelProviderId,
   validateConfiguredModelProvider,
   validateConfiguredModelProviders,
   withProviderBaseUrl,
@@ -46,6 +47,14 @@ import {
 } from "../runtime/opencode-go-accounts.mjs";
 
 describe("model provider runtime topology", () => {
+  it("rejects reserved Codex provider IDs as custom primary candidates", () => {
+    const environment = testEnvironment(tmpdir());
+    for (const id of ["openai", "ollama", "lmstudio", "amazon-bedrock"]) {
+      expect(validateCustomPrimaryModelProviderId(id, environment))
+        .toBe("该 Provider ID 已被 Codex 或 Gateway 保留");
+    }
+  });
+
   it("resolves the primary socket from one shared runtime descriptor", () => {
     expect(resolvePrimaryAppServerSocketPath(
       { codex: { socket_path: "runtime/custom.sock" } },
@@ -190,6 +199,21 @@ describe("model provider runtime topology", () => {
         id: "first",
         baseUrl: "https://first.example.test/v1",
       });
+  });
+
+  it("keeps the official primary when openai is explicitly selected even with one candidate", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-explicit-openai-"));
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model_provider = "openai"',
+      "",
+      "[model_providers.only]",
+      'base_url = "https://only.example.test/v1"',
+      'wire_api = "responses"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    expect(loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
+      .toBeUndefined();
   });
 
   it("rejects a custom primary Provider together with a top-level official base URL", async () => {

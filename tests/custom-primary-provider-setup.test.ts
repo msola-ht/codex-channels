@@ -26,7 +26,6 @@ describe("custom primary Provider setup", () => {
     const prompts = {
       isCancel: () => false,
       text: vi.fn()
-        .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("https://zzone.cc.cd/v1")
         .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("gpt-5.6-sol"),
@@ -77,7 +76,6 @@ describe("custom primary Provider setup", () => {
     const prompts = {
       isCancel: () => false,
       text: vi.fn()
-        .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("https://zzone.cc.cd/v1")
         .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("gpt-5.6-sol"),
@@ -132,7 +130,6 @@ describe("custom primary Provider setup", () => {
     const prompts = {
       isCancel: () => false,
       text: vi.fn()
-        .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("https://zzone.cc.cd/v1")
         .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("gpt-5.6-sol"),
@@ -171,6 +168,73 @@ describe("custom primary Provider setup", () => {
     });
   });
 
+  it("writes the API key into config as experimental_bearer_token without echoing it", async () => {
+    const client = {
+      connect: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      readUserConfigSnapshot: vi.fn(async () => ({
+        config: {
+          model: "gpt-5.6-sol",
+          model_provider: "OpenAI",
+          model_providers: {
+            OpenAI: {
+              name: "Third-party",
+              base_url: "https://old.example.test/v1",
+              wire_api: "responses",
+              env_key: "OLD_THIRD_PARTY_KEY",
+              requires_openai_auth: false,
+            },
+          },
+        },
+        version: "v1",
+      })),
+      writeUserConfigEdits: vi.fn<
+        (
+          edits: Array<{ keyPath: string; value: unknown }>,
+          options?: { expectedVersion?: string },
+        ) => Promise<void>
+      >(async () => undefined),
+    };
+    const createClient = vi.fn(async () => client);
+    const output = { write: vi.fn() };
+    const prompts = {
+      isCancel: () => false,
+      text: vi.fn()
+        .mockResolvedValueOnce("https://new.example.test/v1")
+        .mockResolvedValueOnce("Third-party")
+        .mockResolvedValueOnce("gpt-5.6-sol"),
+      password: vi.fn(async () => "sk-test-secret"),
+      select: vi.fn()
+        .mockResolvedValueOnce("bearer_token")
+        .mockResolvedValueOnce("no"),
+      confirm: vi.fn(async () => true),
+    };
+
+    const result = await runCustomPrimaryProviderSetup({
+      environment: {},
+      output,
+      prompts,
+      createClient,
+    });
+
+    expect(result).toEqual({ provider: "OpenAI", model: "gpt-5.6-sol" });
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "model_provider", value: "OpenAI" },
+      { keyPath: "model", value: "gpt-5.6-sol" },
+      { keyPath: "model_providers.OpenAI.name", value: "Third-party" },
+      { keyPath: "model_providers.OpenAI.base_url", value: "https://new.example.test/v1" },
+      { keyPath: "model_providers.OpenAI.wire_api", value: "responses" },
+      { keyPath: "model_providers.OpenAI.requires_openai_auth", value: false },
+      { keyPath: "model_providers.OpenAI.supports_websockets", value: false },
+      { keyPath: "model_providers.OpenAI.env_key", value: null },
+      {
+        keyPath: "model_providers.OpenAI.experimental_bearer_token",
+        value: "sk-test-secret",
+      },
+    ], { expectedVersion: "v1" });
+    expect(output.write.mock.calls.flat().join("")).not.toContain("sk-test-secret");
+  });
+
   it("keeps other candidates and unrelated blocks when switching the primary", async () => {
     const client = {
       connect: vi.fn(async () => undefined),
@@ -204,7 +268,6 @@ describe("custom primary Provider setup", () => {
     const prompts = {
       isCancel: () => false,
       text: vi.fn()
-        .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("https://zzone.cc.cd/v1")
         .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("gpt-5.6-sol"),
@@ -265,7 +328,6 @@ describe("custom primary Provider setup", () => {
     const prompts = {
       isCancel: () => false,
       text: vi.fn()
-        .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("https://zzone.cc.cd/v1")
         .mockResolvedValueOnce("OpenAI")
         .mockResolvedValueOnce("gpt-5.6-sol"),

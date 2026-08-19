@@ -34,10 +34,27 @@ export function validateConfiguredModelProviders(
   mode: "switching" | "exclusive";
 }>;
 
-export function validateCustomPrimaryModelProviderId(id: unknown): string | null;
+export function validateCustomPrimaryModelProviderId(
+  id: unknown,
+  environment?: NodeJS.ProcessEnv,
+): string | null;
 export function listCustomPrimaryProviderCandidates(
   providers: Record<string, unknown> | undefined,
 ): string[];
+export function primaryProviderBackupPath(
+  environment?: NodeJS.ProcessEnv,
+): string;
+export function readPrimaryProviderBackup(
+  environment?: NodeJS.ProcessEnv,
+): Record<string, Record<string, unknown>>;
+export function backupPrimaryProviderCandidates(
+  providers: Record<string, unknown> | undefined,
+  environment?: NodeJS.ProcessEnv,
+): string[];
+export function restorePrimaryProviderCandidateEdits(
+  id: string,
+  environment?: NodeJS.ProcessEnv,
+): Array<{ keyPath: string; value: unknown }> | undefined;
 export function validProviderBaseUrl(value: string, label: string): string;
 
 export interface ManagedModelProviderSettings {

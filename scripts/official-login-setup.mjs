@@ -5,8 +5,8 @@ import { isAbsolute } from "node:path";
 import * as clackPrompts from "@clack/prompts";
 
 import {
+  backupPrimaryProviderCandidates,
   listCustomPrimaryProviderCandidates,
-  validateCustomPrimaryModelProviderId,
 } from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 
@@ -27,7 +27,7 @@ function resolveCodexBinary(environment) {
 }
 
 function defaultRunLogin({ codexBinary, environment }) {
-  const result = spawnSync(codexBinary, ["login"], {
+  const result = spawnSync(codexBinary, ["login", "--device-auth"], {
     stdio: "inherit",
     env: environment,
   });
@@ -55,50 +55,44 @@ export async function runOfficialLoginSetup({
     await client.close().catch(() => undefined);
   }
   const config = record(snapshot.config);
-  const customIds = [
-    ...listCustomPrimaryProviderCandidates(record(config.model_providers)),
-    ...(typeof config.model_provider === "string"
-      && validateCustomPrimaryModelProviderId(config.model_provider) === null
-      ? [config.model_provider]
-      : []),
-  ];
-  const uniqueCustomIds = [...new Set(customIds)];
+  const candidates = listCustomPrimaryProviderCandidates(record(config.model_providers));
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
 
   output.write("\nCodex Connect 官方登录模式 Setup\n\n");
-  const removals = [
-    ...uniqueCustomIds.map((id) => `自定义主 Provider 块 ${id}`),
-    ...(hasTopLevelBaseUrl ? ["顶层 openai_base_url"] : []),
+  const notices = [
+    ...(candidates.length > 0
+      ? [`备份并停用自定义候选：${candidates.join("、")}（可用 primary-provider switch 切回）`]
+      : []),
+    ...(hasTopLevelBaseUrl ? ["移除顶层 openai_base_url"] : []),
   ];
   output.write(
-    removals.length === 0
-      ? "当前已是官方 OpenAI 模式，将直接运行 codex login。\n"
-      : `将清除：${removals.join("、")}；官方与第三方主 Provider 只能同时存在一个。\n`,
+    notices.length === 0
+      ? "当前已是官方 OpenAI 模式，将直接运行 codex login --device-auth。\n"
+      : `将执行：${notices.join("；")}。\n`,
   );
 
   const confirmed = await prompts.confirm({
-    message: "切换到官方 OpenAI 模式并运行 codex login？",
+    message: "切换到官方 OpenAI 模式并运行 codex login --device-auth？",
     initialValue: true,
   });
   if (prompts.isCancel(confirmed) || confirmed !== true) {
     output.write("已取消，未修改配置。\n");
     return undefined;
   }
+  output.write("将运行 codex login --device-auth；打开终端显示的链接并输入验证码完成登录。\n");
 
   runLogin({
     codexBinary: resolveCodexBinary(environment),
     environment,
   });
 
+  const backedUp = backupPrimaryProviderCandidates(record(config.model_providers), environment);
   const edits = [
-    ...uniqueCustomIds.map((id) => ({
-      keyPath: `model_providers.${id}`,
-      value: null,
-    })),
     ...(hasTopLevelBaseUrl
       ? [{ keyPath: "openai_base_url", value: null }]
       : []),
-    { keyPath: "model_provider", value: null },
+    { keyPath: "model_provider", value: "openai" },
+    ...backedUp.map((id) => ({ keyPath: `model_providers.${id}`, value: null })),
   ];
   const writer = await createClient({ environment });
   try {
@@ -107,7 +101,12 @@ export async function runOfficialLoginSetup({
   } finally {
     await writer.close().catch(() => undefined);
   }
-  output.write("已恢复官方 OpenAI 模式。请运行 codexc service restart all 生效。\n");
+  output.write(
+    backedUp.length === 0
+      ? "已恢复官方 OpenAI 模式。请运行 codexc service restart all 生效。\n"
+      : `已恢复官方 OpenAI 模式（自定义候选已备份：${backedUp.join("、")}）。`
+        + "请运行 codexc service restart all 生效。\n",
+  );
   output.write("旧会话仍使用创建时的 Provider，请用 /new 创建新会话。\n");
   return { mode: "official" };
 }

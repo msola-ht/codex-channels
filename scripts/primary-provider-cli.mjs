@@ -2,7 +2,10 @@ import * as clackPrompts from "@clack/prompts";
 import { pathToFileURL } from "node:url";
 
 import {
+  backupPrimaryProviderCandidates,
   listCustomPrimaryProviderCandidates,
+  readPrimaryProviderBackup,
+  restorePrimaryProviderCandidateEdits,
   validateCustomPrimaryModelProviderId,
 } from "../runtime/model-provider-runtime.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -20,9 +23,11 @@ const usageText = `用法：codexc primary-provider <list|add|switch|remove> [�
   codexc primary-provider list
     列出当前激活的主 Provider 与全部自定义候选。
   codexc primary-provider add
-    交互式新增或更新一个自定义主 Provider，并立即激活。
+    交互式新增或更新固定 ID（OpenAI）的主 Provider，并立即激活。
+  codexc primary-provider switch openai
+    切回官方 OpenAI 主 Provider（不运行登录，官方凭据保留；自定义候选移入私有备份）。
   codexc primary-provider switch <Provider ID> [模型]
-    切换到已配置的自定义主 Provider；模型缺省保持当前设置。
+    切换到自定义主 Provider；候选不在 config 时会从备份恢复；模型缺省保持当前设置。
   codexc primary-provider remove <Provider ID>
     删除候选；若删除的是当前激活项，将恢复官方 OpenAI 主 Provider。
 
@@ -45,11 +50,15 @@ export async function listPrimaryProviders({
   const config = record(snapshot.config);
   const providers = record(config.model_providers);
   const candidates = listCustomPrimaryProviderCandidates(providers);
+  const backup = readPrimaryProviderBackup(environment);
+  const backupIds = Object.keys(backup).filter((id) => !candidates.includes(id));
   const activeId = optionalString(config.model_provider);
   const activeLabel = activeId === undefined || activeId === "openai"
     ? "OpenAI 官方"
     : candidates.includes(activeId)
       ? `${activeId} · 自定义`
+      : backupIds.includes(activeId)
+        ? `${activeId} · 自定义（备份中）`
       : `${activeId}（未在候选列表中）`;
 
   output.write("\nCodex Connect 主 Provider\n");
@@ -66,6 +75,15 @@ export async function listPrimaryProviders({
       output.write(`- ${name}（${id}）· ${baseUrl}${active}\n`);
     }
   }
+  if (backupIds.length > 0) {
+    output.write("备份候选（已从 config 清理，可切回）：\n");
+    for (const id of backupIds) {
+      const provider = record(backup[id]);
+      const name = optionalString(provider.name) ?? id;
+      const baseUrl = typeof provider.base_url === "string" ? provider.base_url : "";
+      output.write(`- ${name}（${id}）· ${baseUrl}\n`);
+    }
+  }
   output.write("\n切换：codexc primary-provider switch <Provider ID>；新增：codexc primary-provider add。\n");
 }
 
@@ -79,19 +97,56 @@ export async function switchPrimaryProvider(
   } = {},
 ) {
   const normalizedId = String(providerId).trim();
+  const normalizedModel = optionalString(model);
+  const snapshot = await readCodexUserConfigSnapshot(environment, { createClient });
+  const config = record(snapshot.config);
+  const providers = record(config.model_providers);
+  if (normalizedId === "openai") {
+    const candidates = listCustomPrimaryProviderCandidates(providers);
+    const backedUp = backupPrimaryProviderCandidates(providers, environment);
+    const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
+    const edits = [
+      ...(removesTopLevelBaseUrl
+        ? [{ keyPath: "openai_base_url", value: null }]
+        : []),
+      { keyPath: "model_provider", value: "openai" },
+      ...candidates.map((id) => ({ keyPath: `model_providers.${id}`, value: null })),
+    ];
+    await writeCodexUserConfigEdits(environment, edits, {
+      expectedVersion: snapshot.version,
+      createClient,
+    });
+    if (removesTopLevelBaseUrl) {
+      output.write("已移除与官方主 Provider 冲突的顶层 openai_base_url。\n");
+    }
+    output.write(
+      backedUp.length === 0
+        ? "已切换到官方 OpenAI 主 Provider（未运行 codex login，官方凭据保留）。\n"
+        : `已切换到官方 OpenAI 主 Provider（未运行 codex login，官方凭据保留）；`
+          + `自定义候选已移入私有备份：${backedUp.join("、")}。\n`,
+    );
+    writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+    return;
+  }
   const reservedError = validateCustomPrimaryModelProviderId(normalizedId);
   if (reservedError !== null) {
     throw new Error(reservedError);
   }
-  const normalizedModel = optionalString(model);
-  const snapshot = await readCodexUserConfigSnapshot(environment, { createClient });
-  const config = record(snapshot.config);
-  const candidates = listCustomPrimaryProviderCandidates(record(config.model_providers));
+  const candidates = listCustomPrimaryProviderCandidates(providers);
+  const restoreEdits = candidates.includes(normalizedId)
+    ? []
+    : restorePrimaryProviderCandidateEdits(normalizedId, environment) ?? [];
+  if (!candidates.includes(normalizedId) && restoreEdits.length === 0) {
+    throw new Error(
+      `未找到自定义主 Provider：${normalizedId}；可用 codexc primary-provider list 查看候选`,
+    );
+  }
   if (!candidates.includes(normalizedId)) {
-    throw new Error(`未找到自定义主 Provider：${normalizedId}；可用 codexc primary-provider list 查看候选`);
+    output.write(`从备份恢复自定义主 Provider：${normalizedId}。\n`);
   }
   const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   const edits = [
+    ...restoreEdits,
     ...(removesTopLevelBaseUrl
       ? [{ keyPath: "openai_base_url", value: null }]
       : []),
@@ -130,7 +185,7 @@ export async function removePrimaryProvider(
   const edits = [
     { keyPath: `model_providers.${normalizedId}`, value: null },
     ...(activeId === normalizedId
-      ? [{ keyPath: "model_provider", value: null }]
+      ? [{ keyPath: "model_provider", value: "openai" }]
       : []),
   ];
   await writeCodexUserConfigEdits(environment, edits, {
@@ -164,9 +219,10 @@ export async function runCustomPrimaryProviderMenu({
       message: "自定义主 Provider",
       showInstructions: false,
       options: [
-        { value: "add", label: "新增或更新", hint: "交互式填写并激活" },
+        { value: "add", label: "新增或更新", hint: "固定 ID OpenAI，交互式填写并激活" },
         { value: "list", label: "列表", hint: "查看当前激活项与候选" },
         { value: "switch", label: "切换", hint: "切换到已配置候选" },
+        { value: "official", label: "切回官方", hint: "不运行登录，官方凭据保留；候选移入私有备份" },
         { value: "remove", label: "删除", hint: "删除候选；删除激活项时恢复官方" },
         ...(allowBack
           ? [{ value: "back", label: "返回", hint: "返回模型与提供商设置" }]
@@ -188,6 +244,10 @@ export async function runCustomPrimaryProviderMenu({
       await listPrimaryProviders({ environment, output, createClient });
       continue;
     }
+    if (action === "official") {
+      await switchPrimaryProvider("openai", undefined, { environment, output, createClient });
+      continue;
+    }
     if (action === "switch" || action === "remove") {
       const id = await selectCustomPrimaryCandidate({
         environment,
@@ -197,6 +257,7 @@ export async function runCustomPrimaryProviderMenu({
         message: action === "switch"
           ? "切换到哪个自定义主 Provider？"
           : "删除哪个自定义主 Provider？",
+        includeBackup: action === "switch",
       });
       if (id === undefined) {
         continue;
@@ -218,25 +279,39 @@ async function selectCustomPrimaryCandidate({
   prompts,
   createClient,
   message,
+  includeBackup = false,
 }) {
   const snapshot = await readCodexUserConfigSnapshot(environment, { createClient });
-  const candidates = listCustomPrimaryProviderCandidates(
+  const configured = listCustomPrimaryProviderCandidates(
     record(snapshot.config.model_providers),
   );
+  const backup = includeBackup ? readPrimaryProviderBackup(environment) : {};
+  const backupIds = includeBackup
+    ? Object.keys(backup).filter((id) => !configured.includes(id))
+    : [];
+  const candidates = [...configured, ...backupIds];
   if (candidates.length === 0) {
-    output.write("暂无自定义主 Provider 候选，请先选择“新增或更新”。\n");
+    output.write(
+      includeBackup
+        ? "暂无自定义主 Provider 候选或备份，请先选择“新增或更新”。\n"
+        : "暂无自定义主 Provider 候选，请先选择“新增或更新”。\n",
+    );
     return undefined;
   }
   const id = await prompts.select({
     message,
     showInstructions: false,
     options: candidates.map((candidate) => {
-      const provider = record(record(snapshot.config.model_providers)[candidate]);
+      const provider = record(record(snapshot.config.model_providers)[candidate] ?? backup[candidate]);
       const name = optionalString(provider.name) ?? candidate;
       const baseUrl = typeof provider.base_url === "string" ? provider.base_url : "";
+      const label = name === candidate ? candidate : `${name}（${candidate}）`;
       return {
         value: candidate,
-        label: `${name}（${candidate}）· ${baseUrl}`,
+        label: `${label} · ${baseUrl}`,
+        ...(backupIds.includes(candidate)
+          ? { hint: "从备份恢复" }
+          : {}),
       };
     }),
   });
@@ -275,7 +350,7 @@ export async function runPrimaryProviderCli(
     return;
   }
   if (subcommand === "switch") {
-    if (rest.length === 0 || rest.length > 2) {
+    if (rest.length === 0 || rest.length > 2 || (rest[0] === "openai" && rest.length !== 1)) {
       throw new Error("用法：codexc primary-provider switch <Provider ID> [模型]");
     }
     await switchPrimaryProvider(rest[0], rest[1], { environment, output, createClient });

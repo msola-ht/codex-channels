@@ -92,18 +92,22 @@
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema；历史 Cloudflare
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
-  “技能”流程委派给具体适配器；模型与提供商下区分 Codex 官方、DeepSeek、OpenCode Go、
-  自定义主 Provider、第三方模型设置、第三方 API 与图片识别。
-- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 自定义主 Provider”；
-  引导填写 Provider ID、上游 `base_url`、认证方式、WebSocket 开关与默认模型，通过 Codex
-  `config/batchWrite` 原子写入 `~/.codex/config.toml` 的自定义主 Provider 块并激活；保留其他
-  候选块，只移除与自定义主 Provider 冲突的顶层 `openai_base_url`。
+  “技能”流程委派给具体适配器；模型与提供商下分官方与第三方两级：官方含登录与默认模型，
+  第三方含自定义第三方、DeepSeek 官方、OpenCode Go 官方、第三方模型设置、第三方 API 与图片识别。
+- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 → 自定义第三方”；
+  引导填写上游 `base_url`、认证方式、WebSocket 开关与默认模型（Provider ID 固定为 `OpenAI`，
+  避免手输填错），通过 Codex
+  `config/batchWrite` 原子写入 `~/.codex/config.toml` 的自定义主 Provider 块并激活；认证方式支持
+  “直接写入 API Key”（`experimental_bearer_token`，明文入 0600 config）与当前 API Key、`env_key`、
+  无认证；保留其他候选块，只移除与自定义主 Provider 冲突的顶层 `openai_base_url`。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
   list / add / switch / remove 子命令；list 与 switch / remove 复用 Codex 用户配置事务读取和
-  原子写入，add 复用自定义主 Provider Setup 的交互流程。
-- `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → 官方登录模式”；运行
-  `codex login` 完成官方登录，并通过 `config/batchWrite` 清除自定义主 Provider 块与顶层
-  `openai_base_url`，把主 Provider 恢复为官方 OpenAI。
+  原子写入，add 复用自定义主 Provider Setup 的交互流程；`switch openai` 不运行登录直接切回官方
+  并把候选移入私有备份，`switch <ID>` 对已清理的候选从备份自动恢复。
+- `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → 官方 → 登录并恢复官方”；运行
+  `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
+  `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
+  之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
