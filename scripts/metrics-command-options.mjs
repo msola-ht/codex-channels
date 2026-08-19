@@ -1,5 +1,8 @@
 import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
-import { loadConfiguredCustomPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadConfiguredCustomPrimaryModelProvider,
+  readPrimaryProviderBackup,
+} from "../runtime/model-provider-runtime.mjs";
 
 export const metricsProviderIds = Object.freeze([
   "openai",
@@ -15,7 +18,11 @@ export function isMetricsProviderId(value, environment = process.env) {
     return true;
   }
   const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);
-  return customPrimaryProvider !== undefined && customPrimaryProvider.id === value;
+  if (customPrimaryProvider !== undefined && customPrimaryProvider.id === value) {
+    return true;
+  }
+  // 候选被 switch openai / 官方登录备份清理后，历史指标仍可按该 ID 清理。
+  return Object.prototype.hasOwnProperty.call(readPrimaryProviderBackup(environment), value);
 }
 
 export const metricsCommandUsage = Object.freeze({

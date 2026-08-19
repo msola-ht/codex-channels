@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -14,6 +14,7 @@ import {
   parseMetricsTurnsArgs,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
+import { primaryProviderBackupPath } from "../runtime/model-provider-runtime.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -79,6 +80,25 @@ describe("metrics command options", () => {
       "",
     ].join("\n"), { mode: 0o600 });
     const environment = { ...process.env, CODEX_HOME: codexHome };
+
+    expect(() => validateMetricsCommandArgs("prune", ["OpenAI"], environment))
+      .not.toThrow();
+    expect(() => validateMetricsCommandArgs("prune", ["unknown"], environment))
+      .toThrow("codexc metrics prune <openai|deepseek|opencode-go>");
+  });
+
+  it("accepts a backed-up custom primary Provider for prune", () => {
+    const connectHome = mkdtempSync(join(tmpdir(), "codexc-metrics-prune-backup-"));
+    temporaryDirectories.push(connectHome);
+    const backupPath = primaryProviderBackupPath({ CODEX_CONNECT_HOME: connectHome });
+    mkdirSync(dirname(backupPath), { recursive: true, mode: 0o700 });
+    writeFileSync(backupPath, JSON.stringify({
+      OpenAI: {
+        base_url: "https://zzone.example.test/v1",
+        wire_api: "responses",
+      },
+    }), { mode: 0o600 });
+    const environment = { ...process.env, CODEX_CONNECT_HOME: connectHome };
 
     expect(() => validateMetricsCommandArgs("prune", ["OpenAI"], environment))
       .not.toThrow();
