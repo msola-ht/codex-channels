@@ -23,7 +23,10 @@ import {
   formatElapsedDuration,
   formatTokensPerSecond,
 } from "./elapsed-duration.js";
-import { formatCodexProviderLabel } from "./provider-format.js";
+import {
+  formatCodexProviderLabel,
+  supportsFastMode,
+} from "./provider-format.js";
 import {
   formatCurrencyNanos,
   formatCnyEquivalent,
@@ -162,7 +165,7 @@ export function createStartupPresentation(
             label: "思考等级",
             value: `${status.effort ?? "模型默认"}${pendingSuffix(status.effortPending)}`,
           },
-          ...(usesOpenAiAccount(status.modelProvider)
+          ...(supportsFastMode(status.modelProvider)
             ? [{
                 label: "Fast 模式",
                 value: `${status.threadId
@@ -427,7 +430,7 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     runFields.push({
       label: "模型",
-      value: usesOpenAiAccount(event.modelProvider)
+      value: supportsFastMode(event.modelProvider)
         ? `${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
         : `${event.model} · ${event.effort ?? "模型默认"}`,
     });

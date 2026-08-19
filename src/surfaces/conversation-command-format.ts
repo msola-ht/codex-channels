@@ -26,7 +26,10 @@ import {
   formatElapsedSeconds,
 } from "./elapsed-duration.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import { formatCodexProviderLabel } from "./provider-format.js";
+import {
+  formatCodexProviderLabel,
+  supportsFastMode,
+} from "./provider-format.js";
 import { formatCurrencyNanos } from "./reference-cost-format.js";
 import {
   formatCacheHitRate,
@@ -1284,7 +1287,7 @@ export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户用量查询。当前 Thread 的 Token 与上下文仍可通过 /status 查看。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户余额/额度查询。请求次数、Token 与费用可通过 /metrics 查看。`;
   }
   if (result.result.kind === "balance") {
     return toStructuredMarkdownList([
@@ -1385,7 +1388,7 @@ export function formatConversationLimits(
   result: Extract<ConversationCommandResult, { kind: "limits" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该提供商已接入的账户信息。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户限额查询。请求统计可通过 /metrics 查看。`;
   }
   const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
@@ -1477,7 +1480,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
     `思考等级：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    ...(usesOpenAiAccount(status.modelProvider)
+    ...(supportsFastMode(status.modelProvider)
       ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
       : []),
     `协作模式：${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`,

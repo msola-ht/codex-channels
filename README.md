@@ -141,8 +141,12 @@ plugin_api = true
 
 ### 自定义第三方 Provider
 
-渠道支持使用 Codex 主配置中选中的 OpenAI 兼容 Responses Provider，不需要模型目录。配置示例和能力边界见
-[`第三方模型 Provider 接入指南`](docs/provider-integration-guide.md)；修改后运行：
+渠道支持使用 Codex 主配置中选中的 OpenAI 兼容 Responses Provider，不需要模型目录。运行
+`codexc setup`，选择“模型与提供商 → 自定义主 Provider”，按提示填写 Provider ID、上游地址、
+认证方式与默认模型即可写入配置；也可手写配置，示例和能力边界见
+[`第三方模型 Provider 接入指南`](docs/provider-integration-guide.md)。官方与第三方主 Provider
+只能同时存在一个：选择“模型与提供商 → 官方登录模式”会运行 `codex login` 并清除自定义配置。
+修改后运行：
 
 ```bash
 codexc service restart all

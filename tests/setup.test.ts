@@ -184,6 +184,11 @@ describe("Codex Connect setup", () => {
     });
     const modelOptions = prompts.select.mock.calls[1]?.[0]?.options ?? [];
     expect(modelOptions).toContainEqual({
+      value: "official_login",
+      label: "官方登录模式",
+      hint: "运行 codex login 登录 OpenAI 并恢复官方主 Provider",
+    });
+    expect(modelOptions).toContainEqual({
       value: "codex",
       label: "Codex 官方",
       hint: "设置全局默认模型与思考等级",
@@ -197,6 +202,68 @@ describe("Codex Connect setup", () => {
       value: "opencode-go",
       label: "OpenCode Go",
       hint: "安装、移除或修改模型设置（思考等级、自动压缩）",
+    });
+    expect(modelOptions).toContainEqual({
+      value: "custom_primary",
+      label: "自定义主 Provider",
+      hint: "配置 OpenAI 兼容中转作为主 Provider（模型、地址、认证）",
+    });
+  });
+
+  it("selects the custom primary Provider setup under models and providers", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("custom_primary"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const customPrimarySetup = vi.fn(async () => "custom-primary-configured");
+
+    const result = await runSetup({
+      input,
+      output,
+      prompts,
+      customPrimarySetup,
+    });
+
+    expect(result).toBe("custom-primary-configured");
+    expect(customPrimarySetup).toHaveBeenCalledWith({
+      input,
+      output,
+      prompts,
+      allowBack: true,
+    });
+  });
+
+  it("selects the official login setup under models and providers", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("official_login"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const officialLoginSetup = vi.fn(async () => "official-login-configured");
+
+    const result = await runSetup({
+      input,
+      output,
+      prompts,
+      officialLoginSetup,
+    });
+
+    expect(result).toBe("official-login-configured");
+    expect(officialLoginSetup).toHaveBeenCalledWith({
+      input,
+      output,
+      prompts,
     });
   });
 

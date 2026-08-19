@@ -546,6 +546,7 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("提供商：OpenAI · 自定义");
     expect(rendered).not.toContain("提供商：OpenAI 官方");
+    expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
   });
 
   it("shows the remaining OpenCode Go usage on completion", () => {

@@ -151,7 +151,6 @@ Gateway 监管的 App Server 子进程中选择它。Gateway 在 App Server 前�
 
 ```toml
 model = "gpt-5.6-terra"
-openai_base_url = "https://proxy.example.com/v1"
 
 [model_providers.thirdparty]
 name = "Third-party Responses"
@@ -161,9 +160,10 @@ requires_openai_auth = true
 supports_websockets = false
 ```
 
-上例保留当前 Codex CLI 的顶层连接，同时让 Gateway 子进程选择 `thirdparty`。若 Codex CLI 本身也要
-选择该 Provider，可再设置 `model_provider = "thirdparty"`；未选中模式下只能定义一个有效的自定义
-Responses Provider，多个候选会失败关闭。
+官方与第三方主 Provider 只能同时存在一个：配置自定义主 Provider 时不能同时设置顶层
+`openai_base_url`，多个自定义主 Provider 块也会失败关闭。可通过 `codexc setup` 的
+“官方登录模式”运行 `codex login` 并清除自定义配置恢复官方，或通过“自定义主 Provider”写入
+第三方配置并自动移除顶层地址与旧块。
 
 `requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；也可以按 Codex 官方配置使用
 `env_key`。Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
@@ -184,8 +184,15 @@ Responses Provider，多个候选会失败关闭。
 `/model clear` 可清除该偏好，让下一个新 Thread 重新使用 `model_provider` 默认值。Gateway
 会把自定义主 Provider 的 Thread 路由到主 App Server 实例，不会为它启动独立实例。
 
-该模式不支持自定义 Provider 的独立模型目录、`/usage` 账户适配、价格专用计价器、Gateway 内跨 Provider
-切换或 `agents.external` 角色；需要这些能力时必须按本指南前述的编译期受管 Provider 流程接入。
+该模式不支持自定义 Provider 的独立模型目录、`/usage` 账户适配、价格专用计价器或 Gateway 内跨 Provider
+切换；自定义主 Provider 也不能作为共享 `agents.external` 角色使用，该角色仍由 DeepSeek / OpenCode Go
+等受管 Provider 提供，可与自定义主 Provider 配置共存。需要这些能力时必须按本指南前述的编译期受管
+Provider 流程接入。
+
+可以通过 `codexc setup` 的“模型与提供商 → 自定义主 Provider”引导写入上述配置：填写 Provider ID、
+上游 `base_url`、认证方式（当前 API Key / `env_key` / 无认证）、是否支持 Responses WebSocket
+和默认模型。Setup 通过 Codex 的 `config/batchWrite` 原子写入用户配置，不读取或复制任何凭据；
+写入后仍需运行 `codexc service restart all` 生效。
 
 ## 关联文档
 

@@ -832,11 +832,11 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationUsage({
       kind: "usage",
       result: { kind: "unsupported", provider: "future-provider" },
-    })).toContain("future-provider 暂不支持账户用量查询");
+    })).toContain("future-provider 仅提供模型请求，不提供账户余额/额度查询");
     expect(formatConversationLimits({
       kind: "limits",
       result: { kind: "unsupported", provider: "future-provider" },
-    })).toContain("可使用 /usage 查看该提供商已接入的账户信息");
+    })).toContain("future-provider 仅提供模型请求，不提供账户限额查询");
   });
 
   it("renders weekly allowance estimates as local rounded samples", () => {
@@ -943,6 +943,7 @@ describe("provider-aware conversation command formatting", () => {
 
       expect(rendered).toContain("提供商：OpenAI · 自定义");
       expect(rendered).not.toContain("提供商：OpenAI 官方");
+      expect(rendered).toContain("Fast 模式：开启");
     } finally {
       setConfiguredCustomPrimaryProviderId(undefined);
     }

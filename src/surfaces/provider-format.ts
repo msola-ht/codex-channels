@@ -19,3 +19,8 @@ export function formatCodexProviderLabel(provider?: string): string {
       ? `${formatProviderLabel(provider)} · 自定义`
       : formatProviderLabel(provider);
 }
+
+export function supportsFastMode(modelProvider?: string): boolean {
+  return (modelProvider ?? "openai") === "openai"
+    || (modelProvider !== undefined && modelProvider === configuredCustomPrimaryProviderId);
+}

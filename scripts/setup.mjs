@@ -13,6 +13,8 @@ import { runSkillSetup } from "./skill-setup.mjs";
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 import { runOpenCodeGoSetup } from "./opencode-go-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
+import { runCustomPrimaryProviderSetup } from "./custom-primary-provider-setup.mjs";
+import { runOfficialLoginSetup } from "./official-login-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -28,6 +30,8 @@ export async function runSetup({
   codexDefaultsSetup = runCodexDefaultsSetup,
   openCodeGoSetup = runOpenCodeGoSetup,
   modelProviderDefaultSetup = runModelProviderDefaultSetup,
+  customPrimarySetup = runCustomPrimaryProviderSetup,
+  officialLoginSetup = runOfficialLoginSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -85,6 +89,8 @@ export async function runSetup({
           codexDefaultsSetup,
           openCodeGoSetup,
           modelProviderDefaultSetup,
+          customPrimarySetup,
+          officialLoginSetup,
         });
         if (isBackResult(result)) continue;
         return result;
@@ -114,11 +120,18 @@ async function runModelSetup({
   codexDefaultsSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
+  customPrimarySetup,
+  officialLoginSetup,
 }) {
   const module = await prompts.select({
     message: "选择模型与提供商设置",
     showInstructions: false,
     options: [
+      {
+        value: "official_login",
+        label: "官方登录模式",
+        hint: "运行 codex login 登录 OpenAI 并恢复官方主 Provider",
+      },
       {
         value: "codex",
         label: "Codex 官方",
@@ -135,6 +148,11 @@ async function runModelSetup({
         hint: "安装、移除或修改模型设置（思考等级、自动压缩）",
       },
       {
+        value: "custom_primary",
+        label: "自定义主 Provider",
+        hint: "配置 OpenAI 兼容中转作为主 Provider（模型、地址、认证）",
+      },
+      {
         value: "provider_default",
         label: "第三方模型设置",
         hint: "按 Provider 和模型设置默认值、思考等级与自动压缩",
@@ -149,6 +167,9 @@ async function runModelSetup({
     ],
   });
   if (prompts.isCancel(module) || module === "back") return { action: "back" };
+  if (module === "official_login") {
+    return officialLoginSetup({ input, output, prompts });
+  }
   if (module === "codex") {
     return codexDefaultsSetup({ input, output, prompts, allowBack: true });
   }
@@ -157,6 +178,9 @@ async function runModelSetup({
   }
   if (module === "opencode-go") {
     return openCodeGoSetup({ input, output, prompts, allowBack: true });
+  }
+  if (module === "custom_primary") {
+    return customPrimarySetup({ input, output, prompts, allowBack: true });
   }
   if (module === "provider_default") {
     return modelProviderDefaultSetup({ input, output, prompts, allowBack: true });

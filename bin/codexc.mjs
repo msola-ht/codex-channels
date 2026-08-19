@@ -128,8 +128,10 @@ const helpText = {
 打开模型与提供商、通讯渠道和技能设置菜单。
 
 常用入口：
+  codexc setup → 模型与提供商 → 官方登录模式（运行 codex login 并恢复官方主 Provider）
   codexc setup → 模型与提供商 → OpenCode Go → 修改模型设置（思考等级、自动压缩）
   codexc setup → 模型与提供商 → DeepSeek → 修改模型设置（思考等级、自动压缩）
+  codexc setup → 模型与提供商 → 自定义主 Provider（OpenAI 兼容中转的模型、地址与认证）
   codexc setup → 模型与提供商 → 第三方模型设置（统一按 Provider 修改思考等级与自动压缩）
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 技能（安装或卸载项目技能）`,

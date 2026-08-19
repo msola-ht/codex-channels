@@ -145,7 +145,7 @@ describe("model provider runtime topology", () => {
       .toThrow("base_url 必须是无凭据、查询和片段的 HTTP(S) URL");
   });
 
-  it("rejects ambiguous inactive custom Responses Providers", async () => {
+  it("rejects multiple custom Responses Provider blocks", async () => {
     const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-ambiguous-"));
     writeFileSync(join(codexHome, "config.toml"), [
       "[model_providers.first]",
@@ -159,7 +159,42 @@ describe("model provider runtime topology", () => {
     ].join("\n"), { mode: 0o600 });
 
     expect(() => loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
-      .toThrow("Gateway 只能使用一个未选中的自定义主模型 Provider");
+      .toThrow("同一时刻只能配置一个自定义主模型 Provider");
+  });
+
+  it("rejects multiple custom Responses Provider blocks even with one selected", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-selected-ambiguous-"));
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model_provider = "first"',
+      "",
+      "[model_providers.first]",
+      'base_url = "https://first.example.test/v1"',
+      'wire_api = "responses"',
+      "",
+      "[model_providers.second]",
+      'base_url = "https://second.example.test/v1"',
+      'wire_api = "responses"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    expect(() => loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
+      .toThrow("同一时刻只能配置一个自定义主模型 Provider");
+  });
+
+  it("rejects a custom primary Provider together with a top-level official base URL", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-top-level-url-"));
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model_provider = "thirdparty"',
+      'openai_base_url = "https://api.openai.com/v1"',
+      "",
+      "[model_providers.thirdparty]",
+      'base_url = "https://third.example.test/v1"',
+      'wire_api = "responses"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    expect(() => loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
+      .toThrow("官方顶层 openai_base_url 与自定义主 Provider 不能同时配置");
   });
 
   it("uses the native DeepSeek configuration as the only primary server in exclusive mode", async () => {

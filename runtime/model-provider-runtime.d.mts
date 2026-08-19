@@ -34,6 +34,9 @@ export function validateConfiguredModelProviders(
   mode: "switching" | "exclusive";
 }>;
 
+export function validateCustomPrimaryModelProviderId(id: unknown): string | null;
+export function validProviderBaseUrl(value: string, label: string): string;
+
 export interface ManagedModelProviderSettings {
   provider: ManagedModelProviderId;
   displayName: string;

@@ -41,6 +41,16 @@ const providerDescriptors = new Map(managedModelProviderDefinitions.map((definit
 const deepseekProvider = providerDescriptors.get(deepseekProviderDefinition.id);
 const opencodeGoProvider = providerDescriptors.get(opencodeGoProviderDefinition.id);
 
+export function validateCustomPrimaryModelProviderId(id) {
+  if (typeof id !== "string" || !customProviderIdPattern.test(id)) {
+    return "Provider ID 只能使用 1-64 位 ASCII 字母、数字、- 或 _";
+  }
+  if (builtInModelProviderIds.has(id) || providerDescriptors.has(id)) {
+    return "该 Provider ID 已被 Codex 或 Gateway 保留";
+  }
+  return null;
+}
+
 export function managedProviderDirectory(environment, definition) {
   return join(providerStorageRoot(environment), definition.id);
 }
@@ -257,32 +267,34 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     throw new Error("Codex 主模型 Provider 配置无法安全读取");
   }
   const providers = record(document.model_providers);
+  const configuredIds = Object.keys(providers).filter((candidate) => {
+    if (validateCustomPrimaryModelProviderId(candidate) !== null) {
+      return false;
+    }
+    const provider = record(providers[candidate]);
+    return typeof provider.base_url === "string" && provider.wire_api === "responses";
+  });
+  if (configuredIds.length > 1) {
+    throw new Error("同一时刻只能配置一个自定义主模型 Provider");
+  }
   let id = document.model_provider;
   if (id === undefined || id === "openai") {
-    const configuredIds = Object.keys(providers).filter((candidate) => {
-      if (
-        !customProviderIdPattern.test(candidate)
-        || builtInModelProviderIds.has(candidate)
-        || providerDescriptors.has(candidate)
-      ) {
-        return false;
-      }
-      const provider = record(providers[candidate]);
-      return typeof provider.base_url === "string" && provider.wire_api === "responses";
-    });
     if (configuredIds.length === 0) return undefined;
-    if (configuredIds.length > 1) {
-      throw new Error("Gateway 只能使用一个未选中的自定义主模型 Provider");
-    }
     [id] = configuredIds;
   }
-  if (typeof id !== "string" || !customProviderIdPattern.test(id)) {
-    throw new Error("Codex 主模型 Provider ID 无效");
-  }
-  if (builtInModelProviderIds.has(id) || providerDescriptors.has(id)) {
+  const reservedError = validateCustomPrimaryModelProviderId(id);
+  if (reservedError !== null) {
     throw new Error(`Codex 主模型 Provider 不受 Gateway 支持：${id}`);
   }
   const provider = record(providers[id]);
+  if (
+    typeof document.openai_base_url === "string"
+    && document.openai_base_url.trim() !== ""
+  ) {
+    throw new Error(
+      "官方顶层 openai_base_url 与自定义主 Provider 不能同时配置；请移除顶层 openai_base_url",
+    );
+  }
   const baseUrl = provider.base_url;
   if (typeof baseUrl !== "string") {
     throw new Error(`Codex 主模型 Provider ${id} 缺少 base_url`);
@@ -348,7 +360,7 @@ function exclusiveManagedProviders(environment) {
     readManagedMarker(environment, definition)?.mode === "exclusive");
 }
 
-function validProviderBaseUrl(value, label) {
+export function validProviderBaseUrl(value, label) {
   let url;
   try {
     url = new URL(value);
