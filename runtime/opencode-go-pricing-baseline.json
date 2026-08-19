@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "source": "https://opencode.ai/docs/go/",
-  "sourceUpdatedAt": "2026-08-17T18:54:03.000Z",
+  "sourceUpdatedAt": "2026-08-19T03:58:10.000Z",
   "currency": "USD",
   "unit": "per_million_tokens",
   "timezone": "UTC",
@@ -183,6 +183,15 @@
       "input": 0.3,
       "output": 1.2,
       "cachedRead": 0.06,
+      "cachedWrite": null,
+      "includedUsageUsd": 60
+    },
+    "muse-spark-1.2": {
+      "endpoint": "https://opencode.ai/zen/go/v1/responses",
+      "aiSdkPackage": "@ai-sdk/openai",
+      "input": 0.1,
+      "output": 0.2,
+      "cachedRead": 0.002,
       "cachedWrite": null,
       "includedUsageUsd": 60
     },
