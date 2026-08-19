@@ -23,6 +23,7 @@ import {
   formatConversationWorkspaces,
 } from "../src/surfaces/conversation-command-format.js";
 import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
+import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-format.js";
 
 describe("provider-aware conversation command formatting", () => {
   it("renders occupancy release results", () => {
@@ -919,6 +920,32 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("Codex 有效上下文窗口：1.05 M");
     expect(rendered).not.toContain("Fast 模式");
     expect(rendered).not.toContain("周限");
+  });
+
+  it("marks the configured custom primary Provider in status", () => {
+    setConfiguredCustomPrimaryProviderId("OpenAI");
+    try {
+      const rendered = formatConversationStatus({
+        threadId: "thread-custom",
+        workspaceId: "main",
+        workspaceName: "Main",
+        cwd: "/workspace",
+        model: "gpt-test",
+        modelProvider: "OpenAI",
+        effort: "medium",
+        serviceTier: "priority",
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
+      });
+
+      expect(rendered).toContain("提供商：OpenAI · 自定义");
+      expect(rendered).not.toContain("提供商：OpenAI 官方");
+    } finally {
+      setConfiguredCustomPrimaryProviderId(undefined);
+    }
   });
 
   it("renders latest Turn aggregation and direct API metrics separately", () => {

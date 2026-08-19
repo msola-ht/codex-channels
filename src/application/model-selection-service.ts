@@ -203,7 +203,9 @@ export class ModelSelectionService {
     const pending = this.pendingByConversation.get(this.key(target));
     return {
       ...(pending?.model ? { model: pending.model } : {}),
-      ...(pending?.modelProvider ? { modelProvider: pending.modelProvider } : {}),
+      ...(pending?.modelProvider
+        ? { modelProvider: this.normalizeProvider(pending.modelProvider) ?? this.primaryProvider }
+        : {}),
     };
   }
 
@@ -215,7 +217,8 @@ export class ModelSelectionService {
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       model,
-      modelProvider: pending?.modelProvider ?? current?.modelProvider ?? "openai",
+      modelProvider: this.normalizeProvider(pending?.modelProvider ?? current?.modelProvider)
+        ?? this.primaryProvider,
       effort: pending?.effort ?? current?.effort ?? null,
       serviceTier: serviceTierPending
         ? pending?.serviceTier ?? null
@@ -230,11 +233,16 @@ export class ModelSelectionService {
     const key = this.key(target);
     this.pendingByConversation.delete(key);
     if (!preference) return;
-    const currentProvider = this.router.modelSettings(target)?.modelProvider ?? "openai";
-    if (this.router.current(target) && currentProvider !== preference.modelProvider) return;
+    const currentProvider = this.normalizeProvider(
+      this.router.modelSettings(target)?.modelProvider,
+    )
+      ?? this.primaryProvider;
+    const preferredProvider = this.normalizeProvider(preference.modelProvider)
+      ?? this.primaryProvider;
+    if (this.router.current(target) && currentProvider !== preferredProvider) return;
     this.pendingByConversation.set(key, {
       model: preference.model,
-      modelProvider: preference.modelProvider,
+      modelProvider: preferredProvider,
       ...(preference.effort ? { effort: preference.effort } : {}),
       serviceTier: preference.serviceTier,
     });
@@ -248,7 +256,8 @@ export class ModelSelectionService {
     if (pending && binding && current) {
       this.router.updateModelSettings(binding.threadId, {
         model: pending.model ?? current.model,
-        modelProvider: pending.modelProvider ?? current.modelProvider ?? "openai",
+        modelProvider: this.normalizeProvider(pending.modelProvider ?? current.modelProvider)
+          ?? this.primaryProvider,
         effort: pending.effort ?? current.effort,
         serviceTier: hasServiceTierOverride(pending)
           ? pending.serviceTier ?? null
@@ -269,7 +278,8 @@ export class ModelSelectionService {
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       model: pending?.model ?? current?.model ?? this.configuredDefaultModel ?? "默认模型",
-      modelProvider: pending?.modelProvider ?? current?.modelProvider ?? this.primaryProvider,
+      modelProvider: this.normalizeProvider(pending?.modelProvider ?? current?.modelProvider)
+        ?? this.primaryProvider,
       effort: pending?.effort ?? current?.effort ?? null,
       serviceTier: serviceTierPending ? pending?.serviceTier ?? null : current?.serviceTier ?? null,
       pending: pending !== undefined,
@@ -305,19 +315,23 @@ export class ModelSelectionService {
       ?? models.find((model) => (model.provider ?? "openai") === this.primaryProvider)
       ?? models[0]!;
     const model = pending?.model ?? current?.model ?? fallback.model;
-    const selectedProvider = pending?.modelProvider
-      ?? current?.modelProvider
-      ?? fallback.provider
-      ?? this.primaryProvider;
+    const selectedProvider = this.normalizeProvider(
+      pending?.modelProvider
+        ?? current?.modelProvider
+        ?? fallback.provider
+        ?? this.primaryProvider,
+    ) ?? this.primaryProvider;
     const catalogModel = findModel(models, model, selectedProvider);
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       models,
       model,
-      modelProvider: pending?.modelProvider
-        ?? current?.modelProvider
-        ?? catalogModel?.provider
-        ?? this.primaryProvider,
+      modelProvider: this.normalizeProvider(
+        pending?.modelProvider
+          ?? current?.modelProvider
+          ?? catalogModel?.provider
+          ?? this.primaryProvider,
+      ) ?? this.primaryProvider,
       effort: pending?.effort ?? current?.effort ?? catalogModel?.defaultReasoningEffort ?? null,
       serviceTier: serviceTierPending
         ? pending?.serviceTier ?? null
@@ -334,6 +348,13 @@ export class ModelSelectionService {
 
   private key(target: ConversationTarget): string {
     return conversationTargetKey(target);
+  }
+
+  private normalizeProvider(provider: string | undefined): string | undefined {
+    if (provider === undefined) return undefined;
+    return provider === "openai" && this.primaryProvider !== "openai"
+      ? this.primaryProvider
+      : provider;
   }
 
   private async listModels(): Promise<ModelOption[]> {

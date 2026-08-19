@@ -169,6 +169,35 @@ describe("ConversationService model selection", () => {
     });
   });
 
+  it("clears pending model selection through the selection service", async () => {
+    const state = {
+      models: [],
+      model: "gpt-5.6-sol",
+      modelProvider: "OpenAI",
+      effort: null,
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    };
+    const models = {
+      clear: vi.fn(),
+      state: vi.fn(async () => state),
+    } as unknown as ModelSelectionService;
+    const service = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {} as ConversationCore,
+      models,
+      queryPort(),
+    );
+
+    await expect(service.clearModelSelection(target)).resolves.toEqual(state);
+    expect(models.clear).toHaveBeenCalledWith(target);
+    expect(models.state).toHaveBeenCalledWith(target);
+  });
+
   it("estimates one percent and remaining weekly allowance from proxy metrics", () => {
     const estimate = estimateWeeklyLimit({
       limitId: "codex",

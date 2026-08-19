@@ -109,7 +109,7 @@ export const conversationCommandHelpSections = [
   {
     title: "模型与能力：",
     lines: [
-      "/model [序号|模型 ID|名称]",
+      "/model [序号|模型 ID|名称|clear]",
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill · /skills [名称或序号 任务]",
       "/agents [角色名称或序号 任务]",

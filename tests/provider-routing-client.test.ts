@@ -416,6 +416,171 @@ describe("ProviderRoutingClient", () => {
     expect(openai.reloadMcpServers).toHaveBeenCalledOnce();
     expect(deepseek.reloadMcpServers).toHaveBeenCalledOnce();
   });
+
+  it("routes alias custom-primary Threads to the primary App Server without reconnecting", async () => {
+    const openai = client();
+    const started = session("thread-custom", "OpenAI", "idle");
+    openai.startThread.mockResolvedValue(started);
+    openai.startTurn.mockResolvedValue({ turnId: "turn-1" });
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      async () => undefined,
+      new Set(["OpenAI"]),
+    );
+
+    await routed.connect();
+    expect(openai.connect).toHaveBeenCalledOnce();
+
+    await expect(routed.startThread(cwd, {
+      model: "gpt-5.6-sol",
+      modelProvider: "OpenAI",
+    })).resolves.toBe(started);
+    await routed.startTurn(
+      "thread-custom",
+      [{ type: "text", text: "hello" }],
+      "client-1",
+      cwd,
+    );
+
+    expect(openai.startThread).toHaveBeenCalledOnce();
+    expect(openai.startTurn).toHaveBeenCalledOnce();
+    expect(openai.connect).toHaveBeenCalledOnce();
+  });
+
+  it("keeps alias custom-primary Threads visible and resumable from the primary list", async () => {
+    const openai = client();
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-custom", "OpenAI", "idle"),
+    ]);
+    openai.resumeThread.mockResolvedValue(session("thread-custom", "OpenAI", "active"));
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      async () => undefined,
+      new Set(["OpenAI"]),
+    );
+
+    await routed.connect();
+
+    await expect(routed.listThreads(cwd)).resolves.toMatchObject([
+      { id: "thread-custom", modelProvider: "OpenAI" },
+    ]);
+    await expect(routed.resumeThread("thread-custom", cwd)).resolves.toMatchObject({
+      thread: { id: "thread-custom" },
+    });
+    expect(openai.resumeThread).toHaveBeenCalledOnce();
+    expect(openai.connect).toHaveBeenCalledOnce();
+  });
+
+  it("reconnects an alias custom-primary without launching a separate App Server", async () => {
+    const openai = client();
+    const ensureProvider = vi.fn(async () => undefined);
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      ensureProvider,
+      new Set(["OpenAI"]),
+    );
+
+    await routed.reconnectProvider("OpenAI");
+
+    expect(ensureProvider).not.toHaveBeenCalled();
+    expect(openai.reconnect).toHaveBeenCalledOnce();
+  });
+
+  it("rewrites the primary routing key to the custom primary Thread Provider", async () => {
+    const openai = client();
+    openai.startThread.mockResolvedValue(session("thread-custom", "OpenAI", "idle"));
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      async () => undefined,
+      new Set(["OpenAI"]),
+      "OpenAI",
+    );
+
+    await routed.connect();
+    await routed.startThread(cwd, {
+      model: "gpt-5.6-sol",
+      modelProvider: "openai",
+    });
+
+    expect(openai.startThread).toHaveBeenCalledOnce();
+    expect(openai.startThread).toHaveBeenCalledWith(cwd, expect.objectContaining({
+      modelProvider: "OpenAI",
+    }));
+  });
+
+  it("uses the custom primary Thread Provider when creating a Thread without a Provider", async () => {
+    const openai = client();
+    openai.startThread.mockResolvedValue(session("thread-custom", "OpenAI", "idle"));
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      async () => undefined,
+      new Set(["OpenAI"]),
+      "OpenAI",
+    );
+
+    await routed.connect();
+    await routed.startThread(cwd, { model: "gpt-5.6-sol" });
+
+    expect(openai.startThread).toHaveBeenCalledWith(cwd, expect.objectContaining({
+      modelProvider: "OpenAI",
+    }));
+  });
+
+  it("keeps auxiliary Provider Thread forks on the matching App Server", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.listThreads.mockResolvedValue([]);
+    deepseek.listThreads.mockResolvedValue([
+      snapshot("thread-deepseek", "deepseek", "idle"),
+    ]);
+    deepseek.forkThread.mockResolvedValue(session("thread-fork", "deepseek", "idle"));
+    const routed = routing(openai, deepseek);
+
+    await routed.connect();
+    await routed.listThreads(cwd);
+    await routed.forkThread("thread-deepseek", cwd, {
+      modelProvider: "deepseek",
+    });
+
+    expect(deepseek.forkThread).toHaveBeenCalledWith(
+      "thread-deepseek",
+      cwd,
+      expect.objectContaining({ modelProvider: "deepseek" }),
+    );
+    expect(openai.forkThread).not.toHaveBeenCalled();
+  });
+
+  it("normalizes alias-equal Providers when forking a custom primary Thread", async () => {
+    const openai = client();
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-custom", "OpenAI", "idle"),
+    ]);
+    openai.forkThread.mockResolvedValue(session("thread-fork", "OpenAI", "idle"));
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      async () => undefined,
+      new Set(["OpenAI"]),
+      "OpenAI",
+    );
+
+    await routed.connect();
+    await routed.listThreads(cwd);
+    await routed.forkThread("thread-custom", cwd, {
+      modelProvider: "openai",
+    });
+
+    expect(openai.forkThread).toHaveBeenCalledWith(
+      "thread-custom",
+      cwd,
+      expect.objectContaining({ modelProvider: "OpenAI" }),
+    );
+  });
 });
 
 function routing(openai: MockClient, deepseek: MockClient): ProviderRoutingClient {

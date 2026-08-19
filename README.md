@@ -148,6 +148,9 @@ plugin_api = true
 codexc service restart all
 ```
 
+旧会话仍使用创建时的 Provider；切换后请先 `/new` 创建新会话，新配置才会生效。若之前用
+`/model` 选过模型，先执行 `/model clear` 清除会话偏好，否则它仍会覆盖配置文件默认值。
+
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型与提供商”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式

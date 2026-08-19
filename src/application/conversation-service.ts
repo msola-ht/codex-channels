@@ -276,6 +276,7 @@ export interface ConversationUseCases {
   startPlan(target: ConversationTarget, prompt: string): Promise<Submission>;
   review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission>;
   modelState(target: ConversationTarget): Promise<ModelSelectionState>;
+  clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState>;
   selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
   selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
   selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
@@ -1200,6 +1201,11 @@ export class ConversationService implements ConversationUseCases {
   }
 
   modelState(target: ConversationTarget): Promise<ModelSelectionState> {
+    return this.models.state(target);
+  }
+
+  clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState> {
+    this.models.clear(target);
     return this.models.state(target);
   }
 

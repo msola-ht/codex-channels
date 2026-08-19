@@ -15,6 +15,7 @@ import {
   opencodeGoProviderDefinition,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
+  loadConfiguredCustomPrimaryModelProvider,
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
@@ -86,7 +87,10 @@ import {
   SqliteBindingStore,
   type ConversationBinding,
 } from "../storage/index.js";
-import type { SurfaceAdapter } from "../surfaces/index.js";
+import {
+  setConfiguredCustomPrimaryProviderId,
+  type SurfaceAdapter,
+} from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
 import {
   createSurfaceModules,
@@ -130,6 +134,7 @@ export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly primaryProvider: string;
+  private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -179,6 +184,7 @@ export class GatewayApplication {
       ? undefined
       : new TomlWorkspacePermissionWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
+    const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const managedProviders = loadManagedModelProviders();
     const configuredProviders = new Set<string>([
       primaryProvider,
@@ -192,6 +198,8 @@ export class GatewayApplication {
       ));
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
+    this.customPrimaryProviderId = customPrimaryProvider?.id;
+    setConfiguredCustomPrimaryProviderId(customPrimaryProvider?.id);
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger),
@@ -215,6 +223,10 @@ export class GatewayApplication {
       primaryProvider,
       clients,
       async (provider) => ensureAppServerProvider(config.codexSocketPath, provider),
+      customPrimaryProvider === undefined
+        ? undefined
+        : new Set([customPrimaryProvider.id]),
+      customPrimaryProvider?.id ?? primaryProvider,
     );
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
@@ -373,7 +385,7 @@ export class GatewayApplication {
       this.router,
       config.codexModel,
       supplementaryModels,
-      primaryProvider,
+      customPrimaryProvider?.id ?? primaryProvider,
     );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
@@ -875,7 +887,7 @@ export class GatewayApplication {
       const initialized = await this.codex.connect();
       this.requireRunning();
       this.codexUpstreamUserAgent = initialized.userAgent;
-      if (this.primaryProvider === "openai") {
+      if (this.primaryProvider === "openai" && this.customPrimaryProviderId === undefined) {
         const [connectivity] = await Promise.all([
           this.primaryProvider === undefined
             ? Promise.resolve<OpenAiConnectivityStatus>("not-applicable")
@@ -1095,7 +1107,7 @@ export class GatewayApplication {
           return;
         }
         this.codexUpstreamUserAgent = initialized.userAgent;
-        if (provider === "openai") {
+        if (provider === "openai" && this.customPrimaryProviderId === undefined) {
           await this.refreshRateLimits();
         }
         if (this.stopping || signal.aborted) {

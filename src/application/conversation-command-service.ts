@@ -531,9 +531,11 @@ export class ConversationCommandService {
         return {
           kind: "models",
           view: "model",
-          state: argumentsText
-            ? await this.conversations.selectModel(target, argumentsText)
-            : await this.conversations.modelState(target),
+          state: argumentsText === "clear"
+            ? await this.conversations.clearModelSelection(target)
+            : argumentsText
+              ? await this.conversations.selectModel(target, argumentsText)
+              : await this.conversations.modelState(target),
         };
       case "effort":
         return {

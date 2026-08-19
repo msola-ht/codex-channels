@@ -68,6 +68,8 @@ export class ProviderRoutingClient {
     private readonly primaryProvider: string,
     private readonly clients: ReadonlyMap<string, ProviderClientInstance>,
     private readonly ensureProvider?: (provider: string) => Promise<void>,
+    private readonly aliasProviders: ReadonlySet<string> = new Set(),
+    private readonly primaryThreadProvider = primaryProvider,
   ) {
     if (!clients.has(primaryProvider)) {
       throw new Error(`缺少主模型 Provider App Server：${primaryProvider}`);
@@ -92,16 +94,18 @@ export class ProviderRoutingClient {
   async reconnectProvider(
     provider: string,
   ): ReturnType<ProviderClientInstance["reconnect"]> {
-    if (provider !== this.primaryProvider) {
-      await this.ensureProvider?.(provider);
+    const canonical = this.canonicalProvider(provider);
+    if (canonical !== this.primaryProvider) {
+      await this.ensureProvider?.(canonical);
     }
-    await this.ensureClient(provider);
-    return this.clientForProvider(provider).reconnect();
+    await this.ensureClient(canonical);
+    return this.clientForProvider(canonical).reconnect();
   }
 
   closeProvider(provider: string): ReturnType<ProviderClientInstance["close"]> {
-    this.connectedProviders.delete(provider);
-    return this.clientForProvider(provider).close();
+    const canonical = this.canonicalProvider(provider);
+    this.connectedProviders.delete(canonical);
+    return this.clientForProvider(canonical).close();
   }
 
   async close(): Promise<void> {
@@ -179,16 +183,16 @@ export class ProviderRoutingClient {
     const snapshots = new Map<string, ThreadSnapshot>();
     for (const page of pages) {
       for (const thread of page.threads) {
-        if (this.clients.has(thread.modelProvider)) {
+        if (this.clients.has(this.canonicalProvider(thread.modelProvider))) {
           this.rememberThread(thread);
         }
         if (
-          thread.modelProvider === page.provider
+          this.canonicalProvider(thread.modelProvider) === page.provider
           || (
             page.provider === this.primaryProvider
             && (
-              !this.clients.has(thread.modelProvider)
-              || !this.connectedProviders.has(thread.modelProvider)
+              !this.clients.has(this.canonicalProvider(thread.modelProvider))
+              || !this.connectedProviders.has(this.canonicalProvider(thread.modelProvider))
             )
           )
         ) {
@@ -218,7 +222,7 @@ export class ProviderRoutingClient {
     }
     const canonical = await this.primaryClient().readThread(...args);
     this.rememberThread(canonical);
-    if (canonical.modelProvider === this.primaryProvider) {
+    if (this.canonicalProvider(canonical.modelProvider) === this.primaryProvider) {
       return canonical;
     }
     const thread = await (await this.ensureClient(canonical.modelProvider)).readThread(...args);
@@ -229,8 +233,15 @@ export class ProviderRoutingClient {
   async startThread(
     ...args: Parameters<ProviderClientInstance["startThread"]>
   ): ReturnType<ProviderClientInstance["startThread"]> {
-    const provider = args[1]?.modelProvider ?? this.primaryProvider;
-    const session = await (await this.ensureClient(provider)).startThread(...args);
+    const requestedProvider = args[1]?.modelProvider ?? this.primaryProvider;
+    const provider = this.canonicalProvider(requestedProvider);
+    const threadProvider = provider === this.primaryProvider
+      ? this.primaryThreadProvider
+      : requestedProvider;
+    const options = requestedProvider === threadProvider
+      ? args[1]
+      : { ...(args[1] ?? {}), modelProvider: threadProvider };
+    const session = await (await this.ensureClient(provider)).startThread(args[0], options);
     this.rememberThread(session.thread);
     return session;
   }
@@ -346,10 +357,21 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["forkThread"]> {
     const provider = await this.resolveThreadProvider(args[0], args[1]);
     const requestedProvider = args[2]?.modelProvider;
-    if (requestedProvider && requestedProvider !== provider) {
+    if (
+      requestedProvider
+      && this.canonicalProvider(requestedProvider) !== this.canonicalProvider(provider)
+    ) {
       throw new Error("Codex Thread 分支不能跨模型 Provider");
     }
-    const session = await (await this.ensureClient(provider)).forkThread(...args);
+    const threadProvider = requestedProvider === provider ? requestedProvider : provider;
+    const options = requestedProvider === threadProvider
+      ? args[2]
+      : { ...(args[2] ?? {}), modelProvider: threadProvider };
+    const session = await (await this.ensureClient(provider)).forkThread(
+      args[0],
+      args[1],
+      options,
+    );
     this.rememberThread(session.thread);
     return session;
   }
@@ -500,7 +522,7 @@ export class ProviderRoutingClient {
   }
 
   private clientForProvider(provider: string): ProviderClientInstance {
-    const client = this.clients.get(provider);
+    const client = this.clients.get(this.canonicalProvider(provider));
     if (!client) {
       throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
     }
@@ -508,20 +530,27 @@ export class ProviderRoutingClient {
   }
 
   private async ensureClient(provider: string): Promise<ProviderClientInstance> {
-    const client = this.clientForProvider(provider);
-    if (this.connectedProviders.has(provider)) return client;
-    let connection = this.providerConnections.get(provider);
+    const canonical = this.canonicalProvider(provider);
+    const client = this.clientForProvider(canonical);
+    if (this.connectedProviders.has(canonical)) return client;
+    let connection = this.providerConnections.get(canonical);
     if (!connection) {
       connection = (async () => {
-        await this.ensureProvider?.(provider);
+        if (canonical !== this.primaryProvider) {
+          await this.ensureProvider?.(canonical);
+        }
         await client.connect();
-        this.connectedProviders.add(provider);
+        this.connectedProviders.add(canonical);
       })();
-      this.providerConnections.set(provider, connection);
-      connection.finally(() => this.providerConnections.delete(provider)).catch(() => undefined);
+      this.providerConnections.set(canonical, connection);
+      connection.finally(() => this.providerConnections.delete(canonical)).catch(() => undefined);
     }
     await connection;
     return client;
+  }
+
+  private canonicalProvider(provider: string): string {
+    return this.aliasProviders.has(provider) ? this.primaryProvider : provider;
   }
 
   private async resolveThreadProvider(threadId: string, cwd?: string): Promise<string> {

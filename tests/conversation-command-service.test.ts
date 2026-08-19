@@ -96,6 +96,31 @@ describe("ConversationCommandService", () => {
     });
   });
 
+  it("routes model clear through the application boundary", async () => {
+    const state = {
+      models: [],
+      model: "gpt-5.6-sol",
+      modelProvider: "OpenAI",
+      effort: null,
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    };
+    const clearModelSelection = vi.fn(async () => state);
+    const commands = new ConversationCommandService({
+      clearModelSelection,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "model", "clear")).resolves.toEqual({
+      kind: "models",
+      view: "model",
+      state,
+    });
+    expect(clearModelSelection).toHaveBeenCalledWith(target);
+  });
+
   it("routes project rule generation and checks through the application boundary", async () => {
     const result = {
       projectRoot: "/workspace/project",

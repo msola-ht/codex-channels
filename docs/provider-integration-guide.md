@@ -173,6 +173,17 @@ Responses Provider，多个候选会失败关闭。
 修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
 
+已存在的 Thread 在 Codex 中保留创建时的 Provider：恢复旧会话时，官方实现会用线程保存的
+`model_provider` 覆盖当前配置。因此切换 `model_provider` 后，旧会话仍走原 Provider（例如内置
+`openai` 加顶层 `openai_base_url`，仍会先尝试 WebSocket 再回退 HTTPS），自定义 Provider 的
+`base_url` 与 `supports_websockets` 不会对旧 Thread 生效。要让新 Provider 生效，先使用
+`/new` 创建新会话；新 Thread 才读取当前 `model_provider` 并使用本地统计代理，且
+`supports_websockets = false` 生效后不会再发起 WebSocket 连接。
+
+会话内通过 `/model` 选择的模型和 Provider 会作为该会话的待生效偏好，覆盖配置文件默认值；
+`/model clear` 可清除该偏好，让下一个新 Thread 重新使用 `model_provider` 默认值。Gateway
+会把自定义主 Provider 的 Thread 路由到主 App Server 实例，不会为它启动独立实例。
+
 该模式不支持自定义 Provider 的独立模型目录、`/usage` 账户适配、价格专用计价器、Gateway 内跨 Provider
 切换或 `agents.external` 角色；需要这些能力时必须按本指南前述的编译期受管 Provider 流程接入。
 

@@ -15,8 +15,8 @@
   最后一次请求的可观测首事件延迟（调试模式开启时），以及整轮综合思考速度与含推理生成速度。
 - 推理 Token 计数对所有 Provider 展示；OpenAI 官方只返回计数与用量，不返回推理内容或可靠
   计时流，因此思考/生成速度等计时字段仍在 DeepSeek 与 OpenCode Go 展示。
-- 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”，与直接 API 的自定义提供商
-  区分。
+- 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”；配置的自定义主模型
+  Provider（如 `model_providers.OpenAI`）显示为“OpenAI · 自定义”，与官方直连区分。
 - 同一 Turn 中模型请求遇到 `429/5xx` 或上游 WebSocket 断流后由 Codex 重试并最终完成时，完成
   卡片显示“自动重试、最终成功”，本轮计价覆盖率只以成功请求为分母；真实失败尝试仍保留在
   指标库与异常报告中。

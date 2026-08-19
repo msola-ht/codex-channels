@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   createStartupPresentation,
@@ -13,8 +13,13 @@ import {
   formatReferenceCostTotal,
 } from "../src/surfaces/reference-cost-format.js";
 import { formatOpenAiErrorMessage } from "../src/surfaces/account-format.js";
+import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-format.js";
 
 describe("shared Surface lifecycle presentation", () => {
+  beforeEach(() => {
+    setConfiguredCustomPrimaryProviderId(undefined);
+  });
+
   it("adds an actionable OpenAI network warning to the startup notice", () => {
     const presentation = createStartupPresentation(
       [{ id: "main", name: "Main", cwd: "/workspace/main" }],
@@ -516,6 +521,31 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("提供商：DeepSeek");
     expect(rendered).not.toContain("Fast");
     expect(rendered).not.toContain("周限");
+  });
+
+  it("labels a custom primary Provider separately from the official OpenAI account", () => {
+    setConfiguredCustomPrimaryProviderId("OpenAI");
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "failed",
+        error: "失败：[REDACTED]",
+        model: "gpt-test",
+        modelProvider: "OpenAI",
+        effort: "medium",
+        serviceTier: "priority",
+      }),
+    );
+
+    expect(rendered).toContain("提供商：OpenAI · 自定义");
+    expect(rendered).not.toContain("提供商：OpenAI 官方");
   });
 
   it("shows the remaining OpenCode Go usage on completion", () => {
