@@ -152,12 +152,71 @@ codexc doctor
 - 峰谷价格按请求开始时间验证：生效时间前后、快照存在与缺失、窗口重置边界；
 - `agents.configure <id> <model>` 能切换共享第三方子代理并保持 Key 隔离。
 
-## 6. 自添加模式现状与边界
+## 6. 用户配置的主 Provider
 
-当前“用户自添加”只覆盖 `api_providers`（视觉代理与直接 API 展示），不进入 App Server、
-`/model`、会话路由和 `/usage`。受管第三方 Provider 仍为编译期注册。若实现完整自添加
-（用户 Provider 注册表），必须满足本指南全部安全与校验要求，并先完成 GO 计价、账户、
-Setup 的参数化，再以严格 Schema 合并用户定义；不支持的组合必须明确报错。
+Gateway 支持 Codex 用户配置中的一个自定义主 Provider，不要求模型目录或 Gateway
+Setup。它读取 `~/.codex/config.toml` 的 `model_provider` 和 `[model_providers.<id>]`；若
+`model_provider` 显式配置为 `openai` 时锁定官方 OpenAI，不自动激活候选；未配置且只存在一个候选
+时沿用该候选兼容旧配置。自定义 Provider 只在 Gateway 监管的 App Server 子进程中选择。
+Gateway 在 App Server 前启动本地统计代理；原配置中的认证方式、模型名、
+`supports_websockets` 等字段仍由 Codex 处理。当前只支持 `wire_api = "responses"`，不把该 Provider
+加入 `/model` 的跨 Provider 菜单，也不为它伪造账户余额或用量接口。
+
+示例：
+
+```toml
+model = "gpt-5.6-terra"
+
+[model_providers.thirdparty]
+name = "Third-party Responses"
+base_url = "https://proxy.example.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+supports_websockets = false
+```
+
+可配置多个自定义主 Provider 候选块，但同一时刻只激活一个：`model_provider` 显式选中时激活
+该候选，显式配置为 `openai` 时锁定官方 OpenAI；`model_provider` 未配置且只有一个候选时仍沿用
+该候选兼容旧配置。配置自定义主 Provider 时不能同时设置顶层 `openai_base_url`。通过
+`codexc primary-provider` 的
+`add` / `switch` / `remove` 管理候选与激活状态。`codexc primary-provider switch openai` 不运行
+登录直接切回官方 OpenAI，官方凭据保留；切回时自定义候选块移入
+`~/.codex-connect/private/primary-providers.json`（0600）并从 config 清理，之后
+`codexc primary-provider switch <ID>` 会从备份自动恢复。`codexc setup` 的“官方 → 登录并恢复官方”
+会运行 `codex login --device-auth`（打开终端显示的链接并输入验证码）并执行相同的备份与清理。
+
+`requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；也可以按 Codex 官方配置使用
+`env_key`，或写入 `experimental_bearer_token` 直接使用 API Key（Key 明文保存在 0600 的
+`~/.codex/config.toml`，Codex 官方标注该字段用于程序化使用）。第三方主 API 使用自己的 Key 时
+设置 `requires_openai_auth = false`，完全不依赖官方 auth.json，官方登录状态不受切换影响。
+Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
+和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
+`openai`、`ollama`、`lmstudio`、`amazon-bedrock` 或项目受管 Provider ID。
+
+修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
+`supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
+
+已存在的 Thread 在 Codex 中保留创建时的 Provider：恢复旧会话时，官方实现会用线程保存的
+`model_provider` 覆盖当前配置。因此切换 `model_provider` 后，旧会话仍走原 Provider（例如内置
+`openai` 加顶层 `openai_base_url`，仍会先尝试 WebSocket 再回退 HTTPS），自定义 Provider 的
+`base_url` 与 `supports_websockets` 不会对旧 Thread 生效。要让新 Provider 生效，先使用
+`/new` 创建新会话；新 Thread 才读取当前 `model_provider` 并使用本地统计代理，且
+`supports_websockets = false` 生效后不会再发起 WebSocket 连接。
+
+会话内通过 `/model` 选择的模型和 Provider 会作为该会话的待生效偏好，覆盖配置文件默认值；
+`/model clear` 可清除该偏好，让下一个新 Thread 重新使用 `model_provider` 默认值。Gateway
+会把自定义主 Provider 的 Thread 路由到主 App Server 实例，不会为它启动独立实例。
+
+该模式不支持自定义 Provider 的独立模型目录、`/usage` 账户适配、价格专用计价器或 Gateway 内跨 Provider
+切换；自定义主 Provider 也不能作为共享 `agents.external` 角色使用，该角色仍由 DeepSeek / OpenCode Go
+等受管 Provider 提供，可与自定义主 Provider 配置共存。需要这些能力时必须按本指南前述的编译期受管
+Provider 流程接入。
+
+可以通过 `codexc setup` 的“模型与提供商 → 第三方 → 自定义第三方”引导写入上述配置：填写 Provider ID、
+上游 `base_url`、认证方式（直接写入 API Key / 当前 API Key / `env_key` / 无认证）、是否支持
+Responses WebSocket 和默认模型；Provider ID 固定为 `OpenAI`，避免手输填错（小写 `openai` 是
+Codex 内置保留 ID，不能作为自定义 Provider）。Setup 通过 Codex 的 `config/batchWrite` 原子写入用户配置，
+Key 输入不显示不回显；写入后仍需运行 `codexc service restart all` 生效。
 
 ## 关联文档
 

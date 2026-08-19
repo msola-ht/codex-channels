@@ -4,6 +4,7 @@ import {
   conversationCommandHelpLines,
   formatConversationAgents,
   formatConversationCommandOutcome,
+  formatConversationOccupancy,
   formatConversationLimits,
   formatConversationMetrics,
   formatConversationMcp,
@@ -22,8 +23,73 @@ import {
   formatConversationWorkspaces,
 } from "../src/surfaces/conversation-command-format.js";
 import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
+import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-format.js";
 
 describe("provider-aware conversation command formatting", () => {
+  it("renders occupancy release results", () => {
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: { status: "unbound" },
+    })).toContain("当前会话没有绑定 Codex Thread");
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: { status: "free", threadId: "thread-free" },
+    })).toContain("未被占用");
+
+    const held = formatConversationOccupancy({
+      kind: "occupancy",
+      result: {
+        status: "held",
+        threadId: "thread-held",
+        holder: { pid: 4242, command: "codex app-server" },
+        releasable: true,
+        stuck: true,
+      },
+    });
+    expect(held).toContain("PID 4242");
+    expect(held).toContain("当前会话恢复失败");
+
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: {
+        status: "held",
+        threadId: "thread-healthy",
+        holder: { pid: 4245, command: "codex app-server" },
+        releasable: true,
+        stuck: false,
+      },
+    })).toContain("通常无需释放");
+
+    const longCommand = formatConversationOccupancy({
+      kind: "occupancy",
+      result: {
+        status: "held",
+        threadId: "thread-long",
+        holder: {
+          pid: 4243,
+          command: `codex ${"-c model=long ".repeat(30)}app-server`,
+        },
+        releasable: true,
+        stuck: true,
+      },
+    });
+    expect(longCommand).toContain("…");
+    expect(longCommand.length).toBeLessThan(400);
+
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: {
+        status: "released",
+        threadId: "thread-held",
+        holder: { pid: 4242, command: "codex app-server" },
+      },
+    })).toContain("已释放 Codex Thread 占用");
+    expect(formatConversationOccupancy({
+      kind: "occupancy",
+      result: { status: "unidentifiable", threadId: "thread-x" },
+    })).toContain("无法识别占用");
+  });
+
   it("shows configured workspace permissions in the workspace list", () => {
     const rendered = formatConversationWorkspaces({
       kind: "workspaces",
@@ -766,11 +832,11 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationUsage({
       kind: "usage",
       result: { kind: "unsupported", provider: "future-provider" },
-    })).toContain("future-provider 暂不支持账户用量查询");
+    })).toContain("future-provider 仅提供模型请求，不提供账户余额/额度查询");
     expect(formatConversationLimits({
       kind: "limits",
       result: { kind: "unsupported", provider: "future-provider" },
-    })).toContain("可使用 /usage 查看该提供商已接入的账户信息");
+    })).toContain("future-provider 仅提供模型请求，不提供账户限额查询");
   });
 
   it("renders weekly allowance estimates as local rounded samples", () => {
@@ -854,6 +920,33 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("Codex 有效上下文窗口：1.05 M");
     expect(rendered).not.toContain("Fast 模式");
     expect(rendered).not.toContain("周限");
+  });
+
+  it("marks the configured custom primary Provider in status", () => {
+    setConfiguredCustomPrimaryProviderId("OpenAI");
+    try {
+      const rendered = formatConversationStatus({
+        threadId: "thread-custom",
+        workspaceId: "main",
+        workspaceName: "Main",
+        cwd: "/workspace",
+        model: "gpt-test",
+        modelProvider: "OpenAI",
+        effort: "medium",
+        serviceTier: "priority",
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
+      });
+
+      expect(rendered).toContain("提供商：OpenAI · 自定义");
+      expect(rendered).not.toContain("提供商：OpenAI 官方");
+      expect(rendered).toContain("Fast 模式：开启");
+    } finally {
+      setConfiguredCustomPrimaryProviderId(undefined);
+    }
   });
 
   it("renders latest Turn aggregation and direct API metrics separately", () => {

@@ -308,6 +308,131 @@ suite("real Codex App Server over Unix WebSocket", () => {
 });
 
 contractSuite("real supervised App Server service", () => {
+  it("starts a custom Responses primary Provider without a model catalog", async () => {
+    const testRuntime = mkdtempSync(join(tmpdir(), "codex-custom-provider-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const workspace = join(testRuntime, "workspace");
+    const configPath = join(testRuntime, "config.toml");
+    const socketPath = join(testRuntime, "codex-app-server.sock");
+    const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
+    const apiServer = createServer((request, response) => {
+      if (request.method === "GET" && request.url === "/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          object: "list",
+          data: [{ id: "gpt-5.6-terra", object: "model", owned_by: "fixture" }],
+        }));
+        return;
+      }
+      request.resume();
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "fixture endpoint" } }));
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      apiServer.once("error", rejectListen);
+      apiServer.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const apiAddress = apiServer.address();
+    if (!apiAddress || typeof apiAddress === "string") {
+      throw new Error("自定义 Provider 合同无法创建本机 Responses 夹具");
+    }
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "gpt-5.6-terra"',
+      "",
+      "[model_providers.thirdparty]",
+      'name = "Contract Responses Provider"',
+      `base_url = "http://127.0.0.1:${apiAddress.port}/v1"`,
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      "supports_websockets = false",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    writeGatewayConfig(configPath, {
+      version: 1,
+      default_workspace: "integration",
+      telegram: {
+        bot_token: "integration-token",
+        allowed_user_ids: [123],
+        message_format: "html",
+      },
+      network: {},
+      codex: {
+        binary: process.env.CODEX_BINARY ?? "codex",
+        socket_path: socketPath,
+        sandbox: "workspace-write",
+      },
+      approval: { timeout_seconds: 300 },
+      storage: { database_path: join(testRuntime, "gateway.sqlite3") },
+      logging: { level: "info" },
+      workspaces: [{ id: "integration", name: "Integration", cwd: workspace }],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let client: CodexAppServerClient | undefined;
+    const service = spawn(
+      process.execPath,
+      [resolve("bin/codexc.mjs"), "service-app-server"],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          CODEX_CONNECT_HOME: testRuntime,
+          CODEX_CONNECT_CONFIG_FILE: configPath,
+          CODEX_HOME: codexHome,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+      },
+    );
+    service.stdout?.setEncoding("utf8");
+    service.stderr?.setEncoding("utf8");
+    service.stdout?.on("data", (chunk: string) => {
+      stdout = appendDiagnostic(stdout, chunk);
+    });
+    service.stderr?.on("data", (chunk: string) => {
+      stderr = appendDiagnostic(stderr, chunk);
+    });
+
+    try {
+      await waitFor(
+        () => existsSync(socketPath) && stdout.includes("openai 模型统计代理已启动"),
+        15_000,
+        () => service.exitCode === null && service.signalCode === null
+          ? undefined
+          : new Error(appServerFailure(
+              "自定义 Provider App Server 在就绪前退出",
+              `${stdout}\n${stderr}`,
+            )),
+      );
+      expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
+        primaryProvider: "openai",
+        managedProviders: [],
+        socketPaths: [socketPath],
+      });
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+      expect((await client.listModels()).some(({ model }) => model === "gpt-5.6-terra"))
+        .toBe(true);
+    } finally {
+      try {
+        await client?.close().catch(() => undefined);
+        await stopDetachedTestProcess(service, 10_000);
+        await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
+      } finally {
+        await new Promise<void>((resolveClose, rejectClose) => {
+          apiServer.close((error) => error ? rejectClose(error) : resolveClose());
+        });
+        rmSync(testRuntime, { recursive: true, force: true });
+      }
+    }
+  }, 30_000);
+
   it("starts OpenAI and an on-demand OpenCode Go App Server with matching topology", async () => {
     const testRuntime = mkdtempSync(join(tmpdir(), "codex-contract-"));
     const codexHome = join(testRuntime, "codex-home");

@@ -254,16 +254,7 @@ export class ConversationCore {
         this.artifactsByThread.delete(threadId);
         this.timingByThread.delete(threadId);
       }
-      for (const binding of this.router.allBindings()) {
-        if (affectedThreadIds.has(binding.threadId)) {
-          this.publish({
-            type: "connection.lost",
-            target: binding.target,
-            threadId: binding.threadId,
-            message,
-          });
-        }
-      }
+      this.publishConnectionNotice("connection.lost", message, affectedThreadIds);
       return;
     }
     this.activeByThread.clear();
@@ -277,14 +268,11 @@ export class ConversationCore {
     this.timingByThread.clear();
     this.mcpStatus.clear();
     this.unhealthyMcpServers.clear();
-    for (const binding of this.router.allBindings()) {
-      this.publish({
-        type: "connection.lost",
-        target: binding.target,
-        threadId: binding.threadId,
-        message,
-      });
-    }
+    this.publishConnectionNotice("connection.lost", message);
+  }
+
+  connectionRestored(message: string, affectedThreadIds?: ReadonlySet<string>): void {
+    this.publishConnectionNotice("connection.restored", message, affectedThreadIds);
   }
 
   handle(event: ConversationInputEvent): void {
@@ -855,6 +843,23 @@ export class ConversationCore {
 
   private isBackgroundThread(threadId: string): boolean {
     return this.router.isBackgroundThread?.(threadId) ?? false;
+  }
+
+  private publishConnectionNotice(
+    type: "connection.lost" | "connection.restored",
+    message: string,
+    threadIds?: ReadonlySet<string>,
+  ): void {
+    for (const binding of this.router.allBindings()) {
+      if (threadIds === undefined || threadIds.has(binding.threadId)) {
+        this.publish({
+          type,
+          target: binding.target,
+          threadId: binding.threadId,
+          message,
+        });
+      }
+    }
   }
 
   private publishUserMessage(

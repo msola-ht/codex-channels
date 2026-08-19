@@ -37,6 +37,7 @@ import {
   emptyCodexResponseText,
   formatCodexWarning,
   formatConnectionLost,
+  formatConnectionRestored,
   formatThreadAvailability,
 } from "../output-copy.js";
 import {
@@ -520,6 +521,11 @@ export class TelegramOutbox {
         this.clearThreadOutput(chatId, event.threadId);
         this.enqueue(chatId, async () => {
           await this.send(chatId, formatConnectionLost(event.message));
+        }, true);
+        return;
+      case "connection.restored":
+        this.enqueue(chatId, async () => {
+          await this.send(chatId, formatConnectionRestored(event.message));
         }, true);
         return;
       case "account.updated":

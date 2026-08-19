@@ -111,8 +111,8 @@ Token 与费用总计及均价，调试模式才展示模型请求聚合耗时�
 换算对照。子代理完成卡片复用同一价格、Token 和均价格式：正式模式保留总计，调试模式才展开
 缓存与推理 Token、缓存命中率、输入/缓存/输出费用、附加货币换算和模型请求聚合耗时；计价覆盖
 不全时显示覆盖比例并省略可能低估的均价，指标读取失败时只显示“统计暂不可用”。
-原生 OpenAI
-鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与 OpenAI 周限；
+原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与
+OpenAI 周限；配置的自定义主模型 Provider 追加“ · 自定义”标识（例如“OpenAI · 自定义”），
 直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。

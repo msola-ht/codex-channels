@@ -287,6 +287,7 @@ export type OutputEvent =
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
+  | { type: "connection.restored"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
   | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)
   | { type: "account.rateLimits.updated"; target: ConversationTarget; rateLimits: RateLimitSnapshot }
   | ({ type: "mcp.status.updated"; target: ConversationTarget } & McpServerStatus)

@@ -151,6 +151,11 @@ export {
   type TurnStarted,
 } from "./turn-port.js";
 export {
+  type ThreadLockHolder,
+  type ThreadOccupancyPort,
+  type ThreadOccupancyReleaseResult,
+} from "./thread-occupancy-port.js";
+export {
   parseVisionRecognitionPayload,
   replaceLocalImagesWithVisionContext,
   visionRecognitionJsonSchema,

@@ -3,20 +3,6 @@ import { isAbsolute } from "node:path";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
 
-export async function writeCodexUserConfigEdits(
-  environment,
-  edits,
-  { createClient = createCodexUserConfigClient } = {},
-) {
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
-    await client.writeUserConfigEdits(edits);
-  } finally {
-    await client.close().catch(() => undefined);
-  }
-}
-
 export async function updateCodexUserConfig(
   environment,
   createEdits,
@@ -29,6 +15,35 @@ export async function updateCodexUserConfig(
     const edits = createEdits(snapshot.config);
     if (edits.length === 0) return;
     await client.writeUserConfigEdits(edits, { expectedVersion: snapshot.version });
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+export async function readCodexUserConfigSnapshot(
+  environment,
+  { createClient = createCodexUserConfigClient } = {},
+) {
+  const client = await createClient({ environment });
+  try {
+    await client.connect();
+    return await client.readUserConfigSnapshot();
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+export async function writeCodexUserConfigEdits(
+  environment,
+  edits,
+  { expectedVersion, createClient = createCodexUserConfigClient } = {},
+) {
+  const client = await createClient({ environment });
+  try {
+    await client.connect();
+    await client.writeUserConfigEdits(edits, {
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    });
   } finally {
     await client.close().catch(() => undefined);
   }

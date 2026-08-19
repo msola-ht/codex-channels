@@ -13,7 +13,9 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { providerMetricsSocketPath } from "../runtime/model-provider-runtime.mjs";
+import {
+  providerMetricsSocketPath,
+} from "../runtime/model-provider-runtime.mjs";
 import {
   assertSynchronousChildSuccess,
   ForwardedChildSignalError,
@@ -392,7 +394,7 @@ export function resetMetricsSyncStateWithGatewayRestart(
 }
 
 export function pruneProviderMetrics(provider, environment = process.env, options = {}) {
-  assertPruneProvider(provider);
+  assertPruneProvider(provider, environment);
   const localDatabasePath = options.localDatabasePath
     ?? resolveMetricsRuntime(environment).databasePath;
   const centerSettings = options.centerSettings
@@ -645,8 +647,8 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function assertPruneProvider(provider) {
-  if (!isMetricsProviderId(provider)) {
+function assertPruneProvider(provider, environment = process.env) {
+  if (!isMetricsProviderId(provider, environment)) {
     throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
   }
 }

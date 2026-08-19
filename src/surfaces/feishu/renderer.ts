@@ -15,6 +15,7 @@ import {
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationCommandOutcome,
+  formatConversationOccupancy,
   isTurnLifecycleAcknowledgedOutcome,
   formatConversationGoal,
   formatConversationLimits,
@@ -65,6 +66,7 @@ import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import {
   formatCodexWarning,
   formatConnectionLost,
+  formatConnectionRestored,
   formatThreadAvailability,
 } from "../output-copy.js";
 import {
@@ -193,6 +195,8 @@ export function renderFeishuCommandResult(
       return formatConversationArtifacts(result);
     case "goal":
       return formatConversationGoal(result);
+    case "occupancy":
+      return formatConversationOccupancy(result);
   }
 }
 
@@ -266,6 +270,8 @@ export function renderFeishuOutput(
       );
     case "connection.lost":
       return formatConnectionLost(visibleUpstreamMessage(event.message));
+    case "connection.restored":
+      return formatConnectionRestored(visibleUpstreamMessage(event.message));
     case "account.updated":
       return formatRuntimeAccountUpdate(event.authMode, event.planType);
     case "account.rateLimits.updated":

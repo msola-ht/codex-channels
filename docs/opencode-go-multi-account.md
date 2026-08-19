@@ -57,7 +57,7 @@ Key 只写入 `~/.codex/sf-opencode-go-<account>.config.toml`（沿用现有私�
 
 ## 4. CLI / Setup
 
-在 `codexc setup` 的“模型与提供商 → OpenCode Go”下增加账户管理入口，同时提供
+在 `codexc setup` 的“模型与提供商 → 第三方 → OpenCode Go 官方”下增加账户管理入口，同时提供
 独立命令（方便脚本化）：
 
 ```bash

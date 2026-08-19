@@ -15,8 +15,8 @@
   最后一次请求的可观测首事件延迟（调试模式开启时），以及整轮综合思考速度与含推理生成速度。
 - 推理 Token 计数对所有 Provider 展示；OpenAI 官方只返回计数与用量，不返回推理内容或可靠
   计时流，因此思考/生成速度等计时字段仍在 DeepSeek 与 OpenCode Go 展示。
-- 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”，与直接 API 的自定义提供商
-  区分。
+- 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”；配置的自定义主模型
+  Provider（如 `model_providers.OpenAI`）显示为“OpenAI · 自定义”，与官方直连区分。
 - 同一 Turn 中模型请求遇到 `429/5xx` 或上游 WebSocket 断流后由 Codex 重试并最终完成时，完成
   卡片显示“自动重试、最终成功”，本轮计价覆盖率只以成功请求为分母；真实失败尝试仍保留在
   指标库与异常报告中。
@@ -93,9 +93,17 @@ HTML 和微信结构化字段渲染。
 `/resume` 恢复结果会显示该 Thread 的会话模型和 Provider；`/new` 与 Workspace 切换结果会显示
 下一条普通消息使用的模型和 Provider；`/model` 产生待生效选择时也使用“下一条消息模型”明确
 区分当前 Thread 设置。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
+
+`/release` 输出当前会话 Thread 的占用状态：未占用、被占用（含持锁进程 PID 与命令行、
+是否处于恢复失败）或已释放结果；
+`/release force` 只在该 Thread 存在可识别持锁进程时发送结束信号并立即重试恢复。恢复绑定失败时
+渠道会收到一次“占用”提示（连续未知失败达到阈值也会升级提示），恢复成功后再收到“解除”提示。
 按需运行的受管 Provider（DeepSeek、OpenCode Go）在首次选择对应模型、恢复其 Thread 或使用对应
 Remote TUI 之前尚未启动，其历史 Thread 不会出现在 `/resume` 会话列表中；对应 Provider 启动后
 即可正常列出和恢复。
+
+App Server 连接断开时，受影响会话会收到“连接已中断，正在恢复”提示；重连成功后会收到
+“连接已恢复”提示。仅当断开时确实存在受影响会话才发送，多个 Provider 各自独立提示。
 
 `/mcp login` 在当前会话已绑定 Thread 时返回安全授权地址；浏览器流程结束后，Gateway 只把带有
 该 Thread 的官方 OAuth 完成通知显示为“MCP OAuth”成功或失败状态，无法关联 Thread 的通知不向

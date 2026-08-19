@@ -70,6 +70,9 @@
 - `agent-roles.d.mts`：声明共享子代理角色配置模块的 TypeScript 接口。
 - `codex-home.mjs` / `codex-home.d.mts`：统一解析 Codex 用户目录（`CODEX_HOME` 或
   `~/.codex`），供 CLI、脚本、Runtime 与 Bootstrap 复用。
+- `thread-writer-lock.mjs` / `thread-writer-lock.d.mts`：定位并安全结束持有 Codex 线程写锁
+  （`~/.codex/thread-writer-locks/<thread>.lock`）的本地进程；Linux 通过 `/proc` 按打开描述符
+  与命令行识别持锁方，供 `/release` 命令与恢复诊断复用，不删除锁文件。
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup、迁移脚本与 Runtime 复用。

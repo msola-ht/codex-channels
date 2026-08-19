@@ -14,6 +14,7 @@ import {
   loadManagedModelProviderDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
+  loadConfiguredCustomPrimaryModelProvider,
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
   loadManagedModelProviderRole,
@@ -22,6 +23,10 @@ import {
   providerAppServerSocketPath,
   providerMetricsSocketPath,
 } from "../../runtime/model-provider-runtime.mjs";
+import {
+  inspectThreadWriterLock,
+  terminateThreadWriterHolder,
+} from "../../runtime/thread-writer-lock.mjs";
 import {
   inspectAppServerSupervisor,
   releaseAppServerProvider,
@@ -58,12 +63,15 @@ import {
   ProviderAccountService,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
+  type ThreadLockHolder,
+  type ThreadOccupancyReleaseResult,
   type RequestMetricsTimeRange,
 } from "../application/index.js";
 import {
   ConversationCore,
   isCriticalOutputEvent,
   surfaceAccountKey,
+  type ConversationTarget,
   type OutputEvent,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
@@ -84,7 +92,10 @@ import {
   SqliteBindingStore,
   type ConversationBinding,
 } from "../storage/index.js";
-import type { SurfaceAdapter } from "../surfaces/index.js";
+import {
+  setConfiguredCustomPrimaryProviderId,
+  type SurfaceAdapter,
+} from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
 import {
   createSurfaceModules,
@@ -117,16 +128,19 @@ import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js"
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 
 const bindingRestoreRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
+const bindingRestoreEscalationAttempts = 3;
 
 interface PendingBindingRestore {
   binding: ConversationBinding;
   occupiedNotified: boolean;
+  failureCount: number;
 }
 
 export class GatewayApplication {
   private readonly transport: UnixWebSocketTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly primaryProvider: string;
+  private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
@@ -158,6 +172,7 @@ export class GatewayApplication {
   private reconnecting: Promise<void> | undefined;
   private reconnectAbort: AbortController | undefined;
   private readonly disconnectedProviders = new Set<string>();
+  private readonly disconnectedBindingsByProvider = new Map<string, Set<string>>();
   private readonly pendingBindingRestores = new Map<string, PendingBindingRestore>();
   private readonly restoringThreadIds = new Set<string>();
   private bindingRestoreTimer: NodeJS.Timeout | undefined;
@@ -177,6 +192,7 @@ export class GatewayApplication {
       ? undefined
       : new TomlWorkspacePermissionWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
+    const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const managedProviders = loadManagedModelProviders();
     const providerDefinitions = loadManagedModelProviderDefinitions();
     const configuredProviders = new Set<string>([
@@ -191,6 +207,8 @@ export class GatewayApplication {
       ));
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
+    this.customPrimaryProviderId = customPrimaryProvider?.id;
+    setConfiguredCustomPrimaryProviderId(customPrimaryProvider?.id);
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger),
@@ -217,6 +235,10 @@ export class GatewayApplication {
         this.providerIdleReleaser?.markLaunching(provider);
         await ensureAppServerProvider(config.codexSocketPath, provider);
       },
+      customPrimaryProvider === undefined
+        ? undefined
+        : new Set([customPrimaryProvider.id]),
+      customPrimaryProvider?.id ?? primaryProvider,
     );
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
@@ -304,11 +326,14 @@ export class GatewayApplication {
         && config.vision.provider === deepseekProviderDefinition.id);
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
-        primaryProvider,
+        customPrimaryProvider?.id ?? primaryProvider,
         ...managedProviders.map(({ provider }) => provider),
       ],
       socketPath: (provider) =>
-        providerMetricsSocketPath(config.codexSocketPath, provider),
+        providerMetricsSocketPath(
+          config.codexSocketPath,
+          provider === customPrimaryProvider?.id ? primaryProvider : provider,
+        ),
       writer: {
         enqueue: (sample) => {
           metricsWriter.enqueue(sample);
@@ -380,7 +405,7 @@ export class GatewayApplication {
       this.router,
       config.codexModel,
       supplementaryModels,
-      primaryProvider,
+      customPrimaryProvider?.id ?? primaryProvider,
     );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
@@ -614,6 +639,9 @@ export class GatewayApplication {
       },
       {
         pluginApiEnabled: config.pluginApiEnabled,
+      },
+      {
+        releaseThread: (target, force) => this.releaseThread(target, force),
       },
     );
     this.output.subscribe("conversation-follow-up", async (event) => {
@@ -906,6 +934,16 @@ export class GatewayApplication {
             .map((binding) => binding.threadId)
             .filter((threadId) => this.codex.knownProvider(threadId) === provider),
         );
+        if (affectedThreadIds.size > 0) {
+          const existing = this.disconnectedBindingsByProvider.get(provider);
+          if (existing) {
+            for (const threadId of affectedThreadIds) {
+              existing.add(threadId);
+            }
+          } else {
+            this.disconnectedBindingsByProvider.set(provider, affectedThreadIds);
+          }
+        }
         this.interactions.cancelThreads(affectedThreadIds);
         this.core.connectionLost(
           `${provider} App Server 连接已断开，正在恢复连接`,
@@ -916,7 +954,7 @@ export class GatewayApplication {
       const initialized = await this.codex.connect();
       this.requireRunning();
       this.codexUpstreamUserAgent = initialized.userAgent;
-      if (this.primaryProvider === "openai") {
+      if (this.primaryProvider === "openai" && this.customPrimaryProviderId === undefined) {
         const [connectivity] = await Promise.all([
           this.primaryProvider === undefined
             ? Promise.resolve<OpenAiConnectivityStatus>("not-applicable")
@@ -1138,7 +1176,7 @@ export class GatewayApplication {
           return;
         }
         this.codexUpstreamUserAgent = initialized.userAgent;
-        if (provider === "openai") {
+        if (provider === "openai" && this.customPrimaryProviderId === undefined) {
           await this.refreshRateLimits();
         }
         if (this.stopping || signal.aborted) {
@@ -1149,6 +1187,14 @@ export class GatewayApplication {
         if (this.stopping || signal.aborted) {
           return;
         }
+        const restoredThreadIds = this.disconnectedBindingsByProvider.get(provider);
+        if (restoredThreadIds !== undefined && restoredThreadIds.size > 0) {
+          this.core.connectionRestored(
+            `${provider} App Server 已重新连接`,
+            restoredThreadIds,
+          );
+        }
+        this.disconnectedBindingsByProvider.delete(provider);
         this.logger.info(
           {
             attempt,
@@ -1316,13 +1362,20 @@ export class GatewayApplication {
         continue;
       }
       const previous = this.pendingBindingRestores.get(failure.binding.threadId);
+      const failureCount = (previous?.failureCount ?? 0) + 1;
+      const shouldNotifyOccupied = failure.reason === "active-writer"
+        || (
+          failure.reason === "other"
+          && failureCount >= bindingRestoreEscalationAttempts
+        );
       const occupiedNotified = previous?.occupiedNotified === true
-        || failure.reason === "active-writer";
+        || shouldNotifyOccupied;
       this.pendingBindingRestores.set(failure.binding.threadId, {
         binding: failure.binding,
         occupiedNotified,
+        failureCount,
       });
-      if (failure.reason === "active-writer" && !previous?.occupiedNotified) {
+      if (shouldNotifyOccupied && !previous?.occupiedNotified) {
         this.publishThreadAvailability(failure.binding, "occupied");
       }
     }
@@ -1348,6 +1401,72 @@ export class GatewayApplication {
       availability,
       background: this.router.isBackgroundThread(binding.threadId),
     }, true);
+  }
+
+  private async releaseThread(
+    target: ConversationTarget,
+    force?: boolean,
+  ): Promise<ThreadOccupancyReleaseResult> {
+    const current = this.router.current(target);
+    if (!current) {
+      return { status: "unbound" };
+    }
+    const threadId = current.threadId;
+    const inspection = inspectThreadWriterLock(threadId);
+    if (!inspection.held) {
+      this.retryPendingBindingRestore(threadId);
+      return { status: "free", threadId };
+    }
+    if (inspection.holder === null) {
+      return { status: "unidentifiable", threadId };
+    }
+    const holder = inspection.holder;
+    const releasable = isReleaseableThreadWriterHolder(holder);
+    const stuck = this.pendingBindingRestores.has(threadId);
+    if (!force || !releasable) {
+      return {
+        status: "held",
+        threadId,
+        holder,
+        releasable,
+        stuck,
+      };
+    }
+    const recheck = inspectThreadWriterLock(threadId);
+    if (!recheck.held) {
+      this.retryPendingBindingRestore(threadId);
+      return { status: "released", threadId, holder };
+    }
+    if (recheck.holder === null || recheck.holder.pid !== holder.pid) {
+      return {
+        status: "held",
+        threadId,
+        holder: recheck.holder ?? holder,
+        releasable: recheck.holder === null
+          ? false
+          : isReleaseableThreadWriterHolder(recheck.holder),
+        stuck,
+      };
+    }
+    const exited = await terminateThreadWriterHolder(holder.pid);
+    if (!exited) {
+      return {
+        status: "held",
+        threadId,
+        holder,
+        releasable,
+        stuck,
+      };
+    }
+    this.retryPendingBindingRestore(threadId);
+    return { status: "released", threadId, holder };
+  }
+
+  private retryPendingBindingRestore(threadId: string): void {
+    if (!this.pendingBindingRestores.has(threadId)) {
+      return;
+    }
+    void this.restoreBindings(undefined, new Set([threadId]));
   }
 
   private scheduleBindingRestore(): void {
@@ -1391,6 +1510,11 @@ export class GatewayApplication {
 
 function isHighFrequencyNotification(method: string): boolean {
   return /\/(?:delta|outputDelta|progress)$/u.test(method);
+}
+
+function isReleaseableThreadWriterHolder(holder: ThreadLockHolder): boolean {
+  return /codex/u.test(holder.command)
+    && !/codexc\.mjs/u.test(holder.command);
 }
 
 function resolveRequestMetricsRange(

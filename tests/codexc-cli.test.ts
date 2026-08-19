@@ -118,6 +118,7 @@ describe("codexc CLI", () => {
       [["agents", "status", "--help"], "用法：codexc agents status"],
       [["agents", "configure", "-h"], "用法：codexc agents configure"],
       [["agents", "disable", "--help"], "用法：codexc agents disable"],
+      [["primary-provider", "-h"], "用法：codexc primary-provider"],
       [["opencode-go", "-h"], "用法：codexc opencode-go"],
       [["opencode-go", "account", "--help"], "用法：codexc opencode-go account"],
       [["opencode-go", "account", "add", "-h"], "用法：codexc opencode-go account add"],
@@ -160,7 +161,7 @@ describe("codexc CLI", () => {
     const configHelp = spawnSync(process.execPath, [cli, "config", "--help"], { encoding: "utf8" });
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
-    expect(setupHelp.stdout).toContain("修改模型设置（思考等级、自动压缩）");
+    expect(setupHelp.stdout).toContain("登录并恢复官方 / 默认模型与思考等级");
     const workHelp = spawnSync(process.execPath, [cli, "work", "--help"], { encoding: "utf8" });
     expect(workHelp.stdout).toContain("权限");
     for (const subcommand of ["run", "turns", "threads", "report", "export"]) {
@@ -192,6 +193,7 @@ describe("codexc CLI", () => {
       "work",
       "rules",
       "agents",
+      "primary-provider",
       "opencode-go",
       "metrics",
       "channel",
@@ -1278,6 +1280,61 @@ describe("codexc CLI", () => {
       lowerHttpsProxy: "http://127.0.0.1:8899",
       serviceRole: "app-server",
     });
+  });
+
+  it("starts a selected custom Responses Provider through the local metrics proxy", () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-custom-provider-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const capturePath = join(root, "capture.json");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { writeFileSync } from 'node:fs';",
+      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(process.argv.slice(2)));",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+      CODEX_TEST_CAPTURE: capturePath,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "gpt-5.6-terra"',
+      "",
+      "[model_providers.thirdparty]",
+      'name = "Third-party Responses"',
+      'base_url = "https://proxy.example.test/v1"',
+      'wire_api = "responses"',
+      "requires_openai_auth = true",
+      "supports_websockets = false",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    execFileSync(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: environment,
+    });
+
+    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
+      "-c",
+      'model_provider="thirdparty"',
+      "-c",
+      expect.stringMatching(/^model_providers\.thirdparty\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
+      "app-server",
+      "--listen",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+    ]);
   });
 
   it("starts the DeepSeek proxy for subagents without eagerly starting its App Server", () => {

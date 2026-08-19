@@ -1,4 +1,8 @@
 import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import {
+  loadConfiguredCustomPrimaryModelProvider,
+  readPrimaryProviderBackup,
+} from "../runtime/model-provider-runtime.mjs";
 
 export const metricsProviderIds = Object.freeze([
   "openai",
@@ -6,10 +10,19 @@ export const metricsProviderIds = Object.freeze([
 ]);
 export const metricsProviderUsage = metricsProviderIds.join("|");
 
-export function isMetricsProviderId(value) {
-  return new Set(metricsProviderIds).has(value)
+export function isMetricsProviderId(value, environment = process.env) {
+  if (typeof value !== "string") return false;
+  if (new Set(metricsProviderIds).has(value)
     || value === "opencode-go"
-    || /^opencode-go-[a-z0-9_-]{1,32}$/u.test(value);
+    || /^opencode-go-[a-z0-9_-]{1,32}$/u.test(value)) {
+    return true;
+  }
+  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);
+  if (customPrimaryProvider !== undefined && customPrimaryProvider.id === value) {
+    return true;
+  }
+  // 候选被 switch openai / 官方登录备份清理后，历史指标仍可按该 ID 清理。
+  return Object.prototype.hasOwnProperty.call(readPrimaryProviderBackup(environment), value);
 }
 
 export const metricsCommandUsage = Object.freeze({
@@ -90,7 +103,7 @@ export function parseMetricsOptions(args, allowed) {
   return result;
 }
 
-export function validateMetricsCommandArgs(subcommand, args) {
+export function validateMetricsCommandArgs(subcommand, args, environment = process.env) {
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   if (subcommand === "run") {
     parseMetricsRunArgs(withoutStdout);
@@ -131,7 +144,7 @@ export function validateMetricsCommandArgs(subcommand, args) {
     return;
   }
   if (subcommand === "prune") {
-    if (args.length !== 1 || !isMetricsProviderId(args[0])) {
+    if (args.length !== 1 || !isMetricsProviderId(args[0], environment)) {
       throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
     }
     return;

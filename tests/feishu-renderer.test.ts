@@ -946,4 +946,13 @@ describe("Feishu output renderer", () => {
     expect(rendered).toContain("登录失败，cookie=[已隐藏]");
     expect(rendered).toContain("配置无效，password=[已隐藏]");
   });
+
+  it("renders a connection restore notice", () => {
+    expect(renderFeishuOutput({
+      type: "connection.restored",
+      target,
+      threadId: "thread-1",
+      message: "Codex App Server 已重新连接，会话已恢复",
+    })).toBe("Codex 连接已恢复：Codex App Server 已重新连接，会话已恢复");
+  });
 });

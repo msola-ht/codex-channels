@@ -617,6 +617,71 @@ describe("ConversationCore", () => {
     }]);
   });
 
+  it("publishes a connection restore notice without clearing active state", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const router = {
+      allBindings: () => [{ target, threadId: "thread-1" }],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    } satisfies ConversationRoutingPort;
+    const core = new ConversationCore(router, output);
+    core.markTurnStarted(target, "thread-1", "turn-1");
+
+    core.connectionRestored("openai App Server 已重新连接");
+    await output.close();
+
+    expect(core.activeTurn(target)?.turnId).toBe("turn-1");
+    expect(events.filter((event) => event.type === "connection.restored")).toEqual([{
+      type: "connection.restored",
+      target,
+      threadId: "thread-1",
+      message: "openai App Server 已重新连接",
+    }]);
+  });
+
+  it("isolates a connection restore notice to its affected Threads", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const openaiTarget = {
+      surface: "telegram" as const,
+      accountId: "default",
+      conversationId: "openai",
+    };
+    const deepseekTarget = {
+      surface: "feishu" as const,
+      accountId: "default",
+      conversationId: "deepseek",
+    };
+    const core = new ConversationCore({
+      allBindings: () => [
+        { target: openaiTarget, threadId: "thread-openai" },
+        { target: deepseekTarget, threadId: "thread-deepseek" },
+      ],
+      targetForThread: () => undefined,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    core.connectionRestored("DeepSeek App Server 已重新连接", new Set(["thread-deepseek"]));
+    await output.close();
+
+    expect(events.filter((event) => event.type === "connection.restored")).toEqual([{
+      type: "connection.restored",
+      target: deepseekTarget,
+      threadId: "thread-deepseek",
+      message: "DeepSeek App Server 已重新连接",
+    }]);
+  });
+
   it("publishes sanitized operation snapshots for command and file items", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

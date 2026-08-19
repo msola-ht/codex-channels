@@ -86,6 +86,24 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("sends a connection restore notice", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "connection.restored",
+      target,
+      threadId: "thread",
+      message: "openai App Server 已重新连接",
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "Codex 连接已恢复：openai App Server 已重新连接",
+      }),
+    );
+  });
+
   it("asks for and renders the OpenCode Go remaining usage on completion", async () => {
     const requestStartedAtMs = Date.parse("2026-08-17T03:30:00.000Z");
     const remainingUsage = vi.fn<NonNullable<WeixinOutboxOptions["remainingUsage"]>>(async () => ({

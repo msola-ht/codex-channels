@@ -63,7 +63,7 @@ Actor、Conversation 或渠道使用。
 
 ## 配置
 
-运行 `codexc setup`，先选择“模型与提供商 → 第三方 API”添加一个或多个 Responses 兼容中转，
+运行 `codexc setup`，先选择“模型与提供商 → 第三方 → 第三方 API”添加一个或多个 Responses 兼容中转，
 分别填写提供商 ID、显示名称、精确接口地址和 API Key；再选择“图片识别 → 外部视觉 API”，
 从已登记的提供商中选择一个并填写视觉模型 ID。重复设置图片识别即可显式切换提供商。
 第三方 API 注册表不接入 Codex App Server，不会出现在 `/model`，也不改变 DeepSeek 配置。

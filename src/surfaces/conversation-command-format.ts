@@ -26,7 +26,10 @@ import {
   formatElapsedSeconds,
 } from "./elapsed-duration.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import { formatCodexProviderLabel } from "./provider-format.js";
+import {
+  formatCodexProviderLabel,
+  supportsFastMode,
+} from "./provider-format.js";
 import { formatCurrencyNanos } from "./reference-cost-format.js";
 import {
   formatCacheHitRate,
@@ -40,6 +43,7 @@ const maximumMcpHealthFindings = 8;
 const maximumMcpDetailSectionCharacters = 5_000;
 const maximumMcpDescriptionCharacters = 240;
 const maximumMcpOutputCharacters = 20_000;
+const maximumProcessCommandCharacters = 160;
 const mcpToolAccessNotice =
   "工具读写属性来自 MCP 上游声明，仅供提示；实际调用仍按审批策略处理。";
 
@@ -77,6 +81,7 @@ export const conversationCommandDescriptions = {
   plan: "切换 Plan 模式或直接开始规划",
   goal: "查看或管理 Goal",
   agents: "查看或调用子代理",
+  release: "查看或释放被占用的 Codex 会话",
 } satisfies Record<ConversationCommandName, string>;
 
 export const conversationCommandHelpSections = [
@@ -100,13 +105,14 @@ export const conversationCommandHelpSections = [
       "/stop · /queue <描述>",
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
+      "/release · /release force",
       "/plan [规划需求] · /goal [set <目标>|clear]",
     ],
   },
   {
     title: "模型与能力：",
     lines: [
-      "/model [序号|模型 ID|名称]",
+      "/model [序号|模型 ID|名称|clear]",
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill · /skills [名称或序号 任务]",
       "/agents [角色名称或序号 任务]",
@@ -432,6 +438,55 @@ export function formatConversationCommandOutcome(
         `目标：${outcome.goal.objective}`,
       ].join("\n"));
   }
+}
+
+export function formatConversationOccupancy(
+  result: Extract<ConversationCommandResult, { kind: "occupancy" }>,
+): string {
+  const { result: release } = result;
+  switch (release.status) {
+    case "unbound":
+      return toStructuredMarkdownList([
+        "当前会话没有绑定 Codex Thread，无需释放占用。",
+      ].join("\n"));
+    case "free":
+      return toStructuredMarkdownList([
+        "当前会话的 Codex Thread 未被占用。",
+        `Thread：${release.threadId}`,
+      ].join("\n"));
+    case "released":
+      return toStructuredMarkdownList([
+        "已释放 Codex Thread 占用，正在自动恢复订阅。",
+        `Thread：${release.threadId}`,
+        `占用进程：PID ${release.holder.pid}`,
+        formatProcessCommand(release.holder.command),
+      ].join("\n"));
+    case "held":
+      return toStructuredMarkdownList([
+        `Codex Thread 被 PID ${release.holder.pid} 占用。`,
+        `进程：${formatProcessCommand(release.holder.command)}`,
+        release.releasable
+          ? release.stuck
+            ? "当前会话恢复失败，可确认释放：/release force（会向该进程发送结束信号；若是 App Server 子进程，服务会自动重启并重连所有会话）。"
+            : "当前会话运行正常，通常无需释放；如确认需要，/release force 会结束该进程（App Server 子进程会重启并重连所有会话）。"
+          : "该进程无法自动释放，请关闭占用 Thread 的 Codex 客户端，或重启 App Server 服务。",
+        `Thread：${release.threadId}`,
+      ].join("\n"));
+    case "unidentifiable":
+      return toStructuredMarkdownList([
+        "无法识别占用 Codex Thread 的进程（当前平台不支持进程诊断）。",
+        "请关闭占用该 Thread 的 Codex 客户端，或重启 App Server 服务后等待自动恢复。",
+        `Thread：${release.threadId}`,
+      ].join("\n"));
+  }
+}
+
+function formatProcessCommand(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length <= maximumProcessCommandCharacters) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maximumProcessCommandCharacters - 1)}…`;
 }
 
 export function isTurnLifecycleAcknowledgedOutcome(
@@ -1232,7 +1287,7 @@ export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户用量查询。当前 Thread 的 Token 与上下文仍可通过 /status 查看。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户余额/额度查询。请求次数、Token 与费用可通过 /metrics 查看。`;
   }
   if (result.result.kind === "balance") {
     return toStructuredMarkdownList([
@@ -1333,7 +1388,7 @@ export function formatConversationLimits(
   result: Extract<ConversationCommandResult, { kind: "limits" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatCodexProviderLabel(result.result.provider)} 暂不支持账户限额查询。可使用 /usage 查看该提供商已接入的账户信息。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户限额查询。请求统计可通过 /metrics 查看。`;
   }
   const planType = result.result.limits.limits.find(
     (limit) => limit.planType,
@@ -1425,7 +1480,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
     `思考等级：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    ...(usesOpenAiAccount(status.modelProvider)
+    ...(supportsFastMode(status.modelProvider)
       ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
       : []),
     `协作模式：${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`,

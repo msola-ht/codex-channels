@@ -38,6 +38,7 @@ import {
   formatCliInput,
   formatCodexWarning,
   formatConnectionLost,
+  formatConnectionRestored,
   formatThreadAvailability,
 } from "../output-copy.js";
 import {
@@ -386,6 +387,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
       }
       case "connection.lost":
         return formatConnectionLost(visibleMessage(event.message));
+      case "connection.restored":
+        return formatConnectionRestored(visibleMessage(event.message));
       case "thread.availability":
         return formatThreadAvailability(
           event.availability,

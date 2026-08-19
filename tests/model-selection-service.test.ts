@@ -67,6 +67,25 @@ function createService(settings?: {
 }
 
 describe("ModelSelectionService", () => {
+  it("uses the configured primary Provider as the default before any selection", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      current: () => undefined,
+      modelSettings: () => undefined,
+      newSession: async () => undefined,
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, undefined, [], "OpenAI");
+
+    const state = await service.state(target);
+
+    expect(state.modelProvider).toBe("OpenAI");
+    expect(state.model).toBe("gpt-main");
+  });
+
   it("keeps identical model IDs from different Providers independently selectable", async () => {
     const sharedModel = "deepseek-v4-flash";
     const deepseek = { ...model(sharedModel, ["high"], "high"), provider: "deepseek" };
@@ -303,6 +322,72 @@ describe("ModelSelectionService", () => {
     service.restorePreference(target, preference);
 
     expect(service.turnOverrides(target)).toEqual({});
+  });
+
+  it("falls back to the custom primary Provider when capturing and restoring preferences", () => {
+    const currentSettings = {
+      model: "gpt-main",
+      effort: "medium",
+      serviceTier: "default",
+    } as {
+      model: string;
+      modelProvider?: string;
+      effort: string | null;
+      serviceTier: string | null;
+    };
+    const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      modelSettings: () => currentSettings,
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService({
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    }, router, undefined, [], "OpenAI");
+
+    const preference = service.capturePreference(target);
+
+    expect(preference?.modelProvider).toBe("OpenAI");
+
+    service.restorePreference(target, preference);
+
+    expect(service.turnOverrides(target)).toMatchObject({
+      modelProvider: "OpenAI",
+    });
+  });
+
+  it("normalizes a stale built-in Provider id to the custom primary Provider", () => {
+    let currentSettings = {
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: "default",
+    };
+    const router = {
+      current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
+      modelSettings: () => currentSettings,
+      updateModelSettings: (_threadId: string, next: typeof currentSettings) => {
+        currentSettings = next;
+      },
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService({
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    }, router, undefined, [], "OpenAI");
+
+    expect(service.status(target).modelProvider).toBe("OpenAI");
+    expect(service.capturePreference(target)?.modelProvider).toBe("OpenAI");
+
+    service.restorePreference(target, {
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: null,
+      serviceTier: "default",
+    });
+
+    expect(service.turnOverrides(target).modelProvider).toBe("OpenAI");
+    expect(service.threadStartOptions(target).modelProvider).toBe("OpenAI");
   });
 
   it("rejects an effort unsupported by the selected model", async () => {

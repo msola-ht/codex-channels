@@ -16,6 +16,10 @@ export function formatConnectionLost(message: string): string {
   return `Codex 连接已中断：${message}`;
 }
 
+export function formatConnectionRestored(message: string): string {
+  return `Codex 连接已恢复：${message}`;
+}
+
 export function formatThreadAvailability(
   availability: "occupied" | "available",
   threadId: string,

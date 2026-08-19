@@ -46,6 +46,8 @@ export type UserFacingErrorCode =
   | "thread.takeover.changed"
   | "goal.empty"
   | "goal.usage"
+  | "release.usage"
+  | "release.unsupported"
   | "queue.usage"
   | "metrics.usage"
   | "queue.inactive"

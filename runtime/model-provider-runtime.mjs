@@ -13,7 +13,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
-import { providerStorageRoot } from "./connect-home.mjs";
+import { connectHomePath, providerStorageRoot } from "./connect-home.mjs";
 import {
   deepseekProviderDefinition,
   loadManagedModelProviderDefinitions,
@@ -28,8 +28,84 @@ const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
 const managedThirdPartyRoleName = "external";
 const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
+const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon-bedrock"]);
+const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 
 const deepseekProvider = providerDescriptor(deepseekProviderDefinition);
+
+export function validateCustomPrimaryModelProviderId(id, environment = process.env) {
+  if (typeof id !== "string" || !customProviderIdPattern.test(id)) {
+    return "Provider ID 只能使用 1-64 位 ASCII 字母、数字、- 或 _";
+  }
+  if (
+    builtInModelProviderIds.has(id)
+    || managedProviderDefinitions(environment).some((definition) => definition.id === id)
+  ) {
+    return "该 Provider ID 已被 Codex 或 Gateway 保留";
+  }
+  return null;
+}
+
+export function listCustomPrimaryProviderCandidates(providers, environment = process.env) {
+  const entries = record(providers);
+  return Object.keys(entries).filter((candidate) => {
+    if (validateCustomPrimaryModelProviderId(candidate, environment) !== null) {
+      return false;
+    }
+    const provider = record(entries[candidate]);
+    return typeof provider.base_url === "string" && provider.wire_api === "responses";
+  });
+}
+
+export function primaryProviderBackupPath(environment = process.env) {
+  return join(connectHomePath(environment), "private", "primary-providers.json");
+}
+
+export function readPrimaryProviderBackup(environment = process.env) {
+  try {
+    return record(JSON.parse(readFileSync(primaryProviderBackupPath(environment), "utf8")));
+  } catch (error) {
+    if (error?.code === "ENOENT") return {};
+    // 备份文件包含用户 Key，解析失败不能把原文作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("主 Provider 备份无法安全读取");
+  }
+}
+
+export function backupPrimaryProviderCandidates(providers, environment = process.env) {
+  const candidates = listCustomPrimaryProviderCandidates(providers, environment);
+  if (candidates.length === 0) return candidates;
+  const next = { ...readPrimaryProviderBackup(environment) };
+  for (const id of candidates) {
+    next[id] = record(providers[id]);
+  }
+  writePrivateFileAtomicSync(
+    primaryProviderBackupPath(environment),
+    `${JSON.stringify(next, null, 2)}\n`,
+  );
+  return candidates;
+}
+
+export function restorePrimaryProviderCandidateEdits(id, environment = process.env) {
+  const provider = record(readPrimaryProviderBackup(environment)[id]);
+  if (typeof provider.base_url !== "string") return undefined;
+  return [
+    { keyPath: `model_providers.${id}.name`, value: provider.name ?? id },
+    { keyPath: `model_providers.${id}.base_url`, value: provider.base_url },
+    { keyPath: `model_providers.${id}.wire_api`, value: "responses" },
+    { keyPath: `model_providers.${id}.requires_openai_auth`, value: provider.requires_openai_auth === true },
+    { keyPath: `model_providers.${id}.supports_websockets`, value: provider.supports_websockets === true },
+    ...(typeof provider.env_key === "string"
+      ? [{ keyPath: `model_providers.${id}.env_key`, value: provider.env_key }]
+      : [{ keyPath: `model_providers.${id}.env_key`, value: null }]),
+    ...(typeof provider.experimental_bearer_token === "string"
+      ? [{
+          keyPath: `model_providers.${id}.experimental_bearer_token`,
+          value: provider.experimental_bearer_token,
+        }]
+      : [{ keyPath: `model_providers.${id}.experimental_bearer_token`, value: null }]),
+  ];
+}
 
 export function managedProviderDirectory(environment, definition) {
   return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
@@ -231,12 +307,80 @@ export function withPreservedManagedModelCatalogSettings(
 }
 
 export function loadPrimaryModelProvider(environment = process.env) {
-  const exclusiveProviders = managedProviderDefinitions(environment).filter((definition) =>
-    readManagedMarker(environment, definition)?.mode === "exclusive");
+  const exclusiveProviders = exclusiveManagedProviders(environment);
   if (exclusiveProviders.length > 1) {
     throw new Error("只能有一个受管第三方 Provider 使用固定模式");
   }
-  return exclusiveProviders[0]?.id ?? "openai";
+  if (exclusiveProviders[0] !== undefined) return exclusiveProviders[0].id;
+  // Gateway 的主 App Server 始终使用稳定的 openai 路由键；自定义 Provider 只改变其上游。
+  loadConfiguredCustomPrimaryModelProvider(environment);
+  return "openai";
+}
+
+export function loadConfiguredCustomPrimaryModelProvider(environment = process.env) {
+  if (exclusiveManagedProviders(environment).length > 0) return undefined;
+  const path = join(codexHomePath(environment), "config.toml");
+  let document;
+  try {
+    document = record(parse(readCodexConfigFile(path)));
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    // TOML 解析错误可能包含用户配置原文，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("Codex 主模型 Provider 配置无法安全读取");
+  }
+  const providers = record(document.model_providers);
+  const configuredIds = listCustomPrimaryProviderCandidates(providers, environment);
+  let id = document.model_provider;
+  if (id === "openai") {
+    // 显式选择官方时锁定官方，不自动激活候选。
+    return undefined;
+  }
+  if (id === undefined) {
+    if (configuredIds.length === 0) return undefined;
+    if (configuredIds.length > 1) {
+      // 多个候选且未显式选择时保持官方主 Provider，候选可通过 primary-provider 命令切换。
+      return undefined;
+    }
+    [id] = configuredIds;
+  }
+  const reservedError = validateCustomPrimaryModelProviderId(id, environment);
+  if (reservedError !== null) {
+    throw new Error(`Codex 主模型 Provider 不受 Gateway 支持：${id}`);
+  }
+  const provider = record(providers[id]);
+  if (
+    typeof document.openai_base_url === "string"
+    && document.openai_base_url.trim() !== ""
+  ) {
+    throw new Error(
+      "官方顶层 openai_base_url 与自定义主 Provider 不能同时配置；请移除顶层 openai_base_url",
+    );
+  }
+  const baseUrl = provider.base_url;
+  if (typeof baseUrl !== "string") {
+    throw new Error(`Codex 主模型 Provider ${id} 缺少 base_url`);
+  }
+  const normalizedBaseUrl = validProviderBaseUrl(baseUrl, `Codex 主模型 Provider ${id}`);
+  if (provider.wire_api !== undefined && provider.wire_api !== "responses") {
+    throw new Error(`Codex 主模型 Provider ${id} 只支持 Responses API`);
+  }
+  if (
+    provider.supports_websockets !== undefined
+    && typeof provider.supports_websockets !== "boolean"
+  ) {
+    throw new Error(`Codex 主模型 Provider ${id} 的 supports_websockets 无效`);
+  }
+  if (
+    provider.requires_openai_auth !== undefined
+    && typeof provider.requires_openai_auth !== "boolean"
+  ) {
+    throw new Error(`Codex 主模型 Provider ${id} 的 requires_openai_auth 无效`);
+  }
+  return {
+    id,
+    baseUrl: normalizedBaseUrl,
+  };
 }
 
 export function loadOpenAiBaseUrl(environment = process.env) {
@@ -269,6 +413,30 @@ export function loadOpenAiBaseUrl(environment = process.env) {
     || url.hash !== ""
   ) {
     throw new Error("Codex openai_base_url 必须是无凭据、查询和片段的 HTTP(S) URL");
+  }
+  return url.toString();
+}
+
+function exclusiveManagedProviders(environment) {
+  return managedProviderDefinitions(environment).filter((definition) =>
+    readManagedMarker(environment, definition)?.mode === "exclusive");
+}
+
+export function validProviderBaseUrl(value, label) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} base_url 必须是 HTTP(S) URL`);
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:")
+    || url.username !== ""
+    || url.password !== ""
+    || url.search !== ""
+    || url.hash !== ""
+  ) {
+    throw new Error(`${label} base_url 必须是无凭据、查询和片段的 HTTP(S) URL`);
   }
   return url.toString();
 }

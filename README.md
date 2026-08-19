@@ -135,9 +135,41 @@ plugin_api = true
 
 ### Codex 官方
 
-在 `codexc setup` 中选择“模型与提供商 → Codex 官方”，可从当前 Codex 模型目录设置全局默认模型和
+在 `codexc setup` 中选择“模型与提供商 → 官方 → 默认模型与思考等级”，可从当前 Codex 模型目录设置全局默认模型和
 思考等级。设置通过 App Server 写入 `~/.codex/config.toml`，不修改 Codex 登录状态；完成后运行
 `codexc service restart all`，让新 App Server 会话使用新的默认值。
+
+### 自定义第三方 Provider
+
+渠道支持使用 Codex 主配置中选中的 OpenAI 兼容 Responses Provider，不需要模型目录。运行
+`codexc setup`，选择“模型与提供商 → 第三方 → 自定义第三方 → 新增或更新”，按提示填写
+上游地址、认证方式与默认模型即可写入配置（Provider ID 固定为 `OpenAI`，不能使用保留的
+`openai`）。认证方式支持“直接写入 API Key”（写入
+`experimental_bearer_token`，明文保存在 0600 的 `~/.codex/config.toml`），第三方主 API 不再依赖
+官方 auth.json，官方凭据不受影响；也可手写配置，示例和能力边界见
+[`第三方模型 Provider 接入指南`](docs/provider-integration-guide.md)。可配置多个自定义候选，
+但同一时刻只激活一个，通过 `codexc primary-provider` 管理：
+
+```bash
+codexc primary-provider list                 # 查看当前激活项与候选列表
+codexc primary-provider add                  # 交互式新增或更新并激活
+codexc primary-provider switch openai        # 切回官方（不运行登录，官方凭据保留）
+codexc primary-provider switch <Provider ID> [模型]   # 切换激活项（模型缺省保持不变）
+codexc primary-provider remove <Provider ID> # 删除候选；删除激活项时恢复官方
+```
+
+选择“模型与提供商 → 官方 → 登录并恢复官方”会运行 `codex login --device-auth`，打开终端显示的
+链接并输入验证码完成登录，然后停用自定义主 Provider：候选块移入
+`~/.codex-connect/private/` 私有备份并从 config 清理，之后可用
+`codexc primary-provider switch <Provider ID>` 自动恢复切回。
+修改后运行：
+
+```bash
+codexc service restart all
+```
+
+旧会话仍使用创建时的 Provider；切换后请先 `/new` 创建新会话，新配置才会生效。若之前用
+`/model` 选过模型，先执行 `/model clear` 清除会话偏好，否则它仍会覆盖配置文件默认值。
 
 ### DeepSeek
 
@@ -268,7 +300,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
 - Workspace：`/workspace`、`/workspaceperm`
-- 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`
+- 运行：`/status`、`/stop`、`/queue <描述>`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`
@@ -285,6 +317,9 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 `/sessions` 与 `/archived` 支持分页和组合筛选；`/pin` 与 `/unpin` 管理当前会话的内置 Pinned 状态，
 `/section` 查看 App Server 原生全局分区，自定义分区写操作需要配置管理员。完整语法以 `/help` 为准，协议与安全边界见
 [`docs/index.md`](docs/index.md)。
+
+`/release` 查看当前会话的 Codex Thread 是否被其他客户端占用；确认后 `/release force` 会结束占用进程并
+自动重试恢复，App Server 子进程被结束时服务会自动重启。
 
 命令、文件修改和额外权限默认不会自动批准。审批、用户输入和 MCP 交互会逐项显示，并绑定当前
 用户、会话和 Turn。

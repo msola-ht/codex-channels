@@ -136,6 +136,7 @@ describe("Codex Connect setup", () => {
       intro: vi.fn(),
       select: vi.fn()
         .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("third_party")
         .mockResolvedValueOnce("deepseek"),
       isCancel: () => false,
       cancel: vi.fn(),
@@ -156,13 +157,14 @@ describe("Codex Connect setup", () => {
     expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts, allowBack: true });
   });
 
-  it("selects official Codex global model settings under models and providers", async () => {
+  it("selects official Codex global model settings under the official category", async () => {
     const input = {};
     const output = {};
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
         .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("official")
         .mockResolvedValueOnce("codex"),
       isCancel: () => false,
       cancel: vi.fn(),
@@ -182,21 +184,86 @@ describe("Codex Connect setup", () => {
       prompts,
       allowBack: true,
     });
-    const modelOptions = prompts.select.mock.calls[1]?.[0]?.options ?? [];
-    expect(modelOptions).toContainEqual({
+    const categoryOptions = prompts.select.mock.calls[1]?.[0]?.options ?? [];
+    expect(categoryOptions).toContainEqual({
+      value: "official",
+      label: "官方",
+      hint: "OpenAI 官方登录与默认模型",
+    });
+    expect(categoryOptions).toContainEqual({
+      value: "third_party",
+      label: "第三方",
+      hint: "自定义第三方、DeepSeek 官方、OpenCode Go 官方等",
+    });
+    const officialOptions = prompts.select.mock.calls[2]?.[0]?.options ?? [];
+    expect(officialOptions).toContainEqual({
+      value: "official_login",
+      label: "登录并恢复官方",
+      hint: "运行 codex login --device-auth，输入终端显示的验证码并停用自定义主 Provider",
+    });
+    expect(officialOptions).toContainEqual({
       value: "codex",
-      label: "Codex 官方",
-      hint: "设置全局默认模型与思考等级",
+      label: "默认模型与思考等级",
+      hint: "设置 Codex 官方全局默认值",
     });
-    expect(modelOptions).toContainEqual({
-      value: "deepseek",
-      label: "DeepSeek",
-      hint: "安装、切换、恢复或修改模型设置（思考等级、自动压缩）",
+  });
+
+  it("selects the custom primary Provider setup under models and providers", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("third_party")
+        .mockResolvedValueOnce("custom_primary"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const customPrimarySetup = vi.fn(async () => "custom-primary-configured");
+
+    const result = await runSetup({
+      input,
+      output,
+      prompts,
+      customPrimarySetup,
     });
-    expect(modelOptions).toContainEqual({
-      value: "opencode-go",
-      label: "OpenCode Go",
-      hint: "安装、移除或修改模型设置（思考等级、自动压缩）",
+
+    expect(result).toBe("custom-primary-configured");
+    expect(customPrimarySetup).toHaveBeenCalledWith({
+      input,
+      output,
+      prompts,
+      allowBack: true,
+    });
+  });
+
+  it("selects the official login setup under models and providers", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("official")
+        .mockResolvedValueOnce("official_login"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const officialLoginSetup = vi.fn(async () => "official-login-configured");
+
+    const result = await runSetup({
+      input,
+      output,
+      prompts,
+      officialLoginSetup,
+    });
+
+    expect(result).toBe("official-login-configured");
+    expect(officialLoginSetup).toHaveBeenCalledWith({
+      input,
+      output,
+      prompts,
     });
   });
 
@@ -207,6 +274,7 @@ describe("Codex Connect setup", () => {
       intro: vi.fn(),
       select: vi.fn()
         .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("third_party")
         .mockResolvedValueOnce("provider_default"),
       isCancel: () => false,
       cancel: vi.fn(),
@@ -226,7 +294,7 @@ describe("Codex Connect setup", () => {
       prompts,
       allowBack: true,
     });
-    expect(prompts.select.mock.calls[1]?.[0]?.options).toContainEqual({
+    expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "provider_default",
       label: "第三方模型设置",
       hint: "按 Provider 和模型设置默认值、思考等级与自动压缩",
@@ -239,6 +307,7 @@ describe("Codex Connect setup", () => {
       intro: vi.fn(),
       select: vi.fn()
         .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("third_party")
         .mockResolvedValueOnce("vision"),
       isCancel: () => false,
       cancel: vi.fn(),
@@ -262,6 +331,7 @@ describe("Codex Connect setup", () => {
       intro: vi.fn(),
       select: vi.fn()
         .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("third_party")
         .mockResolvedValueOnce("api_provider"),
       isCancel: () => false,
       cancel: vi.fn(),
@@ -311,6 +381,7 @@ describe("Codex Connect setup", () => {
     const deepseekSetup = vi.fn(async () => ({ action: "back" }));
     const select = vi.fn()
       .mockResolvedValueOnce("models")
+      .mockResolvedValueOnce("third_party")
       .mockResolvedValueOnce("deepseek")
       .mockResolvedValueOnce("cancel");
 
@@ -331,7 +402,7 @@ describe("Codex Connect setup", () => {
 
     expect(result).toBeUndefined();
     expect(deepseekSetup).toHaveBeenCalledWith(expect.objectContaining({ allowBack: true }));
-    expect(select).toHaveBeenCalledTimes(3);
+    expect(select).toHaveBeenCalledTimes(4);
     expect(cancel).toHaveBeenCalledWith("Setup 已取消");
   });
 
