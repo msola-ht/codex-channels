@@ -206,7 +206,7 @@ describe("Codex Connect setup", () => {
     expect(modelOptions).toContainEqual({
       value: "custom_primary",
       label: "自定义主 Provider",
-      hint: "配置 OpenAI 兼容中转作为主 Provider（模型、地址、认证）",
+      hint: "新增、列表、切换或删除 OpenAI 兼容中转主 Provider",
     });
   });
 

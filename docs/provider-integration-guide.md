@@ -160,10 +160,11 @@ requires_openai_auth = true
 supports_websockets = false
 ```
 
-官方与第三方主 Provider 只能同时存在一个：配置自定义主 Provider 时不能同时设置顶层
-`openai_base_url`，多个自定义主 Provider 块也会失败关闭。可通过 `codexc setup` 的
-“官方登录模式”运行 `codex login` 并清除自定义配置恢复官方，或通过“自定义主 Provider”写入
-第三方配置并自动移除顶层地址与旧块。
+可配置多个自定义主 Provider 候选块，但同一时刻只激活一个：`model_provider` 显式选中时激活
+该候选，未选中时保持官方 OpenAI（只有一个候选且未选中时仍沿用该候选兼容旧配置）。配置
+自定义主 Provider 时不能同时设置顶层 `openai_base_url`。通过 `codexc primary-provider` 的
+`add` / `switch` / `remove` 管理候选与激活状态；`codexc setup` 的“官方登录模式”会运行
+`codex login` 并清除自定义配置恢复官方。
 
 `requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；也可以按 Codex 官方配置使用
 `env_key`。Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询

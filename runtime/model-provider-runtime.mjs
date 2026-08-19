@@ -279,12 +279,13 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
   }
   const providers = record(document.model_providers);
   const configuredIds = listCustomPrimaryProviderCandidates(providers);
-  if (configuredIds.length > 1) {
-    throw new Error("同一时刻只能配置一个自定义主模型 Provider");
-  }
   let id = document.model_provider;
   if (id === undefined || id === "openai") {
     if (configuredIds.length === 0) return undefined;
+    if (configuredIds.length > 1) {
+      // 多个候选且未显式选择时保持官方主 Provider，候选可通过 primary-provider 命令切换。
+      return undefined;
+    }
     [id] = configuredIds;
   }
   const reservedError = validateCustomPrimaryModelProviderId(id);

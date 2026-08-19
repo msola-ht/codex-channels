@@ -98,7 +98,7 @@ describe("custom primary Provider setup", () => {
     expect(client.close).toHaveBeenCalledTimes(1);
   });
 
-  it("removes stale custom Provider blocks when switching the primary", async () => {
+  it("removes the top-level base URL while keeping other candidates", async () => {
     const client = {
       connect: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
@@ -153,11 +153,11 @@ describe("custom primary Provider setup", () => {
 
     expect(result).toEqual({ provider: "OpenAI", model: "gpt-5.6-sol" });
     const edits = vi.mocked(client.writeUserConfigEdits).mock.calls[0]?.[0];
-    expect(edits).toContainEqual({
+    expect(edits).not.toContainEqual({
       keyPath: "model_providers.thirdparty",
       value: null,
     });
-    expect(edits).toContainEqual({
+    expect(edits).not.toContainEqual({
       keyPath: "model_providers.oldone",
       value: null,
     });
@@ -171,7 +171,7 @@ describe("custom primary Provider setup", () => {
     });
   });
 
-  it("keeps unrelated non-Responses provider blocks when switching the primary", async () => {
+  it("keeps other candidates and unrelated blocks when switching the primary", async () => {
     const client = {
       connect: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
@@ -224,13 +224,13 @@ describe("custom primary Provider setup", () => {
     });
 
     const edits = vi.mocked(client.writeUserConfigEdits).mock.calls[0]?.[0];
-    expect(edits).toContainEqual({
-      keyPath: "model_providers.thirdparty",
-      value: null,
-    });
     expect(edits).not.toContainEqual({
       keyPath: "model_providers.chatapi",
       value: null,
+    });
+    expect(edits).toContainEqual({
+      keyPath: "model_provider",
+      value: "OpenAI",
     });
   });
 

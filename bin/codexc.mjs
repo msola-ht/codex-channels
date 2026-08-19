@@ -102,6 +102,7 @@ const helpText = {
   work                         管理 Workspace（交互菜单或子命令）
   rules                        管理项目 Codex 命令预设
   agents                       管理共享第三方子代理
+  primary-provider             管理第三方主 Provider（新增、列表、切换、删除）
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
@@ -182,6 +183,20 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   configure <Provider> [模型]  配置共享第三方子代理（agents.external）
   disable                    移除共享第三方子代理
   status                     查看当前状态`,
+  "primary-provider": `用法：codexc primary-provider <list|add|switch|remove> [参数]
+
+管理 Codex 第三方主 Provider：可配置多个候选，但同一时刻只激活一个。
+
+  codexc primary-provider list
+    列出当前激活的主 Provider 与全部自定义候选。
+  codexc primary-provider add
+    交互式新增或更新一个自定义主 Provider，并立即激活。
+  codexc primary-provider switch <Provider ID> [模型]
+    切换到已配置的自定义主 Provider；模型缺省保持当前设置。
+  codexc primary-provider remove <Provider ID>
+    删除候选；若删除的是当前激活项，将恢复官方 OpenAI 主 Provider。
+
+修改后运行 codexc service restart all 生效。`,
   "agents.configure": `用法：codexc agents configure <Provider> [模型]
 
 选择已配置的第三方 Provider 与模型，启用 multi_agent_v2 并注册 agents.external。`,
@@ -412,6 +427,14 @@ try {
       break;
     case "agents":
       agents(args);
+      break;
+    case "primary-provider":
+      if (showRequestedHelp(args, "primary-provider")) {
+        break;
+      }
+      runScript("scripts/primary-provider-cli.mjs", args, {
+        failureReportedByChild: true,
+      });
       break;
     case "update":
       if (showRequestedHelp(args, "update")) {

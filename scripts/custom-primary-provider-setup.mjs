@@ -1,7 +1,6 @@
 import * as clackPrompts from "@clack/prompts";
 
 import {
-  listCustomPrimaryProviderCandidates,
   validateCustomPrimaryModelProviderId,
   validProviderBaseUrl,
 } from "../runtime/model-provider-runtime.mjs";
@@ -181,28 +180,13 @@ export async function runCustomPrimaryProviderSetup({
   }
   const normalizedModel = String(model).trim();
 
-  const staleProviderIds = [
-    ...listCustomPrimaryProviderCandidates(currentProviders).filter((id) => id !== normalizedId),
-    ...(currentProviderId !== undefined
-      && currentProviderId !== normalizedId
-      && validateCustomPrimaryModelProviderId(currentProviderId) === null
-      ? [currentProviderId]
-      : []),
-  ];
-  const uniqueStaleProviderIds = [...new Set(staleProviderIds)];
   const removesTopLevelBaseUrl = hasTopLevelBaseUrl;
-  if (uniqueStaleProviderIds.length > 0 || removesTopLevelBaseUrl) {
+  if (removesTopLevelBaseUrl) {
     output.write(
-      `检测到需要清理的官方/旧配置：${
-        uniqueStaleProviderIds.length > 0
-          ? `自定义主 Provider 块 ${uniqueStaleProviderIds.join("、")}`
-          : ""
-      }${uniqueStaleProviderIds.length > 0 && removesTopLevelBaseUrl ? "、" : ""}`
-      + `${removesTopLevelBaseUrl ? "顶层 openai_base_url" : ""}；`
-      + "官方与第三方主 Provider 只能同时存在一个。\n",
+      "检测到顶层 openai_base_url：官方与自定义主 Provider 不能同时配置，写入时将移除该顶层地址。\n",
     );
     const removeConfirmed = await prompts.confirm({
-      message: "是否移除这些旧配置？",
+      message: "是否移除顶层 openai_base_url？",
       initialValue: true,
     });
     if (prompts.isCancel(removeConfirmed) || removeConfirmed !== true) {
@@ -233,10 +217,6 @@ export async function runCustomPrimaryProviderSetup({
   }
 
   const edits = [
-    ...uniqueStaleProviderIds.map((id) => ({
-      keyPath: `model_providers.${id}`,
-      value: null,
-    })),
     ...(removesTopLevelBaseUrl
       ? [{ keyPath: "openai_base_url", value: null }]
       : []),

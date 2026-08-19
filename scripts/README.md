@@ -95,8 +95,11 @@
   自定义主 Provider、第三方模型设置、第三方 API 与图片识别。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 自定义主 Provider”；
   引导填写 Provider ID、上游 `base_url`、认证方式、WebSocket 开关与默认模型，通过 Codex
-  `config/batchWrite` 原子写入 `~/.codex/config.toml` 的自定义主 Provider 块，并清理旧的
-  自定义块与顶层 `openai_base_url`，保证官方与第三方主 Provider 只能存在一个。
+  `config/batchWrite` 原子写入 `~/.codex/config.toml` 的自定义主 Provider 块并激活；保留其他
+  候选块，只移除与自定义主 Provider 冲突的顶层 `openai_base_url`。
+- `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
+  list / add / switch / remove 子命令；list 与 switch / remove 复用 Codex 用户配置事务读取和
+  原子写入，add 复用自定义主 Provider Setup 的交互流程。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → 官方登录模式”；运行
   `codex login` 完成官方登录，并通过 `config/batchWrite` 清除自定义主 Provider 块与顶层
   `openai_base_url`，把主 Provider 恢复为官方 OpenAI。

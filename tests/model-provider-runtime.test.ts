@@ -145,7 +145,7 @@ describe("model provider runtime topology", () => {
       .toThrow("base_url 必须是无凭据、查询和片段的 HTTP(S) URL");
   });
 
-  it("rejects multiple custom Responses Provider blocks", async () => {
+  it("keeps the official primary when multiple candidates have no explicit selection", async () => {
     const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-ambiguous-"));
     writeFileSync(join(codexHome, "config.toml"), [
       "[model_providers.first]",
@@ -158,11 +158,11 @@ describe("model provider runtime topology", () => {
       "",
     ].join("\n"), { mode: 0o600 });
 
-    expect(() => loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
-      .toThrow("同一时刻只能配置一个自定义主模型 Provider");
+    expect(loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
+      .toBeUndefined();
   });
 
-  it("rejects multiple custom Responses Provider blocks even with one selected", async () => {
+  it("activates the explicitly selected candidate among multiple blocks", async () => {
     const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-selected-ambiguous-"));
     writeFileSync(join(codexHome, "config.toml"), [
       'model_provider = "first"',
@@ -177,8 +177,11 @@ describe("model provider runtime topology", () => {
       "",
     ].join("\n"), { mode: 0o600 });
 
-    expect(() => loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
-      .toThrow("同一时刻只能配置一个自定义主模型 Provider");
+    expect(loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))
+      .toEqual({
+        id: "first",
+        baseUrl: "https://first.example.test/v1",
+      });
   });
 
   it("rejects a custom primary Provider together with a top-level official base URL", async () => {

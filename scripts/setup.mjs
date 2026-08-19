@@ -13,7 +13,7 @@ import { runSkillSetup } from "./skill-setup.mjs";
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 import { runOpenCodeGoSetup } from "./opencode-go-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
-import { runCustomPrimaryProviderSetup } from "./custom-primary-provider-setup.mjs";
+import { runCustomPrimaryProviderMenu } from "./primary-provider-cli.mjs";
 import { runOfficialLoginSetup } from "./official-login-setup.mjs";
 
 export async function runSetup({
@@ -30,7 +30,7 @@ export async function runSetup({
   codexDefaultsSetup = runCodexDefaultsSetup,
   openCodeGoSetup = runOpenCodeGoSetup,
   modelProviderDefaultSetup = runModelProviderDefaultSetup,
-  customPrimarySetup = runCustomPrimaryProviderSetup,
+  customPrimarySetup = runCustomPrimaryProviderMenu,
   officialLoginSetup = runOfficialLoginSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
@@ -150,7 +150,7 @@ async function runModelSetup({
       {
         value: "custom_primary",
         label: "自定义主 Provider",
-        hint: "配置 OpenAI 兼容中转作为主 Provider（模型、地址、认证）",
+        hint: "新增、列表、切换或删除 OpenAI 兼容中转主 Provider",
       },
       {
         value: "provider_default",

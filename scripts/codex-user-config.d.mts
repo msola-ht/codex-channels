@@ -54,7 +54,8 @@ export interface CodexUserConfigClient
 export function writeCodexUserConfigEdits(
   environment: NodeJS.ProcessEnv,
   edits: CodexUserConfigEdit[],
-  dependencies?: {
+  options?: {
+    expectedVersion?: string;
     createClient?: (options: {
       environment: NodeJS.ProcessEnv;
     }) => Promise<CodexUserConfigTransactionClient>;
@@ -72,6 +73,18 @@ export function updateCodexUserConfig(
     }) => Promise<CodexUserConfigTransactionClient>;
   },
 ): Promise<void>;
+
+export function readCodexUserConfigSnapshot(
+  environment: NodeJS.ProcessEnv,
+  dependencies?: {
+    createClient?: (options: {
+      environment: NodeJS.ProcessEnv;
+    }) => Promise<CodexUserConfigTransactionClient>;
+  },
+): Promise<{
+  config: Record<string, CodexUserConfigValue | undefined>;
+  version: string;
+}>;
 
 export function createCodexUserConfigClient(options?: {
   environment?: NodeJS.ProcessEnv;
