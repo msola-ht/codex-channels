@@ -103,7 +103,7 @@ describe("OpenCode Go setup", () => {
         auto_compact_token_limit: 600_000,
       });
       expect(parse(readFileSync(
-        join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"),
+        join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"),
         "utf8",
       ))).toEqual({ version: 1, provider: "opencode-go", mode });
       expect(configureRole).toHaveBeenCalledWith(
@@ -164,7 +164,7 @@ describe("OpenCode Go setup", () => {
     expect(result).toMatchObject({ action: "restored" });
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"))).toBe(false);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(false);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
   });
@@ -288,11 +288,11 @@ describe("OpenCode Go setup", () => {
       output: { write: () => undefined },
       prompter: prompt("switching"),
       downloadCatalog: successfulCatalog,
-    })).rejects.toThrow("已占用 OpenCode Go Provider 或 Profile");
+    })).rejects.toThrow("已占用 opencode-go Provider 或 Profile");
 
     expect(readFileSync(configPath, "utf8")).toBe(original);
     expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"))).toBe(false);
   });
 
   it("rolls back every file when shared-role configuration fails", async () => {
@@ -310,7 +310,7 @@ describe("OpenCode Go setup", () => {
 
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"))).toBe(false);
   });
 });
 
@@ -331,6 +331,8 @@ function opencodeFixture(): string {
     "opencode-go",
   );
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  const accountDirectory = join(providerDirectory, "accounts", "opencode-go");
+  mkdirSync(accountDirectory, { recursive: true, mode: 0o700 });
   const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
@@ -347,7 +349,12 @@ function opencodeFixture(): string {
     "",
   ].join("\n");
   writeFileSync(
-    join(providerDirectory, "managed.toml"),
+    join(providerDirectory, "accounts.json"),
+    `${JSON.stringify([{ id: "opencode-go", default: true }], null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(accountDirectory, "managed.toml"),
     'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
     { mode: 0o600 },
   );

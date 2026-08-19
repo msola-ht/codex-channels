@@ -4,13 +4,11 @@ import { basename, dirname, extname, resolve } from "node:path";
 
 import WebSocket from "ws";
 
-import { managedModelProviderDefinitions } from "./model-provider-definitions.mjs";
-
 const protocolVersion = 2;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 1_024;
 const connectionTimeoutMs = 1_000;
-const managedProviderIds = new Set(managedModelProviderDefinitions.map(({ id }) => id));
+const providerIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 
 export class AppServerSupervisorOwner {
   #identity;
@@ -19,8 +17,9 @@ export class AppServerSupervisorOwner {
   #sockets = new Set();
   #closePromise;
   #ensureProvider;
+  #releaseProvider;
 
-  constructor(primarySocketPath, topology, { ensureProvider } = {}) {
+  constructor(primarySocketPath, topology, { ensureProvider, releaseProvider } = {}) {
     this.#socketPath = appServerSupervisorSocketPath(primarySocketPath);
     const payload = `${JSON.stringify({
       version: protocolVersion,
@@ -30,6 +29,7 @@ export class AppServerSupervisorOwner {
       socketPaths: topology.socketPaths,
     })}\n`;
     this.#ensureProvider = ensureProvider;
+    this.#releaseProvider = releaseProvider;
     this.#server = createServer({ allowHalfOpen: true }, (socket) => {
       this.#sockets.add(socket);
       const chunks = [];
@@ -63,9 +63,38 @@ export class AppServerSupervisorOwner {
       socket.end(topologyPayload);
       return;
     }
+    if (request?.action === "releaseProvider") {
+      if (
+        typeof request.provider !== "string"
+        || !providerIdPattern.test(request.provider)
+        || !this.#releaseProvider
+      ) {
+        socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
+        return;
+      }
+      socket.setTimeout(15_000, () => socket.destroy());
+      try {
+        const released = await this.#releaseProvider(request.provider);
+        socket.end(`${JSON.stringify({
+          version: protocolVersion,
+          ok: true,
+          provider: request.provider,
+          released,
+        })}\n`);
+      } catch (error) {
+        socket.end(`${JSON.stringify({
+          version: protocolVersion,
+          ok: false,
+          provider: request.provider,
+          error: error instanceof Error ? error.message.slice(0, 512) : "释放失败",
+        })}\n`);
+      }
+      return;
+    }
     if (
       request?.action !== "ensureProvider"
       || typeof request.provider !== "string"
+      || !providerIdPattern.test(request.provider)
       || !this.#ensureProvider
     ) {
       socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
@@ -172,6 +201,29 @@ export async function ensureAppServerProvider(primarySocketPath, provider) {
         : `模型 Provider 启动失败：${provider}`,
     );
   }
+}
+
+export async function releaseAppServerProvider(primarySocketPath, provider) {
+  const socketPath = appServerSupervisorSocketPath(primarySocketPath);
+  assertSafeSupervisorSocket(socketPath);
+  const response = await readSupervisorResponse(socketPath, {
+    action: "releaseProvider",
+    provider,
+  }, 15_000);
+  let value;
+  try {
+    value = JSON.parse(response?.trim() ?? "");
+  } catch {
+    throw new Error(`模型 Provider 释放请求没有有效响应：${provider}`);
+  }
+  if (value?.version !== protocolVersion || value.provider !== provider || value.ok !== true) {
+    throw new Error(
+      typeof value?.error === "string" && value.error
+        ? value.error
+        : `模型 Provider 释放失败：${provider}`,
+    );
+  }
+  return value.released === true;
 }
 
 function assertSafeSupervisorSocket(socketPath) {
@@ -312,7 +364,7 @@ function parseTopology(response) {
     || value.pid <= 0
     || typeof value.primaryProvider !== "string"
     || !Array.isArray(value.managedProviders)
-    || value.managedProviders.some((provider) => !managedProviderIds.has(provider))
+    || value.managedProviders.some((provider) => !providerIdPattern.test(provider))
     || new Set(value.managedProviders).size !== value.managedProviders.length
     || !Array.isArray(value.socketPaths)
     || value.socketPaths.length < 1

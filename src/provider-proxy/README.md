@@ -38,7 +38,10 @@
   避免紧随其后的关闭事件重复写入。
   其他路径以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
-  `network.proxy` 选择传入上游 Agent。
+  `network.proxy` 选择传入上游 Agent。OpenCode Go 共享代理额外接受
+  `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
+  携带账户标识供服务侧按 `opencode-go-<账户>` Socket 上报；无前缀请求归属配置的默认账户
+  （`agents.external` 角色请求）。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的 `0600` Unix Socket，
   接收端归约后返回确认，保证短回复的 Turn 完成事件不会抢先清理计时状态；Gateway 不在线时指标
   直接丢弃并继续模型响应。接收端拒绝非 Socket、非当前用户或已被活动进程占用的路径，并只删除
@@ -49,7 +52,8 @@
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
 `observability` 独立指标库和 `conversation-core` 的稳定计时输入事件。
 App Server 服务立即为主 Provider 创建独立代理，并在可选切换 Provider 首次使用时按需创建对应
-代理，不暴露手工监听配置。
+代理；所有 OpenCode Go 账户共享同一个代理（内存 HTTP Server，不随账户增长），账户隔离 App
+Server 的 `base_url` 带 `/go/<账户>` 前缀。不暴露手工监听配置。
 服务通过共享运行时的私有监管 Socket 独占完整 App Server 拓扑；前台只能复用监管身份和
 Provider 拓扑匹配且已完成 WebSocket 握手的实例。Gateway 另以配置级所有权 Socket 全局互斥，
 不把 Provider 指标 Socket 当作进程锁；裸实例与重复 Gateway 均失败关闭。

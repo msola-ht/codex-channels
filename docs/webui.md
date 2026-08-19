@@ -74,7 +74,7 @@ codexc service stop webui        # 停止
 | 错误 | `#/errors` | `GET /api/v1/errors?range=` |
 | 设置 | — | `GET /api/v1/settings`（当前全局币种与汇率） |
 | DS 余额 | — | `GET /api/v1/deepseek-balance`（DeepSeek 官方账户余额；未配置凭据或查询失败时返回不可用） |
-| OpenCode Go 用量 | — | `GET /api/v1/opencode-go-usage`（OpenCode Go 官方 5 小时/7 天/月度配额窗口与各窗口本地 Token 用量，以及按当前价格基线重算的模型本地用量与包含额度；未配置凭据或查询失败时返回不可用） |
+| OpenCode Go 用量 | — | `GET /api/v1/opencode-go-usage`（返回全部已配置账户，每账户含官方 5 小时/7 天/月度配额窗口、各窗口总额（5 小时 $12 / 7 天 $30 / 月度 $60）与本地 Token 用量，以及按当前价格基线重算的模型本地用量与包含额度；账户未配置凭据或查询失败时该账户标记不可用，未配置任何账户时返回空列表） |
 
 所有接口只接受 GET；`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
 `this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按

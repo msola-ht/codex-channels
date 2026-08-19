@@ -7,6 +7,17 @@ export const metricsProviderIds = Object.freeze([
 ]);
 export const metricsProviderUsage = metricsProviderIds.join("|");
 
+export function isMetricsProviderId(value, environment = process.env) {
+  if (typeof value !== "string") return false;
+  if (new Set(metricsProviderIds).has(value)
+    || value === "opencode-go"
+    || /^opencode-go-[a-z0-9_-]{1,32}$/u.test(value)) {
+    return true;
+  }
+  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);
+  return customPrimaryProvider !== undefined && customPrimaryProvider.id === value;
+}
+
 export const metricsCommandUsage = Object.freeze({
   run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
   turns: "用法：codexc metrics turns <Thread ID> [--format markdown|json|csv] [--stdout]",
@@ -126,12 +137,7 @@ export function validateMetricsCommandArgs(subcommand, args, environment = proce
     return;
   }
   if (subcommand === "prune") {
-    const providers = new Set(metricsProviderIds);
-    const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);
-    if (customPrimaryProvider !== undefined) {
-      providers.add(customPrimaryProvider.id);
-    }
-    if (args.length !== 1 || !providers.has(args[0])) {
+    if (args.length !== 1 || !isMetricsProviderId(args[0], environment)) {
       throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
     }
     return;

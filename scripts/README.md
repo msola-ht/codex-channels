@@ -48,7 +48,8 @@
   设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
   Gateway，用于重放修复中心历史数据。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
   备份后清理最旧请求记录，可选 `--vacuum` 立即回收 SQLite 文件空间。
-  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、opencode-go）的全部请求
+  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、opencode-go 或
+  `opencode-go-<账户>`）的全部请求
   行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
@@ -166,9 +167,11 @@
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   切换 Profile、固定配置与受管字段恢复逻辑。
-- `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：配置 OpenCode Go 切换/固定模式或恢复首次
-  配置前状态，从同一受审查来源生成自己的模型目录并复用共享子代理机制，但不复用凭据、Provider
-  身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的默认模型与逐模型设置。
+- `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
+  （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；配置
+  切换/固定模式或恢复首次配置前状态，从同一受审查来源生成共享模型目录并复用共享子代理机制，
+  但不复用凭据、Provider 身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
+  默认模型与逐模型设置。
 - `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一
   `~/.codex-connect/providers/<id>/` 布局，并把 Provider 根级上下文、思考等级和自动压缩阈值
   迁入各自模型目录，切换模式 Profile 再镜像所选模型的默认思考等级。
@@ -224,8 +227,8 @@
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  受管 `--profile`（当前公开为 `deepseek` 与 `opencode-go`），选择隔离实例后映射为磁盘上的
-  `sf-deepseek` 或 `sf-opencode-go` Profile，供 Remote TUI 完成第三方 Provider 认证；
+  受管 `--profile`（当前公开为 `deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
+  磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。

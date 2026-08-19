@@ -6,7 +6,7 @@ import { parse } from "smol-toml";
 
 import { agentRolesConfigPath } from "../runtime/agent-roles.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProviderRole,
   managedModelProviderRoleConfigPath,
@@ -65,7 +65,7 @@ export async function configureThirdPartyRole(
   environment = process.env,
   { updateConfig = updateCodexUserConfig } = {},
 ) {
-  const definition = providerDefinition(provider);
+  const definition = providerDefinition(provider, environment);
   if (!validateConfiguredModelProviders(environment).some((entry) => entry.provider === provider)) {
     throw new Error(`${definition.displayName} Provider 尚未配置；请先运行 codexc setup`);
   }
@@ -168,11 +168,13 @@ export async function removeManagedThirdPartyRole(
   return true;
 }
 
-function providerDefinition(provider) {
-  const definition = managedModelProviderDefinitions.find((candidate) => candidate.id === provider);
+function providerDefinition(provider, environment = process.env) {
+  const definitions = loadManagedModelProviderDefinitions(environment);
+  const definition = definitions
+    .find((candidate) => candidate.id === provider);
   if (!definition) {
     throw new Error(`未知第三方 Provider：${provider}；可选：${
-      managedModelProviderDefinitions.map((candidate) => candidate.id).join("、")
+      definitions.map((candidate) => candidate.id).join("、")
     }`);
   }
   return definition;
@@ -264,7 +266,8 @@ const usage = `用法：codexc agents <configure|disable|status> [参数]
   disable                    移除共享第三方子代理
   status                     查看当前状态
 
-Provider：${managedModelProviderDefinitions.map((definition) => definition.id).join("、")}`;
+Provider：${loadManagedModelProviderDefinitions(process.env)
+  .map((definition) => definition.id).join("、")}`;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await runAgentsCli().catch((error) => {

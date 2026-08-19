@@ -1,7 +1,14 @@
-export type ManagedModelProviderId = "deepseek" | "opencode-go";
+export type ManagedModelProviderId =
+  | "deepseek"
+  | "opencode-go"
+  | `opencode-go-${string}`;
 
 export interface ModelProviderDefinition {
   readonly id: ManagedModelProviderId;
+  /** OpenCode Go 账户实例的账户 id（非账户实例为 undefined） */
+  readonly accountId?: string;
+  /** 存储目录归属，OpenCode Go 账户共享 `opencode-go` 目录 */
+  readonly storageId?: string;
   readonly displayName: string;
   readonly profileName: string;
   readonly codexProfileName: string;
@@ -26,3 +33,10 @@ export interface ModelProviderDefinition {
 export const deepseekProviderDefinition: ModelProviderDefinition;
 export const opencodeGoProviderDefinition: ModelProviderDefinition;
 export const managedModelProviderDefinitions: readonly ModelProviderDefinition[];
+
+export function loadOpencodeGoAccountDefinitions(
+  environment?: NodeJS.ProcessEnv,
+): readonly ModelProviderDefinition[];
+export function loadManagedModelProviderDefinitions(
+  environment?: NodeJS.ProcessEnv,
+): readonly ModelProviderDefinition[];

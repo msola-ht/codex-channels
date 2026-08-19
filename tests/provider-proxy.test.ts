@@ -76,6 +76,50 @@ describe("ProviderProxy", () => {
     expect(agentUsed).toBe(true);
   });
 
+  it("routes /go/<account> prefixes to the shared upstream and reports the account", async () => {
+    const seenPaths: string[] = [];
+    const upstream = createServer((request, response) => {
+      seenPaths.push(request.url ?? "");
+      request.resume();
+      request.on("end", () => response.end("ok"));
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metricsAccounts: Array<string | undefined> = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      upstreamBasePath: "/zen/go/v1",
+      accountIds: ["main", "b"],
+      defaultAccountId: "main",
+      onMetrics: (_metrics, accountId) => {
+        metricsAccounts.push(accountId);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const proxyPort = Number(proxy.address().split(":")[1]);
+
+    await requestProxy(proxyPort, "/go/b/responses", "POST");
+    await requestProxy(proxyPort, "/responses", "POST");
+    await expect(requestProxy(proxyPort, "/go/unknown/responses", "POST"))
+      .rejects.toMatchObject({ status: 404 });
+
+    expect(seenPaths).toEqual([
+      "/zen/go/v1/responses",
+      "/zen/go/v1/responses",
+    ]);
+    expect(metricsAccounts).toEqual(["b", "main"]);
+  });
+
   it("streams the request body upstream before the client finishes sending", async () => {
     let resolveFirstChunk: () => void = () => undefined;
     const firstChunk = new Promise<void>((resolve) => {
@@ -1958,3 +2002,36 @@ describe("ProviderProxy", () => {
     })]);
   });
 });
+
+function requestProxy(
+  port: number,
+  path: string,
+  method: string,
+): Promise<{ status: number }> {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const request = httpRequest({
+      hostname: "127.0.0.1",
+      port,
+      path,
+      method,
+    }, (response) => {
+      response.resume();
+      response.on("end", () => {
+        if ((response.statusCode ?? 0) >= 400) {
+          rejectRequest(new ProxyStatusError(response.statusCode ?? 0));
+          return;
+        }
+        resolveRequest({ status: response.statusCode ?? 0 });
+      });
+      response.on("error", rejectRequest);
+    });
+    request.on("error", rejectRequest);
+    request.end("{}");
+  });
+}
+
+class ProxyStatusError extends Error {
+  constructor(readonly status: number) {
+    super(`unexpected status ${status}`);
+  }
+}

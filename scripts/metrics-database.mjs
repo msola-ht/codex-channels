@@ -14,7 +14,6 @@ import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
-  loadConfiguredCustomPrimaryModelProvider,
   providerMetricsSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -42,6 +41,7 @@ import {
 import { resolveConfiguredPath } from "./runtime-config.mjs";
 import {
   assertExportFormat,
+  isMetricsProviderId,
   metricsProviderIds,
   metricsProviderUsage,
   parseCleanupOptions,
@@ -648,12 +648,7 @@ function errorMessage(error) {
 }
 
 function assertPruneProvider(provider, environment = process.env) {
-  const providers = new Set(metricsProviderIds);
-  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);
-  if (customPrimaryProvider !== undefined) {
-    providers.add(customPrimaryProvider.id);
-  }
-  if (!providers.has(provider)) {
+  if (!isMetricsProviderId(provider, environment)) {
     throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
   }
 }

@@ -310,10 +310,16 @@ export interface ModelUsageEstimate {
 
 export type OpencodeGoModelUsageEstimate = ModelUsageEstimate
 
-export interface OpencodeGoUsageResponse {
+export interface OpencodeGoAccountUsage {
+  account: string
+  default: boolean
   available: boolean
   windows: OpencodeGoQuotaWindow[]
-  modelUsage?: ModelUsageEstimate[]
+  modelUsage: ModelUsageEstimate[]
+}
+
+export interface OpencodeGoUsageResponse {
+  accounts: OpencodeGoAccountUsage[]
 }
 
 export interface GlobalTotals {

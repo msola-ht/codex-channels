@@ -9,7 +9,10 @@ import {
   loadManagedModelProviders,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
-import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import {
+  loadManagedModelProviderDefinitions,
+  opencodeGoProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   assertSynchronousChildSuccess,
@@ -50,9 +53,10 @@ async function runRemoteCli() {
   }
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
   let socketPath = primarySocketPath;
-  const selectedDefinition = managedModelProviderDefinitions.find(
-    ({ profileName }) => profileName === selectedProfile,
-  );
+  const selectedDefinition = [
+    ...loadManagedModelProviderDefinitions(process.env),
+    opencodeGoProviderDefinition,
+  ].find(({ profileName }) => profileName === selectedProfile);
   if (selectedDefinition) {
     const managedProvider = loadManagedModelProviders().find(
       ({ provider }) => provider === selectedDefinition.id,

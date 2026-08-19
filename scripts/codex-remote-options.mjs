@@ -1,4 +1,7 @@
-import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import {
+  loadManagedModelProviderDefinitions,
+  opencodeGoProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
 
 export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
 
@@ -58,7 +61,11 @@ function codexProfileArgument(args, index) {
 
 function managedProfileArgument(args, index) {
   const argument = args[index];
-  for (const { profileName: profile } of managedModelProviderDefinitions) {
+  const definitions = [
+    ...loadManagedModelProviderDefinitions(process.env),
+    opencodeGoProviderDefinition,
+  ];
+  for (const { profileName: profile } of definitions) {
     if (
       (argument === "--profile" || argument === "-p")
       && args[index + 1] === profile

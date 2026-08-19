@@ -279,11 +279,13 @@ describe("webui server", () => {
     const response = await fetch(`${origin}/api/v1/opencode-go-usage`);
     expect(response.status).toBe(200);
     const body = await response.json() as {
-      available: boolean;
-      windows: unknown[];
+      accounts: Array<{
+        account: string;
+        available: boolean;
+        windows: unknown[];
+      }>;
     };
-    expect(body.available).toBe(false);
-    expect(body.windows).toEqual([]);
+    expect(body.accounts).toEqual([]);
   });
 
   it("lists threads and returns run and turns details", async () => {

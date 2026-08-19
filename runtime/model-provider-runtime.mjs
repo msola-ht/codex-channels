@@ -16,9 +16,12 @@ import { codexHomePath } from "./codex-home.mjs";
 import { providerStorageRoot } from "./connect-home.mjs";
 import {
   deepseekProviderDefinition,
-  managedModelProviderDefinitions,
+  loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
 } from "./model-provider-definitions.mjs";
+import {
+  opencodeGoAccountMarkerPath,
+} from "./opencode-go-accounts.mjs";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
@@ -28,33 +31,25 @@ const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
 const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio"]);
 const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 
-const providerDescriptors = new Map(managedModelProviderDefinitions.map((definition) => [
-  definition.id,
-  Object.freeze({
-    definition,
-    id: definition.id,
-    profileName: definition.profileFileName,
-    baseUrl: definition.baseUrl,
-    wireApi: definition.wireApi,
-  }),
-]));
-const deepseekProvider = providerDescriptors.get(deepseekProviderDefinition.id);
-const opencodeGoProvider = providerDescriptors.get(opencodeGoProviderDefinition.id);
+const deepseekProvider = providerDescriptor(deepseekProviderDefinition);
 
-export function validateCustomPrimaryModelProviderId(id) {
+export function validateCustomPrimaryModelProviderId(id, environment = process.env) {
   if (typeof id !== "string" || !customProviderIdPattern.test(id)) {
     return "Provider ID 只能使用 1-64 位 ASCII 字母、数字、- 或 _";
   }
-  if (builtInModelProviderIds.has(id) || providerDescriptors.has(id)) {
+  if (
+    builtInModelProviderIds.has(id)
+    || managedProviderDefinitions(environment).some((definition) => definition.id === id)
+  ) {
     return "该 Provider ID 已被 Codex 或 Gateway 保留";
   }
   return null;
 }
 
-export function listCustomPrimaryProviderCandidates(providers) {
+export function listCustomPrimaryProviderCandidates(providers, environment = process.env) {
   const entries = record(providers);
   return Object.keys(entries).filter((candidate) => {
-    if (validateCustomPrimaryModelProviderId(candidate) !== null) {
+    if (validateCustomPrimaryModelProviderId(candidate, environment) !== null) {
       return false;
     }
     const provider = record(entries[candidate]);
@@ -63,7 +58,17 @@ export function listCustomPrimaryProviderCandidates(providers) {
 }
 
 export function managedProviderDirectory(environment, definition) {
-  return join(providerStorageRoot(environment), definition.id);
+  return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
+}
+
+export function managedProviderMarkerPath(environment, definition) {
+  if (definition.accountId !== undefined) {
+    return opencodeGoAccountMarkerPath(environment, definition.accountId);
+  }
+  return join(
+    managedProviderDirectory(environment, definition),
+    definition.managedMarkerFileName,
+  );
 }
 
 export function loadManagedModelProvider(environment = process.env) {
@@ -115,12 +120,13 @@ export function validateConfiguredModelProvider(environment = process.env) {
 }
 
 export function validateConfiguredModelProviders(environment = process.env) {
-  const exclusiveProviders = managedModelProviderDefinitions.filter((definition) =>
+  const definitions = managedProviderDefinitions(environment);
+  const exclusiveProviders = definitions.filter((definition) =>
     readManagedMarker(environment, definition)?.mode === "exclusive");
   if (exclusiveProviders.length > 1) {
     throw new Error("只能有一个受管第三方 Provider 使用固定模式");
   }
-  return managedModelProviderDefinitions.flatMap((definition) => {
+  return definitions.flatMap((definition) => {
     const marker = readManagedMarker(environment, definition);
     if (!marker) return [];
     if (marker.mode === "exclusive") {
@@ -133,7 +139,7 @@ export function validateConfiguredModelProviders(environment = process.env) {
 }
 
 export function loadManagedModelProviderSettings(environment = process.env) {
-  return managedModelProviderDefinitions.flatMap((definition) => {
+  return managedProviderDefinitions(environment).flatMap((definition) => {
     const marker = readManagedMarker(environment, definition);
     if (!marker) return [];
     const profile = loadConfiguredProviderProfile(environment, definition);
@@ -153,9 +159,7 @@ export function writeManagedModelProviderProfileDefault(
   settings,
   environment = process.env,
 ) {
-  const definition = managedModelProviderDefinitions.find(
-    (candidate) => candidate.id === provider,
-  );
+  const definition = findManagedProviderDefinition(environment, provider);
   if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
   const model = settings?.model;
   validateManagedModelSettings(definition, settings);
@@ -165,7 +169,7 @@ export function writeManagedModelProviderProfileDefault(
   if (marker.mode !== "switching") {
     throw new Error(`${definition.displayName} 固定模式必须通过 Codex 配置事务修改默认模型`);
   }
-  const descriptor = providerDescriptors.get(definition.id);
+  const descriptor = providerDescriptor(definition);
   const profilePath = join(codexHome, definition.profileFileName);
   const expectedCatalogPath = join(
     managedProviderDirectory(environment, definition),
@@ -202,9 +206,7 @@ export function writeManagedModelProviderCatalogSettings(
   settings,
   environment = process.env,
 ) {
-  const definition = managedModelProviderDefinitions.find(
-    (candidate) => candidate.id === provider,
-  );
+  const definition = findManagedProviderDefinition(environment, provider);
   if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
   validateManagedModelSettings(definition, settings);
   const catalogPath = join(
@@ -278,7 +280,7 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     throw new Error("Codex 主模型 Provider 配置无法安全读取");
   }
   const providers = record(document.model_providers);
-  const configuredIds = listCustomPrimaryProviderCandidates(providers);
+  const configuredIds = listCustomPrimaryProviderCandidates(providers, environment);
   let id = document.model_provider;
   if (id === undefined || id === "openai") {
     if (configuredIds.length === 0) return undefined;
@@ -288,7 +290,7 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     }
     [id] = configuredIds;
   }
-  const reservedError = validateCustomPrimaryModelProviderId(id);
+  const reservedError = validateCustomPrimaryModelProviderId(id, environment);
   if (reservedError !== null) {
     throw new Error(`Codex 主模型 Provider 不受 Gateway 支持：${id}`);
   }
@@ -362,7 +364,7 @@ export function loadOpenAiBaseUrl(environment = process.env) {
 }
 
 function exclusiveManagedProviders(environment) {
-  return managedModelProviderDefinitions.filter((definition) =>
+  return managedProviderDefinitions(environment).filter((definition) =>
     readManagedMarker(environment, definition)?.mode === "exclusive");
 }
 
@@ -452,7 +454,22 @@ export function loadOpencodeGoAccountCredential(environment = process.env) {
   );
   if (managed !== undefined) return managed.apiKey;
   const configPath = join(codexHomePath(environment), "config.toml");
-  return readProviderProfile(configPath, opencodeGoProvider, { requireSelection: false }).apiKey;
+  return readProviderProfile(
+    configPath,
+    providerDescriptor(opencodeGoProviderDefinition),
+    { requireSelection: false },
+  ).apiKey;
+}
+
+export function loadOpencodeGoAccountCredentialFor(provider, environment = process.env) {
+  if (provider === undefined || provider === "opencode-go") {
+    return loadOpencodeGoAccountCredential(environment);
+  }
+  const definition = findManagedProviderDefinition(environment, provider);
+  if (!definition) throw new Error(`未知 OpenCode Go 账户：${provider}`);
+  const profile = loadConfiguredProviderProfile(environment, definition);
+  if (!profile) throw new Error(`OpenCode Go 账户尚未配置：${provider}`);
+  return profile.apiKey;
 }
 
 export function managedModelProviderRoleConfigPath(environment = process.env) {
@@ -464,9 +481,7 @@ export function writeManagedModelProviderRoleConfig(
   { provider, model, baseUrl } = {},
 ) {
   const selectedProvider = provider ?? loadManagedModelProviderRole(environment)?.provider;
-  const definition = managedModelProviderDefinitions.find(
-    (candidate) => candidate.id === selectedProvider,
-  );
+  const definition = findManagedProviderDefinition(environment, selectedProvider);
   if (!definition) throw new Error("请先选择已配置的第三方 Provider");
   const profile = loadConfiguredProviderProfile(environment, definition);
   if (profile === undefined) throw new Error(`${definition.displayName} Provider 尚未配置`);
@@ -531,7 +546,7 @@ export function loadManagedModelProviderRole(environment = process.env) {
   }
   const provider = document.model_provider;
   const model = document.model;
-  const definition = managedModelProviderDefinitions.find((candidate) => candidate.id === provider);
+  const definition = findManagedProviderDefinition(environment, provider);
   if (!definition || typeof model !== "string") {
     throw new Error("第三方子代理角色配置无效");
   }
@@ -539,7 +554,7 @@ export function loadManagedModelProviderRole(environment = process.env) {
 }
 
 export function loadConfiguredProviderCredential(provider, environment = process.env) {
-  const definition = managedModelProviderDefinitions.find((candidate) => candidate.id === provider);
+  const definition = findManagedProviderDefinition(environment, provider);
   if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
   const profile = loadConfiguredProviderProfile(environment, definition);
   if (!profile) throw new Error(`${definition.displayName} Provider 尚未配置`);
@@ -566,7 +581,7 @@ function loadManagedProviderProfileFor(
   const codexHome = codexHomePath(environment);
   const marker = readManagedMarker(environment, definition);
   if (!marker || marker.mode === "exclusive") return undefined;
-  const descriptor = providerDescriptors.get(definition.id);
+  const descriptor = providerDescriptor(definition);
   const expectedCatalogPath = join(
     managedProviderDirectory(environment, definition),
     definition.catalogFileName,
@@ -585,10 +600,10 @@ function loadManagedProviderProfileFor(
 
 function loadManagedProviderProfiles(environment, { requireLaunchConfig = false } = {}) {
   const codexHome = codexHomePath(environment);
-  return managedModelProviderDefinitions.flatMap((definition) => {
+  return managedProviderDefinitions(environment).flatMap((definition) => {
     const marker = readManagedMarker(environment, definition);
     if (!marker || marker.mode === "exclusive") return [];
-    const descriptor = providerDescriptors.get(definition.id);
+    const descriptor = providerDescriptor(definition);
     const expectedCatalogPath = join(
       managedProviderDirectory(environment, definition),
       definition.catalogFileName,
@@ -610,7 +625,7 @@ function loadConfiguredProviderProfile(environment, definition) {
   const codexHome = codexHomePath(environment);
   const marker = readManagedMarker(environment, definition);
   if (!marker) return undefined;
-  const descriptor = providerDescriptors.get(definition.id);
+  const descriptor = providerDescriptor(definition);
   const expectedCatalogPath = join(
     managedProviderDirectory(environment, definition),
     definition.catalogFileName,
@@ -888,10 +903,7 @@ function validateManagedModelSettings(definition, settings) {
 }
 
 function readManagedMarker(environment, definition) {
-  const markerPath = join(
-    managedProviderDirectory(environment, definition),
-    definition.managedMarkerFileName,
-  );
+  const markerPath = managedProviderMarkerPath(environment, definition);
   let marker;
   try {
     marker = record(parse(readPrivateFile(markerPath)));
@@ -912,6 +924,27 @@ function readManagedMarker(environment, definition) {
     provider: marker.provider,
     mode: marker.mode ?? "switching",
   };
+}
+
+function managedProviderDefinitions(environment) {
+  return loadManagedModelProviderDefinitions(environment);
+}
+
+function findManagedProviderDefinition(environment, provider) {
+  if (provider === undefined) return undefined;
+  return managedProviderDefinitions(environment).find(
+    (candidate) => candidate.id === provider,
+  );
+}
+
+function providerDescriptor(definition) {
+  return Object.freeze({
+    definition,
+    id: definition.id,
+    profileName: definition.profileFileName,
+    baseUrl: definition.baseUrl,
+    wireApi: definition.wireApi,
+  });
 }
 
 function tomlString(value) {

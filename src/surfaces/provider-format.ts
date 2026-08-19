@@ -10,6 +10,10 @@ export function formatProviderLabel(provider: string): string {
   if (provider === "openai") return "OpenAI";
   if (provider === "deepseek") return "DeepSeek";
   if (provider === "opencode-go") return "OpenCode Go";
+  const accountPrefix = "opencode-go-";
+  if (provider.startsWith(accountPrefix) && provider.length > accountPrefix.length) {
+    return `OpenCode Go（${provider.slice(accountPrefix.length)}）`;
+  }
   const normalized = provider.replace(/\s+/gu, " ").trim();
   return normalized ? normalized.slice(0, 64) : "未知提供商";
 }
