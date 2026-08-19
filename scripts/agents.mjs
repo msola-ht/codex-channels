@@ -5,7 +5,10 @@ import { pathToFileURL } from "node:url";
 import { parse } from "smol-toml";
 
 import { agentRolesConfigPath } from "../runtime/agent-roles.mjs";
-import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import {
+  writeCliMessage,
+  writeCliRemediationRestartAll,
+} from "../runtime/cli-presentation.mjs";
 import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProviderRole,
@@ -287,13 +290,13 @@ async function runAgentsCli() {
       "success",
       `已配置共享第三方子代理：${selection.provider} / ${selection.model}（agents.external）。`,
     );
-    writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+    writeCliRemediationRestartAll();
     printStatus(process.env);
   } else if (command === "disable" && provider === undefined) {
     const removed = await disableThirdPartyRole(process.env);
     if (removed) {
       writeCliMessage("success", "已移除共享第三方子代理。");
-      writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+      writeCliRemediationRestartAll();
     } else {
       writeCliMessage("note", "当前没有本项目管理的第三方子代理，无需处理。");
     }

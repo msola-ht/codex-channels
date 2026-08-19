@@ -8,30 +8,17 @@ import {
   restorePrimaryProviderCandidateEdits,
   validateCustomPrimaryModelProviderId,
 } from "../runtime/model-provider-runtime.mjs";
-import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import {
+  writeCliMessage,
+  writeCliRemediationRestartAll,
+} from "../runtime/cli-presentation.mjs";
 import {
   createCodexUserConfigClient,
   readCodexUserConfigSnapshot,
   writeCodexUserConfigEdits,
 } from "./codex-user-config.mjs";
 import { runCustomPrimaryProviderSetup } from "./custom-primary-provider-setup.mjs";
-
-const usageText = `用法：codexc primary-provider <list|add|switch|remove> [参数]
-
-管理 Codex 第三方主 Provider 候选：可配置多个候选，但同一时刻只激活一个。
-
-  codexc primary-provider list
-    列出当前激活的主 Provider 与全部自定义候选。
-  codexc primary-provider add
-    交互式新增或更新固定 ID（OpenAI）的主 Provider，并立即激活。
-  codexc primary-provider switch openai
-    切回官方 OpenAI 主 Provider（不运行登录，官方凭据保留；自定义候选移入私有备份）。
-  codexc primary-provider switch <Provider ID> [模型]
-    切换到自定义主 Provider；候选不在 config 时会从备份恢复；模型缺省保持当前设置。
-  codexc primary-provider remove <Provider ID>
-    删除候选；若删除的是当前激活项，将恢复官方 OpenAI 主 Provider。
-
-修改后运行 codexc service restart all 生效。`;
+import { primaryProviderUsage } from "./primary-provider-usage.mjs";
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -125,7 +112,7 @@ export async function switchPrimaryProvider(
         : `已切换到官方 OpenAI 主 Provider（未运行 codex login，官方凭据保留）；`
           + `自定义候选已移入私有备份：${backedUp.join("、")}。\n`,
     );
-    writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+    writeCliRemediationRestartAll();
     return;
   }
   const reservedError = validateCustomPrimaryModelProviderId(normalizedId);
@@ -163,7 +150,7 @@ export async function switchPrimaryProvider(
     output.write("已移除与自定义主 Provider 冲突的顶层 openai_base_url。\n");
   }
   output.write(`已切换到自定义主 Provider：${normalizedId}。\n`);
-  writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+  writeCliRemediationRestartAll();
 }
 
 export async function removePrimaryProvider(
@@ -197,7 +184,7 @@ export async function removePrimaryProvider(
       ? `已删除自定义主 Provider ${normalizedId} 并恢复官方 OpenAI 主 Provider。\n`
       : `已删除自定义主 Provider 候选：${normalizedId}。\n`,
   );
-  writeCliMessage("remediation", "运行 codexc service restart all 后生效。");
+  writeCliRemediationRestartAll();
 }
 
 export async function addPrimaryProvider(options = {}) {
@@ -332,7 +319,7 @@ export async function runPrimaryProviderCli(
 ) {
   const [subcommand, ...rest] = args;
   if (subcommand === undefined || subcommand === "-h" || subcommand === "--help") {
-    output.write(`${usageText}\n`);
+    output.write(`${primaryProviderUsage}\n`);
     return;
   }
   if (subcommand === "list") {
@@ -363,7 +350,7 @@ export async function runPrimaryProviderCli(
     await removePrimaryProvider(rest[0], { environment, output, createClient });
     return;
   }
-  throw new Error(`未知子命令：${subcommand}\n${usageText}`);
+  throw new Error(`未知子命令：${subcommand}\n${primaryProviderUsage}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
