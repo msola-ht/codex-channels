@@ -394,7 +394,7 @@ export function resetMetricsSyncStateWithGatewayRestart(
 }
 
 export function pruneProviderMetrics(provider, environment = process.env, options = {}) {
-  assertPruneProvider(provider);
+  assertPruneProvider(provider, environment);
   const localDatabasePath = options.localDatabasePath
     ?? resolveMetricsRuntime(environment).databasePath;
   const centerSettings = options.centerSettings
