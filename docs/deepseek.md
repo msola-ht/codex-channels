@@ -184,10 +184,11 @@ codexc agents disable
 运行 `codexc update` 会统一预检、自动备份升级并恢复 App Server 与 Gateway，也可单独运行
 `codexc metrics upgrade`。
 
-Gateway 只在父线程收到官方 `collabAgentToolCall.agentsStates` 子代理终态后，向父会话推送
-“子代理完成”或“子代理失败”卡片，不再以最后模型请求后的静默时间推断完成。卡片基于指标库
-汇总展示任务名、模型、请求次数、Token、费用与全量计价时的每 100M Token 均价（跟随全局价格
-显示），不依赖 App Server 订阅子代理线程。官方终态后约 5 秒只用于等待指标收敛；没有模型指标
+Gateway 在收到以下官方终态信号之一后，向父会话推送带具体终态的子代理卡片：V2
+自动订阅子线程后收到的 `turn/completed`，官方 `subAgentActivity` 的 `interrupted`，以及兼容旧版
+父线程 `collabAgentToolCall.agentsStates` 的子代理终态。不再以最后模型请求后的静默时间推断完成。
+卡片基于指标库汇总展示任务名、模型、请求次数、Token、费用与全量计价时的每 100M Token 均价（跟随全局价格
+显示）。终态信号后约 5 秒只用于等待指标收敛；没有模型指标
 时仍发送零统计终态卡片，指标写入或读取失败则显示“统计暂不可用”。收敛结束后会等待当前指标 Writer 水位
 落库，避免积压时读取部分汇总。缓存、推理、输入/缓存/输出费用分项和模型请求聚合耗时仅在调试
 模式展示。紧凑操作模式只保留子代理启动与失败，成功的等待和交互操作不再各自生成完成卡片。
