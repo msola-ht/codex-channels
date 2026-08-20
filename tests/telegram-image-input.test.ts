@@ -976,7 +976,7 @@ describe("Telegram image input", () => {
   });
 
   it("routes the built-in Pinned Thread Section button through /pin", async () => {
-    const setPinned = vi.fn().mockResolvedValue(undefined);
+    const setPinned = vi.fn().mockResolvedValue(true);
     const { surface, output, apiCalls, sentTexts } = createSurface(
       vi.fn(),
       vi.fn(),

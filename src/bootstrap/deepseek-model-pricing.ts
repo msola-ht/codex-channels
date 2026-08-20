@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { sharedProviderProxyKey } from "../../runtime/opencode-go-accounts.mjs";
 import type { ExchangeRateSnapshot } from "../application/index.js";
 import type {
   ModelPricingLookup,
@@ -139,7 +140,7 @@ export class ProviderModelPricingResolver implements ModelPricingResolver {
   ) {}
 
   resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null {
-    return (this.providerResolvers.get(lookup.provider) ?? this.fallback).resolve(lookup);
+    return (this.providerResolvers.get(sharedProviderProxyKey(lookup.provider)) ?? this.fallback).resolve(lookup);
   }
 }
 

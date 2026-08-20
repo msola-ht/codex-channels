@@ -33,6 +33,30 @@ describe("OpenCodeGoModelPricingResolver", () => {
     })).toBeNull();
   });
 
+  it("applies OpenCode Go prices to account-scoped providers", () => {
+    const resolver = new OpenCodeGoModelPricingResolver();
+
+    expect(resolver.resolve({
+      provider: "opencode-go-lunare",
+      model: "deepseek-v4-flash",
+      serviceTier: null,
+      inputTokens: 1_000,
+      atMs: Date.parse("2026-08-16T05:00:00.000Z"),
+    })).toMatchObject({
+      billingMode: "subscription",
+      currency: "USD",
+      source: "opencode-go-official",
+      bucket: "off-peak",
+    });
+    expect(resolver.resolve({
+      provider: "deepseek-extra",
+      model: "deepseek-v4-flash",
+      serviceTier: null,
+      inputTokens: 1_000,
+      atMs: Date.parse("2026-08-16T05:00:00.000Z"),
+    })).toBeNull();
+  });
+
   it("selects the Peak price inside official Peak hours", () => {
     const resolver = new OpenCodeGoModelPricingResolver();
 

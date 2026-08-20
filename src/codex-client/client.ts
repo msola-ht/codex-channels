@@ -347,7 +347,7 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
-  async setThreadPinned(threadId: string, pinned: boolean): Promise<void> {
+  async setThreadPinned(threadId: string, pinned: boolean): Promise<boolean> {
     const observed = await this.rpc.request<ThreadReadResponse>({
       method: "thread/read",
       params: { threadId, includeTurns: false },
@@ -357,7 +357,7 @@ export class CodexAppServerClient implements
       throw new Error("Codex Thread 固定状态更新目标不一致");
     }
     if (current.isPinned === pinned) {
-      return;
+      return false;
     }
     const updated = await this.applyThreadSectionMove(
       threadId,
@@ -367,6 +367,7 @@ export class CodexAppServerClient implements
     if (updated.id !== threadId || updated.isPinned !== pinned) {
       throw new Error("Codex Thread 固定状态更新结果不一致");
     }
+    return true;
   }
 
   async listThreadSections(): Promise<ThreadSectionSnapshot[]> {

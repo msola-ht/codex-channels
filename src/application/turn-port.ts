@@ -60,7 +60,7 @@ export interface TurnExecutionPort {
   ): Promise<TurnStarted>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   setThreadName(threadId: string, name: string): Promise<void>;
-  setThreadPinned(threadId: string, pinned: boolean): Promise<void>;
+  setThreadPinned(threadId: string, pinned: boolean): Promise<boolean>;
   listThreadSections(): Promise<ThreadSectionSnapshot[]>;
   createThreadSection(name: string): Promise<ThreadSectionSnapshot>;
   renameThreadSection(sectionId: string, name: string): Promise<ThreadSectionSnapshot>;
