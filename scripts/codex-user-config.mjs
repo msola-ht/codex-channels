@@ -1,7 +1,5 @@
-import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
-
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import { resolveOptionalExecutable } from "../runtime/executable.mjs";
 
 export async function updateCodexUserConfig(
   environment,
@@ -54,9 +52,7 @@ export async function createCodexUserConfigClient({
   cwd = codexHomePath(environment),
 } = {}) {
   const configuredBinary = stringValue(environment.CODEX_BINARY) || "codex";
-  const codexBinary = isAbsolute(configuredBinary)
-    ? realpathSync(configuredBinary)
-    : configuredBinary;
+  const codexBinary = resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
   const {
     CodexAppServerClient,
     JsonRpcClient,

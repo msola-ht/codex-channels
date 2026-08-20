@@ -67,3 +67,7 @@ export function writeCliMessage(
     : stdout;
   stream.write(`${formatCliMessage(kind, message, { stream, environment })}\n`);
 }
+
+export function writeCliRemediationRestartAll(options) {
+  writeCliMessage("remediation", "运行 codexc service restart all 后生效。", options);
+}

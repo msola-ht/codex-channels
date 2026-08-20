@@ -606,6 +606,8 @@ describe("primary provider CLI", () => {
       { keyPath: "model_providers.OpenAI.wire_api", value: "responses" },
       { keyPath: "model_providers.OpenAI.requires_openai_auth", value: true },
       { keyPath: "model_providers.OpenAI.supports_websockets", value: false },
+      { keyPath: "model_providers.OpenAI.env_key", value: null },
+      { keyPath: "model_providers.OpenAI.experimental_bearer_token", value: null },
     ], { expectedVersion: "v1" });
   });
 });

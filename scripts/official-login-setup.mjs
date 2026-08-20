@@ -1,9 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 
+import { resolveOptionalExecutable } from "../runtime/executable.mjs";
 import {
   backupPrimaryProviderCandidates,
   listCustomPrimaryProviderCandidates,
@@ -23,7 +22,7 @@ function resolveCodexBinary(environment) {
     ? environment.CODEX_BINARY.trim()
     : "";
   const binary = configured || "codex";
-  return isAbsolute(binary) ? realpathSync(binary) : binary;
+  return resolveOptionalExecutable(binary, environment) ?? binary;
 }
 
 function defaultRunLogin({ codexBinary, environment }) {

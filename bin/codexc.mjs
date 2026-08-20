@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
+import { primaryProviderUsage } from "../scripts/primary-provider-usage.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import {
   readGatewayConfig,
@@ -142,7 +143,7 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → 官方 → 登录并恢复官方 / 默认模型与思考等级
-  codexc setup → 模型与提供商 → 第三方 → 自定义第三方 / DeepSeek 官方 / OpenCode Go 官方等
+  codexc setup → 模型与提供商 → 第三方 → 自定义 第三方 / DeepSeek 官方 / OpenCode Go 官方等
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 技能（安装或卸载项目技能）`,
   start: `用法：codexc start
@@ -192,22 +193,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   configure <Provider> [模型]  配置共享第三方子代理（agents.external）
   disable                    移除共享第三方子代理
   status                     查看当前状态`,
-  "primary-provider": `用法：codexc primary-provider <list|add|switch|remove> [参数]
-
-管理 Codex 第三方主 Provider：可配置多个候选，但同一时刻只激活一个。
-
-  codexc primary-provider list
-    列出当前激活的主 Provider 与全部自定义候选。
-  codexc primary-provider add
-    交互式新增或更新固定 ID（OpenAI）的主 Provider，并立即激活。
-  codexc primary-provider switch openai
-    切回官方 OpenAI 主 Provider（不运行登录，官方凭据保留；自定义候选移入私有备份）。
-  codexc primary-provider switch <Provider ID> [模型]
-    切换到自定义主 Provider；候选不在 config 时从备份恢复；模型缺省保持当前设置。
-  codexc primary-provider remove <Provider ID>
-    删除候选；若删除的是当前激活项，将恢复官方 OpenAI 主 Provider。
-
-修改后运行 codexc service restart all 生效。`,
+  "primary-provider": primaryProviderUsage,
   "agents.configure": `用法：codexc agents configure <Provider> [模型]
 
 选择已配置的第三方 Provider 与模型，启用 multi_agent_v2 并注册 agents.external。`,

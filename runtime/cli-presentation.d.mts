@@ -38,3 +38,6 @@ export function writeCliMessage(
   message: string,
   options?: CliMessageWriterOptions,
 ): void;
+export function writeCliRemediationRestartAll(
+  options?: CliMessageWriterOptions,
+): void;

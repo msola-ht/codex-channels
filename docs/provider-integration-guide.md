@@ -212,7 +212,7 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 等受管 Provider 提供，可与自定义主 Provider 配置共存。需要这些能力时必须按本指南前述的编译期受管
 Provider 流程接入。
 
-可以通过 `codexc setup` 的“模型与提供商 → 第三方 → 自定义第三方”引导写入上述配置：填写 Provider ID、
+可以通过 `codexc setup` 的“模型与提供商 → 第三方 → 自定义 第三方”引导写入上述配置：填写 Provider ID、
 上游 `base_url`、认证方式（直接写入 API Key / 当前 API Key / `env_key` / 无认证）、是否支持
 Responses WebSocket 和默认模型；Provider ID 固定为 `OpenAI`，避免手输填错（小写 `openai` 是
 Codex 内置保留 ID，不能作为自定义 Provider）。Setup 通过 Codex 的 `config/batchWrite` 原子写入用户配置，

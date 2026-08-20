@@ -93,8 +93,8 @@
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
   “技能”流程委派给具体适配器；模型与提供商下分官方与第三方两级：官方含登录与默认模型，
-  第三方含自定义第三方、DeepSeek 官方、OpenCode Go 官方、第三方模型设置、第三方 API 与图片识别。
-- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 → 自定义第三方”；
+  第三方含自定义 第三方、DeepSeek 官方、OpenCode Go 官方、第三方模型设置、第三方 API 与图片识别。
+- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 → 自定义 第三方”；
   引导填写上游 `base_url`、认证方式、WebSocket 开关与默认模型（Provider ID 固定为 `OpenAI`，
   避免手输填错），通过 Codex
   `config/batchWrite` 原子写入 `~/.codex/config.toml` 的自定义主 Provider 块并激活；认证方式支持
@@ -104,6 +104,8 @@
   list / add / switch / remove 子命令；list 与 switch / remove 复用 Codex 用户配置事务读取和
   原子写入，add 复用自定义主 Provider Setup 的交互流程；`switch openai` 不运行登录直接切回官方
   并把候选移入私有备份，`switch <ID>` 对已清理的候选从备份自动恢复。
+- `primary-provider-usage.mjs`：`codexc primary-provider` 的规范帮助文案，供脚本与入口帮助共用，
+  避免两份文案漂移。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
   `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，

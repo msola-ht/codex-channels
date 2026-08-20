@@ -20,7 +20,8 @@
   （`accounts.json`）、账户目录与管理标记，以及旧版单账户配置原地迁移为默认账户
   `opencode-go`（新增账户才使用 `opencode-go-<账户>`）；Key 不进入注册表。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
-  私有 Profile、Provider 配置和管理标记，避免 DeepSeek 与 OpenCode Go Setup 重复解释同一格式。
+  私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
+  config 编辑映射，避免 DeepSeek、OpenCode Go 与自定义 Setup 重复解释同一格式。
 - `deepseek-pricing-baseline.json`：保存从 DeepSeek 官方价格页审查后的人民币每百万 Token 单价、
   北京时间峰谷区间和生效日期；Bootstrap 只读使用，自动检查只能通过 Draft PR 提议更新。
 - `opencode-go-pricing-baseline.json`：保存 OpenCode Go 官方页面全部模型的美元每百万 Token 单价、

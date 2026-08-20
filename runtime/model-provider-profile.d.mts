@@ -15,6 +15,20 @@ export function createModelProviderConfig(
   apiKey: string,
 ): Record<string, unknown>;
 
+export function createCustomPrimaryProviderConfig(options: {
+  name: string;
+  baseUrl: string;
+  auth: "apikey" | "env_key" | "none" | "bearer_token";
+  envKey?: string;
+  bearerToken?: string;
+  supportsWebsockets: boolean;
+}): Record<string, unknown>;
+
+export function modelProviderBlockEdits(
+  id: string,
+  provider: Record<string, unknown>,
+): Array<{ keyPath: string; value: unknown }>;
+
 export function createManagedProviderMarker(
   definition: ModelProviderDefinition,
   mode?: "switching" | "exclusive",

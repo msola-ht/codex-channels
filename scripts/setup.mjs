@@ -136,7 +136,7 @@ async function runModelSetup({
         {
           value: "third_party",
           label: "第三方",
-          hint: "自定义第三方、DeepSeek 官方、OpenCode Go 官方等",
+          hint: "自定义 第三方、DeepSeek 官方、OpenCode Go 官方等",
         },
         { value: "back", label: "返回", hint: "返回设置类别" },
       ],
@@ -176,7 +176,7 @@ async function runModelSetup({
         options: [
           {
             value: "custom_primary",
-            label: "自定义第三方",
+            label: "自定义 第三方",
             hint: "新增、列表、切换或删除 OpenAI 兼容中转主 Provider",
           },
           {
