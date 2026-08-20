@@ -17,7 +17,10 @@ import {
   inspectAppServerSupervisorState,
   releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
-import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import {
+  opencodeGoAccountDefinition,
+  opencodeGoProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProviderRole,
   loadManagedModelProviderSettings,
@@ -36,7 +39,6 @@ import {
   opencodeGoAccountDirectory,
   opencodeGoAccountMarkerPath,
   opencodeGoAccountsFilePath,
-  opencodeGoApiKeyEnvironmentKey,
   opencodeGoProviderId,
   readOpencodeGoAccountMarker,
   validateOpencodeGoAccountId,
@@ -582,7 +584,8 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
 
 function accountPaths(environment, accountId) {
   const codexHome = codexHomePath(environment);
-  const providerDirectory = managedProviderDirectory(environment, definition);
+  const accountDefinition = opencodeGoAccountDefinition(accountId);
+  const providerDirectory = managedProviderDirectory(environment, accountDefinition);
   const accountDirectory = opencodeGoAccountDirectory(environment, accountId);
   const backupDirectory = opencodeGoAccountBackupDirectory(environment, accountId);
   return {
@@ -591,43 +594,16 @@ function accountPaths(environment, accountId) {
     accountDirectory,
     backupDirectory,
     configPath: join(codexHome, "config.toml"),
-    profilePath: join(codexHome, opencodeGoProfileFileName(accountId)),
+    profilePath: join(codexHome, accountDefinition.profileFileName),
     markerPath: opencodeGoAccountMarkerPath(environment, accountId),
-    catalogPath: join(providerDirectory, definition.catalogFileName),
-    manifestPath: join(providerDirectory, definition.catalogManifestFileName),
+    catalogPath: join(providerDirectory, accountDefinition.catalogFileName),
+    manifestPath: join(providerDirectory, accountDefinition.catalogManifestFileName),
     roleConfigPath: managedModelProviderRoleConfigPath(environment),
   };
 }
 
-function opencodeGoAccountDefinition(accountId) {
-  const provider = opencodeGoProviderId(accountId);
-  const isDefaultAccount = accountId === defaultAccountId;
-  return Object.freeze({
-    id: provider,
-    accountId,
-    storageId: "opencode-go",
-    displayName: isDefaultAccount ? "OpenCode Go" : `OpenCode Go（${accountId}）`,
-    profileName: provider,
-    codexProfileName: isDefaultAccount ? "sf-opencode-go" : `sf-opencode-go-${accountId}`,
-    profileFileName: opencodeGoProfileFileName(accountId),
-    catalogFileName: definition.catalogFileName,
-    catalogManifestFileName: definition.catalogManifestFileName,
-    managedMarkerFileName: definition.managedMarkerFileName,
-    backupDirectoryName: definition.backupDirectoryName,
-    baseUrl: definition.baseUrl,
-    wireApi: definition.wireApi,
-    apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey(accountId),
-    defaultModel: definition.defaultModel,
-    defaultReasoningEffort: definition.defaultReasoningEffort,
-    supportsWebsockets: false,
-    models: definition.models,
-  });
-}
-
 function opencodeGoProfileFileName(accountId) {
-  return accountId === defaultAccountId
-    ? "sf-opencode-go.config.toml"
-    : `sf-opencode-go-${accountId}.config.toml`;
+  return opencodeGoAccountDefinition(accountId).profileFileName;
 }
 
 function publicPaths(paths) {

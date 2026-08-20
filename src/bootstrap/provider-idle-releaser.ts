@@ -1,6 +1,9 @@
 import type { Logger } from "pino";
 
-import type { ConversationTarget } from "../conversation-core/index.js";
+import {
+  conversationTargetKey,
+  type ConversationTarget,
+} from "../conversation-core/index.js";
 import type { ConversationBinding } from "../storage/index.js";
 
 const defaultIdleThresholdMs = 5 * 60 * 1_000;
@@ -169,8 +172,4 @@ export class ProviderIdleReleaser {
       (binding) => this.providerForThread(binding.threadId) === provider,
     );
   }
-}
-
-function conversationTargetKey(target: ConversationTarget): string {
-  return JSON.stringify([target.surface, target.accountId, target.conversationId]);
 }

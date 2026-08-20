@@ -1,5 +1,6 @@
 import type { OperationUpdate } from "../conversation-core/index.js";
 import { formatElapsedDuration } from "./elapsed-duration.js";
+import { visibleUpstreamMessage } from "./output-copy.js";
 import type { OperationUpdateDisplay } from "./types.js";
 
 export function shouldDisplayOperation(
@@ -45,7 +46,7 @@ export function compactOperationDetail(value: string): string {
 }
 
 export function redactOperationDetail(value: string): string {
-  return value.replaceAll("[REDACTED]", "[已隐藏]");
+  return visibleUpstreamMessage(value);
 }
 
 export function operationStatus(status: OperationUpdate["status"]): string {

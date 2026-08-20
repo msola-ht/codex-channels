@@ -40,6 +40,7 @@ import {
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
+  visibleUpstreamMessage,
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
@@ -1486,10 +1487,6 @@ function boundedTelegramStreamText(text: string): {
       .join(""),
     truncated: true,
   };
-}
-
-function visibleUpstreamMessage(message: string): string {
-  return message.replaceAll("[REDACTED]", "[已隐藏]");
 }
 
 function canSendRichMarkdown(text: string): boolean {
