@@ -6,6 +6,7 @@ import {
   type TurnStartIdentity,
 } from "../../conversation-core/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
@@ -456,13 +457,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
               "飞书思考流式卡已创建",
             );
           } catch (error) {
-            this.reasoningCards.delete(event.threadId);
+            if (this.reasoningCards.get(event.threadId) === state) {
+              this.reasoningCards.delete(event.threadId);
+            }
             this.logger.warn(
               {
                 component: "Feishu",
                 threadId: event.threadId,
                 turnId: event.turnId,
-                error: error instanceof Error ? error.message : String(error),
+                ...surfaceErrorMetadata(error),
               },
               "飞书思考流式卡创建失败，回退普通卡片",
             );
@@ -481,7 +484,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       chatId,
       async () => {
         if (existing.cardId === undefined) {
-          this.reasoningCards.delete(event.threadId);
+          if (this.reasoningCards.get(event.threadId) === existing) {
+            this.reasoningCards.delete(event.threadId);
+          }
           await this.sendMarkdown(chatId, rendered);
           return;
         }
@@ -516,14 +521,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
             existing.sequence,
           );
         } catch (error) {
-          this.reasoningCards.delete(event.threadId);
+          if (this.reasoningCards.get(event.threadId) === existing) {
+            this.reasoningCards.delete(event.threadId);
+          }
           this.logger.warn(
             {
               component: "Feishu",
               threadId: event.threadId,
               turnId: event.turnId,
               final: event.final === true,
-              error: error instanceof Error ? error.message : String(error),
+              ...surfaceErrorMetadata(error),
             },
             "飞书思考流式卡更新失败，回退普通卡片",
           );
@@ -794,7 +801,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
               component: "Feishu",
               threadId: event.threadId,
               turnId: event.turnId,
-              error: error instanceof Error ? error.message : String(error),
+              ...surfaceErrorMetadata(error),
             },
             "飞书状态卡刷新失败",
           );
@@ -999,7 +1006,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
             component: "Feishu",
             threadId: event.threadId,
             status: event.status,
-            error: error instanceof Error ? error.message : String(error),
+            ...surfaceErrorMetadata(error),
           },
           "飞书状态卡更新失败，改为重建",
         );

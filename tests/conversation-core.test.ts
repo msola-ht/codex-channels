@@ -221,6 +221,53 @@ describe("ConversationCore", () => {
     expect(reasoning[4]).toMatchObject({ final: true });
   });
 
+  it("stops stale thinking updates when a new Turn starts on the same Thread", async () => {
+    vi.useFakeTimers();
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "feishu" as const, accountId: "cli_app", conversationId: "oc_chat" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      foregroundThreadId: () => "thread-1",
+      isBackgroundThread: () => false,
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "turn-1" } },
+    });
+    handleNotification(core, {
+      method: "item/reasoning/textDelta",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-r1",
+        contentIndex: 0,
+        delta: "x",
+      },
+    });
+    vi.advanceTimersByTime(1_000);
+    handleNotification(core, {
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "turn-2" } },
+    });
+    vi.advanceTimersByTime(5_000);
+    await output.close();
+
+    const reasoning = events.filter((event) => event.type === "turn.reasoning");
+    expect(reasoning.map((event) => event.elapsedMs)).toEqual([0, 1_000, 1_000]);
+    expect(reasoning.at(-1)).toMatchObject({
+      turnId: "turn-1",
+      final: true,
+    });
+  });
+
   it("reduces thread token usage notifications for status rendering", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const router = {

@@ -321,6 +321,92 @@ describe("Feishu outbox", () => {
     expect(markdownCards).toEqual(["## 思考中…\n\n---\n**耗时：** 15秒"]);
   });
 
+  it("does not let an old thinking-card failure delete a newer segment", async () => {
+    const created: string[] = [];
+    let resolveSecondCreated!: () => void;
+    const secondCreated = new Promise<void>((resolve) => {
+      resolveSecondCreated = resolve;
+    });
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async () => {},
+        createStreamingCard: async () => {
+          const cardId = `om_reason_${created.length + 1}`;
+          created.push(cardId);
+          if (created.length === 2) resolveSecondCreated();
+          return { cardId, messageId: `${cardId}_message` };
+        },
+        updateStreamingCard: async (cardId) => {
+          if (cardId === "om_reason_1") {
+            throw new Error("old card failed");
+          }
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const reasoning = (elapsedMs: number, final?: boolean): void => {
+      void outbox.handle({
+        type: "turn.reasoning",
+        target,
+        threadId: "thread-1",
+        turnId: "turn-1",
+        summary: "",
+        elapsedMs,
+        ...(final === undefined ? {} : { final }),
+      });
+    };
+
+    reasoning(0);
+    reasoning(1_000, true);
+    reasoning(0);
+    await secondCreated;
+    reasoning(1_000);
+    await outbox.close();
+
+    expect(created).toEqual(["om_reason_1", "om_reason_2"]);
+  });
+
+  it("does not log credentials when a thinking card fails", async () => {
+    const logger = pino({ level: "silent" });
+    const warn = vi.spyOn(logger, "warn");
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async () => {},
+        createStreamingCard: async () => {
+          throw new Error("Authorization: Bearer thinking-secret");
+        },
+      },
+      logger,
+    );
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-secret",
+      turnId: "turn-secret",
+      summary: "",
+      elapsedMs: 0,
+    });
+    await outbox.close();
+
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("thinking-secret");
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "Feishu",
+        errorType: "Error",
+      }),
+      "飞书思考流式卡创建失败，回退普通卡片",
+    );
+  });
+
   it("does not send thinking status when reasoning display is disabled", async () => {
     const markdownCards: string[] = [];
     const created: string[] = [];

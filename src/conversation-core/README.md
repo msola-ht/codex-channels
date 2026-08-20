@@ -25,7 +25,8 @@
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP OAuth 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；外部视觉 API 请求发起后
   使用不含路径、提示正文或凭据的非关键 `vision.started` 事件通知对应渠道；`turn.reasoning`
-  输出只携带“思考中…”状态、每段独立耗时与最终标记，不携带摘要或原始思维链内容。
+  输出只携带“思考中…”状态、每段独立耗时与最终标记，不携带摘要或原始思维链内容；同一 Thread
+  开始新 Turn 时会结束并释放旧 Turn 遗留的推理段定时器。
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。
 - `user-facing-error.ts`：用稳定错误代码和最小参数描述预期输入与状态错误；Surface 按平台独立渲染，未标记异常默认隐藏详情。
 
