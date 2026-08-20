@@ -8,8 +8,6 @@ export const metricsProviderIds = Object.freeze([
   "openai",
   ...managedModelProviderDefinitions.map(({ id }) => id),
 ]);
-export const metricsProviderUsage = metricsProviderIds.join("|");
-
 export function isMetricsProviderId(value, environment = process.env) {
   if (typeof value !== "string") return false;
   if (new Set(metricsProviderIds).has(value)
@@ -145,7 +143,7 @@ export function validateMetricsCommandArgs(subcommand, args, environment = proce
   }
   if (subcommand === "prune") {
     if (args.length !== 1 || !isMetricsProviderId(args[0], environment)) {
-      throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
+      throw new Error("用法：codexc metrics prune <provider>");
     }
     return;
   }

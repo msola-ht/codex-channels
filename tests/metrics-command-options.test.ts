@@ -84,7 +84,7 @@ describe("metrics command options", () => {
     expect(() => validateMetricsCommandArgs("prune", ["OpenAI"], environment))
       .not.toThrow();
     expect(() => validateMetricsCommandArgs("prune", ["unknown"], environment))
-      .toThrow("codexc metrics prune <openai|deepseek|opencode-go>");
+      .toThrow("codexc metrics prune <provider>");
   });
 
   it("accepts a backed-up custom primary Provider for prune", () => {
@@ -103,6 +103,6 @@ describe("metrics command options", () => {
     expect(() => validateMetricsCommandArgs("prune", ["OpenAI"], environment))
       .not.toThrow();
     expect(() => validateMetricsCommandArgs("prune", ["unknown"], environment))
-      .toThrow("codexc metrics prune <openai|deepseek|opencode-go>");
+      .toThrow("codexc metrics prune <provider>");
   });
 });
