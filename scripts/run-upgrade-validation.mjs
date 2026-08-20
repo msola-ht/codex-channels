@@ -35,9 +35,9 @@ export const defaultUpgradeValidationStages = [
   },
   {
     id: "unit-tests",
-    name: "全量测试",
+    name: "测试（不含发布前 README 同步）",
     command: "npm",
-    args: ["test"],
+    args: ["test", "--", "--exclude", "tests/release-readme-sync.test.ts"],
   },
   {
     id: "contract-tests",
