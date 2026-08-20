@@ -542,6 +542,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
+    reasoningEnabled: true,
     pluginApiEnabled: true,
     threadSectionAdministrators: new Set(),
     priceCurrency: "cny",

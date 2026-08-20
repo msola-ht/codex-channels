@@ -14,6 +14,57 @@ export type SurfaceErrorReason =
   | "non-steerable-compact"
   | "empty-input";
 
+// 只放行各 Surface 错误类声明的稳定小写 kebab 错误码；新增错误码时必须同步本白名单，
+// 否则该码会被当作不可信字符串从日志元数据中剥离（失败安全）。
+const knownLowerKebabErrorCodes = new Set([
+  // FeishuMessageErrorCode（client.ts）与 FeishuApplicationSetupErrorCode /
+  // FeishuConnectionErrorCode（application-api.ts / event-connection.ts）。
+  "card-create-failed",
+  "client-create-failed",
+  "invalid-credentials",
+  "invalid-response",
+  "download-failed",
+  "download-timeout",
+  "read-failed",
+  "read-timeout",
+  "rate-limited",
+  "send-failed",
+  "send-timeout",
+  "authorization-invalid",
+  "configuration-conflict",
+  "configuration-failed",
+  "inspect-failed",
+  "start-failed",
+  "start-timeout",
+  "stopped",
+  "invalid-menu-event",
+  "invalid-card-action",
+  // WeixinOutboxErrorCode / WeixinProtocolErrorCode / WeixinFileInputErrorCode /
+  // WeixinInputFatalCode / WeixinRequestAbortReason（outbox.ts / protocol-client.ts /
+  // file-input.ts / input-adapter.ts / request-abort.ts）。
+  "image-sender-unavailable",
+  "missing-reply-context",
+  "unauthorized-recipient",
+  "aborted",
+  "api-error",
+  "http-error",
+  "invalid-input",
+  "network-error",
+  "timeout",
+  "integrity",
+  "message-processing",
+  "receiver-failed",
+  "network-abort",
+  // TelegramTextFileInputErrorCode / TelegramFileLocationError
+  // （file-input.ts / file-download.ts）与共享 GeneratedImageErrorCode（generated-image.ts）。
+  "too-large",
+  "unsupported",
+  "lookup-failed",
+  "invalid-path",
+  "invalid-file",
+  "unsupported-image",
+]);
+
 export function surfaceErrorMetadata(error: unknown): SurfaceErrorMetadata {
   if (error instanceof UserFacingError) {
     return {
@@ -55,7 +106,10 @@ export function surfaceErrorMetadata(error: unknown): SurfaceErrorMetadata {
   }
   if (
     typeof record.code === "string"
-    && /^[A-Z][A-Z0-9_]{1,40}$/u.test(record.code)
+    && (
+      /^[A-Z][A-Z0-9_]{1,40}$/u.test(record.code)
+      || knownLowerKebabErrorCodes.has(record.code)
+    )
   ) {
     return { errorType, errorCode: record.code };
   }

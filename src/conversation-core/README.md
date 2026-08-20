@@ -5,7 +5,7 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
-- `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan 和事件去重状态，
+- `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan、推理段状态和事件去重状态，
   把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
   `durationMs` 与 Router 已确认的 `modelProvider`；模型代理提供时，Core 按 Thread/Turn 聚合全部
   已关联请求的次数、实际产生推理输出的思考次数、累计耗时、Usage 与流式时间窗，不读取 SQLite；
@@ -24,7 +24,8 @@
   根据 Provider 能力计算通用或详细聚合计时。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP OAuth 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；外部视觉 API 请求发起后
-  使用不含路径、提示正文或凭据的非关键 `vision.started` 事件通知对应渠道。
+  使用不含路径、提示正文或凭据的非关键 `vision.started` 事件通知对应渠道；`turn.reasoning`
+  输出只携带“思考中…”状态、每段独立耗时与最终标记，不携带摘要或原始思维链内容。
 - `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。
 - `user-facing-error.ts`：用稳定错误代码和最小参数描述预期输入与状态错误；Surface 按平台独立渲染，未标记异常默认隐藏详情。
 

@@ -194,6 +194,31 @@ describe("Codex Connect config menu", () => {
     });
   });
 
+  it("toggles the reasoning display through the menu", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("display")
+        .mockResolvedValueOnce("reasoning")
+        .mockResolvedValueOnce("disabled"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({ reasoningEnabled: false, configPath: fixture.configPath });
+    expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
+      reasoning: false,
+    });
+  });
+
   it("sets the approval timeout through the system settings", async () => {
     const fixture = createFixture();
     const output: string[] = [];

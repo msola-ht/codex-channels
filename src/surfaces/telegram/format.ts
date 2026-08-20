@@ -131,7 +131,11 @@ export function formatStartupNotification(
 export function renderTelegramLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  return renderStructuredLifecyclePresentation(presentation);
+  const { footer, ...rest } = presentation;
+  const body = renderStructuredLifecyclePresentation(rest);
+  return footer === undefined
+    ? body
+    : `${body}\n\n${footer.label}：${footer.value}`;
 }
 
 export function renderTelegramSubagentCompleted(

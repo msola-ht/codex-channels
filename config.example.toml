@@ -43,6 +43,8 @@ timeout_seconds = 300
 operation_updates = "compact"
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
+# 是否在渠道显示“思考中”状态卡；false 时不显示。
+reasoning = true
 # 模型价格显示币种：全局统一为 cny（人民币）或 usd（美元）；
 # 选择 cny 时 Gateway 会刷新并持久化汇率，拉取失败时继续使用最后一次缓存。
 price_currency = "cny"

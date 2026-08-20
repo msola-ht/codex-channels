@@ -24,6 +24,7 @@ import type {
 } from "../types.js";
 import {
   createSubagentStartedPresentation,
+  createTurnReasoningPresentation,
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
@@ -98,6 +99,7 @@ export interface WeixinOutboxOptions {
   closeTimeoutMs?: number;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  reasoningEnabled?: boolean;
   exchangeRate?: () => ExchangeRateSnapshot | null;
   priceCurrency?: (
     provider: string | null | undefined,
@@ -162,6 +164,28 @@ export class WeixinOutbox implements SurfaceOutputPort {
             createTurnStartedPresentation(
               event.background ? event.threadId : undefined,
               event.identity,
+            ),
+          ),
+        ),
+        true,
+      );
+      return;
+    }
+    if (event.type === "turn.reasoning") {
+      if (this.options.reasoningEnabled === false) {
+        return;
+      }
+      if (event.final !== true) {
+        return;
+      }
+      this.delivery.enqueue(
+        event.target.conversationId,
+        () => this.send(
+          event.target,
+          renderPlainLifecyclePresentation(
+            createTurnReasoningPresentation(
+              event.background ? event.threadId : undefined,
+              event.elapsedMs,
             ),
           ),
         ),

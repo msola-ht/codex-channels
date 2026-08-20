@@ -113,6 +113,7 @@ describe("Gateway config reload", () => {
     ["surface.telegram.message-format", "telegram", { telegramMessageFormat: "rich" }],
     ["display.operation-updates", "global", { operationUpdateDisplay: "compact" }],
     ["display.plan-updates", "global", { planUpdatesEnabled: true }],
+    ["display.reasoning", "global", { reasoningEnabled: false }],
     ["display.price-currency", "global", { priceCurrency: "usd" }],
     ["experimental.plugin-api", "global", { pluginApiEnabled: false }],
     ["thread-sections.administrators", "global", {
@@ -463,6 +464,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     codexSandbox: "workspace-write",
     operationUpdateDisplay: "full",
     planUpdatesEnabled: false,
+    reasoningEnabled: true,
     pluginApiEnabled: true,
     threadSectionAdministrators: new Set(),
     priceCurrency: "cny",

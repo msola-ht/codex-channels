@@ -257,10 +257,12 @@ const gatewayDocumentSchema = z.strictObject({
   display: z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
+    reasoning: z.boolean().default(true),
     price_currency: priceCurrencySchema,
   }).default({
     operation_updates: "compact",
     plan_updates: true,
+    reasoning: true,
     price_currency: "cny",
   }),
   experimental: z.strictObject({

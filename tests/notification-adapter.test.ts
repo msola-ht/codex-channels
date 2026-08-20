@@ -245,6 +245,53 @@ describe("Notification adapter", () => {
     });
   });
 
+  it("maps reasoning notifications to stable heartbeat Core events", () => {
+    expect(toConversationInputEvent({
+      method: "item/reasoning/summaryTextDelta",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        summaryIndex: 0,
+        delta: "先分析协议",
+      },
+    })).toEqual({
+      type: "item.reasoning.delta",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+    });
+    expect(toConversationInputEvent({
+      method: "item/reasoning/summaryPartAdded",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        summaryIndex: 1,
+      },
+    })).toEqual({
+      type: "item.reasoning.delta",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+    });
+    expect(toConversationInputEvent({
+      method: "item/reasoning/textDelta",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        contentIndex: 0,
+        delta: "raw chain-of-thought",
+      },
+    })).toEqual({
+      type: "item.reasoning.delta",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+    });
+  });
+
   it("maps Goal updates and clears to stable Core events", () => {
     expect(toConversationInputEvent({
       method: "thread/goal/updated",

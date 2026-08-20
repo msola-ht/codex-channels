@@ -37,6 +37,9 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
 变化需要重启 Gateway，不需要重启 App Server。
 
+`display.reasoning` 是“思考中”状态展示开关，默认开启；显式设为 `false` 时三渠道不再发送
+思考状态卡，其余输出保持不变。变化需要重启 Gateway，不需要重启 App Server。
+
 `display.price_currency` 统一控制渠道与指标输出使用人民币或美元。人民币显示依赖 Gateway 持有的
 汇率刷新组件，因此币种变化需要重启 Gateway，不需要重启 App Server。
 

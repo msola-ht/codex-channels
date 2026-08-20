@@ -110,11 +110,13 @@ https_proxy = "http://127.0.0.1:7890"
 [display]
 operation_updates = "compact"
 plan_updates = true
+reasoning = true
 price_currency = "cny"
 ```
 
-`operation_updates` 控制操作过程详情，`plan_updates` 控制计划更新，`price_currency` 统一选择
-人民币或美元。完整显示与统计口径见 [`docs/display.md`](docs/display.md)。
+`operation_updates` 控制操作过程详情，`plan_updates` 控制计划更新，`reasoning` 控制“思考中”
+状态卡显示，`price_currency` 统一选择人民币或美元。完整显示与统计口径见
+[`docs/display.md`](docs/display.md)。
 
 运行 `codexc config` 选择「指标设置 → 本机接入中心」，即可把多台设备的脱敏指标汇总到中心。
 服务端配置、令牌边界和数据说明见 [`docs/metrics-sync.md`](docs/metrics-sync.md)。

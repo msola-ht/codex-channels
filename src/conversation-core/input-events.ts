@@ -52,6 +52,12 @@ export type ConversationInputEvent =
       phase: MessagePhase | null;
     }
   | {
+      type: "item.reasoning.delta";
+      threadId: string;
+      turnId: string;
+      itemId: string;
+    }
+  | {
       type: "item.subagentActivity";
       threadId: string;
       turnId: string;

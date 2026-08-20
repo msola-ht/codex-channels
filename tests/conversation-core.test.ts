@@ -1,5 +1,5 @@
 import pino from "pino";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   toConversationInputEvent,
@@ -14,6 +14,10 @@ import { EventBus } from "../src/event-bus/event-bus.js";
 import type { ConversationRoutingPort } from "../src/conversation-core/routing-port.js";
 
 describe("ConversationCore", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("tracks foreground and background Turns independently", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
@@ -50,6 +54,171 @@ describe("ConversationCore", () => {
     expect(events.find(
       (event) => event.type === "turn.completed" && event.threadId === "thread-1",
     )).toMatchObject({ background: true, target });
+  });
+
+  it("shows one thinking status per reasoning segment and resumes after operations", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      foregroundThreadId: () => "thread-1",
+      isBackgroundThread: () => false,
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "turn-1" } },
+    });
+    const reasoningDelta = (): void => handleNotification(core, {
+      method: "item/reasoning/textDelta",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-r1",
+        contentIndex: 0,
+        delta: "x",
+      },
+    });
+    reasoningDelta();
+    reasoningDelta();
+    reasoningDelta();
+    const commandItem = {
+      type: "commandExecution",
+      id: "cmd-1",
+      command: "git status --short",
+      status: "inProgress",
+      durationMs: null,
+      exitCode: null,
+    };
+    handleNotification(core, {
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: commandItem },
+    });
+    handleNotification(core, {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { ...commandItem, status: "completed", durationMs: 125, exitCode: 0 },
+      },
+    });
+    reasoningDelta();
+    reasoningDelta();
+    handleNotification(core, {
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-a1",
+        delta: "OK",
+      },
+    });
+    await output.close();
+
+    const reasoning = events.filter((event) => event.type === "turn.reasoning");
+    const starts = reasoning.filter((event) => event.final !== true);
+    const finals = reasoning.filter((event) => event.final === true);
+    expect(starts).toHaveLength(2);
+    expect(finals).toHaveLength(2);
+    expect(starts[0]).toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      target,
+    });
+    expect(starts[0]!.elapsedMs).toBeLessThan(1_000);
+    expect(starts[1]).toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      target,
+    });
+    expect(starts[1]!.elapsedMs).toBeLessThan(1_000);
+    expect(finals[0]).toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      final: true,
+      target,
+    });
+    expect(finals[0]!.elapsedMs).toBeGreaterThanOrEqual(
+      starts[0]!.elapsedMs,
+    );
+    expect(finals[1]).toMatchObject({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      final: true,
+      target,
+    });
+    expect(finals[1]!.elapsedMs).toBeGreaterThanOrEqual(
+      starts[1]!.elapsedMs,
+    );
+    expect(events.some((event) => event.type === "operation.updated")).toBe(true);
+    expect(events.some((event) => event.type === "text.delta")).toBe(true);
+  });
+
+  it("streams the thinking elapsed time every second and stops after the segment ends", async () => {
+    vi.useFakeTimers();
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "feishu" as const, accountId: "cli_app", conversationId: "oc_chat" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      foregroundThreadId: () => "thread-1",
+      isBackgroundThread: () => false,
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "turn-1" } },
+    });
+    handleNotification(core, {
+      method: "item/reasoning/textDelta",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-r1",
+        contentIndex: 0,
+        delta: "x",
+      },
+    });
+    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(2_000);
+    handleNotification(core, {
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-a1",
+        delta: "OK",
+      },
+    });
+    vi.advanceTimersByTime(5_000);
+    await output.close();
+
+    const reasoning = events.filter((event) => event.type === "turn.reasoning");
+    expect(reasoning.map((event) => event.elapsedMs)).toEqual([
+      0,
+      1_000,
+      2_000,
+      3_000,
+      3_000,
+    ]);
+    expect(reasoning[4]).toMatchObject({ final: true });
   });
 
   it("reduces thread token usage notifications for status rendering", async () => {

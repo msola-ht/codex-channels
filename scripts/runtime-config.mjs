@@ -79,6 +79,7 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
     display: {
       operation_updates: "compact",
       plan_updates: true,
+      reasoning: true,
     },
     experimental: {
       plugin_api: false,

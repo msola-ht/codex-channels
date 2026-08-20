@@ -35,6 +35,17 @@ describe("Feishu output renderer", () => {
     })).toBe("## 子代理开始 · review_task");
   });
 
+  it("renders the thinking status with elapsed time", () => {
+    expect(renderFeishuOutput({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 15_000,
+    })).toBe("## 思考中…\n\n---\n**耗时：** 15秒");
+  });
+
   it("distinguishes a batch image limit from a single-image limit", () => {
     expect(renderFeishuUserFacingError(new UserFacingError(
       "image.too-large",

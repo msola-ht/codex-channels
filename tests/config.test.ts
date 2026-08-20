@@ -146,6 +146,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("compact");
     expect(runtime.config.planUpdatesEnabled).toBe(true);
+    expect(runtime.config.reasoningEnabled).toBe(true);
     expect(runtime.config.pluginApiEnabled).toBe(false);
     expect(runtime.config.threadSectionAdministrators).toEqual(new Set());
     expect(runtime.config.apiProviders).toEqual([]);
@@ -517,6 +518,7 @@ describe("Gateway config.toml", () => {
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,
+      reasoning: true,
       price_currency: "cny",
     });
     expect(persisted.experimental).toEqual({ plugin_api: false });
@@ -627,6 +629,20 @@ describe("Gateway config.toml", () => {
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     }).config.planUpdatesEnabled).toBe(false);
+  });
+
+  it("preserves an explicit reasoning display opt-out", () => {
+    const fixture = createFixture({
+      display: {
+        operation_updates: "compact",
+        plan_updates: true,
+        reasoning: false,
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.reasoningEnabled).toBe(false);
   });
 
   it("preserves the explicit global price currency", () => {

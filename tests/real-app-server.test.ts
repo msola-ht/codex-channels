@@ -308,7 +308,7 @@ suite("real Codex App Server over Unix WebSocket", () => {
 });
 
 contractSuite("real supervised App Server service", () => {
-  it("starts a custom Responses primary Provider without a model catalog", async () => {
+  it("starts a custom Responses primary Provider and maps reasoning notifications", async () => {
     const testRuntime = mkdtempSync(join(tmpdir(), "codex-custom-provider-contract-"));
     const codexHome = join(testRuntime, "codex-home");
     const workspace = join(testRuntime, "workspace");
@@ -322,6 +322,75 @@ contractSuite("real supervised App Server service", () => {
           object: "list",
           data: [{ id: "gpt-5.6-terra", object: "model", owned_by: "fixture" }],
         }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/v1/responses") {
+        request.resume();
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        const encryptedReasoning = Buffer
+          .from(`${"b".repeat(550)}step one`)
+          .toString("base64");
+        const events = [
+          { type: "response.created", response: { id: "resp-1" } },
+          {
+            type: "response.output_item.added",
+            item: {
+              type: "reasoning",
+              id: "reasoning-1",
+              summary: [{ type: "summary_text", text: "" }],
+            },
+          },
+          {
+            type: "response.reasoning_summary_text.delta",
+            delta: "step one",
+            summary_index: 0,
+          },
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "reasoning",
+              id: "reasoning-1",
+              summary: [{ type: "summary_text", text: "step one" }],
+              encrypted_content: encryptedReasoning,
+            },
+          },
+          {
+            type: "response.output_item.added",
+            item: {
+              type: "message",
+              role: "assistant",
+              id: "message-1",
+              content: [],
+            },
+          },
+          { type: "response.output_text.delta", delta: "Done" },
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "message",
+              role: "assistant",
+              id: "message-1",
+              content: [{ type: "output_text", text: "Done" }],
+            },
+          },
+          {
+            type: "response.completed",
+            response: {
+              id: "resp-1",
+              usage: {
+                input_tokens: 1,
+                input_tokens_details: null,
+                output_tokens: 1,
+                output_tokens_details: null,
+                total_tokens: 2,
+              },
+            },
+          },
+        ];
+        for (const event of events) {
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+        response.end();
         return;
       }
       request.resume();
@@ -419,6 +488,45 @@ contractSuite("real supervised App Server service", () => {
       await client.connect();
       expect((await client.listModels()).some(({ model }) => model === "gpt-5.6-terra"))
         .toBe(true);
+
+      const started = await client.startThread(workspace);
+      const threadId = started.thread.id;
+      let reasoningDeltaCount = 0;
+      let turnId: string | undefined;
+      let completed = false;
+      const removeNotification = client.onNotification((notification) => {
+        const event = toConversationInputEvent(notification);
+        if (event?.type === "item.reasoning.delta" && event.threadId === threadId) {
+          reasoningDeltaCount += 1;
+        }
+        if (
+          event?.type === "turn.completed"
+          && event.threadId === threadId
+        ) {
+          completed = true;
+        }
+      });
+      try {
+        const turn = await client.startTurn(
+          threadId,
+          [{ type: "text", text: "reason through it" }],
+          "codex_connect:contract",
+          workspace,
+        );
+        turnId = turn.turnId;
+        await waitFor(
+          () => reasoningDeltaCount >= 1,
+          10_000,
+        );
+        await waitFor(() => completed, 10_000);
+      } finally {
+        removeNotification();
+        if (turnId) {
+          await client.interruptTurn(threadId, turnId).catch(() => undefined);
+        }
+        await client.unsubscribeThread(threadId).catch(() => undefined);
+        await client.deleteThread(threadId).catch(() => undefined);
+      }
     } finally {
       try {
         await client?.close().catch(() => undefined);

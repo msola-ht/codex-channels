@@ -200,6 +200,8 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 文件、工具或搜索操作终态卡片；审批、错误、最终回复和 Turn 完成统计保持原有行为。
 `display.plan_updates = true` 时，官方自动计划在同一 Turn 内固定使用一张卡片显示完整步骤；
 后续计划状态全部在原消息中更新，不再为完成步骤新增卡片；默认开启，可通过 `display.plan_updates = false` 关闭。
+思考状态只显示“思考中…”，连续思考每段只显示一次，每段独立计时并以一张流式卡片原地更新
+耗时，不展示推理摘要或思维链内容；`display.reasoning = false` 时不显示。
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
