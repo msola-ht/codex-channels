@@ -732,8 +732,9 @@ async function runServiceAppServer(args) {
         baseUrl,
       });
     } catch (error) {
-      console.error(
+      throw new Error(
         `第三方子代理角色配置生成失败：${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
   };

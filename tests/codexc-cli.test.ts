@@ -1493,6 +1493,76 @@ describe("codexc CLI", () => {
     );
   });
 
+  it("fails closed when the managed subagent role cannot be refreshed", () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-role-write-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    const faultInjection = join(root, "fail-role-write.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(0);\n");
+    chmodSync(fakeCodex, 0o700);
+    writeFileSync(faultInjection, [
+      "import fs from 'node:fs';",
+      "import { syncBuiltinESMExports } from 'node:module';",
+      "const renameSync = fs.renameSync;",
+      "fs.renameSync = (source, target) => {",
+      "  if (String(target).endsWith('sf-agent.config.toml')) {",
+      "    const error = new Error('injected role config write failure');",
+      "    error.code = 'EACCES';",
+      "    throw error;",
+      "  }",
+      "  return renameSync(source, target);",
+      "};",
+      "syncBuiltinESMExports();",
+    ].join("\n"));
+    writeManagedProviderFixture(
+      codexHome,
+      home,
+      deepseekProviderDefinition,
+      "switching",
+      "sk-service-secret",
+    );
+    writeFileSync(
+      join(codexHome, "sf-agent.config.toml"),
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `[agents.external]\nconfig_file = ${JSON.stringify(
+        join(codexHome, "sf-agent.config.toml"),
+      )}\n`,
+      { mode: 0o600 },
+    );
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const result = spawnSync(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: {
+        ...environment,
+        NODE_OPTIONS: `--import=${pathToFileURL(faultInjection).href}`,
+      },
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("第三方子代理角色配置生成失败");
+  });
+
   it("does not start an on-demand Provider proxy before that Provider is used", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-proxy-"));
     temporaryDirectories.push(root);
