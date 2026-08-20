@@ -875,7 +875,7 @@ describe("JsonRpcClient", () => {
     await client.listThreads("/tmp/project", { archived: true, searchTerm: "修复" });
     await client.archiveThread("thread-1");
     await client.unarchiveThread("thread-1");
-    await client.setThreadPinned("thread-1", true);
+    await expect(client.setThreadPinned("thread-1", true)).resolves.toBe(true);
 
     expect(transport.sent.find((message) => message.method === "thread/list")?.params)
       .toMatchObject({ archived: true, searchTerm: "修复" });
@@ -891,6 +891,21 @@ describe("JsonRpcClient", () => {
         sectionId: pinnedThreadSection.id,
         beforeThreadId: null,
       });
+  });
+
+  it("reports no change when the Thread is already in the requested pinned state", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.setThreadPinned("thread-1", false)).resolves.toBe(false);
+    expect(transport.sent.some((message) => message.method === "thread/section/move"))
+      .toBe(false);
+
+    await client.setThreadPinned("thread-1", true);
+    await expect(client.setThreadPinned("thread-1", true)).resolves.toBe(false);
   });
 
   it.each([

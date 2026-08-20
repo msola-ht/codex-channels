@@ -314,7 +314,13 @@ export function formatConversationCommandOutcome(
       ].join("\n"));
     case "thread.pin-updated":
       return toStructuredMarkdownList([
-        outcome.pinned ? "已固定当前会话。" : "已取消固定当前会话。",
+        outcome.changed
+          ? outcome.pinned
+            ? "已固定当前会话。"
+            : "已取消固定当前会话。"
+          : outcome.pinned
+            ? "当前会话已处于固定状态，无需重复操作。"
+            : "当前会话未固定，无需取消。若 /resume 列表仍有会话显示“固定”，请先 /resume 该会话，再执行 /unpin。",
       ].join("\n"));
     case "thread-section.created":
       return toStructuredMarkdownList([

@@ -269,7 +269,7 @@ export interface ConversationUseCases {
   ): Promise<Workspace>;
   stop(target: ConversationTarget): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
-  setPinned(target: ConversationTarget, pinned: boolean): Promise<void>;
+  setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean>;
   compact(target: ConversationTarget): Promise<void>;
   fork(target: ConversationTarget): Promise<string>;
   togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState>;
@@ -1139,13 +1139,13 @@ export class ConversationService implements ConversationUseCases {
     });
   }
 
-  setPinned(target: ConversationTarget, pinned: boolean): Promise<void> {
+  setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean> {
     return this.locked(target, async () => {
       const binding = this.router.current(target);
       if (!binding) {
         throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
       }
-      await this.codex.setThreadPinned(binding.threadId, pinned);
+      return this.codex.setThreadPinned(binding.threadId, pinned);
     });
   }
 

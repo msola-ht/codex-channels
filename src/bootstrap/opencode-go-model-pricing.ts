@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { isOpencodeGoProvider } from "../../runtime/opencode-go-accounts.mjs";
 import type {
   ModelPricingLookup,
   ModelPricingResolver,
@@ -64,7 +65,7 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
   }
 
   resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null {
-    if (lookup.provider !== "opencode-go" || lookup.model === null) return null;
+    if (!isOpencodeGoProvider(lookup.provider) || lookup.model === null) return null;
     const model = this.baseline.models.get(lookup.model);
     if (!model) return null;
     if (model.peakOffPeak) {

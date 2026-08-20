@@ -2182,7 +2182,7 @@ describe("ConversationService model selection", () => {
       | undefined;
     const interruptTurn = vi.fn(async () => undefined);
     const setThreadName = vi.fn(async () => undefined);
-    const setThreadPinned = vi.fn(async () => undefined);
+    const setThreadPinned = vi.fn(async () => true);
     const compactThread = vi.fn(async () => undefined);
     const startReview = vi.fn(async () => ({
       threadId: "thread-1",

@@ -497,12 +497,20 @@ describe("Feishu output renderer", () => {
         expected: "名称：新名称",
       },
       {
-        outcome: { type: "thread.pin-updated", pinned: true },
+        outcome: { type: "thread.pin-updated", pinned: true, changed: true },
         expected: "已固定当前会话",
       },
       {
-        outcome: { type: "thread.pin-updated", pinned: false },
+        outcome: { type: "thread.pin-updated", pinned: false, changed: true },
         expected: "已取消固定当前会话",
+      },
+      {
+        outcome: { type: "thread.pin-updated", pinned: true, changed: false },
+        expected: "当前会话已处于固定状态",
+      },
+      {
+        outcome: { type: "thread.pin-updated", pinned: false, changed: false },
+        expected: "当前会话未固定",
       },
       {
         outcome: { type: "thread.compaction-requested" },

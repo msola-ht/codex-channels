@@ -199,7 +199,7 @@ export type ConversationCommandOutcome =
     }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.unarchived"; threadId: string }
-  | { type: "thread.pin-updated"; pinned: boolean }
+  | { type: "thread.pin-updated"; pinned: boolean; changed: boolean }
   | { type: "thread-section.created"; sectionId: string; name: string }
   | { type: "thread-section.renamed"; sectionId: string; name: string }
   | { type: "thread-section.moved"; sectionId: string; name: string; pinned: boolean; ordered: boolean }
@@ -334,17 +334,21 @@ export class ConversationCommandService {
         };
       }
       case "pin":
-        await this.conversations.setPinned(target, true);
-        return {
-          kind: "outcome",
-          outcome: { type: "thread.pin-updated", pinned: true },
-        };
+        {
+          const changed = await this.conversations.setPinned(target, true);
+          return {
+            kind: "outcome",
+            outcome: { type: "thread.pin-updated", pinned: true, changed },
+          };
+        }
       case "unpin":
-        await this.conversations.setPinned(target, false);
-        return {
-          kind: "outcome",
-          outcome: { type: "thread.pin-updated", pinned: false },
-        };
+        {
+          const changed = await this.conversations.setPinned(target, false);
+          return {
+            kind: "outcome",
+            outcome: { type: "thread.pin-updated", pinned: false, changed },
+          };
+        }
       case "section": {
         const operation = parseThreadSectionOperation(argumentsText);
         const canManageCustomSections = Boolean(

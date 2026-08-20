@@ -969,7 +969,7 @@ describe("ConversationCommandService", () => {
       newSession: vi.fn(async () => undefined),
       archive: vi.fn(async () => "thread-archived"),
       unarchive: vi.fn(async () => "thread-unarchived"),
-      setPinned: vi.fn(async () => undefined),
+      setPinned: vi.fn(async () => true),
       listThreadSections: vi.fn(async () => []),
       selectWorkspace: vi.fn(async () => ({ id: "main", name: "Main", cwd: "/workspace" })),
       listWorkspaces: vi.fn(() => [{ id: "main", name: "Main", cwd: "/workspace" }]),
@@ -1070,6 +1070,24 @@ describe("ConversationCommandService", () => {
     });
     expect(service.setPinned).toHaveBeenNthCalledWith(1, target, true);
     expect(service.setPinned).toHaveBeenNthCalledWith(2, target, false);
+  });
+
+  it("reports whether pin/unpin changed the current Thread state", async () => {
+    const setPinned = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const commands = new ConversationCommandService({
+      setPinned,
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "pin")).resolves.toEqual({
+      kind: "outcome",
+      outcome: { type: "thread.pin-updated", pinned: true, changed: true },
+    });
+    await expect(commands.execute(target, "unpin")).resolves.toEqual({
+      kind: "outcome",
+      outcome: { type: "thread.pin-updated", pinned: false, changed: false },
+    });
   });
 
   it("returns structured goal query and clear results", async () => {
