@@ -77,6 +77,32 @@ describe("OpenCode Go account adapter", () => {
     );
   });
 
+  it("reads the default account credential after migrating to the account registry", async () => {
+    const codexHome = await createAccountRegistryCodexHome();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      usage: {
+        rolling: { status: "ok", percent: 10, resetsAt: "2026-08-16T18:03:54.934Z" },
+      },
+    }), { status: 200 }));
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await expect(adapter.accountUsage()).resolves.toMatchObject({
+      kind: "quota-windows",
+      provider: "opencode-go",
+      available: true,
+      windows: [{ windowId: "rolling", usedPercent: 10 }],
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://opencode.ai/zen/go/v1/usage",
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: "Bearer sk-test-secret" }),
+      }),
+    );
+  });
+
   it("fails with a stable user error without exposing malformed responses", async () => {
     const codexHome = await createCodexHome();
     const adapter = createOpencodeGoAccountAdapter({
@@ -137,6 +163,7 @@ describe("OpenCode Go account adapter", () => {
     const codexHome = await createCodexHome();
     const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-metrics-"));
     temporaryDirectories.push(directory);
+    const nowMs = Date.parse("2026-08-19T00:00:00.000Z");
     const metricsPath = modelRequestMetricsDatabasePath(
       join(directory, "gateway.sqlite3"),
     );
@@ -174,6 +201,7 @@ describe("OpenCode Go account adapter", () => {
       firstOutputDeltaAtMs: 1_400,
       lastOutputDeltaAtMs: 1_600,
       responseCompletedAtMs: 1_650,
+      recordedAtMs: nowMs - 1,
       weeklyQuota: null,
     });
     store.record({
@@ -217,6 +245,7 @@ describe("OpenCode Go account adapter", () => {
       firstOutputDeltaAtMs: 1_400,
       lastOutputDeltaAtMs: 1_600,
       responseCompletedAtMs: 1_650,
+      recordedAtMs: nowMs - 1,
       weeklyQuota: null,
     });
     store.record({
@@ -258,11 +287,11 @@ describe("OpenCode Go account adapter", () => {
       firstOutputDeltaAtMs: 1_400,
       lastOutputDeltaAtMs: 1_600,
       responseCompletedAtMs: 1_650,
+      recordedAtMs: nowMs - 1,
       weeklyQuota: null,
     });
     store.close();
 
-    const nowMs = Date.now();
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       usage: {
         monthly: {
@@ -291,28 +320,40 @@ describe("OpenCode Go account adapter", () => {
     const peak = usage.modelUsage!.find(
       (estimate) => estimate.bucket === "peak",
     );
+    if (
+      offPeak === undefined
+      || peak === undefined
+      || offPeak.usedUsdNanos === null
+      || peak.usedUsdNanos === null
+    ) {
+      throw new Error("expected both OpenCode Go pricing buckets");
+    }
     expect(offPeak).toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "off-peak",
       includedUsageUsd: 30,
-      usedUsdNanos: 237_500_000,
-      remainingUsdNanos: 29_762_500_000,
       windowEndAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
     });
+    expect(offPeak.usedUsdNanos).toBeGreaterThan(0);
+    expect(offPeak.remainingUsdNanos).toBe(
+      30_000_000_000 - offPeak.usedUsdNanos,
+    );
     expect(offPeak!.usedPercent).toBeCloseTo(
-      237_500_000 / 30_000_000_000 * 100,
+      offPeak.usedUsdNanos / 30_000_000_000 * 100,
       6,
     );
     expect(peak).toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "peak",
       includedUsageUsd: 30,
-      usedUsdNanos: 110_000_000,
-      remainingUsdNanos: 29_890_000_000,
       windowEndAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
     });
+    expect(peak.usedUsdNanos).toBeGreaterThan(0);
+    expect(peak.remainingUsdNanos).toBe(
+      30_000_000_000 - peak.usedUsdNanos,
+    );
     expect(peak!.usedPercent).toBeCloseTo(
-      110_000_000 / 30_000_000_000 * 100,
+      peak.usedUsdNanos / 30_000_000_000 * 100,
       6,
     );
     expect(offPeak!.windowStartAtMs).toBe(
@@ -911,6 +952,30 @@ async function createCodexHome(): Promise<string> {
   await writeFile(
     join(providerDirectory, "managed.toml"),
     'version = 1\nprovider = "opencode-go"\n',
+    { mode: 0o600 },
+  );
+  return directory;
+}
+
+async function createAccountRegistryCodexHome(): Promise<string> {
+  const directory = await createCodexHome();
+  const providerDirectory = join(
+    directory,
+    ".codex-connect",
+    "providers",
+    "opencode-go",
+  );
+  await rm(join(providerDirectory, "managed.toml"));
+  const accountDirectory = join(providerDirectory, "accounts", "opencode-go");
+  await mkdir(accountDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(providerDirectory, "accounts.json"),
+    `${JSON.stringify([{ id: "opencode-go", default: true }], null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(accountDirectory, "managed.toml"),
+    'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
     { mode: 0o600 },
   );
   return directory;

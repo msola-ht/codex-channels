@@ -502,11 +502,19 @@ export function loadOpencodeGoAccountCredential(environment = process.env) {
 }
 
 export function loadOpencodeGoAccountCredentialFor(provider, environment = process.env) {
-  if (provider === undefined || provider === "opencode-go") {
+  if (provider === undefined) {
     return loadOpencodeGoAccountCredential(environment);
   }
   const definition = findManagedProviderDefinition(environment, provider);
-  if (!definition) throw new Error(`未知 OpenCode Go 账户：${provider}`);
+  if (!definition) {
+    // 默认账户在账户注册表出现前使用旧版单 Provider 布局。
+    if (provider === "opencode-go") {
+      return loadOpencodeGoAccountCredential(environment);
+    }
+    throw new Error(`未知 OpenCode Go 账户：${provider}`);
+  }
+  const managed = loadManagedProviderProfileFor(environment, definition);
+  if (managed !== undefined) return managed.apiKey;
   const profile = loadConfiguredProviderProfile(environment, definition);
   if (!profile) throw new Error(`OpenCode Go 账户尚未配置：${provider}`);
   return profile.apiKey;

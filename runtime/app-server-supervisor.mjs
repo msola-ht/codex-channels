@@ -8,6 +8,7 @@ const protocolVersion = 2;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 1_024;
 const connectionTimeoutMs = 1_000;
+const minimumUnixSocketPathLimitBytes = 104;
 const providerIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 
 export class AppServerSupervisorOwner {
@@ -135,6 +136,18 @@ export class AppServerSupervisorOwner {
     }).catch((error) => {
       if (error?.code === "EADDRINUSE") {
         throw new Error("Codex App Server 统一监管入口已在运行");
+      }
+      if (
+        error?.code === "ENAMETOOLONG"
+        || (
+          error?.code === "EINVAL"
+          && Buffer.byteLength(this.#socketPath) > minimumUnixSocketPathLimitBytes
+        )
+      ) {
+        throw new Error(
+          `App Server 监管 Socket 无法创建（路径可能超过平台长度限制）：${this.#socketPath}`,
+          { cause: error },
+        );
       }
       throw error;
     });
