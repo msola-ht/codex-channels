@@ -1,3 +1,5 @@
+import { visibleUpstreamMessage } from "./output-copy.js";
+
 interface RateLimitWindowView {
   usedPercent: number;
   windowDurationMins: number | null;
@@ -69,7 +71,7 @@ export function formatPlanType(value: string): string {
 }
 
 export function formatOpenAiErrorMessage(value: string): string {
-  const message = value.replaceAll("[REDACTED]", "[已隐藏]");
+  const message = visibleUpstreamMessage(value);
   if (message.includes("You've hit your usage limit")) {
     const parts = ["OpenAI 用量上限已到达"];
     if (message.includes("purchase more credits")) {

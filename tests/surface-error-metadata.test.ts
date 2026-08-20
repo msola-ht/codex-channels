@@ -34,6 +34,12 @@ describe("surfaceErrorMetadata", () => {
       errorType: "Error",
       errorCode: "card-create-failed",
     });
+    expect(surfaceErrorMetadata(Object.assign(new Error("failed"), {
+      code: "invalid-message-event",
+    }))).toEqual({
+      errorType: "Error",
+      errorCode: "invalid-message-event",
+    });
   });
 
   it("classifies only locked App Server turn-steer errors without logging details", () => {

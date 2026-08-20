@@ -9,6 +9,7 @@ import {
   installProcessSignalHandlers,
   ReportedChildExitError,
   signalChildProcesses,
+  terminateChildProcess,
 } from "../runtime/process-lifecycle.mjs";
 
 describe("process lifecycle primitives", () => {
@@ -19,6 +20,32 @@ describe("process lifecycle primitives", () => {
     expect(childProcessIsRunning(running)).toBe(true);
     expect(running.kill).toHaveBeenCalledWith("SIGTERM");
     expect(exited.kill).not.toHaveBeenCalled();
+  });
+
+  it("waits for the child to exit after escalating to SIGKILL", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn<(signal?: NodeJS.Signals | number) => boolean>(() => true),
+    });
+    let completed = false;
+    const termination = terminateChildProcess(
+      child as unknown as Parameters<typeof terminateChildProcess>[0],
+      {
+        gracePeriodMs: 1,
+        forcePeriodMs: 100,
+      },
+    ).then(() => {
+      completed = true;
+    });
+
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith("SIGKILL"));
+    expect(completed).toBe(false);
+    child.signalCode = "SIGKILL";
+    child.emit("exit", null, "SIGKILL");
+    await termination;
+    expect(child.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
+    expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
   });
 
   it("installs and idempotently removes signal handlers", () => {

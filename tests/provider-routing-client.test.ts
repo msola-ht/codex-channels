@@ -492,6 +492,24 @@ describe("ProviderRoutingClient", () => {
     expect(openai.connect).toHaveBeenCalledOnce();
   });
 
+  it("reports the canonical primary Provider for alias custom-primary Threads", async () => {
+    const openai = client();
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-custom", "OpenAI", "idle"),
+    ]);
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      async () => undefined,
+      new Set(["OpenAI"]),
+    );
+
+    await routed.connect();
+    await routed.listThreads(cwd);
+
+    expect(routed.knownProvider("thread-custom")).toBe("openai");
+  });
+
   it("reconnects an alias custom-primary without launching a separate App Server", async () => {
     const openai = client();
     const ensureProvider = vi.fn(async () => undefined);
@@ -593,6 +611,36 @@ describe("ProviderRoutingClient", () => {
     await routed.forkThread("thread-custom", cwd, {
       modelProvider: "openai",
     });
+
+    expect(openai.forkThread).toHaveBeenCalledWith(
+      "thread-custom",
+      cwd,
+      expect.objectContaining({ modelProvider: "OpenAI" }),
+    );
+  });
+
+  it("preserves a custom primary Thread Provider after receiving its notifications", async () => {
+    const openai = client();
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-custom", "OpenAI", "idle"),
+    ]);
+    openai.forkThread.mockResolvedValue(session("thread-fork", "OpenAI", "idle"));
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      async () => undefined,
+      new Set(["OpenAI"]),
+      "OpenAI",
+    );
+
+    routed.onNotification(() => undefined);
+    await routed.connect();
+    await routed.listThreads(cwd);
+    openai.emitNotification({
+      method: "thread/status/changed",
+      params: { threadId: "thread-custom" },
+    });
+    await routed.forkThread("thread-custom", cwd, {});
 
     expect(openai.forkThread).toHaveBeenCalledWith(
       "thread-custom",

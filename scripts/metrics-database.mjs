@@ -43,7 +43,6 @@ import {
   assertExportFormat,
   isMetricsProviderId,
   metricsProviderIds,
-  metricsProviderUsage,
   parseCleanupOptions,
   parseLocalDate,
   parseMetricsOptions,
@@ -418,33 +417,40 @@ export function pruneProviderMetrics(provider, environment = process.env, option
   const warnings = [];
   let gatewayStopped = false;
   let centerStopped = false;
+  const stopErrors = [];
   try {
     stopGateway();
     gatewayStopped = true;
   } catch (error) {
-    warnings.push(`停止 Gateway 失败：${errorMessage(error)}`);
+    stopErrors.push(error);
   }
   if (centerConfigured) {
     try {
       stopCenter();
       centerStopped = true;
     } catch (error) {
-      warnings.push(`停止中心服务失败：${errorMessage(error)}`);
+      stopErrors.push(error);
     }
   }
 
   let result;
   let operationError;
-  try {
-    result = pruneProviderDatabases({
-      provider,
-      localDatabasePath,
-      centerDatabasePath,
-      allowVacuumLocal: gatewayStopped,
-      allowVacuumCenter: centerStopped,
-    });
-  } catch (error) {
-    operationError = error;
+  if (stopErrors.length > 0) {
+    operationError = stopErrors.length === 1
+      ? stopErrors[0]
+      : new AggregateError(stopErrors, "停止指标服务失败");
+  } else {
+    try {
+      result = pruneProviderDatabases({
+        provider,
+        localDatabasePath,
+        centerDatabasePath,
+        allowVacuumLocal: gatewayStopped,
+        allowVacuumCenter: centerStopped,
+      });
+    } catch (error) {
+      operationError = error;
+    }
   }
 
   const startFailures = [];
@@ -573,6 +579,9 @@ function pruneProviderDatabases({
   allowVacuumCenter,
 }) {
   const localBackupPath = backupMetricsDatabase(localDatabasePath, provider);
+  const centerBackupPath = centerDatabasePath === null
+    ? null
+    : backupMetricsDatabase(centerDatabasePath, provider);
   const localDeleted = deleteProviderRows(
     localDatabasePath,
     "model_request_metrics",
@@ -590,7 +599,6 @@ function pruneProviderDatabases({
       center: { skipped: true },
     };
   }
-  const centerBackupPath = backupMetricsDatabase(centerDatabasePath, provider);
   const centerDeleted = deleteProviderRows(
     centerDatabasePath,
     "request_metrics",
@@ -617,9 +625,8 @@ function backupMetricsDatabase(databasePath, provider) {
   if (!existsSync(databasePath)) return null;
   try {
     checkpoint(databasePath);
-  } catch {
-    // 服务未能完全停止时跳过备份，仍继续尝试删除（带 busy_timeout）。
-    return null;
+  } catch (error) {
+    throw new Error(`备份指标数据库失败：${errorMessage(error)}`, { cause: error });
   }
   const backupPath = `${databasePath}.${provider}-prune-${backupTimestamp(new Date())}.bak`;
   copyFileSync(databasePath, backupPath);
@@ -628,6 +635,7 @@ function backupMetricsDatabase(databasePath, provider) {
 }
 
 function deleteProviderRows(databasePath, table, provider, allowVacuum) {
+  if (!existsSync(databasePath)) return 0;
   const database = new DatabaseSync(databasePath);
   try {
     database.exec("PRAGMA busy_timeout = 10000;");
@@ -649,7 +657,7 @@ function errorMessage(error) {
 
 function assertPruneProvider(provider, environment = process.env) {
   if (!isMetricsProviderId(provider, environment)) {
-    throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
+    throw new Error("用法：codexc metrics prune <provider>");
   }
 }
 

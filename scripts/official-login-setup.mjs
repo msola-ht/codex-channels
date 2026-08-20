@@ -54,6 +54,8 @@ export async function runOfficialLoginSetup({
     await client.close().catch(() => undefined);
   }
   const config = record(snapshot.config);
+  const currentProvider = optionalString(config.model_provider);
+  const clearsCustomModel = currentProvider !== undefined && currentProvider !== "openai";
   const candidates = listCustomPrimaryProviderCandidates(record(config.model_providers));
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
 
@@ -91,6 +93,7 @@ export async function runOfficialLoginSetup({
       ? [{ keyPath: "openai_base_url", value: null }]
       : []),
     { keyPath: "model_provider", value: "openai" },
+    ...(clearsCustomModel ? [{ keyPath: "model", value: null }] : []),
     ...backedUp.map((id) => ({ keyPath: `model_providers.${id}`, value: null })),
   ];
   const writer = await createClient({ environment });

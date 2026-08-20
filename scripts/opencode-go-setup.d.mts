@@ -37,7 +37,7 @@ export function runOpenCodeGoSetup(options?: {
   | { action: "restored" }
   | { action: "configured"; mode: "switching" | "exclusive"; accountId: string }
   | { action: "default-set" }
-  | { action: "stopped" }
+  | { action: "stopped" | "not-running" | "in-use"; accountId: string }
   | { action: "listed" }
   | undefined
 >;

@@ -233,7 +233,11 @@ export class GatewayApplication {
       clients,
       async (provider) => {
         this.providerIdleReleaser?.markLaunching(provider);
-        await ensureAppServerProvider(config.codexSocketPath, provider);
+        try {
+          await ensureAppServerProvider(config.codexSocketPath, provider);
+        } finally {
+          this.providerIdleReleaser?.finishLaunching(provider);
+        }
       },
       customPrimaryProvider === undefined
         ? undefined
@@ -695,9 +699,10 @@ export class GatewayApplication {
       isAccountProvider: (provider) =>
         opencodeGoAccountIdFromProvider(provider) !== undefined,
       listRunningProviders: async () =>
-        (await inspectAppServerSupervisor(config.codexSocketPath))?.managedProviders ?? [],
+        (await inspectAppServerSupervisor(config.codexSocketPath))?.runningProviders ?? [],
       releaseProvider: (provider) =>
-        releaseAppServerProvider(config.codexSocketPath, provider),
+        releaseAppServerProvider(config.codexSocketPath, provider)
+          .then((result) => result.released),
       providerForThread: (threadId) =>
         this.router.modelSettingsForThread(threadId)?.modelProvider,
       listBindings: () => this.bindings.list(),
@@ -924,32 +929,7 @@ export class GatewayApplication {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
-        if (this.stopping) {
-          return;
-        }
-        this.disconnectedProviders.add(provider);
-        this.logger.warn({ err: error, provider }, "Codex App Server 连接已断开");
-        const affectedThreadIds = new Set(
-          this.router.allBindings()
-            .map((binding) => binding.threadId)
-            .filter((threadId) => this.codex.knownProvider(threadId) === provider),
-        );
-        if (affectedThreadIds.size > 0) {
-          const existing = this.disconnectedBindingsByProvider.get(provider);
-          if (existing) {
-            for (const threadId of affectedThreadIds) {
-              existing.add(threadId);
-            }
-          } else {
-            this.disconnectedBindingsByProvider.set(provider, affectedThreadIds);
-          }
-        }
-        this.interactions.cancelThreads(affectedThreadIds);
-        this.core.connectionLost(
-          `${provider} App Server 连接已断开，正在恢复连接`,
-          affectedThreadIds,
-        );
-        this.beginReconnect();
+        void this.handleCodexDisconnect(error, provider);
       });
       const initialized = await this.codex.connect();
       this.requireRunning();
@@ -1151,6 +1131,58 @@ export class GatewayApplication {
       await this.reconnectProvider(provider, signal);
       this.disconnectedProviders.delete(provider);
     }
+  }
+
+  private async handleCodexDisconnect(error: Error, provider: string): Promise<void> {
+    if (this.stopping) return;
+    const affectedThreadIds = new Set(
+      this.router.allBindings()
+        .map((binding) => binding.threadId)
+        .filter((threadId) => this.codex.knownProvider(threadId) === provider),
+    );
+    let intentionallyReleased = false;
+    try {
+      const topology = await inspectAppServerSupervisor(this.config.codexSocketPath);
+      intentionallyReleased = topology?.releasedProviders.some(
+        (releasedProvider) => releasedProvider === provider,
+      ) === true;
+    } catch (inspectError) {
+      this.logger.warn(
+        { err: inspectError, provider },
+        "无法确认模型 Provider 是否主动停止，将按意外断线恢复",
+      );
+    }
+    if (this.stopping) return;
+    if (intentionallyReleased) {
+      try {
+        await this.codex.closeProvider(provider);
+      } catch (closeError) {
+        this.logger.warn({ err: closeError, provider }, "主动停止的 Provider Client 清理失败");
+      }
+      this.interactions.cancelThreads(affectedThreadIds);
+      this.core.connectionLost(
+        `${provider} App Server 已主动停止；再次使用时将自动启动`,
+        affectedThreadIds,
+      );
+      this.logger.info({ provider }, "模型 Provider App Server 已主动停止");
+      return;
+    }
+    this.disconnectedProviders.add(provider);
+    this.logger.warn({ err: error, provider }, "Codex App Server 连接已断开");
+    if (affectedThreadIds.size > 0) {
+      const existing = this.disconnectedBindingsByProvider.get(provider);
+      if (existing) {
+        for (const threadId of affectedThreadIds) existing.add(threadId);
+      } else {
+        this.disconnectedBindingsByProvider.set(provider, affectedThreadIds);
+      }
+    }
+    this.interactions.cancelThreads(affectedThreadIds);
+    this.core.connectionLost(
+      `${provider} App Server 连接已断开，正在恢复连接`,
+      affectedThreadIds,
+    );
+    this.beginReconnect();
   }
 
   private async reconnectProvider(provider: string, signal: AbortSignal): Promise<void> {
@@ -1437,14 +1469,18 @@ export class GatewayApplication {
       this.retryPendingBindingRestore(threadId);
       return { status: "released", threadId, holder };
     }
-    if (recheck.holder === null || recheck.holder.pid !== holder.pid) {
+    const recheckedReleasable = recheck.holder !== null
+      && isReleaseableThreadWriterHolder(recheck.holder);
+    if (
+      recheck.holder === null
+      || recheck.holder.pid !== holder.pid
+      || !recheckedReleasable
+    ) {
       return {
         status: "held",
         threadId,
         holder: recheck.holder ?? holder,
-        releasable: recheck.holder === null
-          ? false
-          : isReleaseableThreadWriterHolder(recheck.holder),
+        releasable: recheckedReleasable,
         stuck,
       };
     }
@@ -1513,8 +1549,7 @@ function isHighFrequencyNotification(method: string): boolean {
 }
 
 function isReleaseableThreadWriterHolder(holder: ThreadLockHolder): boolean {
-  return /codex/u.test(holder.command)
-    && !/codexc\.mjs/u.test(holder.command);
+  return /^(?:codex|[^\s]*[/\\]codex)(?:\s|$)/u.test(holder.command);
 }
 
 function resolveRequestMetricsRange(

@@ -43,6 +43,18 @@ export function signalChildProcesses(children, signal) {
   }
 }
 
+export async function terminateChildProcess(child, {
+  gracePeriodMs = 5_000,
+  forcePeriodMs = 1_000,
+} = {}) {
+  if (!childProcessIsRunning(child)) return;
+  child.kill("SIGTERM");
+  if (await childExitedWithin(child, gracePeriodMs)) return;
+  if (childProcessIsRunning(child)) child.kill("SIGKILL");
+  if (await childExitedWithin(child, forcePeriodMs)) return;
+  throw new Error("子进程在强制终止后仍未退出");
+}
+
 export function installProcessSignalHandlers(handlers, source = process) {
   const entries = Object.entries(handlers).filter((entry) =>
     typeof entry[1] === "function");
@@ -53,4 +65,26 @@ export function installProcessSignalHandlers(handlers, source = process) {
     installed = false;
     for (const [signal, handler] of entries) source.off(signal, handler);
   };
+}
+
+function childExitedWithin(child, timeoutMs) {
+  if (!childProcessIsRunning(child)) return Promise.resolve(true);
+  return new Promise((resolveWait) => {
+    let timer;
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      child.off("exit", onExit);
+      resolveWait(exited);
+    };
+    const onExit = () => finish(true);
+    child.once("exit", onExit);
+    if (!childProcessIsRunning(child)) {
+      finish(true);
+      return;
+    }
+    timer = setTimeout(() => finish(!childProcessIsRunning(child)), timeoutMs);
+  });
 }

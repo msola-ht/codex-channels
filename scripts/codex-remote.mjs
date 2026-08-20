@@ -4,7 +4,7 @@ import { isAbsolute } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
-import { ensureAppServerProvider } from "../runtime/app-server-supervisor.mjs";
+import { acquireAppServerProviderLease } from "../runtime/app-server-supervisor.mjs";
 import {
   loadManagedModelProviders,
   providerAppServerSocketPath,
@@ -53,6 +53,7 @@ async function runRemoteCli() {
   }
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
   let socketPath = primarySocketPath;
+  let providerLease;
   const selectedDefinition = [
     ...loadManagedModelProviderDefinitions(process.env),
     opencodeGoProviderDefinition,
@@ -65,30 +66,37 @@ async function runRemoteCli() {
       throw new Error(`${selectedDefinition.displayName} 尚未配置，请先运行 codexc setup`);
     }
     socketPath = providerAppServerSocketPath(primarySocketPath, managedProvider.provider);
-    await ensureAppServerProvider(primarySocketPath, managedProvider.provider);
+    providerLease = await acquireAppServerProviderLease(
+      primarySocketPath,
+      managedProvider.provider,
+    );
   }
   const configuredBinary = stringValue(codex.binary) || "codex";
   const codexBinary = isAbsolute(configuredBinary)
     ? realpathSync(configuredBinary)
     : configuredBinary;
-  const result = spawnSync(
-    codexBinary,
-    [
-      "--remote",
-      `unix://${socketPath}`,
-      "-C",
-      workdir,
-      ...(selectedDefinition
-        ? ["--profile", selectedDefinition.codexProfileName]
-        : []),
-      ...passthrough,
-    ],
-    { stdio: "inherit" },
-  );
-  assertSynchronousChildSuccess(result, {
-    failureReportedByChild: true,
-    failureMessage: (exitCode) => `Codex TUI 已退出：exit=${exitCode}`,
-  });
+  try {
+    const result = spawnSync(
+      codexBinary,
+      [
+        "--remote",
+        `unix://${socketPath}`,
+        "-C",
+        workdir,
+        ...(selectedDefinition
+          ? ["--profile", selectedDefinition.codexProfileName]
+          : []),
+        ...passthrough,
+      ],
+      { stdio: "inherit" },
+    );
+    assertSynchronousChildSuccess(result, {
+      failureReportedByChild: true,
+      failureMessage: (exitCode) => `Codex TUI 已退出：exit=${exitCode}`,
+    });
+  } finally {
+    await providerLease?.close();
+  }
 }
 
 function table(value) {

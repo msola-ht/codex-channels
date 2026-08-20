@@ -38,6 +38,7 @@ const knownLowerKebabErrorCodes = new Set([
   "start-timeout",
   "stopped",
   "invalid-menu-event",
+  "invalid-message-event",
   "invalid-card-action",
   // WeixinOutboxErrorCode / WeixinProtocolErrorCode / WeixinFileInputErrorCode /
   // WeixinInputFatalCode / WeixinRequestAbortReason（outbox.ts / protocol-client.ts /

@@ -8,6 +8,7 @@ import {
   formatRateLimitState,
   formatRateLimitWindow,
 } from "./account-format.js";
+import { visibleUpstreamMessage } from "./output-copy.js";
 
 export function formatRuntimeAccountUpdate(
   authMode: string | null,
@@ -48,7 +49,7 @@ export function formatRuntimeMcpStatusUpdate(
     `- 名称：${update.name}`,
     `- 状态：${labels[update.status]}`,
     ...(update.error
-      ? [`- 原因：${visibleRuntimeMessage(update.error)}`]
+      ? [`- 原因：${visibleUpstreamMessage(update.error)}`]
       : []),
   ].join("\n");
 }
@@ -65,11 +66,7 @@ export function formatRuntimeMcpOAuthCompleted(
     `- 名称：${completion.name}`,
     `- 状态：${completion.success ? "登录成功" : "登录失败"}`,
     ...(!completion.success && completion.error
-      ? [`- 原因：${visibleRuntimeMessage(completion.error)}`]
+      ? [`- 原因：${visibleUpstreamMessage(completion.error)}`]
       : []),
   ].join("\n");
-}
-
-function visibleRuntimeMessage(message: string): string {
-  return message.replaceAll("[REDACTED]", "[已隐藏]");
 }

@@ -1,6 +1,9 @@
 import type { Logger } from "pino";
 
-import type { ConversationTarget } from "../conversation-core/index.js";
+import {
+  conversationTargetKey,
+  type ConversationTarget,
+} from "../conversation-core/index.js";
 import type { ConversationBinding } from "../storage/index.js";
 
 const defaultIdleThresholdMs = 5 * 60 * 1_000;
@@ -40,6 +43,7 @@ export class ProviderIdleReleaser {
   private readonly launching = new Set<string>();
   private readonly recentTargets = new Map<string, ConversationTarget[]>();
   private timer: NodeJS.Timeout | undefined;
+  private scanTask: Promise<void> | undefined;
   private stopped = false;
 
   constructor(options: ProviderIdleReleaserOptions) {
@@ -69,12 +73,13 @@ export class ProviderIdleReleaser {
     this.timer.unref?.();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
     }
+    await this.scanTask;
   }
 
   touch(provider: string | undefined, target?: ConversationTarget): void {
@@ -97,7 +102,21 @@ export class ProviderIdleReleaser {
     this.touch(provider);
   }
 
-  async scan(): Promise<void> {
+  finishLaunching(provider: string): void {
+    this.launching.delete(provider);
+  }
+
+  scan(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    if (this.scanTask) return this.scanTask;
+    const task = this.scanOnce().finally(() => {
+      if (this.scanTask === task) this.scanTask = undefined;
+    });
+    this.scanTask = task;
+    return task;
+  }
+
+  private async scanOnce(): Promise<void> {
     let running: readonly string[];
     try {
       running = await this.listRunningProviders();
@@ -108,9 +127,11 @@ export class ProviderIdleReleaser {
       );
       return;
     }
+    if (this.stopped) return;
     const defaultProvider = this.defaultRoleProvider();
     const nowMs = this.nowMs();
     for (const provider of running) {
+      if (this.stopped) return;
       if (
         !this.isAccountProvider(provider)
         || this.launching.has(provider)
@@ -128,9 +149,10 @@ export class ProviderIdleReleaser {
         const released = await this.releaseProvider(provider);
         if (released) {
           const targets = this.recentTargets.get(provider) ?? [];
-          this.notify(provider, targets);
           this.lastActivityAt.delete(provider);
           this.recentTargets.delete(provider);
+          if (this.stopped) return;
+          this.notify(provider, targets);
           this.logger.info(
             { provider },
             "OpenCode Go 账户隔离 App Server 已空闲停止",
@@ -150,8 +172,4 @@ export class ProviderIdleReleaser {
       (binding) => this.providerForThread(binding.threadId) === provider,
     );
   }
-}
-
-function conversationTargetKey(target: ConversationTarget): string {
-  return JSON.stringify([target.surface, target.accountId, target.conversationId]);
 }

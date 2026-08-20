@@ -17,9 +17,11 @@ import { parse } from "smol-toml";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  acquireAppServerProviderLease,
   appServerSupervisorSocketPath,
   ensureAppServerProvider,
   inspectAppServerSupervisor,
+  releaseAppServerProvider,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
@@ -583,6 +585,7 @@ contractSuite("real supervised App Server service", () => {
         slug: "deepseek-v4-flash",
         display_name: "DeepSeek-V4-Flash",
         description: "OpenCode Go contract fixture",
+        context_window: 200_000,
         default_reasoning_level: "high",
         supported_reasoning_levels: [{
           effort: "high",
@@ -740,6 +743,16 @@ contractSuite("real supervised App Server service", () => {
       );
       const openCodeInitialized = await openCodeClient.connect();
       expect(openCodeInitialized.userAgent).toContain("codex_connect/");
+      const providerLease = await acquireAppServerProviderLease(socketPath, "opencode-go");
+      try {
+        expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
+          leasedProviders: ["opencode-go"],
+        });
+        await expect(releaseAppServerProvider(socketPath, "opencode-go"))
+          .resolves.toEqual({ released: false, reason: "leased" });
+      } finally {
+        await providerLease.close();
+      }
       const models = await openCodeClient.listModels();
       expect(models.some(({ model }) => model === "deepseek-v4-flash")).toBe(true);
     } finally {

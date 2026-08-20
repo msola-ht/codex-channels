@@ -31,6 +31,13 @@ export function signalChildProcesses(
   children: Array<Pick<ChildProcess, "exitCode" | "signalCode" | "kill">>,
   signal: NodeJS.Signals,
 ): void;
+export function terminateChildProcess(
+  child: Pick<ChildProcess, "exitCode" | "signalCode" | "kill" | "once" | "off">,
+  options?: {
+    gracePeriodMs?: number;
+    forcePeriodMs?: number;
+  },
+): Promise<void>;
 export function installProcessSignalHandlers(
   handlers: Partial<Record<NodeJS.Signals, () => void>>,
   source?: EventEmitter,

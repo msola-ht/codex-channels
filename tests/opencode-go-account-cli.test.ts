@@ -1,9 +1,30 @@
-import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+const fileRemovalFailure = vi.hoisted(() => ({ path: undefined as string | undefined }));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    unlinkSync: (path: string) => {
+      if (path === fileRemovalFailure.path) throw new Error("injected remove failure");
+      return actual.unlinkSync(path);
+    },
+  };
+});
+
+import {
+  AppServerSupervisorOwner,
+  acquireAppServerProviderLease,
+  appServerSupervisorSocketPath,
+} from "../runtime/app-server-supervisor.mjs";
+import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   addOpencodeGoAccount,
   printOpencodeGoAccounts,
@@ -15,7 +36,9 @@ import {
   loadOpencodeGoAccounts,
   opencodeGoAccountMarkerPath,
 } from "../runtime/opencode-go-accounts.mjs";
-import { initializeUserData } from "../scripts/runtime-config.mjs";
+import { initializeUserData, runtimeConfig } from "../scripts/runtime-config.mjs";
+
+const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
 
 describe("OpenCode Go account CLI", () => {
   it("adds the first account as default and a second account without changing the role", async () => {
@@ -116,6 +139,45 @@ describe("OpenCode Go account CLI", () => {
     expect(existsSync(join(backup, "sf-opencode-go-b.config.toml"))).toBe(true);
   });
 
+  it("restores the account when removing a managed file fails midway", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    await addOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    const profilePath = join(codexHome(home), "sf-opencode-go-b.config.toml");
+    const markerPath = opencodeGoAccountMarkerPath(environment, "b");
+    fileRemovalFailure.path = markerPath;
+
+    try {
+      await expect(removeOpencodeGoAccount("b", {
+        environment,
+        output: { write: () => undefined },
+        confirm: false,
+      })).rejects.toThrow("injected remove failure");
+    } finally {
+      fileRemovalFailure.path = undefined;
+    }
+
+    expect(loadOpencodeGoAccounts(environment)).toEqual([
+      { id: "opencode-go", default: true },
+      { id: "b", default: false },
+    ]);
+    expect(existsSync(profilePath)).toBe(true);
+    expect(existsSync(markerPath)).toBe(true);
+  });
+
   it("refuses to delete the final account before stopping its App Server", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
@@ -168,6 +230,120 @@ describe("OpenCode Go account CLI", () => {
     ]);
   });
 
+  it("keeps the previous default account when the shared role update fails", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    const rolePath = join(codexHome(home), "sf-agent.config.toml");
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async (provider, model) => {
+        writeFileSync(
+          join(codexHome(home), "config.toml"),
+          `[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n`,
+          { mode: 0o600 },
+        );
+        writeFileSync(
+          rolePath,
+          `model = ${JSON.stringify(model)}\nmodel_provider = ${JSON.stringify(provider)}\n`,
+          { mode: 0o600 },
+        );
+      },
+      downloadCatalog: successfulCatalog,
+    });
+    await addOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+
+    await expect(setOpencodeGoDefaultAccount("b", {
+      environment,
+      configureRole: async () => { throw new Error("role update failed"); },
+    })).rejects.toThrow("role update failed");
+
+    expect(loadOpencodeGoAccounts(environment)).toEqual([
+      { id: "opencode-go", default: true },
+      { id: "b", default: false },
+    ]);
+  });
+
+  it("does not replace a DeepSeek shared role when the GO default account changes", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    await addOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    const rolePath = join(codexHome(home), "sf-agent.config.toml");
+    writeFileSync(
+      join(codexHome(home), "config.toml"),
+      `[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n`,
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      rolePath,
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      { mode: 0o600 },
+    );
+    const configureRole = vi.fn(async () => undefined);
+
+    await setOpencodeGoDefaultAccount("b", { environment, configureRole });
+
+    expect(configureRole).not.toHaveBeenCalled();
+    expect(loadOpencodeGoAccounts(environment)).toEqual([
+      { id: "opencode-go", default: false },
+      { id: "b", default: true },
+    ]);
+  });
+
+  it("does not change the default when the shared role cannot be read safely", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    await addOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    const rolePath = join(codexHome(home), "sf-agent.config.toml");
+    writeFileSync(
+      join(codexHome(home), "config.toml"),
+      `[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n`,
+      { mode: 0o600 },
+    );
+    writeFileSync(rolePath, "not valid [ toml", { mode: 0o600 });
+
+    await expect(setOpencodeGoDefaultAccount("b", { environment }))
+      .rejects.toThrow("第三方子代理角色配置无法安全读取");
+
+    expect(loadOpencodeGoAccounts(environment)).toEqual([
+      { id: "opencode-go", default: true },
+      { id: "b", default: false },
+    ]);
+  });
+
   it("runs the list subcommand through the CLI entry", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
@@ -183,6 +359,36 @@ describe("OpenCode Go account CLI", () => {
     await runOpencodeGoAccountCli(["account", "list"], { environment, output });
 
     expect(output.write).toHaveBeenCalledWith(expect.stringContaining("opencode-go（默认）"));
+  });
+
+  it("reports the default-account change and required restart through the CLI", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    await addOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    const output = { write: vi.fn() };
+
+    await runOpencodeGoAccountCli(
+      ["account", "default", "b"],
+      { environment, output },
+    );
+
+    expect(output.write).toHaveBeenCalledWith("默认 OpenCode Go 账户已设置为 b。\n");
+    expect(output.write).toHaveBeenCalledWith(
+      "请重启 Gateway 与 App Server：codexc service restart all\n",
+    );
   });
 
   it("reports a not-running account on stop", async () => {
@@ -204,10 +410,114 @@ describe("OpenCode Go account CLI", () => {
 
     expect(result).toEqual({ action: "not-running", accountId: "opencode-go" });
   });
+
+  it("does not remove an account while a Remote TUI holds its Provider lease", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    await addOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    const runtime = runtimeConfig(environment);
+    const primarySocketPath = resolvePrimaryAppServerSocketPath(
+      readGatewayConfig(runtime.configPath),
+      runtime.dataDir,
+    );
+    const owner = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["opencode-go", "opencode-go-b"],
+      socketPaths: [primarySocketPath],
+    }, {
+      ensureProvider: async () => undefined,
+      releaseProvider: async () => true,
+    });
+    await owner.start();
+    const lease = await acquireAppServerProviderLease(primarySocketPath, "opencode-go-b");
+
+    try {
+      await expect(removeOpencodeGoAccount("b", {
+        environment,
+        output: { write: () => undefined },
+        confirm: false,
+      })).rejects.toThrow("Remote TUI");
+      expect(loadOpencodeGoAccounts(environment)).toEqual([
+        { id: "opencode-go", default: true },
+        { id: "b", default: false },
+      ]);
+    } finally {
+      await lease.close();
+      await owner.close();
+    }
+  });
+
+  it("does not remove an account when the running Supervisor protocol is incompatible", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    await addOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    const runtime = runtimeConfig(environment);
+    const primarySocketPath = resolvePrimaryAppServerSocketPath(
+      readGatewayConfig(runtime.configPath),
+      runtime.dataDir,
+    );
+    const supervisorSocketPath = appServerSupervisorSocketPath(primarySocketPath);
+    const server = createServer((socket) => {
+      socket.once("data", () => socket.end(`${JSON.stringify({
+        version: 3,
+        pid: process.pid,
+        primaryProvider: "openai",
+        managedProviders: ["opencode-go", "opencode-go-b"],
+        socketPaths: [primarySocketPath],
+        runningProviders: ["opencode-go-b"],
+        releasedProviders: [],
+      })}\n`));
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(supervisorSocketPath, resolve);
+    });
+    chmodSync(supervisorSocketPath, 0o600);
+
+    try {
+      await expect(removeOpencodeGoAccount("b", {
+        environment,
+        output: { write: () => undefined },
+        confirm: false,
+      })).rejects.toThrow("监管协议");
+      expect(loadOpencodeGoAccounts(environment)).toEqual([
+        { id: "opencode-go", default: true },
+        { id: "b", default: false },
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 function fixture() {
-  const home = mkdtempSync(join(tmpdir(), "codexc-go-account-cli-"));
+  const home = mkdtempSync(join(unixSocketTmpdir, "codexc-go-account-cli-"));
   const connectHome = join(home, ".codex-connect");
   const codex = join(home, ".codex");
   mkdirSync(connectHome, { recursive: true, mode: 0o700 });

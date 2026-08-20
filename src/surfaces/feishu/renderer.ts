@@ -45,6 +45,11 @@ import {
 import {
   emptyCodexResponseText,
   formatCliInput,
+  formatCodexWarning,
+  formatConnectionLost,
+  formatConnectionRestored,
+  formatThreadAvailability,
+  visibleUpstreamMessage,
 } from "../output-copy.js";
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
@@ -64,12 +69,6 @@ import {
   formatVisionStarted,
 } from "../input-copy.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
-import {
-  formatCodexWarning,
-  formatConnectionLost,
-  formatConnectionRestored,
-  formatThreadAvailability,
-} from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
   formatRuntimeMcpOAuthCompleted,
@@ -334,10 +333,6 @@ function renderFeishuLifecyclePresentation(
   return footer === undefined
     ? rendered
     : `${rendered}\n\n---\n**${footer.label}：** ${footer.value}`;
-}
-
-function visibleUpstreamMessage(message: string): string {
-  return message.replaceAll("[REDACTED]", "[已隐藏]");
 }
 
 function threadStatusLabel(status: string): string {

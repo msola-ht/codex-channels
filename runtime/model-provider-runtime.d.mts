@@ -55,6 +55,10 @@ export function restorePrimaryProviderCandidateEdits(
   id: string,
   environment?: NodeJS.ProcessEnv,
 ): Array<{ keyPath: string; value: unknown }> | undefined;
+export function removePrimaryProviderBackupCandidate(
+  id: string,
+  environment?: NodeJS.ProcessEnv,
+): Record<string, unknown> | undefined;
 export function validProviderBaseUrl(value: string, label: string): string;
 
 export interface ManagedModelProviderSettings {

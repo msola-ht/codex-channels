@@ -11,7 +11,10 @@ import { stringify } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
-import { AppServerSupervisorOwner } from "../runtime/app-server-supervisor.mjs";
+import {
+  AppServerSupervisorOwner,
+  inspectAppServerSupervisor,
+} from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsActive, GatewayOwner } from "../runtime/gateway-owner.mjs";
 import {
@@ -1282,6 +1285,72 @@ describe("codexc CLI", () => {
     });
   });
 
+  it("finishes service shutdown when an App Server ignores graceful termination", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-shutdown-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const capturePath = join(root, "capture.json");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { writeFileSync } from 'node:fs';",
+      "let signals = 0;",
+      "const capture = () => writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({ pid: process.pid, signals }));",
+      "process.on('SIGTERM', () => { signals += 1; capture(); });",
+      "capture();",
+      "setInterval(() => undefined, 1000);",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+      CODEX_TEST_CAPTURE: capturePath,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+    const service = spawn(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const exited = new Promise<void>((resolveExit) => service.once("exit", () => resolveExit()));
+
+    let exitedWithinLimit = false;
+    let captured: { pid?: number; signals?: number };
+    try {
+      await waitForCondition(() => existsSync(capturePath), 2_000);
+      await expect(inspectAppServerSupervisor(
+        join(home, "runtime", "codex-app-server.sock"),
+      )).resolves.toBeDefined();
+      service.kill("SIGTERM");
+      exitedWithinLimit = await Promise.race([
+        exited.then(() => true),
+        new Promise<false>((resolveTimeout) => setTimeout(() => resolveTimeout(false), 8_000)),
+      ]);
+    } finally {
+      captured = existsSync(capturePath)
+        ? JSON.parse(readFileSync(capturePath, "utf8")) as { pid?: number }
+        : {};
+      if (!exitedWithinLimit) {
+        if (service.exitCode === null && service.signalCode === null) service.kill("SIGKILL");
+        if (typeof captured.pid === "number") {
+          signalTestProcess(captured.pid, "SIGKILL");
+        }
+        await exited;
+      }
+    }
+    expect(exitedWithinLimit).toBe(true);
+    expect(captured.signals).toBeGreaterThanOrEqual(1);
+  }, 15_000);
+
   it("starts a selected custom Responses Provider through the local metrics proxy", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-custom-provider-"));
     temporaryDirectories.push(root);
@@ -1430,6 +1499,76 @@ describe("codexc CLI", () => {
     expect(readFileSync(roleConfigPath, "utf8")).toMatch(
       /base_url = "http:\/\/127\.0\.0\.1:\d+\/"/u,
     );
+  });
+
+  it("fails closed when the managed subagent role cannot be refreshed", () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-role-write-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    const faultInjection = join(root, "fail-role-write.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(0);\n");
+    chmodSync(fakeCodex, 0o700);
+    writeFileSync(faultInjection, [
+      "import fs from 'node:fs';",
+      "import { syncBuiltinESMExports } from 'node:module';",
+      "const renameSync = fs.renameSync;",
+      "fs.renameSync = (source, target) => {",
+      "  if (String(target).endsWith('sf-agent.config.toml')) {",
+      "    const error = new Error('injected role config write failure');",
+      "    error.code = 'EACCES';",
+      "    throw error;",
+      "  }",
+      "  return renameSync(source, target);",
+      "};",
+      "syncBuiltinESMExports();",
+    ].join("\n"));
+    writeManagedProviderFixture(
+      codexHome,
+      home,
+      deepseekProviderDefinition,
+      "switching",
+      "sk-service-secret",
+    );
+    writeFileSync(
+      join(codexHome, "sf-agent.config.toml"),
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `[agents.external]\nconfig_file = ${JSON.stringify(
+        join(codexHome, "sf-agent.config.toml"),
+      )}\n`,
+      { mode: 0o600 },
+    );
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const result = spawnSync(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: {
+        ...environment,
+        NODE_OPTIONS: `--import=${pathToFileURL(faultInjection).href}`,
+      },
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("第三方子代理角色配置生成失败");
   });
 
   it("does not start an on-demand Provider proxy before that Provider is used", async () => {
@@ -3497,6 +3636,16 @@ function readCapturedInitialization(path: string): boolean {
 function signalTestProcessGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pid, signal);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+      throw error;
+    }
+  }
+}
+
+function signalTestProcess(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
       throw error;

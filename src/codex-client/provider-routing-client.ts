@@ -152,7 +152,8 @@ export class ProviderRoutingClient {
   }
 
   knownProvider(threadId: string): string | undefined {
-    return this.threadProviders.get(threadId);
+    const provider = this.threadProviders.get(threadId);
+    return provider === undefined ? undefined : this.canonicalProvider(provider);
   }
 
   async listThreads(
@@ -593,7 +594,7 @@ export class ProviderRoutingClient {
     const threadId = params && typeof params.threadId === "string"
       ? params.threadId
       : undefined;
-    if (threadId) {
+    if (threadId && !this.threadProviders.has(threadId)) {
       this.threadProviders.set(threadId, provider);
     }
   }

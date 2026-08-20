@@ -786,8 +786,8 @@ describe("OpenCode Go account adapter", () => {
       totalTokens: 110_000,
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
-      requestStartedAtMs: Date.parse("2026-08-16T08:00:00.000Z"),
-      recordedAtMs: Date.parse("2026-08-17T07:00:00.000Z"),
+      requestStartedAtMs: Date.parse("2026-08-18T08:00:00.000Z"),
+      recordedAtMs: Date.parse("2026-08-18T09:00:00.000Z"),
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
       lastReasoningDeltaAtMs: null,
@@ -798,7 +798,7 @@ describe("OpenCode Go account adapter", () => {
     });
     store.close();
 
-    const nowMs = Date.parse("2026-08-17T08:30:00.000Z");
+    const nowMs = Date.parse("2026-08-19T08:30:00.000Z");
     const fetchImpl = async () => new Response(JSON.stringify({
       usage: {
         monthly: {
@@ -826,11 +826,12 @@ describe("OpenCode Go account adapter", () => {
     const peak = usage.modelUsage?.find(
       (estimate) => estimate.bucket === "peak",
     );
-    // 请求开始于 Peak 时段，但快照保存的是 Off-Peak 档位，历史重算必须沿用存档位。
+    // 请求晚于当前价格基线生效时间且开始于 Peak 时段，但快照保存的是 Off-Peak 档位：
+    // 历史重算应沿用存档位，并使用当前基线的 Off-Peak 单价。
     expect(offPeak).toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "off-peak",
-      usedUsdNanos: 57_200_000,
+      usedUsdNanos: 28_600_000,
     });
     expect(peak).toMatchObject({
       model: "deepseek-v4-flash",

@@ -64,12 +64,17 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
     this.baseline = baseline;
   }
 
-  resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null {
+  resolve(
+    lookup: ModelPricingLookup,
+    bucket?: "peak" | "off-peak",
+  ): ModelRequestPricingSnapshot | null {
     if (!isOpencodeGoProvider(lookup.provider) || lookup.model === null) return null;
     const model = this.baseline.models.get(lookup.model);
     if (!model) return null;
     if (model.peakOffPeak) {
-      const peak = isOpenCodeGoPeakMinute(new Date(lookup.atMs), this.baseline);
+      const peak = bucket === undefined
+        ? isOpenCodeGoPeakMinute(new Date(lookup.atMs), this.baseline)
+        : bucket === "peak";
       const price = peak ? model.peakOffPeak.peak : model.peakOffPeak.offPeak;
       return {
         billingMode: "subscription",

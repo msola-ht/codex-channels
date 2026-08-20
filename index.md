@@ -26,7 +26,7 @@
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
 - [`docs/opencode-go-multi-account.md`](docs/opencode-go-multi-account.md)：OpenCode Go
-  多账户共享统计代理方案（账户注册、CLI/Setup、会话切换与生命周期）。
+  多账户实现（账户文件、CLI/Setup、共享代理、会话切换与租约生命周期）。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 当前设计决策与停止条件。
 - [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书资料与实现映射。
 - [`docs/weixin-surface-plan.md`](docs/weixin-surface-plan.md)：微信 Surface 当前设计决策与停止条件。

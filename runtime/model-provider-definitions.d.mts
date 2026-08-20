@@ -34,6 +34,9 @@ export const deepseekProviderDefinition: ModelProviderDefinition;
 export const opencodeGoProviderDefinition: ModelProviderDefinition;
 export const managedModelProviderDefinitions: readonly ModelProviderDefinition[];
 
+export function opencodeGoAccountDefinition(
+  accountId: string,
+): ModelProviderDefinition;
 export function loadOpencodeGoAccountDefinitions(
   environment?: NodeJS.ProcessEnv,
 ): readonly ModelProviderDefinition[];

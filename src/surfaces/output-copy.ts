@@ -20,6 +20,10 @@ export function formatConnectionRestored(message: string): string {
   return `Codex 连接已恢复：${message}`;
 }
 
+export function visibleUpstreamMessage(message: string): string {
+  return message.replaceAll("[REDACTED]", "[已隐藏]");
+}
+
 export function formatThreadAvailability(
   availability: "occupied" | "available",
   threadId: string,

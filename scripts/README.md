@@ -103,13 +103,16 @@
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
   list / add / switch / remove 子命令；list 与 switch / remove 复用 Codex 用户配置事务读取和
   原子写入，add 复用自定义主 Provider Setup 的交互流程；`switch openai` 不运行登录直接切回官方
-  并把候选移入私有备份，`switch <ID>` 对已清理的候选从备份自动恢复。
+  并把候选移入私有备份，`switch <ID>` 对已清理的候选从备份自动恢复并消费该备份项；删除候选
+  同时清理同名备份，配置写入失败时回滚备份。从第三方切回官方时清除第三方顶层模型，已在官方
+  模式时保留官方模型。
 - `primary-provider-usage.mjs`：`codexc primary-provider` 的规范帮助文案，供脚本与入口帮助共用，
   避免两份文案漂移。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
   `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
-  之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`。
+  之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`，从第三方
+  模式恢复时清除第三方顶层模型。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。

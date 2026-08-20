@@ -412,7 +412,7 @@ function readModelUsageEstimates(
                   serviceTier: record.serviceTier,
                   inputTokens: record.inputTokens,
                   atMs,
-                });
+                }, record.pricing?.bucket ?? undefined);
                 return pricing === null
                   ? null
                   : calculateModelRequestCostComponents(usage, pricing);

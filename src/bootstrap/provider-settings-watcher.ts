@@ -64,6 +64,7 @@ export class ProviderSettingsWatcher {
   private readonly validate: () => void;
   private readonly filesByProvider: ManagedProviderFiles[];
   private fingerprints = new Map<string, string>();
+  private lastReadFailureAt = Number.NEGATIVE_INFINITY;
   private lastValidationFailureAt = Number.NEGATIVE_INFINITY;
   private timer: NodeJS.Timeout | undefined;
   private stopping = false;
@@ -109,7 +110,7 @@ export class ProviderSettingsWatcher {
   }
 
   start(): void {
-    this.fingerprints = this.readFingerprints();
+    this.fingerprints = this.tryReadFingerprints() ?? new Map<string, string>();
     this.initialized = true;
     this.timer = setInterval(() => {
       void this.checkNow();
@@ -129,7 +130,10 @@ export class ProviderSettingsWatcher {
     if (this.stopping) {
       return;
     }
-    const nextFingerprints = this.readFingerprints();
+    const nextFingerprints = this.tryReadFingerprints();
+    if (!nextFingerprints) {
+      return;
+    }
     if (this.initialized && !sameFingerprints(this.fingerprints, nextFingerprints)) {
       const providers = this.filesByProvider
         .filter(({ paths }) => paths.some((path) =>
@@ -244,6 +248,22 @@ export class ProviderSettingsWatcher {
         );
       }
       return false;
+    }
+  }
+
+  private tryReadFingerprints(): Map<string, string> | undefined {
+    try {
+      return this.readFingerprints();
+    } catch (error) {
+      const now = this.nowMs();
+      if (now - this.lastReadFailureAt >= this.validationCooldownMs) {
+        this.lastReadFailureAt = now;
+        this.logger.error(
+          { err: error },
+          "读取第三方模型设置失败，继续使用现有配置并等待修复",
+        );
+      }
+      return undefined;
     }
   }
 

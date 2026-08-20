@@ -41,6 +41,7 @@ import {
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
+  visibleUpstreamMessage,
 } from "../output-copy.js";
 import {
   formatRuntimeAccountUpdate,
@@ -410,9 +411,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       }
       case "connection.lost":
-        return formatConnectionLost(visibleMessage(event.message));
+        return formatConnectionLost(visibleUpstreamMessage(event.message));
       case "connection.restored":
-        return formatConnectionRestored(visibleMessage(event.message));
+        return formatConnectionRestored(visibleUpstreamMessage(event.message));
       case "thread.availability":
         return formatThreadAvailability(
           event.availability,
@@ -420,7 +421,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
           event.background,
         );
       case "warning":
-        return formatCodexWarning(visibleMessage(event.message));
+        return formatCodexWarning(visibleUpstreamMessage(event.message));
       case "account.updated":
         return formatWeixinCommandText(
           formatRuntimeAccountUpdate(event.authMode, event.planType),
@@ -669,10 +670,6 @@ function safePrefixLength(value: string, maximumLength: number): number {
 
 function isHighSurrogate(value: number): boolean {
   return value >= 0xd800 && value <= 0xdbff;
-}
-
-function visibleMessage(value: string): string {
-  return value.replaceAll("[REDACTED]", "[已隐藏]");
 }
 
 function weixinOutputErrorMetadata(

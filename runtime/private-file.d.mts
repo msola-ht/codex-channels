@@ -1,3 +1,8 @@
+export function readPrivateFileSync(
+  path: string,
+  maximumBytes?: number,
+): string;
+
 export function writePrivateFileAtomicSync(
   path: string,
   content: string | Uint8Array,

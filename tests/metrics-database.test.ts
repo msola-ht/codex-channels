@@ -213,14 +213,30 @@ describe("model request metrics database operations", () => {
     expect(calls).toEqual(["stop:gateway", "start:gateway"]);
   });
 
-  it("still restarts services when stopping the Gateway fails", () => {
+  it("treats a missing local database as empty without creating it", () => {
+    const { environment, databasePath } = fixture();
+
+    const result = pruneProviderMetrics("openai", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: null,
+      stopGateway: () => undefined,
+      startGateway: () => undefined,
+      stopCenter: () => undefined,
+      startCenter: () => undefined,
+    });
+
+    expect(result.local).toMatchObject({ backupPath: null, deleted: 0 });
+    expect(existsSync(databasePath)).toBe(false);
+  });
+
+  it("fails closed and restarts services when stopping the Gateway fails", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
     store.record({ ...metricSample(), provider: "openai" });
     store.close();
     const calls: string[] = [];
 
-    const result = pruneProviderMetrics("openai", environment, {
+    expect(() => pruneProviderMetrics("openai", environment, {
       localDatabasePath: databasePath,
       centerDatabasePath: null,
       stopGateway: () => {
@@ -230,11 +246,14 @@ describe("model request metrics database operations", () => {
       startGateway: () => calls.push("start:gateway"),
       stopCenter: () => calls.push("stop:center"),
       startCenter: () => calls.push("start:center"),
-    });
+    })).toThrow("stop failed");
 
     expect(calls).toEqual(["stop:gateway", "start:gateway"]);
-    expect(result.warnings[0]).toContain("停止 Gateway 失败");
-    expect(result.local.deleted).toBe(1);
+    const local = new DatabaseSync(databasePath, { readOnly: true });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 1 });
+    local.close();
   });
 
   it("restarts services and surfaces the failure when the delete fails", () => {
@@ -254,6 +273,74 @@ describe("model request metrics database operations", () => {
       startCenter: () => calls.push("start:center"),
     })).toThrow();
     expect(calls).toEqual(["stop:gateway", "start:gateway"]);
+  });
+
+  it("fails closed before deleting when the metrics database cannot be backed up", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const lock = new DatabaseSync(databasePath);
+    lock.exec("BEGIN EXCLUSIVE");
+    const calls: string[] = [];
+
+    try {
+      expect(() => pruneProviderMetrics("openai", environment, {
+        localDatabasePath: databasePath,
+        centerDatabasePath: null,
+        stopGateway: () => calls.push("stop:gateway"),
+        startGateway: () => calls.push("start:gateway"),
+        stopCenter: () => calls.push("stop:center"),
+        startCenter: () => calls.push("start:center"),
+      })).toThrow("备份指标数据库失败");
+    } finally {
+      lock.exec("ROLLBACK");
+      lock.close();
+    }
+
+    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
+    const local = new DatabaseSync(databasePath, { readOnly: true });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 1 });
+    local.close();
+  });
+
+  it("backs up every configured database before deleting from either one", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const centerPath = join(dirname(databasePath), "center-locked.sqlite3");
+    const center = new DatabaseSync(centerPath);
+    center.exec(`
+      CREATE TABLE request_metrics (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL
+      )
+    `);
+    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)").run("openai");
+    center.exec("BEGIN EXCLUSIVE");
+
+    try {
+      expect(() => pruneProviderMetrics("openai", environment, {
+        localDatabasePath: databasePath,
+        centerDatabasePath: centerPath,
+        stopGateway: () => undefined,
+        startGateway: () => undefined,
+        stopCenter: () => undefined,
+        startCenter: () => undefined,
+      })).toThrow("备份指标数据库失败");
+    } finally {
+      center.exec("ROLLBACK");
+      center.close();
+    }
+
+    const local = new DatabaseSync(databasePath, { readOnly: true });
+    expect(local.prepare(`
+      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
+    `).get()).toMatchObject({ c: 1 });
+    local.close();
   });
 
   it("prunes rows for the requested provider", () => {
@@ -368,7 +455,7 @@ describe("model request metrics database operations", () => {
       startGateway: () => undefined,
       stopCenter: () => undefined,
       startCenter: () => undefined,
-    })).toThrow("codexc metrics prune <openai|deepseek|opencode-go>");
+    })).toThrow("codexc metrics prune <provider>");
   });
 
   it("reports a missing database without creating it", () => {

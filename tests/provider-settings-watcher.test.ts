@@ -106,6 +106,31 @@ describe("ProviderSettingsWatcher", () => {
     expect(stateEvents).toEqual(["scheduled", "restarting", "applied"]);
   });
 
+  it("设置文件暂时不可读时保留旧基线，修复后再触发重启", async () => {
+    const errors: string[] = [];
+    const instance = createWatcher({
+      logger: {
+        error: (_payload: unknown, message?: string) => {
+          errors.push(message ?? "");
+        },
+        info: () => undefined,
+        warn: () => undefined,
+      } as unknown as Logger,
+    });
+    mkdirSync(catalogPath(), { recursive: true });
+
+    expect(() => instance.checkNow()).not.toThrow();
+    expect(restartCalls).toEqual([]);
+    expect(stateEvents).toEqual([]);
+    expect(errors).toEqual(["读取第三方模型设置失败，继续使用现有配置并等待修复"]);
+
+    rmSync(catalogPath(), { recursive: true, force: true });
+    writeCatalog('{"models":[{"slug":"deepseek-v4-flash"}]}\n');
+    await instance.checkNow();
+    expect(restartCalls).toEqual(["restart"]);
+    expect(stateEvents).toEqual(["scheduled", "restarting", "applied"]);
+  });
+
   it("校验失败在冷却窗口内只记录一次，修复后触发重启", async () => {
     const errors: string[] = [];
     const instance = createWatcher({

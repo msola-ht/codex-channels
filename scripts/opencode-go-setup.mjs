@@ -1,11 +1,8 @@
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   rmSync,
   unlinkSync,
-  chmodSync,
 } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,10 +14,13 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
-  inspectAppServerSupervisor,
+  inspectAppServerSupervisorState,
   releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
-import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import {
+  opencodeGoAccountDefinition,
+  opencodeGoProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProviderRole,
   loadManagedModelProviderSettings,
@@ -39,7 +39,6 @@ import {
   opencodeGoAccountDirectory,
   opencodeGoAccountMarkerPath,
   opencodeGoAccountsFilePath,
-  opencodeGoApiKeyEnvironmentKey,
   opencodeGoProviderId,
   readOpencodeGoAccountMarker,
   validateOpencodeGoAccountId,
@@ -47,7 +46,10 @@ import {
   writeOpencodeGoAccounts,
 } from "../runtime/opencode-go-accounts.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
+import {
+  readPrivateFileSync,
+  writePrivateFileAtomic,
+} from "../runtime/private-file.mjs";
 import { configureThirdPartyRole } from "./agents.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
@@ -62,6 +64,7 @@ import {
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
 const defaultAccountId = opencodeGoDefaultAccountId;
+const maximumPrivateConfigBytes = 2_097_152;
 
 class OpenCodeGoSetupCancelled extends Error {}
 
@@ -125,13 +128,13 @@ export async function runOpenCodeGoSetup({
       if (accountId === undefined) return { action: "back" };
       await setOpencodeGoDefaultAccount(accountId, { environment, configureRole });
       output.write(`默认 OpenCode Go 账户已设置为 ${accountId}。\n`);
+      output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
       return { action: "default-set" };
     }
     if (action === "account-stop") {
       const accountId = await prompt.selectAccount(accounts);
       if (accountId === undefined) return { action: "back" };
-      await stopOpencodeGoAccount(accountId, { environment, output });
-      return { action: "stopped" };
+      return stopOpencodeGoAccount(accountId, { environment, output });
     }
     if (action === "list") {
       printAccounts(environment, output);
@@ -232,9 +235,12 @@ export async function addOpencodeGoAccount(accountId, {
       downloadedAt: new Date().toISOString(),
     };
   } else {
-    managedCatalog = JSON.parse(readFileSync(paths.catalogPath, "utf8"));
+    managedCatalog = JSON.parse(readPrivateFileSync(
+      paths.catalogPath,
+      maximumPrivateConfigBytes,
+    ));
     manifest = existsSync(paths.manifestPath)
-      ? JSON.parse(readFileSync(paths.manifestPath, "utf8"))
+      ? JSON.parse(readPrivateFileSync(paths.manifestPath, maximumPrivateConfigBytes))
       : undefined;
   }
   const managedCatalogWithPreserved = withPreservedManagedModelCatalogSettings(
@@ -242,7 +248,7 @@ export async function addOpencodeGoAccount(accountId, {
     definition,
     previous?.models,
   );
-  const snapshots = snapshotFiles([
+  const transactionPaths = [
     paths.configPath,
     paths.profilePath,
     paths.markerPath,
@@ -250,7 +256,8 @@ export async function addOpencodeGoAccount(accountId, {
     paths.catalogPath,
     paths.manifestPath,
     opencodeGoAccountsFilePath(environment),
-  ]);
+  ];
+  const snapshots = snapshotFiles(transactionPaths);
   let guards;
   try {
     mkdirSync(paths.accountDirectory, { recursive: true, mode: 0o700 });
@@ -301,13 +308,18 @@ export async function addOpencodeGoAccount(accountId, {
       paths.catalogPath,
       `${JSON.stringify(managedCatalogWithPreserved, null, 2)}\n`,
     );
+    guards = snapshotFiles(transactionPaths);
     await writePrivateFileAtomic(paths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    guards = snapshotFiles(transactionPaths);
     await replaceOptionalFile(
       paths.configPath,
       Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
     );
+    guards = snapshotFiles(transactionPaths);
     await replaceOptionalFile(paths.profilePath, profileContent);
+    guards = snapshotFiles(transactionPaths);
     writeOpencodeGoAccountMarker(environment, accountId, mode);
+    guards = snapshotFiles(transactionPaths);
     const nextAccounts = accounts.some((account) => account.id === accountId)
       ? accounts.map((account) => account.id === accountId
           ? { id: accountId, default: account.default }
@@ -317,14 +329,7 @@ export async function addOpencodeGoAccount(accountId, {
           { id: accountId, default: accounts.length === 0 },
         ];
     writeOpencodeGoAccounts(environment, nextAccounts);
-    guards = snapshotFiles([
-      paths.configPath,
-      paths.profilePath,
-      paths.markerPath,
-      paths.catalogPath,
-      paths.manifestPath,
-      opencodeGoAccountsFilePath(environment),
-    ]);
+    guards = snapshotFiles(transactionPaths);
     if (accounts.length === 0 || accounts.find((account) => account.id === accountId)?.default) {
       await configureRole(opencodeGoProviderId(accountId), selectedModel, environment);
     }
@@ -387,29 +392,58 @@ export async function removeOpencodeGoAccount(accountId, {
     return { action: "cancelled" };
   }
   const paths = accountPaths(environment, accountId);
-  await stopOpencodeGoAccount(accountId, { environment, output, silent: true }).catch(() => undefined);
-  mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
-  if (existsSync(paths.profilePath)) {
-    copyFileSync(
-      paths.profilePath,
-      join(paths.backupDirectory, opencodeGoProfileFileName(accountId)),
-    );
-    chmodSync(
-      join(paths.backupDirectory, opencodeGoProfileFileName(accountId)),
-      0o600,
+  const stopResult = await stopOpencodeGoAccount(accountId, {
+    environment,
+    output,
+    silent: true,
+  });
+  if (stopResult.action === "in-use") {
+    throw new Error(
+      `OpenCode Go 账户 ${accountId} 正在被 Remote TUI 使用；请退出对应 TUI 后再删除`,
     );
   }
-  if (existsSync(paths.markerPath)) {
-    copyFileSync(paths.markerPath, join(paths.backupDirectory, "managed.toml"));
-    chmodSync(join(paths.backupDirectory, "managed.toml"), 0o600);
+  mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
+  const profile = await readOptionalFile(paths.profilePath);
+  if (profile !== undefined) {
+    await writePrivateFileAtomic(
+      join(paths.backupDirectory, opencodeGoProfileFileName(accountId)),
+      profile,
+    );
+  }
+  const marker = await readOptionalFile(paths.markerPath);
+  if (marker !== undefined) {
+    await writePrivateFileAtomic(
+      join(paths.backupDirectory, "managed.toml"),
+      marker,
+    );
   }
   const remaining = accounts.filter((candidate) => candidate.id !== accountId);
   if (account.default && remaining.length > 0) {
     remaining[0] = { ...remaining[0], default: true };
   }
-  writeOpencodeGoAccounts(environment, remaining);
-  if (existsSync(paths.profilePath)) unlinkSync(paths.profilePath);
-  if (existsSync(paths.markerPath)) unlinkSync(paths.markerPath);
+  const transactionPaths = [
+    opencodeGoAccountsFilePath(environment),
+    paths.profilePath,
+    paths.markerPath,
+  ];
+  const snapshots = snapshotFiles(transactionPaths);
+  let guards;
+  try {
+    writeOpencodeGoAccounts(environment, remaining);
+    guards = snapshotFiles(transactionPaths);
+    if (existsSync(paths.profilePath)) unlinkSync(paths.profilePath);
+    guards = snapshotFiles(transactionPaths);
+    if (existsSync(paths.markerPath)) unlinkSync(paths.markerPath);
+  } catch (error) {
+    if (guards === undefined) throw error;
+    await restoreSnapshots(snapshots, guards).catch((rollbackError) => {
+      throw new AggregateError(
+        [error, rollbackError],
+        "OpenCode Go 账户删除失败，且未能完整恢复操作前文件",
+      );
+    });
+    throw error;
+  }
   output.write(`OpenCode Go 账户已删除：${accountId}（备份保留在 ${paths.backupDirectory}）。\n`);
   output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
   return { action: "removed", accountId };
@@ -428,11 +462,24 @@ export async function setOpencodeGoDefaultAccount(accountId, {
     id: account.id,
     default: account.id === accountId,
   }));
-  writeOpencodeGoAccounts(environment, nextAccounts);
   const role = loadManagedModelProviderRole(environment);
-  if (role) {
+  writeOpencodeGoAccounts(environment, nextAccounts);
+  if (role && isOpencodeGoProvider(role.provider)) {
     const definition = opencodeGoAccountDefinition(accountId);
-    await configureRole(opencodeGoProviderId(accountId), definition.defaultModel, environment);
+    try {
+      await configureRole(opencodeGoProviderId(accountId), definition.defaultModel, environment);
+    } catch (error) {
+      try {
+        writeOpencodeGoAccounts(environment, accounts);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "共享第三方子代理更新失败，且默认账户回滚失败",
+          { cause: rollbackError },
+        );
+      }
+      throw error;
+    }
   }
   return { action: "default-set", accountId };
 }
@@ -448,13 +495,31 @@ export async function stopOpencodeGoAccount(accountId, {
     readGatewayConfig(configPath),
     dataDir,
   );
-  const topology = await inspectAppServerSupervisor(primarySocketPath);
+  const inspection = await inspectAppServerSupervisorState(primarySocketPath);
+  if (inspection.status === "incompatible") {
+    throw new Error(
+      "App Server 监管协议不兼容或响应无效；请先运行 codexc service restart app-server",
+    );
+  }
+  const topology = inspection.status === "ready" ? inspection.topology : undefined;
   const provider = opencodeGoProviderId(accountId);
-  if (!topology?.managedProviders.includes(provider)) {
+  if (!topology?.runningProviders.includes(provider)) {
     if (!silent) output.write(`OpenCode Go 账户 ${accountId} 的 App Server 当前未运行。\n`);
     return { action: "not-running", accountId };
   }
-  await releaseAppServerProvider(primarySocketPath, provider);
+  const release = await releaseAppServerProvider(primarySocketPath, provider);
+  if (release.reason === "leased") {
+    if (!silent) {
+      output.write(
+        `OpenCode Go 账户 ${accountId} 正在被 Remote TUI 使用，未停止。请退出对应 TUI 后重试。\n`,
+      );
+    }
+    return { action: "in-use", accountId };
+  }
+  if (release.reason === "not-running") {
+    if (!silent) output.write(`OpenCode Go 账户 ${accountId} 的 App Server 当前未运行。\n`);
+    return { action: "not-running", accountId };
+  }
   if (!silent) {
     output.write(`OpenCode Go 账户 ${accountId} 的 App Server 已停止；再次使用时会自动启动。\n`);
   }
@@ -503,9 +568,13 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
     });
   }
   if (action === "default") {
-    return setOpencodeGoDefaultAccount(id, {
+    const result = await setOpencodeGoDefaultAccount(id, {
       environment: options.environment ?? process.env,
     });
+    const output = options.output ?? process.stdout;
+    output.write(`默认 OpenCode Go 账户已设置为 ${id}。\n`);
+    output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+    return result;
   }
   return stopOpencodeGoAccount(id, {
     environment: options.environment ?? process.env,
@@ -515,7 +584,8 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
 
 function accountPaths(environment, accountId) {
   const codexHome = codexHomePath(environment);
-  const providerDirectory = managedProviderDirectory(environment, definition);
+  const accountDefinition = opencodeGoAccountDefinition(accountId);
+  const providerDirectory = managedProviderDirectory(environment, accountDefinition);
   const accountDirectory = opencodeGoAccountDirectory(environment, accountId);
   const backupDirectory = opencodeGoAccountBackupDirectory(environment, accountId);
   return {
@@ -524,43 +594,16 @@ function accountPaths(environment, accountId) {
     accountDirectory,
     backupDirectory,
     configPath: join(codexHome, "config.toml"),
-    profilePath: join(codexHome, opencodeGoProfileFileName(accountId)),
+    profilePath: join(codexHome, accountDefinition.profileFileName),
     markerPath: opencodeGoAccountMarkerPath(environment, accountId),
-    catalogPath: join(providerDirectory, definition.catalogFileName),
-    manifestPath: join(providerDirectory, definition.catalogManifestFileName),
+    catalogPath: join(providerDirectory, accountDefinition.catalogFileName),
+    manifestPath: join(providerDirectory, accountDefinition.catalogManifestFileName),
     roleConfigPath: managedModelProviderRoleConfigPath(environment),
   };
 }
 
-function opencodeGoAccountDefinition(accountId) {
-  const provider = opencodeGoProviderId(accountId);
-  const isDefaultAccount = accountId === defaultAccountId;
-  return Object.freeze({
-    id: provider,
-    accountId,
-    storageId: "opencode-go",
-    displayName: isDefaultAccount ? "OpenCode Go" : `OpenCode Go（${accountId}）`,
-    profileName: provider,
-    codexProfileName: isDefaultAccount ? "sf-opencode-go" : `sf-opencode-go-${accountId}`,
-    profileFileName: opencodeGoProfileFileName(accountId),
-    catalogFileName: definition.catalogFileName,
-    catalogManifestFileName: definition.catalogManifestFileName,
-    managedMarkerFileName: definition.managedMarkerFileName,
-    backupDirectoryName: definition.backupDirectoryName,
-    baseUrl: definition.baseUrl,
-    wireApi: definition.wireApi,
-    apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey(accountId),
-    defaultModel: definition.defaultModel,
-    defaultReasoningEffort: definition.defaultReasoningEffort,
-    supportsWebsockets: false,
-    models: definition.models,
-  });
-}
-
 function opencodeGoProfileFileName(accountId) {
-  return accountId === defaultAccountId
-    ? "sf-opencode-go.config.toml"
-    : `sf-opencode-go-${accountId}.config.toml`;
+  return opencodeGoAccountDefinition(accountId).profileFileName;
 }
 
 function publicPaths(paths) {
@@ -581,7 +624,7 @@ async function restoreOpencodeGoSetup(environment) {
   if (!existsSync(legacyStatePath)) {
     throw new Error("未找到可恢复的 OpenCode Go 初始配置");
   }
-  const state = JSON.parse(readFileSync(legacyStatePath, "utf8"));
+  const state = JSON.parse(readPrivateFileSync(legacyStatePath));
   const legacyCatalogState = state.catalog === undefined && state.manifest === undefined;
   const restoredState = {
     config: state.config,
@@ -627,7 +670,7 @@ async function restoreOpencodeGoSetup(environment) {
     state.manifest === undefined ? false : state.manifest,
   );
   if (existsSync(accountPathsValue.markerPath)) {
-    const marker = parse(readFileSync(accountPathsValue.markerPath, "utf8"));
+    const marker = parse(readPrivateFileSync(accountPathsValue.markerPath));
     if (marker.provider === "opencode-go") {
       writePrivateFileAtomic(accountPathsValue.markerPath, stringify({
         version: 1,
@@ -674,7 +717,10 @@ function backupKey(file) {
 
 async function restoreBackup(target, backup, existed) {
   if (existed === true) {
-    await writePrivateFileAtomic(target, readFileSync(backup));
+    await writePrivateFileAtomic(
+      target,
+      readPrivateFileSync(backup, maximumPrivateConfigBytes),
+    );
   } else if (existed === false) {
     await removeOptionalFile(target);
   } else {
@@ -685,7 +731,7 @@ async function restoreBackup(target, backup, existed) {
 async function readBackupToml(paths) {
   const legacyStatePath = join(paths.providerDirectory, definition.backupDirectoryName, "state.json");
   if (!existsSync(legacyStatePath)) return {};
-  const state = JSON.parse(readFileSync(legacyStatePath, "utf8"));
+  const state = JSON.parse(readPrivateFileSync(legacyStatePath));
   return state.config
     ? readTomlFile(join(paths.providerDirectory, definition.backupDirectoryName, "config.toml"))
     : {};
@@ -778,10 +824,10 @@ function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, leg
       options.push(
         { value: "switching", label: hasAccounts
           ? "切换模式（配置默认账户为切换模式）"
-          : "OpenAI + OpenCode Go 切换模式（创建默认账户 main）" },
+          : `OpenAI + OpenCode Go 切换模式（创建默认账户 ${defaultAccountId}）` },
         { value: "exclusive", label: hasAccounts
           ? "固定模式（配置默认账户为固定模式）"
-          : "仅 OpenCode Go 固定模式（创建默认账户 main）" },
+          : `仅 OpenCode Go 固定模式（创建默认账户 ${defaultAccountId}）` },
       );
       if (hasModelSettings) {
         options.push({ value: "model-settings", label: "修改模型设置（思考等级、自动压缩）" });
@@ -847,7 +893,7 @@ async function confirmPrompt(prompts, message, initialValue) {
 
 async function readOptionalFile(path) {
   try {
-    return await readFileSync(path);
+    return Buffer.from(readPrivateFileSync(path, maximumPrivateConfigBytes));
   } catch (error) {
     if (error?.code === "ENOENT") return undefined;
     throw error;
@@ -870,7 +916,9 @@ async function removeOptionalFile(path) {
 function snapshotFiles(paths) {
   return [...new Set(paths)].map((path) => ({
     path,
-    content: existsSync(path) ? readFileSync(path) : undefined,
+    content: existsSync(path)
+      ? Buffer.from(readPrivateFileSync(path, maximumPrivateConfigBytes))
+      : undefined,
   }));
 }
 

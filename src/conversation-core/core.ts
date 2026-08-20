@@ -293,6 +293,8 @@ export class ConversationCore {
   handle(event: ConversationInputEvent): void {
     switch (event.type) {
       case "turn.started": {
+        this.clearReasoning(event.threadId);
+        this.disposeReasoning(event.threadId);
         this.timingByThread.set(event.threadId, {
           turnId: event.turnId,
           modelRequestCount: 0,

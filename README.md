@@ -164,6 +164,8 @@ codexc primary-provider remove <Provider ID> # 删除候选；删除激活项时
 链接并输入验证码完成登录，然后停用自定义主 Provider：候选块移入
 `~/.codex-connect/private/` 私有备份并从 config 清理，之后可用
 `codexc primary-provider switch <Provider ID>` 自动恢复切回。
+从自定义主 Provider 切回官方时会同时清除第三方顶层默认模型，让官方模型目录默认值重新接管；
+当前本来就是官方模式时保留已配置的官方模型。
 修改后运行：
 
 ```bash
@@ -210,7 +212,7 @@ codexc opencode-go account stop <id>
 `--profile opencode-go-<账户>`；`/usage`
 只展示当前 Thread 账户的额度，WebUI 按账户分别展示。配置、协议范围和官方全模型价格维护见
 [`OpenCode Go 使用说明`](docs/opencode-go.md) 与
-[`多账户方案`](docs/opencode-go-multi-account.md)。
+[`多账户实现`](docs/opencode-go-multi-account.md)。
 
 ## 日常使用
 

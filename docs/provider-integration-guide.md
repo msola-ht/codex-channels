@@ -89,13 +89,15 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
 
 ### 3.5 生命周期与空闲停止
 
-- 受管 Provider 的统计代理与隔离 App Server 按需启动、空闲自动停止，避免使用过的
-  Provider/账户无限常驻；
-- 空闲停止条件（全部满足）：无活动 Turn、无 Conversation 绑定、不是
-  `agents.external` 当前默认 Provider、空闲超过阈值（默认 5 分钟）；
+- 受管 Provider 的统计代理与隔离 App Server 支持按需启动；当前只有 OpenCode Go 账户实例启用
+  空闲自动停止，避免使用过的账户无限常驻；
+- 自动停止条件（全部满足）：无 Conversation 绑定、不是 `agents.external` 当前默认 Provider、
+  Gateway 最近无 Turn 活动、没有受管 Remote TUI 租约，且空闲超过固定阈值 5 分钟；
 - 停止只终止隔离 App Server 子进程与启动记录，保留 Profile、模型目录与 Thread
   持久数据；再次选择模型、恢复 Thread 或使用对应 Remote TUI 时自动按需拉起；
-- **释放通知**：每次成功释放后必须向渠道通知一次，说明该 Provider/账户已空闲停止
+- `codexc remote` 必须在 TUI 生命周期内持有 Supervisor Provider 租约；租约存在时自动释放和
+  手动停止都必须失败关闭，连接退出或异常断开时自动撤销租约；
+- **释放通知**：每次成功自动释放后必须向渠道通知一次，说明该 Provider/账户已空闲停止
   及自动恢复行为，不静默释放；同一次释放只通知一次。
 
 ### 3.6 Setup
@@ -184,6 +186,8 @@ supports_websockets = false
 `~/.codex-connect/private/primary-providers.json`（0600）并从 config 清理，之后
 `codexc primary-provider switch <ID>` 会从备份自动恢复。`codexc setup` 的“官方 → 登录并恢复官方”
 会运行 `codex login --device-auth`（打开终端显示的链接并输入验证码）并执行相同的备份与清理。
+从自定义候选切回官方时同时清除该候选留下的顶层 `model`；当前已经是官方模式时保留官方模型。
+候选从备份恢复后会消费对应备份项；`remove` 同时删除配置候选和同名备份，配置事务失败时恢复备份。
 
 `requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；也可以按 Codex 官方配置使用
 `env_key`，或写入 `experimental_bearer_token` 直接使用 API Key（Key 明文保存在 0600 的
@@ -191,7 +195,8 @@ supports_websockets = false
 设置 `requires_openai_auth = false`，完全不依赖官方 auth.json，官方登录状态不受切换影响。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
-`openai`、`ollama`、`lmstudio`、`amazon-bedrock` 或项目受管 Provider ID。
+`openai`、`ollama`、`lmstudio`、`amazon-bedrock`、OpenCode Go 保留命名空间
+`opencode-go` / `opencode-go-*`，或其他项目受管 Provider ID。
 
 修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。

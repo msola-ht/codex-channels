@@ -55,7 +55,7 @@ export const managedModelProviderDefinitions = Object.freeze([
 
 export function loadOpencodeGoAccountDefinitions(environment = process.env) {
   return loadOpencodeGoAccounts(environment).map((account) =>
-    Object.freeze(opencodeGoAccountDefinition(account.id)));
+    opencodeGoAccountDefinition(account.id));
 }
 
 export function loadManagedModelProviderDefinitions(environment = process.env) {
@@ -65,10 +65,10 @@ export function loadManagedModelProviderDefinitions(environment = process.env) {
   ]);
 }
 
-function opencodeGoAccountDefinition(accountId) {
+export function opencodeGoAccountDefinition(accountId) {
   const provider = opencodeGoProviderId(accountId);
   const isDefaultAccount = accountId === opencodeGoDefaultAccountId;
-  return {
+  return Object.freeze({
     id: provider,
     accountId,
     storageId: "opencode-go",
@@ -89,5 +89,5 @@ function opencodeGoAccountDefinition(accountId) {
     defaultReasoningEffort: opencodeGoProviderDefinition.defaultReasoningEffort,
     supportsWebsockets: false,
     models: opencodeGoProviderDefinition.models,
-  };
+  });
 }
