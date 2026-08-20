@@ -432,7 +432,20 @@ export async function setOpencodeGoDefaultAccount(accountId, {
   const role = loadManagedModelProviderRole(environment);
   if (role) {
     const definition = opencodeGoAccountDefinition(accountId);
-    await configureRole(opencodeGoProviderId(accountId), definition.defaultModel, environment);
+    try {
+      await configureRole(opencodeGoProviderId(accountId), definition.defaultModel, environment);
+    } catch (error) {
+      try {
+        writeOpencodeGoAccounts(environment, accounts);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "共享第三方子代理更新失败，且默认账户回滚失败",
+          { cause: rollbackError },
+        );
+      }
+      throw error;
+    }
   }
   return { action: "default-set", accountId };
 }
@@ -450,7 +463,7 @@ export async function stopOpencodeGoAccount(accountId, {
   );
   const topology = await inspectAppServerSupervisor(primarySocketPath);
   const provider = opencodeGoProviderId(accountId);
-  if (!topology?.managedProviders.includes(provider)) {
+  if (!topology?.runningProviders.includes(provider)) {
     if (!silent) output.write(`OpenCode Go 账户 ${accountId} 的 App Server 当前未运行。\n`);
     return { action: "not-running", accountId };
   }

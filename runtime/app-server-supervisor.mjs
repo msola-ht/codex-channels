@@ -4,7 +4,7 @@ import { basename, dirname, extname, resolve } from "node:path";
 
 import WebSocket from "ws";
 
-const protocolVersion = 2;
+const protocolVersion = 3;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 1_024;
 const connectionTimeoutMs = 1_000;
@@ -19,16 +19,13 @@ export class AppServerSupervisorOwner {
   #closePromise;
   #ensureProvider;
   #releaseProvider;
+  #topology;
+  #runningProviders = new Set();
+  #releasedProviders = new Set();
 
   constructor(primarySocketPath, topology, { ensureProvider, releaseProvider } = {}) {
     this.#socketPath = appServerSupervisorSocketPath(primarySocketPath);
-    const payload = `${JSON.stringify({
-      version: protocolVersion,
-      pid: process.pid,
-      primaryProvider: topology.primaryProvider,
-      managedProviders: topology.managedProviders,
-      socketPaths: topology.socketPaths,
-    })}\n`;
+    this.#topology = topology;
     this.#ensureProvider = ensureProvider;
     this.#releaseProvider = releaseProvider;
     this.#server = createServer({ allowHalfOpen: true }, (socket) => {
@@ -47,12 +44,12 @@ export class AppServerSupervisorOwner {
         chunks.push(chunk);
         if (!chunk.includes(0x0a)) return;
         socket.pause();
-        void this.#handleRequest(socket, Buffer.concat(chunks).toString("utf8"), payload);
+        void this.#handleRequest(socket, Buffer.concat(chunks).toString("utf8"));
       });
     });
   }
 
-  async #handleRequest(socket, requestText, topologyPayload) {
+  async #handleRequest(socket, requestText) {
     let request;
     try {
       request = JSON.parse(requestText.trim());
@@ -61,7 +58,15 @@ export class AppServerSupervisorOwner {
       return;
     }
     if (request?.action === "inspect") {
-      socket.end(topologyPayload);
+      socket.end(`${JSON.stringify({
+        version: protocolVersion,
+        pid: process.pid,
+        primaryProvider: this.#topology.primaryProvider,
+        managedProviders: this.#topology.managedProviders,
+        socketPaths: this.#topology.socketPaths,
+        runningProviders: [...this.#runningProviders],
+        releasedProviders: [...this.#releasedProviders],
+      })}\n`);
       return;
     }
     if (request?.action === "releaseProvider") {
@@ -74,6 +79,9 @@ export class AppServerSupervisorOwner {
         return;
       }
       socket.setTimeout(15_000, () => socket.destroy());
+      const wasRunning = this.#runningProviders.has(request.provider);
+      this.#runningProviders.delete(request.provider);
+      this.#releasedProviders.add(request.provider);
       try {
         const released = await this.#releaseProvider(request.provider);
         socket.end(`${JSON.stringify({
@@ -83,6 +91,8 @@ export class AppServerSupervisorOwner {
           released,
         })}\n`);
       } catch (error) {
+        this.#releasedProviders.delete(request.provider);
+        if (wasRunning) this.#runningProviders.add(request.provider);
         socket.end(`${JSON.stringify({
           version: protocolVersion,
           ok: false,
@@ -104,6 +114,8 @@ export class AppServerSupervisorOwner {
     socket.setTimeout(15_000, () => socket.destroy());
     try {
       await this.#ensureProvider(request.provider);
+      this.#releasedProviders.delete(request.provider);
+      this.#runningProviders.add(request.provider);
       socket.end(`${JSON.stringify({
         version: protocolVersion,
         ok: true,
@@ -382,10 +394,19 @@ function parseTopology(response) {
     || !Array.isArray(value.socketPaths)
     || value.socketPaths.length < 1
     || value.socketPaths.some((path) => typeof path !== "string" || path.length === 0)
+    || !validProviderStateList(value.runningProviders, value.managedProviders)
+    || !validProviderStateList(value.releasedProviders, value.managedProviders)
   ) {
     return undefined;
   }
   return value;
+}
+
+function validProviderStateList(value, managedProviders) {
+  return Array.isArray(value)
+    && value.every((provider) =>
+      providerIdPattern.test(provider) && managedProviders.includes(provider))
+    && new Set(value).size === value.length;
 }
 
 function preserveStaleSocket(socketPath) {

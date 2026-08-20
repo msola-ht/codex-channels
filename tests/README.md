@@ -118,7 +118,8 @@
   路由与分账户指标、账户适配器按 `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与
   SDK 协议解析，以及每小时价格 Draft PR 的只读检查和最小写权限边界。
 - OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、无活动 Turn、非 `agents.external` 默认
-  账户且超过空闲阈值时经 supervisor `releaseProvider` 释放，释放后按最近使用过的渠道会话通知一次，
+  账户且超过空闲阈值时经 supervisor `releaseProvider` 释放，监管状态区分运行中与主动释放，Gateway
+  不会把主动释放误判为意外断线；释放后按最近使用过的渠道会话通知一次，
   正在拉起的账户跳过本轮，失败只记录不阻塞。
 - 全 Provider 同一 Turn 多次模型响应的请求次数、实际产生推理输出的思考次数、聚合模型耗时、
   缓存与文本/函数/自定义工具参数

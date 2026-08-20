@@ -97,6 +97,10 @@ export class ProviderIdleReleaser {
     this.touch(provider);
   }
 
+  finishLaunching(provider: string): void {
+    this.launching.delete(provider);
+  }
+
   async scan(): Promise<void> {
     let running: readonly string[];
     try {

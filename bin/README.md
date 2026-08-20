@@ -47,7 +47,8 @@
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一受监管组件退出都会共同重建。
 账户隔离实例空闲超过 5 分钟（无活动 Turn、无绑定、非 `agents.external` 默认账户）由
-`releaseProvider` 释放，再次使用自动拉起。代理指标通过私有 Unix Socket
+`releaseProvider` 释放，监管入口记录运行与主动释放状态，防止 Gateway 立即把它重新拉起；再次使用
+自动启动。代理指标通过私有 Unix Socket
 发送给 Gateway，Gateway 生命周期不再控制模型数据通路。入口持有独立 `0600` 监管 Socket，
 用于跨进程互斥和向前台启动器证明精确 Provider 拓扑；它同时集中拒绝已被裸进程占用的 App
 Server Socket。

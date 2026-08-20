@@ -687,9 +687,10 @@ async function runServiceAppServer(args) {
     console.log(`${provider} 模型统计代理已启动：${modelProxy.address()}`);
     return { ...proxyRuntime, created: true };
   };
-  const closeProviderProxy = async (provider, proxy) => {
-    const active = providerProxyRuntimes.get(provider);
-    if (active?.proxy === proxy) providerProxyRuntimes.delete(provider);
+  const closeProviderProxy = async (proxy) => {
+    for (const [provider, active] of providerProxyRuntimes) {
+      if (active.proxy === proxy) providerProxyRuntimes.delete(provider);
+    }
     const proxyIndex = providerProxies.indexOf(proxy);
     if (proxyIndex >= 0) providerProxies.splice(proxyIndex, 1);
     await proxy.close();
@@ -817,7 +818,7 @@ async function runServiceAppServer(args) {
           childrenByProvider.delete(provider);
           if (childProcessIsRunning(child)) signalChildProcesses([child], "SIGTERM");
         }
-        if (proxyCreated) await closeProviderProxy(provider, proxy);
+        if (proxyCreated) await closeProviderProxy(proxy);
         throw error;
       }
     })();
@@ -844,7 +845,7 @@ async function runServiceAppServer(args) {
       const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
       if (!remainingGoChild) {
         const goProxy = providerProxyRuntimes.get("opencode-go")?.proxy;
-        if (goProxy) await closeProviderProxy("opencode-go", goProxy);
+        if (goProxy) await closeProviderProxy(goProxy);
         if (managedRole && isGoProvider(managedRole.provider)) {
           const { baseUrl: roleProxyBaseUrl } = await startProviderProxy(
             "opencode-go",

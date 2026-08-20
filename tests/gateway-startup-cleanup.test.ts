@@ -1,4 +1,7 @@
 import pino from "pino";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AccountRateLimits } from "../src/application/index.js";
@@ -7,6 +10,10 @@ import {
   inspectThreadWriterLock,
   terminateThreadWriterHolder,
 } from "../runtime/thread-writer-lock.mjs";
+import {
+  AppServerSupervisorOwner,
+  releaseAppServerProvider,
+} from "../runtime/app-server-supervisor.mjs";
 
 vi.mock("../runtime/thread-writer-lock.mjs", () => ({
   inspectThreadWriterLock: vi.fn(),
@@ -877,6 +884,92 @@ describe("GatewayApplication startup cleanup", () => {
     expect(reconnectAttempts).toBe(1);
     expect(cancelAllCalls).toBe(0);
     expect(cancelledThreadSets).toEqual([new Set()]);
+  });
+
+  it("does not reconnect a Provider intentionally released by the supervisor", async () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "codexc-gateway-release-"));
+    const socketPath = join(runtimeDir, "codex-app-server.sock");
+    const owner = new AppServerSupervisorOwner(socketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["opencode-go-b"],
+      socketPaths: [socketPath, join(runtimeDir, "codex-app-server-opencode-go-b.sock")],
+    }, {
+      releaseProvider: async () => true,
+    });
+    await owner.start();
+    let disconnect: ((error: Error, provider: string) => void) | undefined;
+    const reconnectProvider = vi.fn(async () => ({
+      userAgent: "test",
+      platformFamily: "unix" as const,
+      platformOs: "linux" as const,
+    }));
+    const closeProvider = vi.fn(async () => undefined);
+    const connectionLost = vi.fn();
+    const target = {
+      surface: "feishu" as const,
+      accountId: "default",
+      conversationId: "conversation-1",
+    };
+    const binding = {
+      target,
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      sessionId: "session-1",
+    };
+    const application = Object.create(GatewayApplication.prototype);
+    Object.assign(application, createRestoreApplication({
+      target,
+      binding,
+      published: [],
+      restoreSubscriptions: async () => [],
+      overrides: {
+        config: { codexSocketPath: socketPath },
+        codex: {
+          onNotification: () => () => undefined,
+          onDisconnect: (handler: (error: Error, provider: string) => void) => {
+            disconnect = handler;
+            return () => undefined;
+          },
+          connect: async () => ({
+            userAgent: "test",
+            platformFamily: "unix" as const,
+            platformOs: "linux" as const,
+          }),
+          reconnectProvider,
+          knownProvider: () => "opencode-go-b",
+          closeProvider,
+          accountRateLimits: async () => emptyRateLimits(),
+          close: async () => undefined,
+        },
+        interactions: {
+          cancelAll: () => undefined,
+          cancelThreads: () => undefined,
+        },
+        core: {
+          rememberRateLimits: () => undefined,
+          connectionLost,
+          connectionRestored: () => undefined,
+        },
+      },
+    }));
+    const gateway = application as GatewayApplication;
+
+    try {
+      await gateway.start();
+      await releaseAppServerProvider(socketPath, "opencode-go-b");
+      disconnect?.(new Error("connection closed"), "opencode-go-b");
+
+      await vi.waitFor(() => expect(closeProvider).toHaveBeenCalledWith("opencode-go-b"));
+      expect(reconnectProvider).not.toHaveBeenCalled();
+      expect(connectionLost).toHaveBeenCalledWith(
+        expect.stringContaining("主动停止"),
+        new Set(["thread-1"]),
+      );
+    } finally {
+      await gateway.stop();
+      await owner.close();
+      rmSync(runtimeDir, { recursive: true, force: true });
+    }
   });
 
   it("notifies affected threads after a Provider reconnects", async () => {

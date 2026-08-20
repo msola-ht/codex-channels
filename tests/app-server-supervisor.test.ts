@@ -57,7 +57,7 @@ describe("App Server supervisor", () => {
 
     expect(ensured).toEqual(["opencode-go"]);
     await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
-      version: 2,
+      version: 3,
       managedProviders: ["deepseek", "opencode-go"],
     });
     await owner.close();
@@ -104,6 +104,45 @@ describe("App Server supervisor", () => {
     expect(released).toEqual(["opencode-go"]);
     await expect(releaseAppServerProvider(primarySocketPath, "unknown-provider"))
       .rejects.toThrow("未知 Provider");
+    await owner.close();
+  });
+
+  it("reports running and intentionally released Providers across lifecycle requests", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-state-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
+    const owner = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["opencode-go"],
+      socketPaths: [
+        primarySocketPath,
+        join(runtimeDir, "codex-app-server-opencode-go.sock"),
+      ],
+    }, {
+      ensureProvider: async () => undefined,
+      releaseProvider: async () => true,
+    });
+    await owner.start();
+
+    await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
+      runningProviders: [],
+      releasedProviders: [],
+    });
+    await ensureAppServerProvider(primarySocketPath, "opencode-go");
+    await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
+      runningProviders: ["opencode-go"],
+      releasedProviders: [],
+    });
+    await releaseAppServerProvider(primarySocketPath, "opencode-go");
+    await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
+      runningProviders: [],
+      releasedProviders: ["opencode-go"],
+    });
+    await ensureAppServerProvider(primarySocketPath, "opencode-go");
+    await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
+      runningProviders: ["opencode-go"],
+      releasedProviders: [],
+    });
     await owner.close();
   });
 

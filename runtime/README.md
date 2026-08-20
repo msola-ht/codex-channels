@@ -44,7 +44,8 @@
   和服务安装入口复用，避免各入口独立解释运行拓扑。
 - `app-server-supervisor.mjs`：以当前用户私有 Unix Socket 持有 App Server 监管入口互斥锁，
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动/释放请求
-  （`ensureProvider` / `releaseProvider`）；集中检查真实 WebSocket 健康状态，拒绝
+  （`ensureProvider` / `releaseProvider`）；拓扑同时区分已配置、运行中和主动释放的 Provider，
+  供 Gateway 避免把主动释放误判为意外断线；集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server，并安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。

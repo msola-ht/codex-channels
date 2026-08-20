@@ -73,8 +73,8 @@
   当前基线判定；Key、响应正文和解析异常同样不进入日志或业务事件。
 - `provider-idle-releaser.ts`：定期扫描已启动的 OpenCode Go 账户隔离 App Server，无活动 Turn、
   无 Conversation 绑定、非 `agents.external` 默认账户且空闲超过 5 分钟时通过 supervisor
-  `releaseProvider` 释放，并向最近使用过该账户的渠道会话通知一次；正在拉起的账户跳过本轮，
-  释放失败只记录日志不阻塞请求。
+  `releaseProvider` 释放，并向最近使用过该账户的渠道会话通知一次；正在拉起的账户只跳过启动期间
+  的扫描，主动释放造成的断线不进入自动重连；释放失败只记录日志不阻塞请求。
 - `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；组合根按
   `vision.provider` 从第三方 API 注册表解析显示名称、精确 Endpoint 和隔离凭据，适配器复用统一
   代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回 Application 的稳定识别结果；

@@ -7,11 +7,13 @@ export interface AppServerTopology {
 }
 
 export interface InspectedAppServerTopology {
-  version: 2;
+  version: 3;
   pid: number;
   primaryProvider: string;
   managedProviders: ManagedModelProviderId[];
   socketPaths: string[];
+  runningProviders: ManagedModelProviderId[];
+  releasedProviders: ManagedModelProviderId[];
 }
 
 export class AppServerSupervisorOwner {

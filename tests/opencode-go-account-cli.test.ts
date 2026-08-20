@@ -168,6 +168,34 @@ describe("OpenCode Go account CLI", () => {
     ]);
   });
 
+  it("keeps the previous default account when the shared role update fails", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      downloadCatalog: successfulCatalog,
+    });
+    await addOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+
+    await expect(setOpencodeGoDefaultAccount("b", {
+      environment,
+      configureRole: async () => { throw new Error("role update failed"); },
+    })).rejects.toThrow("role update failed");
+
+    expect(loadOpencodeGoAccounts(environment)).toEqual([
+      { id: "opencode-go", default: true },
+      { id: "b", default: false },
+    ]);
+  });
+
   it("runs the list subcommand through the CLI entry", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
