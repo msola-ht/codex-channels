@@ -32,7 +32,7 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
             window.resetsAt === null ? Number.POSITIVE_INFINITY : window.resetsAt * 1_000));
           cached = {
             windows,
-            expiresAtMs: Number.isFinite(nextResetMs)
+            expiresAtMs: Number.isFinite(nextResetMs) && nextResetMs > nowMs
               ? nextResetMs
               : nowMs + fallbackCacheMs,
           };

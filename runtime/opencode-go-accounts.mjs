@@ -1,10 +1,6 @@
 import {
-  chmodSync,
-  copyFileSync,
   existsSync,
-  lstatSync,
   mkdirSync,
-  readFileSync,
   rmSync,
   unlinkSync,
 } from "node:fs";
@@ -14,7 +10,10 @@ import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import { providerStorageRoot } from "./connect-home.mjs";
-import { writePrivateFileAtomicSync } from "./private-file.mjs";
+import {
+  readPrivateFileSync,
+  writePrivateFileAtomicSync,
+} from "./private-file.mjs";
 
 const accountIdPattern = /^[a-z0-9_-]{1,32}$/u;
 const reservedAccountIds = new Set(["openai", "deepseek"]);
@@ -349,46 +348,23 @@ function sanitizeEnvironmentName(accountId) {
 }
 
 function readRegistryFile(path) {
-  const status = statPrivate(path);
-  if (status.size > maximumRegistryBytes) {
-    throw new Error("OpenCode Go 账户注册表过大");
-  }
-  return readFileSync(path, "utf8");
+  return readPrivateFileSync(path, maximumRegistryBytes);
 }
 
 function readPrivateFile(path) {
-  const status = statPrivate(path);
-  if (status.size > 262_144) {
-    throw new Error("OpenCode Go 配置文件过大");
-  }
-  return readFileSync(path, "utf8");
-}
-
-function statPrivate(path) {
-  const status = lstatSync(path);
-  const currentUid = process.getuid?.();
-  if (
-    !status.isFile()
-    || status.isSymbolicLink()
-    || (status.mode & 0o077) !== 0
-    || (currentUid !== undefined && status.uid !== currentUid)
-  ) {
-    throw new Error("OpenCode Go 文件权限或类型无效");
-  }
-  return status;
+  return readPrivateFileSync(path, 262_144);
 }
 
 function backupOptional(source, target) {
   if (!existsSync(source)) return false;
-  copyFileSync(source, target);
-  chmodSync(target, 0o600);
+  writePrivateFileAtomicSync(target, readPrivateFile(source));
   return true;
 }
 
 function snapshotFiles(paths) {
   return [...new Set(paths)].map((path) => ({
     path,
-    content: existsSync(path) ? readFileSync(path) : undefined,
+    content: existsSync(path) ? readPrivateFile(path) : undefined,
   }));
 }
 

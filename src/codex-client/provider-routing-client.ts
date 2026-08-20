@@ -594,7 +594,7 @@ export class ProviderRoutingClient {
     const threadId = params && typeof params.threadId === "string"
       ? params.threadId
       : undefined;
-    if (threadId) {
+    if (threadId && !this.threadProviders.has(threadId)) {
       this.threadProviders.set(threadId, provider);
     }
   }

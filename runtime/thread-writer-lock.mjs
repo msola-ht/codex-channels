@@ -3,6 +3,9 @@ import { join } from "node:path";
 
 import { codexHomePath } from "./codex-home.mjs";
 
+const redactedArgument = "[已脱敏]";
+const sensitiveArgumentNamePattern = /(?:authorization|cookie|api[-_]?key|apikey|bearer[-_]?token|token|secret|password|header)/iu;
+
 export function threadWriterLockPath(threadId, environment = process.env) {
   return join(codexHomePath(environment), "thread-writer-locks", `${threadId}.lock`);
 }
@@ -71,10 +74,10 @@ export function threadWriterLockHolders(lockPath, procRoot = "/proc") {
 
 export function processCommandLine(pid, procRoot = "/proc") {
   try {
-    return readFileSync(join(procRoot, String(pid), "cmdline"), "utf8")
+    const argumentsList = readFileSync(join(procRoot, String(pid), "cmdline"), "utf8")
       .split("\0")
-      .filter(Boolean)
-      .join(" ");
+      .filter(Boolean);
+    return redactProcessArguments(argumentsList).join(" ");
   } catch {
     return "";
   }
@@ -115,4 +118,25 @@ function isRunningProcess(pid) {
     return !["ESRCH", "ERR_INVALID_ARG_VALUE", "ERR_INVALID_ARG_TYPE", "ERR_OUT_OF_RANGE"]
       .includes(error?.code);
   }
+}
+
+function redactProcessArguments(argumentsList) {
+  let redactNext = false;
+  return argumentsList.map((argument) => {
+    if (redactNext) {
+      redactNext = false;
+      return redactedArgument;
+    }
+    const separatorIndex = argument.search(/[=:]/u);
+    const name = separatorIndex < 0 ? argument : argument.slice(0, separatorIndex);
+    if (!sensitiveArgumentNamePattern.test(name)) return argument;
+    if (separatorIndex >= 0) {
+      return `${argument.slice(0, separatorIndex)}${argument[separatorIndex]}${redactedArgument}`;
+    }
+    if (argument.startsWith("-")) {
+      redactNext = true;
+      return argument;
+    }
+    return redactedArgument;
+  });
 }

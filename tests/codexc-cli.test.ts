@@ -1282,6 +1282,67 @@ describe("codexc CLI", () => {
     });
   });
 
+  it("finishes service shutdown when an App Server ignores the first termination signal", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-shutdown-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const capturePath = join(root, "capture.json");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { writeFileSync } from 'node:fs';",
+      "let signals = 0;",
+      "const capture = () => writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({ pid: process.pid, signals }));",
+      "capture();",
+      "process.on('SIGTERM', () => { signals += 1; capture(); if (signals >= 2) process.exit(0); });",
+      "setInterval(() => undefined, 1000);",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+      CODEX_TEST_CAPTURE: capturePath,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+    const service = spawn(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const exited = new Promise<void>((resolveExit) => service.once("exit", () => resolveExit()));
+
+    let exitedWithinLimit = false;
+    try {
+      await waitForCondition(() => existsSync(capturePath), 2_000);
+      service.kill("SIGTERM");
+      exitedWithinLimit = await Promise.race([
+        exited.then(() => true),
+        new Promise<false>((resolveTimeout) => setTimeout(() => resolveTimeout(false), 2_000)),
+      ]);
+    } finally {
+      const captured = existsSync(capturePath)
+        ? JSON.parse(readFileSync(capturePath, "utf8")) as { pid?: number }
+        : {};
+      if (!exitedWithinLimit) {
+        if (service.exitCode === null && service.signalCode === null) service.kill("SIGKILL");
+        if (typeof captured.pid === "number") {
+          signalTestProcess(captured.pid, "SIGKILL");
+        }
+        await exited;
+      }
+    }
+    expect(exitedWithinLimit).toBe(true);
+  }, 10_000);
+
   it("starts a selected custom Responses Provider through the local metrics proxy", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-custom-provider-"));
     temporaryDirectories.push(root);
@@ -3497,6 +3558,16 @@ function readCapturedInitialization(path: string): boolean {
 function signalTestProcessGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pid, signal);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+      throw error;
+    }
+  }
+}
+
+function signalTestProcess(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
       throw error;

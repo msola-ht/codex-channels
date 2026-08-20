@@ -7,14 +7,28 @@ export interface AppServerTopology {
 }
 
 export interface InspectedAppServerTopology {
-  version: 3;
+  version: 4;
   pid: number;
   primaryProvider: string;
   managedProviders: ManagedModelProviderId[];
   socketPaths: string[];
   runningProviders: ManagedModelProviderId[];
   releasedProviders: ManagedModelProviderId[];
+  leasedProviders: ManagedModelProviderId[];
 }
+
+export interface AppServerProviderLease {
+  close(): Promise<void>;
+}
+
+export type AppServerProviderReleaseResult =
+  | { released: true; reason: "released" }
+  | { released: false; reason: "leased" | "not-running" };
+
+export type AppServerSupervisorInspection =
+  | { status: "missing" }
+  | { status: "incompatible" }
+  | { status: "ready"; topology: InspectedAppServerTopology };
 
 export class AppServerSupervisorOwner {
   constructor(
@@ -33,14 +47,21 @@ export function appServerSupervisorSocketPath(primarySocketPath: string): string
 export function inspectAppServerSupervisor(
   primarySocketPath: string,
 ): Promise<InspectedAppServerTopology | undefined>;
+export function inspectAppServerSupervisorState(
+  primarySocketPath: string,
+): Promise<AppServerSupervisorInspection>;
 export function ensureAppServerProvider(
   primarySocketPath: string,
   provider: string,
 ): Promise<void>;
+export function acquireAppServerProviderLease(
+  primarySocketPath: string,
+  provider: string,
+): Promise<AppServerProviderLease>;
 export function releaseAppServerProvider(
   primarySocketPath: string,
   provider: string,
-): Promise<boolean>;
+): Promise<AppServerProviderReleaseResult>;
 export function sameAppServerTopology(
   actual: InspectedAppServerTopology | undefined,
   expected: AppServerTopology,

@@ -14,7 +14,7 @@ describe("official login setup", () => {
       close: vi.fn(async () => undefined),
       readUserConfigSnapshot: vi.fn(async () => ({
         config: {
-          model: "gpt-5.6-sol",
+          model: "custom-only-model",
           model_provider: "thirdparty",
           openai_base_url: "https://api.openai.com/v1",
           model_providers: {
@@ -52,6 +52,7 @@ describe("official login setup", () => {
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "openai_base_url", value: null },
       { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model", value: null },
       { keyPath: "model_providers.thirdparty", value: null },
     ], { expectedVersion: "v1" });
     const backup = JSON.parse(
@@ -131,6 +132,7 @@ describe("official login setup", () => {
     expect(readFileSync(argsPath, "utf8").trim()).toBe("login --device-auth");
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model", value: null },
     ], { expectedVersion: "v1" });
   });
 });

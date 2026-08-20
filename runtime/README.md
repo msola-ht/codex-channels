@@ -29,10 +29,12 @@
   模型按请求时间生成请求价格快照。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照；按最早 `resetsAt` 失效前缓存，失败时短时
-  退避后重试，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
+  退避后重试，缺失或已过期的重置时间同样短时退避，避免每个模型请求重复查询；快照随请求指标
+  写入指标库供账户用量按周期归属本地 Token。
 - `model-provider-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
-  凭据；读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
+  凭据；自定义主 Provider 的私有候选备份按普通私有文件同样校验类型、属主、权限、大小和符号链接；
+  读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
   共享第三方子代理只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个 Provider 使用独立
   模型目录，并按模型读取上下文、默认思考等级与自动压缩阈值；受管 Profile 镜像所选模型的默认
@@ -43,11 +45,14 @@
   配置一次性派生主 Socket、可选 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用，避免各入口独立解释运行拓扑。
 - `app-server-supervisor.mjs`：以当前用户私有 Unix Socket 持有 App Server 监管入口互斥锁，
-  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动/释放请求
-  （`ensureProvider` / `releaseProvider`）；拓扑同时区分已配置、运行中和主动释放的 Provider，
-  供 Gateway 避免把主动释放误判为意外断线；集中检查真实 WebSocket 健康状态，拒绝
+  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动、释放与
+  Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`）；拓扑同时区分
+  已配置、运行中、主动释放和持有租约的 Provider。租约由私有 Socket 连接持有，断开时自动撤销，
+  存在租约时拒绝释放；同一 Provider 的启动、释放与租约获取串行执行，释放结果明确区分已释放、
+  租约占用和实例未运行，旧版或无效监管响应对账户删除失败关闭。Gateway 还据此避免把主动释放
+  误判为意外断线。入口集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server，并安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
-  保持连接而阻塞服务退出。
+  保持连接而阻塞服务退出，同时等待已经开始的 Provider 生命周期操作收尾且拒绝启动排队操作。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 Socket，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
@@ -56,8 +61,10 @@
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
   label、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor 复用。
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
-  解释同步子进程的启动错误/退出码/终止信号和成对安装/移除进程信号监听；可标记失败已由子命令
-  展示，避免嵌套 CLI 重复报错。具体关闭超时和资源清理仍由各生命周期所有者决定。
+  按温和终止、强制终止和有限终态等待关闭单个子进程，解释同步子进程的启动错误/退出码/终止信号
+  和成对安装/移除进程信号监听；App Server 服务入口收到退出信号后停止监管请求、等待已开始的
+  Provider 操作，并对全部子进程执行有限终止。可标记失败已由子命令展示，避免嵌套 CLI 重复报错。
+  具体关闭超时和资源清理仍由各生命周期所有者决定。
 - `cli-presentation.mjs` / `cli-presentation.d.mts`：集中定义公开 CLI 的成功、失败、提示和处理
   状态标签、颜色、输出流路由和换行，Doctor 检查项另用通过；统一遵守 TTY 与 `NO_COLOR`，
   重定向输出保持纯文本。
@@ -74,13 +81,15 @@
   `~/.codex`），供 CLI、脚本、Runtime 与 Bootstrap 复用。
 - `thread-writer-lock.mjs` / `thread-writer-lock.d.mts`：定位并安全结束持有 Codex 线程写锁
   （`~/.codex/thread-writer-locks/<thread>.lock`）的本地进程；Linux 通过 `/proc` 按打开描述符
-  与命令行识别持锁方，供 `/release` 命令与恢复诊断复用，不删除锁文件。
+  与命令行识别持锁方，向渠道展示前剥离凭据参数；`/release force` 只放行入口可执行文件为
+  `codex`、且发送信号前二次核验身份未变化的持锁方，供恢复诊断复用且不删除锁文件。
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup、迁移脚本与 Runtime 复用。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记、子代理配置和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
-  文件原子替换；
+  文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
+  避免路径校验后被符号链接替换；
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
 - `api-provider-credential.mjs` / `api-provider-credential.d.mts`：按第三方 API 提供商 ID 隔离
   API Key，严格校验私有目录、文件所有者、权限与符号链接，并复用统一私有文件原子替换。

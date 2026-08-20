@@ -5,6 +5,7 @@ import {
   backupPrimaryProviderCandidates,
   listCustomPrimaryProviderCandidates,
   readPrimaryProviderBackup,
+  removePrimaryProviderBackupCandidate,
   restorePrimaryProviderCandidateEdits,
   validateCustomPrimaryModelProviderId,
 } from "../runtime/model-provider-runtime.mjs";
@@ -26,6 +27,36 @@ function record(value) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+async function writeEditsRemovingBackupCandidate({
+  id,
+  environment,
+  edits,
+  expectedVersion,
+  createClient,
+  operation,
+}) {
+  const removedBackup = removePrimaryProviderBackupCandidate(id, environment);
+  try {
+    await writeCodexUserConfigEdits(environment, edits, {
+      expectedVersion,
+      createClient,
+    });
+  } catch (error) {
+    if (removedBackup !== undefined) {
+      try {
+        backupPrimaryProviderCandidates({ [id]: removedBackup }, environment);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          `${operation}失败，且私有备份回滚失败`,
+          { cause: rollbackError },
+        );
+      }
+    }
+    throw error;
+  }
 }
 
 export async function listPrimaryProviders({
@@ -89,6 +120,8 @@ export async function switchPrimaryProvider(
   const config = record(snapshot.config);
   const providers = record(config.model_providers);
   if (normalizedId === "openai") {
+    const currentProvider = optionalString(config.model_provider);
+    const clearsCustomModel = currentProvider !== undefined && currentProvider !== "openai";
     const candidates = listCustomPrimaryProviderCandidates(providers);
     const backedUp = backupPrimaryProviderCandidates(providers, environment);
     const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
@@ -97,6 +130,7 @@ export async function switchPrimaryProvider(
         ? [{ keyPath: "openai_base_url", value: null }]
         : []),
       { keyPath: "model_provider", value: "openai" },
+      ...(clearsCustomModel ? [{ keyPath: "model", value: null }] : []),
       ...candidates.map((id) => ({ keyPath: `model_providers.${id}`, value: null })),
     ];
     await writeCodexUserConfigEdits(environment, edits, {
@@ -142,9 +176,13 @@ export async function switchPrimaryProvider(
       ? []
       : [{ keyPath: "model", value: normalizedModel }]),
   ];
-  await writeCodexUserConfigEdits(environment, edits, {
+  await writeEditsRemovingBackupCandidate({
+    id: normalizedId,
+    environment,
+    edits,
     expectedVersion: snapshot.version,
     createClient,
+    operation: `恢复自定义主 Provider ${normalizedId}`,
   });
   if (removesTopLevelBaseUrl) {
     output.write("已移除与自定义主 Provider 冲突的顶层 openai_base_url。\n");
@@ -172,12 +210,19 @@ export async function removePrimaryProvider(
   const edits = [
     { keyPath: `model_providers.${normalizedId}`, value: null },
     ...(activeId === normalizedId
-      ? [{ keyPath: "model_provider", value: "openai" }]
+      ? [
+          { keyPath: "model_provider", value: "openai" },
+          { keyPath: "model", value: null },
+        ]
       : []),
   ];
-  await writeCodexUserConfigEdits(environment, edits, {
+  await writeEditsRemovingBackupCandidate({
+    id: normalizedId,
+    environment,
+    edits,
     expectedVersion: snapshot.version,
     createClient,
+    operation: `删除自定义主 Provider ${normalizedId}`,
   });
   output.write(
     activeId === normalizedId

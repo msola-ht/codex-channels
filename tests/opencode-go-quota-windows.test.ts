@@ -89,6 +89,28 @@ describe("OpenCode Go quota windows provider", () => {
     );
   });
 
+  it("backs off when a successful snapshot contains an already elapsed reset time", async () => {
+    const codexHome = await createCodexHome();
+    const nowMs = Date.parse("2026-08-17T14:00:00.000Z");
+    const elapsedReset = new Date(nowMs - 1_000).toISOString();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      usage: {
+        rolling: { status: "ok", percent: 45, resetsAt: elapsedReset },
+        weekly: { status: "ok", percent: 18, resetsAt: elapsedReset },
+        monthly: { status: "ok", percent: 15, resetsAt: elapsedReset },
+      },
+    }), { status: 200 }));
+    const provider = createOpencodeGoQuotaWindowsProvider({
+      environment: testEnvironment(codexHome),
+      fetchImpl: fetchImpl as typeof fetch,
+      nowMs: () => nowMs,
+    });
+
+    await expect(provider()).resolves.toHaveLength(3);
+    await expect(provider()).resolves.toHaveLength(3);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("backs off for a short interval after a failed fetch", async () => {
     const codexHome = await createCodexHome();
     let nowMs = Date.parse("2026-08-17T14:00:00.000Z");

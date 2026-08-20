@@ -9,12 +9,60 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parse } from "smol-toml";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const privateFileFailure = vi.hoisted(() => ({ path: undefined as string | undefined }));
+
+vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../runtime/private-file.mjs")>();
+  return {
+    ...actual,
+    writePrivateFileAtomic: async (
+      ...args: Parameters<typeof actual.writePrivateFileAtomic>
+    ) => {
+      const [path] = args;
+      if (path === privateFileFailure.path) throw new Error("injected private write failure");
+      return actual.writePrivateFileAtomic(...args);
+    },
+  };
+});
 
 import { runOpenCodeGoSetup } from "../scripts/opencode-go-setup.mjs";
 import { writeManagedModelProviderProfileDefault } from "../runtime/model-provider-runtime.mjs";
 
 describe("OpenCode Go setup", () => {
+  afterEach(() => {
+    privateFileFailure.path = undefined;
+  });
+
+  it("shows the stable default account id in first-time setup choices", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-first-menu-"));
+    let labels: string[] = [];
+
+    await expect(runOpenCodeGoSetup({
+      allowBack: true,
+      environment: {
+        CODEX_HOME: codexHome,
+        CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+      },
+      prompts: {
+        select: async (options: { options: Array<{ label: string }> }) => {
+          labels = options.options.map(({ label }) => label);
+          return "back";
+        },
+        text: vi.fn(),
+        password: vi.fn(),
+        confirm: vi.fn(),
+        isCancel: () => false,
+      } as never,
+    })).resolves.toEqual({ action: "back" });
+
+    expect(labels.filter((label) => label.includes("创建默认账户"))).toEqual([
+      "OpenAI + OpenCode Go 切换模式（创建默认账户 opencode-go）",
+      "仅 OpenCode Go 固定模式（创建默认账户 opencode-go）",
+    ]);
+  });
+
   it("opens model settings from the OpenCode Go menu when configured", async () => {
     const codexHome = opencodeFixture();
     const select = vi.fn()
@@ -311,6 +359,29 @@ describe("OpenCode Go setup", () => {
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
     expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"))).toBe(false);
+  });
+
+  it("rolls back earlier files when a setup write fails midway", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-write-rollback-"));
+    const connectHome = join(codexHome, ".codex-connect");
+    const providerDirectory = join(connectHome, "providers", "opencode-go");
+    const configPath = join(codexHome, "config.toml");
+    const original = "custom = true\n";
+    writeFileSync(configPath, original, { mode: 0o600 });
+    privateFileFailure.path = join(providerDirectory, "models.manifest.json");
+
+    await expect(runOpenCodeGoSetup({
+      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: connectHome },
+      output: { write: () => undefined },
+      prompter: prompt("switching"),
+      configureRole: vi.fn(async () => undefined),
+      downloadCatalog: successfulCatalog,
+    })).rejects.toThrow("injected private write failure");
+
+    expect(readFileSync(configPath, "utf8")).toBe(original);
+    expect(existsSync(join(providerDirectory, "models.json"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
+    expect(existsSync(join(providerDirectory, "accounts.json"))).toBe(false);
   });
 });
 

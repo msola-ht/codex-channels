@@ -63,10 +63,12 @@ App Server 监管进程才启动该账户的隔离实例；账户 App Server 的
 `agents.external` 选择的默认账户会预先启动共享统计代理，确保子代理随主 App Server 可用；未使用
 也未选作子代理的账户不增加进程。
 
-默认账户的隔离 App Server 空闲超过 5 分钟（无活动 Turn、无 Conversation 绑定、且不是
-`agents.external` 默认账户）会自动释放并移除启动记录；释放后向最近使用过该账户的渠道会话通知
-一次，再次选择账户、恢复 Thread 或使用对应 Remote TUI 时会自动拉起。也可用
-`codexc opencode-go account stop <id>` 手动释放。统计代理始终共享一个，不参与账户释放。
+账户的隔离 App Server 在无 Conversation 绑定、不是 `agents.external` 默认账户、Gateway 最近没有
+观察到 Turn 活动且没有受管 Remote TUI 租约的状态下空闲超过 5 分钟，会自动释放并移除启动记录；
+释放后向最近使用过该账户的渠道会话通知一次，再次选择账户、恢复 Thread 或使用对应 Remote TUI
+时会自动拉起。`codexc remote` 在 TUI 运行期间持有 Supervisor 租约，避免实例被自动释放；也可用
+`codexc opencode-go account stop <id>` 手动释放，存在 Remote TUI 租约时会拒绝并提示退出 TUI。
+统计代理始终共享一个，不参与账户释放。
 
 ## 协议与模型范围
 

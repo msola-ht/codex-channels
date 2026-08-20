@@ -660,6 +660,47 @@ describe("GatewayApplication startup cleanup", () => {
       stuck: false,
     });
     expect(vi.mocked(terminateThreadWriterHolder)).not.toHaveBeenCalled();
+
+    vi.mocked(inspectThreadWriterLock).mockReturnValue({
+      held: true,
+      holder: { pid: 556, command: "node /tmp/codex-helper.js --worker" },
+    });
+    const misleadingCommand = await releaseThread.call(
+      application as unknown as GatewayApplication,
+      target,
+      true,
+    );
+    expect(misleadingCommand).toEqual({
+      status: "held",
+      threadId: binding.threadId,
+      holder: { pid: 556, command: "node /tmp/codex-helper.js --worker" },
+      releasable: false,
+      stuck: false,
+    });
+    expect(vi.mocked(terminateThreadWriterHolder)).not.toHaveBeenCalled();
+
+    vi.mocked(inspectThreadWriterLock)
+      .mockReturnValueOnce({
+        held: true,
+        holder: { pid: 557, command: "codex app-server" },
+      })
+      .mockReturnValueOnce({
+        held: true,
+        holder: { pid: 557, command: "other-daemon --worker" },
+      });
+    const changedCommand = await releaseThread.call(
+      application as unknown as GatewayApplication,
+      target,
+      true,
+    );
+    expect(changedCommand).toEqual({
+      status: "held",
+      threadId: binding.threadId,
+      holder: { pid: 557, command: "other-daemon --worker" },
+      releasable: false,
+      stuck: false,
+    });
+    expect(vi.mocked(terminateThreadWriterHolder)).not.toHaveBeenCalled();
   });
 
   it("does not start a Surface when stop is requested during startup", async () => {

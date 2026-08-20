@@ -45,10 +45,12 @@
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
-Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一受监管组件退出都会共同重建。
-账户隔离实例空闲超过 5 分钟（无活动 Turn、无绑定、非 `agents.external` 默认账户）由
-`releaseProvider` 释放，监管入口记录运行与主动释放状态，防止 Gateway 立即把它重新拉起；再次使用
-自动启动。代理指标通过私有 Unix Socket
+Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一非主动释放的受监管组件异常
+退出都会共同重建。OpenCode Go 账户隔离实例在无绑定、Gateway 最近无 Turn 活动、非
+`agents.external` 默认账户且无受管 Remote TUI 租约的状态下空闲超过 5 分钟，由
+`releaseProvider` 释放。监管入口记录运行、主动释放与租约状态，防止 Gateway 立即把实例重新拉起，
+并按 Provider 串行处理启动、释放和租约获取；释放结果区分已释放、租约占用与实例未运行，防止
+并发租约误停 Remote TUI。再次使用自动启动。代理指标通过私有 Unix Socket
 发送给 Gateway，Gateway 生命周期不再控制模型数据通路。入口持有独立 `0600` 监管 Socket，
 用于跨进程互斥和向前台启动器证明精确 Provider 拓扑；它同时集中拒绝已被裸进程占用的 App
 Server Socket。

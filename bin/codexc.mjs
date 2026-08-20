@@ -62,6 +62,7 @@ import {
   installProcessSignalHandlers,
   ReportedChildExitError,
   signalChildProcesses,
+  terminateChildProcess,
 } from "../runtime/process-lifecycle.mjs";
 import {
   AppServerSupervisorOwner,
@@ -84,7 +85,6 @@ import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options
 import { parseMetricsCenterCliArgs } from "../scripts/metrics-center-settings.mjs";
 import {
   metricsCommandUsage,
-  metricsProviderUsage,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
@@ -210,7 +210,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   add <id>     新增账户（交互输入 API Key）
   list         列出账户与默认标记
   remove <id>  备份后删除账户 Profile 与注册表项
-  default <id> 设置新会话默认账户（agents.external 同步切换）
+  default <id> 设置新会话默认账户（当前为 OpenCode Go 时同步 agents.external）
   stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）`,
   "opencode_go.account": `用法：codexc opencode-go account <add|list|remove|default|stop> [id]`,
   "opencode_go.account.add": "用法：codexc opencode-go account add <id>",
@@ -321,7 +321,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 停止并重新启动 Gateway。`,
   "metrics.prune": `用法：codexc metrics prune <provider>
 
-provider 当前支持 ${metricsProviderUsage.replaceAll("|", "、")}。备份并删除本地与中心库中该提供商全部请求行，随后
+provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以及当前或已备份的自定义主 Provider ID。备份并删除本地与中心库中该提供商全部请求行，随后
 自动重启 Gateway 与中心服务（即使任一步骤失败也会尝试把服务拉起来）。OpenAI 额度重置
 后可用 openai 从零重新统计用量；备份保留在指标库同目录的 *.<provider>-prune-*.bak。`,
   "metrics.cleanup": `用法：codexc metrics cleanup [--before YYYY-MM-DD | --keep-days 天数] [--max-rows 行数] [--vacuum] [--restart-gateway]
@@ -812,13 +812,36 @@ async function runServiceAppServer(args) {
         watchChild(child);
         console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
       } catch (error) {
+        let cleanupError;
         if (child) {
-          const childIndex = children.indexOf(child);
-          if (childIndex >= 0) children.splice(childIndex, 1);
           childrenByProvider.delete(provider);
-          if (childProcessIsRunning(child)) signalChildProcesses([child], "SIGTERM");
+          if (childProcessIsRunning(child) && child.pid !== undefined) {
+            try {
+              await terminateChildProcess(child);
+            } catch (terminationError) {
+              cleanupError = terminationError;
+            }
+          }
+          if (childProcessIsRunning(child)) {
+            watchChild(child);
+          } else {
+            const childIndex = children.indexOf(child);
+            if (childIndex >= 0) children.splice(childIndex, 1);
+          }
         }
-        if (proxyCreated) await closeProviderProxy(proxy);
+        if (proxyCreated) {
+          try {
+            await closeProviderProxy(proxy);
+          } catch (proxyError) {
+            cleanupError ??= proxyError;
+          }
+        }
+        if (cleanupError) {
+          throw new Error(
+            `模型 Provider App Server 启动失败且资源未能完全清理：${provider}`,
+            { cause: error },
+          );
+        }
         throw error;
       }
     })();
@@ -836,11 +859,14 @@ async function runServiceAppServer(args) {
     const child = childrenByProvider.get(provider);
     if (!child) return false;
     detachChild?.(child);
-    childrenByProvider.delete(provider);
-    if (childProcessIsRunning(child)) {
-      signalChildProcesses([child], "SIGTERM");
-      await waitForChildExit(child, 5_000);
+    try {
+      await terminateChildProcess(child);
+    } catch (error) {
+      if (!children.includes(child)) children.push(child);
+      watchChild?.(child);
+      throw error;
     }
+    childrenByProvider.delete(provider);
     if (isGoProvider(provider)) {
       const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
       if (!remainingGoChild) {
@@ -962,9 +988,9 @@ async function runServiceAppServer(args) {
   });
   children.push(primaryChild);
   const lifecycle = forwardChildrenLifecycle(children, async () => {
+    await supervisorOwner?.close();
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
-    await supervisorOwner?.close();
   });
   watchChild = lifecycle.watchChild;
   detachChild = lifecycle.detachChild;
@@ -982,22 +1008,6 @@ function withoutManagedProviderApiKeys(environment) {
     delete childEnvironment[key];
   }
   return childEnvironment;
-}
-
-function waitForChildExit(child, timeoutMs) {
-  if (!childProcessIsRunning(child)) return Promise.resolve();
-  return new Promise((resolveWait) => {
-    const timer = setTimeout(() => {
-      if (childProcessIsRunning(child)) {
-        signalChildProcesses([child], "SIGKILL");
-      }
-      resolveWait();
-    }, timeoutMs);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolveWait();
-    });
-  });
 }
 
 function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_000) {
@@ -1530,7 +1540,7 @@ async function metrics(args) {
     return;
   }
   if (subcommand === "prune" && rest.length !== 1) {
-    throw new Error(`用法：codexc metrics prune <${metricsProviderUsage}>`);
+    throw new Error("用法：codexc metrics prune <provider>");
   }
   if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
@@ -1707,18 +1717,22 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
   let settled = false;
   const watchers = new Map();
   const forward = (signal) => signalChildProcesses(children, signal);
-  const terminate = () => forward("SIGTERM");
-  const interrupt = () => forward("SIGINT");
-  const cleanup = installProcessSignalHandlers({
-    SIGTERM: terminate,
-    SIGINT: interrupt,
-  });
-  const finish = (code, signal, error) => {
+  let cleanup = () => undefined;
+  const finish = (code, signal, error, initialSignal = "SIGTERM") => {
     if (settled) return;
     settled = true;
     cleanup();
-    forward("SIGTERM");
-    void Promise.resolve(closeResources()).then(() => {
+    forward(initialSignal);
+    void (async () => {
+      const cleanupResults = await Promise.allSettled([
+        Promise.resolve().then(closeResources),
+      ]);
+      const terminationResults = await Promise.allSettled(
+        [...children].map((child) => terminateChildProcess(child)),
+      );
+      const cleanupFailure = [...cleanupResults, ...terminationResults]
+        .find((result) => result.status === "rejected");
+      if (cleanupFailure?.status === "rejected") throw cleanupFailure.reason;
       if (error) {
         printCliMessage(
           "failure",
@@ -1736,7 +1750,7 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
         printCliMessage("failure", `Codex App Server 进程意外退出：exit=${exitCode}`);
       }
       process.exitCode = exitCode;
-    }).catch((closeError) => {
+    })().catch((closeError) => {
       printCliMessage(
         "failure",
         `Codex App Server 资源清理失败：${closeError instanceof Error ? closeError.message : String(closeError)}`,
@@ -1744,6 +1758,10 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
       process.exitCode = 1;
     });
   };
+  cleanup = installProcessSignalHandlers({
+    SIGTERM: () => finish(null, "SIGTERM", undefined, "SIGTERM"),
+    SIGINT: () => finish(null, "SIGINT", undefined, "SIGINT"),
+  });
   const watchChild = (child) => {
     if (watchers.has(child)) return;
     const onError = (error) => finish(1, null, error);

@@ -23,7 +23,10 @@ import { modelProviderBlockEdits } from "./model-provider-profile.mjs";
 import {
   opencodeGoAccountMarkerPath,
 } from "./opencode-go-accounts.mjs";
-import { writePrivateFileAtomicSync } from "./private-file.mjs";
+import {
+  readPrivateFileSync,
+  writePrivateFileAtomicSync,
+} from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
@@ -64,7 +67,7 @@ export function primaryProviderBackupPath(environment = process.env) {
 
 export function readPrimaryProviderBackup(environment = process.env) {
   try {
-    return record(JSON.parse(readFileSync(primaryProviderBackupPath(environment), "utf8")));
+    return record(JSON.parse(readPrivateFile(primaryProviderBackupPath(environment))));
   } catch (error) {
     if (error?.code === "ENOENT") return {};
     // 备份文件包含用户 Key，解析失败不能把原文作为 cause 暴露。
@@ -91,6 +94,19 @@ export function restorePrimaryProviderCandidateEdits(id, environment = process.e
   const provider = record(readPrimaryProviderBackup(environment)[id]);
   if (typeof provider.base_url !== "string") return undefined;
   return modelProviderBlockEdits(id, provider);
+}
+
+export function removePrimaryProviderBackupCandidate(id, environment = process.env) {
+  const backup = readPrimaryProviderBackup(environment);
+  if (!Object.prototype.hasOwnProperty.call(backup, id)) return undefined;
+  const removed = record(backup[id]);
+  const next = { ...backup };
+  delete next[id];
+  writePrivateFileAtomicSync(
+    primaryProviderBackupPath(environment),
+    `${JSON.stringify(next, null, 2)}\n`,
+  );
+  return removed;
 }
 
 export function managedProviderDirectory(environment, definition) {
@@ -794,23 +810,7 @@ function reasoningEffortMismatch(document, selectedModel, reasoningEffortPolicy)
 }
 
 function readPrivateFile(path, maximumBytes = maximumConfigBytes) {
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-  const descriptor = openSync(path, constants.O_RDONLY | noFollow);
-  try {
-    const metadata = fstatSync(descriptor);
-    const currentUid = process.getuid?.();
-    if (
-      !metadata.isFile()
-      || metadata.size > maximumBytes
-      || (metadata.mode & 0o077) !== 0
-      || (currentUid !== undefined && metadata.uid !== currentUid)
-    ) {
-      throw new Error("Codex 提供商配置文件权限或类型无效");
-    }
-    return readFileSync(descriptor, "utf8");
-  } finally {
-    closeSync(descriptor);
-  }
+  return readPrivateFileSync(path, maximumBytes);
 }
 
 function readCodexConfigFile(path) {

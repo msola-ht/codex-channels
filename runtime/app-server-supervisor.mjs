@@ -4,7 +4,7 @@ import { basename, dirname, extname, resolve } from "node:path";
 
 import WebSocket from "ws";
 
-const protocolVersion = 3;
+const protocolVersion = 4;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 1_024;
 const connectionTimeoutMs = 1_000;
@@ -17,11 +17,14 @@ export class AppServerSupervisorOwner {
   #socketPath;
   #sockets = new Set();
   #closePromise;
+  #closing = false;
   #ensureProvider;
   #releaseProvider;
   #topology;
   #runningProviders = new Set();
   #releasedProviders = new Set();
+  #providerLeases = new Map();
+  #providerOperations = new Map();
 
   constructor(primarySocketPath, topology, { ensureProvider, releaseProvider } = {}) {
     this.#socketPath = appServerSupervisorSocketPath(primarySocketPath);
@@ -34,6 +37,7 @@ export class AppServerSupervisorOwner {
       let bytes = 0;
       socket.on("error", () => undefined);
       socket.on("close", () => this.#sockets.delete(socket));
+      socket.on("end", () => socket.end());
       socket.setTimeout(connectionTimeoutMs, () => socket.destroy());
       socket.on("data", (chunk) => {
         bytes += chunk.length;
@@ -66,7 +70,52 @@ export class AppServerSupervisorOwner {
         socketPaths: this.#topology.socketPaths,
         runningProviders: [...this.#runningProviders],
         releasedProviders: [...this.#releasedProviders],
+        leasedProviders: [...this.#providerLeases.keys()],
       })}\n`);
+      return;
+    }
+    if (request?.action === "leaseProvider") {
+      if (
+        typeof request.provider !== "string"
+        || !providerIdPattern.test(request.provider)
+        || !this.#ensureProvider
+      ) {
+        socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
+        return;
+      }
+      socket.setTimeout(15_000, () => socket.destroy());
+      const leases = this.#providerLeases.get(request.provider) ?? new Set();
+      leases.add(socket);
+      this.#providerLeases.set(request.provider, leases);
+      const removeLease = () => {
+        leases.delete(socket);
+        if (leases.size === 0) this.#providerLeases.delete(request.provider);
+      };
+      socket.once("close", removeLease);
+      try {
+        await this.#runProviderOperation(request.provider, async () => {
+          if (socket.destroyed) return;
+          await this.#ensureProvider(request.provider);
+          this.#releasedProviders.delete(request.provider);
+          this.#runningProviders.add(request.provider);
+        });
+        if (socket.destroyed) return;
+        socket.setTimeout(0);
+        socket.resume();
+        socket.write(`${JSON.stringify({
+          version: protocolVersion,
+          ok: true,
+          provider: request.provider,
+        })}\n`);
+      } catch (error) {
+        removeLease();
+        socket.end(`${JSON.stringify({
+          version: protocolVersion,
+          ok: false,
+          provider: request.provider,
+          error: error instanceof Error ? error.message.slice(0, 512) : "启动失败",
+        })}\n`);
+      }
       return;
     }
     if (request?.action === "releaseProvider") {
@@ -78,21 +127,49 @@ export class AppServerSupervisorOwner {
         socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
         return;
       }
-      socket.setTimeout(15_000, () => socket.destroy());
-      const wasRunning = this.#runningProviders.has(request.provider);
-      this.#runningProviders.delete(request.provider);
-      this.#releasedProviders.add(request.provider);
-      try {
-        const released = await this.#releaseProvider(request.provider);
+      if ((this.#providerLeases.get(request.provider)?.size ?? 0) > 0) {
         socket.end(`${JSON.stringify({
           version: protocolVersion,
           ok: true,
           provider: request.provider,
-          released,
+          released: false,
+          reason: "leased",
+        })}\n`);
+        return;
+      }
+      socket.setTimeout(15_000, () => socket.destroy());
+      try {
+        const result = await this.#runProviderOperation(request.provider, async () => {
+          if ((this.#providerLeases.get(request.provider)?.size ?? 0) > 0) {
+            return { released: false, reason: "leased" };
+          }
+          const wasRunning = this.#runningProviders.has(request.provider);
+          this.#runningProviders.delete(request.provider);
+          this.#releasedProviders.add(request.provider);
+          try {
+            const didRelease = await this.#releaseProvider(request.provider);
+            if ((this.#providerLeases.get(request.provider)?.size ?? 0) > 0) {
+              await this.#ensureProvider(request.provider);
+              this.#releasedProviders.delete(request.provider);
+              this.#runningProviders.add(request.provider);
+              return { released: false, reason: "leased" };
+            }
+            return didRelease
+              ? { released: true, reason: "released" }
+              : { released: false, reason: "not-running" };
+          } catch (error) {
+            this.#releasedProviders.delete(request.provider);
+            if (wasRunning) this.#runningProviders.add(request.provider);
+            throw error;
+          }
+        });
+        socket.end(`${JSON.stringify({
+          version: protocolVersion,
+          ok: true,
+          provider: request.provider,
+          ...result,
         })}\n`);
       } catch (error) {
-        this.#releasedProviders.delete(request.provider);
-        if (wasRunning) this.#runningProviders.add(request.provider);
         socket.end(`${JSON.stringify({
           version: protocolVersion,
           ok: false,
@@ -113,9 +190,11 @@ export class AppServerSupervisorOwner {
     }
     socket.setTimeout(15_000, () => socket.destroy());
     try {
-      await this.#ensureProvider(request.provider);
-      this.#releasedProviders.delete(request.provider);
-      this.#runningProviders.add(request.provider);
+      await this.#runProviderOperation(request.provider, async () => {
+        await this.#ensureProvider(request.provider);
+        this.#releasedProviders.delete(request.provider);
+        this.#runningProviders.add(request.provider);
+      });
       socket.end(`${JSON.stringify({
         version: protocolVersion,
         ok: true,
@@ -129,6 +208,23 @@ export class AppServerSupervisorOwner {
         error: error instanceof Error ? error.message.slice(0, 512) : "启动失败",
       })}\n`);
     }
+  }
+
+  #runProviderOperation(provider, operation) {
+    const previous = this.#providerOperations.get(provider) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(() => {
+      if (this.#closing) {
+        throw new Error("App Server 监管入口正在关闭");
+      }
+      return operation();
+    });
+    this.#providerOperations.set(provider, current);
+    current.finally(() => {
+      if (this.#providerOperations.get(provider) === current) {
+        this.#providerOperations.delete(provider);
+      }
+    }).catch(() => undefined);
+    return current;
   }
 
   async start() {
@@ -180,7 +276,10 @@ export class AppServerSupervisorOwner {
   }
 
   close() {
-    this.#closePromise ??= this.#closeInternal();
+    if (!this.#closePromise) {
+      this.#closing = true;
+      this.#closePromise = this.#closeInternal();
+    }
     return this.#closePromise;
   }
 
@@ -189,6 +288,7 @@ export class AppServerSupervisorOwner {
     if (this.#server.listening) {
       await new Promise((resolveClose) => this.#server.close(() => resolveClose()));
     }
+    await Promise.allSettled([...this.#providerOperations.values()]);
     unlinkOwnedSocket(this.#socketPath, this.#identity);
   }
 }
@@ -200,10 +300,20 @@ export function appServerSupervisorSocketPath(primarySocketPath) {
 }
 
 export async function inspectAppServerSupervisor(primarySocketPath) {
+  const inspection = await inspectAppServerSupervisorState(primarySocketPath);
+  return inspection.status === "ready" ? inspection.topology : undefined;
+}
+
+export async function inspectAppServerSupervisorState(primarySocketPath) {
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
   const status = assertSafeSupervisorSocket(socketPath);
-  if (!status) return undefined;
-  return parseTopology(await readSupervisorResponse(socketPath, { action: "inspect" }));
+  if (!status) return { status: "missing" };
+  const topology = parseTopology(
+    await readSupervisorResponse(socketPath, { action: "inspect" }),
+  );
+  return topology === undefined
+    ? { status: "incompatible" }
+    : { status: "ready", topology };
 }
 
 export async function ensureAppServerProvider(primarySocketPath, provider) {
@@ -228,6 +338,74 @@ export async function ensureAppServerProvider(primarySocketPath, provider) {
   }
 }
 
+export async function acquireAppServerProviderLease(primarySocketPath, provider) {
+  const socketPath = appServerSupervisorSocketPath(primarySocketPath);
+  assertSafeSupervisorSocket(socketPath);
+  return new Promise((resolveLease, rejectLease) => {
+    const socket = createConnection(socketPath);
+    let response = Buffer.alloc(0);
+    let settled = false;
+    const fail = (message) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      rejectLease(new Error(message));
+    };
+    const timer = setTimeout(
+      () => fail(`模型 Provider 租约请求超时：${provider}`),
+      15_000,
+    );
+    socket.once("connect", () => {
+      socket.write(`${JSON.stringify({ action: "leaseProvider", provider })}\n`);
+    });
+    socket.on("data", (chunk) => {
+      response = Buffer.concat([response, chunk]);
+      if (response.length > maximumResponseBytes) {
+        fail(`模型 Provider 租约响应过大：${provider}`);
+        return;
+      }
+      const newline = response.indexOf(0x0a);
+      if (newline < 0) return;
+      let value;
+      try {
+        value = JSON.parse(response.subarray(0, newline).toString("utf8"));
+      } catch {
+        fail(`模型 Provider 租约请求没有有效响应：${provider}`);
+        return;
+      }
+      if (value?.version !== protocolVersion || value.provider !== provider || value.ok !== true) {
+        fail(
+          typeof value?.error === "string" && value.error
+            ? value.error
+            : `模型 Provider 租约获取失败：${provider}`,
+        );
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      socket.pause();
+      socket.on("error", () => undefined);
+      let closePromise;
+      resolveLease({
+        close() {
+          closePromise ??= new Promise((resolveClose) => {
+            if (socket.destroyed) {
+              resolveClose();
+              return;
+            }
+            socket.once("close", resolveClose);
+            socket.end();
+          });
+          return closePromise;
+        },
+      });
+    });
+    socket.once("error", () => fail(`模型 Provider 租约连接失败：${provider}`));
+    socket.once("end", () => fail(`模型 Provider 租约连接提前关闭：${provider}`));
+  });
+}
+
 export async function releaseAppServerProvider(primarySocketPath, provider) {
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
   assertSafeSupervisorSocket(socketPath);
@@ -248,7 +426,13 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
         : `模型 Provider 释放失败：${provider}`,
     );
   }
-  return value.released === true;
+  if (
+    !["released", "leased", "not-running"].includes(value.reason)
+    || (value.released === true) !== (value.reason === "released")
+  ) {
+    throw new Error(`模型 Provider 释放响应无效：${provider}`);
+  }
+  return { released: value.released, reason: value.reason };
 }
 
 function assertSafeSupervisorSocket(socketPath) {
@@ -396,6 +580,7 @@ function parseTopology(response) {
     || value.socketPaths.some((path) => typeof path !== "string" || path.length === 0)
     || !validProviderStateList(value.runningProviders, value.managedProviders)
     || !validProviderStateList(value.releasedProviders, value.managedProviders)
+    || !validProviderStateList(value.leasedProviders, value.managedProviders)
   ) {
     return undefined;
   }

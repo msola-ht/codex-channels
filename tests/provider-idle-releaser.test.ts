@@ -138,6 +138,36 @@ describe("ProviderIdleReleaser", () => {
 
     expect(released).toEqual(["opencode-go-b"]);
   });
+
+  it("waits for an in-flight scan and prevents releases after stop begins", async () => {
+    let resolveRunning!: (providers: readonly string[]) => void;
+    const running = new Promise<readonly string[]>((resolve) => {
+      resolveRunning = resolve;
+    });
+    const released: string[] = [];
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
+      listRunningProviders: () => running,
+      releaseProvider: async (provider) => {
+        released.push(provider);
+        return true;
+      },
+      providerForThread: () => undefined,
+      listBindings: () => [],
+      defaultRoleProvider: () => undefined,
+      notify: () => undefined,
+      idleThresholdMs: 0,
+      nowMs: () => 1_000,
+    });
+
+    const scan = releaser.scan();
+    const stop = releaser.stop();
+    resolveRunning(["opencode-go-b"]);
+    await Promise.all([scan, stop]);
+
+    expect(released).toEqual([]);
+  });
 });
 
 function silentLogger(): import("pino").Logger {

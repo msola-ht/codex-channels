@@ -41,7 +41,8 @@
   重新接收，微信临时取消不会永久关闭交互端口；飞书短审批直接显示，长审批在初始与处理结果
   CardKit 中提供有界预览和默认收起的完整原文，并保留一次性动作令牌。
 - Bootstrap 单渠道启动/运行故障隔离、独立退避恢复、Thread 写锁冲突下继续启动并在释放后自动恢复、首次启动与恢复期关键输出有界暂存、启动中停止的单次组件
-  关闭、App Server 重连取消与关闭等待；内置 Surface 插件
+  关闭、App Server 重连取消与关闭等待；`/release` 展示持锁命令前剥离凭据参数，只把入口可执行
+  文件为 `codex`、且二次核验身份未变化的持锁方判为可强制释放；内置 Surface 插件
   顺序、零/多账号展开、插件与 Surface ID 一致性、账号唯一性；飞书按配置显式注册、允许名单
   热加载、撤权绑定清理，以及已授权但暂时无 Thread 绑定的飞书/微信会话启动通知；OpenAI 启动
   探测覆盖官方双目标、自定义上游、部分/全部传输失败、超时中止、部分失败不误报和三渠道共享告警文案。
@@ -72,7 +73,9 @@
   退出码元数据、上游敏感占位符、完整本机路径显示、Unicode 单行摘要边界及三渠道按 Turn 聚合成功查询类操作；Outbox
   的精确账号路由、同 Chat 顺序、跨 Chat 并行、静态 CardKit 单元素 5,000 字符与最多 5 张卡片、
   纯文本及降级富文本 20,000 字节上限、
-  明确截断、关闭等待及完整、单行摘要、隐藏三档操作输出；同一 Thread 的 active/idle 轻量状态卡片创建、重复抑制、顺序更新、更新错误
+  明确截断、关闭等待及完整、单行摘要、隐藏三档操作输出；旧思考卡异步失败不会清理新推理段状态，
+  思考流式卡与 Thread 状态卡失败日志只保留
+  受约束异常类型和机器错误码；同一 Thread 的 active/idle 轻量状态卡片创建、重复抑制、顺序更新、更新错误
   分类、失败绑定清理和关闭超时后的迟到结果隔离；操作详情、状态、耗时和退出码的
   运行帧忽略、终态静态 CardKit 发送及会话顺序；已授权文本、PNG/JPEG 独立图片、单张图片说明
   文字和独立 UTF-8 文本文件到 Application 的提交，图片的 10 MiB 限制、内容签名校验、私有
@@ -103,7 +106,9 @@
   历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；按第三方 Provider
   和模型独立设置新会话默认值、目录上下文、思考等级与自动压缩阈值，固定模式清除根级覆盖并使用
   官方配置事务，以及旧受管文件到 `sf-` 前缀、独立模型目录和按模型设置的冲突检测、权限校验与
-  引用迁移；DeepSeek 官方脚本目录提取、两种 Setup 模式、
+  引用迁移；自定义主 Provider 私有候选备份读取覆盖普通文件、当前属主、`0600`、大小和非符号链接
+  校验，恢复/删除候选消费同名备份且配置失败时回滚；从第三方恢复官方清除第三方模型覆盖，已在
+  官方模式时保留官方模型；共享私有文件读取以同一描述符完成 `O_NOFOLLOW` 与权限校验；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash 与 Pro 可选，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。
@@ -112,15 +117,22 @@
 - Provider 账户能力的编译期唯一注册、未知 Provider 不回退、OpenAI Token 用量与单桶/多桶额度
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
-  不进入 DeepSeek 状态或完成卡片。
+  不进入 DeepSeek 状态或完成卡片；OpenCode Go 配额窗口快照按未来最早重置缓存，上游返回已过期
+  重置时间时短时退避，避免逐请求查询 usage 接口。
 - OpenCode Go 的账户注册表与旧版单账户迁移、账户 CLI（add/list/remove/default/stop）、切换/固定
   Setup、同名模型按 Provider 独立选择、按需 App Server 启动、共享统计代理的 `/go/<账户>` 前缀
-  路由与分账户指标、账户适配器按 `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与
+  路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、账户适配器按 `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与
   SDK 协议解析，以及每小时价格 Draft PR 的只读检查和最小写权限边界。
-- OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、无活动 Turn、非 `agents.external` 默认
-  账户且超过空闲阈值时经 supervisor `releaseProvider` 释放，监管状态区分运行中与主动释放，Gateway
-  不会把主动释放误判为意外断线；释放后按最近使用过的渠道会话通知一次，
-  正在拉起的账户跳过本轮，失败只记录不阻塞。
+- OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、Gateway 最近无 Turn 活动、非
+  `agents.external` 默认账户且超过空闲阈值时经 supervisor `releaseProvider` 释放；受管 Remote TUI
+  通过私有连接持有 Provider 租约，租约存在时拒绝释放，退出时自动撤销。监管状态区分运行中、主动
+  释放与持有租约；测试还覆盖释放与租约并发时按 Provider 串行、租约有限关闭、释放结果区分实例
+  未运行、监管关闭等待已开始的 Provider 操作且拒绝排队操作、子进程温和终止超时后的强制终止和
+  终态确认、服务收到退出信号后再次收敛忽略首次信号的 App Server，以及账户删除遇到旧版监管
+  协议时失败关闭。
+  Gateway 不会把主动释放误判为意外断线，关闭会等待进行中的扫描且不再发起新释放；OpenCode Go
+  默认账户变更只同步当前 OpenCode Go 共享角色，不覆盖已选择的 DeepSeek 角色；
+  释放后按最近使用过的渠道会话通知一次，正在拉起的账户跳过本轮，失败只记录不阻塞。
 - 全 Provider 同一 Turn 多次模型响应的请求次数、实际产生推理输出的思考次数、聚合模型耗时、
   缓存与文本/函数/自定义工具参数
   不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和
@@ -342,8 +354,8 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 
 默认真实测试会让两个 Client 连接同一个临时 Unix WebSocket App Server，验证一个连接创建的
 临时 Thread 会实时广播到另一个连接，并出现在共享的 loaded Thread 列表中；还会在隔离的
-`CODEX_HOME` 下启动真实 `service-app-server`，确认 OpenAI 统计代理、私有监管拓扑和 App Server
-初始化属于同一条服务链路。该流程不会启动模型 Turn。若还要验证两个连接依次读取和恢复同一个已有会话，可显式指定当前 Workspace 中
+`CODEX_HOME` 下启动真实 `service-app-server`，确认 OpenAI 统计代理、私有监管拓扑、Provider
+租约拒绝释放和 App Server 初始化属于同一条服务链路。该流程不会启动模型 Turn。若还要验证两个连接依次读取和恢复同一个已有会话，可显式指定当前 Workspace 中
 空闲且允许临时订阅的 fixture Thread：
 
 ```bash

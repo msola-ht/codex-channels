@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -14,6 +14,7 @@ import {
 import {
   backupPrimaryProviderCandidates,
   primaryProviderBackupPath,
+  readPrimaryProviderBackup,
 } from "../runtime/model-provider-runtime.mjs";
 
 function clientFixture(snapshot: {
@@ -38,6 +39,24 @@ function clientFixture(snapshot: {
     writeUserConfigEdits,
   };
 }
+
+describe("primary Provider private backup", () => {
+  it("rejects a backup file readable by other users", () => {
+    const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-permissions-"));
+    const environment = { CODEX_CONNECT_HOME: connectHome };
+    backupPrimaryProviderCandidates({
+      OpenAI: {
+        name: "OpenAI",
+        base_url: "https://example.test/v1",
+        wire_api: "responses",
+        experimental_bearer_token: "sk-private",
+      },
+    }, environment);
+    chmodSync(primaryProviderBackupPath(environment), 0o644);
+
+    expect(() => readPrimaryProviderBackup(environment)).toThrow("无法安全读取");
+  });
+});
 
 describe("primary provider CLI", () => {
   it("lists the active primary and all custom candidates", async () => {
@@ -146,7 +165,7 @@ describe("primary provider CLI", () => {
     const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-official-"));
     const { createClient, writeUserConfigEdits } = clientFixture({
       config: {
-        model: "gpt-5.6-sol",
+        model: "custom-only-model",
         model_provider: "OpenAI",
         openai_base_url: "https://api.openai.com/v1",
         model_providers: {
@@ -174,6 +193,7 @@ describe("primary provider CLI", () => {
     expect(writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "openai_base_url", value: null },
       { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model", value: null },
       { keyPath: "model_providers.OpenAI", value: null },
       { keyPath: "model_providers.thirdparty", value: null },
     ], { expectedVersion: "v1" });
@@ -185,6 +205,27 @@ describe("primary provider CLI", () => {
     );
     expect(backup.OpenAI.base_url).toBe("https://zzone.cc.cd/v1");
     expect(backup.thirdparty.base_url).toBe("https://third.example.test/v1");
+  });
+
+  it("keeps the configured model when the primary Provider is already official", async () => {
+    const { createClient, writeUserConfigEdits } = clientFixture({
+      config: {
+        model: "gpt-5.6-sol",
+        model_provider: "openai",
+        model_providers: {},
+      },
+      version: "v1",
+    });
+
+    await switchPrimaryProvider("openai", undefined, {
+      environment: {},
+      output: { write: vi.fn() },
+      createClient,
+    });
+
+    expect(writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "model_provider", value: "openai" },
+    ], { expectedVersion: "v1" });
   });
 
   it("restores a backed-up candidate when switching back to custom", async () => {
@@ -312,7 +353,7 @@ describe("primary provider CLI", () => {
   it("restores the official primary when removing the active candidate", async () => {
     const { createClient, writeUserConfigEdits } = clientFixture({
       config: {
-        model: "gpt-5.6-sol",
+        model: "custom-only-model",
         model_provider: "thirdparty",
         model_providers: {
           OpenAI: {
@@ -338,10 +379,77 @@ describe("primary provider CLI", () => {
     expect(writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "model_providers.thirdparty", value: null },
       { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model", value: null },
     ], { expectedVersion: "v1" });
     expect(output.write.mock.calls.flat().join("")).toContain(
       "已删除自定义主 Provider thirdparty 并恢复官方 OpenAI 主 Provider",
     );
+  });
+
+  it("removes a configured candidate from the private backup too", async () => {
+    const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-remove-backup-"));
+    const environment = { CODEX_CONNECT_HOME: connectHome };
+    backupPrimaryProviderCandidates({
+      thirdparty: {
+        base_url: "https://third.example.test/v1",
+        wire_api: "responses",
+      },
+    }, environment);
+    const { createClient } = clientFixture({
+      config: {
+        model_provider: "openai",
+        model_providers: {
+          thirdparty: {
+            base_url: "https://third.example.test/v1",
+            wire_api: "responses",
+          },
+        },
+      },
+      version: "v1",
+    });
+
+    await removePrimaryProvider("thirdparty", {
+      environment,
+      output: { write: vi.fn() },
+      createClient,
+    });
+
+    expect(JSON.parse(readFileSync(
+      primaryProviderBackupPath(environment),
+      "utf8",
+    ))).toEqual({});
+  });
+
+  it("restores the private backup when removing the config candidate fails", async () => {
+    const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-remove-rollback-"));
+    const environment = { CODEX_CONNECT_HOME: connectHome };
+    backupPrimaryProviderCandidates({
+      thirdparty: {
+        base_url: "https://third.example.test/v1",
+        wire_api: "responses",
+      },
+    }, environment);
+    const { createClient, writeUserConfigEdits } = clientFixture({
+      config: {
+        model_provider: "openai",
+        model_providers: {
+          thirdparty: {
+            base_url: "https://third.example.test/v1",
+            wire_api: "responses",
+          },
+        },
+      },
+      version: "v1",
+    });
+    writeUserConfigEdits.mockRejectedValueOnce(new Error("config write failed"));
+
+    await expect(removePrimaryProvider("thirdparty", {
+      environment,
+      output: { write: vi.fn() },
+      createClient,
+    })).rejects.toThrow("config write failed");
+
+    expect(readPrimaryProviderBackup(environment)).toHaveProperty("thirdparty");
   });
 
   it("routes subcommands and rejects unknown ones", async () => {
@@ -518,6 +626,7 @@ describe("primary provider CLI", () => {
 
     expect(writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model", value: null },
       { keyPath: "model_providers.OpenAI", value: null },
     ], { expectedVersion: "v1" });
     expect(output.write.mock.calls.flat().join("")).toContain(
@@ -564,6 +673,7 @@ describe("primary provider CLI", () => {
     expect(writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "model_providers.thirdparty", value: null },
       { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model", value: null },
     ], { expectedVersion: "v1" });
   });
 

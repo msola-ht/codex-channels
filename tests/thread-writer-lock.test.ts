@@ -49,6 +49,33 @@ describe("thread writer lock diagnostics", () => {
     }, join(root, "proc"))).toEqual({ held: false });
   });
 
+  it("redacts credentials from the lock holder command line", () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-thread-lock-secret-"));
+    const procRoot = join(root, "proc");
+    const pid = 34567;
+    mkdirSync(join(procRoot, String(pid)), { recursive: true });
+    writeFileSync(
+      join(procRoot, String(pid), "cmdline"),
+      [
+        "codex",
+        "-c",
+        'model_providers.OpenAI.experimental_bearer_token="sk-config-secret"',
+        "--header",
+        "Authorization: Bearer header-secret",
+        "--workspace",
+        "/workspace/project",
+      ].join("\0"),
+    );
+
+    const command = processCommandLine(pid, procRoot);
+
+    expect(command).toContain("experimental_bearer_token=[已脱敏]");
+    expect(command).toContain("--header [已脱敏]");
+    expect(command).toContain("--workspace /workspace/project");
+    expect(command).not.toContain("sk-config-secret");
+    expect(command).not.toContain("header-secret");
+  });
+
   it("treats an unreadable process table as unidentifiable instead of free", () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-thread-lock-proc-"));
     const codexHome = join(root, "codex-home");

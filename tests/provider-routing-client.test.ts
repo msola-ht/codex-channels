@@ -618,6 +618,36 @@ describe("ProviderRoutingClient", () => {
       expect.objectContaining({ modelProvider: "OpenAI" }),
     );
   });
+
+  it("preserves a custom primary Thread Provider after receiving its notifications", async () => {
+    const openai = client();
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-custom", "OpenAI", "idle"),
+    ]);
+    openai.forkThread.mockResolvedValue(session("thread-fork", "OpenAI", "idle"));
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([["openai", openai]]),
+      async () => undefined,
+      new Set(["OpenAI"]),
+      "OpenAI",
+    );
+
+    routed.onNotification(() => undefined);
+    await routed.connect();
+    await routed.listThreads(cwd);
+    openai.emitNotification({
+      method: "thread/status/changed",
+      params: { threadId: "thread-custom" },
+    });
+    await routed.forkThread("thread-custom", cwd, {});
+
+    expect(openai.forkThread).toHaveBeenCalledWith(
+      "thread-custom",
+      cwd,
+      expect.objectContaining({ modelProvider: "OpenAI" }),
+    );
+  });
 });
 
 function routing(openai: MockClient, deepseek: MockClient): ProviderRoutingClient {

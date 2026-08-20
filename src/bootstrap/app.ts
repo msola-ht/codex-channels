@@ -701,7 +701,8 @@ export class GatewayApplication {
       listRunningProviders: async () =>
         (await inspectAppServerSupervisor(config.codexSocketPath))?.runningProviders ?? [],
       releaseProvider: (provider) =>
-        releaseAppServerProvider(config.codexSocketPath, provider),
+        releaseAppServerProvider(config.codexSocketPath, provider)
+          .then((result) => result.released),
       providerForThread: (threadId) =>
         this.router.modelSettingsForThread(threadId)?.modelProvider,
       listBindings: () => this.bindings.list(),
@@ -1468,14 +1469,18 @@ export class GatewayApplication {
       this.retryPendingBindingRestore(threadId);
       return { status: "released", threadId, holder };
     }
-    if (recheck.holder === null || recheck.holder.pid !== holder.pid) {
+    const recheckedReleasable = recheck.holder !== null
+      && isReleaseableThreadWriterHolder(recheck.holder);
+    if (
+      recheck.holder === null
+      || recheck.holder.pid !== holder.pid
+      || !recheckedReleasable
+    ) {
       return {
         status: "held",
         threadId,
         holder: recheck.holder ?? holder,
-        releasable: recheck.holder === null
-          ? false
-          : isReleaseableThreadWriterHolder(recheck.holder),
+        releasable: recheckedReleasable,
         stuck,
       };
     }
@@ -1544,8 +1549,7 @@ function isHighFrequencyNotification(method: string): boolean {
 }
 
 function isReleaseableThreadWriterHolder(holder: ThreadLockHolder): boolean {
-  return /codex/u.test(holder.command)
-    && !/codexc\.mjs/u.test(holder.command);
+  return /^(?:codex|[^\s]*[/\\]codex)(?:\s|$)/u.test(holder.command);
 }
 
 function resolveRequestMetricsRange(
