@@ -24,6 +24,13 @@ interface ActiveTurn {
   turnId: string;
 }
 
+interface ReasoningState {
+  turnId: string;
+  startedAtMs: number;
+  segmentActive: boolean;
+  timer?: NodeJS.Timeout;
+}
+
 interface TurnTimingState {
   turnId: string;
   turnStartedAtMs?: number;
@@ -108,6 +115,7 @@ export class ConversationCore {
   private readonly timingByThread = new Map<string, TurnTimingState>();
   private readonly mcpStatus = new Map<string, string>();
   private readonly unhealthyMcpServers = new Set<string>();
+  private readonly reasoningByThread = new Map<string, ReasoningState>();
   private accountStatus: string | undefined;
   private readonly rateLimitNotices = new Map<string, string>();
   private readonly rateLimitSnapshots = new Map<string, RateLimitSnapshot>();
@@ -253,6 +261,7 @@ export class ConversationCore {
         this.contextCompactionItemIdsByThread.delete(threadId);
         this.artifactsByThread.delete(threadId);
         this.timingByThread.delete(threadId);
+        this.disposeReasoning(threadId);
       }
       this.publishConnectionNotice("connection.lost", message, affectedThreadIds);
       return;
@@ -266,6 +275,12 @@ export class ConversationCore {
     this.seenUserMessages.clear();
     this.phaseByItem.clear();
     this.timingByThread.clear();
+    for (const state of this.reasoningByThread.values()) {
+      if (state.timer !== undefined) {
+        clearInterval(state.timer);
+      }
+    }
+    this.reasoningByThread.clear();
     this.mcpStatus.clear();
     this.unhealthyMcpServers.clear();
     this.publishConnectionNotice("connection.lost", message);
@@ -380,6 +395,7 @@ export class ConversationCore {
         );
         return;
       case "item.agentMessage.delta": {
+        this.clearReasoning(event.threadId, event.turnId);
         const key = this.itemKey(event.threadId, event.turnId, event.itemId);
         const phase = this.phaseByItem.get(key);
         if (event.receivedAtMs !== undefined) {
@@ -405,6 +421,48 @@ export class ConversationCore {
           text: event.text,
           ...(phase !== undefined ? { phase } : {}),
         });
+        return;
+      }
+      case "item.reasoning.delta": {
+        const current = this.reasoningByThread.get(event.threadId);
+        if (current !== undefined && current.turnId !== event.turnId) {
+          if (current.timer !== undefined) {
+            clearInterval(current.timer);
+          }
+        }
+        const state = current?.turnId === event.turnId
+          ? current
+          : {
+              turnId: event.turnId,
+              startedAtMs: 0,
+              segmentActive: false,
+            };
+        if (!state.segmentActive) {
+          state.segmentActive = true;
+          state.startedAtMs = Date.now();
+          this.publishForThread(event.threadId, {
+            type: "turn.reasoning",
+            threadId: event.threadId,
+            turnId: event.turnId,
+            summary: "",
+            elapsedMs: Date.now() - state.startedAtMs,
+          });
+          state.timer = setInterval(() => {
+            const latest = this.reasoningByThread.get(event.threadId);
+            if (latest !== state || !state.segmentActive) {
+              return;
+            }
+            this.publishForThread(event.threadId, {
+              type: "turn.reasoning",
+              threadId: event.threadId,
+              turnId: state.turnId,
+              summary: "",
+              elapsedMs: Date.now() - state.startedAtMs,
+            });
+          }, 1_000);
+          state.timer.unref();
+        }
+        this.reasoningByThread.set(event.threadId, state);
         return;
       }
       case "turn.modelTiming.updated": {
@@ -615,6 +673,7 @@ export class ConversationCore {
         this.publishUserMessage(event);
         return;
       case "item.operation.updated":
+        this.clearReasoning(event.threadId, event.turnId);
         if (
           event.operation.kind === "contextCompaction"
           && event.operation.status === "completed"
@@ -641,11 +700,13 @@ export class ConversationCore {
         });
         return;
       case "turn.error":
+        this.clearReasoning(event.threadId, event.turnId);
         if (!event.willRetry) {
           this.errorsByTurn.set(event.turnId, event.message);
         }
         return;
       case "turn.completed": {
+        this.clearReasoning(event.threadId, event.turnId);
         this.clearSeenUserMessages(event.threadId, event.turnId);
         this.clearItemPhases(event.threadId, event.turnId);
         const target = this.router.targetForThread(event.threadId);
@@ -717,6 +778,7 @@ export class ConversationCore {
         this.goalsByThread.delete(event.threadId);
         this.contextCompactionItemIdsByThread.delete(event.threadId);
         this.timingByThread.delete(event.threadId);
+        this.disposeReasoning(event.threadId);
         this.clearSeenUserMessages(event.threadId);
         this.clearItemPhases(event.threadId);
         this.artifactsByThread.delete(event.threadId);
@@ -839,6 +901,35 @@ export class ConversationCore {
         ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
       });
     }
+  }
+
+  private clearReasoning(threadId: string, turnId?: string): void {
+    const current = this.reasoningByThread.get(threadId);
+    if (current !== undefined && (turnId === undefined || current.turnId === turnId)) {
+      if (current.segmentActive) {
+        current.segmentActive = false;
+        this.publishForThread(threadId, {
+          type: "turn.reasoning",
+          threadId,
+          turnId: current.turnId,
+          summary: "",
+          elapsedMs: Date.now() - current.startedAtMs,
+          final: true,
+        });
+      }
+      if (current.timer !== undefined) {
+        clearInterval(current.timer);
+        delete current.timer;
+      }
+    }
+  }
+
+  private disposeReasoning(threadId: string): void {
+    const current = this.reasoningByThread.get(threadId);
+    if (current?.timer !== undefined) {
+      clearInterval(current.timer);
+    }
+    this.reasoningByThread.delete(threadId);
   }
 
   private isBackgroundThread(threadId: string): boolean {

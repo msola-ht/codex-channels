@@ -286,6 +286,7 @@ export type OutputEvent =
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }
+  | { type: "turn.reasoning"; target: ConversationTarget; threadId: string; turnId: string; summary: string; elapsedMs: number; final?: boolean; background?: boolean }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
   | { type: "connection.restored"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
   | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)

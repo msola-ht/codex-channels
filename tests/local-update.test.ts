@@ -81,6 +81,7 @@ describe("local update", () => {
     expect(result.addedPaths).toEqual(expect.arrayContaining([
       "display.operation_updates",
       "display.plan_updates",
+      "display.reasoning",
       "display.price_currency",
     ]));
     expect(result.backupPath).toContain(".pre-update.2026-08-13T12-34-56-789Z.bak");

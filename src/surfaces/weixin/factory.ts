@@ -37,6 +37,7 @@ export interface CreateWeixinSurfaceOptions {
   startupNotification: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  reasoningEnabled?: boolean;
   debugEnabled?: boolean;
   exchangeRate?: () => ExchangeRateSnapshot | null;
   priceCurrency?: (
@@ -99,6 +100,9 @@ export function createWeixinSurface(
     ...(options.planUpdatesEnabled === undefined
       ? {}
       : { planUpdatesEnabled: options.planUpdatesEnabled }),
+    ...(options.reasoningEnabled === undefined
+      ? {}
+      : { reasoningEnabled: options.reasoningEnabled }),
     ...(options.debugEnabled === undefined
       ? {}
       : { debugEnabled: options.debugEnabled }),

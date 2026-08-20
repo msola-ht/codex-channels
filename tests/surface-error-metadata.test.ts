@@ -8,7 +8,7 @@ describe("surfaceErrorMetadata", () => {
   it("keeps only constrained error types and machine-readable codes", () => {
     const unsafe = Object.assign(new Error("Authorization Bearer secret"), {
       name: "opaque-secret",
-      code: "unsafe-secret",
+      code: "unsafe secret",
       responseBody: "token=secret",
     });
 
@@ -27,6 +27,12 @@ describe("surfaceErrorMetadata", () => {
     })).toEqual({
       errorType: "object",
       errorCode: 42,
+    });
+    expect(surfaceErrorMetadata(Object.assign(new Error("failed"), {
+      code: "card-create-failed",
+    }))).toEqual({
+      errorType: "Error",
+      errorCode: "card-create-failed",
     });
   });
 

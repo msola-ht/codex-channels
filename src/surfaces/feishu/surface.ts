@@ -118,6 +118,7 @@ export interface FeishuSurfaceOptions {
   disableEnvironmentProxy?: boolean;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  reasoningEnabled?: boolean;
   debugEnabled?: boolean;
   exchangeRate?: () => ExchangeRateSnapshot | null;
   priceCurrency?: (
@@ -213,6 +214,9 @@ export class FeishuSurface implements SurfaceAdapter {
           : {}),
         ...(options.planUpdatesEnabled !== undefined
           ? { planUpdatesEnabled: options.planUpdatesEnabled }
+          : {}),
+        ...(options.reasoningEnabled !== undefined
+          ? { reasoningEnabled: options.reasoningEnabled }
           : {}),
         ...(options.exchangeRate === undefined
           ? {}

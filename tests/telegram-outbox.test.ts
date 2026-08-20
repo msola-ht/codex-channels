@@ -213,6 +213,69 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual(["<b>已使用 GitHub Plugin 开始处理。</b>"]);
   });
 
+  it("streams the thinking status as a panel updated in place", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 0,
+    });
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 3_000,
+    });
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 15_000,
+      final: true,
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["<b>思考中…</b>"]);
+    expect(api.edits).toEqual([
+      "<b>思考中…</b>\n\n<b>耗时：</b>3秒",
+      "<b>思考中…</b>\n\n<b>耗时：</b>15秒",
+    ]);
+  });
+
+  it("does not send thinking status when reasoning display is disabled", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(
+      api as unknown as Api,
+      pino({ level: "silent" }),
+      undefined,
+      { reasoningEnabled: false },
+    );
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 0,
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([]);
+    expect(api.edits).toEqual([]);
+  });
+
   it("reports when image and text input is sent to the visual API", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -1491,7 +1554,10 @@ function createOutbox(
     api as unknown as Api,
     pino({ level: "silent" }),
     undefined,
-    { finalMessageFormat, ...(debugEnabled ? { debugEnabled: true } : {}) },
+    {
+      finalMessageFormat,
+      ...(debugEnabled ? { debugEnabled: true } : {}),
+    },
   );
 }
 

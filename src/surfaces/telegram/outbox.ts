@@ -19,6 +19,7 @@ import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
+  createTurnReasoningPresentation,
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
 import type {
@@ -95,6 +96,13 @@ interface PlanMessageState {
   tracker: PlanProgressTracker;
 }
 
+interface TelegramReasoningMessage {
+  chatId: string;
+  threadId: string;
+  turnId: string;
+  messageId?: number | undefined;
+}
+
 const maximumRichMarkdownCharacters = 32_000;
 const maximumTelegramActiveStreams = 100;
 const maximumTelegramBufferedStreamCharacters = 1_000_000;
@@ -107,6 +115,7 @@ export interface TelegramOutboxOptions {
   accountId?: string;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  reasoningEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
   exchangeRate?: () => ExchangeRateSnapshot | null;
   priceCurrency?: (
@@ -125,6 +134,7 @@ export class TelegramOutbox {
   private readonly operationLogs = new Map<string, OperationLogState>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly planMessages = new Map<string, PlanMessageState>();
+  private readonly reasoningMessages = new Map<string, TelegramReasoningMessage>();
   private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
   private readonly delivery: ConversationDeliveryQueue;
@@ -208,6 +218,7 @@ export class TelegramOutbox {
         );
         return;
       case "turn.started":
+        this.reasoningMessages.delete(event.threadId);
         this.replyTargets.bindPending(
           chatId,
           this.turnKey(event.threadId, event.turnId),
@@ -230,6 +241,12 @@ export class TelegramOutbox {
           },
           true,
         );
+        return;
+      case "turn.reasoning":
+        if (this.options.reasoningEnabled === false) {
+          return;
+        }
+        this.deliverReasoning(event);
         return;
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
@@ -634,6 +651,7 @@ export class TelegramOutbox {
     this.operationLogs.clear();
     this.operationUpdates.clear();
     this.planMessages.clear();
+    this.reasoningMessages.clear();
     this.replyTargets.clear();
     this.approvalOperations.clear();
     this.notifiedTurns.clear();
@@ -1072,6 +1090,81 @@ export class TelegramOutbox {
       firstMessageId ??= messageId;
     }
     return firstMessageId;
+  }
+
+  private deliverReasoning(
+    event: Extract<OutputEvent, { type: "turn.reasoning" }>,
+  ): void {
+    const chatId = event.target.conversationId;
+    const text = renderTelegramLifecyclePresentation(
+      createTurnReasoningPresentation(
+        event.background ? event.threadId : undefined,
+        event.elapsedMs,
+      ),
+    );
+    const editText = formatTelegramPanelChunks(text)[0] ?? text;
+    const existing = this.reasoningMessages.get(event.threadId);
+    if (existing !== undefined && existing.turnId !== event.turnId) {
+      this.reasoningMessages.delete(event.threadId);
+      this.deliverReasoning(event);
+      return;
+    }
+    if (existing === undefined) {
+      if (event.final === true) {
+        this.enqueue(
+          chatId,
+          () => this.sendPanel(chatId, text).then(() => undefined),
+          true,
+        );
+        return;
+      }
+      const state: TelegramReasoningMessage = {
+        chatId,
+        threadId: event.threadId,
+        turnId: event.turnId,
+      };
+      this.reasoningMessages.set(event.threadId, state);
+      this.enqueue(
+        chatId,
+        async () => {
+          state.messageId = await this.sendPanel(chatId, text);
+        },
+        true,
+      );
+      return;
+    }
+    if (event.final === true) {
+      this.reasoningMessages.delete(event.threadId);
+    }
+    this.enqueue(
+      chatId,
+      async () => {
+        if (existing.messageId === undefined) {
+          existing.messageId = await this.sendPanel(chatId, text);
+          return;
+        }
+        try {
+          await this.executor.call(
+            { chatId, operation: "editMessageText", critical: event.final === true },
+            () => this.api.editMessageText(
+              chatId,
+              existing.messageId!,
+              editText,
+              operationEditOptions(),
+            ),
+          );
+        } catch (error) {
+          if (isMessageNotModified(error)) {
+            // 最终文本已经可见，无需重复编辑。
+          } else if (event.final === true) {
+            existing.messageId = await this.sendPanel(chatId, text);
+          } else {
+            throw error;
+          }
+        }
+      },
+      true,
+    );
   }
 
   private turnKey(threadId: string, turnId: string): string {

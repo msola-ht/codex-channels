@@ -86,6 +86,61 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("shows the thinking status with elapsed time", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 0,
+    });
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 3_000,
+    });
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 15_000,
+      final: true,
+    });
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "思考中…\n\n耗时：15秒",
+    ]);
+  });
+
+  it("does not send thinking status when reasoning display is disabled", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      { reasoningEnabled: false },
+    );
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 15_000,
+      final: true,
+    });
+    await outbox.close();
+
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
   it("sends a connection restore notice", async () => {
     const { outbox, sendText } = outboxFixture();
 

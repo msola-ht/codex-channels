@@ -80,8 +80,8 @@ describe("Feishu outbox", () => {
     );
   });
 
-  it("sends the shared Turn start confirmation as a Markdown card", async () => {
-    const markdownCards: string[] = [];
+  it("sends the Turn start confirmation as a reply and creates the Thread status card", async () => {
+    const sent: FeishuCardDocument[] = [];
     const replies: Array<{ messageId: string; markdown: string }> = [];
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -89,11 +89,13 @@ describe("Feishu outbox", () => {
         ...cardMethods,
         sendText: async () => {},
         sendPost: async () => {},
-        sendMarkdownCard: async (_chatId, markdown) => {
-          markdownCards.push(markdown);
+        sendCard: async (_chatId, card) => {
+          sent.push(card);
+          return "om_status";
         },
         replyMarkdownCard: async (messageId, markdown) => {
           replies.push({ messageId, markdown });
+          return "om_started";
         },
       },
       pino({ level: "silent" }),
@@ -109,11 +111,249 @@ describe("Feishu outbox", () => {
     });
     await outbox.close();
 
-    expect(markdownCards).toEqual([]);
     expect(replies).toEqual([{
       messageId: "om_origin",
       markdown: "## 已使用 GitHub Plugin 开始处理。",
     }]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.header.title.content).toBe("Thread 状态");
+    expect(statusCardText(sent[0]!)).toBe("GitHub Plugin · 运行中");
+  });
+
+  it("refreshes the existing Thread status card on the next Turn start", async () => {
+    const sent: FeishuCardDocument[] = [];
+    const updated: FeishuCardDocument[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendCard: async (_chatId, card) => {
+          sent.push(card);
+          return "om_status";
+        },
+        updateCard: async (_messageId, card) => {
+          updated.push(card);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-2",
+    });
+    await outbox.close();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.header.title.content).toBe("Thread 状态");
+    expect(updated).toHaveLength(1);
+    expect(updated[0]?.header.title.content).toBe("Thread 状态");
+    expect(statusCardText(updated[0]!)).toBe("运行中");
+  });
+
+  it("keeps the same Thread status card when active repeats", async () => {
+    const sent: FeishuCardDocument[] = [];
+    const updated: FeishuCardDocument[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendCard: async (_chatId, card) => {
+          sent.push(card);
+          return "om_status";
+        },
+        updateCard: async (_messageId, card) => {
+          updated.push(card);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    outbox.handle({
+      type: "thread.status",
+      target,
+      threadId: "thread-1",
+      status: "active",
+    });
+    await outbox.close();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.header.title.content).toBe("Thread 状态");
+    expect(statusCardText(sent[0]!)).toBe("运行中");
+    expect(updated).toHaveLength(0);
+  });
+
+  it("streams the thinking status as one streaming card per segment", async () => {
+    const created: Array<{ chatId: string; initialText: string }> = [];
+    const updated: Array<{
+      cardId: string;
+      content: string;
+      sequence: number;
+    }> = [];
+    const finished: Array<{
+      cardId: string;
+      sequence: number;
+      summary: string;
+    }> = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        createStreamingCard: async (chatId, initialText) => {
+          created.push({ chatId, initialText });
+          return {
+            cardId: `om_reason_${created.length}`,
+            messageId: `om_reason_msg_${created.length}`,
+          };
+        },
+        updateStreamingCard: async (cardId, content, sequence) => {
+          updated.push({ cardId, content, sequence });
+        },
+        finishStreamingCard: async (cardId, sequence, summary) => {
+          finished.push({ cardId, sequence, summary });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    const reasoning = (
+      elapsedMs: number,
+      final?: boolean,
+    ): void => {
+      outbox.handle({
+        type: "turn.reasoning",
+        target,
+        threadId: "thread-1",
+        turnId: "turn-1",
+        summary: "",
+        elapsedMs,
+        ...(final === undefined ? {} : { final }),
+      });
+    };
+    reasoning(0);
+    reasoning(3_000);
+    reasoning(15_000, true);
+    reasoning(0);
+    reasoning(2_000, true);
+    await outbox.close();
+
+    expect(created).toEqual([
+      { chatId: "oc_chat", initialText: "## 思考中…" },
+      { chatId: "oc_chat", initialText: "## 思考中…" },
+    ]);
+    expect(updated).toEqual([
+      {
+        cardId: "om_reason_1",
+        content: "## 思考中…\n\n---\n**耗时：** 3秒",
+        sequence: 1,
+      },
+      {
+        cardId: "om_reason_1",
+        content: "## 思考中…\n\n---\n**耗时：** 15秒",
+        sequence: 2,
+      },
+      {
+        cardId: "om_reason_2",
+        content: "## 思考中…\n\n---\n**耗时：** 2秒",
+        sequence: 1,
+      },
+    ]);
+    expect(finished).toEqual([
+      {
+        cardId: "om_reason_1",
+        sequence: 3,
+        summary: "## 思考中…\n\n---\n**耗时：** 15秒",
+      },
+      {
+        cardId: "om_reason_2",
+        sequence: 2,
+        summary: "## 思考中…\n\n---\n**耗时：** 2秒",
+      },
+    ]);
+  });
+
+  it("falls back to a Markdown card for a final-only thinking notice", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 15_000,
+      final: true,
+    });
+    await outbox.close();
+
+    expect(markdownCards).toEqual(["## 思考中…\n\n---\n**耗时：** 15秒"]);
+  });
+
+  it("does not send thinking status when reasoning display is disabled", async () => {
+    const markdownCards: string[] = [];
+    const created: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+        createStreamingCard: async () => {
+          created.push("card");
+          return { cardId: "om_reason", messageId: "om_reason_msg" };
+        },
+      },
+      pino({ level: "silent" }),
+      { reasoningEnabled: false },
+    );
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 0,
+    });
+    await outbox.close();
+
+    expect(markdownCards).toEqual([]);
+    expect(created).toEqual([]);
   });
 
   it("sends the subagent start notice as a Markdown card instead of plain text", async () => {
@@ -1584,9 +1824,8 @@ describe("Feishu outbox", () => {
     }]);
   });
 
-  it("reuses the Turn start confirmation for the foreground Thread status", async () => {
-    const replies: Array<{ messageId: string; markdown: string }> = [];
-    const sendCard = vi.fn(async () => "om_status");
+  it("keeps the foreground Thread status card across active and idle", async () => {
+    const sent: FeishuCardDocument[] = [];
     const updateCard = vi.fn(async () => {});
     const outbox = new FeishuOutbox(
       "cli_app",
@@ -1594,11 +1833,10 @@ describe("Feishu outbox", () => {
         ...cardMethods,
         sendText: async () => {},
         sendPost: async () => {},
-        replyMarkdownCard: async (messageId, markdown) => {
-          replies.push({ messageId, markdown });
-          return "om_started";
+        sendCard: async (_chatId, card) => {
+          sent.push(card);
+          return "om_status";
         },
-        sendCard,
         updateCard,
       },
       pino({ level: "silent" }),
@@ -1616,13 +1854,10 @@ describe("Feishu outbox", () => {
     outbox.handle(threadStatus("idle"));
     await outbox.close();
 
-    expect(replies).toEqual([{
-      messageId: "om_origin",
-      markdown: "## 已使用 GitHub Plugin 开始处理。",
-    }]);
-    expect(sendCard).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(1);
+    expect(statusCardText(sent[0]!)).toBe("GitHub Plugin · 运行中");
     expect(updateCard).toHaveBeenCalledWith(
-      "om_started",
+      "om_status",
       expect.objectContaining({
         header: expect.objectContaining({ template: "green" }),
         elements: [expect.objectContaining({
@@ -1697,7 +1932,7 @@ describe("Feishu outbox", () => {
     expect(updateCard).not.toHaveBeenCalled();
   });
 
-  it("drops a stale status binding after an update failure", async () => {
+  it("rebuilds the Thread status card after an update failure", async () => {
     const created: string[] = [];
     let updateAttempts = 0;
     const outbox = new FeishuOutbox(
@@ -1725,6 +1960,7 @@ describe("Feishu outbox", () => {
 
     expect(created).toEqual([
       "运行中",
+      "处理结束 · 结果见下方消息",
       "运行中",
     ]);
     expect(updateAttempts).toBe(1);

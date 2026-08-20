@@ -14,6 +14,48 @@ export type SurfaceErrorReason =
   | "non-steerable-compact"
   | "empty-input";
 
+const knownLowerKebabErrorCodes = new Set([
+  "aborted",
+  "api-error",
+  "authorization-invalid",
+  "card-create-failed",
+  "client-create-failed",
+  "configuration-conflict",
+  "configuration-failed",
+  "download-failed",
+  "download-timeout",
+  "http-error",
+  "image-sender-unavailable",
+  "inspect-failed",
+  "integrity",
+  "invalid-card-action",
+  "invalid-credentials",
+  "invalid-file",
+  "invalid-input",
+  "invalid-menu-event",
+  "invalid-path",
+  "invalid-response",
+  "lookup-failed",
+  "message-processing",
+  "missing-reply-context",
+  "network-abort",
+  "network-error",
+  "rate-limited",
+  "read-failed",
+  "read-timeout",
+  "receiver-failed",
+  "send-failed",
+  "send-timeout",
+  "start-failed",
+  "start-timeout",
+  "stopped",
+  "timeout",
+  "too-large",
+  "unauthorized-recipient",
+  "unsupported",
+  "unsupported-image",
+]);
+
 export function surfaceErrorMetadata(error: unknown): SurfaceErrorMetadata {
   if (error instanceof UserFacingError) {
     return {
@@ -55,7 +97,10 @@ export function surfaceErrorMetadata(error: unknown): SurfaceErrorMetadata {
   }
   if (
     typeof record.code === "string"
-    && /^[A-Z][A-Z0-9_]{1,40}$/u.test(record.code)
+    && (
+      /^[A-Z][A-Z0-9_]{1,40}$/u.test(record.code)
+      || knownLowerKebabErrorCodes.has(record.code)
+    )
   ) {
     return { errorType, errorCode: record.code };
   }

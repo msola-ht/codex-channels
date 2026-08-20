@@ -110,6 +110,7 @@ export interface TelegramSurfaceOptions {
   finalMessageFormat?: TelegramFinalMessageFormat;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  reasoningEnabled?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
   openAiConnectivity?: () => NonNullable<StartupRuntimeInfo["openAiConnectivity"]>;
   inputQuietWindowMs?: number;
@@ -233,6 +234,9 @@ export class TelegramSurface {
         : {}),
       ...(options.planUpdatesEnabled !== undefined
         ? { planUpdatesEnabled: options.planUpdatesEnabled }
+        : {}),
+      ...(options.reasoningEnabled !== undefined
+        ? { reasoningEnabled: options.reasoningEnabled }
         : {}),
         ...(options.exchangeRate === undefined
           ? {}

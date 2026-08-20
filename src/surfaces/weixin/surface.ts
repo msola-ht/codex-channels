@@ -75,6 +75,7 @@ export interface WeixinSurfaceOptions {
   startupNotification?: WeixinStartupNotification;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  reasoningEnabled?: boolean;
   debugEnabled?: boolean;
   exchangeRate?: () => ExchangeRateSnapshot | null;
   priceCurrency?: (
@@ -159,6 +160,11 @@ export class WeixinSurface implements SurfaceAdapter {
           ? {}
           : {
               planUpdatesEnabled: options.planUpdatesEnabled,
+            }),
+        ...(options.reasoningEnabled === undefined
+          ? {}
+          : {
+              reasoningEnabled: options.reasoningEnabled,
             }),
         ...(options.exchangeRate === undefined
           ? {}

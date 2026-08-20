@@ -64,6 +64,7 @@ export interface GatewayConfig {
   codexSandbox: "read-only" | "workspace-write";
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
+  reasoningEnabled: boolean;
   pluginApiEnabled: boolean;
   threadSectionAdministrators: ReadonlySet<string>;
   priceCurrency: "cny" | "usd";
@@ -295,6 +296,7 @@ function loadValidatedConfigDocument(
     codexSandbox: raw.codex.sandbox,
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
+    reasoningEnabled: raw.display.reasoning,
     pluginApiEnabled: raw.experimental.plugin_api,
     threadSectionAdministrators: new Set(raw.thread_sections.administrators),
     priceCurrency: raw.display.price_currency,

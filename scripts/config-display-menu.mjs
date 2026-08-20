@@ -17,6 +17,7 @@ export async function runDisplaySettings({
     options: [
       { value: "operation_updates", label: "操作详情显示", hint: "full / compact / hidden" },
       { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
+      { value: "reasoning", label: "思考状态显示", hint: "是否显示“思考中”状态卡" },
       { value: "price_currency", label: "价格显示方式", hint: "全局统一人民币或美元" },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
@@ -27,6 +28,9 @@ export async function runDisplaySettings({
   }
   if (section === "plan_updates") {
     return runPlanUpdatesToggle({ environment, output, prompts, writeConfig });
+  }
+  if (section === "reasoning") {
+    return runReasoningToggle({ environment, output, prompts, writeConfig });
   }
   if (section === "price_currency") {
     return runPriceCurrency({ environment, output, prompts, writeConfig });
@@ -119,6 +123,33 @@ async function runPlanUpdatesToggle({ environment, output, prompts, writeConfig 
   output.write(`计划更新显示已${selected === "enabled" ? "开启" : "关闭"}：${configPath}\n`);
   writeGatewayConfigActivationNotice(output);
   return { planUpdatesEnabled: selected === "enabled", configPath };
+}
+
+async function runReasoningToggle({ environment, output, prompts, writeConfig }) {
+  const { configPath } = requireUserConfig(environment);
+  const document = readGatewayConfig(configPath);
+  const enabled = table(document.display).reasoning !== false;
+  const selected = await prompts.select({
+    message: "思考状态显示",
+    showInstructions: false,
+    initialValue: enabled ? "enabled" : "disabled",
+    options: [
+      { value: "enabled", label: "开启", hint: "显示“思考中”状态卡" },
+      { value: "disabled", label: "关闭", hint: "隐藏“思考中”状态卡" },
+      { value: "back", label: "返回上一级" },
+    ],
+  });
+  if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
+  if (selected !== "enabled" && selected !== "disabled") {
+    throw new Error(`未知思考状态显示设置：${String(selected)}`);
+  }
+  const display = table(document.display);
+  display.reasoning = selected === "enabled";
+  document.display = display;
+  writeConfig(configPath, document);
+  output.write(`思考状态显示已${selected === "enabled" ? "开启" : "关闭"}：${configPath}\n`);
+  writeGatewayConfigActivationNotice(output);
+  return { reasoningEnabled: selected === "enabled", configPath };
 }
 
 async function runPriceCurrency({ environment, output, prompts, writeConfig }) {

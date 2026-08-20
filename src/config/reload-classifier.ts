@@ -92,6 +92,11 @@ function restartRequiredReasons(
       next.planUpdatesEnabled,
     ],
     [
+      configChange("display.reasoning"),
+      current.reasoningEnabled,
+      next.reasoningEnabled,
+    ],
+    [
       configChange("display.price-currency"),
       current.priceCurrency,
       next.priceCurrency,

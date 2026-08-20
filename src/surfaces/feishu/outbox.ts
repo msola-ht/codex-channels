@@ -89,6 +89,14 @@ interface FeishuPlanState {
   fingerprint?: string;
 }
 
+interface FeishuReasoningCard {
+  chatId: string;
+  threadId: string;
+  turnId: string;
+  cardId?: string;
+  sequence: number;
+}
+
 export interface FeishuMessagePort {
   sendText(chatId: string, text: string): Promise<void>;
   sendPost(chatId: string, markdown: string): Promise<void>;
@@ -123,6 +131,7 @@ export interface FeishuMessagePort {
 export interface FeishuOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
+  reasoningEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
   exchangeRate?: () => ExchangeRateSnapshot | null;
   priceCurrency?: (
@@ -153,6 +162,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   >();
   private readonly streams = new Map<string, FeishuStreamState>();
   private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
+  private readonly reasoningCards = new Map<string, FeishuReasoningCard>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly replyTargets = new TurnReplyTargets<string>();
   private streamCapacityWarningIssued = false;
@@ -183,10 +193,28 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "turn.started") {
+      this.reasoningCards.delete(event.threadId);
       this.replyTargets.bindPending(
         event.target.conversationId,
         turnKey(event.threadId, event.turnId),
       );
+    }
+    if (event.type === "turn.reasoning") {
+      if (this.options.reasoningEnabled === false) {
+        return;
+      }
+      this.logger.debug(
+        {
+          component: "Feishu",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          elapsedMs: event.elapsedMs,
+          final: event.final === true,
+        },
+        "飞书收到思考状态事件",
+      );
+      this.deliverReasoning(event);
+      return;
     }
     if (event.type === "text.completed") {
       if (event.phase !== "commentary") {
@@ -377,6 +405,136 @@ export class FeishuOutbox implements SurfaceOutputPort {
     state.fingerprint = presentation.fingerprint;
   }
 
+  private deliverReasoning(
+    event: Extract<OutputEvent, { type: "turn.reasoning" }>,
+  ): void {
+    const rendered = renderFeishuOutput(
+      event,
+      this.options.priceCurrency,
+      this.options.exchangeRate?.() ?? null,
+      this.options.debugEnabled ?? false,
+    );
+    if (rendered === null) {
+      return;
+    }
+    const chatId = event.target.conversationId;
+    const existing = this.reasoningCards.get(event.threadId);
+    if (existing !== undefined && existing.turnId !== event.turnId) {
+      this.reasoningCards.delete(event.threadId);
+      this.deliverReasoning(event);
+      return;
+    }
+    if (existing === undefined) {
+      if (event.final === true) {
+        this.delivery.enqueue(
+          chatId,
+          () => this.sendMarkdown(chatId, rendered),
+          true,
+        );
+        return;
+      }
+      const state: FeishuReasoningCard = {
+        chatId,
+        threadId: event.threadId,
+        turnId: event.turnId,
+        sequence: 0,
+      };
+      this.reasoningCards.set(event.threadId, state);
+      this.delivery.enqueue(
+        chatId,
+        async () => {
+          try {
+            const created = await this.messagePort.createStreamingCard(chatId, rendered);
+            state.cardId = created.cardId;
+            this.logger.info(
+              {
+                component: "Feishu",
+                threadId: event.threadId,
+                turnId: event.turnId,
+                cardId: created.cardId,
+              },
+              "飞书思考流式卡已创建",
+            );
+          } catch (error) {
+            this.reasoningCards.delete(event.threadId);
+            this.logger.warn(
+              {
+                component: "Feishu",
+                threadId: event.threadId,
+                turnId: event.turnId,
+                error: error instanceof Error ? error.message : String(error),
+              },
+              "飞书思考流式卡创建失败，回退普通卡片",
+            );
+            await this.sendMarkdown(chatId, rendered);
+            throw error;
+          }
+        },
+        true,
+      );
+      return;
+    }
+    if (event.final === true) {
+      this.reasoningCards.delete(event.threadId);
+    }
+    this.delivery.enqueue(
+      chatId,
+      async () => {
+        if (existing.cardId === undefined) {
+          this.reasoningCards.delete(event.threadId);
+          await this.sendMarkdown(chatId, rendered);
+          return;
+        }
+        existing.sequence += 1;
+        try {
+          if (event.final === true) {
+            await this.messagePort.updateStreamingCard(
+              existing.cardId,
+              rendered,
+              existing.sequence,
+            );
+            existing.sequence += 1;
+            await this.messagePort.finishStreamingCard(
+              existing.cardId,
+              existing.sequence,
+              rendered,
+            );
+            this.logger.info(
+              {
+                component: "Feishu",
+                threadId: event.threadId,
+                turnId: event.turnId,
+                cardId: existing.cardId,
+              },
+              "飞书思考流式卡已结束",
+            );
+            return;
+          }
+          await this.messagePort.updateStreamingCard(
+            existing.cardId,
+            rendered,
+            existing.sequence,
+          );
+        } catch (error) {
+          this.reasoningCards.delete(event.threadId);
+          this.logger.warn(
+            {
+              component: "Feishu",
+              threadId: event.threadId,
+              turnId: event.turnId,
+              final: event.final === true,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "飞书思考流式卡更新失败，回退普通卡片",
+          );
+          await this.sendMarkdown(chatId, rendered);
+          throw error;
+        }
+      },
+      true,
+    );
+  }
+
   private async sendImage(
     chatId: string,
     imagePath: string,
@@ -505,6 +663,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.planMessages.clear();
     this.streams.clear();
     this.finishedStreams.clear();
+    this.reasoningCards.clear();
     this.operationUpdates.clear();
     this.replyTargets.clear();
   }
@@ -602,19 +761,91 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): Promise<void> {
     if (event.type === "turn.started") {
       const current = this.threadStatusMessages.get(event.threadId);
+      this.logger.info(
+        {
+          component: "Feishu",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          hasCurrent: current !== undefined,
+        },
+        "飞书 Turn 开始状态卡检查",
+      );
       if (current?.chatId === event.target.conversationId) {
-        if (event.identity && current.identity === undefined) {
+        try {
           await this.messagePort.updateCard(
             current.messageId,
-            renderFeishuThreadStatusCard("active", event.identity),
+            renderFeishuThreadStatusCard(
+              "active",
+              event.identity ?? current.identity,
+            ),
           );
-          this.threadStatusMessages.set(event.threadId, {
-            ...current,
-            identity: event.identity,
-          });
+          this.logger.info(
+            {
+              component: "Feishu",
+              threadId: event.threadId,
+              turnId: event.turnId,
+              messageId: current.messageId,
+            },
+            "飞书状态卡已刷新为运行中",
+          );
+        } catch (error) {
+          this.logger.warn(
+            {
+              component: "Feishu",
+              threadId: event.threadId,
+              turnId: event.turnId,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            "飞书状态卡刷新失败",
+          );
+          if (this.threadStatusMessages.get(event.threadId) === current) {
+            this.threadStatusMessages.delete(event.threadId);
+          }
+          throw error;
         }
+        this.threadStatusMessages.set(event.threadId, {
+          ...current,
+          status: "active",
+          ...(event.identity ? { identity: event.identity } : {}),
+        });
         return;
       }
+      const replyTo = this.replyTargets.get(
+        turnKey(event.threadId, event.turnId),
+      );
+      if (replyTo !== undefined) {
+        await this.sendMarkdown(
+          event.target.conversationId,
+          markdown,
+          maximumFeishuMessageChunks,
+          replyTo,
+        );
+      }
+      if (event.background === true) {
+        return;
+      }
+      const messageId = await this.messagePort.sendCard(
+        event.target.conversationId,
+        renderFeishuThreadStatusCard("active", event.identity),
+      );
+      this.logger.info(
+        {
+          component: "Feishu",
+          threadId: event.threadId,
+          turnId: event.turnId,
+          messageId,
+        },
+        "飞书状态卡已创建",
+      );
+      if (!this.closeFinished) {
+        this.threadStatusMessages.set(event.threadId, {
+          chatId: event.target.conversationId,
+          messageId,
+          status: "active",
+          ...(event.identity ? { identity: event.identity } : {}),
+        });
+      }
+      return;
     }
     const key = turnKey(event.threadId, event.turnId);
     const consumesReplyTarget = event.type === "turn.completed"
@@ -622,7 +853,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         event.type === "text.completed"
         && event.phase !== "commentary"
       );
-    const replyTo = event.type === "turn.started" || consumesReplyTarget
+    const replyTo = consumesReplyTarget
       ? this.replyTargets.get(key)
       : undefined;
     if (
@@ -643,28 +874,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       return;
     }
-    let messageId: string | undefined;
     await this.sendMarkdown(
       event.target.conversationId,
       markdown,
       maximumFeishuMessageChunks,
       replyTo,
-      (value) => {
-        messageId = value;
-      },
     );
-    if (
-      event.type === "turn.started"
-      && messageId !== undefined
-      && !this.closeFinished
-    ) {
-      this.threadStatusMessages.set(event.threadId, {
-        chatId: event.target.conversationId,
-        messageId,
-        status: "active",
-        ...(event.identity ? { identity: event.identity } : {}),
-      });
-    }
     if (consumesReplyTarget) {
       this.replyTargets.delete(key);
     }
@@ -758,15 +973,57 @@ export class FeishuOutbox implements SurfaceOutputPort {
       && current.chatId === event.target.conversationId
     ) {
       if (current.status === event.status) {
+        this.logger.info(
+          {
+            component: "Feishu",
+            threadId: event.threadId,
+            status: event.status,
+          },
+          "飞书状态卡状态未变化，跳过更新",
+        );
         return;
       }
       try {
         await this.messagePort.updateCard(current.messageId, card);
+        this.logger.info(
+          {
+            component: "Feishu",
+            threadId: event.threadId,
+            status: event.status,
+          },
+          "飞书状态卡已原地更新",
+        );
       } catch (error) {
-        if (this.threadStatusMessages.get(event.threadId) === current) {
-          this.threadStatusMessages.delete(event.threadId);
+        this.logger.warn(
+          {
+            component: "Feishu",
+            threadId: event.threadId,
+            status: event.status,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          "飞书状态卡更新失败，改为重建",
+        );
+        try {
+          const messageId = await this.messagePort.sendCard(
+            event.target.conversationId,
+            card,
+          );
+          if (event.status === "active" && !this.closeFinished) {
+            this.threadStatusMessages.set(event.threadId, {
+              chatId: event.target.conversationId,
+              messageId,
+              status: event.status,
+            });
+          } else {
+            this.threadStatusMessages.delete(event.threadId);
+          }
+          return;
+        } catch (fallbackError) {
+          if (this.threadStatusMessages.get(event.threadId) === current) {
+            this.threadStatusMessages.delete(event.threadId);
+          }
+          throw fallbackError;
         }
-        throw error;
       }
       if (event.status === "active" && !this.closeFinished) {
         this.threadStatusMessages.set(event.threadId, {
@@ -784,6 +1041,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const messageId = await this.messagePort.sendCard(
       event.target.conversationId,
       card,
+    );
+    this.logger.info(
+      {
+        component: "Feishu",
+        threadId: event.threadId,
+        status: event.status,
+        messageId,
+      },
+      "飞书状态卡已创建",
     );
     if (event.status === "active" && !this.closeFinished) {
       this.threadStatusMessages.set(event.threadId, {

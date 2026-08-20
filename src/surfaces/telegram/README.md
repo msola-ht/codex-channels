@@ -107,3 +107,5 @@ ForceReply 收集任务，再使用完整 Plugin ID 进入共享 Application 调
 审批、错误、最终回复和 Turn 完成统计保持原有行为。
 `display.plan_updates = true` 时，官方自动计划先发送一次静默文本清单，每个步骤首次完成时
 再发送一条紧凑进度；默认开启，可通过 `display.plan_updates = false` 关闭，不解析模型正文，也不改变 `/plan` 模式。
+思考状态只显示“思考中…”，连续思考每段只显示一次，每段独立计时并原地编辑同一条面板更新
+耗时，不展示推理摘要或思维链内容；`display.reasoning = false` 时不显示。

@@ -52,6 +52,7 @@ import {
   createSubagentCompletedPresentation,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
+  createTurnReasoningPresentation,
   createTurnStartedPresentation,
   renderStructuredLifecyclePresentation,
   type LifecyclePresentation,
@@ -235,6 +236,13 @@ export function renderFeishuOutput(
           event.identity,
         ),
       );
+    case "turn.reasoning":
+      return renderFeishuLifecyclePresentation(
+        createTurnReasoningPresentation(
+          event.background ? event.threadId : undefined,
+          event.elapsedMs,
+        ),
+      );
     case "text.delta":
       return null;
     case "user.message":
@@ -321,7 +329,11 @@ function renderFeishuTurnCompleted(
 function renderFeishuLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
-  return renderStructuredLifecyclePresentation(presentation);
+  const { footer, ...rest } = presentation;
+  const rendered = renderStructuredLifecyclePresentation(rest);
+  return footer === undefined
+    ? rendered
+    : `${rendered}\n\n---\n**${footer.label}：** ${footer.value}`;
 }
 
 function visibleUpstreamMessage(message: string): string {

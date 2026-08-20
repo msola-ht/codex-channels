@@ -5,6 +5,7 @@ import {
   createSubagentCompletedPresentation,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
+  createTurnReasoningPresentation,
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
   renderStructuredLifecyclePresentation,
@@ -50,6 +51,17 @@ describe("shared Surface lifecycle presentation", () => {
       { label: "App Server", value: "已连接" },
       { label: "OpenAI 网络", value: "连接失败；请检查代理设置" },
     ]);
+  });
+
+  it("formats the thinking status with elapsed time", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnReasoningPresentation("thread-1234567890", 15_000),
+    );
+    expect(rendered).toContain("思考中…");
+    expect(rendered).toContain("耗时：15秒");
+    expect(renderPlainLifecyclePresentation(
+      createTurnReasoningPresentation(undefined, 500),
+    )).toBe("思考中…");
   });
 
   it("does not warn when at least one official OpenAI route is reachable", () => {

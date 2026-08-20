@@ -44,7 +44,7 @@ export async function runConfig({
       message: "选择配置项",
       showInstructions: false,
       options: [
-        { value: "display", label: "显示设置", hint: "操作详情、计划更新、参考价人民币换算" },
+        { value: "display", label: "显示设置", hint: "操作详情、计划更新、思考状态、参考价人民币换算" },
         {
           value: "system",
           label: "系统设置",

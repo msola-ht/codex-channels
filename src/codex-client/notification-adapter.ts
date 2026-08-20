@@ -45,6 +45,9 @@ type CoreNotification = Extract<
       | "turn/diff/updated"
       | "turn/plan/updated"
       | "item/agentMessage/delta"
+      | "item/reasoning/summaryTextDelta"
+      | "item/reasoning/summaryPartAdded"
+      | "item/reasoning/textDelta"
       | "item/started"
       | "item/completed"
       | "error"
@@ -76,6 +79,9 @@ const coreMethods = {
   turnDiffUpdated: "turn/diff/updated",
   turnPlanUpdated: "turn/plan/updated",
   agentMessageDelta: "item/agentMessage/delta",
+  reasoningSummaryTextDelta: "item/reasoning/summaryTextDelta",
+  reasoningSummaryPartAdded: "item/reasoning/summaryPartAdded",
+  reasoningTextDelta: "item/reasoning/textDelta",
   itemStarted: "item/started",
   itemCompleted: "item/completed",
   error: "error",
@@ -126,6 +132,10 @@ export function toConversationInputEvent(
       return toTurnPlanEvent(notification.params);
     case coreMethods.agentMessageDelta:
       return toAgentMessageDeltaEvent(notification.params, notification.receivedAtMs);
+    case coreMethods.reasoningSummaryTextDelta:
+    case coreMethods.reasoningSummaryPartAdded:
+    case coreMethods.reasoningTextDelta:
+      return toReasoningHeartbeatEvent(notification.params);
     case coreMethods.itemStarted:
       return toItemEvent(notification.params, "started");
     case coreMethods.itemCompleted:
@@ -295,6 +305,23 @@ function toAgentMessageDeltaEvent(
         itemId,
         text,
         ...(receivedAtMs === undefined ? {} : { receivedAtMs }),
+      }
+    : undefined;
+}
+
+function toReasoningHeartbeatEvent(
+  value: unknown,
+): ConversationInputEvent | undefined {
+  const params = asRecord(value);
+  const threadId = nonEmptyString(params?.threadId);
+  const turnId = nonEmptyString(params?.turnId);
+  const itemId = nonEmptyString(params?.itemId);
+  return threadId && turnId && itemId
+    ? {
+        type: "item.reasoning.delta",
+        threadId,
+        turnId,
+        itemId,
       }
     : undefined;
 }

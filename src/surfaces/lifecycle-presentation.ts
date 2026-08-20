@@ -46,6 +46,7 @@ export interface LifecyclePresentation {
   title: string;
   fields: readonly LifecyclePresentationField[];
   sections?: readonly LifecyclePresentationSection[];
+  footer?: { label: string; value: string };
 }
 
 export interface LifecyclePresentationLeafField {
@@ -205,6 +206,21 @@ export function createTurnStartedPresentation(
     fields: backgroundThreadId
       ? [{ label: "Thread", value: backgroundThreadId }]
       : [],
+  };
+}
+
+export function createTurnReasoningPresentation(
+  backgroundThreadId?: string,
+  elapsedMs?: number,
+): LifecyclePresentation {
+  return {
+    title: "思考中…",
+    fields: backgroundThreadId
+      ? [{ label: "Thread", value: backgroundThreadId }]
+      : [],
+    ...(elapsedMs === undefined || elapsedMs < 1_000
+      ? {}
+      : { footer: { label: "耗时", value: formatElapsedDuration(elapsedMs) } }),
   };
 }
 
@@ -755,6 +771,9 @@ export function renderPlainLifecyclePresentation(
       `${section.title}：`,
       ...section.fields.map(formatField),
     ]),
+    ...(presentation.footer
+      ? ["", `${presentation.footer.label}：${presentation.footer.value}`]
+      : []),
   ].join("\n");
 }
 

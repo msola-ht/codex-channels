@@ -153,6 +153,13 @@ Turn 时没有新的 Turn 启动事件，因此继续显示明确的追加确认
 Turn 的启动回复直接登记为 Thread 状态消息，后续 `active` 不再创建第二张卡，`idle` 原地更新
 这张回复并保留扩展身份。
 
+Turn 推理期间，Gateway 消费官方 `item/reasoning/summaryTextDelta`、`summaryPartAdded` 与
+`textDelta` 通知，在渠道按顺序展示“思考中…”状态；连续思考只显示一次，操作打断后再次思考时
+重新显示一次。每段独立从 0 开始计时，超过 1 秒时附“耗时”字段并每秒流式原地更新；飞书
+使用每段一张的流式卡片，Telegram 原地编辑同一条面板，微信只在该段结束时发送一条“思考中+耗时”
+文本。`display.reasoning = false` 时三渠道都不显示思考状态；摘要与原始思维链内容不进入渠道；
+首个回复增量、Turn 错误或完成时结束本段。
+
 `/plugin <对象>` 的详情只显示 `plugin/installed` 返回的安全摘要；能力和适用套餐标识各最多展示
 8 项并明确省略数量，不显示 Plugin 来源路径、远端 URL、图标、截图或默认提示词。
 `/plugin` 与 `/plugin list` 对同一次已安装目录按每页 8 项展示，本地搜索不会调用官方
