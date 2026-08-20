@@ -15,6 +15,8 @@ import {
   releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
 
+const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
+
 vi.mock("../runtime/thread-writer-lock.mjs", () => ({
   inspectThreadWriterLock: vi.fn(),
   terminateThreadWriterHolder: vi.fn(),
@@ -928,7 +930,7 @@ describe("GatewayApplication startup cleanup", () => {
   });
 
   it("does not reconnect a Provider intentionally released by the supervisor", async () => {
-    const runtimeDir = mkdtempSync(join(tmpdir(), "codexc-gateway-release-"));
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-gateway-release-"));
     const socketPath = join(runtimeDir, "codex-app-server.sock");
     const owner = new AppServerSupervisorOwner(socketPath, {
       primaryProvider: "openai",

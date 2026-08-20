@@ -38,6 +38,8 @@ import {
 } from "../runtime/opencode-go-accounts.mjs";
 import { initializeUserData, runtimeConfig } from "../scripts/runtime-config.mjs";
 
+const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
+
 describe("OpenCode Go account CLI", () => {
   it("adds the first account as default and a second account without changing the role", async () => {
     const home = fixture();
@@ -231,10 +233,23 @@ describe("OpenCode Go account CLI", () => {
   it("keeps the previous default account when the shared role update fails", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
+    const rolePath = join(codexHome(home), "sf-agent.config.toml");
     await addOpencodeGoAccount("opencode-go", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
+      configureRole: async (provider, model) => {
+        writeFileSync(
+          join(codexHome(home), "config.toml"),
+          `[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n`,
+          { mode: 0o600 },
+        );
+        writeFileSync(
+          rolePath,
+          `model = ${JSON.stringify(model)}\nmodel_provider = ${JSON.stringify(provider)}\n`,
+          { mode: 0o600 },
+        );
+      },
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
@@ -502,7 +517,7 @@ describe("OpenCode Go account CLI", () => {
 });
 
 function fixture() {
-  const home = mkdtempSync(join(tmpdir(), "codexc-go-account-cli-"));
+  const home = mkdtempSync(join(unixSocketTmpdir, "codexc-go-account-cli-"));
   const connectHome = join(home, ".codex-connect");
   const codex = join(home, ".codex");
   mkdirSync(connectHome, { recursive: true, mode: 0o700 });

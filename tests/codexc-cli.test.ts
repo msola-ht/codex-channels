@@ -11,7 +11,10 @@ import { stringify } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
-import { AppServerSupervisorOwner } from "../runtime/app-server-supervisor.mjs";
+import {
+  AppServerSupervisorOwner,
+  inspectAppServerSupervisor,
+} from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsActive, GatewayOwner } from "../runtime/gateway-owner.mjs";
 import {
@@ -1282,7 +1285,7 @@ describe("codexc CLI", () => {
     });
   });
 
-  it("finishes service shutdown when an App Server ignores the first termination signal", async () => {
+  it("finishes service shutdown when an App Server ignores graceful termination", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-shutdown-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1297,8 +1300,8 @@ describe("codexc CLI", () => {
       "import { writeFileSync } from 'node:fs';",
       "let signals = 0;",
       "const capture = () => writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({ pid: process.pid, signals }));",
+      "process.on('SIGTERM', () => { signals += 1; capture(); });",
       "capture();",
-      "process.on('SIGTERM', () => { signals += 1; capture(); if (signals >= 2) process.exit(0); });",
       "setInterval(() => undefined, 1000);",
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
@@ -1321,15 +1324,19 @@ describe("codexc CLI", () => {
     const exited = new Promise<void>((resolveExit) => service.once("exit", () => resolveExit()));
 
     let exitedWithinLimit = false;
+    let captured: { pid?: number; signals?: number };
     try {
       await waitForCondition(() => existsSync(capturePath), 2_000);
+      await expect(inspectAppServerSupervisor(
+        join(home, "runtime", "codex-app-server.sock"),
+      )).resolves.toBeDefined();
       service.kill("SIGTERM");
       exitedWithinLimit = await Promise.race([
         exited.then(() => true),
-        new Promise<false>((resolveTimeout) => setTimeout(() => resolveTimeout(false), 2_000)),
+        new Promise<false>((resolveTimeout) => setTimeout(() => resolveTimeout(false), 8_000)),
       ]);
     } finally {
-      const captured = existsSync(capturePath)
+      captured = existsSync(capturePath)
         ? JSON.parse(readFileSync(capturePath, "utf8")) as { pid?: number }
         : {};
       if (!exitedWithinLimit) {
@@ -1341,7 +1348,8 @@ describe("codexc CLI", () => {
       }
     }
     expect(exitedWithinLimit).toBe(true);
-  }, 10_000);
+    expect(captured.signals).toBeGreaterThanOrEqual(1);
+  }, 15_000);
 
   it("starts a selected custom Responses Provider through the local metrics proxy", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-custom-provider-"));

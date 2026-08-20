@@ -585,6 +585,7 @@ contractSuite("real supervised App Server service", () => {
         slug: "deepseek-v4-flash",
         display_name: "DeepSeek-V4-Flash",
         description: "OpenCode Go contract fixture",
+        context_window: 200_000,
         default_reasoning_level: "high",
         supported_reasoning_levels: [{
           effort: "high",
