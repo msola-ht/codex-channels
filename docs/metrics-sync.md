@@ -151,6 +151,6 @@ codexc service start center          # 启动指标中心后台服务
 }
 ```
 
-`localId` 是本地指标库的自增主键；中心库建议以 `(device_id, local_id)` 为主键，
-用 `INSERT OR IGNORE` 幂等去重。完整字段与本地 `model_request_metrics_enriched` 视图
-一致（不含 `error_message`）。
+`localId` 是本地指标库的自增主键；中心库以 `(device_id, local_id)` 为主键，
+用 UPSERT 幂等覆盖同一记录，使水位重置后的完整重放可以修复中心历史。完整字段与本地
+`model_request_metrics_enriched` 视图一致（不含 `error_message`）。
