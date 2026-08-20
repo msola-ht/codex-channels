@@ -21,6 +21,7 @@ import {
 } from "./model-provider-definitions.mjs";
 import { modelProviderBlockEdits } from "./model-provider-profile.mjs";
 import {
+  isOpencodeGoProviderNamespace,
   opencodeGoAccountMarkerPath,
 } from "./opencode-go-accounts.mjs";
 import {
@@ -43,6 +44,7 @@ export function validateCustomPrimaryModelProviderId(id, environment = process.e
   }
   if (
     builtInModelProviderIds.has(id)
+    || isOpencodeGoProviderNamespace(id)
     || managedProviderDefinitions(environment).some((definition) => definition.id === id)
   ) {
     return "该 Provider ID 已被 Codex 或 Gateway 保留";

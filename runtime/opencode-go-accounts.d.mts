@@ -11,6 +11,7 @@ export interface OpencodeGoAccountMarker {
 
 export const opencodeGoDefaultAccountId: "opencode-go";
 
+export function isOpencodeGoProviderNamespace(provider: string): boolean;
 export function isOpencodeGoProvider(provider: string): boolean;
 export function sharedProviderProxyKey(provider: string): string;
 export function opencodeGoAccountIdFromProvider(provider: string): string | undefined;

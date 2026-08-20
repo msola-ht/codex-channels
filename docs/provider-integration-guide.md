@@ -195,7 +195,8 @@ supports_websockets = false
 设置 `requires_openai_auth = false`，完全不依赖官方 auth.json，官方登录状态不受切换影响。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
-`openai`、`ollama`、`lmstudio`、`amazon-bedrock` 或项目受管 Provider ID。
+`openai`、`ollama`、`lmstudio`、`amazon-bedrock`、OpenCode Go 保留命名空间
+`opencode-go` / `opencode-go-*`，或其他项目受管 Provider ID。
 
 修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。

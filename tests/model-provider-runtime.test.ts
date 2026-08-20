@@ -49,7 +49,13 @@ import {
 describe("model provider runtime topology", () => {
   it("rejects reserved Codex provider IDs as custom primary candidates", () => {
     const environment = testEnvironment(tmpdir());
-    for (const id of ["openai", "ollama", "lmstudio", "amazon-bedrock"]) {
+    for (const id of [
+      "openai",
+      "ollama",
+      "lmstudio",
+      "amazon-bedrock",
+      "opencode-go-custom",
+    ]) {
       expect(validateCustomPrimaryModelProviderId(id, environment))
         .toBe("该 Provider ID 已被 Codex 或 Gateway 保留");
     }

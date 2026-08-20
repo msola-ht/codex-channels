@@ -22,12 +22,18 @@ export const opencodeGoDefaultAccountId = "opencode-go";
 const opencodeGoProviderPrefix = "opencode-go-";
 const defaultAccountId = opencodeGoDefaultAccountId;
 
+export function isOpencodeGoProviderNamespace(provider) {
+  return typeof provider === "string"
+    && (provider === defaultAccountId || provider.startsWith(opencodeGoProviderPrefix));
+}
+
 export function isOpencodeGoProvider(provider) {
-  if (typeof provider !== "string") return false;
+  if (!isOpencodeGoProviderNamespace(provider)) return false;
   if (provider === defaultAccountId) return true;
-  if (!provider.startsWith(opencodeGoProviderPrefix)) return false;
+  const accountId = provider.slice(opencodeGoProviderPrefix.length);
+  if (accountId === defaultAccountId) return false;
   try {
-    validateOpencodeGoAccountId(provider.slice(opencodeGoProviderPrefix.length));
+    validateOpencodeGoAccountId(accountId);
     return true;
   } catch {
     return false;

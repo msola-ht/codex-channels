@@ -1,4 +1,5 @@
 import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import { isOpencodeGoProvider } from "../runtime/opencode-go-accounts.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
   readPrimaryProviderBackup,
@@ -11,8 +12,7 @@ export const metricsProviderIds = Object.freeze([
 export function isMetricsProviderId(value, environment = process.env) {
   if (typeof value !== "string") return false;
   if (new Set(metricsProviderIds).has(value)
-    || value === "opencode-go"
-    || /^opencode-go-[a-z0-9_-]{1,32}$/u.test(value)) {
+    || isOpencodeGoProvider(value)) {
     return true;
   }
   const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);

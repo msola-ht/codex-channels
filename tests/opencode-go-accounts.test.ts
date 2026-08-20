@@ -28,11 +28,13 @@ describe("OpenCode Go account registry", () => {
     expect(opencodeGoAccountIdFromProvider("opencode-go-b-2")).toBe("b-2");
     expect(opencodeGoAccountIdFromProvider("opencode-go-")).toBeUndefined();
     expect(opencodeGoAccountIdFromProvider("opencode-go-INVALID")).toBeUndefined();
+    expect(opencodeGoAccountIdFromProvider("opencode-go-opencode-go")).toBeUndefined();
     expect(opencodeGoAccountIdFromProvider("openai")).toBeUndefined();
     expect(isOpencodeGoProvider("opencode-go")).toBe(true);
     expect(isOpencodeGoProvider("opencode-go-lunare")).toBe(true);
     expect(isOpencodeGoProvider("opencode-go-")).toBe(false);
     expect(isOpencodeGoProvider("opencode-go-INVALID")).toBe(false);
+    expect(isOpencodeGoProvider("opencode-go-opencode-go")).toBe(false);
     expect(isOpencodeGoProvider("deepseek")).toBe(false);
     expect(opencodeGoApiKeyEnvironmentKey("main")).toBe(
       "CODEX_CONNECT_OPENCODE_GO_MAIN_API_KEY",
