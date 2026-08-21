@@ -22,6 +22,8 @@
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：Codex CLI 升级流程。
 - [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：各正式版本对本项目的
   采用、暂缓和拒绝决策。
+- [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：Codex 0.148.0
+  原生 Thread Queue 替换方案、分页历史与 Revert 的实施边界和验收链路。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
