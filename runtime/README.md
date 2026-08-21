@@ -25,8 +25,8 @@
 - `deepseek-pricing-baseline.json`：保存从 DeepSeek 官方价格页审查后的人民币每百万 Token 单价、
   北京时间峰谷区间和生效日期；Bootstrap 只读使用，自动检查只能通过 Draft PR 提议更新。
 - `opencode-go-pricing-baseline.json`：保存 OpenCode Go 官方页面全部模型的美元每百万 Token 单价、
-  Peak/Off-Peak 时段（UTC）、长上下文档位、套餐包含用量、端点与 SDK 协议；运行时只为已开放
-  模型按请求时间生成请求价格快照。
+  Peak/Off-Peak 时段（UTC）、长上下文档位、套餐包含用量、端点与 SDK 协议，并明确记录未给出
+  数值价格的限时免费模型；运行时只为已开放且有数值价格的模型按请求时间生成请求价格快照。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照；按最早 `resetsAt` 失效前缓存，失败时短时
   退避后重试，缺失或已过期的重置时间同样短时退避，避免每个模型请求重复查询；快照随请求指标

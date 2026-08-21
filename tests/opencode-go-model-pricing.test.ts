@@ -6,6 +6,55 @@ import {
 } from "../src/bootstrap/opencode-go-model-pricing.js";
 
 describe("OpenCodeGoModelPricingResolver", () => {
+  it("tracks limited-free models without creating a numeric price", () => {
+    const baseline = loadOpenCodeGoPricingBaseline(JSON.stringify({
+      schemaVersion: 3,
+      source: "https://opencode.ai/docs/go/",
+      sourceUpdatedAt: "2026-08-21T14:49:25.000Z",
+      currency: "USD",
+      unit: "per_million_tokens",
+      timezone: "UTC",
+      peakHours: ["01:00-04:00", "06:00-10:00"],
+      models: {
+        "ox-alpha-free": {
+          endpoint: "https://opencode.ai/zen/go/v1/chat/completions",
+          aiSdkPackage: "@ai-sdk/openai-compatible",
+          pricingStatus: "limited-free",
+        },
+      },
+    }));
+
+    expect(baseline.limitedFreeModels.has("ox-alpha-free")).toBe(true);
+    expect(baseline.models.has("ox-alpha-free")).toBe(false);
+    expect(new OpenCodeGoModelPricingResolver(baseline).resolve({
+      provider: "opencode-go",
+      model: "ox-alpha-free",
+      serviceTier: null,
+      inputTokens: 1_000,
+      atMs: Date.parse("2026-08-21T15:00:00.000Z"),
+    })).toBeNull();
+  });
+
+  it("rejects numeric prices on a limited-free model", () => {
+    expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify({
+      schemaVersion: 3,
+      source: "https://opencode.ai/docs/go/",
+      sourceUpdatedAt: "2026-08-21T14:49:25.000Z",
+      currency: "USD",
+      unit: "per_million_tokens",
+      timezone: "UTC",
+      peakHours: ["01:00-04:00", "06:00-10:00"],
+      models: {
+        "ox-alpha-free": {
+          endpoint: "https://opencode.ai/zen/go/v1/chat/completions",
+          aiSdkPackage: "@ai-sdk/openai-compatible",
+          pricingStatus: "limited-free",
+          input: 0,
+        },
+      },
+    }))).toThrow("限时免费模型条目无效");
+  });
+
   it("uses OpenCode Go prices independently from the DeepSeek provider", () => {
     const resolver = new OpenCodeGoModelPricingResolver();
 
@@ -74,6 +123,26 @@ describe("OpenCodeGoModelPricingResolver", () => {
     });
   });
 
+  it("prices the OpenCode Go Vision model with its own included usage", () => {
+    const resolver = new OpenCodeGoModelPricingResolver();
+    const baseline = loadOpenCodeGoPricingBaseline();
+
+    expect(baseline.models.get("deepseek-v4-flash-vision-exp")?.includedUsageUsd)
+      .toBe(15);
+    expect(resolver.resolve({
+      provider: "opencode-go",
+      model: "deepseek-v4-flash-vision-exp",
+      serviceTier: null,
+      inputTokens: 1_000,
+      atMs: Date.parse("2026-08-21T02:00:00.000Z"),
+    })).toMatchObject({
+      bucket: "peak",
+      uncachedInputPricePerMillionNanos: 440_000_000,
+      cachedInputPricePerMillionNanos: 14_000_000,
+      outputPricePerMillionNanos: 1_320_000_000,
+    });
+  });
+
   it("selects the matching long-context price tier", () => {
     const resolver = new OpenCodeGoModelPricingResolver();
 
@@ -91,7 +160,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects an incomplete tiered baseline", () => {
     expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",
@@ -116,7 +185,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects an incomplete Peak/Off-Peak baseline", () => {
     expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",
@@ -143,7 +212,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects a baseline without official Peak hours", () => {
     expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",
@@ -166,7 +235,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects a model endpoint outside the official API boundary", () => {
     const baseline = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",

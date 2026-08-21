@@ -40,11 +40,12 @@ export const opencodeGoProviderDefinition = Object.freeze({
   baseUrl: "https://opencode.ai/zen/go/v1",
   wireApi: "responses",
   apiKeyEnvironmentKey: "CODEX_CONNECT_OPENCODE_GO_API_KEY",
-  defaultModel: "deepseek-v4-flash",
+  defaultModel: "deepseek-v4-flash-vision-exp",
   defaultReasoningEffort: "high",
   supportsWebsockets: false,
   models: Object.freeze([
     Object.freeze({ slug: "deepseek-v4-flash", available: true }),
+    Object.freeze({ slug: "deepseek-v4-flash-vision-exp", available: true }),
     Object.freeze({ slug: "deepseek-v4-pro", available: true }),
   ]),
 });

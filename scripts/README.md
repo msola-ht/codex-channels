@@ -31,8 +31,10 @@
   未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
   `backup-provider-migration.mjs` 先完整备份旧布局、现有新目录与被改写引用文件，再把受管
   第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
-  不安全权限时拒绝覆盖，迁移失败时恢复原有目录；随后刷新已配置 DeepSeek 的受控官方模型目录，
-  保留现有选中模型和逐模型设置，并在私有备份后移除已废弃的 `[vision]` 配置段。
+  不安全权限时拒绝覆盖，迁移失败时恢复原有目录；随后以同一次官方目录下载刷新已配置 DeepSeek
+  与 OpenCode Go 的受控模型目录，保留逐模型设置，并一次性把仍使用 OpenCode Go 旧默认 Flash 的
+  账户与共享子代理切换到 Flash Vision Exp；目录清单记录迁移完成状态，避免以后覆盖用户主动选回
+  Flash 的决定；最后在私有备份后移除已废弃的 `[vision]` 配置段。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
@@ -174,7 +176,8 @@
   （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；配置
   切换/固定模式或恢复首次配置前状态，从同一受审查来源生成共享模型目录并复用共享子代理机制，
   但不复用凭据、Provider 身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
-  默认模型与逐模型设置。
+  默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
+  Pro 的账户保持不变。
 - `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一
   `~/.codex-connect/providers/<id>/` 布局，并把 Provider 根级上下文、思考等级和自动压缩阈值
   迁入各自模型目录，切换模式 Profile 再镜像所选模型的默认思考等级。
@@ -187,7 +190,7 @@
   语义化 HTML 表格解析，不进入 Gateway 运行路径。
 - `prepare-opencode-go-pricing-proposal.mjs` / `prepare-opencode-go-pricing-proposal.d.mts`：从
   OpenCode Go 官方价格表与模型端点表交叉解析全部模型 ID、Token 单价、档位、套餐包含用量、
-  端点和 SDK 协议，
+  限时免费状态、端点和 SDK 协议，
   输出候选基线、结构化差异和失败现场。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；

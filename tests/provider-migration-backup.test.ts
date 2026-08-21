@@ -134,6 +134,7 @@ describe("backup provider migration", () => {
       );
       expect(catalog.models.map(({ slug }) => slug)).toEqual([
         "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
         "deepseek-v4-pro",
       ]);
 
@@ -330,7 +331,11 @@ function writeConfigAndRole(fixture: ReturnType<typeof createFixture>) {
 
 function legacyCatalog(): string {
   return `${JSON.stringify({
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+    models: [
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek-v4-pro",
+    ].map((slug) => ({
       slug,
       display_name: slug,
       context_window: 1_048_576,

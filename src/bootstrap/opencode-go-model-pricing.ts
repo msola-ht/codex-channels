@@ -55,6 +55,7 @@ export interface OpenCodeGoPricingBaseline {
   timezone: "UTC";
   peakRanges: readonly LocalMinuteRange[];
   models: ReadonlyMap<string, ModelPrice>;
+  limitedFreeModels: ReadonlySet<string>;
 }
 
 export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
@@ -125,7 +126,7 @@ export function loadOpenCodeGoPricingBaseline(
     throw new Error("OpenCode Go 官方价格基线不是有效 JSON");
   }
   if (!isRecord(value)
-    || value.schemaVersion !== 2
+    || value.schemaVersion !== 3
     || value.source !== source
     || value.currency !== "USD"
     || value.unit !== "per_million_tokens"
@@ -143,12 +144,22 @@ export function loadOpenCodeGoPricingBaseline(
     throw new Error("OpenCode Go 官方价格基线更新时间无效");
   }
   const models = new Map<string, ModelPrice>();
+  const limitedFreeModels = new Set<string>();
   for (const [model, candidate] of Object.entries(value.models)) {
     if (!modelPattern.test(model) || !isRecord(candidate)) {
       throw new Error("OpenCode Go 官方价格模型条目无效");
     }
     const endpoint = validatedEndpoint(candidate.endpoint);
     const aiSdkPackage = validatedAiSdkPackage(candidate.aiSdkPackage);
+    if (candidate.pricingStatus !== undefined) {
+      if (candidate.pricingStatus !== "limited-free"
+        || Object.keys(candidate).some((key) =>
+          key !== "endpoint" && key !== "aiSdkPackage" && key !== "pricingStatus")) {
+        throw new Error("OpenCode Go 官方限时免费模型条目无效");
+      }
+      limitedFreeModels.add(model);
+      continue;
+    }
     const includedUsageUsd = positivePrice(candidate.includedUsageUsd);
     const tiers = Array.isArray(candidate.tiers)
       ? candidate.tiers.map(parseTier)
@@ -174,7 +185,7 @@ export function loadOpenCodeGoPricingBaseline(
       includedUsageUsd,
     });
   }
-  return { sourceUpdatedAtMs, timezone: "UTC", peakRanges, models };
+  return { sourceUpdatedAtMs, timezone: "UTC", peakRanges, models, limitedFreeModels };
 }
 
 function parseTier(value: unknown): PriceTier {

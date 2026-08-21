@@ -29,6 +29,7 @@ import {
   managedProviderDirectory,
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
+  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   isOpencodeGoProvider,
@@ -65,6 +66,7 @@ const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
 const defaultAccountId = opencodeGoDefaultAccountId;
 const maximumPrivateConfigBytes = 2_097_152;
+const previousDefaultModel = "deepseek-v4-flash";
 
 class OpenCodeGoSetupCancelled extends Error {}
 
@@ -229,10 +231,16 @@ export async function addOpencodeGoAccount(accountId, {
         autoCompactLimit,
       },
     );
+    const previousManifest = await readOptionalJson(
+      paths.manifestPath,
+      "OpenCode Go 模型目录清单",
+    );
+    const defaultModelMigration = readDefaultModelMigration(previousManifest);
     manifest = {
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
       downloadedAt: new Date().toISOString(),
+      ...(defaultModelMigration === undefined ? {} : { defaultModelMigration }),
     };
   } else {
     managedCatalog = JSON.parse(readPrivateFileSync(
@@ -482,6 +490,146 @@ export async function setOpencodeGoDefaultAccount(accountId, {
     }
   }
   return { action: "default-set", accountId };
+}
+
+export async function refreshOpencodeGoCatalogForUpdate(
+  environment = process.env,
+  options = {},
+) {
+  const accounts = loadOpencodeGoAccounts(environment);
+  const previousSettings = loadManagedModelProviderSettings(environment)
+    .filter(({ provider }) => isOpencodeGoProvider(provider));
+  if (accounts.length === 0 || previousSettings.length === 0) {
+    return { status: "not-configured" };
+  }
+  const downloaded = await (options.downloadCatalog
+    ? options.downloadCatalog()
+    : downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch));
+  const models = Array.isArray(downloaded.catalog?.models)
+    ? downloaded.catalog.models
+    : [];
+  for (const { slug, available } of definition.models) {
+    if (available && !models.some((model) => model?.slug === slug)) {
+      throw new Error(`OpenCode Go 官方模型目录缺少 ${slug}`);
+    }
+  }
+  const defaultEntry = models.find((model) => model?.slug === definition.defaultModel);
+  const contextWindow = defaultEntry?.context_window;
+  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
+    throw new Error("OpenCode Go 模型目录缺少默认模型上下文窗口");
+  }
+  const managedCatalog = withPreservedManagedModelCatalogSettings(
+    withManagedModelCatalogSettings(downloaded.catalog, definition, {
+      model: definition.defaultModel,
+      reasoningEffort: definition.defaultReasoningEffort,
+      autoCompactLimit: Math.round(contextWindow * defaultAutoCompactPercent / 100),
+    }),
+    definition,
+    previousSettings[0]?.models,
+  );
+  const managedDefault = managedCatalog.models.find(
+    (model) => model?.slug === definition.defaultModel,
+  );
+  const reasoningEffort = managedDefault?.default_reasoning_level;
+  if (typeof reasoningEffort !== "string") {
+    throw new Error("OpenCode Go 模型目录缺少默认思考等级");
+  }
+  const providerDirectory = managedProviderDirectory(environment, definition);
+  const catalogPath = join(providerDirectory, definition.catalogFileName);
+  const manifestPath = join(providerDirectory, definition.catalogManifestFileName);
+  const previousManifest = await readOptionalJson(manifestPath, "OpenCode Go 模型目录清单");
+  const previousMigration = readDefaultModelMigration(previousManifest);
+  const migrationAlreadyApplied = previousMigration !== undefined;
+  const settingsByProvider = new Map(
+    previousSettings.map((settings) => [settings.provider, settings]),
+  );
+  const updates = [];
+  const migratedProviders = [];
+  for (const account of accounts) {
+    const provider = opencodeGoProviderId(account.id);
+    const settings = settingsByProvider.get(provider);
+    if (migrationAlreadyApplied || !settings || settings.model !== previousDefaultModel) continue;
+    const paths = accountPaths(environment, account.id);
+    const documentPath = settings.mode === "switching" ? paths.profilePath : paths.configPath;
+    const document = await readTomlFile(documentPath);
+    if (document.model !== previousDefaultModel || document.model_provider !== provider) {
+      throw new Error(`OpenCode Go 账户 ${account.id} 默认模型配置不一致`);
+    }
+    document.model = definition.defaultModel;
+    if (settings.mode === "switching") {
+      document.model_reasoning_effort = reasoningEffort;
+    } else {
+      delete document.model_reasoning_effort;
+      delete document.model_context_window;
+      delete document.model_auto_compact_token_limit;
+      delete document.model_auto_compact_token_limit_scope;
+    }
+    updates.push({ path: documentPath, content: stringify(document) });
+    migratedProviders.push(provider);
+  }
+  const role = loadManagedModelProviderRole(environment);
+  const migrateRole = !migrationAlreadyApplied
+    && role !== undefined
+    && isOpencodeGoProvider(role.provider)
+    && role.model === previousDefaultModel;
+  const roleConfigPath = managedModelProviderRoleConfigPath(environment);
+  const transactionPaths = [
+    catalogPath,
+    manifestPath,
+    ...updates.map(({ path }) => path),
+    ...(migrateRole ? [roleConfigPath] : []),
+  ];
+  const snapshots = snapshotFiles(transactionPaths);
+  let guards = snapshots;
+  try {
+    await writePrivateFileAtomic(catalogPath, `${JSON.stringify(managedCatalog, null, 2)}\n`);
+    guards = snapshotFiles(transactionPaths);
+    const updatedAt = (options.now ?? (() => new Date()))().toISOString();
+    await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
+      source: deepseekSetupScriptUrl,
+      sha256: downloaded.sha256,
+      downloadedAt: updatedAt,
+      defaultModelMigration: migrationAlreadyApplied
+        ? previousMigration
+        : {
+            from: previousDefaultModel,
+            to: definition.defaultModel,
+            appliedAt: updatedAt,
+          },
+    }, null, 2)}\n`);
+    guards = snapshotFiles(transactionPaths);
+    for (const update of updates) {
+      await writePrivateFileAtomic(update.path, update.content);
+      guards = snapshotFiles(transactionPaths);
+    }
+    if (migrateRole) {
+      writeManagedModelProviderRoleConfig(environment, {
+        provider: role.provider,
+        model: definition.defaultModel,
+      });
+      guards = snapshotFiles(transactionPaths);
+    }
+  } catch (error) {
+    try {
+      await restoreSnapshots(snapshots, guards);
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "OpenCode Go 模型目录更新失败，且未能完整恢复更新前文件",
+        { cause: rollbackError },
+      );
+    }
+    throw error;
+  }
+  return {
+    status: "updated",
+    catalogPath,
+    manifestPath,
+    modelCount: managedCatalog.models.length,
+    migratedProviders,
+    roleMigrated: migrateRole,
+    defaultModelMigrationApplied: !migrationAlreadyApplied,
+  };
 }
 
 export async function stopOpencodeGoAccount(accountId, {
@@ -898,6 +1046,33 @@ async function readOptionalFile(path) {
     if (error?.code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+async function readOptionalJson(path, label) {
+  const content = await readOptionalFile(path);
+  if (content === undefined) return undefined;
+  try {
+    const value = JSON.parse(content.toString("utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    return value;
+  } catch {
+    throw new Error(`${label}无法安全读取或解析`);
+  }
+}
+
+function readDefaultModelMigration(manifest) {
+  const migration = manifest?.defaultModelMigration;
+  if (migration === undefined) return undefined;
+  if (!migration
+    || typeof migration !== "object"
+    || Array.isArray(migration)
+    || migration.from !== previousDefaultModel
+    || migration.to !== definition.defaultModel
+    || typeof migration.appliedAt !== "string"
+    || !Number.isFinite(Date.parse(migration.appliedAt))) {
+    throw new Error("OpenCode Go 默认模型迁移标记无效");
+  }
+  return migration;
 }
 
 async function replaceOptionalFile(path, content) {

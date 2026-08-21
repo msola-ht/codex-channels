@@ -27,6 +27,7 @@ import {
   gatewayOwnerIsReady,
 } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
   assertSynchronousChildSuccess,
   ForwardedChildSignalError,
@@ -53,7 +54,11 @@ import {
 } from "./upgrade-state.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { backupAndMigrateProviderFiles } from "./backup-provider-migration.mjs";
-import { refreshDeepseekCatalogForUpdate } from "./deepseek-setup.mjs";
+import {
+  downloadDeepseekCatalog,
+  refreshDeepseekCatalogForUpdate,
+} from "./deepseek-setup.mjs";
+import { refreshOpencodeGoCatalogForUpdate } from "./opencode-go-setup.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
@@ -163,7 +168,7 @@ export async function updateLocalInstallation(environment = process.env, options
     (options.updateProviderFiles
       ?? (() => backupAndMigrateProviderFiles(environment, { apply: true })))();
     providerCatalogs = await (options.updateProviderCatalogs
-      ?? (() => refreshDeepseekCatalogForUpdate(environment)))();
+      ?? (() => refreshManagedProviderCatalogsForUpdate(environment)))();
     config = (options.updateConfig
       ?? (() => updateGatewayConfiguration(environment)))();
     databases = (options.updateDatabases
@@ -197,6 +202,18 @@ export async function updateLocalInstallation(environment = process.env, options
     databases,
     providerCatalogs,
     servicesRestored: serviceInspection.installed,
+  };
+}
+
+async function refreshManagedProviderCatalogsForUpdate(environment) {
+  let downloaded;
+  const downloadCatalog = async () => {
+    downloaded ??= await downloadDeepseekCatalog(globalThis.fetch);
+    return downloaded;
+  };
+  return {
+    deepseek: await refreshDeepseekCatalogForUpdate(environment, { downloadCatalog }),
+    opencodeGo: await refreshOpencodeGoCatalogForUpdate(environment, { downloadCatalog }),
   };
 }
 
@@ -535,15 +552,36 @@ if (
         return result;
       },
       updateProviderCatalogs: async () => {
-        const result = await refreshDeepseekCatalogForUpdate(process.env);
-        if (result.status === "updated") {
+        let downloaded;
+        const downloadCatalog = async () => {
+          downloaded ??= await downloadDeepseekCatalog(globalThis.fetch);
+          return downloaded;
+        };
+        const deepseek = await refreshDeepseekCatalogForUpdate(process.env, { downloadCatalog });
+        if (deepseek.status === "updated") {
           writeCliMessage(
             "success",
-            `DeepSeek 官方模型目录已更新（${result.modelCount} 个模型）。`,
+            `DeepSeek 官方模型目录已更新（${deepseek.modelCount} 个模型）。`,
           );
-          console.log(`当前默认选择保持：${result.selectedModel}`);
+          console.log(`当前默认选择保持：${deepseek.selectedModel}`);
         }
-        return result;
+        const opencodeGo = await refreshOpencodeGoCatalogForUpdate(process.env, {
+          downloadCatalog,
+        });
+        if (opencodeGo.status === "updated") {
+          writeCliMessage(
+            "success",
+            `OpenCode Go 官方模型目录已更新（${opencodeGo.modelCount} 个模型）。`,
+          );
+          if (opencodeGo.migratedProviders.length > 0) {
+            console.log(
+              `已切换旧默认模型：${opencodeGo.migratedProviders.join("、")} → ${opencodeGoProviderDefinition.defaultModel}`,
+            );
+          } else {
+            console.log("OpenCode Go 当前默认选择均已保留。");
+          }
+        }
+        return { deepseek, opencodeGo };
       },
       databaseOptions: {
         onInspected: printInspection,
