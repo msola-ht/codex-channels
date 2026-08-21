@@ -18,9 +18,10 @@
   Draft PR，同版本已有开放提案时不重复创建。它不自动转为 Ready、合并、发布或部署。官方
   Release 解析失败时仍上传以 `unresolved-<run id>` 命名的失败 Artifact 和 `resolve.log`，
   不会因目标版本为空丢失现场。
-- `codex-upgrade-pr.yml`：在正式升级 PR 打开、更新、编辑或转为 Ready 时检查描述；Draft
-  阶段允许自动占位内容，Ready 后必须写清对本项目的收益、本次采用、本次不采用及风险与验证。
-  普通 PR 不受此检查影响。
+- `codex-upgrade-pr.yml`：统一检查 PR 描述；Draft 阶段允许模板或自动占位内容，所有 Ready PR
+  必须写清新增、修复和改动，没有对应内容时明确写“无”。正式 Codex CLI 升级 PR 还必须写清
+  对本项目的收益、本次采用、本次不采用及风险与验证。Job 名 `Project benefits and tradeoffs`
+  为兼容 main 的现有 Branch Protection 保留。
 - `codex-alpha-canary.yml`：每天选择 `openai/codex` 最高版本号的官方 Alpha，在临时 Runner
   生成协议，并使用与正式预览相同的独立兼容检查和报告。成功或失败都会上传完整现场，失败后
   任务标红；Release 解析失败同样保留 `unresolved` 报告；结果只作前向兼容预警，不进入正式

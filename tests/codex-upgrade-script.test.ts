@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error JavaScript upgrade helper intentionally has no declaration file.
 import * as upgradeHelpers from "../scripts/prepare-codex-upgrade.mjs";
 // @ts-expect-error JavaScript PR description helper intentionally has no declaration file.
-import * as prDescriptionHelpers from "../scripts/check-upgrade-pr-description.mjs";
+import * as prDescriptionHelpers from "../scripts/check-pr-description.mjs";
 
 const {
   assertCleanWorktree,
@@ -15,7 +15,7 @@ const {
   parseUpgradeArguments,
   upgradeReviewChecklist,
 } = upgradeHelpers;
-const { checkUpgradePullRequestDescription } = prDescriptionHelpers;
+const { checkPullRequestDescription } = prDescriptionHelpers;
 
 describe("Codex CLI upgrade preparation", () => {
   it("accepts one exact target version and optional dry-run", () => {
@@ -83,13 +83,19 @@ describe("Codex CLI upgrade preparation", () => {
         body: "待 Codex 填写",
       },
     };
-    expect(checkUpgradePullRequestDescription(draft)).toEqual({ checked: false });
+    expect(checkPullRequestDescription(draft)).toEqual({ checked: false });
 
     const ready = {
       pull_request: {
         draft: false,
         title: "升级 Codex CLI 至 0.147.0",
         body: [
+          "## 新增",
+          "新增当前项目决定采用的协议能力。",
+          "## 修复",
+          "无",
+          "## 改动",
+          "更新协议类型、实现、测试与文档基线。",
           "## 对本项目的收益",
           "现有共享 App Server 路径获得明确的稳定性收益。",
           "## 本次采用",
@@ -101,8 +107,8 @@ describe("Codex CLI upgrade preparation", () => {
         ].join("\n\n"),
       },
     };
-    expect(checkUpgradePullRequestDescription(ready)).toEqual({ checked: true });
-    expect(() => checkUpgradePullRequestDescription({
+    expect(checkPullRequestDescription(ready)).toEqual({ checked: true });
+    expect(() => checkPullRequestDescription({
       ...ready,
       pull_request: {
         ...ready.pull_request,
@@ -112,7 +118,7 @@ describe("Codex CLI upgrade preparation", () => {
         ),
       },
     })).toThrow("对本项目的收益");
-    expect(() => checkUpgradePullRequestDescription({
+    expect(() => checkPullRequestDescription({
       ...ready,
       pull_request: {
         ...ready.pull_request,
@@ -122,5 +128,37 @@ describe("Codex CLI upgrade preparation", () => {
         ),
       },
     })).toThrow("本次不采用");
+  });
+
+  it("requires added, fixed, and changed sections for every ready PR", () => {
+    const ready = {
+      pull_request: {
+        draft: false,
+        title: "统一 PR 描述",
+        body: [
+          "## 新增",
+          "<!-- 没有新增内容时写“无”。 -->",
+          "无",
+          "## 修复",
+          "修复所有 Ready PR 缺少统一分类的问题。",
+          "## 改动",
+          "更新 PR 模板和 GitHub Actions 门禁。",
+        ].join("\n\n"),
+      },
+    };
+    expect(checkPullRequestDescription(ready)).toEqual({ checked: true });
+
+    for (const section of ["新增", "修复", "改动"]) {
+      expect(() => checkPullRequestDescription({
+        ...ready,
+        pull_request: {
+          ...ready.pull_request,
+          body: ready.pull_request.body.replace(
+            new RegExp(`## ${section}[\\s\\S]*?(?=\\n\\n## |$)`, "u"),
+            `## ${section}\n\n<!-- 仍是模板占位 -->`,
+          ),
+        },
+      })).toThrow(section);
+    }
   });
 });
