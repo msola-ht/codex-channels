@@ -20,8 +20,9 @@
   Provider 的候选 Thread；没有兼容候选时按该 Provider 新建，避免把模型交给错误的 App Server。
 
 运行中的前台 Thread 在 `/resume` 或 `/new` 切换时转为后台绑定，保持 App Server 订阅与原
-Conversation 归属；新输入只路由到前台 Thread。后台 Turn 完成并投递完成事件后取消订阅并移除
-后台绑定，Thread 历史仍由 App Server 保存。Gateway 恢复时同时恢复前台与后台订阅；若后台
+Conversation 归属；新输入只路由到前台 Thread。后台 Turn 完成后先与原生 Queue 的自动派发
+协调；Queue 已启动下一 Turn、仍有排队条目或 Thread 仍为活动状态时保留绑定，只有权威状态确认
+空闲后才取消订阅并移除后台绑定，Thread 历史仍由 App Server 保存。Gateway 恢复时同时恢复前台与后台订阅；若后台
 Thread 已在离线期间结束，只提示通过 `/resume` 查看，不伪造或重放完成事件。
 - `thread-state-sync.ts`：定义并消费不含协议信封的稳定 Thread 路由事件，同步模型、思考等级和
   服务层级，并在官方通知未携带不可变 Provider 时保留 Router 已确认的值；归档或删除事件会清理对应绑定，关闭事件只表示无订阅者的空闲 Thread 已从

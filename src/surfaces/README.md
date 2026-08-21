@@ -51,6 +51,8 @@ Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台�
 `ConversationDeliveryQueue` 提供可复用的每 Conversation 有界顺序队列：同一 Conversation 串行，
 不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。新增 Surface 时应实现统一输入、
 输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或提供等价约束。
+Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和五分钟数字选择快照；Surface
+只渲染共享的 `/queue add|list|update|delete|reorder|start` 结果，不保存 Queue 镜像或消息正文。
 审批卡片和其他需要等待结果的 `runOrdered` 操作排在所有既有关键消息之后，但会越过尚未执行的
 非关键过程输出；关键消息与非关键消息各自保持原顺序，已经开始的平台请求不会被中断。
 Telegram 和飞书在交互消息创建成功或失败时

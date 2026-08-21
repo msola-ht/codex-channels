@@ -26,6 +26,10 @@ import type {
   PluginQueryPort,
   PermissionProfileOption,
   PermissionQueryPort,
+  ThreadQueuePort,
+  ThreadQueueItem,
+  ThreadQueueListOptions,
+  ThreadQueuePage,
 } from "../application/index.js";
 import type {
   ConfigReadParams,
@@ -50,6 +54,18 @@ import type {
   ThreadListResponse,
   ThreadMetadataUpdateResponse,
   ThreadReadResponse,
+  ThreadQueueAddResponse,
+  ThreadQueueAddParams,
+  ThreadQueueDeleteResponse,
+  ThreadQueueDeleteParams,
+  ThreadQueueListResponse,
+  ThreadQueueListParams,
+  ThreadQueueReorderResponse,
+  ThreadQueueReorderParams,
+  ThreadQueueStartResponse,
+  ThreadQueueStartParams,
+  ThreadQueueUpdateResponse,
+  ThreadQueueUpdateParams,
   ThreadResumeResponse,
   ThreadStartResponse,
   ThreadSectionMoveResponse,
@@ -103,6 +119,14 @@ import {
   toInstalledPlugins,
 } from "./plugin-adapter.js";
 import { toPermissionProfilePage } from "./permission-adapter.js";
+import {
+  toProtocolQueueText,
+  toThreadQueueAddResult,
+  toThreadQueueDeleteResult,
+  toThreadQueuePage,
+  toThreadQueueStartResult,
+  toThreadQueueUpdateResult,
+} from "./queue-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
@@ -118,7 +142,8 @@ export class CodexAppServerClient implements
   SkillQueryPort,
   McpQueryPort,
   PluginQueryPort,
-  PermissionQueryPort
+  PermissionQueryPort,
+  ThreadQueuePort
 {
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -313,6 +338,93 @@ export class CodexAppServerClient implements
       },
     }, { retryOverload: false });
     return toTurnStarted(response);
+  }
+
+  async addQueueItem(
+    threadId: string,
+    text: string,
+    clientUserMessageId: string,
+  ): Promise<ThreadQueueItem> {
+    const response = await this.rpc.request<ThreadQueueAddResponse>({
+      method: "thread/queue/add",
+      params: {
+        threadId,
+        input: toProtocolQueueText(text),
+        clientUserMessageId,
+      } satisfies ThreadQueueAddParams,
+    }, { retryOverload: false });
+    return toThreadQueueAddResult(response);
+  }
+
+  async listQueue(
+    threadId: string,
+    options: ThreadQueueListOptions = {},
+  ): Promise<ThreadQueuePage> {
+    const limit = options.limit ?? 25;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error("Codex Queue 列表页大小必须在 1 到 100 之间");
+    }
+    const response = await this.rpc.request<ThreadQueueListResponse>({
+      method: "thread/queue/list",
+      params: {
+        threadId,
+        ...(options.cursor ? { cursor: options.cursor } : {}),
+        limit,
+      } satisfies ThreadQueueListParams,
+    }, { retryOverload: true });
+    const page = toThreadQueuePage(response);
+    if (page.items.length > limit) {
+      throw new Error("Codex Queue 列表响应超过请求页大小");
+    }
+    return page;
+  }
+
+  async updateQueueItem(
+    threadId: string,
+    queuedSubmissionId: string,
+    text: string,
+  ): Promise<ThreadQueueItem> {
+    const response = await this.rpc.request<ThreadQueueUpdateResponse>({
+      method: "thread/queue/update",
+      params: {
+        threadId,
+        queuedSubmissionId,
+        input: toProtocolQueueText(text),
+      } satisfies ThreadQueueUpdateParams,
+    }, { retryOverload: false });
+    return toThreadQueueUpdateResult(response);
+  }
+
+  async deleteQueueItem(
+    threadId: string,
+    queuedSubmissionId: string,
+  ): Promise<{ deleted: boolean }> {
+    const response = await this.rpc.request<ThreadQueueDeleteResponse>({
+      method: "thread/queue/delete",
+      params: { threadId, queuedSubmissionId } satisfies ThreadQueueDeleteParams,
+    }, { retryOverload: false });
+    return toThreadQueueDeleteResult(response);
+  }
+
+  async reorderQueue(threadId: string, queuedSubmissionIds: string[]): Promise<void> {
+    await this.rpc.request<ThreadQueueReorderResponse>({
+      method: "thread/queue/reorder",
+      params: { threadId, queuedSubmissionIds } satisfies ThreadQueueReorderParams,
+    }, { retryOverload: false });
+  }
+
+  async startQueueItem(
+    threadId: string,
+    queuedSubmissionId?: string,
+  ): Promise<{ turnId: string }> {
+    const response = await this.rpc.request<ThreadQueueStartResponse>({
+      method: "thread/queue/start",
+      params: {
+        threadId,
+        ...(queuedSubmissionId === undefined ? {} : { queuedSubmissionId }),
+      } satisfies ThreadQueueStartParams,
+    }, { retryOverload: false });
+    return toThreadQueueStartResult(response);
   }
 
   async steerTurn(

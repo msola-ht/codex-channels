@@ -2,8 +2,13 @@
 
 本文定义 Codex CLI `0.148.0` 实验 `thread/queue/*`、`thread/queue/changed`、
 `thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的采用方案。
-它是实施合同，不表示当前 `main` 已经支持这些能力；完成本文验收项并更新
-[`Codex 协议支持矩阵`](index.md) 后，才能对三个 Surface 宣布可用。
+它是实施合同；当前项目已完成第一阶段原生 Queue 替换，Revert 与分页历史仍未实施。Queue 的
+条件式真实 App Server 合同需在设置 `RUN_CODEX_CONTRACT=1` 后运行；未具备该环境时不得
+把跳过的真实合同伪报为通过。完成 Revert 验收项并更新 [`Codex 协议支持矩阵`](index.md) 后，
+才能对三个 Surface 宣布 Revert 可用。
+
+当前 Queue 条件式真实合同覆盖握手、100/101 容量、CRUD、25/100 分页、活动 busy、指定条目
+启动、中断保留、自动派发以及 App Server 重启后的冷恢复；跳过条件合同不计为通过。
 
 ## 目标与顺序
 
@@ -41,14 +46,14 @@ Thread 的历史模式并增加破坏性写操作，必须单独审查和回滚�
 | 列表默认每页 25 条、单页最多 100 条 | Application 和 Surface 默认展示 25 条；内部需要完整快照时最多一次读取 100 条，并仍检查游标 |
 | `QueuedSubmission` 包含 `id`、`input`、`clientUserMessageId` | 保留两个身份字段；`clientUserMessageId` 使用现有 Gateway UUID 前缀生成，不从消息正文推导 |
 | Queue 持久化在 App Server 的 SQLite 状态库 | 不写入 Gateway StateStore；公开文案明确说明重启后仍保留 |
-| 空闲 Thread 入队后可以立即自动派发 | 不再要求 `/queue add` 只能用于活动 Turn，也不由 Gateway 手动启动下一 Turn |
-| 活动 Turn 完成后自动派发，普通新 Turn 不会提前消费 Queue | 只消费正常 `turn/started`、`turn/completed` 生命周期，不实现本地完成监听器 |
+| 空闲 Thread 入队后可以立即自动派发 | 不再要求 `/queue add` 只能用于活动 Turn；后台完成释放时只调用一次原生 `thread/queue/start` 作为 0.148 派发屏障，不重放消息正文 |
+| 活动 Turn 完成后自动派发，普通新 Turn 不会提前消费 Queue | 只消费正常 `turn/started`、`turn/completed` 生命周期；`thread/queue/start` 与上游空闲派发共用 Thread 锁，启动成功则保留后台绑定，空队列才继续读取权威 Thread 状态 |
 | 中断当前 Turn 保留 Queue | `/stop` 不清空 Queue |
 | 冷 Thread 恢复后继续派发持久队列 | `thread/resume` 后不执行本地恢复或重放；由 App Server 决定派发 |
 | `start` 无 ID 时启动队首，有 ID 时可以启动非队首项 | 两种形式都开放；只在 Thread 已加载且空闲时调用 |
 | 活动或存在待触发 Turn 时 `start` 返回 busy，并保留 Queue | 映射为稳定的可操作错误，不自动重试、不删除条目 |
 | `reorder` 必须包含当前 Queue 的全部 ID 且每个恰好一次 | Application 从最新完整快照计算全排列；并发变化导致失败时提示刷新，不重试旧排列 |
-| `thread/queue/changed` 只携带 `threadId` | 不把通知解释为队列内容；只使当前 Conversation 的短期选择快照和 Revert 确认失效，列表和写操作始终重新读取权威状态 |
+| `thread/queue/changed` 只携带 `threadId` | 不把通知解释为队列内容；只使当前 Conversation 的短期选择快照和 Revert 确认失效，列表和写操作始终重新读取权威状态。其他客户端实际派发出的 `turn/started` 只清理该 Thread 绑定 Conversation 的待生效模型、effort、Fast、Plan 选择，不影响其他 Conversation |
 
 Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread Store 为 local，但没有状态库、
 使用 in-memory Thread Store 或上游明确返回 `user message queue is unavailable` 时，Gateway 必须
@@ -61,6 +66,8 @@ Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread S
 - 所有读写先校验当前 Surface Actor、Workspace、Conversation 与 Thread 绑定；外部用户不能提供任意 Thread ID。
 - Queue 归属 Thread，不归属某次 Gateway 进程。接管或转移前异步读取来源与目标 Thread 的权威 Queue；任一非空时阻止 Thread 被另一个外部 Conversation 接管，避免排队内容在新 Actor 下执行。
 - Queue 非空时继续禁止把当前 Thread 转为后台绑定；先由用户启动、删除或等待队列排空。
+- `/resume` 恢复已有非空 Queue 的 Thread 时沿用该 Thread 自身模型/协作设置，不把当前会话的待生效偏好
+  延后带入 Queue Turn，并在结果中明确提示；后台完成释放前重新查询 Queue 和按 Thread 的活动 Turn。
 - 第一阶段渠道命令只创建和更新纯文本条目。其他客户端创建的图片、音频、Skill 或 Mention 条目可以列出安全摘要、删除、排序或启动，但 Gateway 不允许编辑，以免丢失附件或扩大输入语义。
 - 列表不得显示本地媒体绝对路径、Plugin 路径或未裁剪的上游输入；Client 只返回输入种类、可编辑状态和有界文字预览。
 - `add`、`update`、`delete`、`reorder`、`start` 都是写操作，不在过载、超时或断线后盲目重试。`list` 是只读请求，可以使用现有有界过载重试。
@@ -96,7 +103,7 @@ Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread S
 - `codex-client/client.ts`：封装六个 RPC，只有 `list` 允许只读重试。
 - `codex-client/provider-routing-client.ts`：六个请求全部通过 `callForThread` 路由到 Thread 所属 Provider App Server。
 - `application/conversation-service.ts`：完成授权后编排命令，维护不含正文的短期选择快照，解析选择器和计算最新完整 reorder 排列。
-- `bootstrap/app.ts`：删除 `conversation-follow-up` 中由 Gateway 启动下一 Turn 的分支；后台 Thread 正常完成后的释放职责保留。
+- `bootstrap/app.ts`：删除 `conversation-follow-up` 中由 Gateway 重放下一 Turn 的分支；后台 Thread 正常完成后的释放职责保留，并以一次原生 `thread/queue/start` 与权威 Thread 读取协调完成→自动派发竞争。Reader 回调只做本地失效并登记需要 RPC 的释放重试；组合根有界持有该任务，关闭时先停止接收新任务并限时等待，不在 Reader 回调内等待网络请求。
 - `codex-client/notification-adapter.ts` 与组合根：校验 `thread/queue/changed.threadId`，只触发选择快照和 Revert 确认失效，不同步读取 Queue，也不阻塞 App Server Reader。
 - `surfaces/conversation-command-format.ts` 与三个 Surface：只负责规范命令和平台文案，不保存 Queue 镜像。
 
@@ -203,7 +210,7 @@ Revert 成功后：
 采用时仍必须：
 
 - 从 `codex-protocol/index.ts` 只导出实际使用的 Queue、Turn 分页、Revert 请求响应和通知类型。
-- 修改根 `AGENTS.md` 中“只有两个受控实验例外”的旧约束，精确列出新增方法，不借机开放其他实验 API。
+- 修改根 `AGENTS.md` 中受控实验例外的旧约束，精确列出新增 Queue 方法，不借机开放其他实验 API。
 - 更新 `docs/index.md` 的受控导出数、直接调用方法数、支持矩阵、固定源码说明和复核命令结果。
 - 不增加运行时兼容层；运行中的 App Server 不是精确 `0.148.0` 时仍由现有版本门禁拒绝。
 - 不新增 Gateway SQLite Schema，也不新增消息正文持久化配置。
@@ -241,15 +248,23 @@ Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设�
 
 ## 完成标准与停止条件
 
-只有同时满足以下条件，才能把升级决策和支持矩阵改为“已采用”：
+### Queue 阶段完成标准
+
+Queue 是否已采用只按本节判断，不以前置完成尚未实施的 Revert 或 Queue/Revert 联合合同为条件：
 
 - 旧 Gateway Queue 已完全删除，生产代码不存在第二套消息正文队列。
 - 原生六个 Queue 请求、100 条容量和 25/100 分页均有本地与真实合同覆盖。
 - Gateway/App Server 重启、冷恢复、多 Provider 和跨客户端修改不会丢失或串用 Queue。
+- `docs/index.md`、根 README、模块 README、三个 Surface 帮助和 Queue 测试描述与实现一致。
+
+### Revert 阶段完成标准
+
+Revert 仍需单独满足以下条件，完成前保持失败关闭：
+
 - 新建 Thread 使用 paginated；legacy Thread 明确拒绝 Revert，且没有隐式迁移。
 - Revert 具有一次性确认、执行前复核、活动 Turn 中断处理和“不会恢复文件”提示。
 - Queue/Revert 联合行为已在真实 0.148 App Server 上锁定。
-- `docs/index.md`、根 README、模块 README、三个 Surface 帮助和测试描述与实现一致。
+- `docs/index.md`、根 README、模块 README、三个 Surface 帮助和 Revert 测试描述与实现一致。
 
 遇到以下任一情况必须停止实施并重新审查设计：
 

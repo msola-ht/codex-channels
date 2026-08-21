@@ -855,11 +855,12 @@ function renderCommandCenterForm(
   if (action === "queue") {
     return {
       kind: "form",
-      title: "追加下一 Turn",
-      description: "内容会进入当前 Conversation 的有界内存队列。",
+      title: "写入 App Server Queue",
+      description: "纯文本会由 App Server 持久保存，默认容量为 100 条。",
       action,
-      fieldLabel: "补充要求",
-      placeholder: "请输入下一轮需要继续处理的内容",
+      fieldLabel: "Queue 文本",
+      placeholder: "请输入要排队的纯文本",
+      inputPrefix: "add ",
       multiline: true,
     };
   }

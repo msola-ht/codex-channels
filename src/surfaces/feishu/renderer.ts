@@ -34,6 +34,7 @@ import {
   formatConversationProjectRules,
   formatConversationSessions,
   formatConversationThreadSectionDeletePreview,
+  formatConversationThreadQueue,
   formatConversationThreadSections,
   formatConversationSkills,
   formatConversationStatus,
@@ -149,6 +150,8 @@ export function renderFeishuCommandResult(
       return formatConversationThreadSections(result);
     case "thread-section-delete-preview":
       return formatConversationThreadSectionDeletePreview(result);
+    case "thread-queue":
+      return formatConversationThreadQueue(result);
     case "status":
       return formatConversationStatus(result.status);
     case "workspaces":

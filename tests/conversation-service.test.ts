@@ -12,6 +12,7 @@ import {
   type RequestMetricsQueryPort,
 } from "../src/application/request-metrics-port.js";
 import type { TurnExecutionPort } from "../src/application/turn-port.js";
+import type { ThreadQueuePort } from "../src/application/thread-queue-port.js";
 import {
   ConversationCore,
   UserFacingError,
@@ -516,23 +517,6 @@ describe("ConversationService model selection", () => {
       .rejects.toMatchObject({ code: "rules.check-failed" });
   });
 
-  it("queues a follow-up for the active Turn without steering it immediately", async () => {
-    const steerTurn = vi.fn();
-    const service = new ConversationService(
-      turnPort({ steerTurn }),
-      {} as SessionRouter,
-      {
-        activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }),
-      } as unknown as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-    );
-
-    await expect(service.queueFollowUp(target, "下一轮再检查测试"))
-      .resolves.toEqual({ position: 1 });
-    expect(steerTurn).not.toHaveBeenCalled();
-  });
-
   it("starts an inline Plan prompt with the selected collaboration mode override", async () => {
     const startTurn = vi.fn(async () => ({ turnId: "turn-plan" }));
     const markTurnStarted = vi.fn();
@@ -621,167 +605,6 @@ describe("ConversationService model selection", () => {
     expect(toggle).not.toHaveBeenCalled();
   });
 
-  it("starts the first queued follow-up as a new Turn after the active Turn completes", async () => {
-    let active = { threadId: "thread-1", turnId: "turn-1" } as
-      | { threadId: string; turnId: string }
-      | undefined;
-    const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-2" });
-    const markTurnStarted = vi.fn(() => {
-      active = { threadId: "thread-1", turnId: "turn-2" };
-    });
-    const service = new ConversationService(
-      turnPort({ startTurn }),
-      {
-        current: () => ({
-          target,
-          workspaceId: "main",
-          threadId: "thread-1",
-          sessionId: "session-1",
-        }),
-        workspace: () => main,
-      } as unknown as SessionRouter,
-      {
-        activeTurn: () => active,
-        markTurnStarted,
-      } as unknown as ConversationCore,
-      {
-        turnOverrides: () => ({}),
-        markApplied: vi.fn(),
-      } as unknown as ModelSelectionService,
-      queryPort(),
-    );
-    await service.queueFollowUp(target, "下一轮再检查测试");
-    active = undefined;
-
-    await expect(service.handleTurnCompleted(target, "thread-1"))
-      .resolves.toMatchObject({
-        threadId: "thread-1",
-        turnId: "turn-2",
-        steered: false,
-      });
-    expect(startTurn).toHaveBeenCalledWith(
-      "thread-1",
-      [{ type: "text", text: "下一轮再检查测试" }],
-      expect.stringMatching(/^codex_connect:/),
-      "/workspace/main",
-      {},
-    );
-  });
-
-  it("starts multiple queued follow-ups one Turn at a time in insertion order", async () => {
-    let active = { threadId: "thread-1", turnId: "turn-1" } as
-      | { threadId: string; turnId: string }
-      | undefined;
-    const startTurn = vi.fn()
-      .mockResolvedValueOnce({ turnId: "turn-2" })
-      .mockResolvedValueOnce({ turnId: "turn-3" });
-    const service = new ConversationService(
-      turnPort({ startTurn }),
-      {
-        current: () => ({
-          target,
-          workspaceId: "main",
-          threadId: "thread-1",
-          sessionId: "session-1",
-        }),
-        workspace: () => main,
-      } as unknown as SessionRouter,
-      {
-        activeTurn: () => active,
-        markTurnStarted: (
-          _target: typeof target,
-          threadId: string,
-          turnId: string,
-        ) => {
-          active = { threadId, turnId };
-        },
-      } as unknown as ConversationCore,
-      {
-        turnOverrides: () => ({}),
-        markApplied: vi.fn(),
-      } as unknown as ModelSelectionService,
-      queryPort(),
-    );
-    await service.queueFollowUp(target, "第一条");
-    await service.queueFollowUp(target, "第二条");
-
-    active = undefined;
-    await service.handleTurnCompleted(target, "thread-1");
-    active = undefined;
-    await service.handleTurnCompleted(target, "thread-1");
-
-    expect(startTurn.mock.calls.map((call) => call[1])).toEqual([
-      [{ type: "text", text: "第一条" }],
-      [{ type: "text", text: "第二条" }],
-    ]);
-  });
-
-  it("rejects follow-up queuing when no Turn is running", async () => {
-    const service = new ConversationService(
-      turnPort(),
-      {} as SessionRouter,
-      { activeTurn: () => undefined } as unknown as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-    );
-
-    await expect(service.queueFollowUp(target, "稍后执行"))
-      .rejects.toMatchObject({ code: "queue.inactive" });
-  });
-
-  it("rejects follow-ups beyond the per-Conversation queue limit", async () => {
-    const service = new ConversationService(
-      turnPort(),
-      {} as SessionRouter,
-      {
-        activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }),
-      } as unknown as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-    );
-
-    for (let index = 1; index <= 10; index += 1) {
-      await expect(service.queueFollowUp(target, `任务 ${index}`))
-        .resolves.toEqual({ position: index });
-    }
-    await expect(service.queueFollowUp(target, "任务 11"))
-      .rejects.toMatchObject({ code: "queue.full" });
-  });
-
-  it("clears queued follow-ups when the next Turn cannot start", async () => {
-    let active = { threadId: "thread-1", turnId: "turn-1" } as
-      | { threadId: string; turnId: string }
-      | undefined;
-    const service = new ConversationService(
-      turnPort({
-        startTurn: vi.fn().mockRejectedValue(new Error("start failed")),
-      }),
-      {
-        current: () => ({
-          target,
-          workspaceId: "main",
-          threadId: "thread-1",
-          sessionId: "session-1",
-        }),
-        workspace: () => main,
-      } as unknown as SessionRouter,
-      { activeTurn: () => active } as unknown as ConversationCore,
-      {
-        turnOverrides: () => ({}),
-      } as unknown as ModelSelectionService,
-      queryPort(),
-    );
-    await service.queueFollowUp(target, "第一条");
-    await service.queueFollowUp(target, "第二条");
-    active = undefined;
-
-    await expect(service.handleTurnCompleted(target, "thread-1"))
-      .rejects.toThrow("start failed");
-    active = { threadId: "thread-1", turnId: "turn-2" };
-    await expect(service.queueFollowUp(target, "失败后的新任务"))
-      .resolves.toEqual({ position: 1 });
-  });
-
   it("records a Turn start RPC failure as a model request error", async () => {
     const startTurn = vi.fn().mockRejectedValue(Object.assign(
       new Error("You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage"),
@@ -828,36 +651,6 @@ describe("ConversationService model selection", () => {
       errorType: "usage_limit_reached",
       errorCode: "rpc:-32603",
     }));
-  });
-
-  it("cancels queued follow-ups instead of running them in a different Thread", async () => {
-    let active = { threadId: "thread-1", turnId: "turn-1" } as
-      | { threadId: string; turnId: string }
-      | undefined;
-    let currentThreadId = "thread-1";
-    const service = new ConversationService(
-      turnPort(),
-      {
-        current: () => ({
-          target,
-          workspaceId: "main",
-          threadId: currentThreadId,
-          sessionId: "session-1",
-        }),
-      } as unknown as SessionRouter,
-      { activeTurn: () => active } as unknown as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-    );
-    await service.queueFollowUp(target, "只属于旧会话");
-    active = undefined;
-    currentThreadId = "thread-2";
-
-    await expect(service.handleTurnCompleted(target, "thread-1"))
-      .rejects.toMatchObject({ code: "queue.thread-changed" });
-    active = { threadId: "thread-2", turnId: "turn-2" };
-    await expect(service.queueFollowUp(target, "新会话任务"))
-      .resolves.toEqual({ position: 1 });
   });
 
   it("lists stable installed Skills for the authorized Workspace", async () => {
@@ -2382,14 +2175,23 @@ describe("ConversationService model selection", () => {
     expect(transferBinding).not.toHaveBeenCalled();
   });
 
-  it("does not take over a Thread while either channel has a queued follow-up", async () => {
+  it("does not take over a Thread while its native Queue is non-empty", async () => {
     const previousTarget = {
       surface: "feishu" as const,
       accountId: "tenant-a",
       conversationId: "chat-a",
     };
     const transferBinding = vi.fn();
-    let activeTarget: typeof previousTarget | undefined = previousTarget;
+    const listQueue = vi.fn(async () => ({
+      items: [{
+        id: "queued-1",
+        clientUserMessageId: "client-1",
+        inputType: "text" as const,
+        textPreview: "queued",
+        editable: true,
+      }],
+      nextCursor: null,
+    }));
     const service = new ConversationService(
       turnPort(),
       {
@@ -2410,13 +2212,7 @@ describe("ConversationService model selection", () => {
         transferBinding,
       } as unknown as SessionRouter,
       {
-        activeTurn: (candidate: typeof target | typeof previousTarget) =>
-          activeTarget
-          && candidate.surface === activeTarget.surface
-          && candidate.accountId === activeTarget.accountId
-          && candidate.conversationId === activeTarget.conversationId
-            ? { threadId: "thread-shared", turnId: "turn-1" }
-            : undefined,
+        activeTurn: () => undefined,
       } as unknown as ConversationCore,
       { clear: vi.fn() } as unknown as ModelSelectionService,
       queryPort(),
@@ -2427,13 +2223,21 @@ describe("ConversationService model selection", () => {
         hasPendingInteraction: () => false,
         notifyTransferred: vi.fn(),
       },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { listQueue } as unknown as ThreadQueuePort,
     );
-    await service.queueFollowUp(previousTarget, "下一轮继续");
-    activeTarget = undefined;
 
     await expect(service.resume(target, "thread-shared"))
       .rejects.toMatchObject({ code: "thread.takeover.busy" });
     expect(transferBinding).not.toHaveBeenCalled();
+    expect(listQueue).toHaveBeenCalledWith("thread-shared", { limit: 1 });
   });
 
   it("does not automatically take over another Conversation on the same Surface", async () => {

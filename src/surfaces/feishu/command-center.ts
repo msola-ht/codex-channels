@@ -537,7 +537,7 @@ function renderFeishuCategorizedCommandsCard(
       actionRow(token, [
         ["分叉会话", "fork", "default"],
         ["重命名", "rename", "default"],
-        ["追加下一轮", "queue", "default"],
+        ["写入 App Server Queue", "queue", "default"],
         ["释放占用", "release", "default"],
       ]),
       actionRow(token, [

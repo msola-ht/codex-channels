@@ -23,6 +23,12 @@ type ProviderClientMethod =
   | "unarchiveThread"
   | "startTurn"
   | "steerTurn"
+  | "addQueueItem"
+  | "listQueue"
+  | "updateQueueItem"
+  | "deleteQueueItem"
+  | "reorderQueue"
+  | "startQueueItem"
   | "interruptTurn"
   | "setThreadName"
   | "setThreadPinned"
@@ -297,6 +303,42 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["steerTurn"]>
   ): ReturnType<ProviderClientInstance["steerTurn"]> {
     return this.callForThread(args[0], (client) => client.steerTurn(...args));
+  }
+
+  addQueueItem(
+    ...args: Parameters<ProviderClientInstance["addQueueItem"]>
+  ): ReturnType<ProviderClientInstance["addQueueItem"]> {
+    return this.callForThread(args[0], (client) => client.addQueueItem(...args));
+  }
+
+  listQueue(
+    ...args: Parameters<ProviderClientInstance["listQueue"]>
+  ): ReturnType<ProviderClientInstance["listQueue"]> {
+    return this.callForThread(args[0], (client) => client.listQueue(...args));
+  }
+
+  updateQueueItem(
+    ...args: Parameters<ProviderClientInstance["updateQueueItem"]>
+  ): ReturnType<ProviderClientInstance["updateQueueItem"]> {
+    return this.callForThread(args[0], (client) => client.updateQueueItem(...args));
+  }
+
+  deleteQueueItem(
+    ...args: Parameters<ProviderClientInstance["deleteQueueItem"]>
+  ): ReturnType<ProviderClientInstance["deleteQueueItem"]> {
+    return this.callForThread(args[0], (client) => client.deleteQueueItem(...args));
+  }
+
+  reorderQueue(
+    ...args: Parameters<ProviderClientInstance["reorderQueue"]>
+  ): ReturnType<ProviderClientInstance["reorderQueue"]> {
+    return this.callForThread(args[0], (client) => client.reorderQueue(...args));
+  }
+
+  startQueueItem(
+    ...args: Parameters<ProviderClientInstance["startQueueItem"]>
+  ): ReturnType<ProviderClientInstance["startQueueItem"]> {
+    return this.callForThread(args[0], (client) => client.startQueueItem(...args));
   }
 
   interruptTurn(

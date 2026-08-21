@@ -33,6 +33,7 @@ import {
   formatConversationSessions,
   formatConversationSkills,
   formatConversationThreadSectionDeletePreview,
+  formatConversationThreadQueue,
   formatConversationThreadSections,
   formatConversationUsage,
   formatConversationWorkspacePermissions,
@@ -77,6 +78,9 @@ export async function renderTelegramCommandResult(
         context,
         formatConversationThreadSectionDeletePreview(result),
       );
+      return;
+    case "thread-queue":
+      await replyTelegramPanel(context, formatConversationThreadQueue(result));
       return;
     case "status":
       await replyTelegramPanel(context, formatStatus(result.status));

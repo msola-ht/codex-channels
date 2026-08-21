@@ -119,10 +119,18 @@ kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既
 | --- | --- | --- |
 | `goal.empty` | 目标不能为空 | /goal set 未提供目标 |
 | `goal.usage` | /goal 用法提示 | 参数格式错误 |
-| `queue.usage` | /queue 用法提示 | 参数格式错误 |
-| `queue.inactive` | 当前没有运行中的任务 | 无活动 Turn 时排队 |
-| `queue.full` | 下一 Turn 队列已满，最多 10 条 | 排队消息超过上限 |
-| `queue.thread-changed` | 排队消息所属会话已切换，队列已清空 | 排队期间会话切换 |
+| `queue.usage` | `/queue add|list|update|delete|reorder|start` 用法提示 | 参数格式错误 |
+| `queue.unavailable` | 当前 App Server 不提供持久队列 | Queue 未装配或状态库不可用 |
+| `queue.empty` | App Server Queue 为空 | 启动时没有可用条目 |
+| `queue.busy` | 当前 Thread 有活动或待触发 Turn，请稍后重试 | 启动条目时 App Server 忙 |
+| `queue.pending-overrides` | Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成 | Queue 与下一 Turn 设置同时待处理 |
+| `queue.full` | App Server Queue 已满，最多 100 条 | 原生 Queue 达到容量 |
+| `queue.snapshot.required` | 请先执行 `/queue list` 刷新数字选择快照 | 数字选择器快照过期 |
+| `queue.item-not-found` | 找不到指定 Queue 条目，请使用完整 ID 或刷新列表 | 条目不存在或列表已变化 |
+| `queue.item-not-editable` | 只有纯文本 Queue 条目可以更新 | 条目含非文本输入 |
+| `queue.position.invalid` | Queue 目标位置必须在当前队列范围内 | reorder 位置无效 |
+| `queue.reorder-conflict` | Queue 已发生变化，请刷新列表后重试排序 | 并发 reorder 失败 |
+| `queue.failed` | Queue 操作失败，请稍后重试 | 未分类的 Queue 错误 |
 | `metrics.usage` | /metrics 用法提示 | 参数格式错误 |
 
 ### 提供商、协作模式与计划

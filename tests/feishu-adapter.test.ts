@@ -874,11 +874,17 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
   });
 
-  it("reuses the command form for queued follow-up text", async () => {
+  it("uses the command form for native Queue text", async () => {
     const fixture = createOutbox();
-    const queueFollowUp = vi.fn(async () => ({ position: 1 }));
+    const queueAdd = vi.fn(async () => ({
+      id: "queue-1",
+      clientUserMessageId: "client-1",
+      inputType: "text" as const,
+      textPreview: "继续检查私聊失败路径",
+      editable: true,
+    }));
     const adapter = new FeishuConversationAdapter(
-      { queueFollowUp } as unknown as ConversationUseCases,
+      { queueAdd } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -891,20 +897,21 @@ describe("Feishu conversation adapter", () => {
       kind: "form",
       action: "queue",
       multiline: true,
+      inputPrefix: "add ",
     });
     await adapter.handleCommandCenterAction(
       message.target,
       "queue",
       message.actorId,
-      "继续检查私聊失败路径",
+      "add 继续检查私聊失败路径",
     );
     await fixture.outbox.close();
 
-    expect(queueFollowUp).toHaveBeenCalledWith(
+    expect(queueAdd).toHaveBeenCalledWith(
       message.target,
       "继续检查私聊失败路径",
     );
-    expect(fixture.sent[0]?.text).toContain("已排到下一 Turn");
+    expect(fixture.sent[0]?.text).toContain("已写入 App Server Queue");
   });
 
   it("offers only the existing safe project-rule actions", async () => {
@@ -1219,27 +1226,30 @@ describe("Feishu conversation adapter", () => {
   it("forwards command arguments through the shared Application command service", async () => {
     const fixture = createOutbox();
     const submit = vi.fn();
-    const queueFollowUp = vi.fn(async () => ({
-      threadId: "thread-1",
-      position: 2,
+    const queueAdd = vi.fn(async () => ({
+      id: "queue-2",
+      clientUserMessageId: "client-2",
+      inputType: "text" as const,
+      textPreview: "继续检查参数",
+      editable: true,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit, queueFollowUp } as unknown as ConversationUseCases,
+      { submit, queueAdd } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
 
-    await adapter.handle({ ...message, text: "/queue 继续检查参数" });
+    await adapter.handle({ ...message, text: "/queue add 继续检查参数" });
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
-    expect(queueFollowUp).toHaveBeenCalledWith(
+    expect(queueAdd).toHaveBeenCalledWith(
       message.target,
       "继续检查参数",
     );
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
-      text: "## 已排到下一 Turn，当前第 2 条。队列仅保存在内存，Gateway 重启会清空。",
+      text: expect.stringContaining("已写入 App Server Queue"),
     }]);
   });
 

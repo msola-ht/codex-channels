@@ -199,6 +199,10 @@ export class ModelSelectionService {
     return { ...this.pendingByConversation.get(this.key(target)) };
   }
 
+  hasPending(target: ConversationTarget): boolean {
+    return this.pendingByConversation.has(this.key(target));
+  }
+
   threadStartOptions(target: ConversationTarget) {
     const pending = this.pendingByConversation.get(this.key(target));
     return {

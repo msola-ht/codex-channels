@@ -95,6 +95,10 @@ export class SessionRouter {
     return this.bindings.getByThread(threadId)?.target;
   }
 
+  readThread(threadId: string): Promise<ThreadSnapshot> {
+    return this.codex.readThread(threadId);
+  }
+
   foregroundThreadId(target: ConversationTarget): string | undefined {
     return this.bindings.get(target)?.threadId;
   }

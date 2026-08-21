@@ -11,7 +11,7 @@
 - `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。
 - `conversation-service.ts`：通过稳定的 `ConversationUseCases` 公开 Surface 和命令层所需用例，
   具体 `ConversationService` 负责新建、恢复、切换、归档、固定、原生分区和分页筛选 Thread，提交、steer 或将纯文本
-  排到下一 Turn，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
+  写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
   到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、
@@ -64,6 +64,10 @@
   不接触配置文件。
 - `thread-occupancy-port.ts`：定义渠道 `/release` 使用的 Thread 占用查询与释放窄端口；只返回
   稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。
+- `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例；Application 只接收纯文本写入，
+  通过 Client 返回条目种类、可编辑标记和有界安全预览，不传播官方 `UserInput` 或本地路径。
+  切换到已有 Queue 的 Thread 时沿用该 Thread 自身设置并清除当前会话待生效偏好；后台完成释放前
+  重新查询 Queue 和按 Thread 活动 Turn，避免自动派发期间解除绑定。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
   输入只允许文本、绝对本地图片路径、绝对本地音频路径、已由 Client 从当前 Workspace
@@ -74,11 +78,10 @@
 
 Surface 应依赖 `ConversationUseCases` 驱动会话，不依赖具体服务类，也不应直接拼装 JSON-RPC。
 Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
-下一 Turn 队列按 Conversation 隔离、每个会话最多 10 条且只保存在内存中；`turn.completed`
-后一次启动一条，Thread 变化或启动失败时清空，不能把消息正文写入 StateStore。
-运行中通过 `/resume` 或 `/new` 切换时，Application 只把当前 Thread 转为有界后台绑定，不停止
-Turn；后续普通输入、`/queue` 与 `/stop` 仍只作用于前台 Thread。后台完成事件不消费前台下一
-Turn 队列。
+Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默认以 25 条一页维护五分钟、
+不含正文的 Conversation 选择快照，数字选择器只使用该快照，完整 ID 则重新复核权威列表。
+`thread/queue/changed` 只使快照失效，不触发网络读取；Queue 非空时转移、接管或转后台失败关闭。
+后台 Thread 完成后只释放后台绑定，不由 Gateway 手动派发下一 Turn。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 按当前
 Thread 返回稳定概览与详情；命令结果携带工具、资源或模板的有界分页搜索视图，OAuth 登录不自动

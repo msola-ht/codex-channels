@@ -2,10 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import {
   toConversationInputEvent,
+  toThreadQueueChangedEvent,
   toThreadStateEvent,
 } from "../src/codex-client/index.js";
 
 describe("Notification adapter", () => {
+  it("maps Queue changes to a thread-only snapshot invalidation event", () => {
+    expect(toThreadQueueChangedEvent({
+      method: "thread/queue/changed",
+      params: { threadId: "thread-queue" },
+    })).toEqual({ threadId: "thread-queue" });
+    expect(toThreadQueueChangedEvent({
+      method: "thread/queue/changed",
+      params: { threadId: "/private/user/secret" },
+    })).toEqual({ threadId: "/private/user/secret" });
+    expect(toThreadQueueChangedEvent({
+      method: "thread/queue/changed",
+      params: {},
+    })).toBeUndefined();
+  });
+
   it("maps complete Thread settings to a stable routing event", () => {
     expect(toThreadStateEvent({
       method: "thread/settings/updated",

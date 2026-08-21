@@ -13,6 +13,7 @@ import type {
 } from "../conversation-core/index.js";
 import type {
   ServerNotification,
+  ThreadQueueChangedNotification,
   ThreadGoal as ProtocolThreadGoal,
 } from "../codex-protocol/index.js";
 import type { ThreadStateEvent } from "../session-routing/index.js";
@@ -112,6 +113,16 @@ export function toThreadStateEvent(
     default:
       return undefined;
   }
+}
+
+/** Queue changes only invalidate the local selector snapshot; they never trigger a read. */
+export function toThreadQueueChangedEvent(
+  notification: RpcNotification,
+): { threadId: string } | undefined {
+  if (notification.method !== "thread/queue/changed") return undefined;
+  const params = asRecord(notification.params) as Partial<ThreadQueueChangedNotification> | undefined;
+  const threadId = nonEmptyString(params?.threadId);
+  return threadId ? { threadId } : undefined;
 }
 
 export function toConversationInputEvent(

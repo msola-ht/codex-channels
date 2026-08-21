@@ -44,11 +44,14 @@ describe("Telegram user error renderer", () => {
   });
 
   it.each([
-    ["queue.usage", "用法：/queue <描述>"],
-    ["queue.inactive", "当前没有运行中的任务，请直接发送普通消息"],
-    ["queue.full", "下一 Turn 队列已满，最多 10 条"],
-    ["queue.thread-changed", "排队消息所属会话已切换，队列已清空"],
-  ] as const)("renders %s follow-up queue errors", (code, expected) => {
+    ["queue.usage", "用法：/queue add <文本> | /queue list [页码] | /queue update <完整 ID 或当前列表序号> <文本> | /queue delete <完整 ID 或当前列表序号> | /queue reorder <完整 ID 或当前列表序号> <目标位置> | /queue start [完整 ID 或当前列表序号]"],
+    ["queue.unavailable", "当前 App Server 不提供持久队列"],
+    ["queue.empty", "App Server Queue 为空，请先使用 /queue add 新增条目"],
+    ["queue.busy", "当前 Thread 有活动或待触发 Turn，请稍后重试"],
+    ["queue.pending-overrides", "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成"],
+    ["queue.full", "App Server Queue 已满，最多 100 条"],
+    ["queue.snapshot.required", "数字选择器只对最近五分钟的本会话 Queue 列表有效，请先执行 /queue list"],
+  ] as const)("renders %s native queue errors", (code, expected) => {
     expect(formatTelegramUserFacingError(
       new UserFacingError(code, "opaque-internal-fallback"),
     )).toBe(expected);

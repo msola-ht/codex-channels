@@ -195,11 +195,14 @@
 | 异步命令与 MCP Tool Hook | 让 Hook 在后台执行命令或调用 MCP 工具 | Gateway 不提供 Hook 管理界面；命令和 MCP 调用必须保持现有 Turn、审批和 Surface Actor 归属，不建立旁路执行入口 |
 | Amazon Bedrock Runtime Provider | 通过 AWS 凭据和区域使用内置 Bedrock 模型 | 当前受管 Provider 只有 OpenAI、DeepSeek 与 OpenCode Go；接入 Bedrock 需要新的凭据、模型目录、定价、服务隔离和部署边界，不属于本次协议升级 |
 
-### 已决定采用，待实施
+### 已决定采用
 
 | 上游能力 | 采用决策 | 实施边界 |
 | --- | --- | --- |
-| 实验 `thread/queue/*` 与 `thread/queue/changed` | 用 App Server 持久 Queue 完整替换 Gateway 内存队列，对齐六个原生请求、每 Thread 100 条容量和 25/100 分页 | 不保留第二套队列；Gateway 只负责 Actor、Workspace、Conversation 归属、Provider 路由和安全展示，详细设计见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) |
+| 实验 `thread/queue/*` 与 `thread/queue/changed` | 已用 App Server 持久 Queue 完整替换 Gateway 内存队列，对齐六个原生请求、每 Thread 100 条容量和 25/100 分页 | 不保留第二套队列；Gateway 只负责 Actor、Workspace、Conversation 归属、Provider 路由和安全展示；本地契约与条件式真实 App Server 合同见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) |
+
+### 已决定采用，待实施
+
 | 实验 `thread/revert` 与 `thread/reverted` | 在 Queue 替换完成后独立采用；新建 Thread 使用 paginated history，并通过分页 Turn 列表选择回退边界 | 既有 legacy Thread 不迁移；回退必须一次性确认、执行前复核并明确不会恢复文件，Queue 联合语义通过真实合同前保持失败关闭，详细设计见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) |
 
 ### 纯上游变化

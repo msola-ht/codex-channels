@@ -14,6 +14,7 @@ export const pluginCommandUsageText = "用法：/plugin [health | list [页码] 
 export const sessionCommandUsageText = "用法：/sessions [页码] [filter <all|running|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]";
 export const archivedSessionCommandUsageText = "用法：/archived [页码] [filter <all|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]";
 export const threadSectionCommandUsageText = "用法：/section [list [页码] | create <名称> | rename <ID 或序号> <新名称> | move <ID 或序号> [before <会话选择器>] | remove | delete <ID 或序号> [confirm]]";
+export const threadQueueCommandUsageText = "用法：/queue add <文本> | /queue list [页码] | /queue update <完整 ID 或当前列表序号> <文本> | /queue delete <完整 ID 或当前列表序号> | /queue reorder <完整 ID 或当前列表序号> <目标位置> | /queue start [完整 ID 或当前列表序号]";
 
 export interface McpDetailView {
   section: "tools" | "resources" | "templates";
@@ -192,6 +193,60 @@ export function parseThreadSectionOperation(input: string):
     return { type: "delete", selector: parts[1], confirmed: parts[2] === "confirm" };
   }
   throw new UserFacingError("thread-section.usage", threadSectionCommandUsageText);
+}
+
+export function parseThreadQueueOperation(input: string):
+  | { type: "add"; text: string }
+  | { type: "list"; page: number }
+  | { type: "update"; selector: string; text: string }
+  | { type: "delete"; selector: string }
+  | { type: "reorder"; selector: string; position: number }
+  | { type: "start"; selector?: string } {
+  const normalized = input.trim();
+  const commandMatch = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(normalized);
+  const command = commandMatch?.[1];
+  const rest = commandMatch?.[2]?.trim() ?? "";
+  const usage = (): never => {
+    throw new UserFacingError("queue.usage", threadQueueCommandUsageText);
+  };
+  if (command === "add") {
+    return rest ? { type: "add", text: rest } : usage();
+  }
+  if (command === "list") {
+    const page = rest === "" ? 1 : Number(rest);
+    if (Number.isSafeInteger(page) && page >= 1 && page <= 4) {
+      return { type: "list", page };
+    }
+    return usage();
+  }
+  if (command === "update") {
+    const match = /^(\S+)(?:\s+([\s\S]+))$/u.exec(rest);
+    const selector = match?.[1]?.trim() ?? "";
+    const text = match?.[2]?.trim() ?? "";
+    return selector && text ? { type: "update", selector, text } : usage();
+  }
+  if (command === "delete" && /^\S+$/u.test(rest)) {
+    return { type: "delete", selector: rest };
+  }
+  if (command === "reorder") {
+    const match = /^(\S+)\s+(\S+)$/u.exec(rest);
+    const position = Number(match?.[2]);
+    if (
+      match?.[1]?.trim()
+      && Number.isSafeInteger(position)
+      && position >= 1
+      && position <= 100
+    ) {
+      return { type: "reorder", selector: match[1], position };
+    }
+    return usage();
+  }
+  if (command === "start" && (rest === "" || /^\S+$/u.test(rest))) {
+    return rest === ""
+      ? { type: "start" }
+      : { type: "start", selector: rest };
+  }
+  return usage();
 }
 
 export function parseSkillInvocation(input: string): { selector: string; task: string } {

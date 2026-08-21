@@ -75,6 +75,11 @@ import type {
   TurnInput,
 } from "./turn-port.js";
 import type {
+  ThreadQueueItem,
+  ThreadQueuePage,
+  ThreadQueuePort,
+} from "./thread-queue-port.js";
+import type {
   CollaborationModeSelectionService,
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
@@ -152,6 +157,21 @@ export interface ConversationResumeResult {
   threadId: string;
   backgroundedThreadId?: string;
   transferredFrom?: SurfaceId;
+  queuePending?: boolean;
+}
+
+export interface ThreadQueueListResult {
+  items: ThreadQueueItem[];
+  selectors: string[];
+  page: number;
+  pageCount: number;
+  totalItemCount: number;
+}
+
+export interface ThreadQueueReorderResult {
+  itemId: string;
+  position: number;
+  totalItemCount: number;
 }
 
 export type ConversationQueryPort =
@@ -176,12 +196,11 @@ const builtInAgentRoles: AgentRoleEntry[] = [
   { name: "worker", description: "执行与实现：完成归属明确的实现、修复或测试任务" },
 ];
 
-interface QueuedFollowUp {
-  threadId: string;
-  input: TurnInput[];
-}
-
-const maximumQueuedFollowUpsPerConversation = 10;
+const maximumNativeQueueItems = 100;
+const nativeQueuePageSize = 25;
+const maximumNativeQueuePages = 4;
+const queueSelectionSnapshotLifetimeMs = 5 * 60_000;
+const maximumQueueSelectionSnapshots = 128;
 const maximumBackgroundThreadsPerConversation = 3;
 const maximumConcurrentVisionRecognitions = 2;
 const visionHeartbeatInitialDelayMs = 10_000;
@@ -228,11 +247,20 @@ export interface ConversationUseCases {
     selector: string,
     task: string,
   ): Promise<Submission & { roleName: string }>;
-  queueFollowUp(target: ConversationTarget, value: string): Promise<{ position: number }>;
-  handleTurnCompleted(
+  queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem>;
+  queueList(target: ConversationTarget, page?: number): Promise<ThreadQueueListResult>;
+  queueUpdate(
     target: ConversationTarget,
-    threadId: string,
-  ): Promise<Submission | undefined>;
+    selector: string,
+    value: string,
+  ): Promise<ThreadQueueItem>;
+  queueDelete(target: ConversationTarget, selector: string): Promise<{ deleted: boolean }>;
+  queueReorder(
+    target: ConversationTarget,
+    selector: string,
+    position: number,
+  ): Promise<ThreadQueueReorderResult>;
+  queueStart(target: ConversationTarget, selector?: string): Promise<{ turnId: string }>;
   listSessions(
     target: ConversationTarget,
     options?: ConversationSessionQuery,
@@ -321,7 +349,13 @@ export interface ConversationUseCases {
 export class ConversationService implements ConversationUseCases {
   private readonly locks = new Map<string, Promise<void>>();
   private readonly threadSectionsLockKey = "global:thread-sections";
-  private readonly queuedFollowUps = new Map<string, QueuedFollowUp[]>();
+  private readonly queueSelectionSnapshots = new Map<string, {
+    threadId: string;
+    itemIds: string[];
+    capturedAtMs: number;
+  }>();
+  private readonly pendingBackgroundReleases = new Set<string>();
+  private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
   private activeVisionRecognitions = 0;
 
   constructor(
@@ -344,6 +378,7 @@ export class ConversationService implements ConversationUseCases {
       pluginApiEnabled: false,
     },
     private readonly threadOccupancy?: ThreadOccupancyPort,
+    private readonly threadQueue?: ThreadQueuePort,
   ) {}
 
   releaseThread(
@@ -627,97 +662,152 @@ export class ConversationService implements ConversationUseCases {
     return this.startNewTurn(target, input, clientUserMessageId, identity);
   }
 
-  queueFollowUp(
-    target: ConversationTarget,
-    value: string,
-  ): Promise<{ position: number }> {
-    let input: TurnInput[];
-    try {
-      input = normalizeInput(value);
-    } catch (error) {
-      return Promise.reject(
-        error instanceof Error ? error : new Error("排队输入规范化失败"),
-      );
-    }
-    if (input.length === 0) {
-      return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
-    }
-    return this.locked(target, () => {
-      const active = this.core.activeTurn(target);
-      if (!active) {
-        throw new UserFacingError("queue.inactive", "当前没有运行中的任务");
-      }
-      const key = conversationTargetKey(target);
-      const queued = this.queuedFollowUps.get(key) ?? [];
-      if (queued.length >= maximumQueuedFollowUpsPerConversation) {
-        throw new UserFacingError(
-          "queue.full",
-          `下一 Turn 队列已满，最多 ${maximumQueuedFollowUpsPerConversation} 条`,
+  queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem> {
+    return this.locked(target, async () => {
+      const threadId = this.requireCurrentThread(target);
+      const queue = this.requireThreadQueue();
+      this.rejectQueuePendingOverrides(target);
+      const text = normalizeQueueText(value);
+      try {
+        const item = await queue.addQueueItem(
+          threadId,
+          text,
+          `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
         );
+        this.invalidateQueueSnapshot(threadId);
+        return item;
+      } catch (error) {
+        throw queueUserFacingError(error, "add");
       }
-      queued.push({ threadId: active.threadId, input });
-      this.queuedFollowUps.set(key, queued);
-      return { position: queued.length };
     });
   }
 
-  handleTurnCompleted(
-    target: ConversationTarget,
-    threadId: string,
-  ): Promise<Submission | undefined> {
+  queueList(target: ConversationTarget, page = 1): Promise<ThreadQueueListResult> {
     return this.locked(target, async () => {
-      if (this.router.isBackgroundThread?.(threadId)) {
-        return undefined;
+      if (!Number.isSafeInteger(page) || page < 1 || page > maximumNativeQueuePages) {
+        throw new UserFacingError("queue.usage", "Queue 页码无效");
       }
-      if (this.core.activeTurn(target)) {
-        return undefined;
-      }
-      const key = conversationTargetKey(target);
-      const queued = this.queuedFollowUps.get(key);
-      const next = queued?.[0];
-      if (!next) {
-        return undefined;
-      }
-      if (next.threadId !== threadId) {
-        this.queuedFollowUps.delete(key);
-        throw new UserFacingError(
-          "queue.thread-changed",
-          "排队消息所属的 Codex Thread 已切换",
-        );
-      }
-      const binding = this.router.current(target);
-      if (!binding || binding.threadId !== threadId) {
-        this.queuedFollowUps.delete(key);
-        throw new UserFacingError(
-          "queue.thread-changed",
-          "排队消息所属的 Codex Thread 已切换",
-        );
-      }
-      const workspace = this.router.workspace(target);
-      const overrides = this.turnOverrides(target);
-      let result;
-      try {
-        result = await this.codex.startTurn(
-          threadId,
-          next.input,
-          `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
-          workspace.cwd,
-          overrides,
-        );
-      } catch (error) {
-        this.recordTurnError("start", target, threadId, null, error);
-        this.queuedFollowUps.delete(key);
-        throw error;
-      }
-      queued.shift();
-      if (queued.length === 0) {
-        this.queuedFollowUps.delete(key);
-      }
-      this.models.markApplied(target);
-      this.collaborationModes?.markApplied(target);
-      this.core.markTurnStarted(target, threadId, result.turnId);
-      return { threadId, turnId: result.turnId, steered: false };
+      const threadId = this.requireCurrentThread(target);
+      const snapshot = await this.readQueueSnapshot(target, threadId);
+      const pageCount = Math.max(1, Math.ceil(snapshot.items.length / nativeQueuePageSize));
+      const start = (page - 1) * nativeQueuePageSize;
+      const items = page <= pageCount
+        ? snapshot.items.slice(start, start + nativeQueuePageSize)
+        : [];
+      return {
+        items,
+        selectors: items.map((_item, index) => String(start + index + 1)),
+        page,
+        pageCount,
+        totalItemCount: snapshot.items.length,
+      };
     });
+  }
+
+  queueUpdate(
+    target: ConversationTarget,
+    selector: string,
+    value: string,
+  ): Promise<ThreadQueueItem> {
+    return this.locked(target, async () => {
+      const threadId = this.requireCurrentThread(target);
+      const queue = this.requireThreadQueue();
+      const item = await this.resolveQueueSelector(target, threadId, selector);
+      if (!item.editable) {
+        throw new UserFacingError(
+          "queue.item-not-editable",
+          "该 Queue 条目不是纯文本，不能更新",
+        );
+      }
+      const text = normalizeQueueText(value);
+      try {
+        const updated = await queue.updateQueueItem(threadId, item.id, text);
+        this.invalidateQueueSnapshot(threadId);
+        return updated;
+      } catch (error) {
+        throw queueUserFacingError(error, "update");
+      }
+    });
+  }
+
+  queueDelete(target: ConversationTarget, selector: string): Promise<{ deleted: boolean }> {
+    return this.locked(target, async () => {
+      const threadId = this.requireCurrentThread(target);
+      const queue = this.requireThreadQueue();
+      const item = await this.resolveQueueSelector(target, threadId, selector);
+      try {
+        const result = await queue.deleteQueueItem(threadId, item.id);
+        this.invalidateQueueSnapshot(threadId);
+        return result;
+      } catch (error) {
+        throw queueUserFacingError(error, "delete");
+      }
+    });
+  }
+
+  queueReorder(
+    target: ConversationTarget,
+    selector: string,
+    position: number,
+  ): Promise<ThreadQueueReorderResult> {
+    return this.locked(target, async () => {
+      const threadId = this.requireCurrentThread(target);
+      const queue = this.requireThreadQueue();
+      const resolved = await this.resolveQueueSelectorSnapshot(target, threadId, selector);
+      const snapshot = resolved.snapshot;
+      const item = resolved.item;
+      if (!Number.isSafeInteger(position) || position < 1 || position > snapshot.items.length) {
+        throw new UserFacingError("queue.position.invalid", "Queue 目标位置超出当前队列范围");
+      }
+      const ids = snapshot.items.map((entry) => entry.id).filter((id) => id !== item.id);
+      ids.splice(position - 1, 0, item.id);
+      try {
+        await queue.reorderQueue(threadId, ids);
+        this.invalidateQueueSnapshot(threadId);
+        return { itemId: item.id, position, totalItemCount: snapshot.items.length };
+      } catch (error) {
+        this.invalidateQueueSnapshot(threadId);
+        throw queueUserFacingError(error, "reorder");
+      }
+    });
+  }
+
+  queueStart(target: ConversationTarget, selector?: string): Promise<{ turnId: string }> {
+    return this.locked(target, async () => {
+      const threadId = this.requireCurrentThread(target);
+      const queue = this.requireThreadQueue();
+      this.rejectQueuePendingOverrides(target);
+      let queuedSubmissionId: string | undefined;
+      if (selector?.trim()) {
+        queuedSubmissionId = (await this.resolveQueueSelectorSnapshot(target, threadId, selector)).item.id;
+      }
+      try {
+        const result = await queue.startQueueItem(threadId, queuedSubmissionId);
+        this.invalidateQueueSnapshot(threadId);
+        return result;
+      } catch (error) {
+        throw queueUserFacingError(error, "start");
+      }
+    });
+  }
+
+  invalidateQueueSnapshot(threadId: string): void {
+    for (const [key, snapshot] of this.queueSelectionSnapshots) {
+      if (snapshot.threadId === threadId) {
+        this.queueSelectionSnapshots.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Clear only the pending selections owned by the Conversation whose current
+   * Thread started. Background or unrelated Threads must not consume them.
+   */
+  clearPendingSelectionsForThread(threadId: string): void {
+    const target = this.router.targetForThread(threadId);
+    if (target && this.router.current(target)?.threadId === threadId) {
+      this.clearPendingSelections(target);
+    }
   }
 
   async listSessions(
@@ -939,13 +1029,20 @@ export class ConversationService implements ConversationUseCases {
         }
         this.requireIdle(owner);
         this.requireIdle(target);
-        if (this.hasQueuedFollowUps(owner) || this.hasQueuedFollowUps(target)) {
+        const destination = this.router.current(target);
+        const ownerHasQueue = await this.probeNativeQueueItems(selected.id);
+        const destinationHasQueue = destination
+          && destination.threadId !== selected.id
+          ? await this.probeNativeQueueItems(destination.threadId)
+          : false;
+        this.requireIdle(owner);
+        this.requireIdle(target);
+        if (ownerHasQueue || destinationHasQueue) {
           throw new UserFacingError(
             "thread.takeover.busy",
             "原渠道或当前渠道仍有排队消息，暂不能接管",
           );
         }
-        const destination = this.router.current(target);
         if (
           transfers.hasPendingInteraction(selected.id)
           || (
@@ -974,7 +1071,6 @@ export class ConversationService implements ConversationUseCases {
     }
     return this.locked(target, async () => {
       const modelPreference = this.models.capturePreference?.(target);
-      const active = this.core.activeTurn(target);
       const currentOwner = this.router.targetForThread(selected.id);
       if (
         currentOwner
@@ -986,13 +1082,16 @@ export class ConversationService implements ConversationUseCases {
         );
       }
       const current = this.router.current?.(target);
-      const preserveCurrent = active !== undefined && current?.threadId !== selected.id;
-      if (preserveCurrent && this.hasQueuedFollowUps(target)) {
+      const leavesCurrent = current !== undefined && current.threadId !== selected.id;
+      if (leavesCurrent && current && await this.probeNativeQueueItems(current.threadId)) {
         throw new UserFacingError(
           "conversation.background-queued",
           "当前任务仍有下一 Turn 排队消息，暂不能转入后台",
         );
       }
+      const selectedHasQueue = await this.probeNativeQueueItems(selected.id);
+      const active = this.core.activeTurn(target);
+      const preserveCurrent = active !== undefined && leavesCurrent;
       if (
         preserveCurrent
         && !this.router.isBackgroundThread?.(selected.id)
@@ -1006,10 +1105,15 @@ export class ConversationService implements ConversationUseCases {
       const binding = preserveCurrent
         ? await this.router.resume(target, selected.id, true)
         : await this.router.resume(target, selected.id);
-      this.restoreSelectionsAfterBindingChange(target, modelPreference);
+      if (selectedHasQueue) {
+        this.clearPendingSelections(target);
+      } else {
+        this.restoreSelectionsAfterBindingChange(target, modelPreference);
+      }
       return {
         threadId: binding.threadId,
         ...(preserveCurrent && current ? { backgroundedThreadId: current.threadId } : {}),
+        ...(selectedHasQueue ? { queuePending: true } : {}),
       };
     });
   }
@@ -1017,13 +1121,14 @@ export class ConversationService implements ConversationUseCases {
   newSession(target: ConversationTarget): Promise<string | undefined> {
     return this.locked(target, async () => {
       const modelPreference = this.models.capturePreference?.(target);
-      const active = this.core.activeTurn(target);
-      if (active && this.hasQueuedFollowUps(target)) {
+      const current = this.router.current?.(target);
+      if (current && await this.probeNativeQueueItems(current.threadId)) {
         throw new UserFacingError(
           "conversation.background-queued",
           "当前任务仍有下一 Turn 排队消息，暂不能转入后台",
         );
       }
+      const active = this.core.activeTurn(target);
       if (
         active
         && (this.router.backgroundBindings?.(target).length ?? 0) >= maximumBackgroundThreadsPerConversation
@@ -1051,10 +1156,19 @@ export class ConversationService implements ConversationUseCases {
   unarchive(target: ConversationTarget, selector: string): Promise<string> {
     return this.locked(target, async () => {
       this.requireIdle(target);
+      const current = this.router.current?.(target);
+      if (current && await this.probeNativeQueueItems(current.threadId)) {
+        throw new UserFacingError(
+          "conversation.background-queued",
+          "当前会话仍有排队消息，暂不能切换 Thread",
+        );
+      }
+      this.requireIdle(target);
       const sessions = pinnedFirst(
         await this.router.list(target, { archived: true }),
       );
       const selected = resolveThread(sessions, selector.trim(), "unarchive");
+      this.requireIdle(target);
       const binding = await this.router.unarchive(target, selected.id);
       this.clearPendingSelections(target);
       return binding.threadId;
@@ -1081,6 +1195,15 @@ export class ConversationService implements ConversationUseCases {
       }
       const selected = this.router.resolveWorkspace(selector);
       const currentWorkspaceId = this.router.workspace(target).id;
+      const current = this.router.current?.(target);
+      if (current && currentWorkspaceId !== selected.id
+        && await this.probeNativeQueueItems(current.threadId)) {
+        throw new UserFacingError(
+          "conversation.background-queued",
+          "当前会话仍有排队消息，暂不能切换 Workspace",
+        );
+      }
+      this.requireIdle(target);
       const modelPreference = selected.id === currentWorkspaceId
         ? undefined
         : this.models.capturePreference?.(target);
@@ -1160,7 +1283,14 @@ export class ConversationService implements ConversationUseCases {
   fork(target: ConversationTarget): Promise<string> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      await this.router.ensure(target);
+      const current = await this.router.ensure(target);
+      if (await this.probeNativeQueueItems(current.threadId)) {
+        throw new UserFacingError(
+          "conversation.background-queued",
+          "当前会话仍有排队消息，暂不能分叉 Thread",
+        );
+      }
+      this.requireIdle(target);
       const binding = await this.router.fork(target);
       this.clearPendingSelections(target);
       return binding.threadId;
@@ -1170,7 +1300,17 @@ export class ConversationService implements ConversationUseCases {
   togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      return this.requireCollaborationModes().toggle(target);
+      await this.rejectQueueWhenPendingOverrideChanges(target);
+      try {
+        const state = await this.requireCollaborationModes().toggle(target);
+        await this.rejectQueueWhenPendingOverrideChanges(target);
+        return state;
+      } catch (error) {
+        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
+          this.clearPendingSelections(target);
+        }
+        throw error;
+      }
     });
   }
 
@@ -1181,7 +1321,14 @@ export class ConversationService implements ConversationUseCases {
     }
     return this.locked(target, async () => {
       this.requireIdle(target);
+      await this.rejectQueueWhenPendingOverrideChanges(target);
       await this.requireCollaborationModes().select(target, "plan");
+      try {
+        await this.rejectQueueWhenPendingOverrideChanges(target);
+      } catch (error) {
+        this.clearPendingSelections(target);
+        throw error;
+      }
       return this.startNewTurn(
         target,
         [{ type: "text", text: normalized }],
@@ -1212,14 +1359,34 @@ export class ConversationService implements ConversationUseCases {
   selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      return this.models.selectModel(target, selector);
+      await this.rejectQueueWhenPendingOverrideChanges(target);
+      try {
+        const state = await this.models.selectModel(target, selector);
+        await this.rejectQueueWhenPendingOverrideChanges(target);
+        return state;
+      } catch (error) {
+        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
+          this.clearPendingSelections(target);
+        }
+        throw error;
+      }
     });
   }
 
   selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      return this.models.selectEffort(target, selector);
+      await this.rejectQueueWhenPendingOverrideChanges(target);
+      try {
+        const state = await this.models.selectEffort(target, selector);
+        await this.rejectQueueWhenPendingOverrideChanges(target);
+        return state;
+      } catch (error) {
+        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
+          this.clearPendingSelections(target);
+        }
+        throw error;
+      }
     });
   }
 
@@ -1229,7 +1396,17 @@ export class ConversationService implements ConversationUseCases {
     }
     return this.locked(target, async () => {
       this.requireIdle(target);
-      return this.models.selectFastMode(target, selector);
+      await this.rejectQueueWhenPendingOverrideChanges(target);
+      try {
+        const state = await this.models.selectFastMode(target, selector);
+        await this.rejectQueueWhenPendingOverrideChanges(target);
+        return state;
+      } catch (error) {
+        if (error instanceof UserFacingError && error.code === "queue.pending-overrides") {
+          this.clearPendingSelections(target);
+        }
+        throw error;
+      }
     });
   }
 
@@ -1683,6 +1860,234 @@ export class ConversationService implements ConversationUseCases {
     this.collaborationModes?.clear(target);
   }
 
+  private requireThreadQueue(): ThreadQueuePort {
+    if (!this.threadQueue) {
+      throw new UserFacingError(
+        "queue.unavailable",
+        "当前 App Server 不提供持久队列",
+      );
+    }
+    return this.threadQueue;
+  }
+
+  private requireCurrentThread(target: ConversationTarget): string {
+    const binding = this.router.current(target);
+    if (!binding) {
+      throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+    }
+    return binding.threadId;
+  }
+
+  private rejectQueuePendingOverrides(target: ConversationTarget): void {
+    if (this.models.hasPending?.(target) || this.collaborationModes?.hasPending?.(target)) {
+      throw new UserFacingError(
+        "queue.pending-overrides",
+        "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成",
+      );
+    }
+  }
+
+  private async rejectQueueWhenPendingOverrideChanges(target: ConversationTarget): Promise<void> {
+    const threadId = this.router.current?.(target)?.threadId;
+    if (!threadId || !this.threadQueue) return;
+    if (await this.probeNativeQueueItems(threadId)) {
+      throw new UserFacingError(
+        "queue.pending-overrides",
+        "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成",
+      );
+    }
+  }
+
+  private async readQueueSnapshot(
+    target: ConversationTarget,
+    threadId: string,
+  ): Promise<{ items: ThreadQueueItem[] }> {
+    const queue = this.requireThreadQueue();
+    let response: ThreadQueuePage;
+    try {
+      response = await queue.listQueue(threadId, { limit: maximumNativeQueueItems });
+    } catch (error) {
+      throw queueUserFacingError(error, "list");
+    }
+    if (response.items.length > maximumNativeQueueItems || response.nextCursor !== null) {
+      throw new UserFacingError(
+        "queue.unavailable",
+        "当前 App Server 返回了不完整或超过 100 条的 Queue 页面",
+      );
+    }
+    const items = response.items;
+    this.rememberQueueSelectionSnapshot(target, threadId, items.map((item) => item.id));
+    return { items };
+  }
+
+  private async resolveQueueSelectorSnapshot(
+    target: ConversationTarget,
+    threadId: string,
+    selector: string,
+  ): Promise<{ snapshot: { items: ThreadQueueItem[] }; item: ThreadQueueItem }> {
+    const normalized = selector.trim();
+    let selectedId = normalized;
+    if (/^\d+$/u.test(normalized)) {
+      const selection = this.queueSelectionSnapshots.get(conversationTargetKey(target));
+      if (
+        !selection
+        || selection.threadId !== threadId
+        || Date.now() - selection.capturedAtMs > queueSelectionSnapshotLifetimeMs
+      ) {
+        throw new UserFacingError(
+          "queue.snapshot.required",
+          "数字选择器只对最近五分钟的 Queue 列表有效，请先执行 /queue list",
+        );
+      }
+      const index = Number(normalized) - 1;
+      selectedId = Number.isSafeInteger(index) && index >= 0
+        ? selection.itemIds[index] ?? ""
+        : "";
+    }
+    const snapshot = await this.readQueueSnapshot(target, threadId);
+    const item = snapshot.items.find((candidate) => candidate.id === selectedId);
+    if (!item) {
+      throw new UserFacingError(
+        "queue.item-not-found",
+        "找不到指定 Queue 条目，请使用完整 ID 或刷新 /queue list",
+      );
+    }
+    return { snapshot, item };
+  }
+
+  private async resolveQueueSelector(
+    target: ConversationTarget,
+    threadId: string,
+    selector: string,
+  ): Promise<ThreadQueueItem> {
+    return (await this.resolveQueueSelectorSnapshot(target, threadId, selector)).item;
+  }
+
+  private rememberQueueSelectionSnapshot(
+    target: ConversationTarget,
+    threadId: string,
+    itemIds: string[],
+  ): void {
+    const now = Date.now();
+    for (const [key, snapshot] of this.queueSelectionSnapshots) {
+      if (now - snapshot.capturedAtMs > queueSelectionSnapshotLifetimeMs) {
+        this.queueSelectionSnapshots.delete(key);
+      }
+    }
+    const key = conversationTargetKey(target);
+    this.queueSelectionSnapshots.delete(key);
+    this.queueSelectionSnapshots.set(key, {
+      threadId,
+      itemIds,
+      capturedAtMs: now,
+    });
+    while (this.queueSelectionSnapshots.size > maximumQueueSelectionSnapshots) {
+      const oldest = this.queueSelectionSnapshots.keys().next().value;
+      if (oldest === undefined) break;
+      this.queueSelectionSnapshots.delete(oldest);
+    }
+  }
+
+  private async probeNativeQueueItems(threadId: string): Promise<boolean> {
+    const queue = this.threadQueue;
+    if (!queue) return false;
+    try {
+      const page = await queue.listQueue(threadId, { limit: 1 });
+      return page.items.length > 0 || page.nextCursor !== null;
+    } catch (error) {
+      const mapped = queueUserFacingError(error, "list");
+      if (mapped.code === "queue.unavailable") return false;
+      throw mapped;
+    }
+  }
+
+  async releaseBackgroundIfComplete(
+    threadId: string,
+    options: { dispatchQueued?: boolean } = {},
+  ): Promise<boolean> {
+    const current = this.backgroundReleaseAttempts.get(threadId);
+    if (current) return current;
+    const attempt = this.performBackgroundRelease(threadId, options);
+    this.backgroundReleaseAttempts.set(threadId, attempt);
+    try {
+      return await attempt;
+    } finally {
+      if (this.backgroundReleaseAttempts.get(threadId) === attempt) {
+        this.backgroundReleaseAttempts.delete(threadId);
+      }
+    }
+  }
+
+  private async performBackgroundRelease(
+    threadId: string,
+    options: { dispatchQueued?: boolean },
+  ): Promise<boolean> {
+    if (!this.router.isBackgroundThread(threadId)) {
+      this.pendingBackgroundReleases.delete(threadId);
+      return false;
+    }
+    this.pendingBackgroundReleases.add(threadId);
+    if (options.dispatchQueued !== false) {
+      const queueState = await this.dispatchNativeQueueBeforeRelease(threadId);
+      if (queueState !== "empty" && queueState !== "unavailable") {
+        return false;
+      }
+    } else if (await this.probeNativeQueueItems(threadId)) {
+      return false;
+    }
+    const active = this.core.activeTurnForThread(threadId);
+    if (active) {
+      return false;
+    }
+    const readThread = this.router.readThread?.bind(this.router);
+    if (readThread) {
+      const snapshot = await readThread(threadId);
+      if (snapshot.status.type === "active") {
+        return false;
+      }
+    }
+    await this.router.releaseBackground(threadId);
+    this.pendingBackgroundReleases.delete(threadId);
+    return true;
+  }
+
+  /**
+   * Retry a completion that raced the App Server's idle transition. The caller
+   * must invoke this from a later lifecycle event; this method never waits in
+   * the App Server notification reader itself.
+   */
+  retryPendingBackgroundRelease(threadId: string): Promise<boolean> {
+    if (!this.pendingBackgroundReleases.has(threadId)) {
+      return Promise.resolve(false);
+    }
+    return this.releaseBackgroundIfComplete(threadId);
+  }
+
+  private async dispatchNativeQueueBeforeRelease(
+    threadId: string,
+  ): Promise<"empty" | "started" | "busy" | "unavailable"> {
+    const queue = this.threadQueue;
+    if (!queue) return "unavailable";
+    try {
+      // `thread/queue/start` takes the same per-Thread dispatch lock as the
+      // 0.148 idle contributor. It is used here as a completion barrier: an
+      // already queued item is either started or observed empty only after
+      // the native dispatcher has finished its own start/delete sequence.
+      await queue.startQueueItem(threadId);
+      return "started";
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      if (message.includes("queue is empty")) {
+        return "empty";
+      }
+      const mapped = queueUserFacingError(error, "start");
+      if (mapped.code === "queue.unavailable") return "unavailable";
+      if (mapped.code === "queue.busy") return "busy";
+      if (mapped.code === "queue.item-not-found") return "busy";
+      throw mapped;
+    }
+  }
+
   private restoreSelectionsAfterBindingChange(
     target: ConversationTarget,
     modelPreference: ModelSelectionPreference | undefined,
@@ -1697,11 +2102,7 @@ export class ConversationService implements ConversationUseCases {
 
   private clearConversationState(target: ConversationTarget): void {
     this.clearPendingSelections(target);
-    this.queuedFollowUps.delete(conversationTargetKey(target));
-  }
-
-  private hasQueuedFollowUps(target: ConversationTarget): boolean {
-    return (this.queuedFollowUps.get(conversationTargetKey(target))?.length ?? 0) > 0;
+    this.queueSelectionSnapshots.delete(conversationTargetKey(target));
   }
 
   private requireCollaborationModes(): CollaborationModeSelectionService {
@@ -1850,6 +2251,58 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
     input.push({ type: "localAudio", path: audio.path });
   }
   return input;
+}
+
+function normalizeQueueText(value: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new UserFacingError("message.empty", "消息不能为空");
+  }
+  return normalized;
+}
+
+function queueUserFacingError(
+  error: unknown,
+  operation: "add" | "list" | "update" | "delete" | "reorder" | "start",
+): UserFacingError {
+  if (error instanceof UserFacingError) return error;
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("user message queue is unavailable")) {
+    return new UserFacingError("queue.unavailable", "当前 App Server 不提供持久队列");
+  }
+  if (message.includes("queue is empty")) {
+    return new UserFacingError("queue.empty", "App Server Queue 为空");
+  }
+  if (message.includes("cannot contain more than 100")) {
+    return new UserFacingError("queue.full", "原生 Queue 已达到 100 条上限");
+  }
+  if (message.includes("active or pending turn")) {
+    return new UserFacingError(
+      "queue.busy",
+      "当前 Thread 有活动或待触发 Turn，请稍后重试",
+    );
+  }
+  if (message.includes("queued submission not found")) {
+    return new UserFacingError(
+      "queue.item-not-found",
+      "找不到指定 Queue 条目，请刷新 /queue list",
+    );
+  }
+  if (message.includes("reorder must include every")) {
+    return new UserFacingError(
+      "queue.reorder-conflict",
+      "Queue 已发生变化，请刷新 /queue list 后重试排序",
+    );
+  }
+  const labels: Record<typeof operation, string> = {
+    add: "新增",
+    list: "读取",
+    update: "更新",
+    delete: "删除",
+    reorder: "排序",
+    start: "启动",
+  };
+  return new UserFacingError("queue.failed", `Queue ${labels[operation]}失败，请稍后重试`);
 }
 
 export function resolveThread<T extends Pick<ConversationSession, "id" | "name">>(
