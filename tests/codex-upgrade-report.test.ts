@@ -36,7 +36,7 @@ const {
   renderUpgradeSummary,
 } = reportHelpers;
 const { analyzeProtocolDiff } = protocolAnalysisHelpers;
-const { runUpgradeValidationStages } = validationHelpers;
+const { defaultUpgradeValidationStages, runUpgradeValidationStages } = validationHelpers;
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
@@ -46,6 +46,22 @@ afterEach(() => {
 });
 
 describe("Codex release upgrade preview", () => {
+  it("keeps release-only README synchronization outside the document-free preview", () => {
+    const unitTests = defaultUpgradeValidationStages.find(
+      (stage: { id: string }) => stage.id === "unit-tests",
+    );
+
+    expect(unitTests).toMatchObject({
+      name: "测试（不含发布前 README 同步）",
+      args: [
+        "test",
+        "--",
+        "--exclude",
+        "tests/release-readme-sync.test.ts",
+      ],
+    });
+  });
+
   it("accepts only the requested official stable release", () => {
     expect(validateOfficialRelease({
       tag_name: "rust-v0.146.0",

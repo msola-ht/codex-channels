@@ -218,7 +218,7 @@ jobs:
           PR_BODY: |
             这是由 Codex 正式版升级工作流生成的 Draft PR。
 
-            自动阶段已经完成协议生成、类型检查、Lint、全量测试、真实 App Server 合同、构建和打包验证。完整 Patch、协议影响、结构化结果与逐阶段日志保存在本次运行的 Artifact 中。
+            自动阶段已经完成协议生成、类型检查、Lint、测试（不含发布前 README 同步）、真实 App Server 合同、构建和打包验证。完整 Patch、协议影响、结构化结果与逐阶段日志保存在本次运行的 Artifact 中。
 
             官方发布说明：${{ needs.preview.outputs.release_url }}
 
