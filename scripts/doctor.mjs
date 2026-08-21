@@ -307,7 +307,7 @@ if (document) {
   note(
     "Plugin API",
     pluginApiEnabled
-      ? "已启用（开发中；Codex 0.147.0 暂不保证生产兼容性）"
+      ? "已启用（开发中；Codex 0.148.0 暂不保证生产兼容性）"
       : "已关闭",
     pluginApiEnabled
       ? "如需关闭，在 [experimental] 中设置 plugin_api = false 后重启 Gateway"

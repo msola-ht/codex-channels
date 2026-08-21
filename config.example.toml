@@ -50,7 +50,7 @@ reasoning = true
 price_currency = "cny"
 
 [experimental]
-# Codex 0.147.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。
+# Codex 0.148.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。
 plugin_api = false
 
 [thread_sections]

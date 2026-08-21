@@ -47,7 +47,7 @@ jobs:
         run: npm run verify:commit
 
   app-server-contract:
-    name: Codex 0.147.0 App Server contract
+    name: Codex 0.148.0 App Server contract
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -67,7 +67,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Install locked Codex CLI
-        run: npm install --global @openai/codex@0.147.0
+        run: npm install --global @openai/codex@0.148.0
 
       - name: Check protocol version
         run: npm run protocol:check

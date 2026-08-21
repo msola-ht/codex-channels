@@ -101,7 +101,7 @@ Surface -> Application/Core <- Codex Client
 - 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
-- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.147.0` 只有两个
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.148.0` 只有两个
   受控例外。官方 Plan 模式只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`，必须通过
   `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server

@@ -308,7 +308,7 @@ function summarizeResponseRecord(value) {
 function baseInfo() {
   return {
     channel_version: "2.4.6",
-    bot_agent: "CodexConnect/0.147.0",
+    bot_agent: "CodexConnect/0.148.0",
   };
 }
 

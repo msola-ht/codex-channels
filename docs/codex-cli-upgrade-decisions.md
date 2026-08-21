@@ -161,6 +161,51 @@
 - Windows 进程与路径修复、Bedrock 缓存搜索和远端压缩、依赖升级、macOS 公证及发布归档调整
   不改变当前 Gateway 的公开接口或 npm 分发流程。
 
+## 0.148.0
+
+- 官方 Release：[`rust-v0.148.0`](https://github.com/openai/codex/releases/tag/rust-v0.148.0)
+- 项目开发基线：Gateway、生成协议、真实 App Server 合同与固定源码索引锁定 `0.148.0`；
+  README 当前正式版和安装命令在发布准备完成前继续保留 `0.147.0`
+- 评估范围：持久 Thread 提交队列、Thread 历史回退、进程诊断、Thread 用量、图片生成额度失败、
+  模型与自动审核元数据、MCP OAuth 与 Plugin 归属、Hook 扩展、Bedrock，以及会话恢复和安全修复
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 0.148.0 精确协议基线 | 让 Gateway、App Server 和生成类型保持在同一正式版本 | 重新生成协议并同步 Gateway、CI、固定源码与真实合同版本；不保留 0.147.0 兼容分支 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`ci.yml`](../.github/workflows/ci.yml)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 图片生成额度失败摘要 | 把 `ImageGenerationItem.failure=usageLimitExceeded` 作为结构化失败返回 | 只显示有界的“图片生成额度已用尽”，不外发上游内部限额 ID，不推断未声明的重置时间单位；成功产物仍只使用官方 `savedPath` | [`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)、[`operation-adapter.test.ts`](../tests/operation-adapter.test.ts) |
+| 微信运行版本标识统一 | 让微信 `base_info.bot_agent` 与实际 Gateway 包版本一致 | 生产客户端从统一 `src/version.json` 读取版本，避免后续 CLI 升级遗漏手写常量；独立合同探针继续显式锁定当前版本 | [`protocol-client.ts`](../src/surfaces/weixin/protocol-client.ts)、[`weixin-protocol-client.test.ts`](../tests/weixin-protocol-client.test.ts) |
+
+### 待评估
+
+| 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
+| --- | --- | --- | --- |
+| `account/usage/read.threadId` 与 `threadUsage` | 查询单个 OpenAI Thread 的估算 Credit 或费用分解 | 可在会话状态中补充服务端估算，而不是只显示 Gateway 自有请求统计 | 当前 `/metrics` 还要统一处理 OpenAI、DeepSeek 与 OpenCode Go，不能把单 Provider 可选估算混成统一账单；等产品明确展示口径和第三方 Provider 降级方式后再采用 |
+| 模型 `multiAgentVersion`、退休时间与自动审核要求 | 描述模型的多代理运行时、退役时间和受管自动审核约束 | 可改进模型目录说明和受管环境提示 | 当前模型路由不依赖这些字段，审批仍由 Surface Actor 显式决定；只有字段影响模型可选性、请求合法性或必须展示的安全约束时再映射到 Application |
+| MCP Server `pluginId` 与单次 OAuth 注册策略 | 标识 MCP 的 Plugin 所有者，并允许登录时选择自动发现、动态注册或预注册客户端 | 可在 Plugin 调试和 OAuth 故障排查中说明来源 | 当前 OAuth 自动发现路径工作正常，Plugin API 仍为受开关约束的调试能力；没有用户选择和凭据配置边界前不扩展参数或展示 |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| 实验 `thread/queue/*` 与 `thread/queue/changed` | 在 App Server 中持久保存、排序并启动待提交的用户消息 | Gateway 已有按 Conversation 隔离、明确提示且重启可清空的有界补充输入队列；接入实验持久队列会形成两套排队语义，并改变现有隐私、重启和多客户端协调边界 |
+| 实验 `thread/revert` 与 `thread/reverted` | 持久回退 Thread 历史并重新加载订阅 | 这是破坏性历史写操作，需要新的显式确认、授权、并发客户端和状态恢复设计；不能仅因生成类型存在就暴露 |
+| 实验 `server/diagnostics` | 读取 App Server 进程、资源和活动快照 | 当前 Doctor 已有受控健康检查，新增进程诊断没有公开需求，还会扩大运维信息暴露面 |
+| 异步命令与 MCP Tool Hook | 让 Hook 在后台执行命令或调用 MCP 工具 | Gateway 不提供 Hook 管理界面；命令和 MCP 调用必须保持现有 Turn、审批和 Surface Actor 归属，不建立旁路执行入口 |
+| Amazon Bedrock Runtime Provider | 通过 AWS 凭据和区域使用内置 Bedrock 模型 | 当前受管 Provider 只有 OpenAI、DeepSeek 与 OpenCode Go；接入 Bedrock 需要新的凭据、模型目录、定价、服务隔离和部署边界，不属于本次协议升级 |
+
+### 纯上游变化
+
+- 模型切换和活动 Turn 设置保持稳定、恢复会话时还原持久 CWD 与审批策略、Provider 临时中断重连、
+  MCP OAuth 重新认证恢复，均由锁定 App Server 提供；现有 Gateway 路由和审批接口无需复制实现。
+- Linux 与 Windows 对拒绝或不可读路径继续失败关闭；Gateway 保留自身 Workspace 授权、Socket 权限、
+  日志脱敏和显式审批边界。
+- TUI Markdown 导出、`codex exec fork`、恢复选择器归档、启动时草拟提示词和 Thread 费用状态属于
+  原生 Codex 客户端；Gateway 不实现第二套终端会话界面。
+- Hook、Skill Creator、TUI 渲染、Windows 运行时与发布打包修复不改变 Gateway 的公开接口、
+  持久化 Schema 或 npm 分发流程。
+
 ## 后续使用
 
 处理下一个正式版本时：

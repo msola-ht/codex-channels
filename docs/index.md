@@ -1,23 +1,23 @@
 # Codex 官方文档与源码索引
 
-本页用于定位 Codex App Server 的官方说明、`0.147.0` 固定版本源码，以及本项目对应实现。
+本页用于定位 Codex App Server 的官方说明、`0.148.0` 固定版本源码，以及本项目对应实现。
 它是查询入口，不替代生成协议类型，也不声明本项目支持官方协议的全部能力。
 
 ## 版本与数字
 
 当前索引对应 [`src/codex-protocol/version.json`](../src/codex-protocol/version.json) 锁定的
-`codex-cli 0.147.0`。生成时启用实验类型，但业务只采用固定版本官方 Plan 模式所需的
+`codex-cli 0.148.0`。生成时启用实验类型，但业务只采用固定版本官方 Plan 模式所需的
 `collaborationMode/list`、`turn/start.collaborationMode`，以及由配置开关控制的开发中
 `plugin/installed` 与 Turn `mention` 调用；其他实验类型不表示已支持。
 
 | 数量 | 是什么 | 事实来源 |
 | ---: | --- | --- |
-| 723 | 当前 CLI 生成的 TypeScript 文件总数 | `src/codex-protocol/generated/` |
-| 97 | 生成目录根层的公共、兼容和初始化类型 | `src/codex-protocol/generated/*.ts` |
-| 625 | v2 请求、响应、通知和数据类型 | `src/codex-protocol/generated/v2/*.ts` |
+| 752 | 当前 CLI 生成的 TypeScript 文件总数 | `src/codex-protocol/generated/` |
+| 98 | 生成目录根层的公共、兼容和初始化类型 | `src/codex-protocol/generated/*.ts` |
+| 653 | v2 请求、响应、通知和数据类型 | `src/codex-protocol/generated/v2/*.ts` |
 | 1 | `serde_json` 辅助类型 | `src/codex-protocol/generated/serde_json/` |
-| 136 | 客户端发给 App Server 的 Request 方法 | [`ClientRequest.ts`](../src/codex-protocol/generated/ClientRequest.ts) |
-| 72 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
+| 144 | 客户端发给 App Server 的 Request 方法 | [`ClientRequest.ts`](../src/codex-protocol/generated/ClientRequest.ts) |
+| 74 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
 | 11 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
 | 1 | 客户端发给 App Server 的 Notification，即 `initialized` | [`ClientNotification.ts`](../src/codex-protocol/generated/ClientNotification.ts) |
 | 44 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
@@ -38,62 +38,67 @@
    `profile-name.config.toml` 的加载顺序、命名与 `--profile` 用法。
 4. [OpenAI Codex 仓库](https://github.com/openai/codex)：当前官方源码；排查本项目锁定协议时，
    优先读取 [`upstream/openai-codex`](upstream-sources.md) 的固定本地副本；本地副本缺失时
-   再打开下面固定到 `rust-v0.147.0` 的链接，不能直接以 `main` 为准。
+   再打开下面固定到 `rust-v0.148.0` 的链接，不能直接以 `main` 为准。
 
 官方文档定义产品和协议行为；本项目实际字段必须以当前锁定 CLI 生成的 TypeScript 类型为准。
 如果两者看起来不一致，先检查文档是否描述了更新版本，再审查固定版本源码和生成差异。
 
 ## 固定版本官方源码
 
-以下链接固定到 OpenAI Codex `rust-v0.147.0`：
+以下链接固定到 OpenAI Codex `rust-v0.148.0`：
 
 | 查询目标 | 官方源码 | 主要内容 |
 | --- | --- | --- |
-| App Server 总览 | [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/README.md) | 启动方式、协议和开发入口 |
-| JSON-RPC 消息总表 | [`rpc.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/rpc.rs) | Client Request、Server Notification、Server Request |
-| 协议公共类型 | [`common.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/common.rs) | 初始化、ID、通用协议结构 |
-| v2 协议入口 | [`v2/mod.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/v2/mod.rs) | v2 模块与受支持类型汇总 |
-| Thread | [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs) | Thread 请求、响应和生命周期 |
-| Turn | [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs) | Turn 启动、追加、停止和状态 |
-| 用户输入 | [`user_input.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/protocol/src/user_input.rs) | 文本、图片、一次性音频、Skill 与 Mention 输入 |
-| Item | [`item.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/v2/item.rs) | 消息、命令、文件、工具等 Item |
-| 图片生成 Item 与产物 | [`image_generation.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/ext/items/src/image_generation.rs)、[`artifact.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/ext/image-generation/src/artifact.rs) | `ImageGenerationItem.savedPath` 与生成图片落盘目录 |
-| 权限协议 | [`permissions.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/v2/permissions.rs) | 临时权限、命令网络上下文与持久规则结构 |
-| MCP 协议 | [`mcp.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs) | MCP 状态与 form、openai/form、URL elicitation |
-| Plugin 协议 | [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs) | 开发中 Plugin 已安装、目录与安装类型；本项目只采用已安装响应 |
-| 通知 | [`notification.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server-protocol/src/protocol/v2/notification.rs) | v2 Notification 参数 |
-| Transport | [`transport.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/transport.rs) | stdio、WebSocket 和连接收发 |
-| 初始化处理 | [`initialize_processor.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/initialize_processor.rs) | `initialize` 握手与能力协商 |
-| Thread 请求处理 | [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/thread_processor.rs) | Thread 请求的运行时实现 |
-| Thread 分区处理 | [`thread_sections.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/thread_sections.rs) | 内置 Pinned 分区、自定义分区与生命周期约束 |
-| Thread 订阅生命周期 | [`thread_lifecycle.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/thread_lifecycle.rs) | 订阅、空闲卸载与 `thread/closed` |
-| Turn 请求处理 | [`turn_processor.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/turn_processor.rs) | Turn 启动、追加、停止和状态 |
-| 配置请求处理 | [`config_processor.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/config_processor.rs) | `config/read`、批量写入与用户配置热加载 |
-| 模型目录测试 | [`model_list.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/model_list.rs) | 可见模型、分页和远端目录合同 |
+| App Server 总览 | [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/README.md) | 启动方式、协议和开发入口 |
+| JSON-RPC 消息总表 | [`rpc.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/rpc.rs) | Client Request、Server Notification、Server Request |
+| 协议公共类型 | [`common.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/common.rs) | 初始化、ID、通用协议结构 |
+| v2 协议入口 | [`v2/mod.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/v2/mod.rs) | v2 模块与受支持类型汇总 |
+| Thread | [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs) | Thread 请求、响应和生命周期 |
+| Turn | [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs) | Turn 启动、追加、停止和状态 |
+| 用户输入 | [`user_input.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/protocol/src/user_input.rs) | 文本、图片、一次性音频、Skill 与 Mention 输入 |
+| Item | [`item.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/v2/item.rs) | 消息、命令、文件、工具等 Item |
+| 图片生成 Item 与产物 | [`image_generation.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/ext/items/src/image_generation.rs)、[`artifact.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/ext/image-generation/src/artifact.rs) | `ImageGenerationItem.savedPath` 与生成图片落盘目录 |
+| 权限协议 | [`permissions.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/v2/permissions.rs) | 临时权限、命令网络上下文与持久规则结构 |
+| MCP 协议 | [`mcp.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs) | MCP 状态与 form、openai/form、URL elicitation |
+| Plugin 协议 | [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs) | 开发中 Plugin 已安装、目录与安装类型；本项目只采用已安装响应 |
+| 通知 | [`notification.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server-protocol/src/protocol/v2/notification.rs) | v2 Notification 参数 |
+| Transport | [`transport.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/transport.rs) | stdio、WebSocket 和连接收发 |
+| 初始化处理 | [`initialize_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/initialize_processor.rs) | `initialize` 握手与能力协商 |
+| Server Diagnostics 处理 | [`diagnostics.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/diagnostics.rs) | 实验、无内容的进程与运行时快照；本项目未采用 |
+| Thread 请求处理 | [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/thread_processor.rs) | Thread 请求的运行时实现 |
+| Thread 队列处理 | [`thread_queue_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/thread_queue_processor.rs) | 实验 `thread/queue/*` 的持久提交队列；本项目未采用 |
+| Thread 分区处理 | [`thread_sections.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/thread_sections.rs) | 内置 Pinned 分区、自定义分区与生命周期约束 |
+| Thread 订阅生命周期 | [`thread_lifecycle.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/thread_lifecycle.rs) | 订阅、空闲卸载与 `thread/closed` |
+| Turn 请求处理 | [`turn_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/turn_processor.rs) | Turn 启动、追加、停止和状态 |
+| 配置请求处理 | [`config_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/config_processor.rs) | `config/read`、批量写入与用户配置热加载 |
+| 模型目录测试 | [`model_list.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/model_list.rs) | 可见模型、分页和远端目录合同 |
 | DeepSeek Codex 接入 | [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex) | Responses Provider、配置字段、官方脚本和当前支持模型 |
 | DeepSeek Responses 指南 | [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/guides/responses_api) | 无状态会话、流式事件、输入与工具兼容性、缓存及用量字段 |
 | DeepSeek 创建响应接口 | [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/api/create-response) | `POST /responses` 请求字段、响应结构与 SSE 终止事件 |
 | DeepSeek 账户余额 | [DeepSeek 官方余额接口](https://api-docs.deepseek.com/zh-cn/api/get-user-balance/) | `GET /user/balance` 的可用状态、币种与余额字段；不提供 Codex 周限或历史 Token 汇总 |
 | OpenCode Go | [OpenCode Go 官方文档](https://opencode.ai/docs/go/) | Provider 基础地址、模型端点、全模型美元价格、长上下文档位与套餐包含用量 |
-| 账户请求处理 | [`account_processor.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/account_processor.rs) | 账户 Token 用量与额度读取 |
-| 账户测试 | [`account.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/account.rs) | 用量读取、认证与错误合同 |
-| 额度测试 | [`rate_limits.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/rate_limits.rs) | 单桶、多桶、消费控制与重置券合同 |
-| Skill 列表测试 | [`skills_list.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/skills_list.rs) | CWD、Scope、缓存、Plugin Skill 与变更通知合同 |
-| MCP 请求处理 | [`mcp_processor.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/mcp_processor.rs) | Thread 配置上下文、精简清单、排序与分页 |
-| Plugin 请求处理 | [`plugins.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/plugins.rs) | 已安装 Plugin 的 Workspace 发现、启用与可用状态 |
-| MCP 工具审批 | [`mcp_tool_call.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/core/src/mcp_tool_call.rs) | 工具审批 elicitation 元数据、会话与持久授权响应 |
-| MCP 状态测试 | [`mcp_server_status.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/mcp_server_status.rs) | 工具原名、项目级配置、实时元数据与精简清单合同 |
-| MCP 资源测试 | [`mcp_resource.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/mcp_resource.rs) | Thread 可选上下文、文本/二进制资源读取与错误合同 |
-| MCP 配置刷新测试 | [`executor_mcp.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/executor_mcp.rs) | 从磁盘重载配置并在已加载 Thread 的下一次活动 Turn 刷新 MCP |
-| Plugin 列表测试 | [`plugin_list.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/plugin_list.rs) | Marketplace、已安装项、启用状态与 CWD 发现合同 |
-| Catalog 请求处理 | [`catalog_processor.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/src/request_processors/catalog_processor.rs) | Permission Profile 的 CWD 配置归并、allowed 状态和分页 |
-| Permission Profile 测试 | [`permission_profile_list.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/permission_profile_list.rs) | 内置、自定义、项目级 Profile 与分页合同 |
-| 用户输入测试 | [`request_user_input.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/request_user_input.rs) | 问题、自动解决时限、响应与跨客户端失效合同 |
-| MCP elicitation 测试 | [`mcp_server_elicitation.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/mcp_server_elicitation.rs) | 三种 elicitation 模式、能力协商与响应合同 |
-| Thread 设置测试 | [`thread_settings_update.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/thread_settings_update.rs) | 模型、思考等级和服务层级通知合同 |
-| Thread 分区测试 | [`thread_sections.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/thread_sections.rs)、[`thread_metadata_update.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/thread_metadata_update.rs) | 内置 Pinned 分区、移动、列表状态、迁移与分页保持合同 |
-| 上下文压缩测试 | [`compaction.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/compaction.rs) | 手动与自动压缩、`contextCompaction` Item 开始和完成通知合同 |
-| Unix WebSocket 测试 | [`connection_handling_websocket_unix.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/tests/suite/v2/connection_handling_websocket_unix.rs) | Unix Socket WebSocket 行为 |
+| 账户请求处理 | [`account_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/account_processor.rs) | 账户 Token 用量与额度读取 |
+| 账户测试 | [`account.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/account.rs) | 用量读取、认证与错误合同 |
+| Thread 用量测试 | [`account_thread_usage.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/account_thread_usage.rs) | `account/usage/read.threadId` 与估算用量合同；本项目未采用 |
+| 额度测试 | [`rate_limits.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/rate_limits.rs) | 单桶、多桶、消费控制与重置券合同 |
+| Skill 列表测试 | [`skills_list.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/skills_list.rs) | CWD、Scope、缓存、Plugin Skill 与变更通知合同 |
+| MCP 请求处理 | [`mcp_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/mcp_processor.rs) | Thread 配置上下文、精简清单、排序与分页 |
+| Plugin 请求处理 | [`plugins.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/plugins.rs) | 已安装 Plugin 的 Workspace 发现、启用与可用状态 |
+| MCP 工具审批 | [`mcp_tool_call.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/core/src/mcp_tool_call.rs) | 工具审批 elicitation 元数据、会话与持久授权响应 |
+| MCP 状态测试 | [`mcp_server_status.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/mcp_server_status.rs) | 工具原名、项目级配置、实时元数据与精简清单合同 |
+| MCP 资源测试 | [`mcp_resource.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/mcp_resource.rs) | Thread 可选上下文、文本/二进制资源读取与错误合同 |
+| MCP 配置刷新测试 | [`executor_mcp.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/executor_mcp.rs) | 从磁盘重载配置并在已加载 Thread 的下一次活动 Turn 刷新 MCP |
+| Plugin 列表测试 | [`plugin_list.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/plugin_list.rs) | Marketplace、已安装项、启用状态与 CWD 发现合同 |
+| Catalog 请求处理 | [`catalog_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/catalog_processor.rs) | Permission Profile 的 CWD 配置归并、allowed 状态和分页 |
+| Permission Profile 测试 | [`permission_profile_list.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/permission_profile_list.rs) | 内置、自定义、项目级 Profile 与分页合同 |
+| 用户输入测试 | [`request_user_input.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/request_user_input.rs) | 问题、自动解决时限、响应与跨客户端失效合同 |
+| MCP elicitation 测试 | [`mcp_server_elicitation.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/mcp_server_elicitation.rs) | 三种 elicitation 模式、能力协商与响应合同 |
+| Thread 设置测试 | [`thread_settings_update.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/thread_settings_update.rs) | 模型、思考等级和服务层级通知合同 |
+| Thread 分区测试 | [`thread_sections.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/thread_sections.rs)、[`thread_metadata_update.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/thread_metadata_update.rs) | 内置 Pinned 分区、移动、列表状态、迁移与分页保持合同 |
+| Thread 队列与回退测试 | [`thread_queue.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/thread_queue.rs)、[`thread_revert.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/thread_revert.rs) | 实验持久提交队列、历史回退、订阅与通知合同；本项目未采用 |
+| Server Diagnostics 测试 | [`server_diagnostics.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/server_diagnostics.rs) | 实验进程与运行时诊断快照；本项目未采用 |
+| 上下文压缩测试 | [`compaction.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/compaction.rs) | 手动与自动压缩、`contextCompaction` Item 开始和完成通知合同 |
+| Unix WebSocket 测试 | [`connection_handling_websocket_unix.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/connection_handling_websocket_unix.rs) | Unix Socket WebSocket 行为 |
 
 ## 当前支持矩阵
 
@@ -133,7 +138,7 @@ USD/CNY 汇率固化为统一 USD 快照，并把请求时段对应的 Peak/Off-
 只通过 Draft PR 提议更新，不进入 Gateway 请求路径。
 OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/opencode-go-model-pricing.ts)
 读取官方美元价格基线并按请求开始时间（UTC）选择 Peak/Off-Peak 价；[`prepare-opencode-go-pricing-proposal.mjs`](../scripts/prepare-opencode-go-pricing-proposal.mjs)
-每日核对官方页面全部模型的价格、时段、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.147.0
+每日核对官方页面全部模型的价格、时段、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.148.0
 真实 App Server 按需启动、初始化与模型列表合同验证的模型计价和开放选择。`/usage` 与 WebUI
 在官方账户窗口外，还用当前官方价格基线按请求开始时间重新计价（峰谷对齐）当前官方月度窗口
 （由 `resetsAt` 倒推开始时间）内各模型已用金额；价格更新生效时间（基线 `sourceUpdatedAt`）之前
@@ -167,7 +172,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 
 ### 输入与语音边界
 
-| 输入或交互 | 固定 CLI 0.147.0 | Gateway 当前状态 | 边界 |
+| 输入或交互 | 固定 CLI 0.148.0 | Gateway 当前状态 | 边界 |
 | --- | --- | --- | --- |
 | 文本 | `turn/start`、`turn/steer` 的稳定 `UserInput.text` | Telegram、飞书、微信已支持 | 由 Application 的 `TurnInput.text` 进入统一 Turn |
 | 本地图片 | `turn/start`、`turn/steer` 的稳定 `UserInput.localImage` | 三渠道受限 PNG/JPEG 已支持；不支持图片的模型可显式启用视觉代理 | Surface 完成下载、签名和大小校验后，Application 只接收临时本地图片路径；原生支持时直接提交，不支持时统一调用视觉配置引用的第三方 Responses API 提供商及其隔离私有 Key，结果按已完成但不可信的文字观察进入原 Thread；第三方 API 注册表不接入 App Server、`modelProvider` 或 `/model`，视觉只是首个显式调用方。三渠道 `/vision <要求>` 只在 Surface 内存中按 Actor 与 Conversation 预设下一批图片的文字输入，`/vision <2–4> <要求>` 显式收集指定数量并在收齐后自动提交；外部识别失败后 `/vision retry` 可在五分钟内复用同一 Actor 与 Conversation 最近一次失败任务的原要求和临时图片，成功、新任务、取消、过期或停止时清除且不持久化；图片流程状态采用统一结构化消息并由各渠道转换格式；外部识别超过 10 秒后提供有界心跳，完成时展示配置的提供商名称、响应体实际视觉模型 ID 及上游实际返回的基础 Token 用量；本地实测 API 耗时仅在调试模式开启时展示；内部同时裁剪完成状态、上游时间戳差、服务层级、缓存与推理 Token，思考等级按当前 Thread 模型设置透传给视觉请求并同步记录，然后把不含图片、提示词、响应正文和识别结果的脱敏请求指标写入独立指标库；已有 Thread 时关联 `thread_id`，调用先于 Codex Turn，因此 `turn_id` 为 `NULL`；兼容的 `begin/done/cancel` 仍可处理数量未知的收集，不新增 App Server RPC；[`vision.md`](vision.md)、[`api-provider-setup.test.ts`](../tests/api-provider-setup.test.ts)、[`vision-port.test.ts`](../tests/vision-port.test.ts)、[`vision-command.test.ts`](../tests/vision-command.test.ts)、[`surface-input-coalescer.test.ts`](../tests/surface-input-coalescer.test.ts)、[`responses-vision-adapter.test.ts`](../tests/responses-vision-adapter.test.ts)、[`vision-setup.test.ts`](../tests/vision-setup.test.ts) |
@@ -224,7 +229,7 @@ Client 与 Surface，不终止共享 App Server。
 2. 查协议字段时打开生成的 `ClientRequest.ts`、`ServerNotification.ts` 或 `ServerRequest.ts`，
    再沿具体类型文件查看参数，不能凭官方 `main` 分支或记忆手写字段。
 3. 查行为语义时阅读官方 App Server 文档，再优先查看 `upstream/openai-codex` 中
-   `rust-v0.147.0` 固定版本实现和测试；本地副本缺失或基线不符时才使用上面的固定版本链接。
+   `rust-v0.148.0` 固定版本实现和测试；本地副本缺失或基线不符时才使用上面的固定版本链接。
 4. 查本项目行为时从模块 `index.ts` 和 README 进入，最后运行对应测试或真实合同测试。
 
 协议升级从 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 开始，使用
