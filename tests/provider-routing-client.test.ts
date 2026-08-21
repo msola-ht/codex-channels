@@ -78,6 +78,58 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.startTurn).toHaveBeenCalledOnce();
   });
 
+  it("routes every Thread Queue operation to the remembered Thread Provider", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-deepseek", "deepseek", "idle"),
+    ]);
+    deepseek.listThreads.mockResolvedValue([]);
+    deepseek.addQueueItem.mockResolvedValue({
+      id: "queued-1",
+      clientUserMessageId: "client-1",
+      inputType: "text",
+      textPreview: "queued",
+      editable: true,
+    });
+    deepseek.listQueue.mockResolvedValue({ items: [], nextCursor: null });
+    deepseek.updateQueueItem.mockResolvedValue({
+      id: "queued-1",
+      clientUserMessageId: "client-1",
+      inputType: "text",
+      textPreview: "updated",
+      editable: true,
+    });
+    deepseek.deleteQueueItem.mockResolvedValue({ deleted: true });
+    deepseek.reorderQueue.mockResolvedValue(undefined);
+    deepseek.startQueueItem.mockResolvedValue({ turnId: "turn-queue" });
+    const routed = routing(openai, deepseek);
+
+    await routed.listThreads(cwd);
+    await routed.addQueueItem("thread-deepseek", "queued", "client-1");
+    await routed.listQueue("thread-deepseek", { limit: 25 });
+    await routed.updateQueueItem("thread-deepseek", "queued-1", "updated");
+    await routed.deleteQueueItem("thread-deepseek", "queued-1");
+    await routed.reorderQueue("thread-deepseek", ["queued-1"]);
+    await routed.startQueueItem("thread-deepseek", "queued-1");
+
+    expect(deepseek.addQueueItem).toHaveBeenCalledWith(
+      "thread-deepseek",
+      "queued",
+      "client-1",
+    );
+    expect(deepseek.listQueue).toHaveBeenCalledWith("thread-deepseek", { limit: 25 });
+    expect(deepseek.updateQueueItem).toHaveBeenCalledWith(
+      "thread-deepseek",
+      "queued-1",
+      "updated",
+    );
+    expect(deepseek.deleteQueueItem).toHaveBeenCalledWith("thread-deepseek", "queued-1");
+    expect(deepseek.reorderQueue).toHaveBeenCalledWith("thread-deepseek", ["queued-1"]);
+    expect(deepseek.startQueueItem).toHaveBeenCalledWith("thread-deepseek", "queued-1");
+    expect(openai.addQueueItem).not.toHaveBeenCalled();
+  });
+
   it("uses each Provider App Server status while preserving the primary list order", async () => {
     const openai = client();
     const deepseek = client();
@@ -728,6 +780,12 @@ function client() {
     unarchiveThread: vi.fn(),
     startTurn: vi.fn(),
     steerTurn: vi.fn(),
+    addQueueItem: vi.fn(),
+    listQueue: vi.fn(),
+    updateQueueItem: vi.fn(),
+    deleteQueueItem: vi.fn(),
+    reorderQueue: vi.fn(),
+    startQueueItem: vi.fn(),
     interruptTurn: vi.fn(),
     setThreadName: vi.fn(),
     setThreadPinned: vi.fn(),

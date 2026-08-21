@@ -18,6 +18,7 @@ import {
   formatConversationPluginHealth,
   formatConversationPlugins,
   formatConversationStatus,
+  formatConversationThreadQueue,
   formatConversationUsage,
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
@@ -26,6 +27,34 @@ import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
 import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-format.js";
 
 describe("provider-aware conversation command formatting", () => {
+  it("distinguishes an empty Queue from an out-of-range page", () => {
+    const missingPage = formatConversationThreadQueue({
+      kind: "thread-queue",
+      result: {
+        items: [],
+        selectors: [],
+        page: 2,
+        pageCount: 1,
+        totalItemCount: 1,
+      },
+    });
+    expect(missingPage).toContain("第 2 页不存在，共 1 页");
+    expect(missingPage).toContain("/queue list 1");
+    expect(missingPage).not.toContain("Queue 为空");
+
+    const empty = formatConversationThreadQueue({
+      kind: "thread-queue",
+      result: {
+        items: [],
+        selectors: [],
+        page: 1,
+        pageCount: 1,
+        totalItemCount: 0,
+      },
+    });
+    expect(empty).toContain("Queue 为空");
+  });
+
   it("renders occupancy release results", () => {
     expect(formatConversationOccupancy({
       kind: "occupancy",
@@ -690,6 +719,12 @@ describe("provider-aware conversation command formatting", () => {
       threadId: "thread-1",
       model: { model: "deepseek-v4-pro", modelProvider: "deepseek" },
     })).toContain("会话模型：deepseek-v4-pro · Provider：deepseek");
+    expect(formatConversationCommandOutcome({
+      type: "thread.resumed",
+      threadId: "thread-cold",
+      queuePending: true,
+      model: { model: "gpt-test", modelProvider: "openai" },
+    })).toContain("已沿用该 Thread 自身设置");
   });
 
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {

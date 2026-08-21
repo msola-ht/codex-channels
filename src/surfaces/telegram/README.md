@@ -15,7 +15,7 @@
   才构造稳定 `localAudio`，私有临时文件一小时后清理；Application 仅在当前模型目录包含
   `audio` 时提交，否则在创建或追加 Turn 前明确拒绝；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
-  `/queue <描述>` 把纯文本排到下一 Turn，`/rules <init|check>` 只操作当前 Workspace 且不提供
+  `/queue add|list|update|delete|reorder|start` 管理 App Server 持久 Queue，`/rules <init|check>` 只操作当前 Workspace 且不提供
   强制覆盖；同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
   版本字符串和当前 Workspace Git 分支，不读取生成协议。
@@ -81,7 +81,9 @@ Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最
 Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 HTTP(S) 代理；共享代理
 遵循 `NO_PROXY`，Telegram 私有 `proxy_url` 作为显式覆盖。
 下一 Turn 输入队列属于 Application，不得复用本目录的 Telegram 输出队列；Telegram 只负责
-命令解析及位置、容量和内存生命周期提示。
+命令解析及位置、容量和内存生命周期提示。`/queue list` 还提供当前业务页的刷新、分页和条目入口；
+条目按钮使用完整 Queue ID，进入后可启动或删除，删除必须二次确认。新增、更新和排序继续使用文本命令，
+不建立渠道私有 Queue 状态。
 Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/r` 快捷入口，分别执行
 `/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
 分组列表，只在 Telegram 边界转换为安全 HTML。无参数 `/skill` 与其他渠道一样展示编号列表，

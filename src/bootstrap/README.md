@@ -5,7 +5,8 @@
 ## 文件
 
 - `index.ts`：向进程入口公开 `GatewayApplication`、进程生命周期入口和安全的 Gateway 所有权错误。
-- `app.ts`：校验 Codex 版本，装配 Transport、Client、Core、Router 和 Storage；处理启动、重连、
+- `app.ts`：校验 Codex 版本，装配 Transport、Client、Core、Router 和 Storage；把同一 Client 的
+  原生 Thread Queue 端口注入 Application，并把 Queue changed 通知仅用于失效短期选择快照；处理启动、重连、
   订阅恢复与关闭，并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
@@ -115,4 +116,5 @@ Thread 恢复失败。单个 Thread 被另一个 Codex 进程持有写锁时，�
 其他 Thread 正常启动，按有界退避间隔只重试未恢复 Thread；占用与解除各投递一次结构化渠道通知。
 停止会取消等待计时器并限时等待在途恢复，不删除官方写锁或绕过 App Server 单写约束。
 启动失败、启动中停止和正常停止共享同一个组件关闭任务；除中断未完成连接所需
-的 Client 关闭外，Surface、事件总线、Client 收尾和存储不会被组合根重复关闭。
+的 Client 关闭外，Surface、事件总线、Client 收尾和存储不会被组合根重复关闭。组合根有界持有
+已接收的 Queue 完成释放任务，停止时拒绝新任务并先限时等待，避免 Surface 或 Client 关闭后继续派发。

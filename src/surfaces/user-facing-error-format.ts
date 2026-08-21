@@ -3,6 +3,7 @@ import {
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
+  threadQueueCommandUsageText,
 } from "../application/index.js";
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
@@ -109,15 +110,31 @@ export function formatSurfaceUserFacingError(
     case "goal.usage":
       return "用法：/goal [set <目标>|clear]";
     case "queue.usage":
-      return "用法：/queue <描述>";
+      return threadQueueCommandUsageText;
     case "metrics.usage":
       return "用法：/metrics [session|global|providers|models|errors] [24h|7d|30d]";
-    case "queue.inactive":
-      return "当前没有运行中的任务，请直接发送普通消息";
     case "queue.full":
-      return "下一 Turn 队列已满，最多 10 条";
-    case "queue.thread-changed":
-      return "排队消息所属会话已切换，队列已清空";
+      return "App Server Queue 已满，最多 100 条";
+    case "queue.unavailable":
+      return "当前 App Server 不提供持久队列";
+    case "queue.empty":
+      return "App Server Queue 为空，请先使用 /queue add 新增条目";
+    case "queue.busy":
+      return "当前 Thread 有活动或待触发 Turn，请稍后重试";
+    case "queue.pending-overrides":
+      return "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成";
+    case "queue.snapshot.required":
+      return "数字选择器只对最近五分钟的本会话 Queue 列表有效，请先执行 /queue list";
+    case "queue.item-not-found":
+      return "找不到指定 Queue 条目，请使用完整 ID 或刷新 /queue list";
+    case "queue.item-not-editable":
+      return "只有纯文本 Queue 条目可以更新；非纯文本输入可删除、排序或启动，但不能更新";
+    case "queue.position.invalid":
+      return "Queue 目标位置必须在当前队列范围内";
+    case "queue.reorder-conflict":
+      return "Queue 已发生变化，请刷新 /queue list 后重试排序";
+    case "queue.failed":
+      return "Queue 操作失败，请稍后重试";
     case "workspace.missing":
       return `Workspace 不存在或未获授权：${detail(error, "workspaceId", "未知")}`;
     case "workspace.selector.required":

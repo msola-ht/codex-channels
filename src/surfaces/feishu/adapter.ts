@@ -12,7 +12,10 @@ import {
 } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
-import { formatSessionListCommand } from "../conversation-command-format.js";
+import {
+  formatSessionListCommand,
+  formatThreadQueueInputTypeLabel,
+} from "../conversation-command-format.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
   formatOperationFailure,
@@ -354,6 +357,16 @@ export class FeishuConversationAdapter {
         );
         return;
       }
+      if (action === "queue") {
+        const queueResponse = await this.handleQueueCommandCenterAction(
+          target,
+          actorId,
+          input,
+        );
+        if (queueResponse) {
+          return queueResponse;
+        }
+      }
       const initialChoices = input === ""
         ? renderCommandCenterInitialChoices(action)
         : undefined;
@@ -441,6 +454,108 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
+  }
+
+  private async handleQueueCommandCenterAction(
+    target: ConversationTarget,
+    actorId: string,
+    input: string,
+  ): Promise<FeishuCommandCenterResponse | undefined> {
+    const normalized = input.trim();
+    if (normalized === "") {
+      return this.loadQueueCommandCenterChoices(target, actorId, 1, 0);
+    }
+    if (normalized === "add") {
+      return renderCommandCenterForm("queue");
+    }
+    const listMatch = /^list ([1-9]\d*)(?: chunk ([1-9]\d*))?$/u.exec(normalized);
+    if (listMatch) {
+      return this.loadQueueCommandCenterChoices(
+        target,
+        actorId,
+        Number(listMatch[1]),
+        Number(listMatch[2] ?? "1") - 1,
+      );
+    }
+    const itemMatch = /^item ([1-9]\d*) ([1-9]\d*) ([A-Za-z0-9_-]{1,128})$/u.exec(normalized);
+    if (itemMatch) {
+      return this.loadQueueItemCommandCenterChoices(
+        target,
+        actorId,
+        Number(itemMatch[1]),
+        Number(itemMatch[2]) - 1,
+        itemMatch[3]!,
+      );
+    }
+    const deleteMatch = /^delete-confirm ([1-9]\d*) ([1-9]\d*) ([A-Za-z0-9_-]{1,128})$/u.exec(normalized);
+    if (deleteMatch) {
+      const result = await this.loadQueueResult(
+        target,
+        actorId,
+        Number(deleteMatch[1]),
+      );
+      const item = result.result.items.find((candidate) => candidate.id === deleteMatch[3]);
+      if (!item) {
+        throw new UserFacingError(
+          "queue.item-not-found",
+          "Queue 条目按钮已失效，请刷新 Queue 列表",
+        );
+      }
+      return renderQueueDeleteConfirmationChoices(
+        Number(deleteMatch[1]),
+        Number(deleteMatch[2]) - 1,
+        item,
+      );
+    }
+    return undefined;
+  }
+
+  private async loadQueueResult(
+    target: ConversationTarget,
+    actorId: string,
+    page: number,
+  ): Promise<Extract<ConversationCommandResult, { kind: "thread-queue" }>> {
+    const result = await this.commands.execute(
+      target,
+      "queue",
+      `list ${page}`,
+      actorId,
+    );
+    if (result.kind !== "thread-queue") {
+      throw new UserFacingError(
+        "queue.item-not-found",
+        "Queue 列表按钮已失效，请刷新 Queue 列表",
+      );
+    }
+    return result;
+  }
+
+  private async loadQueueCommandCenterChoices(
+    target: ConversationTarget,
+    actorId: string,
+    page: number,
+    chunk: number,
+  ): Promise<FeishuCommandCenterChoices> {
+    const result = await this.loadQueueResult(target, actorId, page);
+    return renderQueueCommandCenterChoices(result, chunk);
+  }
+
+  private async loadQueueItemCommandCenterChoices(
+    target: ConversationTarget,
+    actorId: string,
+    page: number,
+    chunk: number,
+    itemId: string,
+  ): Promise<FeishuCommandCenterChoices> {
+    const result = await this.loadQueueResult(target, actorId, page);
+    const item = result.result.items.find((candidate) => candidate.id === itemId);
+    if (!item) {
+      throw new UserFacingError(
+        "queue.item-not-found",
+        "Queue 条目按钮已失效，请刷新 Queue 列表",
+      );
+    }
+    return renderQueueItemChoices(page, chunk, item);
   }
 
   private async handleFeishuCommand(
@@ -781,6 +896,143 @@ function containsFeishuCopiedMessageLink(text: string): boolean {
   });
 }
 
+const feishuQueueChoiceChunkSize = 13;
+
+function renderQueueCommandCenterChoices(
+  result: Extract<ConversationCommandResult, { kind: "thread-queue" }>,
+  chunk: number,
+): FeishuCommandCenterChoices {
+  const items = result.result.items;
+  const chunkCount = Math.max(1, Math.ceil(items.length / feishuQueueChoiceChunkSize));
+  if (!Number.isSafeInteger(chunk) || chunk < 0 || chunk >= chunkCount) {
+    throw new UserFacingError(
+      "queue.item-not-found",
+      "Queue 列表按钮已失效，请刷新 Queue 列表",
+    );
+  }
+  const start = chunk * feishuQueueChoiceChunkSize;
+  const visibleItems = items.slice(start, start + feishuQueueChoiceChunkSize);
+  const choices: FeishuCommandCenterChoices["choices"][number][] = visibleItems.map((item) => ({
+    label: queueChoiceLabel(item),
+    action: "queue",
+    input: `item ${result.result.page} ${chunk + 1} ${item.id}`,
+  }));
+  if (chunk > 0) {
+    choices.push({
+      label: "上一组",
+      action: "queue",
+      input: `list ${result.result.page} chunk ${chunk}`,
+    });
+  }
+  if (chunk + 1 < chunkCount) {
+    choices.push({
+      label: "下一组",
+      action: "queue",
+      input: `list ${result.result.page} chunk ${chunk + 2}`,
+    });
+  }
+  choices.push({
+    label: "刷新",
+    action: "queue",
+    input: `list ${result.result.page} chunk ${chunk + 1}`,
+  });
+  choices.push({
+    label: "新增文本",
+    action: "queue",
+    input: "add",
+  });
+  if (result.result.page > 1) {
+    choices.push({
+      label: "上一页",
+      action: "queue",
+      input: `list ${result.result.page - 1}`,
+    });
+  }
+  if (result.result.page < result.result.pageCount) {
+    choices.push({
+      label: "下一页",
+      action: "queue",
+      input: `list ${result.result.page + 1}`,
+    });
+  }
+  const firstVisible = visibleItems.length > 0 ? start + 1 : 0;
+  const lastVisible = visibleItems.length > 0 ? start + visibleItems.length : 0;
+  return {
+    title: `App Server Queue · 第 ${result.result.page}/${result.result.pageCount} 页`,
+    description: result.result.totalItemCount === 0
+      ? "Queue 为空；可新增纯文本条目。更新与排序请使用 /queue update|reorder 文本命令。"
+      : `当前显示第 ${firstVisible}-${lastVisible}/${items.length} 条；业务页最多 25 条，卡片按每组最多 ${feishuQueueChoiceChunkSize} 条展示。条目操作只使用安全预览，点击后可启动或删除；更新与排序请使用 /queue update|reorder 文本命令。`,
+    choices,
+  };
+}
+
+function renderQueueItemChoices(
+  page: number,
+  chunk: number,
+  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
+): FeishuCommandCenterChoices {
+  return {
+    title: "Queue 条目",
+    description: [
+      `ID：${item.id}`,
+      `类型：${formatThreadQueueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}`,
+      `安全预览：${item.textPreview || "（无文本预览）"}`,
+    ].join("\n"),
+    choices: [
+      {
+        label: "启动",
+        action: "queue",
+        input: `start ${item.id}`,
+      },
+      {
+        label: "删除",
+        action: "queue",
+        input: `delete-confirm ${page} ${chunk + 1} ${item.id}`,
+      },
+      {
+        label: "返回列表",
+        action: "queue",
+        input: `list ${page} chunk ${chunk + 1}`,
+      },
+    ],
+  };
+}
+
+function renderQueueDeleteConfirmationChoices(
+  page: number,
+  chunk: number,
+  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
+): FeishuCommandCenterChoices {
+  return {
+    title: "确认删除 Queue 条目",
+    description: [
+      `ID：${item.id}`,
+      `安全预览：${item.textPreview || "（无文本预览）"}`,
+      "删除后无法通过 Gateway 恢复。",
+    ].join("\n"),
+    choices: [
+      {
+        label: "确认删除",
+        action: "queue",
+        input: `delete ${item.id}`,
+      },
+      {
+        label: "取消",
+        action: "queue",
+        input: `item ${page} ${chunk + 1} ${item.id}`,
+      },
+    ],
+  };
+}
+
+function queueChoiceLabel(
+  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
+): string {
+  return item.textPreview
+    ? item.textPreview
+    : `${formatThreadQueueInputTypeLabel(item.inputType)} Queue 条目`;
+}
+
 function renderCommandCenterInitialChoices(
   action: FeishuCommandCenterAction,
 ): FeishuCommandCenterChoices | undefined {
@@ -855,11 +1107,12 @@ function renderCommandCenterForm(
   if (action === "queue") {
     return {
       kind: "form",
-      title: "追加下一 Turn",
-      description: "内容会进入当前 Conversation 的有界内存队列。",
+      title: "写入 App Server Queue",
+      description: "纯文本会由 App Server 持久保存，默认容量为 100 条。",
       action,
-      fieldLabel: "补充要求",
-      placeholder: "请输入下一轮需要继续处理的内容",
+      fieldLabel: "Queue 文本",
+      placeholder: "请输入要排队的纯文本",
+      inputPrefix: "add ",
       multiline: true,
     };
   }

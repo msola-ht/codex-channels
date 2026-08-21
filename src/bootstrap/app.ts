@@ -44,6 +44,7 @@ import {
   JsonRpcClient,
   supportedCodexCliVersion,
   toConversationInputEvent,
+  toThreadQueueChangedEvent,
   toThreadStateEvent,
   UnixWebSocketTransport,
   type RpcNotification,
@@ -175,6 +176,7 @@ export class GatewayApplication {
   private readonly disconnectedBindingsByProvider = new Map<string, Set<string>>();
   private readonly pendingBindingRestores = new Map<string, PendingBindingRestore>();
   private readonly restoringThreadIds = new Set<string>();
+  private readonly queueLifecycleTasks = new Set<Promise<void>>();
   private bindingRestoreTimer: NodeJS.Timeout | undefined;
   private bindingRestoreTask: Promise<void> | undefined;
   private bindingRestoreAttempt = 0;
@@ -647,50 +649,31 @@ export class GatewayApplication {
       {
         releaseThread: (target, force) => this.releaseThread(target, force),
       },
+      this.codex,
     );
-    this.output.subscribe("conversation-follow-up", async (event) => {
-      if (event.type !== "turn.completed") {
-        return;
-      }
-      if (this.router.isBackgroundThread(event.threadId)) {
-        try {
-          await this.router.releaseBackground(event.threadId);
-        } catch (error) {
-          this.logger.warn(
-            { err: error, threadId: event.threadId },
-            "后台 Thread 完成后的订阅清理失败，已保留绑定供重启重试",
-          );
-          this.output.publish({
-            type: "warning",
-            target: event.target,
-            threadId: event.threadId,
-            background: true,
-            message: "后台任务已完成，但订阅清理暂时失败；Gateway 重启后会重试。",
-          }, true);
-        }
+    this.output.subscribe("conversation-background-release", async (event) => {
+      if (event.type !== "turn.completed" || !this.router.isBackgroundThread(event.threadId)) {
         return;
       }
       try {
-        await service.handleTurnCompleted(
-          event.target,
-          event.threadId,
+        await this.trackQueueLifecycleTask(() =>
+          service.releaseBackgroundIfComplete(event.threadId, {
+            // 0.148 deliberately keeps Queue entries after an interrupted turn;
+            // only normal/failed completion participates in native idle dispatch.
+            dispatchQueued: event.status !== "interrupted",
+          })
         );
       } catch (error) {
         this.logger.warn(
-          {
-            err: error,
-            surface: event.target.surface,
-            accountId: event.target.accountId,
-            conversationId: event.target.conversationId,
-            threadId: event.threadId,
-          },
-          "下一 Turn 排队消息启动失败，队列已清空",
+          { err: error, threadId: event.threadId },
+          "后台 Thread 完成后的订阅清理失败，已保留绑定供重启重试",
         );
         this.output.publish({
           type: "warning",
           target: event.target,
           threadId: event.threadId,
-          message: "下一 Turn 排队消息未能启动，队列已清空。",
+          background: true,
+          message: "后台任务已完成，但订阅清理暂时失败；Gateway 重启后会重试。",
         }, true);
       }
     });
@@ -793,8 +776,31 @@ export class GatewayApplication {
       logger,
     );
     this.inbound.subscribe("conversation-core", (notification) => {
+      const queueChanged = toThreadQueueChangedEvent(notification);
+      if (queueChanged) {
+        service.invalidateQueueSnapshot(queueChanged.threadId);
+      }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        if (coreEvent.type === "turn.started") {
+          // A TUI or another App Server client may have consumed a native Queue
+          // entry. Pending model/effort/Fast/Plan choices are Conversation-local
+          // and must not leak into the next direct Turn after that dispatch.
+          service.clearPendingSelectionsForThread(coreEvent.threadId);
+        }
+        if (coreEvent.type === "thread.status.changed" && coreEvent.status !== "active") {
+          // A completion can race the native idle contributor. Retry only a
+          // marked background release, without making the App Server reader
+          // await any RPC or platform output.
+          void this.trackQueueLifecycleTask(() =>
+            service.retryPendingBackgroundRelease(coreEvent.threadId)
+          ).catch((error) => {
+            this.logger.warn(
+              { err: error, threadId: coreEvent.threadId },
+              "后台 Thread 空闲状态后的订阅清理失败，已保留绑定供后续重试",
+            );
+          });
+        }
         this.subagentCompletion.handleInput(coreEvent);
         this.core.handle(coreEvent);
         if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
@@ -994,6 +1000,7 @@ export class GatewayApplication {
     this.subagentCompletion?.close();
     const failures: unknown[] = [];
     for (const [component, close] of [
+      ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
       ["Surface", () => this.surfaceManager.stop()],
@@ -1015,6 +1022,28 @@ export class GatewayApplication {
     }
     if (failures.length > 0) {
       throw new AggregateError(failures, "Gateway 资源未完全关闭");
+    }
+  }
+
+  private trackQueueLifecycleTask(operation: () => Promise<unknown>): Promise<void> {
+    if (this.stopping) {
+      return Promise.resolve();
+    }
+    const task = operation().then(() => undefined);
+    const tracked = task.finally(() => {
+      this.queueLifecycleTasks.delete(tracked);
+    });
+    this.queueLifecycleTasks.add(tracked);
+    return tracked;
+  }
+
+  private async closeQueueLifecycleTasks(): Promise<void> {
+    if (this.queueLifecycleTasks.size === 0) {
+      return;
+    }
+    const settled = Promise.allSettled([...this.queueLifecycleTasks]).then(() => undefined);
+    if (!(await waitAtMost(settled, 5_000))) {
+      throw new Error("等待 Queue 生命周期任务停止超时");
     }
   }
 

@@ -127,6 +127,18 @@ describe("shared surface copy contract", () => {
     }
   });
 
+  it("reports Queue and pending override conflicts consistently on every surface", () => {
+    const error = new UserFacingError(
+      "queue.pending-overrides",
+      "opaque internal fallback",
+    );
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      expect(formatSurfaceUserFacingError(error, surface)).toBe(
+        "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成",
+      );
+    }
+  });
+
   it("reports the complete MCP command usage consistently on every surface", () => {
     const error = new UserFacingError("mcp.usage", "invalid MCP command");
     for (const surface of ["Telegram", "飞书", "微信"] as const) {

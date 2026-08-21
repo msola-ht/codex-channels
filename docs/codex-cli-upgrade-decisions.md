@@ -184,16 +184,26 @@
 | `account/usage/read.threadId` 与 `threadUsage` | 查询单个 OpenAI Thread 的估算 Credit 或费用分解 | 可在会话状态中补充服务端估算，而不是只显示 Gateway 自有请求统计 | 当前 `/metrics` 还要统一处理 OpenAI、DeepSeek 与 OpenCode Go，不能把单 Provider 可选估算混成统一账单；等产品明确展示口径和第三方 Provider 降级方式后再采用 |
 | 模型 `multiAgentVersion`、退休时间与自动审核要求 | 描述模型的多代理运行时、退役时间和受管自动审核约束 | 可改进模型目录说明和受管环境提示 | 当前模型路由不依赖这些字段，审批仍由 Surface Actor 显式决定；只有字段影响模型可选性、请求合法性或必须展示的安全约束时再映射到 Application |
 | MCP Server `pluginId` 与单次 OAuth 注册策略 | 标识 MCP 的 Plugin 所有者，并允许登录时选择自动发现、动态注册或预注册客户端 | 可在 Plugin 调试和 OAuth 故障排查中说明来源 | 当前 OAuth 自动发现路径工作正常，Plugin API 仍为受开关约束的调试能力；没有用户选择和凭据配置边界前不扩展参数或展示 |
+| Thread 分区外观 | 为自定义 Thread 分区保存跨客户端同步的图标和颜色 | 可让渠道中的分区目录与原生客户端使用相同的视觉标识 | 当前 `/section` 只投影分区名称，创建和重命名时省略 `appearance`，因此不会覆盖其他客户端已有设置；只有三个 Surface 形成统一、安全且有明确用户需求的图标或颜色展示规则时再扩展 Application 类型与写入命令 |
+| `misalignmentPolicyViolation` 结构化错误 | 明确表示 Turn 因安全策略不一致而终止 | 可用稳定、脱敏的渠道文案替代依赖上游自由文本判断原因 | 当前通知适配统一裁剪并脱敏 App Server 错误文字，没有按 `codexErrorInfo` 分类；只有确定该类型需要独立用户操作提示，并完成错误、重试和 Turn 终态合同后再映射到 Core 与 Surface |
 
 ### 明确不采用
 
 | 上游能力 | 它是做什么的 | 当前不采用原因 |
 | --- | --- | --- |
-| 实验 `thread/queue/*` 与 `thread/queue/changed` | 在 App Server 中持久保存、排序并启动待提交的用户消息 | Gateway 已有按 Conversation 隔离、明确提示且重启可清空的有界补充输入队列；接入实验持久队列会形成两套排队语义，并改变现有隐私、重启和多客户端协调边界 |
-| 实验 `thread/revert` 与 `thread/reverted` | 持久回退 Thread 历史并重新加载订阅 | 这是破坏性历史写操作，需要新的显式确认、授权、并发客户端和状态恢复设计；不能仅因生成类型存在就暴露 |
 | 实验 `server/diagnostics` | 读取 App Server 进程、资源和活动快照 | 当前 Doctor 已有受控健康检查，新增进程诊断没有公开需求，还会扩大运维信息暴露面 |
 | 异步命令与 MCP Tool Hook | 让 Hook 在后台执行命令或调用 MCP 工具 | Gateway 不提供 Hook 管理界面；命令和 MCP 调用必须保持现有 Turn、审批和 Surface Actor 归属，不建立旁路执行入口 |
 | Amazon Bedrock Runtime Provider | 通过 AWS 凭据和区域使用内置 Bedrock 模型 | 当前受管 Provider 只有 OpenAI、DeepSeek 与 OpenCode Go；接入 Bedrock 需要新的凭据、模型目录、定价、服务隔离和部署边界，不属于本次协议升级 |
+
+### 已决定采用
+
+| 上游能力 | 采用决策 | 实施边界 |
+| --- | --- | --- |
+| 实验 `thread/queue/*` 与 `thread/queue/changed` | 已用 App Server 持久 Queue 完整替换 Gateway 内存队列，对齐六个原生请求、每 Thread 100 条容量和 25/100 分页 | 不保留第二套队列；Gateway 只负责 Actor、Workspace、Conversation 归属、Provider 路由和安全展示；本地契约与条件式真实 App Server 合同见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) |
+
+### 已决定采用，待实施
+
+| 实验 `thread/revert` 与 `thread/reverted` | 在 Queue 替换完成后独立采用；新建 Thread 使用 paginated history，并通过分页 Turn 列表选择回退边界 | 既有 legacy Thread 不迁移；回退必须一次性确认、执行前复核并明确不会恢复文件，Queue 联合语义通过真实合同前保持失败关闭，详细设计见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) |
 
 ### 纯上游变化
 

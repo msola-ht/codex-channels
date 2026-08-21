@@ -103,6 +103,7 @@ function createRestoreApplication(options: {
       close: async () => undefined,
     },
     stopping: false,
+    queueLifecycleTasks: new Set<Promise<void>>(),
     disconnectedProviders: new Set<string>(),
     disconnectedBindingsByProvider: new Map<string, Set<string>>(),
     pendingBindingRestores: new Map(),
@@ -158,6 +159,64 @@ function createRestoreApplication(options: {
 }
 
 describe("GatewayApplication startup cleanup", () => {
+  it("waits for accepted Queue lifecycle work before stopping Surfaces and Codex", async () => {
+    const calls: string[] = [];
+    let finishQueueTask!: () => void;
+    const queueTask = new Promise<void>((resolve) => {
+      finishQueueTask = resolve;
+    }).then(() => {
+      calls.push("queue:finished");
+    });
+    const target = {
+      surface: "feishu" as const,
+      accountId: "default",
+      conversationId: "conversation-1",
+    };
+    const binding = {
+      target,
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      sessionId: "session-1",
+    };
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, createRestoreApplication({
+      target,
+      binding,
+      published: [],
+      restoreSubscriptions: async () => [],
+      overrides: {
+        queueLifecycleTasks: new Set([queueTask]),
+        surfaceManager: {
+          start: async () => undefined,
+          stop: async () => {
+            calls.push("surface:stopped");
+          },
+        },
+        codex: {
+          close: async () => {
+            calls.push("codex:closed");
+          },
+        },
+      },
+    }));
+    const gateway = application as unknown as GatewayApplication;
+
+    const stopping = gateway.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+
+    finishQueueTask();
+    await expect(stopping).resolves.toBeUndefined();
+    expect(calls).toEqual([
+      "queue:finished",
+      "surface:stopped",
+      "codex:closed",
+    ]);
+  });
+
   it("delegates a Surface fatal error without stopping the Gateway", () => {
     const reportFatal = vi.fn();
     const application = Object.create(
@@ -743,6 +802,7 @@ describe("GatewayApplication startup cleanup", () => {
         close: async () => undefined,
       },
       stopping: false,
+      queueLifecycleTasks: new Set<Promise<void>>(),
       disconnectedProviders: new Set<string>(),
       disconnectedBindingsByProvider: new Map<string, Set<string>>(),
       pendingBindingRestores: new Map(),
@@ -854,6 +914,7 @@ describe("GatewayApplication startup cleanup", () => {
         close: async () => undefined,
       },
       stopping: false,
+      queueLifecycleTasks: new Set<Promise<void>>(),
       disconnectedProviders: new Set<string>(),
       disconnectedBindingsByProvider: new Map<string, Set<string>>(),
       pendingBindingRestores: new Map(),
@@ -1043,6 +1104,7 @@ describe("GatewayApplication startup cleanup", () => {
         close: async () => undefined,
       },
       stopping: false,
+      queueLifecycleTasks: new Set<Promise<void>>(),
       disconnectedProviders: new Set<string>(),
       disconnectedBindingsByProvider: new Map<string, Set<string>>(),
       pendingBindingRestores: new Map(),

@@ -205,6 +205,74 @@ describe("Feishu command center", () => {
     );
   });
 
+  it("consumes a Queue start action token after selection", async () => {
+    const cards: Array<{
+      chatId: string;
+      messageId: string;
+      card: FeishuCardDocument;
+    }> = [];
+    const execute = vi.fn(async (
+      _target,
+      action,
+      _actorId,
+      input,
+    ) => action === "queue" && input === ""
+      ? {
+          title: "Queue 条目",
+          choices: [{
+            label: "启动",
+            action: "queue" as const,
+            input: "start queue-1",
+          }],
+        }
+      : undefined);
+    const center = new FeishuCommandCenter(
+      {
+        deliverCard: async (chatId, card) => {
+          const messageId = `om_card_${cards.length + 1}`;
+          cards.push({ chatId, messageId, card });
+          return messageId;
+        },
+      },
+      { isAllowed: () => true },
+      execute,
+      pino({ level: "silent" }),
+    );
+
+    await center.open(target, "ou_actor");
+    expect(center.handleCardAction(cardAction(cards[0]!, "help"))).toBe("accepted");
+    await settle();
+    expect(center.handleCardAction(cardAction(cards[1]!, "queue"))).toBe("accepted");
+    await settle();
+
+    const queueCard = cards[2]!;
+    const startAction = collectCardActions(queueCard.card).find((action) =>
+      typeof action === "object"
+      && action !== null
+      && "value" in action
+      && (action as { value: Record<string, string> }).value.codexc_command_input === "start queue-1"
+    ) as { value: Readonly<Record<string, string>> } | undefined;
+    if (!startAction) {
+      throw new Error("Queue 启动按钮未渲染");
+    }
+    const action = {
+      messageId: queueCard.messageId,
+      chatId: queueCard.chatId,
+      actorOpenId: "ou_actor",
+      tag: "button" as const,
+      value: startAction.value,
+    };
+    expect(center.handleCardAction(action)).toBe("accepted");
+    expect(center.handleCardAction(action)).toBe("invalid");
+    await settle();
+    expect(execute).toHaveBeenLastCalledWith(
+      target,
+      "queue",
+      "ou_actor",
+      "start queue-1",
+    );
+  });
+
   it("opens one reusable command form and submits its bounded text", async () => {
     const cards: Array<{
       chatId: string;

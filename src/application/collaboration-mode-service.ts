@@ -53,6 +53,10 @@ export class CollaborationModeSelectionService {
     return this.pendingByConversation.get(this.key(target));
   }
 
+  hasPending(target: ConversationTarget): boolean {
+    return this.pendingByConversation.has(this.key(target));
+  }
+
   markApplied(target: ConversationTarget): void {
     const key = this.key(target);
     const pending = this.pendingByConversation.get(key);

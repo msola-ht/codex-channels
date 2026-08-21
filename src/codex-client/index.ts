@@ -3,6 +3,14 @@ export {
   type ThreadDefaults,
 } from "./client.js";
 export {
+  toProtocolQueueText,
+  toThreadQueueAddResult,
+  toThreadQueueItem,
+  toThreadQueuePage,
+  toThreadQueueStartResult,
+  toThreadQueueUpdateResult,
+} from "./queue-adapter.js";
+export {
   ProviderRoutingClient,
   type ProviderClientInstance,
 } from "./provider-routing-client.js";
@@ -16,6 +24,7 @@ export {
 } from "./json-rpc.js";
 export {
   toConversationInputEvent,
+  toThreadQueueChangedEvent,
   toThreadStateEvent,
 } from "./notification-adapter.js";
 export {

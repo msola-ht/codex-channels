@@ -7,6 +7,7 @@ import {
   type ConversationUseCases,
   type InstalledPlugin,
 } from "../src/application/index.js";
+import { parseThreadQueueOperation } from "../src/application/conversation-command-parser.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import { TelegramAccessPolicy } from "../src/policy/index.js";
 
@@ -43,6 +44,18 @@ function installedPlugin(
 }
 
 describe("ConversationCommandService", () => {
+  it("preserves internal whitespace and newlines in Queue text", () => {
+    expect(parseThreadQueueOperation("add first line\n\n  second line  ")).toEqual({
+      type: "add",
+      text: "first line\n\n  second line",
+    });
+    expect(parseThreadQueueOperation("update 1 first line\n\n  second line  ")).toEqual({
+      type: "update",
+      selector: "1",
+      text: "first line\n\n  second line",
+    });
+  });
+
   it("owns the platform-independent command catalog without duplicates", () => {
     expect(new Set(conversationCommandNames).size).toBe(conversationCommandNames.length);
     expect(conversationCommandNames).toContain("resume");
@@ -423,6 +436,27 @@ describe("ConversationCommandService", () => {
       });
   });
 
+  it("propagates a cold Queue resume warning without restoring old preferences", async () => {
+    const commands = new ConversationCommandService({
+      resume: vi.fn(async () => ({
+        threadId: "thread-cold-queue",
+        queuePending: true,
+      })),
+      status: vi.fn(() => ({
+        model: "gpt-5.6",
+        modelProvider: "openai",
+      })),
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "resume", "thread-cold-queue"))
+      .resolves.toMatchObject({
+        outcome: {
+          type: "thread.resumed",
+          queuePending: true,
+        },
+      });
+  });
+
   it("keeps review parsing and business invocation outside Surface adapters", async () => {
     const review = vi.fn(async () => ({
       threadId: "review-thread",
@@ -507,29 +541,73 @@ describe("ConversationCommandService", () => {
     expect(setGoal).toHaveBeenCalledWith(target, "ship it");
   });
 
-  it("queues a follow-up through the shared command boundary", async () => {
-    const queueFollowUp = vi.fn(async () => ({ position: 2 }));
+  it("dispatches the explicit native Queue command operations", async () => {
+    const item = {
+      id: "queued-1",
+      clientUserMessageId: "client-1",
+      inputType: "text" as const,
+      textPreview: "queued",
+      editable: true,
+    };
+    const queueAdd = vi.fn(async () => item);
+    const queueList = vi.fn(async () => ({
+      items: [item],
+      selectors: ["1"],
+      page: 1,
+      pageCount: 1,
+      totalItemCount: 1,
+    }));
+    const queueUpdate = vi.fn(async () => ({ ...item, textPreview: "updated" }));
+    const queueDelete = vi.fn(async () => ({ deleted: true }));
+    const queueReorder = vi.fn(async () => ({
+      itemId: "queued-1",
+      position: 1,
+      totalItemCount: 1,
+    }));
+    const queueStart = vi.fn(async () => ({ turnId: "turn-queue" }));
     const commands = new ConversationCommandService({
-      queueFollowUp,
+      queueAdd,
+      queueList,
+      queueUpdate,
+      queueDelete,
+      queueReorder,
+      queueStart,
     } as unknown as ConversationUseCases);
 
-    await expect(commands.execute(target, "queue", " 下一轮检查测试 "))
-      .resolves.toEqual({
-        kind: "outcome",
-        outcome: { type: "turn.follow-up-queued", position: 2 },
-      });
-    expect(queueFollowUp).toHaveBeenCalledWith(target, "下一轮检查测试");
+    await expect(commands.execute(target, "queue", "add next task")).resolves.toMatchObject({
+      outcome: { type: "thread-queue.added", item },
+    });
+    await expect(commands.execute(target, "queue", "list")).resolves.toEqual({
+      kind: "thread-queue",
+      result: expect.objectContaining({ totalItemCount: 1 }),
+    });
+    await expect(commands.execute(target, "queue", "update 1 updated task")).resolves.toMatchObject({
+      outcome: { type: "thread-queue.updated" },
+    });
+    await expect(commands.execute(target, "queue", "delete queued-1")).resolves.toMatchObject({
+      outcome: { type: "thread-queue.deleted", deleted: true },
+    });
+    await expect(commands.execute(target, "queue", "reorder queued-1 1")).resolves.toMatchObject({
+      outcome: { type: "thread-queue.reordered", position: 1 },
+    });
+    await expect(commands.execute(target, "queue", "start queued-1")).resolves.toMatchObject({
+      outcome: { type: "thread-queue.started", turnId: "turn-queue" },
+    });
+    expect(queueAdd).toHaveBeenCalledWith(target, "next task");
+    expect(queueList).toHaveBeenCalledWith(target, 1);
+    expect(queueUpdate).toHaveBeenCalledWith(target, "1", "updated task");
+    expect(queueDelete).toHaveBeenCalledWith(target, "queued-1");
+    expect(queueReorder).toHaveBeenCalledWith(target, "queued-1", 1);
+    expect(queueStart).toHaveBeenCalledWith(target, "queued-1");
   });
 
-  it("rejects /queue without a follow-up description", async () => {
-    const queueFollowUp = vi.fn();
-    const commands = new ConversationCommandService({
-      queueFollowUp,
-    } as unknown as ConversationUseCases);
+  it("rejects the removed implicit Queue alias", async () => {
+    const queueAdd = vi.fn();
+    const commands = new ConversationCommandService({ queueAdd } as unknown as ConversationUseCases);
 
-    await expect(commands.execute(target, "queue", " "))
+    await expect(commands.execute(target, "queue", "下一轮检查测试"))
       .rejects.toMatchObject({ code: "queue.usage" });
-    expect(queueFollowUp).not.toHaveBeenCalled();
+    expect(queueAdd).not.toHaveBeenCalled();
   });
 
   it("routes model and account queries without Surface-specific branching", async () => {
@@ -979,7 +1057,20 @@ describe("ConversationCommandService", () => {
         cwd: "/workspace",
       })),
       stop: vi.fn(async () => true),
-      queueFollowUp: vi.fn(async () => ({ position: 1 })),
+      queueAdd: vi.fn(async () => ({
+        id: "queued-1",
+        clientUserMessageId: "client-1",
+        inputType: "text" as const,
+        textPreview: "queued",
+        editable: true,
+      })),
+      queueList: vi.fn(async () => ({
+        items: [], selectors: [], page: 1, pageCount: 1, totalItemCount: 0,
+      })),
+      queueUpdate: vi.fn(),
+      queueDelete: vi.fn(),
+      queueReorder: vi.fn(),
+      queueStart: vi.fn(),
       rename: vi.fn(async () => undefined),
       compact: vi.fn(async () => undefined),
       fork: vi.fn(async () => "thread-forked"),
@@ -1036,7 +1127,7 @@ describe("ConversationCommandService", () => {
       ["workspace", "main", "selectWorkspace"],
       ["workspaceperm", "approval never", "updateWorkspacePermissions"],
       ["stop", "", "stop"],
-      ["queue", "follow up", "queueFollowUp"],
+      ["queue", "add follow up", "queueAdd"],
       ["rename", "name", "rename"],
       ["compact", "", "compact"],
       ["fork", "", "fork"],

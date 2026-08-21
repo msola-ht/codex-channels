@@ -11,6 +11,7 @@ import {
   parseReviewTarget,
   parseSessionListView,
   parseSkillInvocation,
+  parseThreadQueueOperation,
   parseThreadSectionOperation,
   parseWorkspacePermissionCommand,
   toSessionQuery,
@@ -28,6 +29,7 @@ export {
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
+  threadQueueCommandUsageText,
   threadSectionCommandUsageText,
   type McpDetailView,
   type PluginListView,
@@ -106,6 +108,10 @@ export type ConversationCommandResult =
   | {
       kind: "thread-section-delete-preview";
       preview: Awaited<ReturnType<ConversationUseCases["previewThreadSectionDelete"]>>;
+    }
+  | {
+      kind: "thread-queue";
+      result: Awaited<ReturnType<ConversationUseCases["queueList"]>>;
     }
   | { kind: "status"; status: ReturnType<ConversationUseCases["status"]> }
   | {
@@ -190,6 +196,7 @@ export type ConversationCommandOutcome =
       threadId: string;
       backgroundedThreadId?: string;
       transferredFrom?: string;
+      queuePending?: boolean;
       model: ConversationModelSummary;
     }
   | {
@@ -215,7 +222,25 @@ export type ConversationCommandOutcome =
       workspace: Awaited<ReturnType<ConversationUseCases["updateWorkspacePermissions"]>>;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
-  | { type: "turn.follow-up-queued"; position: number }
+  | {
+      type: "thread-queue.added";
+      item: Awaited<ReturnType<ConversationUseCases["queueAdd"]>>;
+    }
+  | {
+      type: "thread-queue.updated";
+      item: Awaited<ReturnType<ConversationUseCases["queueUpdate"]>>;
+    }
+  | {
+      type: "thread-queue.deleted";
+      deleted: boolean;
+    }
+  | {
+      type: "thread-queue.reordered";
+      itemId: string;
+      position: number;
+      totalItemCount: number;
+    }
+  | { type: "thread-queue.started"; turnId: string }
   | { type: "thread.renamed"; name: string }
   | { type: "thread.compaction-requested" }
   | { type: "thread.forked"; threadId: string }
@@ -274,6 +299,7 @@ export class ConversationCommandService {
               ...(resumed.transferredFrom
                 ? { transferredFrom: resumed.transferredFrom }
                 : {}),
+              ...(resumed.queuePending ? { queuePending: true } : {}),
               model,
             },
           };
@@ -493,13 +519,62 @@ export class ConversationCommandService {
         };
       }
       case "queue": {
-        if (!argumentsText) {
-          throw new UserFacingError("queue.usage", "Queue 参数无效");
+        const operation = parseThreadQueueOperation(argumentsText);
+        if (operation.type === "list") {
+          return {
+            kind: "thread-queue",
+            result: await this.conversations.queueList(target, operation.page),
+          };
         }
-        const queued = await this.conversations.queueFollowUp(target, argumentsText);
+        if (operation.type === "add") {
+          return {
+            kind: "outcome",
+            outcome: {
+              type: "thread-queue.added",
+              item: await this.conversations.queueAdd(target, operation.text),
+            },
+          };
+        }
+        if (operation.type === "update") {
+          return {
+            kind: "outcome",
+            outcome: {
+              type: "thread-queue.updated",
+              item: await this.conversations.queueUpdate(
+                target,
+                operation.selector,
+                operation.text,
+              ),
+            },
+          };
+        }
+        if (operation.type === "delete") {
+          const result = await this.conversations.queueDelete(target, operation.selector);
+          return {
+            kind: "outcome",
+            outcome: { type: "thread-queue.deleted", deleted: result.deleted },
+          };
+        }
+        if (operation.type === "reorder") {
+          const result = await this.conversations.queueReorder(
+            target,
+            operation.selector,
+            operation.position,
+          );
+          return {
+            kind: "outcome",
+            outcome: {
+              type: "thread-queue.reordered",
+              itemId: result.itemId,
+              position: result.position,
+              totalItemCount: result.totalItemCount,
+            },
+          };
+        }
+        const result = await this.conversations.queueStart(target, operation.selector);
         return {
           kind: "outcome",
-          outcome: { type: "turn.follow-up-queued", position: queued.position },
+          outcome: { type: "thread-queue.started", turnId: result.turnId },
         };
       }
       case "rename":

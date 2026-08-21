@@ -7,6 +7,8 @@ import {
   type ConversationCommandResult,
   type ConversationStatus,
   type McpResourceContent,
+  type ThreadQueueInputType,
+  type ThreadQueueItem,
 } from "../application/index.js";
 import {
   usesOpenAiAccount,
@@ -61,7 +63,7 @@ export const conversationCommandDescriptions = {
   workspace: "列出或切换 Workspace",
   workspaceperm: "查看或修改当前工作区权限",
   stop: "停止当前任务",
-  queue: "排到下一 Turn",
+  queue: "管理 App Server 持久队列",
   rename: "命名当前会话",
   compact: "压缩当前上下文",
   fork: "分叉当前会话",
@@ -102,7 +104,9 @@ export const conversationCommandHelpSections = [
     title: "运行与项目：",
     lines: [
       "/status · /workspace [序号|ID|名称] · /workspaceperm",
-      "/stop · /queue <描述>",
+      "/stop · /queue add <文本> · /queue list [页码]",
+      "/queue update <完整 ID 或列表序号> <文本> · /queue delete <完整 ID 或列表序号>",
+      "/queue reorder <完整 ID 或列表序号> <目标位置> · /queue start [完整 ID 或列表序号]",
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
       "/release · /release force",
@@ -187,6 +191,32 @@ export function formatConversationSessions(
     result.archived
       ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
       : "恢复：/resume <序号、名称或 Thread ID>",
+  ].join("\n"));
+}
+
+export function formatConversationThreadQueue(
+  result: Extract<ConversationCommandResult, { kind: "thread-queue" }>,
+): string {
+  if (result.result.totalItemCount === 0) {
+    return toStructuredMarkdownList([
+      "App Server Queue 为空",
+      `第 ${result.result.page}/${result.result.pageCount} 页 · 共 ${result.result.totalItemCount} 条`,
+      "新增：/queue add <文本>",
+    ].join("\n"));
+  }
+  if (result.result.page > result.result.pageCount) {
+    return toStructuredMarkdownList([
+      `App Server Queue（共 ${result.result.totalItemCount} 条）`,
+      `第 ${result.result.page} 页不存在，共 ${result.result.pageCount} 页`,
+      "返回第一页：/queue list 1",
+    ].join("\n"));
+  }
+  return toStructuredMarkdownList([
+    `App Server Queue（第 ${result.result.page}/${result.result.pageCount} 页 · 共 ${result.result.totalItemCount} 条）：`,
+    ...result.result.items.map((item, index) =>
+      `${result.result.selectors[index] ?? "?"}. ${formatQueueItem(item)}`),
+    "",
+    "数字序号仅在最近五分钟的本会话列表快照内有效；也可使用完整 ID。",
   ].join("\n"));
 }
 
@@ -280,11 +310,17 @@ export function formatConversationCommandOutcome(
             formatTakeoverSource(outcome.transferredFrom),
             `Thread：${outcome.threadId}`,
             formatConversationModel("会话模型", outcome.model),
+            ...(outcome.queuePending
+              ? ["Queue 中有待派发条目，已沿用该 Thread 自身设置，未应用当前会话的待生效偏好。"]
+              : []),
           ].join("\n"))
         : toStructuredMarkdownList([
             "已恢复 Codex Thread",
             `Thread：${outcome.threadId}`,
             formatConversationModel("会话模型", outcome.model),
+            ...(outcome.queuePending
+              ? ["Queue 中有待派发条目，已沿用该 Thread 自身设置，未应用当前会话的待生效偏好。"]
+              : []),
             ...(outcome.backgroundedThreadId
               ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
               : []),
@@ -375,9 +411,31 @@ export function formatConversationCommandOutcome(
       return outcome.stopped
         ? toStructuredMarkdownList(["已请求停止当前任务。"].join("\n"))
         : toStructuredMarkdownList(["当前没有运行中的任务。"].join("\n"));
-    case "turn.follow-up-queued":
+    case "thread-queue.added":
       return toStructuredMarkdownList([
-        `已排到下一 Turn，当前第 ${outcome.position} 条。队列仅保存在内存，Gateway 重启会清空。`,
+        "已写入 App Server Queue",
+        formatQueueItem(outcome.item),
+        "该条目由 App Server 持久保存；Gateway 重启不会清空。",
+      ].join("\n"));
+    case "thread-queue.updated":
+      return toStructuredMarkdownList([
+        "已更新 App Server Queue 条目",
+        formatQueueItem(outcome.item),
+      ].join("\n"));
+    case "thread-queue.deleted":
+      return toStructuredMarkdownList([
+        outcome.deleted ? "已删除 App Server Queue 条目" : "Queue 条目已不存在",
+      ].join("\n"));
+    case "thread-queue.reordered":
+      return toStructuredMarkdownList([
+        "已重新排序 App Server Queue",
+        `条目：${outcome.itemId}`,
+        `位置：${outcome.position}/${outcome.totalItemCount}`,
+      ].join("\n"));
+    case "thread-queue.started":
+      return toStructuredMarkdownList([
+        "已启动 App Server Queue 条目",
+        `Turn：${outcome.turnId}`,
       ].join("\n"));
     case "thread.renamed":
       return toStructuredMarkdownList([
@@ -503,6 +561,24 @@ export function isTurnLifecycleAcknowledgedOutcome(
     || outcome.type === "plugin.started"
     || outcome.type === "agents.started"
   ) && !outcome.steered;
+}
+
+function formatQueueItem(
+  item: ThreadQueueItem,
+): string {
+  const preview = item.textPreview ? ` · ${item.textPreview}` : "";
+  return `${item.id} · 类型：${formatThreadQueueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}${preview}`;
+}
+
+export function formatThreadQueueInputTypeLabel(type: ThreadQueueInputType): string {
+  switch (type) {
+    case "text": return "纯文本";
+    case "image": return "图片";
+    case "audio": return "音频";
+    case "skill": return "Skill";
+    case "mention": return "Mention";
+    default: return "复合输入";
+  }
 }
 
 function formatTakeoverSource(surface: string): string {

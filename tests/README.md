@@ -14,8 +14,9 @@
   与定向绑定/交互恢复；切换模式双 App Server、固定模式单主实例和 Provider Remote TUI Socket 选择。
 - Thread 设置、归档、删除和关闭 Notification 到稳定 Routing 事件的映射，残缺或无关通知隔离，
   以及 Routing 不再解析原始协议信封。
-- 活动 Turn 的即时 steer 与下一 Turn 有界内存队列、顺序启动、Thread 隔离和失败清理；项目输入
-  到官方 `UserInput` 的映射，以及 Review、Goal 和控制响应到稳定 Application 结果的映射。
+- 原生 Thread Queue 六请求、100 条容量、25 条分页、五分钟 ID 选择快照、非文本安全摘要、Provider 路由、
+  pending model/effort/Fast/Plan 覆盖失败关闭和写入竞态；项目输入到官方 `UserInput` 的映射，以及
+  Review、Goal 和控制响应到稳定 Application 结果的映射。
 - 图片识别结果的严格数量、顺序、长度和提示注入隔离；第三方 Provider Setup 均为
   外部视觉接口分离保存 Key；模型不支持图片时使用单次 Responses 请求、私有 Key 和稳定响应裁剪，
   外部视觉模型只做客观观察和文字提取，原 Thread 默认不额外搜索、核实或调用工具；
@@ -41,7 +42,7 @@
   重新接收，微信临时取消不会永久关闭交互端口；飞书短审批直接显示，长审批在初始与处理结果
   CardKit 中提供有界预览和默认收起的完整原文，并保留一次性动作令牌。
 - Bootstrap 单渠道启动/运行故障隔离、独立退避恢复、Thread 写锁冲突下继续启动并在释放后自动恢复、首次启动与恢复期关键输出有界暂存、启动中停止的单次组件
-  关闭、App Server 重连取消与关闭等待；`/release` 展示持锁命令前剥离凭据参数，只把入口可执行
+  关闭、Queue 生命周期任务先于 Surface 与 Client 的关闭等待、App Server 重连取消与关闭等待；`/release` 展示持锁命令前剥离凭据参数，只把入口可执行
   文件为 `codex`、且二次核验身份未变化的持锁方判为可强制释放；内置 Surface 插件
   顺序、零/多账号展开、插件与 Surface ID 一致性、账号唯一性；飞书按配置显式注册、允许名单
   热加载、撤权绑定清理，以及已授权但暂时无 Thread 绑定的飞书/微信会话启动通知；OpenAI 启动
@@ -333,6 +334,9 @@ CI 中的隔离 App Server 合同测试要求安装受支持的 Codex CLI，但�
 ```bash
 RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 ```
+
+其中原生 Thread Queue 合同使用该门禁变量，验证真实握手、100/101 容量、CRUD、25/100 分页、
+活动 busy、指定条目启动、中断保留、自动派发和 App Server 重启后的冷恢复；跳过或环境拒绝都不计为通过。
 
 该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 测试配置和本地测试 MCP 进程，验证
 App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 完整详情、只读资源、OAuth PKCE 回调及完成通知、

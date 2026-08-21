@@ -489,8 +489,17 @@ describe("Feishu output renderer", () => {
         expected: "已请求停止当前任务",
       },
       {
-        outcome: { type: "turn.follow-up-queued", position: 3 },
-        expected: "当前第 3 条",
+        outcome: {
+          type: "thread-queue.added",
+          item: {
+            id: "queue-3",
+            clientUserMessageId: "client-3",
+            inputType: "text",
+            textPreview: "继续检查",
+            editable: true,
+          },
+        },
+        expected: "已写入 App Server Queue",
       },
       {
         outcome: { type: "thread.renamed", name: "新名称" },

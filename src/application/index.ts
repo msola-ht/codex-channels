@@ -37,6 +37,7 @@ export {
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
+  threadQueueCommandUsageText,
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
@@ -58,6 +59,8 @@ export {
   type ConversationStatus,
   type ConversationTransferPort,
   type ConversationUseCases,
+  type ThreadQueueListResult,
+  type ThreadQueueReorderResult,
   type ProjectRulesPort,
   type ProjectRulesResult,
   type Submission,
@@ -150,6 +153,13 @@ export {
   type TurnOverrides,
   type TurnStarted,
 } from "./turn-port.js";
+export {
+  type ThreadQueueInputType,
+  type ThreadQueueItem,
+  type ThreadQueueListOptions,
+  type ThreadQueuePage,
+  type ThreadQueuePort,
+} from "./thread-queue-port.js";
 export {
   type ThreadLockHolder,
   type ThreadOccupancyPort,

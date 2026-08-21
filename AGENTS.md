@@ -101,11 +101,14 @@ Surface -> Application/Core <- Codex Client
 - 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
-- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.148.0` 只有两个
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.148.0` 只有三个
   受控例外。官方 Plan 模式只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`，必须通过
   `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
-  合同测试覆盖。开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用
+  合同测试覆盖。原生 Thread Queue 只允许使用
+  `thread/queue/add|list|update|delete|reorder|start` 与 `thread/queue/changed`，必须通过
+  `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
+  合同测试覆盖；列表可进行有界只读重试，写入不得盲目重试。开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用
   `plugin/installed` 查询已安装项，并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入调用；
   开关默认关闭且必须在 Doctor、命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些
   例外接入或暴露其他实验方法、字段或通知。
@@ -165,8 +168,8 @@ Surface -> Application/Core <- Codex Client
 - 队列过载时可以合并或丢弃非关键中间事件，但不得静默丢弃审批、错误、Item 完成或 Turn 完成事件。
 - 平台 API 超时、限流或失败不得阻塞 App Server Reader。
 - 后台任务必须有明确所有者、取消路径、有限重试和关闭等待上限。
-- 下一 Turn 的补充输入使用按 Conversation 隔离的有界内存队列；消息正文不得持久化，
-  Gateway 重启时允许清空，但入队时必须明确提示用户。
+- 下一 Turn 的补充输入统一使用当前 Thread 的 App Server Queue；Gateway 不保存第二套消息正文队列，
+  入队、列表、更新、删除、排序和启动必须通过受控 Queue 端口，入队时明确提示 App Server 持久化语义。
 - 审批状态必须绑定 Thread、协议提供的 Turn 和请求标识；MCP elicitation 无法关联活动 Turn
   时允许 `turnId` 为 `null`，但仍必须保留 Thread 与 App Server 请求 ID。交互令牌必须不可预测、
   一次性使用并设置过期时间。
