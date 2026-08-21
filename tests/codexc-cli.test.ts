@@ -89,7 +89,7 @@ describe("codexc CLI", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("Schema：9");
+    expect(result.stdout).toContain("Schema：10");
     expect(result.stderr).toBe("");
   });
 

@@ -291,6 +291,13 @@ export function createSubagentCompletedPresentation(
       value: formatCodexProviderLabel(event.modelProvider),
     });
   }
+  if (event.reasoningEffort) {
+    fields.push({ label: "思考等级", value: event.reasoningEffort });
+  }
+  fields.push({
+    label: "耗时",
+    value: formatElapsedDuration(event.elapsedMs),
+  });
   if (event.metricsStatus === "unavailable") {
     fields.push({ label: "统计", value: "暂不可用" });
     return {
@@ -336,6 +343,14 @@ export function createSubagentCompletedPresentation(
       label: "模型请求聚合耗时",
       value: formatElapsedDuration(event.durationMs),
     });
+  }
+  const outputSpeed = formatReliableOutputSpeed(
+    event.outputTokensPerSecond,
+    event.outputSpeedTimedCount,
+    event.outputSpeedSampleCount,
+  );
+  if (outputSpeed !== null) {
+    fields.push({ label: "综合输出速度", value: outputSpeed });
   }
   if (displayCost !== null) {
     fields.push({
@@ -643,6 +658,105 @@ export function createTurnCompletedPresentation(
       ),
     });
   }
+  if (event.taskAggregate) {
+    const task = event.taskAggregate;
+    const successfulTaskRequestCount = Math.max(
+      0,
+      task.requestCount - task.unsuccessfulRequestCount,
+    );
+    const taskFields: LifecyclePresentationField[] = [
+      {
+        label: "模型请求",
+        value: `${task.requestCount} 次`,
+      },
+      {
+        title: "Token",
+        value: formatTokenCount(task.inputTokens + task.outputTokens),
+        fields: debug ? [
+          ...(task.cachedInputTokens === null
+            ? [{ label: "输入", value: formatTokenCount(task.inputTokens) }]
+            : [
+                {
+                  label: "输入命中缓存",
+                  value: formatTokenCount(task.cachedInputTokens),
+                },
+                {
+                  label: "输入未命中缓存",
+                  value: formatTokenCount(
+                    Math.max(0, task.inputTokens - task.cachedInputTokens),
+                  ),
+                },
+              ]),
+          { label: "输出", value: formatTokenCount(task.outputTokens) },
+          ...(task.reasoningOutputTokens > 0
+            ? [{
+                label: "其中推理输出",
+                value: formatTokenCount(task.reasoningOutputTokens),
+              }]
+            : []),
+          ...(task.cachedInputTokens === null
+            ? []
+            : [{
+                label: "缓存命中率",
+                value: formatCacheHitRate(task.inputTokens, task.cachedInputTokens),
+              }]),
+        ] : [],
+      },
+    ];
+    if (successfulTaskRequestCount > 0) {
+      const taskCost = toDisplayReferenceCost({
+        currency: task.pricingCurrency,
+        totalCostNanos: task.totalCostNanos,
+        inputCostNanos: task.inputCostNanos,
+        cachedInputCostNanos: task.cachedInputCostNanos,
+        outputCostNanos: task.outputCostNanos,
+        pricedRequestCount: task.pricedRequestCount,
+        requestCount: successfulTaskRequestCount,
+        uncachedInputPricePerMillionNanos: task.uncachedInputPricePerMillionNanos,
+        cachedInputPricePerMillionNanos: task.cachedInputPricePerMillionNanos,
+        outputPricePerMillionNanos: task.outputPricePerMillionNanos,
+        hasMixedPrices: task.hasMixedPrices,
+        ...(task.pricingBuckets === undefined
+          ? {}
+          : { pricingBuckets: task.pricingBuckets }),
+      }, currency, exchangeRate ?? null);
+      taskFields.push({
+        title: "费用",
+        value: formatReferenceCostTotal(
+          taskCost,
+          debug ? exchangeRate ?? null : null,
+        ),
+        fields: !debug || taskCost.currency === null
+          ? []
+          : ([
+              ["输入价格", taskCost.inputCostNanos],
+              ["缓存价格", taskCost.cachedInputCostNanos],
+              ["输出价格", taskCost.outputCostNanos],
+            ] as const).flatMap(([label, costNanos]) =>
+              costNanos === null
+                ? []
+                : [{
+                    label,
+                    value: formatCostFieldValue(taskCost, costNanos, exchangeRate),
+                  }]
+            ),
+      });
+      if (task.pricedRequestCount === successfulTaskRequestCount) {
+        const averagePrice = formatAveragePriceValue({
+          pricingCurrency: task.pricingCurrency,
+          totalCostNanos: task.totalCostNanos,
+          pricedRequestCount: task.pricedRequestCount,
+          requestCount: successfulTaskRequestCount,
+          inputTokens: task.pricedInputTokens,
+          outputTokens: task.pricedOutputTokens,
+        }, currency, currency === "cny" || debug ? exchangeRate ?? null : null);
+        if (averagePrice !== null) {
+          taskFields.push({ label: "均价", value: averagePrice });
+        }
+      }
+    }
+    runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
+  }
   const performanceFields: LifecyclePresentationField[] = [];
   if (debug && event.timing?.ttftMs !== undefined) {
     performanceFields.push({
@@ -708,6 +822,23 @@ export function createTurnCompletedPresentation(
     });
   }
   if (event.sessionReferenceCost) {
+    sessionFields.push({
+      label: "模型请求",
+      value: `${event.sessionReferenceCost.requestCount} 次`,
+    });
+    if (
+      event.sessionReferenceCost.inputTokens !== undefined
+      && event.sessionReferenceCost.outputTokens !== undefined
+    ) {
+      sessionFields.push({
+        title: "Token",
+        value: formatTokenCount(
+          event.sessionReferenceCost.inputTokens
+            + event.sessionReferenceCost.outputTokens,
+        ),
+        fields: [],
+      });
+    }
     sessionFields.push({
       label: "总价",
       value: formatReferenceCostTotal(
@@ -830,6 +961,26 @@ function formatSpeedCoverage(
   return timedCount === undefined || sampleCount === undefined
     ? ""
     : ` · 覆盖 ${timedCount}/${sampleCount} 次请求`;
+}
+
+function formatReliableOutputSpeed(
+  outputTokensPerSecond: number | null,
+  timedCount: number,
+  sampleCount: number,
+): string | null {
+  if (
+    outputTokensPerSecond === null
+    || !Number.isFinite(outputTokensPerSecond)
+    || outputTokensPerSecond <= 0
+    || !Number.isSafeInteger(timedCount)
+    || !Number.isSafeInteger(sampleCount)
+    || timedCount <= 0
+    || sampleCount <= 0
+    || timedCount > sampleCount
+  ) {
+    return null;
+  }
+  return `${formatTokensPerSecond(outputTokensPerSecond)}（不含推理 · 覆盖 ${timedCount}/${sampleCount} 次请求）`;
 }
 
 function pendingSuffix(pending: boolean): string {

@@ -8,7 +8,7 @@ import {
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export const modelRequestMetricsSchemaVersion = 9;
+export const modelRequestMetricsSchemaVersion = 10;
 const incompleteLockGraceMs = 30_000;
 
 export interface RequestMetricsDatabaseLock {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import worker from "../cloudflare/worker/src/index.js";
 import { parseIngestPayload } from "../cloudflare/worker/src/payload.js";
 
 describe("Cloudflare ingest payload validation", () => {
@@ -16,6 +17,59 @@ describe("Cloudflare ingest payload validation", () => {
       deviceId: "device-a",
       deviceName: "main-server",
     });
+  });
+
+  it("accepts legacy subagent payloads without a parent Turn", () => {
+    const legacyRow = { ...subagentRow("legacy-sub"), parentTurnId: undefined };
+    const parsed = parseIngestPayload({
+      deviceId: "device-a",
+      requestMetrics: [],
+      subagentThreads: [legacyRow],
+    });
+
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("writes a legacy subagent payload with a NULL parent Turn", async () => {
+    const statements: Array<{ sql: string; params: unknown[] }> = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...params: unknown[]) {
+            statements.push({ sql, params });
+            return { sql, params };
+          },
+        };
+      },
+      async batch(batch: unknown[]) {
+        return batch.map(() => ({ meta: { changes: 1 } }));
+      },
+    };
+    const legacyRow = { ...subagentRow("legacy-sub"), parentTurnId: undefined };
+
+    const response = await worker.fetch(
+      new Request("https://metrics.example/api/ingest", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          deviceId: "device-a",
+          requestMetrics: [],
+          subagentThreads: [legacyRow],
+        }),
+      }),
+      { DB: db, INGEST_TOKEN: "test-token" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      insertedSubagents: 1,
+    });
+    expect(statements[0]?.sql).toContain("parent_turn_id");
+    expect(statements[0]?.params[3]).toBeNull();
   });
 
   it("accepts a missing or blank device name and rejects oversized names", () => {
@@ -106,6 +160,7 @@ describe("Cloudflare ingest payload validation", () => {
       { ...subagentRow("sub-1"), threadId: "x".repeat(129) },
       { ...subagentRow("sub-1"), recordedAtMs: 0 },
       { ...subagentRow("sub-1"), parentThreadId: 42 },
+      { ...subagentRow("sub-1"), parentTurnId: "" },
       null,
     ];
     for (const row of cases) {
@@ -139,6 +194,7 @@ function subagentRow(threadId: string) {
   return {
     threadId,
     parentThreadId: "main-1",
+    parentTurnId: "turn-1",
     agentPath: "/root/ds_probe",
     recordedAtMs: 1_785_640_800_000,
   };

@@ -6,6 +6,7 @@ import {
   type ConversationTarget,
   type OutputEvent,
   type ReferenceCostSummary,
+  type TurnTaskMetricsSummary,
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import type {
@@ -36,6 +37,10 @@ export interface SurfaceManagerOptions {
     turnId: string,
     current: ReferenceCostSummary | undefined,
   ): ReferenceCostSummary | undefined;
+  taskAggregate?(
+    threadId: string,
+    turnId: string,
+  ): TurnTaskMetricsSummary | undefined | Promise<TurnTaskMetricsSummary | undefined>;
 }
 
 export class SurfaceManager {
@@ -265,15 +270,32 @@ export class SurfaceManager {
     }
     let routedEvent = event;
     if (event.type === "turn.completed") {
-      const sessionReferenceCost = this.options.sessionReferenceCost?.(
+      const taskAggregateResult = this.options.taskAggregate?.(
         event.threadId,
         event.turnId,
-        event.timing?.referenceCost,
       );
+      let sessionReferenceCost: ReferenceCostSummary | undefined;
+      let taskAggregate: TurnTaskMetricsSummary | undefined;
+      if (taskAggregateResult instanceof Promise) {
+        taskAggregate = await taskAggregateResult;
+        sessionReferenceCost = this.options.sessionReferenceCost?.(
+          event.threadId,
+          event.turnId,
+          event.timing?.referenceCost,
+        );
+      } else {
+        sessionReferenceCost = this.options.sessionReferenceCost?.(
+          event.threadId,
+          event.turnId,
+          event.timing?.referenceCost,
+        );
+        taskAggregate = taskAggregateResult;
+      }
       routedEvent = {
         ...event,
         gitBranch: this.currentGitBranch?.(event.target),
         ...(sessionReferenceCost === undefined ? {} : { sessionReferenceCost }),
+        ...(taskAggregate === undefined ? {} : { taskAggregate }),
       };
     }
     if (!this.active.has(surface)) {

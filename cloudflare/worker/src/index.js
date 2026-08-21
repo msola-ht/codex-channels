@@ -84,6 +84,7 @@ async function handleIngest(request, env) {
       parsed.deviceId,
       row.threadId,
       row.parentThreadId ?? null,
+      row.parentTurnId ?? null,
       row.agentPath ?? null,
       row.recordedAtMs,
       nowMs,
@@ -169,7 +170,7 @@ async function handleSubagents(url, env) {
   const params = deviceId ? [deviceId] : [];
   const where = deviceId ? "WHERE device_id = ?" : "";
   const rows = await env.DB.prepare(
-    `SELECT device_id, thread_id, parent_thread_id, agent_path, recorded_at_ms
+    `SELECT device_id, thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms
      FROM subagent_threads
      ${where}
      ORDER BY recorded_at_ms DESC, thread_id DESC
@@ -201,9 +202,18 @@ const insertRequestMetricSql = `
 `;
 
 const insertSubagentThreadSql = `
-  INSERT OR IGNORE INTO subagent_threads
-    (device_id, thread_id, parent_thread_id, agent_path, recorded_at_ms, ingested_at_ms)
-  VALUES (?, ?, ?, ?, ?, ?)
+  INSERT INTO subagent_threads
+    (device_id, thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms, ingested_at_ms)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(device_id, thread_id) DO UPDATE SET
+    parent_thread_id = excluded.parent_thread_id,
+    parent_turn_id = COALESCE(
+      excluded.parent_turn_id,
+      subagent_threads.parent_turn_id
+    ),
+    agent_path = excluded.agent_path,
+    recorded_at_ms = excluded.recorded_at_ms,
+    ingested_at_ms = excluded.ingested_at_ms
 `;
 
 const upsertDeviceSql = `

@@ -66,6 +66,11 @@ function isSubagentThread(row) {
     && row.threadId.length > 0
     && row.threadId.length <= 128
     && (row.parentThreadId === null || typeof row.parentThreadId === "string")
+    && (row.parentTurnId === undefined
+      || row.parentTurnId === null
+      || (typeof row.parentTurnId === "string"
+        && row.parentTurnId.length > 0
+        && row.parentTurnId.length <= 128))
     && (row.agentPath === null || typeof row.agentPath === "string")
     && Number.isInteger(row.recordedAtMs)
     && row.recordedAtMs > 0;

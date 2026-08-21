@@ -158,7 +158,7 @@ describe("local update", () => {
   });
 
   it("accepts every metrics schema with an explicit migration path", () => {
-    for (const schemaVersion of [3, 4, 5, 6]) {
+    for (const schemaVersion of [3, 4, 5, 6, 7, 8, 9]) {
       expect(inspectDatabaseUpdates(process.env, {
         inspectState: () => ({
           schemaVersion: 4,

@@ -1191,6 +1191,7 @@ describe("ProviderProxy", () => {
     expect(metrics).toHaveLength(1);
     expect(metrics[0]?.threadId).toBeNull();
     expect(metrics[0]?.turnId).toBeNull();
+    expect(metrics[0]?.reasoningEffort).toBeNull();
   });
 
   it("classifies remote compaction v2 WebSocket traffic and strips private metadata", async () => {
@@ -1253,6 +1254,7 @@ describe("ProviderProxy", () => {
       client.on("open", () => {
         client.send(JSON.stringify({
           type: "response.create",
+          reasoning: { effort: "medium" },
           client_metadata: {
             "x-codex-turn-metadata": JSON.stringify({
               request_kind: "compaction",
@@ -1275,6 +1277,7 @@ describe("ProviderProxy", () => {
 
     expect(upstreamMessage).toEqual({
       type: "response.create",
+      reasoning: { effort: "medium" },
       client_metadata: {
         "x-codex-ws-stream-request-start-ms": String(requestStartedAtMs),
         stable: "kept",
@@ -1286,6 +1289,7 @@ describe("ProviderProxy", () => {
       operation: "compact",
       threadId: "thread-ws",
       turnId: "turn-ws",
+      reasoningEffort: "medium",
       requestStartedAtMs,
       weeklyQuota: {
         limitId: "codex",

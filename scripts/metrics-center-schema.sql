@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS subagent_threads (
   device_id TEXT NOT NULL,
   thread_id TEXT NOT NULL,
   parent_thread_id TEXT,
+  parent_turn_id TEXT,
   agent_path TEXT,
   recorded_at_ms INTEGER NOT NULL,
   ingested_at_ms INTEGER NOT NULL,

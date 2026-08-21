@@ -224,6 +224,7 @@ describe("shared Surface lifecycle presentation", () => {
       agentPath: "/root/ds_annotate_probe",
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
+      reasoningEffort: "medium",
       status: "completed",
       metricsStatus: "available",
       requestCount: 1,
@@ -235,20 +236,70 @@ describe("shared Surface lifecycle presentation", () => {
       outputTokens: 3_000,
       pricedOutputTokens: 3_000,
       reasoningOutputTokens: 0,
+      outputTokensPerSecond: 10,
+      outputSpeedSampleCount: 1,
+      outputSpeedTimedCount: 1,
       totalCostNanos: 237_000,
       inputCostNanos: null,
       cachedInputCostNanos: null,
       outputCostNanos: null,
       pricingCurrency: "USD",
+      elapsedMs: 12_345,
       durationMs: 5_558,
     }, () => "usd", null);
     const rendered = renderPlainLifecyclePresentation(presentation);
 
     expect(rendered).toContain("子代理完成 · ds_annotate_probe");
     expect(rendered).toContain("deepseek-v4-flash");
+    expect(rendered).toContain("思考等级：medium");
     expect(rendered).toContain("模型请求：1 次");
+    expect(rendered).toContain("耗时：12秒");
+    expect(rendered).toContain("综合输出速度：10 token/s（不含推理 · 覆盖 1/1 次请求）");
     expect(rendered).toContain("$0.000237");
     expect(rendered).not.toContain("耗时：6秒");
+  });
+
+  it("hides unreliable output speed and unknown reasoning effort", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createSubagentCompletedPresentation({
+        type: "subagent.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        parentThreadId: "thread-1",
+        agentThreadId: "subagent-thread-1",
+        agentPath: "/root/review",
+        model: "gpt-test",
+        modelProvider: "openai",
+        reasoningEffort: null,
+        status: "completed",
+        metricsStatus: "available",
+        requestCount: 1,
+        unsuccessfulRequestCount: 0,
+        pricedRequestCount: 0,
+        inputTokens: 20_000,
+        pricedInputTokens: 0,
+        cachedInputTokens: null,
+        outputTokens: 3_000,
+        pricedOutputTokens: 0,
+        reasoningOutputTokens: 0,
+        outputTokensPerSecond: 10,
+        outputSpeedSampleCount: 1,
+        outputSpeedTimedCount: 0,
+        totalCostNanos: null,
+        inputCostNanos: null,
+        cachedInputCostNanos: null,
+        outputCostNanos: null,
+        pricingCurrency: null,
+        elapsedMs: 500,
+        durationMs: 0,
+      }),
+    );
+
+    expect(rendered).not.toContain("思考等级");
+    expect(rendered).not.toContain("综合输出速度");
   });
 
   it("converts the subagent completion cost to CNY when required", () => {
@@ -264,6 +315,7 @@ describe("shared Surface lifecycle presentation", () => {
       agentPath: "/root/ds_annotate_probe",
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
+      reasoningEffort: null,
       status: "completed",
       metricsStatus: "available",
       requestCount: 1,
@@ -275,11 +327,15 @@ describe("shared Surface lifecycle presentation", () => {
       outputTokens: 3_000,
       pricedOutputTokens: 3_000,
       reasoningOutputTokens: 500,
+      outputTokensPerSecond: null,
+      outputSpeedSampleCount: 0,
+      outputSpeedTimedCount: 0,
       totalCostNanos: 1_000_000_000,
       inputCostNanos: 600_000_000,
       cachedInputCostNanos: 100_000_000,
       outputCostNanos: 300_000_000,
       pricingCurrency: "USD",
+      elapsedMs: 2_000,
       durationMs: 0,
     }, () => "cny", { usdToCny: 7.2, effectiveAtMs: 1_700_000_000_000, source: "ecb" });
     const rendered = renderPlainLifecyclePresentation(presentation);
@@ -300,6 +356,7 @@ describe("shared Surface lifecycle presentation", () => {
       agentPath: "/root/review",
       model: "gpt-test",
       modelProvider: "openai",
+      reasoningEffort: "medium",
       status: "completed" as const,
       metricsStatus: "available" as const,
       requestCount: 1,
@@ -311,11 +368,15 @@ describe("shared Surface lifecycle presentation", () => {
       outputTokens: 3_000,
       pricedOutputTokens: 3_000,
       reasoningOutputTokens: 500,
+      outputTokensPerSecond: null,
+      outputSpeedSampleCount: 0,
+      outputSpeedTimedCount: 0,
       totalCostNanos: 1_000_000_000,
       inputCostNanos: 600_000_000,
       cachedInputCostNanos: 100_000_000,
       outputCostNanos: 300_000_000,
       pricingCurrency: "USD",
+      elapsedMs: 65_432,
       durationMs: 1_000,
     };
     const exchangeRate = {
@@ -331,6 +392,7 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(normal).toContain("Token：23 K");
+    expect(normal).toContain("耗时：1分5秒");
     expect(normal).toContain("均价：约 $4,347.83/100M");
     expect(normal).not.toContain("输入：20 K");
     expect(normal).not.toContain("输入命中缓存");
@@ -365,6 +427,7 @@ describe("shared Surface lifecycle presentation", () => {
         agentPath: "/root/review",
         model: "gpt-test",
         modelProvider: "openai",
+        reasoningEffort: null,
         status: "completed",
         metricsStatus: "available",
         requestCount: 2,
@@ -376,11 +439,15 @@ describe("shared Surface lifecycle presentation", () => {
         outputTokens: 3_000,
         pricedOutputTokens: 1_000,
         reasoningOutputTokens: 0,
+        outputTokensPerSecond: null,
+        outputSpeedSampleCount: 0,
+        outputSpeedTimedCount: 0,
         totalCostNanos: 1_000_000_000,
         inputCostNanos: null,
         cachedInputCostNanos: null,
         outputCostNanos: null,
         pricingCurrency: "USD",
+        elapsedMs: 3_000,
         durationMs: 1_000,
       }, () => "usd", null),
     );
@@ -406,6 +473,7 @@ describe("shared Surface lifecycle presentation", () => {
         metricsStatus: "unavailable",
         model: null,
         modelProvider: null,
+        reasoningEffort: null,
         requestCount: 0,
         unsuccessfulRequestCount: 0,
         pricedRequestCount: 0,
@@ -415,16 +483,21 @@ describe("shared Surface lifecycle presentation", () => {
         outputTokens: 0,
         pricedOutputTokens: 0,
         reasoningOutputTokens: 0,
+        outputTokensPerSecond: null,
+        outputSpeedSampleCount: 0,
+        outputSpeedTimedCount: 0,
         totalCostNanos: null,
         inputCostNanos: null,
         cachedInputCostNanos: null,
         outputCostNanos: null,
         pricingCurrency: null,
+        elapsedMs: 4_000,
         durationMs: 0,
       }),
     );
 
     expect(rendered).toContain("统计：暂不可用");
+    expect(rendered).toContain("耗时：4秒");
     expect(rendered).not.toContain("模型请求：0 次");
     expect(rendered).not.toContain("Token：0");
   });
@@ -776,6 +849,8 @@ describe("shared Surface lifecycle presentation", () => {
         sessionReferenceCost: {
           currency: "USD",
           totalCostNanos: 1_250_000,
+          inputTokens: 90_000,
+          outputTokens: 2_000,
           inputCostNanos: 500_000,
           cachedInputCostNanos: 200_000,
           outputCostNanos: 550_000,
@@ -796,6 +871,8 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("费用：$0.000350");
     expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
     expect(rendered).toContain("总价：$0.001250（计价 8/9）");
+    expect(rendered).toContain("模型请求：9 次");
+    expect(rendered).toContain("Token：92 K");
     expect(rendered).toContain("缓存命中率：75.00%");
     expect(rendered).toContain("最后请求首事件延迟：640毫秒");
     expect(rendered).toContain("首段回复延迟：920毫秒");
@@ -804,6 +881,60 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("综合生成速度：120 token/s（含推理 · 覆盖 2/2 次请求）");
     expect(rendered).not.toContain("思考时长");
     expect(rendered).not.toContain("输出时长");
+  });
+
+  it("shows parent Turn task totals separately from the parent run", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-parent",
+        turnId: "turn-parent",
+        status: "completed",
+        modelProvider: "openai",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          requestInputTokens: 100,
+          requestOutputTokens: 20,
+          outputTokensPerSecond: 42,
+          outputSpeedSampleCount: 1,
+          outputSpeedTimedCount: 1,
+        },
+        taskAggregate: {
+          requestCount: 3,
+          unsuccessfulRequestCount: 0,
+          inputTokens: 3_000,
+          cachedInputTokens: 2_500,
+          outputTokens: 300,
+          reasoningOutputTokens: 100,
+          pricedRequestCount: 3,
+          pricedInputTokens: 3_000,
+          pricedOutputTokens: 300,
+          totalCostNanos: 3_000_000,
+          inputCostNanos: 1_000_000,
+          cachedInputCostNanos: 500_000,
+          outputCostNanos: 1_500_000,
+          pricingCurrency: "USD",
+          uncachedInputPricePerMillionNanos: null,
+          cachedInputPricePerMillionNanos: null,
+          outputPricePerMillionNanos: null,
+          hasMixedPrices: false,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("模型请求：1 次");
+    expect(rendered).toContain("任务合计（含子代理）");
+    expect(rendered).toContain("模型请求：3 次");
+    expect(rendered).toContain("Token：3.3 K");
+    expect(rendered).toContain("费用：$0.003000");
+    expect(rendered).toContain("均价：");
+    expect(rendered).toContain("综合输出速度：42 token/s");
   });
 
   it("separates completed, interrupted and unobservable model attempts", () => {

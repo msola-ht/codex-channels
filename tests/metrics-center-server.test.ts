@@ -93,6 +93,7 @@ describe("metrics center server", () => {
       [{
         threadId: "sub-1",
         parentThreadId: "main-1",
+        parentTurnId: "turn-1",
         agentPath: "/root/ds",
         recordedAtMs: 1_785_640_800_000,
       }],
@@ -133,6 +134,30 @@ describe("metrics center server", () => {
       expect.objectContaining({
         thread_id: "sub-1",
         parent_thread_id: "main-1",
+        parent_turn_id: "turn-1",
+      }),
+    ]);
+  });
+
+  it("accepts legacy subagent uploads and preserves a null parent Turn", async () => {
+    const { origin } = await startServer();
+    const response = await ingest(
+      origin,
+      payloadBody([], [{
+        threadId: "legacy-sub",
+        parentThreadId: "main-1",
+        agentPath: "/root/legacy",
+        recordedAtMs: 1_785_640_800_000,
+      }]),
+    );
+    expect(response.status).toBe(200);
+    const subagents = await fetchJson<SubagentsResponse>(
+      `${origin}/api/subagents`,
+    );
+    expect(subagents.subagents).toEqual([
+      expect.objectContaining({
+        thread_id: "legacy-sub",
+        parent_turn_id: null,
       }),
     ]);
   });
@@ -391,6 +416,7 @@ async function ingest(origin: string, payload: unknown) {
     body: JSON.stringify(payload),
   });
   expect(response.status).toBe(200);
+  return response;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {

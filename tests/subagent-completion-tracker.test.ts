@@ -17,7 +17,7 @@ function summary() {
     latestTurn: {
       provider: "deepseek",
       model: "deepseek-v4-flash",
-      reasoningEffort: null,
+      reasoningEffort: "medium",
       turnId: "agent-turn-1",
       requestCount: 2,
       unsuccessfulRequestCount: 0,
@@ -148,6 +148,10 @@ describe("SubagentCompletionTracker", () => {
       pricedRequestCount: 2,
       cachedInputTokens: 500,
       reasoningOutputTokens: 0,
+      reasoningEffort: "medium",
+      outputTokensPerSecond: 10,
+      outputSpeedSampleCount: 1,
+      outputSpeedTimedCount: 1,
       inputCostNanos: 800_000,
       cachedInputCostNanos: 100_000,
       outputCostNanos: 100_000,
@@ -166,6 +170,7 @@ describe("SubagentCompletionTracker", () => {
     });
 
     tracker.handle(spawned());
+    await vi.advanceTimersByTimeAsync(12_345);
     tracker.handleInput({
       type: "turn.completed",
       threadId: "agent-1",
@@ -179,6 +184,7 @@ describe("SubagentCompletionTracker", () => {
       type: "subagent.completed",
       agentThreadId: "agent-1",
       status: "completed",
+      elapsedMs: 12_345,
     }));
     tracker.close();
     vi.useRealTimers();

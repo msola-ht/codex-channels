@@ -59,10 +59,11 @@ const insertRequestMetricSql = `
 
 const insertSubagentThreadSql = `
   INSERT INTO subagent_threads
-    (device_id, thread_id, parent_thread_id, agent_path, recorded_at_ms, ingested_at_ms)
-  VALUES (?, ?, ?, ?, ?, ?)
+    (device_id, thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms, ingested_at_ms)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(device_id, thread_id) DO UPDATE SET
     parent_thread_id = excluded.parent_thread_id,
+    parent_turn_id = COALESCE(excluded.parent_turn_id, subagent_threads.parent_turn_id),
     agent_path = excluded.agent_path,
     recorded_at_ms = excluded.recorded_at_ms,
     ingested_at_ms = excluded.ingested_at_ms
@@ -87,6 +88,10 @@ export function openCentralDatabase(databasePath) {
   const deviceColumns = database.prepare("PRAGMA table_info(devices)").all();
   if (!deviceColumns.some((column) => column.name === "display_name")) {
     database.exec("ALTER TABLE devices ADD COLUMN display_name TEXT");
+  }
+  const subagentColumns = database.prepare("PRAGMA table_info(subagent_threads)").all();
+  if (!subagentColumns.some((column) => column.name === "parent_turn_id")) {
+    database.exec("ALTER TABLE subagent_threads ADD COLUMN parent_turn_id TEXT");
   }
   chmodSync(databasePath, 0o600);
   return database;
@@ -296,6 +301,7 @@ async function handleIngest(request, database, response) {
         parsed.deviceId,
         row.threadId,
         row.parentThreadId ?? null,
+        row.parentTurnId ?? null,
         row.agentPath ?? null,
         row.recordedAtMs,
         nowMs,
@@ -452,7 +458,7 @@ function handleSubagents(url, database, response) {
   const params = deviceId ? [deviceId] : [];
   const where = deviceId ? "WHERE device_id = ?" : "";
   const rows = database.prepare(`
-    SELECT device_id, thread_id, parent_thread_id, agent_path, recorded_at_ms
+    SELECT device_id, thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms
     FROM subagent_threads
     ${where}
     ORDER BY recorded_at_ms DESC, thread_id DESC

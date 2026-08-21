@@ -135,6 +135,28 @@ export interface ReferenceCostSummary {
   pricingBuckets?: Array<"peak" | "off-peak">;
 }
 
+export interface TurnTaskMetricsSummary {
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  pricedRequestCount: number;
+  pricedInputTokens: number;
+  pricedOutputTokens: number;
+  totalCostNanos: number | null;
+  inputCostNanos: number | null;
+  cachedInputCostNanos: number | null;
+  outputCostNanos: number | null;
+  pricingCurrency: string | null;
+  uncachedInputPricePerMillionNanos: number | null;
+  cachedInputPricePerMillionNanos: number | null;
+  outputPricePerMillionNanos: number | null;
+  hasMixedPrices: boolean;
+  pricingBuckets?: Array<"peak" | "off-peak">;
+}
+
 export interface RateLimitWindow {
   usedPercent: number;
   windowDurationMins: number | null;
@@ -261,8 +283,8 @@ export type OutputEvent =
   | { type: "operation.updated"; target: ConversationTarget; threadId: string; turnId: string; operation: OperationUpdate; background?: boolean }
   | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[]; background?: boolean }
   | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
-  | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; requestCount: number; unsuccessfulRequestCount: number; pricedRequestCount: number; inputTokens: number; pricedInputTokens: number; cachedInputTokens: number | null; outputTokens: number; pricedOutputTokens: number; reasoningOutputTokens: number; totalCostNanos: number | null; inputCostNanos: number | null; cachedInputCostNanos: number | null; outputCostNanos: number | null; pricingCurrency: string | null; durationMs: number }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; gitBranch?: string | undefined; background?: boolean }
+  | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; pricedRequestCount: number; inputTokens: number; pricedInputTokens: number; cachedInputTokens: number | null; outputTokens: number; pricedOutputTokens: number; reasoningOutputTokens: number; outputTokensPerSecond: number | null; outputSpeedSampleCount: number; outputSpeedTimedCount: number; totalCostNanos: number | null; inputCostNanos: number | null; cachedInputCostNanos: number | null; outputCostNanos: number | null; pricingCurrency: string | null; elapsedMs: number; durationMs: number }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; taskAggregate?: TurnTaskMetricsSummary; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }
   | { type: "turn.reasoning"; target: ConversationTarget; threadId: string; turnId: string; summary: string; elapsedMs: number; final?: boolean; background?: boolean }

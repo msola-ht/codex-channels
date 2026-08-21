@@ -46,6 +46,7 @@ describe("ProviderMetricsComposition", () => {
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
+        threadTurnTaskSummary: () => null,
         errors: () => emptyErrorReport(),
       }),
       onModelTiming: (event) => timings.push(event),
@@ -96,6 +97,7 @@ describe("ProviderMetricsComposition", () => {
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
+        threadTurnTaskSummary: () => null,
         errors: () => emptyErrorReport(),
       }),
       onModelTiming,
@@ -147,6 +149,7 @@ describe("ProviderMetricsComposition", () => {
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
+        threadTurnTaskSummary: () => null,
         errors: () => emptyErrorReport(),
       }),
       pricingResolver: { resolve },
@@ -238,7 +241,7 @@ describe("ProviderMetricsComposition", () => {
     });
   });
 
-  it("carries the bound Thread reasoning effort into recorded metrics", async () => {
+  it("prefers proxy reasoning effort and falls back to bound Thread settings", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-effort-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "deepseek.sock");
@@ -255,6 +258,7 @@ describe("ProviderMetricsComposition", () => {
         count: () => 0,
         recent: () => [],
         aggregate: () => emptyMetricsReport(),
+        threadTurnTaskSummary: () => null,
         errors: () => emptyErrorReport(),
       }),
       resolveModelSettings: (threadId) => threadId === "thread-1"
@@ -272,13 +276,22 @@ describe("ProviderMetricsComposition", () => {
     await composition.start();
 
     await sendProviderProxyMetrics(socketPath, metrics());
+    await sendProviderProxyMetrics(socketPath, {
+      ...metrics(),
+      reasoningEffort: "medium",
+    });
 
     await vi.waitFor(() => {
-      expect(record).toHaveBeenCalledWith(expect.objectContaining({
-        provider: "deepseek",
-        reasoningEffort: "max",
-      }));
+      expect(record).toHaveBeenCalledTimes(2);
     });
+    expect(record).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      provider: "deepseek",
+      reasoningEffort: "max",
+    }));
+    expect(record).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      provider: "deepseek",
+      reasoningEffort: "medium",
+    }));
     await composition.close();
   });
 
@@ -360,6 +373,7 @@ function metrics(): ProviderProxyMetrics {
     turnId: "turn-1",
     model: "deepseek-v4-flash",
     serviceTier: "default",
+    reasoningEffort: null,
     status: "completed",
     httpStatus: 200,
     errorType: null,
