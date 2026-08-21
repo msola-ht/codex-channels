@@ -222,6 +222,18 @@ jobs:
 
             官方发布说明：${{ needs.preview.outputs.release_url }}
 
+            ## 新增
+
+            待 Codex 写明本次为项目新增的能力；没有新增时明确写“无”。
+
+            ## 修复
+
+            待 Codex 写明本次修复的问题；没有修复时明确写“无”。
+
+            ## 改动
+
+            待 Codex 写明除新增和修复外的行为、协议、文档或流程改动；没有其他改动时明确写“无”。
+
             ## 对本项目的收益
 
             待 Codex 对照当前 Gateway 架构、支持矩阵和实际使用路径填写；每项先用一句普通话解释用途，不要照抄上游功能清单。
@@ -243,11 +255,11 @@ jobs:
             - 先从上述官方发布说明筛选 CLI/TUI、App Server 协议和内部修复对本项目的影响；
             - 对照固定版本官方源码和测试审查协议语义；
             - 修复业务枚举、通知、Server Request 与安全边界适配；
-            - 把上述四个占位章节替换为本项目的实际收益与取舍结论；
+            - 把新增、修复、改动及上述四个升级专属占位章节替换为本项目的实际结论；
             - 更新 `docs/index.md`、`docs/codex-cli-upgrade-decisions.md`、README、CI 锁定版本及相关测试；
             - 运行 `npm run verify:commit` 并审查最终差异。
 
-            占位内容未替换时，升级 PR 描述门禁会阻止 Ready PR 通过。本工作流不会自动转为 Ready、合并、发布或部署。
+            占位内容未替换时，统一 PR 描述门禁会阻止 Ready PR 通过。本工作流不会自动转为 Ready、合并、发布或部署。
 
             升级运行：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: >-
