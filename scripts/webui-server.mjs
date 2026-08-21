@@ -450,6 +450,7 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
         threadId,
         agentPath: subagent.agentPath,
         parentThreadId: subagent.parentThreadId,
+        parentTurnId: subagent.parentTurnId,
         latestTurn: enrichCosts(summary.latestTurn, display, provider),
         threadAggregate: enrichCosts(summary.threadAggregate, display, provider),
         latestDirectApi: enrichCosts(

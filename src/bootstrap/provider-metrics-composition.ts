@@ -84,9 +84,10 @@ export class ProviderMetricsComposition {
         ...metrics,
         pricing,
         reasoningEffort:
-          metrics.threadId === null
+          metrics.reasoningEffort
+          ?? (metrics.threadId === null
             ? null
-            : this.options.resolveModelSettings?.(metrics.threadId)?.effort ?? null,
+            : this.options.resolveModelSettings?.(metrics.threadId)?.effort ?? null),
       });
     } catch (error) {
       this.options.logger.warn({ err: error, provider }, "模型请求指标持久化失败");

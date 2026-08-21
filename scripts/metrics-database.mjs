@@ -166,7 +166,7 @@ export function upgradeMetricsDatabase(
     if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7/v8 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6/v7/v8/v9 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
     checkpoint(status.databasePath);
@@ -211,20 +211,28 @@ export function upgradeMetricsDatabase(
           ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
         `);
       }
-      statements.push(`
-        CREATE TABLE IF NOT EXISTS subagent_threads (
-          thread_id TEXT PRIMARY KEY,
-          parent_thread_id TEXT NOT NULL,
-          agent_path TEXT NOT NULL,
-          recorded_at_ms INTEGER NOT NULL
-        );
-      `);
+      if (!databaseHasTable(database, "subagent_threads")) {
+        statements.push(`
+          CREATE TABLE subagent_threads (
+            thread_id TEXT PRIMARY KEY,
+            parent_thread_id TEXT NOT NULL,
+            parent_turn_id TEXT,
+            agent_path TEXT NOT NULL,
+            recorded_at_ms INTEGER NOT NULL
+          );
+        `);
+      } else if (!databaseHasColumn(database, "subagent_threads", "parent_turn_id")) {
+        statements.push(`
+          ALTER TABLE subagent_threads ADD COLUMN parent_turn_id TEXT;
+        `);
+      }
       statements.push(`
         UPDATE schema_metadata SET value = ${modelRequestMetricsSchemaVersion}
           WHERE name = 'schema_version';
-        COMMIT;
       `);
       database.exec(statements.join("\n"));
+      requireMigratedMetricsColumns(database);
+      database.exec("COMMIT;");
     } catch (error) {
       try { database.exec("ROLLBACK"); } catch { /* transaction already closed */ }
       throw error;
@@ -789,6 +797,47 @@ socket.setTimeout(500, () => finish(2));`,
     throw new Error("无法确认 Gateway 指标 Socket 状态；为保护指标数据库，已拒绝重置");
   }
   return result.status !== 1;
+}
+
+function databaseHasTable(database, name) {
+  return database.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(name) !== undefined;
+}
+
+function databaseHasColumn(database, table, name) {
+  return database.prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some((column) => column.name === name);
+}
+
+function requireMigratedMetricsColumns(database) {
+  const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
+    .all()
+    .map((column) => column.name);
+  const required = [
+    "id", "provider", "transport", "response_format", "operation",
+    "thread_id", "turn_id", "request_started_at_ms", "response_completed_at_ms",
+    "recorded_at_ms", "weekly_quota_limit_id", "weekly_used_percent_millionths",
+    "weekly_resets_at", "weekly_quota_plan_type", "error_message", "pricing_bucket",
+    "quota_windows",
+  ];
+  const missingMetrics = required.filter((column) => !columns.includes(column));
+  if (missingMetrics.length > 0) {
+    throw new Error(`model_request_metrics 缺少 ${missingMetrics.join("、")}`);
+  }
+  if (!databaseHasTable(database, "subagent_threads")) {
+    throw new Error("subagent_threads 表缺失");
+  }
+  const subagentColumns = database.prepare("PRAGMA table_info(subagent_threads)")
+    .all()
+    .map((column) => column.name);
+  const missingSubagent = [
+    "thread_id", "parent_thread_id", "parent_turn_id", "agent_path", "recorded_at_ms",
+  ].filter((column) => !subagentColumns.includes(column));
+  if (missingSubagent.length > 0) {
+    throw new Error(`subagent_threads 缺少 ${missingSubagent.join("、")}`);
+  }
 }
 
 function backupTimestamp(date) {

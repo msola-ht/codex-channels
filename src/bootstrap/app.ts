@@ -73,6 +73,7 @@ import {
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
+  type TurnTaskMetricsSummary,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
 import {
@@ -382,6 +383,7 @@ export class GatewayApplication {
           metricsStore.recordSubagentThread({
             agentThreadId: event.agentThreadId,
             parentThreadId: event.threadId,
+            parentTurnId: event.turnId,
             agentPath: event.agentPath,
           });
         } catch (error) {
@@ -714,6 +716,39 @@ export class GatewayApplication {
             turnId,
             current,
           ),
+        taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
+          let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
+          if (summary === null) return undefined;
+          // The completion event can outrun the buffered request writer. Once
+          // a child is known, wait for the current queue watermark so the
+          // parent task total includes the root Turn's just-finished samples.
+          await metricsWriter.waitForCurrentWrites(threadId);
+          summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
+          if (summary === null) return undefined;
+          return {
+            requestCount: summary.requestCount,
+            unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
+            inputTokens: summary.inputTokens,
+            cachedInputTokens: summary.cachedInputTokens,
+            outputTokens: summary.outputTokens,
+            reasoningOutputTokens: summary.reasoningOutputTokens,
+            pricedRequestCount: summary.pricedRequestCount,
+            pricedInputTokens: summary.pricedInputTokens,
+            pricedOutputTokens: summary.pricedOutputTokens,
+            totalCostNanos: summary.totalCostNanos,
+            inputCostNanos: summary.inputCostNanos,
+            cachedInputCostNanos: summary.cachedInputCostNanos,
+            outputCostNanos: summary.outputCostNanos,
+            pricingCurrency: summary.pricingCurrency,
+            uncachedInputPricePerMillionNanos:
+              summary.uncachedInputPricePerMillionNanos,
+            cachedInputPricePerMillionNanos:
+              summary.cachedInputPricePerMillionNanos,
+            outputPricePerMillionNanos: summary.outputPricePerMillionNanos,
+            hasMixedPrices: summary.hasMixedPrices,
+            pricingBuckets: summary.pricingBuckets,
+          };
+        },
       },
     );
     this.channelImageSpool = new ChannelImageSpool({

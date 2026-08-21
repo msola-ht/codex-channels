@@ -81,7 +81,8 @@ OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go
 `GET /zen/go/v1/usage` 查询 5 小时（$12）、7 天（$30）和月度（$60）三个配额窗口的已用百分比与
 重置时间，并在每个窗口旁展示本机指标库按请求归属窗口归集的本地 Token 用量（非官方账单）。
 本地 Token 与官方窗口使用同一周期口径：统计代理在每个模型请求发生时把官方三个窗口的
-`resetsAt` 快照写入指标记录（指标库 Schema v9 新增 `quota_windows` 列），读取时优先按记录的
+`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v10 另保存子代理
+父 Turn 关联），读取时优先按记录的
 窗口快照归属 Token；记录缺失或快照与当前官方窗口不一致时才按时间回退——5 小时和 7 天窗口按
 官方 `resetsAt` 反推窗口起点（`resetsAt - 窗口时长`）、终点取 `min(now, resetsAt)`，月度窗口
 继续由官方 `resetsAt` 倒推开始时间，官方未返回 `resetsAt` 时才回退到最近 5 小时 / 7 天的固定

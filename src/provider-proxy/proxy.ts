@@ -41,6 +41,7 @@ export interface ProviderProxyMetrics {
   turnId: string | null;
   model: string | null;
   serviceTier: string | null;
+  reasoningEffort: string | null;
   status: "completed" | "failed" | "incomplete" | "unknown";
   httpStatus: number | null;
   errorType: string | null;
@@ -420,6 +421,7 @@ export class ProviderProxy {
         );
         activeMetrics.model = sanitized.model ?? null;
         activeMetrics.serviceTier = sanitized.serviceTier ?? null;
+        activeMetrics.reasoningEffort = sanitized.reasoningEffort ?? null;
       }
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(sanitized.data, { binary: isBinary });
@@ -568,6 +570,7 @@ function createMetricsState(
     operation,
     model: null,
     serviceTier: null,
+    reasoningEffort: null,
     status: "unknown",
     httpStatus: null,
     errorType: null,
@@ -859,6 +862,7 @@ function sanitizeClientWebSocketMessage(
   requestStartedAtMs?: number;
   model?: string;
   serviceTier?: string;
+  reasoningEffort?: string;
 } {
   if (isBinary) return { data };
   const parsed = parseJsonPayload(rawDataText(data));
@@ -868,6 +872,8 @@ function sanitizeClientWebSocketMessage(
   const requestStartedAtMs = requestStartTimestamp(clientMetadata);
   const model = boundedString(parsed.model) ?? undefined;
   const serviceTier = boundedString(parsed.service_tier) ?? undefined;
+  const reasoning = asRecord(parsed.reasoning);
+  const reasoningEffort = boundedReasoningEffort(reasoning?.effort) ?? undefined;
   const metadata = typeof rawMetadata === "string"
     ? parseTurnMetadata(rawMetadata)
     : parseTurnMetadataObject(rawMetadata);
@@ -878,6 +884,7 @@ function sanitizeClientWebSocketMessage(
       ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
       ...(model ? { model } : {}),
       ...(serviceTier ? { serviceTier } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
     };
   }
   const sanitizedMetadata = { ...clientMetadata };
@@ -888,7 +895,17 @@ function sanitizeClientWebSocketMessage(
     ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
     ...(model ? { model } : {}),
     ...(serviceTier ? { serviceTier } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
+}
+
+function boundedReasoningEffort(value: unknown): string | null {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 128
+    && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
+    ? value
+    : null;
 }
 
 function requestStartTimestamp(

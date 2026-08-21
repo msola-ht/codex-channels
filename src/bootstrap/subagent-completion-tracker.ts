@@ -12,7 +12,9 @@ interface ActiveSubagent {
   target: ConversationTarget;
   parentThreadId: string;
   agentPath: string;
+  startedAtMs: number;
   terminalStatus?: SubagentCompletedEvent["status"];
+  terminalAtMs?: number;
   metricsCheckpoint?: Promise<boolean>;
   waitObservedAfterTerminal: boolean;
   timer: NodeJS.Timeout | undefined;
@@ -23,6 +25,7 @@ interface SubagentMetricsSummary {
   latestTurn: {
     model: string | null;
     provider: string | null;
+    reasoningEffort: string | null;
   } | null;
   threadAggregate: {
     requestCount: number;
@@ -40,11 +43,15 @@ interface SubagentMetricsSummary {
     outputCostNanos: number | null;
     pricingCurrency: string | null;
     requestDurationMs: number;
+    outputTokensPerSecond: number | null;
+    outputSpeedSampleCount: number;
+    outputSpeedTimedCount: number;
   } | null;
 }
 
 interface PendingTerminal {
   status: SubagentTerminalStatus;
+  terminalAtMs: number;
   expiresAtMs: number;
 }
 
@@ -77,6 +84,7 @@ export class SubagentCompletionTracker {
           target: event.target,
           parentThreadId: event.threadId,
           agentPath: event.agentPath,
+          startedAtMs: Date.now(),
           waitObservedAfterTerminal: false,
           timer: undefined,
           revision: 0,
@@ -84,7 +92,8 @@ export class SubagentCompletionTracker {
         this.active.set(event.agentThreadId, entry);
         const pending = this.takePendingTerminal(event.agentThreadId);
         if (pending) {
-          entry.terminalStatus = pending;
+          entry.terminalStatus = pending.status;
+          entry.terminalAtMs = pending.terminalAtMs;
           this.schedule(event.agentThreadId, entry);
         }
       }
@@ -97,6 +106,7 @@ export class SubagentCompletionTracker {
       const entry = this.active.get(state.threadId);
       if (!entry || entry.terminalStatus) continue;
       entry.terminalStatus = terminalStatus;
+      entry.terminalAtMs = Date.now();
       this.schedule(state.threadId, entry);
     }
     if (
@@ -160,6 +170,7 @@ export class SubagentCompletionTracker {
     if (entry) {
       if (entry.terminalStatus) return;
       entry.terminalStatus = status;
+      entry.terminalAtMs = Date.now();
       this.schedule(agentThreadId, entry);
       return;
     }
@@ -168,6 +179,7 @@ export class SubagentCompletionTracker {
     this.pendingTerminals.delete(agentThreadId);
     this.pendingTerminals.set(agentThreadId, {
       status,
+      terminalAtMs: Date.now(),
       expiresAtMs: Date.now() + pendingTerminalTtlMs,
     });
     while (this.pendingTerminals.size > maxPendingTerminals) {
@@ -177,11 +189,11 @@ export class SubagentCompletionTracker {
     }
   }
 
-  private takePendingTerminal(agentThreadId: string): SubagentTerminalStatus | undefined {
+  private takePendingTerminal(agentThreadId: string): PendingTerminal | undefined {
     this.prunePendingTerminals();
     const pending = this.pendingTerminals.get(agentThreadId);
     this.pendingTerminals.delete(agentThreadId);
-    return pending?.status;
+    return pending;
   }
 
   private prunePendingTerminals(): void {
@@ -247,6 +259,7 @@ export class SubagentCompletionTracker {
       metricsStatus,
       model: summary?.latestTurn?.model ?? null,
       modelProvider: summary?.latestTurn?.provider ?? null,
+      reasoningEffort: summary?.latestTurn?.reasoningEffort ?? null,
       status: entry.terminalStatus ?? "errored",
       requestCount: aggregate?.requestCount ?? 0,
       unsuccessfulRequestCount: aggregate?.unsuccessfulRequestCount ?? 0,
@@ -262,6 +275,13 @@ export class SubagentCompletionTracker {
       cachedInputCostNanos: aggregate?.cachedInputCostNanos ?? null,
       outputCostNanos: aggregate?.outputCostNanos ?? null,
       pricingCurrency: aggregate?.pricingCurrency ?? null,
+      outputTokensPerSecond: aggregate?.outputTokensPerSecond ?? null,
+      outputSpeedSampleCount: aggregate?.outputSpeedSampleCount ?? 0,
+      outputSpeedTimedCount: aggregate?.outputSpeedTimedCount ?? 0,
+      elapsedMs: Math.max(
+        0,
+        (entry.terminalAtMs ?? Date.now()) - entry.startedAtMs,
+      ),
       durationMs: aggregate?.requestDurationMs ?? 0,
     };
     this.active.delete(agentThreadId);

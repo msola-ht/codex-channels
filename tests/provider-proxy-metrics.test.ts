@@ -45,6 +45,41 @@ describe("Provider proxy metrics channel", () => {
     expect(existsSync(socketPath)).toBe(false);
   });
 
+  it("normalizes missing, malformed and overlong reasoning effort to null", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-effort-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "metrics.sock");
+    const received: ProviderProxyMetrics[] = [];
+    const server = new ProviderProxyMetricsServer(socketPath, (value) => {
+      received.push(value);
+    });
+    await server.start();
+
+    await sendProviderProxyMetrics(socketPath, {
+      ...metrics(),
+      reasoningEffort: "medium",
+    });
+    await sendProviderProxyMetrics(socketPath, {
+      ...metrics(),
+      reasoningEffort: "not valid" as ProviderProxyMetrics["reasoningEffort"],
+    });
+    await sendProviderProxyMetrics(socketPath, {
+      ...metrics(),
+      reasoningEffort: "x".repeat(129),
+    });
+    const legacy = { ...metrics() } as Partial<ProviderProxyMetrics>;
+    delete legacy.reasoningEffort;
+    await sendProviderProxyMetrics(socketPath, legacy as ProviderProxyMetrics);
+
+    expect(received.map(({ reasoningEffort }) => reasoningEffort)).toEqual([
+      "medium",
+      null,
+      null,
+      null,
+    ]);
+    await server.close();
+  });
+
   it("drops metrics when the Gateway receiver is not running", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-missing-"));
     temporaryDirectories.push(directory);
@@ -175,6 +210,7 @@ function metrics(): ProviderProxyMetrics {
     turnId: "turn-1",
     model: "deepseek-v4-flash",
     serviceTier: null,
+    reasoningEffort: null,
     status: "completed",
     httpStatus: 200,
     errorType: null,

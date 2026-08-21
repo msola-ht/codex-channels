@@ -82,7 +82,8 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
 - 无账户：`/usage` 明确显示不支持，不回退 OpenAI；
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
-  5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9），
+  5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
+  Schema v10，另含子代理父 Turn 关联），
   读取时优先按快照归属窗口，快照缺失或与当前官方窗口不一致时才回退到按请求开始时间判定。
   窗口总额度（如 OpenCode Go 5 小时 $12、7 天 $30、月度 $60）随窗口展示，用于按已用
   百分比换算金额；总额由 Provider 定义或套餐常量提供，不来自官方用量接口。

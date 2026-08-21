@@ -504,6 +504,68 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("reads session reference cost after an asynchronous task aggregate", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const order: string[] = [];
+    let resolveTask!: () => void;
+    let resolveTaskStarted!: () => void;
+    const taskGate = new Promise<void>((resolve) => {
+      resolveTask = resolve;
+    });
+    const taskStarted = new Promise<void>((resolve) => {
+      resolveTaskStarted = resolve;
+    });
+    let resolveDelivery!: () => void;
+    const delivered = new Promise<void>((resolve) => {
+      resolveDelivery = resolve;
+    });
+    feishu.output.handle = () => {
+      order.push("output");
+      resolveDelivery();
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      sessionReferenceCost: () => {
+        order.push("session");
+        return undefined;
+      },
+      taskAggregate: async () => {
+        order.push("task-start");
+        resolveTaskStarted();
+        await taskGate;
+        order.push("task-finished");
+        return undefined;
+      },
+    });
+    await manager.start();
+
+    output.publish({
+      type: "turn.completed",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+    });
+    await taskStarted;
+
+    expect(order).toEqual(["task-start"]);
+    resolveTask();
+    await delivered;
+    expect(order).toEqual([
+      "task-start",
+      "task-finished",
+      "session",
+      "output",
+    ]);
+
+    await manager.stop();
+    await output.close();
+  });
+
   it("isolates a Surface output rejection from later events", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: string[] = [];

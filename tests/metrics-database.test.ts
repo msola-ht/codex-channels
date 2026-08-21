@@ -938,14 +938,14 @@ describe("model request metrics database operations", () => {
       changed: true,
       databasePath,
       previousSchemaVersion: 3,
-      schemaVersion: 9,
+      schemaVersion: 10,
     });
     expect(result.backupPath).toContain(".v3.2026-08-05T12-34-56-789Z.bak");
     expect(existsSync(result.backupPath!)).toBe(true);
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 9 });
+    ).get()).toEqual({ value: 10 });
     expect(database.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subagent_threads'",
     ).get()).toEqual({ name: "subagent_threads" });
@@ -982,14 +982,14 @@ describe("model request metrics database operations", () => {
       changed: true,
       databasePath,
       previousSchemaVersion: 4,
-      schemaVersion: 9,
+      schemaVersion: 10,
     });
     expect(result.backupPath).toContain(".v4.2026-08-05T12-34-56-789Z.bak");
     expect(existsSync(result.backupPath!)).toBe(true);
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 9 });
+    ).get()).toEqual({ value: 10 });
     const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
       .all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
@@ -1018,13 +1018,13 @@ describe("model request metrics database operations", () => {
       changed: true,
       databasePath,
       previousSchemaVersion: 5,
-      schemaVersion: 9,
+      schemaVersion: 10,
     });
     expect(result.backupPath).toContain(".v5.2026-08-05T12-34-56-789Z.bak");
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 9 });
+    ).get()).toEqual({ value: 10 });
     const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
       .all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
@@ -1049,14 +1049,14 @@ describe("model request metrics database operations", () => {
       changed: true,
       databasePath,
       previousSchemaVersion: 6,
-      schemaVersion: 9,
+      schemaVersion: 10,
     });
     expect(result.backupPath).toContain(".v6.2026-08-05T12-34-56-789Z.bak");
     expect(existsSync(result.backupPath!)).toBe(true);
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 9 });
+    ).get()).toEqual({ value: 10 });
     expect(database.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subagent_threads'",
     ).get()).toEqual({ name: "subagent_threads" });
@@ -1087,14 +1087,14 @@ describe("model request metrics database operations", () => {
       changed: true,
       databasePath,
       previousSchemaVersion: 7,
-      schemaVersion: 9,
+      schemaVersion: 10,
     });
     expect(result.backupPath).toContain(".v7.2026-08-05T12-34-56-789Z.bak");
     expect(existsSync(result.backupPath!)).toBe(true);
     const upgraded = new DatabaseSync(databasePath, { readOnly: true });
     expect(upgraded.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 9 });
+    ).get()).toEqual({ value: 10 });
     const columns = upgraded.prepare("PRAGMA table_info(model_request_metrics)")
       .all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
@@ -1129,14 +1129,14 @@ describe("model request metrics database operations", () => {
       changed: true,
       databasePath,
       previousSchemaVersion: 8,
-      schemaVersion: 9,
+      schemaVersion: 10,
     });
     expect(result.backupPath).toContain(".v8.2026-08-05T12-34-56-789Z.bak");
     expect(existsSync(result.backupPath!)).toBe(true);
     const upgraded = new DatabaseSync(databasePath, { readOnly: true });
     expect(upgraded.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 9 });
+    ).get()).toEqual({ value: 10 });
     const columns = upgraded.prepare("PRAGMA table_info(model_request_metrics)")
       .all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
@@ -1147,6 +1147,82 @@ describe("model request metrics database operations", () => {
     const store = new SqliteModelRequestMetricsStore(databasePath);
     expect(store.count()).toBe(2);
     store.close();
+  });
+
+  it("backs up and upgrades v9 subagent annotations to v10 without guessing historical parent Turns", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV6Database(databasePath, 2);
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      ALTER TABLE model_request_metrics ADD COLUMN pricing_bucket TEXT
+        CHECK (pricing_bucket IS NULL OR pricing_bucket IN ('peak', 'off-peak'));
+      ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
+      CREATE TABLE subagent_threads (
+        thread_id TEXT PRIMARY KEY,
+        parent_thread_id TEXT NOT NULL,
+        agent_path TEXT NOT NULL,
+        recorded_at_ms INTEGER NOT NULL
+      );
+      INSERT INTO subagent_threads
+        (thread_id, parent_thread_id, agent_path, recorded_at_ms)
+      VALUES ('legacy-child', 'root', '/root/legacy', 1000);
+      UPDATE schema_metadata SET value = 9 WHERE name = 'schema_version';
+    `);
+    database.close();
+
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      previousSchemaVersion: 9,
+      schemaVersion: 10,
+    });
+    expect(result.backupPath).toContain(".v9.2026-08-05T12-34-56-789Z.bak");
+    expect(existsSync(result.backupPath!)).toBe(true);
+    const upgraded = new DatabaseSync(databasePath, { readOnly: true });
+    expect(upgraded.prepare(
+      "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
+    ).get()).toEqual({ value: 10 });
+    expect(upgraded.prepare(
+      "SELECT parent_turn_id FROM subagent_threads WHERE thread_id = 'legacy-child'",
+    ).get()).toEqual({ parent_turn_id: null });
+    upgraded.close();
+  });
+
+  it("rolls back the v9 to v10 migration when structural validation fails", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV6Database(databasePath, 1);
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      ALTER TABLE model_request_metrics ADD COLUMN pricing_bucket TEXT
+        CHECK (pricing_bucket IS NULL OR pricing_bucket IN ('peak', 'off-peak'));
+      ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
+      CREATE TABLE subagent_threads (
+        thread_id TEXT PRIMARY KEY,
+        parent_thread_id TEXT NOT NULL,
+        recorded_at_ms INTEGER NOT NULL
+      );
+      UPDATE schema_metadata SET value = 9 WHERE name = 'schema_version';
+    `);
+    database.close();
+
+    expect(() => upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-08-05T12:34:56.789Z"),
+    })).toThrow(/subagent_threads 缺少 agent_path/u);
+
+    expect(inspectMetricsDatabase(environment).schemaVersion).toBe(9);
+    const rolledBack = new DatabaseSync(databasePath, { readOnly: true });
+    const columns = rolledBack.prepare("PRAGMA table_info(subagent_threads)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).not.toContain("parent_turn_id");
+    rolledBack.close();
+    expect(existsSync(
+      `${databasePath}.v9.2026-08-05T12-34-56-789Z.bak`,
+    )).toBe(true);
   });
 
   it("refuses metrics upgrades while Gateway is running", () => {
@@ -1165,7 +1241,7 @@ describe("model request metrics database operations", () => {
 
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
-    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8 升级到 v9/u);
+    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9 升级到 v10/u);
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
   });
 

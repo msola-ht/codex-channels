@@ -230,6 +230,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   const quota = weeklyQuota as Record<string, unknown> | null | undefined;
   return {
     ...record,
+    reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
     errorMessage: typeof record.errorMessage === "string"
       ? record.errorMessage
       : null,
@@ -240,6 +241,15 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
       ? null
       : quotaWindows,
   } as unknown as ProviderProxyMetrics;
+}
+
+function normalizeReasoningEffort(value: unknown): string | null {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 128
+    && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
+    ? value
+    : null;
 }
 
 function nullableQuotaWindows(value: unknown): boolean {

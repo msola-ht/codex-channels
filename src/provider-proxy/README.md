@@ -10,8 +10,9 @@
   Provider，保留端到端状态码与响应头；Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
   转发 SSE 或 WebSocket 响应时按事件类型记录首 Token、推理、文本与函数/自定义工具参数输出的
-  首尾时间；WebSocket 从出站 `response.create` 提前记录有界的模型与服务层级，完成事件再刷新
-  最终模型、服务层级、状态、上游时间戳及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
+  首尾时间；WebSocket 从出站 `response.create` 提前记录有界的模型、服务层级与
+  `reasoning.effort`，完成事件再刷新最终模型、服务层级、状态、上游时间戳及输入/缓存/输出/推理
+  Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
   状态、超时、上游错误、完成事件前的客户端断开和 WebSocket 提前关闭同样产生受控失败指标，
   不保留错误正文；HTTP/SSE 已收到完成事件后的正常收尾断开不重复改写为失败或输出误报警；
@@ -32,7 +33,7 @@
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联，并只识别精确的
   `request_kind=compaction` 操作标记；其他值保持普通响应语义。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，
-  正文和响应 ID 不进入指标；
+  正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，由组合层按 Thread 设置回退；
   超限或畸形响应只保留基础 HTTP 状态与本机耗时。上游模型、服务层级及错误标识符只接受受限字符，
   不能把控制字符带入指标展示。WebSocket 在完成事件投递前先解除活动指标引用，
   避免紧随其后的关闭事件重复写入。

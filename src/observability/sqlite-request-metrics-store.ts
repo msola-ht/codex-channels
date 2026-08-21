@@ -383,10 +383,13 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
-        INSERT INTO subagent_threads (thread_id, parent_thread_id, agent_path, recorded_at_ms)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO subagent_threads (
+          thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms
+        )
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(thread_id) DO UPDATE SET
           parent_thread_id = excluded.parent_thread_id,
+          parent_turn_id = excluded.parent_turn_id,
           agent_path = excluded.agent_path,
           recorded_at_ms = excluded.recorded_at_ms
       `);
@@ -462,9 +465,15 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   recordSubagentThread(details: {
     agentThreadId: string;
     parentThreadId: string;
+    parentTurnId: string;
     agentPath: string;
   }): void {
-    const { agentThreadId, parentThreadId, agentPath } = details;
+    const {
+      agentThreadId,
+      parentThreadId,
+      parentTurnId,
+      agentPath,
+    } = details;
     this.requireOpen();
     if (!this.insertSubagentThread) {
       throw new Error("只读模型请求指标数据库不能写入");
@@ -475,10 +484,19 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     if (!parentThreadId.trim() || parentThreadId.length > 128) {
       throw new Error("子代理父 Thread ID 无效");
     }
+    if (!parentTurnId.trim() || parentTurnId.length > 128) {
+      throw new Error("子代理父 Turn ID 无效");
+    }
     if (!agentPath.trim() || agentPath.length > 512) {
       throw new Error("子代理路径无效");
     }
-    this.insertSubagentThread.run(agentThreadId, parentThreadId, agentPath, Date.now());
+    this.insertSubagentThread.run(
+      agentThreadId,
+      parentThreadId,
+      parentTurnId,
+      agentPath,
+      Date.now(),
+    );
   }
 
   recent(limit: number): StoredModelRequestMetric[] {
@@ -810,19 +828,23 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           GROUP BY turn_id
         `).get(threadId, latestTurn.turn_id) as TurnSummaryRow | undefined;
     const threadAggregate = this.database.prepare(`
+      WITH RECURSIVE thread_tree(thread_id) AS (
+        SELECT ?
+        UNION
+        SELECT child.thread_id
+        FROM subagent_threads AS child
+        JOIN thread_tree AS parent
+          ON child.parent_thread_id = parent.thread_id
+      ), scoped AS (
+        SELECT metric.*
+        FROM model_request_metrics_enriched AS metric
+        WHERE metric.thread_id IN (SELECT thread_id FROM thread_tree)
+          AND metric.turn_id IS NOT NULL
+      )
       SELECT
-        (
-          SELECT provider
-          FROM model_request_metrics_enriched AS latest_provider
-          WHERE latest_provider.thread_id
-              = model_request_metrics_enriched.thread_id
-            AND latest_provider.turn_id IS NOT NULL
-            AND latest_provider.operation = 'response'
-          ORDER BY latest_provider.id DESC
-          LIMIT 1
-        ) AS provider,
+        (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
         NULL AS turn_id,
-        COUNT(DISTINCT turn_id) AS turn_count,
+        COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count,
         COUNT(*) AS request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count,
@@ -848,8 +870,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AS output_speed_timed_count,
         ${successfulCostAggregateSql},
         ${compactAggregateSql}
-      FROM model_request_metrics_enriched
-      WHERE thread_id = ? AND turn_id IS NOT NULL
+      FROM scoped
     `).get(threadId) as unknown as TurnSummaryRow;
     const latestDirectApi = this.database.prepare(`
       SELECT *
@@ -872,6 +893,82 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ? null
         : toStoredMetric(latestDirectApi),
     };
+  }
+
+  threadTurnTaskSummary(
+    threadId: string,
+    turnId: string,
+  ): StoredTurnRequestMetricsSummary | null {
+    this.requireOpen();
+    validateThreadId(threadId, "Thread ID");
+    validateThreadId(turnId, "Turn ID");
+    const child = this.database.prepare(`
+      SELECT 1
+      FROM subagent_threads
+      WHERE parent_thread_id = ?
+        AND parent_turn_id = ?
+      LIMIT 1
+    `).get(threadId, turnId);
+    if (child === undefined) return null;
+    const row = this.database.prepare(`
+      WITH RECURSIVE task_threads(thread_id) AS (
+        SELECT child.thread_id
+        FROM subagent_threads AS child
+        WHERE child.parent_thread_id = ?
+          AND child.parent_turn_id = ?
+        UNION
+        SELECT child.thread_id
+        FROM subagent_threads AS child
+        JOIN task_threads AS parent
+          ON child.parent_thread_id = parent.thread_id
+      ), scoped AS (
+        SELECT metric.*
+        FROM model_request_metrics_enriched AS metric
+        WHERE (
+          metric.thread_id = ? AND metric.turn_id = ?
+        ) OR (
+          metric.thread_id IN (SELECT thread_id FROM task_threads)
+          AND metric.turn_id IS NOT NULL
+        )
+      )
+      SELECT
+        (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
+        (SELECT model FROM scoped ORDER BY id DESC LIMIT 1) AS model,
+        (SELECT reasoning_effort FROM scoped ORDER BY id DESC LIMIT 1)
+          AS reasoning_effort,
+        ? AS turn_id,
+        COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count,
+        COUNT(*) AS request_count,
+        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
+          AS unsuccessful_request_count,
+        SUM(request_duration_ms) AS request_duration_ms,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        COUNT(input_tokens) AS input_token_count,
+        COUNT(cached_input_tokens) AS cached_input_token_count,
+        SUM(output_tokens) AS output_tokens,
+        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0
+            THEN non_reasoning_output_tokens ELSE 0 END)
+          AS non_reasoning_output_tokens,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0
+            THEN output_duration_ms ELSE 0 END)
+          AS output_duration_ms,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
+          AS output_speed_sample_count,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0 THEN 1 ELSE 0 END)
+          AS output_speed_timed_count,
+        ${successfulCostAggregateSql},
+        ${compactAggregateSql}
+      FROM scoped
+    `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
+    // The direct-child probe above is the display gate. Keep a zero summary
+    // when a child has not produced any model rows yet so the parent card can
+    // distinguish an observed child from an absent task aggregate.
+    return row === undefined ? null : toStoredTurnSummary(row);
   }
 
   threadTurnSummaries(threadId: string): StoredThreadTurnSummary[] {
@@ -1002,7 +1099,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         MIN(request_started_at_ms) AS first_request_started_at_ms,
         MAX(model_request_metrics_enriched.recorded_at_ms) AS recorded_at_ms,
         subagent.agent_path AS agent_path,
-        subagent.parent_thread_id AS parent_thread_id
+        subagent.parent_thread_id AS parent_thread_id,
+        subagent.parent_turn_id AS parent_turn_id
       FROM model_request_metrics_enriched
       LEFT JOIN subagent_threads AS subagent
         ON subagent.thread_id = model_request_metrics_enriched.thread_id
@@ -1027,6 +1125,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       recorded_at_ms: number;
       agent_path: string | null;
       parent_thread_id: string | null;
+      parent_turn_id: string | null;
     }>;
     return rows.map((row) => ({
       threadId: row.thread_id,
@@ -1035,6 +1134,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       reasoningEffort: row.reasoning_effort ?? null,
       agentPath: row.agent_path ?? null,
       parentThreadId: row.parent_thread_id ?? null,
+      parentTurnId: row.parent_turn_id ?? null,
       turnCount: row.turn_count,
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
@@ -1053,22 +1153,25 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   subagentThread(threadId: string): {
     agentPath: string | null;
     parentThreadId: string | null;
+    parentTurnId: string | null;
   } {
     this.requireOpen();
     if (!threadId.trim() || threadId.length > 128) {
       throw new Error("Thread ID 无效");
     }
     const row = this.database.prepare(`
-      SELECT agent_path, parent_thread_id
+      SELECT agent_path, parent_thread_id, parent_turn_id
       FROM subagent_threads
       WHERE thread_id = ?
     `).get(threadId) as {
       agent_path: string;
       parent_thread_id: string;
+      parent_turn_id: string | null;
     } | undefined;
     return {
       agentPath: row?.agent_path ?? null,
       parentThreadId: row?.parent_thread_id ?? null,
+      parentTurnId: row?.parent_turn_id ?? null,
     };
   }
 
@@ -1104,7 +1207,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       throw new Error("子代理同步游标 Thread ID 不能为空");
     }
     const rows = this.database.prepare(`
-      SELECT thread_id, parent_thread_id, agent_path, recorded_at_ms
+      SELECT thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms
       FROM subagent_threads
       WHERE recorded_at_ms > ? OR (recorded_at_ms = ? AND thread_id > ?)
       ORDER BY recorded_at_ms ASC, thread_id ASC
@@ -1112,12 +1215,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     `).all(recordedAtMs, recordedAtMs, afterThreadId ?? "") as unknown as Array<{
       thread_id: string;
       parent_thread_id: string;
+      parent_turn_id: string | null;
       agent_path: string;
       recorded_at_ms: number;
     }>;
     return rows.map((row) => ({
       threadId: row.thread_id,
       parentThreadId: row.parent_thread_id,
+      parentTurnId: row.parent_turn_id,
       agentPath: row.agent_path,
       recordedAtMs: row.recorded_at_ms,
     }));
@@ -1255,6 +1360,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           CREATE TABLE subagent_threads (
             thread_id TEXT PRIMARY KEY,
             parent_thread_id TEXT NOT NULL,
+            parent_turn_id TEXT,
             agent_path TEXT NOT NULL,
             recorded_at_ms INTEGER NOT NULL
           );
@@ -1486,7 +1592,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         LIMIT 0
       `).all();
       this.database.prepare(`
-        SELECT thread_id, parent_thread_id, agent_path, recorded_at_ms
+        SELECT thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms
         FROM subagent_threads
         LIMIT 0
       `).all();
@@ -1745,6 +1851,12 @@ function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): v
   validateMetricsTimeRange(query);
   if (!(["global", "provider", "model"] as const).includes(query.dimension)) {
     throw new Error("模型请求指标聚合维度无效");
+  }
+}
+
+function validateThreadId(value: string, label: string): void {
+  if (!value.trim() || value.length > 128) {
+    throw new Error(`${label}无效`);
   }
 }
 

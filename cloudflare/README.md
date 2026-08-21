@@ -10,8 +10,10 @@ Cloudflare Access 保护 Pages 与 Worker 域名，不在前端做登录页。
 
 ## 目录
 
-- `migrations/0001_init.sql`：D1 表结构（请求指标、子代理标注、设备）。
-- `worker/src/index.js`：Worker 入口，`/api/ingest` 写入、`/api/overview`、
+- `migrations/0001_init.sql`：D1 初始表结构（请求指标、子代理标注、设备）。
+- `migrations/0002_parent_turn_id.sql`：为子代理标注增加可空 `parent_turn_id`；部署迁移期间仍接受
+  缺少该字段的旧上报载荷，缺失值保持 `NULL`，不按时间推断父 Turn。
+- `worker/src/index.js` / `worker/src/index.d.ts`：Worker 入口及其测试用窄类型声明，`/api/ingest` 写入、`/api/overview`、
   `/api/requests`、`/api/subagents`、`/api/devices` 查询、`/api/health`。
 - `worker/src/payload.js`：兼容导出共享的 `scripts/metrics-center-payload.mjs` 上报载荷校验。
 - `pages/`：静态查看页（无构建步骤，直接部署）。
@@ -69,7 +71,8 @@ npx wrangler pages deploy pages --project-name codex-metrics-viewer
 
 - `request_metrics`：主键 `(device_id, local_id)`，`INSERT OR IGNORE` 幂等去重；
   `payload` 保存该条脱敏指标完整 JSON，关键字段拆列用于查询与汇总。
-- `subagent_threads`：主键 `(device_id, thread_id)`，更新会覆盖同线程标注。
+- `subagent_threads`：主键 `(device_id, thread_id)`，更新会覆盖同线程标注；`parent_turn_id` 只在
+  新载荷显式提供时写入，旧数据保持空值。
 - `devices`：设备首次/最后上报时间，用于查看页展示设备状态。
 
 ## 安全边界

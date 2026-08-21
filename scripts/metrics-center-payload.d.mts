@@ -8,6 +8,7 @@ export interface IngestRequestMetric {
 export interface IngestSubagentThread {
   threadId: string;
   parentThreadId: string | null;
+  parentTurnId?: string | null;
   agentPath: string | null;
   recordedAtMs: number;
 }

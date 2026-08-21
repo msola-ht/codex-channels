@@ -13,6 +13,7 @@ export type {
   RateLimitSnapshot,
   RateLimitWindow,
   ReferenceCostSummary,
+  TurnTaskMetricsSummary,
   ThreadGoal,
   ThreadTokenUsage,
   TokenUsageBreakdown,

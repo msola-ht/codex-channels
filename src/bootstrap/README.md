@@ -18,9 +18,9 @@
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   既有计时端口。所有脱敏请求样本都会持久化；具备 Thread、Turn 与 Token 窗口的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
-  既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照，可选
-  `resolveModelSettings` 按 Thread 关联补齐路由层维护的思考等级；代理、Core 和数据库 View
-  都不读取设置或内置模型价格。
+  既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照；优先使用
+  代理指标携带的 WebSocket `reasoning.effort`，仅在缺失时由可选 `resolveModelSettings` 按 Thread
+  关联回填路由层维护的思考等级；代理、Core 和数据库 View 都不读取设置或内置模型价格。
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
 - `model-pricing-catalog.ts`：实现组合根注入的远程价格目录。启动时先读取 Gateway 数据目录下的
@@ -47,7 +47,9 @@
   已观察到模型指标且终态后出现父线程官方 `wait` Item 时，立即等待 Observability Writer 当前
   水位落库并发布，保持该等待操作先于完成卡片；终态到达时尚无指标或之后未出现父线程等待时
   保留有界收敛窗口，后续新指标使旧结算失效；指标到达或静默本身不推断子代理结束。无指标
-  发布零统计终态，指标写入或读取失败发布“统计不可用”终态。
+  发布零统计终态，指标写入或读取失败发布“统计不可用”终态；Tracker 记录启动到首次官方终态的
+  墙钟耗时，不把后续指标收敛等待计入运行时间；完成事件复用汇总中的最后一次
+  思考等级以及线程聚合输出速度和计时覆盖，不在 Tracker 内重复计算。
 - `workspace-permission-writer.ts`：把渠道 `/workspaceperm` 的工作区权限更新写回
   `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
@@ -89,7 +91,7 @@
 - `service-restart-runner.ts`：统一执行 App Server 服务重启的异步子进程封装，Gateway 自动重启
   与未来 CLI 单 Provider 重启复用同一入口，输出脱敏后写入日志。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
-  `turn.completed` 注入当前授权 Workspace 的 Git 分支和 Thread 累计总价；并行完成各 Surface 的首次启动，
+  `turn.completed` 注入当前授权 Workspace 的 Git 分支、递归 Thread 累计总价及显式父 Turn 任务合计；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。

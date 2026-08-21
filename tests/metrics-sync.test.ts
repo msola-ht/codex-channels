@@ -36,6 +36,7 @@ describe("MetricsSync", () => {
       subagents: [{
         threadId: "sub-1",
         parentThreadId: "main-1",
+        parentTurnId: "turn-1",
         agentPath: "ds",
         recordedAtMs: 1_000,
       }],
@@ -79,6 +80,7 @@ describe("MetricsSync", () => {
     expect(payload.subagentThreads).toEqual([{
       threadId: "sub-1",
       parentThreadId: "main-1",
+      parentTurnId: "turn-1",
       agentPath: "ds",
       recordedAtMs: 1_000,
     }]);
@@ -288,6 +290,7 @@ function createStore(options: {
       groups: [],
       totalGroupCount: 0,
     })),
+    threadTurnTaskSummary: vi.fn(() => null),
     errors: vi.fn(() => ({
       startAtMs: 0,
       endAtMs: 1,

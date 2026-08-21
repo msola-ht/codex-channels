@@ -288,6 +288,7 @@ export interface StoredThreadListItem {
   reasoningEffort: string | null;
   agentPath: string | null;
   parentThreadId: string | null;
+  parentTurnId: string | null;
   turnCount: number;
   requestCount: number;
   inputTokens: number;
@@ -303,6 +304,7 @@ export interface StoredThreadListItem {
 export interface StoredSubagentThreadRecord {
   threadId: string;
   parentThreadId: string;
+  parentTurnId: string | null;
   agentPath: string;
   recordedAtMs: number;
 }
@@ -426,6 +428,7 @@ export interface ModelRequestMetricsStore {
   recordSubagentThread(details: {
     agentThreadId: string;
     parentThreadId: string;
+    parentTurnId: string;
     agentPath: string;
   }): void;
   requestRowsAfter(afterLocalId: number, limit: number): StoredModelRequestMetric[];
@@ -440,6 +443,10 @@ export interface ModelRequestMetricsStore {
   errors(
     query: ModelRequestMetricsErrorQuery,
   ): StoredModelRequestMetricsErrorReport;
+  threadTurnTaskSummary(
+    threadId: string,
+    turnId: string,
+  ): StoredTurnRequestMetricsSummary | null;
   count(): number;
   close(): void;
 }

@@ -535,6 +535,7 @@ setInterval(() => undefined, 1_000);`,
     store.recordSubagentThread({
       agentThreadId: "subagent-thread-1",
       parentThreadId: "parent-thread-1",
+      parentTurnId: "parent-turn-1",
       agentPath: "/root/ds_probe",
     });
     expect(store.threadList()[0]).toMatchObject({
@@ -545,17 +546,51 @@ setInterval(() => undefined, 1_000);`,
     expect(store.subagentThread("subagent-thread-1")).toEqual({
       agentPath: "/root/ds_probe",
       parentThreadId: "parent-thread-1",
+      parentTurnId: "parent-turn-1",
     });
     expect(store.subagentThread("unknown-thread")).toEqual({
       agentPath: null,
       parentThreadId: null,
+      parentTurnId: null,
     });
 
     expect(() => store.recordSubagentThread({
       agentThreadId: "",
       parentThreadId: "parent-thread-1",
+      parentTurnId: "turn-1",
       agentPath: "/root/ds_probe",
     })).toThrow("Thread ID 无效");
+    store.close();
+  });
+
+  it("requires and persists the parent Turn for newly recorded subagents", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+
+    expect(() => store.recordSubagentThread({
+      agentThreadId: "subagent-1",
+      parentThreadId: "parent-1",
+      parentTurnId: "",
+      agentPath: "/root/probe",
+    })).toThrow(/父 Turn/u);
+
+    store.recordSubagentThread({
+      agentThreadId: "subagent-1",
+      parentThreadId: "parent-1",
+      parentTurnId: "turn-1",
+      agentPath: "/root/probe",
+    });
+    expect(store.subagentThread("subagent-1")).toEqual({
+      agentPath: "/root/probe",
+      parentThreadId: "parent-1",
+      parentTurnId: "turn-1",
+    });
+    expect(store.subagentThreadsAfter(0)[0]).toMatchObject({
+      parentThreadId: "parent-1",
+      parentTurnId: "turn-1",
+    });
     store.close();
   });
 
@@ -610,11 +645,13 @@ setInterval(() => undefined, 1_000);`,
     store.recordSubagentThread({
       agentThreadId: "subagent-1",
       parentThreadId: "parent-1",
+      parentTurnId: "turn-1",
       agentPath: "/root/probe-a",
     });
     store.recordSubagentThread({
       agentThreadId: "subagent-2",
       parentThreadId: "parent-1",
+      parentTurnId: "turn-1",
       agentPath: "/root/probe-b",
     });
 
@@ -643,12 +680,14 @@ setInterval(() => undefined, 1_000);`,
     store.recordSubagentThread({
       agentThreadId: "subagent-a",
       parentThreadId: "parent-1",
+      parentTurnId: "turn-a",
       agentPath: "/root/probe-a",
     });
     vi.setSystemTime(new Date(1_700_000_000_001));
     store.recordSubagentThread({
       agentThreadId: "subagent-b",
       parentThreadId: "parent-1",
+      parentTurnId: "turn-b",
       agentPath: "/root/probe-b",
     });
 
@@ -814,6 +853,148 @@ setInterval(() => undefined, 1_000);`,
     const summary = store.threadSummary("thread-1");
     expect(summary.latestTurn).toMatchObject({ turnId: "turn-2", requestCount: 1 });
     expect(summary.threadAggregate).toMatchObject({ turnCount: 2, requestCount: 2 });
+    store.close();
+  });
+
+  it("recursively includes descendants in the root session aggregate without looping on cycles", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path);
+    store.record({ ...sample(), threadId: "root", turnId: "root-turn", inputTokens: 100, outputTokens: 10, totalTokens: 110 });
+    store.record({ ...sample(), threadId: "child", turnId: "child-turn", inputTokens: 200, outputTokens: 20, totalTokens: 220 });
+    store.record({ ...sample(), threadId: "grandchild", turnId: "grand-turn", inputTokens: 300, outputTokens: 30, totalTokens: 330 });
+    store.record({ ...sample(), threadId: "legacy-child", turnId: "legacy-turn", inputTokens: 400, outputTokens: 40, totalTokens: 440 });
+    store.recordSubagentThread({
+      agentThreadId: "child",
+      parentThreadId: "root",
+      parentTurnId: "root-turn",
+      agentPath: "/root/child",
+    });
+    store.recordSubagentThread({
+      agentThreadId: "grandchild",
+      parentThreadId: "child",
+      parentTurnId: "child-turn",
+      agentPath: "/root/grandchild",
+    });
+
+    // Simulate a v9-era annotation: it remains part of the root session by
+    // parent Thread, but cannot be attributed to any parent Turn.
+    const raw = new DatabaseSync(path);
+    raw.prepare(`
+      INSERT INTO subagent_threads
+        (thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms)
+      VALUES (?, ?, NULL, ?, ?)
+    `).run("legacy-child", "root", "/root/legacy", Date.now());
+    raw.prepare(`
+      INSERT INTO subagent_threads
+        (thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms)
+      VALUES (?, ?, ?, ?, ?)
+    `).run("root", "grandchild", "grand-turn", "/root/cycle", Date.now());
+    raw.close();
+
+    const summary = store.threadSummary("root");
+    expect(summary.threadAggregate).toMatchObject({
+      requestCount: 4,
+      inputTokens: 1_000,
+      outputTokens: 100,
+      turnCount: 4,
+    });
+    expect(store.aggregate({
+      dimension: "global",
+      startAtMs: 0,
+      endAtMs: Date.now() + 1_000,
+    }).aggregate).toMatchObject({
+      requestCount: 4,
+      inputTokens: 1_000,
+      outputTokens: 100,
+    });
+    store.close();
+  });
+
+  it("attributes only explicitly linked child threads to a parent Turn task aggregate", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record({ ...sample(), threadId: "root", turnId: "turn-a", inputTokens: 100, outputTokens: 10, totalTokens: 110 });
+    store.record({ ...sample(), threadId: "root", turnId: "turn-b", inputTokens: 200, outputTokens: 20, totalTokens: 220 });
+    store.record({ ...sample(), threadId: "child-a", turnId: "child-turn", inputTokens: 300, outputTokens: 30, totalTokens: 330 });
+    store.record({ ...sample(), threadId: "grandchild", turnId: "grand-turn", inputTokens: 400, outputTokens: 40, totalTokens: 440 });
+    store.record({ ...sample(), threadId: "child-b", turnId: "child-b-turn", inputTokens: 500, outputTokens: 50, totalTokens: 550 });
+    store.record({ ...sample(), threadId: "legacy-child", turnId: "legacy-turn", inputTokens: 600, outputTokens: 60, totalTokens: 660 });
+    store.recordSubagentThread({
+      agentThreadId: "child-a",
+      parentThreadId: "root",
+      parentTurnId: "turn-a",
+      agentPath: "/root/a",
+    });
+    store.recordSubagentThread({
+      agentThreadId: "grandchild",
+      parentThreadId: "child-a",
+      parentTurnId: "child-turn",
+      agentPath: "/root/grandchild",
+    });
+    store.recordSubagentThread({
+      agentThreadId: "child-b",
+      parentThreadId: "root",
+      parentTurnId: "turn-b",
+      agentPath: "/root/b",
+    });
+    const raw = new DatabaseSync(join(directory, "request-metrics.sqlite3"));
+    raw.prepare(`
+      INSERT INTO subagent_threads
+        (thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms)
+      VALUES (?, ?, NULL, ?, ?)
+    `).run("legacy-child", "root", "/root/legacy", Date.now());
+    raw.close();
+
+    expect(store.threadTurnTaskSummary("root", "turn-a")).toMatchObject({
+      turnId: "turn-a",
+      requestCount: 3,
+      inputTokens: 800,
+      outputTokens: 80,
+    });
+    expect(store.threadTurnTaskSummary("root", "turn-b")).toMatchObject({
+      turnId: "turn-b",
+      requestCount: 2,
+      inputTokens: 700,
+      outputTokens: 70,
+    });
+    store.close();
+  });
+
+  it("keeps a zero task summary when a linked child has no model rows yet", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    store.record({ ...sample(), threadId: "root", turnId: "turn-a" });
+    store.recordSubagentThread({
+      agentThreadId: "child",
+      parentThreadId: "root",
+      parentTurnId: "turn-a",
+      agentPath: "/root/child",
+    });
+
+    expect(store.threadTurnTaskSummary("root", "turn-a")).toMatchObject({
+      turnId: "turn-a",
+      requestCount: 1,
+      inputTokens: 1_000,
+      outputTokens: 100,
+    });
+    store.recordSubagentThread({
+      agentThreadId: "empty-child",
+      parentThreadId: "empty-root",
+      parentTurnId: "turn-a",
+      agentPath: "/root/empty",
+    });
+    expect(store.threadTurnTaskSummary("empty-root", "turn-a")).toMatchObject({
+      turnId: "turn-a",
+      requestCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(store.threadTurnTaskSummary("root", "turn-b")).toBeNull();
     store.close();
   });
 
@@ -1481,6 +1662,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
       subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
+      threadTurnTaskSummary: () => null,
       errors: () => emptyErrorReport(),
       count: () => 0,
       close: () => undefined,
@@ -1510,6 +1692,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
       subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
+      threadTurnTaskSummary: () => null,
       errors: () => emptyErrorReport(),
       count: () => 0,
       close: () => {
@@ -1535,6 +1718,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
       subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
+      threadTurnTaskSummary: () => null,
       errors: () => emptyErrorReport(),
       count: () => 0,
       close: () => undefined,
@@ -1574,6 +1758,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
       subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
+      threadTurnTaskSummary: () => null,
       errors: () => emptyErrorReport(),
       count: () => 0,
       close: () => undefined,
@@ -1600,6 +1785,7 @@ describe("BufferedModelRequestMetricsWriter", () => {
       subagentThreadsAfter: () => [],
       recent: () => [],
       aggregate: () => emptyMetricsReport(),
+      threadTurnTaskSummary: () => null,
       errors: () => emptyErrorReport(),
       count: () => 0,
       close: () => undefined,
