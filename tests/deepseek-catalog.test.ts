@@ -17,6 +17,7 @@ describe("DeepSeek model catalog", () => {
         slug: string;
         supportedInApi: boolean;
         visibility: string;
+        inputModalities: string[];
       }>;
     };
 
@@ -28,9 +29,13 @@ describe("DeepSeek model catalog", () => {
         visibility: "list",
       }));
     }
+    expect(baseline.models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4-flash-vision-exp",
+      inputModalities: ["text", "image"],
+    }));
   });
 
-  it("makes the official Flash and Pro models selectable", () => {
+  it("makes the reviewed official models selectable with their input capabilities", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-"));
     const providerDirectory = join(
       codexHome,
@@ -41,8 +46,13 @@ describe("DeepSeek model catalog", () => {
     mkdirSync(providerDirectory, { recursive: true });
     writeFileSync(join(providerDirectory, "models.json"), JSON.stringify({
       models: [
-        model("deepseek-v4-flash", "DeepSeek-V4-Flash"),
-        model("deepseek-v4-pro", "DeepSeek-V4-Pro"),
+        model("deepseek-v4-flash", "DeepSeek-V4-Flash", ["text"]),
+        model(
+          "deepseek-v4-flash-vision-exp",
+          "DeepSeek-V4-Flash-Vision",
+          ["text", "image"],
+        ),
+        model("deepseek-v4-pro", "DeepSeek-V4-Pro", ["text"]),
       ],
     }));
 
@@ -53,8 +63,13 @@ describe("DeepSeek model catalog", () => {
     );
 
     expect(models).toMatchObject([
-      { model: "deepseek-v4-flash", available: true },
-      { model: "deepseek-v4-pro", available: true },
+      { model: "deepseek-v4-flash", available: true, inputModalities: ["text"] },
+      {
+        model: "deepseek-v4-flash-vision-exp",
+        available: true,
+        inputModalities: ["text", "image"],
+      },
+      { model: "deepseek-v4-pro", available: true, inputModalities: ["text"] },
     ]);
   });
 
@@ -75,13 +90,27 @@ describe("DeepSeek model catalog", () => {
       deepseekProviderDefinition,
     )).toEqual([]);
   });
+
+  it("fails closed when a selectable model has an unknown input capability", () => {
+    const providerDirectory = mkdtempSync(join(tmpdir(), "codexc-deepseek-capability-"));
+    writeFileSync(join(providerDirectory, "models.json"), JSON.stringify({
+      models: [model("deepseek-v4-flash", "DeepSeek-V4-Flash", ["text", "video"])],
+    }));
+
+    expect(() => loadManagedModelOptions(
+      providerDirectory,
+      true,
+      deepseekProviderDefinition,
+    )).toThrow("DeepSeek 模型目录包含未知输入能力");
+  });
 });
 
-function model(slug: string, displayName: string) {
+function model(slug: string, displayName: string, inputModalities: string[]) {
   return {
     slug,
     display_name: displayName,
     default_reasoning_level: "high",
     supported_reasoning_levels: [{ effort: "high", description: "High" }],
+    input_modalities: inputModalities,
   };
 }

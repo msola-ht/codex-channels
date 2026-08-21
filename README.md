@@ -187,9 +187,13 @@ codexc service restart all
 
 聊天中使用 `/model` 切换；当前渠道模型会在切换 Workspace、新会话或同 Provider 历史会话时继续
 用于下一 Turn，显式恢复不同 Provider 的历史会话时仍尊重该 Thread 的 Provider。终端使用
-`codexc remote --profile deepseek`。模型限制、自动压缩、
-子代理和跨 Provider 行为见 [`DeepSeek 使用说明`](docs/deepseek.md)；外部识图见
-[`图片识别代理`](docs/vision.md)。
+`codexc remote --profile deepseek`。模型限制、原生视觉、自动压缩、
+子代理和跨 Provider 行为见 [`DeepSeek 使用说明`](docs/deepseek.md)。
+
+从旧版外部识图升级时，`codexc update` 会先创建私有备份，再自动移除
+`~/.codex-connect/config.toml` 中整个 `[vision]` 配置段，避免严格 Schema 拒绝启动。
+`api_providers` 及其按提供商保存的 API Key 会继续保留；旧 `credentials/vision/` 凭据不再读取，
+也不会自动删除。
 
 ### OpenCode Go
 
@@ -308,7 +312,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`
-- 图片：`/vision <下一批要求>`；多图：`/vision <2–4> <要求>`，收齐自动提交；失败重试：`/vision retry`；取消：`/vision cancel`
+- 图片：直接发送 PNG/JPEG；当前模型不支持图片时，先用 `/model` 切换到支持图片的模型
 - 帮助：`/help`、`/whoami`
 
 飞书中需要引用其他消息时，请直接回复目标消息后发送要求。Gateway 不解析飞书“复制消息链接”，
@@ -367,7 +371,9 @@ codexc doctor
 
 日常升级统一使用 `codexc update`。Git 源码安装会更新官方 `main` 并刷新 npm 全局命令，后台服务
 已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。旧版第三方 Provider 文件会在停机
-窗口内先自动备份，再迁移到 `~/.codex-connect/providers/<id>/`。该命令必须从本机终端执行。详细
+窗口内先自动备份，再迁移到 `~/.codex-connect/providers/<id>/`；已配置的 DeepSeek 会同步刷新
+受控官方模型目录并保留当前选择与逐模型设置，已废弃的 `[vision]` 配置段也会在备份后自动移除。
+该命令必须从本机终端执行。详细
 流程和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 

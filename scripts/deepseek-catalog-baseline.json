@@ -67,6 +67,40 @@
       "supportsSearchTool": true,
       "supportsParallelToolCalls": true,
       "multiAgentVersion": "v2"
+    },
+    {
+      "slug": "deepseek-v4-flash-vision-exp",
+      "digest": "72e1e6e26e6407a0b22d9f4ef9eb494a9cb7b35035708b2fe0e4cf0abb1d703d",
+      "displayName": "DeepSeek-V4-Flash-Vision",
+      "description": "Latest frontier agentic coding model with image input.",
+      "contextWindow": 1048576,
+      "maxContextWindow": 1048576,
+      "effectiveContextWindowPercent": 95,
+      "inputModalities": [
+        "text",
+        "image"
+      ],
+      "defaultReasoningLevel": "high",
+      "supportedReasoningLevels": [
+        {
+          "effort": "low",
+          "description": "Fast responses with lighter reasoning"
+        },
+        {
+          "effort": "high",
+          "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
+        }
+      ],
+      "visibility": "list",
+      "minimalClientVersion": "0.144.0",
+      "supportedInApi": true,
+      "supportsSearchTool": true,
+      "supportsParallelToolCalls": true,
+      "multiAgentVersion": "v2"
     }
   ]
 }

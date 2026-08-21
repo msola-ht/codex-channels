@@ -39,7 +39,7 @@ describe("Codex Connect setup", () => {
       options: [{
         value: "models",
         label: "模型与提供商",
-        hint: "设置 Codex 官方默认值、第三方模型、API 与图片识别",
+          hint: "设置 Codex 官方默认值、第三方模型与 API",
       }, {
         value: "channels",
         label: "通讯渠道",
@@ -299,29 +299,6 @@ describe("Codex Connect setup", () => {
       label: "第三方模型设置",
       hint: "按 Provider 和模型设置默认值、思考等级与自动压缩",
     });
-  });
-
-  it("selects image recognition under the models and providers category", async () => {
-    const visionSetup = vi.fn(async () => "vision-configured");
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("models")
-        .mockResolvedValueOnce("third_party")
-        .mockResolvedValueOnce("vision"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    await expect(runSetup({
-      input: {},
-      output: {},
-      prompts,
-      deepseekSetup: vi.fn(),
-      visionSetup,
-    })).resolves.toBe("vision-configured");
-
-    expect(visionSetup).toHaveBeenCalledWith({ input: {}, output: {}, prompts });
   });
 
   it("selects third-party API management without entering DeepSeek setup", async () => {

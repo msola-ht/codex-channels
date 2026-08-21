@@ -159,30 +159,6 @@ export async function runDeepseekSetup({
     const autoCompactPercent = await askAutoCompact(prompt);
 
     const downloaded = await downloadDeepseekCatalog(fetchImpl);
-    const contextWindow = downloaded.catalog.models?.find(
-      (model) => model?.slug === supportedModel,
-    )?.context_window;
-    if (
-      autoCompactPercent !== undefined
-      && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)
-    ) {
-      throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
-    }
-    const defaultCatalog = withManagedModelCatalogSettings(
-      downloaded.catalog,
-      deepseekProviderDefinition,
-      {
-        model: supportedModel,
-        reasoningEffort: deepseekProviderDefinition.defaultReasoningEffort,
-        ...(autoCompactPercent === undefined
-          ? {}
-          : {
-              autoCompactLimit: Math.round(
-                contextWindow * autoCompactPercent / 100,
-              ),
-            }),
-      },
-    );
     const installationPaths = [
       configPath,
       profilePath,
@@ -218,10 +194,10 @@ export async function runDeepseekSetup({
         backupStatePath,
       });
       const selectedModel = previous?.model ?? supportedModel;
-      const managedCatalog = withPreservedManagedModelCatalogSettings(
-        defaultCatalog,
-        deepseekProviderDefinition,
+      const managedCatalog = createManagedDeepseekCatalog(
+        downloaded.catalog,
         previous?.models,
+        autoCompactPercent ?? null,
       );
       const selectedModelEntry = managedCatalog.models?.find(
         (entry) => entry?.slug === selectedModel,
@@ -417,11 +393,110 @@ export function extractDeepseekCatalog(script) {
   if (!catalog || !Array.isArray(catalog.models)) {
     throw new Error("DeepSeek 官方模型目录缺少 models");
   }
-  const flash = catalog.models.find((model) => model?.slug === supportedModel);
-  if (!flash || typeof flash !== "object") {
+  const defaultModel = catalog.models.find((model) => model?.slug === supportedModel);
+  if (!defaultModel || typeof defaultModel !== "object") {
     throw new Error(`DeepSeek 官方模型目录缺少 ${supportedModel}`);
   }
   return catalog;
+}
+
+export function createManagedDeepseekCatalog(
+  catalog,
+  previousModels = [],
+  autoCompactPercent = defaultAutoCompactPercent,
+) {
+  if (autoCompactPercent !== null && (
+    !Number.isInteger(autoCompactPercent)
+    || autoCompactPercent < minimumAutoCompactPercent
+    || autoCompactPercent > maximumAutoCompactPercent
+  )) {
+    throw new Error("DeepSeek 自动压缩百分比无效");
+  }
+  const models = Array.isArray(catalog?.models) ? catalog.models : [];
+  for (const { slug, available } of deepseekProviderDefinition.models) {
+    if (available && !models.some((model) => model?.slug === slug)) {
+      throw new Error(`DeepSeek 官方模型目录缺少 ${slug}`);
+    }
+  }
+  const defaultEntry = models.find((model) => model?.slug === supportedModel);
+  const contextWindow = defaultEntry?.context_window;
+  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
+    throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
+  }
+  const defaultsApplied = withManagedModelCatalogSettings(
+    catalog,
+    deepseekProviderDefinition,
+    {
+      model: supportedModel,
+      reasoningEffort: deepseekProviderDefinition.defaultReasoningEffort,
+      ...(autoCompactPercent === null
+        ? {}
+        : { autoCompactLimit: Math.round(contextWindow * autoCompactPercent / 100) }),
+    },
+  );
+  return withPreservedManagedModelCatalogSettings(
+    defaultsApplied,
+    deepseekProviderDefinition,
+    previousModels,
+  );
+}
+
+export async function refreshDeepseekCatalogForUpdate(
+  environment = process.env,
+  options = {},
+) {
+  const previous = loadManagedModelProviderSettings(environment).find(
+    (candidate) => candidate.provider === providerId,
+  );
+  if (!previous) return { status: "not-configured" };
+  const downloaded = await (options.downloadCatalog
+    ? options.downloadCatalog()
+    : downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch));
+  const managedCatalog = createManagedDeepseekCatalog(
+    downloaded.catalog,
+    previous.models,
+  );
+  const providerDirectory = managedProviderDirectory(
+    environment,
+    deepseekProviderDefinition,
+  );
+  const catalogPath = join(providerDirectory, deepseekProviderDefinition.catalogFileName);
+  const manifestPath = join(
+    providerDirectory,
+    deepseekProviderDefinition.catalogManifestFileName,
+  );
+  const paths = [catalogPath, manifestPath];
+  const snapshots = await snapshotFiles(paths);
+  try {
+    await writePrivateFileAtomic(
+      catalogPath,
+      `${JSON.stringify(managedCatalog, null, 2)}\n`,
+    );
+    await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
+      source: deepseekSetupScriptUrl,
+      sha256: downloaded.sha256,
+      downloadedAt: (options.now ?? (() => new Date()))().toISOString(),
+    }, null, 2)}\n`);
+  } catch (error) {
+    const guards = await snapshotFiles(paths);
+    try {
+      await restoreFileSnapshots(snapshots, guards);
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "DeepSeek 模型目录更新失败，且未能完整恢复更新前文件",
+        { cause: rollbackError },
+      );
+    }
+    throw error;
+  }
+  return {
+    status: "updated",
+    catalogPath,
+    manifestPath,
+    modelCount: managedCatalog.models.length,
+    selectedModel: previous.model,
+  };
 }
 
 async function buildCodexConfig({

@@ -40,9 +40,15 @@ describe("managed model provider default setup", () => {
       catalogPath(codexHome),
       "utf8",
     ));
-    expect(catalog.models).toEqual([
+    expect(catalog.models).toHaveLength(3);
+    expect(catalog.models).toEqual(expect.arrayContaining([
       expect.objectContaining({
         slug: "deepseek-v4-flash",
+        default_reasoning_level: "high",
+        auto_compact_token_limit: 629_146,
+      }),
+      expect.objectContaining({
+        slug: "deepseek-v4-flash-vision-exp",
         default_reasoning_level: "high",
         auto_compact_token_limit: 629_146,
       }),
@@ -51,7 +57,7 @@ describe("managed model provider default setup", () => {
         default_reasoning_level: "max",
         auto_compact_token_limit: 786_432,
       }),
-    ]);
+    ]));
     expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8")))
       .toMatchObject({ model: "gpt-5.6-sol", model_provider: "openai" });
     expect(output.write).toHaveBeenCalledWith(
@@ -164,7 +170,11 @@ function providerFixture(mode: "switching" | "exclusive") {
     { mode: 0o600 },
   );
   writeFileSync(catalogPath, JSON.stringify({
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+    models: [
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek-v4-pro",
+    ].map((slug) => ({
       slug,
       display_name: slug,
       context_window: 1_048_576,

@@ -21,7 +21,6 @@ export type {
   TurnPlanStepStatus,
   TurnStatus,
   TurnStartIdentity,
-  VisionTokenUsage,
 } from "./events.js";
 export {
   conversationTargetKey,

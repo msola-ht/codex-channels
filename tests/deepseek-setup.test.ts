@@ -17,6 +17,7 @@ import {
   deepseekSetupScriptUrl,
   downloadDeepseekCatalog,
   extractDeepseekCatalog,
+  refreshDeepseekCatalogForUpdate,
   runDeepseekSetup as runDeepseekSetupImplementation,
   type DeepseekSetupOptions,
 } from "../scripts/deepseek-setup.mjs";
@@ -32,7 +33,7 @@ import { writeManagedModelProviderProfileDefault } from "../runtime/model-provid
 
 const script = `#!/bin/sh
 cat > "$TMP_MODELS" <<'CODEX_MODELS_JSON'
-{"models":[{"slug":"deepseek-v4-flash","display_name":"DeepSeek V4 Flash","context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-pro","display_name":"DeepSeek V4 Pro","context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]}]}
+{"models":[{"slug":"deepseek-v4-flash","display_name":"DeepSeek V4 Flash","input_modalities":["text"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-flash-vision-exp","display_name":"DeepSeek V4 Flash Vision","input_modalities":["text","image"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-pro","display_name":"DeepSeek V4 Pro","input_modalities":["text"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]}]}
 CODEX_MODELS_JSON
 `;
 
@@ -50,8 +51,75 @@ function runDeepseekSetup(options: DeepseekSetupOptions = {}) {
 
 describe("DeepSeek setup", () => {
   it("extracts exactly one official model catalog heredoc", () => {
-    expect(extractDeepseekCatalog(script).models).toHaveLength(2);
+    expect(extractDeepseekCatalog(script).models).toHaveLength(3);
     expect(() => extractDeepseekCatalog("echo no-catalog")).toThrow("模型目录标记无效");
+  });
+
+  it("refreshes an installed two-model catalog during codexc update", async () => {
+    const codexHome = deepseekFixture();
+    const connectHome = join(codexHome, ".codex-connect");
+    const catalogPath = join(connectHome, "providers", "deepseek", "models.json");
+    const previous = JSON.parse(readFileSync(catalogPath, "utf8"));
+    previous.models = previous.models.filter((model: { slug?: string }) =>
+      model.slug !== "deepseek-v4-flash-vision-exp"
+    );
+    const flash = previous.models.find((model: { slug?: string }) =>
+      model.slug === "deepseek-v4-flash"
+    );
+    if (!flash) throw new Error("测试目录缺少 Flash");
+    flash.default_reasoning_level = "max";
+    flash.auto_compact_token_limit = 838_861;
+    writeFileSync(catalogPath, `${JSON.stringify(previous)}\n`, { mode: 0o600 });
+    const profilePath = join(codexHome, "sf-deepseek.config.toml");
+    writeFileSync(
+      profilePath,
+      readFileSync(profilePath, "utf8").replace(
+        'model_reasoning_effort = "high"',
+        'model_reasoning_effort = "max"',
+      ),
+      { mode: 0o600 },
+    );
+
+    const result = await refreshDeepseekCatalogForUpdate({
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    }, {
+      downloadCatalog: async () => ({
+        catalog: extractDeepseekCatalog(script),
+        sha256: "updated-catalog",
+      }),
+      now: () => new Date("2026-08-21T12:34:56.000Z"),
+    });
+
+    expect(result).toMatchObject({
+      status: "updated",
+      modelCount: 3,
+      selectedModel: "deepseek-v4-flash",
+    });
+    const updated = JSON.parse(readFileSync(catalogPath, "utf8"));
+    expect(updated.models).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        slug: "deepseek-v4-flash",
+        default_reasoning_level: "max",
+        auto_compact_token_limit: 838_861,
+      }),
+      expect.objectContaining({
+        slug: "deepseek-v4-flash-vision-exp",
+        input_modalities: ["text", "image"],
+        default_reasoning_level: "high",
+        auto_compact_token_limit: 629_146,
+      }),
+    ]));
+    expect(JSON.parse(readFileSync(
+      join(connectHome, "providers", "deepseek", "models.manifest.json"),
+      "utf8",
+    ))).toMatchObject({
+      sha256: "updated-catalog",
+      downloadedAt: "2026-08-21T12:34:56.000Z",
+    });
+    expect(parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8")))
+      .toMatchObject({ model: "deepseek-v4-flash" });
   });
 
   it("returns to the parent setup without reading a key or changing files", async () => {
@@ -233,12 +301,12 @@ describe("DeepSeek setup", () => {
     const roleConfigPath = join(fixture.home, "sf-agent.config.toml");
     expect(existsSync(roleConfigPath)).toBe(true);
     expect(parse(readFileSync(roleConfigPath, "utf8"))).toMatchObject({
-      model: "deepseek-v4-flash",
+      model: "deepseek-v4-flash-vision-exp",
       model_provider: "deepseek",
     });
     expect(readFileSync(roleConfigPath, "utf8")).not.toContain("sk-secret");
     const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
-    expect(profile.model).toBe("deepseek-v4-flash");
+    expect(profile.model).toBe("deepseek-v4-flash-vision-exp");
     expect(profile.model_provider).toBe("deepseek");
     expect(profile.model_reasoning_effort).toBe("high");
     expect(profile.model_auto_compact_token_limit).toBeUndefined();
@@ -247,8 +315,10 @@ describe("DeepSeek setup", () => {
       join(fixture.connectHome, "providers", "deepseek", "models.json"),
       "utf8",
     ));
-    expect(catalog.models[0]).toMatchObject({
-      slug: "deepseek-v4-flash",
+    expect(catalog.models.find((model: { slug?: string }) =>
+      model.slug === "deepseek-v4-flash-vision-exp"
+    )).toMatchObject({
+      slug: "deepseek-v4-flash-vision-exp",
       default_reasoning_level: "high",
       auto_compact_token_limit: 629_146,
     });
@@ -335,7 +405,9 @@ describe("DeepSeek setup", () => {
       join(fixture.connectHome, "providers", "deepseek", "models.json"),
       "utf8",
     ));
-    expect(catalog.models[1]).toMatchObject({
+    expect(catalog.models.find((model: { slug?: string }) =>
+      model.slug === "deepseek-v4-pro"
+    )).toMatchObject({
       slug: "deepseek-v4-pro",
       default_reasoning_level: "max",
       auto_compact_token_limit: 786_432,
@@ -427,7 +499,7 @@ describe("DeepSeek setup", () => {
       prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
-    expect(config.model).toBe("deepseek-v4-flash");
+    expect(config.model).toBe("deepseek-v4-flash-vision-exp");
     expect(config.model_provider).toBe("deepseek");
     expect(config.forced_login_method).toBeUndefined();
     expect(config.preferred_auth_method).toBeUndefined();
@@ -516,7 +588,7 @@ describe("DeepSeek setup", () => {
     expect(config.features).toMatchObject({ multi_agent_v2: true });
     expect(record(config.agents).external).toBeDefined();
     const profile = parse(readFileSync(join(home, "sf-deepseek.config.toml"), "utf8"));
-    expect(profile.model).toBe("deepseek-v4-flash");
+    expect(profile.model).toBe("deepseek-v4-flash-vision-exp");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
       .toBe("sk-switching");
   });
@@ -578,7 +650,7 @@ describe("DeepSeek setup", () => {
     expect(config.model_provider).toBe("openai");
     expect(record(config.model_providers).deepseek).toBeUndefined();
     const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
-    expect(profile.model).toBe("deepseek-v4-flash");
+    expect(profile.model).toBe("deepseek-v4-flash-vision-exp");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
       .toBe("sk-migrated");
   });
@@ -832,7 +904,11 @@ function deepseekFixture(): string {
     { mode: 0o600 },
   );
   writeFileSync(catalogPath, JSON.stringify({
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+    models: [
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek-v4-pro",
+    ].map((slug) => ({
       slug,
       display_name: slug,
       context_window: 1_048_576,

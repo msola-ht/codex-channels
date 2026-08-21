@@ -17,15 +17,8 @@
 - 原生 Thread Queue 六请求、100 条容量、25 条分页、五分钟 ID 选择快照、非文本安全摘要、Provider 路由、
   pending model/effort/Fast/Plan 覆盖失败关闭和写入竞态；项目输入到官方 `UserInput` 的映射，以及
   Review、Goal 和控制响应到稳定 Application 结果的映射。
-- 图片识别结果的严格数量、顺序、长度和提示注入隔离；第三方 Provider Setup 均为
-  外部视觉接口分离保存 Key；模型不支持图片时使用单次 Responses 请求、私有 Key 和稳定响应裁剪，
-  外部视觉模型只做客观观察和文字提取，原 Thread 默认不额外搜索、核实或调用工具；
-  三渠道只在外部请求发起后发送一次包含图片数量与本条要求的视觉 API 识别提示；`/vision`
-  下一批图片要求的 Actor/Conversation 隔离、替换、取消、五分钟过期和一次消费，以及显式
-  定量多图收齐自动提交，以及兼容的 `begin/done/cancel` 手动收集顺序、容量、隔离和停止清理。
-  外部视觉请求还覆盖 10 秒首次心跳、20 秒后续心跳的完成清理，以及实际视觉模型 ID、API 往返
-  耗时、实际 Token 用量和统一结构化消息的三渠道呈现；真实响应模型、完成状态、服务层级、上游
-  时间戳差、缓存及推理 Token 另有严格裁剪和不完整响应拒绝覆盖。
+- 图片输入的路径、格式、单张/批量大小与数量边界；当前模型目录未声明 `image` 能力时在创建或
+  追加 Turn 前拒绝，声明支持时沿用官方 `localImage` 输入，不建立第二套识图请求链路。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
   官方 `Turn.durationMs` 校验、三渠道统一结束汇报耗时字段、可重试错误隔离、Thread/全局警告路由，
@@ -110,11 +103,10 @@
   引用迁移；自定义主 Provider 私有候选备份读取覆盖普通文件、当前属主、`0600`、大小和非符号链接
   校验，恢复/删除候选消费同名备份且配置失败时回滚；从第三方恢复官方清除第三方模型覆盖，已在
   官方模式时保留官方模型；共享私有文件读取以同一描述符完成 `O_NOFOLLOW` 与权限校验；DeepSeek 官方脚本目录提取、两种 Setup 模式、
-  API Key 输出隔离、下载失败不修改、Flash 与 Pro 可选，以及跨 Provider 新建
+  API Key 输出隔离、下载失败不修改、Flash、Flash Vision Exp 与 Pro 可选、受控目录输入能力校验，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。
-- DeepSeek 目录提案的规范化基线、完整模型指纹变化检测，以及官方目录无法解析时仍保留结构化
-  失败结果和摘要且不生成候选基线。
+- DeepSeek 人工审查目录基线与现行价格基线的一致性、视觉模型原生图片能力和峰谷计价。
 - Provider 账户能力的编译期唯一注册、未知 Provider 不回退、OpenAI Token 用量与单桶/多桶额度
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限

@@ -11,7 +11,6 @@ import {
   type TurnOutputTiming,
   type TurnStartIdentity,
   type TurnArtifacts,
-  type VisionTokenUsage,
   isCriticalOutputEvent,
   usesOpenAiAccount,
 } from "./events.js";
@@ -148,34 +147,6 @@ export class ConversationCore {
       ...(identity ? { identity } : {}),
       ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
     });
-  }
-
-  visionStarted(
-    target: ConversationTarget,
-    details: { imageCount: number },
-  ): void {
-    this.publish({ type: "vision.started", target, ...details });
-  }
-
-  visionProgress(
-    target: ConversationTarget,
-    details: { elapsedSeconds: number },
-  ): void {
-    this.publish({ type: "vision.progress", target, ...details });
-  }
-
-  visionCompleted(
-    target: ConversationTarget,
-    details: {
-      provider: string;
-      model: string;
-      elapsedMs?: number;
-      upstreamDurationMs?: number;
-      serviceTier?: string;
-      usage?: VisionTokenUsage;
-    },
-  ): void {
-    this.publish({ type: "vision.completed", target, ...details });
   }
 
   activeTurn(target: ConversationTarget): ActiveTurn | undefined {

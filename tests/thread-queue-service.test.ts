@@ -214,7 +214,6 @@ function serviceWithQueue(
     undefined,
     undefined,
     undefined,
-    undefined,
     queue,
   );
 }

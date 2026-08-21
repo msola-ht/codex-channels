@@ -74,15 +74,6 @@ export interface GatewayConfig {
     protocol: "responses";
     endpoint: string;
   }>;
-  vision:
-    | { mode: "disabled" }
-    | {
-        mode: "responses_api";
-        provider: string;
-        endpoint: string;
-        model: string;
-        timeoutMs: number;
-      };
   credentialsDirectory: string;
   stateDatabasePath: string;
   approvalTimeoutMs: number;
@@ -301,7 +292,6 @@ function loadValidatedConfigDocument(
     threadSectionAdministrators: new Set(raw.thread_sections.administrators),
     priceCurrency: raw.display.price_currency,
     apiProviders: raw.api_providers.map(toApiProviderConfig),
-    vision: toVisionConfig(raw.vision, raw.api_providers),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
@@ -363,24 +353,6 @@ function toApiProviderConfig(
   return {
     ...raw,
     endpoint: validateApiEndpoint(raw.endpoint, `api_providers.${raw.id}.endpoint`),
-  };
-}
-
-function toVisionConfig(
-  raw: GatewayConfigDocument["vision"],
-  providers: GatewayConfigDocument["api_providers"],
-): GatewayConfig["vision"] {
-  if (raw.mode === "disabled") return raw;
-  const provider = providers.find((candidate) => candidate.id === raw.provider);
-  if (!provider) {
-    throw new ConfigurationError(`vision.provider 不存在：${raw.provider}`);
-  }
-  return {
-    mode: raw.mode,
-    provider: provider.id,
-    endpoint: validateApiEndpoint(provider.endpoint, `api_providers.${provider.id}.endpoint`),
-    model: raw.model,
-    timeoutMs: raw.timeout_seconds * 1000,
   };
 }
 

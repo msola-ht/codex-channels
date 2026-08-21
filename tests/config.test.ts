@@ -150,7 +150,6 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.pluginApiEnabled).toBe(false);
     expect(runtime.config.threadSectionAdministrators).toEqual(new Set());
     expect(runtime.config.apiProviders).toEqual([]);
-    expect(runtime.config.vision).toEqual({ mode: "disabled" });
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
@@ -321,93 +320,14 @@ describe("Gateway config.toml", () => {
     })).toThrow(/permissions 与 sandbox 不能同时设置/u);
   });
 
-  it("rejects the removed App Server vision mode", () => {
-    const appServer = createFixture({
-      vision: { mode: "openai_app_server", model: "gpt-vision" },
-    });
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: appServer.configPath,
-    })).toThrow(/vision\.mode/u);
-  });
-
-  it("loads external vision settings without reading API key contents into config", () => {
-    const external = createFixture({
-      api_providers: [{
-        id: "vision-relay",
-        name: "视觉中转",
-        protocol: "responses",
-        endpoint: "https://vision.example/v1/responses",
-      }],
-      vision: {
-        mode: "responses_api",
-        provider: "vision-relay",
-        model: "vision-model",
-      },
-    });
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: external.configPath,
-    }).config.vision).toEqual({
-      mode: "responses_api",
-      provider: "vision-relay",
-      endpoint: "https://vision.example/v1/responses",
-      model: "vision-model",
-      timeoutMs: 120_000,
-    });
-  });
-
-  it("accepts a custom vision timeout and rejects values outside the supported range", () => {
-    const custom = createFixture({
-      api_providers: [{
-        id: "vision-relay",
-        name: "视觉中转",
-        protocol: "responses",
-        endpoint: "https://vision.example/v1/responses",
-      }],
-      vision: {
-        mode: "responses_api",
-        provider: "vision-relay",
-        model: "vision-model",
-        timeout_seconds: 300,
-      },
-    });
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: custom.configPath,
-    }).config.vision).toEqual(expect.objectContaining({
-      timeoutMs: 300_000,
-    }));
-
-    const invalid = createFixture({
-      api_providers: [{
-        id: "vision-relay",
-        name: "视觉中转",
-        protocol: "responses",
-        endpoint: "https://vision.example/v1/responses",
-      }],
-      vision: {
-        mode: "responses_api",
-        provider: "vision-relay",
-        model: "vision-model",
-        timeout_seconds: 20,
-      },
-    });
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: invalid.configPath,
-    })).toThrow();
-  });
-
-  it("rejects insecure remote vision endpoints", () => {
+  it("rejects insecure remote direct API endpoints", () => {
     const fixture = createFixture({
       api_providers: [{
-        id: "vision-relay",
-        name: "视觉中转",
+        id: "responses-relay",
+        name: "Responses 中转",
         protocol: "responses",
-        endpoint: "http://vision.example/v1/responses",
+        endpoint: "http://responses.example/v1/responses",
       }],
-      vision: {
-        mode: "responses_api",
-        provider: "vision-relay",
-        model: "vision-model",
-      },
     });
 
     expect(() => loadRuntimeConfig({
@@ -415,7 +335,7 @@ describe("Gateway config.toml", () => {
     })).toThrow("必须使用 HTTPS");
   });
 
-  it("rejects a vision provider that is not registered", () => {
+  it("rejects the removed vision configuration", () => {
     const fixture = createFixture({
       vision: {
         mode: "responses_api",
@@ -426,7 +346,7 @@ describe("Gateway config.toml", () => {
 
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toThrow("vision.provider 不存在");
+    })).toThrow(/vision/u);
   });
 
   it("rejects the removed manual DeepSeek proxy setting", () => {

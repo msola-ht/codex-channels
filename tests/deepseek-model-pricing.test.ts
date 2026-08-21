@@ -36,7 +36,7 @@ describe("DeepseekModelPricingResolver", () => {
         billingMode: "api",
         currency: "USD",
         source: "deepseek-official:open-er-api",
-        effectiveAtMs: Date.parse("2026-08-13T10:49:16.000Z"),
+        effectiveAtMs: Date.parse("2026-08-21T09:03:26.000Z"),
         bucket: null,
         cachedInputPricePerMillionNanos: 10_000_000,
         uncachedInputPricePerMillionNanos: 500_000_000,
@@ -92,7 +92,29 @@ describe("DeepseekModelPricingResolver", () => {
     })).toBeNull();
   });
 
-  it("rejects baseline gaps, overlaps and divergent model sets", () => {
+  it("prices the native vision model only in the current peak and off-peak plan", () => {
+    const resolver = new DeepseekModelPricingResolver({
+      exchangeRate: () => exchangeRate,
+    });
+
+    expect(resolveAt(
+      resolver,
+      "2026-08-16T23:59:59+08:00",
+      "deepseek-v4-flash-vision-exp",
+    )).toBeNull();
+    expect(resolveAt(
+      resolver,
+      "2026-08-17T09:00:00+08:00",
+      "deepseek-v4-flash-vision-exp",
+    )).toMatchObject({
+      cachedInputPricePerMillionNanos: 50_000_000,
+      uncachedInputPricePerMillionNanos: 1_500_000_000,
+      outputPricePerMillionNanos: 4_500_000_000,
+      bucket: "peak",
+    });
+  });
+
+  it("rejects baseline gaps, overlaps and divergent model sets within one plan", () => {
     const parsed = JSON.parse(readFileSync(
       new URL("../runtime/deepseek-pricing-baseline.json", import.meta.url),
       "utf8",

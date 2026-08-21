@@ -73,63 +73,6 @@ function createAudioMessage(): Extract<FeishuInboxMessage, { kind: "audio" }> {
 }
 
 describe("Feishu conversation adapter", () => {
-  it("shows /vision delivery and Gateway handling latency", async () => {
-    const fixture = createOutbox();
-    const inputOptions = {
-      quietWindowMs: 0,
-      now: () => 1_450,
-      debugEnabled: true,
-    };
-    const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
-      fixture.outbox,
-      imagePort,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      inputOptions,
-    );
-
-    await adapter.handle({
-      ...message,
-      text: "/vision 2 比较两张图片",
-      createdAtMs: 1_000,
-      receivedAtMs: 1_200,
-    });
-    await fixture.outbox.close();
-
-    expect(fixture.sent[0]?.text).toContain("接收延迟：200毫秒");
-    expect(fixture.sent[0]?.text).toContain("Gateway 处理：250毫秒");
-  });
-
-  it("hides /vision technical timing outside debug mode", async () => {
-    const fixture = createOutbox();
-    const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
-      fixture.outbox,
-      imagePort,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { quietWindowMs: 0, now: () => 1_450 },
-    );
-
-    await adapter.handle({
-      ...message,
-      text: "/vision 2 比较两张图片",
-      createdAtMs: 1_000,
-      receivedAtMs: 1_200,
-    });
-    await fixture.outbox.close();
-
-    expect(fixture.sent[0]?.text).not.toContain("接收延迟");
-    expect(fixture.sent[0]?.text).not.toContain("Gateway 处理");
-  });
-
   it("uses rich posts for command results but keeps failures as plain text", async () => {
     const notifyMarkdown = vi.fn(() => true);
     const notifyText = vi.fn(() => true);
@@ -199,37 +142,6 @@ describe("Feishu conversation adapter", () => {
       "- Chat ID：oc_chat",
       "- App ID：cli_0123456789abcdef",
     ].join("\n"));
-  });
-
-  it("applies /vision to the next Feishu image only", async () => {
-    const fixture = createOutbox();
-    const submit = vi.fn(async () => ({
-      threadId: "thread",
-      turnId: "turn",
-      steered: false,
-    }));
-    const download = vi.fn().mockResolvedValue({
-      path: "/private/feishu/error.png",
-      mimeType: "image/png",
-      bytes: 10,
-    });
-    const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
-      fixture.outbox,
-      { download },
-    );
-
-    await adapter.handle({ ...message, text: "/vision 分析报错原因" });
-    await adapter.handle(createImageMessage());
-    await fixture.outbox.close();
-
-    expect(submit).toHaveBeenCalledWith(message.target, {
-      text: "分析报错原因",
-      localImages: [{ path: "/private/feishu/error.png" }],
-    });
-    expect(fixture.sent.some((entry) =>
-      entry.text.includes("图片识别要求已记录")
-    )).toBe(true);
   });
 
   it("uses /stop to stop a pending interaction before stopping the active Turn", async () => {
@@ -1789,57 +1701,6 @@ describe("Feishu conversation adapter", () => {
       ],
     });
     expect(fixture.sent).toEqual([]);
-  });
-
-  it("automatically submits a sized collection from adjacent Feishu images", async () => {
-    const fixture = createOutbox();
-    const submit = vi.fn(async () => ({
-      threadId: "thread-1",
-      turnId: "turn-1",
-      steered: false,
-    }));
-    const download = vi.fn()
-      .mockResolvedValueOnce({
-        path: "/private/uploads/feishu/first.png",
-        mimeType: "image/png" as const,
-        bytes: 8,
-      })
-      .mockResolvedValueOnce({
-        path: "/private/uploads/feishu/second.jpg",
-        mimeType: "image/jpeg" as const,
-        bytes: 9,
-      });
-    const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
-      fixture.outbox,
-      { download },
-    );
-
-    await adapter.handle({ ...message, text: "/vision 2 比较这些图片" });
-    await adapter.handleImageBatch([
-      createImageMessage({
-        messageId: "om_first",
-        imageKeys: ["img_v2_first"],
-      }),
-      createImageMessage({
-        eventId: "event-2",
-        messageId: "om_second",
-        imageKeys: ["img_v2_second"],
-      }),
-    ]);
-    await fixture.outbox.close();
-
-    expect(submit).toHaveBeenCalledTimes(1);
-    expect(submit).toHaveBeenCalledWith(message.target, {
-      text: "比较这些图片",
-      localImages: [
-        { path: "/private/uploads/feishu/first.png" },
-        { path: "/private/uploads/feishu/second.jpg" },
-      ],
-    });
-    expect(fixture.sent.some((entry) =>
-      entry.text.includes("图片已收齐")
-    )).toBe(true);
   });
 
   it("submits multiple images from one rich post in their original order", async () => {

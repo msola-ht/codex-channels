@@ -62,3 +62,32 @@ export function downloadDeepseekCatalog(
   sha256: string;
 }>;
 export function extractDeepseekCatalog(script: string): { models: Array<Record<string, unknown>> };
+export function createManagedDeepseekCatalog(
+  catalog: { models: Array<Record<string, unknown>> },
+  previousModels?: Array<{
+    model: string;
+    reasoningEffort: string;
+    autoCompactPercent?: number;
+  }>,
+  autoCompactPercent?: number | null,
+): { models: Array<Record<string, unknown>> };
+export function refreshDeepseekCatalogForUpdate(
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    downloadCatalog?: () => Promise<{
+      catalog: { models: Array<Record<string, unknown>> };
+      sha256: string;
+    }>;
+    fetchImpl?: typeof fetch;
+    now?: () => Date;
+  },
+): Promise<
+  | { status: "not-configured" }
+  | {
+      status: "updated";
+      catalogPath: string;
+      manifestPath: string;
+      modelCount: number;
+      selectedModel: string;
+    }
+>;

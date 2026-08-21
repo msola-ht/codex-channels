@@ -24,7 +24,7 @@ Gateway 运行配置。
 
 ### 仅 DeepSeek 固定模式
 
-- Setup 在 `~/.codex/config.toml` 中注册并选中 `deepseek-v4-flash`。
+- Setup 在 `~/.codex/config.toml` 中注册并选中 `deepseek-v4-flash-vision-exp`。
 - 原生 Codex CLI、TUI、IDE 和 Gateway 都默认使用 DeepSeek。
 - 固定模式只有一个 DeepSeek 主 App Server，使用 `codexc remote` 连接。
 
@@ -33,7 +33,7 @@ DeepSeek Provider。
 
 ### 自动压缩阈值
 
-安装流程在填写 API Key 后会为初始 Flash 模型询问自动压缩阈值。后续有两种入口：`codexc setup`
+安装流程在填写 API Key 后会为初始 Flash Vision Exp 模型询问自动压缩阈值。后续有两种入口：`codexc setup`
 中选择“模型与提供商 → 第三方 → DeepSeek 官方 → 修改模型设置（思考等级、自动压缩）”，或走原有的
 “模型与提供商 → 第三方 → 第三方模型设置 → DeepSeek”，按 Provider 和模型分别选择默认思考等级与自动压缩百分比
 （10–90%）；该百分比按模型自己的 `context_window` 换算为模型目录中的
@@ -65,20 +65,23 @@ OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或�
 和备份迁移到 `~/.codex-connect/providers/deepseek/`；新旧文件同时存在时不会猜测覆盖关系，而是
 明确报错。旧版 Profile 顶层的思考等级和自动压缩阈值会迁移进对应模型目录，切换模式 Profile 再
 镜像所选模型的默认思考等级；迁移不保留旧的 `body_after_prefix` 压缩作用域，升级后统一按
-`total` 作用域应用。
+`total` 作用域应用。迁移后同一命令会下载并校验最新官方模型目录，补入新受控模型，并保留现有
+模型的思考等级、自动压缩百分比及当前选中模型。
 
-当前 DeepSeek 官方目录声明 `deepseek-v4-flash` 和 `deepseek-v4-pro` 均支持 Codex；两者都可通过
-`/model` 选择。初次配置默认使用 Flash；之后可在 `codexc setup` 的“模型与提供商 → 第三方 → 第三方模型设置”
-中按模型设置 DeepSeek 新会话的默认模型、思考等级和自动压缩阈值。历史 Thread 仍保留自身模型。Setup 每次安装时下载最新官方目录，项目的每小时目录提案工作流
-还会比较模型完整指纹与关键审查字段；发现变化时只创建 Draft PR，不会自动开放未知模型、发布或部署。
+当前 DeepSeek 官方目录声明 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 和
+`deepseek-v4-pro` 均支持 Codex；三者都可通过
+`/model` 选择。初次配置默认使用 Flash Vision Exp；之后可在 `codexc setup` 的“模型与提供商 → 第三方 → 第三方模型设置”
+中按模型设置 DeepSeek 新会话的默认模型、思考等级和自动压缩阈值。历史 Thread 仍保留自身模型。
+Setup 每次安装时下载最新官方目录；项目只开放人工审查并写入编译期定义的模型，不自动采用未知模型。
 
-当前 Responses API 只支持文字输入。DeepSeek 会把收到的图片替换成占位文本而不是报错，因此
-Gateway 会在创建或追加 Turn 前检查模型能力：未启用外部图片识别时明确拒绝图片并提示切换到
-支持图片的模型；启用后则先走独立视觉代理，避免产生“DeepSeek 已经原生看图”的误解。
+`deepseek-v4-flash-vision-exp` 原生支持文字和图片；Gateway 从官方模型目录读取该输入能力，图片沿用
+既有 `localImage` Turn 输入直接交给 App Server，不增加 DeepSeek API 客户端或另一套调用方式。
+`deepseek-v4-flash` 与 `deepseek-v4-pro` 仍只支持文字；发送图片前应切换到视觉模型，否则 Gateway
+会在创建 Turn 前明确拒绝。
 
 ## 网页搜索
 
-DeepSeek（当前 `deepseek-v4-flash`、`deepseek-v4-pro` + Codex 0.148.0）支持网页搜索，且不依赖 OpenAI：
+DeepSeek（当前三个受控模型 + Codex 0.148.0）支持网页搜索，且不依赖 OpenAI：
 
 - DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
   回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的
@@ -139,17 +142,24 @@ Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review�
   汇率、精确模型或有效计划缺失时不使用通用目录猜价。总价按 `display.price_currency` 全局统一展示（默认 `cny`
   人民币），先出总计、再列出输入、缓存、输出三项价格明细，不显示目录静态单价，但会按本机
   实际用量折算并展示均价（元/100M，人民币）；历史价格快照不按新价格回算，人民币展示仍按当前
-  汇率统一换算。每小时上游检查会
-  解析官方价格页并在变化时创建 Draft PR，不会让运行中的 Gateway 直接抓取 HTML 或自动发布。
+  汇率统一换算。模型目录与价格基线由人工对照官方文档审查更新，运行中的 Gateway 不抓取价格
+  HTML，也不自动发布。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
 ## 图片识别
 
-DeepSeek 模型目录当前只声明文字输入。未启用外部图片识别时，Gateway 继续在 Turn 前拒绝图片；
-如需识图，可按
-[`图片识别代理`](vision.md) 从独立第三方 API 注册表选择 Responses 接口。识别结果作为标明来源的不可信
-文字资料进入当前 DeepSeek Thread。
+`deepseek-v4-flash-vision-exp` 原生接受当前渠道校验后的 PNG/JPEG 图片，并通过现有 App Server
+Turn 输入处理；项目仍采用更严格的最多四张、单张 10 MiB、整批 20 MiB 边界，不开放图片 URL、
+Files API、GIF 或 WebP 新入口。图片 Token 由 DeepSeek 按尺寸换算并随标准 Usage 返回，Gateway
+继续使用上游 Usage 和本模型现行价格计费，不自行按像素估算。
+
+Flash 与 Pro 仍为文字模型，收到图片时会在 Turn 前明确拒绝；需要看图时使用 `/model` 切换到
+Flash Vision Exp。Gateway 不再把图片转交给另一套外部视觉 API。
+
+旧版 `[vision]` 配置已删除；`codexc update` 会先创建私有备份，再自动移除该配置段。通用 `api_providers`
+注册表及其隔离 API Key 仍保留给未来明确设计的直接 API 功能，现阶段没有运行时调用方；旧的
+`credentials/vision/` 单视觉凭据不再读取，也不会自动删除。
 
 固定模式下，DeepSeek 代理服务于主 App Server；切换模式按需启动，若共享 `agents.external`
 当前选择 DeepSeek，则随服务预先启动统计代理。代理支持项目当前使用的

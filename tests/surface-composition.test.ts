@@ -547,7 +547,6 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     threadSectionAdministrators: new Set(),
     priceCurrency: "cny",
     apiProviders: [],
-    vision: { mode: "disabled" },
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     metricsStorage: { retentionDays: 365, maxRows: 1_000_000 },

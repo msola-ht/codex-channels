@@ -132,7 +132,6 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "experimental.plugin-api": "开发中 Plugin API",
     "thread-sections.administrators": "Thread 分区管理员",
     "api.providers": "第三方 API 提供商",
-    "vision.provider": "视觉识别服务",
     "metrics.sync": "多设备指标同步",
     "metrics.storage": "指标保留策略",
     "observability.log-level": "日志级别",

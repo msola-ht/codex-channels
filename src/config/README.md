@@ -44,8 +44,8 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 汇率刷新组件，因此币种变化需要重启 Gateway，不需要重启 App Server。
 
 `logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、
-`error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果，并在
-渠道中展示 `/vision` 接收与 Gateway 处理耗时；消息正文、请求参数、上游响应、凭据和审批内容
+`error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果；
+消息正文、请求参数、上游响应、凭据和审批内容
 仍不得进入日志。可通过 Setup 的“系统设置 → 调试模式”在 `debug` 与 `info` 间切换，变化需要
 重启 Gateway，不需要重启 App Server。
 
@@ -78,9 +78,8 @@ Workspace 上配置。
 
 `api_providers` 保存多个直接 API 调用使用的 Responses 提供商 ID、名称和精确 HTTPS Endpoint；
 API Key 由 Setup 按提供商保存到独立私有凭据文件。它们不属于 Codex `modelProvider`，不接入
-App Server 或 `/model`。`vision.mode` 默认为 `disabled`；`responses_api` 只保存提供商引用和
-视觉模型，引用不存在时配置失败关闭。提供商或视觉配置变化需要重启 Gateway，不需要重启
-App Server；配置文件不保存 API Key。
+App Server 或 `/model`，当前也没有运行时调用方；保留该注册表只为后续明确设计的直接 API 功能。
+提供商变化需要重启 Gateway，不需要重启 App Server；配置文件不保存 API Key。
 
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须

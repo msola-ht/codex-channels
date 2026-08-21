@@ -64,7 +64,7 @@ export function updateDatabases(
 
 export function inspectGatewayConfiguration(
   environment?: LocalUpdateEnvironment,
-): { configPath: string; missingSafeDefaults: string[] };
+): { configPath: string; missingSafeDefaults: string[]; removedPaths: string[] };
 
 export function updateGatewayConfiguration(
   environment?: LocalUpdateEnvironment,
@@ -75,25 +75,31 @@ export function updateGatewayConfiguration(
 ): {
   addedPaths: string[];
   backupPath: string | null;
-  changed: boolean;
-  configPath: string;
+    changed: boolean;
+    configPath: string;
+    removedPaths: string[];
 };
 
 export function updateLocalInstallation(
   environment?: LocalUpdateEnvironment,
   options?: {
     databaseOptions?: Parameters<typeof updateDatabases>[1];
-    inspectConfig?: () => { configPath: string; missingSafeDefaults?: string[] };
+    inspectConfig?: () => {
+      configPath: string;
+      missingSafeDefaults?: string[];
+      removedPaths?: string[];
+    };
     inspectDatabases?: () => { state: DatabaseInspection; metrics: DatabaseInspection };
     inspectServices?: () => CoreServiceInstallation;
     onInspected?: (inspection: {
-      config: { configPath: string; missingSafeDefaults?: string[] };
+      config: { configPath: string; missingSafeDefaults?: string[]; removedPaths?: string[] };
       databases: { state: DatabaseInspection; metrics: DatabaseInspection };
       services: CoreServiceInstallation;
     }) => void;
     startServices?: () => void;
     stopServices?: () => void;
     updateProviderFiles?: () => unknown;
+    updateProviderCatalogs?: () => unknown | Promise<unknown>;
     updateConfig?: () => unknown;
     updateDatabases?: () => unknown;
     validateOffline?: () => unknown;
@@ -102,6 +108,7 @@ export function updateLocalInstallation(
 ): Promise<{
   config: unknown;
   databases: unknown;
+  providerCatalogs: unknown;
   servicesRestored: boolean;
 }>;
 

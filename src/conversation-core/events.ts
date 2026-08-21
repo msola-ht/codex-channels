@@ -248,33 +248,12 @@ export interface TurnArtifacts {
   };
 }
 
-export interface VisionTokenUsage {
-  inputTokens?: number;
-  cachedInputTokens?: number;
-  cacheWriteInputTokens?: number;
-  outputTokens?: number;
-  reasoningOutputTokens?: number;
-  totalTokens?: number;
-}
-
 export interface TurnStartIdentity {
   kind: "skill" | "plugin" | "agent";
   name: string;
 }
 
 export type OutputEvent =
-  | { type: "vision.started"; target: ConversationTarget; imageCount: number }
-  | { type: "vision.progress"; target: ConversationTarget; elapsedSeconds: number }
-  | {
-      type: "vision.completed";
-      target: ConversationTarget;
-      provider: string;
-      model: string;
-      elapsedMs?: number;
-      upstreamDurationMs?: number;
-      serviceTier?: string;
-      usage?: VisionTokenUsage;
-    }
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; identity?: TurnStartIdentity; background?: boolean }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
@@ -304,8 +283,6 @@ export type OutputEvent =
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {
   return event.type !== "text.delta" && event.type !== "turn.started" &&
-    event.type !== "vision.started" &&
-    event.type !== "vision.progress" &&
     event.type !== "plan.updated" &&
     event.type !== "subagent.spawned" &&
     !(event.type === "operation.updated" && event.operation.status === "running");

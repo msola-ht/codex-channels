@@ -28,11 +28,6 @@ import type {
   ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import {
-  formatVisionCompleted,
-  formatVisionProgress,
-  formatVisionStarted,
-} from "../input-copy.js";
-import {
   cliInputTitle,
   contentTruncatedText,
   emptyCodexResponseText,
@@ -197,27 +192,6 @@ export class TelegramOutbox {
     }
     const chatId = event.target.conversationId;
     switch (event.type) {
-      case "vision.started":
-        this.enqueue(
-          chatId,
-          () => this.sendPanel(
-            chatId,
-            formatVisionStarted(event.imageCount),
-            undefined,
-            true,
-          ).then(() => undefined),
-          false,
-        );
-        return;
-      case "vision.progress":
-        this.notifyPanel(chatId, formatVisionProgress(event.elapsedSeconds));
-        return;
-      case "vision.completed":
-        this.notifyPanel(
-          chatId,
-          formatVisionCompleted(event, this.options.debugEnabled ?? false),
-        );
-        return;
       case "turn.started":
         this.reasoningMessages.delete(event.threadId);
         this.replyTargets.bindPending(

@@ -61,16 +61,11 @@ Telegram 和飞书在交互消息创建成功或失败时
 [`通讯渠道 Surface 接入指南`](../../docs/surface-integration-guide.md)。
 关闭队列时拒绝新输出、限时等待在途发送；并发关闭调用等待同一个关闭结果，不能提前报告完成。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
-`surface-input-coalescer.ts` 是已授权 Surface 输入门面，组合两个独立状态边界：
-`surface-input-batcher.ts` 只合并 Surface 明确标识的原生图片批次，普通文字、单图和无批次标识的
-消息立即提交；`vision-input-session.ts` 按完整 Conversation 与 Actor 在内存保存五分钟有效的
-下一批要求，以及 `/vision <2–4> <要求>` 定量收集并在收齐后自动提交的最多四张图片；兼容的
-`begin/done/cancel` 保留给数量未知的手动收集。外部识别失败后，共用输入门面还会按完整
-Conversation 与 Actor 在内存保留五分钟有效的一次重试输入，`/vision retry` 复用原要求与临时图片；
-成功、新图片任务、取消、过期或停止会清除记录。停止时原生批次排空，尚未提交的手动收集直接清除；这些状态都不根据消息间隔
-猜测独立消息关系。`vision-command.ts` 统一三个 Surface 的命令和确认文案。
+`surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface
+明确标识的原生图片批次，普通文字、单图和无批次标识的消息立即提交。图片直接进入当前模型的
+`localImage` 输入能力，不在 Surface 维护另一套识图会话或重试队列。
 三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
-并单独列出最近视觉等直接 API 请求；`global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
+并单独列出最近直接 API 请求；`global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
 把 Codex Provider 和直接 API 按同一请求口径聚合，最多展示请求量最高的 20 组；`errors` 用同一
 范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
 综合速度和首段回复延迟附带有效样本覆盖率，不把请求累计输入误写成上下文占用；总价附带
@@ -87,13 +82,6 @@ Markdown、Telegram HTML、微信结构化字段渲染列表。
 `thread_sections.administrators` 时只能查看和筛选自定义分区。内置 Pinned 在三渠道统一复用 `/pin` 与 `/unpin`；
 飞书选择卡与 Telegram 内联按钮只向管理员展示自定义分区移动，并向所有用户提供翻页，微信使用同一
 文字命令。渠道只提交选择，不保存分区状态。
-定量收齐确认在调用 Application 前同步入队；外部视觉请求发起、10 秒后的有界心跳及完成后的
-视觉模型 ID、本地实测 API 耗时和上游实际 Token 用量由 Core 作为平台无关事件发布（本地实测 API
-耗时仅在调试模式开启时展示）。图片收集、
-转发、心跳和完成消息统一使用标题与字段列表，三个渠道只负责转换 Markdown/HTML/富文本并按序投递。
-`vision-command.ts` 还在全局调试模式开启时统一呈现平台消息到 Gateway 的接收延迟，以及截至回复入队的
-Gateway 处理耗时；各 Surface 只传入已验证的平台创建时间、接收时间和当前毫秒时间。接收延迟是
-跨平台时钟差值，部署环境必须保持 NTP 同步，不能把未同步主机上的结果直接解释为渠道投递耗时。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
 Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，
 Turn、Thread 或 Surface 关闭时清理。
@@ -148,7 +136,7 @@ Telegram 使用当前页按钮和绑定 Actor 的十分钟一次性 ForceReply�
 `error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap
 继续通过注入的 Pino `err` 序列化器处理组合根异常。
-`input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案，以及外部视觉 API
+`input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案，以及
 开始识别图片与本条要求时的进度文案，并统一视觉完成通知正式模式只显示 Token 总计、调试模式
 展开 Token 子项与 API 耗时的展示策略；
 `output-copy.ts` 统一 CLI 输入镜像、断线、警告、操作失败、停止交互、空回复与内容截断等输出

@@ -178,14 +178,6 @@ export function parseDeepseekPricingBaseline(value: unknown): DeepseekPricingBas
       throw new Error("DeepSeek 价格计划存在空档或重叠");
     }
   }
-  const expectedModels = modelSet(plans[0]);
-  for (const plan of plans) {
-    const models = modelSet(plan);
-    if (models.size !== expectedModels.size
-      || [...expectedModels].some((model) => !models.has(model))) {
-      throw new Error("DeepSeek 价格计划的模型集合不一致");
-    }
-  }
   return {
     source: value.source,
     sourceUpdatedAtMs,
@@ -298,10 +290,6 @@ function parseIsoTimestamp(value: unknown, label: string): number {
     throw new Error(`DeepSeek ${label}无效`);
   }
   return timestamp;
-}
-
-function modelSet(plan: DeepseekPricingPlan): ReadonlySet<string> {
-  return new Set(plan.windows[0]!.models.keys());
 }
 
 function cnyToUsdNanos(cny: number, usdToCny: number): number | null {

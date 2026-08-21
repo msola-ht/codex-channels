@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ModelOption } from "../application/index.js";
+import type {
+  ModelInputModality,
+  ModelOption,
+} from "../application/index.js";
 
 interface ManagedCatalogDefinition {
   id: string;
@@ -55,6 +58,11 @@ export function loadManagedModelOptions(
     if (efforts.length === 0) {
       throw new Error(`${definition.displayName} 模型目录缺少思考等级：${catalogPath}`);
     }
+    const inputModalities = parseInputModalities(
+      model.input_modalities,
+      definition.displayName,
+      catalogPath,
+    );
     return [{
       provider: definition.id,
       available: knownModel.available,
@@ -73,9 +81,35 @@ export function loadManagedModelOptions(
       serviceTiers: [],
       defaultServiceTier: null,
       isDefault: false,
-      inputModalities: ["text" as const],
+      inputModalities,
     }];
   });
+}
+
+function parseInputModalities(
+  value: unknown,
+  displayName: string,
+  catalogPath: string,
+): ModelInputModality[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${displayName} 模型目录缺少输入能力：${catalogPath}`);
+  }
+  const allowed = new Set<ModelInputModality>(["text", "image", "audio"]);
+  const modalities: ModelInputModality[] = [];
+  for (const candidate of value) {
+    if (typeof candidate !== "string" || !allowed.has(candidate as ModelInputModality)) {
+      throw new Error(`${displayName} 模型目录包含未知输入能力：${catalogPath}`);
+    }
+    const modality = candidate as ModelInputModality;
+    if (modalities.includes(modality)) {
+      throw new Error(`${displayName} 模型目录包含重复输入能力：${catalogPath}`);
+    }
+    modalities.push(modality);
+  }
+  if (!modalities.includes("text")) {
+    throw new Error(`${displayName} 模型目录缺少文字输入能力：${catalogPath}`);
+  }
+  return modalities;
 }
 
 function record(value: unknown): Record<string, unknown> {

@@ -70,7 +70,7 @@ describe("TelegramLifecycle", () => {
     expect(registeredCommands.some((command) => command.command === "workspaceperm")).toBe(true);
     expect(registeredCommands.every((command) => /^[a-z0-9_]{1,32}$/u.test(command.command)))
       .toBe(true);
-    expect(registeredCommands.some((command) => command.command === "vision")).toBe(true);
+    expect(registeredCommands.some((command) => command.command === "vision")).toBe(false);
     expect(registeredCommands.some((command) => command.command === "cancel")).toBe(false);
   });
 

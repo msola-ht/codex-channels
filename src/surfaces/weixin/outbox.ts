@@ -29,11 +29,6 @@ import {
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
-  formatVisionCompleted,
-  formatVisionProgress,
-  formatVisionStarted,
-} from "../input-copy.js";
-import {
   contentTruncatedText,
   emptyCodexResponseText,
   formatCliInput,
@@ -365,21 +360,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private async render(event: OutputEvent): Promise<string | null> {
     switch (event.type) {
-      case "vision.started":
-        return formatWeixinCommandText(
-          formatVisionStarted(event.imageCount),
-          { structuredFields: true },
-        );
-      case "vision.progress":
-        return formatWeixinCommandText(
-          formatVisionProgress(event.elapsedSeconds),
-          { structuredFields: true },
-        );
-      case "vision.completed":
-        return formatWeixinCommandText(
-          formatVisionCompleted(event, this.options.debugEnabled ?? false),
-          { structuredFields: true },
-        );
       case "user.message":
         return formatCliInput(event.text);
       case "text.completed":

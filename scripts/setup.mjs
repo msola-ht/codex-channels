@@ -7,7 +7,6 @@ import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
-import { runVisionSetup } from "./vision-setup.mjs";
 import { runApiProviderSetup } from "./api-provider-setup.mjs";
 import { runSkillSetup } from "./skill-setup.mjs";
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
@@ -24,7 +23,6 @@ export async function runSetup({
   deepseekSetup = runDeepseekSetup,
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
-  visionSetup = runVisionSetup,
   apiProviderSetup = runApiProviderSetup,
   skillSetup = runSkillSetup,
   codexDefaultsSetup = runCodexDefaultsSetup,
@@ -42,7 +40,7 @@ export async function runSetup({
         {
           value: "models",
           label: "模型与提供商",
-          hint: "设置 Codex 官方默认值、第三方模型、API 与图片识别",
+          hint: "设置 Codex 官方默认值、第三方模型与 API",
         },
         {
           value: "channels",
@@ -85,7 +83,6 @@ export async function runSetup({
           prompts,
           deepseekSetup,
           apiProviderSetup,
-          visionSetup,
           codexDefaultsSetup,
           openCodeGoSetup,
           modelProviderDefaultSetup,
@@ -116,7 +113,6 @@ async function runModelSetup({
   prompts,
   deepseekSetup,
   apiProviderSetup,
-  visionSetup,
   codexDefaultsSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
@@ -197,9 +193,8 @@ async function runModelSetup({
           {
             value: "api_provider",
             label: "第三方 API",
-            hint: "管理供图片识别等功能使用的 Responses 中转接口",
+            hint: "管理预留给直接 API 功能的 Responses 中转接口",
           },
-          { value: "vision", label: "图片识别", hint: "为不支持图片的模型配置视觉代理" },
           { value: "back", label: "返回", hint: "返回模型与提供商设置" },
         ],
       });
@@ -219,7 +214,6 @@ async function runModelSetup({
       if (module === "api_provider") {
         return apiProviderSetup({ input, output, prompts });
       }
-      if (module === "vision") return visionSetup({ input, output, prompts });
       throw new Error(`未知第三方设置：${String(module)}`);
     }
     throw new Error(`未知模型与提供商设置：${String(category)}`);

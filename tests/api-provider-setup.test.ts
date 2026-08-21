@@ -18,13 +18,7 @@ import {
   writeApiProviderKey,
 } from "../runtime/api-provider-credential.mjs";
 import {
-  readVisionApiKey,
-  visionCredentialPath,
-  writeVisionApiKey,
-} from "../runtime/vision-credential.mjs";
-import {
   readGatewayConfig,
-  writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { runApiProviderSetup } from "../scripts/api-provider-setup.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
@@ -36,33 +30,22 @@ afterEach(() => {
 });
 
 describe("Third-party API provider setup", () => {
-  it("does not let legacy fixed temporary files block credential replacement", () => {
+  it("does not let fixed temporary files block credential replacement", () => {
     const fixture = createFixture();
     const providerPath = apiProviderCredentialPath(fixture.credentialsDirectory, "relay-a");
-    const visionPath = visionCredentialPath(fixture.credentialsDirectory);
     mkdirSync(join(fixture.credentialsDirectory, "api-providers", "relay-a"), {
       recursive: true,
       mode: 0o700,
     });
-    mkdirSync(join(fixture.credentialsDirectory, "vision"), {
-      recursive: true,
-      mode: 0o700,
-    });
     writeFileSync(`${providerPath}.${process.pid}.tmp`, "stale-provider-key\n", { mode: 0o600 });
-    writeFileSync(`${visionPath}.${process.pid}.tmp`, "stale-vision-key\n", { mode: 0o600 });
 
     expect(() => writeApiProviderKey(
       fixture.credentialsDirectory,
       "relay-a",
       "current-provider-key",
     )).not.toThrow();
-    expect(() => writeVisionApiKey(
-      fixture.credentialsDirectory,
-      "current-vision-key",
-    )).not.toThrow();
     expect(readApiProviderKey(fixture.credentialsDirectory, "relay-a"))
       .toBe("current-provider-key");
-    expect(readVisionApiKey(fixture.credentialsDirectory)).toBe("current-vision-key");
   });
 
   it("stores multiple provider definitions and isolates each API key", async () => {
@@ -121,110 +104,6 @@ describe("Third-party API provider setup", () => {
     })).rejects.toThrow("配置写入失败");
 
     expect(() => readApiProviderKey(fixture.credentialsDirectory, "relay-a")).toThrow();
-  });
-
-  it("refuses to delete a provider selected by image recognition", async () => {
-    const fixture = createFixture();
-    await addProvider(fixture, "relay-a", "中转 A", "https://a.example/v1/responses", "key-a");
-    const document = readGatewayConfig(fixture.configPath);
-    document.vision = {
-      mode: "responses_api",
-      provider: "relay-a",
-      model: "vision-model",
-    };
-    writeGatewayConfig(fixture.configPath, document);
-
-    await expect(runApiProviderSetup({
-      environment: fixture.environment,
-      output: fixture.output as unknown as NodeJS.WritableStream,
-      prompts: promptFixture({ selections: ["remove", "relay-a"] }),
-    })).rejects.toThrow("仍被 vision 使用");
-
-    expect(readApiProviderKey(fixture.credentialsDirectory, "relay-a")).toBe("key-a");
-  });
-
-  it("explicitly converts the old single-vision endpoint and credential", async () => {
-    const fixture = createFixture();
-    const document = readGatewayConfig(fixture.configPath);
-    document.vision = {
-      mode: "responses_api",
-      endpoint: "https://legacy.example/v1/responses",
-      model: "legacy-vision",
-    };
-    writeGatewayConfig(fixture.configPath, document);
-    writeVisionApiKey(fixture.credentialsDirectory, "legacy-key");
-
-    await runApiProviderSetup({
-      environment: fixture.environment,
-      output: fixture.output as unknown as NodeJS.WritableStream,
-      prompts: promptFixture({
-        selections: ["upsert"],
-        texts: ["legacy-relay", "旧视觉中转", "https://legacy.example/v1/responses"],
-        passwords: [""],
-      }),
-    });
-
-    expect(readGatewayConfig(fixture.configPath).vision).toEqual({
-      mode: "responses_api",
-      provider: "legacy-relay",
-      model: "legacy-vision",
-    });
-    expect(readApiProviderKey(fixture.credentialsDirectory, "legacy-relay")).toBe("legacy-key");
-    expect(() => readVisionApiKey(fixture.credentialsDirectory)).toThrow();
-  });
-
-  it("does not reuse the legacy vision key when migration is declined", async () => {
-    const fixture = createFixture();
-    const document = readGatewayConfig(fixture.configPath);
-    document.vision = {
-      mode: "responses_api",
-      endpoint: "https://legacy.example/v1/responses",
-      model: "legacy-vision",
-    };
-    writeGatewayConfig(fixture.configPath, document);
-    writeVisionApiKey(fixture.credentialsDirectory, "legacy-key");
-
-    await expect(runApiProviderSetup({
-      environment: fixture.environment,
-      output: fixture.output as unknown as NodeJS.WritableStream,
-      prompts: promptFixture({
-        selections: ["upsert"],
-        texts: ["new-relay", "新中转", "https://new.example/v1/responses"],
-        passwords: [""],
-        confirmations: [false],
-      }),
-    })).rejects.toThrow("API Key 不能为空");
-
-    expect(() => readApiProviderKey(fixture.credentialsDirectory, "new-relay")).toThrow();
-    expect(readVisionApiKey(fixture.credentialsDirectory)).toBe("legacy-key");
-    expect(readGatewayConfig(fixture.configPath).api_providers).toBeUndefined();
-  });
-
-  it("does not leave a migrated provider key behind when config saving fails", async () => {
-    const fixture = createFixture();
-    const document = readGatewayConfig(fixture.configPath);
-    document.vision = {
-      mode: "responses_api",
-      endpoint: "https://legacy.example/v1/responses",
-      model: "legacy-vision",
-    };
-    writeGatewayConfig(fixture.configPath, document);
-    writeVisionApiKey(fixture.credentialsDirectory, "legacy-key");
-
-    await expect(runApiProviderSetup({
-      environment: fixture.environment,
-      output: fixture.output as unknown as NodeJS.WritableStream,
-      writeConfig: () => { throw new Error("配置写入失败"); },
-      prompts: promptFixture({
-        selections: ["upsert"],
-        texts: ["legacy-relay", "旧视觉中转", "https://legacy.example/v1/responses"],
-        passwords: [""],
-        confirmations: [true],
-      }),
-    })).rejects.toThrow("配置写入失败");
-
-    expect(() => readApiProviderKey(fixture.credentialsDirectory, "legacy-relay")).toThrow();
-    expect(readVisionApiKey(fixture.credentialsDirectory)).toBe("legacy-key");
   });
 
   it("rejects a symbolic-link provider credential directory", () => {

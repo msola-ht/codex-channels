@@ -18,10 +18,11 @@ export const deepseekProviderDefinition = Object.freeze({
   baseUrl: "https://api.deepseek.com/",
   wireApi: "responses",
   apiKeyEnvironmentKey: "CODEX_CONNECT_DEEPSEEK_API_KEY",
-  defaultModel: "deepseek-v4-flash",
+  defaultModel: "deepseek-v4-flash-vision-exp",
   defaultReasoningEffort: "high",
   models: Object.freeze([
     Object.freeze({ slug: "deepseek-v4-flash", available: true }),
+    Object.freeze({ slug: "deepseek-v4-flash-vision-exp", available: true }),
     Object.freeze({ slug: "deepseek-v4-pro", available: true }),
   ]),
 });

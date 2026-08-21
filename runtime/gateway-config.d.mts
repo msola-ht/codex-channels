@@ -52,14 +52,6 @@ export interface GatewayConfigDocument {
     protocol: "responses";
     endpoint: string;
   }>;
-  vision:
-    | { mode: "disabled" }
-    | {
-        mode: "responses_api";
-        provider: string;
-        model: string;
-        timeout_seconds: number;
-      };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
   webui?: {

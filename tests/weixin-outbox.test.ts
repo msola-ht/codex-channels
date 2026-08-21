@@ -246,59 +246,6 @@ describe("WeixinOutbox", () => {
     }));
   });
 
-  it("reports when image input is sent to the visual API", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle({
-      type: "vision.started",
-      target,
-      imageCount: 2,
-    });
-    await outbox.close();
-
-    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-      text: [
-        "**视觉识别中**",
-        "- 图片：2 张",
-        "- 状态：已发送至视觉 API",
-      ].join("\n"),
-    }));
-  });
-
-  it("reports structured visual completion details with the recognition model", async () => {
-    const { outbox, sendText } = outboxFixture(
-      undefined,
-      { debugEnabled: true },
-    );
-
-    outbox.handle({
-      type: "vision.completed",
-      target,
-      provider: "BLTCY",
-      model: "gpt-5.6-luna",
-      elapsedMs: 18_000,
-      usage: {
-        inputTokens: 9_433,
-        outputTokens: 483,
-        totalTokens: 9_916,
-      },
-    });
-    await outbox.close();
-
-    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-      text: [
-        "**图片识别完成**",
-        "- API 提供商：BLTCY",
-        "- 调用模型：gpt-5.6-luna",
-        "- 视觉 API 耗时：18秒",
-        "- **Token**：9,916",
-        "  - 输出：483",
-        "",
-        "- 正在交给当前模型处理。",
-      ].join("\n"),
-    }));
-  });
-
   it("mirrors CLI input into the bound Weixin conversation", async () => {
     const { outbox, sendText } = outboxFixture();
 
