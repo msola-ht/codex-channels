@@ -455,7 +455,7 @@ describe("Notification adapter", () => {
     });
   });
 
-  it("rejects malformed supported Core notifications and ignores unknown methods", () => {
+  it("rejects malformed supported notifications and ignores unadopted methods", () => {
     expect(toConversationInputEvent({
       method: "thread/goal/updated",
       params: {
@@ -499,6 +499,18 @@ describe("Notification adapter", () => {
     expect(toConversationInputEvent({
       method: "account/updated",
       params: { authMode: "chatgpt" },
+    })).toBeUndefined();
+    expect(toConversationInputEvent({
+      method: "thread/queue/changed",
+      params: { threadId: "thread-1", submissions: [] },
+    })).toBeUndefined();
+    expect(toConversationInputEvent({
+      method: "thread/reverted",
+      params: { threadId: "thread-1" },
+    })).toBeUndefined();
+    expect(toThreadStateEvent({
+      method: "thread/reverted",
+      params: { threadId: "thread-1" },
     })).toBeUndefined();
     expect(toConversationInputEvent({
       method: "future/notification",

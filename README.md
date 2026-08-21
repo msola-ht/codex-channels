@@ -11,7 +11,7 @@
 通过 `codexc remote` 启动的原生 Codex TUI 与聊天客户端按模型提供商共享同一个 Codex App
 Server，因此可以继续使用对应的会话、Thread 和运行状态。
 
-`main` 开发基线：`0.147.0`
+`main` 开发基线：`0.148.0`（尚未发布）
 当前正式版：`0.147.0`
 要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.147.0`
 
@@ -124,7 +124,7 @@ price_currency = "cny"
 在 `codexc config` 中选择“系统设置 → 调试模式”，可开启脱敏的运行阶段、耗时和统计详情。
 修改后运行 `codexc service restart gateway`。调试内容不会包含消息正文、凭据或审批内容。
 
-Codex 0.147.0 的 Plugin API 仍在开发中，Gateway 默认关闭。需要调试时显式开启并重启 Gateway：
+Codex 0.148.0 的 Plugin API 仍在开发中，Gateway 默认关闭。需要调试时显式开启并重启 Gateway：
 
 ```toml
 [experimental]

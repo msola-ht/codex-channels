@@ -68,6 +68,22 @@ describe("operation normalization", () => {
     });
 
     expect(toOperationUpdate({
+      type: "imageGeneration",
+      id: "limited-image",
+      status: "failed",
+      failure: {
+        type: "usageLimitExceeded",
+        limitId: "image-generation",
+        resetsAt: null,
+      },
+    }, "completed")).toEqual({
+      itemId: "limited-image",
+      kind: "imageGeneration",
+      status: "failed",
+      detail: "图片生成额度已用尽",
+    });
+
+    expect(toOperationUpdate({
       type: "imageView",
       id: "view",
       path: "/private/uploads/inbound.png",

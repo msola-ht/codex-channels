@@ -109,9 +109,14 @@ export function toOperationUpdate(
     }
     case "imageGeneration": {
       const imagePath = stringValue(item.savedPath);
+      const failure = recordValue(item.failure);
+      const detail = stringValue(failure?.type) === "usageLimitExceeded"
+        ? "图片生成额度已用尽"
+        : undefined;
       return {
         ...common,
         kind: "imageGeneration",
+        ...(detail ? { detail } : {}),
         ...(imagePath ? { imagePath } : {}),
       };
     }
