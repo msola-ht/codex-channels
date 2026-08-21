@@ -36,12 +36,6 @@ import {
 import { formatTextFileTooLarge } from "../text-file-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
-import {
-  executeVisionCommand,
-  formatVisionCollectionReady,
-  formatVisionCommandTiming,
-  formatVisionImagesCollected,
-} from "../vision-command.js";
 import { surfaceCommandAliases } from "../slash-command.js";
 import {
   formatConfigurationChange,
@@ -60,7 +54,6 @@ import {
   workspacePermissionFieldKeyboard,
   workspacePermissionPrompt,
 } from "./command-renderer.js";
-import { formatTelegramPanelHtml } from "./html-format.js";
 import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { telegramDefaultAccountId } from "./constants.js";
@@ -258,12 +251,6 @@ export class TelegramSurface {
       (inputTarget, input) => service.submit(inputTarget, input),
       {
         quietWindowMs: options.inputQuietWindowMs ?? 1_000,
-        onVisionCollectionReady: (inputTarget, imageCount, maximumImages) => {
-          this.outbox.notifyPanel(
-            inputTarget.conversationId,
-            formatVisionCollectionReady(imageCount, maximumImages),
-          );
-        },
       },
     );
     this.interactions = new TelegramInteractionPort(this.bot, logger, apiExecutor, this.outbox);
@@ -374,7 +361,6 @@ export class TelegramSurface {
           "",
           ...conversationCommandHelpLines,
           "Telegram：",
-          "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
           "- /whoami",
           "- /start · /help · /h",
         ].join("\n"),
@@ -389,29 +375,6 @@ export class TelegramSurface {
       this.executeCommand(context, surfaceCommandAliases.work));
     this.bot.command("r", (context) =>
       this.executeCommand(context, surfaceCommandAliases.r));
-    this.bot.command("vision", async (context) => {
-      const receivedAtMs = this.now();
-      await this.inputs.flushPending(
-        target(context),
-        String(context.from?.id ?? ""),
-      );
-      const rendered = await executeVisionCommand(
-        this.inputs,
-        target(context),
-        String(context.from?.id ?? ""),
-        commandArguments(context),
-      );
-      await replyTelegramPanel(
-        context,
-        this.debugEnabled
-          ? formatVisionCommandTiming(rendered, {
-              createdAtMs: (context.message?.date ?? 0) * 1_000,
-              receivedAtMs,
-              respondedAtMs: this.now(),
-            })
-          : rendered,
-      );
-    });
     this.bot.command("stop", async (context) => {
       if (this.interactions.stopForChat(String(context.chat.id))) {
         await context.reply(interactionStoppedText);
@@ -779,10 +742,6 @@ export class TelegramSurface {
         this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
         throw error;
       }
-      if (result.kind === "collected") {
-        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
-        throw new Error("纯文本不能进入图片收集");
-      }
       if (result.tail && result.submission.steered) {
         this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
       } else if (result.tail) {
@@ -907,10 +866,6 @@ export class TelegramSurface {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
       throw error;
     }
-    if (result.kind === "collected") {
-      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
-      throw new Error("文本文件不能进入图片收集");
-    }
     if (result.tail && result.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
     } else if (result.tail) {
@@ -984,22 +939,6 @@ export class TelegramSurface {
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
       throw error;
-    }
-    if (result.kind === "collected") {
-      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
-      await context.reply(formatTelegramPanelHtml(formatVisionImagesCollected(
-        result.imageCount,
-        result.maximumImages,
-        result.automatic,
-      )), {
-        parse_mode: "HTML",
-        disable_notification: true,
-        reply_parameters: {
-          message_id: context.message.message_id,
-          allow_sending_without_reply: true,
-        },
-      });
-      return;
     }
     if (result.tail && result.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);

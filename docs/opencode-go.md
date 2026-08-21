@@ -106,8 +106,8 @@ Turn 完成通知也会在“账户状态”区附带当前模型剩余用量（
 
 ### 能力边界
 
-- 当前受控模型只声明文字输入。未启用外部图片识别时，Gateway 在 Turn 前拒绝图片，可配置
-  [`图片识别代理`](vision.md) 走外部视觉接口；音频输入同样在 Turn 前拒绝。
+- 当前受控模型只声明文字输入。文字模型收到图片或音频时，Gateway 会在 Turn 前拒绝；需要看图时
+  切换到支持图片的模型。
 - OpenCode Go 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 - 网页搜索已实测：OpenCode Go 与 DeepSeek 一样通过 `/responses` 提供搜索工具，Codex 侧统一
   以 `web_search` item 回传（`query`、`action` 和结构化 `results`），实测能返回带标题、URL、

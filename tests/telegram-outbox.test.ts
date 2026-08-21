@@ -276,68 +276,6 @@ describe("TelegramOutbox", () => {
     expect(api.edits).toEqual([]);
   });
 
-  it("reports when image and text input is sent to the visual API", async () => {
-    const api = new FakeTelegramApi();
-    const outbox = createOutbox(api);
-
-    outbox.handle({
-      type: "vision.started",
-      target,
-      imageCount: 1,
-    });
-    await outbox.close();
-
-    expect(api.sent).toEqual([
-      [
-        "<b>视觉识别中</b>",
-        "• <b>图片：</b>1 张",
-        "• <b>状态：</b>已发送至视觉 API",
-      ].join("\n"),
-    ]);
-  });
-
-  it("reports visual recognition heartbeats and structured completion details", async () => {
-    const api = new FakeTelegramApi();
-    const outbox = createOutbox(api, "html", true);
-
-    outbox.handle({
-      type: "vision.progress",
-      target,
-      elapsedSeconds: 30,
-    });
-    outbox.handle({
-      type: "vision.completed",
-      target,
-      provider: "BLTCY",
-      model: "gpt-5.6-luna",
-      elapsedMs: 31_000,
-      usage: {
-        inputTokens: 1_234,
-        outputTokens: 56,
-        totalTokens: 1_290,
-      },
-    });
-    await outbox.close();
-
-    expect(api.sent).toEqual([
-      [
-        "<b>视觉识别中</b>",
-        "• <b>已等待：</b>30 秒",
-        "• <b>状态：</b>上游仍在处理",
-      ].join("\n"),
-      [
-        "<b>图片识别完成</b>",
-        "• <b>API 提供商：</b>BLTCY",
-        "• <b>调用模型：</b>gpt-5.6-luna",
-        "• <b>视觉 API 耗时：</b>31秒",
-        "• <b>Token</b>：1,290",
-        "  • <b>输出：</b>56",
-        "",
-        "• 正在交给当前模型处理。",
-      ].join("\n"),
-    ]);
-  });
-
   it("queues a Workspace notification with direct switch buttons", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);

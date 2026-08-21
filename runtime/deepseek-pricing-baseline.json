@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
-  "sourceUpdatedAt": "2026-08-13T10:49:16.000Z",
+  "sourceUpdatedAt": "2026-08-21T09:03:26.000Z",
   "currency": "CNY",
   "unit": "per_million_tokens",
   "timezone": "Asia/Shanghai",
@@ -41,6 +41,11 @@
               "uncachedInput": 1.5,
               "output": 4.5
             },
+            "deepseek-v4-flash-vision-exp": {
+              "cachedInput": 0.05,
+              "uncachedInput": 1.5,
+              "output": 4.5
+            },
             "deepseek-v4-pro": {
               "cachedInput": 0.15,
               "uncachedInput": 4.5,
@@ -56,6 +61,11 @@
           ],
           "models": {
             "deepseek-v4-flash": {
+              "cachedInput": 0.1,
+              "uncachedInput": 3,
+              "output": 9
+            },
+            "deepseek-v4-flash-vision-exp": {
               "cachedInput": 0.1,
               "uncachedInput": 3,
               "output": 9

@@ -3558,7 +3558,7 @@ function writeManagedProviderFixture(
   const providerDirectory = join(connectHome, "providers", definition.id);
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
   const catalogPath = join(providerDirectory, definition.catalogFileName);
-  writeFileSync(catalogPath, managedModelCatalog(), { mode: 0o600 });
+  writeFileSync(catalogPath, managedModelCatalog(definition), { mode: 0o600 });
   const target = mode === "exclusive"
     ? join(codexHome, "config.toml")
     : join(codexHome, definition.profileFileName);
@@ -3587,11 +3587,12 @@ function writeManagedProviderFixture(
   );
 }
 
-function managedModelCatalog(): string {
+function managedModelCatalog(definition: ModelProviderDefinition): string {
   return `${JSON.stringify({
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+    models: definition.models.filter(({ available }) => available).map(({ slug }) => ({
       slug,
       display_name: slug,
+      input_modalities: slug.includes("vision") ? ["text", "image"] : ["text"],
       context_window: 1_048_576,
       default_reasoning_level: "high",
       supported_reasoning_levels: [

@@ -77,11 +77,6 @@
   `releaseProvider` 释放；Supervisor 还会拒绝释放存在受管 Remote TUI 租约的账户。成功自动释放后
   向最近使用过该账户的渠道会话通知一次；正在拉起的账户只跳过启动期间的扫描，主动释放造成的
   断线不进入自动重连；关闭时停止新扫描并等待已开始的扫描退出，释放失败只记录日志不阻塞请求。
-- `responses-vision-adapter.ts`：模型不支持图片时可选的外部 Responses 图片识别实现；组合根按
-  `vision.provider` 从第三方 API 注册表解析显示名称、精确 Endpoint 和隔离凭据，适配器复用统一
-  代理、限制响应大小，并把用户原始提示和图片交给视觉接口后只返回 Application 的稳定识别结果；
-  成功、失败与不完整响应的脱敏请求指标复用 Observability Writer，已有 Thread 时关联 Thread，
-  组合根按实际响应模型附加当次价格快照，不保存图片、提示词、响应正文或识别结果。
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存错误原文与分类，不携带任何平台上下文或敏感凭据。
 - `config-lifecycle.ts`：在任何 Surface 或指标组件启动前获取配置级 Gateway 所有权，随后管理配置

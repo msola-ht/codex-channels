@@ -296,12 +296,6 @@ if (document) {
       );
     }
   }
-  const vision = table(document.vision);
-  if (vision.mode === "responses_api") {
-    note("图片识别", `使用第三方 API 提供商 ${String(vision.provider)}`);
-  } else {
-    note("图片识别", "未启用");
-  }
   const experimental = table(document.experimental);
   const pluginApiEnabled = experimental.plugin_api === true;
   note(

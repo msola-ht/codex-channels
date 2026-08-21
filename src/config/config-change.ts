@@ -13,7 +13,6 @@ export type GlobalConfigChangeCode =
   | "experimental.plugin-api"
   | "thread-sections.administrators"
   | "api.providers"
-  | "vision.provider"
   | "metrics.sync"
   | "metrics.storage"
   | "observability.log-level"

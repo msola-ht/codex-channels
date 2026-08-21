@@ -14,16 +14,15 @@
 | `surface` | 渠道标识 | `feishu`、`weixin`、`telegram` |
 | `conversationId` | 外部会话标识 | `oc_...` |
 | `messageId` | 触发失败的外部消息标识 | `om_...` |
-| `errorType` | 错误构造类型或稳定分类 | `UserFacingError`、`vision_timeout` |
-| `errorCode` | 用户错误码或受控渠道/协议诊断码 | `vision.failed`、`send-failed`、`429` |
-| `errorMessage` | 受控、可向用户展示的文案 | `图片识别失败` |
+| `errorType` | 错误构造类型或稳定分类 | `UserFacingError`、`TypeError` |
+| `errorCode` | 用户错误码或受控渠道/协议诊断码 | `send-failed`、`429` |
+| `errorMessage` | 受控、可向用户展示的文案 | `当前模型不支持图片输入` |
 | `err` / `cause` | 本地诊断用的底层错误链 | 仅本地日志，分享前人工检查 |
 
 安全边界：`UserFacingError` 的受控 `code`/`message` 可以同时进入结构化日志。其他错误不记录原始
 `message`；只允许安全整数错误码、全大写稳定码，以及代码白名单中由渠道错误类型声明的小写
 kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既保留平台限流、发送失败等可检索
-分类，又避免上游响应、凭据或本机路径泄密。视觉识别等自产错误（HTTP 状态、超时、网络错误）
-会单独记录稳定分类和受控说明。
+分类，又避免上游响应、凭据或本机路径泄密。
 
 ## 用户可见错误码字典
 
@@ -38,7 +37,7 @@ kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既
 | `conversation.background-limit` | 后台任务数量达到上限 | 后台 Thread 超过允许数量 |
 | `conversation.background-queued` | 当前任务仍有下一 Turn 排队消息，暂不能切换会话 | 切换会话时存在排队输入 |
 
-### 图片输入与视觉识别
+### 图片输入
 
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
@@ -46,17 +45,6 @@ kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既
 | `image.too-large` | 单张超过 10 MiB / 批量超过 20 MiB | 图片超过暂存大小限制 |
 | `image.too-many` | 一次最多处理 4 张图片 | 单次发送图片过多 |
 | `image.unsupported` | 仅支持 PNG 和 JPEG 图片 | 图片类型不支持 |
-| `vision.busy` | 视觉识别任务繁忙，请稍后重试 | 同时超过两个外部识图请求 |
-| `vision.failed` | 图片识别失败，可在 5 分钟内发送 /vision retry 重试 | 外部视觉 API 失败或超时 |
-| `vision.retry.missing` | 当前没有可重试的图片识别任务 | 无可重试记录时执行 /vision retry |
-| `vision.command.usage` | /vision 命令用法提示 | 参数格式错误 |
-| `vision.prompt.invalid` | 图片识别要求必须为 1 至 4000 个字符 | 识别要求超长或为空 |
-| `vision.prompt.capacity` | 待处理的图片识别要求已满 | 待处理队列已满 |
-| `vision.collection.active` | 正在收集多张图片，请先 /vision done 或 /vision cancel | 多图收集进行中再次提交 |
-| `vision.collection.missing` | 当前没有进行中的多图收集 | 未开始收集时执行 /vision done |
-| `vision.collection.empty` | 请先发送至少一张图片，再使用 /vision done | 无图片时完成收集 |
-| `vision.collection.count.invalid` | 多图数量必须为 2 至指定数量 | 收集数量参数非法 |
-| `vision.collection.count.exceeded` | 本次只需指定数量图片 | 发送图片多于预期 |
 
 ### 音频输入
 
@@ -77,7 +65,7 @@ kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既
 | `model.selector.required` | /model 用法提示 | 未提供模型选择参数 |
 | `model.selector.ambiguous` | 模型选择不唯一 | 选择器匹配多个模型 |
 | `model.selector.not-found` | 找不到指定模型 | 选择器无匹配 |
-| `model.input.image.unsupported` | 当前模型不支持图片输入 | 模型无图片模态且未启用视觉代理 |
+| `model.input.image.unsupported` | 当前模型不支持图片输入 | 模型目录未声明图片模态 |
 | `model.input.audio.unsupported` | 当前模型不支持语音输入 | 模型无音频模态 |
 | `model.input.unsupported` | 当前模型不支持该输入类型 | 其他输入模态不支持 |
 | `effort.unsupported` | 当前模型不支持该思考等级并附可选值 | 思考等级与模型不匹配 |
@@ -176,18 +164,6 @@ kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既
 | `agents.usage` | 需要提供子代理角色名称或序号及任务内容 | /agents 缺少角色或任务 |
 | `agents.not-found` | 指定的子代理角色不存在；使用 /agents 查看可用角色 | 子代理角色不存在 |
 | `agents.config-unreadable` | Codex 子代理角色配置无法安全读取；请检查 ~/.codex/config.toml | 角色配置无法安全读取 |
-
-## 排查示例
-
-飞书图片发送失败时，日志应同时出现两行：
-
-```text
-errorType=vision_timeout httpStatus=503 errorMessage="视觉 API 请求超时（120000 毫秒）"
-errorType=UserFacingError errorCode=vision.failed errorMessage=图片识别失败
-```
-
-第一行来自视觉代理，是底层原因；第二行来自渠道消息处理，是用户可见错误。若只有第二行，
-说明视觉代理错误日志尚未产生，检查 `[vision]` 配置是否指向可用端点。
 
 未知内部异常只显示 `Gateway 未能完成请求，请稍后重试`，日志里也只有 `errorType`；此时按
 `surface` 与时间范围过滤日志，再查看同一时段的 `err`/`cause` 字段。

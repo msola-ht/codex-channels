@@ -17,12 +17,6 @@ import {
 import { formatQuotedInput } from "../quoted-input.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
-  executeVisionCommand,
-  formatVisionCommandTiming,
-  formatVisionCollectionReady,
-  formatVisionImagesCollected,
-} from "../vision-command.js";
-import {
   formatWeixinCommandText,
   renderWeixinCommandResult,
   renderWeixinHelp,
@@ -123,18 +117,7 @@ export class WeixinConversationAdapter {
     );
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
-      {
-        ...inputOptions,
-        onVisionCollectionReady: (target, imageCount, maximumImages) => {
-          this.outbox.notifyText(
-            target,
-            formatWeixinCommandText(
-              formatVisionCollectionReady(imageCount, maximumImages),
-              { structuredFields: true },
-            ),
-          );
-        },
-      },
+      inputOptions,
     );
   }
 
@@ -206,9 +189,6 @@ export class WeixinConversationAdapter {
           sequence,
           text: fileText,
         });
-        if (result.kind === "collected") {
-          throw new Error("文本文件不能进入图片收集");
-        }
         if (result.tail && result.submission.steered) {
           this.notify(
             message.target,
@@ -254,17 +234,6 @@ export class WeixinConversationAdapter {
               }),
           localImages,
         });
-        if (result.kind === "collected") {
-          this.notifyCommand(
-            message.target,
-            formatVisionImagesCollected(
-              result.imageCount,
-              result.maximumImages,
-              result.automatic,
-            ),
-          );
-          return;
-        }
         if (result.tail && result.submission.steered) {
           this.notify(
             message.target,
@@ -300,30 +269,6 @@ export class WeixinConversationAdapter {
             await this.inputOptions.doctor.inspect(message.target),
             this.inputOptions.now?.() ?? Date.now(),
           ),
-        );
-        return;
-      }
-      if (command.name === "vision") {
-        const now = this.inputOptions.now ?? Date.now;
-        const receivedAtMs = message.receivedAtMs ?? now();
-        await this.inputs.flushPending(message.target, message.actorId);
-        const rendered = await executeVisionCommand(
-          this.inputs,
-          message.target,
-          message.actorId,
-          command.argumentsText,
-        );
-        this.notifyCommand(
-          message.target,
-          this.inputOptions.debugEnabled
-            ? formatVisionCommandTiming(rendered, {
-                ...(message.createdAtMs === undefined
-                  ? {}
-                  : { createdAtMs: message.createdAtMs }),
-                receivedAtMs,
-                respondedAtMs: now(),
-              })
-            : rendered,
         );
         return;
       }

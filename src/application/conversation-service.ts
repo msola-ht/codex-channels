@@ -83,11 +83,6 @@ import type {
   CollaborationModeSelectionService,
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
-import {
-  replaceLocalImagesWithVisionContext,
-  visionUserPrompt,
-  type VisionRecognitionPort,
-} from "./vision-port.js";
 
 export interface Submission {
   threadId: string;
@@ -202,9 +197,6 @@ const maximumNativeQueuePages = 4;
 const queueSelectionSnapshotLifetimeMs = 5 * 60_000;
 const maximumQueueSelectionSnapshots = 128;
 const maximumBackgroundThreadsPerConversation = 3;
-const maximumConcurrentVisionRecognitions = 2;
-const visionHeartbeatInitialDelayMs = 10_000;
-const visionHeartbeatIntervalMs = 20_000;
 
 export interface ConversationStatus {
   threadId?: string;
@@ -356,7 +348,6 @@ export class ConversationService implements ConversationUseCases {
   }>();
   private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
-  private activeVisionRecognitions = 0;
 
   constructor(
     private readonly codex: TurnExecutionPort,
@@ -369,7 +360,6 @@ export class ConversationService implements ConversationUseCases {
     private readonly collaborationModes?: CollaborationModeSelectionService,
     private readonly transfers?: ConversationTransferPort,
     private readonly providerAccounts?: ProviderAccountQueryPort,
-    private readonly vision?: VisionRecognitionPort,
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
     private readonly workspacePermissions?: WorkspacePermissionPort,
     private readonly turnErrorRecorder?: TurnErrorRecorder,
@@ -589,61 +579,7 @@ export class ConversationService implements ConversationUseCases {
     identity?: TurnStartIdentity,
   ): Promise<Submission> {
     if (input.some((item) => item.type === "localImage")) {
-      try {
-        await this.models.requireInputModality(target, "image");
-      } catch (error) {
-        if (
-          !(error instanceof UserFacingError)
-          || error.code !== "model.input.image.unsupported"
-          || !this.vision
-        ) {
-          throw error;
-        }
-        const images = input.flatMap((item) =>
-          item.type === "localImage" ? [{ path: item.path }] : []
-        );
-        const releaseVisionRecognition = this.reserveVisionRecognition();
-        let result;
-        let stopHeartbeat = (): void => {};
-        let requestStarted = false;
-        try {
-          const threadId = this.router.current(target)?.threadId ?? null;
-          result = await this.vision.recognize({
-            images,
-            userPrompt: visionUserPrompt(input),
-            threadId,
-            reasoningEffort: threadId === null
-              ? null
-              : this.router.modelSettingsForThread(threadId)?.effort ?? null,
-            onRequestStarted: () => {
-              if (requestStarted) return;
-              requestStarted = true;
-              this.core.visionStarted(target, { imageCount: images.length });
-              stopHeartbeat = this.startVisionHeartbeat(target);
-            },
-          });
-          this.core.visionCompleted(target, {
-            provider: result.provider,
-            model: result.model,
-            ...(result.elapsedMs === undefined
-              ? {}
-              : { elapsedMs: result.elapsedMs }),
-            ...(result.upstreamDurationMs === undefined
-              ? {}
-              : { upstreamDurationMs: result.upstreamDurationMs }),
-            ...(result.serviceTier === undefined
-              ? {}
-              : { serviceTier: result.serviceTier }),
-            ...(result.usage === undefined ? {} : { usage: result.usage }),
-          });
-        } catch {
-          throw new UserFacingError("vision.failed", "图片识别失败");
-        } finally {
-          stopHeartbeat();
-          releaseVisionRecognition();
-        }
-        input = replaceLocalImagesWithVisionContext(input, result);
-      }
+      await this.models.requireInputModality(target, "image");
     }
     if (input.some((item) => item.type === "localAudio")) {
       await this.models.requireInputModality(target, "audio");
@@ -2116,42 +2052,6 @@ export class ConversationService implements ConversationUseCases {
     if (this.core.activeTurn(target)) {
       throw new UserFacingError("conversation.busy", "当前任务运行中，请先停止当前任务");
     }
-  }
-
-  private startVisionHeartbeat(target: ConversationTarget): () => void {
-    const startedAt = Date.now();
-    let interval: NodeJS.Timeout | undefined;
-    const publish = (): void => {
-      this.core.visionProgress(target, {
-        elapsedSeconds: Math.max(1, Math.round((Date.now() - startedAt) / 1_000)),
-      });
-    };
-    const initial = setTimeout(() => {
-      publish();
-      interval = setInterval(publish, visionHeartbeatIntervalMs);
-      interval.unref();
-    }, visionHeartbeatInitialDelayMs);
-    initial.unref();
-    return () => {
-      clearTimeout(initial);
-      if (interval) clearInterval(interval);
-    };
-  }
-
-  private reserveVisionRecognition(): () => void {
-    if (this.activeVisionRecognitions >= maximumConcurrentVisionRecognitions) {
-      throw new UserFacingError(
-        "vision.busy",
-        "视觉识别任务繁忙，请稍后重试",
-      );
-    }
-    this.activeVisionRecognitions += 1;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.activeVisionRecognitions -= 1;
-    };
   }
 
   private async locked<T>(

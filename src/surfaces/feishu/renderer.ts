@@ -64,11 +64,6 @@ import {
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
-import {
-  formatVisionCompleted,
-  formatVisionProgress,
-  formatVisionStarted,
-} from "../input-copy.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
 import {
   formatRuntimeAccountUpdate,
@@ -116,7 +111,6 @@ export function renderFeishuHelp(): string {
     "飞书：",
     "- /whoami · /fs <status|doctor|revoke>",
     "- /start · /help · /h",
-    "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
   ].join("\n"));
 }
 
@@ -225,12 +219,6 @@ export function renderFeishuOutput(
   remainingUsage?: ProviderModelUsageEstimate | null,
 ): string | null {
   switch (event.type) {
-    case "vision.started":
-      return formatVisionStarted(event.imageCount);
-    case "vision.progress":
-      return formatVisionProgress(event.elapsedSeconds);
-    case "vision.completed":
-      return formatVisionCompleted(event, debug);
     case "turn.started":
       return renderFeishuLifecyclePresentation(
         createTurnStartedPresentation(

@@ -31,7 +31,8 @@
   未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
   `backup-provider-migration.mjs` 先完整备份旧布局、现有新目录与被改写引用文件，再把受管
   第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
-  不安全权限时拒绝覆盖，迁移失败时恢复原有目录。
+  不安全权限时拒绝覆盖，迁移失败时恢复原有目录；随后刷新已配置 DeepSeek 的受控官方模型目录，
+  保留现有选中模型和逐模型设置，并在私有备份后移除已废弃的 `[vision]` 配置段。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
@@ -93,7 +94,7 @@
   D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
   “技能”流程委派给具体适配器；模型与提供商下分官方与第三方两级：官方含登录与默认模型，
-  第三方含自定义 第三方、DeepSeek 官方、OpenCode Go 官方、第三方模型设置、第三方 API 与图片识别。
+  第三方含自定义 第三方、DeepSeek 官方、OpenCode Go 官方、第三方模型设置与第三方 API。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 → 自定义 第三方”；
   引导填写上游 `base_url`、认证方式、WebSocket 开关与默认模型（Provider ID 固定为 `OpenAI`，
   避免手输填错），通过 Codex
@@ -144,13 +145,11 @@
 - `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
   调试日志和渠道技术字段，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
-  提供商，非敏感元数据写入主配置，API Key 按提供商隔离；拒绝删除仍被调用方引用的提供商，
-  并可经确认显式转换旧单视觉配置。
-- `vision-setup.mjs` / `vision-setup.d.mts`：为 OpenAI + 第三方 Provider 模式选择已登记的第三方
-  API 提供商和视觉模型；不复制 Endpoint 或 API Key，禁用视觉不删除共享提供商。
+  提供商，非敏感元数据写入主配置，API Key 按提供商隔离；当前没有运行时调用方，保留给后续
+  明确设计的直接 API 功能。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
-  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与 Flash 模型后写入
+  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与全部受控模型后写入
   `~/.codex-connect/providers/deepseek/`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
   模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，模型目录与管理标记写入
   `~/.codex-connect/providers/deepseek/`，并自动开启 `features.multi_agent_v2`、把共享
@@ -164,15 +163,9 @@
   安装时为初始模型设置自动压缩阈值；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
   模型设置”按模型维护 10–90% 阈值，写入模型目录的 `auto_compact_token_limit`，不再使用会覆盖
   全部模型的 Profile 顶层阈值。
-- `prepare-deepseek-catalog-proposal.mjs` / `prepare-deepseek-catalog-proposal.d.mts` /
-  `deepseek-catalog-baseline.json`：复用 Setup 的官方
-  下载器，比较排序后的模型完整指纹与上下文、输入模态、思考等级、搜索、并行工具、最低客户端版本
-  等有限审查字段，输出候选基线、结构化结果、摘要和失败日志所需现场。模型提示词只参与哈希，不复制
-  到仓库；脚本不修改运行时受控模型列表。
-- `prepare-deepseek-pricing-proposal.mjs` / `prepare-deepseek-pricing-proposal.d.mts`：有界下载
-  DeepSeek 官方价格 HTML，按模型、计价表头、北京时间峰谷文字和生效日期解析语义化表格，与
-  `runtime/deepseek-pricing-baseline.json` 比较后输出候选基线、结构化差异、来源哈希和失败报告；
-  页面缺列、重复模型、时间重叠或结构无法确认时失败关闭，不在 Gateway 请求路径抓取网页。
+- `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
+  上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；运行时仍只开放编译期定义明确
+  列出的模型。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   切换 Profile、固定配置与受管字段恢复逻辑。

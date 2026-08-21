@@ -24,12 +24,6 @@ import {
 } from "../output-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import { formatQuotedInput } from "../quoted-input.js";
-import {
-  executeVisionCommand,
-  formatVisionCommandTiming,
-  formatVisionCollectionReady,
-  formatVisionImagesCollected,
-} from "../vision-command.js";
 
 import type {
   FeishuCommandCenter,
@@ -126,15 +120,7 @@ export class FeishuConversationAdapter {
     );
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
-      {
-        ...inputOptions,
-        onVisionCollectionReady: (target, imageCount, maximumImages) => {
-          this.outbox.notifyMarkdown(
-            target.conversationId,
-            formatVisionCollectionReady(imageCount, maximumImages),
-          );
-        },
-      },
+      inputOptions,
     );
   }
 
@@ -188,28 +174,6 @@ export class FeishuConversationAdapter {
             message.target.accountId,
             message.target.conversationId,
             command.argumentsText,
-          );
-          return;
-        }
-        if (command.name === "vision") {
-          const now = this.inputOptions.now ?? Date.now;
-          const receivedAtMs = message.receivedAtMs ?? now();
-          await this.inputs.flushPending(message.target, message.actorId);
-          const rendered = await executeVisionCommand(
-            this.inputs,
-            message.target,
-            message.actorId,
-            command.argumentsText,
-          );
-          this.notifyMarkdown(
-            message.target.conversationId,
-            this.inputOptions.debugEnabled
-              ? formatVisionCommandTiming(rendered, {
-                  createdAtMs: message.createdAtMs,
-                  receivedAtMs,
-                  respondedAtMs: now(),
-                })
-              : rendered,
           );
           return;
         }
@@ -666,12 +630,6 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
-    if (result.kind === "collected") {
-      this.outbox.discardPendingTurnReplyTarget?.(
-        message.target.conversationId,
-      );
-      throw new Error("文本输入不能进入图片收集");
-    }
     if (!result.tail) {
       return;
     }
@@ -812,23 +770,7 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
-    const collected = results.filter((result) => result.kind === "collected");
-    const submitted = results.filter((result) => result.kind !== "collected");
-    if (collected.length > 0 && submitted.length === 0) {
-      this.outbox.discardPendingTurnReplyTarget?.(
-        replyMessage.target.conversationId,
-      );
-      const imageCount = Math.max(...collected.map((result) => result.imageCount));
-      this.notifyMarkdown(
-        replyMessage.target.conversationId,
-        formatVisionImagesCollected(
-          imageCount,
-          collected[0]!.maximumImages,
-          collected[0]!.automatic,
-        ),
-      );
-      return;
-    }
+    const submitted = results;
     const tail = submitted.find((result) => result.tail);
     if (tail?.submission.steered) {
       this.outbox.discardPendingTurnReplyTarget?.(

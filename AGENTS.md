@@ -260,7 +260,7 @@ Surface -> Application/Core <- Codex Client
 - `docs/display.md`：渠道展示口径、完成卡片、`/metrics` 统计行为、信息命令格式与调试模式。
 - `docs/index.md`：Codex 协议基线、支持矩阵、官方源码与实现映射；CLI 导出等非协议能力只在
   对应实现说明中一句话带过，不扩展支持矩阵。
-- `docs/deepseek.md`、`docs/vision.md`、`docs/errors.md` 等：单一主题文档，只写该主题内容。
+- `docs/deepseek.md`、`docs/errors.md` 等：单一主题文档，只写该主题内容。
 - `src/**/README.md`：模块职责、文件索引与公开接口，不重复用户可见的命令和配置说明。
 - `index.md`：全项目文档索引；新增或移动任何 `docs/` 文档或模块 README 时必须同步更新。
 - 不确定归属时优先放最具体的文档并更新 `index.md`，不把细节写进根 `README.md`。

@@ -25,7 +25,8 @@
   `text/image/audio` 输入能力，过滤不可见项，
   并在缺少模型选择必需字段时失败关闭。
 - `model-provider-catalog.ts`：按 Bootstrap 注入的编译期 Provider 定义，只读取 Setup 下载到用户
-  `CODEX_HOME` 的受控模型目录；相同模型 ID 仍按 Provider 独立映射，未列入对应定义的模型不会开放。
+  `CODEX_HOME` 的受控模型目录；相同模型 ID 仍按 Provider 独立映射，未列入对应定义的模型不会开放；
+  已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；未知枚举或畸形数值失败关闭，不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，

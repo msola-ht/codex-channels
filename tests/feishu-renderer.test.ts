@@ -779,30 +779,6 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput(event)).toBe("Codex 返回了空消息。");
   });
 
-  it("renders structured visual completion details with the recognition model", () => {
-    expect(renderFeishuOutput({
-      type: "vision.completed",
-      target,
-      provider: "BLTCY",
-      model: "gpt-5.6-luna",
-      elapsedMs: 18_000,
-      usage: {
-        inputTokens: 9_433,
-        outputTokens: 483,
-        totalTokens: 9_916,
-      },
-    }, undefined, undefined, true)).toBe([
-      "## 图片识别完成",
-      "- API 提供商：BLTCY",
-      "- 调用模型：gpt-5.6-luna",
-      "- 视觉 API 耗时：18秒",
-      "- **Token**：9,916",
-      "  - 输出：483",
-      "",
-      "- 正在交给当前模型处理。",
-    ].join("\n"));
-  });
-
   it("renders every critical output event and ignores non-critical progress", () => {
     const criticalEvents: OutputEvent[] = [
       {
@@ -890,11 +866,6 @@ describe("Feishu output renderer", () => {
     ];
     const progressEvents: OutputEvent[] = [
       {
-        type: "vision.started",
-        target,
-        imageCount: 2,
-      },
-      {
         type: "turn.started",
         target,
         threadId: "thread-1",
@@ -929,7 +900,6 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
     expect(progressEvents.map((event) => renderFeishuOutput(event))).toEqual([
-      "## 视觉识别中\n- 图片：2 张\n- 状态：已发送至视觉 API",
       "## 已开始处理。",
       null,
       null,

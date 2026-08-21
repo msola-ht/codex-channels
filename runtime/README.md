@@ -93,8 +93,6 @@
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
 - `api-provider-credential.mjs` / `api-provider-credential.d.mts`：按第三方 API 提供商 ID 隔离
   API Key，严格校验私有目录、文件所有者、权限与符号链接，并复用统一私有文件原子替换。
-- `vision-credential.mjs` / `vision-credential.d.mts`：只供 Setup 显式转换旧单视觉凭据；新的
-  Gateway 调用不再读取该路径；旧凭据更新同样复用统一私有文件原子替换。
 - `workspace-permission.mjs` / `workspace-permission.d.mts`：统一 Workspace 的 Sandbox、审批策略
   与 Permission Profile 更新及互斥规则，供 CLI、Config 菜单和渠道写入适配器复用。
 

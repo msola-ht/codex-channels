@@ -33,7 +33,6 @@ import {
 } from "../../runtime/app-server-supervisor.mjs";
 import { opencodeGoAccountIdFromProvider } from "../../runtime/opencode-go-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
-import { readApiProviderKey } from "../../runtime/api-provider-credential.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
@@ -113,7 +112,6 @@ import {
   checkOpenAiConnectivity,
   type OpenAiConnectivityStatus,
 } from "./openai-connectivity.js";
-import { createResponsesVisionAdapter } from "./responses-vision-adapter.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
@@ -327,9 +325,7 @@ export class GatewayApplication {
       pricingResolvers,
     );
     this.modelPricingNeedsExchangeRate = primaryProvider === deepseekProviderDefinition.id
-      || managedProviders.some(({ provider }) => provider === deepseekProviderDefinition.id)
-      || (config.vision.mode === "responses_api"
-        && config.vision.provider === deepseekProviderDefinition.id);
+      || managedProviders.some(({ provider }) => provider === deepseekProviderDefinition.id);
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
         customPrimaryProvider?.id ?? primaryProvider,
@@ -435,43 +431,6 @@ export class GatewayApplication {
       }));
     }
     const providerAccounts = new ProviderAccountService(accountAdapters);
-    const visionConfig = config.vision;
-    const visionProviderName = visionConfig.mode === "disabled"
-      ? undefined
-      : config.apiProviders.find(
-          (candidate) => candidate.id === visionConfig.provider,
-        )?.name;
-    const vision = visionConfig.mode === "disabled"
-      ? undefined
-      : createResponsesVisionAdapter({
-          provider: visionConfig.provider,
-          ...(visionProviderName === undefined
-            ? {}
-            : { providerName: visionProviderName }),
-          endpoint: visionConfig.endpoint,
-          model: visionConfig.model,
-          requestTimeoutMs: visionConfig.timeoutMs,
-          loadApiKey: () => readApiProviderKey(
-            config.credentialsDirectory,
-            visionConfig.provider,
-          ),
-          fetchImpl: createProxyFetch(config.networkProxy),
-          logger,
-          onMetric: (metric) => {
-            try {
-              const pricing = this.pricingResolver.resolve({
-                provider: metric.provider,
-                model: metric.model,
-                serviceTier: metric.serviceTier,
-                inputTokens: metric.inputTokens,
-                atMs: metric.requestStartedAtMs,
-              });
-              metricsWriter.enqueue({ ...metric, pricing });
-            } catch (error) {
-              logger.warn({ err: error }, "视觉 API 指标持久化失败");
-            }
-          },
-        });
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -507,7 +466,6 @@ export class GatewayApplication {
         },
       },
       providerAccounts,
-      vision,
       {
         forThread: (threadId) => {
           const summary = metricsStore.threadSummary(threadId);

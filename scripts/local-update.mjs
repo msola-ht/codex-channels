@@ -8,11 +8,13 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { stringify } from "smol-toml";
 
 import {
   parseGatewayConfig,
   readGatewayConfig,
   validateGatewayConfigDocument,
+  writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import {
   appServerSocketAcceptsWebSocket,
@@ -51,6 +53,7 @@ import {
 } from "./upgrade-state.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import { backupAndMigrateProviderFiles } from "./backup-provider-migration.mjs";
+import { refreshDeepseekCatalogForUpdate } from "./deepseek-setup.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 
@@ -65,32 +68,50 @@ export function updateGatewayConfiguration(environment = process.env, options = 
   copyFileSync(configPath, backupPath);
   chmodSync(backupPath, 0o600);
   try {
+    const document = readGatewayConfig(configPath);
+    const removedPaths = removeObsoleteGatewayConfig(document);
+    if (removedPaths.length > 0) writeGatewayConfig(configPath, document);
     (options.loadConfig ?? (() => loadRuntimeConfig(environment)))();
+    const changed = readFileSync(configPath, "utf8") !== before;
+    const addedPaths = changed
+      ? missingConfigPaths(
+          parseGatewayConfig(before, configPath),
+          parseGatewayConfig(readFileSync(configPath, "utf8"), configPath),
+        )
+      : [];
+    if (!changed) unlinkSync(backupPath);
+    return {
+      addedPaths,
+      backupPath: changed ? backupPath : null,
+      changed,
+      configPath,
+      removedPaths,
+    };
   } catch (error) {
-    if (readFileSync(configPath, "utf8") === before) unlinkSync(backupPath);
+    if (readFileSync(configPath, "utf8") !== before) {
+      copyFileSync(backupPath, configPath);
+      chmodSync(configPath, 0o600);
+    }
+    unlinkSync(backupPath);
     throw error;
   }
-  const changed = readFileSync(configPath, "utf8") !== before;
-  const addedPaths = changed
-    ? missingConfigPaths(
-        parseGatewayConfig(before, configPath),
-        parseGatewayConfig(readFileSync(configPath, "utf8"), configPath),
-      )
-    : [];
-  if (!changed) unlinkSync(backupPath);
-  return { addedPaths, backupPath: changed ? backupPath : null, changed, configPath };
 }
 
 export function inspectGatewayConfiguration(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
   const content = readFileSync(configPath, "utf8");
   const source = parseGatewayConfig(content, configPath);
+  const removedPaths = removeObsoleteGatewayConfig(source);
   const defaults = validateGatewayConfigDocument(source);
-  loadConfigDocument(content, dirname(configPath), {
+  loadConfigDocument(stringify(source), dirname(configPath), {
     environment,
     detectSystemProxy: true,
   });
-  return { configPath, missingSafeDefaults: missingConfigPaths(source, defaults) };
+  return {
+    configPath,
+    missingSafeDefaults: missingConfigPaths(source, defaults),
+    removedPaths,
+  };
 }
 
 export async function updateLocalInstallation(environment = process.env, options = {}) {
@@ -136,10 +157,13 @@ export async function updateLocalInstallation(environment = process.env, options
 
   let config;
   let databases;
+  let providerCatalogs;
   let updateError;
   try {
     (options.updateProviderFiles
       ?? (() => backupAndMigrateProviderFiles(environment, { apply: true })))();
+    providerCatalogs = await (options.updateProviderCatalogs
+      ?? (() => refreshDeepseekCatalogForUpdate(environment)))();
     config = (options.updateConfig
       ?? (() => updateGatewayConfiguration(environment)))();
     databases = (options.updateDatabases
@@ -171,8 +195,18 @@ export async function updateLocalInstallation(environment = process.env, options
   return {
     config,
     databases,
+    providerCatalogs,
     servicesRestored: serviceInspection.installed,
   };
+}
+
+function removeObsoleteGatewayConfig(document) {
+  const removedPaths = [];
+  if (Object.hasOwn(document, "vision")) {
+    delete document.vision;
+    removedPaths.push("vision");
+  }
+  return removedPaths;
 }
 
 export function inspectCoreServiceInstallation(
@@ -457,6 +491,9 @@ if (
         console.log(config.missingSafeDefaults.length === 0
           ? "配置参数：已兼容"
           : `待补齐安全参数：${config.missingSafeDefaults.join("、")}`);
+        if (config.removedPaths.length > 0) {
+          console.log(`待移除旧配置：${config.removedPaths.join("、")}`);
+        }
         if (!services.installed) {
           writeCliMessage("note", "核心后台服务未安装，本次只离线更新配置与数据库。");
         }
@@ -466,7 +503,12 @@ if (
         if (result.changed) {
           writeCliMessage("success", "config.toml 缺失的安全参数已补齐。");
           console.log(`配置：${result.configPath}`);
-          console.log(`已补齐参数：${result.addedPaths.join("、")}`);
+          if (result.addedPaths.length > 0) {
+            console.log(`已补齐参数：${result.addedPaths.join("、")}`);
+          }
+          if (result.removedPaths.length > 0) {
+            console.log(`已移除旧配置：${result.removedPaths.join("、")}`);
+          }
           console.log(`更新前备份：${result.backupPath}`);
         } else {
           writeCliMessage("note", "config.toml 已兼容，无需更新。");
@@ -492,6 +534,17 @@ if (
         }
         return result;
       },
+      updateProviderCatalogs: async () => {
+        const result = await refreshDeepseekCatalogForUpdate(process.env);
+        if (result.status === "updated") {
+          writeCliMessage(
+            "success",
+            `DeepSeek 官方模型目录已更新（${result.modelCount} 个模型）。`,
+          );
+          console.log(`当前默认选择保持：${result.selectedModel}`);
+        }
+        return result;
+      },
       databaseOptions: {
         onInspected: printInspection,
         onUpdated: printDatabaseResult,
@@ -500,8 +553,8 @@ if (
     writeCliMessage(
       "success",
       result.servicesRestored
-        ? "本地配置与数据库更新完成，App Server 与 Gateway 已恢复运行。"
-        : "本地配置与数据库更新完成；核心后台服务未安装，未执行启动。",
+        ? "本地配置、模型目录与数据库更新完成，App Server 与 Gateway 已恢复运行。"
+        : "本地配置、模型目录与数据库更新完成；核心后台服务未安装，未执行启动。",
     );
   } catch (error) {
     if (

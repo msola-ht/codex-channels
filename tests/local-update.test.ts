@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +22,7 @@ import { initializeUserData } from "../scripts/runtime-config.mjs";
 import {
   inspectDatabaseUpdates,
   inspectCoreServiceInstallation,
+  inspectGatewayConfiguration,
   updateDatabases,
   updateGatewayConfiguration,
   updateLocalInstallation,
@@ -78,6 +79,7 @@ describe("local update", () => {
     });
 
     expect(result.changed).toBe(true);
+    expect(result.removedPaths).toEqual([]);
     expect(result.addedPaths).toEqual(expect.arrayContaining([
       "display.operation_updates",
       "display.plan_updates",
@@ -93,6 +95,49 @@ describe("local update", () => {
       plan_updates: true,
       price_currency: "cny",
     });
+  });
+
+  it("backs up and removes the obsolete vision config during update", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    (document as Record<string, unknown>).vision = {
+      mode: "responses_api",
+      provider: "relay",
+      model: "legacy-vision",
+    };
+    writeGatewayConfig(configPath, document);
+
+    expect(inspectGatewayConfiguration(environment)).toMatchObject({
+      removedPaths: ["vision"],
+    });
+    const result = updateGatewayConfiguration(environment);
+
+    expect(result.changed).toBe(true);
+    expect(result.removedPaths).toEqual(["vision"]);
+    expect(result.backupPath).not.toBeNull();
+    expect((readGatewayConfig(configPath) as Record<string, unknown>).vision).toBeUndefined();
+  });
+
+  it("restores the obsolete vision config when config validation fails", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    (document as Record<string, unknown>).vision = {
+      mode: "responses_api",
+      provider: "relay",
+      model: "legacy-vision",
+    };
+    writeGatewayConfig(configPath, document);
+
+    expect(() => updateGatewayConfiguration(environment, {
+      loadConfig: () => {
+        throw new Error("validation failed");
+      },
+    })).toThrow("validation failed");
+
+    expect((readGatewayConfig(configPath) as Record<string, unknown>).vision)
+      .toMatchObject({ model: "legacy-vision" });
+    expect(readdirSync(dirname(configPath)))
+      .not.toEqual(expect.arrayContaining([expect.stringContaining(".pre-update.")]));
   });
 
   it("rejects unsupported database schemas before applying updates", () => {
@@ -167,6 +212,10 @@ describe("local update", () => {
       updateProviderFiles: () => {
         calls.push("update-provider-files");
       },
+      updateProviderCatalogs: () => {
+        calls.push("update-provider-catalogs");
+        return "provider-catalogs";
+      },
       updateConfig: () => {
         calls.push("update-config");
         return "config";
@@ -187,6 +236,7 @@ describe("local update", () => {
       "inspect-databases",
       "stop",
       "update-provider-files",
+      "update-provider-catalogs",
       "update-config",
       "update-databases",
       "validate-offline",
@@ -196,6 +246,7 @@ describe("local update", () => {
     expect(result).toEqual({
       config: "config",
       databases: "databases",
+      providerCatalogs: "provider-catalogs",
       servicesRestored: true,
     });
   });
@@ -217,6 +268,10 @@ describe("local update", () => {
       },
       stopServices: () => calls.push("stop"),
       updateProviderFiles: () => calls.push("update-provider-files"),
+      updateProviderCatalogs: () => {
+        calls.push("update-provider-catalogs");
+        return "provider-catalogs";
+      },
       updateConfig: () => {
         calls.push("update-config");
         return "config";
@@ -237,6 +292,7 @@ describe("local update", () => {
       "inspect-databases",
       "inspect-services",
       "update-provider-files",
+      "update-provider-catalogs",
       "update-config",
       "update-databases",
       "validate-offline",
@@ -244,6 +300,7 @@ describe("local update", () => {
     expect(result).toEqual({
       config: "config",
       databases: "databases",
+      providerCatalogs: "provider-catalogs",
       servicesRestored: false,
     });
   });
@@ -311,6 +368,7 @@ describe("local update", () => {
       inspectDatabases: () => ({ state: {}, metrics: {} }),
       inspectServices: () => ({ installed: false }),
       updateConfig: () => "config",
+      updateProviderCatalogs: () => "provider-catalogs",
       updateDatabases: () => "databases",
       validateOffline: () => undefined,
       startServices: () => undefined,
@@ -320,6 +378,7 @@ describe("local update", () => {
     expect(result).toEqual({
       config: "config",
       databases: "databases",
+      providerCatalogs: "provider-catalogs",
       servicesRestored: false,
     });
     const providerDirectory = join(connectHome, "providers", "deepseek");

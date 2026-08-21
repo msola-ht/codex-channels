@@ -660,7 +660,9 @@ function loadManagedProviderProfileFor(
         }
       : {}),
   });
-  if (requireLaunchConfig) validateModelCatalog(profile.catalogPath, definition);
+  if (requireLaunchConfig) {
+    validateModelCatalog(profile.catalogPath, definition, profile.model);
+  }
   return profile;
 }
 
@@ -682,7 +684,9 @@ function loadManagedProviderProfiles(environment, { requireLaunchConfig = false 
           }
         : {}),
     });
-    if (requireLaunchConfig) validateModelCatalog(profile.catalogPath, definition);
+    if (requireLaunchConfig) {
+      validateModelCatalog(profile.catalogPath, definition, profile.model);
+    }
     return [profile];
   });
 }
@@ -703,7 +707,7 @@ function loadConfiguredProviderProfile(environment, definition) {
     expectedCatalogPath,
     reasoningEffortPolicy: marker.mode === "switching" ? "mirror" : "absent",
   });
-  validateModelCatalog(profile.catalogPath, definition);
+  validateModelCatalog(profile.catalogPath, definition, profile.model);
   return { ...profile, mode: marker.mode };
 }
 
@@ -839,9 +843,24 @@ function validateModelCatalog(path, definition, model = definition.defaultModel)
 }
 
 function loadModelCatalogSettings(path, definition) {
+  const content = readPrivateFile(path, maximumCatalogBytes);
+  let catalog;
+  try {
+    catalog = JSON.parse(content);
+  } catch {
+    throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
+  }
+  const presentModels = new Set(
+    Array.isArray(catalog?.models)
+      ? catalog.models.flatMap((entry) => {
+          const slug = record(entry).slug;
+          return typeof slug === "string" ? [slug] : [];
+        })
+      : [],
+  );
   return definition.models.flatMap(({ slug, available }) => {
-    if (!available) return [];
-    return [readModelCatalogSetting(path, definition, slug)];
+    if (!available || !presentModels.has(slug)) return [];
+    return [modelCatalogSetting(content, definition, slug)];
   });
 }
 

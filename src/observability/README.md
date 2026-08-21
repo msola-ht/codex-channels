@@ -70,9 +70,8 @@ Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读
 `progress` 通知不逐条记录，避免调试模式造成无界日志放大；对应完成态、路由结果与请求耗时仍保留。
 
 模型指标库不属于会话 `StateStore`，不保存消息、提示词、请求/响应正文、图片、识别结果、工具
-参数、凭据或上游响应 ID。`provider-proxy` 生成 Codex Provider 脱敏样本，Bootstrap 的外部视觉
-适配器生成直接 API 脱敏样本，两者复用同一有界 Writer；已有 Thread 的视觉请求保存
-`thread_id`，因调用发生在 Codex Turn 之前而保持 `turn_id = NULL`。本模块不依赖代理、App Server
+参数、凭据或上游响应 ID。`provider-proxy` 生成 Codex Provider 脱敏样本；指标 Schema 仍可读取
+历史直接 API 样本，但当前没有新的直接 API 调用方。本模块不依赖代理、App Server
 协议、Surface 或业务 Storage。本模块不直接暴露 HTTP API；`codexc metrics` 的
 `report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读

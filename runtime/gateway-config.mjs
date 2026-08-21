@@ -72,16 +72,6 @@ const apiProviderSchema = z.strictObject({
   endpoint: z.url(),
 });
 
-const visionSchema = z.discriminatedUnion("mode", [
-  z.strictObject({ mode: z.literal("disabled") }),
-  z.strictObject({
-    mode: z.literal("responses_api"),
-    provider: apiProviderIdSchema,
-    model: z.string().trim().min(1),
-    timeout_seconds: z.number().int().min(30).max(600).default(120),
-  }),
-]);
-
 const priceCurrencySchema = z.enum(["cny", "usd"]).default("cny");
 
 const threadSectionPrincipalSchema = z.string().regex(
@@ -273,7 +263,6 @@ const gatewayDocumentSchema = z.strictObject({
     (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
     "api_providers 不能包含重复 ID",
   ).default([]),
-  vision: visionSchema.default({ mode: "disabled" }),
   storage: z.strictObject({
     database_path: z.string().min(1).default("data/gateway.sqlite3"),
   }).default({ database_path: "data/gateway.sqlite3" }),

@@ -88,7 +88,6 @@ export function renderWeixinHelp(): string {
     "微信：",
     "- /whoami · /wx doctor",
     "- /start · /help · /h",
-    "- /vision <要求> · /vision <2–4> <要求> · /vision retry · /vision cancel",
   ].join("\n"));
 }
 

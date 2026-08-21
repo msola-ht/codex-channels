@@ -118,11 +118,6 @@ function restartRequiredReasons(
       JSON.stringify(next.apiProviders),
     ],
     [
-      configChange("vision.provider"),
-      JSON.stringify(current.vision),
-      JSON.stringify(next.vision),
-    ],
-    [
       configChange("metrics.sync"),
       JSON.stringify(current.metricsSync),
       JSON.stringify(next.metricsSync),

@@ -35,28 +35,6 @@ export function formatSurfaceUserFacingError(
       return "一次最多处理 4 张图片";
     case "image.unsupported":
       return "仅支持 PNG 和 JPEG 图片";
-    case "vision.busy":
-      return "视觉识别任务繁忙，请稍后重试";
-    case "vision.failed":
-      return "图片识别失败，可在 5 分钟内发送 /vision retry 重试，或切换支持图片的模型";
-    case "vision.retry.missing":
-      return "当前没有可重试的图片识别任务";
-    case "vision.command.usage":
-      return "用法：/vision <要求>；多图：/vision <2–4> <要求>；重试：/vision retry；取消：/vision cancel";
-    case "vision.prompt.invalid":
-      return "图片识别要求必须为 1 至 4000 个字符";
-    case "vision.prompt.capacity":
-      return "待处理的图片识别要求已满，请稍后重试";
-    case "vision.collection.active":
-      return "当前正在收集多张图片，请先使用 /vision done 完成或 /vision cancel 取消";
-    case "vision.collection.missing":
-      return "当前没有进行中的多图收集，请先使用 /vision begin <要求>";
-    case "vision.collection.empty":
-      return "请先发送至少一张图片，再使用 /vision done";
-    case "vision.collection.count.invalid":
-      return `多图数量必须为 2 至 ${detail(error, "maximumImages", "4")}`;
-    case "vision.collection.count.exceeded":
-      return `本次只需 ${detail(error, "expectedImages", "指定数量")} 张图片`;
     case "audio.path.invalid":
       return "本地音频路径必须是绝对路径";
     case "audio.duration-missing":

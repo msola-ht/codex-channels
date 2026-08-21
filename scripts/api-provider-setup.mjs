@@ -9,10 +9,6 @@ import {
   removeApiProviderKey,
   writeApiProviderKey,
 } from "../runtime/api-provider-credential.mjs";
-import {
-  readVisionApiKey,
-  removeVisionApiKey,
-} from "../runtime/vision-credential.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
@@ -27,7 +23,6 @@ export async function runApiProviderSetup({
   const credentialsDirectory = join(dataDir, "credentials");
   const document = readGatewayConfig(configPath);
   const providers = providerList(document.api_providers);
-  const legacyVision = legacyVisionConfig(document.vision);
   const action = await prompts.select({
     message: "第三方 API 提供商",
     showInstructions: false,
@@ -68,18 +63,12 @@ export async function runApiProviderSetup({
   if (prompts.isCancel(name)) return { action: "back" };
   const endpoint = await prompts.text({
     message: "Responses API 地址",
-    initialValue: existing?.endpoint ?? legacyVision?.endpoint ?? "",
+    initialValue: existing?.endpoint ?? "",
     validate: validateEndpoint,
   });
   if (prompts.isCancel(endpoint)) return { action: "back" };
   const existingProviderKey = optionalProviderKey(credentialsDirectory, providerId);
-  const migrateLegacyVision = legacyVision !== undefined
-    && await prompts.confirm(
-      "检测到旧的单视觉 API 配置，是否同时改为使用这个提供商？",
-      true,
-    );
-  const retainedKey = existingProviderKey
-    ?? (migrateLegacyVision ? optionalVisionKey(credentialsDirectory) : undefined);
+  const retainedKey = existingProviderKey;
   const apiKey = await prompts.password({
     message: retainedKey
       ? "API Key（留空保留当前 Key）"
@@ -104,13 +93,6 @@ export async function runApiProviderSetup({
   try {
     writeApiProviderKey(credentialsDirectory, providerId, nextKey);
     document.api_providers = nextProviders;
-    if (migrateLegacyVision) {
-      document.vision = {
-        mode: "responses_api",
-        provider: providerId,
-        model: legacyVision.model,
-      };
-    }
     writeConfig(configPath, document);
   } catch (error) {
     document.api_providers = previousProviders;
@@ -119,13 +101,6 @@ export async function runApiProviderSetup({
     }
     else removeApiProviderKey(credentialsDirectory, providerId);
     throw error;
-  }
-  if (migrateLegacyVision) {
-    try {
-      removeVisionApiKey(credentialsDirectory);
-    } catch {
-      output.write("旧视觉凭据未能清理；新提供商已生效，请稍后检查 credentials/vision。\n");
-    }
   }
   output.write(`第三方 API 提供商已保存：${nextProvider.name} (${providerId})\n`);
   output.write(`配置文件：${configPath}\n`);
@@ -149,9 +124,6 @@ async function removeProvider(options) {
   if (options.prompts.isCancel(selected) || selected === "back") return { action: "back" };
   const provider = options.providers.find((candidate) => candidate.id === selected);
   if (!provider) throw new Error("找不到第三方 API 提供商");
-  if (table(options.document.vision).provider === provider.id) {
-    throw new Error(`第三方 API 提供商仍被 vision 使用：${provider.id}`);
-  }
   if (!await options.prompts.confirm(`确认删除 ${provider.name} 及其 API Key？`, false)) {
     return { action: "back" };
   }
@@ -192,25 +164,6 @@ function optionalProviderKey(credentialsDirectory, providerId) {
     if (error?.code === "ENOENT") return undefined;
     throw error;
   }
-}
-
-function optionalVisionKey(credentialsDirectory) {
-  try {
-    return readVisionApiKey(credentialsDirectory);
-  } catch (error) {
-    if (error?.code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-function legacyVisionConfig(value) {
-  const vision = table(value);
-  return vision.mode === "responses_api"
-    && typeof vision.endpoint === "string"
-    && typeof vision.model === "string"
-    && typeof vision.provider !== "string"
-    ? { endpoint: vision.endpoint, model: vision.model }
-    : undefined;
 }
 
 function validateProviderId(value) {

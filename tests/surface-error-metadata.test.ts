@@ -74,14 +74,6 @@ describe("surfaceErrorMetadata", () => {
 
   it("keeps the constrained code and user-facing message for surfaced errors", () => {
     expect(surfaceErrorMetadata(new UserFacingError(
-      "vision.failed",
-      "图片识别失败",
-    ))).toEqual({
-      errorType: "UserFacingError",
-      errorCode: "vision.failed",
-      errorMessage: "图片识别失败",
-    });
-    expect(surfaceErrorMetadata(new UserFacingError(
       "model.input.image.unsupported",
       "当前模型 deepseek-v4-flash 不支持图片输入",
     ))).toEqual({

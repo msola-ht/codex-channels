@@ -14,7 +14,6 @@ const commands = [
     command: name,
     description: conversationCommandDescriptions[name],
   })),
-  { command: "vision", description: "设置、收集或重试图片识别" },
   { command: "whoami", description: "显示 Telegram 用户 ID" },
 ];
 
