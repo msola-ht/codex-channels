@@ -280,7 +280,7 @@ export class FeishuCommandCenter {
     }
     if (
       pending.consumeOnUse
-      || directStateChangingActions.has(resolvedCommand)
+      || commandCenterActionConsumesToken(resolvedCommand, submittedInput!)
     ) {
       this.pending.delete(token);
     }
@@ -537,7 +537,7 @@ function renderFeishuCategorizedCommandsCard(
       actionRow(token, [
         ["分叉会话", "fork", "default"],
         ["重命名", "rename", "default"],
-        ["写入 App Server Queue", "queue", "default"],
+        ["App Server Queue", "queue", "default"],
         ["释放占用", "release", "default"],
       ]),
       actionRow(token, [
@@ -693,6 +693,17 @@ function isCommandCenterAction(
   return isConversationCommandName(value)
     || feishuLocalCommandActions.includes(
       value as typeof feishuLocalCommandActions[number],
+    );
+}
+
+function commandCenterActionConsumesToken(
+  action: FeishuCommandCenterAction,
+  input: string,
+): boolean {
+  return directStateChangingActions.has(action)
+    || (
+      action === "queue"
+      && /^(?:start|delete)\s+/u.test(input)
     );
 }
 

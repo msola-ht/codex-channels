@@ -3,6 +3,8 @@ import type { Context } from "grammy";
 
 import {
   renderTelegramCommandResult,
+  threadQueueDeleteConfirmationKeyboard,
+  threadQueueItemKeyboard,
   threadSectionKeyboard,
   workspacePermissionFieldKeyboard,
   workspacePermissionKeyboard,
@@ -132,6 +134,49 @@ describe("Telegram command renderer", () => {
 
     expect(reply).toHaveBeenCalledWith(expect.stringContaining("已写入 App Server Queue"));
     expect(reply).toHaveBeenCalledWith(expect.stringContaining("Gateway 重启不会清空"));
+  });
+
+  it("renders Queue pagination, refresh, and complete-ID item buttons", async () => {
+    const replies: Array<{ text: string; options?: unknown }> = [];
+    const reply = vi.fn(async (text: string, options?: unknown) => {
+      replies.push({ text, options });
+    });
+    const items = Array.from({ length: 25 }, (_, index) => ({
+      id: `01a02373-1bd5-7661-aa48-fc0ff087f0${String(index).padStart(2, "0")}`,
+      clientUserMessageId: `client-${index}`,
+      inputType: "text" as const,
+      textPreview: `安全预览 ${index + 1}`,
+      editable: true,
+    }));
+    const result = {
+      kind: "thread-queue" as const,
+      result: {
+        items,
+        selectors: items.map((_, index) => String(index + 1)),
+        page: 1,
+        pageCount: 2,
+        totalItemCount: 25,
+      },
+    };
+
+    await renderTelegramCommandResult({ reply } as unknown as Context, result);
+
+    const options = replies[0]?.options as {
+      reply_markup: { inline_keyboard: Array<Array<{ callback_data?: string }>> };
+    };
+    const callbacks = options.reply_markup.inline_keyboard.flatMap((row) =>
+      row.map((button) => button.callback_data).filter((value): value is string => value !== undefined));
+    expect(callbacks).toContain("queue:page:2");
+    expect(callbacks).toContain("queue:refresh:1");
+    expect(callbacks).toContain(`queue:item:1:${items[0]!.id}`);
+    expect(callbacks.every((callback) => callback.length <= 64)).toBe(true);
+    const operationCallbacks = [
+      ...threadQueueItemKeyboard(1, items[0]!.id).inline_keyboard,
+      ...threadQueueDeleteConfirmationKeyboard(1, items[0]!.id).inline_keyboard,
+    ].flatMap((row) => row.flatMap((button) =>
+      "callback_data" in button ? [button.callback_data] : []));
+    expect(operationCallbacks.every((callback) => callback.length <= 64)).toBe(true);
+    expect(replies[0]?.text).toContain("新增、更新、排序请继续使用 /queue 文本命令");
   });
 
   it("uses the dedicated diff renderer for artifact results", async () => {

@@ -874,8 +874,22 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
   });
 
-  it("uses the command form for native Queue text", async () => {
+  it("opens a complete Queue management card and keeps add as a command form", async () => {
     const fixture = createOutbox();
+    const queueItems = Array.from({ length: 25 }, (_, index) => ({
+      id: `01a02373-1bd5-7661-aa48-fc0ff087f${String(index).padStart(2, "0")}`,
+      clientUserMessageId: `client-${index}`,
+      inputType: "text" as const,
+      textPreview: `安全预览 ${index + 1}`,
+      editable: true,
+    }));
+    const queueList = vi.fn(async (_target: unknown, page = 1) => ({
+      items: page === 1 ? queueItems : [],
+      selectors: page === 1 ? queueItems.map((_, index) => String(index + 1)) : [],
+      page,
+      pageCount: 1,
+      totalItemCount: queueItems.length,
+    }));
     const queueAdd = vi.fn(async () => ({
       id: "queue-1",
       clientUserMessageId: "client-1",
@@ -883,22 +897,90 @@ describe("Feishu conversation adapter", () => {
       textPreview: "继续检查私聊失败路径",
       editable: true,
     }));
+    const queueDelete = vi.fn(async () => ({ deleted: true }));
     const adapter = new FeishuConversationAdapter(
-      { queueAdd } as unknown as ConversationUseCases,
+      { queueList, queueAdd, queueDelete } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
 
-    await expect(adapter.handleCommandCenterAction(
+    const firstChunk = await adapter.handleCommandCenterAction(
       message.target,
       "queue",
       message.actorId,
-    )).resolves.toMatchObject({
-      kind: "form",
-      action: "queue",
-      multiline: true,
-      inputPrefix: "add ",
+    );
+    expect(firstChunk).toMatchObject({
+      title: "App Server Queue · 第 1/1 页",
+      choices: expect.arrayContaining([
+        expect.objectContaining({
+          action: "queue",
+          input: expect.stringContaining("item 1 1 01a02373-1bd5-7661-aa48-fc0ff087f00"),
+        }),
+        expect.objectContaining({ label: "下一组" }),
+      ]),
     });
+    const firstChoices = (firstChunk as {
+      choices: ReadonlyArray<{ input: string }>;
+    }).choices;
+    expect(firstChoices.length).toBeLessThanOrEqual(18);
+    const secondChunk = await adapter.handleCommandCenterAction(
+      message.target,
+      "queue",
+      message.actorId,
+      "list 1 chunk 2",
+    );
+    expect(secondChunk).toMatchObject({
+      choices: expect.arrayContaining([
+        expect.objectContaining({
+          input: `item 1 2 ${queueItems[13]!.id}`,
+        }),
+        expect.objectContaining({
+          input: `item 1 2 ${queueItems[24]!.id}`,
+        }),
+      ]),
+    });
+    const secondChoices = (secondChunk as {
+      choices: ReadonlyArray<{ input: string }>;
+    }).choices;
+    expect(secondChoices.length).toBeLessThanOrEqual(18);
+    const queueItemInputs = [...firstChoices, ...secondChoices]
+      .map(({ input }) => input)
+      .filter((input) => input.startsWith("item "));
+    expect(new Set(queueItemInputs)).toHaveLength(25);
+    const itemChoices = await adapter.handleCommandCenterAction(
+      message.target,
+      "queue",
+      message.actorId,
+      `item 1 1 ${queueItems[0]!.id}`,
+    );
+    expect(itemChoices).toMatchObject({
+      title: "Queue 条目",
+      choices: expect.arrayContaining([
+        { label: "启动", action: "queue", input: `start ${queueItems[0]!.id}` },
+        { label: "删除", action: "queue", input: `delete-confirm 1 1 ${queueItems[0]!.id}` },
+      ]),
+    });
+    const deleteChoices = await adapter.handleCommandCenterAction(
+      message.target,
+      "queue",
+      message.actorId,
+      `delete-confirm 1 1 ${queueItems[0]!.id}`,
+    );
+    expect(deleteChoices).toMatchObject({
+      title: "确认删除 Queue 条目",
+      choices: expect.arrayContaining([{
+          label: "确认删除",
+          action: "queue",
+          input: `delete ${queueItems[0]!.id}`,
+        }]),
+    });
+    await adapter.handleCommandCenterAction(
+      message.target,
+      "queue",
+      message.actorId,
+      `delete ${queueItems[0]!.id}`,
+    );
+    expect(queueDelete).toHaveBeenCalledWith(message.target, queueItems[0]!.id);
     await adapter.handleCommandCenterAction(
       message.target,
       "queue",
@@ -911,7 +993,7 @@ describe("Feishu conversation adapter", () => {
       message.target,
       "继续检查私聊失败路径",
     );
-    expect(fixture.sent[0]?.text).toContain("已写入 App Server Queue");
+    expect(fixture.sent.some(({ text }) => text.includes("已写入 App Server Queue"))).toBe(true);
   });
 
   it("offers only the existing safe project-rule actions", async () => {

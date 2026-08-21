@@ -35,6 +35,7 @@ import {
   formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
   formatConversationThreadSections,
+  formatThreadQueueInputTypeLabel,
   formatConversationUsage,
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
@@ -80,7 +81,15 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "thread-queue":
-      await replyTelegramPanel(context, formatConversationThreadQueue(result));
+      await replyTelegramPanel(
+        context,
+        [
+          formatConversationThreadQueue(result),
+          "",
+          "按钮支持分页、刷新和进入条目后启动/删除；新增、更新、排序请继续使用 /queue 文本命令。",
+        ].join("\n"),
+        threadQueueKeyboard(result),
+      );
       return;
     case "status":
       await replyTelegramPanel(context, formatStatus(result.status));
@@ -259,6 +268,120 @@ export function threadSectionKeyboard(
   return inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined;
 }
 
+export function threadQueueKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "thread-queue" }>,
+): InlineKeyboardMarkup | undefined {
+  if (
+    result.result.page > result.result.pageCount
+    || result.result.items.length === 0
+  ) {
+    return result.result.totalItemCount === 0
+      ? {
+          inline_keyboard: [[{
+            text: "刷新",
+            callback_data: `queue:refresh:${result.result.page}`,
+          }]],
+        }
+      : undefined;
+  }
+  const rows = result.result.items.flatMap((item) => {
+    const callbackData = `queue:item:${result.result.page}:${item.id}`;
+    return callbackData.length <= 64
+      ? [[{
+          text: boundedButtonLabel(queueItemButtonLabel(item)),
+          callback_data: callbackData,
+        }]]
+      : [];
+  });
+  const pageButtons = [
+    ...(result.result.page > 1
+      ? [{
+          text: "上一页",
+          callback_data: `queue:page:${result.result.page - 1}`,
+        }]
+      : []),
+    {
+      text: "刷新",
+      callback_data: `queue:refresh:${result.result.page}`,
+    },
+    ...(result.result.page < result.result.pageCount
+      ? [{
+          text: "下一页",
+          callback_data: `queue:page:${result.result.page + 1}`,
+        }]
+      : []),
+  ];
+  return pageButtons.length > 0
+    ? { inline_keyboard: [...rows, pageButtons] }
+    : undefined;
+}
+
+export function threadQueueItemKeyboard(
+  page: number,
+  itemId: string,
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "启动",
+          callback_data: `queue:start:${page}:${itemId}`,
+        },
+        {
+          text: "删除",
+          callback_data: `queue:delete-confirm:${page}:${itemId}`,
+        },
+      ],
+      [{
+        text: "返回 Queue 列表",
+        callback_data: `queue:refresh:${page}`,
+      }],
+    ],
+  };
+}
+
+export function threadQueueDeleteConfirmationKeyboard(
+  page: number,
+  itemId: string,
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[
+      {
+        text: "确认删除",
+        callback_data: `queue:delete:${page}:${itemId}`,
+      },
+      {
+        text: "取消",
+        callback_data: `queue:item:${page}:${itemId}`,
+      },
+    ]],
+  };
+}
+
+export function formatTelegramThreadQueueItemAction(
+  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
+): string {
+  return [
+    "Queue 条目",
+    `ID：${item.id}`,
+    `类型：${formatThreadQueueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}`,
+    `安全预览：${item.textPreview || "（无文本预览）"}`,
+    "",
+    "请选择操作：",
+  ].join("\n");
+}
+
+export function formatTelegramThreadQueueDeleteConfirmation(
+  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
+): string {
+  return [
+    "确认删除 Queue 条目？",
+    `ID：${item.id}`,
+    `安全预览：${item.textPreview || "（无文本预览）"}`,
+    "删除后无法通过 Gateway 恢复。",
+  ].join("\n");
+}
+
 export function telegramThreadSectionToken(sectionId: string): string {
   return createHash("sha256").update(sectionId).digest("base64url");
 }
@@ -314,6 +437,14 @@ function renderOutcome(
       "goal.updated",
     ].includes(outcome.type),
   };
+}
+
+function queueItemButtonLabel(
+  item: Extract<ConversationCommandResult, { kind: "thread-queue" }>["result"]["items"][number],
+): string {
+  return item.textPreview
+    ? item.textPreview
+    : `${formatThreadQueueInputTypeLabel(item.inputType)} Queue 条目`;
 }
 
 export async function replyTelegramPanel(

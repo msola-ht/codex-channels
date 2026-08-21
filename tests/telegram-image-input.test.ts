@@ -1009,6 +1009,128 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
+  it("opens a Queue item and requires delete confirmation before deletion", async () => {
+    const item = {
+      id: "01a02373-1bd5-7661-aa48-fc0ff087f0d8",
+      clientUserMessageId: "client-queue-1",
+      inputType: "text" as const,
+      textPreview: "继续检查 Queue 按钮",
+      editable: true,
+    };
+    const queueList = vi.fn(async () => ({
+      items: [item],
+      selectors: ["1"],
+      page: 1,
+      pageCount: 1,
+      totalItemCount: 1,
+    }));
+    const queueDelete = vi.fn(async () => ({ deleted: true }));
+    const { surface, output, apiCalls, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      { queueList, queueDelete },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 17,
+      callback_query: {
+        id: "queue-item",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: `queue:item:1:${item.id}`,
+        message: {
+          message_id: 26,
+          date: 1,
+          chat: telegramChat(),
+          text: "App Server Queue",
+        },
+      },
+    });
+    expect(queueList).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      1,
+    );
+    expect(sentTexts.join("\n")).toContain("请选择操作");
+    expect(apiCalls).toContain("answerCallbackQuery");
+
+    await surface.bot.handleUpdate({
+      update_id: 18,
+      callback_query: {
+        id: "queue-delete-confirm",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: `queue:delete-confirm:1:${item.id}`,
+        message: {
+          message_id: 27,
+          date: 1,
+          chat: telegramChat(),
+          text: "Queue 条目",
+        },
+      },
+    });
+    expect(sentTexts.join("\n")).toContain("确认删除 Queue 条目");
+    expect(queueDelete).not.toHaveBeenCalled();
+
+    await surface.bot.handleUpdate({
+      update_id: 19,
+      callback_query: {
+        id: "queue-delete",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: `queue:delete:1:${item.id}`,
+        message: {
+          message_id: 28,
+          date: 1,
+          chat: telegramChat(),
+          text: "确认删除 Queue 条目？",
+        },
+      },
+    });
+    expect(queueDelete).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      item.id,
+    );
+    expect(sentTexts.join("\n")).toContain("已删除 App Server Queue 条目");
+    await surface.stop();
+    await output.close();
+  });
+
+  it("fails closed when a Queue item button no longer resolves", async () => {
+    const itemId = "01a02373-1bd5-7661-aa48-fc0ff087f0d8";
+    const queueList = vi.fn(async () => ({
+      items: [],
+      selectors: [],
+      page: 1,
+      pageCount: 1,
+      totalItemCount: 0,
+    }));
+    const { surface, output, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      { queueList },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 20,
+      callback_query: {
+        id: "queue-stale",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: `queue:item:1:${itemId}`,
+        message: {
+          message_id: 29,
+          date: 1,
+          chat: telegramChat(),
+          text: "App Server Queue",
+        },
+      },
+    });
+
+    expect(sentTexts.join("\n")).toContain("找不到指定 Queue 条目");
+    await surface.stop();
+    await output.close();
+  });
+
   it("rejects replies to stale Plugin prompts after in-memory state is gone", async () => {
     const submit = vi.fn();
     const { surface, output, sentTexts } = createSurface(submit, vi.fn());

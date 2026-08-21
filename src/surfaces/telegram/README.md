@@ -81,7 +81,9 @@ Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最
 Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 HTTP(S) 代理；共享代理
 遵循 `NO_PROXY`，Telegram 私有 `proxy_url` 作为显式覆盖。
 下一 Turn 输入队列属于 Application，不得复用本目录的 Telegram 输出队列；Telegram 只负责
-命令解析及位置、容量和内存生命周期提示。
+命令解析及位置、容量和内存生命周期提示。`/queue list` 还提供当前业务页的刷新、分页和条目入口；
+条目按钮使用完整 Queue ID，进入后可启动或删除，删除必须二次确认。新增、更新和排序继续使用文本命令，
+不建立渠道私有 Queue 状态。
 Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/r` 快捷入口，分别执行
 `/help`、`/workspace`、`/resume`；快捷入口不重复写入 BotFather 菜单。帮助消息复用共享的
 分组列表，只在 Telegram 边界转换为安全 HTML。无参数 `/skill` 与其他渠道一样展示编号列表，

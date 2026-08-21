@@ -7,6 +7,7 @@ import {
   type ConversationCommandResult,
   type ConversationStatus,
   type McpResourceContent,
+  type ThreadQueueInputType,
   type ThreadQueueItem,
 } from "../application/index.js";
 import {
@@ -566,10 +567,10 @@ function formatQueueItem(
   item: ThreadQueueItem,
 ): string {
   const preview = item.textPreview ? ` · ${item.textPreview}` : "";
-  return `${item.id} · 类型：${queueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}${preview}`;
+  return `${item.id} · 类型：${formatThreadQueueInputTypeLabel(item.inputType)}${item.editable ? " · 可更新" : " · 只读摘要"}${preview}`;
 }
 
-function queueInputTypeLabel(type: string): string {
+export function formatThreadQueueInputTypeLabel(type: ThreadQueueInputType): string {
   switch (type) {
     case "text": return "纯文本";
     case "image": return "图片";
