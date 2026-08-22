@@ -157,22 +157,10 @@ export function createWeixinUpdatesMonitor(
               >);
               index += 1;
             }
-            const outcomes = await Promise.allSettled(
-              imageMessages.map((imageMessage) =>
-                options.handleMessage(imageMessage)
-              ),
-            );
-            let failure: Error | undefined;
-            for (const [outcomeIndex, outcome] of outcomes.entries()) {
-              if (outcome.status === "fulfilled") {
-                recentMessageIds.add(imageMessages[outcomeIndex]!.messageId);
-              } else {
-                failure ??= outcome.reason instanceof Error
-                  ? outcome.reason
-                  : new Error("微信图片消息处理失败");
-              }
+            for (const imageMessage of imageMessages) {
+              await options.handleMessage(imageMessage);
+              recentMessageIds.add(imageMessage.messageId);
             }
-            if (failure !== undefined) throw failure;
             continue;
           }
           if (

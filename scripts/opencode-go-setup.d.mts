@@ -91,6 +91,29 @@ export function setOpencodeGoDefaultAccount(
   },
 ): Promise<{ action: string; accountId: string }>;
 
+export function refreshOpencodeGoCatalogForUpdate(
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    downloadCatalog?: () => Promise<{
+      catalog: { models: Array<Record<string, unknown>> };
+      sha256: string;
+    }>;
+    fetchImpl?: typeof fetch;
+    now?: () => Date;
+  },
+): Promise<
+  | { status: "not-configured" }
+  | {
+      status: "updated";
+      catalogPath: string;
+      manifestPath: string;
+      modelCount: number;
+      migratedProviders: string[];
+      roleMigrated: boolean;
+      defaultModelMigrationApplied: boolean;
+    }
+>;
+
 export function stopOpencodeGoAccount(
   accountId: string,
   options?: {

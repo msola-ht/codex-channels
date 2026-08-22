@@ -6,6 +6,11 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../conversation-core/index.js";
+import {
+  GeneratedImageError,
+  readGeneratedImage,
+  type GeneratedImage,
+} from "./generated-image.js";
 
 const DEFAULT_QUIET_WINDOW_MS = 1_000;
 const DEFAULT_MAXIMUM_IMAGES = 4;
@@ -16,7 +21,11 @@ export interface SurfaceInputPart {
   actorId: string;
   sequence: number;
   text?: string;
-  localImages?: ReadonlyArray<{ path: string; bytes?: number }>;
+  localImages?: ReadonlyArray<{
+    path: string;
+    mimeType: "image/jpeg" | "image/png";
+    bytes?: number;
+  }>;
   aggregationKey?: string;
   aggregationSize?: number;
 }
@@ -230,16 +239,26 @@ export class SurfaceInputBatcher {
     const texts = parts.flatMap((part) =>
       part.text === undefined ? [] : [part.text]
     );
-    const localImages = parts.flatMap((part) =>
-      (part.localImages ?? []).map(({ path }) => ({ path }))
-    );
+    const localImages = parts.flatMap((part) => part.localImages ?? []);
     const text = texts.join("\n") || (localImages.length === 1
       ? "请查看这张图片并根据图片内容协助我。"
       : "请查看这些图片并根据图片内容协助我。");
-    const value = localImages.length === 0
-      ? text
-      : { text, localImages };
     try {
+      const images = await Promise.all(localImages.map(toInlineImage));
+      const limitError = imageBatchLimitError(
+        images,
+        this.maximumImages,
+        this.maximumImageBytes,
+      );
+      if (limitError !== undefined) {
+        throw limitError;
+      }
+      const value: string | ConversationInput = images.length === 0
+        ? text
+        : {
+            text,
+            images: images.map(({ url }) => ({ url })),
+          };
       const submission = await this.submit(batch.target, value);
       parts.forEach((part, index) => {
         part.resolve({
@@ -253,13 +272,40 @@ export class SurfaceInputBatcher {
         actorId: parts[0]!.actorId,
         sequence: parts[0]!.sequence,
         text,
-        ...(localImages.length === 0 ? {} : { localImages }),
       }, error);
       for (const part of parts) {
         part.reject(error);
       }
     }
   }
+}
+
+interface InlineImage {
+  url: string;
+  bytes: number;
+}
+
+async function toInlineImage(image: {
+  path: string;
+  mimeType: "image/jpeg" | "image/png";
+}): Promise<InlineImage> {
+  let stored: GeneratedImage;
+  try {
+    stored = await readGeneratedImage(image.path);
+  } catch (error) {
+    if (error instanceof GeneratedImageError && error.code === "too-large") {
+      throw new UserFacingError("image.too-large", "图片超过 10 MiB 限制");
+    }
+    throw new UserFacingError("image.unsupported", "图片无法读取");
+  }
+  const expectedFormat = image.mimeType === "image/png" ? "png" : "jpeg";
+  if (stored.format !== expectedFormat) {
+    throw new UserFacingError("image.unsupported", "图片类型无效");
+  }
+  return {
+    url: `data:${image.mimeType};base64,${stored.bytes.toString("base64")}`,
+    bytes: stored.bytes.length,
+  };
 }
 
 export function surfaceActorKey(

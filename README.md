@@ -198,7 +198,8 @@ codexc service restart all
 ### OpenCode Go
 
 在 `codexc setup` 的“模型与提供商”中可配置独立 OpenCode Go Provider，并支持同一 Gateway 内
-多个账户（各自 Key、各自套餐额度）；当前开放 `deepseek-v4-flash` 和 `deepseek-v4-pro`，支持保留
+多个账户（各自 Key、各自套餐额度）；当前开放 `deepseek-v4-flash`、
+`deepseek-v4-flash-vision-exp` 和 `deepseek-v4-pro`，支持保留
 OpenAI 的切换模式和仅 OpenCode Go 固定模式。账户管理命令：
 
 ```bash
@@ -371,8 +372,10 @@ codexc doctor
 
 日常升级统一使用 `codexc update`。Git 源码安装会更新官方 `main` 并刷新 npm 全局命令，后台服务
 已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。旧版第三方 Provider 文件会在停机
-窗口内先自动备份，再迁移到 `~/.codex-connect/providers/<id>/`；已配置的 DeepSeek 会同步刷新
-受控官方模型目录并保留当前选择与逐模型设置，已废弃的 `[vision]` 配置段也会在备份后自动移除。
+窗口内先自动备份，再迁移到 `~/.codex-connect/providers/<id>/`；已配置的 DeepSeek 与 OpenCode Go
+会同步刷新受控官方模型目录并保留逐模型设置；首次升级时，OpenCode Go 仍使用旧默认 Flash 的账户
+会自动切换到 Flash Vision Exp，已主动选择 Pro 的账户不变，迁移完成后再手动选回 Flash 也会保留；
+已废弃的 `[vision]` 配置段会在备份后自动移除。
 该命令必须从本机终端执行。详细
 流程和失败处理见
 [`Git 源码安装`](docs/source-install.md)。

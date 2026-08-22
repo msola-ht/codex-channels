@@ -2009,7 +2009,10 @@ describe("JsonRpcClient", () => {
       "thread-1",
       [
         { type: "text", text: "测试输入" },
-        { type: "localImage", path: "/tmp/screenshot.png" },
+        {
+          type: "image",
+          url: "data:image/png;base64,AA==",
+        },
         { type: "localAudio", path: "/tmp/voice.ogg" },
         {
           type: "skill",
@@ -2045,7 +2048,7 @@ describe("JsonRpcClient", () => {
         clientUserMessageId: "codex_connect:request-1",
         input: [
           { type: "text", text: "测试输入", text_elements: [] },
-          { type: "localImage", path: "/tmp/screenshot.png" },
+          { type: "image", url: "data:image/png;base64,AA==" },
           { type: "localAudio", path: "/tmp/voice.ogg" },
           {
             type: "skill",

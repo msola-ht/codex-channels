@@ -336,7 +336,11 @@ function writeManagedProvider(
 
 function modelCatalog() {
   return `${JSON.stringify({
-    models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+    models: [
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek-v4-pro",
+    ].map((slug) => ({
       slug,
       display_name: slug,
       context_window: 1_048_576,

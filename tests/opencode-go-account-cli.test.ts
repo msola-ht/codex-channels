@@ -73,7 +73,7 @@ describe("OpenCode Go account CLI", () => {
     expect(configureRole).toHaveBeenCalledTimes(1);
     expect(configureRole).toHaveBeenCalledWith(
       "opencode-go",
-      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
       environment,
     );
   });
@@ -569,7 +569,11 @@ function testPrompter() {
 async function successfulCatalog() {
   return {
     catalog: {
-      models: ["deepseek-v4-flash", "deepseek-v4-pro"].map((slug) => ({
+      models: [
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "deepseek-v4-pro",
+      ].map((slug) => ({
         slug,
         context_window: 1_000_000,
         default_reasoning_level: "high",

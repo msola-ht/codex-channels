@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import pino from "pino";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import {
   conversationCommandNames,
@@ -30,6 +34,20 @@ const message: FeishuInboxMessage = {
 const imagePort = {
   download: vi.fn(),
 };
+
+const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-feishu-images-"));
+const pngImagePath = join(imageFixtureDirectory, "image.png");
+const jpegImagePath = join(imageFixtureDirectory, "image.jpg");
+writeFileSync(pngImagePath, Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]), { mode: 0o600 });
+writeFileSync(jpegImagePath, Buffer.from([0xff, 0xd8, 0xff]), { mode: 0o600 });
+const pngDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+const jpegDataUrl = "data:image/jpeg;base64,/9j/";
+
+afterAll(() => {
+  rmSync(imageFixtureDirectory, { recursive: true, force: true });
+});
 
 function createImageMessage(
   overrides: Partial<Extract<FeishuInboxMessage, { kind: "image" }>> = {},
@@ -1439,7 +1457,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const download = vi.fn(async () => ({
-      path: "/private/uploads/feishu/image.png",
+      path: pngImagePath,
       mimeType: "image/png" as const,
       bytes: 8,
     }));
@@ -1458,7 +1476,7 @@ describe("Feishu conversation adapter", () => {
     );
     expect(submit).toHaveBeenCalledWith(message.target, {
       text: "请查看这张图片并根据图片内容协助我。",
-      localImages: [{ path: "/private/uploads/feishu/image.png" }],
+      images: [{ url: pngDataUrl }],
     });
     expect(fixture.sent).toEqual([]);
   });
@@ -1628,7 +1646,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const download = vi.fn(async () => ({
-      path: "/private/uploads/feishu/image.png",
+      path: pngImagePath,
       mimeType: "image/png" as const,
       bytes: 8,
     }));
@@ -1649,7 +1667,7 @@ describe("Feishu conversation adapter", () => {
     );
     expect(submit).toHaveBeenCalledWith(message.target, {
       text: "收得到吗",
-      localImages: [{ path: "/private/uploads/feishu/image.png" }],
+      images: [{ url: pngDataUrl }],
     });
     expect(fixture.sent).toEqual([]);
   });
@@ -1663,12 +1681,12 @@ describe("Feishu conversation adapter", () => {
     }));
     const download = vi.fn()
       .mockResolvedValueOnce({
-        path: "/private/uploads/feishu/first.png",
+        path: pngImagePath,
         mimeType: "image/png" as const,
         bytes: 8,
       })
       .mockResolvedValueOnce({
-        path: "/private/uploads/feishu/second.jpg",
+        path: jpegImagePath,
         mimeType: "image/jpeg" as const,
         bytes: 9,
       });
@@ -1695,9 +1713,9 @@ describe("Feishu conversation adapter", () => {
     expect(submit).toHaveBeenCalledTimes(1);
     expect(submit).toHaveBeenCalledWith(message.target, {
       text: "比较这些图片",
-      localImages: [
-        { path: "/private/uploads/feishu/first.png" },
-        { path: "/private/uploads/feishu/second.jpg" },
+      images: [
+        { url: pngDataUrl },
+        { url: jpegDataUrl },
       ],
     });
     expect(fixture.sent).toEqual([]);
@@ -1712,12 +1730,12 @@ describe("Feishu conversation adapter", () => {
     }));
     const download = vi.fn()
       .mockResolvedValueOnce({
-        path: "/private/uploads/feishu/first.png",
+      path: pngImagePath,
         mimeType: "image/png" as const,
         bytes: 8,
       })
       .mockResolvedValueOnce({
-        path: "/private/uploads/feishu/second.jpg",
+        path: jpegImagePath,
         mimeType: "image/jpeg" as const,
         bytes: 9,
       });
@@ -1739,9 +1757,9 @@ describe("Feishu conversation adapter", () => {
     ]);
     expect(submit).toHaveBeenCalledWith(message.target, {
       text: "飞书多图发送测试",
-      localImages: [
-        { path: "/private/uploads/feishu/first.png" },
-        { path: "/private/uploads/feishu/second.jpg" },
+      images: [
+        { url: pngDataUrl },
+        { url: jpegDataUrl },
       ],
     });
     expect(fixture.sent).toEqual([]);
@@ -1785,7 +1803,7 @@ describe("Feishu conversation adapter", () => {
       fixture.outbox,
       {
         download: async () => ({
-          path: "/private/uploads/feishu/image.jpg",
+          path: jpegImagePath,
           mimeType: "image/jpeg",
           bytes: 3,
         }),

@@ -751,6 +751,7 @@ export class FeishuConversationAdapter {
               }),
         localImages: images.map((image) => ({
           path: image.path,
+          mimeType: image.mimeType,
           bytes: image.bytes,
         })),
       };

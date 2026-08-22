@@ -183,6 +183,30 @@ export function parseOpenCodeGoPricingPage(html) {
     const parsedName = parsePricingDisplayName(row[0]);
     const endpointRecord = endpointsByDisplayName.get(normalizeModelName(parsedName.displayName));
     if (!endpointRecord) throw new Error(`OpenCode Go 官方价格模型缺少端点 ID：${row[0]}`);
+    const limitedFree = row.slice(1).every((value) => value === "-");
+    const entry = rowsByModel.get(endpointRecord.model) ?? {
+      ...endpointRecord,
+      rows: [],
+      offPeak: null,
+      peak: null,
+      pricingStatus: null,
+    };
+    if (limitedFree) {
+      if (parsedName.maximumInputTokens !== null
+        || parsedName.timeOfDay !== null
+        || entry.rows.length > 0
+        || entry.offPeak !== null
+        || entry.peak !== null
+        || entry.pricingStatus !== null) {
+        throw new Error(`OpenCode Go 官方限时免费模型条目无效：${row[0]}`);
+      }
+      entry.pricingStatus = "limited-free";
+      rowsByModel.set(endpointRecord.model, entry);
+      continue;
+    }
+    if (entry.pricingStatus !== null) {
+      throw new Error(`OpenCode Go 官方限时免费模型条目无效：${row[0]}`);
+    }
     const price = {
       maximumInputTokens: parsedName.maximumInputTokens,
       input: parseUsd(row[1], false),
@@ -190,12 +214,6 @@ export function parseOpenCodeGoPricingPage(html) {
       cachedRead: parseUsd(row[3], false),
       cachedWrite: parseUsd(row[4], true),
       includedUsageUsd: parseUsd(row[5], false),
-    };
-    const entry = rowsByModel.get(endpointRecord.model) ?? {
-      ...endpointRecord,
-      rows: [],
-      offPeak: null,
-      peak: null,
     };
     if (parsedName.timeOfDay === null) {
       entry.rows.push(price);
@@ -210,7 +228,11 @@ export function parseOpenCodeGoPricingPage(html) {
   if (rowsByModel.size === 0) throw new Error("OpenCode Go 官方价格表没有模型");
   const models = {};
   for (const model of [...rowsByModel.keys()].sort()) {
-    const { endpoint, aiSdkPackage, rows, offPeak, peak } = rowsByModel.get(model);
+    const { endpoint, aiSdkPackage, rows, offPeak, peak, pricingStatus } = rowsByModel.get(model);
+    if (pricingStatus === "limited-free") {
+      models[model] = { endpoint, aiSdkPackage, pricingStatus };
+      continue;
+    }
     if (offPeak !== null || peak !== null) {
       if (offPeak === null || peak === null) {
         throw new Error(`OpenCode Go 官方价格缺少完整峰谷档位：${model}`);
@@ -248,7 +270,7 @@ export function parseOpenCodeGoPricingPage(html) {
       : { endpoint, aiSdkPackage, tiers: normalizedRows, includedUsageUsd };
   }
   return validateBaseline({
-    schemaVersion: 2,
+    schemaVersion: 3,
     source: openCodeGoPageUrl,
     sourceUpdatedAt,
     currency: "USD",
@@ -270,7 +292,7 @@ function withoutMaximumInputTokens(price) {
 
 function validateBaseline(value) {
   if (!isRecord(value)
-    || value.schemaVersion !== 2
+    || value.schemaVersion !== 3
     || value.source !== openCodeGoPageUrl
     || value.currency !== "USD"
     || value.unit !== "per_million_tokens"

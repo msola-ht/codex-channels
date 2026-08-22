@@ -934,7 +934,11 @@ export class TelegramSurface {
                   quotedText,
                 ),
               }),
-        localImages: [{ path: image.path, bytes: image.bytes }],
+        localImages: [{
+          path: image.path,
+          mimeType: image.mimeType,
+          bytes: image.bytes,
+        }],
       });
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);

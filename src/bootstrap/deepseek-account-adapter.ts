@@ -1,4 +1,5 @@
 import { loadDeepseekAccountCredential } from "../../runtime/model-provider-runtime.mjs";
+import { deepseekProviderDefinition } from "../../runtime/model-provider-definitions.mjs";
 import { readBoundedFetchBody } from "./bounded-fetch-body.js";
 
 import type {
@@ -17,8 +18,12 @@ export function createDeepseekAccountAdapter(
 ): ProviderAccountAdapter {
   const environment = options.environment ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const provider = options.provider ?? deepseekProviderDefinition.id;
+  if (provider !== deepseekProviderDefinition.id) {
+    throw new Error(`DeepSeek 账户适配器不支持 Provider：${provider}`);
+  }
   return {
-    provider: "deepseek",
+    provider,
     async accountUsage() {
       try {
         const apiKey = loadDeepseekAccountCredential(environment);
@@ -53,6 +58,7 @@ export function createDeepseekAccountAdapter(
 export interface DeepseekAccountAdapterOptions {
   environment?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
+  provider?: string;
 }
 
 function parseBalanceResponse(value: unknown): ProviderAccountUsage {

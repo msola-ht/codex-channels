@@ -154,7 +154,7 @@ describe("Thread Queue Client", () => {
 
   it("keeps Queue summaries platform-independent and does not expose paths", () => {
     const image = toThreadQueueItem({
-      ...submission([{ type: "localImage", path: "/private/user/secret.png" }], "image-1"),
+      ...submission([{ type: "image", url: "data:image/png;base64,AA==" }], "image-1"),
     } as never);
     expect(image).toMatchObject({
       id: "image-1",

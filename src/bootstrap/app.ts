@@ -10,7 +10,6 @@ import {
   initializeProjectRulesAtRoot,
 } from "../../runtime/project-rules.mjs";
 import {
-  deepseekProviderDefinition,
   loadManagedModelProviderDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
@@ -103,11 +102,7 @@ import {
 } from "./surface-composition.js";
 import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
-import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
-import {
-  createOpencodeGoAccountAdapter,
-  createOpencodeGoRemainingUsageReader,
-} from "./opencode-go-account-adapter.js";
+import { createOpencodeGoRemainingUsageReader } from "./opencode-go-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import {
   checkOpenAiConnectivity,
@@ -119,13 +114,16 @@ import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
 import {
-  DeepseekModelPricingResolver,
   ProviderModelPricingResolver,
 } from "./deepseek-model-pricing.js";
-import { OpenCodeGoModelPricingResolver } from "./opencode-go-model-pricing.js";
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
+import {
+  createManagedProviderAccountAdapters,
+  createManagedProviderPricingResolvers,
+  managedProviderNeedsExchangeRate,
+} from "./managed-provider-capabilities.js";
 
 const bindingRestoreRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 const bindingRestoreEscalationAttempts = 3;
@@ -311,22 +309,21 @@ export class GatewayApplication {
       fetchImpl: createProxyFetch(config.networkProxy),
       logger,
     });
-    const pricingResolvers = new Map<string, ModelPricingResolver>([
-      [deepseekProviderDefinition.id, new DeepseekModelPricingResolver({
-        exchangeRate: () => this.exchangeRate.resolve(),
-      })],
-    ]);
-    for (const definition of providerDefinitions) {
-      if (definition.accountId !== undefined) {
-        pricingResolvers.set(definition.id, new OpenCodeGoModelPricingResolver());
-      }
-    }
+    const pricingResolvers = createManagedProviderPricingResolvers(
+      providerDefinitions,
+      { exchangeRate: () => this.exchangeRate.resolve() },
+    );
     this.pricingResolver = new ProviderModelPricingResolver(
       this.modelPricing,
       pricingResolvers,
     );
-    this.modelPricingNeedsExchangeRate = primaryProvider === deepseekProviderDefinition.id
-      || managedProviders.some(({ provider }) => provider === deepseekProviderDefinition.id);
+    this.modelPricingNeedsExchangeRate = managedProviderNeedsExchangeRate(
+      providerDefinitions,
+      new Set([
+        primaryProvider,
+        ...managedProviders.map(({ provider }) => provider),
+      ]),
+    );
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
         customPrimaryProvider?.id ?? primaryProvider,
@@ -418,20 +415,17 @@ export class GatewayApplication {
     );
     const accountAdapters = [
       createOpenAiAccountAdapter(this.codex),
-      createDeepseekAccountAdapter({
-        fetchImpl: createProxyFetch(config.networkProxy),
-      }),
+      ...createManagedProviderAccountAdapters(
+        providerDefinitions,
+        {
+          environment: process.env,
+          fetchImpl: createProxyFetch(config.networkProxy),
+          metricsDatabasePath: modelRequestMetricsDatabasePath(
+            config.stateDatabasePath,
+          ),
+        },
+      ),
     ];
-    for (const definition of providerDefinitions) {
-      if (definition.accountId === undefined) continue;
-      accountAdapters.push(createOpencodeGoAccountAdapter({
-        provider: definition.id,
-        fetchImpl: createProxyFetch(config.networkProxy),
-        metricsDatabasePath: modelRequestMetricsDatabasePath(
-          config.stateDatabasePath,
-        ),
-      }));
-    }
     const providerAccounts = new ProviderAccountService(accountAdapters);
     const service = new ConversationService(
       this.codex,

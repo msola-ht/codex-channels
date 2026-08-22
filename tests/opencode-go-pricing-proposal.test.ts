@@ -12,7 +12,7 @@ import {
 describe("OpenCode Go pricing proposal", () => {
   it("maps the official Usage pricing table to endpoint model IDs", () => {
     expect(parseOpenCodeGoPricingPage(pricingPageFixture())).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",
@@ -57,6 +57,11 @@ describe("OpenCode Go pricing proposal", () => {
           }],
           includedUsageUsd: 60,
         },
+        "ox-alpha-free": {
+          endpoint: "https://opencode.ai/zen/go/v1/chat/completions",
+          aiSdkPackage: "@ai-sdk/openai-compatible",
+          pricingStatus: "limited-free",
+        },
       },
     });
   });
@@ -68,6 +73,15 @@ describe("OpenCode Go pricing proposal", () => {
         "",
       ),
     )).toThrow("缺少完整峰谷档位");
+  });
+
+  it("rejects a partially blank price row as an invalid limited-free model", () => {
+    expect(() => parseOpenCodeGoPricingPage(
+      pricingPageFixture().replace(
+        "<tr><td>Ox Alpha Free</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>",
+        "<tr><td>Ox Alpha Free</td><td>$0</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>",
+      ),
+    )).toThrow("美元价格无效");
   });
 
   it("fails closed when the official Peak hour description is missing", () => {
@@ -124,10 +138,12 @@ function pricingPageFixture(): string {
       <tr><td>Qwen3.7 Plus (> 256K tokens)</td><td>$1.20</td><td>$4.80</td><td>$0.12</td><td>$1.50</td><td>$60</td></tr>
       <tr><td>DeepSeek V4 Flash (Off-Peak)</td><td>$0.22</td><td>$0.66</td><td>$0.007</td><td>-</td><td>$15</td></tr>
       <tr><td>DeepSeek V4 Flash (Peak)</td><td>$0.44</td><td>$1.32</td><td>$0.014</td><td>-</td><td>$15</td></tr>
+      <tr><td>Ox Alpha Free</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
     </tbody></table>
     <table><thead><tr><th>Model</th><th>Model ID</th><th>Endpoint</th><th>AI SDK Package</th></tr></thead><tbody>
       <tr><td>Qwen3.7 Plus</td><td>qwen3.7-plus</td><td>https://opencode.ai/zen/go/v1/messages</td><td>@ai-sdk/anthropic</td></tr>
       <tr><td>DeepSeek V4 Flash</td><td>deepseek-v4-flash</td><td>https://opencode.ai/zen/go/v1/chat/completions</td><td>@ai-sdk/openai-compatible</td></tr>
+      <tr><td>Ox Alpha Free</td><td>ox-alpha-free</td><td>https://opencode.ai/zen/go/v1/chat/completions</td><td>@ai-sdk/openai-compatible</td></tr>
     </tbody></table>
     <p><strong>DeepSeek V4 Flash / Pro:</strong> Peak hours are 01:00-04:00 and 06:00-10:00 UTC.</p>
     <footer><time datetime="2026-08-14T05:48:32.000Z">Aug 14, 2026</time></footer>

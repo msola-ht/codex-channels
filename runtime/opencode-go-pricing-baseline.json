@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "source": "https://opencode.ai/docs/go/",
-  "sourceUpdatedAt": "2026-08-17T18:54:03.000Z",
+  "sourceUpdatedAt": "2026-08-21T14:49:25.000Z",
   "currency": "USD",
   "unit": "per_million_tokens",
   "timezone": "UTC",
@@ -28,6 +28,25 @@
         }
       },
       "includedUsageUsd": 30
+    },
+    "deepseek-v4-flash-vision-exp": {
+      "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+      "aiSdkPackage": "@ai-sdk/openai-compatible",
+      "peakOffPeak": {
+        "offPeak": {
+          "input": 0.22,
+          "output": 0.66,
+          "cachedRead": 0.007,
+          "cachedWrite": null
+        },
+        "peak": {
+          "input": 0.44,
+          "output": 1.32,
+          "cachedRead": 0.014,
+          "cachedWrite": null
+        }
+      },
+      "includedUsageUsd": 15
     },
     "deepseek-v4-pro": {
       "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
@@ -185,6 +204,20 @@
       "cachedRead": 0.06,
       "cachedWrite": null,
       "includedUsageUsd": 60
+    },
+    "muse-spark-1.2-contributor": {
+      "endpoint": "https://opencode.ai/zen/go/v1/responses",
+      "aiSdkPackage": "@ai-sdk/openai",
+      "input": 0.1,
+      "output": 0.2,
+      "cachedRead": 0.002,
+      "cachedWrite": null,
+      "includedUsageUsd": 60
+    },
+    "ox-alpha-free": {
+      "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+      "aiSdkPackage": "@ai-sdk/openai-compatible",
+      "pricingStatus": "limited-free"
     },
     "qwen3.6-plus": {
       "endpoint": "https://opencode.ai/zen/go/v1/messages",

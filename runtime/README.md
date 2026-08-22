@@ -14,8 +14,11 @@
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
-  `loadManagedModelProviderDefinitions` 按 OpenCode Go 账户注册表动态生成
-  `opencode-go-<账户>` 实例。
+  `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 OpenCode
+  Go 账户注册表动态生成 `opencode-go-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
+  更新、计价、账户和汇率需求，允许显式无更新/无计价/无账户能力。账户实例继承共享定义；
+  `loadManagedModelProviderWatcherDefinitions` 额外保留未配置的共享目录，watcher 再按 Provider ID
+  合并并去重文件路径。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
   （`accounts.json`）、账户目录与管理标记，以及旧版单账户配置原地迁移为默认账户
   `opencode-go`（新增账户才使用 `opencode-go-<账户>`）；Key 不进入注册表。
@@ -25,8 +28,8 @@
 - `deepseek-pricing-baseline.json`：保存从 DeepSeek 官方价格页审查后的人民币每百万 Token 单价、
   北京时间峰谷区间和生效日期；Bootstrap 只读使用，自动检查只能通过 Draft PR 提议更新。
 - `opencode-go-pricing-baseline.json`：保存 OpenCode Go 官方页面全部模型的美元每百万 Token 单价、
-  Peak/Off-Peak 时段（UTC）、长上下文档位、套餐包含用量、端点与 SDK 协议；运行时只为已开放
-  模型按请求时间生成请求价格快照。
+  Peak/Off-Peak 时段（UTC）、长上下文档位、套餐包含用量、端点与 SDK 协议，并明确记录未给出
+  数值价格的限时免费模型；运行时只为已开放且有数值价格的模型按请求时间生成请求价格快照。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照；按最早 `resetsAt` 失效前缓存，失败时短时
   退避后重试，缺失或已过期的重置时间同样短时退避，避免每个模型请求重复查询；快照随请求指标

@@ -9,6 +9,10 @@ import {
   ProviderSettingsWatcher,
   type ProviderSettingsWatcherOptions,
 } from "../src/bootstrap/provider-settings-watcher.js";
+import {
+  opencodeGoAccountMarkerPath,
+  writeOpencodeGoAccounts,
+} from "../runtime/opencode-go-accounts.mjs";
 
 const logger = pino({ level: "silent" });
 
@@ -92,6 +96,33 @@ describe("ProviderSettingsWatcher", () => {
     expect(stateEvents).toEqual(["scheduled", "restarting", "applied"]);
   });
 
+  it("GO 多账户共享目录变化时合并默认账户定义并只重启一次", async () => {
+    const environment = {
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    };
+    writeOpencodeGoAccounts(environment, [
+      { id: "opencode-go", default: true },
+      { id: "lunare", default: false },
+    ]);
+    const scheduledProviders: string[][] = [];
+    const instance = createWatcher({
+      environment,
+      onStateChange: (change) => {
+        if (change.kind === "scheduled") scheduledProviders.push(change.providers);
+      },
+    });
+
+    writeCatalog('{"models":[{"slug":"deepseek-v4-flash"}]}\n');
+    await instance.checkNow();
+
+    expect(restartCalls).toEqual(["restart"]);
+    expect(scheduledProviders).toEqual([
+      ["opencode-go", "opencode-go-lunare"],
+    ]);
+  });
+
   it("校验失败时不更新基线，修复后触发重启", async () => {
     const instance = createWatcher();
     writeCatalog('{"models":[]}\n');
@@ -127,6 +158,32 @@ describe("ProviderSettingsWatcher", () => {
     rmSync(catalogPath(), { recursive: true, force: true });
     writeCatalog('{"models":[{"slug":"deepseek-v4-flash"}]}\n');
     await instance.checkNow();
+    expect(restartCalls).toEqual(["restart"]);
+    expect(stateEvents).toEqual(["scheduled", "restarting", "applied"]);
+  });
+
+  it("合并 OpenCode Go 共享目录与账户标记，账户变更只触发一次 Provider 重启", async () => {
+    const environment = {
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    };
+    writeOpencodeGoAccounts(environment, [
+      { id: "opencode-go", default: true },
+      { id: "lunare", default: false },
+    ]);
+    const defaultMarkerPath = opencodeGoAccountMarkerPath(environment, "opencode-go");
+    const accountMarkerPath = opencodeGoAccountMarkerPath(environment, "lunare");
+    mkdirSync(dirname(defaultMarkerPath), { recursive: true, mode: 0o700 });
+    mkdirSync(dirname(accountMarkerPath), { recursive: true, mode: 0o700 });
+    writeFileSync(defaultMarkerPath, "default-v1\n");
+    writeFileSync(accountMarkerPath, "lunare-v1\n");
+
+    const instance = createWatcher({ environment });
+    writeFileSync(defaultMarkerPath, "default-v2\n");
+    writeFileSync(accountMarkerPath, "lunare-v2\n");
+    await instance.checkNow();
+
     expect(restartCalls).toEqual(["restart"]);
     expect(stateEvents).toEqual(["scheduled", "restarting", "applied"]);
   });
