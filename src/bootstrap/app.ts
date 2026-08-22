@@ -604,6 +604,7 @@ export class GatewayApplication {
         releaseThread: (target, force) => this.releaseThread(target, force),
       },
       this.codex,
+      this.codex,
     );
     this.output.subscribe("conversation-background-release", async (event) => {
       if (event.type !== "turn.completed" || !this.router.isBackgroundThread(event.threadId)) {
@@ -766,9 +767,20 @@ export class GatewayApplication {
       const queueChanged = toThreadQueueChangedEvent(notification);
       if (queueChanged) {
         service.invalidateQueueSnapshot(queueChanged.threadId);
+        service.invalidateRevertSnapshot(queueChanged.threadId);
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        if (
+          coreEvent.type === "turn.started"
+          || coreEvent.type === "turn.completed"
+          || coreEvent.type === "thread.reverted"
+          || coreEvent.type === "thread.closed"
+          || coreEvent.type === "thread.archived"
+          || coreEvent.type === "thread.deleted"
+        ) {
+          service.invalidateRevertSnapshot(coreEvent.threadId);
+        }
         if (coreEvent.type === "turn.started") {
           // A TUI or another App Server client may have consumed a native Queue
           // entry. Pending model/effort/Fast/Plan choices are Conversation-local

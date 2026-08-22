@@ -11,6 +11,7 @@ import {
   parseReviewTarget,
   parseSessionListView,
   parseSkillInvocation,
+  parseThreadRevertOperation,
   parseThreadQueueOperation,
   parseThreadSectionOperation,
   parseWorkspacePermissionCommand,
@@ -30,6 +31,7 @@ export {
   pluginCommandUsageText,
   sessionCommandUsageText,
   threadQueueCommandUsageText,
+  threadRevertCommandUsageText,
   threadSectionCommandUsageText,
   type McpDetailView,
   type PluginListView,
@@ -51,6 +53,7 @@ export const conversationCommandNames = [
   "workspaceperm",
   "stop",
   "queue",
+  "revert",
   "rename",
   "compact",
   "fork",
@@ -112,6 +115,14 @@ export type ConversationCommandResult =
   | {
       kind: "thread-queue";
       result: Awaited<ReturnType<ConversationUseCases["queueList"]>>;
+    }
+  | {
+      kind: "thread-revert";
+      result: Awaited<ReturnType<ConversationUseCases["revertList"]>>;
+    }
+  | {
+      kind: "thread-revert-preview";
+      preview: Awaited<ReturnType<ConversationUseCases["revertPreview"]>>;
     }
   | { kind: "status"; status: ReturnType<ConversationUseCases["status"]> }
   | {
@@ -241,6 +252,7 @@ export type ConversationCommandOutcome =
       totalItemCount: number;
     }
   | { type: "thread-queue.started"; turnId: string }
+  | { type: "thread.reverted"; threadId: string; beforeTurnId: string }
   | { type: "thread.renamed"; name: string }
   | { type: "thread.compaction-requested" }
   | { type: "thread.forked"; threadId: string }
@@ -575,6 +587,34 @@ export class ConversationCommandService {
         return {
           kind: "outcome",
           outcome: { type: "thread-queue.started", turnId: result.turnId },
+        };
+      }
+      case "revert": {
+        const operation = parseThreadRevertOperation(argumentsText);
+        if (operation.type === "list") {
+          return {
+            kind: "thread-revert",
+            result: await this.conversations.revertList(target, operation.page),
+          };
+        }
+        if (operation.type === "preview") {
+          return {
+            kind: "thread-revert-preview",
+            preview: await this.conversations.revertPreview(
+              target,
+              operation.selector,
+              actorId,
+            ),
+          };
+        }
+        const result = await this.conversations.revertConfirm(target, operation.token, actorId);
+        return {
+          kind: "outcome",
+          outcome: {
+            type: "thread.reverted",
+            threadId: result.threadId,
+            beforeTurnId: result.beforeTurnId,
+          },
         };
       }
       case "rename":

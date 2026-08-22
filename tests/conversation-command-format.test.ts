@@ -19,6 +19,8 @@ import {
   formatConversationPlugins,
   formatConversationStatus,
   formatConversationThreadQueue,
+  formatConversationThreadRevert,
+  formatConversationThreadRevertPreview,
   formatConversationUsage,
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
@@ -53,6 +55,55 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
     expect(empty).toContain("Queue 为空");
+  });
+
+  it("renders bounded Revert selection and destructive confirmation warnings", () => {
+    const listed = formatConversationThreadRevert({
+      kind: "thread-revert",
+      result: {
+        threadId: "thread-1",
+        turns: [{
+          id: "turn-1",
+          status: "completed",
+          startedAt: 1,
+          completedAt: 2,
+          durationMs: 1_000,
+          inputType: "text",
+          textPreview: "需要回退的任务",
+        }],
+        selectors: ["1"],
+        page: 1,
+        hasNextPage: false,
+      },
+    });
+    expect(listed).toContain("turn-1");
+    expect(listed).toContain("最近五分钟");
+
+    const preview = formatConversationThreadRevertPreview({
+      kind: "thread-revert-preview",
+      preview: {
+        threadId: "thread-1",
+        beforeTurnId: "turn-1",
+        turn: {
+          id: "turn-1",
+          status: "completed",
+          startedAt: 1,
+          completedAt: 2,
+          durationMs: 1_000,
+          inputType: "text",
+          textPreview: "需要回退的任务",
+        },
+        affectedTurnCount: 2,
+        activeTurnId: "turn-active",
+        queueItemCount: 2,
+        token: "one-time-token",
+      },
+    });
+    expect(preview).toContain("会被中断");
+    expect(preview).toContain("按原顺序保留");
+    expect(preview).toContain("不会恢复工作区文件");
+    expect(preview).toContain("其他客户端");
+    expect(preview).toContain("/revert confirm one-time-token");
   });
 
   it("renders occupancy release results", () => {

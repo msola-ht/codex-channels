@@ -6,7 +6,8 @@
 
 - `index.ts`：向进程入口公开 `GatewayApplication`、进程生命周期入口和安全的 Gateway 所有权错误。
 - `app.ts`：校验 Codex 版本，装配 Transport、Client、Core、Router 和 Storage；把同一 Client 的
-  原生 Thread Queue 端口注入 Application，并把 Queue changed 通知仅用于失效短期选择快照；处理启动、重连、
+  原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
+  仅用于失效短期选择快照和校正 Core 派生状态；处理启动、重连、
   订阅恢复与关闭，并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；

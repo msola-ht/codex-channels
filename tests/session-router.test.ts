@@ -32,6 +32,7 @@ function thread(id: string, status: ThreadStatus): ThreadSnapshot {
     source: "cli",
     name: null,
     activeTurnId: null,
+    historyMode: "paginated",
   };
 }
 

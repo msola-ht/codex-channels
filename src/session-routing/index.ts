@@ -12,6 +12,7 @@ export {
   type ThreadSnapshot,
   type ThreadSectionSnapshot,
   type ThreadSource,
+  type ThreadHistoryMode,
   type ThreadStatus,
 } from "./thread-port.js";
 export {

@@ -63,6 +63,8 @@
   通过 Client 返回条目种类、可编辑标记和有界安全预览，不传播官方 `UserInput` 或本地路径。
   切换到已有 Queue 的 Thread 时沿用该 Thread 自身设置并清除当前会话待生效偏好；后台完成释放前
   重新查询 Queue 和按 Thread 活动 Turn，避免自动派发期间解除绑定。
+- `thread-history-port.ts`：定义分页 Turn 摘要、历史模式和 Revert 的稳定端口；只为当前会话提供
+  有界列表、预览和一次性确认结果，不保存完整历史或工作区文件状态。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
   输入只允许文本、PNG/JPEG/WebP/非动画 GIF Base64 Data URL 图片、绝对本地音频路径、已由 Client 从当前 Workspace
@@ -76,6 +78,10 @@ Thread 的权威状态仍来自 App Server，本模块只编排请求和必要�
 Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默认以 25 条一页维护五分钟、
 不含正文的 Conversation 选择快照，数字选择器只使用该快照，完整 ID 则重新复核权威列表。
 `thread/queue/changed` 只使快照失效，不触发网络读取；Queue 非空时转移、接管或转后台失败关闭。
+新建 Thread 使用分页历史模式；`/revert list`、预览和确认只使用最近一次有效页面快照，执行前重新读取
+历史、活动 Turn 和完整 Queue，并在并发变化时失败关闭；Queue 按真实 0.148 合同保留原顺序且不会因 Revert 自动启动。成功的
+`thread.reverted` 会清除 Core 的产物、计划、目标、上下文压缩、用量与计时等派生展示缓存；不持久化
+Turn/Item 历史，也不承诺恢复工作区文件。
 后台 Thread 完成后只释放后台绑定，不由 Gateway 手动派发下一 Turn。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 按当前

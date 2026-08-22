@@ -361,6 +361,81 @@ describe("ConversationCore", () => {
     expect(core.goal("thread-1")).toBeUndefined();
   });
 
+  it("clears derived Thread displays on Revert but keeps the active turn for interruption", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      foregroundThreadId: () => "thread-1",
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    core.handle({ type: "turn.started", threadId: "thread-1", turnId: "turn-1" });
+    core.handle({
+      type: "thread.tokenUsage.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      tokenUsage: {
+        total: breakdown(10_000),
+        last: breakdown(1_000),
+        modelContextWindow: 200_000,
+      },
+    });
+    core.handle({
+      type: "thread.goal.updated",
+      threadId: "thread-1",
+      goal: {
+        threadId: "thread-1",
+        objective: "保留当前任务",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 1,
+        timeUsedSeconds: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    });
+    core.handle({
+      type: "turn.diff.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      diff: "diff --git a/a b/a",
+    });
+    core.handle({
+      type: "turn.plan.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      explanation: null,
+      plan: [{ step: "检查", status: "inProgress" }],
+    });
+    core.handle({
+      type: "item.operation.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      operation: {
+        itemId: "compact-1",
+        kind: "contextCompaction",
+        status: "completed",
+      },
+    });
+
+    expect(core.tokenUsage("thread-1")).toBeDefined();
+    expect(core.goal("thread-1")).toBeDefined();
+    expect(core.artifacts("thread-1")).toMatchObject({ diff: expect.any(String), plan: expect.any(Object) });
+    expect(core.contextCompactionCount("thread-1")).toBe(1);
+
+    core.handle({ type: "thread.reverted", threadId: "thread-1" });
+
+    expect(core.tokenUsage("thread-1")).toBeUndefined();
+    expect(core.goal("thread-1")).toBeUndefined();
+    expect(core.artifacts("thread-1")).toBeUndefined();
+    expect(core.contextCompactionCount("thread-1")).toBeUndefined();
+    expect(core.activeTurnForThread("thread-1")).toMatchObject({ turnId: "turn-1" });
+    await output.close();
+  });
+
   it("attaches only the completed turn's context usage to its output event", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

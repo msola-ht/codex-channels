@@ -330,6 +330,18 @@ export class ConversationCore {
       case "thread.goal.cleared":
         this.goalsByThread.delete(event.threadId);
         return;
+      case "thread.reverted":
+        // Revert changes durable history, not local files. Drop only derived
+        // displays; an active turn is left in activeByThread so the official
+        // interrupted turn/completed event can close it normally.
+        this.usageByThread.delete(event.threadId);
+        this.usageTurnByThread.delete(event.threadId);
+        this.goalsByThread.delete(event.threadId);
+        this.contextCompactionItemIdsByThread.delete(event.threadId);
+        this.artifactsByThread.delete(event.threadId);
+        this.timingByThread.delete(event.threadId);
+        this.disposeReasoning(event.threadId);
+        return;
       case "turn.diff.updated": {
         const current = this.artifactsByThread.get(event.threadId);
         this.artifactsByThread.set(event.threadId, {

@@ -159,8 +159,8 @@ describe("module boundaries", () => {
     const unsupportedMethods = [
       "thread/search",
       "thread/searchOccurrences",
-      "thread/turns/list",
       "thread/items/list",
+      "thread/rollback",
       "plugin/list",
       "plugin/search",
       "plugin/read",

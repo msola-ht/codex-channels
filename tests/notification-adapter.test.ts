@@ -523,7 +523,7 @@ describe("Notification adapter", () => {
     expect(toConversationInputEvent({
       method: "thread/reverted",
       params: { threadId: "thread-1" },
-    })).toBeUndefined();
+    })).toEqual({ type: "thread.reverted", threadId: "thread-1" });
     expect(toThreadStateEvent({
       method: "thread/reverted",
       params: { threadId: "thread-1" },

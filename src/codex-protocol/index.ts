@@ -8,6 +8,13 @@ export type { JsonValue } from "./generated/serde_json/JsonValue.js";
 export type { ServerNotification } from "./generated/ServerNotification.js";
 export type { ServerRequest } from "./generated/ServerRequest.js";
 export type { Thread } from "./generated/v2/Thread.js";
+export type { ThreadHistoryMode } from "./generated/v2/ThreadHistoryMode.js";
+export type { ThreadRevertParams } from "./generated/v2/ThreadRevertParams.js";
+export type { ThreadRevertResponse } from "./generated/v2/ThreadRevertResponse.js";
+export type { ThreadRevertedNotification } from "./generated/v2/ThreadRevertedNotification.js";
+export type { ThreadTurnsListParams } from "./generated/v2/ThreadTurnsListParams.js";
+export type { ThreadTurnsListResponse } from "./generated/v2/ThreadTurnsListResponse.js";
+export type { Turn } from "./generated/v2/Turn.js";
 export type { ConfigReadParams } from "./generated/v2/ConfigReadParams.js";
 export type { ConfigReadResponse } from "./generated/v2/ConfigReadResponse.js";
 export type {

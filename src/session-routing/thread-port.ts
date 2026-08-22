@@ -5,6 +5,7 @@ export type ThreadStatus =
   | { type: "active" };
 
 export type ThreadSource = "cli" | "vscode" | "appServer" | "other";
+export type ThreadHistoryMode = "legacy" | "paginated";
 
 export interface ThreadSectionSnapshot {
   id: string;
@@ -23,6 +24,7 @@ export interface ThreadSnapshot {
   status: ThreadStatus;
   cwd: string;
   source: ThreadSource;
+  historyMode: ThreadHistoryMode;
   activeTurnId: string | null;
 }
 

@@ -68,6 +68,7 @@ export const conversationCommandDescriptions = {
   workspaceperm: "查看或修改当前工作区权限",
   stop: "停止当前任务",
   queue: "管理 App Server 持久队列",
+  revert: "回退当前 Thread 的分页历史",
   rename: "命名当前会话",
   compact: "压缩当前上下文",
   fork: "分叉当前会话",
@@ -111,6 +112,7 @@ export const conversationCommandHelpSections = [
       "/stop · /queue add <文本> · /queue list [页码]",
       "/queue update <完整 ID 或列表序号> <文本> · /queue delete <完整 ID 或列表序号>",
       "/queue reorder <完整 ID 或列表序号> <目标位置> · /queue start [完整 ID 或列表序号]",
+      "/revert list [页码] · /revert <Turn ID 或列表序号> · /revert confirm <一次性令牌>",
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
       "/release · /release force",
@@ -222,6 +224,63 @@ export function formatConversationThreadQueue(
     "",
     "数字序号仅在最近五分钟的本会话列表快照内有效；也可使用完整 ID。",
   ].join("\n"));
+}
+
+export function formatConversationThreadRevert(
+  result: Extract<ConversationCommandResult, { kind: "thread-revert" }>,
+): string {
+  if (result.result.turns.length === 0) {
+    return toStructuredMarkdownList([
+      `分页历史 Turn（第 ${result.result.page} 页）`,
+      result.result.page > 1
+        ? `第 ${result.result.page} 页不存在，请返回 /revert list 1。`
+        : "当前页面没有可回退的 Turn。",
+    ].join("\n"));
+  }
+  return toStructuredMarkdownList([
+    `分页历史 Turn（第 ${result.result.page} 页）：`,
+    ...result.result.turns.map((turn, index) => {
+      const selector = result.result.selectors[index] ?? turn.id;
+      const preview = turn.textPreview ? ` · ${turn.textPreview}` : "";
+      return `${selector}. ${turn.id} · ${formatThreadTurnStatus(turn.status)}${turn.inputType ? ` · ${turn.inputType}` : ""}${preview}`;
+    }),
+    "",
+    "选择器只对最近五分钟的本会话列表页面有效；预览后必须确认。",
+    ...(result.result.page > 1 ? [`上一页：/revert list ${result.result.page - 1}`] : []),
+    ...(result.result.hasNextPage ? [`下一页：/revert list ${result.result.page + 1}`] : []),
+  ].join("\n"));
+}
+
+export function formatConversationThreadRevertPreview(
+  result: Extract<ConversationCommandResult, { kind: "thread-revert-preview" }>,
+): string {
+  const preview = result.preview;
+  return toStructuredMarkdownList([
+    "Revert 预览（尚未执行）",
+    `边界 Turn：${preview.beforeTurnId}${preview.turn.textPreview ? ` · ${preview.turn.textPreview}` : ""}`,
+    `将移除该 Turn 及其之后的历史，共 ${preview.affectedTurnCount} 条 Turn`,
+    `活动 Turn：${preview.activeTurnId ? `会被中断（${preview.activeTurnId}）` : "无"}`,
+    `当前 Queue：${preview.queueItemCount} 条（Revert 后按原顺序保留，不会自动启动）`,
+    "不会恢复工作区文件、命令副作用或外部 API/MCP 副作用。",
+    "确认完成前请勿从 TUI 或其他客户端向该 Thread 追加 Turn。",
+    "确认：/revert confirm " + preview.token,
+    "令牌五分钟内有效且只能使用一次。",
+  ].join("\n"));
+}
+
+function formatThreadTurnStatus(
+  status: Extract<ConversationCommandResult, { kind: "thread-revert" }>["result"]["turns"][number]["status"],
+): string {
+  switch (status) {
+    case "completed":
+      return "已完成";
+    case "interrupted":
+      return "已中断";
+    case "failed":
+      return "失败";
+    case "inProgress":
+      return "进行中";
+  }
 }
 
 export function formatConversationThreadSections(
@@ -440,6 +499,13 @@ export function formatConversationCommandOutcome(
       return toStructuredMarkdownList([
         "已启动 App Server Queue 条目",
         `Turn：${outcome.turnId}`,
+      ].join("\n"));
+    case "thread.reverted":
+      return toStructuredMarkdownList([
+        "已回退 Thread 历史",
+        `Thread：${outcome.threadId}`,
+        `边界 Turn：${outcome.beforeTurnId}`,
+        "工作区文件和外部副作用不会随历史回退。",
       ].join("\n"));
     case "thread.renamed":
       return toStructuredMarkdownList([

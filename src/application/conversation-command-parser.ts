@@ -15,6 +15,7 @@ export const sessionCommandUsageText = "用法：/sessions [页码] [filter <all
 export const archivedSessionCommandUsageText = "用法：/archived [页码] [filter <all|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]";
 export const threadSectionCommandUsageText = "用法：/section [list [页码] | create <名称> | rename <ID 或序号> <新名称> | move <ID 或序号> [before <会话选择器>] | remove | delete <ID 或序号> [confirm]]";
 export const threadQueueCommandUsageText = "用法：/queue add <文本> | /queue list [页码] | /queue update <完整 ID 或当前列表序号> <文本> | /queue delete <完整 ID 或当前列表序号> | /queue reorder <完整 ID 或当前列表序号> <目标位置> | /queue start [完整 ID 或当前列表序号]";
+export const threadRevertCommandUsageText = "用法：/revert list [页码] | /revert <Turn ID 或当前列表序号> | /revert confirm <一次性令牌>";
 
 export interface McpDetailView {
   section: "tools" | "resources" | "templates";
@@ -247,6 +248,32 @@ export function parseThreadQueueOperation(input: string):
       : { type: "start", selector: rest };
   }
   return usage();
+}
+
+export function parseThreadRevertOperation(input: string):
+  | { type: "list"; page: number }
+  | { type: "preview"; selector: string }
+  | { type: "confirm"; token: string } {
+  const normalized = input.trim();
+  if (normalized === "" || normalized === "list") return { type: "list", page: 1 };
+  const listMatch = /^list\s+(\d+)$/u.exec(normalized);
+  if (listMatch) {
+    const page = Number(listMatch[1]);
+    if (Number.isSafeInteger(page) && page >= 1 && page <= 20) return { type: "list", page };
+  }
+  const confirmMatch = /^confirm\s+(\S+)$/u.exec(normalized);
+  if (confirmMatch && confirmMatch[1]!.length <= 256) {
+    return { type: "confirm", token: confirmMatch[1]! };
+  }
+  if (/^\d+$/u.test(normalized)) {
+    const selector = Number(normalized);
+    if (Number.isSafeInteger(selector) && selector >= 1 && selector <= 500) {
+      return { type: "preview", selector: normalized };
+    }
+  } else if (/^\S+$/u.test(normalized) && normalized.length <= 128) {
+    return { type: "preview", selector: normalized };
+  }
+  throw new UserFacingError("revert.usage", threadRevertCommandUsageText);
 }
 
 export function parseSkillInvocation(input: string): { selector: string; task: string } {

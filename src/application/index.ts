@@ -40,6 +40,7 @@ export {
   pluginCommandUsageText,
   sessionCommandUsageText,
   threadQueueCommandUsageText,
+  threadRevertCommandUsageText,
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
@@ -162,6 +163,16 @@ export {
   type ThreadQueuePage,
   type ThreadQueuePort,
 } from "./thread-queue-port.js";
+export {
+  type ThreadHistoryPort,
+  type ThreadHistorySortDirection,
+  type ThreadRevertListResult,
+  type ThreadRevertPreview,
+  type ThreadRevertResult,
+  type ThreadTurnsListOptions,
+  type ThreadTurnsPage,
+  type ThreadTurnSummary,
+} from "./thread-history-port.js";
 export {
   type ThreadLockHolder,
   type ThreadOccupancyPort,

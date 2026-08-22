@@ -309,7 +309,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
 - Workspace：`/workspace`、`/workspaceperm`
-- 运行：`/status`、`/stop`、`/queue add <文本>`、`/queue list [页码]`、`/queue update <ID 或列表序号> <文本>`、`/queue delete <ID 或列表序号>`、`/queue reorder <ID 或列表序号> <位置>`、`/queue start [ID 或列表序号]`、`/compact`、`/fork`、`/review`、`/release`；Queue 由 App Server 持久保存，容量最多 100 条
+- 运行：`/status`、`/stop`、`/queue add <文本>`、`/queue list [页码]`、`/queue update <ID 或列表序号> <文本>`、`/queue delete <ID 或列表序号>`、`/queue reorder <ID 或列表序号> <位置>`、`/queue start [ID 或列表序号]`、`/revert list [页码]`、`/revert <Turn ID 或列表序号>`、`/revert confirm <一次性令牌>`、`/compact`、`/fork`、`/review`、`/release`；Queue 由 App Server 持久保存，容量最多 100 条
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`
@@ -326,6 +326,9 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 `/sessions` 与 `/archived` 支持分页和组合筛选；`/pin` 与 `/unpin` 管理当前会话的内置 Pinned 状态，
 `/section` 查看 App Server 原生全局分区，自定义分区写操作需要配置管理员。完整语法以 `/help` 为准，协议与安全边界见
 [`docs/index.md`](docs/index.md)。
+
+`/revert` 只对新建的分页历史 Thread 开放，必须先列出目标 Turn，再预览并使用一次性令牌确认；它只回退
+App Server 历史，不恢复工作区文件。完整边界与条件式真实合同见 [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)。
 
 `/release` 查看当前会话的 Codex Thread 是否被其他客户端占用；确认后 `/release force` 会结束占用进程并
 自动重试恢复，App Server 子进程被结束时服务会自动重启。

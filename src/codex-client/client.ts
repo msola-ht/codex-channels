@@ -31,6 +31,10 @@ import type {
   ThreadQueueItem,
   ThreadQueueListOptions,
   ThreadQueuePage,
+  ThreadHistoryPort,
+  ThreadTurnsListOptions,
+  ThreadTurnsPage,
+  ThreadRevertResult,
 } from "../application/index.js";
 import type {
   ConfigReadParams,
@@ -68,6 +72,10 @@ import type {
   ThreadQueueStartParams,
   ThreadQueueUpdateResponse,
   ThreadQueueUpdateParams,
+  ThreadRevertResponse,
+  ThreadTurnsListParams,
+  ThreadTurnsListResponse,
+  ThreadRevertParams,
   ThreadResumeResponse,
   ThreadStartResponse,
   ThreadSectionMoveResponse,
@@ -133,6 +141,10 @@ import {
   toThreadQueueStartResult,
   toThreadQueueUpdateResult,
 } from "./queue-adapter.js";
+import {
+  toThreadRevertResult,
+  toThreadTurnsPage,
+} from "./history-adapter.js";
 
 export interface ThreadDefaults {
   model?: string;
@@ -149,7 +161,8 @@ export class CodexAppServerClient implements
   McpQueryPort,
   PluginQueryPort,
   PermissionQueryPort,
-  ThreadQueuePort
+  ThreadQueuePort,
+  ThreadHistoryPort
 {
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -247,6 +260,7 @@ export class CodexAppServerClient implements
       method: "thread/start",
       params: {
         cwd,
+        historyMode: "paginated",
         approvalPolicy: options.approvalPolicy ?? "on-request",
         serviceName: codexConnectIntegrationId,
         ...(options.permissions !== undefined
@@ -259,6 +273,39 @@ export class CodexAppServerClient implements
       },
     }, { retryOverload: false });
     return toThreadSession(response);
+  }
+
+  async listThreadTurns(
+    threadId: string,
+    options: ThreadTurnsListOptions = {},
+  ): Promise<ThreadTurnsPage> {
+    const limit = options.limit ?? 25;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error("Codex Turn 列表页大小必须在 1 到 100 之间");
+    }
+    const response = await this.rpc.request<ThreadTurnsListResponse>({
+      method: "thread/turns/list",
+      params: {
+        threadId,
+        ...(options.cursor ? { cursor: options.cursor } : {}),
+        limit,
+        sortDirection: options.sortDirection ?? "desc",
+        itemsView: "summary",
+      } satisfies ThreadTurnsListParams,
+    }, { retryOverload: true });
+    const page = toThreadTurnsPage(response);
+    if (page.turns.length > limit) {
+      throw new Error("Codex Turn 列表响应超过请求页大小");
+    }
+    return page;
+  }
+
+  async revertThread(threadId: string, beforeTurnId: string): Promise<ThreadRevertResult> {
+    const response = await this.rpc.request<ThreadRevertResponse>({
+      method: "thread/revert",
+      params: { threadId, beforeTurnId } satisfies ThreadRevertParams,
+    }, { retryOverload: false });
+    return toThreadRevertResult(response);
   }
 
   async resumeThread(

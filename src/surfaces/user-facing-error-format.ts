@@ -4,6 +4,7 @@ import {
   pluginCommandUsageText,
   sessionCommandUsageText,
   threadQueueCommandUsageText,
+  threadRevertCommandUsageText,
 } from "../application/index.js";
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
@@ -113,6 +114,26 @@ export function formatSurfaceUserFacingError(
       return "Queue 已发生变化，请刷新 /queue list 后重试排序";
     case "queue.failed":
       return "Queue 操作失败，请稍后重试";
+    case "revert.usage":
+      return threadRevertCommandUsageText;
+    case "revert.unavailable":
+      return "当前 App Server 不支持分页历史回退";
+    case "revert.empty-history":
+      return "当前 Thread 还没有可回退的 Turn";
+    case "revert.legacy-thread":
+      return "当前 Thread 不支持回退；请新建分页历史会话";
+    case "revert.snapshot-required":
+      return "Turn 选择器只对最近五分钟的 /revert list 页面有效，请先重新列出历史";
+    case "revert.turn-not-found":
+      return "找不到指定 Turn，Revert 未执行";
+    case "revert.confirmation-invalid":
+      return "Revert 确认已失效，请重新生成预览";
+    case "revert.concurrent":
+      return "Thread 历史、活动任务或 Queue 已发生变化，请重新生成 Revert 预览";
+    case "revert.queue-unknown":
+      return "无法确认当前 Queue，Revert 已失败关闭";
+    case "revert.result-unknown":
+      return "Revert 结果未知；请求不会自动重试，请重新执行 /revert list 核对历史";
     case "workspace.missing":
       return `Workspace 不存在或未获授权：${detail(error, "workspaceId", "未知")}`;
     case "workspace.selector.required":

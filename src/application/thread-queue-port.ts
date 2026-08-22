@@ -24,6 +24,8 @@ export interface ThreadQueueItem {
 export interface ThreadQueuePage {
   items: ThreadQueueItem[];
   nextCursor: string | null;
+  /** Opaque digest of the complete ordered page returned by App Server. */
+  fingerprint?: string;
 }
 
 export interface ThreadQueueListOptions {

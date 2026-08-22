@@ -35,6 +35,8 @@ import {
   formatConversationSessions,
   formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
+  formatConversationThreadRevert,
+  formatConversationThreadRevertPreview,
   formatConversationThreadSections,
   formatConversationSkills,
   formatConversationStatus,
@@ -160,6 +162,10 @@ export function renderWeixinCommandResult(
       return formatConversationThreadSectionDeletePreview(result);
     case "thread-queue":
       return formatConversationThreadQueue(result);
+    case "thread-revert":
+      return formatConversationThreadRevert(result);
+    case "thread-revert-preview":
+      return formatConversationThreadRevertPreview(result);
     case "status":
       return formatConversationStatus(result.status);
     case "workspaces":
