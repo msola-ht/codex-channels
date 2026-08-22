@@ -6,8 +6,13 @@
 ## 文件
 
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发实现。监听自动分配的回环地址，把精确
-  `/responses`、HTTP `/responses/compact` 与只读 `/models` 路径转发到上游
-  Provider，保留端到端状态码与响应头；Authorization 只用于上游请求，不落日志、不进指标，
+  `/responses`、HTTP `/responses/compact` 与只读 `/models` 路径转发到上游；官方 OpenAI
+  主代理还按 Codex 0.148.0 固定端点清单接受 POST `/alpha/search`、
+  `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
+  `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
+  Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
+  OpenCode Go 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
+  Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
   转发 SSE 或 WebSocket 响应时按事件类型记录首 Token、推理、文本与函数/自定义工具参数输出的
   首尾时间；WebSocket 从出站 `response.create` 提前记录有界的模型、服务层级与
@@ -37,7 +42,7 @@
   超限或畸形响应只保留基础 HTTP 状态与本机耗时。上游模型、服务层级及错误标识符只接受受限字符，
   不能把控制字符带入指标展示。WebSocket 在完成事件投递前先解除活动指标引用，
   避免紧随其后的关闭事件重复写入。
-  其他路径以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
+  其他路径、OpenAI 额外端点的非 POST 请求以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
   `network.proxy` 选择传入上游 Agent。OpenCode Go 共享代理额外接受
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`

@@ -81,6 +81,8 @@ export interface ProviderProxyOptions {
   upstreamPort?: number;
   upstreamProtocol?: "http" | "https";
   upstreamBasePath?: string;
+  /** 仅官方 OpenAI 主代理启用的 Codex 0.148.0 API 路径。 */
+  allowOpenAiApiPaths?: boolean;
   /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
   accountIds?: readonly string[];
   /** 无账户前缀请求归属的默认账户（agents.external 等角色请求） */
@@ -117,6 +119,7 @@ export class ProviderProxy {
     | undefined;
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
+  private readonly allowOpenAiApiPaths: boolean;
   private readonly quotaWindowsProvider:
     | ((accountId?: string) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
     | undefined;
@@ -141,6 +144,7 @@ export class ProviderProxy {
     this.resolveUpstream = options.resolveUpstream;
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
+    this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
     this.quotaWindowsProvider = options.quotaWindowsProvider;
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.onMetrics = options.onMetrics;
@@ -194,7 +198,12 @@ export class ProviderProxy {
       this.accountIds,
       this.defaultAccountId,
     );
-    if (!account || !isSupportedHttpRequest(request.method, account.path)) {
+    if (!account || !isSupportedHttpRequest(
+      request.method,
+      account.path,
+      this.allowOpenAiApiPaths,
+    )) {
+      request.resume();
       rejectUnsupportedPath(response);
       return;
     }
@@ -208,8 +217,10 @@ export class ProviderProxy {
       "http",
       responseOperation(account.path, turnMetadata.operation),
     );
+    const recordsResponseMetrics = isResponsesRequestPath(account.path);
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
+      if (!recordsResponseMetrics) return Promise.resolve();
       metrics.responseCompletedAtMs = Math.max(metrics.responseCompletedAtMs, Date.now());
       metricsDelivery ??= this.deliverMetrics(metrics, account.accountId);
       return metricsDelivery;
@@ -372,12 +383,25 @@ export class ProviderProxy {
       this.accountIds,
       this.defaultAccountId,
     );
-    if (!account || !isResponsesPath(account.path)) {
+    const recordsResponseMetrics = account
+      ? isResponsesPath(account.path)
+      : false;
+    if (
+      !account
+      || (!recordsResponseMetrics && !(
+        this.allowOpenAiApiPaths && isOpenAiRealtimeWebSocketPath(account.path)
+      ))
+    ) {
       socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       return;
     }
     this.websocketServer.handleUpgrade(request, socket, head, (client) => {
-      this.proxyWebSocket(request, client, account.accountId);
+      this.proxyWebSocket(
+        request,
+        client,
+        account.accountId,
+        recordsResponseMetrics,
+      );
     });
   }
 
@@ -385,6 +409,7 @@ export class ProviderProxy {
     request: IncomingMessage,
     client: WebSocket,
     accountId?: string,
+    recordsResponseMetrics = true,
   ): void {
     const target = this.upstreamFor(request.headers);
     const scheme = target.protocol === "https" ? "wss" : "ws";
@@ -394,9 +419,10 @@ export class ProviderProxy {
       this.accountIds,
       this.defaultAccountId,
     );
-    const url = `${scheme}://${target.host}${port}${upstreamPath(
+    const url = `${scheme}://${target.host}${port}${upstreamWebSocketPath(
       target.basePath,
       account?.path ?? "/responses",
+      recordsResponseMetrics,
     )}`;
     const protocols = websocketProtocols(request.headers["sec-websocket-protocol"]);
     const upstream = new WebSocket(url, protocols, {
@@ -411,7 +437,9 @@ export class ProviderProxy {
     let forwarding = Promise.resolve();
 
     client.on("message", (data, isBinary) => {
-      const sanitized = sanitizeClientWebSocketMessage(data, isBinary);
+      const sanitized = recordsResponseMetrics
+        ? sanitizeClientWebSocketMessage(data, isBinary)
+        : { data };
       if (sanitized.metadata) {
         activeMetrics = createMetricsState(
           sanitized.metadata,
@@ -437,6 +465,12 @@ export class ProviderProxy {
     upstream.on("unexpected-response", (_request, response) => {
       const receivedAtMs = Date.now();
       const statusCode = response.statusCode ?? 502;
+      if (!recordsResponseMetrics) {
+        response.resume();
+        client.terminate();
+        upstream.terminate();
+        return;
+      }
       if (activeMetrics) {
         activeMetrics.httpStatus = statusCode;
         markMetricsFailed(activeMetrics, "upstream_handshake_error");
@@ -966,21 +1000,44 @@ function rejectUnsupportedPath(response: ServerResponse): void {
 function isSupportedHttpRequest(
   method: string | undefined,
   value: string | undefined,
+  allowOpenAiApiPaths: boolean,
 ): boolean {
   if (!value) return false;
   try {
     const path = new URL(value, "http://127.0.0.1").pathname;
     if (path === "/models") return method === "GET";
+    if (allowOpenAiApiPaths && openAiPostPaths.has(path)) return method === "POST";
     return path === "/responses" || path === "/responses/compact";
   } catch {
     return false;
   }
 }
 
+const openAiPostPaths = new Set([
+  "/alpha/search",
+  "/images/edits",
+  "/images/generations",
+  "/live",
+  "/memories/trace_summarize",
+  "/realtime/calls",
+]);
+
 function isResponsesPath(value: string | undefined): boolean {
   if (!value) return false;
   try {
     return new URL(value, "http://127.0.0.1").pathname === "/responses";
+  } catch {
+    return false;
+  }
+}
+
+function isOpenAiRealtimeWebSocketPath(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    const path = new URL(value, "http://127.0.0.1").pathname;
+    return path === "/v1/realtime"
+      || path === "/v1/live"
+      || /^\/v1\/live\/[a-zA-Z0-9_-]{1,128}$/u.test(path);
   } catch {
     return false;
   }
@@ -1049,6 +1106,17 @@ function upstreamPath(basePath: string | undefined, requestPath: string | undefi
   const source = new URL(requestPath ?? "/", "http://127.0.0.1");
   const prefix = basePath?.replace(/\/$/u, "") ?? "";
   return `${prefix}${source.pathname}${source.search}`;
+}
+
+function upstreamWebSocketPath(
+  basePath: string | undefined,
+  requestPath: string | undefined,
+  recordsResponseMetrics: boolean,
+): string {
+  if (recordsResponseMetrics) return upstreamPath(basePath, requestPath);
+  const source = new URL(requestPath ?? "/", "http://127.0.0.1");
+  source.pathname = source.pathname.replace(/^\/v1(?=\/)/u, "");
+  return upstreamPath(basePath, `${source.pathname}${source.search}`);
 }
 
 function forwardedRequestHeaders(

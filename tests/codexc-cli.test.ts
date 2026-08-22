@@ -1222,7 +1222,7 @@ describe("codexc CLI", () => {
     ]);
   }, 30_000);
 
-  it("starts the App Server through the service entry with effective proxy settings", () => {
+  it("starts the App Server with effective proxy settings and the official path allowlist", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-entry-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1235,8 +1235,12 @@ describe("codexc CLI", () => {
     writeFileSync(fakeCodex, [
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
+      "const args = process.argv.slice(2);",
+      "const baseUrlArgument = args.find((value) => value.startsWith('openai_base_url='));",
+      "const openAiApiPathStatus = baseUrlArgument === undefined ? null : (await fetch(`${JSON.parse(baseUrlArgument.slice('openai_base_url='.length))}/alpha/search`, { method: 'POST' })).status;",
       "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
-      "  args: process.argv.slice(2),",
+      "  args,",
+      "  openAiApiPathStatus,",
       "  cwd: process.cwd(),",
       "  httpsProxy: process.env.HTTPS_PROXY,",
       "  lowerHttpsProxy: process.env.https_proxy,",
@@ -1244,6 +1248,11 @@ describe("codexc CLI", () => {
       "}));",
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      'openai_base_url = "http://127.0.0.1:1/v1"\n',
+      { mode: 0o600 },
+    );
     const environment = {
       ...process.env,
       CODEX_CONNECT_HOME: home,
@@ -1265,6 +1274,7 @@ describe("codexc CLI", () => {
 
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
       args: string[];
+      openAiApiPathStatus: number;
       cwd: string;
       httpsProxy: string;
       lowerHttpsProxy: string;
@@ -1278,6 +1288,7 @@ describe("codexc CLI", () => {
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
     ]);
     expect(captured).toMatchObject({
+      openAiApiPathStatus: 502,
       cwd: realpathSync(join(home, "workspace")),
       httpsProxy: "http://127.0.0.1:8899",
       lowerHttpsProxy: "http://127.0.0.1:8899",

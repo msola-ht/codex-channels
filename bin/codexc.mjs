@@ -923,7 +923,10 @@ async function runServiceAppServer(args) {
           },
         };
       }
-      const { baseUrl: localBaseUrl } = await startProviderProxy("openai", openAiProxyOptions);
+      const { baseUrl: localBaseUrl } = await startProviderProxy("openai", {
+        ...openAiProxyOptions,
+        allowOpenAiApiPaths: true,
+      });
       primaryArguments = withOpenAiBaseUrl(primaryArguments, localBaseUrl);
     } else {
       const definition = providerDefinitions.get(primaryProvider);

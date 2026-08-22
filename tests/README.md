@@ -137,7 +137,9 @@
   JSON 调用记录的最近直接 API 分栏查询，以及全局/提供商/模型和异常请求的自然日/周/月、滚动窗口与全部历史
   SQL 聚合、失败率分母、错误分组与最近发生时间、TTFT 平均与 P50/P95、缓存和速度样本覆盖；自动回环
   代理的精确 `/responses`、`/responses/compact`
-  与只读 `/models` 路径、HTTP/SSE 与 WebSocket、旧版路径及 `request_kind=compaction` 标记的
+  与只读 `/models` 路径，以及仅官方 OpenAI 主代理启用的搜索、记忆摘要、图片和 Realtime
+  HTTP/WS 固定端点；第三方代理继续拒绝这些 OpenAI 专用路径，额外端点不计入 Responses 指标。
+  覆盖 HTTP/SSE 与 WebSocket、旧版路径及 `request_kind=compaction` 标记的
   remote compaction v2 操作分类，以及压缩 Usage、费用和额度进入会话与全局汇总的口径；上游
   状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server
   服务独立生命周期、响应完成前的指标确认、启动失败清理，以及 `0600` Unix Socket 指标投递和

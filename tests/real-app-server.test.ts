@@ -38,6 +38,7 @@ import {
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import { ProviderProxy } from "../src/provider-proxy/index.js";
 
 const run = process.env.RUN_CODEX_INTEGRATION === "1";
 const suite = run ? describe : describe.skip;
@@ -326,6 +327,184 @@ suite("real Codex App Server over Unix WebSocket", () => {
 });
 
 contractSuite("real supervised App Server service", () => {
+  it("routes standalone web search through the OpenAI proxy path allowlist", async () => {
+    const testRuntime = mkdtempSync(join(tmpdir(), "codex-search-proxy-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const workspace = join(testRuntime, "workspace");
+    const socketPath = join(testRuntime, "codex-app-server.sock");
+    const observedPaths: string[] = [];
+    let responsesRequestCount = 0;
+    const apiServer = createServer((request, response) => {
+      observedPaths.push(`${request.method ?? ""} ${request.url ?? ""}`);
+      if (request.method === "GET" && request.url?.startsWith("/v1/models")) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          object: "list",
+          data: [{ id: "gpt-5.6-sol", object: "model", owned_by: "openai" }],
+        }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/v1/alpha/search") {
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ output: "official docs result", results: [] }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/v1/responses") {
+        request.resume();
+        responsesRequestCount += 1;
+        const responseId = `search-proxy-response-${responsesRequestCount}`;
+        const events = responsesRequestCount === 1
+          ? [
+              {
+                type: "response.created",
+                response: { id: responseId },
+              },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "function_call",
+                  call_id: "web-run-contract",
+                  namespace: "web",
+                  name: "run",
+                  arguments: JSON.stringify({
+                    search_query: [{ q: "OpenAI Codex docs" }],
+                  }),
+                },
+              },
+              completedResponseEvent(responseId),
+            ]
+          : [
+              {
+                type: "response.created",
+                response: { id: responseId },
+              },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "message",
+                  role: "assistant",
+                  id: "search-proxy-message",
+                  content: [{ type: "output_text", text: "done" }],
+                },
+              },
+              completedResponseEvent(responseId),
+            ];
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        for (const event of events) {
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+        response.end();
+        return;
+      }
+      request.resume();
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "search proxy contract fixture" } }));
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      apiServer.once("error", rejectListen);
+      apiServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const apiAddress = apiServer.address();
+    if (!apiAddress || typeof apiAddress === "string") {
+      throw new Error("Search Proxy 合同无法创建本机 API 夹具");
+    }
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: apiAddress.port,
+      upstreamProtocol: "http",
+      upstreamBasePath: "/v1",
+      allowOpenAiApiPaths: true,
+    });
+    await proxy.start();
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "gpt-5.6-sol"',
+      'model_provider = "search-proxy-contract"',
+      "",
+      "[features]",
+      "standalone_web_search = true",
+      "",
+      "[model_providers.search-proxy-contract]",
+      'name = "Search Proxy Contract Provider"',
+      `base_url = "http://${proxy.address()}"`,
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      "supports_websockets = false",
+      "supports_standalone_web_search = true",
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    let stderr = "";
+    const processHandle = spawn(
+      process.env.CODEX_BINARY ?? "codex",
+      ["app-server", "--listen", `unix://${socketPath}`],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, CODEX_HOME: codexHome },
+        stdio: ["ignore", "ignore", "pipe"],
+        detached: process.platform !== "win32",
+      },
+    );
+    processHandle.stderr?.setEncoding("utf8");
+    processHandle.stderr?.on("data", (chunk: string) => {
+      stderr = appendDiagnostic(stderr, chunk);
+    });
+    let client: CodexAppServerClient | undefined;
+    let threadId: string | undefined;
+    let removeNotification: (() => void) | undefined;
+    let completed = false;
+    try {
+      await waitFor(
+        () => existsSync(socketPath),
+        10_000,
+        () => processHandle.exitCode === null
+          ? undefined
+          : new Error(appServerFailure("Search Proxy 合同 App Server 启动失败", stderr)),
+      );
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+      const started = await client.startThread(workspace);
+      threadId = started.thread.id;
+      removeNotification = client.onNotification((notification) => {
+        const event = toConversationInputEvent(notification);
+        if (event?.type === "turn.completed" && event.threadId === threadId) {
+          completed = true;
+        }
+      });
+      await client.startTurn(
+        threadId,
+        [{ type: "text", text: "Search the OpenAI Codex docs." }],
+        "codex_connect:search-proxy-contract",
+        workspace,
+      );
+      await waitFor(() => completed, 15_000);
+
+      expect(observedPaths).toContain("POST /v1/alpha/search");
+      expect(responsesRequestCount).toBe(2);
+    } finally {
+      removeNotification?.();
+      if (client && threadId) {
+        await client.unsubscribeThread(threadId).catch(() => undefined);
+        await client.deleteThread(threadId).catch(() => undefined);
+      }
+      await client?.close().catch(() => undefined);
+      await stopDetachedTestProcess(processHandle, 5_000).catch(() => undefined);
+      await proxy.close();
+      await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  }, 30_000);
+
   it("runs the native Queue capacity, paging, dispatch and restart contract", async () => {
     const testRuntime = mkdtempSync(join(tmpdir(), "codex-queue-contract-"));
     const codexHome = join(testRuntime, "codex-home");
@@ -2502,6 +2681,23 @@ deepseekCatalogContractTest(
   },
   30_000,
 );
+
+function completedResponseEvent(id: string): Record<string, unknown> {
+  return {
+    type: "response.completed",
+    response: {
+      id,
+      status: "completed",
+      usage: {
+        input_tokens: 1,
+        input_tokens_details: null,
+        output_tokens: 1,
+        output_tokens_details: null,
+        total_tokens: 2,
+      },
+    },
+  };
+}
 
 async function expectConfiguredTier(
   client: CodexAppServerClient,
