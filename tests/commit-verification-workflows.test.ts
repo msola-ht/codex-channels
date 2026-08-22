@@ -9,6 +9,17 @@ const workflows = [
 ];
 
 describe("commit verification workflows", () => {
+  it("runs CI for pull requests and manual checks without push duplication", () => {
+    const workflow = readFileSync(
+      join(process.cwd(), ".github/workflows", "ci.yml"),
+      "utf8",
+    );
+
+    expect(workflow).not.toContain("  push:");
+    expect(workflow).toContain("  pull_request:");
+    expect(workflow).toContain("  workflow_dispatch:");
+  });
+
   it.each(workflows)("installs WebUI dependencies before verification in %s", (name) => {
     const workflow = readFileSync(
       join(process.cwd(), ".github/workflows", name),

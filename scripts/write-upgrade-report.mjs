@@ -26,14 +26,12 @@ export function renderUpgradeSummary(
   result = "success",
   validation = undefined,
 ) {
+  if (channel !== "stable") {
+    throw new Error(`不支持的升级通道：${channel}`);
+  }
   const entries = nameStatus.trim().split(/\r?\n/u).filter(Boolean);
   const protocolEntries = entries.filter((entry) =>
     entry.includes("src/codex-protocol/"));
-  const isAlpha = channel === "alpha";
-  const title = isAlpha ? "Alpha Canary" : "正式升级提案";
-  const source = isAlpha
-    ? "openai/codex 官方 GitHub Pre-release"
-    : "openai/codex 正式 GitHub Release";
   const validationLines = validation?.stages?.length
     ? [
         "",
@@ -47,17 +45,14 @@ export function renderUpgradeSummary(
       ]
     : [];
   return [
-    `## Codex CLI ${version === "unresolved" ? "目标版本尚未解析" : version} ${title}`,
+    `## Codex CLI ${version === "unresolved" ? "目标版本尚未解析" : version} 正式升级提案`,
     "",
     `- 变更文件：${entries.length}`,
     `- 协议目录文件：${protocolEntries.length}`,
     `- 基线提交：${baseCommit}`,
-    `- 来源：${source}`,
+    "- 来源：openai/codex 正式 GitHub Release",
     `- 自动验证：${result === "success" ? "通过" : "失败，详见 Artifact 日志"}`,
     "- 状态：仅生成预览，未提交、未推送、未部署",
-    ...(isAlpha
-      ? ["- 限制：仅用于前向兼容预警，不可作为 main 的协议或版本基线"]
-      : []),
     ...validationLines,
     "",
     "### 差异统计",
@@ -114,16 +109,16 @@ function main() {
   ] = process.argv.slice(2);
   if (
     !(
-      /^\d+\.\d+\.\d+(?:-alpha(?:\.\d+)+)?$/u.test(version || "")
+      /^\d+\.\d+\.\d+$/u.test(version || "")
       || (version === "unresolved" && result === "failure")
     )
     || !outputDirectory
-    || !["stable", "alpha"].includes(channel)
+    || channel !== "stable"
     || !["success", "failure"].includes(result)
   ) {
     throw new Error(
       "用法：node scripts/write-upgrade-report.mjs <版本> <输出目录> "
-      + "[stable|alpha] [success|failure]",
+      + "[stable] [success|failure]",
     );
   }
 

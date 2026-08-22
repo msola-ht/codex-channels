@@ -187,12 +187,6 @@
   备份目录，再执行文件布局与模型设置迁移；遇到新旧并存时先把现有 Provider 目录移到备份内
   的 `original-providers/`，迁移失败时恢复原目录。默认只预演，需显式 `--apply` 才写入；
   `codexc update` 的停机窗口会自动以 `--apply` 方式调用。
-- `semantic-html-table.mjs` / `semantic-html-table.d.mts`：为受控官方价格提案提供有界、无脚本的
-  语义化 HTML 表格解析，不进入 Gateway 运行路径。
-- `prepare-opencode-go-pricing-proposal.mjs` / `prepare-opencode-go-pricing-proposal.d.mts`：从
-  OpenCode Go 官方价格表与模型端点表交叉解析全部模型 ID、Token 单价、档位、套餐包含用量、
-  限时免费状态、端点和 SDK 协议，
-  输出候选基线、结构化差异和失败现场。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
@@ -239,15 +233,13 @@
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
-- `codex-release-api.mjs`：为稳定版和 Alpha 解析器调用 GitHub Release API；请求或响应正文
+- `codex-release-api.mjs`：为稳定版解析器调用 GitHub Release API；请求或响应正文
   读取发生网络异常，以及遇到 429 和 5xx 时做三次有限重试，不在错误中输出凭据或上游正文。
 - `resolve-codex-release.mjs`：通过 GitHub Release API 解析或验证 `openai/codex` 正式发行版，
   拒绝 Draft、Pre-release 和版本不匹配。
-- `resolve-codex-alpha.mjs`：从官方 GitHub Pre-release 列表选择最高版本号的 Alpha，只供隔离
-  Canary 使用，不改变正式版本基线。
 - `analyze-upgrade-protocol.mjs`：比较 `HEAD` 与升级工作树中的生成协议，报告 RPC 名称、顶层
   类型字段和生成文件变化；只陈述结构差异，不推断行为语义。
-- `run-upgrade-validation.mjs`：为正式升级提案和 Alpha Canary 独立运行协议、类型、Lint、测试、
+- `run-upgrade-validation.mjs`：为正式升级提案独立运行协议、类型、Lint、测试、
   真实合同、构建和打包检查；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
   改稳定版文档，因此明确跳过文档索引检查和仅用于发布前的 README 同步测试。
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
