@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   QueuedSubmission,
   ThreadQueueAddResponse,
@@ -8,13 +10,11 @@ import type {
   UserInput,
 } from "../codex-protocol/index.js";
 import type {
-  ThreadQueueInputType,
   ThreadQueueItem,
   ThreadQueuePage,
 } from "../application/index.js";
 import { toTurnStarted } from "./turn-adapter.js";
-
-const maximumQueuePreviewCharacters = 160;
+import { summarizeUserInput } from "./user-input-summary.js";
 
 /** Convert the official Queue response to the safe Application summary. */
 export function toThreadQueueItem(value: QueuedSubmission): ThreadQueueItem {
@@ -24,7 +24,7 @@ export function toThreadQueueItem(value: QueuedSubmission): ThreadQueueItem {
   if (!Array.isArray(value.input) || value.input.length === 0) {
     throw new Error("Codex Queue 响应缺少输入条目");
   }
-  const summary = summarizeQueueInput(value.input);
+  const summary = summarizeUserInput(value.input);
   return {
     id: value.id,
     clientUserMessageId: value.clientUserMessageId,
@@ -44,6 +44,7 @@ export function toThreadQueuePage(value: ThreadQueueListResponse): ThreadQueuePa
   return {
     items: value.data.map(toThreadQueueItem),
     nextCursor: value.nextCursor,
+    fingerprint: fingerprintQueueSubmissions(value.data),
   };
 }
 
@@ -74,57 +75,20 @@ export function toProtocolQueueText(text: string): UserInput[] {
   return [{ type: "text", text, text_elements: [] }];
 }
 
-function summarizeQueueInput(input: UserInput[]): {
-  inputType: ThreadQueueInputType;
-  textPreview: string | null;
-  editable: boolean;
-} {
-  if (input.length === 1) {
-    const first = input[0]!;
-    switch (first.type) {
-      case "text":
-        return {
-          inputType: "text",
-          textPreview: boundedText(first.text),
-          editable: true,
-        };
-      case "image":
-      case "localImage":
-        return { inputType: "image", textPreview: null, editable: false };
-      case "audio":
-      case "localAudio":
-        return { inputType: "audio", textPreview: null, editable: false };
-      case "skill":
-        return { inputType: "skill", textPreview: null, editable: false };
-      case "mention":
-        return { inputType: "mention", textPreview: null, editable: false };
-    }
-  }
-  const text = input
-    .filter((item): item is Extract<UserInput, { type: "text" }> => item.type === "text")
-    .map((item) => item.text)
-    .join(" ");
-  return {
-    inputType: "other",
-    textPreview: text ? boundedText(text) : null,
-    editable: false,
-  };
-}
-
-function boundedText(value: string): string {
-  const printable = [...value]
-    .map((character) => character.charCodeAt(0) < 0x20 || character.charCodeAt(0) === 0x7f
-      ? " "
-      : character)
-    .join("");
-  const normalized = printable.replace(/\s+/gu, " ").trim();
-  if (!normalized) return "";
-  const characters = [...normalized];
-  return characters.length > maximumQueuePreviewCharacters
-    ? `${characters.slice(0, maximumQueuePreviewCharacters - 1).join("")}…`
-    : normalized;
-}
-
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * Hash the complete ordered protocol input before it crosses the Client
+ * boundary. Application only receives the digest and safe item summaries.
+ */
+function fingerprintQueueSubmissions(value: readonly QueuedSubmission[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify(value.map((submission) => ({
+      id: submission.id,
+      clientUserMessageId: submission.clientUserMessageId,
+      input: submission.input,
+    }))))
+    .digest("hex");
 }

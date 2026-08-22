@@ -11,6 +11,11 @@ export {
   toThreadQueueUpdateResult,
 } from "./queue-adapter.js";
 export {
+  toThreadRevertResult,
+  toThreadTurnSummary,
+  toThreadTurnsPage,
+} from "./history-adapter.js";
+export {
   ProviderRoutingClient,
   type ProviderClientInstance,
 } from "./provider-routing-client.js";

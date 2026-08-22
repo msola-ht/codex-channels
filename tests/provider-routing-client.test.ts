@@ -78,7 +78,7 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.startTurn).toHaveBeenCalledOnce();
   });
 
-  it("routes every Thread Queue operation to the remembered Thread Provider", async () => {
+  it("routes Queue and history operations to the remembered Thread Provider", async () => {
     const openai = client();
     const deepseek = client();
     openai.listThreads.mockResolvedValue([
@@ -103,6 +103,10 @@ describe("ProviderRoutingClient", () => {
     deepseek.deleteQueueItem.mockResolvedValue({ deleted: true });
     deepseek.reorderQueue.mockResolvedValue(undefined);
     deepseek.startQueueItem.mockResolvedValue({ turnId: "turn-queue" });
+    deepseek.listThreadTurns.mockResolvedValue({ turns: [], nextCursor: null });
+    deepseek.revertThread.mockResolvedValue({
+      thread: snapshot("thread-deepseek", "deepseek", "idle"),
+    });
     const routed = routing(openai, deepseek);
 
     await routed.listThreads(cwd);
@@ -112,6 +116,8 @@ describe("ProviderRoutingClient", () => {
     await routed.deleteQueueItem("thread-deepseek", "queued-1");
     await routed.reorderQueue("thread-deepseek", ["queued-1"]);
     await routed.startQueueItem("thread-deepseek", "queued-1");
+    await routed.listThreadTurns("thread-deepseek", { limit: 25 });
+    await routed.revertThread("thread-deepseek", "turn-1");
 
     expect(deepseek.addQueueItem).toHaveBeenCalledWith(
       "thread-deepseek",
@@ -127,7 +133,14 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.deleteQueueItem).toHaveBeenCalledWith("thread-deepseek", "queued-1");
     expect(deepseek.reorderQueue).toHaveBeenCalledWith("thread-deepseek", ["queued-1"]);
     expect(deepseek.startQueueItem).toHaveBeenCalledWith("thread-deepseek", "queued-1");
+    expect(deepseek.listThreadTurns).toHaveBeenCalledWith(
+      "thread-deepseek",
+      { limit: 25 },
+    );
+    expect(deepseek.revertThread).toHaveBeenCalledWith("thread-deepseek", "turn-1");
     expect(openai.addQueueItem).not.toHaveBeenCalled();
+    expect(openai.listThreadTurns).not.toHaveBeenCalled();
+    expect(openai.revertThread).not.toHaveBeenCalled();
   });
 
   it("routes an OpenAI Thread usage query through the owning App Server", async () => {
@@ -746,6 +759,7 @@ function snapshot(
     cwd,
     source: "appServer",
     activeTurnId: status === "active" ? "turn-active" : null,
+    historyMode: "paginated",
   };
 }
 
@@ -805,6 +819,8 @@ function client() {
     deleteQueueItem: vi.fn(),
     reorderQueue: vi.fn(),
     startQueueItem: vi.fn(),
+    listThreadTurns: vi.fn(),
+    revertThread: vi.fn(),
     interruptTurn: vi.fn(),
     setThreadName: vi.fn(),
     setThreadPinned: vi.fn(),

@@ -15,6 +15,7 @@ import type {
   ServerNotification,
   ThreadQueueChangedNotification,
   ThreadGoal as ProtocolThreadGoal,
+  ThreadRevertedNotification,
 } from "../codex-protocol/index.js";
 import type { ThreadStateEvent } from "../session-routing/index.js";
 import type { RpcNotification } from "./json-rpc.js";
@@ -42,6 +43,7 @@ type CoreNotification = Extract<
       | "turn/started"
       | "thread/goal/updated"
       | "thread/goal/cleared"
+      | "thread/reverted"
       | "thread/tokenUsage/updated"
       | "turn/diff/updated"
       | "turn/plan/updated"
@@ -96,6 +98,7 @@ const coreMethods = {
   mcpOAuthCompleted: "mcpServer/oauthLogin/completed",
   mcpStatusUpdated: "mcpServer/startupStatus/updated",
   warning: "warning",
+  reverted: "thread/reverted",
 } as const satisfies Record<string, CoreNotification["method"]>;
 
 export function toThreadStateEvent(
@@ -135,6 +138,8 @@ export function toConversationInputEvent(
       return toGoalUpdatedEvent(notification.params);
     case coreMethods.goalCleared:
       return toGoalClearedEvent(notification.params);
+    case coreMethods.reverted:
+      return toThreadRevertedEvent(notification.params);
     case coreMethods.tokenUsageUpdated:
       return toTokenUsageEvent(notification.params);
     case coreMethods.turnDiffUpdated:
@@ -176,6 +181,12 @@ export function toConversationInputEvent(
     default:
       return undefined;
   }
+}
+
+function toThreadRevertedEvent(value: unknown): ConversationInputEvent | undefined {
+  const params = asRecord(value) as Partial<ThreadRevertedNotification> | undefined;
+  const threadId = nonEmptyString(params?.threadId);
+  return threadId ? { type: "thread.reverted", threadId } : undefined;
 }
 
 function toGoalUpdatedEvent(value: unknown): ConversationInputEvent | undefined {

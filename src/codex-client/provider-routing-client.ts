@@ -29,6 +29,8 @@ type ProviderClientMethod =
   | "deleteQueueItem"
   | "reorderQueue"
   | "startQueueItem"
+  | "listThreadTurns"
+  | "revertThread"
   | "interruptTurn"
   | "setThreadName"
   | "setThreadPinned"
@@ -340,6 +342,18 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["startQueueItem"]>
   ): ReturnType<ProviderClientInstance["startQueueItem"]> {
     return this.callForThread(args[0], (client) => client.startQueueItem(...args));
+  }
+
+  listThreadTurns(
+    ...args: Parameters<ProviderClientInstance["listThreadTurns"]>
+  ): ReturnType<ProviderClientInstance["listThreadTurns"]> {
+    return this.callForThread(args[0], (client) => client.listThreadTurns(...args));
+  }
+
+  revertThread(
+    ...args: Parameters<ProviderClientInstance["revertThread"]>
+  ): ReturnType<ProviderClientInstance["revertThread"]> {
+    return this.callForThread(args[0], (client) => client.revertThread(...args));
   }
 
   interruptTurn(

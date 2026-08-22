@@ -1,5 +1,6 @@
 import type {
   Thread,
+  ThreadHistoryMode,
   ThreadForkResponse,
   ThreadResumeResponse,
   ThreadStartResponse,
@@ -61,8 +62,14 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
     status: toThreadStatus(thread.status),
     cwd: thread.cwd,
     source: toThreadSource(thread.source),
+    historyMode: toThreadHistoryMode(thread.historyMode),
     activeTurnId: activeTurn?.id ?? null,
   };
+}
+
+function toThreadHistoryMode(mode: Thread["historyMode"]): ThreadHistoryMode {
+  if (mode === "legacy" || mode === "paginated") return mode;
+  throw new Error("Codex Thread 响应包含未知 historyMode");
 }
 
 function toThreadModelProvider(thread: Thread): string {

@@ -21,6 +21,10 @@
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；
   本地媒体、Skill、Mention 与其他非文本输入只返回安全摘要，不传播原始值或绝对路径。
+- `history-adapter.ts`：把官方分页 Turn 与 Revert 响应裁剪为有界摘要和稳定 Thread 快照；只提取
+  `userMessage` 的安全输入摘要，拒绝残缺游标、非空 Revert 历史和越界字段。
+- `user-input-summary.ts`：为 Queue 与分页历史共用的 Client 内部 UserInput 安全摘要工具；摘要有界，
+  不传播完整输入、命令参数或本地路径。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
   `text/image/audio` 输入能力，过滤不可见项，
   并在缺少模型选择必需字段时失败关闭。
@@ -57,7 +61,7 @@
   精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
-- `client.ts`：Thread 搜索/归档/固定、全局分区 CRUD 与 Thread 分区移动、原生 Queue 六请求、Turn、模型、权限、Skill、账户与 Thread 用量及用户级配置
+- `client.ts`：Thread 搜索/归档/固定、全局分区 CRUD 与 Thread 分区移动、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill、账户与 Thread 用量及用户级配置
   读取等 App Server 方法的类型化封装；模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；MCP 概览按 Thread 使用
@@ -84,6 +88,8 @@
 
 Queue 的六个请求也按 Thread Provider 路由；只有 `thread/queue/list` 使用有界只读过载重试，
 其余五个写请求不自动重试。
+`thread/turns/list` 是有界只读查询，可按协议安全重试；`thread/revert` 是破坏性写请求，禁止自动重试。
+Queue 复核摘要由 Client 对完整有序原始输入计算不可逆指纹，Application 不使用截断预览自行重算。
 
 本模块不得调用 Telegram API、生成平台文案或保存业务绑定。协议字段必须来自
 `codex-protocol`；无参数请求和通知不得自行补空对象，写操作不得在过载或断线后盲目重试。

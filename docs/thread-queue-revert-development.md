@@ -2,7 +2,8 @@
 
 本文定义 Codex CLI `0.148.0` 实验 `thread/queue/*`、`thread/queue/changed`、
 `thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的采用方案。
-它是实施合同；当前项目已完成第一阶段原生 Queue 替换，Revert 与分页历史仍未实施。Queue 的
+它是实施合同；当前项目已完成第一阶段原生 Queue 替换，并已接入第二阶段分页历史与 Revert。
+Queue/Revert 联合真实合同仍是条件门禁：
 条件式真实 App Server 合同需在设置 `RUN_CODEX_CONTRACT=1` 后运行；未具备该环境时不得
 把跳过的真实合同伪报为通过。完成 Revert 验收项并更新 [`Codex 协议支持矩阵`](index.md) 后，
 才能对三个 Surface 宣布 Revert 可用。
@@ -20,6 +21,34 @@
 
 Queue 与 Revert 不在同一个提交或 PR 中实现。Queue 替换现有公开能力；Revert 会改变新建
 Thread 的历史模式并增加破坏性写操作，必须单独审查和回滚。
+
+### Revert 实施定稿
+
+本轮只实施第二阶段 Revert，不重新设计或改写已经上线的 Queue。以下约束在编码前冻结：
+
+- Gateway 新建的 Thread 一律显式发送 `historyMode: "paginated"`；Resume、Fork 和 Provider 路由
+  只采用 App Server 返回的实际 `historyMode`。既有 `legacy` Thread 仍可正常使用，但 `/revert`
+  必须明确拒绝，不做迁移、隐式 Fork 或内部文件改写。
+- `/revert list [页码]` 固定按最新到最旧排序、每页 25 条，首期最多浏览最近 20 页（500 个 Turn）。
+  查询只遍历到请求页，逐页校验游标非空、不重复且最终可达；页码超界、游标循环或中途历史变化
+  都失败关闭，不扩展成完整历史浏览器。
+- `/revert <Turn ID 或当前列表序号>` 中两种选择器都只能指向当前 Conversation 最近一次、五分钟内
+  的 `/revert list` 页面快照。完整 ID 不触发无界历史扫描；没有有效快照时统一要求重新列出。
+  页面按最新到最旧排列，因此目标位于第 `p` 页第 `i` 项时，本次将删除的 Turn 数可确定为
+  `(p - 1) * 25 + i`；执行前历史变化会使该数值和确认令牌一起失效。
+- Turn 列表请求显式使用 `sortDirection: "desc"`、`itemsView: "summary"`。Client 只从
+  `userMessage` Item 提取输入种类和有界文字预览，不把命令、工具参数、输出、本地路径或完整
+  Item 带出协议边界。Queue 与历史适配器复用同一个 Client 内部 `UserInput` 安全摘要工具，
+  不复制第二套裁剪规则。
+- Application 分别持有有界的页面选择快照和一次性确认注册表；二者都不持久化正文。
+  `thread/queue/changed`、`thread/reverted`、Thread 解绑/切换以及成功或失败的确认消费都会使相关
+  快照失效。Surface 只解析规范命令和渲染结构化结果，不保存历史镜像。
+- Queue 复核使用 Client 从完整有序 Queue 原始输入计算的不可逆摘要；摘要覆盖条目 ID、
+  `clientUserMessageId`、输入类型与完整输入值，但 Application 只接收摘要和条目数量。
+  不得用有界展示预览计算摘要，否则预览截断可能隐藏并发变化。
+- 真实合同使用临时 `CODEX_HOME`、真实锁定版 App Server 和本机 Mock Responses SSE 服务，
+  不调用用户账户或真实模型。实测确认 Queue 条目在 Revert 后按原顺序保留，但不会由 Revert
+  自动启动；用户显式 `/queue start` 后按队列顺序继续派发。条件测试未实际运行时不能伪报为通过。
 
 ## 固定事实来源
 
@@ -121,9 +150,9 @@ Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread S
 ### 前置历史模式
 
 `thread/revert` 只支持创建时使用 `historyMode: "paginated"` 的 Thread；现有 Gateway
-`thread/start` 没有显式发送该字段，既有 Thread 可能是 `legacy`，不能原地迁移。
+新建 Thread 已显式发送该字段，既有 Thread 仍可能是 `legacy`，不能原地迁移。
 
-Revert 阶段必须先完成：
+Revert 实现必须满足：
 
 1. `thread/start` 对 Gateway 新建 Thread 显式发送 `historyMode: "paginated"`。
 2. Thread 稳定快照保留 `legacy | paginated`，供 Application 判断能力。
@@ -164,6 +193,13 @@ Revert 响应的 `thread.turns` 固定为空，不能当作历史已丢失，也
 `clientUserMessageId` 和完整输入，但不把正文或路径带出 Client。令牌不可预测、只能消费一次，
 Gateway 重启后自然失效。
 
+Turn ID 与数字序号都必须来自最近一次 `/revert list` 的同一页面快照；首期不接受任意历史 Turn ID
+并从头扫描全部历史。确认前重新读取第一页和目标页：第一页用于复核最新 Turn 与活动 Turn，目标页
+用于复核目标仍处于相同位置；同时复核 Thread 历史模式和完整 Queue 摘要。任一游标、顺序、目标、
+最新 Turn、活动 Turn 或 Queue 在最后一次执行前复核时发生变化，令牌立即失效。固定版
+`thread/revert` 不提供历史版本号或条件写入参数，因此外部客户端仍可能在最终复核与写请求之间
+追加 Turn；预览必须提示确认完成前不要从 TUI 或其他客户端继续操作该 Thread，不能宣称原子防竞态。
+
 预览必须明确展示：
 
 - 被删除的边界 Turn，以及该 Turn 也会删除。
@@ -176,10 +212,10 @@ Gateway 重启后自然失效。
 确认失效并要求重新预览。这样既允许原生支持的活动 Turn Revert，也不会把五分钟前的确认应用到
 已经变化的 Thread。
 
-固定版本源码中 Revert 与 Queue 使用独立存储，Revert 请求没有清空 Queue；但官方 0.148 测试
-没有覆盖二者同时存在的合同。因此实施前必须增加真实 App Server 合同测试，确认 Revert 后 Queue
-的实际保留和派发顺序。测试未通过前，Gateway 应在 Queue 非空时拒绝 Revert，而不是自行清空；
-通过并确认原生保留语义后，按预览提示保留 Queue，不增加隐式清理。
+固定版本源码中 Revert 与 Queue 使用独立存储，Revert 请求没有清空 Queue；官方 0.148 测试没有
+覆盖二者同时存在的合同。本项目真实 App Server 联合合同已确认：Revert 后 Queue 条目和顺序保留，
+Revert 本身不自动派发；显式启动队首后，后续条目继续按原生顺序派发。因此 Gateway 允许 Queue
+非空时预览和执行 Revert，执行前后都用完整有序输入摘要复核，不自行清空、重放或启动 Queue。
 
 ### 状态协调
 
@@ -195,11 +231,18 @@ Revert 成功后：
 ### 模块落点
 
 - `application/thread-history-port.ts`：拥有分页 Turn 摘要、历史模式和 Revert 稳定结果。
-- `codex-client/history-adapter.ts`：从官方 Turn/Item 只提取选择所需的有界摘要，不传播完整历史或敏感操作参数。
+- `codex-client/user-input-summary.ts`：从现有 Queue 适配器提取 Client 内部共享的 `UserInput`
+  种类识别、有界文字预览和敏感路径裁剪；不从 `codex-client/index.ts` 公开。
+- `codex-client/history-adapter.ts`：复用共享输入摘要，从官方 Turn/Item 只提取选择所需的有界摘要，
+  不传播完整历史或敏感操作参数。
 - `codex-client/client.ts`：封装 `thread/turns/list` 与 `thread/revert`；前者允许只读重试，后者禁止重试。
 - `codex-client/provider-routing-client.ts`：按 Thread Provider 路由历史查询和 Revert。
-- `application/conversation-service.ts`：生成和校验一次性确认，执行前复核 Thread、历史和 Queue。
+- `application/conversation-command-parser.ts`、`conversation-command-service.ts` 与
+  `conversation-service.ts`：解析规范命令，维护最多 500 个 Turn 的有界页面选择状态，生成和校验
+  一次性确认，并在执行前复核 Thread、历史和 Queue。
 - `codex-client/notification-adapter.ts` 与 `conversation-core`：增加受控的 `thread.reverted` 状态失效事件，不把原始响应带入 Core。
+- `surfaces/conversation-command-format.ts` 与三个 Surface：渲染统一列表、破坏性预览、确认结果和
+  legacy/并发失败文案；同步 `/help` 与菜单，但不各自实现 Revert 状态。
 
 首期不接入 `thread/items/list` 公开浏览能力。只有真实合同或状态校正证明必须读取 Item 游标时，
 才把它作为 Revert 内部只读依赖受控导出；不能借 Revert 扩展成完整聊天历史浏览器。
@@ -210,7 +253,8 @@ Revert 成功后：
 采用时仍必须：
 
 - 从 `codex-protocol/index.ts` 只导出实际使用的 Queue、Turn 分页、Revert 请求响应和通知类型。
-- 修改根 `AGENTS.md` 中受控实验例外的旧约束，精确列出新增 Queue 方法，不借机开放其他实验 API。
+- 修改根 `AGENTS.md` 中受控实验例外，精确加入 `thread/turns/list`、`thread/revert` 与
+  `thread/reverted`，不借机开放 `thread/items/list` 或其他实验 API。
 - 更新 `docs/index.md` 的受控导出数、直接调用方法数、支持矩阵、固定源码说明和复核命令结果。
 - 不增加运行时兼容层；运行中的 App Server 不是精确 `0.148.0` 时仍由现有版本门禁拒绝。
 - 不新增 Gateway SQLite Schema，也不新增消息正文持久化配置。
@@ -240,7 +284,8 @@ Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设�
 4. `turn/completed: interrupted` 与 `thread/reverted` 状态校正。
 5. 从 `module-boundaries.test.ts` 的未支持清单中只移除实际采用的 `thread/turns/list`，并把 `notification-adapter.test.ts` 的 Revert 负向断言替换为正向状态失效合同；`thread/items/list` 和其他实验方法继续禁止。
 6. 真实合同：空闲回退、活动 Turn 回退、未知 Turn、重启持久、旧 path 拒绝、下一 Turn 上下文排除已删除历史。
-7. Queue 与 Revert 联合合同：保留/派发顺序得到官方 0.148 实测后，才能解除 Queue 非空拒绝。
+7. Queue 与 Revert 联合合同：使用本机 Mock Responses 与真实 App Server 验证 Queue 条目在 Revert
+   后保留原顺序、不会自动启动，并在显式启动后继续按序派发。
 
 两个 PR 都必须执行定向单元测试、`npm run check`、`npm run lint`、`npm run docs:check`、协议检查
 和真实 App Server 合同；提交门禁再统一运行 `npm run verify:commit`。Queue/Revert 的创建和写入

@@ -20,6 +20,7 @@ export type ConversationInputEvent =
     }
   | { type: "thread.goal.updated"; threadId: string; goal: ThreadGoal }
   | { type: "thread.goal.cleared"; threadId: string }
+  | { type: "thread.reverted"; threadId: string }
   | { type: "turn.diff.updated"; threadId: string; turnId: string; diff: string }
   | {
       type: "turn.plan.updated";

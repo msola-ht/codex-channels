@@ -53,6 +53,9 @@ Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台�
 输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或提供等价约束。
 Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和五分钟数字选择快照；Surface
 只渲染共享的 `/queue add|list|update|delete|reorder|start` 结果，不保存 Queue 镜像或消息正文。
+分页历史 Revert 同样由 Application 统一编排；三个 Surface 只渲染 `/revert list`、预览和一次性确认结果，
+统一提示仅支持新建分页历史 Thread、执行前会复核并且不会恢复工作区文件。Surface 不保存 Turn 历史、
+确认令牌或 Queue/历史快照；按钮和菜单只能提交当前绑定 Actor 的规范选择器。
 审批卡片和其他需要等待结果的 `runOrdered` 操作排在所有既有关键消息之后，但会越过尚未执行的
 非关键过程输出；关键消息与非关键消息各自保持原顺序，已经开始的平台请求不会被中断。
 Telegram 和飞书在交互消息创建成功或失败时

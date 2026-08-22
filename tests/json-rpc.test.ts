@@ -23,6 +23,7 @@ function appServerThread(
     ephemeral: false,
     section: null,
     sectionEnteredAt: null,
+    historyMode: "legacy",
     modelProvider: "openai",
     createdAt: 1,
     updatedAt: 1,
@@ -801,6 +802,7 @@ describe("JsonRpcClient", () => {
       cwd: "/tmp/project",
       source: "other",
       activeTurnId: "turn-running",
+      historyMode: "legacy",
     }]);
   });
 

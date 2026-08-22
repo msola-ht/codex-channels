@@ -16,7 +16,9 @@
   以及 Routing 不再解析原始协议信封。
 - 原生 Thread Queue 六请求、100 条容量、25 条分页、五分钟 ID 选择快照、非文本安全摘要、Provider 路由、
   pending model/effort/Fast/Plan 覆盖失败关闭和写入竞态；项目输入到官方 `UserInput` 的映射，以及
-  Review、Goal 和控制响应到稳定 Application 结果的映射。
+  Review、Goal 和控制响应到稳定 Application 结果的映射；分页历史 `thread/turns/list`、Revert
+  的页面快照/一次性确认/执行前并发复核、legacy 失败关闭、Queue 指纹复核与保留，以及 `thread.reverted` 清理
+  Core 派生展示状态（[`thread-history.test.ts`](thread-history.test.ts)、[`thread-revert-service.test.ts`](thread-revert-service.test.ts)）。
 - 图片输入的 PNG/JPEG/WebP/非动画 GIF 签名、可信 MIME、Data URL、单张/批量大小与数量边界；当前模型目录未声明
   `image` 能力时在创建或追加 Turn 前拒绝，声明支持时沿用官方 `image` 输入，不把本地路径交给
   App Server，不建立第二套识图请求链路。

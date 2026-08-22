@@ -34,6 +34,8 @@ import {
   formatConversationSkills,
   formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
+  formatConversationThreadRevert,
+  formatConversationThreadRevertPreview,
   formatConversationThreadSections,
   formatThreadQueueInputTypeLabel,
   formatConversationUsage,
@@ -90,6 +92,12 @@ export async function renderTelegramCommandResult(
         ].join("\n"),
         threadQueueKeyboard(result),
       );
+      return;
+    case "thread-revert":
+      await replyTelegramPanel(context, formatConversationThreadRevert(result));
+      return;
+    case "thread-revert-preview":
+      await replyTelegramPanel(context, formatConversationThreadRevertPreview(result));
       return;
     case "status":
       await replyTelegramPanel(context, formatStatus(result.status));
