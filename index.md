@@ -23,6 +23,8 @@
   采用、暂缓和拒绝决策。
 - [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：Codex 0.148.0
   原生 Thread Queue 替换方案、分页历史与 Revert 的实施边界和验收链路。
+- [`docs/thread-usage-development.md`](docs/thread-usage-development.md)：Codex 0.148.0
+  OpenAI Thread 官方估算合入现有 `/usage` 的数据口径、降级、模块与验证边界。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。

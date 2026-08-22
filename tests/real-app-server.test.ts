@@ -173,6 +173,21 @@ suite("real Codex App Server over Unix WebSocket", () => {
       || typeof result.limits[0]?.primary?.usedPercent === "number").toBe(true);
   });
 
+  it("reads the current account's estimate for one exact Thread", async () => {
+    const started = await client.startThread(workdir);
+    try {
+      const result = await client.accountThreadUsage(started.thread.id);
+
+      expect(result.kind === "unavailable"
+        || (result.kind === "available" && result.threadId === started.thread.id)).toBe(true);
+      await expect(client.accountThreadUsage("not-a-thread-id"))
+        .rejects.toThrow(/invalid thread id/iu);
+    } finally {
+      await client.unsubscribeThread(started.thread.id).catch(() => undefined);
+      await client.deleteThread(started.thread.id);
+    }
+  });
+
   it("lists models with their supported reasoning efforts", async () => {
     const models = await client.listModels();
 

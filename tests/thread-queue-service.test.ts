@@ -79,6 +79,7 @@ function queryPort(): ConversationQueryPort {
     resolvePlugin: unsupported,
     accountUsage: unsupported,
     accountRateLimits: unsupported,
+    accountThreadUsage: unsupported,
     listPermissionProfiles: unsupported,
   };
 }

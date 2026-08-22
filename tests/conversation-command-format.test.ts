@@ -782,6 +782,133 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("累计 Tokens");
   });
 
+  it("renders OpenAI Thread official estimates after the account summary", () => {
+    const groups = Array.from({ length: 9 }, (_, index) => ({
+      model: index === 0 ? "gpt-5.4" : null,
+      reasoningEffort: index === 0 ? "high" : null,
+      speed: index === 0 ? "fast" : null,
+      estimatedUsageCreditsMicros: index === 0 ? 46_000_000 : 1_000_000,
+      netNewInputTokens: index === 0 ? 80 : 0,
+      cachedInputTokens: index === 0 ? 20 : 0,
+      inputTokens: index === 0 ? 100 : 0,
+      outputTokens: index === 0 ? 40 : 0,
+      totalTokens: index === 0 ? 140 : 0,
+    }));
+    const rendered = formatConversationUsage({
+      kind: "usage",
+      result: {
+        kind: "token-usage",
+        provider: "openai",
+        usage: {
+          summary: {
+            lifetimeTokens: 123,
+            peakDailyTokens: 45,
+            longestRunningTurnSec: 6,
+            currentStreakDays: 7,
+            longestStreakDays: 8,
+          },
+          daily: [],
+        },
+        threadUsage: {
+          kind: "available",
+          threadId: "thread-secret",
+          estimatedUsageCreditsMicros: 46_000_000,
+          estimatedUsageUsdMicros: 1_820_000,
+          groups,
+        },
+      },
+    });
+
+    expect(rendered).toContain("OpenAI Codex 账户用量摘要");
+    expect(rendered).toContain("当前 Thread 官方估算");
+    expect(rendered).toContain("Credits：46");
+    expect(rendered).toContain("估算费用：$1.82");
+    expect(rendered).toContain("计费 Token：输入 100 · 缓存 20 · 输出 40");
+    expect(rendered).toContain("gpt-5.4 · high · fast：46 Credits");
+    expect(rendered).toContain("尚未展示 1 组");
+    expect(rendered).toContain("官方估算可能延迟更新；本地请求明细与子代理累计请查看 /metrics");
+    expect(rendered).not.toContain("thread-secret");
+  });
+
+  it("renders isolated unavailable and failed Thread estimate states", () => {
+    const usage = {
+      summary: {
+        lifetimeTokens: 123,
+        peakDailyTokens: null,
+        longestRunningTurnSec: null,
+        currentStreakDays: null,
+        longestStreakDays: null,
+      },
+      daily: [],
+    };
+    const unavailable = formatConversationUsage({
+      kind: "usage",
+      result: {
+        kind: "token-usage",
+        provider: "openai",
+        usage,
+        threadUsage: { kind: "unavailable" },
+      },
+    });
+    expect(unavailable).toContain("累计 Tokens");
+    expect(unavailable).toContain("当前 Thread 的官方计费估算不可用");
+    expect(unavailable).toContain("仅向部分 Business/Enterprise 工作区开放");
+
+    const failed = formatConversationUsage({
+      kind: "usage",
+      result: {
+        kind: "token-usage",
+        provider: "openai",
+        usage,
+        threadUsage: { kind: "failed" },
+      },
+    });
+    expect(failed).toContain("累计 Tokens");
+    expect(failed).toContain("当前 Thread 官方估算暂时无法查询，请稍后重试 /usage");
+  });
+
+  it("omits unavailable official dollars and only sums complete Token fields", () => {
+    const rendered = formatConversationUsage({
+      kind: "usage",
+      result: {
+        kind: "token-usage",
+        provider: "openai",
+        usage: {
+          summary: {
+            lifetimeTokens: null,
+            peakDailyTokens: null,
+            longestRunningTurnSec: null,
+            currentStreakDays: null,
+            longestStreakDays: null,
+          },
+          daily: [],
+        },
+        threadUsage: {
+          kind: "available",
+          threadId: "thread-1",
+          estimatedUsageCreditsMicros: 1,
+          estimatedUsageUsdMicros: null,
+          groups: [{
+            model: null,
+            reasoningEffort: null,
+            speed: null,
+            estimatedUsageCreditsMicros: 1,
+            netNewInputTokens: null,
+            cachedInputTokens: 2,
+            inputTokens: null,
+            outputTokens: 3,
+            totalTokens: null,
+          }],
+        },
+      },
+    });
+
+    expect(rendered).not.toContain("估算费用");
+    expect(rendered).toContain("计费 Token：缓存 2 · 输出 3");
+    expect(rendered).not.toContain("计费 Token：输入");
+    expect(rendered).toContain("其他 · 其他 · 其他：0.000001 Credits");
+  });
+
   it("renders OpenCode Go quota windows instead of OpenAI account usage", () => {
     const rendered = formatConversationUsage({
       kind: "usage",

@@ -4,6 +4,8 @@ import type {
   RateLimitSnapshot,
 } from "../codex-protocol/index.js";
 import type {
+  AccountThreadUsage,
+  AccountThreadUsageGroup,
   AccountMetric,
   AccountPlanType,
   AccountRateLimit,
@@ -12,6 +14,8 @@ import type {
   AccountRateLimits,
   AccountUsage,
 } from "../application/index.js";
+
+const maximumThreadMetric = 9_223_372_036_854_775_807n;
 
 export function toAccountUsage(response: GetAccountTokenUsageResponse): AccountUsage {
   const summary = response.summary;
@@ -38,6 +42,83 @@ export function toAccountUsage(response: GetAccountTokenUsageResponse): AccountU
         tokens: requiredMetric(bucket.tokens, "daily tokens"),
       };
     }),
+  };
+}
+
+export function toAccountThreadUsage(
+  response: GetAccountTokenUsageResponse,
+  requestedThreadId: string,
+): AccountThreadUsage {
+  if (requestedThreadId.length === 0) {
+    throw new Error("Codex Thread 用量查询缺少 threadId");
+  }
+  const threadUsage = response.threadUsage;
+  if (threadUsage === undefined || threadUsage === null) {
+    return { kind: "unavailable" };
+  }
+  if (typeof threadUsage !== "object" || threadUsage === null || Array.isArray(threadUsage)) {
+    throw new Error("Codex 响应缺少有效 threadUsage");
+  }
+  if (threadUsage.threadId !== requestedThreadId) {
+    throw new Error("Codex Thread 用量响应 threadId 与请求不一致");
+  }
+  if (!Array.isArray(threadUsage.groups)) {
+    throw new Error("Codex 响应缺少有效 threadUsage groups");
+  }
+  return {
+    kind: "available",
+    threadId: requestedThreadId,
+    estimatedUsageCreditsMicros: requiredThreadMetric(
+      threadUsage.estimatedUsageCreditsMicros,
+      "thread usage estimatedUsageCreditsMicros",
+    ),
+    estimatedUsageUsdMicros: optionalThreadMetric(
+      threadUsage.estimatedUsageUsdMicros,
+      "thread usage estimatedUsageUsdMicros",
+    ),
+    groups: threadUsage.groups.map((group, index) => toAccountThreadUsageGroup(group, index)),
+  };
+}
+
+function toAccountThreadUsageGroup(
+  group: unknown,
+  index: number,
+): AccountThreadUsageGroup {
+  if (group === null || typeof group !== "object" || Array.isArray(group)) {
+    throw new Error(`Codex 响应缺少有效 thread usage group ${index + 1}`);
+  }
+  const value = group as Record<string, unknown>;
+  return {
+    model: optionalBoundedString(value.model, `thread usage group ${index + 1} model`),
+    reasoningEffort: optionalBoundedString(
+      value.reasoningEffort,
+      `thread usage group ${index + 1} reasoningEffort`,
+    ),
+    speed: optionalBoundedString(value.speed, `thread usage group ${index + 1} speed`),
+    estimatedUsageCreditsMicros: requiredThreadMetric(
+      value.estimatedUsageCreditsMicros,
+      `thread usage group ${index + 1} estimatedUsageCreditsMicros`,
+    ),
+    netNewInputTokens: optionalThreadMetric(
+      value.netNewInputTokens,
+      `thread usage group ${index + 1} netNewInputTokens`,
+    ),
+    cachedInputTokens: optionalThreadMetric(
+      value.cachedInputTokens,
+      `thread usage group ${index + 1} cachedInputTokens`,
+    ),
+    inputTokens: optionalThreadMetric(
+      value.inputTokens,
+      `thread usage group ${index + 1} inputTokens`,
+    ),
+    outputTokens: optionalThreadMetric(
+      value.outputTokens,
+      `thread usage group ${index + 1} outputTokens`,
+    ),
+    totalTokens: optionalThreadMetric(
+      value.totalTokens,
+      `thread usage group ${index + 1} totalTokens`,
+    ),
   };
 }
 
@@ -123,6 +204,49 @@ function toWindow(
 
 function optionalMetric(value: unknown, field: string): AccountMetric | null {
   return value === null ? null : requiredMetric(value, field);
+}
+
+function optionalThreadMetric(value: unknown, field: string): AccountMetric | null {
+  return value === null ? null : requiredThreadMetric(value, field);
+}
+
+function requiredThreadMetric(value: unknown, field: string): AccountMetric {
+  if (typeof value === "bigint") {
+    if (value < 0n || value > maximumThreadMetric) {
+      throw new Error(`Codex 响应缺少有效 ${field}`);
+    }
+    return value;
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Codex 响应缺少有效 ${field}`);
+  }
+  return value;
+}
+
+function optionalBoundedString(value: unknown, field: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (
+    typeof value !== "string"
+    || normalized.length === 0
+    || normalized.length > 256
+    || containsControlCharacter(normalized)
+  ) {
+    throw new Error(`Codex 响应缺少有效 ${field}`);
+  }
+  return normalized;
+}
+
+function containsControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function requiredMetric(value: unknown, field: string): AccountMetric {

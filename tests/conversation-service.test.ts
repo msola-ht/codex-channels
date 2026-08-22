@@ -65,6 +65,7 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
     resolvePlugin: unsupported,
     accountUsage: unsupported,
     accountRateLimits: unsupported,
+    accountThreadUsage: unsupported,
     listPermissionProfiles: unsupported,
     ...overrides,
   };
@@ -349,6 +350,150 @@ describe("ConversationService model selection", () => {
     } finally {
       now.mockRestore();
     }
+  });
+
+  it("passes only the bound OpenAI Thread to the optional account query", async () => {
+    const providerAccountUsage = vi.fn(async (provider: string, threadId?: string) => ({
+      kind: "unsupported" as const,
+      provider: `${provider}:${threadId ?? "none"}`,
+    }));
+    const service = new ConversationService(
+      turnPort(),
+      {
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-openai",
+          sessionId: "session-openai",
+        }),
+        modelSettings: () => ({
+          model: "gpt-test",
+          modelProvider: "openai",
+          effort: "high",
+          serviceTier: null,
+          collaborationMode: "default" as const,
+        }),
+      } as unknown as SessionRouter,
+      {} as ConversationCore,
+      { status: () => ({ modelProvider: "openai" }) } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { accountUsage: providerAccountUsage, accountLimits: vi.fn() },
+    );
+
+    await expect(service.providerAccountUsage(target)).resolves.toEqual({
+      kind: "unsupported",
+      provider: "openai:thread-openai",
+    });
+    expect(providerAccountUsage).toHaveBeenCalledWith("openai", "thread-openai");
+  });
+
+  it("does not pass a Thread to third-party account providers", async () => {
+    const providerAccountUsage = vi.fn(async (provider: string, threadId?: string) => ({
+      kind: "unsupported" as const,
+      provider: `${provider}:${threadId ?? "none"}`,
+    }));
+    const service = new ConversationService(
+      turnPort(),
+      {
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-deepseek",
+          sessionId: "session-deepseek",
+        }),
+        modelSettings: () => ({
+          model: "deepseek-v4-flash",
+          modelProvider: "deepseek",
+          effort: "high",
+          serviceTier: null,
+          collaborationMode: "default" as const,
+        }),
+      } as unknown as SessionRouter,
+      {} as ConversationCore,
+      { status: () => ({ modelProvider: "deepseek" }) } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { accountUsage: providerAccountUsage, accountLimits: vi.fn() },
+    );
+
+    await expect(service.providerAccountUsage(target)).resolves.toEqual({
+      kind: "unsupported",
+      provider: "deepseek:none",
+    });
+    expect(providerAccountUsage).toHaveBeenCalledWith("deepseek");
+  });
+
+  it("preserves a pending third-party account selection over the bound OpenAI Thread", async () => {
+    const providerAccountUsage = vi.fn(async (provider: string, threadId?: string) => ({
+      kind: "unsupported" as const,
+      provider: `${provider}:${threadId ?? "none"}`,
+    }));
+    const service = new ConversationService(
+      turnPort(),
+      {
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-openai",
+          sessionId: "session-openai",
+        }),
+        modelSettings: () => ({
+          model: "gpt-test",
+          modelProvider: "openai",
+          effort: "high",
+          serviceTier: null,
+          collaborationMode: "default" as const,
+        }),
+      } as unknown as SessionRouter,
+      {} as ConversationCore,
+      { status: () => ({ modelProvider: "deepseek" }) } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { accountUsage: providerAccountUsage, accountLimits: vi.fn() },
+    );
+
+    await expect(service.providerAccountUsage(target)).resolves.toEqual({
+      kind: "unsupported",
+      provider: "deepseek:none",
+    });
+    expect(providerAccountUsage).toHaveBeenCalledWith("deepseek");
+  });
+
+  it("queries only the OpenAI account summary before a Thread is bound", async () => {
+    const providerAccountUsage = vi.fn(async (provider: string, threadId?: string) => ({
+      kind: "unsupported" as const,
+      provider: `${provider}:${threadId ?? "none"}`,
+    }));
+    const service = new ConversationService(
+      turnPort(),
+      {
+        current: () => undefined,
+      } as unknown as SessionRouter,
+      {} as ConversationCore,
+      { status: () => ({ modelProvider: "openai" }) } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { accountUsage: providerAccountUsage, accountLimits: vi.fn() },
+    );
+
+    await expect(service.providerAccountUsage(target)).resolves.toEqual({
+      kind: "unsupported",
+      provider: "openai:none",
+    });
+    expect(providerAccountUsage).toHaveBeenCalledWith("openai");
   });
 
   it("reflects confirmed Goal set and clear results in status immediately", async () => {

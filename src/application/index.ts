@@ -5,6 +5,8 @@ export {
   type AccountRateLimit,
   type AccountRateLimitReachedType,
   type AccountRateLimits,
+  type AccountThreadUsage,
+  type AccountThreadUsageGroup,
   type AccountRateLimitWindow,
   type AccountUsage,
   type AccountWeeklyLimitEstimate,

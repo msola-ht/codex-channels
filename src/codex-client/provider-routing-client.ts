@@ -53,6 +53,7 @@ type ProviderClientMethod =
   | "listPlugins"
   | "resolvePlugin"
   | "accountUsage"
+  | "accountThreadUsage"
   | "accountRateLimits"
   | "listPermissionProfiles"
   | "getGoal"
@@ -546,6 +547,12 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["accountUsage"]>
   ): ReturnType<ProviderClientInstance["accountUsage"]> {
     return this.primaryClient().accountUsage(...args);
+  }
+
+  accountThreadUsage(
+    ...args: Parameters<ProviderClientInstance["accountThreadUsage"]>
+  ): ReturnType<ProviderClientInstance["accountThreadUsage"]> {
+    return this.callForThread(args[0], (client) => client.accountThreadUsage(...args));
   }
 
   accountRateLimits(

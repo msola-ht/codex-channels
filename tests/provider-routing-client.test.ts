@@ -130,6 +130,25 @@ describe("ProviderRoutingClient", () => {
     expect(openai.addQueueItem).not.toHaveBeenCalled();
   });
 
+  it("routes an OpenAI Thread usage query through the owning App Server", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.listThreads.mockResolvedValue([
+      snapshot("thread-openai", "openai", "idle"),
+    ]);
+    deepseek.listThreads.mockResolvedValue([]);
+    openai.accountThreadUsage.mockResolvedValue({ kind: "unavailable" });
+    const routed = routing(openai, deepseek);
+
+    await routed.listThreads(cwd);
+    await expect(routed.accountThreadUsage("thread-openai")).resolves.toEqual({
+      kind: "unavailable",
+    });
+
+    expect(openai.accountThreadUsage).toHaveBeenCalledWith("thread-openai");
+    expect(deepseek.accountThreadUsage).not.toHaveBeenCalled();
+  });
+
   it("uses each Provider App Server status while preserving the primary list order", async () => {
     const openai = client();
     const deepseek = client();
@@ -805,6 +824,7 @@ function client() {
     listPlugins: vi.fn(),
     resolvePlugin: vi.fn(),
     accountUsage: vi.fn(),
+    accountThreadUsage: vi.fn(),
     accountRateLimits: vi.fn(),
     listPermissionProfiles: vi.fn(),
     getGoal: vi.fn(),

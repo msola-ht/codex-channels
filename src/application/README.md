@@ -34,7 +34,7 @@
 - `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级与
   Fast 默认值窄端口；CLI Setup 的全局模型默认值不进入会话 Application 边界。
   Application 和 Surface 不接收完整官方模型对象。
-- `account-port.ts`：分别定义 OpenAI 账户 Token/额度、第三方余额和未支持状态的可辨识结果，
+- `account-port.ts`：分别定义 OpenAI 账户 Token/额度、当前 Thread 官方估算、第三方余额和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
@@ -104,9 +104,11 @@ Surface Actor 执行自定义分区写操作，读取与筛选不需要管理员
 `config.toml` 的 `config/read` / `config/batchWrite` 事务由 `codex-client` 统一处理。CLI Setup
 直接依赖具体 Client 的全局默认值读写，不扩大 Surface 可用的会话端口。
 OpenAI 原生账户查询只依赖 `AccountQueryPort`；当前 Thread 的 `/usage` 与 `/limits` 通过
-`ProviderAccountQueryPort` 按 `modelProvider` 选择显式注册的适配器。新增第三方时实现
-`ProviderAccountAdapter` 并在 Bootstrap 登记；未提供的账户能力保持不支持。Application 和
-Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方完整响应。
+`ProviderAccountQueryPort` 按 `modelProvider` 选择显式注册的适配器。OpenAI `/usage` 在有当前绑定
+Thread 时并行读取账户摘要和精确 Thread 官方估算，估算失败隔离为可辨识状态；待生效 Provider
+选择仍决定账户来源，只有账户选择和实际绑定都属于 OpenAI 时才附加 Thread 估算；无 Thread 只读取摘要。
+新增第三方时实现 `ProviderAccountAdapter` 并在 Bootstrap 登记，不能伪造 OpenAI Thread 估算；未提供的账户能力保持不支持。
+Application 和 Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方完整响应。
 `/metrics` 只依赖 `RequestMetricsQueryPort`；无参数或 `session` 查询当前 Thread，`global`、
 `providers`、`models` 和 `errors` 使用严格的 `24h`、`7d`、`30d` 时间范围；`errors` 只展示
 脱敏后的状态、HTTP 状态、错误类型、次数和最近发生时间。Bootstrap 把独立指标库映射为稳定摘要，

@@ -1585,10 +1585,21 @@ export class ConversationService implements ConversationUseCases {
   }
 
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage> {
-    const provider = this.models.status(target).modelProvider ?? "openai";
-    return this.providerAccounts
+    const binding = this.router.current(target);
+    const model = this.models.status(target);
+    const provider = model.modelProvider ?? "openai";
+    const threadProvider = binding
+      ? this.router.modelSettings(target)?.modelProvider ?? provider
+      : undefined;
+    const threadId = usesOpenAiAccount(provider) && usesOpenAiAccount(threadProvider)
+      ? binding?.threadId
+      : undefined;
+    if (!this.providerAccounts) {
+      return Promise.resolve({ kind: "unsupported", provider });
+    }
+    return threadId === undefined
       ? this.providerAccounts.accountUsage(provider)
-      : Promise.resolve({ kind: "unsupported", provider });
+      : this.providerAccounts.accountUsage(provider, threadId);
   }
 
   async providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits> {

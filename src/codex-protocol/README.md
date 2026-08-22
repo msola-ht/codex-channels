@@ -5,7 +5,8 @@
 ## 文件与目录
 
 - `index.ts`：只向 `codex-client` 暴露经过审查的最小协议类型集合，包括约束出站消息的
-  `ClientRequest`、`ClientNotification` 与用户配置编辑值 `JsonValue`；其他业务模块不得导入。
+  `ClientRequest`、`ClientNotification`、用户配置编辑值 `JsonValue`，以及账户用量请求使用的
+  `GetAccountTokenUsageParams` 与响应类型；其他业务模块不得导入。
 - `version.json`：记录生成类型对应的 `codex-cli` 版本及实验生成状态。
 - `generated/`：由 `codex app-server generate-ts --experimental` 生成的类型，禁止手工修改，
   也不在其内部维护手写索引文档。业务层只允许使用锁定版本官方 Plan 模式所需的
