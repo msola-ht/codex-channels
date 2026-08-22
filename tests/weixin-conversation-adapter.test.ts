@@ -173,11 +173,18 @@ describe("WeixinConversationAdapter", () => {
       turnId: "turn",
       steered: false,
     }));
+    let releaseFirstDownload!: () => void;
+    const firstDownloadGate = new Promise<void>((resolve) => {
+      releaseFirstDownload = resolve;
+    });
     const download = vi.fn()
-      .mockResolvedValueOnce({
-        path: pngImagePath,
-        mimeType: "image/png" as const,
-        bytes: 8,
+      .mockImplementationOnce(async () => {
+        await firstDownloadGate;
+        return {
+          path: pngImagePath,
+          mimeType: "image/png" as const,
+          bytes: 8,
+        };
       })
       .mockResolvedValueOnce({
         path: jpegImagePath,
@@ -203,7 +210,14 @@ describe("WeixinConversationAdapter", () => {
       kind: "image",
       images: [{ encryptedQueryParam: "second-private-query" }],
     });
-    await Promise.all([first, second]);
+    await Promise.resolve();
+    try {
+      expect(download).toHaveBeenCalledTimes(1);
+      expect(submit).not.toHaveBeenCalled();
+    } finally {
+      releaseFirstDownload();
+      await Promise.allSettled([first, second]);
+    }
 
     expect(submit).toHaveBeenCalledTimes(2);
     expect(submit).toHaveBeenNthCalledWith(1, target, {
@@ -216,6 +230,67 @@ describe("WeixinConversationAdapter", () => {
     });
     await adapter.close();
     vi.useRealTimers();
+  });
+
+  it("allows different Weixin Conversations to download images in parallel", async () => {
+    const otherTarget: ConversationTarget = {
+      ...target,
+      conversationId: "other-actor-fixture@im.wechat",
+    };
+    const submit = vi.fn(async () => ({
+      threadId: "thread",
+      turnId: "turn",
+      steered: false,
+    }));
+    let releaseFirstDownload!: () => void;
+    const firstDownloadGate = new Promise<void>((resolve) => {
+      releaseFirstDownload = resolve;
+    });
+    const download = vi.fn()
+      .mockImplementationOnce(async () => {
+        await firstDownloadGate;
+        return {
+          path: pngImagePath,
+          mimeType: "image/png" as const,
+          bytes: 8,
+        };
+      })
+      .mockResolvedValueOnce({
+        path: jpegImagePath,
+        mimeType: "image/jpeg" as const,
+        bytes: 9,
+      });
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit }),
+      { notifyText: vi.fn(() => true) },
+      { download },
+    );
+
+    const first = adapter.handle({
+      target,
+      actorId: message.actorId,
+      kind: "image",
+      images: [{ encryptedQueryParam: "first-private-query" }],
+    });
+    const second = adapter.handle({
+      target: otherTarget,
+      actorId: "other-actor-fixture@im.wechat",
+      kind: "image",
+      images: [{ encryptedQueryParam: "second-private-query" }],
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    try {
+      expect(download).toHaveBeenCalledTimes(2);
+    } finally {
+      releaseFirstDownload();
+      await Promise.allSettled([first, second]);
+    }
+    expect(submit).toHaveBeenCalledWith(otherTarget, {
+      text: "请查看这张图片并根据图片内容协助我。",
+      images: [{ url: jpegDataUrl }],
+    });
+    await adapter.close();
   });
 
   it("does not submit a partially downloaded image batch", async () => {

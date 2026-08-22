@@ -4,6 +4,7 @@ import {
   type ConversationUseCases,
 } from "../../application/index.js";
 import {
+  conversationTargetKey,
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
@@ -90,6 +91,7 @@ export type WeixinConversationMessage =
 export class WeixinConversationAdapter {
   private readonly commands: ConversationCommandService;
   private readonly inputs: SurfaceInputCoalescer;
+  private readonly handlingLocks = new Map<string, Promise<void>>();
   private nextSequence = 0;
 
   constructor(
@@ -121,7 +123,14 @@ export class WeixinConversationAdapter {
     );
   }
 
-  async handle(message: WeixinConversationMessage): Promise<void> {
+  handle(message: WeixinConversationMessage): Promise<void> {
+    return this.handleOrdered(
+      conversationTargetKey(message.target),
+      () => this.handleOnce(message),
+    );
+  }
+
+  private async handleOnce(message: WeixinConversationMessage): Promise<void> {
     try {
       if (message.kind === "audio") {
         await this.inputs.flushPending(message.target, message.actorId);
@@ -341,6 +350,28 @@ export class WeixinConversationAdapter {
 
   close(): Promise<void> {
     return this.inputs.close();
+  }
+
+  private async handleOrdered<T>(
+    key: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.handlingLocks.get(key) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chain = previous.then(() => current);
+    this.handlingLocks.set(key, chain);
+    await previous;
+    try {
+      return await action();
+    } finally {
+      release?.();
+      if (this.handlingLocks.get(key) === chain) {
+        this.handlingLocks.delete(key);
+      }
+    }
   }
 
   private notify(target: ConversationTarget, text: string): void {
