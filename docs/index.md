@@ -149,8 +149,8 @@ Codex App Server RPC。它负责受管实例的按需启动和主动释放；`co
 模型或计划缺失时不回退通用目录。模型目录与价格基线由人工对照 DeepSeek 官方文档审查更新，
 运行中的 Gateway 不抓取价格 HTML。
 OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/opencode-go-model-pricing.ts)
-读取官方美元价格基线并按请求开始时间（UTC）选择 Peak/Off-Peak 价；[`prepare-opencode-go-pricing-proposal.mjs`](../scripts/prepare-opencode-go-pricing-proposal.mjs)
-每日核对官方页面全部模型的价格、时段、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.148.0
+读取人工审查的官方美元价格基线并按请求开始时间（UTC）选择 Peak/Off-Peak 价；维护时同时核对
+官方页面全部模型的价格、时段、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.148.0
 真实 App Server 按需启动、初始化与模型列表合同验证的模型计价和开放选择。`/usage` 与 WebUI
 在官方账户窗口外，还用当前官方价格基线按请求开始时间重新计价（峰谷对齐）当前官方月度窗口
 （由 `resetsAt` 倒推开始时间）内各模型已用金额；价格更新生效时间（基线 `sourceUpdatedAt`）之前
@@ -250,11 +250,10 @@ Client 与 Surface，不终止共享 App Server。
 固定版本源码链接和支持矩阵。`npm run docs:check` 会自动核对上表的协议和模块数字；也可用以下
 命令手动复核：
 
-每日 Alpha Canary 只对官方 Pre-release 做隔离前向兼容测试，不改变本页记录的稳定版本、数量、
-固定版本链接或支持矩阵；它和正式升级提案会独立运行各项兼容检查，并保存逐阶段结果、日志、
-完整 Patch 和协议结构影响摘要。自动提案阶段不修改本页稳定基线，因此文档索引检查明确跳过；正式
-Release 发布并完成适配后必须重新运行正式升级流程和完整提交检查。Release 解析在有限网络
-重试后仍失败时，工作流保留 `unresolved` 失败报告，不生成或猜测协议版本。
+正式升级提案会运行各项兼容检查，并保存逐阶段结果、日志、完整 Patch 和协议结构影响摘要。自动
+提案阶段不修改本页稳定基线，因此文档索引检查明确跳过；正式 Release 发布并完成适配后必须运行
+完整提交检查。Release 解析在有限网络重试后仍失败时，工作流保留 `unresolved` 失败报告，不生成
+或猜测协议版本。
 
 ```bash
 find src/codex-protocol/generated -type f -name '*.ts' | wc -l

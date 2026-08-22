@@ -15,8 +15,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as releaseHelpers from "../scripts/resolve-codex-release.mjs";
 // @ts-expect-error JavaScript GitHub release helper intentionally has no declaration file.
 import * as releaseApiHelpers from "../scripts/codex-release-api.mjs";
-// @ts-expect-error JavaScript Alpha release helper intentionally has no declaration file.
-import * as alphaReleaseHelpers from "../scripts/resolve-codex-alpha.mjs";
 // @ts-expect-error JavaScript report helper intentionally has no declaration file.
 import * as reportHelpers from "../scripts/write-upgrade-report.mjs";
 // @ts-expect-error JavaScript protocol analyzer intentionally has no declaration file.
@@ -26,11 +24,6 @@ import * as validationHelpers from "../scripts/run-upgrade-validation.mjs";
 
 const { compareStableVersions, validateOfficialRelease } = releaseHelpers;
 const { fetchCodexReleaseJson } = releaseApiHelpers;
-const {
-  compareAlphaVersions,
-  selectLatestOfficialAlpha,
-  validateOfficialAlphaRelease,
-} = alphaReleaseHelpers;
 const {
   collectGitDiff,
   renderUpgradeSummary,
@@ -141,7 +134,7 @@ describe("Codex release upgrade preview", () => {
             if (attempts < 3) {
               throw new TypeError("terminated");
             }
-            return [{ tag_name: "rust-v0.146.0-alpha.6" }];
+            return [{ tag_name: "rust-v0.146.0" }];
           },
         };
       },
@@ -149,39 +142,7 @@ describe("Codex release upgrade preview", () => {
     });
 
     expect(attempts).toBe(3);
-    expect(result).toEqual([{ tag_name: "rust-v0.146.0-alpha.6" }]);
-  });
-
-  it("selects the highest official Alpha and rejects stable releases", () => {
-    const alpha = (version: string) => ({
-      tag_name: `rust-v${version}`,
-      draft: false,
-      prerelease: true,
-      html_url: `https://github.com/openai/codex/releases/tag/rust-v${version}`,
-    });
-    expect(selectLatestOfficialAlpha([
-      alpha("0.146.0-alpha.5"),
-      alpha("0.146.0-alpha.3.1"),
-      alpha("0.146.0-alpha.6"),
-      {
-        tag_name: "rust-v0.145.0",
-        draft: false,
-        prerelease: false,
-      },
-    ])).toEqual({
-      version: "0.146.0-alpha.6",
-      tag: "rust-v0.146.0-alpha.6",
-      url: "https://github.com/openai/codex/releases/tag/rust-v0.146.0-alpha.6",
-    });
-    expect(compareAlphaVersions(
-      "0.146.0-alpha.4",
-      "0.146.0-alpha.3.1",
-    )).toBeGreaterThan(0);
-    expect(() => validateOfficialAlphaRelease({
-      tag_name: "rust-v0.146.0",
-      draft: false,
-      prerelease: false,
-    })).toThrow("Alpha Release");
+    expect(result).toEqual([{ tag_name: "rust-v0.146.0" }]);
   });
 
   it("renders a file list and protocol file count for the CI summary", () => {
@@ -201,29 +162,28 @@ describe("Codex release upgrade preview", () => {
     expect(summary).toContain("NewType.ts");
   });
 
-  it("renders a failed Alpha report even when generation produced no diff", () => {
+  it("renders a failed stable report even when generation produced no diff", () => {
     const summary = renderUpgradeSummary(
-      "0.146.0-alpha.6",
+      "0.146.0",
       "0123456789abcdef",
       "",
       "",
-      "alpha",
+      "stable",
       "failure",
     );
-    expect(summary).toContain("Alpha Canary");
+    expect(summary).toContain("正式升级提案");
     expect(summary).toContain("自动验证：失败");
     expect(summary).toContain("变更文件：0");
     expect(summary).toContain("(没有文件差异)");
-    expect(summary).toContain("不可作为 main");
   });
 
   it("renders every independent validation stage in the summary", () => {
     const summary = renderUpgradeSummary(
-      "0.146.0-alpha.6",
+      "0.146.0",
       "0123456789abcdef",
       "",
       "",
-      "alpha",
+      "stable",
       "failure",
       {
         stages: [
@@ -250,7 +210,7 @@ describe("Codex release upgrade preview", () => {
     const script = join(process.cwd(), "scripts/write-upgrade-report.mjs");
     const failure = spawnSync(
       process.execPath,
-      [script, "unresolved", output, "alpha", "failure"],
+      [script, "unresolved", output, "stable", "failure"],
       {
         cwd: process.cwd(),
         encoding: "utf8",
@@ -279,7 +239,7 @@ describe("Codex release upgrade preview", () => {
 
     const invalidSuccess = spawnSync(
       process.execPath,
-      [script, "unresolved", output, "alpha", "success"],
+      [script, "unresolved", output, "stable", "success"],
       { cwd: process.cwd(), encoding: "utf8" },
     );
     expect(invalidSuccess.status).not.toBe(0);
