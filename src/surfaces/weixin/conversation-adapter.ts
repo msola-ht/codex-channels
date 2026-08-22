@@ -10,6 +10,7 @@ import {
 } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
+import type { InputImageMimeType } from "../generated-image.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
   formatOperationFailure,
@@ -217,7 +218,7 @@ export class WeixinConversationAdapter {
         }
         const localImages: Array<{
           path: string;
-          mimeType: "image/jpeg" | "image/png";
+          mimeType: InputImageMimeType;
           bytes: number;
         }> = [];
         let totalBytes = 0;

@@ -13,7 +13,7 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 当前实现：
 
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、一次性音频、UTF-8 文本文件和生命周期。
-- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本、PNG/JPEG、一次性音频与 UTF-8 文本文件到
+- [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本、PNG/JPEG/WebP/非动画 GIF、一次性音频与 UTF-8 文本文件到
   Application 的窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心、
   用户 OAuth Device Flow 和单账号生命周期组合；有效配置启用时由 Bootstrap 显式注册。真实平台
   状态见 [`通讯渠道验收矩阵`](../../docs/channel-acceptance-matrix.md)。
@@ -63,8 +63,8 @@ Telegram 和飞书在交互消息创建成功或失败时
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
 `surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface
 明确标识的图片批次，普通文字、单图和无批次标识的消息立即提交。图片落盘后仍由渠道管理，批次
-flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG 签名、单张 10 MiB 与整批 20 MiB，转换为
-有界 `data:image/png|jpeg;base64,...` 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
+flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非动画 GIF 签名、单张 10 MiB 与整批 20 MiB，转换为
+有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
 不写入自身日志或独立存储，也不向 App Server 发送本地路径，不在 Surface 维护另一套识图会话或重试队列。
 三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
 并单独列出最近直接 API 请求；`global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
@@ -179,7 +179,7 @@ Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类
 会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
 并渲染类型化结果。Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期确认，命令结果
 不重复发送启动提示；该事件保留具体扩展类型和名称，追加到活动 Turn 时仍渲染明确确认。普通文本、图片下载、平台帮助、身份查询和
-交互取消保留在平台边界。PNG/JPEG
+交互取消保留在平台边界。PNG/JPEG/WebP/非动画 GIF
 的大小限制与内容签名校验由 `managed-image-store.ts` 在 Surface 内复用；
 一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、`0700/0600` 私有暂存和一小时清理由
 `managed-audio-store.ts` 复用。两者通过内部 `managed-media-store.ts` 统一私有目录生命周期、

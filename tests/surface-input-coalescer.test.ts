@@ -17,6 +17,16 @@ const target: ConversationTarget = {
 const tinyPng = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
+const tinyWebp = Buffer.from("524946460400000057454250", "hex");
+const gifHeader = Buffer.from("47494638396101000100800000000000ffffff", "hex");
+const gifFrame = Buffer.from("2c0000000001000100000202440100", "hex");
+const tinyGif = Buffer.concat([gifHeader, gifFrame, Buffer.from([0x3b])]);
+const animatedGif = Buffer.concat([
+  gifHeader,
+  gifFrame,
+  gifFrame,
+  Buffer.from([0x3b]),
+]);
 
 function writeTinyPng(name: string): { directory: string; path: string } {
   const directory = mkdtempSync(join(tmpdir(), "codex-input-"));
@@ -62,6 +72,61 @@ describe("SurfaceInputCoalescer", () => {
         images: [{ url: "data:image/png;base64,iVBORw0KGgo=" }],
       });
       expect(JSON.stringify(submit.mock.calls[0])).not.toContain(imagePath);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["image/gif" as const, "image.gif", tinyGif],
+    ["image/webp" as const, "image.webp", tinyWebp],
+  ])("submits %s input as an inline data URL", async (mimeType, name, bytes) => {
+    const directory = mkdtempSync(join(tmpdir(), "codex-input-"));
+    const imagePath = join(directory, name);
+    writeFileSync(imagePath, bytes, { mode: 0o600 });
+    try {
+      const submit = vi.fn(async () => ({
+        threadId: "thread",
+        turnId: "turn",
+        steered: false,
+      }));
+      const coalescer = new SurfaceInputCoalescer(submit, { quietWindowMs: 0 });
+
+      await coalescer.enqueue({
+        target,
+        actorId: "actor-1",
+        sequence: 1,
+        localImages: [{ path: imagePath, mimeType, bytes: bytes.length }],
+      });
+
+      expect(submit).toHaveBeenCalledWith(target, {
+        text: "请查看这张图片并根据图片内容协助我。",
+        images: [{ url: `data:${mimeType};base64,${bytes.toString("base64")}` }],
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects animated GIF input", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codex-input-"));
+    const imagePath = join(directory, "animated.gif");
+    writeFileSync(imagePath, animatedGif, { mode: 0o600 });
+    try {
+      const submit = vi.fn();
+      const coalescer = new SurfaceInputCoalescer(submit, { quietWindowMs: 0 });
+
+      await expect(coalescer.enqueue({
+        target,
+        actorId: "actor-1",
+        sequence: 1,
+        localImages: [{
+          path: imagePath,
+          mimeType: "image/gif",
+          bytes: animatedGif.length,
+        }],
+      })).rejects.toMatchObject({ code: "image.unsupported" });
+      expect(submit).not.toHaveBeenCalled();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

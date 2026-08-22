@@ -17,7 +17,7 @@
 - 原生 Thread Queue 六请求、100 条容量、25 条分页、五分钟 ID 选择快照、非文本安全摘要、Provider 路由、
   pending model/effort/Fast/Plan 覆盖失败关闭和写入竞态；项目输入到官方 `UserInput` 的映射，以及
   Review、Goal 和控制响应到稳定 Application 结果的映射。
-- 图片输入的 PNG/JPEG 签名、可信 MIME、Data URL、单张/批量大小与数量边界；当前模型目录未声明
+- 图片输入的 PNG/JPEG/WebP/非动画 GIF 签名、可信 MIME、Data URL、单张/批量大小与数量边界；当前模型目录未声明
   `image` 能力时在创建或追加 Turn 前拒绝，声明支持时沿用官方 `image` 输入，不把本地路径交给
   App Server，不建立第二套识图请求链路。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
@@ -72,7 +72,7 @@
   思考流式卡与 Thread 状态卡失败日志只保留
   受约束异常类型和机器错误码；同一 Thread 的 active/idle 轻量状态卡片创建、重复抑制、顺序更新、更新错误
   分类、失败绑定清理和关闭超时后的迟到结果隔离；操作详情、状态、耗时和退出码的
-  运行帧忽略、终态静态 CardKit 发送及会话顺序；已授权文本、PNG/JPEG 独立图片、单张图片说明
+  运行帧忽略、终态静态 CardKit 发送及会话顺序；已授权文本、PNG/JPEG/WebP/非动画 GIF 独立图片、单张图片说明
   文字和独立 UTF-8 文本文件到 Application 的提交，图片的 10 MiB 限制、内容签名校验、私有
   暂存与过期清理，文件的安全名称、1,000,000 字节、控制字符、纯内存和错误脱敏边界，活动 Turn
   追加提示、命令参数透传、
@@ -199,7 +199,7 @@
 - 微信 `getconfig/sendtyping` 合同探针的固定认证 Header、输入状态票据裁剪、开始/5 秒续期/
   取消顺序、续期失败后的取消、API 错误脱敏、畸形票据、超时与外部取消。
 - 微信图片合同探针的已授权完成态图片筛选、固定官方 CDN 地址、`image_item.aeskey` 与
-  `media.aes_key` 两种 AES-128-ECB key 形态、内存解密、10 MiB 上限、PNG/JPEG 签名校验，
+  `media.aes_key` 两种 AES-128-ECB key 形态、内存解密、10 MiB 上限、PNG/JPEG/WebP/非动画 GIF 签名校验，
   以及图片、地址、查询参数、key、Token、游标和完整身份不进入输出。
 - 微信一般文件合同探针的已授权完成态文件筛选、固定官方 CDN 地址、`media.aes_key`
   AES-128-ECB key 形态、内存解密和 20 MiB 本地安全上限，声明长度与 MD5 校验、文件名形状
@@ -217,7 +217,7 @@
   取消；版本 1 游标 Store 的账号哈希文件名、严格载荷、原子替换、权限修复、精确删除、损坏与
   符号链接失败关闭；接收监控器的顺序投递、原始 ID 去重、整批成功后游标提交、失败保留旧游标、
   有限瞬时重试、长轮询超时和取消；固定官方 CDN 图片下载、两种 AES key 形态、AES-128-ECB
-  解密、单张 10 MiB/PNG/JPEG 边界、私有暂存和敏感错误裁剪；语音转写优先、MP3/OGG
+  解密、单张 10 MiB 与 PNG/JPEG/WebP/非动画 GIF 边界、私有暂存和敏感错误裁剪；语音转写优先、MP3/OGG
   下载、5 分钟/20 MiB、SILK 明确拒绝，以及当前模型缺少 `audio` 时在 Turn 前拒绝；
   私聊文本、图文与多图片输入
   Adapter 的授权、Actor 记录、协议单次更新多图兼容与客户端独立消息立即提交、整批 20 MiB 限制、失败不提交部分输入及

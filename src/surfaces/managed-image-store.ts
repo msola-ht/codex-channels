@@ -1,7 +1,10 @@
-import { open } from "node:fs/promises";
 import type { Readable } from "node:stream";
 
 import { UserFacingError } from "../conversation-core/index.js";
+import {
+  readInputImage,
+  type InputImageMimeType,
+} from "./generated-image.js";
 import { ManagedMediaStore } from "./managed-media-store.js";
 
 export const maximumManagedImageBytes = 10 * 1024 * 1024;
@@ -16,7 +19,7 @@ export interface ManagedImageSource {
 
 export interface StoredManagedImage {
   path: string;
-  mimeType: "image/jpeg" | "image/png";
+  mimeType: InputImageMimeType;
   bytes: number;
 }
 
@@ -33,7 +36,7 @@ export class ManagedImageStore {
       maximumBytes: maximumManagedImageBytes,
       retentionMs,
       cleanupIntervalMs,
-      managedFileName: /^[0-9a-f-]+\.(?:jpg|png|part)$/u,
+      managedFileName: /^[0-9a-f-]+\.(?:gif|jpg|png|webp|part)$/u,
       closedMessage: "图片暂存器已经关闭",
       storeFailureMessage: "保存图片失败",
       invalidContentLength: (contentLength) =>
@@ -41,8 +44,10 @@ export class ManagedImageStore {
       tooLargeError: () =>
         new UserFacingError("image.too-large", "图片超过 10 MiB 限制"),
       detectType: detectImageType,
-      unsupportedError: () =>
-        new UserFacingError("image.unsupported", "仅支持 PNG 和 JPEG 图片"),
+      unsupportedError: () => new UserFacingError(
+        "image.unsupported",
+        "仅支持 PNG、JPEG、WebP 和非动画 GIF 图片",
+      ),
       onCleanupFailure,
     });
   }
@@ -61,22 +66,18 @@ export class ManagedImageStore {
 }
 
 async function detectImageType(path: string): Promise<{
-  extension: "jpg" | "png";
-  mimeType: "image/jpeg" | "image/png";
+  extension: "gif" | "jpg" | "png" | "webp";
+  mimeType: InputImageMimeType;
 } | undefined> {
-  const handle = await open(path, "r");
   try {
-    const header = Buffer.alloc(8);
-    const { bytesRead } = await handle.read(header, 0, header.length, 0);
-    if (bytesRead >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) {
-      return { extension: "jpg", mimeType: "image/jpeg" };
+    const image = await readInputImage(path);
+    switch (image.format) {
+      case "gif": return { extension: "gif", mimeType: "image/gif" };
+      case "jpeg": return { extension: "jpg", mimeType: "image/jpeg" };
+      case "png": return { extension: "png", mimeType: "image/png" };
+      case "webp": return { extension: "webp", mimeType: "image/webp" };
     }
-    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    if (bytesRead === png.length && header.equals(png)) {
-      return { extension: "png", mimeType: "image/png" };
-    }
+  } catch {
     return undefined;
-  } finally {
-    await handle.close();
   }
 }

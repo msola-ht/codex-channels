@@ -355,7 +355,7 @@ export class TelegramSurface {
           "Codex Connect Gateway",
           "",
           "普通文本会发送到当前 Codex Thread。",
-          "发送 PNG/JPEG 图片时，可在图片说明中写明需要 Codex 处理的任务。",
+          "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
           "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
@@ -773,6 +773,15 @@ export class TelegramSurface {
         context.message.caption,
       );
     });
+    this.bot.on("message:animation", async (context) => {
+      const animation = context.message.animation;
+      await this.submitImage(
+        context,
+        animation.file_id,
+        animation.file_size,
+        context.message.caption,
+      );
+    });
     this.bot.on(["message:voice", "message:audio"], async (context) => {
       const audio = context.message.voice ?? context.message.audio;
       if (!audio) {
@@ -1117,6 +1126,7 @@ function telegramMessageType(context: Context): string | undefined {
   if (!message) return undefined;
   if (message.text !== undefined) return "text";
   if (message.photo !== undefined) return "photo";
+  if (message.animation !== undefined) return "animation";
   if (message.document !== undefined) return "document";
   if (message.voice !== undefined) return "voice";
   if (message.audio !== undefined) return "audio";
@@ -1126,7 +1136,9 @@ function telegramMessageType(context: Context): string | undefined {
 function isSupportedImageDocument(mimeType: string | undefined, fileName: string | undefined): boolean {
   return mimeType === "image/png" ||
     mimeType === "image/jpeg" ||
-    /\.(?:png|jpe?g)$/i.test(fileName ?? "");
+    mimeType === "image/gif" ||
+    mimeType === "image/webp" ||
+    /\.(?:gif|png|jpe?g|webp)$/i.test(fileName ?? "");
 }
 
 function target(context: Context): ConversationTarget {

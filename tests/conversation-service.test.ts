@@ -1616,7 +1616,9 @@ describe("ConversationService model selection", () => {
     expect(requireInputModality).toHaveBeenCalledWith(target, "image");
   });
 
-  it("steers inline images into the active turn", async () => {
+  it.each(["jpeg", "gif", "webp"])(
+    "steers inline %s images into the active turn",
+    async (format) => {
     const steerTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
     const requireInputModality = vi.fn().mockResolvedValue(undefined);
     const service = new ConversationService(
@@ -1629,7 +1631,7 @@ describe("ConversationService model selection", () => {
 
     const submission = await service.submit(target, {
       text: "补充图片",
-      images: [{ url: "data:image/jpeg;base64,AA==" }],
+      images: [{ url: `data:image/${format};base64,AA==` }],
     });
 
     expect(steerTurn).toHaveBeenCalledWith(
@@ -1637,13 +1639,14 @@ describe("ConversationService model selection", () => {
       "turn-1",
       [
         { type: "text", text: "补充图片" },
-        { type: "image", url: "data:image/jpeg;base64,AA==" },
+        { type: "image", url: `data:image/${format};base64,AA==` },
       ],
       expect.stringMatching(/^codex_connect:/),
     );
     expect(submission.steered).toBe(true);
     expect(requireInputModality).toHaveBeenCalledWith(target, "image");
-  });
+    },
+  );
 
   it("rejects non-data image URLs at the application boundary", async () => {
     const service = new ConversationService(
@@ -1656,7 +1659,7 @@ describe("ConversationService model selection", () => {
 
     await expect(service.submit(target, {
       images: [{ url: "https://example.com/image.png" }],
-    })).rejects.toThrow("图片必须使用 PNG 或 JPEG Base64 Data URL");
+    })).rejects.toThrow("图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL");
   });
 
   it.each([
@@ -1673,7 +1676,7 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.submit(target, { images: [{ url }] }))
-      .rejects.toThrow("图片必须使用 PNG 或 JPEG Base64 Data URL");
+      .rejects.toThrow("图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL");
   });
 
   it("rejects inline images before creating a Turn when the current model lacks image input", async () => {

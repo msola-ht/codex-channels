@@ -7,7 +7,7 @@ Bootstrap 显式组合、全部平台无关
 私聊命令、审批和用户输入卡片，以及
 按需 OAuth 与 Doctor。当前可通过严格 TOML 或统一 Setup 启用单账号私聊 Surface；群聊、Lark、
 Office、压缩包和其他未列明的通用二进制输入不支持。展示体验包括上线通知、Turn 开始确认、最终回复、命令
-结果、操作过程与每轮结束统计统一使用 CardKit 2.0 Markdown，私聊 PNG/JPEG 图片复用
+结果、操作过程与每轮结束统计统一使用 CardKit 2.0 Markdown，私聊 PNG/JPEG/WebP/非动画 GIF 图片复用
 Application 的内联 Data URL 输入，同一 Thread 的
 运行中与处理结束状态已实现合并到一条可更新消息，上线通知与每轮上下文状态复用共享生命周期数据，
 持续模型增量使用 CardKit 2.0 原生流式卡片；Codex 原生 `imageGeneration` 完成以及
@@ -184,7 +184,7 @@ Queue ID、有界页码和分组编号，条目标签只显示 Application 提�
 丢弃，不会在旧 Surface 上继续启动。不持久化消息正文。
 
 `media.ts` 只在已授权消息进入 Conversation Worker 后下载图片。平台资源 Key 不作为本机路径，
-下载流经 Surface 共用 `ManagedImageStore` 限制为 10 MiB，并按内容签名只接受 PNG/JPEG；
+下载流经 Surface 共用 `ManagedImageStore` 限制为 10 MiB，并按内容签名只接受 PNG/JPEG/WebP/非动画 GIF；
 目录权限为 `0700`、文件权限为 `0600`，过期文件定期清理。下载或文件异常只返回稳定脱敏错误。
 
 `renderer.ts` 通过模块公开入口接收 `OutputEvent`。没有进入原生流式路径的最终文本、
@@ -256,7 +256,7 @@ StateStore 中已知且仍有授权 Actor 的精确 Chat 生成消息，不要�
 并通过同一 CardKit Markdown Outbox 入队。生成失败或输出队列关闭只记录受约束诊断，不阻塞长连接。
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
-图片记录（路径、可信 MIME 与字节数），再由共享输入批处理器读取为 PNG/JPEG Data URL；富文本内的全部图片按原顺序与说明文字在同一次
+图片记录（路径、可信 MIME 与字节数），再由共享输入批处理器读取为 PNG/JPEG/WebP/非动画 GIF Data URL；富文本内的全部图片按原顺序与说明文字在同一次
 提交中传入，没有说明文字时才使用稳定图片提示。对已知平台无关命令调用
 `ConversationCommandService.execute()`；手动输入的 `/h`、`/work`、`/r` 分别规范化为
 `/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。`/start`、`/help` 打开同一命令中心卡片；

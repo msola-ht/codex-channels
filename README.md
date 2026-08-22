@@ -313,7 +313,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`
-- 图片：直接发送 PNG/JPEG；当前模型不支持图片时，先用 `/model` 切换到支持图片的模型
+- 图片：直接发送 PNG/JPEG/WebP/非动画 GIF；当前模型不支持图片时，先用 `/model` 切换到支持图片的模型
 - 帮助：`/help`、`/whoami`
 
 飞书中需要引用其他消息时，请直接回复目标消息后发送要求。Gateway 不解析飞书“复制消息链接”，

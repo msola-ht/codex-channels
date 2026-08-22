@@ -17,7 +17,7 @@
 
 飞书通过企业自建应用的 WebSocket 长连接接入 Gateway，只支持已授权用户的私聊。当前已接入：
 
-- 普通文本、纯文字富文本、代码块与 Markdown 富文本、PNG/JPEG、一次性音频和受限 UTF-8 文本文件输入；
+- 普通文本、纯文字富文本、代码块与 Markdown 富文本、PNG/JPEG/WebP/非动画 GIF、一次性音频和受限 UTF-8 文本文件输入；
 - 共享会话、Workspace、模型、Fast、Goal、用量、项目规则和其他平台无关命令；
 - 命令、文件、权限、用户输入和 MCP elicitation 的 CardKit 交互；
 - CardKit Markdown 静态与原生流式回复、操作过程、Thread 状态和 Turn 完成统计；

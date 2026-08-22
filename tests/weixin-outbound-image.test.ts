@@ -57,6 +57,7 @@ describe("Weixin outbound generated-image reader", () => {
     const imagePath = join(directory, "image.png");
     const linkPath = join(directory, "link.png");
     const textPath = join(directory, "text.txt");
+    const webpPath = join(directory, "image.webp");
     await writeFile(imagePath, Buffer.from([
       0x89,
       0x50,
@@ -69,12 +70,15 @@ describe("Weixin outbound generated-image reader", () => {
     ]));
     await symlink(imagePath, linkPath);
     await writeFile(textPath, "private text");
+    await writeFile(webpPath, Buffer.from("524946460400000057454250", "hex"));
 
     await expect(readWeixinOutboundImage("relative.png"))
       .rejects.toMatchObject({ code: "invalid-path" });
     await expect(readWeixinOutboundImage(linkPath))
       .rejects.toMatchObject({ code: "invalid-file" });
     await expect(readWeixinOutboundImage(textPath))
+      .rejects.toMatchObject({ code: "unsupported-image" });
+    await expect(readWeixinOutboundImage(webpPath))
       .rejects.toMatchObject({ code: "unsupported-image" });
   });
 

@@ -26,7 +26,7 @@ export function formatSurfaceUserFacingError(
     case "conversation.background-queued":
       return "当前任务仍有下一 Turn 排队消息，暂不能切换会话";
     case "image.url.invalid":
-      return "图片必须使用 PNG 或 JPEG Base64 Data URL";
+      return "图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL";
     case "image.too-large":
       return error.details.scope === "batch"
         ? "图片总大小超过 20 MiB 限制"
@@ -34,7 +34,7 @@ export function formatSurfaceUserFacingError(
     case "image.too-many":
       return "一次最多处理 4 张图片";
     case "image.unsupported":
-      return "仅支持 PNG 和 JPEG 图片";
+      return "仅支持 PNG、JPEG、WebP 和非动画 GIF 图片";
     case "audio.path.invalid":
       return "本地音频路径必须是绝对路径";
     case "audio.duration-missing":

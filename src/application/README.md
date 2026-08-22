@@ -65,9 +65,9 @@
   重新查询 Queue 和按 Thread 活动 Turn，避免自动派发期间解除绑定。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
-  输入只允许文本、PNG/JPEG Base64 Data URL 图片、绝对本地音频路径、已由 Client 从当前 Workspace
+  输入只允许文本、PNG/JPEG/WebP/非动画 GIF Base64 Data URL 图片、绝对本地音频路径、已由 Client 从当前 Workspace
   `skills/list` 解析的 Skill 引用，以及受开发中开关约束的 Plugin mention；Data URL 仅允许内联
-  `data:image/png|jpeg;base64,...`，音频路径不代表当前模型可用，必须先通过模型目录能力检查。
+  受支持的 `data:image/*;base64,...`，音频路径不代表当前模型可用，必须先通过模型目录能力检查。
   显式 Skill 调用同时发送 `$<skill-name>` 文本标记和内部 Skill 引用。Application 不构造官方 `UserInput`，
   也不接收完整官方 Turn 响应。
 

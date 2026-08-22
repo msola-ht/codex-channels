@@ -9,8 +9,9 @@
 - `constants.ts`：Telegram Surface 的稳定账号标识。
 - `bot.ts`：提供 Bootstrap 使用的单一选项工厂，注册 Telegram SDK 处理器，执行访问检查，
   把标准命令或普通输入提交给 Application；
-  同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；共享输入批处理器在提交时
-  将已校验的 PNG/JPEG 暂存文件读取为 Data URL，不把本地路径交给 App Server；
+  同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；静态 GIF 无论作为文档还是
+  `animation` 消息到达都进入相同内容校验，真正的动画 GIF 会被拒绝；共享输入批处理器在提交时
+  将已校验的 PNG/JPEG/WebP/非动画 GIF 暂存文件读取为 Data URL，不把本地路径交给 App Server；
   普通文字、单图和没有相册标识的独立图片立即提交，不用时间窗口猜测图文关系；
   原生 Voice/Audio 最长 5 分钟、最大 20 MiB，只在下载后验证为 WAV、MP3、M4A、WebM 或 OGG
   才构造稳定 `localAudio`，私有临时文件一小时后清理；Application 仅在当前模型目录包含
