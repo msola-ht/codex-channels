@@ -176,12 +176,12 @@
 | 0.148.0 精确协议基线 | 让 Gateway、App Server 和生成类型保持在同一正式版本 | 重新生成协议并同步 Gateway、CI、固定源码与真实合同版本；不保留 0.147.0 兼容分支 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`ci.yml`](../.github/workflows/ci.yml)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 图片生成额度失败摘要 | 把 `ImageGenerationItem.failure=usageLimitExceeded` 作为结构化失败返回 | 只显示有界的“图片生成额度已用尽”，不外发上游内部限额 ID，不推断未声明的重置时间单位；成功产物仍只使用官方 `savedPath` | [`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)、[`operation-adapter.test.ts`](../tests/operation-adapter.test.ts) |
 | 微信运行版本标识统一 | 让微信 `base_info.bot_agent` 与实际 Gateway 包版本一致 | 生产客户端从统一 `src/version.json` 读取版本，避免后续 CLI 升级遗漏手写常量；独立合同探针继续显式锁定当前版本 | [`protocol-client.ts`](../src/surfaces/weixin/protocol-client.ts)、[`weixin-protocol-client.test.ts`](../tests/weixin-protocol-client.test.ts) |
+| `account/usage/read.threadId` 与 `threadUsage` | 查询一个 OpenAI Thread 的官方估算 Credit、可选美元和用量分组 | 复用现有 `/usage`：账户摘要保持主结果，当前 OpenAI Thread 的估算并行读取且失败隔离；没有 Thread 或使用第三方 Provider 时保持原行为。官方估算不写入指标库、不与 `/metrics` 参考费用合并，也不宣称递归包含子代理 | [`Thread 官方用量开发设计`](thread-usage-development.md)、[`account-adapter.ts`](../src/codex-client/account-adapter.ts)、[`provider-account-service.test.ts`](../tests/provider-account-service.test.ts) |
 
 ### 待评估
 
 | 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
 | --- | --- | --- | --- |
-| `account/usage/read.threadId` 与 `threadUsage` | 查询单个 OpenAI Thread 的估算 Credit 或费用分解 | 可在会话状态中补充服务端估算，而不是只显示 Gateway 自有请求统计 | 当前 `/metrics` 还要统一处理 OpenAI、DeepSeek 与 OpenCode Go，不能把单 Provider 可选估算混成统一账单；等产品明确展示口径和第三方 Provider 降级方式后再采用 |
 | 模型 `multiAgentVersion`、退休时间与自动审核要求 | 描述模型的多代理运行时、退役时间和受管自动审核约束 | 可改进模型目录说明和受管环境提示 | 当前模型路由不依赖这些字段，审批仍由 Surface Actor 显式决定；只有字段影响模型可选性、请求合法性或必须展示的安全约束时再映射到 Application |
 | MCP Server `pluginId` 与单次 OAuth 注册策略 | 标识 MCP 的 Plugin 所有者，并允许登录时选择自动发现、动态注册或预注册客户端 | 可在 Plugin 调试和 OAuth 故障排查中说明来源 | 当前 OAuth 自动发现路径工作正常，Plugin API 仍为受开关约束的调试能力；没有用户选择和凭据配置边界前不扩展参数或展示 |
 | Thread 分区外观 | 为自定义 Thread 分区保存跨客户端同步的图标和颜色 | 可让渠道中的分区目录与原生客户端使用相同的视觉标识 | 当前 `/section` 只投影分区名称，创建和重命名时省略 `appearance`，因此不会覆盖其他客户端已有设置；只有三个 Surface 形成统一、安全且有明确用户需求的图标或颜色展示规则时再扩展 Application 类型与写入命令 |

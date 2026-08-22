@@ -1,5 +1,6 @@
 import type {
   AccountQueryPort,
+  AccountThreadUsage,
   ProviderAccountAdapter,
   ProviderAccountLimits,
   ProviderAccountQueryPort,
@@ -18,11 +19,27 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     }
   }
 
-  async accountUsage(modelProvider: string): Promise<ProviderAccountUsage> {
+  async accountUsage(
+    modelProvider: string,
+    threadId?: string,
+  ): Promise<ProviderAccountUsage> {
     const adapter = this.adapters.get(modelProvider);
-    return adapter
-      ? await adapter.accountUsage()
-      : { kind: "unsupported", provider: modelProvider };
+    if (!adapter) {
+      return { kind: "unsupported", provider: modelProvider };
+    }
+    const accountUsage = adapter.accountUsage();
+    if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
+      return await accountUsage;
+    }
+    const [usage, threadUsage] = await Promise.all([
+      accountUsage,
+      adapter.accountThreadUsage(threadId).catch((): AccountThreadUsage => ({
+        kind: "failed",
+      })),
+    ]);
+    return usage.kind === "token-usage"
+      ? { ...usage, threadUsage }
+      : usage;
   }
 
   async accountLimits(modelProvider: string): Promise<ProviderAccountLimits> {
@@ -44,6 +61,9 @@ export function createOpenAiAccountAdapter(
         provider: "openai",
         usage: await query.accountUsage(),
       };
+    },
+    async accountThreadUsage(threadId) {
+      return await query.accountThreadUsage(threadId);
     },
     async accountLimits() {
       return {

@@ -34,6 +34,29 @@ export interface AccountUsage {
   }>;
 }
 
+export interface AccountThreadUsageGroup {
+  model: string | null;
+  reasoningEffort: string | null;
+  speed: string | null;
+  estimatedUsageCreditsMicros: AccountMetric;
+  netNewInputTokens: AccountMetric | null;
+  cachedInputTokens: AccountMetric | null;
+  inputTokens: AccountMetric | null;
+  outputTokens: AccountMetric | null;
+  totalTokens: AccountMetric | null;
+}
+
+export type AccountThreadUsage =
+  | {
+      kind: "available";
+      threadId: string;
+      estimatedUsageCreditsMicros: AccountMetric;
+      estimatedUsageUsdMicros: AccountMetric | null;
+      groups: AccountThreadUsageGroup[];
+    }
+  | { kind: "unavailable" }
+  | { kind: "failed" };
+
 export interface AccountRateLimitWindow {
   usedPercent: number;
   windowDurationMins: number | null;
@@ -89,6 +112,7 @@ export interface AccountWeeklyLimitEstimate {
 export interface AccountQueryPort {
   accountUsage(): Promise<AccountUsage>;
   accountRateLimits(): Promise<AccountRateLimits>;
+  accountThreadUsage(threadId: string): Promise<AccountThreadUsage>;
 }
 
 export interface ProviderBalance {
@@ -122,7 +146,12 @@ export interface ProviderModelUsageEstimate {
 }
 
 export type ProviderAccountUsage =
-  | { kind: "token-usage"; provider: "openai"; usage: AccountUsage }
+  | {
+      kind: "token-usage";
+      provider: "openai";
+      usage: AccountUsage;
+      threadUsage?: AccountThreadUsage;
+    }
   | { kind: "balance"; provider: string; available: boolean; balances: ProviderBalance[] }
   | {
       kind: "quota-windows";
@@ -145,10 +174,11 @@ export type ProviderAccountLimits =
 export interface ProviderAccountAdapter {
   provider: string;
   accountUsage(): Promise<ProviderAccountUsage>;
+  accountThreadUsage?(threadId: string): Promise<AccountThreadUsage>;
   accountLimits?(): Promise<ProviderAccountLimits>;
 }
 
 export interface ProviderAccountQueryPort {
-  accountUsage(modelProvider: string): Promise<ProviderAccountUsage>;
+  accountUsage(modelProvider: string, threadId?: string): Promise<ProviderAccountUsage>;
   accountLimits(modelProvider: string): Promise<ProviderAccountLimits>;
 }

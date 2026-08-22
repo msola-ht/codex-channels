@@ -10,6 +10,7 @@ import type {
   ModelOption,
   AccountQueryPort,
   AccountRateLimits,
+  AccountThreadUsage,
   AccountUsage,
   CollaborationModeQueryPort,
   CollaborationModePreset,
@@ -35,6 +36,7 @@ import type {
   ConfigReadParams,
   ConfigReadResponse,
   CollaborationModeListResponse,
+  GetAccountTokenUsageParams,
   GetAccountTokenUsageResponse,
   GetAccountRateLimitsResponse,
   InitializeResponse,
@@ -103,7 +105,11 @@ import {
   toTurnStarted,
 } from "./turn-adapter.js";
 import { toModelOption } from "./model-adapter.js";
-import { toAccountRateLimits, toAccountUsage } from "./account-adapter.js";
+import {
+  toAccountRateLimits,
+  toAccountThreadUsage,
+  toAccountUsage,
+} from "./account-adapter.js";
 import {
   resolveInvocableSkill,
   toInstalledSkills,
@@ -852,6 +858,17 @@ export class CodexAppServerClient implements
       params: undefined,
     }, { retryOverload: true });
     return toAccountUsage(response);
+  }
+
+  async accountThreadUsage(threadId: string): Promise<AccountThreadUsage> {
+    if (threadId.length === 0) {
+      throw new Error("Codex Thread 用量查询缺少 threadId");
+    }
+    const response = await this.rpc.request<GetAccountTokenUsageResponse>({
+      method: "account/usage/read",
+      params: { threadId } satisfies GetAccountTokenUsageParams,
+    }, { retryOverload: true });
+    return toAccountThreadUsage(response, threadId);
   }
 
   async accountRateLimits(): Promise<AccountRateLimits> {

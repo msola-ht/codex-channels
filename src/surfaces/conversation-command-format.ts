@@ -6,6 +6,9 @@ import {
   type ConversationCommandOutcome,
   type ConversationCommandResult,
   type ConversationStatus,
+  type AccountMetric,
+  type AccountThreadUsage,
+  type AccountThreadUsageGroup,
   type McpResourceContent,
   type ThreadQueueInputType,
   type ThreadQueueItem,
@@ -46,6 +49,7 @@ const maximumMcpDetailSectionCharacters = 5_000;
 const maximumMcpDescriptionCharacters = 240;
 const maximumMcpOutputCharacters = 20_000;
 const maximumProcessCommandCharacters = 160;
+const maximumThreadUsageGroups = 8;
 const mcpToolAccessNotice =
   "工具读写属性来自 MCP 上游声明，仅供提示；实际调用仍按审批策略处理。";
 
@@ -74,7 +78,7 @@ export const conversationCommandDescriptions = {
   skill: "查看或调用 Skill",
   mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
   plugin: "列出、查看或调用 Plugin（开发中）",
-  usage: "查看账号用量",
+  usage: "查看账号与当前 Thread 用量",
   metrics: "查看会话、聚合或异常请求指标",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",
@@ -1442,7 +1446,7 @@ export function formatConversationUsage(
   const daily = [...result.result.usage.daily]
     .sort((left, right) => right.startDate.localeCompare(left.startDate))
     .slice(0, 7);
-  return toStructuredMarkdownList([
+  const lines = [
     "OpenAI Codex 账户用量摘要：",
     `累计 Tokens：${formatMillions(result.result.usage.summary.lifetimeTokens)}`,
     `单日峰值：${formatMillions(result.result.usage.summary.peakDailyTokens)}`,
@@ -1456,7 +1460,93 @@ export function formatConversationUsage(
       : daily.map(
           (entry) => `- ${entry.startDate}：${formatMillions(entry.tokens)}`,
         )),
-  ].join("\n"));
+  ];
+  appendThreadUsage(lines, result.result.threadUsage);
+  return toStructuredMarkdownList(lines.join("\n"));
+}
+
+function appendThreadUsage(
+  lines: string[],
+  threadUsage: AccountThreadUsage | undefined,
+): void {
+  if (!threadUsage) {
+    return;
+  }
+  lines.push("", "当前 Thread 官方估算：");
+  if (threadUsage.kind === "unavailable") {
+    lines.push(
+      "当前 Thread 的官方计费估算不可用；该能力目前仅向部分 Business/Enterprise 工作区开放。",
+    );
+    return;
+  }
+  if (threadUsage.kind === "failed") {
+    lines.push("当前 Thread 官方估算暂时无法查询，请稍后重试 /usage。");
+    return;
+  }
+  lines.push(`Credits：${formatMicros(threadUsage.estimatedUsageCreditsMicros)}`);
+  if (threadUsage.estimatedUsageUsdMicros !== null) {
+    lines.push(`估算费用：$${formatMicros(threadUsage.estimatedUsageUsdMicros)}`);
+  }
+  const tokenSummary = formatThreadTokenSummary(threadUsage.groups);
+  if (tokenSummary) {
+    lines.push(`计费 Token：${tokenSummary}`);
+  }
+  const visibleGroups = threadUsage.groups.slice(0, maximumThreadUsageGroups);
+  lines.push(
+    ...visibleGroups.map((group) =>
+      `${group.model ?? "其他"} · ${group.reasoningEffort ?? "其他"} · ${group.speed ?? "其他"}`
+      + `：${formatMicros(group.estimatedUsageCreditsMicros)} Credits`),
+  );
+  if (threadUsage.groups.length > visibleGroups.length) {
+    lines.push(`尚未展示 ${threadUsage.groups.length - visibleGroups.length} 组`);
+  }
+  lines.push(
+    "",
+    "官方估算可能延迟更新；本地请求明细与子代理累计请查看 /metrics。",
+  );
+}
+
+function formatThreadTokenSummary(
+  groups: readonly AccountThreadUsageGroup[],
+): string | null {
+  if (groups.length === 0) {
+    return null;
+  }
+  const entries: Array<[
+    string,
+    "inputTokens" | "cachedInputTokens" | "outputTokens",
+  ]> = [
+    ["输入", "inputTokens"],
+    ["缓存", "cachedInputTokens"],
+    ["输出", "outputTokens"],
+  ];
+  const parts = entries.flatMap(([label, field]) => {
+    const total = sumThreadMetric(groups, field);
+    return total === null ? [] : [`${label} ${formatMetric(total)}`];
+  });
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
+function sumThreadMetric(
+  groups: readonly AccountThreadUsageGroup[],
+  field: "inputTokens" | "cachedInputTokens" | "outputTokens",
+): AccountMetric | null {
+  let total = 0n;
+  for (const group of groups) {
+    const value = group[field];
+    if (value === null) {
+      return null;
+    }
+    total += typeof value === "bigint" ? value : BigInt(value);
+  }
+  return total;
+}
+
+function formatMicros(value: AccountMetric): string {
+  const micros = typeof value === "bigint" ? value : BigInt(value);
+  const whole = micros / 1_000_000n;
+  const fraction = (micros % 1_000_000n).toString().padStart(6, "0").replace(/0+$/u, "");
+  return fraction.length === 0 ? whole.toString() : `${whole}.${fraction}`;
 }
 
 function formatUsdAmount(nanos: number): string {
