@@ -135,6 +135,7 @@ try {
     "systemd/codex-connect-center.service.template",
     "launchd/com.hegenai.codex-webui.plist.template",
     "launchd/com.hegenai.codex-center.plist.template",
+    "webui/dist/index.html",
     "scripts/install-systemd.mjs",
     "scripts/metrics-database-access.mjs",
     "scripts/metrics-database.mjs",

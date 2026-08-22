@@ -15,6 +15,7 @@ npm run lint       # oxlint
 ## 结构
 
 ```text
+.npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
   lib/         API 客户端、共享类型转出与格式化
   hooks/       数据 hook（useApi 统一 loading/error/refetch）、请求排序状态与全局货币上下文
