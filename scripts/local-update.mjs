@@ -27,7 +27,11 @@ import {
   gatewayOwnerIsReady,
 } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import {
+  assertManagedModelProviderCapabilities,
+  managedModelProviderDefinitions,
+  opencodeGoProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
 import {
   assertSynchronousChildSuccess,
   ForwardedChildSignalError,
@@ -205,16 +209,51 @@ export async function updateLocalInstallation(environment = process.env, options
   };
 }
 
-async function refreshManagedProviderCatalogsForUpdate(environment) {
-  let downloaded;
-  const downloadCatalog = async () => {
-    downloaded ??= await downloadDeepseekCatalog(globalThis.fetch);
-    return downloaded;
+export async function refreshManagedProviderCatalogsForUpdate(
+  environment = process.env,
+  options = {},
+) {
+  const definitions = options.definitions ?? managedModelProviderDefinitions;
+  const updateAdapters = options.updateAdapters ?? {
+    deepseek: (targetEnvironment, adapterOptions) =>
+      refreshDeepseekCatalogForUpdate(targetEnvironment, adapterOptions),
+    "opencode-go": (targetEnvironment, adapterOptions) =>
+      refreshOpencodeGoCatalogForUpdate(targetEnvironment, adapterOptions),
   };
-  return {
-    deepseek: await refreshDeepseekCatalogForUpdate(environment, { downloadCatalog }),
-    opencodeGo: await refreshOpencodeGoCatalogForUpdate(environment, { downloadCatalog }),
+  const catalogDownloaders = options.catalogDownloaders ?? {
+    "deepseek-official": () => downloadDeepseekCatalog(globalThis.fetch),
   };
+  const downloads = new Map();
+  const results = {};
+  for (const definition of definitions) {
+    const capabilities = assertManagedModelProviderCapabilities(definition);
+    const adapter = capabilities.catalogUpdateAdapter;
+    if (adapter === "none") {
+      results[definition.id] = { status: "not-applicable" };
+      continue;
+    }
+    const update = updateAdapters[adapter];
+    if (typeof update !== "function") {
+      throw new Error(`未知受管 Provider 目录更新适配器：${adapter}`);
+    }
+    const source = capabilities.catalogSource;
+    const downloader = catalogDownloaders[source];
+    if (typeof downloader !== "function") {
+      throw new Error(`未知受管 Provider 模型目录来源：${source}`);
+    }
+    const downloadCatalog = () => {
+      let pending = downloads.get(source);
+      if (!pending) {
+        pending = Promise.resolve().then(() => downloader());
+        downloads.set(source, pending);
+      }
+      return pending;
+    };
+    const result = await update(environment, { definition, downloadCatalog });
+    results[definition.id] = result;
+    options.onUpdated?.({ definition, result });
+  }
+  return results;
 }
 
 function removeObsoleteGatewayConfig(document) {
@@ -551,38 +590,31 @@ if (
         }
         return result;
       },
-      updateProviderCatalogs: async () => {
-        let downloaded;
-        const downloadCatalog = async () => {
-          downloaded ??= await downloadDeepseekCatalog(globalThis.fetch);
-          return downloaded;
-        };
-        const deepseek = await refreshDeepseekCatalogForUpdate(process.env, { downloadCatalog });
-        if (deepseek.status === "updated") {
-          writeCliMessage(
-            "success",
-            `DeepSeek 官方模型目录已更新（${deepseek.modelCount} 个模型）。`,
-          );
-          console.log(`当前默认选择保持：${deepseek.selectedModel}`);
-        }
-        const opencodeGo = await refreshOpencodeGoCatalogForUpdate(process.env, {
-          downloadCatalog,
-        });
-        if (opencodeGo.status === "updated") {
-          writeCliMessage(
-            "success",
-            `OpenCode Go 官方模型目录已更新（${opencodeGo.modelCount} 个模型）。`,
-          );
-          if (opencodeGo.migratedProviders.length > 0) {
-            console.log(
-              `已切换旧默认模型：${opencodeGo.migratedProviders.join("、")} → ${opencodeGoProviderDefinition.defaultModel}`,
+      updateProviderCatalogs: () => refreshManagedProviderCatalogsForUpdate(
+        process.env,
+        {
+          onUpdated: ({ definition, result }) => {
+            if (result.status !== "updated") return;
+            writeCliMessage(
+              "success",
+              `${definition.displayName} 官方模型目录已更新（${result.modelCount} 个模型）。`,
             );
-          } else {
-            console.log("OpenCode Go 当前默认选择均已保留。");
-          }
-        }
-        return { deepseek, opencodeGo };
-      },
+            if (definition.id === "deepseek") {
+              console.log(`当前默认选择保持：${result.selectedModel}`);
+              return;
+            }
+            if (definition.id === opencodeGoProviderDefinition.id) {
+              if (result.migratedProviders.length > 0) {
+                console.log(
+                  `已切换旧默认模型：${result.migratedProviders.join("、")} → ${opencodeGoProviderDefinition.defaultModel}`,
+                );
+              } else {
+                console.log("OpenCode Go 当前默认选择均已保留。");
+              }
+            }
+          },
+        },
+      ),
       databaseOptions: {
         onInspected: printInspection,
         onUpdated: printDatabaseResult,

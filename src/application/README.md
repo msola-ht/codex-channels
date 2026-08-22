@@ -24,7 +24,7 @@
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
   `modelProvider` 的 Thread，并采用目标模型目录的默认思考等级，避免把原 Provider 的设置或专属
   历史发送到不兼容的 API；旧 Thread 保持可恢复；
-  含本地图片或音频的输入在创建或追加 Turn 前必须分别通过当前模型的 `image` 或 `audio` 能力检查；
+  含内联图片或本地音频的输入在创建或追加 Turn 前必须分别通过当前模型的 `image` 或 `audio` 能力检查；
   Fast 只允许当前模型目录明确声明支持时切换，并通过模型窄端口保存用户级默认层级；第三方模型
   不得借关闭 Fast 改写 OpenAI 默认设置。
 - `collaboration-mode-port.ts`：定义 Default/Plan 预设的稳定查询边界，不向 Application
@@ -65,9 +65,9 @@
   重新查询 Queue 和按 Thread 活动 Turn，避免自动派发期间解除绑定。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
-  输入只允许文本、绝对本地图片路径、绝对本地音频路径、已由 Client 从当前 Workspace
-  `skills/list` 解析的 Skill 引用，以及受开发中开关约束的 Plugin mention；绝对媒体路径不代表
-  当前模型可用，必须先通过模型目录能力检查。
+  输入只允许文本、PNG/JPEG Base64 Data URL 图片、绝对本地音频路径、已由 Client 从当前 Workspace
+  `skills/list` 解析的 Skill 引用，以及受开发中开关约束的 Plugin mention；Data URL 仅允许内联
+  `data:image/png|jpeg;base64,...`，音频路径不代表当前模型可用，必须先通过模型目录能力检查。
   显式 Skill 调用同时发送 `$<skill-name>` 文本标记和内部 Skill 引用。Application 不构造官方 `UserInput`，
   也不接收完整官方 Turn 响应。
 

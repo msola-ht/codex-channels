@@ -1,3 +1,9 @@
+import type {
+  ManagedModelProviderCatalogSource,
+  ManagedModelProviderCatalogUpdateAdapter,
+  ModelProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
+
 export interface DatabaseInspection {
   compatible?: boolean;
   databasePath?: string;
@@ -111,6 +117,31 @@ export function updateLocalInstallation(
   providerCatalogs: unknown;
   servicesRestored: boolean;
 }>;
+
+export function refreshManagedProviderCatalogsForUpdate(
+  environment?: LocalUpdateEnvironment,
+  options?: {
+    definitions?: readonly ModelProviderDefinition[];
+    catalogDownloaders?: Partial<Record<
+      ManagedModelProviderCatalogSource,
+      () => unknown | Promise<unknown>
+    >>;
+    updateAdapters?: Partial<Record<
+      Exclude<ManagedModelProviderCatalogUpdateAdapter, "none">,
+      (
+        environment: LocalUpdateEnvironment,
+        options: {
+          definition: ModelProviderDefinition;
+          downloadCatalog: () => Promise<unknown>;
+        },
+      ) => unknown | Promise<unknown>
+    >>;
+    onUpdated?: (event: {
+      definition: ModelProviderDefinition;
+      result: unknown;
+    }) => void;
+  },
+): Promise<Record<string, unknown>>;
 
 export function validateLocalInstallation(
   environment?: LocalUpdateEnvironment,

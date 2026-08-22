@@ -18,11 +18,16 @@ import {
 } from "../runtime/gateway-config.mjs";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import {
+  deepseekProviderDefinition,
+  opencodeGoProviderDefinition,
+} from "../runtime/model-provider-definitions.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import {
   inspectDatabaseUpdates,
   inspectCoreServiceInstallation,
   inspectGatewayConfiguration,
+  refreshManagedProviderCatalogsForUpdate,
   updateDatabases,
   updateGatewayConfiguration,
   updateLocalInstallation,
@@ -39,6 +44,50 @@ afterEach(() => {
 });
 
 describe("local update", () => {
+  it("updates catalog definitions through declared adapters and shares one source download", async () => {
+    const download = vi.fn(async () => ({ catalog: {}, sha256: "test" }));
+    const calls: string[] = [];
+    const noUpdateProvider = {
+      ...deepseekProviderDefinition,
+      id: "future-provider",
+      capabilities: {
+        ...deepseekProviderDefinition.capabilities,
+        catalogUpdateAdapter: "none",
+      },
+    } as unknown as typeof deepseekProviderDefinition;
+
+    const result = await refreshManagedProviderCatalogsForUpdate(process.env, {
+      definitions: [
+        deepseekProviderDefinition,
+        opencodeGoProviderDefinition,
+        noUpdateProvider,
+      ],
+      catalogDownloaders: {
+        "deepseek-official": download,
+      },
+      updateAdapters: {
+        deepseek: async (_environment, options) => {
+          calls.push("deepseek");
+          await options.downloadCatalog();
+          return { status: "updated", provider: "deepseek" };
+        },
+        "opencode-go": async (_environment, options) => {
+          calls.push("opencode-go");
+          await options.downloadCatalog();
+          return { status: "updated", provider: "opencode-go" };
+        },
+      },
+    });
+
+    expect(calls).toEqual(["deepseek", "opencode-go"]);
+    expect(download).toHaveBeenCalledOnce();
+    expect(result).toEqual({
+      deepseek: { status: "updated", provider: "deepseek" },
+      "opencode-go": { status: "updated", provider: "opencode-go" },
+      "future-provider": { status: "not-applicable" },
+    });
+  });
+
   it("distinguishes an uninstalled service set from a partial installation", () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-local-update-services-"));
     temporaryDirectories.push(home);

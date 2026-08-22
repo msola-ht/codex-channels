@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import {
   conversationCommandNames,
@@ -21,6 +25,20 @@ const message = {
   kind: "text" as const,
   text: "继续开发",
 };
+
+const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-weixin-images-"));
+const pngImagePath = join(imageFixtureDirectory, "image.png");
+const jpegImagePath = join(imageFixtureDirectory, "image.jpg");
+writeFileSync(pngImagePath, Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]), { mode: 0o600 });
+writeFileSync(jpegImagePath, Buffer.from([0xff, 0xd8, 0xff]), { mode: 0o600 });
+const pngDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+const jpegDataUrl = "data:image/jpeg;base64,/9j/";
+
+afterAll(() => {
+  rmSync(imageFixtureDirectory, { recursive: true, force: true });
+});
 
 describe("WeixinConversationAdapter", () => {
   it("keeps ordinary text on the shared conversation submission path", async () => {
@@ -102,12 +120,12 @@ describe("WeixinConversationAdapter", () => {
     ) => boolean>(() => true);
     const download = vi.fn()
       .mockResolvedValueOnce({
-        path: "/private/weixin/first.png",
+        path: pngImagePath,
         mimeType: "image/png" as const,
         bytes: 8,
       })
       .mockResolvedValueOnce({
-        path: "/private/weixin/second.jpg",
+        path: jpegImagePath,
         mimeType: "image/jpeg" as const,
         bytes: 9,
       });
@@ -137,9 +155,9 @@ describe("WeixinConversationAdapter", () => {
 
     expect(submit).toHaveBeenCalledWith(target, {
       text: "比较这两张图",
-      localImages: [
-        { path: "/private/weixin/first.png" },
-        { path: "/private/weixin/second.jpg" },
+      images: [
+        { url: pngDataUrl },
+        { url: jpegDataUrl },
       ],
     });
     expect(notifyText).toHaveBeenCalledWith(
@@ -157,12 +175,12 @@ describe("WeixinConversationAdapter", () => {
     }));
     const download = vi.fn()
       .mockResolvedValueOnce({
-        path: "/private/weixin/first.png",
+        path: pngImagePath,
         mimeType: "image/png" as const,
         bytes: 8,
       })
       .mockResolvedValueOnce({
-        path: "/private/weixin/second.jpg",
+        path: jpegImagePath,
         mimeType: "image/jpeg" as const,
         bytes: 9,
       });
@@ -190,11 +208,11 @@ describe("WeixinConversationAdapter", () => {
     expect(submit).toHaveBeenCalledTimes(2);
     expect(submit).toHaveBeenNthCalledWith(1, target, {
       text: "比较这些图片",
-      localImages: [{ path: "/private/weixin/first.png" }],
+      images: [{ url: pngDataUrl }],
     });
     expect(submit).toHaveBeenNthCalledWith(2, target, {
       text: "请查看这张图片并根据图片内容协助我。",
-      localImages: [{ path: "/private/weixin/second.jpg" }],
+      images: [{ url: jpegDataUrl }],
     });
     await adapter.close();
     vi.useRealTimers();

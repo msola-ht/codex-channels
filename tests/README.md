@@ -17,8 +17,9 @@
 - 原生 Thread Queue 六请求、100 条容量、25 条分页、五分钟 ID 选择快照、非文本安全摘要、Provider 路由、
   pending model/effort/Fast/Plan 覆盖失败关闭和写入竞态；项目输入到官方 `UserInput` 的映射，以及
   Review、Goal 和控制响应到稳定 Application 结果的映射。
-- 图片输入的路径、格式、单张/批量大小与数量边界；当前模型目录未声明 `image` 能力时在创建或
-  追加 Turn 前拒绝，声明支持时沿用官方 `localImage` 输入，不建立第二套识图请求链路。
+- 图片输入的 PNG/JPEG 签名、可信 MIME、Data URL、单张/批量大小与数量边界；当前模型目录未声明
+  `image` 能力时在创建或追加 Turn 前拒绝，声明支持时沿用官方 `image` 输入，不把本地路径交给
+  App Server，不建立第二套识图请求链路。
 - 官方 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP 和 warning Notification 到稳定 Core
   输入事件的映射，畸形与未知通知隔离；Conversation Core 状态归约、严格 Turn 完成状态、
   官方 `Turn.durationMs` 校验、三渠道统一结束汇报耗时字段、可重试错误隔离、Thread/全局警告路由，
@@ -220,7 +221,7 @@
   下载、5 分钟/20 MiB、SILK 明确拒绝，以及当前模型缺少 `audio` 时在 Turn 前拒绝；
   私聊文本、图文与多图片输入
   Adapter 的授权、Actor 记录、协议单次更新多图兼容与客户端独立消息立即提交、整批 20 MiB 限制、失败不提交部分输入及
-  Application `localImages` 同次提交、
+  Application 内联 `images` 同次提交、
   单个一般文件解析、授权后固定 CDN 下载、AES-128-ECB 内存解密、声明长度与 MD5 校验、
   1,000,000 字节 UTF-8 文本边界、二进制拒绝、Gateway 不保存文件副本及未授权不接触 CDN，
   完整共享命令目录、全结果渲染、未知命令拒绝、未授权确认与上下文撤销、稳定致命错误、重复启停

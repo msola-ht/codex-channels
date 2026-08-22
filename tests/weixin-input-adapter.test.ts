@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import type { ConversationUseCases } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
@@ -22,6 +26,20 @@ const target: ConversationTarget = {
   accountId,
   conversationId: actorId,
 };
+
+const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-weixin-input-images-"));
+const pngImagePath = join(imageFixtureDirectory, "image.png");
+const jpegImagePath = join(imageFixtureDirectory, "image.jpg");
+writeFileSync(pngImagePath, Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]), { mode: 0o600 });
+writeFileSync(jpegImagePath, Buffer.from([0xff, 0xd8, 0xff]), { mode: 0o600 });
+const pngDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+const jpegDataUrl = "data:image/jpeg;base64,/9j/";
+
+afterAll(() => {
+  rmSync(imageFixtureDirectory, { recursive: true, force: true });
+});
 
 describe("WeixinInputAdapter", () => {
   it("authorizes, remembers the actor, submits text, and commits afterward", async () => {
@@ -493,12 +511,12 @@ describe("WeixinInputAdapter", () => {
     const images = {
       download: vi.fn()
         .mockResolvedValueOnce({
-          path: "/private/weixin/first.png",
+          path: pngImagePath,
           mimeType: "image/png" as const,
           bytes: 8,
         })
         .mockResolvedValueOnce({
-          path: "/private/weixin/second.jpg",
+          path: jpegImagePath,
           mimeType: "image/jpeg" as const,
           bytes: 9,
         }),
@@ -534,9 +552,9 @@ describe("WeixinInputAdapter", () => {
     });
     expect(service.submit).toHaveBeenCalledWith(target, {
       text: "比较图片",
-      localImages: [
-        { path: "/private/weixin/first.png" },
-        { path: "/private/weixin/second.jpg" },
+      images: [
+        { url: pngDataUrl },
+        { url: jpegDataUrl },
       ],
     });
   });
@@ -592,12 +610,12 @@ describe("WeixinInputAdapter", () => {
     const images = {
       download: vi.fn()
         .mockResolvedValueOnce({
-          path: "/private/weixin/first.png",
+          path: pngImagePath,
           mimeType: "image/png" as const,
           bytes: 8,
         })
         .mockResolvedValueOnce({
-          path: "/private/weixin/second.jpg",
+          path: jpegImagePath,
           mimeType: "image/jpeg" as const,
           bytes: 9,
         }),
@@ -636,11 +654,11 @@ describe("WeixinInputAdapter", () => {
     expect(service.submit).toHaveBeenCalledTimes(2);
     expect(service.submit).toHaveBeenNthCalledWith(1, target, {
       text: "比较这些图片",
-      localImages: [{ path: "/private/weixin/first.png" }],
+      images: [{ url: pngDataUrl }],
     });
     expect(service.submit).toHaveBeenNthCalledWith(2, target, {
       text: "请查看这张图片并根据图片内容协助我。",
-      localImages: [{ path: "/private/weixin/second.jpg" }],
+      images: [{ url: jpegDataUrl }],
     });
   });
 

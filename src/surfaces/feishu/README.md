@@ -8,7 +8,7 @@ Bootstrap 显式组合、全部平台无关
 按需 OAuth 与 Doctor。当前可通过严格 TOML 或统一 Setup 启用单账号私聊 Surface；群聊、Lark、
 Office、压缩包和其他未列明的通用二进制输入不支持。展示体验包括上线通知、Turn 开始确认、最终回复、命令
 结果、操作过程与每轮结束统计统一使用 CardKit 2.0 Markdown，私聊 PNG/JPEG 图片复用
-Application 的本地图片输入，同一 Thread 的
+Application 的内联 Data URL 输入，同一 Thread 的
 运行中与处理结束状态已实现合并到一条可更新消息，上线通知与每轮上下文状态复用共享生命周期数据，
 持续模型增量使用 CardKit 2.0 原生流式卡片；Codex 原生 `imageGeneration` 完成以及
 `codexc channel send-image` 提交的图片都只读取经共享安全边界校验的 PNG/JPEG，
@@ -256,7 +256,7 @@ StateStore 中已知且仍有授权 Actor 的精确 Chat 生成消息，不要�
 并通过同一 CardKit Markdown Outbox 入队。生成失败或输出队列关闭只记录受约束诊断，不阻塞长连接。
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
-绝对路径，再调用同一 `submit()` 的 `localImages` 输入；富文本内的全部图片按原顺序与说明文字在同一次
+图片记录（路径、可信 MIME 与字节数），再由共享输入批处理器读取为 PNG/JPEG Data URL；富文本内的全部图片按原顺序与说明文字在同一次
 提交中传入，没有说明文字时才使用稳定图片提示。对已知平台无关命令调用
 `ConversationCommandService.execute()`；手动输入的 `/h`、`/work`、`/r` 分别规范化为
 `/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。`/start`、`/help` 打开同一命令中心卡片；

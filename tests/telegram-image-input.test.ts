@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import pino from "pino";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationUseCases } from "../src/application/conversation-service.js";
 import { UserFacingError, type OutputEvent } from "../src/conversation-core/index.js";
@@ -22,6 +22,19 @@ import {
 } from "../src/surfaces/telegram/file-input.js";
 
 const directories: string[] = [];
+const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-telegram-images-"));
+const jpegImagePath = join(imageFixtureDirectory, "image.jpg");
+const pngImagePath = join(imageFixtureDirectory, "image.png");
+writeFileSync(jpegImagePath, Buffer.from([0xff, 0xd8, 0xff]), { mode: 0o600 });
+writeFileSync(pngImagePath, Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]), { mode: 0o600 });
+const jpegDataUrl = "data:image/jpeg;base64,/9j/";
+const pngDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+
+afterAll(() => {
+  rmSync(imageFixtureDirectory, { recursive: true, force: true });
+});
 
 afterEach(() => {
   for (const directory of directories.splice(0)) {
@@ -73,7 +86,7 @@ describe("Telegram image input", () => {
   it("uses the largest photo and sends its caption with the local image", async () => {
     const submit = vi.fn().mockResolvedValue({ threadId: "thread-1", turnId: "turn-1", steered: false });
     const download = vi.fn().mockResolvedValue({
-      path: "/private/uploads/photo.jpg",
+      path: jpegImagePath,
       mimeType: "image/jpeg",
       bytes: 100,
     });
@@ -99,7 +112,7 @@ describe("Telegram image input", () => {
       { surface: "telegram", accountId: "default", conversationId: "100" },
       {
         text: "检查右上角的错误",
-        localImages: [{ path: "/private/uploads/photo.jpg" }],
+        images: [{ url: jpegDataUrl }],
       },
     );
     expect(rememberActor).toHaveBeenCalledWith(
@@ -166,7 +179,7 @@ describe("Telegram image input", () => {
       steered: false,
     });
     const download = vi.fn().mockResolvedValue({
-      path: "/private/uploads/photo.jpg",
+      path: jpegImagePath,
       mimeType: "image/jpeg",
       bytes: 100,
     });
@@ -212,7 +225,7 @@ describe("Telegram image input", () => {
           "当前消息：",
           "比较一下",
         ].join("\n"),
-        localImages: [{ path: "/private/uploads/photo.jpg" }],
+        images: [{ url: jpegDataUrl }],
       },
     );
     await surface.stop();
@@ -222,7 +235,7 @@ describe("Telegram image input", () => {
   it("uses a default instruction when a photo has no caption", async () => {
     const submit = vi.fn().mockResolvedValue({ threadId: "thread-1", turnId: "turn-1", steered: false });
     const download = vi.fn().mockResolvedValue({
-      path: "/private/uploads/photo.jpg",
+      path: jpegImagePath,
       mimeType: "image/jpeg",
       bytes: 100,
     });
@@ -254,12 +267,12 @@ describe("Telegram image input", () => {
     });
     const download = vi.fn()
       .mockResolvedValueOnce({
-        path: "/private/uploads/first.jpg",
+        path: jpegImagePath,
         mimeType: "image/jpeg",
         bytes: 100,
       })
       .mockResolvedValueOnce({
-        path: "/private/uploads/second.jpg",
+        path: jpegImagePath,
         mimeType: "image/jpeg",
         bytes: 100,
       });
@@ -306,9 +319,9 @@ describe("Telegram image input", () => {
       { surface: "telegram", accountId: "default", conversationId: "100" },
       {
         text: "比较这些图片",
-        localImages: [
-          { path: "/private/uploads/first.jpg" },
-          { path: "/private/uploads/second.jpg" },
+        images: [
+          { url: jpegDataUrl },
+          { url: jpegDataUrl },
         ],
       },
     );
@@ -412,7 +425,7 @@ describe("Telegram image input", () => {
   it("accepts PNG/JPEG documents by filename and validates contents in the image store", async () => {
     const submit = vi.fn().mockResolvedValue({ threadId: "thread-1", turnId: "turn-1", steered: false });
     const download = vi.fn().mockResolvedValue({
-      path: "/private/uploads/diagram.png",
+      path: pngImagePath,
       mimeType: "image/png",
       bytes: 100,
     });
@@ -437,7 +450,7 @@ describe("Telegram image input", () => {
     expect(download).toHaveBeenCalledWith(surface.bot.api, "document");
     expect(submit.mock.calls[0]?.[1]).toEqual({
       text: "解释架构图",
-      localImages: [{ path: "/private/uploads/diagram.png" }],
+      images: [{ url: pngDataUrl }],
     });
     await surface.stop();
     await output.close();

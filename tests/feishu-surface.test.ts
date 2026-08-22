@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import pino from "pino";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import type { ConversationUseCases } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
@@ -11,6 +15,17 @@ import {
   type FeishuCardDocument,
 } from "../src/surfaces/feishu/index.js";
 import { FeishuSurface } from "../src/surfaces/feishu/surface.js";
+
+const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-feishu-surface-images-"));
+const imagePath = join(imageFixtureDirectory, "image.png");
+writeFileSync(imagePath, Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]), { mode: 0o600 });
+const imageDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+
+afterAll(() => {
+  rmSync(imageFixtureDirectory, { recursive: true, force: true });
+});
 
 describe("Feishu Surface", () => {
   it("records sanitized connection lifecycle transitions", async () => {
@@ -320,7 +335,7 @@ describe("Feishu Surface", () => {
       conversationId: "oc_chat",
     }, {
       text: "请查看这张图片并根据图片内容协助我。",
-      localImages: [{ path: "/private/uploads/feishu/image.png" }],
+      images: [{ url: imageDataUrl }],
     });
   });
 
@@ -778,7 +793,7 @@ function createFixture(
   const sdkStart = vi.fn(async () => {});
   const sdkClose = vi.fn();
   const imageDownload = vi.fn(async () => ({
-    path: "/private/uploads/feishu/image.png",
+    path: imagePath,
     mimeType: "image/png" as const,
     bytes: 8,
   }));

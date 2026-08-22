@@ -6,7 +6,7 @@ import type { ThreadSectionSnapshot } from "../session-routing/index.js";
 
 export type TurnInput =
   | { type: "text"; text: string }
-  | { type: "localImage"; path: string }
+  | { type: "image"; url: string }
   | { type: "localAudio"; path: string }
   | { type: "skill"; name: string; path: string }
   | { type: "plugin"; name: string; path: string };

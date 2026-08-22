@@ -23,6 +23,7 @@ import type {
 import type { CodexUserConfigWriter } from "../scripts/agents.mjs";
 import {
   deepseekProviderDefinition,
+  opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import type {
   ManagedModelProviderId,
@@ -414,6 +415,7 @@ function opencodeGoMainDefinition(): ModelProviderDefinition {
     defaultModel: "deepseek-v4-flash",
     defaultReasoningEffort: "high",
     supportsWebsockets: false,
+    capabilities: opencodeGoProviderDefinition.capabilities,
     models: [
       { slug: "deepseek-v4-flash", available: true },
       { slug: "deepseek-v4-pro", available: true },

@@ -5,8 +5,8 @@
 微信）不适用本指南，走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
 当前受管第三方 Provider 是编译期注册的：DeepSeek 与 OpenCode Go 共用同一套受管管道，
-Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Provider 时优先复用管道，
-不得动态加载代码，也不得把未知 Provider 回退到 OpenAI 账户查询。
+Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目录更新、计价、账户和 Setup。
+新增 Provider 时优先复用管道，不得动态加载代码，也不得把未知 Provider 回退到 OpenAI 账户查询。
 
 ## 1. 接入前决策清单
 
@@ -48,9 +48,17 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
   `catalogManifestFileName`、`managedMarkerFileName`、`backupDirectoryName`；
 - `baseUrl`、`wireApi`、`apiKeyEnvironmentKey`、`supportsWebsockets`；
 - `defaultModel`、`defaultReasoningEffort`、受控 `models` 列表。
+- `capabilities`：只允许声明已实现的实例展开、模型目录来源与更新适配器、计价适配器、
+  账户适配器和 `needsExchangeRate`；无自动目录更新、无计价或无账户能力时显式使用 `none`，
+  静态或人工审查目录可把来源也设为 `none`；通用远程价格目录使用 `remote`，不得把任意 URL、
+  脚本或动态插件放入定义。启用目录更新适配器时必须声明非空受控来源。
 
 注册后自动获得：watcher 目录路径、`codexc remote --profile <id>` 别名、
 `agents.external` 角色、文件迁移、`/model` 的 Provider 选项、App Server 启动参数。
+Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
+按计价适配器创建解析器并以精确 Provider ID 登记，按账户适配器创建账户窄适配器。未知能力和
+重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 多账户实例继承基础定义的能力
+元数据；watcher 另保留未配置的共享模型目录，并按 Provider 合并重复定义与路径。
 
 ### 3.2 模型目录与 manifest
 
@@ -66,19 +74,21 @@ Provider 特化只存在于定义、计价、账户和 Setup 四处。新增 Pro
 
 ### 3.3 计价
 
-- GO 形态（USD 峰谷 + 包含额度）：先把 `opencode-go-model-pricing.ts` 参数化成工厂
-  （provider id + 基线加载），再注册到 `app.ts` 的 `ProviderModelPricingResolver`；
-- DS 形态（CNY 计划 + 汇率）：参考 `deepseek-model-pricing.ts`，并设置
-  `modelPricingNeedsExchangeRate`；
+- GO 形态（USD 峰谷 + 包含额度）：由 `managed-provider-capabilities.ts` 按能力元数据创建
+  `opencode-go-model-pricing.ts` 解析器，并按账户 Provider ID 有界匹配；
+- DS 形态（CNY 计划 + 汇率）：由同一工厂创建 `deepseek-model-pricing.ts`，并由定义中的
+  `needsExchangeRate` 决定是否装配汇率；
 - 其他形态：使用通用远程价格目录或按实际合同新建 resolver；
+- 无专用价格时使用 `none`，明确返回无价格；只有经审查允许使用通用远程目录时才使用 `remote`；
 - 价格按请求开始时间判定：生效时间前的请求使用保存的价格快照，生效时间后按当前基线重算；
   峰谷档位优先沿用快照 `pricing_bucket`，缺失时才按当前基线判定。
 
 ### 3.4 账户
 
-- GO 形态：先把 `opencode-go-account-adapter.ts` 参数化成工厂（provider、usage URL、
-  凭据读取、计价器、指标库 provider 过滤），注册进 `ProviderAccountService`；
-- 余额形态：参考 `deepseek-account-adapter.ts`；
+- GO 形态：通过 `opencode-go-account-adapter.ts` 工厂按账户 Provider ID 创建适配器，复用
+  usage URL、凭据读取、计价器和指标库 Provider 过滤；
+- 余额形态：通过 `deepseek-account-adapter.ts` 受控创建；该适配器只接受 DeepSeek Provider，
+  不会把未知 Provider 当作余额账户。
 - 无账户：`/usage` 明确显示不支持，不回退 OpenAI；
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方

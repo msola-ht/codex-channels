@@ -62,8 +62,10 @@ Telegram 和飞书在交互消息创建成功或失败时
 关闭队列时拒绝新输出、限时等待在途发送；并发关闭调用等待同一个关闭结果，不能提前报告完成。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
 `surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface
-明确标识的原生图片批次，普通文字、单图和无批次标识的消息立即提交。图片直接进入当前模型的
-`localImage` 输入能力，不在 Surface 维护另一套识图会话或重试队列。
+明确标识的图片批次，普通文字、单图和无批次标识的消息立即提交。图片落盘后仍由渠道管理，批次
+flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG 签名、单张 10 MiB 与整批 20 MiB，转换为
+有界 `data:image/png|jpeg;base64,...` 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
+不写入自身日志或独立存储，也不向 App Server 发送本地路径，不在 Surface 维护另一套识图会话或重试队列。
 三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
 并单独列出最近直接 API 请求；`global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
 把 Codex Provider 和直接 API 按同一请求口径聚合，最多展示请求量最高的 20 组；`errors` 用同一

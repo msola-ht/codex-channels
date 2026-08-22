@@ -31,10 +31,11 @@
   未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
   `backup-provider-migration.mjs` 先完整备份旧布局、现有新目录与被改写引用文件，再把受管
   第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
-  不安全权限时拒绝覆盖，迁移失败时恢复原有目录；随后以同一次官方目录下载刷新已配置 DeepSeek
-  与 OpenCode Go 的受控模型目录，保留逐模型设置，并一次性把仍使用 OpenCode Go 旧默认 Flash 的
-  账户与共享子代理切换到 Flash Vision Exp；目录清单记录迁移完成状态，避免以后覆盖用户主动选回
-  Flash 的决定；最后在私有备份后移除已废弃的 `[vision]` 配置段。
+  不安全权限时拒绝覆盖，迁移失败时恢复原有目录；随后遍历编译期 Provider 定义，按目录更新
+  适配器执行，并按目录来源复用同一个下载 Promise。当前会刷新已配置 DeepSeek 与 OpenCode Go
+  的受控模型目录，保留逐模型设置，并一次性把仍使用 OpenCode Go 旧默认 Flash 的账户与共享子代理
+  切换到 Flash Vision Exp；目录清单记录迁移完成状态，避免以后覆盖用户主动选回 Flash 的决定；
+  最后在私有备份后移除已废弃的 `[vision]` 配置段。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、

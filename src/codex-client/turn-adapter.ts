@@ -20,8 +20,8 @@ export function toProtocolTurnInput(input: TurnInput[]): UserInput[] {
     switch (item.type) {
       case "text":
         return { type: "text", text: item.text, text_elements: [] };
-      case "localImage":
-        return { type: "localImage", path: item.path };
+      case "image":
+        return { type: "image", url: item.url };
       case "localAudio":
         return { type: "localAudio", path: item.path };
       case "skill":

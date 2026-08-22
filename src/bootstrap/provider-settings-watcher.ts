@@ -6,9 +6,7 @@ import type { Logger } from "pino";
 
 import { codexHomePath } from "../../runtime/codex-home.mjs";
 import {
-  deepseekProviderDefinition,
-  loadManagedModelProviderDefinitions,
-  opencodeGoProviderDefinition,
+  loadManagedModelProviderWatcherDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
   managedProviderMarkerPath,
@@ -89,24 +87,27 @@ export class ProviderSettingsWatcher {
       validateConfiguredModelProviders(this.environment);
     });
     const codexHome = codexHomePath(this.environment);
-    const baseDefinitions = [deepseekProviderDefinition, opencodeGoProviderDefinition];
-    const definitions = [
-      ...baseDefinitions,
-      ...loadManagedModelProviderDefinitions(this.environment).filter(
-        (definition) => !baseDefinitions.some((base) => base.id === definition.id),
-      ),
-    ];
-    this.filesByProvider = definitions.map((definition) => ({
-      provider: definition.id,
-      paths: [
+    const definitions = loadManagedModelProviderWatcherDefinitions(this.environment);
+    const filesByProvider = new Map<string, ManagedProviderFiles>();
+    for (const definition of definitions) {
+      const files = filesByProvider.get(definition.id) ?? {
+        provider: definition.id,
+        paths: [],
+      };
+      const paths = [
         join(
           managedProviderDirectory(this.environment, definition),
           definition.catalogFileName,
         ),
         join(codexHome, definition.profileFileName),
         managedProviderMarkerPath(this.environment, definition),
-      ],
-    }));
+      ];
+      for (const path of paths) {
+        if (!files.paths.includes(path)) files.paths.push(path);
+      }
+      filesByProvider.set(definition.id, files);
+    }
+    this.filesByProvider = [...filesByProvider.values()];
   }
 
   start(): void {

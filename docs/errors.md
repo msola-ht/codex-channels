@@ -41,7 +41,7 @@ kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既
 
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
-| `image.path.invalid` | 本地图片路径必须是绝对路径 | 本地图片输入路径非法 |
+| `image.url.invalid` | 图片必须使用 PNG 或 JPEG Base64 Data URL | Application 收到非法内联图片输入 |
 | `image.too-large` | 单张超过 10 MiB / 批量超过 20 MiB | 图片超过暂存大小限制 |
 | `image.too-many` | 一次最多处理 4 张图片 | 单次发送图片过多 |
 | `image.unsupported` | 仅支持 PNG 和 JPEG 图片 | 图片类型不支持 |

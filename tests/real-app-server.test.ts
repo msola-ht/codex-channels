@@ -1914,6 +1914,53 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
+  it("accepts inline image Data URLs without local image paths", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    let observedItem: Record<string, unknown> | undefined;
+    const removeNotification = ownerClient.onNotification((notification) => {
+      if (notification.method !== "item/completed" && notification.method !== "item/started") {
+        return;
+      }
+      const params = typeof notification.params === "object" && notification.params !== null
+        ? notification.params as Record<string, unknown>
+        : {};
+      if (params.threadId !== threadId) return;
+      const item = typeof params.item === "object" && params.item !== null
+        ? params.item as Record<string, unknown>
+        : undefined;
+      if (item?.type === "userMessage") {
+        observedItem = item;
+      }
+    });
+    let turnId: string | undefined;
+    try {
+      const turn = await ownerClient.startTurn(
+        threadId,
+        [{ type: "image", url: imageUrl }],
+        "codex_connect:inline-image-contract",
+        workdir,
+      );
+      turnId = turn.turnId;
+      await waitFor(() => observedItem !== undefined, 2_000);
+      expect(observedItem?.content).toEqual([{
+        type: "image",
+        url: imageUrl,
+        detail: null,
+      }]);
+      expect(JSON.stringify(observedItem)).not.toContain("localImage");
+      expect(JSON.stringify(observedItem)).not.toContain("path");
+    } finally {
+      removeNotification();
+      if (turnId !== undefined) {
+        await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+      }
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
   it("broadcasts peer model, effort and Fast changes across a peer reconnect", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;

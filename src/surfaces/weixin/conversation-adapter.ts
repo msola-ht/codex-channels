@@ -206,7 +206,11 @@ export class WeixinConversationAdapter {
             "微信图片输入尚未启用",
           );
         }
-        const localImages: Array<{ path: string; bytes: number }> = [];
+        const localImages: Array<{
+          path: string;
+          mimeType: "image/jpeg" | "image/png";
+          bytes: number;
+        }> = [];
         let totalBytes = 0;
         for (const reference of message.images) {
           const image = await this.images.download(reference);
@@ -218,7 +222,11 @@ export class WeixinConversationAdapter {
               { scope: "batch" },
             );
           }
-          localImages.push({ path: image.path, bytes: image.bytes });
+          localImages.push({
+            path: image.path,
+            mimeType: image.mimeType,
+            bytes: image.bytes,
+          });
         }
         const result = await this.inputs.enqueue({
           target: message.target,

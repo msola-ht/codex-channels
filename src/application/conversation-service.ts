@@ -92,7 +92,7 @@ export interface Submission {
 
 export interface ConversationInput {
   text?: string;
-  localImages?: ReadonlyArray<{ path: string }>;
+  images?: ReadonlyArray<{ url: string }>;
   localAudios?: ReadonlyArray<{ path: string }>;
 }
 
@@ -578,7 +578,7 @@ export class ConversationService implements ConversationUseCases {
     input: TurnInput[],
     identity?: TurnStartIdentity,
   ): Promise<Submission> {
-    if (input.some((item) => item.type === "localImage")) {
+    if (input.some((item) => item.type === "image")) {
       await this.models.requireInputModality(target, "image");
     }
     if (input.some((item) => item.type === "localAudio")) {
@@ -2138,11 +2138,14 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
   if (text) {
     input.push({ type: "text", text });
   }
-  for (const image of normalized.localImages ?? []) {
-    if (!isAbsolute(image.path)) {
-      throw new UserFacingError("image.path.invalid", "本地图片路径必须是绝对路径");
+  for (const image of normalized.images ?? []) {
+    if (!isInlineImageDataUrl(image.url)) {
+      throw new UserFacingError(
+        "image.url.invalid",
+        "图片必须使用 PNG 或 JPEG Base64 Data URL",
+      );
     }
-    input.push({ type: "localImage", path: image.path });
+    input.push({ type: "image", url: image.url });
   }
   for (const audio of normalized.localAudios ?? []) {
     if (!isAbsolute(audio.path)) {
@@ -2151,6 +2154,10 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
     input.push({ type: "localAudio", path: audio.path });
   }
   return input;
+}
+
+function isInlineImageDataUrl(value: string): boolean {
+  return /^data:image\/(?:png|jpeg);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/u.test(value);
 }
 
 function normalizeQueueText(value: string): string {

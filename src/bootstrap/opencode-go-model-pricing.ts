@@ -61,7 +61,10 @@ export interface OpenCodeGoPricingBaseline {
 export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
   private readonly baseline: OpenCodeGoPricingBaseline;
 
-  constructor(baseline = loadOpenCodeGoPricingBaseline()) {
+  constructor(
+    baseline = loadOpenCodeGoPricingBaseline(),
+    private readonly providerMatcher: (provider: string) => boolean = isOpencodeGoProvider,
+  ) {
     this.baseline = baseline;
   }
 
@@ -69,7 +72,7 @@ export class OpenCodeGoModelPricingResolver implements ModelPricingResolver {
     lookup: ModelPricingLookup,
     bucket?: "peak" | "off-peak",
   ): ModelRequestPricingSnapshot | null {
-    if (!isOpencodeGoProvider(lookup.provider) || lookup.model === null) return null;
+    if (!this.providerMatcher(lookup.provider) || lookup.model === null) return null;
     const model = this.baseline.models.get(lookup.model);
     if (!model) return null;
     if (model.peakOffPeak) {

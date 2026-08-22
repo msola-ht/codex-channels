@@ -1579,7 +1579,7 @@ describe("ConversationService model selection", () => {
     expect(markTurnStarted).toHaveBeenCalledWith(target, "thread-1", "turn-1");
   });
 
-  it("passes text and local images to a new turn", async () => {
+  it("passes text and inline images to a new turn", async () => {
     const startTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
     const requireInputModality = vi.fn().mockResolvedValue(undefined);
     const service = new ConversationService(
@@ -1606,17 +1606,17 @@ describe("ConversationService model selection", () => {
 
     await service.submit(target, {
       text: "检查截图",
-      localImages: [{ path: "/private/uploads/screenshot.png" }],
+      images: [{ url: "data:image/png;base64,AA==" }],
     });
 
     expect(startTurn.mock.calls[0]?.[1]).toEqual([
       { type: "text", text: "检查截图" },
-      { type: "localImage", path: "/private/uploads/screenshot.png" },
+      { type: "image", url: "data:image/png;base64,AA==" },
     ]);
     expect(requireInputModality).toHaveBeenCalledWith(target, "image");
   });
 
-  it("steers local images into the active turn", async () => {
+  it("steers inline images into the active turn", async () => {
     const steerTurn = vi.fn().mockResolvedValue({ turnId: "turn-1" });
     const requireInputModality = vi.fn().mockResolvedValue(undefined);
     const service = new ConversationService(
@@ -1629,7 +1629,7 @@ describe("ConversationService model selection", () => {
 
     const submission = await service.submit(target, {
       text: "补充图片",
-      localImages: [{ path: "/private/uploads/extra.jpg" }],
+      images: [{ url: "data:image/jpeg;base64,AA==" }],
     });
 
     expect(steerTurn).toHaveBeenCalledWith(
@@ -1637,7 +1637,7 @@ describe("ConversationService model selection", () => {
       "turn-1",
       [
         { type: "text", text: "补充图片" },
-        { type: "localImage", path: "/private/uploads/extra.jpg" },
+        { type: "image", url: "data:image/jpeg;base64,AA==" },
       ],
       expect.stringMatching(/^codex_connect:/),
     );
@@ -1645,7 +1645,7 @@ describe("ConversationService model selection", () => {
     expect(requireInputModality).toHaveBeenCalledWith(target, "image");
   });
 
-  it("rejects relative image paths at the application boundary", async () => {
+  it("rejects non-data image URLs at the application boundary", async () => {
     const service = new ConversationService(
       turnPort(),
       {} as SessionRouter,
@@ -1655,11 +1655,28 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.submit(target, {
-      localImages: [{ path: "relative/image.png" }],
-    })).rejects.toThrow("本地图片路径必须是绝对路径");
+      images: [{ url: "https://example.com/image.png" }],
+    })).rejects.toThrow("图片必须使用 PNG 或 JPEG Base64 Data URL");
   });
 
-  it("rejects local images before creating a Turn when the current model lacks image input", async () => {
+  it.each([
+    "data:image/png;base64,",
+    "data:image/png;base64,A=",
+    "data:image/jpeg;base64,AAAA=",
+  ])("rejects malformed inline image Data URL %s", async (url) => {
+    const service = new ConversationService(
+      turnPort(),
+      {} as SessionRouter,
+      {} as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.submit(target, { images: [{ url }] }))
+      .rejects.toThrow("图片必须使用 PNG 或 JPEG Base64 Data URL");
+  });
+
+  it("rejects inline images before creating a Turn when the current model lacks image input", async () => {
     const startTurn = vi.fn();
     const requireInputModality = vi.fn().mockRejectedValue(
       new Error("当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型"),
@@ -1676,7 +1693,7 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.submit(target, {
-      localImages: [{ path: "/private/uploads/screenshot.png" }],
+      images: [{ url: "data:image/png;base64,AA==" }],
     })).rejects.toThrow(
       "当前模型 deepseek-v4-flash 不支持图片输入，请发送文字或切换支持图片的模型",
     );

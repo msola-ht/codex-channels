@@ -25,8 +25,8 @@ export function formatSurfaceUserFacingError(
       return error.message;
     case "conversation.background-queued":
       return "当前任务仍有下一 Turn 排队消息，暂不能切换会话";
-    case "image.path.invalid":
-      return "本地图片路径必须是绝对路径";
+    case "image.url.invalid":
+      return "图片必须使用 PNG 或 JPEG Base64 Data URL";
     case "image.too-large":
       return error.details.scope === "batch"
         ? "图片总大小超过 20 MiB 限制"

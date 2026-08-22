@@ -74,8 +74,9 @@ OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或�
 中按模型设置 DeepSeek 新会话的默认模型、思考等级和自动压缩阈值。历史 Thread 仍保留自身模型。
 Setup 每次安装时下载最新官方目录；项目只开放人工审查并写入编译期定义的模型，不自动采用未知模型。
 
-`deepseek-v4-flash-vision-exp` 原生支持文字和图片；Gateway 从官方模型目录读取该输入能力，图片沿用
-既有 `localImage` Turn 输入直接交给 App Server，不增加 DeepSeek API 客户端或另一套调用方式。
+`deepseek-v4-flash-vision-exp` 原生支持文字和图片；Gateway 从官方模型目录读取该输入能力，渠道图片
+在统一提交边界转换为受限的 PNG/JPEG Base64 Data URL，并通过稳定 `image` Turn 输入交给 App Server，
+不携带本地暂存路径，也不增加 DeepSeek API 客户端或另一套调用方式。
 `deepseek-v4-flash` 与 `deepseek-v4-pro` 仍只支持文字；发送图片前应切换到视觉模型，否则 Gateway
 会在创建 Turn 前明确拒绝。
 

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { sharedProviderProxyKey } from "../../runtime/opencode-go-accounts.mjs";
+import { deepseekProviderDefinition } from "../../runtime/model-provider-definitions.mjs";
 import type { ExchangeRateSnapshot } from "../application/index.js";
 import type {
   ModelPricingLookup,
@@ -49,6 +49,7 @@ export interface DeepseekPricingBaseline {
 export interface DeepseekModelPricingResolverOptions {
   exchangeRate: () => ExchangeRateSnapshot | null;
   baseline?: DeepseekPricingBaseline;
+  providerMatcher?: (provider: string) => boolean;
 }
 
 export class DeepseekModelPricingResolver implements ModelPricingResolver {
@@ -59,7 +60,9 @@ export class DeepseekModelPricingResolver implements ModelPricingResolver {
   }
 
   resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null {
-    if (lookup.provider !== "deepseek" || lookup.model === null) return null;
+    if (!(this.options.providerMatcher?.(lookup.provider)
+      ?? lookup.provider === deepseekProviderDefinition.id)
+      || lookup.model === null) return null;
     const plan = selectDeepseekPlan(this.baseline, lookup.atMs);
     if (!plan) return null;
     const window = selectDeepseekWindow(
@@ -140,7 +143,7 @@ export class ProviderModelPricingResolver implements ModelPricingResolver {
   ) {}
 
   resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null {
-    return (this.providerResolvers.get(sharedProviderProxyKey(lookup.provider)) ?? this.fallback).resolve(lookup);
+    return (this.providerResolvers.get(lookup.provider) ?? this.fallback).resolve(lookup);
   }
 }
 
