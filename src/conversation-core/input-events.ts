@@ -6,6 +6,7 @@ import type {
   RateLimitSnapshot,
   ThreadGoal,
   ThreadTokenUsage,
+  TurnErrorCode,
   TurnPlanStep,
   TurnStatus,
 } from "./events.js";
@@ -116,6 +117,7 @@ export type ConversationInputEvent =
       turnId: string;
       message: string;
       willRetry: boolean;
+      errorCode?: TurnErrorCode;
     }
   | {
       type: "turn.completed";
@@ -123,6 +125,7 @@ export type ConversationInputEvent =
       turnId: string;
       status: TurnStatus;
       error: string | null;
+      errorCode?: TurnErrorCode;
       durationMs?: number;
     }
   | { type: "thread.status.changed"; threadId: string; status: string }

@@ -731,6 +731,103 @@ describe("ConversationCore", () => {
       .not.toHaveProperty("error");
   });
 
+  it("carries the exact structured policy error into failed completion", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "error",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        willRetry: false,
+        error: {
+          message: "上游原始策略文本",
+          codexErrorInfo: "misalignmentPolicyViolation",
+          additionalDetails: "额外内部细节",
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "failed", error: null },
+      },
+    });
+    await output.close();
+
+    expect(events.find((event) => event.type === "turn.completed")).toMatchObject({
+      target,
+      status: "failed",
+      error: "上游原始策略文本 额外内部细节",
+      errorCode: "misalignmentPolicyViolation",
+    });
+  });
+
+  it("does not pair a completed generic error with an earlier structured code", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "error",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        willRetry: false,
+        error: {
+          message: "earlier policy error",
+          codexErrorInfo: "misalignmentPolicyViolation",
+          additionalDetails: null,
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: {
+            message: "completed generic error",
+            codexErrorInfo: "other",
+            additionalDetails: null,
+          },
+        },
+      },
+    });
+    await output.close();
+
+    const completed = events.find((event) => event.type === "turn.completed");
+    expect(completed).toMatchObject({
+      target,
+      status: "failed",
+      error: "completed generic error",
+    });
+    expect(completed).not.toHaveProperty("errorCode");
+  });
+
   it("publishes external turn input once and tracks the external active turn", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

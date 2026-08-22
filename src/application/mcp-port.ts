@@ -11,6 +11,7 @@ export function supportsMcpOAuthLogin(status: McpAuthStatus): boolean {
 
 export interface McpServerSummary {
   name: string;
+  pluginId: string | null;
   authStatus: McpAuthStatus;
   toolCount: number;
 }

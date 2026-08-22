@@ -862,6 +862,7 @@ export function formatConversationMcpDetail(
   return toStructuredMarkdownList([
     `MCP Server：${server.serverTitle ?? server.name}`,
     `名称：${server.name}`,
+    ...(server.pluginId ? [`来源 Plugin：${server.pluginId}`] : []),
     `版本：${server.serverVersion ?? "未提供"}`,
     `认证：${server.authStatus}`,
     ...(server.serverDescription

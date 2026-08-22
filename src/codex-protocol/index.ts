@@ -7,6 +7,7 @@ export type { RequestId } from "./generated/RequestId.js";
 export type { JsonValue } from "./generated/serde_json/JsonValue.js";
 export type { ServerNotification } from "./generated/ServerNotification.js";
 export type { ServerRequest } from "./generated/ServerRequest.js";
+export type { CodexErrorInfo } from "./generated/v2/CodexErrorInfo.js";
 export type { Thread } from "./generated/v2/Thread.js";
 export type { ThreadHistoryMode } from "./generated/v2/ThreadHistoryMode.js";
 export type { ThreadRevertParams } from "./generated/v2/ThreadRevertParams.js";

@@ -72,6 +72,7 @@ import {
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
+  type TurnErrorCode,
   type TurnTaskMetricsSummary,
 } from "../conversation-core/index.js";
 import { EventBus } from "../event-bus/index.js";
@@ -284,6 +285,7 @@ export class GatewayApplication {
       turnId: string | null,
       phase: "start" | "steer" | "notification",
       error: unknown,
+      structuredErrorCode?: TurnErrorCode,
     ): void => {
       try {
         enqueueTurnErrorMetric(
@@ -294,6 +296,7 @@ export class GatewayApplication {
           turnId,
           phase,
           error,
+          structuredErrorCode,
         );
       } catch (cause) {
         logger.warn({ err: cause }, "Turn 级错误指标写入失败");
@@ -811,6 +814,7 @@ export class GatewayApplication {
             coreEvent.turnId,
             "notification",
             new Error(coreEvent.message),
+            coreEvent.errorCode,
           );
         }
       }

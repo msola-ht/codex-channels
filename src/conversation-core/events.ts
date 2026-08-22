@@ -1,6 +1,7 @@
 export type SurfaceId = string;
 export type MessagePhase = "commentary" | "final_answer";
 export type TurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
+export type TurnErrorCode = "misalignmentPolicyViolation";
 export type TurnPlanStepStatus = "pending" | "inProgress" | "completed";
 export type GoalStatus =
   | "active"
@@ -284,7 +285,7 @@ export type OutputEvent =
   | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[]; background?: boolean }
   | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
   | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; pricedRequestCount: number; inputTokens: number; pricedInputTokens: number; cachedInputTokens: number | null; outputTokens: number; pricedOutputTokens: number; reasoningOutputTokens: number; outputTokensPerSecond: number | null; outputSpeedSampleCount: number; outputSpeedTimedCount: number; totalCostNanos: number | null; inputCostNanos: number | null; cachedInputCostNanos: number | null; outputCostNanos: number | null; pricingCurrency: string | null; elapsedMs: number; durationMs: number }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; taskAggregate?: TurnTaskMetricsSummary; gitBranch?: string | undefined; background?: boolean }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; taskAggregate?: TurnTaskMetricsSummary; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }
   | { type: "turn.reasoning"; target: ConversationTarget; threadId: string; turnId: string; summary: string; elapsedMs: number; final?: boolean; background?: boolean }

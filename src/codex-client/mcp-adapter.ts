@@ -216,7 +216,21 @@ function toServerSummary(
   if (typeof server.tools !== "object" || server.tools === null || Array.isArray(server.tools)) {
     throw new Error("Codex 响应缺少有效 MCP server tools");
   }
-  return { name, authStatus: server.authStatus, toolCount: Object.keys(server.tools).length };
+  return {
+    name,
+    pluginId: requiredNullablePluginId(server.pluginId),
+    authStatus: server.authStatus,
+    toolCount: Object.keys(server.tools).length,
+  };
+}
+
+function requiredNullablePluginId(value: unknown): string | null {
+  if (value === null) return null;
+  const pluginId = requiredText(value, "MCP server pluginId", 256);
+  if (!/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*@[A-Za-z0-9_-]+$/u.test(pluginId)) {
+    throw new Error("Codex 响应缺少有效 MCP server pluginId");
+  }
+  return pluginId;
 }
 
 function requiredText(value: unknown, field: string, maximum = 512): string {

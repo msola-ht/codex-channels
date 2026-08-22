@@ -112,6 +112,7 @@ function appServerMcpStatus(
 ): Record<string, unknown> {
   return {
     name: "local-tools",
+    pluginId: null,
     serverInfo: null,
     tools: { search: {} },
     resources: [],
@@ -1617,8 +1618,8 @@ describe("JsonRpcClient", () => {
     await client.connect();
 
     await expect(client.listMcpServers("thread-1")).resolves.toEqual([
-      { name: "project-tools", authStatus: "oAuth", toolCount: 2 },
-      { name: "user-tools", authStatus: "bearerToken", toolCount: 0 },
+      { name: "project-tools", pluginId: null, authStatus: "oAuth", toolCount: 2 },
+      { name: "user-tools", pluginId: null, authStatus: "bearerToken", toolCount: 0 },
     ]);
     expect(
       transport.sent
@@ -1651,8 +1652,31 @@ describe("JsonRpcClient", () => {
     await client.connect();
 
     await expect(client.listMcpServers()).resolves.toEqual([
-      { name: "local-tools", authStatus: "unknown", toolCount: 1 },
+      { name: "local-tools", pluginId: null, authStatus: "unknown", toolCount: 1 },
     ]);
+  });
+
+  it.each([
+    { name: "missing", value: undefined },
+    { name: "empty", value: "" },
+    { name: "whitespace-only", value: "   " },
+    { name: "missing marketplace", value: "github" },
+    { name: "markdown-shaped", value: "**github**@local" },
+    { name: "control", value: "plugin\u0000id" },
+    { name: "oversized", value: "x".repeat(257) },
+  ])("fails closed for a $name MCP pluginId", async ({ value }) => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({ pluginId: value })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers())
+      .rejects.toThrow("Codex 响应缺少有效 MCP server pluginId");
   });
 
   it("maps full MCP details, starts OAuth, and reads bounded resources", async () => {
@@ -1660,6 +1684,7 @@ describe("JsonRpcClient", () => {
     transport.mcpPages = [{
       data: [appServerMcpStatus({
         name: "project-tools",
+        pluginId: "github@local",
         authStatus: "notLoggedIn",
         serverInfo: {
           name: "project-tools",
@@ -1713,6 +1738,7 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listMcpServerDetails("thread-1")).resolves.toEqual([{
       name: "project-tools",
+      pluginId: "github@local",
       authStatus: "notLoggedIn",
       toolCount: 1,
       serverTitle: "Project Tools",

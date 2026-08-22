@@ -1059,72 +1059,89 @@ contractSuite("real supervised App Server service", () => {
         return;
       }
       if (request.method === "POST" && request.url === "/v1/responses") {
-        request.resume();
-        response.writeHead(200, { "content-type": "text/event-stream" });
-        const encryptedReasoning = Buffer
-          .from(`${"b".repeat(550)}step one`)
-          .toString("base64");
-        const events = [
-          { type: "response.created", response: { id: "resp-1" } },
-          {
-            type: "response.output_item.added",
-            item: {
-              type: "reasoning",
-              id: "reasoning-1",
-              summary: [{ type: "summary_text", text: "" }],
-            },
-          },
-          {
-            type: "response.reasoning_summary_text.delta",
-            delta: "step one",
-            summary_index: 0,
-          },
-          {
-            type: "response.output_item.done",
-            item: {
-              type: "reasoning",
-              id: "reasoning-1",
-              summary: [{ type: "summary_text", text: "step one" }],
-              encrypted_content: encryptedReasoning,
-            },
-          },
-          {
-            type: "response.output_item.added",
-            item: {
-              type: "message",
-              role: "assistant",
-              id: "message-1",
-              content: [],
-            },
-          },
-          { type: "response.output_text.delta", delta: "Done" },
-          {
-            type: "response.output_item.done",
-            item: {
-              type: "message",
-              role: "assistant",
-              id: "message-1",
-              content: [{ type: "output_text", text: "Done" }],
-            },
-          },
-          {
-            type: "response.completed",
-            response: {
-              id: "resp-1",
-              usage: {
-                input_tokens: 1,
-                input_tokens_details: null,
-                output_tokens: 1,
-                output_tokens_details: null,
-                total_tokens: 2,
+        const requestChunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer | string) => {
+          requestChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        request.on("end", () => {
+          const requestBody = Buffer.concat(requestChunks).toString("utf8");
+          if (requestBody.includes("trigger policy violation")) {
+            response.writeHead(400, { "content-type": "application/json" });
+            response.end(JSON.stringify({
+              error: {
+                type: "invalid_request_error",
+                code: "misalignment_policy_violation",
+                message: "This request violated the misalignment policy.",
+              },
+            }));
+            return;
+          }
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          const encryptedReasoning = Buffer
+            .from(`${"b".repeat(550)}step one`)
+            .toString("base64");
+          const events = [
+            { type: "response.created", response: { id: "resp-1" } },
+            {
+              type: "response.output_item.added",
+              item: {
+                type: "reasoning",
+                id: "reasoning-1",
+                summary: [{ type: "summary_text", text: "" }],
               },
             },
-          },
-        ];
-        for (const event of events) {
-          response.write(`data: ${JSON.stringify(event)}\n\n`);
-        }
-        response.end();
+            {
+              type: "response.reasoning_summary_text.delta",
+              delta: "step one",
+              summary_index: 0,
+            },
+            {
+              type: "response.output_item.done",
+              item: {
+                type: "reasoning",
+                id: "reasoning-1",
+                summary: [{ type: "summary_text", text: "step one" }],
+                encrypted_content: encryptedReasoning,
+              },
+            },
+            {
+              type: "response.output_item.added",
+              item: {
+                type: "message",
+                role: "assistant",
+                id: "message-1",
+                content: [],
+              },
+            },
+            { type: "response.output_text.delta", delta: "Done" },
+            {
+              type: "response.output_item.done",
+              item: {
+                type: "message",
+                role: "assistant",
+                id: "message-1",
+                content: [{ type: "output_text", text: "Done" }],
+              },
+            },
+            {
+              type: "response.completed",
+              response: {
+                id: "resp-1",
+                usage: {
+                  input_tokens: 1,
+                  input_tokens_details: null,
+                  output_tokens: 1,
+                  output_tokens_details: null,
+                  total_tokens: 2,
+                },
+              },
+            },
+          ];
+          for (const event of events) {
+            response.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+          response.end();
+        });
         return;
       }
       request.resume();
@@ -1228,6 +1245,8 @@ contractSuite("real supervised App Server service", () => {
       let reasoningDeltaCount = 0;
       let turnId: string | undefined;
       let completed = false;
+      let policyError: Extract<ReturnType<typeof toConversationInputEvent>, { type: "turn.error" }> | undefined;
+      let policyCompleted: Extract<ReturnType<typeof toConversationInputEvent>, { type: "turn.completed" }> | undefined;
       const removeNotification = client.onNotification((notification) => {
         const event = toConversationInputEvent(notification);
         if (event?.type === "item.reasoning.delta" && event.threadId === threadId) {
@@ -1238,6 +1257,12 @@ contractSuite("real supervised App Server service", () => {
           && event.threadId === threadId
         ) {
           completed = true;
+        }
+        if (event?.type === "turn.error" && event.threadId === threadId) {
+          policyError = event;
+        }
+        if (event?.type === "turn.completed" && event.threadId === threadId && event.status === "failed") {
+          policyCompleted = event;
         }
       });
       try {
@@ -1253,6 +1278,27 @@ contractSuite("real supervised App Server service", () => {
           10_000,
         );
         await waitFor(() => completed, 10_000);
+
+        const policyTurn = await client.startTurn(
+          threadId,
+          [{ type: "text", text: "trigger policy violation" }],
+          "codex_connect:contract-policy",
+          workspace,
+        );
+        turnId = policyTurn.turnId;
+        await waitFor(() => policyCompleted !== undefined, 10_000);
+        expect(policyError).toMatchObject({
+          threadId,
+          turnId: policyTurn.turnId,
+          willRetry: false,
+          errorCode: "misalignmentPolicyViolation",
+        });
+        expect(policyCompleted).toMatchObject({
+          threadId,
+          turnId: policyTurn.turnId,
+          status: "failed",
+          errorCode: "misalignmentPolicyViolation",
+        });
       } finally {
         removeNotification();
         if (turnId) {
@@ -1821,11 +1867,16 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(Array.isArray(servers)).toBe(true);
     expect(servers.every((server) =>
       typeof server.name === "string"
+      && (server.pluginId === null || typeof server.pluginId === "string")
       && typeof server.authStatus === "string"
       && Number.isInteger(server.toolCount))).toBe(true);
 
     const details = await ownerClient.listMcpServerDetails();
+    // The isolated fixture exposes config-sourced MCP servers only; the fixed
+    // App Server contract has no installed Plugin-backed server to produce a
+    // non-null pluginId, so this verifies the nullable boundary only.
     const approvalProbe = details.find((server) => server.name === "approval_probe");
+    expect(approvalProbe?.pluginId).toBeNull();
     expect(approvalProbe?.serverVersion).toBe("1.0.0");
     expect(approvalProbe?.tools.some((tool) => tool.name === "approval_probe")).toBe(true);
     const approvalTool = approvalProbe?.tools.find((tool) => tool.name === "approval_probe");

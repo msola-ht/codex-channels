@@ -40,7 +40,9 @@
 - `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，并把工具
   `annotations.readOnlyHint` 归约为只读、可能写入或未知；校验 OAuth
   授权 URL，将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
-  合计 8,000 字符且隐藏常见凭据，二进制裁剪为元数据；不传播工具 Schema 或 Base64 正文。
+  合计 8,000 字符且隐藏常见凭据，二进制裁剪为元数据；保留可空、长度受限且符合固定上游
+  `<plugin>@<marketplace>` 字符规则的 `pluginId`，
+  仅供 `/mcp` 详情展示来源 Plugin，不传播工具 Schema 或 Base64 正文。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
   裁剪版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，
   不传播来源路径或 URL；保留 Marketplace 加载失败计数，
@@ -50,7 +52,8 @@
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
   拥有的稳定事件；校验 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP OAuth 完成、warning 与 Thread
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
-  Turn、warning 和 MCP 错误在此统一脱敏并限长，残缺或无关通知不进入业务模块。
+  只识别 `misalignmentPolicyViolation` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
+  残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
   `readOnlyHint` 能力提示，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；只把 `imageGeneration.savedPath` 映射为稳定生成图片

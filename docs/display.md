@@ -172,6 +172,10 @@ OpenCode Go 账户因空闲策略主动释放时改为发送“已空闲停止�
 MCP 工具目录和实际 Tool Item 中的 `readOnlyHint` 统一显示为“上游标记只读”“可能写入”或
 “读写属性未知”；它只说明上游声明的能力，不表示本次调用成功、实际发生写入或可以跳过审批。
 
+MCP Server 详情在 App Server 返回非空、长度受限且符合固定上游 `<plugin>@<marketplace>` 字符规则的
+`pluginId` 时显示“来源 Plugin”；
+该字段只用于来源排障，不用于授权、审批、命令或脚本来源推断，也不改变 OAuth 自动发现策略。
+
 通过 `/skill`、`/plugin` 或 `/agents` 新建 Turn 时，三个渠道只使用统一的 Turn 生命周期确认，
 并在同一条确认中保留具体 Skill、Plugin 或子代理名称，不再额外发送一条扩展启动结果；追加到活动
 Turn 时没有新的 Turn 启动事件，因此继续显示明确的追加确认。MCP Server 的首次 `starting` /
@@ -185,6 +189,11 @@ Turn 推理期间，Gateway 消费官方 `item/reasoning/summaryTextDelta`、`su
 使用每段一张的流式卡片，Telegram 原地编辑同一条面板，微信只在该段结束时发送一条“思考中+耗时”
 文本。`display.reasoning = false` 时三渠道都不显示思考状态；摘要与原始思维链内容不进入渠道；
 首个回复增量、Turn 错误或完成时结束本段。
+
+Turn 的 `misalignmentPolicyViolation` 结构化错误只在边界和 Core 中保留窄分类，完成卡片统一显示
+“请求因安全策略不一致而终止，请调整请求内容或目标后重试。”；上游自由文本和额外细节不直接作为
+该分类文案，Turn 指标使用独立的 `misalignment_policy_violation` 分类并保留原协议代码，
+`willRetry=false` 与失败终态保持原样。其他 `CodexErrorInfo` 继续沿用既有脱敏文本。
 
 `/plugin <对象>` 的详情只显示 `plugin/installed` 返回的安全摘要；能力和适用套餐标识各最多展示
 8 项并明确省略数量，不显示 Plugin 来源路径、远端 URL、图标、截图或默认提示词。

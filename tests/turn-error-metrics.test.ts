@@ -57,4 +57,26 @@ describe("enqueueTurnErrorMetric", () => {
       errorMessage: "Turn 启动失败 请稍后重试",
     });
   });
+
+  it("preserves the structured misalignment policy classification", () => {
+    const metrics: ModelRequestMetricSample[] = [];
+    enqueueTurnErrorMetric(
+      { enqueue: (metric) => metrics.push(metric) },
+      "openai",
+      "gpt-5.6-sol",
+      "thread-3",
+      "turn-3",
+      "notification",
+      new Error("untrusted upstream policy text"),
+      "misalignmentPolicyViolation",
+    );
+
+    expect(metrics[0]).toMatchObject({
+      provider: "openai",
+      threadId: "thread-3",
+      turnId: "turn-3",
+      errorType: "misalignment_policy_violation",
+      errorCode: "misalignmentPolicyViolation",
+    });
+  });
 });
