@@ -1895,6 +1895,134 @@ describe("ProviderProxy", () => {
     expect(status).toBe(404);
   });
 
+  it("forwards the locked OpenAI 0.148.0 HTTP API paths without recording response metrics", async () => {
+    const received: Array<{ method: string; path: string }> = [];
+    const upstream = createServer((request, response) => {
+      received.push({
+        method: request.method ?? "",
+        path: request.url ?? "",
+      });
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      upstreamBasePath: "/v1",
+      allowOpenAiApiPaths: true,
+      onMetrics: (item) => {
+        metrics.push(item);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const proxyPort = Number(proxy.address().split(":")[1]);
+
+    for (const path of [
+      "/alpha/search?source=codex",
+      "/memories/trace_summarize",
+      "/images/generations",
+      "/images/edits",
+      "/realtime/calls?intent=quicksilver",
+      "/live",
+    ]) {
+      await requestProxy(proxyPort, path, "POST");
+    }
+    await expect(requestProxy(proxyPort, "/alpha/search", "GET"))
+      .rejects.toMatchObject({ status: 404 });
+    await expect(requestProxy(proxyPort, "/alpha/search/private", "POST"))
+      .rejects.toMatchObject({ status: 404 });
+
+    expect(received).toEqual([
+      { method: "POST", path: "/v1/alpha/search?source=codex" },
+      { method: "POST", path: "/v1/memories/trace_summarize" },
+      { method: "POST", path: "/v1/images/generations" },
+      { method: "POST", path: "/v1/images/edits" },
+      { method: "POST", path: "/v1/realtime/calls?intent=quicksilver" },
+      { method: "POST", path: "/v1/live" },
+    ]);
+    expect(metrics).toEqual([]);
+  });
+
+  it("keeps OpenAI-only API paths closed for third-party provider proxies", async () => {
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: 1,
+      upstreamProtocol: "http",
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const proxyPort = Number(proxy.address().split(":")[1]);
+    await expect(requestProxy(proxyPort, "/alpha/search", "POST"))
+      .rejects.toMatchObject({ status: 404 });
+  });
+
+  it("transparently forwards official OpenAI realtime WebSockets without response metrics", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    let upstreamPath = "";
+    upstreamWebSocket.on("connection", (socket, request) => {
+      upstreamPath = request.url ?? "";
+      socket.on("message", (data, isBinary) => socket.send(data, { binary: isBinary }));
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      upstreamBasePath: "/v1",
+      allowOpenAiApiPaths: true,
+      onMetrics: (item) => {
+        metrics.push(item);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const client = new WebSocket(
+      `ws://${proxy.address()}/v1/realtime?call_id=rtc_test`,
+    );
+    await new Promise<void>((resolve, reject) => {
+      client.on("open", () => client.send("ping"));
+      client.on("message", (data) => {
+        if (data.toString() === "ping") resolve();
+      });
+      client.on("error", reject);
+    });
+    client.close();
+
+    expect(upstreamPath).toBe("/v1/realtime?call_id=rtc_test");
+    expect(metrics).toEqual([]);
+  });
+
   it("rejects non-read-only model catalog requests", async () => {
     const proxy = new ProviderProxy("127.0.0.1:0", {
       upstreamHost: "127.0.0.1",
@@ -2030,7 +2158,7 @@ function requestProxy(
       response.on("error", rejectRequest);
     });
     request.on("error", rejectRequest);
-    request.end("{}");
+    request.end(method === "GET" ? undefined : "{}");
   });
 }
 
