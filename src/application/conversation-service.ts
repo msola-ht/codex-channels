@@ -833,7 +833,6 @@ export class ConversationService implements ConversationUseCases {
       if (!turn) {
         throw new UserFacingError("revert.turn-not-found", "找不到指定 Turn，请重新执行 /revert list");
       }
-      const thread = await this.router.readThread(threadId);
       const queue = await this.readRevertQueue(threadId);
       const actor = actorId ?? target.accountId;
       const token = randomUUID();
@@ -846,7 +845,7 @@ export class ConversationService implements ConversationUseCases {
         beforeTurnId: turn.id,
         turn,
         latestTurnId: currentPage.latestTurnId,
-        activeTurnId: thread.activeTurnId,
+        activeTurnId: currentPage.activeTurnId,
         queueFingerprint: queue.fingerprint,
         capturedAtMs: Date.now(),
       });
@@ -856,7 +855,7 @@ export class ConversationService implements ConversationUseCases {
         turn,
         affectedTurnCount: (selection.page - 1) * revertPageSize
           + currentPage.turns.indexOf(turn) + 1,
-        activeTurnId: thread.activeTurnId,
+        activeTurnId: currentPage.activeTurnId,
         queueItemCount: queue.count,
         token,
       };
@@ -907,13 +906,12 @@ export class ConversationService implements ConversationUseCases {
         throw new UserFacingError("revert.confirmation-invalid", "Revert 列表已失效，请重新生成预览");
       }
       const currentPage = await this.readRevertPage(confirmation.threadId, confirmation.page);
-      const thread = await this.router.readThread(confirmation.threadId);
       const queue = await this.readRevertQueue(confirmation.threadId);
       const currentTurn = currentPage.turns.find((turn) => turn.id === confirmation.beforeTurnId);
       if (
         !sameTurnIds(currentPage.turns, selection.turns)
         || currentPage.latestTurnId !== confirmation.latestTurnId
-        || thread.activeTurnId !== confirmation.activeTurnId
+        || currentPage.activeTurnId !== confirmation.activeTurnId
         || !currentTurn
         || queue.fingerprint !== confirmation.queueFingerprint
       ) {
@@ -2079,9 +2077,9 @@ export class ConversationService implements ConversationUseCases {
     activeTurnId: string | null;
   }> {
     const history = this.requireThreadHistory();
-    const thread = await this.router.readThread(threadId);
     let cursor: string | null = null;
     let latestTurnId: string | null = null;
+    let activeTurnId: string | null = null;
     const seenCursors = new Set<string>();
     const seenTurnIds = new Set<string>();
     for (let currentPage = 1; currentPage <= page; currentPage += 1) {
@@ -2107,7 +2105,17 @@ export class ConversationService implements ConversationUseCases {
         }
         seenTurnIds.add(turn.id);
       }
-      if (currentPage === 1) latestTurnId = result.turns[0]?.id ?? null;
+      if (currentPage === 1) {
+        latestTurnId = result.turns[0]?.id ?? null;
+        const activeTurns = result.turns.filter((turn) => turn.status === "inProgress");
+        if (activeTurns.length > 1) {
+          throw new UserFacingError(
+            "revert.unavailable",
+            "Codex Turn 列表包含多个活动 Turn",
+          );
+        }
+        activeTurnId = activeTurns[0]?.id ?? null;
+      }
       if (currentPage === page) {
         if (result.nextCursor !== null && !result.nextCursor.trim()) {
           throw new UserFacingError("revert.unavailable", "Codex Turn 列表返回了无效分页游标");
@@ -2119,7 +2127,7 @@ export class ConversationService implements ConversationUseCases {
           turns: result.turns,
           nextCursor: result.nextCursor,
           latestTurnId,
-          activeTurnId: thread.activeTurnId,
+          activeTurnId,
         };
       }
       if (result.nextCursor === null) {
@@ -2127,7 +2135,7 @@ export class ConversationService implements ConversationUseCases {
           turns: [],
           nextCursor: null,
           latestTurnId,
-          activeTurnId: thread.activeTurnId,
+          activeTurnId,
         };
       }
       if (!result.nextCursor.trim() || seenCursors.has(result.nextCursor)) {

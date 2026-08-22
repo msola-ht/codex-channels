@@ -268,6 +268,48 @@ describe("ConversationService Thread Revert", () => {
     expect(history.revertThread).not.toHaveBeenCalled();
   });
 
+  it("uses the paginated in-progress Turn as the active Revert preview", async () => {
+    const activeTurn = {
+      ...turnSummary("turn-active", "running"),
+      status: "inProgress" as const,
+      completedAt: null,
+      durationMs: null,
+    };
+    const { service } = makeService({
+      turns: [activeTurn, turnSummary("turn-completed")],
+      // `thread/read` intentionally excludes turns and therefore cannot expose
+      // the active Turn id through ThreadSnapshot.
+      activeTurnId: null,
+    });
+
+    await service.revertList(target);
+    await expect(service.revertPreview(target, "1", "actor-1")).resolves.toMatchObject({
+      activeTurnId: "turn-active",
+    });
+  });
+
+  it("invalidates confirmation when the paginated active Turn completes", async () => {
+    const activeTurn: ThreadTurnSummary = {
+      ...turnSummary("turn-active", "running"),
+      status: "inProgress",
+      completedAt: null,
+      durationMs: null,
+    };
+    const { service, history } = makeService({
+      turns: [activeTurn, turnSummary("turn-completed")],
+      activeTurnId: null,
+    });
+    await service.revertList(target);
+    const preview = await service.revertPreview(target, "1", "actor-1");
+    activeTurn.status = "completed";
+    activeTurn.completedAt = 2;
+    activeTurn.durationMs = 1_000;
+
+    await expect(service.revertConfirm(target, preview.token, "actor-1"))
+      .rejects.toMatchObject({ code: "revert.concurrent" });
+    expect(history.revertThread).not.toHaveBeenCalled();
+  });
+
   it("invalidates a token when Queue contents change before confirmation", async () => {
     let fingerprint = queueFingerprint;
     const queue = {
