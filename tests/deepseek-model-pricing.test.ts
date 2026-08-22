@@ -23,7 +23,7 @@ describe("DeepseekModelPricingResolver", () => {
       source: "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
       timezone: "Asia/Shanghai",
     });
-    expect(baseline.plans).toHaveLength(2);
+    expect(baseline.plans).toHaveLength(3);
   });
 
   it("uses the fixed price before the scheduled effective time", () => {
@@ -36,7 +36,7 @@ describe("DeepseekModelPricingResolver", () => {
         billingMode: "api",
         currency: "USD",
         source: "deepseek-official:open-er-api",
-        effectiveAtMs: Date.parse("2026-08-21T09:03:26.000Z"),
+        effectiveAtMs: Date.parse("2026-08-22T13:55:41.000Z"),
         bucket: null,
         cachedInputPricePerMillionNanos: 10_000_000,
         uncachedInputPricePerMillionNanos: 500_000_000,
@@ -69,6 +69,58 @@ describe("DeepseekModelPricingResolver", () => {
             : "peak",
         });
     }
+  });
+
+  it("keeps the old weekend schedule before the change takes effect", () => {
+    const resolver = new DeepseekModelPricingResolver({
+      exchangeRate: () => exchangeRate,
+    });
+
+    expect(resolveAt(resolver, "2026-08-22T09:00:00+08:00", "deepseek-v4-flash"))
+      .toMatchObject({
+        effectiveAtMs: Date.parse("2026-08-17T00:00:00+08:00"),
+        outputPricePerMillionNanos: 4_500_000_000,
+        bucket: "peak",
+      });
+  });
+
+  it("uses off-peak prices all weekend after the scheduled change", () => {
+    const resolver = new DeepseekModelPricingResolver({
+      exchangeRate: () => exchangeRate,
+    });
+    const cases = [
+      "2026-08-23T00:00:00+08:00",
+      "2026-08-23T09:00:00+08:00",
+      "2026-08-23T14:00:00+08:00",
+      "2026-08-29T17:59:59+08:00",
+    ];
+
+    for (const at of cases) {
+      expect(resolveAt(resolver, at, "deepseek-v4-flash"))
+        .toMatchObject({
+          effectiveAtMs: Date.parse("2026-08-23T00:00:00+08:00"),
+          outputPricePerMillionNanos: 2_250_000_000,
+          bucket: "off-peak",
+        });
+    }
+  });
+
+  it("keeps the peak intervals on weekdays after the weekend change", () => {
+    const resolver = new DeepseekModelPricingResolver({
+      exchangeRate: () => exchangeRate,
+    });
+
+    expect(resolveAt(resolver, "2026-08-24T09:00:00+08:00", "deepseek-v4-flash"))
+      .toMatchObject({
+        effectiveAtMs: Date.parse("2026-08-23T00:00:00+08:00"),
+        outputPricePerMillionNanos: 4_500_000_000,
+        bucket: "peak",
+      });
+    expect(resolveAt(resolver, "2026-08-24T12:00:00+08:00", "deepseek-v4-flash"))
+      .toMatchObject({
+        outputPricePerMillionNanos: 2_250_000_000,
+        bucket: "off-peak",
+      });
   });
 
   it("uses the Pro prices and fails closed without FX or an exact model", () => {
@@ -127,6 +179,21 @@ describe("DeepseekModelPricingResolver", () => {
     delete parsed.plans[1].windows[0].models["deepseek-v4-pro"];
     expect(() => parseDeepseekPricingBaseline(parsed))
       .toThrow("同一计划的模型集合不一致");
+  });
+
+  it("rejects an invalid weekend pricing rule", () => {
+    const parsed = JSON.parse(readFileSync(
+      new URL("../runtime/deepseek-pricing-baseline.json", import.meta.url),
+      "utf8",
+    ));
+    parsed.plans[2].weekendsOffPeak = "yes";
+    expect(() => parseDeepseekPricingBaseline(parsed))
+      .toThrow("第 3 个价格计划无效");
+
+    parsed.plans[2].weekendsOffPeak = true;
+    parsed.plans[2].windows = [parsed.plans[0].windows[0]];
+    expect(() => parseDeepseekPricingBaseline(parsed))
+      .toThrow("周末低谷规则仅适用于峰谷价格计划");
   });
 
   it("does not fall back to a generic catalog for DeepSeek", () => {

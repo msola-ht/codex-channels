@@ -9,6 +9,7 @@ import type {
 } from "../observability/index.js";
 import {
   isMinuteInLocalRanges,
+  isLocalWeekend,
   localMinuteOf,
   type LocalMinuteRange,
   type PricingBucket,
@@ -36,6 +37,7 @@ interface DeepseekPricingWindow {
 interface DeepseekPricingPlan {
   effectiveFromMs: number | null;
   effectiveUntilMs: number | null;
+  weekendsOffPeak: boolean;
   windows: readonly DeepseekPricingWindow[];
 }
 
@@ -65,9 +67,11 @@ export class DeepseekModelPricingResolver implements ModelPricingResolver {
       || lookup.model === null) return null;
     const plan = selectDeepseekPlan(this.baseline, lookup.atMs);
     if (!plan) return null;
+    const requestStartedAt = new Date(lookup.atMs);
     const window = selectDeepseekWindow(
       plan,
-      localMinuteOf(new Date(lookup.atMs), this.baseline.timezone),
+      localMinuteOf(requestStartedAt, this.baseline.timezone),
+      plan.weekendsOffPeak && isLocalWeekend(requestStartedAt, this.baseline.timezone),
     );
     const price = window?.models.get(lookup.model);
     if (!price) return null;
@@ -117,10 +121,13 @@ function selectDeepseekPlan(
 function selectDeepseekWindow(
   plan: DeepseekPricingPlan,
   localMinute: number,
+  forceOffPeak: boolean,
 ): DeepseekPricingWindow | undefined {
-  const peak = plan.windows.find((window) =>
-    window.kind === "peak"
-    && isMinuteInLocalRanges(localMinute, window.localRanges));
+  const peak = forceOffPeak
+    ? undefined
+    : plan.windows.find((window) =>
+      window.kind === "peak"
+      && isMinuteInLocalRanges(localMinute, window.localRanges));
   return peak
     ?? plan.windows.find((candidate) => candidate.kind === "all_day")
     ?? plan.windows.find((candidate) => candidate.kind === "off_peak");
@@ -193,6 +200,10 @@ function parsePlan(value: unknown, index: number): DeepseekPricingPlan {
   if (!isRecord(value) || !Array.isArray(value.windows) || value.windows.length === 0) {
     throw new Error(`DeepSeek 第 ${index + 1} 个价格计划无效`);
   }
+  if (value.weekendsOffPeak !== undefined && typeof value.weekendsOffPeak !== "boolean") {
+    throw new Error(`DeepSeek 第 ${index + 1} 个价格计划无效`);
+  }
+  const weekendsOffPeak = value.weekendsOffPeak === true;
   const effectiveFromMs = value.effectiveFrom === null
     ? null
     : parseIsoTimestamp(value.effectiveFrom, "价格生效时间");
@@ -212,6 +223,9 @@ function parsePlan(value: unknown, index: number): DeepseekPricingPlan {
     && kinds.has("off_peak")
     && kinds.has("peak");
   if (!validAllDay && !validPeak) throw new Error("DeepSeek 价格时段组合无效");
+  if (weekendsOffPeak && !validPeak) {
+    throw new Error("DeepSeek 周末低谷规则仅适用于峰谷价格计划");
+  }
   if (validPeak) {
     const offPeak = windows.find(({ kind }) => kind === "off_peak")!;
     const peak = windows.find(({ kind }) => kind === "peak")!;
@@ -226,7 +240,7 @@ function parsePlan(value: unknown, index: number): DeepseekPricingPlan {
       throw new Error("DeepSeek 同一计划的模型集合不一致");
     }
   }
-  return { effectiveFromMs, effectiveUntilMs, windows };
+  return { effectiveFromMs, effectiveUntilMs, weekendsOffPeak, windows };
 }
 
 function parseWindow(value: unknown): DeepseekPricingWindow {

@@ -143,8 +143,9 @@ Codex App Server RPC。它负责受管实例的按需启动和主动释放；`co
 回收终止共享 Remote TUI。
 
 模型价格实现补充：DeepSeek 不使用上述通用远程目录，[`deepseek-model-pricing.ts`](../src/bootstrap/deepseek-model-pricing.ts)
-严格读取随包发布的官方人民币基线，按请求开始时的北京时间和生效计划选择峰谷价，再用当前
-USD/CNY 汇率固化为统一 USD 快照，并把请求时段对应的 Peak/Off-Peak 档位写入快照；汇率、精确
+严格读取随包发布的官方人民币基线，按请求开始时的北京时间、生效计划、工作日与周末规则选择
+峰谷价，再用当前 USD/CNY 汇率固化为统一 USD 快照，并把请求时段对应的 Peak/Off-Peak 档位写入
+快照；汇率、精确
 模型或计划缺失时不回退通用目录。模型目录与价格基线由人工对照 DeepSeek 官方文档审查更新，
 运行中的 Gateway 不抓取价格 HTML。
 OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/opencode-go-model-pricing.ts)
