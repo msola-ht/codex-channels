@@ -81,7 +81,7 @@ describe("FeishuImageStore", () => {
       unsupported.download("om_message", "img_text"),
     ).rejects.toEqual(new UserFacingError(
       "image.unsupported",
-      "仅支持 PNG 和 JPEG 图片",
+      "仅支持 PNG、JPEG、WebP 和非动画 GIF 图片",
     ));
     unsupported.close();
   });

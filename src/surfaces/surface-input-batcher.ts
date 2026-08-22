@@ -8,8 +8,9 @@ import {
 } from "../conversation-core/index.js";
 import {
   GeneratedImageError,
-  readGeneratedImage,
-  type GeneratedImage,
+  readInputImage,
+  type InputImage,
+  type InputImageMimeType,
 } from "./generated-image.js";
 
 const DEFAULT_QUIET_WINDOW_MS = 1_000;
@@ -23,7 +24,7 @@ export interface SurfaceInputPart {
   text?: string;
   localImages?: ReadonlyArray<{
     path: string;
-    mimeType: "image/jpeg" | "image/png";
+    mimeType: InputImageMimeType;
     bytes?: number;
   }>;
   aggregationKey?: string;
@@ -287,18 +288,18 @@ interface InlineImage {
 
 async function toInlineImage(image: {
   path: string;
-  mimeType: "image/jpeg" | "image/png";
+  mimeType: InputImageMimeType;
 }): Promise<InlineImage> {
-  let stored: GeneratedImage;
+  let stored: InputImage;
   try {
-    stored = await readGeneratedImage(image.path);
+    stored = await readInputImage(image.path);
   } catch (error) {
     if (error instanceof GeneratedImageError && error.code === "too-large") {
       throw new UserFacingError("image.too-large", "图片超过 10 MiB 限制");
     }
     throw new UserFacingError("image.unsupported", "图片无法读取");
   }
-  const expectedFormat = image.mimeType === "image/png" ? "png" : "jpeg";
+  const expectedFormat = image.mimeType.slice("image/".length);
   if (stored.format !== expectedFormat) {
     throw new UserFacingError("image.unsupported", "图片类型无效");
   }

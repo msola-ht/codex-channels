@@ -126,7 +126,7 @@ describe("WeixinImageStore", () => {
       encryptedQueryParam: "query",
     })).rejects.toMatchObject({
       code: "image.unsupported",
-      message: "仅支持 PNG 和 JPEG 图片",
+      message: "仅支持 PNG、JPEG、WebP 和非动画 GIF 图片",
     });
     unsupported.close();
 

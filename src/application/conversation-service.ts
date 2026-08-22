@@ -2142,7 +2142,7 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
     if (!isInlineImageDataUrl(image.url)) {
       throw new UserFacingError(
         "image.url.invalid",
-        "图片必须使用 PNG 或 JPEG Base64 Data URL",
+        "图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL",
       );
     }
     input.push({ type: "image", url: image.url });
@@ -2157,7 +2157,7 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
 }
 
 function isInlineImageDataUrl(value: string): boolean {
-  return /^data:image\/(?:png|jpeg);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/u.test(value);
+  return /^data:image\/(?:png|jpeg|gif|webp);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/u.test(value);
 }
 
 function normalizeQueueText(value: string): string {

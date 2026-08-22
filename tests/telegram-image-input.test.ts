@@ -422,7 +422,7 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
-  it("accepts PNG/JPEG documents by filename and validates contents in the image store", async () => {
+  it("accepts supported image documents by filename and validates contents in the image store", async () => {
     const submit = vi.fn().mockResolvedValue({ threadId: "thread-1", turnId: "turn-1", steered: false });
     const download = vi.fn().mockResolvedValue({
       path: pngImagePath,
@@ -442,7 +442,7 @@ describe("Telegram image input", () => {
         document: {
           file_id: "document",
           file_unique_id: "document-u",
-          file_name: "architecture.PNG",
+          file_name: "architecture.WebP",
         },
       },
     });
@@ -450,6 +450,43 @@ describe("Telegram image input", () => {
     expect(download).toHaveBeenCalledWith(surface.bot.api, "document");
     expect(submit.mock.calls[0]?.[1]).toEqual({
       text: "解释架构图",
+      images: [{ url: pngDataUrl }],
+    });
+    await surface.stop();
+    await output.close();
+  });
+
+  it("routes animation messages through image validation for non-animated GIF support", async () => {
+    const submit = vi.fn().mockResolvedValue({ threadId: "thread-1", turnId: "turn-1", steered: false });
+    const download = vi.fn().mockResolvedValue({
+      path: pngImagePath,
+      mimeType: "image/png",
+      bytes: 100,
+    });
+    const { surface, output } = createSurface(submit, download);
+
+    await surface.bot.handleUpdate({
+      update_id: 5,
+      message: {
+        message_id: 14,
+        date: 1,
+        from: telegramUser(),
+        chat: telegramChat(),
+        caption: "检查 GIF",
+        animation: {
+          file_id: "animation",
+          file_unique_id: "animation-u",
+          width: 1,
+          height: 1,
+          duration: 0,
+          mime_type: "image/gif",
+        },
+      },
+    });
+
+    expect(download).toHaveBeenCalledWith(surface.bot.api, "animation");
+    expect(submit.mock.calls[0]?.[1]).toEqual({
+      text: "检查 GIF",
       images: [{ url: pngDataUrl }],
     });
     await surface.stop();

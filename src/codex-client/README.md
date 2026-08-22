@@ -17,7 +17,7 @@
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
   缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
-- `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
+- `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；
   本地媒体、Skill、Mention 与其他非文本输入只返回安全摘要，不传播原始值或绝对路径。

@@ -52,6 +52,27 @@ describe("TelegramImageStore", () => {
     store.close();
   });
 
+  it.each([
+    ["image/gif" as const, "images/static.gif", staticGifBytes()],
+    ["image/webp" as const, "images/static.webp", webpBytes()],
+  ])("accepts %s input by content signature", async (mimeType, filePath, bytes) => {
+    const store = new TelegramImageStore(
+      temporaryDirectory(),
+      "123:secret-token",
+      undefined,
+      pino({ level: "silent" }),
+      60_000,
+      async () => ({ stream: Readable.from([bytes]), contentLength: bytes.length }),
+    );
+    await store.start();
+
+    await expect(store.download(
+      { getFile: async () => ({ file_path: filePath }) },
+      "telegram-file-id",
+    )).resolves.toMatchObject({ mimeType, bytes: bytes.length });
+    store.close();
+  });
+
   it("rejects traversal paths, oversized files, and unsupported image contents", async () => {
     const directory = temporaryDirectory();
     const store = new TelegramImageStore(
@@ -71,7 +92,7 @@ describe("TelegramImageStore", () => {
     await expect(store.download(
       { getFile: async () => ({ file_path: "documents/file.bin" }) },
       "file-id",
-    )).rejects.toThrow("仅支持 PNG 和 JPEG");
+    )).rejects.toThrow("仅支持 PNG、JPEG、WebP 和非动画 GIF");
 
     const oversized = new TelegramImageStore(
       join(directory, "oversized"),
@@ -148,4 +169,15 @@ function temporaryDirectory(): string {
 
 function jpegBytes(): Buffer {
   return Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00]);
+}
+
+function staticGifBytes(): Buffer {
+  return Buffer.from(
+    "47494638396101000100800000000000ffffff2c00000000010001000002024401003b",
+    "hex",
+  );
+}
+
+function webpBytes(): Buffer {
+  return Buffer.from("524946460400000057454250", "hex");
 }

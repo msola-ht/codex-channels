@@ -75,7 +75,7 @@ OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或�
 Setup 每次安装时下载最新官方目录；项目只开放人工审查并写入编译期定义的模型，不自动采用未知模型。
 
 `deepseek-v4-flash-vision-exp` 原生支持文字和图片；Gateway 从官方模型目录读取该输入能力，渠道图片
-在统一提交边界转换为受限的 PNG/JPEG Base64 Data URL，并通过稳定 `image` Turn 输入交给 App Server，
+在统一提交边界转换为受限的 PNG/JPEG/WebP/非动画 GIF Base64 Data URL，并通过稳定 `image` Turn 输入交给 App Server，
 不携带本地暂存路径，也不增加 DeepSeek API 客户端或另一套调用方式。
 `deepseek-v4-flash` 与 `deepseek-v4-pro` 仍只支持文字；发送图片前应切换到视觉模型，否则 Gateway
 会在创建 Turn 前明确拒绝。
@@ -150,9 +150,9 @@ Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review�
 
 ## 图片识别
 
-`deepseek-v4-flash-vision-exp` 原生接受当前渠道校验后的 PNG/JPEG 图片，并通过现有 App Server
+`deepseek-v4-flash-vision-exp` 原生接受当前渠道校验后的 PNG/JPEG/WebP/非动画 GIF 图片，并通过现有 App Server
 Turn 输入处理；项目仍采用更严格的最多四张、单张 10 MiB、整批 20 MiB 边界，不开放图片 URL、
-Files API、GIF 或 WebP 新入口。图片 Token 由 DeepSeek 按尺寸换算并随标准 Usage 返回，Gateway
+Files API 或其他图片入口。图片 Token 由 DeepSeek 按尺寸换算并随标准 Usage 返回，Gateway
 继续使用上游 Usage 和本模型现行价格计费，不自行按像素估算。
 
 Flash 与 Pro 仍为文字模型，收到图片时会在 Turn 前明确拒绝；需要看图时使用 `/model` 切换到
