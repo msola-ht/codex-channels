@@ -446,7 +446,7 @@ describe("provider-aware conversation command formatting", () => {
     );
     expect(formatConversationMcp({
       kind: "mcp",
-      servers: [{ name: "project-tools", authStatus: "notLoggedIn", toolCount: 1 }],
+      servers: [{ name: "project-tools", pluginId: null, authStatus: "notLoggedIn", toolCount: 1 }],
     })).toContain("1. project-tools");
 
     expect(formatConversationMcpHealth({
@@ -485,6 +485,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "Project Tools",
+        pluginId: "github@local",
         authStatus: "notLoggedIn",
         toolCount: 1,
         serverTitle: "Project Tools",
@@ -502,6 +503,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
     expect(detail).toContain("MCP Server：Project Tools");
+    expect(detail).toContain("来源 Plugin：github@local");
     expect(detail).toContain("Search · search");
     expect(detail).toContain("上游标记只读");
     expect(detail).toContain("实际调用仍按审批策略处理");
@@ -516,6 +518,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "codex_apps",
       server: {
         name: "codex_apps",
+        pluginId: null,
         authStatus: "bearerToken",
         toolCount: 0,
         serverTitle: null,
@@ -534,6 +537,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "large",
       server: {
         name: "large",
+        pluginId: null,
         authStatus: "oAuth",
         toolCount: 20,
         serverTitle: null,
@@ -658,6 +662,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "codex_apps",
+        pluginId: null,
         authStatus: "bearerToken",
         toolCount: 18,
         serverTitle: null,
@@ -698,6 +703,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "codex_apps",
+        pluginId: null,
         authStatus: "bearerToken",
         toolCount: 1,
         serverTitle: null,

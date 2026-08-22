@@ -412,6 +412,16 @@ function subagentTaskName(agentPath: string): string {
   return separator >= 0 ? normalized.slice(separator + 1) : normalized;
 }
 
+function formatTurnErrorMessage(
+  value: string,
+  errorCode?: "misalignmentPolicyViolation",
+): string {
+  if (errorCode === "misalignmentPolicyViolation") {
+    return "请求因安全策略不一致而终止，请调整请求内容或目标后重试。";
+  }
+  return formatOpenAiErrorMessage(value);
+}
+
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
   priceCurrency?: (
@@ -431,7 +441,7 @@ export function createTurnCompletedPresentation(
   if (event.error) {
     runFields.push({
       label: "错误",
-      value: formatOpenAiErrorMessage(event.error),
+      value: formatTurnErrorMessage(event.error, event.errorCode),
     });
   }
   if (event.tokenUsage) {

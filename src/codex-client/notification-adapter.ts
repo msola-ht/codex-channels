@@ -8,6 +8,7 @@ import type {
   RateLimitReachedType,
   RateLimitSnapshot,
   ThreadTokenUsage,
+  TurnErrorCode,
   TurnPlanStep,
   TurnStatus,
 } from "../conversation-core/index.js";
@@ -16,6 +17,7 @@ import type {
   ThreadQueueChangedNotification,
   ThreadGoal as ProtocolThreadGoal,
   ThreadRevertedNotification,
+  CodexErrorInfo,
 } from "../codex-protocol/index.js";
 import type { ThreadStateEvent } from "../session-routing/index.js";
 import type { RpcNotification } from "./json-rpc.js";
@@ -437,7 +439,14 @@ function toTurnErrorEvent(value: unknown): ConversationInputEvent | undefined {
   const error = parseTurnError(params?.error);
   const willRetry = params?.willRetry;
   return threadId && turnId && error.valid && error.value && typeof willRetry === "boolean"
-    ? { type: "turn.error", threadId, turnId, message: error.value, willRetry }
+    ? {
+        type: "turn.error",
+        threadId,
+        turnId,
+        message: error.value,
+        willRetry,
+        ...(error.errorCode ? { errorCode: error.errorCode } : {}),
+      }
     : undefined;
 }
 
@@ -456,6 +465,7 @@ function toTurnCompletedEvent(value: unknown): ConversationInputEvent | undefine
         turnId,
         status,
         error: error.value,
+        ...(error.errorCode ? { errorCode: error.errorCode } : {}),
         ...(durationMs.value === undefined ? {} : { durationMs: durationMs.value }),
       }
     : undefined;
@@ -634,7 +644,7 @@ function parseMessagePhase(value: unknown): MessagePhase | null {
 
 function parseTurnError(
   value: unknown,
-): { valid: true; value: string | null } | { valid: false } {
+): { valid: true; value: string | null; errorCode?: TurnErrorCode } | { valid: false } {
   if (value === null) {
     return { valid: true, value: null };
   }
@@ -644,6 +654,7 @@ function parseTurnError(
     return { valid: false };
   }
   const additionalDetails = nonEmptyString(error?.additionalDetails);
+  const errorCode = parseTurnErrorCode(error?.codexErrorInfo);
   return {
     valid: true,
     value: sanitizeOperationText(
@@ -651,7 +662,14 @@ function parseTurnError(
         ? `${message}\n${additionalDetails}`
         : message,
     ),
+    ...(errorCode ? { errorCode } : {}),
   };
+}
+
+function parseTurnErrorCode(value: unknown): TurnErrorCode | undefined {
+  return value === ("misalignmentPolicyViolation" satisfies CodexErrorInfo)
+    ? "misalignmentPolicyViolation"
+    : undefined;
 }
 
 function parseAuthMode(

@@ -129,6 +129,27 @@ describe("shared Surface lifecycle presentation", () => {
     expect(formatOpenAiErrorMessage("未知错误：foo")).toBe("未知错误：foo");
   });
 
+  it("uses a fixed actionable message for structured policy violations", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "failed",
+        error: "untrusted upstream policy text",
+        errorCode: "misalignmentPolicyViolation",
+      }),
+    );
+
+    expect(rendered).toContain("错误：请求因安全策略不一致而终止，请调整请求内容或目标后重试。");
+    expect(rendered).not.toContain("untrusted upstream policy text");
+  });
+
   it("appends a CNY equivalent when USD costs are rendered with a rate", () => {
     expect(formatReferenceCostTotal({
       currency: "USD",

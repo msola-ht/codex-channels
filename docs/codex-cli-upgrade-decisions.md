@@ -177,15 +177,18 @@
 | 图片生成额度失败摘要 | 把 `ImageGenerationItem.failure=usageLimitExceeded` 作为结构化失败返回 | 只显示有界的“图片生成额度已用尽”，不外发上游内部限额 ID，不推断未声明的重置时间单位；成功产物仍只使用官方 `savedPath` | [`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)、[`operation-adapter.test.ts`](../tests/operation-adapter.test.ts) |
 | 微信运行版本标识统一 | 让微信 `base_info.bot_agent` 与实际 Gateway 包版本一致 | 生产客户端从统一 `src/version.json` 读取版本，避免后续 CLI 升级遗漏手写常量；独立合同探针继续显式锁定当前版本 | [`protocol-client.ts`](../src/surfaces/weixin/protocol-client.ts)、[`weixin-protocol-client.test.ts`](../tests/weixin-protocol-client.test.ts) |
 | `account/usage/read.threadId` 与 `threadUsage` | 查询一个 OpenAI Thread 的官方估算 Credit、可选美元和用量分组 | 复用现有 `/usage`：账户摘要保持主结果，当前 OpenAI Thread 的估算并行读取且失败隔离；没有 Thread 或使用第三方 Provider 时保持原行为。官方估算不写入指标库、不与 `/metrics` 参考费用合并，也不宣称递归包含子代理 | [`Thread 官方用量开发设计`](thread-usage-development.md)、[`account-adapter.ts`](../src/codex-client/account-adapter.ts)、[`provider-account-service.test.ts`](../tests/provider-account-service.test.ts) |
+| `misalignmentPolicyViolation` 结构化错误 | 用固定协议枚举表示 Turn 因安全策略不一致而终止 | Client 只识别该精确枚举并向 Core 传递窄分类；三渠道完成卡片统一显示固定、脱敏且可操作的中文提示，指标保留独立错误分类与代码，`willRetry=false` 与 `failed` 终态保持不变；其他 `CodexErrorInfo` 继续沿用现有脱敏自由文本 | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`core.ts`](../src/conversation-core/core.ts)、[`turn-error-metrics.ts`](../src/bootstrap/turn-error-metrics.ts)、[`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts)、结构化错误真实合同 [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| MCP Server `pluginId` 来源展示 | 标识 MCP Server 是否由某个 Plugin 提供 | Client 在协议边界校验可空、长度受限且符合固定上游 `<plugin>@<marketplace>` 字符规则的 Plugin ID；只在 `/mcp` 详情显示来源，不用于授权、审批、命令/脚本来源推断或 OAuth 参数。OAuth 仍使用自动发现 | [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`conversation-command-format.ts`](../src/surfaces/conversation-command-format.ts) |
+| 实验 `thread/queue/*` 与 `thread/queue/changed` | 用 App Server 持久 Queue 替换 Gateway 内存队列，对齐六个原生请求、每 Thread 100 条容量和 25/100 分页 | 不保留第二套队列；Gateway 只负责 Actor、Workspace、Conversation 归属、Provider 路由和安全展示；本地契约与条件式真实 App Server 合同见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) | [`queue-adapter.ts`](../src/codex-client/queue-adapter.ts)、[`thread-queue-port.ts`](../src/application/thread-queue-port.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 实验 `thread/revert` 与 `thread/reverted` | 在 Queue 替换后独立采用 Thread 历史回退 | 新建 Thread 使用 `paginated` history，并通过分页 Turn 列表选择回退边界；既有 legacy Thread 不迁移；回退一次性确认、执行前复核且明确不会恢复文件，Queue 联合语义以条件式真实 App Server 合同门禁验证，详细设计见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) | [`history-adapter.ts`](../src/codex-client/history-adapter.ts)、[`thread-history-port.ts`](../src/application/thread-history-port.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 ### 待评估
 
 | 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
 | --- | --- | --- | --- |
 | 模型 `multiAgentVersion`、退休时间与自动审核要求 | 描述模型的多代理运行时、退役时间和受管自动审核约束 | 可改进模型目录说明和受管环境提示 | 当前模型路由不依赖这些字段，审批仍由 Surface Actor 显式决定；只有字段影响模型可选性、请求合法性或必须展示的安全约束时再映射到 Application |
-| MCP Server `pluginId` 与单次 OAuth 注册策略 | 标识 MCP 的 Plugin 所有者，并允许登录时选择自动发现、动态注册或预注册客户端 | 可在 Plugin 调试和 OAuth 故障排查中说明来源 | 当前 OAuth 自动发现路径工作正常，Plugin API 仍为受开关约束的调试能力；没有用户选择和凭据配置边界前不扩展参数或展示 |
+| MCP 单次 OAuth 注册策略 | 允许登录时选择自动发现、动态注册或预注册客户端 | 可为少数 OAuth 注册兼容性问题提供显式覆盖 | 当前 OAuth 自动发现路径工作正常，且没有用户选择和凭据配置边界；不扩展 OAuth 参数或凭据策略 |
 | Thread 分区外观 | 为自定义 Thread 分区保存跨客户端同步的图标和颜色 | 可让渠道中的分区目录与原生客户端使用相同的视觉标识 | 当前 `/section` 只投影分区名称，创建和重命名时省略 `appearance`，因此不会覆盖其他客户端已有设置；只有三个 Surface 形成统一、安全且有明确用户需求的图标或颜色展示规则时再扩展 Application 类型与写入命令 |
-| `misalignmentPolicyViolation` 结构化错误 | 明确表示 Turn 因安全策略不一致而终止 | 可用稳定、脱敏的渠道文案替代依赖上游自由文本判断原因 | 当前通知适配统一裁剪并脱敏 App Server 错误文字，没有按 `codexErrorInfo` 分类；只有确定该类型需要独立用户操作提示，并完成错误、重试和 Turn 终态合同后再映射到 Core 与 Surface |
 
 ### 明确不采用
 
@@ -195,15 +198,6 @@
 | 异步命令与 MCP Tool Hook | 让 Hook 在后台执行命令或调用 MCP 工具 | Gateway 不提供 Hook 管理界面；命令和 MCP 调用必须保持现有 Turn、审批和 Surface Actor 归属，不建立旁路执行入口 |
 | Amazon Bedrock Runtime Provider | 通过 AWS 凭据和区域使用内置 Bedrock 模型 | 当前受管 Provider 只有 OpenAI、DeepSeek 与 OpenCode Go；接入 Bedrock 需要新的凭据、模型目录、定价、服务隔离和部署边界，不属于本次协议升级 |
 
-### 已决定采用
-
-| 上游能力 | 采用决策 | 实施边界 |
-| --- | --- | --- |
-| 实验 `thread/queue/*` 与 `thread/queue/changed` | 已用 App Server 持久 Queue 完整替换 Gateway 内存队列，对齐六个原生请求、每 Thread 100 条容量和 25/100 分页 | 不保留第二套队列；Gateway 只负责 Actor、Workspace、Conversation 归属、Provider 路由和安全展示；本地契约与条件式真实 App Server 合同见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) |
-
-### 已决定采用，待实施
-
-| 实验 `thread/revert` 与 `thread/reverted` | 在 Queue 替换完成后独立采用；新建 Thread 使用 paginated history，并通过分页 Turn 列表选择回退边界 | 既有 legacy Thread 不迁移；回退必须一次性确认、执行前复核并明确不会恢复文件，Queue 联合语义通过真实合同前保持失败关闭，详细设计见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) |
 
 ### 纯上游变化
 

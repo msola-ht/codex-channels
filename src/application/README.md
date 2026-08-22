@@ -47,8 +47,8 @@
   或请求正文。
 - `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
-- `mcp-port.ts`：定义 MCP Server 概览、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth
-  能力判断、登录结果和有界只读资源内容；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
+- `mcp-port.ts`：定义 MCP Server 概览、可空 Plugin 来源、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth
+  能力判断、登录结果和有界只读资源内容；Plugin 来源只供 `/mcp` 详情展示，不用于授权或 OAuth；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
 - `plugin-port.ts`：定义开发中 Plugin 的已安装摘要、版本、来源、安装时间、开发者、分类、能力、
   认证时机、可用原因、适用套餐标识、Marketplace 加载失败计数与只供 Turn 调用的官方 mention 引用；
   不提供搜索、市场、安装、卸载或分享能力。

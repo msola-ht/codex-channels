@@ -471,6 +471,50 @@ describe("Notification adapter", () => {
     });
   });
 
+  it("only exposes the exact structured misalignment policy error code", () => {
+    expect(toConversationInputEvent({
+      method: "error",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        willRetry: false,
+        error: {
+          message: "upstream policy text",
+          codexErrorInfo: "misalignmentPolicyViolation",
+          additionalDetails: "do not expose this as a category",
+        },
+      },
+    })).toEqual({
+      type: "turn.error",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      message: "upstream policy text do not expose this as a category",
+      willRetry: false,
+      errorCode: "misalignmentPolicyViolation",
+    });
+    expect(toConversationInputEvent({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "failed",
+          error: {
+            message: "policy text",
+            codexErrorInfo: "someFutureErrorCode",
+            additionalDetails: null,
+          },
+        },
+      },
+    })).toEqual({
+      type: "turn.completed",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "failed",
+      error: "policy text",
+    });
+  });
+
   it("rejects malformed supported notifications and ignores unadopted methods", () => {
     expect(toConversationInputEvent({
       method: "thread/goal/updated",

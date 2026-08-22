@@ -3,6 +3,7 @@ import {
   turnErrorMessage,
   turnErrorType,
 } from "../application/index.js";
+import type { TurnErrorCode } from "../conversation-core/index.js";
 import type {
   ModelRequestMetricSample,
 } from "../observability/index.js";
@@ -19,6 +20,7 @@ export function enqueueTurnErrorMetric(
   turnId: string | null,
   phase: Parameters<typeof turnErrorType>[1],
   error: unknown,
+  structuredErrorCode?: TurnErrorCode,
 ): void {
   const recordedAtMs = Date.now();
   writer.enqueue({
@@ -34,8 +36,10 @@ export function enqueueTurnErrorMetric(
     reasoningEffort: null,
     status: "failed",
     httpStatus: null,
-    errorType: turnErrorType(error, phase),
-    errorCode: turnErrorCode(error),
+    errorType: structuredErrorCode === "misalignmentPolicyViolation"
+      ? "misalignment_policy_violation"
+      : turnErrorType(error, phase),
+    errorCode: structuredErrorCode ?? turnErrorCode(error),
     errorMessage: turnErrorMessage(error),
     incompleteReason: null,
     inputTokens: null,

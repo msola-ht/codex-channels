@@ -588,7 +588,7 @@ describe("Feishu output renderer", () => {
     })).toContain("1. tdd：测试驱动开发");
     expect(renderFeishuCommandResult({
       kind: "mcp",
-      servers: [{ name: "docs", authStatus: "oAuth", toolCount: 2 }],
+      servers: [{ name: "docs", pluginId: null, authStatus: "oAuth", toolCount: 2 }],
     })).toContain("1. docs · auth=oAuth · tools=2");
     expect(renderFeishuCommandResult({
       kind: "plugins",

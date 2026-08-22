@@ -7,7 +7,8 @@
 - `index.ts`：本模块的公开导出入口。
 - `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan、推理段状态和事件去重状态，
   把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
-  `durationMs` 与 Router 已确认的 `modelProvider`；模型代理提供时，Core 按 Thread/Turn 聚合全部
+  `durationMs` 与 Router 已确认的 `modelProvider`；结构化 `misalignmentPolicyViolation` 只以窄分类
+  传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 按 Thread/Turn 聚合全部
   已关联请求的次数、实际产生推理输出的思考次数、累计耗时、Usage 与流式时间窗，不读取 SQLite；
   三类综合速度只聚合同时具有对应
   Token 和流式时间窗的请求，并携带已计时请求数与可计速请求数，避免缺失时间窗时虚高。OpenAI 不展示

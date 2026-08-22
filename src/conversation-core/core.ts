@@ -8,6 +8,7 @@ import {
   type RateLimitSnapshot,
   type ThreadGoal,
   type ThreadTokenUsage,
+  type TurnErrorCode,
   type TurnOutputTiming,
   type TurnStartIdentity,
   type TurnArtifacts,
@@ -103,7 +104,7 @@ type UntargetedOutputEvent = WithoutTarget<OutputEvent>;
 
 export class ConversationCore {
   private readonly activeByThread = new Map<string, ActiveTurn>();
-  private readonly errorsByTurn = new Map<string, string>();
+  private readonly errorsByTurn = new Map<string, { message: string; errorCode?: TurnErrorCode }>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
   private readonly usageTurnByThread = new Map<string, string>();
   private readonly goalsByThread = new Map<string, ThreadGoal>();
@@ -687,7 +688,10 @@ export class ConversationCore {
       case "turn.error":
         this.clearReasoning(event.threadId, event.turnId);
         if (!event.willRetry) {
-          this.errorsByTurn.set(event.turnId, event.message);
+          this.errorsByTurn.set(event.turnId, {
+            message: event.message,
+            ...(event.errorCode ? { errorCode: event.errorCode } : {}),
+          });
         }
         return;
       case "turn.completed": {
@@ -703,7 +707,13 @@ export class ConversationCore {
         if (active?.turnId === event.turnId) {
           this.activeByThread.delete(event.threadId);
         }
-        const error = event.error ?? this.errorsByTurn.get(event.turnId);
+        const storedError = this.errorsByTurn.get(event.turnId);
+        const resolvedError = event.error === null
+          ? storedError
+          : {
+              message: event.error,
+              ...(event.errorCode ? { errorCode: event.errorCode } : {}),
+            };
         const tokenUsage = this.usageTurnByThread.get(event.threadId) === event.turnId
           ? this.usageByThread.get(event.threadId)
           : undefined;
@@ -726,7 +736,8 @@ export class ConversationCore {
           threadId: event.threadId,
           turnId: event.turnId,
           status: event.status,
-          ...(error ? { error } : {}),
+          ...(resolvedError ? { error: resolvedError.message } : {}),
+          ...(resolvedError?.errorCode ? { errorCode: resolvedError.errorCode } : {}),
           ...(event.durationMs === undefined
             ? {}
             : { durationMs: event.durationMs }),
