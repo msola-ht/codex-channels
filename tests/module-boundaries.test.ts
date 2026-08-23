@@ -44,6 +44,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   "provider-proxy": [],
   observability: ["config"],
   policy: ["conversation-core"],
+  "scheduled-tasks": [],
   "session-routing": [
     "conversation-core",
     "policy",
