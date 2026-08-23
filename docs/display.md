@@ -145,7 +145,7 @@ OpenCode Go 账户因空闲策略主动释放时改为发送“已空闲停止�
 
 渠道开始通知：Gateway 在官方 `subAgentActivity.started` Item 完成后向父会话发送一次简短的
 “子代理开始 · 任务名”，不展示子线程 ID；后续 `interacted` 显示为“子代理继续 · 任务名”，
-不改变子代理存活状态，`interrupted` 不会重复显示为开始。
+不改变正在运行的子代理存活状态；上一轮已经终止时会开启新一轮完成跟踪，`interrupted` 不会重复显示为开始。
 
 渠道完成通知：Gateway 只在 App Server 已自动订阅的子线程发送 `turn/completed`、官方中断活动，
 或旧版 `collabAgentToolCall.agentsStates` 报告子代理终态后，向父会话推送“子代理完成”或其他精确

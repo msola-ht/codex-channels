@@ -79,23 +79,19 @@ export class SubagentCompletionTracker {
   handle(event: OutputEvent): void {
     if (this.closed) return;
     if (event.type === "subagent.spawned") {
-      if (!this.active.has(event.agentThreadId)) {
-        const entry: ActiveSubagent = {
-          target: event.target,
-          parentThreadId: event.threadId,
-          agentPath: event.agentPath,
-          startedAtMs: Date.now(),
-          waitObservedAfterTerminal: false,
-          timer: undefined,
-          revision: 0,
-        };
-        this.active.set(event.agentThreadId, entry);
-        const pending = this.takePendingTerminal(event.agentThreadId);
-        if (pending) {
-          entry.terminalStatus = pending.status;
-          entry.terminalAtMs = pending.terminalAtMs;
-          this.schedule(event.agentThreadId, entry);
-        }
+      if (!this.active.has(event.agentThreadId)) this.register(event);
+      return;
+    }
+    if (event.type === "subagent.contacted") {
+      const previous = this.active.get(event.agentThreadId);
+      if (!previous) {
+        this.register(event);
+      } else if (previous.terminalStatus) {
+        if (previous.timer) clearTimeout(previous.timer);
+        previous.timer = undefined;
+        this.active.delete(event.agentThreadId);
+        void this.complete(event.agentThreadId, previous, previous.revision, true);
+        this.register(event);
       }
       return;
     }
@@ -196,6 +192,27 @@ export class SubagentCompletionTracker {
     return pending;
   }
 
+  private register(
+    event: Extract<OutputEvent, { type: "subagent.spawned" | "subagent.contacted" }>,
+  ): void {
+    const entry: ActiveSubagent = {
+      target: event.target,
+      parentThreadId: event.threadId,
+      agentPath: event.agentPath,
+      startedAtMs: Date.now(),
+      waitObservedAfterTerminal: false,
+      timer: undefined,
+      revision: 0,
+    };
+    this.active.set(event.agentThreadId, entry);
+    const pending = this.takePendingTerminal(event.agentThreadId);
+    if (pending) {
+      entry.terminalStatus = pending.status;
+      entry.terminalAtMs = pending.terminalAtMs;
+      this.schedule(event.agentThreadId, entry);
+    }
+  }
+
   private prunePendingTerminals(): void {
     const now = Date.now();
     for (const [threadId, pending] of this.pendingTerminals) {
@@ -222,17 +239,22 @@ export class SubagentCompletionTracker {
     agentThreadId: string,
     entry: ActiveSubagent,
     revision: number,
+    detached = false,
   ): Promise<void> {
     if (
       this.closed
-      || this.active.get(agentThreadId) !== entry
-      || entry.revision !== revision
+      || (!detached && (
+        this.active.get(agentThreadId) !== entry
+        || entry.revision !== revision
+      ))
     ) return;
     const metricsPersisted = await (entry.metricsCheckpoint ?? Promise.resolve(true));
     if (
       this.closed
-      || this.active.get(agentThreadId) !== entry
-      || entry.revision !== revision
+      || (!detached && (
+        this.active.get(agentThreadId) !== entry
+        || entry.revision !== revision
+      ))
     ) return;
     let summary: SubagentMetricsSummary | null = null;
     let metricsStatus: SubagentCompletedEvent["metricsStatus"] = "unavailable";
@@ -284,7 +306,7 @@ export class SubagentCompletionTracker {
       ),
       durationMs: aggregate?.requestDurationMs ?? 0,
     };
-    this.active.delete(agentThreadId);
+    if (!detached) this.active.delete(agentThreadId);
     this.options.publish(event);
     this.options.onCompleted?.(event);
   }
