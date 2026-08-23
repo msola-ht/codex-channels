@@ -224,6 +224,18 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     return rows.map(taskFromRow);
   }
 
+  renameTask(taskId: string, name: string, nowMs = Date.now()): ScheduledTask {
+    this.requireOpen();
+    this.requireTimestamp(nowMs);
+    const task = this.requireTask(taskId);
+    if (task.status === "deleted") throw new ScheduledTaskStateError("已删除任务不能重命名");
+    this.requireNonDecreasingTimestamp(nowMs, task.updatedAt, "Task updated_at");
+    this.database
+      .prepare("UPDATE tasks SET name = ?, updated_at = ? WHERE task_id = ? AND status <> 'deleted'")
+      .run(requireText(name, "任务名称"), nowMs, taskId);
+    return this.requireTask(taskId);
+  }
+
   pauseTask(taskId: string, nowMs = Date.now()): ScheduledTask {
     this.requireTimestamp(nowMs);
     const task = this.requireTask(taskId);
@@ -405,6 +417,60 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         .run(nextRunAt, nowMs, taskId);
       this.database.exec("COMMIT");
       return { kind: effectiveResult, run: this.requireRun(runId) };
+    } catch (error) {
+      this.rollback(error);
+    }
+  }
+
+  claimManual(
+    taskId: string,
+    nowMs: number,
+    result: "claimed" | "skipped_capacity" = "claimed",
+  ): ScheduledTaskClaimResult {
+    this.requireOpen();
+    this.requireTimestamp(nowMs);
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const task = this.requireTask(taskId);
+      if (task.status === "deleted" || task.status === "blocked") {
+        throw new ScheduledTaskStateError("当前任务状态不允许手动运行");
+      }
+      const blocking = this.database
+        .prepare(`
+          SELECT state FROM runs
+          WHERE task_id = ? AND state IN ('dispatching', 'running', 'uncertain')
+          ORDER BY CASE state WHEN 'uncertain' THEN 0 ELSE 1 END LIMIT 1
+        `)
+        .get(taskId) as { state: string } | undefined;
+      const kind = blocking === undefined
+        ? result
+        : blocking.state === "uncertain" ? "blocked" : "skipped_overlap";
+      const state: ScheduledRunState = kind === "claimed" ? "dispatching" : kind;
+      const runId = randomUUID();
+      const latest = this.database
+        .prepare("SELECT MAX(scheduled_for) AS value FROM runs WHERE task_id = ?")
+        .get(taskId) as { value: number | null };
+      const scheduledFor = Math.max(nowMs, (latest.value ?? -1) + 1);
+      this.database
+        .prepare(`
+          INSERT INTO runs (
+            run_id, task_id, scheduled_for, state,
+            thread_id, turn_id, dispatch_started_at, started_at, completed_at,
+            error_category, error_message
+          ) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?)
+        `)
+        .run(
+          runId,
+          taskId,
+          scheduledFor,
+          state,
+          state === "dispatching" ? nowMs : null,
+          state === "dispatching" ? null : nowMs,
+          errorCategoryForState(state),
+          errorMessageForState(state),
+        );
+      this.database.exec("COMMIT");
+      return { kind, run: this.requireRun(runId) };
     } catch (error) {
       this.rollback(error);
     }

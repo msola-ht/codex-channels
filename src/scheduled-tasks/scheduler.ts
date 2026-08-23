@@ -36,6 +36,7 @@ export class ScheduledTaskScheduler {
   private tickCompletion: Promise<void> | undefined;
   private resolveTickCompletion: (() => void) | undefined;
   private readonly abortControllers = new Set<AbortController>();
+  private manualRunTail: Promise<void> = Promise.resolve();
   private lastCleanupAttemptAt: number | undefined;
 
   constructor(
@@ -185,6 +186,42 @@ export class ScheduledTaskScheduler {
 
   runOnce(nowMs = this.clock.now()): Promise<ScheduledTaskTickResult> {
     return this.tick(nowMs);
+  }
+
+  async runTaskNow(taskId: string, nowMs = this.clock.now()): Promise<ScheduledRun> {
+    let releaseManualRun!: () => void;
+    const predecessor = this.manualRunTail;
+    this.manualRunTail = new Promise<void>((resolve) => {
+      releaseManualRun = resolve;
+    });
+    await predecessor;
+    try {
+      while (this.ticking && this.tickCompletion !== undefined) {
+        await this.tickCompletion;
+      }
+      if (this.stopping) throw new Error("计划任务调度器正在停止");
+      this.ticking = true;
+      this.tickCompletion = new Promise<void>((resolve) => {
+        this.resolveTickCompletion = resolve;
+      });
+      const task = this.store.getTask(taskId);
+      if (!task) throw new Error(`任务不存在：${taskId}`);
+      if (!await this.capacityAvailable(task, 0)) {
+        if (this.stopping) throw new Error("计划任务调度器正在停止");
+        return this.store.claimManual(taskId, nowMs, "skipped_capacity").run;
+      }
+      if (this.stopping) throw new Error("计划任务调度器正在停止");
+      const claim = this.store.claimManual(taskId, nowMs);
+      if (claim.kind !== "claimed") return claim.run;
+      return await this.dispatch(task, claim.run);
+    } finally {
+      if (this.ticking) {
+        this.ticking = false;
+        this.resolveTickCompletion?.();
+        this.resolveTickCompletion = undefined;
+      }
+      releaseManualRun();
+    }
   }
 
   start(): void {

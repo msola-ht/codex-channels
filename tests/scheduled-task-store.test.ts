@@ -128,6 +128,29 @@ describe("SqliteScheduledTaskStore", () => {
     store.close();
   });
 
+  it("renames tasks and claims manual runs without advancing the schedule", () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const task = store.createTask(taskInput());
+    const nextRunAt = task.nextRunAt;
+
+    expect(store.renameTask(task.taskId, "Renamed", base + 1)).toMatchObject({
+      name: "Renamed",
+      updatedAt: base + 1,
+    });
+    const manual = store.claimManual(task.taskId, base + 2);
+    expect(manual).toMatchObject({
+      kind: "claimed",
+      run: { state: "dispatching", scheduledFor: base + 2 },
+    });
+    expect(store.getTask(task.taskId)?.nextRunAt).toBe(nextRunAt);
+    expect(store.claimManual(task.taskId, base + 3)).toMatchObject({
+      kind: "skipped_overlap",
+      run: { state: "skipped_overlap" },
+    });
+    store.close();
+  });
+
   it("atomically claims an occurrence and rejects a duplicate claim", () => {
     const { path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);
@@ -274,6 +297,52 @@ describe("SqliteScheduledTaskStore", () => {
 });
 
 describe("ScheduledTaskScheduler", () => {
+  it("dispatches an explicit manual run and records capacity rejection", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const taskA = store.createTask(taskInput({ taskId: "manual-a" }));
+    const taskB = store.createTask(taskInput({ taskId: "manual-b" }));
+    const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>(async () => ({ kind: "running" }));
+    const scheduler = new ScheduledTaskScheduler(
+      store,
+      { execute },
+      { maxConcurrentRunsPerConversation: 1 },
+    );
+
+    const [first, second] = await Promise.all([
+      scheduler.runTaskNow(taskA.taskId, base + 10),
+      scheduler.runTaskNow(taskB.taskId, base + 11),
+    ]);
+    expect(first).toMatchObject({ taskId: taskA.taskId, state: "running" });
+    expect(second).toMatchObject({ taskId: taskB.taskId, state: "skipped_capacity" });
+    expect(execute).toHaveBeenCalledTimes(1);
+    store.close();
+  });
+
+  it("does not claim or dispatch a manual run when stopping during capacity inspection", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const task = store.createTask(taskInput({ taskId: "manual-stop" }));
+    let resolveCapacity!: (value: number) => void;
+    const capacity = new Promise<number>((resolve) => {
+      resolveCapacity = resolve;
+    });
+    const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>(async () => ({ kind: "running" }));
+    const availableCapacity = vi.fn(async () => await capacity);
+    const scheduler = new ScheduledTaskScheduler(store, { execute, availableCapacity });
+
+    const running = scheduler.runTaskNow(task.taskId, base + 10);
+    await waitFor(() => availableCapacity.mock.calls.length === 1);
+    const stopping = scheduler.stop();
+    resolveCapacity(1);
+
+    await expect(running).rejects.toThrow("计划任务调度器正在停止");
+    await expect(stopping).resolves.toBeUndefined();
+    expect(execute).not.toHaveBeenCalled();
+    expect(store.listRuns(task.taskId)).toEqual([]);
+    store.close();
+  });
+
   it("owns cleanup on the first tick and at most once per 24 hours", async () => {
     const { path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);

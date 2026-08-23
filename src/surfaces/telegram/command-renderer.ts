@@ -31,6 +31,9 @@ import {
   formatConversationPermissions,
   formatConversationProjectRules,
   formatConversationSessions,
+  formatConversationScheduledConfirmation,
+  formatConversationScheduledRuns,
+  formatConversationScheduledTasks,
   formatConversationSkills,
   formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
@@ -98,6 +101,15 @@ export async function renderTelegramCommandResult(
       return;
     case "thread-revert-preview":
       await replyTelegramPanel(context, formatConversationThreadRevertPreview(result));
+      return;
+    case "scheduled-tasks":
+      await replyTelegramPanel(context, formatConversationScheduledTasks(result));
+      return;
+    case "scheduled-runs":
+      await replyTelegramPanel(context, formatConversationScheduledRuns(result));
+      return;
+    case "scheduled-confirmation":
+      await replyTelegramPanel(context, formatConversationScheduledConfirmation(result));
       return;
     case "status":
       await replyTelegramPanel(context, formatStatus(result.status));

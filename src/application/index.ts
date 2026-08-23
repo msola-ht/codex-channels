@@ -41,12 +41,27 @@ export {
   sessionCommandUsageText,
   threadQueueCommandUsageText,
   threadRevertCommandUsageText,
+  scheduledTaskCommandUsageText,
   type ConversationCommandName,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
   type McpDetailView,
   type PluginListView,
 } from "./conversation-command-service.js";
+export {
+  ScheduledTaskApplicationService,
+  type ScheduledRunView,
+  type ScheduledTaskApplicationPort,
+  type ScheduledTaskConfirmation,
+  type ScheduledTaskCreatePreview,
+  type ScheduledTaskCreateRequest,
+  type ScheduledTaskCreationContext,
+  type ScheduledTaskDeletePreview,
+  type ScheduledTaskListResult,
+  type ScheduledTaskRunListResult,
+  type ScheduledTaskUseCases,
+  type ScheduledTaskView,
+} from "./scheduled-task-service.js";
 export {
   ConversationService,
   resolveThread,

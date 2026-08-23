@@ -5,6 +5,7 @@ import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
   ProviderModelUsageEstimate,
+  ScheduledTaskUseCases,
 } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
@@ -112,6 +113,7 @@ export interface FeishuSurfaceOptions {
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
   threadSectionAccess?: SurfaceAccessPolicy;
+  scheduledTasks?: ScheduledTaskUseCases;
   openApiAgent?: unknown;
   accountsAgent?: unknown;
   webSocketAgent?: unknown;
@@ -299,6 +301,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.threadSectionAccess === undefined
           ? {}
           : { threadSectionAccess: options.threadSectionAccess }),
+        ...(options.scheduledTasks === undefined
+          ? {}
+          : { scheduledTasks: options.scheduledTasks }),
         ...(files === undefined ? {} : { files }),
         audios: this.audios,
         ...(quotedMessages === undefined

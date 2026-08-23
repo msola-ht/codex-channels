@@ -3,6 +3,7 @@ import {
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
+  scheduledTaskCommandUsageText,
   threadQueueCommandUsageText,
   threadRevertCommandUsageText,
 } from "../application/index.js";
@@ -88,6 +89,14 @@ export function formatSurfaceUserFacingError(
       return "目标不能为空";
     case "goal.usage":
       return "用法：/goal [set <目标>|clear]";
+    case "scheduled-task.command.invalid":
+      return error.message.includes("用法") ? scheduledTaskCommandUsageText : error.message;
+    case "scheduled-task.confirmation.invalid":
+    case "scheduled-task.forbidden":
+    case "scheduled-task.not-found":
+    case "scheduled-task.snapshot.required":
+    case "scheduled-task.state.invalid":
+      return error.message;
     case "queue.usage":
       return threadQueueCommandUsageText;
     case "metrics.usage":

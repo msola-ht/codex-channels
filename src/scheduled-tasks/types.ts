@@ -160,6 +160,7 @@ export interface ScheduledTaskStore {
     };
     readonly includeDeleted?: boolean;
   }): ScheduledTask[];
+  renameTask(taskId: string, name: string, nowMs?: number): ScheduledTask;
   pauseTask(taskId: string, nowMs?: number): ScheduledTask;
   resumeTask(taskId: string, nowMs?: number): ScheduledTask;
   blockTask(taskId: string, nowMs?: number): ScheduledTask;
@@ -182,6 +183,12 @@ export interface ScheduledTaskStore {
     scheduledFor: number,
     result: "claimed" | "skipped_overlap" | "skipped_capacity" | "missed" | "blocked",
     nowMs: number,
+  ): ScheduledTaskClaimResult;
+  /** Claim an independent manual occurrence without advancing nextRunAt. */
+  claimManual(
+    taskId: string,
+    nowMs: number,
+    result?: "claimed" | "skipped_capacity",
   ): ScheduledTaskClaimResult;
   markRunning(
     runId: string,

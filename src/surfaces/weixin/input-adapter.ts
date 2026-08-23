@@ -4,6 +4,7 @@ import type {
   ConversationUseCases,
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
+  ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
   conversationTargetKey,
@@ -73,6 +74,7 @@ export interface WeixinInputAdapterOptions {
   removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
   threadSectionAccess?: SurfaceAccessPolicy;
+  scheduledTasks?: ScheduledTaskUseCases;
   interactions?: Pick<WeixinInteractionPort, "handleText">;
   images?: Pick<WeixinImagePort, "download">;
   files?: Pick<WeixinFilePort, "download">;
@@ -134,6 +136,9 @@ export class WeixinInputAdapter {
         ...(options.threadSectionAccess === undefined
           ? {}
           : { threadSectionAccess: options.threadSectionAccess }),
+        ...(options.scheduledTasks === undefined
+          ? {}
+          : { scheduledTasks: options.scheduledTasks }),
         ...(options.doctor === undefined
           ? {}
           : {

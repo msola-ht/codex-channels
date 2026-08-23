@@ -60,6 +60,7 @@ export const feishuCommandCenterActions = [
   "workspace",
   "goal",
   "plan",
+  "schedule",
   "help",
 ] as const satisfies ReadonlyArray<FeishuCommandCenterAction>;
 
@@ -546,6 +547,9 @@ function renderFeishuCategorizedCommandsCard(
         ["Thread 分区", "section", "default"],
         ["历史回退", "revert", "default"],
       ]),
+      actionRow(token, [
+        ["计划任务", "schedule", "default"],
+      ]),
       sectionTitle("能力与集成"),
       actionRow(token, [
         ["子代理", "agents", "default"],
@@ -622,6 +626,7 @@ export function renderFeishuCommandCenterCard(
       actionRow(token, [
         ["Goal", "goal", "default"],
         ["Plan 模式", "plan", "default"],
+        ["计划任务", "schedule", "default"],
       ]),
       sectionTitle("更多"),
       actionRow(token, [
@@ -705,6 +710,10 @@ function commandCenterActionConsumesToken(
     || (
       action === "queue"
       && /^(?:start|delete)\s+/u.test(input)
+    )
+    || (
+      action === "schedule"
+      && /^(?:confirm|pause|resume|run|retry)\s+/u.test(input)
     );
 }
 

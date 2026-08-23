@@ -10,6 +10,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   application: [
     "conversation-core",
     "policy",
+    "scheduled-tasks",
     "session-routing",
   ],
   approval: [

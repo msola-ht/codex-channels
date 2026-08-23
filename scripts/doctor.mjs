@@ -307,6 +307,23 @@ if (document) {
       ? "如需关闭，在 [experimental] 中设置 plugin_api = false 后重启 Gateway"
       : "如需调试，在 [experimental] 中设置 plugin_api = true 后重启 Gateway",
   );
+  const scheduledTasks = table(document.scheduled_tasks);
+  if (scheduledTasks.enabled === true) {
+    const stateDatabasePath = resolveConfiguredPath(
+      stringValue(storage.database_path),
+      dataDir,
+      join(dataDir, "data", "gateway.sqlite3"),
+    );
+    const scheduledTaskPath = join(dirname(stateDatabasePath), "scheduled-tasks.sqlite3");
+    if (!existsSync(scheduledTaskPath)) {
+      note("Gateway 计划任务", "已启用；数据库将在 Gateway 下次启动时创建");
+    } else {
+      note("Gateway 计划任务", "已启用，私有数据库已存在");
+      checkMode("计划任务数据库权限", scheduledTaskPath, 0o600);
+    }
+  } else {
+    note("Gateway 计划任务", "已关闭");
+  }
   const threadSections = table(document.thread_sections);
   const threadSectionAdministrators = Array.isArray(threadSections.administrators)
     ? threadSections.administrators.filter((value) => typeof value === "string")

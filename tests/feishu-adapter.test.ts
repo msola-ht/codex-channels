@@ -926,6 +926,116 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent.some(({ text }) => text.includes("已写入 App Server Queue"))).toBe(true);
   });
 
+  it("manages Gateway scheduled tasks through shared commands and confirmation buttons", async () => {
+    const fixture = createOutbox();
+    const task = {
+      taskId: "task-1",
+      name: "每日检查",
+      status: "active" as const,
+      schedule: { type: "daily" as const, time: "09:00" },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 1_785_000_000_000,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      serviceTier: null,
+      sandbox: "workspace-write" as const,
+      permissions: null,
+      promptPreview: "检查项目状态",
+    };
+    const scheduledTasks = {
+      list: vi.fn(() => ({
+        tasks: [task],
+        selectors: ["1"],
+        page: 1,
+        pageCount: 1,
+        totalTaskCount: 1,
+      })),
+      runs: vi.fn(() => ({
+        task,
+        runs: [],
+        page: 1,
+        pageCount: 1,
+        totalRunCount: 0,
+      })),
+      previewCreate: vi.fn(() => ({
+        action: "create" as const,
+        token: "12345678-1234-1234-1234-123456789abc",
+        expiresAt: Date.now() + 60_000,
+        task,
+      })),
+    };
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { scheduledTasks: scheduledTasks as never },
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+    )).resolves.toMatchObject({
+      title: "Gateway 计划任务 · 第 1/1 页",
+      choices: expect.arrayContaining([
+        expect.objectContaining({ input: "task task-1" }),
+        expect.objectContaining({ input: "add" }),
+      ]),
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+      "task task-1",
+    )).resolves.toMatchObject({
+      title: "每日检查",
+      choices: expect.arrayContaining([
+        expect.objectContaining({ input: "run task-1" }),
+        expect.objectContaining({ input: "delete task-1" }),
+      ]),
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+      "add-daily",
+    )).resolves.toMatchObject({
+      kind: "form",
+      inputPrefix: "add daily ",
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+      "add daily 09:00 Asia/Shanghai 检查项目状态",
+    )).resolves.toMatchObject({
+      title: "确认创建计划任务",
+      description: expect.stringContaining("计划：每天 09:00 · Asia/Shanghai"),
+      choices: expect.arrayContaining([
+        expect.objectContaining({
+          input: "confirm 12345678-1234-1234-1234-123456789abc",
+        }),
+      ]),
+    });
+    const confirmation = await adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+      "add daily 09:00 Asia/Shanghai 检查项目状态",
+    );
+    expect(confirmation).toMatchObject({
+      description: expect.stringContaining("无人值守执行"),
+    });
+    await fixture.outbox.close();
+  });
+
   it("offers only the existing safe project-rule actions", async () => {
     const fixture = createOutbox();
     const checkProjectRules = vi.fn(async () => ({

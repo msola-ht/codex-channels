@@ -68,6 +68,7 @@
 - `event-bus`：提供进程内有界队列和消费者隔离。
 - `observability`：提供结构化日志和敏感字段脱敏。
 - `policy`：执行 Surface Actor 与 Workspace 授权。
+- `scheduled-tasks`：保存 Gateway 计划任务领域类型、Schedule 计算、SQLite Store 与调度器。
 - `session-routing`：维护 Conversation、Workspace、Thread 的绑定和订阅状态。
 - `storage`：持久化恢复绑定所需的最小业务状态。
 - `surfaces`：适配外部平台输入、输出和交互。
@@ -77,7 +78,7 @@
 ```text
 Surface -> Application/Core <- Codex Client
                      ^
-              Policy / Storage
+       Policy / Storage / Scheduled Tasks
 ```
 
 - `bootstrap` 是组合根，具体实现选择和生命周期协调集中在这里。

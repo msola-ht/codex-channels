@@ -20,5 +20,9 @@ SQLite 只保存任务定义和最小 Run 元数据，目录和文件使用私�
 写请求；`uncertain` Run 会阻塞同一任务后续 occurrence，只有显式 `resolveUncertain` 或权威恢复路径
 才会解除。停止调度
 时会向尚未完成的执行端口传递取消信号，并在有限等待上限后报告稳定超时。配置与 Bootstrap
-App Server 执行已接入且默认关闭；Surface 命令属于后续阶段。Scheduler 在首次 tick 和之后每 24 小时最多调用一次
+App Server 执行与 Surface `/schedule` 管理命令已接入且默认关闭；Application 负责 Actor 归属、
+五分钟选择快照和创建/删除确认，Surface 不直接访问 Store。Scheduler 在首次 tick 和之后每 24 小时最多调用一次
 Run 清理；清理失败经 `onError` 观察但不阻断本次安全调度。
+Application 通过不阻止进程退出的短期定时器主动清理超过五分钟的待确认记录，并把 Store 状态冲突
+转换为稳定的用户可见错误；
+每个 Actor 在同一 Conversation 的未删除任务固定限制为 100 个。

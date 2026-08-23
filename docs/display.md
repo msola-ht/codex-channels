@@ -120,6 +120,11 @@ HTML 和微信结构化字段渲染。
 `/release force` 只在该 Thread 存在可识别持锁进程、且发送信号前二次核验仍由同一可释放
 Codex 进程持有时结束该进程并立即重试恢复。恢复绑定失败时
 渠道会收到一次“占用”提示（连续未知失败达到阈值也会升级提示），恢复成功后再收到“解除”提示。
+`/schedule` 展示 Gateway 自有的计划任务与 Run，不把它描述为 App Server 原生计划任务。列表每页
+8 项、Run 每页 10 条；数字序号只绑定当前 Actor 最近五分钟的列表快照，完整 ID 仍重新复核归属。
+创建和删除先展示 Workspace、Provider、模型、思考等级、Sandbox、计划与 Prompt 安全预览，再用
+五分钟一次性令牌确认。Telegram、飞书和微信共享同一文案；飞书选择卡和表单只提交规范命令参数，
+不在 Surface 保存任务或确认状态。
 按需运行的受管 Provider（DeepSeek、OpenCode Go）在首次选择对应模型、恢复其 Thread 或使用对应
 Remote TUI 之前尚未启动，其历史 Thread 不会出现在 `/resume` 会话列表中；对应 Provider 启动后
 即可正常列出和恢复。

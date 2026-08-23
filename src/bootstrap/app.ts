@@ -60,6 +60,7 @@ import {
   ConversationService,
   ModelSelectionService,
   ProviderAccountService,
+  ScheduledTaskApplicationService,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
   type ThreadLockHolder,
@@ -68,6 +69,7 @@ import {
 } from "../application/index.js";
 import {
   ConversationCore,
+  UserFacingError,
   isCriticalOutputEvent,
   surfaceAccountKey,
   type ConversationTarget,
@@ -679,9 +681,101 @@ export class GatewayApplication {
       const provider = this.router.modelSettingsForThread(event.threadId)?.modelProvider;
       this.providerIdleReleaser.touch(provider, event.target);
     });
+    const scheduledTasks = config.scheduledTasksEnabled
+      ? (() => {
+          const store = new SqliteScheduledTaskStore(
+            scheduledTaskDatabasePath(config.stateDatabasePath),
+          );
+          const executor: ScheduledTaskExecutor = new ScheduledTaskExecutor(
+            this.router,
+            this.codex,
+            this.bindings,
+            this.workspaces,
+            {
+              isProviderConfigured: (provider) => this.codex.isProviderConfigured(provider),
+              ensureProvider: (provider) => this.codex.ensureProviderAvailable(provider),
+              isModelAvailable: (provider, model) =>
+                this.codex.isModelAvailable(provider, model),
+            },
+            this.core,
+            {
+              isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
+                surface.surface === target.surface && surface.accountId === target.accountId),
+              onThreadStarted: (run, target, threadId) =>
+                coordinator.onThreadStarted(run, target, threadId),
+              onTurnStarted: (run, target, threadId, turnId) =>
+                coordinator.onTurnStarted(run, target, threadId, turnId),
+              onRunStateChanged: (run) => coordinator.onRunStateChanged(run),
+              logger,
+            },
+          );
+          const coordinator = new ScheduledTaskRunCoordinator(store, this.router, this.codex, {
+            validateRun: (task) => executor.validateRun(task),
+            logger,
+          });
+          const scheduler = new ScheduledTaskScheduler(store, executor, {
+            onError: (error) => logger.error({ err: error }, "Gateway 计划任务调度失败"),
+          });
+          this.scheduledTaskStore = store;
+          this.scheduledRunCoordinator = coordinator;
+          this.scheduledTaskScheduler = scheduler;
+          this.output.subscribe("scheduled-task-run-coordinator", (event) => {
+            coordinator.handleOutput(event);
+          });
+          return new ScheduledTaskApplicationService(store, {
+            isActorAuthorized: (target, actorId) =>
+              this.bindings.conversations().some((candidate) =>
+                surfaceAccountKey(candidate.surface, candidate.accountId)
+                  === surfaceAccountKey(target.surface, target.accountId)
+                && candidate.conversationId === target.conversationId)
+              && this.bindings.actors(target).includes(actorId),
+            creationContext: (target) => {
+              const status = service.status(target);
+              const workspace = this.workspaces.require(status.workspaceId);
+              const sandbox = workspace.sandbox ?? "read-only";
+              if (sandbox === "danger-full-access") {
+                throw new UserFacingError(
+                  "scheduled-task.state.invalid",
+                  "计划任务不允许使用 danger-full-access Workspace",
+                );
+              }
+              if (
+                workspace.approvalPolicy !== undefined
+                && workspace.approvalPolicy !== "never"
+              ) {
+                throw new UserFacingError(
+                  "scheduled-task.state.invalid",
+                  "当前 Workspace 不能形成 approvalPolicy=never 的无人值守环境",
+                );
+              }
+              return {
+                workspaceId: workspace.id,
+                workspaceName: workspace.name,
+                modelProvider: status.modelProvider ?? "openai",
+                model: status.model,
+                reasoningEffort: status.effort,
+                serviceTier: status.serviceTier,
+                sandbox,
+                approvalPolicy: "never",
+                permissions: workspace.permissions ?? null,
+                modelPending: status.modelPending,
+                effortPending: status.effortPending,
+                serviceTierPending: status.fastModePending,
+              };
+            },
+            runTaskNow: (taskId) => scheduler.runTaskNow(taskId),
+          });
+        })()
+      : undefined;
+    if (!config.scheduledTasksEnabled) {
+      this.scheduledTaskStore = undefined;
+      this.scheduledRunCoordinator = undefined;
+      this.scheduledTaskScheduler = undefined;
+    }
     this.surfaceModules = createSurfaceModules({
       config,
       service,
+      ...(scheduledTasks === undefined ? {} : { scheduledTasks }),
       bindings: this.bindings,
       logger,
       gatewayVersion,
@@ -777,55 +871,6 @@ export class GatewayApplication {
       config.approvalTimeoutMs,
       logger,
     );
-    if (config.scheduledTasksEnabled) {
-      const store = new SqliteScheduledTaskStore(
-        scheduledTaskDatabasePath(config.stateDatabasePath),
-      );
-      const coordinator: ScheduledTaskRunCoordinator = new ScheduledTaskRunCoordinator(
-        store,
-        this.router,
-        this.codex,
-        {
-          validateRun: (task) => executor.validateRun(task),
-          logger,
-        },
-      );
-      const executor: ScheduledTaskExecutor = new ScheduledTaskExecutor(
-        this.router,
-        this.codex,
-        this.bindings,
-        this.workspaces,
-        {
-          isProviderConfigured: (provider) => this.codex.isProviderConfigured(provider),
-          ensureProvider: (provider) => this.codex.ensureProviderAvailable(provider),
-          isModelAvailable: (provider, model) =>
-            this.codex.isModelAvailable(provider, model),
-        },
-        this.core,
-        {
-          isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
-            surface.surface === target.surface && surface.accountId === target.accountId),
-          onThreadStarted: (run, target, threadId) =>
-            coordinator.onThreadStarted(run, target, threadId),
-          onTurnStarted: (run, target, threadId, turnId) =>
-            coordinator.onTurnStarted(run, target, threadId, turnId),
-          onRunStateChanged: (run) => coordinator.onRunStateChanged(run),
-          logger,
-        },
-      );
-      this.scheduledTaskStore = store;
-      this.scheduledRunCoordinator = coordinator;
-      this.scheduledTaskScheduler = new ScheduledTaskScheduler(store, executor, {
-        onError: (error) => logger.error({ err: error }, "Gateway 计划任务调度失败"),
-      });
-      this.output.subscribe("scheduled-task-run-coordinator", (event) => {
-        coordinator.handleOutput(event);
-      });
-    } else {
-      this.scheduledTaskStore = undefined;
-      this.scheduledRunCoordinator = undefined;
-      this.scheduledTaskScheduler = undefined;
-    }
     this.inbound.subscribe("conversation-core", (notification) => {
       const queueChanged = toThreadQueueChangedEvent(notification);
       if (queueChanged) {

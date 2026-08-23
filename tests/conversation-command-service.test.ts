@@ -1139,9 +1139,18 @@ describe("ConversationCommandService", () => {
         status: "free",
         threadId: "thread-release",
       })),
+      scheduleList: vi.fn(() => ({
+        tasks: [],
+        selectors: [],
+        page: 1,
+        pageCount: 1,
+        totalTaskCount: 0,
+      })),
     };
     const commands = new ConversationCommandService(
       service as unknown as ConversationUseCases,
+      undefined,
+      { list: service.scheduleList } as never,
     );
     const cases = [
       ["resume", "thread-1", "resume"],
@@ -1179,12 +1188,13 @@ describe("ConversationCommandService", () => {
       ["goal", "set ship", "setGoal"],
       ["agents", "", "listAgentRoles"],
       ["release", "", "releaseThread"],
+      ["schedule", "", "scheduleList"],
     ] as const;
 
     expect(cases.map(([command]) => command)).toEqual(conversationCommandNames);
     for (const [command, input, method] of cases) {
       const before = service[method].mock.calls.length;
-      await expect(commands.execute(target, command, input)).resolves.toHaveProperty("kind");
+      await expect(commands.execute(target, command, input, "actor-1")).resolves.toHaveProperty("kind");
       expect(service[method].mock.calls.length).toBeGreaterThan(before);
     }
     expect(service.status).toHaveBeenCalledWith(target, {

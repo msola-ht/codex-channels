@@ -17,7 +17,8 @@
   才构造稳定 `localAudio`，私有临时文件一小时后清理；Application 仅在当前模型目录包含
   `audio` 时提交，否则在创建或追加 Turn 前明确拒绝；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
-  `/queue add|list|update|delete|reorder|start` 管理 App Server 持久 Queue，`/rules <init|check>` 只操作当前 Workspace 且不提供
+  `/queue add|list|update|delete|reorder|start` 管理 App Server 持久 Queue，`/schedule` 管理显式启用的
+  Gateway 计划任务，`/rules <init|check>` 只操作当前 Workspace 且不提供
   强制覆盖；同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
   版本字符串和当前 Workspace Git 分支，不读取生成协议。

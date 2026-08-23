@@ -310,6 +310,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue add <文本>`、`/queue list [页码]`、`/queue update <ID 或列表序号> <文本>`、`/queue delete <ID 或列表序号>`、`/queue reorder <ID 或列表序号> <位置>`、`/queue start [ID 或列表序号]`、`/revert list [页码]`、`/revert <Turn ID 或列表序号>`、`/revert confirm <一次性令牌>`、`/compact`、`/fork`、`/review`、`/release`；Queue 由 App Server 持久保存，容量最多 100 条
+- 计划任务：启用 `[scheduled_tasks].enabled = true` 后使用 `/schedule` 查看，用 `/schedule add daily <HH:mm> <时区> <文本>` 等确定性命令创建；完整语法与安全边界见 [`docs/scheduled-tasks-development.md`](docs/scheduled-tasks-development.md)
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`

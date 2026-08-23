@@ -89,6 +89,7 @@ export const conversationCommandDescriptions = {
   goal: "查看或管理 Goal",
   agents: "查看或调用子代理",
   release: "查看或释放被占用的 Codex 会话",
+  schedule: "管理 Gateway 计划任务",
 } satisfies Record<ConversationCommandName, string>;
 
 export const conversationCommandHelpSections = [
@@ -116,6 +117,8 @@ export const conversationCommandHelpSections = [
       "/review [branch <分支>|commit <SHA>|custom <说明>]",
       "/rules <init|check> · /diff",
       "/release · /release force",
+      "/schedule list · /schedule runs <任务> [页码]",
+      "/schedule add <hourly|daily|weekdays|weekly> ... · /schedule pause|resume|run|delete <任务>",
       "/plan [规划需求] · /goal [set <目标>|clear]",
     ],
   },
@@ -223,6 +226,83 @@ export function formatConversationThreadQueue(
       `${result.result.selectors[index] ?? "?"}. ${formatQueueItem(item)}`),
     "",
     "数字序号仅在最近五分钟的本会话列表快照内有效；也可使用完整 ID。",
+  ].join("\n"));
+}
+
+export function formatConversationScheduledTasks(
+  result: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>,
+): string {
+  const { tasks, selectors, page, pageCount, totalTaskCount } = result.result;
+  if (tasks.length === 0) {
+    return toStructuredMarkdownList([
+      "Gateway 计划任务为空",
+      `第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项`,
+      "新增：/schedule add daily <HH:mm> <时区> <文本>",
+    ].join("\n"));
+  }
+  return toStructuredMarkdownList([
+    `Gateway 计划任务（第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项）：`,
+    ...tasks.map((task, index) => [
+      `${selectors[index] ?? "?"}. ${task.name} · ${scheduledTaskStatusLabel(task.status)}`,
+      `   ID：${task.taskId}`,
+      `   计划：${formatSchedule(task.schedule, task.timezone)}`,
+      `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
+      `   Workspace：${task.workspaceId} · 模型：${task.model ?? "默认"} · ${task.sandbox}`,
+    ].join("\n")),
+    "",
+    "数字序号只对最近五分钟的本会话列表有效；详情：/schedule runs <任务>",
+    ...(page > 1 ? [`上一页：/schedule list ${page - 1}`] : []),
+    ...(page < pageCount ? [`下一页：/schedule list ${page + 1}`] : []),
+  ].join("\n"));
+}
+
+export function formatConversationScheduledRuns(
+  result: Extract<ConversationCommandResult, { kind: "scheduled-runs" }>,
+): string {
+  const { task, runs, page, pageCount, totalRunCount } = result.result;
+  return toStructuredMarkdownList([
+    `计划任务运行记录：${task.name}`,
+    `任务：${task.taskId}`,
+    `第 ${page}/${pageCount} 页 · 共 ${totalRunCount} 条`,
+    ...(runs.length === 0
+      ? ["当前没有运行记录。"]
+      : runs.map((run) => [
+          `${run.selector}. ${run.runId} · ${scheduledRunStateLabel(run.state)}`,
+          `   计划时间：${formatScheduledAt(run.scheduledFor)}`,
+          ...(run.threadId ? [`   Thread：${run.threadId}`] : []),
+          ...(run.errorCategory ? [`   分类：${run.errorCategory}`] : []),
+        ].join("\n"))),
+    "",
+    "uncertain Run 可使用：/schedule retry <Run ID 或列表序号>",
+    ...(page > 1 ? [`上一页：/schedule runs ${task.taskId} ${page - 1}`] : []),
+    ...(page < pageCount ? [`下一页：/schedule runs ${task.taskId} ${page + 1}`] : []),
+  ].join("\n"));
+}
+
+export function formatConversationScheduledConfirmation(
+  result: Extract<ConversationCommandResult, { kind: "scheduled-confirmation" }>,
+): string {
+  const { preview } = result;
+  return toStructuredMarkdownList([
+    preview.action === "create"
+      ? "计划任务创建预览（尚未保存）"
+      : "计划任务删除预览（尚未删除）",
+    `名称：${preview.task.name}`,
+    ...(preview.action === "delete" ? [`任务：${preview.task.taskId}`] : []),
+    `计划：${formatSchedule(preview.task.schedule, preview.task.timezone)}`,
+    `Workspace：${preview.task.workspaceId}`,
+    `Provider：${preview.task.modelProvider}`,
+    `模型：${preview.task.model ?? "默认"}`,
+    `思考等级：${preview.task.reasoningEffort ?? "默认"}`,
+    `下次运行：${formatScheduledAt(preview.task.nextRunAt)}`,
+    `Sandbox：${preview.task.sandbox}`,
+    `权限 Profile：${preview.task.permissions ?? "未配置"}`,
+    "网络：沿用 Workspace 当前权限；无人值守审批一律拒绝",
+    "Approval Policy：never（无人值守请求将安全拒绝）",
+    "该任务将在用户不在线时由 Gateway 无人值守执行。",
+    `任务预览：${preview.task.promptPreview}`,
+    `确认：/schedule confirm ${preview.token}`,
+    "令牌五分钟内有效且只能使用一次。",
   ].join("\n"));
 }
 
@@ -571,7 +651,87 @@ export function formatConversationCommandOutcome(
         "Goal 已设置",
         `目标：${outcome.goal.objective}`,
       ].join("\n"));
+    case "scheduled-task.created":
+    case "scheduled-task.deleted":
+    case "scheduled-task.renamed":
+    case "scheduled-task.paused":
+    case "scheduled-task.resumed":
+      return toStructuredMarkdownList([
+        scheduledTaskOutcomeTitle(outcome.type),
+        `名称：${outcome.task.name}`,
+        `任务：${outcome.task.taskId}`,
+        `状态：${scheduledTaskStatusLabel(outcome.task.status)}`,
+      ].join("\n"));
+    case "scheduled-task.run-requested":
+    case "scheduled-task.retry-requested":
+      return toStructuredMarkdownList([
+        outcome.type === "scheduled-task.run-requested"
+          ? "已请求立即运行计划任务"
+          : "已解除 uncertain Run 并请求重试",
+        `Run：${outcome.run.runId}`,
+        `状态：${scheduledRunStateLabel(outcome.run.state)}`,
+        ...(outcome.run.threadId ? [`Thread：${outcome.run.threadId}`] : []),
+      ].join("\n"));
   }
+}
+
+function scheduledTaskOutcomeTitle(type: Extract<ConversationCommandOutcome, {
+  type:
+    | "scheduled-task.created"
+    | "scheduled-task.deleted"
+    | "scheduled-task.renamed"
+    | "scheduled-task.paused"
+    | "scheduled-task.resumed";
+}>["type"]): string {
+  switch (type) {
+    case "scheduled-task.created": return "已创建 Gateway 计划任务";
+    case "scheduled-task.deleted": return "已删除 Gateway 计划任务";
+    case "scheduled-task.renamed": return "已重命名 Gateway 计划任务";
+    case "scheduled-task.paused": return "已暂停 Gateway 计划任务";
+    case "scheduled-task.resumed": return "已恢复 Gateway 计划任务";
+  }
+}
+
+function scheduledTaskStatusLabel(status: "active" | "paused" | "blocked" | "deleted"): string {
+  switch (status) {
+    case "active": return "运行中";
+    case "paused": return "已暂停";
+    case "blocked": return "已阻止";
+    case "deleted": return "已删除";
+  }
+}
+
+function scheduledRunStateLabel(state: Extract<ConversationCommandResult, {
+  kind: "scheduled-runs";
+}>["result"]["runs"][number]["state"]): string {
+  switch (state) {
+    case "dispatching": return "正在派发";
+    case "running": return "运行中";
+    case "completed": return "已完成";
+    case "failed": return "失败";
+    case "interrupted": return "已中断";
+    case "uncertain": return "结果未知";
+    case "missed": return "已错过";
+    case "skipped_overlap": return "重叠跳过";
+    case "skipped_capacity": return "容量跳过";
+    case "blocked": return "已阻止";
+  }
+}
+
+function formatSchedule(
+  schedule: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>["result"]["tasks"][number]["schedule"],
+  timezone: string,
+): string {
+  switch (schedule.type) {
+    case "hourly": return `每 ${schedule.intervalHours} 小时 · ${timezone}`;
+    case "daily": return `每天 ${schedule.time} · ${timezone}`;
+    case "weekdays": return `工作日 ${schedule.time} · ${timezone}`;
+    case "weekly": return `每周 ${schedule.days.join(",")} ${schedule.time} · ${timezone}`;
+  }
+}
+
+function formatScheduledAt(value: number | null): string {
+  return value === null ? "无" : new Date(value).toISOString();
 }
 
 export function formatConversationOccupancy(

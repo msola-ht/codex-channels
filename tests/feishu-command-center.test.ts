@@ -62,6 +62,7 @@ describe("Feishu command center", () => {
       "workspace",
       "goal",
       "plan",
+      "schedule",
       "help",
     ]);
     expect(JSON.stringify(card)).toContain("常用");

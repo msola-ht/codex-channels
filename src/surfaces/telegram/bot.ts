@@ -12,6 +12,7 @@ import {
   type DisplayPriceCurrency,
   type ExchangeRateSnapshot,
   type ProviderModelUsageEstimate,
+  type ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -100,6 +101,7 @@ export interface TelegramSurfaceOptions {
   gatewayVersion: string;
   actorRegistry?: ConversationActorRegistry;
   threadSectionAccess?: SurfaceAccessPolicy;
+  scheduledTasks?: ScheduledTaskUseCases;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
   audioStore?: TelegramAudioPort;
@@ -219,6 +221,7 @@ export class TelegramSurface {
     this.commands = new ConversationCommandService(
       service,
       options.threadSectionAccess,
+      options.scheduledTasks,
     );
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
     const apiExecutor = new TelegramApiExecutor(logger);

@@ -83,6 +83,10 @@ Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默�
 `thread.reverted` 会清除 Core 的产物、计划、目标、上下文压缩、用量与计时等派生展示缓存；不持久化
 Turn/Item 历史，也不承诺恢复工作区文件。
 后台 Thread 完成后只释放后台绑定，不由 Gateway 手动派发下一 Turn。
+Gateway 计划任务通过 `ScheduledTaskApplicationService` 暴露创建预览、一次性确认、列表、运行记录、
+重命名、暂停、恢复、立即运行、uncertain 重试和删除预览；每次操作精确绑定 Surface Actor 与
+Conversation，数字选择器只使用最近五分钟的内存快照，完整 ID 仍重新复核 Store 归属。
+每个 Surface Actor 在同一 Conversation 最多保留 100 个未删除任务；创建预览和确认都会复核该固定上限。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 按当前
 Thread 返回稳定概览与详情；命令结果携带工具、资源或模板的有界分页搜索视图，OAuth 登录不自动

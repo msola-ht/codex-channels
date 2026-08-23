@@ -119,6 +119,12 @@ kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既
 | `queue.position.invalid` | Queue 目标位置必须在当前队列范围内 | reorder 位置无效 |
 | `queue.reorder-conflict` | Queue 已发生变化，请刷新列表后重试排序 | 并发 reorder 失败 |
 | `queue.failed` | Queue 操作失败，请稍后重试 | 未分类的 Queue 错误 |
+| `scheduled-task.command.invalid` | `/schedule` 用法或参数提示 | 计划、页码、名称或文本格式无效 |
+| `scheduled-task.confirmation.invalid` | 确认令牌无效、过期或已使用 | 创建/删除确认失效或上下文改变 |
+| `scheduled-task.forbidden` | 当前用户无权管理该会话的计划任务 | Actor 未授权或身份缺失 |
+| `scheduled-task.not-found` | 找不到指定计划任务或 Run | ID 不存在、已删除或不属于当前 Actor/Conversation |
+| `scheduled-task.snapshot.required` | 请先刷新计划任务或 Run 列表 | 数字选择器快照缺失或过期 |
+| `scheduled-task.state.invalid` | 当前状态不允许该计划任务操作 | 功能未启用、任务阻塞或 Run 不可重试 |
 | `metrics.usage` | /metrics 用法提示 | 参数格式错误 |
 
 ### 提供商、协作模式与计划

@@ -2,8 +2,8 @@
 
 本文定义在 Codex Connect Gateway 中实现计划任务的边界与分阶段方案。设计基于
 `codex-cli 0.148.0` 固定协议，以及 2026-08-22 可见的 OpenAI Scheduled 文档；本文是实施前合同，
-当前已完成存储、纯调度域和默认关闭的 App Server 执行/恢复层；Surface 管理命令尚未实施，因此
-普通用户仍不能从渠道创建或管理计划任务。
+当前已完成存储、纯调度域、默认关闭的 App Server 执行/恢复层，以及三个 Surface 的统一管理命令；
+飞书同时提供绑定 Actor 的短期按钮与输入卡片。功能仍须显式开启并完成部署验收。
 
 首期功能必须对外称为“Gateway 计划任务（由 App Server 执行）”，不得称为“App Server 原生计划
 任务”。App Server 负责 Thread、Turn、工具和运行状态，Gateway 负责调度、任务定义与投递；两者的
@@ -222,7 +222,7 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 /schedule pause <任务 ID 或列表序号>
 /schedule resume <任务 ID 或列表序号>
 /schedule run <任务 ID 或列表序号>
-/schedule retry <Run ID>
+/schedule retry <Run ID 或运行列表序号>
 /schedule delete <任务 ID 或列表序号>
 /schedule confirm <一次性令牌>
 ```
@@ -233,11 +233,14 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 
 新任务名称默认取 Prompt 第一行归一化后的前 40 个字符，用户可用 `rename` 修改；名称不调用模型
 生成。`add` 的待确认 Prompt 只存在于五分钟有效的 Application 内存注册表，确认成功后才写入私有
-数据库，Gateway 重启后未确认预览自然失效。
+数据库；过期记录由不阻止进程退出的短期定时器主动清理，下一次预览或确认也会兜底清理，Gateway
+重启后未确认预览自然失效。每个 Surface
+Actor 在同一 Conversation 最多保留 100 个未删除任务，创建预览和确认都复核该固定上限。
 
-完成卡片沿用普通后台 Thread 的模型、Token、费用、耗时和操作统计，并增加任务名、Run ID 与计划
-时间。计划任务数据库不重复保存这些指标；WebUI 根据 Run 的 Thread ID 关联现有指标查询。关联失败
-只显示“指标不可用”，不回算或复制模型请求。
+完成卡片沿用普通后台 Thread 的模型、Token、费用、耗时和操作统计，并继续标记后台 Thread；任务名、
+Run ID、计划时间和终态以 `/schedule runs` 为事实入口。计划任务数据库不重复保存模型指标；后续若
+WebUI 接入 Run 与指标关联，只能根据 Run 的 Thread ID 查询现有指标，关联失败时显示“指标不可用”，
+不得回算或复制模型请求。
 
 ## 模块落点
 
@@ -245,18 +248,18 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 
 - `src/scheduled-tasks/`：封闭的 Schedule 类型、下次运行计算、SQLite Store、到期领取、状态机和
   生命周期；通过窄端口请求执行，不导入 Surface SDK 或 App Server 协议。
-- `src/application/scheduled-task-port.ts`：拥有平台无关的创建预览、确认、列表、启停、手动运行、
+- `src/application/scheduled-task-service.ts`：拥有平台无关的创建预览、确认、列表、启停、手动运行、
   Run 查询和执行结果类型。
 
 新增一级模块前必须同步 `src/README.md` 与 `tests/module-boundaries.test.ts`。依赖方向固定为：
 
 ```text
-Surface -> Application <- Scheduled Tasks
-                         |
-                         v
-                   Execution Port
-                         |
-                 Bootstrap / Routing
+Surface -> Application -> Scheduled Tasks
+                              ^
+                              |
+                      Bootstrap Executor
+                              |
+                    App Server / Routing
 ```
 
 ### 现有模块修改
@@ -310,10 +313,10 @@ enabled = false
 
 ### PR 3：命令与三 Surface
 
-1. `/schedule` 规范命令、列表快照、创建/删除确认和 Run 查询。
-2. Telegram、飞书、微信统一文案与飞书按钮。
-3. `/help`、菜单、根 README、`docs/display.md`、错误字典与渠道验收矩阵同步。
-4. 授权撤销、Workspace 删除、Provider 删除和 Surface 停用测试。
+1. 已接入 `/schedule` 规范命令、五分钟列表快照、创建/删除一次性确认和 Run 查询。
+2. 已接入 Telegram、飞书、微信统一文案，以及飞书列表、创建、管理和确认按钮。
+3. 已同步 `/help`、菜单、根 README、`docs/display.md`、错误字典与渠道验收矩阵。
+4. 已复用执行层对授权撤销、Workspace 删除、Provider 删除和 Surface 停用的运行前失败关闭。
 
 ### 后续候选，不与首期合并
 
