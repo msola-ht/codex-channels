@@ -17,6 +17,7 @@ import {
 import { shouldDisplayOperation } from "../operation-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
+  createSubagentContactedPresentation,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
   createTurnReasoningPresentation,
@@ -415,6 +416,24 @@ export class TelegramOutbox {
             chatId,
             renderTelegramLifecyclePresentation(
               createSubagentStartedPresentation(event),
+            ),
+            undefined,
+            true,
+          ).then(() => undefined),
+          false,
+        );
+        return;
+      case "subagent.contacted":
+        this.flushStreamsBeforeVisibleOutput(
+          chatId,
+          this.turnKey(event.threadId, event.turnId),
+        );
+        this.enqueue(
+          chatId,
+          () => this.sendPanel(
+            chatId,
+            renderTelegramLifecyclePresentation(
+              createSubagentContactedPresentation(event),
             ),
             undefined,
             true,

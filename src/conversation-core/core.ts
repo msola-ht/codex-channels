@@ -674,11 +674,11 @@ export class ConversationCore {
         });
         return;
       case "item.subagentActivity":
-        if (event.kind !== "started") {
+        if (event.kind === "interrupted") {
           return;
         }
         this.publishForThread(event.threadId, {
-          type: "subagent.spawned",
+          type: event.kind === "started" ? "subagent.spawned" : "subagent.contacted",
           threadId: event.threadId,
           turnId: event.turnId,
           agentThreadId: event.agentThreadId,

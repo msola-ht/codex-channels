@@ -637,7 +637,7 @@ describe("ConversationCore", () => {
     }));
   });
 
-  it("does not present follow-up or interruption activity as a new subagent", async () => {
+  it("presents follow-up activity without presenting interruption as a new subagent", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
     output.subscribe("test", (event) => {
@@ -664,8 +664,17 @@ describe("ConversationCore", () => {
     }
     await output.close();
 
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "subagent.contacted",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+    }));
     expect(events).not.toContainEqual(expect.objectContaining({
       type: "subagent.spawned",
+      agentThreadId: "subagent-thread-1",
     }));
   });
 

@@ -250,6 +250,15 @@ export function createSubagentStartedPresentation(
   };
 }
 
+export function createSubagentContactedPresentation(
+  event: Extract<OutputEvent, { type: "subagent.contacted" }>,
+): LifecyclePresentation {
+  return {
+    title: `子代理继续 · ${subagentTaskName(event.agentPath)}`,
+    fields: [],
+  };
+}
+
 export function createSubagentCompletedPresentation(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
   priceCurrency?: (

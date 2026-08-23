@@ -87,6 +87,17 @@ function spawned(
   };
 }
 
+function contacted(): Extract<OutputEvent, { type: "subagent.contacted" }> {
+  return {
+    type: "subagent.contacted",
+    target,
+    threadId: "parent-1",
+    turnId: "turn-2",
+    agentThreadId: "agent-1",
+    agentPath: "/root/review",
+  };
+}
+
 function state(status: "running" | "completed" | "errored"): OutputEvent {
   return {
     type: "operation.updated",
@@ -270,6 +281,78 @@ describe("SubagentCompletionTracker", () => {
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
       status: "interrupted",
     }));
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("tracks a new completion after contacting an already settled subagent", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "interrupted",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    tracker.handle(contacted());
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(publish.mock.calls.map(([event]) => event.status)).toEqual([
+      "interrupted",
+      "completed",
+    ]);
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("preserves both completions when a subagent is contacted during settlement", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "interrupted",
+      error: null,
+    });
+    tracker.handle(contacted());
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(publish.mock.calls.map(([event]) => event.status)).toEqual([
+      "interrupted",
+      "completed",
+    ]);
     tracker.close();
     vi.useRealTimers();
   });
