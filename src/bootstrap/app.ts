@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
@@ -61,6 +62,7 @@ import {
   ModelSelectionService,
   ProviderAccountService,
   ScheduledTaskApplicationService,
+  ScheduledTaskDraftCoordinator,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
   type ThreadLockHolder,
@@ -175,6 +177,7 @@ export class GatewayApplication {
   private readonly scheduledTaskStore: SqliteScheduledTaskStore | undefined;
   private readonly scheduledTaskScheduler: ScheduledTaskScheduler | undefined;
   private readonly scheduledRunCoordinator: ScheduledTaskRunCoordinator | undefined;
+  private readonly scheduledTaskDraftCoordinator: ScheduledTaskDraftCoordinator | undefined;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -683,6 +686,40 @@ export class GatewayApplication {
     });
     const scheduledTasks = config.scheduledTasksEnabled
       ? (() => {
+          const draftCoordinator = new ScheduledTaskDraftCoordinator({
+            start: async (context, text, outputSchema, onThreadStarted) => {
+              const session = await this.codex.startThread(context.cwd, {
+                model: context.model,
+                modelProvider: context.modelProvider,
+                sandbox: "read-only",
+                approvalPolicy: "never",
+                ephemeral: true,
+              });
+              const threadId = session.thread.id;
+              if (!onThreadStarted(threadId)) {
+                await this.codex.releaseEphemeralThread(threadId).catch(() => undefined);
+                throw new Error("计划任务草案已取消");
+              }
+              const turn = await this.codex.startTurn(
+                threadId,
+                [{ type: "text", text }],
+                `scheduled-draft-${randomUUID()}`,
+                context.cwd,
+                {
+                  model: context.model,
+                  ...(context.reasoningEffort === null
+                    ? {}
+                    : { effort: context.reasoningEffort }),
+                  serviceTier: context.serviceTier,
+                  outputSchema,
+                },
+              );
+              return { threadId, turnId: turn.turnId };
+            },
+            interrupt: (threadId, turnId) => this.codex.interruptTurn(threadId, turnId),
+            release: (threadId) => this.codex.releaseEphemeralThread(threadId),
+          });
+          this.scheduledTaskDraftCoordinator = draftCoordinator;
           const store = new SqliteScheduledTaskStore(
             scheduledTaskDatabasePath(config.stateDatabasePath),
           );
@@ -751,6 +788,7 @@ export class GatewayApplication {
               return {
                 workspaceId: workspace.id,
                 workspaceName: workspace.name,
+                cwd: workspace.cwd,
                 modelProvider: status.modelProvider ?? "openai",
                 model: status.model,
                 reasoningEffort: status.effort,
@@ -764,13 +802,14 @@ export class GatewayApplication {
               };
             },
             runTaskNow: (taskId) => scheduler.runTaskNow(taskId),
-          });
+          }, Date.now, draftCoordinator);
         })()
       : undefined;
     if (!config.scheduledTasksEnabled) {
       this.scheduledTaskStore = undefined;
       this.scheduledRunCoordinator = undefined;
       this.scheduledTaskScheduler = undefined;
+      this.scheduledTaskDraftCoordinator = undefined;
     }
     this.surfaceModules = createSurfaceModules({
       config,
@@ -879,6 +918,7 @@ export class GatewayApplication {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        this.scheduledTaskDraftCoordinator?.handleInput(coreEvent);
         if (
           coreEvent.type === "turn.started"
           || coreEvent.type === "turn.completed"
@@ -1118,6 +1158,7 @@ export class GatewayApplication {
     this.removeRpcDisconnect?.();
     this.removeRpcDisconnect = undefined;
     this.subagentCompletion?.close();
+    this.scheduledTaskDraftCoordinator?.close();
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Scheduled Task Scheduler", () => this.scheduledTaskScheduler?.stop()],

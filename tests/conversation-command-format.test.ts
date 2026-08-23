@@ -18,6 +18,7 @@ import {
   formatConversationPluginHealth,
   formatConversationPlugins,
   formatConversationScheduledTasks,
+  formatConversationScheduledRuns,
   formatScheduledTaskStatusLabel,
   formatConversationStatus,
   formatConversationThreadQueue,
@@ -776,6 +777,83 @@ describe("provider-aware conversation command formatting", () => {
       formatScheduledTaskStatusLabel("blocked"),
       formatScheduledTaskStatusLabel("deleted"),
     ]).toEqual(["已暂停", "已阻止", "已删除"]);
+  });
+
+  it("renders scheduled task and Run selectors as stable semantic labels", () => {
+    const task = {
+      taskId: "task-1",
+      name: "每小时检查",
+      status: "active" as const,
+      schedule: { type: "hourly" as const, intervalHours: 1, anchorAt: 1 },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 2,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "low",
+      serviceTier: null,
+      sandbox: "workspace-write" as const,
+      permissions: null,
+      promptPreview: "检查项目",
+    };
+    const tasks = formatConversationScheduledTasks({
+      kind: "scheduled-tasks",
+      result: {
+        tasks: [task, { ...task, taskId: "task-2", name: "第二项" }],
+        selectors: ["1", "2"],
+        page: 1,
+        pageCount: 1,
+        totalTaskCount: 2,
+      },
+    });
+    const runs = formatConversationScheduledRuns({
+      kind: "scheduled-runs",
+      result: {
+        task,
+        runs: [
+          {
+            runId: "run-1",
+            taskId: task.taskId,
+            scheduledFor: 1,
+            state: "completed",
+            threadId: "thread-1",
+            turnId: "turn-1",
+            dispatchStartedAt: 1,
+            startedAt: 1,
+            completedAt: 2,
+            errorCategory: null,
+            errorMessage: null,
+            selector: "1",
+          },
+          {
+            runId: "run-2",
+            taskId: task.taskId,
+            scheduledFor: 2,
+            state: "completed",
+            threadId: "thread-2",
+            turnId: "turn-2",
+            dispatchStartedAt: 2,
+            startedAt: 2,
+            completedAt: 3,
+            errorCategory: null,
+            errorMessage: null,
+            selector: "2",
+          },
+        ],
+        page: 1,
+        pageCount: 1,
+        totalRunCount: 2,
+      },
+    });
+
+    expect(tasks).toContain("【1】每小时检查");
+    expect(tasks).toContain("【2】第二项");
+    expect(runs).toContain("【1】run-1");
+    expect(runs).toContain("【2】run-2");
+    expect(runs).toContain("### 运行记录");
+    expect(runs).toContain("  - 计划时间：");
+    expect(runs).toContain("  - Thread：thread-1");
+    expect(runs).not.toContain("\n- 计划时间：");
   });
 
   it("renders updated workspace permissions with the hot reload notice", () => {

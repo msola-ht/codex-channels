@@ -286,6 +286,8 @@ export class FeishuSurface implements SurfaceAdapter {
       {
         open: (target, actorId) =>
           this.commandCenter.open(target, actorId),
+        openResponse: (target, actorId, response) =>
+          this.commandCenter.openResponse(target, actorId, response),
       },
       this.applicationSetup,
       this.interactions,

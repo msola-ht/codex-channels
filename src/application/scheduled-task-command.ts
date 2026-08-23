@@ -3,6 +3,7 @@ import { scheduleWeekdays, type ScheduleWeekday } from "../scheduled-tasks/index
 import type { ScheduledTaskCreateRequest } from "./scheduled-task-service.js";
 
 export const scheduledTaskCommandUsageText = [
+  "/schedule <自然语言描述（必须明确时区）>",
   "/schedule add hourly <小时数> <时区> <文本>",
   "/schedule add daily <HH:mm> <时区> <文本>",
   "/schedule add weekdays <HH:mm> <时区> <文本>",
@@ -16,6 +17,7 @@ export const scheduledTaskCommandUsageText = [
 ].join("\n");
 
 export type ScheduledTaskCommandOperation =
+  | { readonly type: "natural"; readonly description: string }
   | { readonly type: "create"; readonly request: ScheduledTaskCreateRequest }
   | { readonly type: "list"; readonly page: number }
   | { readonly type: "runs"; readonly selector: string; readonly page: number }
@@ -60,7 +62,7 @@ export function parseScheduledTaskOperation(
     case "add":
       return parseCreate(remainder, nowMs);
     default:
-      return invalid();
+      return { type: "natural", description: normalized };
   }
 }
 

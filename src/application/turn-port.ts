@@ -20,12 +20,22 @@ export interface TurnCollaborationMode {
   };
 }
 
+export type TurnOutputSchema =
+  | null
+  | boolean
+  | number
+  | string
+  | TurnOutputSchema[]
+  | { [key: string]: TurnOutputSchema };
+
 export interface TurnOverrides {
   model?: string;
   modelProvider?: string;
   effort?: string;
   serviceTier?: string | null;
   collaborationMode?: TurnCollaborationMode;
+  /** Trusted internal JSON Schema for the final assistant message of this turn. */
+  outputSchema?: TurnOutputSchema;
 }
 
 export interface TurnStarted {

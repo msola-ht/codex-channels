@@ -207,6 +207,50 @@ suite("real Codex App Server over Unix WebSocket", () => {
     }
   });
 
+  it("constrains a turn final assistant message with outputSchema", async () => {
+    const started = await client.startThread(workdir, {
+      sandbox: "read-only",
+      approvalPolicy: "never",
+      ephemeral: true,
+    });
+    expect((await client.listThreads(workdir)).some((thread) => thread.id === started.thread.id))
+      .toBe(false);
+    let output: string | undefined;
+    let completed = false;
+    let observedOperation = false;
+    const removeNotification = client.onNotification((notification) => {
+      const event = toConversationInputEvent(notification);
+      if (!event || !("threadId" in event) || event.threadId !== started.thread.id) return;
+      if (event.type === "item.agentMessage.completed") output = event.text;
+      if (event.type === "item.operation.updated" || event.type === "item.subagentActivity") {
+        observedOperation = true;
+      }
+      if (event.type === "turn.completed") completed = true;
+    });
+    try {
+      await client.startTurn(
+        started.thread.id,
+        [{ type: "text", text: "Return a JSON object whose answer is exactly ok. Do not use tools." }],
+        "codex_connect:output-schema-contract",
+        workdir,
+        {
+          outputSchema: {
+            type: "object",
+            properties: { answer: { type: "string", const: "ok" } },
+            required: ["answer"],
+            additionalProperties: false,
+          },
+        },
+      );
+      await waitFor(() => completed, 30_000);
+      expect(JSON.parse(output ?? "null")).toEqual({ answer: "ok" });
+      expect(observedOperation).toBe(false);
+    } finally {
+      removeNotification();
+      await client.unsubscribeThread(started.thread.id).catch(() => undefined);
+    }
+  });
+
   it("reports the upstream user agent used by Codex", () => {
     expect(upstreamUserAgent).toContain("codex_connect/");
   });

@@ -109,7 +109,11 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(context, formatConversationScheduledRuns(result));
       return;
     case "scheduled-confirmation":
-      await replyTelegramPanel(context, formatConversationScheduledConfirmation(result));
+      await replyTelegramPanel(
+        context,
+        formatConversationScheduledConfirmation(result),
+        scheduledTaskConfirmationKeyboard(result),
+      );
       return;
     case "status":
       await replyTelegramPanel(context, formatStatus(result.status));
@@ -219,6 +223,20 @@ export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
       { text: "沙箱", callback_data: "wp:sandbox" },
       { text: "审批", callback_data: "wp:approval" },
       { text: "权限 Profile", callback_data: "wp:profile" },
+    ]],
+  };
+}
+
+export function scheduledTaskConfirmationKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "scheduled-confirmation" }>,
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[
+      {
+        text: "确认",
+        callback_data: `schedule:confirm:${result.preview.token}`,
+      },
+      { text: "取消", callback_data: "schedule:cancel" },
     ]],
   };
 }

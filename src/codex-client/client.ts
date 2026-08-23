@@ -273,6 +273,7 @@ export class CodexAppServerClient implements
         ...(options.threadSource === "automation"
           ? { threadSource: options.threadSource }
           : {}),
+        ...(options.ephemeral === true ? { ephemeral: true } : {}),
       },
     }, { retryOverload: false });
     return toThreadSession(response);
@@ -391,6 +392,9 @@ export class CodexAppServerClient implements
               },
             }
           : {}),
+        ...(overrides.outputSchema === undefined
+          ? {}
+          : { outputSchema: overrides.outputSchema }),
       },
     }, { retryOverload: false });
     return toTurnStarted(response);

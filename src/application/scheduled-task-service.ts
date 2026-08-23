@@ -16,6 +16,7 @@ import {
   type ScheduledTaskSandbox,
   type ScheduledTaskStore,
 } from "../scheduled-tasks/index.js";
+import type { ScheduledTaskDraftExecutionContext } from "./scheduled-task-draft-coordinator.js";
 
 const taskPageSize = 8;
 const runPageSize = 10;
@@ -30,6 +31,7 @@ const maximumTaskNameCharacters = 80;
 export interface ScheduledTaskCreationContext {
   readonly workspaceId: string;
   readonly workspaceName: string;
+  readonly cwd: string;
   readonly modelProvider: string;
   readonly model: string;
   readonly reasoningEffort: string | null;
@@ -135,6 +137,11 @@ interface SelectionSnapshot {
 }
 
 export interface ScheduledTaskUseCases {
+  previewNaturalLanguage(
+    target: ConversationTarget,
+    actorId: string,
+    description: string,
+  ): Promise<ScheduledTaskCreatePreview>;
   previewCreate(
     target: ConversationTarget,
     actorId: string,
@@ -174,7 +181,35 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     private readonly store: ScheduledTaskStore,
     private readonly application: ScheduledTaskApplicationPort,
     private readonly now: () => number = Date.now,
+    private readonly drafts?: {
+      draft(
+        target: ConversationTarget,
+        actorId: string,
+        description: string,
+        context: ScheduledTaskDraftExecutionContext,
+      ): Promise<ScheduledTaskCreateRequest>;
+    },
   ) {}
+
+  async previewNaturalLanguage(
+    target: ConversationTarget,
+    actorId: string,
+    description: string,
+  ): Promise<ScheduledTaskCreatePreview> {
+    this.requireActor(target, actorId);
+    this.requireTaskCapacity(target, actorId);
+    if (!this.drafts) throw scheduledError("scheduled-task.state.invalid", "自然语言计划任务功能未启用");
+    const context = this.requireCreationContext(target);
+    const normalizedDescription = normalizeDraftDescription(description);
+    const request = await this.drafts.draft(target, actorId, normalizedDescription, {
+      cwd: context.cwd,
+      modelProvider: context.modelProvider,
+      model: context.model,
+      reasoningEffort: context.reasoningEffort,
+      serviceTier: context.serviceTier,
+    });
+    return this.previewCreate(target, actorId, request);
+  }
 
   previewCreate(
     target: ConversationTarget,
@@ -187,10 +222,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     const prompt = normalizePrompt(request.prompt);
     const timezone = validateIanaTimeZone(request.timezone);
     const schedule = normalizeSchedule(request.schedule);
-    const context = this.application.creationContext(target);
-    if (context.modelPending || context.effortPending || context.serviceTierPending) {
-      throw scheduledError("scheduled-task.state.invalid", "模型设置仍在等待生效，请稍后重试");
-    }
+    const context = this.requireCreationContext(target);
     const input = {
       name: defaultTaskName(prompt),
       surface: target.surface,
@@ -230,6 +262,14 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
         },
       }),
     };
+  }
+
+  private requireCreationContext(target: ConversationTarget): ScheduledTaskCreationContext {
+    const context = this.application.creationContext(target);
+    if (context.modelPending || context.effortPending || context.serviceTierPending) {
+      throw scheduledError("scheduled-task.state.invalid", "模型设置仍在等待生效，请稍后重试");
+    }
+    return context;
   }
 
   confirm(
@@ -576,6 +616,15 @@ function normalizePrompt(value: string): string {
   if (!normalized) throw scheduledError("scheduled-task.command.invalid", "计划任务文本不能为空");
   if ([...normalized].length > maximumPromptCharacters) {
     throw scheduledError("scheduled-task.command.invalid", `计划任务文本不能超过 ${maximumPromptCharacters} 个字符`);
+  }
+  return normalized;
+}
+
+function normalizeDraftDescription(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw scheduledError("scheduled-task.command.invalid", "计划任务描述不能为空");
+  if ([...normalized].length > maximumPromptCharacters) {
+    throw scheduledError("scheduled-task.command.invalid", `计划任务描述不能超过 ${maximumPromptCharacters} 个字符`);
   }
   return normalized;
 }

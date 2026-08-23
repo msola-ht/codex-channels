@@ -302,6 +302,11 @@ export class ProviderRoutingClient {
     return this.callForThread(args[0], (client) => client.unsubscribeThread(...args));
   }
 
+  async releaseEphemeralThread(threadId: string): Promise<void> {
+    await this.callForThread(threadId, (client) => client.unsubscribeThread(threadId));
+    this.threadProviders.delete(threadId);
+  }
+
   async deleteThread(
     ...args: Parameters<ProviderClientInstance["deleteThread"]>
   ): ReturnType<ProviderClientInstance["deleteThread"]> {

@@ -1,4 +1,9 @@
 export {
+  ScheduledTaskDraftCoordinator,
+  scheduledTaskDraftOutputSchema,
+  type ScheduledTaskDraftTurnPort,
+} from "./scheduled-task-draft-coordinator.js";
+export {
   type AccountMetric,
   type AccountPlanType,
   type AccountQueryPort,
@@ -169,6 +174,7 @@ export {
   type TurnExecutionPort,
   type TurnInput,
   type TurnOverrides,
+  type TurnOutputSchema,
   type TurnStarted,
 } from "./turn-port.js";
 export {

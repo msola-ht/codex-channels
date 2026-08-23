@@ -93,7 +93,7 @@ export class FeishuConversationAdapter {
         menuEventObserved: false,
       }),
     private readonly oauth?: FeishuOAuthControllerPort,
-    private readonly commandCenter?: Pick<FeishuCommandCenter, "open">,
+    private readonly commandCenter?: Pick<FeishuCommandCenter, "open" | "openResponse">,
     private readonly applicationSetup?: Pick<
       FeishuApplicationSetupController,
       "openDoctor"
@@ -193,6 +193,13 @@ export class FeishuConversationAdapter {
           command.argumentsText,
           message.actorId,
         );
+        if (result.kind === "scheduled-confirmation" && this.commandCenter) {
+          const response = renderCommandCenterChoices("schedule", result);
+          if (response) {
+            await this.commandCenter.openResponse(message.target, message.actorId, response);
+            return;
+          }
+        }
         const rendered = renderFeishuCommandResult(
           result,
           this.inputOptions.priceCurrency,
@@ -1284,26 +1291,53 @@ function renderCommandCenterChoices(
     };
   }
   if (action === "schedule" && result.kind === "scheduled-confirmation") {
+    const task = result.preview.task;
+    const actionLabel = result.preview.action === "create" ? "创建" : "删除";
     return {
-      title: result.preview.action === "create" ? "确认创建计划任务" : "确认删除计划任务",
+      title: `确认${actionLabel}计划任务`,
       description: [
-        `名称：${result.preview.task.name}`,
-        `计划：${scheduleChoiceSummary(result.preview.task.schedule)} · ${result.preview.task.timezone}`,
-        `Workspace：${result.preview.task.workspaceId}`,
-        `Provider：${result.preview.task.modelProvider}`,
-        `模型：${result.preview.task.model ?? "默认"}`,
-        `思考等级：${result.preview.task.reasoningEffort ?? "默认"}`,
-        `下次运行：${result.preview.task.nextRunAt === null ? "无" : new Date(result.preview.task.nextRunAt).toISOString()}`,
-        `Sandbox：${result.preview.task.sandbox}`,
-        `权限 Profile：${result.preview.task.permissions ?? "未配置"}`,
-        "网络：沿用 Workspace 当前权限；无人值守审批一律拒绝",
-        "该任务将在用户不在线时由 Gateway 无人值守执行。",
-        `任务预览：${result.preview.task.promptPreview}`,
-        "确认令牌五分钟内有效且只能使用一次。",
+        "**任务**",
+        `- 名称：${escapeFeishuCardMarkdown(task.name)}`,
+        `- 计划：${escapeFeishuCardMarkdown(scheduleChoiceSummary(task.schedule))} · ${escapeFeishuCardMarkdown(task.timezone)}`,
+        `- 下次运行：${escapeFeishuCardMarkdown(task.nextRunAt === null ? "无" : new Date(task.nextRunAt).toISOString())}`,
+        "",
+        "**执行配置**",
+        `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,
+        `- Provider：${escapeFeishuCardMarkdown(task.modelProvider)}`,
+        `- 模型：${escapeFeishuCardMarkdown(task.model ?? "默认")}`,
+        `- 思考等级：${escapeFeishuCardMarkdown(task.reasoningEffort ?? "默认")}`,
+        `- Sandbox：${escapeFeishuCardMarkdown(task.sandbox)}`,
+        `- 权限 Profile：${escapeFeishuCardMarkdown(task.permissions ?? "未配置")}`,
+        "- 网络：沿用 Workspace 当前权限",
+        "- 审批：无人值守时一律拒绝",
+        "",
+        "**任务内容**",
+        `- ${escapeFeishuCardMarkdown(task.promptPreview)}`,
+        "",
+        "该任务由 Gateway 无人值守执行；确认令牌 5 分钟内有效且仅可使用一次。",
       ].join("\n"),
+      descriptionFormat: "markdown",
       choices: [
-        { label: "确认", action: "schedule", input: `confirm ${result.preview.token}` },
-        { label: "取消", action: "schedule", input: "list 1" },
+        {
+          label: "确认",
+          action: "schedule",
+          input: `confirm ${result.preview.token}`,
+          acceptedState: {
+            title: `已确认${actionLabel}计划任务`,
+            description: "请求已提交，原按钮已失效；执行结果见后续消息。",
+            template: "green",
+          },
+        },
+        {
+          label: "取消",
+          action: "schedule",
+          input: "list 1",
+          acceptedState: {
+            title: `已取消${actionLabel}计划任务`,
+            description: `未${actionLabel}计划任务，原按钮已失效。`,
+            template: "grey",
+          },
+        },
       ],
     };
   }
@@ -1681,6 +1715,13 @@ function workspacePermissionLabel(
         never: "免审批",
       } as const);
   return (labels as Record<string, string>)[value] ?? value;
+}
+
+function escapeFeishuCardMarkdown(value: string): string {
+  return value
+    .replace(/[\r\n]+/gu, " ")
+    .replaceAll("\\", "\\\\")
+    .replaceAll(/([`*_~[\]()>#+\-.!|{}])/gu, "\\$1");
 }
 
 class FeishuOutputQueueError extends Error {

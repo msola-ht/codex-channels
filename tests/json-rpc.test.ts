@@ -2254,7 +2254,17 @@ describe("JsonRpcClient", () => {
       ],
       "codex_connect:request-1",
       "/tmp/project",
-      { model: "gpt-selected", effort: "high", serviceTier: null },
+      {
+        model: "gpt-selected",
+        effort: "high",
+        serviceTier: null,
+        outputSchema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+          required: ["answer"],
+          additionalProperties: false,
+        },
+      },
     );
     await client.startTurn(
       "thread-1",
@@ -2262,6 +2272,13 @@ describe("JsonRpcClient", () => {
       "codex_connect:request-fast",
       "/tmp/project",
       { serviceTier: "priority" },
+    );
+    await client.startTurn(
+      "thread-1",
+      [{ type: "text", text: "拒绝所有输出" }],
+      "codex_connect:false-schema",
+      "/tmp/project",
+      { outputSchema: false },
     );
     await client.steerTurn(
       "thread-1",
@@ -2273,6 +2290,12 @@ describe("JsonRpcClient", () => {
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .toMatchObject({
         clientUserMessageId: "codex_connect:request-1",
+        outputSchema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+          required: ["answer"],
+          additionalProperties: false,
+        },
         input: [
           { type: "text", text: "测试输入", text_elements: [] },
           { type: "image", url: "data:image/png;base64,AA==" },
@@ -2297,6 +2320,11 @@ describe("JsonRpcClient", () => {
       .toMatchObject({
         clientUserMessageId: "codex_connect:request-fast",
         serviceTier: "priority",
+      });
+    expect(transport.sent.filter((message) => message.method === "turn/start")[2]?.params)
+      .toMatchObject({
+        clientUserMessageId: "codex_connect:false-schema",
+        outputSchema: false,
       });
     expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
       .toMatchObject({ clientUserMessageId: "codex_connect:request-2" });

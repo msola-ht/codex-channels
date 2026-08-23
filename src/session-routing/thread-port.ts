@@ -45,6 +45,8 @@ export interface ThreadStartOptions {
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy?: "untrusted" | "on-request" | "never";
   permissions?: string;
+  /** Create an in-memory thread that is omitted from durable thread listings. */
+  ephemeral?: boolean;
 }
 
 export interface ThreadQueryOptions {

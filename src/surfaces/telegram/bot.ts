@@ -454,6 +454,34 @@ export class TelegramSurface {
         "请输入权限 Profile，例如发送：\n/workspaceperm profile :read-only",
       );
     });
+    this.bot.callbackQuery(
+      /^schedule:confirm:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/,
+      async (context) => {
+        await context.answerCallbackQuery({ text: "正在确认计划任务" });
+        await context.editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: [] },
+        });
+        const result = await this.commands.execute(
+          target(context),
+          "schedule",
+          `confirm ${context.match[1]}`,
+          String(context.from.id),
+        );
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
+      },
+    );
+    this.bot.callbackQuery("schedule:cancel", async (context) => {
+      await context.answerCallbackQuery({ text: "已取消" });
+      await context.editMessageReplyMarkup({
+        reply_markup: { inline_keyboard: [] },
+      });
+      await context.reply("已取消计划任务操作。未创建或删除任何任务。");
+    });
     this.bot.callbackQuery(/^plugin:page:([1-9]\d*)$/, async (context) => {
       await context.answerCallbackQuery({ text: "正在加载 Plugin" });
       const result = await this.commands.execute(

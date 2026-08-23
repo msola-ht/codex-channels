@@ -243,14 +243,15 @@ export function formatConversationScheduledTasks(
   return toStructuredMarkdownList([
     `Gateway 计划任务（第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项）：`,
     ...tasks.map((task, index) => [
-      `${selectors[index] ?? "?"}. ${task.name} · ${formatScheduledTaskStatusLabel(task.status)}`,
+      `【${selectors[index] ?? "?"}】${task.name} · ${formatScheduledTaskStatusLabel(task.status)}`,
       `   ID：${task.taskId}`,
       `   计划：${formatSchedule(task.schedule, task.timezone)}`,
       `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
       `   Workspace：${task.workspaceId} · 模型：${task.model ?? "默认"} · ${task.sandbox}`,
     ].join("\n")),
     "",
-    "数字序号只对最近五分钟的本会话列表有效；详情：/schedule runs <任务>",
+    "此处列出循环任务定义；每次执行结果与终态：/schedule runs <任务>",
+    "数字序号只对最近五分钟的本会话列表有效。",
     ...(page > 1 ? [`上一页：/schedule list ${page - 1}`] : []),
     ...(page < pageCount ? [`下一页：/schedule list ${page + 1}`] : []),
   ].join("\n"));
@@ -261,19 +262,21 @@ export function formatConversationScheduledRuns(
 ): string {
   const { task, runs, page, pageCount, totalRunCount } = result.result;
   return toStructuredMarkdownList([
-    `计划任务运行记录：${task.name}`,
-    `任务：${task.taskId}`,
+    "计划任务运行记录",
+    `任务：${task.name} · ${task.taskId}`,
     `第 ${page}/${pageCount} 页 · 共 ${totalRunCount} 条`,
+    "运行记录：",
     ...(runs.length === 0
       ? ["当前没有运行记录。"]
       : runs.map((run) => [
-          `${run.selector}. ${run.runId} · ${scheduledRunStateLabel(run.state)}`,
-          `   计划时间：${formatScheduledAt(run.scheduledFor)}`,
-          ...(run.threadId ? [`   Thread：${run.threadId}`] : []),
-          ...(run.errorCategory ? [`   分类：${run.errorCategory}`] : []),
+          `- 【${run.selector}】${run.runId} · ${scheduledRunStateLabel(run.state)}`,
+          `  - 计划时间：${formatScheduledAt(run.scheduledFor)}`,
+          ...(run.threadId ? [`  - Thread：${run.threadId}`] : []),
+          ...(run.errorCategory ? [`  - 分类：${run.errorCategory}`] : []),
         ].join("\n"))),
     "",
-    "uncertain Run 可使用：/schedule retry <Run ID 或列表序号>",
+    "可用操作：",
+    "uncertain Run 可使用 /schedule retry <Run ID 或列表序号>",
     ...(page > 1 ? [`上一页：/schedule runs ${task.taskId} ${page - 1}`] : []),
     ...(page < pageCount ? [`下一页：/schedule runs ${task.taskId} ${page + 1}`] : []),
   ].join("\n"));

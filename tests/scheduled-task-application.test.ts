@@ -158,6 +158,8 @@ describe("parseScheduledTaskOperation", () => {
     });
     expect(() => parseScheduledTaskOperation("add monthly 1 UTC test"))
       .toThrow(expect.objectContaining({ code: "scheduled-task.command.invalid" }));
+    expect(parseScheduledTaskOperation("每天 09:00 在 Asia/Shanghai 检查 CI"))
+      .toEqual({ type: "natural", description: "每天 09:00 在 Asia/Shanghai 检查 CI" });
   });
 });
 
@@ -178,6 +180,7 @@ function createService(clock: () => number = () => now): {
     creationContext: () => ({
       workspaceId: "main",
       workspaceName: "Main",
+      cwd: "/workspace",
       modelProvider: "openai",
       model: "gpt-5.6-sol",
       reasoningEffort: "high",

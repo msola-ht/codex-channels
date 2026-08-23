@@ -179,6 +179,50 @@ describe("Telegram command renderer", () => {
     expect(replies[0]?.text).toContain("新增、更新、排序请继续使用 /queue 文本命令");
   });
 
+  it("renders scheduled-task confirmation as native confirm and cancel buttons", async () => {
+    const replies: Array<{ text: string; options?: unknown }> = [];
+    const reply = vi.fn(async (text: string, options?: unknown) => {
+      replies.push({ text, options });
+    });
+    const token = "12345678-1234-1234-1234-123456789abc";
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "scheduled-confirmation",
+        preview: {
+          action: "create",
+          token,
+          expiresAt: Date.now() + 60_000,
+          task: {
+            taskId: "task-preview",
+            name: "每小时检查",
+            status: "active",
+            schedule: { type: "hourly", intervalHours: 1, anchorAt: 1 },
+            timezone: "Asia/Shanghai",
+            nextRunAt: 2,
+            workspaceId: "main",
+            modelProvider: "openai",
+            model: "gpt-5.6-sol",
+            reasoningEffort: "medium",
+            serviceTier: null,
+            sandbox: "workspace-write",
+            permissions: null,
+            promptPreview: "检查项目",
+          },
+        },
+      },
+    );
+
+    const options = replies[0]?.options as {
+      reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+    };
+    expect(options.reply_markup.inline_keyboard.flat()).toEqual([
+      { text: "确认", callback_data: `schedule:confirm:${token}` },
+      { text: "取消", callback_data: "schedule:cancel" },
+    ]);
+  });
+
   it("uses the dedicated diff renderer for artifact results", async () => {
     const reply = vi.fn(async () => undefined);
 

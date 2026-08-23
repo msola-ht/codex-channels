@@ -30,13 +30,15 @@
   或计价覆盖率。旧版 HTTP `/responses/compact` 以及 Codex 0.146 默认通过普通 HTTP/WebSocket
   `/responses` 发送、由私有元数据 `request_kind=compaction` 标记的 remote compaction v2 都归为
   压缩操作；压缩操作以自身成功状态为准，不要求模型 Usage，但观测到的 Token、费用和额度快照
-  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。
+  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。Codex 0.148.0 WebSocket 首轮
+  `request_kind=prewarm` 使用 `generate=false` 建立并复用连接，不是模型推理请求；代理照常透明
+  转发并移除私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
   OpenAI HTTP/SSE 只从明确的 `x-codex-primary/secondary-*` 白名单响应头提取 10,080 分钟周窗口，
   Responses WebSocket 只从 `codex.rate_limits` 事件提取同一窗口；百分比转换为定点整数并随当前
   请求指标投递，不保存完整 Header、事件正文或其他额度桶。
   指标在响应完成事件前完成投递确认；从
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联，并只识别精确的
-  `request_kind=compaction` 操作标记；其他值保持普通响应语义。
+  `request_kind=compaction` 操作标记和不计指标的 `request_kind=prewarm`；其他值保持普通响应语义。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，
   正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，由组合层按 Thread 设置回退；
   超限或畸形响应只保留基础 HTTP 状态与本机耗时。上游模型、服务层级及错误标识符只接受受限字符，

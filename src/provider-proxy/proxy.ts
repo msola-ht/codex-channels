@@ -441,15 +441,19 @@ export class ProviderProxy {
         ? sanitizeClientWebSocketMessage(data, isBinary)
         : { data };
       if (sanitized.metadata) {
-        activeMetrics = createMetricsState(
-          sanitized.metadata,
-          sanitized.requestStartedAtMs ?? Date.now(),
-          "websocket",
-          sanitized.metadata.operation,
-        );
-        activeMetrics.model = sanitized.model ?? null;
-        activeMetrics.serviceTier = sanitized.serviceTier ?? null;
-        activeMetrics.reasoningEffort = sanitized.reasoningEffort ?? null;
+        activeMetrics = sanitized.recordsMetrics === false
+          ? undefined
+          : createMetricsState(
+              sanitized.metadata,
+              sanitized.requestStartedAtMs ?? Date.now(),
+              "websocket",
+              sanitized.metadata.operation,
+            );
+        if (activeMetrics) {
+          activeMetrics.model = sanitized.model ?? null;
+          activeMetrics.serviceTier = sanitized.serviceTier ?? null;
+          activeMetrics.reasoningEffort = sanitized.reasoningEffort ?? null;
+        }
       }
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(sanitized.data, { binary: isBinary });
@@ -893,6 +897,7 @@ function sanitizeClientWebSocketMessage(
 ): {
   data: RawData | string;
   metadata?: TurnMetadata;
+  recordsMetrics?: boolean;
   requestStartedAtMs?: number;
   model?: string;
   serviceTier?: string;
@@ -908,13 +913,19 @@ function sanitizeClientWebSocketMessage(
   const serviceTier = boundedString(parsed.service_tier) ?? undefined;
   const reasoning = asRecord(parsed.reasoning);
   const reasoningEffort = boundedReasoningEffort(reasoning?.effort) ?? undefined;
-  const metadata = typeof rawMetadata === "string"
-    ? parseTurnMetadata(rawMetadata)
-    : parseTurnMetadataObject(rawMetadata);
+  const parsedMetadata = typeof rawMetadata === "string"
+    ? parseJsonPayload(rawMetadata)
+    : asRecord(rawMetadata);
+  const metadata = parseTurnMetadataObject(parsedMetadata);
+  const recordsMetrics = !(
+    parsedMetadata?.request_kind === "prewarm"
+    && parsed.generate === false
+  );
   if (!clientMetadata || rawMetadata === undefined) {
     return {
       data,
       metadata,
+      recordsMetrics,
       ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
       ...(model ? { model } : {}),
       ...(serviceTier ? { serviceTier } : {}),
@@ -926,6 +937,7 @@ function sanitizeClientWebSocketMessage(
   return {
     data: JSON.stringify({ ...parsed, client_metadata: sanitizedMetadata }),
     metadata,
+    recordsMetrics,
     ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
     ...(model ? { model } : {}),
     ...(serviceTier ? { serviceTier } : {}),

@@ -907,6 +907,11 @@ export class ConversationCommandService {
         }
         const operation = parseScheduledTaskOperation(argumentsText);
         switch (operation.type) {
+          case "natural":
+            return {
+              kind: "scheduled-confirmation",
+              preview: await scheduled.previewNaturalLanguage(target, actorId, operation.description),
+            };
           case "create":
             return {
               kind: "scheduled-confirmation",

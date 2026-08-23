@@ -2,8 +2,9 @@
 
 本文定义在 Codex Connect Gateway 中实现计划任务的边界与分阶段方案。设计基于
 `codex-cli 0.148.0` 固定协议，以及 2026-08-22 可见的 OpenAI Scheduled 文档；本文是实施前合同，
-当前已完成存储、纯调度域、默认关闭的 App Server 执行/恢复层，以及三个 Surface 的统一管理命令；
-飞书同时提供绑定 Actor 的短期按钮与输入卡片。功能仍须显式开启并完成部署验收。
+当前已完成存储、纯调度域、默认关闭的 App Server 执行/恢复层、三个 Surface 的统一管理命令，以及
+基于 `turn/start.outputSchema` 的自然语言创建草案；飞书同时提供绑定 Actor 的短期按钮与输入卡片。
+功能仍须显式开启并完成部署验收。
 
 首期功能必须对外称为“Gateway 计划任务（由 App Server 执行）”，不得称为“App Server 原生计划
 任务”。App Server 负责 Thread、Turn、工具和运行状态，Gateway 负责调度、任务定义与投递；两者的
@@ -41,7 +42,7 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 
 - 不兼容或导入 ChatGPT/Codex App 已创建的 Scheduled；官方没有公开同步 API。
 - 不在同一 Thread 上按计划继续上下文；这需要与活动 Turn、原生 Queue 和会话设置单独设计。
-- 不让模型通过自然语言直接创建或修改任务。
+- 不让模型直接创建、修改或确认任务；模型只可把显式自然语言入口转换为待校验草案。
 - 不接入实验 `dynamicTools`、`item/tool/call` 或 `additionalContext`。
 - 不读取 `plugin/read.scheduledTasks` 并自动安装插件任务模板。
 - 不实现任意 RFC 5545 RRULE、一次性提醒、日历例外、节假日或分布式多机调度。
@@ -207,9 +208,33 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 是否允许网络，以及“任务会在无人值守时执行”。创建和删除使用一次性确认令牌；暂停、恢复和手动
 运行仍需最新任务列表快照或完整 ID。
 
+## 自然语言草案
+
+推荐创建入口是 `/schedule <自然语言>`。Application 先确认 Actor、任务容量和当前模型设置，再通过
+稳定的 `thread/start.ephemeral` 创建不持久化、不进入 Thread 列表的专用临时 Thread，并以
+`turn/start.outputSchema` 启动只读、永不自动审批的专用 Turn；模型只把描述转换为 `hourly`、`daily`、
+`weekdays` 或 `weekly` 草案。Gateway 在协议边界严格解析最终 JSON，再调用与确定性命令完全相同的
+`previewCreate`。模型不接触 Store、Workspace 选择、权限、确认令牌或创建操作。
+
+临时 Thread 不绑定 Conversation，原始用户输入、JSON、推理、工具状态和完成卡不会进入当前会话、
+TUI 或持久历史；请求仍走当前 App Server、Provider 与指标链路。完成、失败或超时后 Gateway 取消
+订阅，由 App Server 回收临时 Thread。为避免普通陈述被误判，首期只识别显式 `/schedule` 命令，
+不扫描普通聊天消息。模型提示要求不调用工具，协议层同时固定 `read-only` 与
+`approvalPolicy=never`；若仍观察到搜索、MCP、子代理或其他工具事件，Gateway 立即中断并以固定提示
+拒绝整个草案，不采用工具参与后的结果。Codex 0.148.0 的稳定 Turn API 不能移除全部工具定义，因此
+这里不承诺工具调用从未发起，只保证工具参与后的结果不会进入预览。最终只有符合 Schema 和领域校验
+的纯模型草案能进入预览。
+
+时区不得猜测。用户明确表达“北京时间”等地区或时区时，模型可以规范化为 IANA 名称；完全没有表达
+时区时由 Gateway 返回固定澄清提示，不回显模型生成的问题，且不保存草案；一次性、
+每月或复杂日历规则返回固定的不支持提示，不近似为其他计划。每个 Conversation 同时只允许一个
+草案，草案 Turn 最长等待 90 秒；超时后请求中断并取消订阅。取消订阅失败只进行一次幂等重试，并在
+成功前保留辅助 Provider 路由。自然语言入口仍需要一次模型运行并计入现有请求指标；高级用户可以继续使用无需模型
+解释的确定性 `add` 命令。
+
 ## 公开命令与渠道交互
 
-首期采用确定性命令，不让模型解释日期或自然语言后直接创建任务：
+默认采用自然语言生成待确认草案，同时保留确定性命令：
 
 ```text
 /schedule add hourly <N> <时区> <文本>
@@ -227,9 +252,17 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 /schedule confirm <一次性令牌>
 ```
 
+自然语言示例：
+
+```text
+/schedule 每天 09:00 在 Asia/Shanghai 检查项目 CI，失败时说明原因
+```
+
 `add` 和 `delete` 先返回预览，再由 `confirm` 执行。序号只在当前 Conversation 最近五分钟的列表
-快照内有效；任务列表与 Run 列表分别维护快照。Surface 只渲染结构化结果，飞书可以增加对应按钮，
-但按钮与文本命令调用同一 Application 用例，不能复制调度逻辑。重命名、暂停和恢复不改变列表顺序，
+快照内有效；任务列表与 Run 列表分别维护快照。多行列表使用不会被渠道 Markdown 重编号的显式
+`【序号】` 标记，Run 的计划时间、Thread 和错误分类使用二级列表。Surface 只渲染结构化结果；飞书和 Telegram 的创建/删除预览提供确认与取消按钮，
+确认按钮与文本命令调用同一 Application 用例和五分钟令牌，不能复制或绕过调度逻辑。飞书预览使用 CardKit 2.0；动作被接受后原卡片更新为不含按钮的终态，
+实际创建或删除结果仍由 Application 结果消息确认。重命名、暂停和恢复不改变列表顺序，
 成功后保留当前任务快照；创建和删除会使任务快照失效。
 
 新任务名称默认取 Prompt 第一行归一化后的前 40 个字符，用户可用 `rename` 修改；名称不调用模型
@@ -238,8 +271,10 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 重启后未确认预览自然失效。每个 Surface
 Actor 在同一 Conversation 最多保留 100 个未删除任务，创建预览和确认都复核该固定上限。
 
-完成卡片沿用普通后台 Thread 的模型、Token、费用、耗时和操作统计，并继续标记后台 Thread；任务名、
-Run ID、计划时间和终态以 `/schedule runs` 为事实入口。计划任务数据库不重复保存模型指标；后续若
+首期四种 Schedule 都是循环任务，不支持一次性 Schedule。完成的是某次 Run，而不是任务定义：终态
+Run 保留在 `/schedule runs` 历史中，循环任务继续计算下次运行，不自动删除。完成卡片沿用普通后台
+Thread 的模型、Token、费用、耗时和操作统计，并继续标记后台 Thread；任务名、Run ID、计划时间和
+终态以 `/schedule runs` 为事实入口。计划任务数据库不重复保存模型指标；后续若
 WebUI 接入 Run 与指标关联，只能根据 Run 的 Thread ID 查询现有指标，关联失败时显示“指标不可用”，
 不得回算或复制模型请求。
 
@@ -315,7 +350,7 @@ enabled = false
 ### PR 3：命令与三 Surface
 
 1. 已接入 `/schedule` 规范命令、五分钟列表快照、创建/删除一次性确认和 Run 查询。
-2. 已接入 Telegram、飞书、微信统一文案，以及飞书列表、创建、管理和确认按钮。
+2. 已接入 Telegram、飞书、微信统一文案，飞书列表、创建和管理卡片，以及飞书、Telegram 创建/删除确认按钮。
 3. 已同步 `/help`、菜单、根 README、`docs/display.md`、错误字典与渠道验收矩阵。
 4. 已复用执行层对授权撤销、Workspace 删除、Provider 删除和 Surface 停用的运行前失败关闭。
 
