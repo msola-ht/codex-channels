@@ -258,6 +258,9 @@ const gatewayDocumentSchema = z.strictObject({
   experimental: z.strictObject({
     plugin_api: z.boolean().default(false),
   }).default({ plugin_api: false }),
+  scheduled_tasks: z.strictObject({
+    enabled: z.boolean().default(false),
+  }).default({ enabled: false }),
   thread_sections: threadSectionsSchema,
   api_providers: z.array(apiProviderSchema).refine(
     (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,

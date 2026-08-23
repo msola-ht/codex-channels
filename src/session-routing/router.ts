@@ -9,7 +9,12 @@ import type {
   BindingTransfer,
   ConversationBinding,
 } from "../storage/index.js";
-import type { ThreadLifecyclePort, ThreadSnapshot, ThreadStartOptions } from "./thread-port.js";
+import type {
+  ThreadLifecyclePort,
+  ThreadSession,
+  ThreadSnapshot,
+  ThreadStartOptions,
+} from "./thread-port.js";
 
 export interface ThreadModelSettings {
   model: string;
@@ -35,8 +40,11 @@ export interface ThreadListOptions {
   sortDirection?: "asc" | "desc";
 }
 
+const maximumBackgroundThreadsPerConversation = 3;
+
 export class SessionRouter {
   private readonly forceNew = new Set<string>();
+  private readonly backgroundStartQueues = new Map<string, Promise<void>>();
   // 模型设置保留到进程结束：thread/list 不返回 model，
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
@@ -150,6 +158,11 @@ export class SessionRouter {
       binding: ConversationBinding,
     ) => boolean = () => true,
     onRestored: (binding: ConversationBinding, thread: ThreadSnapshot) => void = () => undefined,
+    optionsForBinding: (binding: ConversationBinding) => ThreadStartOptions = () => ({}),
+    retainBackground: (
+      binding: ConversationBinding,
+      thread: ThreadSnapshot,
+    ) => boolean = () => false,
   ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
@@ -164,7 +177,10 @@ export class SessionRouter {
         const resumed = await this.codex.resumeThread(
           binding.threadId,
           workspace.cwd,
-          this.workspacePermissions(workspace),
+          {
+            ...this.workspacePermissions(workspace),
+            ...optionsForBinding(binding),
+          },
         );
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
         this.contextCompactionItemIdsByThread.set(
@@ -209,7 +225,11 @@ export class SessionRouter {
         continue;
       }
       onRestored(restoredBinding, restoredThread);
-      if (wasBackground && restoredThread.status.type !== "active") {
+      if (
+        wasBackground
+        && restoredThread.status.type !== "active"
+        && !retainBackground(restoredBinding, restoredThread)
+      ) {
         try {
           await this.codex.unsubscribeThread(restoredBinding.threadId);
           this.bindings.removeThread(restoredBinding.threadId);
@@ -286,6 +306,104 @@ export class SessionRouter {
     this.bindings.bind(binding);
     this.forceNew.delete(targetKey);
     return binding;
+  }
+
+  /**
+   * Start a fresh App Server Thread as a background binding.
+   *
+   * This is intentionally separate from ensure(): scheduled execution must
+   * never inspect or resume an idle historical Thread.  The optional
+   * workspaceId is used by unattended runs so a removed or changed Workspace
+   * cannot silently fall back to the Conversation default.
+   */
+  async startBackground(
+    target: ConversationTarget,
+    startOptions: ThreadStartOptions = {},
+    workspaceId?: string,
+  ): Promise<{ binding: ConversationBinding; session: ThreadSession }> {
+    const key = this.key(target);
+    const previous = this.backgroundStartQueues.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queued = previous.then(() => current);
+    this.backgroundStartQueues.set(key, queued);
+    await previous;
+    try {
+      return await this.startBackgroundUnlocked(target, startOptions, workspaceId);
+    } finally {
+      release();
+      if (this.backgroundStartQueues.get(key) === queued) {
+        this.backgroundStartQueues.delete(key);
+      }
+    }
+  }
+
+  private async startBackgroundUnlocked(
+    target: ConversationTarget,
+    startOptions: ThreadStartOptions,
+    workspaceId?: string,
+  ): Promise<{ binding: ConversationBinding; session: ThreadSession }> {
+    if (startOptions.sandbox === "danger-full-access") {
+      throw new UserFacingError(
+        "workspace.permission.conflict",
+        "后台计划任务不允许 danger-full-access",
+      );
+    }
+    if (
+      startOptions.approvalPolicy !== undefined
+      && startOptions.approvalPolicy !== "never"
+    ) {
+      throw new UserFacingError(
+        "workspace.permission.conflict",
+        "后台计划任务必须使用 approvalPolicy=never",
+      );
+    }
+    if (this.backgroundBindings(target).length >= maximumBackgroundThreadsPerConversation) {
+      throw new UserFacingError(
+        "conversation.background-limit",
+        `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
+      );
+    }
+    const workspace = workspaceId === undefined
+      ? this.workspace(target)
+      : this.workspaces.require(workspaceId);
+    const session = await this.codex.startThread(workspace.cwd, {
+      ...this.workspacePermissions(workspace),
+      ...startOptions,
+      threadSource: "automation",
+    });
+    if (this.bindings.getByThread(session.thread.id)) {
+      throw new UserFacingError(
+        "thread.bound",
+        "App Server 返回的计划任务 Thread 已绑定，已拒绝覆盖现有会话",
+      );
+    }
+    const binding = {
+      target,
+      workspaceId: workspace.id,
+      threadId: session.thread.id,
+      sessionId: session.thread.sessionId,
+    };
+    try {
+      this.bindings.bindBackground(binding);
+    } catch (error) {
+      await this.codex.unsubscribeThread(session.thread.id).catch(() => undefined);
+      throw error;
+    }
+    this.captureModelSettings(
+      session.thread.id,
+      session.model,
+      session.modelProvider,
+      session.reasoningEffort,
+      session.serviceTier,
+    );
+    this.contextCompactionItemIdsByThread.set(
+      session.thread.id,
+      session.contextCompactionItemIds,
+    );
+    return { binding, session };
   }
 
   async resume(
@@ -468,8 +586,8 @@ export class SessionRouter {
 
   forgetThread(threadId: string): ConversationTarget | undefined {
     const binding = this.bindings.getByThread(threadId);
+    this.contextCompactionItemIdsByThread.delete(threadId);
     if (binding) {
-      this.contextCompactionItemIdsByThread.delete(threadId);
       this.bindings.removeThread(threadId);
       return binding.target;
     }

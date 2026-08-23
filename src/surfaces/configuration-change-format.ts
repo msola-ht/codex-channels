@@ -130,6 +130,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "display.reasoning": "思考状态显示",
     "display.price-currency": "价格显示币种",
     "experimental.plugin-api": "开发中 Plugin API",
+    "scheduled-tasks.enabled": "Gateway 计划任务",
     "thread-sections.administrators": "Thread 分区管理员",
     "api.providers": "第三方 API 提供商",
     "metrics.sync": "多设备指标同步",

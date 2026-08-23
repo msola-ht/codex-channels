@@ -2,7 +2,8 @@
 
 本文定义在 Codex Connect Gateway 中实现计划任务的边界与分阶段方案。设计基于
 `codex-cli 0.148.0` 固定协议，以及 2026-08-22 可见的 OpenAI Scheduled 文档；本文是实施前合同，
-不表示当前 Gateway 已经支持计划任务。
+当前已完成存储、纯调度域和默认关闭的 App Server 执行/恢复层；Surface 管理命令尚未实施，因此
+普通用户仍不能从渠道创建或管理计划任务。
 
 首期功能必须对外称为“Gateway 计划任务（由 App Server 执行）”，不得称为“App Server 原生计划
 任务”。App Server 负责 Thread、Turn、工具和运行状态，Gateway 负责调度、任务定义与投递；两者的

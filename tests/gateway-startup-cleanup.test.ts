@@ -159,6 +159,156 @@ function createRestoreApplication(options: {
 }
 
 describe("GatewayApplication startup cleanup", () => {
+  it("restores scheduled Threads with their frozen Provider before reconciling Runs", async () => {
+    const target = {
+      surface: "feishu" as const,
+      accountId: "default",
+      conversationId: "scheduled-chat",
+    };
+    const binding = {
+      target,
+      workspaceId: "main",
+      threadId: "scheduled-thread",
+      sessionId: "scheduled-thread",
+    };
+    const recoverRunning = vi.fn(async () => undefined);
+    let restoredOptions: unknown;
+    let retained = false;
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      stopping: false,
+      logger: pino({ level: "silent" }),
+      surfaces: [{ surface: "feishu", accountId: "default" }],
+      restoringThreadIds: new Set<string>(),
+      disconnectedProviders: new Set<string>(),
+      pendingBindingRestores: new Map(),
+      bindingRestoreAttempt: 0,
+      codex: { knownProvider: () => undefined },
+      output: { publish: () => undefined },
+      core: { markTurnStarted: () => undefined },
+      scheduledRunCoordinator: {
+        runningThreadIds: () => new Set([binding.threadId]),
+        taskForThread: () => ({ modelProvider: "deepseek" }),
+        recoverRunning,
+      },
+      router: {
+        allBindings: () => [binding],
+        isBackgroundThread: () => true,
+        restoreSubscriptions: async (
+          shouldRestore: (candidateTarget: RestoreTestTarget, candidateBinding: RestoreTestBinding) => boolean,
+          onRestored: (candidateBinding: RestoreTestBinding, thread: RestoredTestThread) => void,
+          optionsForBinding: (candidateBinding: RestoreTestBinding) => unknown,
+          retainBackground: (candidateBinding: RestoreTestBinding, thread: RestoredTestThread) => boolean,
+        ) => {
+          expect(shouldRestore(target, binding)).toBe(true);
+          restoredOptions = optionsForBinding(binding);
+          const restoredThread = {
+            id: binding.threadId,
+            status: { type: "idle" as const },
+            activeTurnId: null,
+          };
+          retained = retainBackground(binding, restoredThread);
+          onRestored(binding, restoredThread);
+          return [];
+        },
+      },
+    });
+    const restoreBindings = Reflect.get(
+      GatewayApplication.prototype,
+      "restoreBindings",
+    ) as (this: GatewayApplication) => Promise<void>;
+
+    await restoreBindings.call(application as unknown as GatewayApplication);
+
+    expect(restoredOptions).toEqual({ modelProvider: "deepseek" });
+    expect(retained).toBe(true);
+    expect(recoverRunning).toHaveBeenCalledWith(new Set([binding.threadId]));
+  });
+
+  it("reconciles scheduled Runs even when their persisted background binding is missing", async () => {
+    const recoverRunning = vi.fn(async () => undefined);
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      stopping: false,
+      surfaces: [],
+      scheduledRunCoordinator: {
+        runningThreadIds: () => new Set(["missing-thread"]),
+        recoverRunning,
+      },
+      router: { allBindings: () => [] },
+      codex: { knownProvider: () => undefined },
+      restoringThreadIds: new Set<string>(),
+      disconnectedProviders: new Set<string>(),
+    });
+    const restoreBindings = Reflect.get(
+      GatewayApplication.prototype,
+      "restoreBindings",
+    ) as (this: GatewayApplication) => Promise<void>;
+
+    await restoreBindings.call(application as unknown as GatewayApplication);
+
+    expect(recoverRunning).toHaveBeenCalledWith(new Set(["missing-thread"]));
+  });
+
+  it("starts scheduled claiming only after binding recovery and stops it before stores", async () => {
+    const target = {
+      surface: "feishu" as const,
+      accountId: "default",
+      conversationId: "scheduled-lifecycle",
+    };
+    const binding = {
+      target,
+      workspaceId: "main",
+      threadId: "foreground-thread",
+      sessionId: "foreground-thread",
+    };
+    const calls: string[] = [];
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, createRestoreApplication({
+      target,
+      binding,
+      published: [],
+      restoreSubscriptions: async () => {
+        calls.push("bindings:restored");
+        return [];
+      },
+      overrides: {
+        scheduledTaskScheduler: {
+          recoverAfterCrash: () => calls.push("runs:recovered"),
+          start: () => calls.push("scheduler:started"),
+          stop: async () => {
+            calls.push("scheduler:stopped");
+          },
+        },
+        scheduledRunCoordinator: {
+          initialize: () => calls.push("coordinator:initialized"),
+          prepareRecovery: async () => calls.push("coordinator:prepared"),
+          runningThreadIds: () => new Set<string>(),
+          taskForThread: () => undefined,
+          recoverRunning: async () => undefined,
+        },
+        scheduledTaskStore: {
+          close: () => calls.push("store:closed"),
+        },
+      },
+    }));
+    const gateway = application as unknown as GatewayApplication;
+
+    await gateway.start();
+    await gateway.stop();
+
+    expect(calls.indexOf("runs:recovered")).toBeLessThan(calls.indexOf("bindings:restored"));
+    expect(calls.indexOf("coordinator:prepared")).toBeLessThan(calls.indexOf("bindings:restored"));
+    expect(calls.indexOf("bindings:restored")).toBeLessThan(calls.indexOf("scheduler:started"));
+    expect(calls.indexOf("scheduler:stopped")).toBeLessThan(calls.indexOf("store:closed"));
+  });
+
   it("waits for accepted Queue lifecycle work before stopping Surfaces and Codex", async () => {
     const calls: string[] = [];
     let finishQueueTask!: () => void;

@@ -19,6 +19,8 @@
   `newSession` 解除当前绑定并保留原 Thread，下一 Turn 由对应 App Server 以精确 Provider 和模型新建 Thread；
   不使用 `thread/fork` 复制 Provider 专属历史。自动接续收到渠道保留的 Provider 时只恢复相同
   Provider 的候选 Thread；没有兼容候选时按该 Provider 新建，避免把模型交给错误的 App Server。
+  `startBackground` 是计划任务专用的窄入口：始终发送稳定 `threadSource=automation`、强制
+  `thread/start`，不调用 `ensure` 的空闲候选选择，并在写入前限制每个 Conversation 三个后台绑定。
 
 运行中的前台 Thread 在 `/resume` 或 `/new` 切换时转为后台绑定，保持 App Server 订阅与原
 Conversation 归属；新输入只路由到前台 Thread。后台 Turn 完成后先与原生 Queue 的自动派发

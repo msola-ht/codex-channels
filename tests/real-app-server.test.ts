@@ -162,6 +162,51 @@ suite("real Codex App Server over Unix WebSocket", () => {
     pino({ enabled: false }).info({ count: threads.length });
   });
 
+  it("preserves and recovers an automation Thread through a fresh Gateway connection", async () => {
+    const started = await client.startThread(workdir, { threadSource: "automation" });
+    let completed = false;
+    let turnId: string | undefined;
+    let recoveryClient: CodexAppServerClient | undefined;
+    const removeNotification = client.onNotification((notification) => {
+      const event = toConversationInputEvent(notification);
+      if (event?.type === "turn.completed" && event.threadId === started.thread.id) {
+        completed = true;
+      }
+    });
+    try {
+      expect(started.thread.source).toBe("automation");
+      expect(started.thread.historyMode).toBe("paginated");
+      const turn = await client.startTurn(
+        started.thread.id,
+        [{ type: "text", text: "Reply with one short word." }],
+        "codex_connect:automation-source-contract",
+        workdir,
+      );
+      turnId = turn.turnId;
+      await waitFor(() => completed, 30_000);
+      await client.unsubscribeThread(started.thread.id);
+      recoveryClient = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await recoveryClient.connect();
+      const resumed = await recoveryClient.resumeThread(started.thread.id, workdir);
+      const history = await recoveryClient.listThreadTurns(started.thread.id, { limit: 25 });
+      expect(resumed.thread.source).toBe("automation");
+      expect(history.turns.find((candidate) => candidate.id === turnId)?.status)
+        .toBe("completed");
+    } finally {
+      removeNotification();
+      await recoveryClient?.unsubscribeThread(started.thread.id).catch(() => undefined);
+      await recoveryClient?.deleteThread(started.thread.id).catch(() => undefined);
+      await recoveryClient?.close().catch(() => undefined);
+      if (recoveryClient === undefined) {
+        await client.unsubscribeThread(started.thread.id).catch(() => undefined);
+        await client.deleteThread(started.thread.id).catch(() => undefined);
+      }
+    }
+  });
+
   it("reports the upstream user agent used by Codex", () => {
     expect(upstreamUserAgent).toContain("codex_connect/");
   });

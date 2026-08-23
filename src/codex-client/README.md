@@ -13,7 +13,8 @@
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
   已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
-- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 与自定义分区、运行状态、来源、运行 Turn、
+- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 与自定义分区、运行状态、来源（含稳定的
+  `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
   缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
@@ -75,7 +76,8 @@
   `section_position` 排序，并显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用。
-  新 Thread 和 Fork 可显式携带官方 `modelProvider`。已有 Thread
+  新 Thread 可显式携带官方 `modelProvider` 与受控的 `threadSource=automation`；Fork 只允许模型 Provider。
+  已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
 - `provider-routing-client.ts` 把全局 `threadSection/list|create|update|delete` 固定交给主 App Server，

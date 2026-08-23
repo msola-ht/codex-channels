@@ -13,6 +13,7 @@ import {
   SqliteScheduledTaskStore,
   type CreateScheduledTaskInput,
   type ScheduledTaskExecutionPort,
+  type ScheduledTaskExecutionResult,
 } from "../src/scheduled-tasks/index.js";
 
 const directories: string[] = [];
@@ -355,6 +356,210 @@ describe("ScheduledTaskScheduler", () => {
     expect(overlap.skippedCapacity).toHaveLength(1);
     expect(store.getTask(taskA.taskId)?.nextRunAt).toBeGreaterThan(nextTime);
     expect(store.getTask(taskB.taskId)?.nextRunAt).toBeGreaterThan(nextTime);
+    store.close();
+  });
+
+  it("terminalizes a preflight failure without claiming a started Turn", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const task = store.createTask(taskInput({ schedule: { type: "daily", time: "12:00" } }));
+    const scheduler = new ScheduledTaskScheduler(store, {
+      execute: async () => ({ kind: "failed", category: "authorization", blockTask: true }),
+    });
+
+    const result = await scheduler.tick(Date.parse("2026-01-01T12:04:00.000Z"));
+
+    expect(result.claimed[0]).toMatchObject({
+      state: "failed",
+      startedAt: null,
+      threadId: null,
+      turnId: null,
+    });
+    expect(store.getTask(task.taskId)?.status).toBe("blocked");
+    store.close();
+  });
+
+  it("retains a created Thread identifier when Turn start fails before running", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    store.createTask(taskInput({ schedule: { type: "daily", time: "12:00" } }));
+    const scheduler = new ScheduledTaskScheduler(store, {
+      execute: async () => ({ kind: "failed", category: "unknown", threadId: "thread-created" }),
+    });
+
+    const result = await scheduler.tick(Date.parse("2026-01-01T12:04:00.000Z"));
+
+    expect(result.claimed[0]).toMatchObject({
+      state: "failed",
+      threadId: "thread-created",
+      turnId: null,
+      startedAt: null,
+    });
+    store.close();
+  });
+
+  it("persists identifiers on an uncertain write result", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    store.createTask(taskInput({ schedule: { type: "daily", time: "12:00" } }));
+    const scheduler = new ScheduledTaskScheduler(store, {
+      execute: async () => ({
+        kind: "uncertain",
+        threadId: "thread-uncertain",
+        turnId: "turn-uncertain",
+      }),
+    });
+
+    const result = await scheduler.tick(Date.parse("2026-01-01T12:04:00.000Z"));
+
+    expect(result.claimed[0]).toMatchObject({
+      state: "uncertain",
+      threadId: "thread-uncertain",
+      turnId: "turn-uncertain",
+      startedAt: null,
+    });
+    store.close();
+  });
+
+  it("keeps completed Runs on the running path and tolerates a raced terminal callback", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    store.createTask(taskInput({ schedule: { type: "daily", time: "12:00" } }));
+    const scheduler = new ScheduledTaskScheduler(store, {
+      execute: async () => ({ kind: "completed", threadId: "thread-1", turnId: "turn-1" }),
+      onRunStateChanged: (run) => {
+        if (run.state === "running") store.markCompleted(run.runId, run.startedAt! + 1);
+      },
+    });
+
+    const result = await scheduler.tick(Date.parse("2026-01-01T12:04:00.000Z"));
+
+    expect(result.claimed[0]).toMatchObject({
+      state: "completed",
+      startedAt: expect.any(Number),
+      completedAt: expect.any(Number),
+    });
+    store.close();
+  });
+
+  it("serializes dispatches within one Conversation while other Conversations run in parallel", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    store.createTask(taskInput({
+      taskId: "same-a",
+      createdAt: base,
+      schedule: { type: "daily", time: "12:00" },
+    }));
+    store.createTask(taskInput({
+      taskId: "same-b",
+      createdAt: base + 1,
+      schedule: { type: "daily", time: "12:00" },
+    }));
+    store.createTask(taskInput({
+      taskId: "other",
+      createdAt: base + 2,
+      conversationId: "conversation-2",
+      schedule: { type: "daily", time: "12:00" },
+    }));
+    const started: string[] = [];
+    let active = 0;
+    let maximumActive = 0;
+    const scheduler = new ScheduledTaskScheduler(store, {
+      execute: async (task) => {
+        started.push(task.taskId);
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await delay(task.taskId === "same-a" ? 15 : 1);
+        active -= 1;
+        return { kind: "running" };
+      },
+    });
+
+    const result = await scheduler.tick(Date.parse("2026-01-01T12:04:00.000Z"));
+
+    expect(result.claimed).toHaveLength(3);
+    expect(started.indexOf("same-a")).toBeLessThan(started.indexOf("same-b"));
+    expect(maximumActive).toBeGreaterThan(1);
+    store.close();
+  });
+
+  it("reserves reported background capacity before dispatching a Conversation group", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    for (const [index, taskId] of ["capacity-a", "capacity-b", "capacity-c"].entries()) {
+      store.createTask(taskInput({
+        taskId,
+        createdAt: base + index,
+        schedule: { type: "daily", time: "12:00" },
+      }));
+    }
+    const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>(async () => ({ kind: "running" }));
+    const scheduler = new ScheduledTaskScheduler(store, {
+      availableCapacity: () => 1,
+      execute,
+    });
+
+    const result = await scheduler.tick(Date.parse("2026-01-01T12:04:00.000Z"));
+
+    expect(result.claimed).toHaveLength(1);
+    expect(result.skippedCapacity).toHaveLength(2);
+    expect(execute).toHaveBeenCalledTimes(1);
+    store.close();
+  });
+
+  it("records the actual response time instead of the tick start time", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    store.createTask(taskInput({ schedule: { type: "daily", time: "12:00" } }));
+    const tickAt = Date.parse("2026-01-01T12:04:00.000Z");
+    let current = tickAt;
+    const scheduler = new ScheduledTaskScheduler(
+      store,
+      {
+        execute: async () => {
+          current += 5_000;
+          return { kind: "running" };
+        },
+      },
+      { clock: { now: () => current } },
+    );
+
+    const result = await scheduler.tick(tickAt);
+
+    expect(result.claimed[0]?.startedAt).toBe(tickAt + 5_000);
+    store.close();
+  });
+
+  it("does not start already claimed Conversation jobs after stop begins", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    for (const [index, taskId] of ["stop-a", "stop-b", "stop-c"].entries()) {
+      store.createTask(taskInput({
+        taskId,
+        createdAt: base + index,
+        schedule: { type: "daily", time: "12:00" },
+      }));
+    }
+    let firstSignal: AbortSignal | undefined;
+    const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>(async (_task, _run, signal) => {
+      firstSignal = signal;
+      return await new Promise<ScheduledTaskExecutionResult>((resolve) => {
+        signal.addEventListener("abort", () => resolve({ kind: "interrupted" }), { once: true });
+      });
+    });
+    const scheduler = new ScheduledTaskScheduler(store, { execute }, { stopTimeoutMs: 100 });
+    const tick = scheduler.tick(Date.parse("2026-01-01T12:04:00.000Z"));
+    await waitFor(() => firstSignal !== undefined);
+
+    await scheduler.stop();
+    const result = await tick;
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.claimed.map(({ state }) => state)).toEqual([
+      "interrupted",
+      "interrupted",
+      "interrupted",
+    ]);
     store.close();
   });
 

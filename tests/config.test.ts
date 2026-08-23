@@ -148,6 +148,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.planUpdatesEnabled).toBe(true);
     expect(runtime.config.reasoningEnabled).toBe(true);
     expect(runtime.config.pluginApiEnabled).toBe(false);
+    expect(runtime.config.scheduledTasksEnabled).toBe(false);
     expect(runtime.config.threadSectionAdministrators).toEqual(new Set());
     expect(runtime.config.apiProviders).toEqual([]);
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
@@ -442,6 +443,7 @@ describe("Gateway config.toml", () => {
       price_currency: "cny",
     });
     expect(persisted.experimental).toEqual({ plugin_api: false });
+    expect(persisted.scheduled_tasks).toEqual({ enabled: false });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
     });

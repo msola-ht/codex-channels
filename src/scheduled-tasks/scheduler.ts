@@ -83,6 +83,8 @@ export class ScheduledTaskScheduler {
         missed: [],
       };
       let processed = 0;
+      const dispatchGroups = new Map<string, DispatchJob[]>();
+      let claimOrder = 0;
       for (const initialTask of this.store.listDueTasks(nowMs)) {
         if (this.stopping) break;
         if (processed >= this.maxTasksPerTick) break;
@@ -112,7 +114,9 @@ export class ScheduledTaskScheduler {
           processed += 1;
           continue;
         }
-        const capacityAvailable = await this.capacityAvailable(task);
+        const key = conversationKey(task);
+        const reservedCapacity = dispatchGroups.get(key)?.length ?? 0;
+        const capacityAvailable = await this.capacityAvailable(task, reservedCapacity);
         if (this.stopping) break;
         if (!capacityAvailable) {
           const skipped = this.store.claimDue(task.taskId, scheduledFor, "skipped_capacity", nowMs);
@@ -124,7 +128,13 @@ export class ScheduledTaskScheduler {
         const claim = this.store.claimDue(task.taskId, scheduledFor, "claimed", nowMs);
         processed += 1;
         if (claim.kind === "claimed") {
-          result.claimed.push(await this.dispatch(task, claim.run, nowMs));
+          // Claim synchronously in stable order.  Independent Conversations
+          // dispatch concurrently, but one Conversation stays in claim order
+          // so async validation cannot reorder its fresh Thread starts.
+          const group = dispatchGroups.get(key) ?? [];
+          group.push({ order: claimOrder, task, run: claim.run });
+          dispatchGroups.set(key, group);
+          claimOrder += 1;
         } else if (claim.kind === "skipped_overlap") {
           result.skippedOverlap.push(claim.run);
         } else if (claim.kind === "skipped_capacity") {
@@ -135,6 +145,36 @@ export class ScheduledTaskScheduler {
           result.missed.push(claim.run);
         }
       }
+      const dispatched = await Promise.all(
+        [...dispatchGroups.values()].map(async (group) => {
+          const resolved: Array<{ readonly order: number; readonly run: ScheduledRun }> = [];
+          for (const job of group) {
+            if (this.stopping) {
+              const interrupted = this.store.markInterrupted(
+                job.run.runId,
+                this.transitionTime(job.run),
+              );
+              resolved.push({
+                order: job.order,
+                run: await this.notifyRunStateChanged(interrupted),
+              });
+              continue;
+            }
+            resolved.push({
+              order: job.order,
+              run: await this.dispatch(job.task, job.run),
+            });
+          }
+          return resolved;
+        }),
+      );
+      const resolvedByOrder = new Map(
+        dispatched.flat().map(({ order, run }) => [order, run]),
+      );
+      result.claimed.push(
+        ...[...resolvedByOrder.keys()].sort((left, right) => left - right)
+          .map((order) => resolvedByOrder.get(order)!),
+      );
       return result;
     } finally {
       this.ticking = false;
@@ -190,38 +230,117 @@ export class ScheduledTaskScheduler {
     return this.store.hasBlockingRun(task.taskId);
   }
 
-  private async capacityAvailable(task: ScheduledTask): Promise<boolean> {
+  private async capacityAvailable(
+    task: ScheduledTask,
+    reservedCapacity: number,
+  ): Promise<boolean> {
     const activeCount = this.store.countConversationActiveRuns(task);
     if (activeCount >= this.maxConcurrentRunsPerConversation) return false;
+    if (this.executor.availableCapacity !== undefined) {
+      const available = await this.executor.availableCapacity(task);
+      if (!Number.isSafeInteger(available) || available < 0) {
+        throw new RangeError("执行端口返回的后台容量无效");
+      }
+      return reservedCapacity < available;
+    }
     return this.executor.canStart === undefined ? true : await this.executor.canStart(task);
   }
 
-  private async dispatch(task: ScheduledTask, run: ScheduledRun, nowMs: number): Promise<ScheduledRun> {
+  private async dispatch(task: ScheduledTask, run: ScheduledRun): Promise<ScheduledRun> {
     const controller = new AbortController();
     this.abortControllers.add(controller);
     let outcome: ScheduledTaskExecutionResult;
     try {
       outcome = await this.executor.execute(task, run, controller.signal);
     } catch {
-      return this.store.markUncertain(run.runId, nowMs);
+      const updated = this.store.markUncertain(run.runId, this.transitionTime(run));
+      return await this.notifyRunStateChanged(updated);
     } finally {
       this.abortControllers.delete(controller);
     }
     switch (outcome.kind) {
       case "running":
-        return this.store.markRunning(run.runId, nowMs, executionIdentifiers(outcome));
+        {
+          const updated = this.store.markRunning(
+            run.runId,
+            this.transitionTime(run),
+            executionIdentifiers(outcome),
+          );
+          return await this.notifyRunStateChanged(updated);
+        }
       case "completed":
-        this.store.markRunning(run.runId, nowMs, executionIdentifiers(outcome));
-        return this.store.markCompleted(run.runId, nowMs);
+        {
+          const started = this.store.markRunning(
+            run.runId,
+            this.transitionTime(run),
+            executionIdentifiers(outcome),
+          );
+          const reconciled = await this.notifyRunStateChanged(started);
+          if (reconciled.state !== "running") return reconciled;
+          const updated = this.store.markCompleted(
+            run.runId,
+            this.transitionTime(reconciled),
+            executionIdentifiers(outcome),
+          );
+          return await this.notifyRunStateChanged(updated);
+        }
       case "failed":
-        return this.store.markFailed(
-          run.runId,
-          outcome.category ?? "unknown",
-          nowMs,
-        );
+        {
+          const updated = this.store.markFailed(
+            run.runId,
+            outcome.category ?? "unknown",
+            this.transitionTime(run),
+            executionIdentifiers(outcome),
+          );
+          if (outcome.blockTask) {
+            try {
+              this.store.blockTask(task.taskId, updated.completedAt ?? this.transitionTime(run));
+            } catch (error) {
+              this.reportError(error);
+            }
+          }
+          return await this.notifyRunStateChanged(updated);
+        }
+      case "interrupted":
+        {
+          const updated = this.store.markInterrupted(
+            run.runId,
+            this.transitionTime(run),
+            executionIdentifiers(outcome),
+          );
+          return await this.notifyRunStateChanged(updated);
+        }
       case "uncertain":
-        return this.store.markUncertain(run.runId, nowMs);
+        {
+          const updated = this.store.markUncertain(
+            run.runId,
+            this.transitionTime(run),
+            executionIdentifiers(outcome),
+          );
+          return await this.notifyRunStateChanged(updated);
+        }
     }
+  }
+
+  private async notifyRunStateChanged(run: ScheduledRun): Promise<ScheduledRun> {
+    try {
+      await this.executor.onRunStateChanged?.(run);
+    } catch (error) {
+      // The Store transition is already durable.  A coordinator observer may
+      // fail, but that must not make this dispatch look like an unknown write
+      // or cause the scheduler to retry it.
+      this.reportError(error);
+    }
+    // Observers may reconcile a raced completion and return the newer Store
+    // row.  Always hand callers the authoritative latest row when available.
+    return this.store.getRun(run.runId) ?? run;
+  }
+
+  private transitionTime(run: ScheduledRun): number {
+    return Math.max(
+      this.clock.now(),
+      run.startedAt ?? run.dispatchStartedAt ?? run.scheduledFor,
+    );
   }
 
   private reportError(error: unknown): void {
@@ -248,6 +367,12 @@ export class ScheduledTaskScheduler {
   }
 }
 
+interface DispatchJob {
+  readonly order: number;
+  readonly task: ScheduledTask;
+  readonly run: ScheduledRun;
+}
+
 interface MutableTickResult {
   claimed: ScheduledRun[];
   skippedOverlap: ScheduledRun[];
@@ -267,12 +392,18 @@ function emptyTickResult(): ScheduledTaskTickResult {
 }
 
 function executionIdentifiers(
-  outcome: Extract<ScheduledTaskExecutionResult, { readonly kind: "running" | "completed" }>,
+  outcome: Extract<ScheduledTaskExecutionResult, {
+    readonly kind: "running" | "completed" | "failed" | "interrupted" | "uncertain";
+  }>,
 ): { readonly threadId?: string | null; readonly turnId?: string | null } {
   return {
     ...(outcome.threadId === undefined ? {} : { threadId: outcome.threadId }),
     ...(outcome.turnId === undefined ? {} : { turnId: outcome.turnId }),
   };
+}
+
+function conversationKey(task: ScheduledTask): string {
+  return JSON.stringify([task.surface, task.accountId, task.conversationId]);
 }
 
 export class ScheduledTaskStopTimeoutError extends Error {

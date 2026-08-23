@@ -4,7 +4,7 @@ export type ThreadStatus =
   | { type: "systemError" }
   | { type: "active" };
 
-export type ThreadSource = "cli" | "vscode" | "appServer" | "other";
+export type ThreadSource = "cli" | "vscode" | "appServer" | "automation" | "other";
 export type ThreadHistoryMode = "legacy" | "paginated";
 
 export interface ThreadSectionSnapshot {
@@ -40,6 +40,8 @@ export interface ThreadSession {
 export interface ThreadStartOptions {
   model?: string;
   modelProvider?: string;
+  /** The only non-interactive source exposed by the stable Gateway port. */
+  threadSource?: "automation";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy?: "untrusted" | "on-request" | "never";
   permissions?: string;

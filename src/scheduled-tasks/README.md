@@ -19,6 +19,6 @@ SQLite 只保存任务定义和最小 Run 元数据，目录和文件使用私�
 调度器只通过执行端口请求运行，不建立第二套 App Server Thread/Turn 状态，也不自动重试结果未知的
 写请求；`uncertain` Run 会阻塞同一任务后续 occurrence，只有显式 `resolveUncertain` 或权威恢复路径
 才会解除。停止调度
-时会向尚未完成的执行端口传递取消信号，并在有限等待上限后报告稳定超时。配置、Bootstrap 装配、
-App Server 执行和 Surface 命令属于后续阶段。Scheduler 在首次 tick 和之后每 24 小时最多调用一次
+时会向尚未完成的执行端口传递取消信号，并在有限等待上限后报告稳定超时。配置与 Bootstrap
+App Server 执行已接入且默认关闭；Surface 命令属于后续阶段。Scheduler 在首次 tick 和之后每 24 小时最多调用一次
 Run 清理；清理失败经 `onError` 观察但不阻断本次安全调度。

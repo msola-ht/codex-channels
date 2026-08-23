@@ -26,6 +26,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "observability",
     "policy",
     "provider-proxy",
+    "scheduled-tasks",
     "session-routing",
     "storage",
     "surfaces",

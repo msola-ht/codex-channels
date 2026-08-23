@@ -303,6 +303,18 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     return rows.map(runFromRow);
   }
 
+  listRunningRuns(): ScheduledRun[] {
+    this.requireOpen();
+    const rows = this.database
+      .prepare(`
+        SELECT * FROM runs
+        WHERE state = 'running'
+        ORDER BY scheduled_for ASC, run_id ASC
+      `)
+      .all() as unknown as RunRow[];
+    return rows.map(runFromRow);
+  }
+
   hasBlockingRun(taskId: string): boolean {
     this.requireOpen();
     const row = this.database
@@ -418,7 +430,28 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     return this.requireRun(runId);
   }
 
-  markCompleted(runId: string, nowMs = Date.now()): ScheduledRun {
+  markApprovalRejected(runId: string): ScheduledRun {
+    this.requireOpen();
+    const run = this.requireRun(runId);
+    if (run.state !== "dispatching" && run.state !== "running") {
+      throw new ScheduledTaskStateError(
+        `Run ${runId} 当前状态为 ${run.state}，不能记录无人值守审批拒绝`,
+      );
+    }
+    this.database
+      .prepare(`
+        UPDATE runs SET error_category = 'approval', error_message = ?
+        WHERE run_id = ? AND state IN ('dispatching', 'running')
+      `)
+      .run(errorMessageForCategory("approval"), runId);
+    return this.requireRun(runId);
+  }
+
+  markCompleted(
+    runId: string,
+    nowMs = Date.now(),
+    identifiers: { readonly threadId?: string | null; readonly turnId?: string | null } = {},
+  ): ScheduledRun {
     this.requireTimestamp(nowMs);
     const run = this.requireRun(runId);
     if (run.state !== "running") {
@@ -426,8 +459,16 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     }
     this.requireRunTimestampAtLeast(nowMs, run, "completed_at");
     this.database
-      .prepare("UPDATE runs SET state = 'completed', completed_at = ? WHERE run_id = ? AND state = 'running'")
-      .run(nowMs, runId);
+      .prepare(`
+        UPDATE runs SET state = 'completed', thread_id = ?, turn_id = ?, completed_at = ?
+        WHERE run_id = ? AND state = 'running'
+      `)
+      .run(
+        identifiers.threadId === undefined ? run.threadId : identifiers.threadId,
+        identifiers.turnId === undefined ? run.turnId : identifiers.turnId,
+        nowMs,
+        runId,
+      );
     return this.requireRun(runId);
   }
 
@@ -435,16 +476,25 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     runId: string,
     category: ScheduledRunErrorCategory,
     nowMs = Date.now(),
+    identifiers: { readonly threadId?: string | null; readonly turnId?: string | null } = {},
   ): ScheduledRun {
-    return this.finishRun(runId, "failed", category, nowMs);
+    return this.finishRun(runId, "failed", category, nowMs, identifiers);
   }
 
-  markInterrupted(runId: string, nowMs = Date.now()): ScheduledRun {
-    return this.finishRun(runId, "interrupted", "interrupted", nowMs);
+  markInterrupted(
+    runId: string,
+    nowMs = Date.now(),
+    identifiers: { readonly threadId?: string | null; readonly turnId?: string | null } = {},
+  ): ScheduledRun {
+    return this.finishRun(runId, "interrupted", "interrupted", nowMs, identifiers);
   }
 
-  markUncertain(runId: string, nowMs = Date.now()): ScheduledRun {
-    return this.finishRun(runId, "uncertain", "unknown", nowMs);
+  markUncertain(
+    runId: string,
+    nowMs = Date.now(),
+    identifiers: { readonly threadId?: string | null; readonly turnId?: string | null } = {},
+  ): ScheduledRun {
+    return this.finishRun(runId, "uncertain", "unknown", nowMs, identifiers);
   }
 
   resolveUncertain(
@@ -770,6 +820,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     state: "failed" | "interrupted" | "uncertain",
     category: ScheduledRunErrorCategory,
     nowMs: number,
+    identifiers: { readonly threadId?: string | null; readonly turnId?: string | null },
   ): ScheduledRun {
     this.requireTimestamp(nowMs);
     if (!isScheduledRunErrorCategory(category)) {
@@ -782,10 +833,19 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     this.requireRunTimestampAtLeast(nowMs, run, "completed_at");
     this.database
       .prepare(`
-        UPDATE runs SET state = ?, completed_at = ?, error_category = ?, error_message = ?
+        UPDATE runs SET state = ?, thread_id = ?, turn_id = ?, completed_at = ?,
+          error_category = ?, error_message = ?
         WHERE run_id = ? AND state IN ('dispatching', 'running')
       `)
-      .run(state, nowMs, category, errorMessageForRun(state, category), runId);
+      .run(
+        state,
+        identifiers.threadId === undefined ? run.threadId : identifiers.threadId,
+        identifiers.turnId === undefined ? run.turnId : identifiers.turnId,
+        nowMs,
+        category,
+        errorMessageForRun(state, category),
+        runId,
+      );
     return this.requireRun(runId);
   }
 

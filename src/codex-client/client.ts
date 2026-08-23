@@ -270,6 +270,9 @@ export class CodexAppServerClient implements
           ? { model: options.model }
           : this.defaults.model ? { model: this.defaults.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
+        ...(options.threadSource === "automation"
+          ? { threadSource: options.threadSource }
+          : {}),
       },
     }, { retryOverload: false });
     return toThreadSession(response);

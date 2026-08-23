@@ -9,6 +9,20 @@ import type { ThreadSession, ThreadSnapshot } from "../src/session-routing/index
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("reports configured Providers without starting their App Server", () => {
+    const openai = client();
+    const deepseek = client();
+    const routed = new ProviderRoutingClient("openai", new Map([
+      ["openai", openai],
+      ["deepseek", deepseek],
+    ]), async () => undefined);
+
+    expect(routed.isProviderConfigured("openai")).toBe(true);
+    expect(routed.isProviderConfigured("deepseek")).toBe(true);
+    expect(routed.isProviderConfigured("missing")).toBe(false);
+    expect(deepseek.connect).not.toHaveBeenCalled();
+  });
+
   it("starts and connects an auxiliary Provider only when first selected", async () => {
     const openai = client();
     const deepseek = client();

@@ -165,6 +165,25 @@ export class ProviderRoutingClient {
     return provider === undefined ? undefined : this.canonicalProvider(provider);
   }
 
+  /** Availability preflight; it may connect/start the Provider App Server on demand. */
+  ensureProviderAvailable(provider: string): Promise<void> {
+    return this.ensureClient(provider).then(() => undefined);
+  }
+
+  /** Return whether a Provider is configured, without connecting or starting it. */
+  isProviderConfigured(provider: string): boolean {
+    return this.clients.has(this.canonicalProvider(provider));
+  }
+
+  /**
+   * Check one exact model on its requested Provider.  A missing model is not
+   * replaced by the Provider default; callers must fail closed.
+   */
+  async isModelAvailable(provider: string, model: string): Promise<boolean> {
+    const models = await (await this.ensureClient(provider)).listModels();
+    return models.some((candidate) => candidate.model === model && candidate.available !== false);
+  }
+
   async listThreads(
     ...args: Parameters<ProviderClientInstance["listThreads"]>
   ): ReturnType<ProviderClientInstance["listThreads"]> {
@@ -259,8 +278,19 @@ export class ProviderRoutingClient {
   async resumeThread(
     ...args: Parameters<ProviderClientInstance["resumeThread"]>
   ): ReturnType<ProviderClientInstance["resumeThread"]> {
-    const [threadId, cwd] = args;
-    const provider = await this.resolveThreadProvider(threadId, cwd);
+    const [threadId, cwd, options] = args;
+    const requestedProvider = options?.modelProvider;
+    const knownProvider = this.threadProviders.get(threadId);
+    if (
+      requestedProvider !== undefined
+      && knownProvider !== undefined
+      && this.canonicalProvider(knownProvider) !== this.canonicalProvider(requestedProvider)
+    ) {
+      throw new Error("计划任务 Thread 的模型 Provider 已变化");
+    }
+    const provider = requestedProvider === undefined
+      ? await this.resolveThreadProvider(threadId, cwd)
+      : this.canonicalProvider(requestedProvider);
     const session = await (await this.ensureClient(provider)).resumeThread(...args);
     this.rememberThread(session.thread);
     return session;

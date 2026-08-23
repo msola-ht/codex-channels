@@ -166,6 +166,8 @@ export interface ScheduledTaskStore {
   deleteTask(taskId: string, nowMs?: number): ScheduledTask;
   listDueTasks(nowMs: number): ScheduledTask[];
   listRuns(taskId: string, options?: { readonly limit?: number }): ScheduledRun[];
+  /** All running rows, independent of per-task display retention windows. */
+  listRunningRuns(): ScheduledRun[];
   /** Narrow query used by the scheduler; it must not depend on the display limit. */
   hasBlockingRun(taskId: string): boolean;
   /** Count in-flight or unresolved runs for one Conversation without loading history. */
@@ -186,14 +188,29 @@ export interface ScheduledTaskStore {
     nowMs: number,
     identifiers?: { readonly threadId?: string | null; readonly turnId?: string | null },
   ): ScheduledRun;
-  markCompleted(runId: string, nowMs?: number): ScheduledRun;
+  /** Persist that an unattended interactive request was safely rejected. */
+  markApprovalRejected(runId: string): ScheduledRun;
+  markCompleted(
+    runId: string,
+    nowMs?: number,
+    identifiers?: { readonly threadId?: string | null; readonly turnId?: string | null },
+  ): ScheduledRun;
   markFailed(
     runId: string,
     category: ScheduledRunErrorCategory,
     nowMs?: number,
+    identifiers?: { readonly threadId?: string | null; readonly turnId?: string | null },
   ): ScheduledRun;
-  markInterrupted(runId: string, nowMs?: number): ScheduledRun;
-  markUncertain(runId: string, nowMs?: number): ScheduledRun;
+  markInterrupted(
+    runId: string,
+    nowMs?: number,
+    identifiers?: { readonly threadId?: string | null; readonly turnId?: string | null },
+  ): ScheduledRun;
+  markUncertain(
+    runId: string,
+    nowMs?: number,
+    identifiers?: { readonly threadId?: string | null; readonly turnId?: string | null },
+  ): ScheduledRun;
   /** Explicitly closes an uncertain run; this never happens automatically. */
   resolveUncertain(
     runId: string,
@@ -214,11 +231,15 @@ export type ScheduledUncertainResolution = "failed" | "interrupted";
 export interface ScheduledTaskExecutionPort {
   /** Return false when the Conversation has no background capacity. */
   canStart?(task: ScheduledTask): boolean | Promise<boolean>;
+  /** Return the current number of free background slots for this Conversation. */
+  availableCapacity?(task: ScheduledTask): number | Promise<number>;
   execute(
     task: ScheduledTask,
     run: ScheduledRun,
     signal: AbortSignal,
   ): Promise<ScheduledTaskExecutionResult>;
+  /** Optional hook after the Store records the dispatch result. */
+  onRunStateChanged?(run: ScheduledRun): void | Promise<void>;
 }
 
 export type ScheduledTaskExecutionResult =
@@ -231,8 +252,21 @@ export type ScheduledTaskExecutionResult =
   | {
       readonly kind: "failed";
       readonly category?: ScheduledRunErrorCategory;
+      /** Permanent authorization/configuration loss blocks future occurrences. */
+      readonly blockTask?: boolean;
+      readonly threadId?: string | null;
+      readonly turnId?: string | null;
     }
-  | { readonly kind: "uncertain" };
+  | {
+      readonly kind: "interrupted";
+      readonly threadId?: string | null;
+      readonly turnId?: string | null;
+    }
+  | {
+      readonly kind: "uncertain";
+      readonly threadId?: string | null;
+      readonly turnId?: string | null;
+    };
 
 export interface ScheduledTaskClock {
   now(): number;
