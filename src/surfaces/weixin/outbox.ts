@@ -23,6 +23,7 @@ import type {
   SurfaceOutputPort,
 } from "../types.js";
 import {
+  createSubagentContactedPresentation,
   createSubagentStartedPresentation,
   createTurnReasoningPresentation,
   createTurnStartedPresentation,
@@ -428,6 +429,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatWeixinCommandText(
           renderPlainLifecyclePresentation(
             createSubagentStartedPresentation(event),
+          ),
+          { structuredFields: true },
+        );
+      case "subagent.contacted":
+        return formatWeixinCommandText(
+          renderPlainLifecyclePresentation(
+            createSubagentContactedPresentation(event),
           ),
           { structuredFields: true },
         );

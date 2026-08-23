@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   createStartupPresentation,
+  createSubagentContactedPresentation,
   createSubagentCompletedPresentation,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
@@ -112,6 +113,26 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(rendered).toBe("子代理开始 · review_task");
+    expect(rendered).not.toContain("agent-thread-secret");
+  });
+
+  it("renders a compact subagent follow-up notice without internal IDs", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createSubagentContactedPresentation({
+        type: "subagent.contacted",
+        target: {
+          surface: "feishu",
+          accountId: "default",
+          conversationId: "conversation-1",
+        },
+        threadId: "parent-thread",
+        turnId: "parent-turn",
+        agentThreadId: "agent-thread-secret",
+        agentPath: "/root/review_task",
+      }),
+    );
+
+    expect(rendered).toBe("子代理继续 · review_task");
     expect(rendered).not.toContain("agent-thread-secret");
   });
 

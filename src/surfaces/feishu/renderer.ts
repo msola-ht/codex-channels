@@ -57,6 +57,7 @@ import {
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
+  createSubagentContactedPresentation,
   createSubagentCompletedPresentation,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
@@ -253,6 +254,10 @@ export function renderFeishuOutput(
     case "subagent.spawned":
       return renderFeishuLifecyclePresentation(
         createSubagentStartedPresentation(event),
+      );
+    case "subagent.contacted":
+      return renderFeishuLifecyclePresentation(
+        createSubagentContactedPresentation(event),
       );
     case "subagent.completed":
       return renderFeishuSubagentCompleted(event, priceCurrency, exchangeRate, debug);
