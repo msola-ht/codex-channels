@@ -243,7 +243,7 @@ export function formatConversationScheduledTasks(
   return toStructuredMarkdownList([
     `Gateway 计划任务（第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项）：`,
     ...tasks.map((task, index) => [
-      `${selectors[index] ?? "?"}. ${task.name} · ${scheduledTaskStatusLabel(task.status)}`,
+      `${selectors[index] ?? "?"}. ${task.name} · ${formatScheduledTaskStatusLabel(task.status)}`,
       `   ID：${task.taskId}`,
       `   计划：${formatSchedule(task.schedule, task.timezone)}`,
       `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
@@ -660,7 +660,7 @@ export function formatConversationCommandOutcome(
         scheduledTaskOutcomeTitle(outcome.type),
         `名称：${outcome.task.name}`,
         `任务：${outcome.task.taskId}`,
-        `状态：${scheduledTaskStatusLabel(outcome.task.status)}`,
+        `状态：${formatScheduledTaskStatusLabel(outcome.task.status)}`,
       ].join("\n"));
     case "scheduled-task.run-requested":
     case "scheduled-task.retry-requested":
@@ -692,9 +692,11 @@ function scheduledTaskOutcomeTitle(type: Extract<ConversationCommandOutcome, {
   }
 }
 
-function scheduledTaskStatusLabel(status: "active" | "paused" | "blocked" | "deleted"): string {
+export function formatScheduledTaskStatusLabel(
+  status: "active" | "paused" | "blocked" | "deleted",
+): string {
   switch (status) {
-    case "active": return "运行中";
+    case "active": return "已启用";
     case "paused": return "已暂停";
     case "blocked": return "已阻止";
     case "deleted": return "已删除";

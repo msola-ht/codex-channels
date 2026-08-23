@@ -317,21 +317,18 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     const updated = this.mutateTask(() =>
       this.store.renameTask(task.taskId, normalizeName(name), this.now())
     );
-    this.invalidateTarget(target, actorId);
     return toTaskView(updated);
   }
 
   pause(target: ConversationTarget, actorId: string, selector: string): ScheduledTaskView {
     const task = this.resolveTask(target, actorId, selector);
     const updated = this.mutateTask(() => this.store.pauseTask(task.taskId, this.now()));
-    this.invalidateTarget(target, actorId);
     return toTaskView(updated);
   }
 
   resume(target: ConversationTarget, actorId: string, selector: string): ScheduledTaskView {
     const task = this.resolveTask(target, actorId, selector);
     const updated = this.mutateTask(() => this.store.resumeTask(task.taskId, this.now()));
-    this.invalidateTarget(target, actorId);
     return toTaskView(updated);
   }
 

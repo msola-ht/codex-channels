@@ -985,7 +985,7 @@ describe("Feishu conversation adapter", () => {
     )).resolves.toMatchObject({
       title: "Gateway 计划任务 · 第 1/1 页",
       choices: expect.arrayContaining([
-        expect.objectContaining({ input: "task task-1" }),
+        expect.objectContaining({ label: "已启用 · 每日检查", input: "task task-1" }),
         expect.objectContaining({ input: "add" }),
       ]),
     });

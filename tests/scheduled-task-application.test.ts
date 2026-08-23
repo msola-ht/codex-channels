@@ -109,11 +109,8 @@ describe("ScheduledTaskApplicationService", () => {
       .toThrow(expect.objectContaining({ code: "scheduled-task.snapshot.required" }));
     expect(service.list(target, "actor-1").selectors).toEqual(["1"]);
     expect(service.rename(target, "actor-1", "1", " 每日检查 ").name).toBe("每日检查");
-    service.list(target, "actor-1");
     expect(service.pause(target, "actor-1", "1").status).toBe("paused");
-    service.list(target, "actor-1");
     expect(service.resume(target, "actor-1", "1").status).toBe("active");
-    service.list(target, "actor-1");
     await service.run(target, "actor-1", "1");
     expect(runTaskNow).toHaveBeenCalledWith(task.taskId);
     expect(() => service.list(target, "actor-2"))

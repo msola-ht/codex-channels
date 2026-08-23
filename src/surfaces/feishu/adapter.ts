@@ -14,6 +14,7 @@ import {
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
+  formatScheduledTaskStatusLabel,
   formatSessionListCommand,
   formatThreadQueueInputTypeLabel,
 } from "../conversation-command-format.js";
@@ -1233,7 +1234,7 @@ function renderCommandCenterChoices(
         : `共 ${result.result.totalTaskCount} 项；选择任务后可查看运行记录或执行管理操作。`,
       choices: [
         ...result.result.tasks.map((task) => ({
-          label: `${task.status === "active" ? "运行中" : task.status} · ${task.name}`,
+          label: `${formatScheduledTaskStatusLabel(task.status)} · ${task.name}`,
           action: "schedule" as const,
           input: `task ${task.taskId}`,
         })),

@@ -86,6 +86,7 @@ Turn/Item 历史，也不承诺恢复工作区文件。
 Gateway 计划任务通过 `ScheduledTaskApplicationService` 暴露创建预览、一次性确认、列表、运行记录、
 重命名、暂停、恢复、立即运行、uncertain 重试和删除预览；每次操作精确绑定 Surface Actor 与
 Conversation，数字选择器只使用最近五分钟的内存快照，完整 ID 仍重新复核 Store 归属。
+重命名、暂停和恢复不会改变列表序号，成功后保留当前快照供连续管理；创建和删除会使快照失效。
 每个 Surface Actor 在同一 Conversation 最多保留 100 个未删除任务；创建预览和确认都会复核该固定上限。
 扩展查询也保持平台无关：Skill 只向 Surface 返回当前用户或 Workspace 直接安装且已启用项的
 名称与说明；显式调用时由 Client 再按精确名称解析绝对路径，排除系统和插件缓存内容。MCP 按当前

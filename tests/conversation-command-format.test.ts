@@ -17,6 +17,8 @@ import {
   formatConversationPluginDetail,
   formatConversationPluginHealth,
   formatConversationPlugins,
+  formatConversationScheduledTasks,
+  formatScheduledTaskStatusLabel,
   formatConversationStatus,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
@@ -738,6 +740,42 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("- 沙箱：只读");
     expect(rendered).toContain("/workspaceperm approval");
     expect(rendered).toContain("/workspaceperm profile");
+  });
+
+  it("distinguishes an enabled scheduled task from a running Run", () => {
+    const rendered = formatConversationScheduledTasks({
+      kind: "scheduled-tasks",
+      result: {
+        tasks: [{
+          taskId: "task-1",
+          name: "每日检查",
+          status: "active",
+          schedule: { type: "daily", time: "09:00" },
+          timezone: "Asia/Shanghai",
+          nextRunAt: Date.parse("2026-08-24T01:00:00.000Z"),
+          workspaceId: "main",
+          modelProvider: "openai",
+          model: "gpt-5.6-sol",
+          reasoningEffort: "low",
+          serviceTier: null,
+          sandbox: "workspace-write",
+          permissions: null,
+          promptPreview: "检查项目状态",
+        }],
+        selectors: ["1"],
+        page: 1,
+        pageCount: 1,
+        totalTaskCount: 1,
+      },
+    });
+
+    expect(rendered).toContain("每日检查 · 已启用");
+    expect(rendered).not.toContain("每日检查 · 运行中");
+    expect([
+      formatScheduledTaskStatusLabel("paused"),
+      formatScheduledTaskStatusLabel("blocked"),
+      formatScheduledTaskStatusLabel("deleted"),
+    ]).toEqual(["已暂停", "已阻止", "已删除"]);
   });
 
   it("renders updated workspace permissions with the hot reload notice", () => {
