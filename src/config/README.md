@@ -53,6 +53,10 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
 请求。变化需要重启 Gateway，不需要重启 App Server；Doctor 始终显示开关状态与风险提示。
 
+`scheduled_tasks.enabled` 控制 Gateway 计划任务执行层，默认关闭。开启时才创建独立私有
+`scheduled-tasks.sqlite3`、恢复既有 Run 并启动领取循环；关闭时不创建数据库，也不接管普通
+Thread 的 Server Request。变化需要重启 Gateway，不需要重装或重启 App Server。
+
 `thread_sections.administrators` 是全局 Thread 分区写操作的 Actor 允许名单，条目格式为
 `telegram:<用户 ID>`、`feishu:<open_id>` 或 `weixin:<用户 ID>`。默认空数组；未配置时
 `/section` 只允许列表和会话筛选，新建、重命名、移动、移出与删除失败关闭。每个管理员必须属于

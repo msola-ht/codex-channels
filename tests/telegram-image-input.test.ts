@@ -7,6 +7,10 @@ import pino from "pino";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationUseCases } from "../src/application/conversation-service.js";
+import type {
+  ScheduledTaskConfirmation,
+  ScheduledTaskUseCases,
+} from "../src/application/scheduled-task-service.js";
 import { UserFacingError, type OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../src/policy/telegram-access.js";
@@ -1059,6 +1063,88 @@ describe("Telegram image input", () => {
     await output.close();
   });
 
+  it("confirms a scheduled task from the native Telegram button", async () => {
+    const token = "12345678-1234-1234-1234-123456789abc";
+    const task = {
+      taskId: "task-1",
+      name: "每小时检查",
+      status: "active" as const,
+      schedule: { type: "interval" as const, intervalMinutes: 60, anchorAt: 1 },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 2,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      serviceTier: null,
+      sandbox: "workspace-write" as const,
+      permissions: null,
+      promptPreview: "检查项目",
+    };
+    const confirm = vi.fn(() => ({ action: "created" as const, task }));
+    const { surface, output, apiCalls, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      {},
+      vi.fn(),
+      vi.fn(),
+      undefined,
+      false,
+      { confirm } as unknown as ScheduledTaskUseCases,
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 20,
+      callback_query: {
+        id: "schedule-confirm",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: `schedule:confirm:${token}`,
+        message: {
+          message_id: 30,
+          date: 1,
+          chat: telegramChat(),
+          text: "计划任务创建预览",
+        },
+      },
+    });
+
+    expect(confirm).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "123",
+      token,
+    );
+    expect(apiCalls).toContain("answerCallbackQuery");
+    expect(apiCalls).toContain("editMessageReplyMarkup");
+    expect(sentTexts.join("\n")).toContain("已创建 Gateway 计划任务");
+    await surface.stop();
+    await output.close();
+  });
+
+  it("presents a schedule_task preview with native Telegram buttons", async () => {
+    const { surface, output, apiPayloads } = createSurface(vi.fn(), vi.fn());
+    const preview = scheduledTaskPreview();
+
+    await surface.presentScheduledTaskConfirmation(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "123",
+      preview,
+    );
+
+    const sent = apiPayloads.find(({ method }) => method === "sendMessage");
+    expect(sent?.payload.reply_markup).toEqual({
+      inline_keyboard: [[
+        {
+          text: "确认",
+          callback_data: `schedule:confirm:${preview.token}`,
+        },
+        { text: "取消", callback_data: "schedule:cancel" },
+      ]],
+    });
+    await surface.stop();
+    await output.close();
+  });
+
   it("fails closed when a Queue item button no longer resolves", async () => {
     const itemId = "01a02373-1bd5-7661-aa48-fc0ff087f0d8";
     const queueList = vi.fn(async () => ({
@@ -1130,6 +1216,30 @@ describe("Telegram image input", () => {
   });
 });
 
+function scheduledTaskPreview(): ScheduledTaskConfirmation {
+  return {
+    action: "create",
+    token: "12345678-1234-1234-1234-123456789abc",
+    expiresAt: 2,
+    task: {
+      taskId: "task-preview",
+      name: "检查 CI",
+      status: "active",
+      schedule: { type: "interval", intervalMinutes: 60, anchorAt: 1 },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 2,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      serviceTier: null,
+      sandbox: "workspace-write",
+      permissions: null,
+      promptPreview: "检查 CI",
+    },
+  };
+}
+
 function createSurface(
   submit: ReturnType<typeof vi.fn>,
   download: ReturnType<typeof vi.fn>,
@@ -1138,6 +1248,7 @@ function createSurface(
   downloadAudio: ReturnType<typeof vi.fn> = vi.fn(),
   now?: () => number,
   debugEnabled = false,
+  scheduledTasks?: ScheduledTaskUseCases,
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -1181,6 +1292,7 @@ function createSurface(
     threadSectionAccess: new ThreadSectionAccessPolicy(new Set(["telegram:123"])),
     ...(now === undefined ? {} : { now }),
     debugEnabled,
+    ...(scheduledTasks === undefined ? {} : { scheduledTasks }),
   };
   const surface = new TelegramSurface(
     "123:token",

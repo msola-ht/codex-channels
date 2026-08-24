@@ -1303,6 +1303,82 @@ describe("ProviderProxy", () => {
     expect(metrics[0]?.firstOutputDeltaAtMs).not.toBeNull();
   });
 
+  it("does not record WebSocket startup prewarm as a model request", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    let upstreamMessage: Record<string, unknown> | undefined;
+    upstreamWebSocket.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        upstreamMessage = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
+        socket.send(JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "warm-1",
+            usage: {
+              input_tokens: 12_000,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 0,
+              output_tokens_details: { reasoning_tokens: 0 },
+              total_tokens: 12_000,
+            },
+          },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    await new Promise<void>((resolve, reject) => {
+      client.on("open", () => {
+        client.send(JSON.stringify({
+          type: "response.create",
+          generate: false,
+          client_metadata: {
+            "x-codex-turn-metadata": JSON.stringify({
+              request_kind: "prewarm",
+              thread_id: "thread-warm",
+            }),
+          },
+        }));
+      });
+      client.on("message", (data) => {
+        const message = JSON.parse(data.toString("utf8")) as { type?: string };
+        if (message.type === "response.completed") resolve();
+      });
+      client.on("error", reject);
+    });
+    client.close();
+
+    expect(upstreamMessage).toEqual({
+      type: "response.create",
+      generate: false,
+      client_metadata: {},
+    });
+    expect(metrics).toEqual([]);
+  });
+
   it("records a failed WebSocket handshake without turn metadata", async () => {
     const upstreamServer = createServer();
     upstreamServer.on("upgrade", (_request, socket) => {

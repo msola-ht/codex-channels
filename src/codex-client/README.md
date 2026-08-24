@@ -13,7 +13,8 @@
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
   已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
-- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 与自定义分区、运行状态、来源、运行 Turn、
+- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 与自定义分区、运行状态、来源（含稳定的
+  `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
   缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
@@ -61,7 +62,8 @@
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
   Server Request 解码为 Approval 稳定请求；其中按固定版本的空对象 Schema 与
   `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
-  精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
+  精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。实验
+  `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、全局分区 CRUD 与 Thread 分区移动、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill、账户与 Thread 用量及用户级配置
@@ -75,7 +77,9 @@
   `section_position` 排序，并显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用。
-  新 Thread 和 Fork 可显式携带官方 `modelProvider`。已有 Thread
+  新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
+  `dynamicTools`；Fork 只允许模型 Provider。
+  已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
 - `provider-routing-client.ts` 把全局 `threadSection/list|create|update|delete` 固定交给主 App Server，

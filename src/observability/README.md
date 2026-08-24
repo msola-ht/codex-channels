@@ -56,7 +56,9 @@ Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读
   旧版 `/responses/compact` 与普通 `/responses` 上由受控元数据标记的 remote compaction v2
   都以 `operation = 'compact'` 独立分类，但其请求、Usage、费用与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或
-  复制持久化数据。综合输出速度只使用同时具有非推理输出 Token 与输出时间窗的请求；
+  复制持久化数据。Codex 0.148.0 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
+  连接预热而非模型推理，Provider Proxy 不将其写入本指标库，因此不会扩大请求、Token、费用或
+  错误率分母。综合输出速度只使用同时具有非推理输出 Token 与输出时间窗的请求；
   首段回复延迟只使用有效 TTFT 样本，并返回平均、P50、P95 和覆盖计数。所有合计仍在 SQLite 内完成，
   费用也按同币种快照求和并返回计价请求数；只有聚合范围内三类每百万 Token 单价分别一致时才
   返回统一单价，否则标记为多档价格，不把缺失价格、计时或缓存字段当成零；不同币种不强行合计。

@@ -4,7 +4,7 @@ export type ThreadStatus =
   | { type: "systemError" }
   | { type: "active" };
 
-export type ThreadSource = "cli" | "vscode" | "appServer" | "other";
+export type ThreadSource = "cli" | "vscode" | "appServer" | "automation" | "other";
 export type ThreadHistoryMode = "legacy" | "paginated";
 
 export interface ThreadSectionSnapshot {
@@ -37,12 +37,26 @@ export interface ThreadSession {
   contextCompactionItemIds: readonly string[];
 }
 
+export interface ThreadDynamicToolSpec {
+  type: "function";
+  name: string;
+  description: string;
+  inputSchema: unknown;
+  deferLoading?: boolean;
+}
+
 export interface ThreadStartOptions {
   model?: string;
   modelProvider?: string;
+  /** The only non-interactive source exposed by the stable Gateway port. */
+  threadSource?: "automation";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy?: "untrusted" | "on-request" | "never";
   permissions?: string;
+  /** Create an in-memory thread that is omitted from durable thread listings. */
+  ephemeral?: boolean;
+  /** Official experimental functions shown to the model for this Thread. */
+  dynamicTools?: readonly ThreadDynamicToolSpec[];
 }
 
 export interface ThreadQueryOptions {

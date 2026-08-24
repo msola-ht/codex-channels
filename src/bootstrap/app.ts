@@ -38,6 +38,7 @@ import {
   ProviderRoutingClient,
   gatewayVersion,
   handleApprovalServerRequest,
+  JsonRpcError,
   loadManagedModelOptions,
   JsonRpcClient,
   supportedCodexCliVersion,
@@ -60,6 +61,9 @@ import {
   ConversationService,
   ModelSelectionService,
   ProviderAccountService,
+  ScheduledTaskApplicationService,
+  ScheduledTaskToolService,
+  scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
   type ThreadLockHolder,
@@ -68,6 +72,7 @@ import {
 } from "../application/index.js";
 import {
   ConversationCore,
+  UserFacingError,
   isCriticalOutputEvent,
   surfaceAccountKey,
   type ConversationTarget,
@@ -93,6 +98,11 @@ import {
   SqliteBindingStore,
   type ConversationBinding,
 } from "../storage/index.js";
+import {
+  ScheduledTaskScheduler,
+  scheduledTaskDatabasePath,
+  SqliteScheduledTaskStore,
+} from "../scheduled-tasks/index.js";
 import {
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
@@ -120,6 +130,10 @@ import {
 import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
+import { ScheduledTaskExecutor } from "./scheduled-task-executor.js";
+import { ScheduledTaskRunCoordinator } from "./scheduled-task-run-coordinator.js";
+import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
+import { createScheduledTaskToolRequestHandler } from "./scheduled-task-tool-request.js";
 import {
   createManagedProviderAccountAdapters,
   createManagedProviderPricingResolvers,
@@ -162,6 +176,9 @@ export class GatewayApplication {
   private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private readonly subagentCompletion: SubagentCompletionTracker;
+  private readonly scheduledTaskStore: SqliteScheduledTaskStore | undefined;
+  private readonly scheduledTaskScheduler: ScheduledTaskScheduler | undefined;
+  private readonly scheduledRunCoordinator: ScheduledTaskRunCoordinator | undefined;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -252,6 +269,7 @@ export class GatewayApplication {
       this.codex,
       this.bindings,
       this.workspaces,
+      config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
@@ -668,9 +686,126 @@ export class GatewayApplication {
       const provider = this.router.modelSettingsForThread(event.threadId)?.modelProvider;
       this.providerIdleReleaser.touch(provider, event.target);
     });
+    const scheduledTaskModule = config.scheduledTasksEnabled
+      ? (() => {
+          const store = new SqliteScheduledTaskStore(
+            scheduledTaskDatabasePath(config.stateDatabasePath),
+          );
+          const executor: ScheduledTaskExecutor = new ScheduledTaskExecutor(
+            this.router,
+            this.codex,
+            this.bindings,
+            this.workspaces,
+            {
+              isProviderConfigured: (provider) => this.codex.isProviderConfigured(provider),
+              ensureProvider: (provider) => this.codex.ensureProviderAvailable(provider),
+              isModelAvailable: (provider, model) =>
+                this.codex.isModelAvailable(provider, model),
+            },
+            this.core,
+            {
+              isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
+                surface.surface === target.surface && surface.accountId === target.accountId),
+              onThreadStarted: (run, target, threadId) =>
+                coordinator.onThreadStarted(run, target, threadId),
+              onTurnStarted: (run, target, threadId, turnId) =>
+                coordinator.onTurnStarted(run, target, threadId, turnId),
+              onRunStateChanged: (run) => coordinator.onRunStateChanged(run),
+              logger,
+            },
+          );
+          const coordinator = new ScheduledTaskRunCoordinator(store, this.router, this.codex, {
+            validateRun: (task) => executor.validateRun(task),
+            logger,
+          });
+          const scheduler = new ScheduledTaskScheduler(store, executor, {
+            onError: (error) => logger.error({ err: error }, "Gateway 计划任务调度失败"),
+          });
+          this.scheduledTaskStore = store;
+          this.scheduledRunCoordinator = coordinator;
+          this.scheduledTaskScheduler = scheduler;
+          this.output.subscribe("scheduled-task-run-coordinator", (event) => {
+            coordinator.handleOutput(event);
+          });
+          const scheduledTaskService = new ScheduledTaskApplicationService(store, {
+            isActorAuthorized: (target, actorId) =>
+              this.bindings.conversations().some((candidate) =>
+                surfaceAccountKey(candidate.surface, candidate.accountId)
+                  === surfaceAccountKey(target.surface, target.accountId)
+                && candidate.conversationId === target.conversationId)
+              && this.bindings.actors(target).includes(actorId),
+            isProviderConfigured: (provider) => this.codex.isProviderConfigured(provider),
+            creationContext: (target) => {
+              const status = service.status(target);
+              const workspace = this.workspaces.require(status.workspaceId);
+              const sandbox = workspace.sandbox ?? "read-only";
+              if (sandbox === "danger-full-access") {
+                throw new UserFacingError(
+                  "scheduled-task.state.invalid",
+                  "计划任务不允许使用 danger-full-access Workspace",
+                );
+              }
+              if (
+                workspace.approvalPolicy !== undefined
+                && workspace.approvalPolicy !== "never"
+              ) {
+                throw new UserFacingError(
+                  "scheduled-task.state.invalid",
+                  "当前 Workspace 不能形成 approvalPolicy=never 的无人值守环境",
+                );
+              }
+              return {
+                workspaceId: workspace.id,
+                workspaceName: workspace.name,
+                cwd: workspace.cwd,
+                modelProvider: status.modelProvider ?? "openai",
+                model: status.model,
+                reasoningEffort: status.effort,
+                serviceTier: status.serviceTier,
+                sandbox,
+                approvalPolicy: "never",
+                permissions: workspace.permissions ?? null,
+                modelPending: status.modelPending,
+                effortPending: status.effortPending,
+                serviceTierPending: status.fastModePending,
+              };
+            },
+            runTaskNow: (taskId) => scheduler.runTaskNow(taskId),
+          }, Date.now);
+          const toolService = new ScheduledTaskToolService(
+            scheduledTaskService,
+            Date.now,
+          );
+          const scheduledTaskToolHandler = createScheduledTaskToolRequestHandler({
+            targetForThread: (threadId) => this.router.targetForThread(threadId),
+            actorsForTarget: (target) => this.bindings.actors(target),
+            execute: (target, actorId, args) =>
+              toolService.execute(target, actorId, args),
+            presentConfirmation: (target, actorId, preview) => {
+              this.surfaceManager.presentScheduledTaskConfirmation(
+                target,
+                actorId,
+                preview,
+              );
+            },
+          });
+          return {
+            service: scheduledTaskService,
+            handler: scheduledTaskToolHandler,
+          };
+        })()
+      : undefined;
+    if (!config.scheduledTasksEnabled) {
+      this.scheduledTaskStore = undefined;
+      this.scheduledRunCoordinator = undefined;
+      this.scheduledTaskScheduler = undefined;
+    }
+    const scheduledTaskUseCases = scheduledTaskModule?.service;
+    const scheduledTaskToolHandler = scheduledTaskModule?.handler;
     this.surfaceModules = createSurfaceModules({
       config,
       service,
+      ...(scheduledTaskUseCases === undefined ? {} : { scheduledTasks: scheduledTaskUseCases }),
       bindings: this.bindings,
       logger,
       gatewayVersion,
@@ -842,8 +977,26 @@ export class GatewayApplication {
         }
       }
     });
-    this.codex.setServerRequestHandler((request) =>
-      handleApprovalServerRequest(request, this.approval));
+    const approvalHandler = (request: Parameters<typeof handleApprovalServerRequest>[0]) =>
+      handleApprovalServerRequest(request, this.approval);
+    const appServerRequestHandler: Parameters<typeof this.codex.setServerRequestHandler>[0] =
+      async (request) => {
+        if (request.method === "item/tool/call") {
+          if (!scheduledTaskToolHandler) {
+            throw new JsonRpcError(-32601, "计划任务动态工具未启用");
+          }
+          return scheduledTaskToolHandler(request);
+        }
+        return approvalHandler(request);
+      };
+    this.codex.setServerRequestHandler(
+      this.scheduledRunCoordinator === undefined
+        ? appServerRequestHandler
+        : createScheduledTaskServerRequestHandler(
+            this.scheduledRunCoordinator,
+            appServerRequestHandler,
+          ),
+    );
   }
 
   hasActiveTurns(): boolean {
@@ -964,6 +1117,9 @@ export class GatewayApplication {
         }
       }
       this.requireRunning();
+      this.scheduledTaskScheduler?.recoverAfterCrash();
+      this.scheduledRunCoordinator?.initialize();
+      await this.scheduledRunCoordinator?.prepareRecovery();
       await this.restoreBindings();
       this.requireRunning();
       this.logger.info(
@@ -977,6 +1133,7 @@ export class GatewayApplication {
       );
       await this.surfaceManager.start();
       await this.channelImageSpool.start();
+      this.scheduledTaskScheduler?.start();
       this.providerIdleReleaser?.start();
       this.scheduleBindingRestore();
       this.requireRunning();
@@ -1003,6 +1160,7 @@ export class GatewayApplication {
     this.subagentCompletion?.close();
     const failures: unknown[] = [];
     for (const [component, close] of [
+      ["Scheduled Task Scheduler", () => this.scheduledTaskScheduler?.stop()],
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
@@ -1015,6 +1173,7 @@ export class GatewayApplication {
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
       ["Binding Store", () => Promise.resolve(this.bindings.close())],
+      ["Scheduled Task Store", () => Promise.resolve(this.scheduledTaskStore?.close())],
     ] as const) {
       try {
         await close();
@@ -1332,15 +1491,20 @@ export class GatewayApplication {
     const enabledSurfaces = new Set(
       this.surfaces.map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
     );
+    const scheduledThreadIds = this.scheduledRunCoordinator?.runningThreadIds()
+      ?? new Set<string>();
     const candidateThreadIds = new Set(
       this.router.allBindings()
         .filter((binding) => {
           const bindingProvider = this.codex.knownProvider(binding.threadId);
           return !this.stopping
-            && enabledSurfaces.has(surfaceAccountKey(
-              binding.target.surface,
-              binding.target.accountId,
-            ))
+            && (
+              enabledSurfaces.has(surfaceAccountKey(
+                binding.target.surface,
+                binding.target.accountId,
+              ))
+              || scheduledThreadIds.has(binding.threadId)
+            )
             && !this.restoringThreadIds.has(binding.threadId)
             && (requestedThreadIds === undefined
               || requestedThreadIds.has(binding.threadId))
@@ -1352,6 +1516,9 @@ export class GatewayApplication {
         .map((binding) => binding.threadId),
     );
     if (candidateThreadIds.size === 0) {
+      if (provider === undefined && requestedThreadIds === undefined) {
+        await this.scheduledRunCoordinator?.recoverRunning(scheduledThreadIds);
+      }
       return;
     }
     for (const threadId of candidateThreadIds) {
@@ -1365,7 +1532,10 @@ export class GatewayApplication {
         (binding, thread) => {
           restoredThreadIds.add(binding.threadId);
           if (thread.status.type !== "active") {
-            if (this.router.isBackgroundThread(binding.threadId)) {
+            if (
+              this.router.isBackgroundThread(binding.threadId)
+              && !scheduledThreadIds.has(binding.threadId)
+            ) {
               this.output.publish({
                 type: "warning",
                 target: binding.target,
@@ -1394,6 +1564,13 @@ export class GatewayApplication {
             );
           }
         },
+        (binding) => {
+          const task = this.scheduledRunCoordinator?.taskForThread(binding.threadId);
+          return task?.modelProvider == null
+            ? {}
+            : { modelProvider: task.modelProvider };
+        },
+        (binding) => scheduledThreadIds.has(binding.threadId),
       );
     } finally {
       for (const threadId of candidateThreadIds) {
@@ -1410,6 +1587,7 @@ export class GatewayApplication {
         this.publishThreadAvailability(pending.binding, "available");
       }
     }
+    await this.scheduledRunCoordinator?.recoverRunning(restoredThreadIds);
     for (const failure of failures) {
       this.logger.warn(
         {

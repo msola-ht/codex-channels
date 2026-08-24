@@ -61,7 +61,7 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
     section: thread.section === null ? null : toThreadSectionSnapshot(thread.section),
     status: toThreadStatus(thread.status),
     cwd: thread.cwd,
-    source: toThreadSource(thread.source),
+    source: toThreadSource(thread.source, thread.threadSource),
     historyMode: toThreadHistoryMode(thread.historyMode),
     activeTurnId: activeTurn?.id ?? null,
   };
@@ -121,7 +121,13 @@ function toThreadStatus(status: Thread["status"]): ThreadStatus {
   }
 }
 
-function toThreadSource(source: Thread["source"]): ThreadSource {
+function toThreadSource(
+  source: Thread["source"],
+  threadSource: Thread["threadSource"],
+): ThreadSource {
+  if (threadSource === "automation") {
+    return "automation";
+  }
   if (source === null || source === undefined) {
     throw new Error("Codex Thread 响应缺少有效 source");
   }

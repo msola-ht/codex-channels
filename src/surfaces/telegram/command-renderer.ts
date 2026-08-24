@@ -31,6 +31,9 @@ import {
   formatConversationPermissions,
   formatConversationProjectRules,
   formatConversationSessions,
+  formatConversationScheduledConfirmation,
+  formatConversationScheduledRuns,
+  formatConversationScheduledTasks,
   formatConversationSkills,
   formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
@@ -98,6 +101,19 @@ export async function renderTelegramCommandResult(
       return;
     case "thread-revert-preview":
       await replyTelegramPanel(context, formatConversationThreadRevertPreview(result));
+      return;
+    case "scheduled-tasks":
+      await replyTelegramPanel(context, formatConversationScheduledTasks(result));
+      return;
+    case "scheduled-runs":
+      await replyTelegramPanel(context, formatConversationScheduledRuns(result));
+      return;
+    case "scheduled-confirmation":
+      await replyTelegramPanel(
+        context,
+        formatConversationScheduledConfirmation(result),
+        scheduledTaskConfirmationKeyboard(result),
+      );
       return;
     case "status":
       await replyTelegramPanel(context, formatStatus(result.status));
@@ -207,6 +223,20 @@ export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
       { text: "沙箱", callback_data: "wp:sandbox" },
       { text: "审批", callback_data: "wp:approval" },
       { text: "权限 Profile", callback_data: "wp:profile" },
+    ]],
+  };
+}
+
+export function scheduledTaskConfirmationKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "scheduled-confirmation" }>,
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[
+      {
+        text: "确认",
+        callback_data: `schedule:confirm:${result.preview.token}`,
+      },
+      { text: "取消", callback_data: "schedule:cancel" },
     ]],
   };
 }
@@ -443,6 +473,13 @@ function renderOutcome(
       "thread.forked",
       "review.started",
       "goal.updated",
+      "scheduled-task.created",
+      "scheduled-task.deleted",
+      "scheduled-task.renamed",
+      "scheduled-task.paused",
+      "scheduled-task.resumed",
+      "scheduled-task.run-requested",
+      "scheduled-task.retry-requested",
     ].includes(outcome.type),
   };
 }

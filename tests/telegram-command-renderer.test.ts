@@ -179,6 +179,86 @@ describe("Telegram command renderer", () => {
     expect(replies[0]?.text).toContain("新增、更新、排序请继续使用 /queue 文本命令");
   });
 
+  it("renders scheduled-task confirmation as native confirm and cancel buttons", async () => {
+    const replies: Array<{ text: string; options?: unknown }> = [];
+    const reply = vi.fn(async (text: string, options?: unknown) => {
+      replies.push({ text, options });
+    });
+    const token = "12345678-1234-1234-1234-123456789abc";
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "scheduled-confirmation",
+        preview: {
+          action: "create",
+          token,
+          expiresAt: Date.now() + 60_000,
+          task: {
+            taskId: "task-preview",
+            name: "每小时检查",
+            status: "active",
+            schedule: { type: "interval", intervalMinutes: 60, anchorAt: 1 },
+            timezone: "Asia/Shanghai",
+            nextRunAt: 2,
+            workspaceId: "main",
+            modelProvider: "openai",
+            model: "gpt-5.6-sol",
+            reasoningEffort: "medium",
+            serviceTier: null,
+            sandbox: "workspace-write",
+            permissions: null,
+            promptPreview: "检查项目",
+          },
+        },
+      },
+    );
+
+    const options = replies[0]?.options as {
+      reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+    };
+    expect(options.reply_markup.inline_keyboard.flat()).toEqual([
+      { text: "确认", callback_data: `schedule:confirm:${token}` },
+      { text: "取消", callback_data: "schedule:cancel" },
+    ]);
+  });
+
+  it("renders a scheduled-task creation outcome as HTML instead of raw Markdown", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "outcome",
+        outcome: {
+          type: "scheduled-task.created",
+          task: {
+            taskId: "task-1",
+            name: "提醒我收到",
+            status: "active",
+            schedule: { type: "once", date: "2026-08-24", time: "10:33" },
+            timezone: "Asia/Shanghai",
+            nextRunAt: Date.parse("2026-08-24T02:33:00.000Z"),
+            workspaceId: "main",
+            modelProvider: "opencode-go",
+            model: "deepseek-v4-flash-vision-exp",
+            reasoningEffort: "high",
+            serviceTier: null,
+            sandbox: "workspace-write",
+            permissions: null,
+            promptPreview: "提醒我收到",
+          },
+        },
+      },
+    );
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("<b>已创建 Gateway 计划任务</b>"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+    expect(reply).not.toHaveBeenCalledWith(expect.stringContaining("##"));
+  });
+
   it("uses the dedicated diff renderer for artifact results", async () => {
     const reply = vi.fn(async () => undefined);
 

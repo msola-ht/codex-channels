@@ -807,6 +807,19 @@ describe("JsonRpcClient", () => {
     }]);
   });
 
+  it("maps the official automation Feature source to the closed stable source", async () => {
+    const transport = new FakeTransport();
+    transport.threadListData = [appServerThread({ threadSource: "automation" })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "read-only",
+    });
+    await client.connect();
+
+    await expect(client.listThreads("/tmp/project")).resolves.toMatchObject([
+      { source: "automation" },
+    ]);
+  });
+
   it("extracts context compaction item ids when resuming a thread", async () => {
     const transport = new FakeTransport();
     transport.resumeThreadData = appServerThread({
@@ -2241,7 +2254,11 @@ describe("JsonRpcClient", () => {
       ],
       "codex_connect:request-1",
       "/tmp/project",
-      { model: "gpt-selected", effort: "high", serviceTier: null },
+      {
+        model: "gpt-selected",
+        effort: "high",
+        serviceTier: null,
+      },
     );
     await client.startTurn(
       "thread-1",
@@ -2434,6 +2451,56 @@ describe("JsonRpcClient", () => {
       .toMatchObject({
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",
+      });
+  });
+
+  it("encodes the closed automation Thread source without experimental fields", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "read-only",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", { threadSource: "automation" });
+
+    const params = transport.sent.find((message) => message.method === "thread/start")?.params;
+    expect(params).toMatchObject({ threadSource: "automation" });
+    expect(params).not.toHaveProperty("dynamicTools");
+    expect(params).not.toHaveProperty("additionalContext");
+  });
+
+  it("registers dynamic tool functions on thread start", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", {
+      dynamicTools: [{
+        type: "function",
+        name: "schedule_task",
+        description: "Create a scheduled task",
+        inputSchema: {
+          type: "object",
+          properties: { action: { type: "string" } },
+          required: ["action"],
+        },
+      }],
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/start")?.params)
+      .toMatchObject({
+        dynamicTools: [{
+          type: "function",
+          name: "schedule_task",
+          description: "Create a scheduled task",
+          inputSchema: {
+            type: "object",
+            properties: { action: { type: "string" } },
+            required: ["action"],
+          },
+        }],
       });
   });
 

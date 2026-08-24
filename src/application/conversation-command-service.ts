@@ -24,6 +24,10 @@ import type { ConversationUseCases } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
 import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
 import type { SurfaceAccessPolicy } from "../policy/index.js";
+import {
+  parseScheduledTaskOperation,
+} from "./scheduled-task-command.js";
+import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
 
 export {
   archivedSessionCommandUsageText,
@@ -37,6 +41,7 @@ export {
   type PluginListView,
   type SessionListView,
 } from "./conversation-command-parser.js";
+export { scheduledTaskCommandUsageText } from "./scheduled-task-command.js";
 
 export const conversationCommandNames = [
   "resume",
@@ -74,6 +79,7 @@ export const conversationCommandNames = [
   "goal",
   "agents",
   "release",
+  "schedule",
 ] as const;
 
 export type ConversationCommandName = typeof conversationCommandNames[number];
@@ -194,6 +200,20 @@ export type ConversationCommandResult =
   | {
       kind: "occupancy";
       result: ThreadOccupancyReleaseResult;
+    }
+  | {
+      kind: "scheduled-tasks";
+      result: ReturnType<ScheduledTaskUseCases["list"]>;
+    }
+  | {
+      kind: "scheduled-runs";
+      result: ReturnType<ScheduledTaskUseCases["runs"]>;
+    }
+  | {
+      kind: "scheduled-confirmation";
+      preview:
+        | ReturnType<ScheduledTaskUseCases["previewCreate"]>
+        | ReturnType<ScheduledTaskUseCases["previewDelete"]>;
     };
 
 export interface ConversationModelSummary {
@@ -280,12 +300,26 @@ export type ConversationCommandOutcome =
   | {
       type: "goal.updated";
       goal: ThreadGoal;
+    }
+  | {
+      type:
+        | "scheduled-task.created"
+        | "scheduled-task.deleted"
+        | "scheduled-task.renamed"
+        | "scheduled-task.paused"
+        | "scheduled-task.resumed";
+      task: ReturnType<ScheduledTaskUseCases["rename"]>;
+    }
+  | {
+      type: "scheduled-task.run-requested" | "scheduled-task.retry-requested";
+      run: Awaited<ReturnType<ScheduledTaskUseCases["run"]>>;
     };
 
 export class ConversationCommandService {
   constructor(
     private readonly conversations: ConversationUseCases,
     private readonly threadSectionAccess?: SurfaceAccessPolicy,
+    private readonly scheduledTasks?: ScheduledTaskUseCases,
   ) {}
 
   async execute(
@@ -856,6 +890,92 @@ export class ConversationCommandService {
           kind: "occupancy",
           result: await this.conversations.releaseThread(target, force),
         };
+      }
+      case "schedule": {
+        const scheduled = this.scheduledTasks;
+        if (!scheduled) {
+          throw new UserFacingError(
+            "scheduled-task.state.invalid",
+            "Gateway 计划任务功能未启用",
+          );
+        }
+        if (!actorId) {
+          throw new UserFacingError(
+            "scheduled-task.forbidden",
+            "无法确认当前渠道用户身份",
+          );
+        }
+        const operation = parseScheduledTaskOperation(argumentsText);
+        switch (operation.type) {
+          case "natural":
+            return {
+              kind: "scheduled-confirmation",
+              preview: scheduled.previewNaturalLanguage(target, actorId, operation.description),
+            };
+          case "create":
+            return {
+              kind: "scheduled-confirmation",
+              preview: scheduled.previewCreate(target, actorId, operation.request),
+            };
+          case "list":
+            return { kind: "scheduled-tasks", result: scheduled.list(target, actorId, operation.page) };
+          case "runs":
+            return {
+              kind: "scheduled-runs",
+              result: scheduled.runs(target, actorId, operation.selector, operation.page),
+            };
+          case "rename":
+            return {
+              kind: "outcome",
+              outcome: {
+                type: "scheduled-task.renamed",
+                task: scheduled.rename(target, actorId, operation.selector, operation.name),
+              },
+            };
+          case "pause":
+          case "resume": {
+            const task = scheduled[operation.type](target, actorId, operation.selector);
+            return {
+              kind: "outcome",
+              outcome: {
+                type: operation.type === "pause"
+                  ? "scheduled-task.paused"
+                  : "scheduled-task.resumed",
+                task,
+              },
+            };
+          }
+          case "run":
+          case "retry": {
+            const run = await scheduled[operation.type](target, actorId, operation.selector);
+            return {
+              kind: "outcome",
+              outcome: {
+                type: operation.type === "run"
+                  ? "scheduled-task.run-requested"
+                  : "scheduled-task.retry-requested",
+                run,
+              },
+            };
+          }
+          case "delete":
+            return {
+              kind: "scheduled-confirmation",
+              preview: scheduled.previewDelete(target, actorId, operation.selector),
+            };
+          case "confirm": {
+            const confirmed = scheduled.confirm(target, actorId, operation.token);
+            return {
+              kind: "outcome",
+              outcome: {
+                type: confirmed.action === "created"
+                  ? "scheduled-task.created"
+                  : "scheduled-task.deleted",
+                task: confirmed.task,
+              },
+            };
+          }
+        }
       }
     }
     throw new UserFacingError(

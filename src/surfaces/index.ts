@@ -37,6 +37,12 @@ export {
   type SurfaceErrorMetadata,
 } from "./error-metadata.js";
 export { formatQuotedInput } from "./quoted-input.js";
+export {
+  formatConversationCommandOutcome,
+  formatConversationScheduledConfirmation,
+  formatConversationScheduledRuns,
+  formatConversationScheduledTasks,
+} from "./conversation-command-format.js";
 export { setConfiguredCustomPrimaryProviderId } from "./provider-format.js";
 export type {
   OperationUpdateDisplay,

@@ -162,6 +162,73 @@ suite("real Codex App Server over Unix WebSocket", () => {
     pino({ enabled: false }).info({ count: threads.length });
   });
 
+  it("accepts dynamic tool registration on a fresh Thread", async () => {
+    const started = await client.startThread(workdir, {
+      ephemeral: true,
+      dynamicTools: [{
+        type: "function",
+        name: "schedule_task",
+        description: "Manage Gateway scheduled tasks.",
+        inputSchema: {
+          type: "object",
+          properties: { action: { type: "string" } },
+          required: ["action"],
+          additionalProperties: false,
+        },
+      }],
+    });
+    try {
+      expect(started.thread.id).toBeTruthy();
+    } finally {
+      await client.unsubscribeThread(started.thread.id).catch(() => undefined);
+    }
+  });
+
+  it("preserves and recovers an automation Thread through a fresh Gateway connection", async () => {
+    const started = await client.startThread(workdir, { threadSource: "automation" });
+    let completed = false;
+    let turnId: string | undefined;
+    let recoveryClient: CodexAppServerClient | undefined;
+    const removeNotification = client.onNotification((notification) => {
+      const event = toConversationInputEvent(notification);
+      if (event?.type === "turn.completed" && event.threadId === started.thread.id) {
+        completed = true;
+      }
+    });
+    try {
+      expect(started.thread.source).toBe("automation");
+      expect(started.thread.historyMode).toBe("paginated");
+      const turn = await client.startTurn(
+        started.thread.id,
+        [{ type: "text", text: "Reply with one short word." }],
+        "codex_connect:automation-source-contract",
+        workdir,
+      );
+      turnId = turn.turnId;
+      await waitFor(() => completed, 30_000);
+      await client.unsubscribeThread(started.thread.id);
+      recoveryClient = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await recoveryClient.connect();
+      const resumed = await recoveryClient.resumeThread(started.thread.id, workdir);
+      const history = await recoveryClient.listThreadTurns(started.thread.id, { limit: 25 });
+      expect(resumed.thread.source).toBe("automation");
+      expect(history.turns.find((candidate) => candidate.id === turnId)?.status)
+        .toBe("completed");
+    } finally {
+      removeNotification();
+      await recoveryClient?.unsubscribeThread(started.thread.id).catch(() => undefined);
+      await recoveryClient?.deleteThread(started.thread.id).catch(() => undefined);
+      await recoveryClient?.close().catch(() => undefined);
+      if (recoveryClient === undefined) {
+        await client.unsubscribeThread(started.thread.id).catch(() => undefined);
+        await client.deleteThread(started.thread.id).catch(() => undefined);
+      }
+    }
+  });
+
   it("reports the upstream user agent used by Codex", () => {
     expect(upstreamUserAgent).toContain("codex_connect/");
   });
@@ -495,6 +562,188 @@ contractSuite("real supervised App Server service", () => {
       await client?.close().catch(() => undefined);
       await stopDetachedTestProcess(processHandle, 5_000).catch(() => undefined);
       await proxy.close();
+      await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  }, 30_000);
+
+  it("round-trips a dynamic tool call through the real App Server", async () => {
+    const testRuntime = mkdtempSync(join(tmpdir(), "codex-dynamic-tool-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const workspace = join(testRuntime, "workspace");
+    const socketPath = join(testRuntime, "codex-app-server.sock");
+    let requestCount = 0;
+    const observedToolCalls: Array<{ tool: string; arguments: unknown }> = [];
+    const apiServer = createServer((request, response) => {
+      if (request.method === "GET" && request.url?.startsWith("/v1/models")) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          object: "list",
+          data: [{ id: "dynamic-tool-contract-model", object: "model", owned_by: "contract" }],
+        }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/v1/responses") {
+        request.resume();
+        requestCount += 1;
+        const responseId = `dynamic-tool-response-${requestCount}`;
+        const events = requestCount === 1
+          ? [
+              { type: "response.created", response: { id: responseId } },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "function_call",
+                  call_id: "dynamic-tool-call-1",
+                  name: "schedule_task",
+                  arguments: JSON.stringify({ action: "list" }),
+                },
+              },
+              completedResponseEvent(responseId),
+            ]
+          : [
+              { type: "response.created", response: { id: responseId } },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "message",
+                  role: "assistant",
+                  id: "dynamic-tool-message",
+                  content: [{ type: "output_text", text: "tool-ok" }],
+                },
+              },
+              completedResponseEvent(responseId),
+            ];
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        for (const event of events) {
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+        response.end();
+        return;
+      }
+      request.resume();
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "dynamic tool contract fixture" } }));
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      apiServer.once("error", rejectListen);
+      apiServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const apiAddress = apiServer.address();
+    if (!apiAddress || typeof apiAddress === "string") {
+      throw new Error("Dynamic Tool 合同无法创建本机 Responses 夹具");
+    }
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "dynamic-tool-contract-model"',
+      'model_provider = "dynamic-tool-contract"',
+      "",
+      "[model_providers.dynamic-tool-contract]",
+      'name = "Dynamic Tool Contract Provider"',
+      `base_url = "http://127.0.0.1:${apiAddress.port}/v1"`,
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      "supports_websockets = false",
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    let stderr = "";
+    const processHandle = spawn(
+      process.env.CODEX_BINARY ?? "codex",
+      ["app-server", "--listen", `unix://${socketPath}`],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, CODEX_HOME: codexHome },
+        stdio: ["ignore", "ignore", "pipe"],
+        detached: process.platform !== "win32",
+      },
+    );
+    processHandle.stderr?.setEncoding("utf8");
+    processHandle.stderr?.on("data", (chunk: string) => {
+      stderr = appendDiagnostic(stderr, chunk);
+    });
+    let client: CodexAppServerClient | undefined;
+    let threadId: string | undefined;
+    let removeNotification: (() => void) | undefined;
+    let completed = false;
+    try {
+      await waitFor(
+        () => existsSync(socketPath),
+        10_000,
+        () => processHandle.exitCode === null
+          ? undefined
+          : new Error(appServerFailure("Dynamic Tool 合同 App Server 启动失败", stderr)),
+      );
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+      client.setServerRequestHandler(async (request) => {
+        if (request.method !== "item/tool/call") {
+          throw new Error(`Dynamic Tool 合同收到意外请求：${request.method}`);
+        }
+        const params = request.params as {
+          tool?: unknown;
+          arguments?: unknown;
+        } | undefined;
+        observedToolCalls.push({
+          tool: String(params?.tool ?? ""),
+          arguments: params?.arguments,
+        });
+        return {
+          contentItems: [{ type: "inputText", text: "Gateway scheduled tasks: empty" }],
+          success: true,
+        };
+      });
+      const started = await client.startThread(workspace, {
+        ephemeral: true,
+        dynamicTools: [{
+          type: "function",
+          name: "schedule_task",
+          description: "Manage Gateway scheduled tasks.",
+          inputSchema: {
+            type: "object",
+            properties: { action: { type: "string" } },
+            required: ["action"],
+            additionalProperties: false,
+          },
+        }],
+      });
+      threadId = started.thread.id;
+      removeNotification = client.onNotification((notification) => {
+        const event = toConversationInputEvent(notification);
+        if (event?.type === "turn.completed" && event.threadId === threadId) {
+          completed = true;
+        }
+      });
+      await client.startTurn(
+        threadId,
+        [{ type: "text", text: "List scheduled tasks." }],
+        "codex_connect:dynamic-tool-contract",
+        workspace,
+      );
+      await waitFor(() => completed, 15_000);
+
+      expect(requestCount).toBe(2);
+      expect(observedToolCalls).toEqual([{
+        tool: "schedule_task",
+        arguments: { action: "list" },
+      }]);
+    } finally {
+      removeNotification?.();
+      if (client && threadId) {
+        await client.unsubscribeThread(threadId).catch(() => undefined);
+        await client.deleteThread(threadId).catch(() => undefined);
+      }
+      await client?.close().catch(() => undefined);
+      await stopDetachedTestProcess(processHandle, 5_000).catch(() => undefined);
       await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
       rmSync(testRuntime, {
         recursive: true,

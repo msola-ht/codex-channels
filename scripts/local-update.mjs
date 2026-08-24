@@ -321,6 +321,15 @@ export function inspectDatabaseUpdates(environment = process.env, options = {}) 
       `指标数据库 Schema ${metrics.schemaVersion ?? "unknown"} 无法直接更新到 ${modelRequestMetricsSchemaVersion}`,
     );
   }
+  if (
+    state.scheduledTasks?.exists
+    && !state.scheduledTasks.compatible
+    && !state.scheduledTasks.updateable
+  ) {
+    failures.push(
+      `计划任务数据库 Schema ${state.scheduledTasks.schemaVersion ?? "unknown"} 无法直接更新到 ${state.scheduledTasks.targetSchemaVersion}`,
+    );
+  }
   if (failures.length > 0) {
     throw new Error(`数据库版本预检失败：${failures.join("；")}`);
   }

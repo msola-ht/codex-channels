@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { JsonRpcError } from "../src/codex-client/json-rpc.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
@@ -124,6 +124,40 @@ describe("SessionRouter", () => {
       cwd: "/workspace",
       options: { sandbox: "workspace-write", approvalPolicy: "never" },
     }]);
+  });
+
+  it("attaches dynamic tools to foreground threads and strips them from automation threads", async () => {
+    const store = new MemoryBindingStore();
+    const started: unknown[] = [];
+    const tool = {
+      type: "function" as const,
+      name: "schedule_task",
+      description: "Manage schedules",
+      inputSchema: { type: "object" },
+    };
+    const client = threadPort({
+      listThreads: async () => [],
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session(thread(`new-${started.length}`, { type: "idle" }));
+      },
+    });
+    const router = new SessionRouter(client, store, registry, [tool]);
+
+    await router.ensure(target);
+    await router.startBackground(target, {}, "main");
+
+    expect(started[0]).toMatchObject({
+      cwd: "/workspace",
+      options: { dynamicTools: [tool] },
+    });
+    expect(started[1]).toMatchObject({
+      options: {
+        threadSource: "automation",
+      },
+    });
+    expect((started[1] as { options: Record<string, unknown> }).options)
+      .not.toHaveProperty("dynamicTools");
   });
 
   it("passes a configured permission profile instead of sandbox", async () => {
@@ -385,6 +419,121 @@ describe("SessionRouter", () => {
       serviceTier: "default",
       collaborationMode: "plan",
     });
+  });
+
+  it("starts a fresh automation background Thread without listing or replacing the foreground", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({
+      target,
+      workspaceId: "main",
+      threadId: "foreground",
+      sessionId: "foreground",
+    });
+    const listed = vi.fn(async () => [thread("idle-history", { type: "idle" })]);
+    const started: unknown[] = [];
+    const router = new SessionRouter(threadPort({
+      listThreads: listed,
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session(thread("automation", { type: "idle" }));
+      },
+    }), store, registry);
+
+    const result = await router.startBackground(
+      target,
+      { model: "gpt-main", modelProvider: "openai" },
+      "main",
+    );
+
+    expect(listed).not.toHaveBeenCalled();
+    expect(started).toEqual([{
+      cwd: "/workspace",
+      options: {
+        model: "gpt-main",
+        modelProvider: "openai",
+        threadSource: "automation",
+      },
+    }]);
+    expect(router.current(target)?.threadId).toBe("foreground");
+    expect(router.backgroundBindings(target).map(({ threadId }) => threadId)).toEqual(["automation"]);
+    expect(result.binding.threadId).toBe("automation");
+  });
+
+  it("starts a background Thread in its frozen Workspace without changing foreground selection", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({
+      target,
+      workspaceId: "other",
+      threadId: "foreground-other",
+      sessionId: "foreground-other",
+    });
+    const started: unknown[] = [];
+    const router = new SessionRouter(threadPort({
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session(thread("automation-main", { type: "idle" }));
+      },
+    }), store, registry);
+
+    await router.startBackground(target, {}, "main");
+
+    expect(store.getWorkspace(target)).toBe("other");
+    expect(router.current(target)?.threadId).toBe("foreground-other");
+    expect(router.backgroundBindings(target)[0]).toMatchObject({ workspaceId: "main" });
+    expect(started[0]).toMatchObject({ cwd: "/workspace" });
+  });
+
+  it("does not disturb an existing binding when thread/start returns a duplicate Thread id", async () => {
+    const store = new MemoryBindingStore();
+    const otherTarget = { ...target, conversationId: "other-conversation" };
+    store.bindBackground({
+      target: otherTarget,
+      workspaceId: "main",
+      threadId: "conflict",
+      sessionId: "conflict",
+    });
+    const unsubscribe = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      startThread: async () => session(thread("conflict", { type: "idle" })),
+      unsubscribeThread: unsubscribe,
+    }), store, registry);
+
+    await expect(router.startBackground(target, {}, "main")).rejects.toThrow("已绑定");
+
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(router.contextCompactionItemIdsForThread("conflict")).toBeUndefined();
+    expect(store.getByThread("conflict")?.target).toEqual(otherTarget);
+  });
+
+  it("serializes the capacity check and fresh start per Conversation", async () => {
+    const store = new MemoryBindingStore();
+    const startThread = vi.fn(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+      return session(thread(`background-${startThread.mock.calls.length}`, { type: "idle" }));
+    });
+    const router = new SessionRouter(threadPort({ startThread }), store, registry);
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 5 }, () => router.startBackground(target, {}, "main")),
+    );
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(3);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(2);
+    expect(router.backgroundBindings(target)).toHaveLength(3);
+    expect(startThread).toHaveBeenCalledTimes(3);
+  });
+
+  it("enforces the three-Thread background limit for forced automation starts", async () => {
+    const store = new MemoryBindingStore();
+    for (const threadId of ["bg-1", "bg-2", "bg-3"]) {
+      store.bindBackground({ target, workspaceId: "main", threadId, sessionId: threadId });
+    }
+    const startThread = vi.fn(async () => session(thread("not-started", { type: "idle" })));
+    const router = new SessionRouter(threadPort({ startThread }), store, registry);
+
+    await expect(router.startBackground(target, {}, "main"))
+      .rejects.toMatchObject({ code: "conversation.background-limit" });
+    expect(startThread).not.toHaveBeenCalled();
   });
 
   it("unsubscribes before forcing a new thread", async () => {

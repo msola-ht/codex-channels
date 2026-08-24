@@ -12,6 +12,8 @@ import {
   type DisplayPriceCurrency,
   type ExchangeRateSnapshot,
   type ProviderModelUsageEstimate,
+  type ScheduledTaskConfirmation,
+  type ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -26,7 +28,10 @@ import type {
   OperationUpdateDisplay,
   SurfaceConfigurationChange,
 } from "../types.js";
-import { conversationCommandHelpLines } from "../conversation-command-format.js";
+import {
+  conversationCommandHelpLines,
+  formatConversationScheduledConfirmation,
+} from "../conversation-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatOperationFailure,
@@ -44,6 +49,7 @@ import {
 } from "./format.js";
 import {
   renderTelegramCommandResult,
+  scheduledTaskConfirmationKeyboard,
   formatTelegramThreadQueueDeleteConfirmation,
   formatTelegramThreadQueueItemAction,
   replyTelegramPanel,
@@ -100,6 +106,7 @@ export interface TelegramSurfaceOptions {
   gatewayVersion: string;
   actorRegistry?: ConversationActorRegistry;
   threadSectionAccess?: SurfaceAccessPolicy;
+  scheduledTasks?: ScheduledTaskUseCases;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
   audioStore?: TelegramAudioPort;
@@ -219,6 +226,7 @@ export class TelegramSurface {
     this.commands = new ConversationCommandService(
       service,
       options.threadSectionAccess,
+      options.scheduledTasks,
     );
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
     const apiExecutor = new TelegramApiExecutor(logger);
@@ -296,6 +304,26 @@ export class TelegramSurface {
 
   sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
     return this.output.sendChannelImage(conversationId, imagePath);
+  }
+
+  async presentScheduledTaskConfirmation(
+    target: ConversationTarget,
+    actorId: string,
+    preview: ScheduledTaskConfirmation,
+  ): Promise<void> {
+    if (
+      target.surface !== this.surface
+      || target.accountId !== this.accountId
+      || !this.access.isAllowed({ target, actorId })
+    ) {
+      return;
+    }
+    const result = { kind: "scheduled-confirmation" as const, preview };
+    await this.outbox.deliverPanel(
+      target.conversationId,
+      formatConversationScheduledConfirmation(result),
+      scheduledTaskConfirmationKeyboard(result),
+    );
   }
 
   async start(): Promise<void> {
@@ -450,6 +478,34 @@ export class TelegramSurface {
       await context.editMessageText(
         "请输入权限 Profile，例如发送：\n/workspaceperm profile :read-only",
       );
+    });
+    this.bot.callbackQuery(
+      /^schedule:confirm:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/,
+      async (context) => {
+        await context.answerCallbackQuery({ text: "正在确认计划任务" });
+        await context.editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: [] },
+        });
+        const result = await this.commands.execute(
+          target(context),
+          "schedule",
+          `confirm ${context.match[1]}`,
+          String(context.from.id),
+        );
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
+      },
+    );
+    this.bot.callbackQuery("schedule:cancel", async (context) => {
+      await context.answerCallbackQuery({ text: "已取消" });
+      await context.editMessageReplyMarkup({
+        reply_markup: { inline_keyboard: [] },
+      });
+      await context.reply("已取消计划任务操作。未创建或删除任何任务。");
     });
     this.bot.callbackQuery(/^plugin:page:([1-9]\d*)$/, async (context) => {
       await context.answerCallbackQuery({ text: "正在加载 Plugin" });

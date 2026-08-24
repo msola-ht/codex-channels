@@ -23,9 +23,10 @@
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
-  校验 `config.toml`、两个数据库及核心服务定义的完整状态；服务已安装时在同一个 App Server、
-  Gateway 停机窗口内分别备份并更新配置和数据库，离线复核后启动并通过 Socket 与监管拓扑确认
-  核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线更新，不擅自安装或启动，检测到
+  校验 `config.toml`、状态库、指标库、计划任务库及核心服务定义的完整状态；服务已安装时在同一个
+  App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2），离线复核
+  后启动并通过 Socket 与监管拓扑确认核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线
+  更新，不擅自安装或启动，检测到
   `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按
   目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
   未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
@@ -37,7 +38,8 @@
   切换到 Flash Vision Exp；目录清单记录迁移完成状态，避免以后覆盖用户主动选回 Flash 的决定；
   最后在私有备份后移除已废弃的 `[vision]` 配置段。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
-  升级到 v4，并为统一更新入口提供只读版本检查；不自动迁移未知版本。
+  升级到 v4，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口提供
+  只读版本检查；不自动迁移未知版本。运行时由 SqliteScheduledTaskStore 保持失败关闭。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，

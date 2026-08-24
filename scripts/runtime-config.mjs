@@ -84,6 +84,9 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
     experimental: {
       plugin_api: false,
     },
+    scheduled_tasks: {
+      enabled: false,
+    },
     thread_sections: {
       administrators: [],
     },

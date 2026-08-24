@@ -10,6 +10,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   application: [
     "conversation-core",
     "policy",
+    "scheduled-tasks",
     "session-routing",
   ],
   approval: [
@@ -26,6 +27,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "observability",
     "policy",
     "provider-proxy",
+    "scheduled-tasks",
     "session-routing",
     "storage",
     "surfaces",
@@ -44,6 +46,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   "provider-proxy": [],
   observability: ["config"],
   policy: ["conversation-core"],
+  "scheduled-tasks": [],
   "session-routing": [
     "conversation-core",
     "policy",

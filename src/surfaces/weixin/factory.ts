@@ -5,6 +5,7 @@ import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
   ProviderModelUsageEstimate,
+  ScheduledTaskUseCases,
 } from "../../application/index.js";
 import type {
   ConversationActorRegistry,
@@ -29,6 +30,7 @@ export interface CreateWeixinSurfaceOptions {
   service: ConversationUseCases;
   access: SurfaceAccessPolicy;
   threadSectionAccess?: SurfaceAccessPolicy;
+  scheduledTasks?: ScheduledTaskUseCases;
   actorRegistry: ConversationActorRegistry;
   credentialDirectory: string;
   replyContextDirectory: string;
@@ -77,6 +79,9 @@ export function createWeixinSurface(
     ...(options.threadSectionAccess === undefined
       ? {}
       : { threadSectionAccess: options.threadSectionAccess }),
+    ...(options.scheduledTasks === undefined
+      ? {}
+      : { scheduledTasks: options.scheduledTasks }),
     actorRegistry: options.actorRegistry,
     credentialStore,
     replyContextPersistence: createWeixinReplyContextPersistence(

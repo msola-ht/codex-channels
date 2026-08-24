@@ -5,6 +5,8 @@ import {
   isFastServiceTier,
   type ConversationCommandResult,
   type ConversationUseCases,
+  type ScheduledTaskConfirmation,
+  type ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -13,6 +15,8 @@ import {
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
+  formatDelayMinutes,
+  formatScheduledTaskStatusLabel,
   formatSessionListCommand,
   formatThreadQueueInputTypeLabel,
 } from "../conversation-command-format.js";
@@ -91,7 +95,7 @@ export class FeishuConversationAdapter {
         menuEventObserved: false,
       }),
     private readonly oauth?: FeishuOAuthControllerPort,
-    private readonly commandCenter?: Pick<FeishuCommandCenter, "open">,
+    private readonly commandCenter?: Pick<FeishuCommandCenter, "open" | "openResponse">,
     private readonly applicationSetup?: Pick<
       FeishuApplicationSetupController,
       "openDoctor"
@@ -112,16 +116,33 @@ export class FeishuConversationAdapter {
         provider: string | null | undefined,
       ) => DisplayPriceCurrency;
       threadSectionAccess?: SurfaceAccessPolicy;
+      scheduledTasks?: ScheduledTaskUseCases;
     } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(
       conversations,
       inputOptions.threadSectionAccess,
+      inputOptions.scheduledTasks,
     );
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
       inputOptions,
     );
+  }
+
+  async presentScheduledTaskConfirmation(
+    target: ConversationTarget,
+    actorId: string,
+    preview: ScheduledTaskConfirmation,
+  ): Promise<void> {
+    if (!this.commandCenter) return;
+    const response = renderCommandCenterChoices("schedule", {
+      kind: "scheduled-confirmation",
+      preview,
+    });
+    if (response) {
+      await this.commandCenter.openResponse(target, actorId, response);
+    }
   }
 
   async handle(message: FeishuInboxMessage): Promise<void> {
@@ -189,6 +210,13 @@ export class FeishuConversationAdapter {
           command.argumentsText,
           message.actorId,
         );
+        if (result.kind === "scheduled-confirmation" && this.commandCenter) {
+          const response = renderCommandCenterChoices("schedule", result);
+          if (response) {
+            await this.commandCenter.openResponse(message.target, message.actorId, response);
+            return;
+          }
+        }
         const rendered = renderFeishuCommandResult(
           result,
           this.inputOptions.priceCurrency,
@@ -331,6 +359,16 @@ export class FeishuConversationAdapter {
           return queueResponse;
         }
       }
+      if (action === "schedule") {
+        const scheduleResponse = await this.handleScheduleCommandCenterAction(
+          target,
+          actorId,
+          input,
+        );
+        if (scheduleResponse) {
+          return scheduleResponse;
+        }
+      }
       const initialChoices = input === ""
         ? renderCommandCenterInitialChoices(action)
         : undefined;
@@ -391,6 +429,7 @@ export class FeishuConversationAdapter {
         || action === "archived"
         || (action === "plugin" && result.kind === "plugins")
         || (action === "section" && result.kind === "thread-sections")
+        || action === "schedule"
       )
         ? renderCommandCenterChoices(action, result)
         : undefined;
@@ -418,6 +457,56 @@ export class FeishuConversationAdapter {
       );
       throw error;
     }
+  }
+
+  private async handleScheduleCommandCenterAction(
+    target: ConversationTarget,
+    actorId: string,
+    input: string,
+  ): Promise<FeishuCommandCenterResponse | undefined> {
+    const normalized = input.trim();
+    if (normalized === "") {
+      return undefined;
+    }
+    if (normalized === "add") {
+      return renderScheduleCreateChoices();
+    }
+    const createKind = /^add-(interval|once|monthly|daily|weekdays|weekly)$/u.exec(normalized)?.[1] as
+      | "interval"
+      | "once"
+      | "monthly"
+      | "daily"
+      | "weekdays"
+      | "weekly"
+      | undefined;
+    if (createKind) {
+      return renderScheduleCreateForm(createKind);
+    }
+    const renameMatch = /^rename-task ([A-Za-z0-9_-]{1,128})$/u.exec(normalized);
+    if (renameMatch) {
+      return {
+        kind: "form",
+        title: "重命名计划任务",
+        action: "schedule",
+        fieldLabel: "任务名称",
+        placeholder: "请输入新名称",
+        inputPrefix: `rename ${renameMatch[1]} `,
+      };
+    }
+    const taskMatch = /^task ([A-Za-z0-9_-]{1,128})$/u.exec(normalized);
+    if (taskMatch) {
+      const result = await this.commands.execute(
+        target,
+        "schedule",
+        `runs ${taskMatch[1]}`,
+        actorId,
+      );
+      if (result.kind !== "scheduled-runs") {
+        return undefined;
+      }
+      return renderScheduleTaskChoices(result.result.task);
+    }
+    return undefined;
   }
 
   private async handleQueueCommandCenterAction(
@@ -1014,6 +1103,65 @@ function renderCommandCenterInitialChoices(
   return undefined;
 }
 
+function renderScheduleCreateChoices(): FeishuCommandCenterChoices {
+  return {
+    title: "新增计划任务",
+    description: "创建前会展示执行上下文预览，并要求二次确认。",
+    choices: [
+      { label: "每 N 分钟/小时", action: "schedule", input: "add-interval" },
+      { label: "一次性", action: "schedule", input: "add-once" },
+      { label: "每月指定日", action: "schedule", input: "add-monthly" },
+      { label: "每天", action: "schedule", input: "add-daily" },
+      { label: "工作日", action: "schedule", input: "add-weekdays" },
+      { label: "每周指定日", action: "schedule", input: "add-weekly" },
+      { label: "返回列表", action: "schedule", input: "list 1" },
+    ],
+  };
+}
+
+function renderScheduleCreateForm(
+  kind: "interval" | "once" | "monthly" | "daily" | "weekdays" | "weekly",
+): FeishuCommandCenterForm {
+  const inputs = {
+    interval: ["每 N 分钟/小时", "N(分钟或小时) 时区 任务文本", "30m Asia/Shanghai 检查项目状态"],
+    once: ["一次性", "日期 时间 时区 任务文本", "2026-09-01 09:00 Asia/Shanghai 发送报告"],
+    monthly: ["每月指定日", "日 时间 时区 任务文本", "1 09:00 Asia/Shanghai 汇总上月"],
+    daily: ["每天", "HH:mm 时区 任务文本", "09:00 Asia/Shanghai 汇总昨日进展"],
+    weekdays: ["工作日", "HH:mm 时区 任务文本", "09:00 Asia/Shanghai 检查待办"],
+    weekly: ["每周指定日", "星期 HH:mm 时区 任务文本", "MO,FR 10:00 Asia/Shanghai 输出周报"],
+  } as const;
+  const [title, fieldLabel, placeholder] = inputs[kind];
+  return {
+    kind: "form",
+    title: `新增计划任务 · ${title}`,
+    description: "任务使用当前会话的 Workspace、Provider、模型和思考等级快照运行。",
+    action: "schedule",
+    fieldLabel,
+    placeholder,
+    inputPrefix: `add ${kind} `,
+    multiline: true,
+  };
+}
+
+function renderScheduleTaskChoices(
+  task: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>["result"]["tasks"][number],
+): FeishuCommandCenterChoices {
+  return {
+    title: task.name,
+    description: `ID：${task.taskId}\n状态：${task.status}\n任务预览：${task.promptPreview}`,
+    choices: [
+      { label: "运行记录", action: "schedule", input: `runs ${task.taskId}` },
+      { label: "立即运行", action: "schedule", input: `run ${task.taskId}` },
+      ...(task.status === "paused"
+        ? [{ label: "恢复", action: "schedule" as const, input: `resume ${task.taskId}` }]
+        : [{ label: "暂停", action: "schedule" as const, input: `pause ${task.taskId}` }]),
+      { label: "重命名", action: "schedule", input: `rename-task ${task.taskId}` },
+      { label: "删除", action: "schedule", input: `delete ${task.taskId}` },
+      { label: "返回列表", action: "schedule", input: "list 1" },
+    ],
+  };
+}
+
 function renderCommandCenterForm(
   action: FeishuCommandCenterAction,
 ): FeishuCommandCenterForm | undefined {
@@ -1108,6 +1256,114 @@ function renderCommandCenterChoices(
   action: FeishuCommandCenterAction,
   result: ConversationCommandResult,
 ): FeishuCommandCenterChoices | undefined {
+  if (action === "schedule" && result.kind === "scheduled-tasks") {
+    return {
+      title: `Gateway 计划任务 · 第 ${result.result.page}/${result.result.pageCount} 页`,
+      description: result.result.totalTaskCount === 0
+        ? "当前没有计划任务。"
+        : `共 ${result.result.totalTaskCount} 项；选择任务后可查看运行记录或执行管理操作。`,
+      choices: [
+        ...result.result.tasks.map((task) => ({
+          label: `${formatScheduledTaskStatusLabel(task.status)} · ${task.name}`,
+          action: "schedule" as const,
+          input: `task ${task.taskId}`,
+        })),
+        { label: "新增", action: "schedule", input: "add" },
+        ...(result.result.page > 1
+          ? [{ label: "上一页", action: "schedule" as const, input: `list ${result.result.page - 1}` }]
+          : []),
+        ...(result.result.page < result.result.pageCount
+          ? [{ label: "下一页", action: "schedule" as const, input: `list ${result.result.page + 1}` }]
+          : []),
+      ],
+    };
+  }
+  if (action === "schedule" && result.kind === "scheduled-runs") {
+    return {
+      title: `运行记录 · ${result.result.task.name}`,
+      description: [
+        `第 ${result.result.page}/${result.result.pageCount} 页 · 共 ${result.result.totalRunCount} 条`,
+        ...result.result.runs.map((run) =>
+          `${run.selector}. ${run.state} · ${new Date(run.scheduledFor).toISOString()} · ${run.runId}`
+        ),
+      ].join("\n"),
+      choices: [
+        ...result.result.runs
+          .filter((run) => run.state === "uncertain")
+          .map((run) => ({
+            label: `重试 uncertain · ${run.selector}`,
+            action: "schedule" as const,
+            input: `retry ${run.runId}`,
+          })),
+        ...(result.result.page > 1
+          ? [{
+              label: "上一页",
+              action: "schedule" as const,
+              input: `runs ${result.result.task.taskId} ${result.result.page - 1}`,
+            }]
+          : []),
+        ...(result.result.page < result.result.pageCount
+          ? [{
+              label: "下一页",
+              action: "schedule" as const,
+              input: `runs ${result.result.task.taskId} ${result.result.page + 1}`,
+            }]
+          : []),
+        { label: "返回任务", action: "schedule", input: `task ${result.result.task.taskId}` },
+      ],
+    };
+  }
+  if (action === "schedule" && result.kind === "scheduled-confirmation") {
+    const task = result.preview.task;
+    const actionLabel = result.preview.action === "create" ? "创建" : "删除";
+    return {
+      title: `确认${actionLabel}计划任务`,
+      description: [
+        "**任务**",
+        `- 名称：${escapeFeishuCardMarkdown(task.name)}`,
+        `- 计划：${escapeFeishuCardMarkdown(scheduleChoiceSummary(task.schedule))} · ${escapeFeishuCardMarkdown(task.timezone)}`,
+        `- 下次运行：${escapeFeishuCardMarkdown(task.nextRunAt === null ? "无" : new Date(task.nextRunAt).toISOString())}`,
+        "",
+        "**执行配置**",
+        `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,
+        `- Provider：${escapeFeishuCardMarkdown(task.modelProvider)}`,
+        `- 模型：${escapeFeishuCardMarkdown(task.model ?? "默认")}`,
+        `- 思考等级：${escapeFeishuCardMarkdown(task.reasoningEffort ?? "默认")}`,
+        `- Sandbox：${escapeFeishuCardMarkdown(task.sandbox)}`,
+        `- 权限 Profile：${escapeFeishuCardMarkdown(task.permissions ?? "未配置")}`,
+        "- 网络：沿用 Workspace 当前权限",
+        "- 审批：无人值守时一律拒绝",
+        "",
+        "**任务内容**",
+        `- ${escapeFeishuCardMarkdown(task.promptPreview)}`,
+        "",
+        "该任务由 Gateway 无人值守执行；确认令牌 5 分钟内有效且仅可使用一次。",
+      ].join("\n"),
+      descriptionFormat: "markdown",
+      choices: [
+        {
+          label: "确认",
+          action: "schedule",
+          input: `confirm ${result.preview.token}`,
+          acceptedState: {
+            title: `已确认${actionLabel}计划任务`,
+            description: "请求已提交，原按钮已失效；执行结果见后续消息。",
+            template: "green",
+          },
+        },
+        {
+          label: "取消",
+          action: "schedule",
+          input: "list 1",
+          acceptedState: {
+            title: `已取消${actionLabel}计划任务`,
+            description: `未${actionLabel}计划任务，原按钮已失效。`,
+            template: "grey",
+          },
+        },
+      ],
+    };
+  }
   if (action === "plugin" && result.kind === "plugins") {
     const callable = result.plugins.filter((plugin) =>
       plugin.enabled && plugin.available
@@ -1352,6 +1608,21 @@ function renderCommandCenterChoices(
   return undefined;
 }
 
+function scheduleChoiceSummary(
+  schedule: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>["result"]["tasks"][number]["schedule"],
+): string {
+  switch (schedule.type) {
+    case "interval": return `每 ${formatDelayMinutes(schedule.intervalMinutes)}`;
+    case "once": return "afterMinutes" in schedule
+      ? `一次性 ${formatDelayMinutes(schedule.afterMinutes)}后`
+      : `一次性 ${schedule.date} ${schedule.time}`;
+    case "monthly": return `每月 ${schedule.day} 号 ${schedule.time}`;
+    case "daily": return `每天 ${schedule.time}`;
+    case "weekdays": return `工作日 ${schedule.time}`;
+    case "weekly": return `每周 ${schedule.days.join(",")} ${schedule.time}`;
+  }
+}
+
 function sessionNavigationChoices(
   result: Extract<ConversationCommandResult, { kind: "sessions" }>,
   action: "sessions" | "archived",
@@ -1471,6 +1742,13 @@ function workspacePermissionLabel(
         never: "免审批",
       } as const);
   return (labels as Record<string, string>)[value] ?? value;
+}
+
+function escapeFeishuCardMarkdown(value: string): string {
+  return value
+    .replace(/[\r\n]+/gu, " ")
+    .replaceAll("\\", "\\\\")
+    .replaceAll(/([`*_~[\]()>#+\-.!|{}])/gu, "\\$1");
 }
 
 class FeishuOutputQueueError extends Error {

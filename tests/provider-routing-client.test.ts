@@ -9,6 +9,20 @@ import type { ThreadSession, ThreadSnapshot } from "../src/session-routing/index
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("reports configured Providers without starting their App Server", () => {
+    const openai = client();
+    const deepseek = client();
+    const routed = new ProviderRoutingClient("openai", new Map([
+      ["openai", openai],
+      ["deepseek", deepseek],
+    ]), async () => undefined);
+
+    expect(routed.isProviderConfigured("openai")).toBe(true);
+    expect(routed.isProviderConfigured("deepseek")).toBe(true);
+    expect(routed.isProviderConfigured("missing")).toBe(false);
+    expect(deepseek.connect).not.toHaveBeenCalled();
+  });
+
   it("starts and connects an auxiliary Provider only when first selected", async () => {
     const openai = client();
     const deepseek = client();
@@ -76,6 +90,49 @@ describe("ProviderRoutingClient", () => {
     expect(openai.startThread).not.toHaveBeenCalled();
     expect(deepseek.startThread).toHaveBeenCalledOnce();
     expect(deepseek.startTurn).toHaveBeenCalledOnce();
+  });
+
+  it("releases an ephemeral Thread through its owning Provider and forgets the route", async () => {
+    const openai = client();
+    const deepseek = client();
+    deepseek.startThread.mockResolvedValue(session("thread-draft", "deepseek", "idle"));
+    const routed = routing(openai, deepseek);
+
+    await routed.startThread(cwd, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      ephemeral: true,
+    });
+    await routed.releaseEphemeralThread("thread-draft");
+
+    expect(deepseek.unsubscribeThread).toHaveBeenCalledWith("thread-draft");
+    expect(openai.unsubscribeThread).not.toHaveBeenCalled();
+    openai.readThread.mockRejectedValue(new Error("route forgotten"));
+    await expect(routed.releaseEphemeralThread("thread-draft"))
+      .rejects.toThrow("route forgotten");
+    expect(openai.readThread).toHaveBeenCalledWith("thread-draft");
+  });
+
+  it("retains an ephemeral Thread route when unsubscribe fails so cleanup can retry", async () => {
+    const openai = client();
+    const deepseek = client();
+    deepseek.startThread.mockResolvedValue(session("thread-draft", "deepseek", "idle"));
+    deepseek.unsubscribeThread
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce(undefined);
+    const routed = routing(openai, deepseek);
+
+    await routed.startThread(cwd, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      ephemeral: true,
+    });
+    await expect(routed.releaseEphemeralThread("thread-draft"))
+      .rejects.toThrow("temporary failure");
+    await routed.releaseEphemeralThread("thread-draft");
+
+    expect(deepseek.unsubscribeThread).toHaveBeenCalledTimes(2);
+    expect(openai.readThread).not.toHaveBeenCalled();
   });
 
   it("routes Queue and history operations to the remembered Thread Provider", async () => {

@@ -117,7 +117,6 @@ export class MemoryBindingStore implements BindingStore {
     backgrounds.set(binding.threadId, binding);
     this.backgroundByConversation.set(conversationKey, backgrounds);
     this.byThread.set(binding.threadId, binding);
-    this.workspaceByConversation.set(conversationKey, binding.workspaceId);
   }
 
   switchForeground(

@@ -3,6 +3,7 @@ import {
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
+  scheduledTaskCommandUsageText,
   threadQueueCommandUsageText,
   threadRevertCommandUsageText,
 } from "../application/index.js";
@@ -88,6 +89,14 @@ export function formatSurfaceUserFacingError(
       return "目标不能为空";
     case "goal.usage":
       return "用法：/goal [set <目标>|clear]";
+    case "scheduled-task.command.invalid":
+      return error.message.includes("用法") ? scheduledTaskCommandUsageText : error.message;
+    case "scheduled-task.confirmation.invalid":
+    case "scheduled-task.forbidden":
+    case "scheduled-task.not-found":
+    case "scheduled-task.snapshot.required":
+    case "scheduled-task.state.invalid":
+      return error.message;
     case "queue.usage":
       return threadQueueCommandUsageText;
     case "metrics.usage":
@@ -150,6 +159,8 @@ export function formatSurfaceUserFacingError(
       return "当前 Gateway 不支持修改工作区权限";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
+    case "model.provider.mismatch":
+      return error.message;
     case "model.unavailable":
       return `${detail(error, "model", "该模型")} 暂不可用：${detail(error, "reason", "上游暂未开放")}`;
     case "model.selector.required":

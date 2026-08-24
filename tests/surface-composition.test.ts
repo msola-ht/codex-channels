@@ -544,6 +544,7 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     planUpdatesEnabled: false,
     reasoningEnabled: true,
     pluginApiEnabled: true,
+    scheduledTasksEnabled: false,
     threadSectionAdministrators: new Set(),
     priceCurrency: "cny",
     apiProviders: [],

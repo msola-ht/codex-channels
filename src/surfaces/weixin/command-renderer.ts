@@ -33,6 +33,9 @@ import {
   formatConversationPermissions,
   formatConversationProjectRules,
   formatConversationSessions,
+  formatConversationScheduledConfirmation,
+  formatConversationScheduledRuns,
+  formatConversationScheduledTasks,
   formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
@@ -166,6 +169,12 @@ export function renderWeixinCommandResult(
       return formatConversationThreadRevert(result);
     case "thread-revert-preview":
       return formatConversationThreadRevertPreview(result);
+    case "scheduled-tasks":
+      return formatConversationScheduledTasks(result);
+    case "scheduled-runs":
+      return formatConversationScheduledRuns(result);
+    case "scheduled-confirmation":
+      return formatConversationScheduledConfirmation(result);
     case "status":
       return formatConversationStatus(result.status);
     case "workspaces":

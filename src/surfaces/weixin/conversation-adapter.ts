@@ -2,6 +2,7 @@ import {
   ConversationCommandService,
   isConversationCommandName,
   type ConversationUseCases,
+  type ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
   conversationTargetKey,
@@ -110,6 +111,7 @@ export class WeixinConversationAdapter {
         provider: string | null | undefined,
       ) => DisplayPriceCurrency;
       threadSectionAccess?: SurfaceAccessPolicy;
+      scheduledTasks?: ScheduledTaskUseCases;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
@@ -117,6 +119,7 @@ export class WeixinConversationAdapter {
     this.commands = new ConversationCommandService(
       conversations,
       inputOptions.threadSectionAccess,
+      inputOptions.scheduledTasks,
     );
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),

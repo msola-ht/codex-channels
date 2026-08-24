@@ -62,6 +62,7 @@ describe("Feishu command center", () => {
       "workspace",
       "goal",
       "plan",
+      "schedule",
       "help",
     ]);
     expect(JSON.stringify(card)).toContain("常用");
@@ -148,6 +149,105 @@ describe("Feishu command center", () => {
       "ou_actor",
       "",
     );
+  });
+
+  it("opens a directly supplied schedule confirmation as a bound choice card", async () => {
+    const fixture = createFixture();
+    const input = "confirm 12345678-1234-1234-1234-123456789abc";
+
+    await fixture.center.openResponse(target, "ou_actor", {
+      title: "确认创建计划任务",
+      description: "确认后保存任务",
+      choices: [
+        { label: "确认", action: "schedule", input },
+        { label: "取消", action: "schedule", input: "list 1" },
+      ],
+    });
+
+    expect(JSON.stringify(fixture.cards[0]?.card)).toContain("确认创建计划任务");
+    expect(fixture.center.handleCardAction(
+      cardAction(fixture.cards[0]!, "schedule"),
+    )).toBe("accepted");
+    await settle();
+    expect(fixture.execute).toHaveBeenCalledWith(
+      target,
+      "schedule",
+      "ou_actor",
+      input,
+    );
+  });
+
+  it("renders schedule details as Markdown and replaces accepted confirmation buttons", async () => {
+    const cards: Array<{
+      chatId: string;
+      messageId: string;
+      card: FeishuCardDocument;
+    }> = [];
+    const updateCard = vi.fn(async (
+      _chatId: string,
+      _messageId: string,
+      _card: FeishuCardDocument,
+    ) => {
+      void [_chatId, _messageId, _card];
+    });
+    const execute = vi.fn(async () => {});
+    const center = new FeishuCommandCenter(
+      {
+        deliverCard: async (chatId, card) => {
+          const messageId = "om_confirmation";
+          cards.push({ chatId, messageId, card });
+          return messageId;
+        },
+        updateCard,
+      },
+      { isAllowed: () => true },
+      execute,
+      pino({ level: "silent" }),
+    );
+    const input = "confirm 12345678-1234-1234-1234-123456789abc";
+
+    await center.openResponse(target, "ou_actor", {
+      title: "确认创建计划任务",
+      description: "**任务**\n- 名称：每日检查",
+      descriptionFormat: "markdown",
+      choices: [
+        {
+          label: "确认",
+          action: "schedule",
+          input,
+          acceptedState: {
+            title: "已确认创建计划任务",
+            description: "请求已提交，原按钮已失效。",
+            template: "green",
+          },
+        },
+        {
+          label: "取消",
+          action: "schedule",
+          input: "list 1",
+          acceptedState: {
+            title: "已取消创建计划任务",
+            description: "未创建计划任务。",
+            template: "grey",
+          },
+        },
+      ],
+    });
+
+    expect(feishuCardElements(cards[0]!.card)).toContainEqual(
+      expect.objectContaining({
+        tag: "markdown",
+      }),
+    );
+    expect(center.handleCardAction(
+      cardAction(cards[0]!, "schedule"),
+    )).toBe("accepted");
+    await settle();
+
+    expect(updateCard).toHaveBeenCalledTimes(1);
+    const updated = updateCard.mock.calls[0]![2] as FeishuCardDocument;
+    expect(JSON.stringify(updated)).toContain("已确认创建计划任务");
+    expect(collectCardActions(updated)).toHaveLength(0);
   });
 
   it("opens bounded choices and executes the selected value", async () => {

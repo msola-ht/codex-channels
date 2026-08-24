@@ -12,13 +12,16 @@
   压缩 Item ID，不向业务层暴露完整官方 Turn。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
   权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
-  压缩 Item ID 及 `thread/unsubscribe`；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
+  压缩 Item ID、新建前台 Thread 的动态工具注册及 `thread/unsubscribe`；动态工具不会触发既有前台 Thread 的替换或解绑；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
   已删除或已归档时才移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许
   当前 Thread 与目标 Conversation 原 Thread 都由 App Server 报告为空闲时执行；保留被接管
   Thread 的现有订阅，只取消目标 Conversation 被替换 Thread 的订阅。跨 Provider 模型切换通过
   `newSession` 解除当前绑定并保留原 Thread，下一 Turn 由对应 App Server 以精确 Provider 和模型新建 Thread；
   不使用 `thread/fork` 复制 Provider 专属历史。自动接续收到渠道保留的 Provider 时只恢复相同
   Provider 的候选 Thread；没有兼容候选时按该 Provider 新建，避免把模型交给错误的 App Server。
+  `startBackground` 是计划任务专用的窄入口：始终发送稳定 `threadSource=automation`、强制
+  `thread/start`，不调用 `ensure` 的空闲候选选择，并在写入前限制每个 Conversation 三个后台绑定；
+  后台 Thread 不携带前台 `dynamicTools`，防止计划任务递归创建任务。
 
 运行中的前台 Thread 在 `/resume` 或 `/new` 切换时转为后台绑定，保持 App Server 订阅与原
 Conversation 归属；新输入只路由到前台 Thread。后台 Turn 完成后先与原生 Queue 的自动派发

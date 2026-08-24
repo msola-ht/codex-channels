@@ -88,10 +88,12 @@ import type {
   TurnStartResponse,
   TurnSteerResponse,
   JsonValue,
+  DynamicToolSpec as ProtocolDynamicToolSpec,
 } from "../codex-protocol/index.js";
 import type {
   ThreadLifecyclePort,
   ThreadQueryOptions,
+  ThreadDynamicToolSpec,
   ThreadSession,
   ThreadStartOptions,
   ThreadSnapshot,
@@ -270,6 +272,13 @@ export class CodexAppServerClient implements
           ? { model: options.model }
           : this.defaults.model ? { model: this.defaults.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
+        ...(options.threadSource === "automation"
+          ? { threadSource: options.threadSource }
+          : {}),
+        ...(options.ephemeral === true ? { ephemeral: true } : {}),
+        ...(options.dynamicTools?.length
+          ? { dynamicTools: options.dynamicTools.map(toProtocolDynamicTool) }
+          : {}),
       },
     }, { retryOverload: false });
     return toThreadSession(response);
@@ -966,6 +975,16 @@ export class CodexAppServerClient implements
       params: { threadId },
     }, { retryOverload: false });
   }
+}
+
+function toProtocolDynamicTool(spec: ThreadDynamicToolSpec): ProtocolDynamicToolSpec {
+  return {
+    type: "function",
+    name: spec.name,
+    description: spec.description,
+    inputSchema: spec.inputSchema as JsonValue,
+    ...(spec.deferLoading === true ? { deferLoading: true } : {}),
+  };
 }
 
 function rememberCursor(method: string, cursor: string | null, cursors: Set<string>): void {

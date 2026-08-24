@@ -107,6 +107,11 @@ function restartRequiredReasons(
       next.pluginApiEnabled,
     ],
     [
+      configChange("scheduled-tasks.enabled"),
+      current.scheduledTasksEnabled,
+      next.scheduledTasksEnabled,
+    ],
+    [
       configChange("thread-sections.administrators"),
       JSON.stringify([...current.threadSectionAdministrators].sort()),
       JSON.stringify([...next.threadSectionAdministrators].sort()),

@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   conversationCommandNames,
   type ConversationUseCases,
+  type ScheduledTaskConfirmation,
 } from "../src/application/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
 import { ThreadSectionAccessPolicy } from "../src/policy/index.js";
@@ -213,13 +214,14 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const submit = vi.fn();
     const open = vi.fn(async () => {});
+    const openResponse = vi.fn(async () => {});
     const adapter = new FeishuConversationAdapter(
       { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
       undefined,
       undefined,
-      { open },
+      { open, openResponse },
     );
 
     await adapter.handle({ ...message, text: "/start" });
@@ -238,6 +240,103 @@ describe("Feishu conversation adapter", () => {
     );
     expect(submit).not.toHaveBeenCalled();
     expect(fixture.sent).toEqual([]);
+  });
+
+  it("opens a native confirmation card for a directly typed schedule preview", async () => {
+    const fixture = createOutbox();
+    const openResponse = vi.fn(async () => {});
+    const task = {
+      taskId: "task-preview",
+      name: "每小时检查",
+      status: "active" as const,
+      schedule: { type: "interval" as const, intervalMinutes: 60, anchorAt: 1 },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 2,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      serviceTier: null,
+      sandbox: "workspace-write" as const,
+      permissions: null,
+      promptPreview: "检查项目",
+    };
+    const previewNaturalLanguage = vi.fn(() => ({
+      action: "create" as const,
+      token: "12345678-1234-1234-1234-123456789abc",
+      expiresAt: Date.now() + 60_000,
+      task,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      { open: vi.fn(async () => {}), openResponse } as never,
+      undefined,
+      undefined,
+      { scheduledTasks: { previewNaturalLanguage } as never },
+    );
+
+    await adapter.handle({
+      ...message,
+      text: "/schedule 每隔 1 小时在 Asia/Shanghai 检查项目",
+    });
+    await fixture.outbox.close();
+
+    expect(openResponse).toHaveBeenCalledWith(
+      message.target,
+      message.actorId,
+      expect.objectContaining({
+        title: "确认创建计划任务",
+        choices: expect.arrayContaining([
+          expect.objectContaining({
+            label: "确认",
+            input: "confirm 12345678-1234-1234-1234-123456789abc",
+          }),
+          expect.objectContaining({ label: "取消" }),
+        ]),
+      }),
+    );
+    expect(fixture.sent).toEqual([]);
+  });
+
+  it("opens the native CardKit confirmation for a schedule_task preview", async () => {
+    const fixture = createOutbox();
+    const openResponse = vi.fn(async () => {});
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      { open: vi.fn(async () => {}), openResponse } as never,
+    );
+    const preview = scheduledTaskPreview();
+
+    await adapter.presentScheduledTaskConfirmation(
+      message.target,
+      message.actorId,
+      preview,
+    );
+    await fixture.outbox.close();
+
+    expect(openResponse).toHaveBeenCalledWith(
+      message.target,
+      message.actorId,
+      expect.objectContaining({
+        title: "确认创建计划任务",
+        descriptionFormat: "markdown",
+        choices: expect.arrayContaining([
+          expect.objectContaining({
+            label: "确认",
+            input: `confirm ${preview.token}`,
+          }),
+          expect.objectContaining({ label: "取消" }),
+        ]),
+      }),
+    );
   });
 
   it("provides concise Feishu status and doctor commands without starting a Turn", async () => {
@@ -924,6 +1023,127 @@ describe("Feishu conversation adapter", () => {
       "继续检查私聊失败路径",
     );
     expect(fixture.sent.some(({ text }) => text.includes("已写入 App Server Queue"))).toBe(true);
+  });
+
+  it("manages Gateway scheduled tasks through shared commands and confirmation buttons", async () => {
+    const fixture = createOutbox();
+    const task = {
+      taskId: "task-1",
+      name: "每日检查",
+      status: "active" as const,
+      schedule: { type: "daily" as const, time: "09:00" },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 1_785_000_000_000,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      serviceTier: null,
+      sandbox: "workspace-write" as const,
+      permissions: null,
+      promptPreview: "检查项目状态",
+    };
+    const scheduledTasks = {
+      list: vi.fn(() => ({
+        tasks: [task],
+        selectors: ["1"],
+        page: 1,
+        pageCount: 1,
+        totalTaskCount: 1,
+      })),
+      runs: vi.fn(() => ({
+        task,
+        runs: [],
+        page: 1,
+        pageCount: 1,
+        totalRunCount: 0,
+      })),
+      previewCreate: vi.fn(() => ({
+        action: "create" as const,
+        token: "12345678-1234-1234-1234-123456789abc",
+        expiresAt: Date.now() + 60_000,
+        task,
+      })),
+    };
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { scheduledTasks: scheduledTasks as never },
+    );
+
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+    )).resolves.toMatchObject({
+      title: "Gateway 计划任务 · 第 1/1 页",
+      choices: expect.arrayContaining([
+        expect.objectContaining({ label: "已启用 · 每日检查", input: "task task-1" }),
+        expect.objectContaining({ input: "add" }),
+      ]),
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+      "task task-1",
+    )).resolves.toMatchObject({
+      title: "每日检查",
+      choices: expect.arrayContaining([
+        expect.objectContaining({ input: "run task-1" }),
+        expect.objectContaining({ input: "delete task-1" }),
+      ]),
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+      "add-daily",
+    )).resolves.toMatchObject({
+      kind: "form",
+      inputPrefix: "add daily ",
+    });
+    await expect(adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+      "add daily 09:00 Asia/Shanghai 检查项目状态",
+    )).resolves.toMatchObject({
+      title: "确认创建计划任务",
+      description: expect.stringContaining("计划：每天 09:00 · Asia/Shanghai"),
+      choices: expect.arrayContaining([
+        expect.objectContaining({
+          input: "confirm 12345678-1234-1234-1234-123456789abc",
+          acceptedState: expect.objectContaining({
+            title: "已确认创建计划任务",
+            template: "green",
+          }),
+        }),
+        expect.objectContaining({
+          label: "取消",
+          acceptedState: expect.objectContaining({
+            title: "已取消创建计划任务",
+            template: "grey",
+          }),
+        }),
+      ]),
+    });
+    const confirmation = await adapter.handleCommandCenterAction(
+      message.target,
+      "schedule",
+      message.actorId,
+      "add daily 09:00 Asia/Shanghai 检查项目状态",
+    );
+    expect(confirmation).toMatchObject({
+      description: expect.stringContaining("无人值守执行"),
+    });
+    await fixture.outbox.close();
   });
 
   it("offers only the existing safe project-rule actions", async () => {
@@ -1893,6 +2113,30 @@ describe("Feishu conversation adapter", () => {
     expect(JSON.stringify(fixture.sent)).not.toContain("secret");
   });
 });
+
+function scheduledTaskPreview(): ScheduledTaskConfirmation {
+  return {
+    action: "create",
+    token: "12345678-1234-1234-1234-123456789abc",
+    expiresAt: 2,
+    task: {
+      taskId: "task-preview",
+      name: "检查 CI",
+      status: "active",
+      schedule: { type: "interval", intervalMinutes: 60, anchorAt: 1 },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 2,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      serviceTier: null,
+      sandbox: "workspace-write",
+      permissions: null,
+      promptPreview: "检查 CI",
+    },
+  };
+}
 
 function createOutbox(): {
   outbox: FeishuOutbox;

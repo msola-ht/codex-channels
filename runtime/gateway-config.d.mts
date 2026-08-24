@@ -45,6 +45,7 @@ export interface GatewayConfigDocument {
     price_currency: "cny" | "usd";
   };
   experimental: { plugin_api: boolean };
+  scheduled_tasks: { enabled: boolean };
   thread_sections: { administrators: string[] };
   api_providers: Array<{
     id: string;

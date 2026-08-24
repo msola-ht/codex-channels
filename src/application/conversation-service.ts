@@ -1982,6 +1982,21 @@ export class ConversationService implements ConversationUseCases {
       ? await this.router.ensure(target, threadStartOptions)
       : await this.router.ensure(target);
     const workspace = this.router.workspace(target);
+    const overrides = this.turnOverrides(target);
+    if (overrides.modelProvider != null) {
+      const threadProvider = this.router.modelSettings(target)?.modelProvider ?? "openai";
+      if (overrides.modelProvider !== threadProvider) {
+        throw new UserFacingError(
+          "model.provider.mismatch",
+          `当前线程运行在 ${threadProvider} 账户，不能使用 ${overrides.modelProvider} Provider 的模型 ${overrides.model ?? "当前模型"}；请新建会话切换模型，或改回当前会话可用模型。`,
+          {
+            provider: overrides.modelProvider,
+            threadProvider,
+            ...(overrides.model == null ? {} : { model: overrides.model }),
+          },
+        );
+      }
+    }
     let result;
     try {
       result = await this.codex.startTurn(
@@ -1989,7 +2004,7 @@ export class ConversationService implements ConversationUseCases {
         input,
         clientUserMessageId,
         workspace.cwd,
-        this.turnOverrides(target),
+        overrides,
       );
     } catch (error) {
       this.recordTurnError("start", target, binding.threadId, null, error);
