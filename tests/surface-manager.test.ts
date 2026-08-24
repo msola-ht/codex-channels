@@ -601,6 +601,104 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("waits for recovered completion timing before reading the session aggregate", async () => {
+    const received: OutputEvent[] = [];
+    const order: string[] = [];
+    let releaseTiming!: () => void;
+    let markTimingStarted!: () => void;
+    const timingGate = new Promise<void>((resolve) => {
+      releaseTiming = resolve;
+    });
+    const timingStarted = new Promise<void>((resolve) => {
+      markTimingStarted = resolve;
+    });
+    let markDelivered!: () => void;
+    const delivered = new Promise<void>((resolve) => {
+      markDelivered = resolve;
+    });
+    const feishu = surface("feishu", "tenant-a", []);
+    feishu.output.handle = (event) => {
+      order.push("output");
+      received.push(event);
+      markDelivered();
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      completionTiming: async () => {
+        order.push("timing-start");
+        markTimingStarted();
+        await timingGate;
+        order.push("timing-finished");
+        return {
+          modelRequestCount: 2,
+          requestInputTokens: 1_000,
+          requestOutputTokens: 100,
+          referenceCost: {
+            currency: "USD",
+            totalCostNanos: 12_000,
+            inputTokens: 1_000,
+            outputTokens: 100,
+            inputCostNanos: 8_000,
+            cachedInputCostNanos: 1_000,
+            outputCostNanos: 3_000,
+            pricedRequestCount: 2,
+            requestCount: 2,
+            uncachedInputPricePerMillionNanos: 10,
+            cachedInputPricePerMillionNanos: 1,
+            outputPricePerMillionNanos: 30,
+            hasMixedPrices: false,
+          },
+        };
+      },
+      sessionReferenceCost: (_threadId, _turnId, current) => {
+        order.push(`session-${current?.requestCount ?? "missing"}`);
+        return current;
+      },
+    });
+    await manager.start();
+
+    output.publish({
+      type: "turn.completed",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+    });
+    await timingStarted;
+
+    expect(order).toEqual(["timing-start"]);
+    releaseTiming();
+    await delivered;
+    expect(order).toEqual([
+      "timing-start",
+      "timing-finished",
+      "session-2",
+      "output",
+    ]);
+    expect(received).toEqual([
+      expect.objectContaining({
+        type: "turn.completed",
+        timing: expect.objectContaining({
+          modelRequestCount: 2,
+          requestInputTokens: 1_000,
+          requestOutputTokens: 100,
+        }),
+        sessionReferenceCost: expect.objectContaining({
+          requestCount: 2,
+          inputTokens: 1_000,
+          outputTokens: 100,
+        }),
+      }),
+    ]);
+
+    await manager.stop();
+    await output.close();
+  });
+
   it("isolates a Surface output rejection from later events", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: string[] = [];

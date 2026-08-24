@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeSessionReferenceCost } from "../src/bootstrap/reference-cost-summary.js";
+import {
+  mergeCompletionTiming,
+  mergeSessionReferenceCost,
+} from "../src/bootstrap/reference-cost-summary.js";
 import type {
   StoredThreadRequestMetricsAggregate,
   StoredTurnRequestMetricsSummary,
@@ -147,6 +150,121 @@ describe("mergeSessionReferenceCost", () => {
       hasMixedPrices: false,
       pricingBuckets: [],
     });
+  });
+});
+
+describe("mergeCompletionTiming", () => {
+  it("rebuilds a recovered Turn from the persisted local proxy summary", () => {
+    const latestTurn = turnSummary({
+      requestCount: 2,
+      requestDurationMs: 12_000,
+      inputTokens: 1_000,
+      cachedInputTokens: 800,
+      outputTokens: 100,
+      reasoningOutputTokens: 40,
+      outputTokensPerSecond: 25,
+      outputSpeedSampleCount: 2,
+      outputSpeedTimedCount: 2,
+      pricedRequestCount: 2,
+      pricedInputTokens: 1_000,
+      pricedOutputTokens: 100,
+      totalCostNanos: 12_000,
+      inputCostNanos: 8_000,
+      cachedInputCostNanos: 1_000,
+      outputCostNanos: 3_000,
+      compact: {
+        model: "gpt-5.6-sol",
+        hasMixedModels: false,
+        requestCount: 1,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 400,
+        cachedInputTokens: 320,
+        outputTokens: 20,
+        pricingCurrency: "USD",
+        pricedRequestCount: 1,
+        totalCostNanos: 2_000,
+      },
+    });
+
+    expect(mergeCompletionTiming(latestTurn, "turn-1", undefined)).toEqual({
+      modelRequestCount: 2,
+      modelRequestDurationMs: 12_000,
+      requestInputTokens: 1_000,
+      requestCachedInputTokens: 800,
+      requestOutputTokens: 100,
+      reasoningTokens: 40,
+      outputTokensPerSecond: 25,
+      outputSpeedSampleCount: 2,
+      outputSpeedTimedCount: 2,
+      referenceCost: {
+        currency: "USD",
+        totalCostNanos: 12_000,
+        inputTokens: 1_000,
+        outputTokens: 100,
+        inputCostNanos: 8_000,
+        cachedInputCostNanos: 1_000,
+        outputCostNanos: 3_000,
+        pricedRequestCount: 2,
+        requestCount: 2,
+        ...rates,
+        hasMixedPrices: false,
+        pricingBuckets: [],
+      },
+      compact: {
+        model: "gpt-5.6-sol",
+        hasMixedModels: false,
+        requestCount: 1,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 400,
+        cachedInputTokens: 320,
+        outputTokens: 20,
+        pricingCurrency: "USD",
+        pricedRequestCount: 1,
+        totalCostNanos: 2_000,
+      },
+    });
+  });
+
+  it("clears incomplete persisted fields without dropping live response latency", () => {
+    const latestTurn = turnSummary({
+      requestCount: 2,
+      cachedInputTokens: null,
+      reasoningOutputTokens: 0,
+      outputTokensPerSecond: null,
+      outputSpeedSampleCount: 2,
+      outputSpeedTimedCount: 1,
+      compact: null,
+    });
+
+    const timing = mergeCompletionTiming(latestTurn, "turn-1", {
+      firstResponseLatencyMs: 500,
+      requestCachedInputTokens: 400,
+      reasoningTokens: 20,
+      outputTokensPerSecond: 50,
+      compact: {
+        model: "stale-model",
+        hasMixedModels: false,
+        requestCount: 1,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 10,
+        cachedInputTokens: 10,
+        outputTokens: 1,
+        pricingCurrency: null,
+        pricedRequestCount: 0,
+        totalCostNanos: null,
+      },
+    });
+
+    expect(timing).toMatchObject({
+      firstResponseLatencyMs: 500,
+      modelRequestCount: 2,
+      outputSpeedSampleCount: 2,
+      outputSpeedTimedCount: 1,
+    });
+    expect(timing).not.toHaveProperty("requestCachedInputTokens");
+    expect(timing).not.toHaveProperty("reasoningTokens");
+    expect(timing).not.toHaveProperty("outputTokensPerSecond");
+    expect(timing).not.toHaveProperty("compact");
   });
 });
 

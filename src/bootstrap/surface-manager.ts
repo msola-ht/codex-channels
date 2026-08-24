@@ -7,6 +7,7 @@ import {
   type ConversationTarget,
   type OutputEvent,
   type ReferenceCostSummary,
+  type TurnOutputTiming,
   type TurnTaskMetricsSummary,
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
@@ -38,6 +39,11 @@ export interface SurfaceManagerOptions {
     turnId: string,
     current: ReferenceCostSummary | undefined,
   ): ReferenceCostSummary | undefined;
+  completionTiming?(
+    threadId: string,
+    turnId: string,
+    current: TurnOutputTiming | undefined,
+  ): TurnOutputTiming | undefined | Promise<TurnOutputTiming | undefined>;
   taskAggregate?(
     threadId: string,
     turnId: string,
@@ -298,30 +304,30 @@ export class SurfaceManager {
     }
     let routedEvent = event;
     if (event.type === "turn.completed") {
+      const timingResult = this.options.completionTiming?.(
+        event.threadId,
+        event.turnId,
+        event.timing,
+      );
+      const timing = timingResult instanceof Promise
+        ? await timingResult ?? event.timing
+        : timingResult ?? event.timing;
       const taskAggregateResult = this.options.taskAggregate?.(
         event.threadId,
         event.turnId,
       );
-      let sessionReferenceCost: ReferenceCostSummary | undefined;
-      let taskAggregate: TurnTaskMetricsSummary | undefined;
-      if (taskAggregateResult instanceof Promise) {
-        taskAggregate = await taskAggregateResult;
-        sessionReferenceCost = this.options.sessionReferenceCost?.(
-          event.threadId,
-          event.turnId,
-          event.timing?.referenceCost,
-        );
-      } else {
-        sessionReferenceCost = this.options.sessionReferenceCost?.(
-          event.threadId,
-          event.turnId,
-          event.timing?.referenceCost,
-        );
-        taskAggregate = taskAggregateResult;
-      }
+      const taskAggregate = taskAggregateResult instanceof Promise
+        ? await taskAggregateResult
+        : taskAggregateResult;
+      const sessionReferenceCost = this.options.sessionReferenceCost?.(
+        event.threadId,
+        event.turnId,
+        timing?.referenceCost,
+      );
       routedEvent = {
         ...event,
         gitBranch: this.currentGitBranch?.(event.target),
+        ...(timing === undefined ? {} : { timing }),
         ...(sessionReferenceCost === undefined ? {} : { sessionReferenceCost }),
         ...(taskAggregate === undefined ? {} : { taskAggregate }),
       };

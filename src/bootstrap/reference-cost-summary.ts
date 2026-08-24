@@ -1,5 +1,11 @@
-import type { ReferenceCostSummary } from "../conversation-core/index.js";
-import type { StoredThreadRequestMetricsSummary } from "../observability/index.js";
+import type {
+  ReferenceCostSummary,
+  TurnOutputTiming,
+} from "../conversation-core/index.js";
+import type {
+  StoredThreadRequestMetricsSummary,
+  StoredTurnRequestMetricsSummary,
+} from "../observability/index.js";
 import { pricingBucketOrder } from "./pricing-bucket.js";
 
 export function mergeSessionReferenceCost(
@@ -15,6 +21,55 @@ export function mergeSessionReferenceCost(
     ? subtractReferenceCost(aggregate, toReferenceCost(summary.latestTurn))
     : aggregate;
   return combineReferenceCosts(historical, current);
+}
+
+export function mergeCompletionTiming(
+  latestTurn: StoredTurnRequestMetricsSummary | null,
+  turnId: string,
+  current: TurnOutputTiming | undefined,
+): TurnOutputTiming | undefined {
+  if (latestTurn?.turnId !== turnId) return current;
+  const timing: TurnOutputTiming = {
+    ...current,
+    modelRequestCount: latestTurn.requestCount,
+    modelRequestDurationMs: latestTurn.requestDurationMs,
+    requestInputTokens: latestTurn.inputTokens,
+    requestOutputTokens: latestTurn.outputTokens,
+    outputSpeedSampleCount: latestTurn.outputSpeedSampleCount,
+    outputSpeedTimedCount: latestTurn.outputSpeedTimedCount,
+    referenceCost: toReferenceCost(latestTurn),
+  };
+  assignOptionalMetric(
+    timing,
+    "requestCachedInputTokens",
+    latestTurn.cachedInputTokens,
+  );
+  assignOptionalMetric(
+    timing,
+    "reasoningTokens",
+    latestTurn.reasoningOutputTokens > 0
+      ? latestTurn.reasoningOutputTokens
+      : null,
+  );
+  assignOptionalMetric(
+    timing,
+    "outputTokensPerSecond",
+    latestTurn.outputTokensPerSecond,
+  );
+  assignOptionalMetric(timing, "compact", latestTurn.compact);
+  return timing;
+}
+
+function assignOptionalMetric<K extends keyof TurnOutputTiming>(
+  timing: TurnOutputTiming,
+  key: K,
+  value: TurnOutputTiming[K] | null,
+): void {
+  if (value === null) {
+    delete timing[key];
+    return;
+  }
+  timing[key] = value;
 }
 
 function toReferenceCost(value: {

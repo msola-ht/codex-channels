@@ -50,9 +50,10 @@
   峰谷档位；不回退 DeepSeek 官方价格或通用远程目录。
 - `pricing-bucket.ts`：Provider 无关的峰谷档位判定工具，按时区把请求开始时间转换为本地分钟和
   周末状态，并在半开区间内选择 Peak/Off-Peak；DeepSeek 与 OpenCode Go 的价格解析、账户用量重算共用同一实现。
-- `reference-cost-summary.ts`：在 Turn 完成时把指标库中的 Thread 历史计价与当前实时 Turn 计价
-  合并，并把历史与当前出现的峰谷档位集合一并合并；若当前 Turn 已部分延迟写入，先扣除该部分再
-  加入完整实时值，避免累计总价重复或遗漏。
+- `reference-cost-summary.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、速度、压缩与计价，
+  同时保留只能实时观测的响应延迟；再把 Thread 历史计价与当前 Turn 计价合并，并把历史与当前
+  出现的峰谷档位集合一并合并。若当前 Turn 已部分延迟写入，先扣除该部分再加入完整值，避免累计
+  总价重复或遗漏。
 - `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 自动订阅后发送的
   子线程 `turn/completed` 作为正常终态，并接受官方中断活动与旧版
   `collabAgentToolCall.agentsStates` 终态；极快子线程先完成后登记时只在有界短期缓存中保留终态。
@@ -106,7 +107,8 @@
 - `service-restart-runner.ts`：统一执行 App Server 服务重启的异步子进程封装，Gateway 自动重启
   与未来 CLI 单 Provider 重启复用同一入口，输出脱敏后写入日志。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
-  `turn.completed` 注入当前授权 Workspace 的 Git 分支、递归 Thread 累计总价及显式父 Turn 任务合计；并行完成各 Surface 的首次启动，
+  `turn.completed` 等待当前 Thread 的指标写入水位，再注入可恢复的本轮统计、当前授权 Workspace
+  的 Git 分支、递归 Thread 累计总价及显式父 Turn 任务合计；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。

@@ -19,6 +19,7 @@ export type {
   TokenUsageBreakdown,
   TurnArtifacts,
   TurnErrorCode,
+  TurnOutputTiming,
   TurnPlanStep,
   TurnPlanStepStatus,
   TurnStatus,
