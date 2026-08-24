@@ -76,6 +76,7 @@ export type UserFacingErrorCode =
   | "model.current.missing"
   | "model.configured-default.missing"
   | "model.unavailable"
+  | "model.provider.mismatch"
   | "model.selector.required"
   | "model.selector.ambiguous"
   | "model.selector.not-found"

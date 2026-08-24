@@ -62,6 +62,7 @@ kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既
 | `model.current.missing` | 当前模型不在可用模型列表中 | 会话模型被目录移除 |
 | `model.configured-default.missing` | 配置的默认模型不属于当前主 Provider | 配置的默认模型不在当前主 Provider 的模型目录中 |
 | `model.unavailable` | 模型暂不可用并附原因 | 模型被上游禁用或不可用 |
+| `model.provider.mismatch` | 当前线程运行在 X 账户，不能使用 Y Provider 的模型 | 继续/恢复旧 Thread 时暂存了跨 Provider 模型 |
 | `model.selector.required` | /model 用法提示 | 未提供模型选择参数 |
 | `model.selector.ambiguous` | 模型选择不唯一 | 选择器匹配多个模型 |
 | `model.selector.not-found` | 找不到指定模型 | 选择器无匹配 |

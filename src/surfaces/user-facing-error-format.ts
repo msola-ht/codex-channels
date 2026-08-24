@@ -159,6 +159,8 @@ export function formatSurfaceUserFacingError(
       return "当前 Gateway 不支持修改工作区权限";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
+    case "model.provider.mismatch":
+      return error.message;
     case "model.unavailable":
       return `${detail(error, "model", "该模型")} 暂不可用：${detail(error, "reason", "上游暂未开放")}`;
     case "model.selector.required":

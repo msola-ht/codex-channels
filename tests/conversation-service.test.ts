@@ -746,6 +746,48 @@ describe("ConversationService model selection", () => {
     expect(toggle).not.toHaveBeenCalled();
   });
 
+  it("fails closed when a staged model provider differs from the bound Thread provider", async () => {
+    const startTurn = vi.fn(async () => ({ turnId: "turn-x" }));
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      {
+        ensure: async () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-openai",
+          sessionId: "session-openai",
+        }),
+        workspace: () => main,
+        modelSettings: () => ({
+          model: "gpt-5.6-sol",
+          modelProvider: "openai",
+          effort: "high",
+          serviceTier: null,
+          collaborationMode: "default" as const,
+        }),
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      {
+        status: () => ({
+          model: "deepseek-v4-flash-vision-exp",
+          modelProvider: "deepseek",
+          effort: "high",
+        }),
+        turnOverrides: () => ({
+          model: "deepseek-v4-flash-vision-exp",
+          modelProvider: "deepseek",
+          effort: "high",
+        }),
+        markApplied: vi.fn(),
+      } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(service.submit(target, "第二段消息"))
+      .rejects.toMatchObject({ code: "model.provider.mismatch" });
+    expect(startTurn).not.toHaveBeenCalled();
+  });
+
   it("records a Turn start RPC failure as a model request error", async () => {
     const startTurn = vi.fn().mockRejectedValue(Object.assign(
       new Error("You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage"),
