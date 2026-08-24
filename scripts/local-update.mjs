@@ -609,7 +609,9 @@ if (
               `${definition.displayName} 官方模型目录已更新（${result.modelCount} 个模型）。`,
             );
             if (definition.id === "deepseek") {
-              console.log(`当前默认选择保持：${result.selectedModel}`);
+              console.log(result.modelMigrated
+                ? `已切换旧默认模型：deepseek → ${result.selectedModel}`
+                : `当前默认选择保持：${result.selectedModel}`);
               return;
             }
             if (definition.id === opencodeGoProviderDefinition.id) {

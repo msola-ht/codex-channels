@@ -49,7 +49,7 @@ DeepSeek Provider。
 | --- | --- |
 | `~/.codex/sf-deepseek.config.toml` | 切换模式的 DeepSeek 模型、默认思考等级镜像、Provider 和 API Key |
 | `~/.codex-connect/providers/deepseek/models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
-| `~/.codex-connect/providers/deepseek/models.manifest.json` | 模型目录下载校验清单 |
+| `~/.codex-connect/providers/deepseek/models.manifest.json` | 模型目录下载校验清单与一次性默认模型迁移记录 |
 | `~/.codex-connect/providers/deepseek/managed.toml` | 不含凭据的 Gateway 管理标记 |
 | `~/.codex-connect/providers/deepseek/backup/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
 | `~/.codex/sf-agent.config.toml` | 不含凭据的共享第三方子代理配置 |
@@ -66,7 +66,10 @@ OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或�
 明确报错。旧版 Profile 顶层的思考等级和自动压缩阈值会迁移进对应模型目录，切换模式 Profile 再
 镜像所选模型的默认思考等级；迁移不保留旧的 `body_after_prefix` 压缩作用域，升级后统一按
 `total` 作用域应用。迁移后同一命令会下载并校验最新官方模型目录，补入新受控模型，并保留现有
-模型的思考等级、自动压缩百分比及当前选中模型。
+模型的思考等级与自动压缩百分比。首次更新到 Flash Vision Exp 默认版本时，仍使用旧默认 Flash
+的受管 Profile 与同 Provider 共享子代理会一次性迁移到 Flash Vision Exp，并在
+`models.manifest.json` 记录迁移；已经选择 Pro 等其他模型时只记录迁移已处理，不改变选择。
+记录完成后，后续 Update 与重复 Setup 都保留用户当前选择，包括主动切回 Flash。
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 和
 `deepseek-v4-pro` 均支持 Codex；三者都可通过

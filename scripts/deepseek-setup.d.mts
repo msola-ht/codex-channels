@@ -89,5 +89,8 @@ export function refreshDeepseekCatalogForUpdate(
       manifestPath: string;
       modelCount: number;
       selectedModel: string;
+      modelMigrated: boolean;
+      roleMigrated: boolean;
+      defaultModelMigrationApplied: boolean;
     }
 >;
