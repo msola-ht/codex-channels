@@ -10,14 +10,19 @@ import {
   deepseekProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import {
+  loadManagedModelProviderRole,
   managedProviderDirectory,
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
   managedModelProviderRoleConfigPath,
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
+  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
-import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
+import {
+  readPrivateFileSync,
+  writePrivateFileAtomic,
+} from "../runtime/private-file.mjs";
 import {
   createManagedProviderMarker,
 } from "../runtime/model-provider-profile.mjs";
@@ -43,6 +48,7 @@ const defaultDownloadTimeoutMs = 30_000;
 const defaultAutoCompactPercent = 60;
 const minimumAutoCompactPercent = 10;
 const maximumAutoCompactPercent = 90;
+const previousDefaultModel = "deepseek-v4-flash";
 
 class DeepseekSetupCancelled extends Error {}
 
@@ -159,6 +165,11 @@ export async function runDeepseekSetup({
     const autoCompactPercent = await askAutoCompact(prompt);
 
     const downloaded = await downloadDeepseekCatalog(fetchImpl);
+    const previousManifest = await readOptionalJson(
+      manifestPath,
+      "DeepSeek 模型目录清单",
+    );
+    const defaultModelMigration = readDefaultModelMigration(previousManifest);
     const installationPaths = [
       configPath,
       profilePath,
@@ -226,6 +237,9 @@ export async function runDeepseekSetup({
         source: deepseekSetupScriptUrl,
         sha256: downloaded.sha256,
         downloadedAt: new Date().toISOString(),
+        ...(defaultModelMigration === undefined
+          ? {}
+          : { defaultModelMigration }),
       }, null, 2)}\n`);
       await replaceOptionalFile(configPath, configContent);
       await replaceOptionalFile(profilePath, profileContent);
@@ -465,20 +479,90 @@ export async function refreshDeepseekCatalogForUpdate(
     providerDirectory,
     deepseekProviderDefinition.catalogManifestFileName,
   );
-  const paths = [catalogPath, manifestPath];
+  const previousManifest = await readOptionalJson(
+    manifestPath,
+    "DeepSeek 模型目录清单",
+  );
+  const previousMigration = readDefaultModelMigration(previousManifest);
+  const migrationAlreadyApplied = previousMigration !== undefined;
+  const modelMigrated = !migrationAlreadyApplied
+    && previous.model === previousDefaultModel;
+  const selectedModel = modelMigrated ? supportedModel : previous.model;
+  const selectedModelEntry = managedCatalog.models.find(
+    (model) => model?.slug === selectedModel,
+  );
+  const reasoningEffort = selectedModelEntry?.default_reasoning_level;
+  if (typeof reasoningEffort !== "string") {
+    throw new Error("DeepSeek 模型目录缺少默认思考等级");
+  }
+  const documentPath = previous.mode === "switching"
+    ? join(codexHomePath(environment), deepseekProviderDefinition.profileFileName)
+    : join(codexHomePath(environment), "config.toml");
+  let documentUpdate;
+  if (modelMigrated) {
+    const document = readPrivateToml(documentPath, "DeepSeek 默认模型配置");
+    if (
+      document.model !== previousDefaultModel
+      || document.model_provider !== providerId
+    ) {
+      throw new Error("DeepSeek 默认模型配置不一致");
+    }
+    document.model = supportedModel;
+    if (previous.mode === "switching") {
+      document.model_reasoning_effort = reasoningEffort;
+    } else {
+      delete document.model_reasoning_effort;
+      delete document.model_context_window;
+      delete document.model_auto_compact_token_limit;
+      delete document.model_auto_compact_token_limit_scope;
+    }
+    documentUpdate = stringify(document);
+  }
+  const role = loadManagedModelProviderRole(environment);
+  const roleMigrated = !migrationAlreadyApplied
+    && role?.provider === providerId
+    && role.model === previousDefaultModel;
+  const roleConfigPath = managedModelProviderRoleConfigPath(environment);
+  const paths = [
+    catalogPath,
+    manifestPath,
+    ...(documentUpdate === undefined ? [] : [documentPath]),
+    ...(roleMigrated ? [roleConfigPath] : []),
+  ];
   const snapshots = await snapshotFiles(paths);
+  let guards = snapshots;
   try {
     await writePrivateFileAtomic(
       catalogPath,
       `${JSON.stringify(managedCatalog, null, 2)}\n`,
     );
+    guards = await snapshotFiles(paths);
+    const updatedAt = (options.now ?? (() => new Date()))().toISOString();
     await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
-      downloadedAt: (options.now ?? (() => new Date()))().toISOString(),
+      downloadedAt: updatedAt,
+      defaultModelMigration: migrationAlreadyApplied
+        ? previousMigration
+        : {
+            from: previousDefaultModel,
+            to: supportedModel,
+            appliedAt: updatedAt,
+          },
     }, null, 2)}\n`);
+    guards = await snapshotFiles(paths);
+    if (documentUpdate !== undefined) {
+      await writePrivateFileAtomic(documentPath, documentUpdate);
+      guards = await snapshotFiles(paths);
+    }
+    if (roleMigrated) {
+      writeManagedModelProviderRoleConfig(environment, {
+        provider: role.provider,
+        model: supportedModel,
+      });
+      guards = await snapshotFiles(paths);
+    }
   } catch (error) {
-    const guards = await snapshotFiles(paths);
     try {
       await restoreFileSnapshots(snapshots, guards);
     } catch (rollbackError) {
@@ -495,8 +579,51 @@ export async function refreshDeepseekCatalogForUpdate(
     catalogPath,
     manifestPath,
     modelCount: managedCatalog.models.length,
-    selectedModel: previous.model,
+    selectedModel,
+    modelMigrated,
+    roleMigrated,
+    defaultModelMigrationApplied: !migrationAlreadyApplied,
   };
+}
+
+function readDefaultModelMigration(manifest) {
+  const migration = manifest?.defaultModelMigration;
+  if (migration === undefined) return undefined;
+  if (!migration
+    || typeof migration !== "object"
+    || Array.isArray(migration)
+    || migration.from !== previousDefaultModel
+    || migration.to !== supportedModel
+    || typeof migration.appliedAt !== "string"
+    || !Number.isFinite(Date.parse(migration.appliedAt))) {
+    throw new Error("DeepSeek 默认模型迁移标记无效");
+  }
+  return migration;
+}
+
+async function readOptionalJson(path, label) {
+  let content;
+  try {
+    content = readPrivateFileSync(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
+  try {
+    const value = JSON.parse(content);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    return value;
+  } catch {
+    throw new Error(`${label}无法安全读取或解析`);
+  }
+}
+
+function readPrivateToml(path, label) {
+  try {
+    return parse(readPrivateFileSync(path));
+  } catch {
+    throw new Error(`${label}无法安全读取或解析`);
+  }
 }
 
 async function buildCodexConfig({

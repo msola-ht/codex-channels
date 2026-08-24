@@ -55,7 +55,7 @@ describe("DeepSeek setup", () => {
     expect(() => extractDeepseekCatalog("echo no-catalog")).toThrow("模型目录标记无效");
   });
 
-  it("refreshes an installed two-model catalog during codexc update", async () => {
+  it("refreshes the catalog and migrates the previous default once during codexc update", async () => {
     const codexHome = deepseekFixture();
     const connectHome = join(codexHome, ".codex-connect");
     const catalogPath = join(connectHome, "providers", "deepseek", "models.json");
@@ -79,6 +79,17 @@ describe("DeepSeek setup", () => {
       ),
       { mode: 0o600 },
     );
+    const rolePath = join(codexHome, "sf-agent.config.toml");
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `model = "gpt-5.6-sol"\nmodel_provider = "openai"\n\n[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n`,
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      rolePath,
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      { mode: 0o600 },
+    );
 
     const result = await refreshDeepseekCatalogForUpdate({
       ...process.env,
@@ -95,7 +106,10 @@ describe("DeepSeek setup", () => {
     expect(result).toMatchObject({
       status: "updated",
       modelCount: 3,
-      selectedModel: "deepseek-v4-flash",
+      selectedModel: "deepseek-v4-flash-vision-exp",
+      modelMigrated: true,
+      roleMigrated: true,
+      defaultModelMigrationApplied: true,
     });
     const updated = JSON.parse(readFileSync(catalogPath, "utf8"));
     expect(updated.models).toEqual(expect.arrayContaining([
@@ -117,9 +131,215 @@ describe("DeepSeek setup", () => {
     ))).toMatchObject({
       sha256: "updated-catalog",
       downloadedAt: "2026-08-21T12:34:56.000Z",
+      defaultModelMigration: {
+        from: "deepseek-v4-flash",
+        to: "deepseek-v4-flash-vision-exp",
+        appliedAt: "2026-08-21T12:34:56.000Z",
+      },
     });
     expect(parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8")))
+      .toMatchObject({
+        model: "deepseek-v4-flash-vision-exp",
+        model_reasoning_effort: "high",
+      });
+    expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
+      model: "deepseek-v4-flash-vision-exp",
+      model_provider: "deepseek",
+    });
+
+    writeManagedModelProviderProfileDefault("deepseek", {
+      model: "deepseek-v4-flash",
+      reasoningEffort: "max",
+      autoCompactLimit: 838_861,
+    }, {
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    });
+    writeFileSync(
+      rolePath,
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      { mode: 0o600 },
+    );
+    const repeated = await refreshDeepseekCatalogForUpdate({
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    }, {
+      downloadCatalog: async () => ({
+        catalog: extractDeepseekCatalog(script),
+        sha256: "repeated-catalog",
+      }),
+      now: () => new Date("2026-08-22T12:34:56.000Z"),
+    });
+
+    expect(repeated).toMatchObject({
+      status: "updated",
+      selectedModel: "deepseek-v4-flash",
+      modelMigrated: false,
+      roleMigrated: false,
+      defaultModelMigrationApplied: false,
+    });
+    expect(parse(readFileSync(profilePath, "utf8"))).toMatchObject({
+      model: "deepseek-v4-flash",
+      model_reasoning_effort: "max",
+    });
+    expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
+      model: "deepseek-v4-flash",
+      model_provider: "deepseek",
+    });
+    expect(JSON.parse(readFileSync(
+      join(connectHome, "providers", "deepseek", "models.manifest.json"),
+      "utf8",
+    ))).toMatchObject({
+      defaultModelMigration: {
+        from: "deepseek-v4-flash",
+        to: "deepseek-v4-flash-vision-exp",
+        appliedAt: "2026-08-21T12:34:56.000Z",
+      },
+    });
+  });
+
+  it("preserves the completed default migration when setup keeps a user-selected model", async () => {
+    const fixture = setupFixture('model = "gpt-5.6-sol"\nmodel_provider = "openai"\n');
+    const environment = {
+      ...process.env,
+      CODEX_HOME: fixture.home,
+      CODEX_CONNECT_HOME: fixture.connectHome,
+    };
+    await runDeepseekSetup({
+      environment,
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1", "2"], ["sk-first"]),
+    });
+    writeManagedModelProviderProfileDefault("deepseek", {
+      model: "deepseek-v4-flash",
+      reasoningEffort: "high",
+      autoCompactLimit: 629_146,
+    }, environment);
+    const manifestPath = join(
+      fixture.connectHome,
+      "providers",
+      "deepseek",
+      "models.manifest.json",
+    );
+    writeFileSync(manifestPath, `${JSON.stringify({
+      source: deepseekSetupScriptUrl,
+      sha256: "previous-catalog",
+      downloadedAt: "2026-08-21T12:34:56.000Z",
+      defaultModelMigration: {
+        from: "deepseek-v4-flash",
+        to: "deepseek-v4-flash-vision-exp",
+        appliedAt: "2026-08-21T12:34:56.000Z",
+      },
+    })}\n`, { mode: 0o600 });
+
+    await runDeepseekSetup({
+      environment,
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1", "2"], ["sk-updated"]),
+    });
+
+    expect(parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8")))
       .toMatchObject({ model: "deepseek-v4-flash" });
+    expect(JSON.parse(readFileSync(manifestPath, "utf8"))).toMatchObject({
+      defaultModelMigration: {
+        from: "deepseek-v4-flash",
+        to: "deepseek-v4-flash-vision-exp",
+        appliedAt: "2026-08-21T12:34:56.000Z",
+      },
+    });
+  });
+
+  it("records the default migration without changing an explicitly selected Pro model", async () => {
+    const codexHome = deepseekFixture();
+    const connectHome = join(codexHome, ".codex-connect");
+    const environment = {
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    };
+    writeManagedModelProviderProfileDefault("deepseek", {
+      model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+      autoCompactLimit: 786_432,
+    }, environment);
+
+    const result = await refreshDeepseekCatalogForUpdate(environment, {
+      downloadCatalog: async () => ({
+        catalog: extractDeepseekCatalog(script),
+        sha256: "updated-catalog",
+      }),
+      now: () => new Date("2026-08-21T12:34:56.000Z"),
+    });
+
+    expect(result).toMatchObject({
+      status: "updated",
+      selectedModel: "deepseek-v4-pro",
+      modelMigrated: false,
+      roleMigrated: false,
+      defaultModelMigrationApplied: true,
+    });
+    expect(parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8")))
+      .toMatchObject({
+        model: "deepseek-v4-pro",
+        model_reasoning_effort: "max",
+      });
+    expect(JSON.parse(readFileSync(
+      join(connectHome, "providers", "deepseek", "models.manifest.json"),
+      "utf8",
+    ))).toMatchObject({
+      defaultModelMigration: {
+        from: "deepseek-v4-flash",
+        to: "deepseek-v4-flash-vision-exp",
+        appliedAt: "2026-08-21T12:34:56.000Z",
+      },
+    });
+  });
+
+  it("migrates the previous default in exclusive mode without adding root model overrides", async () => {
+    const fixture = setupFixture('model = "gpt-5.6-sol"\nmodel_provider = "openai"\n');
+    const environment = {
+      ...process.env,
+      CODEX_HOME: fixture.home,
+      CODEX_CONNECT_HOME: fixture.connectHome,
+    };
+    await runDeepseekSetup({
+      environment,
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["2", "2"], ["sk-fixed"], true),
+    });
+    const configPath = join(fixture.home, "config.toml");
+    const previous = parse(readFileSync(configPath, "utf8"));
+    previous.model = "deepseek-v4-flash";
+    writeFileSync(configPath, stringify(previous), { mode: 0o600 });
+
+    const result = await refreshDeepseekCatalogForUpdate(environment, {
+      downloadCatalog: async () => ({
+        catalog: extractDeepseekCatalog(script),
+        sha256: "updated-catalog",
+      }),
+      now: () => new Date("2026-08-21T12:34:56.000Z"),
+    });
+
+    expect(result).toMatchObject({
+      status: "updated",
+      selectedModel: "deepseek-v4-flash-vision-exp",
+      modelMigrated: true,
+      defaultModelMigrationApplied: true,
+    });
+    const updated = parse(readFileSync(configPath, "utf8"));
+    expect(updated).toMatchObject({
+      model: "deepseek-v4-flash-vision-exp",
+      model_provider: "deepseek",
+    });
+    expect(updated.model_reasoning_effort).toBeUndefined();
+    expect(updated.model_context_window).toBeUndefined();
+    expect(updated.model_auto_compact_token_limit).toBeUndefined();
+    expect(updated.model_auto_compact_token_limit_scope).toBeUndefined();
   });
 
   it("returns to the parent setup without reading a key or changing files", async () => {
