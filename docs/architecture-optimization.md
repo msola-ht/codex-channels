@@ -65,7 +65,11 @@ Commentary 保留以及最终文本、Turn 完成前 Flush；Telegram 与微信�
 
 ### 持久化大文件
 
-指标 Store 与计划任务 Store 同时包含运行时事务、Schema、升级、查询和 Row 映射。只在不改变 SQL、Schema 和事务边界的前提下，机械提取 Schema、Migration、Query 和 Row Codec。
+指标 Store 与计划任务 Store 同时包含运行时事务、Schema、升级、查询和 Row 映射。计划任务的 Row Codec
+以及 Schema SQL 与结构校验已完成机械提取；Migration 与 Query 审查后保留其事务和文件生命周期接线。
+Metrics Store 的 Row Projection Codec 也已提取，明细、Turn、Thread、聚合与压缩摘要映射不再与 SQL 执行混放；
+当前 Schema SQL、存储列定义与严格结构校验也已提取，初始化事务仍由 Store 维护。显式 Migration 审查后
+继续留在脚本侧维护停机、备份和逐版本事务，Query 继续留在 Store 维护共享聚合 SQL 与分页/排序语义。
 
 ### Conversation Core 计时聚合
 
@@ -74,7 +78,12 @@ Commentary 保留以及最终文本、Turn 完成前 Flush；Telegram 与微信�
 
 ### 高风险边界
 
-Provider Proxy、微信协议 Client、飞书 SDK Client、CLI 入口和 Provider Runtime 只在前述低风险批次稳定后处理。优先抽纯解析、纯映射或受控组合函数，不拆散必须共同维护连接与事务一致性的状态机。
+Provider Proxy 已先提取回环监听校验、账户前缀解析、受支持路径白名单、上游路径拼接与请求头过滤，
+连接生命周期、流式背压、WebSocket 转发和指标状态机继续共同留在 `proxy.ts`。微信协议 Client 的稳定协议类型、
+共享响应校验和纯入站消息解码也已提取；网络请求、轮询建议超时状态与媒体上传事务仍共同留在 Client。
+飞书 SDK Client 的发送、CardKit、资源下载和错误归一共享同一 SDK Client 与超时策略，审查后保留；CLI 的参数与
+子命令选项已经由现有 `scripts/` 模块承接，入口继续作为可执行组合根；Provider Runtime 的私有文件事务、受管 Profile
+和模型目录校验继续共同维护，不按函数数量拆分。
 
 ## 不统一的边界
 
@@ -108,7 +117,16 @@ Provider Proxy、微信协议 Client、飞书 SDK Client、CLI 入口和 Provide
   - [x] 统一查询操作摘要的 Turn Flush 决策。
   - [x] 统一 Telegram 与微信的 Turn 计划进度状态。
   - [x] 复核命令分发并保留渠道交互接线。
-- [ ] 拆分持久化实现的纯基础设施部分。
-- [ ] 复核高风险协议与运行时边界。
+- [x] 拆分持久化实现的纯基础设施部分。
+  - [x] 提取 Scheduled Tasks Row Codec。
+  - [x] 提取 Scheduled Tasks Schema SQL 与严格结构校验。
+  - [x] 复核 Scheduled Tasks Migration 与 Query，并保留其事务和文件生命周期接线。
+  - [x] 提取 Metrics Store Row Projection Codec。
+  - [x] 提取 Metrics Store 当前 Schema SQL 与严格结构校验。
+  - [x] 复核 Metrics Migration 与 Query，并保留其升级和聚合接线。
+- [x] 复核高风险协议与运行时边界。
+  - [x] 提取 Provider Proxy 的请求路由与 Header 过滤纯函数边界。
+  - [x] 提取微信入站消息解码与共享响应校验；复核并保留飞书 SDK Client 状态接线。
+  - [x] 复核并保留 CLI 组合根与 Provider Runtime 配置事务。
 
 每一项只有在实现、定向验证和差异审查全部完成后才标记完成。
