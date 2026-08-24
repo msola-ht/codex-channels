@@ -2258,12 +2258,6 @@ describe("JsonRpcClient", () => {
         model: "gpt-selected",
         effort: "high",
         serviceTier: null,
-        outputSchema: {
-          type: "object",
-          properties: { answer: { type: "string" } },
-          required: ["answer"],
-          additionalProperties: false,
-        },
       },
     );
     await client.startTurn(
@@ -2272,13 +2266,6 @@ describe("JsonRpcClient", () => {
       "codex_connect:request-fast",
       "/tmp/project",
       { serviceTier: "priority" },
-    );
-    await client.startTurn(
-      "thread-1",
-      [{ type: "text", text: "拒绝所有输出" }],
-      "codex_connect:false-schema",
-      "/tmp/project",
-      { outputSchema: false },
     );
     await client.steerTurn(
       "thread-1",
@@ -2290,12 +2277,6 @@ describe("JsonRpcClient", () => {
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .toMatchObject({
         clientUserMessageId: "codex_connect:request-1",
-        outputSchema: {
-          type: "object",
-          properties: { answer: { type: "string" } },
-          required: ["answer"],
-          additionalProperties: false,
-        },
         input: [
           { type: "text", text: "测试输入", text_elements: [] },
           { type: "image", url: "data:image/png;base64,AA==" },
@@ -2320,11 +2301,6 @@ describe("JsonRpcClient", () => {
       .toMatchObject({
         clientUserMessageId: "codex_connect:request-fast",
         serviceTier: "priority",
-      });
-    expect(transport.sent.filter((message) => message.method === "turn/start")[2]?.params)
-      .toMatchObject({
-        clientUserMessageId: "codex_connect:false-schema",
-        outputSchema: false,
       });
     expect(transport.sent.find((message) => message.method === "turn/steer")?.params)
       .toMatchObject({ clientUserMessageId: "codex_connect:request-2" });
@@ -2491,6 +2467,41 @@ describe("JsonRpcClient", () => {
     expect(params).toMatchObject({ threadSource: "automation" });
     expect(params).not.toHaveProperty("dynamicTools");
     expect(params).not.toHaveProperty("additionalContext");
+  });
+
+  it("registers dynamic tool functions on thread start", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await client.startThread("/tmp/project", {
+      dynamicTools: [{
+        type: "function",
+        name: "schedule_task",
+        description: "Create a scheduled task",
+        inputSchema: {
+          type: "object",
+          properties: { action: { type: "string" } },
+          required: ["action"],
+        },
+      }],
+    });
+
+    expect(transport.sent.find((message) => message.method === "thread/start")?.params)
+      .toMatchObject({
+        dynamicTools: [{
+          type: "function",
+          name: "schedule_task",
+          description: "Create a scheduled task",
+          inputSchema: {
+            type: "object",
+            properties: { action: { type: "string" } },
+            required: ["action"],
+          },
+        }],
+      });
   });
 
   it("starts a new thread with workspace permissions", async () => {

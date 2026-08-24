@@ -224,6 +224,31 @@ describe("local update", () => {
     }
   });
 
+  it("rejects unsupported scheduled task schemas before applying updates", () => {
+    expect(() => inspectDatabaseUpdates(process.env, {
+      inspectState: () => ({
+        compatible: true,
+        exists: true,
+        schemaVersion: 4,
+        targetSchemaVersion: 4,
+        updateable: true,
+        scheduledTasks: {
+          compatible: false,
+          exists: true,
+          schemaVersion: 3,
+          targetSchemaVersion: 2,
+          updateable: false,
+        },
+      }),
+      inspectMetrics: () => ({
+        compatible: true,
+        exists: true,
+        schemaVersion: 10,
+      }),
+      validateMetrics: () => undefined,
+    })).toThrow(/计划任务数据库 Schema 3/u);
+  });
+
   it("updates both databases after their shared preflight", () => {
     const calls: string[] = [];
     const result = updateDatabases(process.env, {

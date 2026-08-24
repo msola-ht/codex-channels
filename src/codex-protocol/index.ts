@@ -37,6 +37,7 @@ export type {
 export type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse.js";
 export type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
 export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
+export type { DynamicToolSpec } from "./generated/v2/DynamicToolSpec.js";
 export type { ThreadUnsubscribeResponse } from "./generated/v2/ThreadUnsubscribeResponse.js";
 export type { ThreadArchiveResponse } from "./generated/v2/ThreadArchiveResponse.js";
 export type { ThreadUnarchiveResponse } from "./generated/v2/ThreadUnarchiveResponse.js";

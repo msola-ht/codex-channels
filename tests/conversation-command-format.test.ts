@@ -784,7 +784,7 @@ describe("provider-aware conversation command formatting", () => {
       taskId: "task-1",
       name: "每小时检查",
       status: "active" as const,
-      schedule: { type: "hourly" as const, intervalHours: 1, anchorAt: 1 },
+      schedule: { type: "interval" as const, intervalMinutes: 60, anchorAt: 1 },
       timezone: "Asia/Shanghai",
       nextRunAt: 2,
       workspaceId: "main",
@@ -854,6 +854,40 @@ describe("provider-aware conversation command formatting", () => {
     expect(runs).toContain("  - 计划时间：");
     expect(runs).toContain("  - Thread：thread-1");
     expect(runs).not.toContain("\n- 计划时间：");
+  });
+
+  it("renders a relative once task as a one-shot delay", () => {
+    const rendered = formatConversationScheduledTasks({
+      kind: "scheduled-tasks",
+      result: {
+        tasks: [{
+          taskId: "task-relative",
+          name: "延时回复",
+          status: "active",
+          schedule: {
+            type: "once",
+            afterMinutes: 1,
+            anchorAt: Date.parse("2026-08-23T14:49:18.500Z"),
+          },
+          timezone: "Asia/Shanghai",
+          nextRunAt: Date.parse("2026-08-23T14:50:18.500Z"),
+          workspaceId: "main",
+          modelProvider: "deepseek",
+          model: "deepseek-v4-flash-vision-exp",
+          reasoningEffort: "high",
+          serviceTier: null,
+          sandbox: "read-only",
+          permissions: null,
+          promptPreview: "回复“计划任务测试成功”",
+        }],
+        selectors: ["1"],
+        page: 1,
+        pageCount: 1,
+        totalTaskCount: 1,
+      },
+    });
+
+    expect(rendered).toContain("一次性 1 分钟后");
   });
 
   it("renders updated workspace permissions with the hot reload notice", () => {

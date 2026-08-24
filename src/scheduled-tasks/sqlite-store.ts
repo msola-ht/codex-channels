@@ -12,6 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   calculateNextRunAt,
   normalizeSchedule,
+  ScheduleValidationError,
   validateIanaTimeZone,
 } from "./schedule.js";
 import {
@@ -52,7 +53,9 @@ export class ScheduledTaskSchemaError extends Error {
   constructor(foundVersion: number, expectedVersion = schemaVersion, cause?: unknown) {
     const message = cause !== undefined && foundVersion === expectedVersion
       ? `计划任务数据库 Schema ${expectedVersion} 结构不完整`
-      : `计划任务数据库 Schema 不受支持：当前 ${foundVersion}，需要 ${expectedVersion}`;
+      : foundVersion === 1 && expectedVersion === schemaVersion
+        ? `计划任务数据库需要显式升级：当前 Schema 1，请停止 Gateway 后运行 codexc update 或 codexc state upgrade`
+        : `计划任务数据库 Schema 不受支持：当前 ${foundVersion}，需要 ${expectedVersion}`;
     super(
       message,
       cause === undefined ? undefined : { cause },
@@ -183,7 +186,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         task.schedule?.type ?? null,
         task.schedule === null ? null : JSON.stringify(task.schedule),
         task.timezone,
-        task.schedule?.type === "hourly" ? task.schedule.anchorAt : null,
+        task.schedule === null ? null : scheduleAnchorAt(task.schedule),
         task.nextRunAt,
         task.modelProvider,
         task.model,
@@ -241,6 +244,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     const task = this.requireTask(taskId);
     if (task.status === "paused") return task;
     if (task.status === "deleted") throw new ScheduledTaskStateError("已删除任务不能暂停");
+    if (task.status === "finished") throw new ScheduledTaskStateError("已完成任务不能暂停");
     return this.updateTask(taskId, "paused", null, nowMs);
   }
 
@@ -249,8 +253,13 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     const task = this.requireTask(taskId);
     if (task.status === "active") return task;
     if (task.status === "deleted") throw new ScheduledTaskStateError("已删除任务不能恢复");
+    if (task.status === "finished") throw new ScheduledTaskStateError("已完成任务不能恢复");
     if (!task.schedule || !task.timezone) throw new ScheduledTaskStateError("任务 Schedule 不完整");
-    return this.updateTask(taskId, "active", calculateNextRunAt(task.schedule, task.timezone, nowMs), nowMs);
+    const nextRunAt = calculateNextRunAt(task.schedule, task.timezone, nowMs);
+    if (nextRunAt === null) {
+      return this.updateTask(taskId, "finished", null, nowMs);
+    }
+    return this.updateTask(taskId, "active", nextRunAt, nowMs);
   }
 
   blockTask(taskId: string, nowMs = Date.now()): ScheduledTask {
@@ -258,6 +267,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     const task = this.requireTask(taskId);
     if (task.status === "deleted") throw new ScheduledTaskStateError("已删除任务不能阻止");
     if (task.status === "blocked") return task;
+    if (task.status === "finished") throw new ScheduledTaskStateError("已完成任务不能阻止");
     return this.updateTask(taskId, "blocked", null, nowMs);
   }
 
@@ -412,9 +422,15 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         );
       const nextRunAt = calculateNextRunAt(task.schedule, task.timezone, scheduledFor);
       this.requireNonDecreasingTimestamp(nowMs, task.updatedAt, "Task updated_at");
-      this.database
-        .prepare("UPDATE tasks SET next_run_at = ?, updated_at = ? WHERE task_id = ?")
-        .run(nextRunAt, nowMs, taskId);
+      if (nextRunAt === null) {
+        this.database
+          .prepare("UPDATE tasks SET status = 'finished', next_run_at = NULL, updated_at = ? WHERE task_id = ?")
+          .run(nowMs, taskId);
+      } else {
+        this.database
+          .prepare("UPDATE tasks SET next_run_at = ?, updated_at = ? WHERE task_id = ?")
+          .run(nextRunAt, nowMs, taskId);
+      }
       this.database.exec("COMMIT");
       return { kind: effectiveResult, run: this.requireRun(runId) };
     } catch (error) {
@@ -432,7 +448,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const task = this.requireTask(taskId);
-      if (task.status === "deleted" || task.status === "blocked") {
+      if (task.status === "deleted" || task.status === "blocked" || task.status === "finished") {
         throw new ScheduledTaskStateError("当前任务状态不允许手动运行");
       }
       const blocking = this.database
@@ -665,18 +681,8 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     this.requireOpen();
     if (this.path === ":memory:") throw new Error("内存数据库不能备份");
     const destination = destinationPath
-      ?? `${this.path}.v${schemaVersion}.${new Date().toISOString().replaceAll(":", "-")}.bak`;
-    if (resolve(destination) === resolve(this.path)) throw new Error("备份目标不能覆盖计划任务数据库");
-    const source = tryLstat(this.path);
-    if (source === undefined || source.isSymbolicLink() || !source.isFile()) throw new Error("计划任务数据库源路径无效");
-    if ((source.mode & 0o777) !== 0o600) throw new Error("计划任务数据库文件权限必须是 0600");
-    const target = tryLstat(destination);
-    if (target?.isSymbolicLink()) throw new Error("备份目标不能是符号链接");
-    if (target !== undefined) throw new Error("备份目标已存在，拒绝覆盖");
-    ensurePrivateDirectory(dirname(destination));
-    copyFileSync(this.path, destination, fsConstants.COPYFILE_EXCL);
-    chmodSync(destination, 0o600);
-    return destination;
+      ?? `${this.path}.v${schemaVersion}.${backupTimestamp()}.bak`;
+    return copyScheduledTaskDatabaseFile(this.path, destination);
   }
 
   close(): void {
@@ -697,159 +703,23 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       const version = metadataExists
         ? (this.database.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get() as { value: number } | undefined)?.value
         : undefined;
-      const pragmaVersion = Number(
-        (this.database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
-      );
+      const pragmaVersion = readScheduledTaskUserVersion(this.database);
       if (hasAnyTable || metadataExists || pragmaVersion !== 0) {
-        if (pragmaVersion !== schemaVersion || (version !== undefined && version !== schemaVersion)) {
-          const foundVersion = pragmaVersion !== schemaVersion ? pragmaVersion : version!;
+        const foundVersion = pragmaVersion !== schemaVersion ? pragmaVersion : (version ?? 0);
+        if (foundVersion !== schemaVersion) {
           throw new ScheduledTaskSchemaError(foundVersion, schemaVersion);
         }
         if (version === undefined) {
           throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("schema_metadata 缺少 schema_version"));
         }
-        this.requireSchemaStructure();
+        requireScheduledTaskDatabaseStructure(this.database);
       } else {
-        this.database.exec(`
-          CREATE TABLE schema_metadata (
-            name TEXT PRIMARY KEY,
-            value INTEGER NOT NULL
-          ) STRICT;
-          CREATE TABLE tasks (
-            task_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'blocked', 'deleted')),
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            surface TEXT NOT NULL,
-            account_id TEXT NOT NULL,
-            conversation_id TEXT NOT NULL,
-            actor_id TEXT NOT NULL,
-            workspace_id TEXT NOT NULL,
-            prompt TEXT NOT NULL,
-            schedule_type TEXT CHECK (
-              schedule_type IS NULL OR schedule_type IN ('hourly', 'daily', 'weekdays', 'weekly')
-            ),
-            schedule_json TEXT,
-            timezone TEXT,
-            anchor_at INTEGER,
-            next_run_at INTEGER,
-            model_provider TEXT,
-            model TEXT,
-            reasoning_effort TEXT,
-            service_tier TEXT,
-            sandbox TEXT CHECK (sandbox IS NULL OR sandbox IN ('read-only', 'workspace-write')),
-            approval_policy TEXT CHECK (approval_policy IS NULL OR approval_policy = 'never'),
-            permissions TEXT
-          ) STRICT;
-          CREATE TABLE runs (
-            run_id TEXT PRIMARY KEY,
-            task_id TEXT NOT NULL REFERENCES tasks(task_id),
-            scheduled_for INTEGER NOT NULL,
-            state TEXT NOT NULL CHECK (
-              state IN (
-                'dispatching', 'running', 'completed', 'failed', 'interrupted',
-                'uncertain', 'missed', 'skipped_overlap', 'skipped_capacity', 'blocked'
-              )
-            ),
-            thread_id TEXT,
-            turn_id TEXT,
-            dispatch_started_at INTEGER,
-            started_at INTEGER,
-            completed_at INTEGER,
-            error_category TEXT CHECK (
-              error_category IS NULL OR error_category IN (
-                'authorization', 'workspace', 'provider', 'model', 'approval', 'capacity',
-                'overlap', 'missed', 'interrupted', 'gateway_crash', 'unknown'
-              )
-            ),
-            error_message TEXT,
-            UNIQUE (task_id, scheduled_for)
-          ) STRICT;
-          CREATE INDEX tasks_due_idx ON tasks(status, next_run_at, task_id);
-          CREATE INDEX runs_task_idx ON runs(task_id, scheduled_for DESC, run_id DESC);
-          CREATE INDEX runs_active_idx ON runs(task_id, state);
-          INSERT INTO schema_metadata (name, value) VALUES ('schema_version', ${schemaVersion});
-          PRAGMA user_version = ${schemaVersion};
-        `);
+        this.database.exec(scheduledTaskInitialSchemaSql);
       }
       this.database.exec("COMMIT");
     } catch (error) {
       this.rollback(error);
     }
-  }
-
-  private requireSchemaStructure(): void {
-    const tableNames = (this.database
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
-      .all() as Array<{ name: string }>)
-      .map((table) => table.name)
-      .sort();
-    if (tableNames.join(",") !== "runs,schema_metadata,tasks") {
-      throw new ScheduledTaskSchemaError(
-        schemaVersion,
-        schemaVersion,
-        new Error("计划任务数据库包含未知或缺失的表"),
-      );
-    }
-    const required: Record<string, readonly string[]> = {
-      schema_metadata: ["name", "value"],
-      tasks: [
-        "task_id", "name", "status", "created_at", "updated_at", "surface", "account_id",
-        "conversation_id", "actor_id", "workspace_id", "prompt", "schedule_type", "schedule_json",
-        "timezone", "anchor_at", "next_run_at", "model_provider", "model", "reasoning_effort",
-        "service_tier", "sandbox", "approval_policy", "permissions",
-      ],
-      runs: [
-        "run_id", "task_id", "scheduled_for", "state", "thread_id", "turn_id",
-        "dispatch_started_at", "started_at", "completed_at", "error_category", "error_message",
-      ],
-    };
-    const tableList = this.database
-      .prepare("PRAGMA table_list")
-      .all() as Array<{ name: string; strict: number }>;
-    for (const table of ["schema_metadata", "tasks", "runs"] as const) {
-      const entry = tableList.find((candidate) => candidate.name === table);
-      if (entry?.strict !== 1) {
-        throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error(`表 ${table} 必须是 STRICT`));
-      }
-    }
-    for (const [table, columns] of Object.entries(required)) {
-      const found = (this.database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
-        .map((column) => column.name)
-        .sort();
-      if (found.join(",") !== [...columns].sort().join(",")) {
-        throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error(`表 ${table} 结构不完整`));
-      }
-    }
-    const uniqueIndexes = this.database
-      .prepare("PRAGMA index_list(runs)")
-      .all() as Array<{ name: string; unique: number }>;
-    const occurrenceIndex = uniqueIndexes.find((index) => index.unique === 1
-      && this.indexColumns(index.name).join(",") === "task_id,scheduled_for");
-    if (!occurrenceIndex) {
-      throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("runs 缺少 occurrence 唯一约束"));
-    }
-    const runSql = this.database
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
-      .get() as { sql: string | null } | undefined;
-    if (!runSql?.sql?.includes("error_category IN")) {
-      throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("runs 错误分类约束缺失"));
-    }
-    if (runSql.sql.toLowerCase().includes("'pending'")) {
-      throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("runs 不支持 pending 状态"));
-    }
-    const metadataNames = (this.database
-      .prepare("SELECT name FROM schema_metadata ORDER BY name")
-      .all() as Array<{ name: string }>);
-    if (metadataNames.length !== 1 || metadataNames[0]?.name !== "schema_version") {
-      throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("schema_metadata 内容无效"));
-    }
-  }
-
-  private indexColumns(indexName: string): string[] {
-    return (this.database.prepare(`PRAGMA index_info(${indexName})`).all() as Array<{ name: string }>)
-      .map((column) => column.name);
   }
 
   private updateTask(
@@ -949,6 +819,379 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
   }
 }
 
+export interface ScheduledTaskDatabaseInspection {
+  readonly compatible: boolean;
+  readonly databasePath: string;
+  readonly exists: boolean;
+  readonly schemaVersion: number | null;
+  readonly targetSchemaVersion: number;
+  readonly updateable: boolean;
+}
+
+export interface ScheduledTaskDatabaseUpgradeResult {
+  readonly changed: boolean;
+  readonly databasePath: string;
+  readonly version: number;
+  readonly backupPath: string | null;
+}
+
+const scheduledTaskSchemaMetadataSql = `
+  CREATE TABLE schema_metadata (
+    name TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+  ) STRICT;
+`;
+
+const scheduledTaskRunsTableSql = `
+  CREATE TABLE runs (
+    run_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(task_id),
+    scheduled_for INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (
+      state IN (
+        'dispatching', 'running', 'completed', 'failed', 'interrupted',
+        'uncertain', 'missed', 'skipped_overlap', 'skipped_capacity', 'blocked'
+      )
+    ),
+    thread_id TEXT,
+    turn_id TEXT,
+    dispatch_started_at INTEGER,
+    started_at INTEGER,
+    completed_at INTEGER,
+    error_category TEXT CHECK (
+      error_category IS NULL OR error_category IN (
+        'authorization', 'workspace', 'provider', 'model', 'approval', 'capacity',
+        'overlap', 'missed', 'interrupted', 'gateway_crash', 'unknown'
+      )
+    ),
+    error_message TEXT,
+    UNIQUE (task_id, scheduled_for)
+  ) STRICT;
+`;
+
+const scheduledTaskTasksDueIndexSql = `
+  CREATE INDEX tasks_due_idx ON tasks(status, next_run_at, task_id);
+`;
+
+const scheduledTaskRunsIndexesSql = `
+  CREATE INDEX runs_task_idx ON runs(task_id, scheduled_for DESC, run_id DESC);
+  CREATE INDEX runs_active_idx ON runs(task_id, state);
+`;
+
+const scheduledTaskInitialSchemaSql = `
+  ${scheduledTaskSchemaMetadataSql}
+  ${scheduledTaskTasksTableSql("tasks")}
+  ${scheduledTaskRunsTableSql}
+  ${scheduledTaskTasksDueIndexSql}
+  ${scheduledTaskRunsIndexesSql}
+  INSERT INTO schema_metadata (name, value) VALUES ('schema_version', ${schemaVersion});
+  PRAGMA user_version = ${schemaVersion};
+`;
+
+function scheduledTaskTasksTableSql(tableName: string): string {
+  return `
+    CREATE TABLE ${tableName} (
+      task_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'blocked', 'finished', 'deleted')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      surface TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      schedule_type TEXT CHECK (
+        schedule_type IS NULL OR schedule_type IN ('interval', 'once', 'monthly', 'daily', 'weekdays', 'weekly')
+      ),
+      schedule_json TEXT,
+      timezone TEXT,
+      anchor_at INTEGER,
+      next_run_at INTEGER,
+      model_provider TEXT,
+      model TEXT,
+      reasoning_effort TEXT,
+      service_tier TEXT,
+      sandbox TEXT CHECK (sandbox IS NULL OR sandbox IN ('read-only', 'workspace-write')),
+      approval_policy TEXT CHECK (approval_policy IS NULL OR approval_policy = 'never'),
+      permissions TEXT
+    ) STRICT;
+  `;
+}
+
+function readScheduledTaskUserVersion(database: DatabaseSync): number {
+  const row = database.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
+  return Number(row?.user_version ?? 0);
+}
+
+function scheduleAnchorAt(schedule: Schedule): number | null {
+  if (schedule.type === "interval") return schedule.anchorAt;
+  if (schedule.type === "once" && "afterMinutes" in schedule) return schedule.anchorAt;
+  return null;
+}
+
+function indexedColumns(database: DatabaseSync, indexName: string): string[] {
+  return (database.prepare(`PRAGMA index_info(${indexName})`).all() as Array<{ name: string }>)
+    .map((column) => column.name);
+}
+
+function requireScheduledTaskDatabaseStructure(database: DatabaseSync): void {
+  const tableNames = (database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all() as Array<{ name: string }>)
+    .map((table) => table.name)
+    .sort();
+  if (tableNames.join(",") !== "runs,schema_metadata,tasks") {
+    throw new ScheduledTaskSchemaError(
+      schemaVersion,
+      schemaVersion,
+      new Error("计划任务数据库包含未知或缺失的表"),
+    );
+  }
+  const required: Record<string, readonly string[]> = {
+    schema_metadata: ["name", "value"],
+    tasks: [
+      "task_id", "name", "status", "created_at", "updated_at", "surface", "account_id",
+      "conversation_id", "actor_id", "workspace_id", "prompt", "schedule_type", "schedule_json",
+      "timezone", "anchor_at", "next_run_at", "model_provider", "model", "reasoning_effort",
+      "service_tier", "sandbox", "approval_policy", "permissions",
+    ],
+    runs: [
+      "run_id", "task_id", "scheduled_for", "state", "thread_id", "turn_id",
+      "dispatch_started_at", "started_at", "completed_at", "error_category", "error_message",
+    ],
+  };
+  const tableList = database
+    .prepare("PRAGMA table_list")
+    .all() as Array<{ name: string; strict: number }>;
+  for (const table of ["schema_metadata", "tasks", "runs"] as const) {
+    const entry = tableList.find((candidate) => candidate.name === table);
+    if (entry?.strict !== 1) {
+      throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error(`表 ${table} 必须是 STRICT`));
+    }
+  }
+  for (const [table, columns] of Object.entries(required)) {
+    const found = (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+      .map((column) => column.name)
+      .sort();
+    if (found.join(",") !== [...columns].sort().join(",")) {
+      throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error(`表 ${table} 结构不完整`));
+    }
+  }
+  const uniqueIndexes = database
+    .prepare("PRAGMA index_list(runs)")
+    .all() as Array<{ name: string; unique: number }>;
+  const occurrenceIndex = uniqueIndexes.find((index) => index.unique === 1
+    && indexedColumns(database, index.name).join(",") === "task_id,scheduled_for");
+  if (!occurrenceIndex) {
+    throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("runs 缺少 occurrence 唯一约束"));
+  }
+  const runForeignKeys = database
+    .prepare("PRAGMA foreign_key_list(runs)")
+    .all() as Array<{ table: string; from: string; to: string }>;
+  if (!runForeignKeys.some((entry) =>
+    entry.table === "tasks" && entry.from === "task_id" && entry.to === "task_id"
+  )) {
+    throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("runs 任务外键缺失或指向无效表"));
+  }
+  const runSql = database
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
+    .get() as { sql: string | null } | undefined;
+  if (!runSql?.sql?.includes("error_category IN")) {
+    throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("runs 错误分类约束缺失"));
+  }
+  if (runSql.sql.toLowerCase().includes("'pending'")) {
+    throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("runs 不支持 pending 状态"));
+  }
+  const metadataNames = (database
+    .prepare("SELECT name FROM schema_metadata ORDER BY name")
+    .all() as Array<{ name: string }>);
+  if (metadataNames.length !== 1 || metadataNames[0]?.name !== "schema_version") {
+    throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("schema_metadata 内容无效"));
+  }
+}
+
+export function inspectScheduledTaskDatabaseFile(
+  databasePath: string,
+): ScheduledTaskDatabaseInspection {
+  if (databasePath === ":memory:") throw new Error("内存计划任务数据库不能检查或升级");
+  const source = tryLstat(databasePath);
+  if (source === undefined) {
+    return {
+      compatible: false,
+      databasePath,
+      exists: false,
+      schemaVersion: null,
+      targetSchemaVersion: schemaVersion,
+      updateable: false,
+    };
+  }
+  if (source.isSymbolicLink() || !source.isFile()) throw new Error("计划任务数据库源路径无效");
+  if ((source.mode & 0o777) !== 0o600) throw new Error("计划任务数据库文件权限必须是 0600");
+  requirePrivateDirectory(dirname(databasePath));
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const foundVersion = readScheduledTaskUserVersion(database);
+    if (foundVersion === schemaVersion) {
+      requireScheduledTaskDatabaseStructure(database);
+      return {
+        compatible: true,
+        databasePath,
+        exists: true,
+        schemaVersion: foundVersion,
+        targetSchemaVersion: schemaVersion,
+        updateable: true,
+      };
+    }
+    if (foundVersion === 1) {
+      requireScheduledTaskV1Migratable(database);
+    }
+    return {
+      compatible: false,
+      databasePath,
+      exists: true,
+      schemaVersion: foundVersion,
+      targetSchemaVersion: schemaVersion,
+      updateable: foundVersion === 1,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+function requireScheduledTaskV1Migratable(database: DatabaseSync): void {
+  const tableNames = (database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all() as Array<{ name: string }>)
+    .map((table) => table.name)
+    .sort();
+  if (tableNames.join(",") !== "runs,schema_metadata,tasks") {
+    throw new Error("v1 计划任务数据库结构不完整，无法迁移");
+  }
+  const metadata = database
+    .prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'")
+    .get() as { value: number } | undefined;
+  if (metadata?.value !== 1) {
+    throw new Error("v1 计划任务数据库 schema_metadata 无效，无法迁移");
+  }
+  const rows = database
+    .prepare("SELECT * FROM tasks ORDER BY task_id ASC")
+    .all() as unknown as TaskRow[];
+  for (const row of rows) {
+    migrateV1TaskRow(row);
+  }
+}
+
+export function upgradeScheduledTaskDatabaseFile(
+  databasePath: string,
+  options: { readonly allowMissing?: boolean; readonly backupPath?: string } = {},
+): ScheduledTaskDatabaseUpgradeResult {
+  const noChange: ScheduledTaskDatabaseUpgradeResult = {
+    changed: false,
+    databasePath,
+    version: schemaVersion,
+    backupPath: null,
+  };
+  const inspection = inspectScheduledTaskDatabaseFile(databasePath);
+  if (!inspection.exists) {
+    if (options.allowMissing === true) return noChange;
+    throw new Error("计划任务数据库尚未创建，请先启动一次 Gateway");
+  }
+  if (inspection.compatible) return noChange;
+  if (!inspection.updateable) {
+    throw new Error(
+      `计划任务数据库版本不支持升级：当前 ${inspection.schemaVersion ?? "unknown"}，只支持 1 → ${schemaVersion}`,
+    );
+  }
+  const backupPath = options.backupPath
+    ?? `${databasePath}.v1.${backupTimestamp()}.bak`;
+  copyScheduledTaskDatabaseFile(databasePath, backupPath);
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE; PRAGMA foreign_keys = ON;");
+    migrateScheduledTaskDatabaseV1ToV2(database);
+  } finally {
+    database.close();
+  }
+  return { changed: true, databasePath, version: schemaVersion, backupPath };
+}
+
+function copyScheduledTaskDatabaseFile(sourcePath: string, destinationPath: string): string {
+  if (resolve(destinationPath) === resolve(sourcePath)) throw new Error("备份目标不能覆盖计划任务数据库");
+  const source = tryLstat(sourcePath);
+  if (source === undefined || source.isSymbolicLink() || !source.isFile()) throw new Error("计划任务数据库源路径无效");
+  if ((source.mode & 0o777) !== 0o600) throw new Error("计划任务数据库文件权限必须是 0600");
+  const target = tryLstat(destinationPath);
+  if (target?.isSymbolicLink()) throw new Error("备份目标不能是符号链接");
+  if (target !== undefined) throw new Error("备份目标已存在，拒绝覆盖");
+  ensurePrivateDirectory(dirname(destinationPath));
+  copyFileSync(sourcePath, destinationPath, fsConstants.COPYFILE_EXCL);
+  chmodSync(destinationPath, 0o600);
+  return destinationPath;
+}
+
+function migrateScheduledTaskDatabaseV1ToV2(database: DatabaseSync): void {
+  database.exec("PRAGMA foreign_keys = OFF");
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.exec(scheduledTaskTasksTableSql("tasks_v2"));
+    const rows = database
+      .prepare("SELECT * FROM tasks ORDER BY task_id ASC")
+      .all() as unknown as TaskRow[];
+    const insert = database.prepare(`
+      INSERT INTO tasks_v2 (
+        task_id, name, status, created_at, updated_at,
+        surface, account_id, conversation_id, actor_id, workspace_id, prompt,
+        schedule_type, schedule_json, timezone, anchor_at, next_run_at,
+        model_provider, model, reasoning_effort, service_tier,
+        sandbox, approval_policy, permissions
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const row of rows) {
+      const migrated = migrateV1TaskRow(row);
+      insert.run(
+        migrated.task_id, migrated.name, migrated.status, migrated.created_at, migrated.updated_at,
+        migrated.surface, migrated.account_id, migrated.conversation_id, migrated.actor_id,
+        migrated.workspace_id, migrated.prompt,
+        migrated.schedule_type, migrated.schedule_json, migrated.timezone, migrated.anchor_at,
+        migrated.next_run_at, migrated.model_provider, migrated.model, migrated.reasoning_effort,
+        migrated.service_tier, migrated.sandbox, migrated.approval_policy, migrated.permissions,
+      );
+    }
+    database.exec("DROP TABLE tasks;");
+    database.exec("ALTER TABLE tasks_v2 RENAME TO tasks;");
+    database.exec(scheduledTaskTasksDueIndexSql);
+    database.exec(`UPDATE schema_metadata SET value = ${schemaVersion} WHERE name = 'schema_version';`);
+    database.exec(`PRAGMA user_version = ${schemaVersion};`);
+    requireScheduledTaskDatabaseStructure(database);
+    database.exec("COMMIT");
+  } catch (error) {
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+      // 迁移失败后 SQLite 可能已经自动回滚。
+    }
+    throw error;
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+function backupTimestamp(): string {
+  return new Date().toISOString().replaceAll(":", "-");
+}
+
+function requirePrivateDirectory(directory: string): void {
+  const entry = tryLstat(directory);
+  if (entry === undefined || entry.isSymbolicLink() || !entry.isDirectory()) {
+    throw new Error("计划任务数据库目录无效");
+  }
+  if ((entry.mode & 0o777) !== 0o700) {
+    throw new Error("计划任务数据库目录权限必须是 0700");
+  }
+}
+
 function buildTask(input: CreateScheduledTaskInput): ScheduledTask {
   const nowMs = input.createdAt ?? Date.now();
   requireTimestamp(nowMs);
@@ -974,7 +1217,11 @@ function buildTask(input: CreateScheduledTaskInput): ScheduledTask {
     serviceTier: normalizeNullableText(input.serviceTier),
     permission: normalizePermission(input),
   } satisfies ScheduledTask;
-  task.nextRunAt = calculateNextRunAt(task.schedule, task.timezone, nowMs);
+  const nextRunAt = calculateNextRunAt(task.schedule, task.timezone, nowMs);
+  if (nextRunAt === null) {
+    throw new ScheduleValidationError("一次性计划时间已过去，请选择未来时间");
+  }
+  task.nextRunAt = nextRunAt;
   return Object.freeze(task);
 }
 
@@ -1017,8 +1264,7 @@ function taskFromRow(row: TaskRow): ScheduledTask {
   if (
     (schedule === null && (row.schedule_type !== null || row.timezone !== null || row.next_run_at !== null))
     || (schedule !== null && (row.schedule_type !== schedule.type || timezone === null))
-    || (schedule?.type === "hourly" && row.anchor_at !== schedule.anchorAt)
-    || (schedule !== null && schedule.type !== "hourly" && row.anchor_at !== null)
+    || (schedule !== null && scheduleAnchorAt(schedule) !== row.anchor_at)
     || (row.sandbox === null && (row.approval_policy !== null || row.permissions !== null))
   ) {
     throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("任务 Schedule 结构不一致"));
@@ -1091,7 +1337,13 @@ function runFromRow(row: RunRow): ScheduledRun {
 }
 
 function parseTaskStatus(value: string): ScheduledTaskStatus {
-  if (value === "active" || value === "paused" || value === "blocked" || value === "deleted") return value;
+  if (
+    value === "active"
+    || value === "paused"
+    || value === "blocked"
+    || value === "finished"
+    || value === "deleted"
+  ) return value;
   throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion);
 }
 
@@ -1125,6 +1377,54 @@ function isScheduledRunErrorCategory(value: string): value is ScheduledRunErrorC
     "missed", "interrupted", "gateway_crash", "unknown",
   ];
   return (values as readonly string[]).includes(value);
+}
+
+function migrateV1TaskRow(row: TaskRow): TaskRow {
+  if (row.schedule_type !== "hourly") return row;
+  if (row.schedule_json === null) {
+    throw new Error(`计划任务 ${row.task_id} 缺少 hourly Schedule 数据，无法迁移`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.schedule_json);
+  } catch (error) {
+    throw new Error(`计划任务 ${row.task_id} 的 hourly Schedule 数据无效，无法迁移`, { cause: error });
+  }
+  if (!isRecord(parsed) || parsed.type !== "hourly") {
+    throw new Error(`计划任务 ${row.task_id} 的 hourly Schedule 类型无效，无法迁移`);
+  }
+  if (!Number.isSafeInteger(parsed.intervalHours) || (parsed.intervalHours as number) < 1) {
+    throw new Error(`计划任务 ${row.task_id} 的 hourly 间隔无效，无法迁移`);
+  }
+  const intervalMinutes = (parsed.intervalHours as number) * 60;
+  const anchorAt = Number.isSafeInteger(parsed.anchorAt)
+    ? (parsed.anchorAt as number)
+    : row.anchor_at;
+  if (anchorAt === null || !Number.isSafeInteger(anchorAt)) {
+    throw new Error(`计划任务 ${row.task_id} 的 hourly anchor 无效，无法迁移`);
+  }
+  try {
+    normalizeSchedule({ type: "interval", intervalMinutes, anchorAt });
+  } catch (error) {
+    throw new Error(
+      `计划任务 ${row.task_id} 的 hourly 间隔换算后不被 v2 支持，请先调整后再升级`,
+      { cause: error },
+    );
+  }
+  return {
+    ...row,
+    schedule_type: "interval",
+    schedule_json: JSON.stringify({
+      type: "interval",
+      intervalMinutes,
+      anchorAt,
+    }),
+    anchor_at: anchorAt,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function errorCategoryForState(state: ScheduledRunState): ScheduledRunErrorCategory | null {

@@ -35,8 +35,10 @@ describe("scheduled-task server request boundary", () => {
       .resolves.toEqual({ answers: {} });
     await expect(handle(request("mcpServer/elicitation/request")))
       .resolves.toEqual({ action: "cancel", content: null, _meta: null });
+    await expect(handle(request("item/tool/call")))
+      .rejects.toMatchObject({ code: -32601 });
     expect(fallback).not.toHaveBeenCalled();
-    expect(lookup.noteServerRequestRejected).toHaveBeenCalledTimes(5);
+    expect(lookup.noteServerRequestRejected).toHaveBeenCalledTimes(6);
   });
 
   it("delegates non-scheduled and unsupported requests to the existing handler", async () => {

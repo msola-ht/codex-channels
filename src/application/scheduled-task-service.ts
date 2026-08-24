@@ -16,7 +16,10 @@ import {
   type ScheduledTaskSandbox,
   type ScheduledTaskStore,
 } from "../scheduled-tasks/index.js";
-import type { ScheduledTaskDraftExecutionContext } from "./scheduled-task-draft-coordinator.js";
+import {
+  parseNaturalScheduledTaskDraft,
+  scheduledTaskCommandUsageText,
+} from "./scheduled-task-command.js";
 
 const taskPageSize = 8;
 const runPageSize = 10;
@@ -141,7 +144,7 @@ export interface ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     description: string,
-  ): Promise<ScheduledTaskCreatePreview>;
+  ): ScheduledTaskCreatePreview;
   previewCreate(
     target: ConversationTarget,
     actorId: string,
@@ -181,34 +184,22 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     private readonly store: ScheduledTaskStore,
     private readonly application: ScheduledTaskApplicationPort,
     private readonly now: () => number = Date.now,
-    private readonly drafts?: {
-      draft(
-        target: ConversationTarget,
-        actorId: string,
-        description: string,
-        context: ScheduledTaskDraftExecutionContext,
-      ): Promise<ScheduledTaskCreateRequest>;
-    },
   ) {}
 
-  async previewNaturalLanguage(
+  previewNaturalLanguage(
     target: ConversationTarget,
     actorId: string,
     description: string,
-  ): Promise<ScheduledTaskCreatePreview> {
+  ): ScheduledTaskCreatePreview {
     this.requireActor(target, actorId);
     this.requireTaskCapacity(target, actorId);
-    if (!this.drafts) throw scheduledError("scheduled-task.state.invalid", "自然语言计划任务功能未启用");
-    const context = this.requireCreationContext(target);
     const normalizedDescription = normalizeDraftDescription(description);
-    const request = await this.drafts.draft(target, actorId, normalizedDescription, {
-      cwd: context.cwd,
-      modelProvider: context.modelProvider,
-      model: context.model,
-      reasoningEffort: context.reasoningEffort,
-      serviceTier: context.serviceTier,
-    });
-    return this.previewCreate(target, actorId, request);
+    const deterministic = parseNaturalScheduledTaskDraft(normalizedDescription, this.now());
+    if (deterministic) return this.previewCreate(target, actorId, deterministic);
+    throw scheduledError(
+      "scheduled-task.command.invalid",
+      scheduledTaskCommandUsageText,
+    );
   }
 
   previewCreate(
@@ -223,6 +214,10 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     const timezone = validateIanaTimeZone(request.timezone);
     const schedule = normalizeSchedule(request.schedule);
     const context = this.requireCreationContext(target);
+    const previewNextRunAt = calculateNextRunAt(schedule, timezone, now);
+    if (previewNextRunAt === null) {
+      throw scheduledError("scheduled-task.command.invalid", "一次性计划时间已过去，请选择未来时间");
+    }
     const input = {
       name: defaultTaskName(prompt),
       surface: target.surface,
@@ -254,7 +249,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
         taskId: "pending",
         status: "active",
         updatedAt: now,
-        nextRunAt: calculateNextRunAt(schedule, timezone, now),
+        nextRunAt: previewNextRunAt,
         permission: {
           sandbox: context.sandbox,
           approvalPolicy: "never",

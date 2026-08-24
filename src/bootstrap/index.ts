@@ -16,5 +16,9 @@ export {
   createScheduledTaskServerRequestHandler,
   type ScheduledTaskThreadLookup,
 } from "./scheduled-task-server-request.js";
+export {
+  createScheduledTaskToolRequestHandler,
+  type ScheduledTaskToolLookup,
+} from "./scheduled-task-tool-request.js";
 export { runGatewayProcess } from "./config-lifecycle.js";
 export { GatewayOwnershipError } from "../../runtime/gateway-owner.mjs";

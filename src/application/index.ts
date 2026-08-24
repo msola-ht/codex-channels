@@ -1,9 +1,4 @@
 export {
-  ScheduledTaskDraftCoordinator,
-  scheduledTaskDraftOutputSchema,
-  type ScheduledTaskDraftTurnPort,
-} from "./scheduled-task-draft-coordinator.js";
-export {
   type AccountMetric,
   type AccountPlanType,
   type AccountQueryPort,
@@ -67,6 +62,15 @@ export {
   type ScheduledTaskUseCases,
   type ScheduledTaskView,
 } from "./scheduled-task-service.js";
+export {
+  ScheduledTaskToolService,
+  isLikelyScheduledTaskInput,
+  scheduledTaskToolName,
+  scheduledTaskToolSpec,
+  type ScheduledTaskToolResult,
+  type ScheduledTaskToolRunOutcome,
+  type ScheduledTaskToolTaskOutcome,
+} from "./scheduled-task-tool.js";
 export {
   ConversationService,
   resolveThread,
@@ -174,7 +178,6 @@ export {
   type TurnExecutionPort,
   type TurnInput,
   type TurnOverrides,
-  type TurnOutputSchema,
   type TurnStarted,
 } from "./turn-port.js";
 export {

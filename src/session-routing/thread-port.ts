@@ -37,6 +37,14 @@ export interface ThreadSession {
   contextCompactionItemIds: readonly string[];
 }
 
+export interface ThreadDynamicToolSpec {
+  type: "function";
+  name: string;
+  description: string;
+  inputSchema: unknown;
+  deferLoading?: boolean;
+}
+
 export interface ThreadStartOptions {
   model?: string;
   modelProvider?: string;
@@ -47,6 +55,8 @@ export interface ThreadStartOptions {
   permissions?: string;
   /** Create an in-memory thread that is omitted from durable thread listings. */
   ephemeral?: boolean;
+  /** Official experimental functions shown to the model for this Thread. */
+  dynamicTools?: readonly ThreadDynamicToolSpec[];
 }
 
 export interface ThreadQueryOptions {

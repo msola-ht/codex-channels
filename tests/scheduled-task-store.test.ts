@@ -11,6 +11,7 @@ import {
   ScheduledTaskStateError,
   ScheduledTaskStopTimeoutError,
   SqliteScheduledTaskStore,
+  upgradeScheduledTaskDatabaseFile,
   type CreateScheduledTaskInput,
   type ScheduledTaskExecutionPort,
   type ScheduledTaskExecutionResult,
@@ -24,7 +25,7 @@ afterEach(() => {
 });
 
 describe("SqliteScheduledTaskStore", () => {
-  it("creates a private v1 database and reopens the task definition", () => {
+  it("creates a private database and reopens the task definition", () => {
     const { directory, path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);
     const task = store.createTask(taskInput({ createdAt: base + 8 * 60 * 60_000 }));
@@ -51,6 +52,127 @@ describe("SqliteScheduledTaskStore", () => {
     reopened.close();
   });
 
+  it("fails closed on a v1 database until the explicit upgrade and keeps runs immutable", () => {
+    const { path, directory } = databasePath();
+    const anchor = base;
+    createV1Database(path, anchor, true);
+    expect(() => new SqliteScheduledTaskStore(path)).toThrow(
+      /需要显式升级.*codexc update/u,
+    );
+
+    const backupPath = join(directory, "scheduled-tasks.v1.bak.sqlite3");
+    const upgrade = upgradeScheduledTaskDatabaseFile(path, { backupPath });
+    expect(upgrade).toMatchObject({
+      changed: true,
+      databasePath: path,
+      version: 2,
+      backupPath,
+    });
+    expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+    const backupDb = new DatabaseSync(backupPath, { readOnly: true });
+    expect(backupDb.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+    expect(backupDb.prepare("SELECT schedule_type FROM tasks WHERE task_id = 'v1-task'").get())
+      .toEqual({ schedule_type: "hourly" });
+    backupDb.close();
+
+    const store = new SqliteScheduledTaskStore(path);
+    const task = store.getTask("v1-task")!;
+    expect(task.schedule).toEqual({ type: "interval", intervalMinutes: 60, anchorAt: anchor });
+    expect(task.status).toBe("active");
+    expect(task.nextRunAt).toBe(anchor + 60 * 60_000);
+    const claim = store.claimDue(task.taskId, task.nextRunAt!, "claimed", task.nextRunAt!);
+    expect(claim.kind).toBe("claimed");
+    const migrated = store.listTasks({ includeDeleted: false });
+    expect(migrated).toHaveLength(1);
+    const schemaDb = new DatabaseSync(path);
+    const foreignKeys = schemaDb.prepare("PRAGMA foreign_key_list(runs)").all() as Array<{ table: string }>;
+    expect(foreignKeys.some((entry) => entry.table === "tasks")).toBe(true);
+    schemaDb.close();
+    store.close();
+  });
+
+  it("refuses to migrate a v1 hourly interval beyond the v2 cap and leaves v1 intact", () => {
+    const { path, directory } = databasePath();
+    createV1Database(path, base, false, 10_000);
+    expect(() => new SqliteScheduledTaskStore(path)).toThrow(/需要显式升级/u);
+    expect(() => upgradeScheduledTaskDatabaseFile(path, {
+      backupPath: join(directory, "unsupported.bak"),
+    })).toThrow(/不被 v2 支持/u);
+    const stillV1 = new DatabaseSync(path, { readOnly: true });
+    expect(stillV1.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+    stillV1.close();
+  });
+
+  it("finishes a once task after its single occurrence is claimed", () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const onceAt = Date.parse("2026-09-01T09:00:00.000Z");
+    const task = store.createTask(taskInput({
+      taskId: "once-task",
+      schedule: { type: "once", date: "2026-09-01", time: "09:00" },
+      timezone: "UTC",
+      createdAt: onceAt - 1,
+    }));
+    expect(task.nextRunAt).toBe(onceAt);
+    const claim = store.claimDue(task.taskId, onceAt, "claimed", onceAt);
+    expect(claim.kind).toBe("claimed");
+    const after = store.getTask(task.taskId);
+    expect(after!.status).toBe("finished");
+    expect(after!.nextRunAt).toBeNull();
+    store.close();
+    const schemaDb = new DatabaseSync(path);
+    expect(schemaDb.prepare("SELECT anchor_at FROM tasks WHERE task_id = ?").get(task.taskId))
+      .toEqual({ anchor_at: null });
+    schemaDb.close();
+  });
+
+  it("persists a relative once anchor and finishes after the delayed occurrence", () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const anchor = base;
+    const task = store.createTask(taskInput({
+      taskId: "relative-once",
+      schedule: { type: "once", afterMinutes: 1, anchorAt: anchor },
+      timezone: "UTC",
+      createdAt: anchor,
+    }));
+    expect(task.nextRunAt).toBe(anchor + 60_000);
+    const claim = store.claimDue(task.taskId, task.nextRunAt!, "claimed", task.nextRunAt!);
+    expect(claim.kind).toBe("claimed");
+    expect(store.getTask(task.taskId)).toMatchObject({
+      status: "finished",
+      nextRunAt: null,
+      schedule: { type: "once", afterMinutes: 1, anchorAt: anchor },
+    });
+    store.close();
+
+    const reopened = new SqliteScheduledTaskStore(path);
+    expect(reopened.getTask(task.taskId)?.schedule)
+      .toEqual({ type: "once", afterMinutes: 1, anchorAt: anchor });
+    const schemaDb = new DatabaseSync(path);
+    expect(schemaDb.prepare("SELECT anchor_at FROM tasks WHERE task_id = ?").get(task.taskId))
+      .toEqual({ anchor_at: anchor });
+    schemaDb.close();
+    reopened.close();
+  });
+
+  it("finishes an expired paused once task when resumed", () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const onceAt = Date.parse("2026-09-01T09:00:00.000Z");
+    const task = store.createTask(taskInput({
+      taskId: "expired-paused-once",
+      schedule: { type: "once", date: "2026-09-01", time: "09:00" },
+      timezone: "UTC",
+      createdAt: onceAt - 1,
+    }));
+    store.pauseTask(task.taskId, onceAt - 1);
+    const resumed = store.resumeTask(task.taskId, onceAt + 1);
+    expect(resumed.status).toBe("finished");
+    expect(resumed.nextRunAt).toBeNull();
+    store.close();
+  });
+
   it("rejects unknown, incomplete, and mismatched schemas without migrating", () => {
     const unknown = databasePath();
     const unknownDb = new DatabaseSync(unknown.path);
@@ -62,14 +184,14 @@ describe("SqliteScheduledTaskStore", () => {
     const incompleteDb = new DatabaseSync(incomplete.path);
     incompleteDb.exec(`
       CREATE TABLE schema_metadata (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
-      INSERT INTO schema_metadata VALUES ('schema_version', 1);
+      INSERT INTO schema_metadata VALUES ('schema_version', 2);
       CREATE TABLE tasks (task_id TEXT PRIMARY KEY);
       CREATE TABLE runs (run_id TEXT PRIMARY KEY);
-      PRAGMA user_version = 1;
+      PRAGMA user_version = 2;
     `);
     incompleteDb.close();
     expect(() => new SqliteScheduledTaskStore(incomplete.path))
-      .toThrow(/Schema 1.*结构不完整/);
+      .toThrow(/Schema 2.*结构不完整/);
 
     const wrongVersion = databasePath();
     const wrongVersionDb = new DatabaseSync(wrongVersion.path);
@@ -86,7 +208,7 @@ describe("SqliteScheduledTaskStore", () => {
     db.exec("ALTER TABLE tasks ADD COLUMN unexpected TEXT");
     db.close();
     expect(() => new SqliteScheduledTaskStore(valid.path))
-      .toThrow(/Schema 1.*结构不完整/);
+      .toThrow(/Schema 2.*结构不完整/);
 
     const unsafe = databasePath();
     chmodSync(unsafe.directory, 0o755);
@@ -154,7 +276,7 @@ describe("SqliteScheduledTaskStore", () => {
   it("atomically claims an occurrence and rejects a duplicate claim", () => {
     const { path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);
-    const task = store.createTask(taskInput({ schedule: { type: "hourly", intervalHours: 1, anchorAt: base } }));
+    const task = store.createTask(taskInput({ schedule: { type: "interval", intervalMinutes: 60, anchorAt: base } }));
     const scheduledFor = task.nextRunAt!;
     const first = store.claimDue(task.taskId, scheduledFor, "claimed", scheduledFor);
     expect(first.kind).toBe("claimed");
@@ -189,9 +311,9 @@ describe("SqliteScheduledTaskStore", () => {
   it("recovers dispatching runs but leaves running runs for authoritative recovery", () => {
     const { path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);
-    const first = store.createTask(taskInput({ taskId: "dispatching", schedule: { type: "hourly", intervalHours: 1, anchorAt: base } }));
+    const first = store.createTask(taskInput({ taskId: "dispatching", schedule: { type: "interval", intervalMinutes: 60, anchorAt: base } }));
     const firstRun = store.claimDue(first.taskId, first.nextRunAt!, "claimed", base + 60 * 60_000);
-    const second = store.createTask(taskInput({ taskId: "running", schedule: { type: "hourly", intervalHours: 1, anchorAt: base } }));
+    const second = store.createTask(taskInput({ taskId: "running", schedule: { type: "interval", intervalMinutes: 60, anchorAt: base } }));
     const secondRun = store.claimDue(second.taskId, second.nextRunAt!, "claimed", base + 60 * 60_000);
     store.markRunning(secondRun.run.runId, base + 60 * 60_000 + 1, { threadId: "thread-1", turnId: "turn-1" });
 
@@ -224,7 +346,7 @@ describe("SqliteScheduledTaskStore", () => {
   it("bounds run retention to 90 days and 200 rows per task", () => {
     const { path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);
-    const task = store.createTask(taskInput({ taskId: "retained", schedule: { type: "hourly", intervalHours: 1, anchorAt: base } }));
+    const task = store.createTask(taskInput({ taskId: "retained", schedule: { type: "interval", intervalMinutes: 60, anchorAt: base } }));
     let current = task;
     for (let index = 0; index < 201; index += 1) {
       const scheduledFor = current.nextRunAt!;
@@ -252,7 +374,7 @@ describe("SqliteScheduledTaskStore", () => {
     const task = store.createTask(taskInput({
       taskId: "old-run",
       createdAt: oldBase,
-      schedule: { type: "hourly", intervalHours: 1, anchorAt: oldBase },
+      schedule: { type: "interval", intervalMinutes: 60, anchorAt: oldBase },
     }));
     const run = store.claimDue(task.taskId, task.nextRunAt!, "claimed", task.nextRunAt!);
     store.markRunning(run.run.runId, task.nextRunAt! + 1);
@@ -281,7 +403,7 @@ describe("SqliteScheduledTaskStore", () => {
     const store = new SqliteScheduledTaskStore(path);
     const task = store.createTask(taskInput({
       taskId: "old-active",
-      schedule: { type: "hourly", intervalHours: 1, anchorAt: base },
+      schedule: { type: "interval", intervalMinutes: 60, anchorAt: base },
     }));
     const first = store.claimDue(task.taskId, task.nextRunAt!, "claimed", task.nextRunAt!);
     let current = store.getTask(task.taskId)!;
@@ -718,6 +840,99 @@ function taskInput(overrides: Partial<CreateScheduledTaskInput> = {}): CreateSch
     createdAt: base,
     ...overrides,
   };
+}
+
+function createV1Database(
+  path: string,
+  anchorAt: number,
+  withRun = false,
+  intervalHours = 1,
+): void {
+  const db = new DatabaseSync(path);
+  db.exec(`
+    CREATE TABLE schema_metadata (
+      name TEXT PRIMARY KEY,
+      value INTEGER NOT NULL
+    ) STRICT;
+    INSERT INTO schema_metadata (name, value) VALUES ('schema_version', 1);
+    CREATE TABLE tasks (
+      task_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'blocked', 'deleted')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      surface TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      schedule_type TEXT CHECK (
+        schedule_type IS NULL OR schedule_type IN ('hourly', 'daily', 'weekdays', 'weekly')
+      ),
+      schedule_json TEXT,
+      timezone TEXT,
+      anchor_at INTEGER,
+      next_run_at INTEGER,
+      model_provider TEXT,
+      model TEXT,
+      reasoning_effort TEXT,
+      service_tier TEXT,
+      sandbox TEXT CHECK (sandbox IS NULL OR sandbox IN ('read-only', 'workspace-write')),
+      approval_policy TEXT CHECK (approval_policy IS NULL OR approval_policy = 'never'),
+      permissions TEXT
+    ) STRICT;
+    CREATE TABLE runs (
+      run_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(task_id),
+      scheduled_for INTEGER NOT NULL,
+      state TEXT NOT NULL CHECK (
+        state IN (
+          'dispatching', 'running', 'completed', 'failed', 'interrupted',
+          'uncertain', 'missed', 'skipped_overlap', 'skipped_capacity', 'blocked'
+        )
+      ),
+      thread_id TEXT,
+      turn_id TEXT,
+      dispatch_started_at INTEGER,
+      started_at INTEGER,
+      completed_at INTEGER,
+      error_category TEXT CHECK (
+        error_category IS NULL OR error_category IN (
+          'authorization', 'workspace', 'provider', 'model', 'approval', 'capacity',
+          'overlap', 'missed', 'interrupted', 'gateway_crash', 'unknown'
+        )
+      ),
+      error_message TEXT,
+      UNIQUE (task_id, scheduled_for)
+    ) STRICT;
+    CREATE INDEX tasks_due_idx ON tasks(status, next_run_at, task_id);
+    CREATE INDEX runs_task_idx ON runs(task_id, scheduled_for DESC, run_id DESC);
+    CREATE INDEX runs_active_idx ON runs(task_id, state);
+    PRAGMA user_version = 1;
+  `);
+  db.prepare(`
+    INSERT INTO tasks (
+      task_id, name, status, created_at, updated_at,
+      surface, account_id, conversation_id, actor_id, workspace_id, prompt,
+      schedule_type, schedule_json, timezone, anchor_at, next_run_at,
+      model_provider, model, reasoning_effort, service_tier,
+      sandbox, approval_policy, permissions
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "v1-task", "每隔一小时", "active", anchorAt, anchorAt,
+    "telegram", "default", "conversation-1", "actor-1", "workspace-1", "read",
+    "hourly", JSON.stringify({ type: "hourly", intervalHours, anchorAt }), "UTC",
+    anchorAt, anchorAt + 60 * 60_000,
+    null, null, null, null, "read-only", "never", null,
+  );
+  if (withRun) {
+    db.prepare(`
+      INSERT INTO runs (run_id, task_id, scheduled_for, state)
+      VALUES (?, ?, ?, ?)
+    `).run("v1-run", "v1-task", anchorAt, "completed");
+  }
+  db.close();
 }
 
 async function delay(milliseconds: number): Promise<void> {

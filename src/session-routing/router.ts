@@ -14,6 +14,7 @@ import type {
   ThreadSession,
   ThreadSnapshot,
   ThreadStartOptions,
+  ThreadDynamicToolSpec,
 } from "./thread-port.js";
 
 export interface ThreadModelSettings {
@@ -49,11 +50,13 @@ export class SessionRouter {
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
   private readonly contextCompactionItemIdsByThread = new Map<string, readonly string[]>();
+  private readonly dynamicToolThreadIds = new Set<string>();
 
   constructor(
     private readonly codex: ThreadLifecyclePort,
     private readonly bindings: BindingStore,
     private readonly workspaces: WorkspaceRegistry,
+    private readonly dynamicTools: readonly ThreadDynamicToolSpec[] = [],
   ) {}
 
   private workspacePermissions(workspace: Workspace): ThreadStartOptions {
@@ -101,6 +104,10 @@ export class SessionRouter {
 
   targetForThread(threadId: string): ConversationTarget | undefined {
     return this.bindings.getByThread(threadId)?.target;
+  }
+
+  hasDynamicTools(threadId: string): boolean {
+    return this.dynamicToolThreadIds.has(threadId);
   }
 
   readThread(threadId: string): Promise<ThreadSnapshot> {
@@ -296,7 +303,13 @@ export class SessionRouter {
     const started = await this.codex.startThread(workspace.cwd, {
       ...this.workspacePermissions(workspace),
       ...startOptions,
+      ...(this.dynamicTools.length > 0
+        ? { dynamicTools: this.dynamicTools }
+        : {}),
     });
+    if (this.dynamicTools.length > 0) {
+      this.dynamicToolThreadIds.add(started.thread.id);
+    }
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier);
     this.contextCompactionItemIdsByThread.set(
       started.thread.id,
@@ -360,6 +373,8 @@ export class SessionRouter {
         "后台计划任务必须使用 approvalPolicy=never",
       );
     }
+    const backgroundStartOptions: ThreadStartOptions = { ...startOptions };
+    delete backgroundStartOptions.dynamicTools;
     if (this.backgroundBindings(target).length >= maximumBackgroundThreadsPerConversation) {
       throw new UserFacingError(
         "conversation.background-limit",
@@ -371,7 +386,7 @@ export class SessionRouter {
       : this.workspaces.require(workspaceId);
     const session = await this.codex.startThread(workspace.cwd, {
       ...this.workspacePermissions(workspace),
-      ...startOptions,
+      ...backgroundStartOptions,
       threadSource: "automation",
     });
     if (this.bindings.getByThread(session.thread.id)) {

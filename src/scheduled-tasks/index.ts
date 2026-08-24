@@ -37,6 +37,7 @@ export {
   type ScheduledTaskTickResult,
 } from "./types.js";
 export {
+  inspectScheduledTaskDatabaseFile,
   scheduledTaskDatabasePath,
   scheduledTaskMaximumRunsPerTask,
   scheduledTaskRetentionDays,
@@ -44,6 +45,9 @@ export {
   ScheduledTaskStateError,
   ScheduledTaskStoreClosedError,
   SqliteScheduledTaskStore,
+  type ScheduledTaskDatabaseInspection,
+  type ScheduledTaskDatabaseUpgradeResult,
+  upgradeScheduledTaskDatabaseFile,
 } from "./sqlite-store.js";
 export {
   ScheduledTaskScheduler,

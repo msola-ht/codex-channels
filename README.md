@@ -310,7 +310,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue add <文本>`、`/queue list [页码]`、`/queue update <ID 或列表序号> <文本>`、`/queue delete <ID 或列表序号>`、`/queue reorder <ID 或列表序号> <位置>`、`/queue start [ID 或列表序号]`、`/revert list [页码]`、`/revert <Turn ID 或列表序号>`、`/revert confirm <一次性令牌>`、`/compact`、`/fork`、`/review`、`/release`；Queue 由 App Server 持久保存，容量最多 100 条
-- 计划任务：启用 `[scheduled_tasks].enabled = true` 后使用 `/schedule` 查看；发送 `/schedule <自然语言>` 由当前 Codex 模型生成结构化草案并在确认后创建，`/schedule add daily <HH:mm> <时区> <文本>` 等确定性命令仍供高级使用；完整语法与安全边界见 [`docs/scheduled-tasks-development.md`](docs/scheduled-tasks-development.md)
+- 计划任务：启用 `[scheduled_tasks].enabled = true` 后使用 `/schedule` 查看；前台 Agent 可直接调用 `schedule_task` 工具创建确认预览，`/schedule <自然语言>` 与 `/schedule add interval <N>m|h <时区> <文本>`、`/schedule add once <日期> <时间> <时区> <文本>` 等命令仍可使用，支持每 N 分钟、每天、工作日、每周、每月与一次性；完整语法与安全边界见 [`docs/scheduled-tasks-development.md`](docs/scheduled-tasks-development.md)
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`

@@ -8,7 +8,10 @@ import {
   ScheduledTaskApplicationService,
   type ScheduledTaskApplicationPort,
 } from "../src/application/index.js";
-import { parseScheduledTaskOperation } from "../src/application/scheduled-task-command.js";
+import {
+  parseNaturalScheduledTaskDraft,
+  parseScheduledTaskOperation,
+} from "../src/application/scheduled-task-command.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
 import { SqliteScheduledTaskStore } from "../src/scheduled-tasks/index.js";
@@ -28,6 +31,35 @@ afterEach(() => {
 });
 
 describe("ScheduledTaskApplicationService", () => {
+  it("creates a confirmation from a deterministic natural sentence without a model draft", async () => {
+    const { store, service } = createService(() => now);
+    const preview = service.previewNaturalLanguage(
+      target,
+      "actor-1",
+      "1 分钟后 Asia/Shanghai 回复“计划任务测试成功”",
+    );
+    expect(preview.task.schedule).toEqual({
+      type: "once",
+      afterMinutes: 1,
+      anchorAt: now,
+    });
+    expect(service.confirm(target, "actor-1", preview.token)).toMatchObject({
+      action: "created",
+      task: { status: "active" },
+    });
+    store.close();
+  });
+
+  it("rejects an unrecognized natural description without starting a model draft", async () => {
+    const { store, service } = createService(() => now);
+    expect(() => service.previewNaturalLanguage(
+      target,
+      "actor-1",
+      "随便提醒我一下",
+    )).toThrow(expect.objectContaining({ code: "scheduled-task.command.invalid" }));
+    store.close();
+  });
+
   it("requires an exact actor-bound preview before creating and consumes the token once", async () => {
     const { store, service } = createService();
     const preview = service.previewCreate(target, "actor-1", {
@@ -161,9 +193,35 @@ describe("parseScheduledTaskOperation", () => {
     expect(parseScheduledTaskOperation("每天 09:00 在 Asia/Shanghai 检查 CI"))
       .toEqual({ type: "natural", description: "每天 09:00 在 Asia/Shanghai 检查 CI" });
   });
+
+  it("deterministically parses common natural language schedule sentences", () => {
+    expect(parseNaturalScheduledTaskDraft("1 分钟后 Asia/Shanghai 发送报告", now)).toEqual({
+      schedule: { type: "once", afterMinutes: 1, anchorAt: now },
+      timezone: "Asia/Shanghai",
+      prompt: "发送报告",
+    });
+    expect(parseNaturalScheduledTaskDraft("每 15 分钟 Asia/Shanghai 检查 CI", now)).toEqual({
+      schedule: { type: "interval", intervalMinutes: 15, anchorAt: now },
+      timezone: "Asia/Shanghai",
+      prompt: "检查 CI",
+    });
+    expect(parseNaturalScheduledTaskDraft("每天 09:00 Asia/Shanghai 检查 CI", now)).toEqual({
+      schedule: { type: "daily", time: "09:00" },
+      timezone: "Asia/Shanghai",
+      prompt: "检查 CI",
+    });
+    expect(parseNaturalScheduledTaskDraft("每天 09:00 在 Asia/Shanghai 检查 CI", now)).toEqual({
+      schedule: { type: "daily", time: "09:00" },
+      timezone: "Asia/Shanghai",
+      prompt: "检查 CI",
+    });
+    expect(parseNaturalScheduledTaskDraft("这不是可解析的计划描述", now)).toBeNull();
+  });
 });
 
-function createService(clock: () => number = () => now): {
+function createService(
+  clock: () => number = () => now,
+): {
   readonly store: SqliteScheduledTaskStore;
   readonly service: ScheduledTaskApplicationService;
   readonly runTaskNow: ReturnType<typeof vi.fn<ScheduledTaskApplicationPort["runTaskNow"]>>;
@@ -194,7 +252,11 @@ function createService(clock: () => number = () => now): {
     }),
     runTaskNow,
   };
-  return { store, service: new ScheduledTaskApplicationService(store, application, clock), runTaskNow };
+  return {
+    store,
+    service: new ScheduledTaskApplicationService(store, application, clock),
+    runTaskNow,
+  };
 }
 
 function taskInput(overrides: Partial<ReturnType<typeof baseTaskInput>> = {}) {

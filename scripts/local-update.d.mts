@@ -8,6 +8,7 @@ export interface DatabaseInspection {
   compatible?: boolean;
   databasePath?: string;
   exists?: boolean;
+  scheduledTasks?: DatabaseInspection;
   schemaVersion?: number | null;
   targetSchemaVersion?: number;
   updateable?: boolean;
@@ -17,6 +18,7 @@ export interface DatabaseUpdateResult {
   backupPath?: string | null;
   changed: boolean;
   databasePath: string;
+  scheduledTasks?: DatabaseUpdateResult;
   schemaVersion?: number | null;
   version?: number | null;
 }

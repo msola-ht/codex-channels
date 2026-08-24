@@ -3,6 +3,11 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
+import {
+  inspectScheduledTaskDatabaseFile,
+  scheduledTaskDatabasePath,
+  upgradeScheduledTaskDatabaseFile,
+} from "../dist/scheduled-tasks/index.js";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
@@ -27,6 +32,7 @@ const requiredStateColumns = Object.freeze({
 
 export function inspectStateDatabase(environment = process.env) {
   const { databasePath } = resolveStateDatabaseContext(environment);
+  const scheduledTasks = inspectScheduledTaskDatabaseFile(scheduledTaskDatabasePath(databasePath));
   if (!existsSync(databasePath)) {
     return {
       compatible: true,
@@ -35,6 +41,7 @@ export function inspectStateDatabase(environment = process.env) {
       schemaVersion: null,
       targetSchemaVersion: currentSchemaVersion,
       updateable: true,
+      scheduledTasks,
     };
   }
   const database = new DatabaseSync(databasePath, { readOnly: true });
@@ -59,6 +66,7 @@ export function inspectStateDatabase(environment = process.env) {
       targetSchemaVersion: currentSchemaVersion,
       updateable: schemaVersion === currentSchemaVersion
         || schemaVersion === supportedPreviousSchemaVersion,
+      scheduledTasks,
     };
   } finally {
     database.close();
@@ -73,10 +81,34 @@ export function validateStateDatabaseStructure(environment = process.env) {
       `状态数据库 Schema ${status.schemaVersion ?? "unknown"} 尚未更新到 ${currentSchemaVersion}`,
     );
   }
+  if (status.scheduledTasks?.exists && !status.scheduledTasks.compatible) {
+    throw new Error(
+      `计划任务数据库 Schema ${status.scheduledTasks.schemaVersion ?? "unknown"} 尚未更新到 ${status.scheduledTasks.targetSchemaVersion}`,
+    );
+  }
   return status;
 }
 
 export function upgradeStateDatabase(environment = process.env, options = {}) {
+  const initialStatus = inspectStateDatabase(environment);
+  if (
+    initialStatus.scheduledTasks?.exists
+    && !initialStatus.scheduledTasks.compatible
+    && !initialStatus.scheduledTasks.updateable
+  ) {
+    throw new Error(
+      `计划任务数据库 Schema ${initialStatus.scheduledTasks.schemaVersion ?? "unknown"} 尚未更新到 ${initialStatus.scheduledTasks.targetSchemaVersion}`,
+    );
+  }
+  const state = upgradeGatewayStateDatabase(environment, options);
+  const scheduledTaskPath = scheduledTaskDatabasePath(state.databasePath);
+  const scheduledTasks = upgradeScheduledTaskDatabaseFile(scheduledTaskPath, {
+    allowMissing: true,
+  });
+  return { ...state, scheduledTasks };
+}
+
+function upgradeGatewayStateDatabase(environment = process.env, options = {}) {
   const { databasePath } = resolveStateDatabaseContext(environment);
   if (!existsSync(databasePath)) {
     if (options.allowMissing === true) {
@@ -177,6 +209,12 @@ if (
       writeCliMessage("success", `状态数据库已升级到 Schema ${result.version}。`);
       console.log(`数据库：${result.databasePath}`);
       console.log(`升级前备份：${result.backupPath}`);
+    }
+    if (result.scheduledTasks?.changed) {
+      writeCliMessage("success", "计划任务数据库已升级到 Schema 2。");
+      console.log(`计划任务数据库升级前备份：${result.scheduledTasks.backupPath}`);
+    } else if (result.scheduledTasks?.exists) {
+      writeCliMessage("note", "计划任务数据库无需升级。");
     }
   } catch (error) {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));

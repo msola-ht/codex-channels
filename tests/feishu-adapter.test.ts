@@ -248,7 +248,7 @@ describe("Feishu conversation adapter", () => {
       taskId: "task-preview",
       name: "每小时检查",
       status: "active" as const,
-      schedule: { type: "hourly" as const, intervalHours: 1, anchorAt: 1 },
+      schedule: { type: "interval" as const, intervalMinutes: 60, anchorAt: 1 },
       timezone: "Asia/Shanghai",
       nextRunAt: 2,
       workspaceId: "main",
@@ -260,7 +260,7 @@ describe("Feishu conversation adapter", () => {
       permissions: null,
       promptPreview: "检查项目",
     };
-    const previewNaturalLanguage = vi.fn(async () => ({
+    const previewNaturalLanguage = vi.fn(() => ({
       action: "create" as const,
       token: "12345678-1234-1234-1234-123456789abc",
       expiresAt: Date.now() + 60_000,

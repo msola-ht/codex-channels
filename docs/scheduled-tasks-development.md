@@ -3,7 +3,8 @@
 本文定义在 Codex Connect Gateway 中实现计划任务的边界与分阶段方案。设计基于
 `codex-cli 0.148.0` 固定协议，以及 2026-08-22 可见的 OpenAI Scheduled 文档；本文是实施前合同，
 当前已完成存储、纯调度域、默认关闭的 App Server 执行/恢复层、三个 Surface 的统一管理命令，以及
-基于 `turn/start.outputSchema` 的自然语言创建草案；飞书同时提供绑定 Actor 的短期按钮与输入卡片。
+基于实验 `thread/start.dynamicTools` 与 `item/tool/call` 的前台 Agent 计划任务工具；飞书同时提供
+绑定 Actor 的短期按钮与输入卡片。
 功能仍须显式开启并完成部署验收。
 
 首期功能必须对外称为“Gateway 计划任务（由 App Server 执行）”，不得称为“App Server 原生计划
@@ -26,7 +27,8 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 - `plugin/read.scheduledTasks` 只返回插件目录中的任务模板摘要，不是用户任务列表或运行状态 API。
 
 因此，Gateway 若要在 Telegram、飞书和微信中提供计划任务，必须拥有一套明确的宿主调度器。首期
-只复用稳定的 Thread/Turn 能力和 `threadSource`，不接入实验动态工具或额外上下文。
+复用稳定的 Thread/Turn 能力和 `threadSource`，并接入官方实验动态工具作为前台入口；动态工具最终
+仍由 Gateway 执行，不把调度器放进 App Server 或模型内部。
 
 ## 目标与非目标
 
@@ -42,10 +44,11 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 
 - 不兼容或导入 ChatGPT/Codex App 已创建的 Scheduled；官方没有公开同步 API。
 - 不在同一 Thread 上按计划继续上下文；这需要与活动 Turn、原生 Queue 和会话设置单独设计。
-- 不让模型直接创建、修改或确认任务；模型只可把显式自然语言入口转换为待校验草案。
-- 不接入实验 `dynamicTools`、`item/tool/call` 或 `additionalContext`。
+- 允许前台 Agent 调用 `schedule_task` 生成待确认预览，但不允许它绕过确认、直接改写任务状态。
+- 实验 `additionalContext` 仍不接入；只接入当前自然语言入口所需的 `dynamicTools` 与
+  `item/tool/call` 宿主回调。
 - 不读取 `plugin/read.scheduledTasks` 并自动安装插件任务模板。
-- 不实现任意 RFC 5545 RRULE、一次性提醒、日历例外、节假日或分布式多机调度。
+- 不实现任意 RFC 5545 RRULE、日历例外、节假日或分布式多机调度。
 - 不把系统 `cron`、systemd timer 或外部 CI 伪装为 Gateway 任务。
 
 ## 固定事实来源
@@ -103,12 +106,14 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 
 ### 调度范围
 
-首期以固定版插件任务摘要中的四种 Schedule 为能力边界，并补充宿主调度必需的
-`anchorAt`：
+首期以固定版插件任务摘要中的基本 Schedule 为能力边界，并补充宿主调度必需的
+`anchorAt` 与一次性任务：
 
 | 类型 | 必需字段 | 语义 |
 | --- | --- | --- |
-| `hourly` | `intervalHours`、`anchorAt` | 从确认创建时间开始每 N 小时一次，N 为正整数 |
+| `interval` | `intervalMinutes`、`anchorAt` | 从确认创建时间开始每 N 分钟一次，N 为正整数 |
+| `once` | `date`、`time`，或 `afterMinutes`、`anchorAt` | 指定时区某本地时刻只执行一次；也支持“从现在起 N 分钟后/小时后执行一次”，执行后进入 `finished` 终态 |
+| `monthly` | `day`、`time` | 指定时区每月指定日执行，月份无该日时跳过一次 |
 | `daily` | `time` | 指定时区每天执行 |
 | `weekdays` | `time` | 指定时区周一至周五执行 |
 | `weekly` | `days`、`time` | 指定时区每周所选日期执行 |
@@ -116,10 +121,15 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 每个任务必须保存有效 IANA 时区，例如 `Asia/Shanghai`。不得静默采用 Gateway 主机时区；创建命令
 没有提供时区时必须要求补充。`time` 固定为 `HH:mm`，工作日使用 `MO` 至 `SU`。
 
-`hourly.anchorAt` 是确认创建成功的 UTC 时间，后续 occurrence 始终由上一计划时间增加固定小时数，
-不因 DST 改变间隔；固定版插件摘要允许 Hourly 附带可选工作日，但首期明确拒绝该组合。Daily、
-Weekdays 和 Weekly 按任务时区计算：不存在的本地时间跳过该次；重复的本地时间只执行第一次。每次
-成功计算后持久化 UTC `nextRunAt`，启动恢复时重新校验，不通过字符串比较判断到期。
+`interval.anchorAt` 是确认创建成功的 UTC 时间，后续 occurrence 始终由上一计划时间增加固定分钟数，
+不因 DST 改变间隔；固定版插件摘要允许 Hourly 附带可选工作日，但首期明确拒绝该组合。`once` 只计算
+目标本地时刻，创建时早于当前时间或落在 DST 缺口中时命令失败关闭；重复的本地时间只执行第一次。
+相对延时形式以创建时刻的 UTC `anchorAt` 加固定分钟数为准确绝对时刻，不受 DST 影响；由自然语言
+「N 分钟后/小时后执行一次」生成，不会映射为循环 `interval`。
+Daily、Weekdays、Weekly 和 Monthly 按任务时区计算：不存在的本地时间跳过该次；重复的本地时间只执行
+第一次；Monthly 在当月缺少指定日时跳到下一个存在的月份。每次成功计算后持久化 UTC `nextRunAt`，
+启动恢复时重新校验，不通过字符串比较判断到期。
+若一次性任务在 `paused` 或 `blocked` 期间到期，恢复时直接收敛为 `finished`，不保留无法执行的死状态。
 
 首期不解析任意 RRULE。若以后对齐 App 的高级 Schedule，应采用经过审查的 RFC 5545 实现，并先
 说明新增依赖、迁移与回滚；不能手写一个看似兼容但语义不完整的解析器。
@@ -183,8 +193,11 @@ Provider 恢复后台绑定和订阅，再读取权威 Thread 与分页 Turn 状
 不可避免的正文，应在产品文案中明确会持久化；数据库目录权限固定 `0700`、文件固定 `0600`，日志、
 错误和指标不得包含 Prompt。实施前必须取得用户对这一新持久化格式的确认。
 
-Schema 首版为 v1，只接受当前版本。后续升级必须由 `codexc update` 在 Gateway 停止后预检、备份并
-显式迁移；运行时不隐式补表。删除任务写入不可运行的墓碑并立即清空 Prompt、Schedule 与用户派生
+Schema 当前为 v2，只接受当前版本。运行时不执行任何迁移：v1 或未知版本在打开时失败关闭，必须先停止
+Gateway 后运行 `codexc update` 或 `codexc state upgrade`，由升级流程预检、生成私有 `.bak` 备份并
+执行唯一的历史 v1→v2 确定性迁移（`hourly`→`interval`，间隔由小时换算为分钟；超出新上限的任务在
+升级前失败并保留原库）。迁移在同一事务中重建任务表并保留 `runs` 外键；成功后旧库仅存在于备份，
+运行时不隐式补表或改写未知结构。删除任务写入不可运行的墓碑并立即清空 Prompt、Schedule 与用户派生
 名称，只保留任务 ID、固定删除标记和既有 Run 关联；不删除 App Server Thread。Run 元数据沿用指标库的保留思路，默认最多
 保留 90 天和每任务 200 条；`dispatching`、`running` 和 `uncertain` Run 不因清理上限或保留期删除，清理不影响 Thread 历史。
 Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理失败通知 `onError`，但不阻塞本次安全调度。
@@ -208,36 +221,41 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 是否允许网络，以及“任务会在无人值守时执行”。创建和删除使用一次性确认令牌；暂停、恢复和手动
 运行仍需最新任务列表快照或完整 ID。
 
-## 自然语言草案
+## 前台工具与自然语言创建
 
-推荐创建入口是 `/schedule <自然语言>`。Application 先确认 Actor、任务容量和当前模型设置，再通过
-稳定的 `thread/start.ephemeral` 创建不持久化、不进入 Thread 列表的专用临时 Thread，并以
-`turn/start.outputSchema` 启动只读、永不自动审批的专用 Turn；模型只把描述转换为 `hourly`、`daily`、
-`weekdays` 或 `weekly` 草案。Gateway 在协议边界严格解析最终 JSON，再调用与确定性命令完全相同的
-`previewCreate`。模型不接触 Store、Workspace 选择、权限、确认令牌或创建操作。
+启用计划任务后，Gateway 前台新建 Thread 时会通过官方实验字段
+`thread/start.dynamicTools` 注册顶层函数 `schedule_task`。用户发送普通自然语言时，当前正在运行的
+Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通过 `item/tool/call`
+向 Gateway 发出宿主回调，Gateway 的
+[`scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) 校验 Thread
+绑定和唯一授权 Actor，再交给 Application 的 `ScheduledTaskToolService`。
 
-临时 Thread 不绑定 Conversation，原始用户输入、JSON、推理、工具状态和完成卡不会进入当前会话、
-TUI 或持久历史；请求仍走当前 App Server、Provider 与指标链路。完成、失败或超时后 Gateway 取消
-订阅，由 App Server 回收临时 Thread。为避免普通陈述被误判，首期只识别显式 `/schedule` 命令，
-不扫描普通聊天消息。模型提示要求不调用工具，协议层同时固定 `read-only` 与
-`approvalPolicy=never`；若仍观察到搜索、MCP、子代理或其他工具事件，Gateway 立即中断并以固定提示
-拒绝整个草案，不采用工具参与后的结果。Codex 0.148.0 的稳定 Turn API 不能移除全部工具定义，因此
-这里不承诺工具调用从未发起，只保证工具参与后的结果不会进入预览。最终只有符合 Schema 和领域校验
-的纯模型草案能进入预览。
+`ScheduledTaskToolService` 不复写任何存储或调度逻辑，只把模型参数解析为现有的
+`previewCreate`、`list`、`runs`、`rename`、`pause`、`resume`、`run`、`retry` 和
+`previewDelete` 用例。`create` 与 `delete` 只返回一次性确认令牌；`confirm` 不在动态工具中暴露，
+必须由用户通过现有 `/schedule confirm <令牌>` 命令完成。
+工具结果复用现有 Surface 命令渲染格式，因此 Agent 能看到与 `/schedule` 相同的预览文本。
+
+该工具只在 Gateway 前台会话注册；后台计划任务 Thread 不携带 `dynamicTools`，且
+`createScheduledTaskServerRequestHandler` 会把后台 Thread 上的 `item/tool/call` 安全拒绝，防止
+计划任务递归创建更多计划任务。
 
 时区不得猜测。用户明确表达“北京时间”等地区或时区时，模型可以规范化为 IANA 名称；完全没有表达
-时区时由 Gateway 返回固定澄清提示，不回显模型生成的问题，且不保存草案；一次性、
-每月或复杂日历规则返回固定的不支持提示，不近似为其他计划。每个 Conversation 同时只允许一个
-草案，草案 Turn 最长等待 90 秒；超时后请求中断并取消订阅。取消订阅失败只进行一次幂等重试，并在
-成功前保留辅助 Provider 路由。自然语言入口仍需要一次模型运行并计入现有请求指标；高级用户可以继续使用无需模型
-解释的确定性 `add` 命令。
+时区时工具返回可操作提示，不创建任务。每两周、每月第 N 个星期几或更复杂日历规则返回固定的不支持
+提示，不近似为其他计划。固定句式仍可在 Application 内确定性解析并直接创建预览，不依赖工具或模型。
+
+官方 `dynamicTools` 只能在 `thread/start` 时注册，不能向已经存在的 Thread 注入。Gateway 会在
+当前绑定 Thread 尚未注册工具时，对计划类自然语言消息先切换到一个带工具的新前台 Thread，再启动
+当前 Agent；因此用户不需要先手动执行 `/new`。旧 Thread 的对话历史不会被删除，只是不会获得该工具。
 
 ## 公开命令与渠道交互
 
-默认采用自然语言生成待确认草案，同时保留确定性命令：
+前台 Agent 可直接通过 `schedule_task` 生成待确认预览；显式命令仍保留确定性入口：
 
 ```text
-/schedule add hourly <N> <时区> <文本>
+/schedule add interval <N>m|h <时区> <文本>
+/schedule add once <YYYY-MM-DD> <HH:mm> <时区> <文本>
+/schedule add monthly <1-31> <HH:mm> <时区> <文本>
 /schedule add daily <HH:mm> <时区> <文本>
 /schedule add weekdays <HH:mm> <时区> <文本>
 /schedule add weekly <MO,TU,...> <HH:mm> <时区> <文本>
@@ -252,10 +270,10 @@ TUI 或持久历史；请求仍走当前 App Server、Provider 与指标链路�
 /schedule confirm <一次性令牌>
 ```
 
-自然语言示例：
+前台自然语言示例（Agent 会调用 `schedule_task`）：
 
 ```text
-/schedule 每天 09:00 在 Asia/Shanghai 检查项目 CI，失败时说明原因
+每天 09:00 在 Asia/Shanghai 检查项目 CI，失败时说明原因
 ```
 
 `add` 和 `delete` 先返回预览，再由 `confirm` 执行。序号只在当前 Conversation 最近五分钟的列表
@@ -271,8 +289,10 @@ TUI 或持久历史；请求仍走当前 App Server、Provider 与指标链路�
 重启后未确认预览自然失效。每个 Surface
 Actor 在同一 Conversation 最多保留 100 个未删除任务，创建预览和确认都复核该固定上限。
 
-首期四种 Schedule 都是循环任务，不支持一次性 Schedule。完成的是某次 Run，而不是任务定义：终态
-Run 保留在 `/schedule runs` 历史中，循环任务继续计算下次运行，不自动删除。完成卡片沿用普通后台
+除 `once` 外，其余 Schedule 都是循环任务；`once` 在目标本地时刻触发一次后任务转为 `finished`
+终态并停止产生新 Run。任何 Schedule 完成的都是某次 Run，而不是任务定义：终态
+Run 保留在 `/schedule runs` 历史中，循环任务继续计算下次运行，不自动删除，一次性任务保留为
+`finished` 供列表与历史核查。完成卡片沿用普通后台
 Thread 的模型、Token、费用、耗时和操作统计，并继续标记后台 Thread；任务名、Run ID、计划时间和
 终态以 `/schedule runs` 为事实入口。计划任务数据库不重复保存模型指标；后续若
 WebUI 接入 Run 与指标关联，只能根据 Run 的 Thread ID 查询现有指标，关联失败时显示“指标不可用”，
@@ -300,8 +320,8 @@ Surface -> Application -> Scheduled Tasks
 
 ### 现有模块修改
 
-- `codex-client`：只给稳定 `ThreadStartOptions` 增加封闭的 `threadSource: "automation"`，并在
-  `thread/start` 原样编码；不导出动态工具或额外上下文类型。
+- `codex-client`：给稳定 `ThreadStartOptions` 增加封闭的 `threadSource: "automation"` 与受控动态
+  工具规格，并在 `thread/start` 原样编码；不导出额外上下文类型。
 - `session-routing`：增加“强制新建后台 Thread”的窄用例，禁止复用 `ensure` 的空闲 Thread 选择；
   继续执行 Thread 独占和每 Conversation 三后台任务限制。
 - `application`：执行 Actor、Workspace、Provider、模型和确认令牌校验；不直接读取 SQLite。
@@ -335,7 +355,7 @@ enabled = false
 ### PR 1：存储与纯调度域
 
 1. 新模块、Schedule 封闭联合、IANA 时区与 DST 测试。
-2. 独立 SQLite Schema v1、权限、严格版本、备份/升级接口。
+2. 独立 SQLite Schema v2、权限、严格版本、备份/升级接口与 v1→v2 受控迁移。
 3. Task/Run 状态机、到期领取、五分钟有限补跑、重叠与容量结果。
 4. 只使用假执行端口的时钟和崩溃恢复测试，不连接 App Server 或 Surface。
 
@@ -354,13 +374,19 @@ enabled = false
 3. 已同步 `/help`、菜单、根 README、`docs/display.md`、错误字典与渠道验收矩阵。
 4. 已复用执行层对授权撤销、Workspace 删除、Provider 删除和 Surface 停用的运行前失败关闭。
 
+### PR 4：前台 Agent 计划任务工具
+
+1. 前台新 Thread 注册官方实验 `thread/start.dynamicTools` 的 `schedule_task`。
+2. Bootstrap 解码 `item/tool/call` 并校验 Thread 绑定与唯一授权 Actor。
+3. `ScheduledTaskToolService` 复用现有创建、确认、列表和生命周期用例，不新增业务逻辑。
+4. 后台计划任务 Thread 不注册工具，且现有无人值守 Server Request 边界拒绝递归工具调用。
+5. 固定句式仍由 Application 直接解析；不再创建临时草案 Thread。
+
 ### 后续候选，不与首期合并
 
 - 同一聊天上下文计划任务：单独审查 App Server Queue 顺序、活动 Turn、模型设置和停止条件。
-- 自然语言管理：只有完成 `dynamicTools`、`item/tool/call` 的完整实验协议与安全审查后，才允许注册
-  `codex_app.automation_update`；该工具只是调用 Application 用例，不获得额外权限。
 - 插件任务模板：等待 `plugin/read` 被项目正式采用，再把模板作为创建预览输入；不得自动启用。
-- RFC 5545 RRULE、一次性任务、多个 Workspace 和隔离 Worktree：分别设计和验收。
+- RFC 5545 RRULE、多个 Workspace 和隔离 Worktree：分别设计和验收。
 - Codex SDK 执行器：只有需要脱离共享 App Server 或运行 CI/云任务时再评估，不能同时保留两套默认
   执行引擎。
 
@@ -375,6 +401,8 @@ enabled = false
 - Actor/Workspace/Provider/模型重新授权与撤权后的失败关闭。
 - 无人值守审批、用户输入、额外权限与 MCP elicitation 全部安全拒绝。
 - 前台 Thread 不变、计划 Thread 独占、后台完成释放、重启订阅恢复和多 Provider 路由。
+- 前台 `thread/start.dynamicTools` 注册与 `item/tool/call` 完整往返真实 App Server 合同，
+  以及参数校验、唯一 Actor 解析和现有命令渲染复用。
 - 三 Surface 命令、确认、按钮令牌、输出顺序、超时隔离和敏感信息清洗。
 - 真实锁定版 App Server 合同使用临时 `CODEX_HOME` 和 Mock Responses，不调用真实账户或模型。
 
@@ -400,5 +428,5 @@ enabled = false
 - 无法让结果未知的派发进入 `uncertain`，只能依靠自动重试规避。
 - 必须持久化模型回答、审批正文、工具输出或完整 Thread 历史才能恢复。
 - 固定版 App Server 不接受 `threadSource: "automation"`，或后台 Thread 与 Remote TUI 共享出现冲突。
-- 首期必须依赖实验 `dynamicTools`、`additionalContext` 或 `item/tool/call` 才能工作。
+- 实验 `dynamicTools`、`item/tool/call` 与当前锁定 App Server、所用模型 Provider 的合同不一致且无法失败关闭。
 - 第三方 Provider 的 Thread/Turn 合同与 OpenAI 主实例不一致且无法失败关闭。

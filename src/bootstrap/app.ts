@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
@@ -39,6 +38,7 @@ import {
   ProviderRoutingClient,
   gatewayVersion,
   handleApprovalServerRequest,
+  JsonRpcError,
   loadManagedModelOptions,
   JsonRpcClient,
   supportedCodexCliVersion,
@@ -62,7 +62,9 @@ import {
   ModelSelectionService,
   ProviderAccountService,
   ScheduledTaskApplicationService,
-  ScheduledTaskDraftCoordinator,
+  ScheduledTaskToolService,
+  isLikelyScheduledTaskInput,
+  scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
   type ThreadLockHolder,
@@ -132,6 +134,7 @@ import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { ScheduledTaskExecutor } from "./scheduled-task-executor.js";
 import { ScheduledTaskRunCoordinator } from "./scheduled-task-run-coordinator.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
+import { createScheduledTaskToolRequestHandler } from "./scheduled-task-tool-request.js";
 import {
   createManagedProviderAccountAdapters,
   createManagedProviderPricingResolvers,
@@ -177,7 +180,6 @@ export class GatewayApplication {
   private readonly scheduledTaskStore: SqliteScheduledTaskStore | undefined;
   private readonly scheduledTaskScheduler: ScheduledTaskScheduler | undefined;
   private readonly scheduledRunCoordinator: ScheduledTaskRunCoordinator | undefined;
-  private readonly scheduledTaskDraftCoordinator: ScheduledTaskDraftCoordinator | undefined;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -268,6 +270,7 @@ export class GatewayApplication {
       this.codex,
       this.bindings,
       this.workspaces,
+      config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
@@ -624,6 +627,10 @@ export class GatewayApplication {
       },
       this.codex,
       this.codex,
+      {
+        enabled: config.scheduledTasksEnabled,
+        isLikelyScheduleInput: (input) => isLikelyScheduledTaskInput(input),
+      },
     );
     this.output.subscribe("conversation-background-release", async (event) => {
       if (event.type !== "turn.completed" || !this.router.isBackgroundThread(event.threadId)) {
@@ -684,42 +691,8 @@ export class GatewayApplication {
       const provider = this.router.modelSettingsForThread(event.threadId)?.modelProvider;
       this.providerIdleReleaser.touch(provider, event.target);
     });
-    const scheduledTasks = config.scheduledTasksEnabled
+    const scheduledTaskModule = config.scheduledTasksEnabled
       ? (() => {
-          const draftCoordinator = new ScheduledTaskDraftCoordinator({
-            start: async (context, text, outputSchema, onThreadStarted) => {
-              const session = await this.codex.startThread(context.cwd, {
-                model: context.model,
-                modelProvider: context.modelProvider,
-                sandbox: "read-only",
-                approvalPolicy: "never",
-                ephemeral: true,
-              });
-              const threadId = session.thread.id;
-              if (!onThreadStarted(threadId)) {
-                await this.codex.releaseEphemeralThread(threadId).catch(() => undefined);
-                throw new Error("计划任务草案已取消");
-              }
-              const turn = await this.codex.startTurn(
-                threadId,
-                [{ type: "text", text }],
-                `scheduled-draft-${randomUUID()}`,
-                context.cwd,
-                {
-                  model: context.model,
-                  ...(context.reasoningEffort === null
-                    ? {}
-                    : { effort: context.reasoningEffort }),
-                  serviceTier: context.serviceTier,
-                  outputSchema,
-                },
-              );
-              return { threadId, turnId: turn.turnId };
-            },
-            interrupt: (threadId, turnId) => this.codex.interruptTurn(threadId, turnId),
-            release: (threadId) => this.codex.releaseEphemeralThread(threadId),
-          });
-          this.scheduledTaskDraftCoordinator = draftCoordinator;
           const store = new SqliteScheduledTaskStore(
             scheduledTaskDatabasePath(config.stateDatabasePath),
           );
@@ -759,7 +732,7 @@ export class GatewayApplication {
           this.output.subscribe("scheduled-task-run-coordinator", (event) => {
             coordinator.handleOutput(event);
           });
-          return new ScheduledTaskApplicationService(store, {
+          const scheduledTaskService = new ScheduledTaskApplicationService(store, {
             isActorAuthorized: (target, actorId) =>
               this.bindings.conversations().some((candidate) =>
                 surfaceAccountKey(candidate.surface, candidate.accountId)
@@ -802,19 +775,34 @@ export class GatewayApplication {
               };
             },
             runTaskNow: (taskId) => scheduler.runTaskNow(taskId),
-          }, Date.now, draftCoordinator);
+          }, Date.now);
+          const toolService = new ScheduledTaskToolService(
+            scheduledTaskService,
+            Date.now,
+          );
+          const scheduledTaskToolHandler = createScheduledTaskToolRequestHandler({
+            targetForThread: (threadId) => this.router.targetForThread(threadId),
+            actorsForTarget: (target) => this.bindings.actors(target),
+            execute: (target, actorId, args) =>
+              toolService.execute(target, actorId, args),
+          });
+          return {
+            service: scheduledTaskService,
+            handler: scheduledTaskToolHandler,
+          };
         })()
       : undefined;
     if (!config.scheduledTasksEnabled) {
       this.scheduledTaskStore = undefined;
       this.scheduledRunCoordinator = undefined;
       this.scheduledTaskScheduler = undefined;
-      this.scheduledTaskDraftCoordinator = undefined;
     }
+    const scheduledTaskUseCases = scheduledTaskModule?.service;
+    const scheduledTaskToolHandler = scheduledTaskModule?.handler;
     this.surfaceModules = createSurfaceModules({
       config,
       service,
-      ...(scheduledTasks === undefined ? {} : { scheduledTasks }),
+      ...(scheduledTaskUseCases === undefined ? {} : { scheduledTasks: scheduledTaskUseCases }),
       bindings: this.bindings,
       logger,
       gatewayVersion,
@@ -918,7 +906,6 @@ export class GatewayApplication {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
-        this.scheduledTaskDraftCoordinator?.handleInput(coreEvent);
         if (
           coreEvent.type === "turn.started"
           || coreEvent.type === "turn.completed"
@@ -989,12 +976,22 @@ export class GatewayApplication {
     });
     const approvalHandler = (request: Parameters<typeof handleApprovalServerRequest>[0]) =>
       handleApprovalServerRequest(request, this.approval);
+    const appServerRequestHandler: Parameters<typeof this.codex.setServerRequestHandler>[0] =
+      async (request) => {
+        if (request.method === "item/tool/call") {
+          if (!scheduledTaskToolHandler) {
+            throw new JsonRpcError(-32601, "计划任务动态工具未启用");
+          }
+          return scheduledTaskToolHandler(request);
+        }
+        return approvalHandler(request);
+      };
     this.codex.setServerRequestHandler(
       this.scheduledRunCoordinator === undefined
-        ? approvalHandler
+        ? appServerRequestHandler
         : createScheduledTaskServerRequestHandler(
             this.scheduledRunCoordinator,
-            approvalHandler,
+            appServerRequestHandler,
           ),
     );
   }
@@ -1158,7 +1155,6 @@ export class GatewayApplication {
     this.removeRpcDisconnect?.();
     this.removeRpcDisconnect = undefined;
     this.subagentCompletion?.close();
-    this.scheduledTaskDraftCoordinator?.close();
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Scheduled Task Scheduler", () => this.scheduledTaskScheduler?.stop()],

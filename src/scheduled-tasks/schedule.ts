@@ -5,10 +5,12 @@ import {
 } from "./types.js";
 
 const hourMs = 60 * 60_000;
+const minuteMs = 60_000;
 const dayMs = 24 * hourMs;
 const maxCalendarSearchDays = 370;
 const maxDateMs = 8_640_000_000_000_000;
-const maxHourlyIntervalHours = Math.floor(maxDateMs / hourMs);
+/** A one-year interval cap keeps drafts and deterministic commands consistent. */
+const maxIntervalMinutes = 525_600;
 /** A bounded set of points around the requested local date. */
 const offsetProbeHours = [
   -72, -48, -36, -24, -12, -6, -3, -1,
@@ -57,24 +59,39 @@ export function normalizeSchedule(schedule: Schedule): Schedule {
     throw new ScheduleValidationError("Schedule 类型无效");
   }
   switch (schedule.type) {
-    case "hourly": {
-      if (!Number.isSafeInteger(schedule.intervalHours) || schedule.intervalHours < 1) {
-        throw new ScheduleValidationError("Hourly intervalHours 必须是正整数");
-      }
-      if (schedule.intervalHours > maxHourlyIntervalHours) {
-        throw new ScheduleValidationError("Hourly intervalHours 超出可表示的时间范围");
-      }
-      const intervalMs = schedule.intervalHours * hourMs;
-      if (!Number.isSafeInteger(intervalMs) || intervalMs > maxDateMs) {
-        throw new ScheduleValidationError("Hourly intervalHours 超出可表示的时间范围");
-      }
-      validateEpochMilliseconds(schedule.anchorAt, "Hourly anchorAt");
+    case "interval": {
+      const intervalMinutes = normalizeIntervalMinutes(schedule.intervalMinutes);
+      validateEpochMilliseconds(schedule.anchorAt, "Interval anchorAt");
       return Object.freeze({
-        type: "hourly",
-        intervalHours: schedule.intervalHours,
+        type: "interval",
+        intervalMinutes,
         anchorAt: schedule.anchorAt,
       });
     }
+    case "once":
+      if ("afterMinutes" in schedule) {
+        if ("date" in schedule || "time" in schedule) {
+          throw new ScheduleValidationError("Once 不能同时使用相对延时和绝对时间");
+        }
+        const afterMinutes = normalizeRelativeOnceMinutes(schedule.afterMinutes);
+        validateEpochMilliseconds(schedule.anchorAt, "Once anchorAt");
+        return Object.freeze({
+          type: "once",
+          afterMinutes,
+          anchorAt: schedule.anchorAt,
+        });
+      }
+      return Object.freeze({
+        type: "once",
+        date: normalizeOnceDate(schedule.date),
+        time: normalizeLocalTime(schedule.time),
+      });
+    case "monthly":
+      return Object.freeze({
+        type: "monthly",
+        day: normalizeMonthDay(schedule.day),
+        time: normalizeLocalTime(schedule.time),
+      });
     case "daily":
       return Object.freeze({ type: "daily", time: normalizeLocalTime(schedule.time) });
     case "weekdays":
@@ -107,17 +124,26 @@ export function validateSchedule(schedule: Schedule, timezone: string): Schedule
  * (two matching instants, of which the earlier one is selected).  It also
  * avoids depending on the host process TZ or on undocumented offset
  * arithmetic.
+ *
+ * A `once` schedule returns `null` once its target instant has passed, which
+ * means the task has no further occurrence and should be treated as finished.
+ * All other schedules are repeating and always resolve to a number.
  */
 export function calculateNextRunAt(
   schedule: Schedule,
   timezone: string,
   afterMs: number,
-): number {
+): number | null {
   validateEpochMilliseconds(afterMs, "计算 nextRunAt");
   const normalizedTimezone = validateIanaTimeZone(timezone);
   const normalized = normalizeSchedule(schedule);
-  if (normalized.type === "hourly") {
-    return nextHourlyOccurrence(normalized, afterMs);
+  if (normalized.type === "interval") {
+    return nextIntervalOccurrence(normalized, afterMs);
+  }
+  if (normalized.type === "once") {
+    return "afterMinutes" in normalized
+      ? nextRelativeOnceOccurrence(normalized, afterMs)
+      : nextOnceOccurrence(normalized, normalizedTimezone, afterMs);
   }
 
   const local = localDateParts(afterMs, normalizedTimezone);
@@ -126,7 +152,10 @@ export function calculateNextRunAt(
     ? null
     : normalized.type === "weekdays"
       ? new Set<ScheduleWeekday>(["MO", "TU", "WE", "TH", "FR"])
-      : new Set(normalized.days);
+      : normalized.type === "weekly"
+        ? new Set(normalized.days)
+        : null;
+  const occurrenceDay = normalized.type === "monthly" ? normalized.day : null;
   let date = datePartsToUtcDay(local.year, local.month, local.day);
 
   for (let day = 0; day <= maxCalendarSearchDays; day += 1) {
@@ -135,7 +164,12 @@ export function calculateNextRunAt(
     }
     const dateParts = utcDayToDateParts(date);
     const weekday = weekdayForUtcDay(date);
-    if (allowedDays === null || allowedDays.has(weekday)) {
+    const dateMatches = occurrenceDay !== null
+      ? dateParts.day === occurrenceDay
+      : allowedDays === null
+        ? true
+        : allowedDays.has(weekday);
+    if (dateMatches) {
       const candidates = localDateTimeToUtcCandidates(
         normalizedTimezone,
         dateParts,
@@ -175,6 +209,65 @@ export function normalizeWeekdays(days: readonly ScheduleWeekday[]): ScheduleWee
   return scheduleWeekdays.filter((day) => seen.has(day));
 }
 
+function normalizeIntervalMinutes(value: unknown): number {
+  if (
+    !Number.isSafeInteger(value)
+    || (value as number) < 1
+    || (value as number) > maxIntervalMinutes
+  ) {
+    throw new ScheduleValidationError(`Interval intervalMinutes 必须是 1 到 ${maxIntervalMinutes} 的整数`);
+  }
+  const intervalMs = (value as number) * minuteMs;
+  if (!Number.isSafeInteger(intervalMs) || intervalMs > maxDateMs) {
+    throw new ScheduleValidationError("Interval intervalMinutes 超出可表示的时间范围");
+  }
+  return value as number;
+}
+
+function normalizeRelativeOnceMinutes(value: unknown): number {
+  if (
+    !Number.isSafeInteger(value)
+    || (value as number) < 1
+    || (value as number) > maxIntervalMinutes
+  ) {
+    throw new ScheduleValidationError(`Once afterMinutes 必须是 1 到 ${maxIntervalMinutes} 的整数`);
+  }
+  return value as number;
+}
+
+function normalizeMonthDay(value: unknown): number {
+  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 31) {
+    throw new ScheduleValidationError("Monthly day 必须是 1 到 31 的整数");
+  }
+  return value as number;
+}
+
+export function normalizeOnceDate(value: unknown): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(normalized)) {
+    throw new ScheduleValidationError(`一次性计划日期必须使用 YYYY-MM-DD：${String(value)}`);
+  }
+  parseOnceDate(normalized);
+  return normalized;
+}
+
+function parseOnceDate(value: string): CalendarDateParts {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) throw new ScheduleValidationError(`一次性计划日期必须使用 YYYY-MM-DD：${value}`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() + 1 !== month
+    || date.getUTCDate() !== day
+  ) {
+    throw new ScheduleValidationError(`一次性计划日期无效：${value}`);
+  }
+  return { year, month, day };
+}
+
 export function parseLocalTime(time: string): { readonly hour: number; readonly minute: number } {
   const normalized = normalizeLocalTime(time);
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/u.exec(normalized);
@@ -201,22 +294,62 @@ interface CalendarDateParts {
 
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
-function nextHourlyOccurrence(
-  schedule: Extract<Schedule, { readonly type: "hourly" }>,
+function nextIntervalOccurrence(
+  schedule: Extract<Schedule, { readonly type: "interval" }>,
   afterMs: number,
 ): number {
-  const intervalMs = schedule.intervalHours * hourMs;
+  const intervalMs = schedule.intervalMinutes * minuteMs;
   if (!Number.isSafeInteger(intervalMs) || intervalMs > maxDateMs) {
-    throw new ScheduleValidationError("Hourly intervalHours 超出可表示的时间范围");
+    throw new ScheduleValidationError("Interval intervalMinutes 超出可表示的时间范围");
   }
   if (afterMs < schedule.anchorAt) return schedule.anchorAt;
   const elapsed = BigInt(afterMs) - BigInt(schedule.anchorAt);
   const steps = elapsed / BigInt(intervalMs) + 1n;
   const candidate = BigInt(schedule.anchorAt) + steps * BigInt(intervalMs);
   if (candidate < BigInt(-maxDateMs) || candidate > BigInt(maxDateMs)) {
-    throw new ScheduleValidationError("Hourly Schedule 超出可表示的时间范围");
+    throw new ScheduleValidationError("Interval Schedule 超出可表示的时间范围");
   }
   return Number(candidate);
+}
+
+function nextOnceOccurrence(
+  schedule: Extract<Schedule, { readonly type: "once" }>,
+  timezone: string,
+  afterMs: number,
+): number | null {
+  if ("afterMinutes" in schedule) {
+    return nextRelativeOnceOccurrence(schedule, afterMs);
+  }
+  const { year, month, day } = parseOnceDate(schedule.date);
+  const time = parseLocalTime(schedule.time);
+  const candidates = localDateTimeToUtcCandidates(
+    timezone,
+    { year, month, day },
+    time.hour,
+    time.minute,
+  );
+  // A repeated local instant selects the earlier one; a DST gap with no
+  // matching instant is reported rather than silently approximated.
+  const onceAt = candidates[0];
+  if (onceAt === undefined) {
+    throw new ScheduleValidationError("一次性计划指定时间在当前时区不存在");
+  }
+  return onceAt > afterMs ? onceAt : null;
+}
+
+function nextRelativeOnceOccurrence(
+  schedule: Extract<Schedule, { readonly type: "once"; readonly afterMinutes: number }>,
+  afterMs: number,
+): number | null {
+  const deltaMs = schedule.afterMinutes * minuteMs;
+  if (!Number.isSafeInteger(deltaMs) || deltaMs > maxDateMs) {
+    throw new ScheduleValidationError("Once afterMinutes 超出可表示的时间范围");
+  }
+  const targetMs = schedule.anchorAt + deltaMs;
+  if (!Number.isSafeInteger(targetMs) || targetMs < -maxDateMs || targetMs > maxDateMs) {
+    throw new ScheduleValidationError("Once Schedule 超出可表示的时间范围");
+  }
+  return targetMs > afterMs ? targetMs : null;
 }
 
 function localDateParts(timestampMs: number, timezone: string): LocalDateParts {

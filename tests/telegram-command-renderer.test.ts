@@ -198,7 +198,7 @@ describe("Telegram command renderer", () => {
             taskId: "task-preview",
             name: "每小时检查",
             status: "active",
-            schedule: { type: "hourly", intervalHours: 1, anchorAt: 1 },
+            schedule: { type: "interval", intervalMinutes: 60, anchorAt: 1 },
             timezone: "Asia/Shanghai",
             nextRunAt: 2,
             workspaceId: "main",

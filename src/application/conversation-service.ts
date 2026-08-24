@@ -414,6 +414,10 @@ export class ConversationService implements ConversationUseCases {
     private readonly threadOccupancy?: ThreadOccupancyPort,
     private readonly threadQueue?: ThreadQueuePort,
     private readonly threadHistory?: ThreadHistoryPort,
+    private readonly scheduledTaskToolGate?: {
+      enabled: boolean;
+      isLikelyScheduleInput(input: readonly TurnInput[]): boolean;
+    },
   ) {}
 
   releaseThread(
@@ -628,6 +632,16 @@ export class ConversationService implements ConversationUseCases {
     }
     if (input.some((item) => item.type === "localAudio")) {
       await this.models.requireInputModality(target, "audio");
+    }
+    const currentBinding = this.router.current?.(target);
+    if (
+      this.scheduledTaskToolGate?.enabled
+      && currentBinding
+      && !this.router.hasDynamicTools(currentBinding.threadId)
+      && !this.core.activeTurn(target)
+      && this.scheduledTaskToolGate.isLikelyScheduleInput(input)
+    ) {
+      await this.router.newSession(target);
     }
     const active = this.core.activeTurn(target);
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;

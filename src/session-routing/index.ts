@@ -6,6 +6,7 @@ export {
 } from "./router.js";
 export {
   type ThreadLifecyclePort,
+  type ThreadDynamicToolSpec,
   type ThreadQueryOptions,
   type ThreadSession,
   type ThreadStartOptions,

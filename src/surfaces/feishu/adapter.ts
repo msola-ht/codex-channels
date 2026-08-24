@@ -14,6 +14,7 @@ import {
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
+  formatDelayMinutes,
   formatScheduledTaskStatusLabel,
   formatSessionListCommand,
   formatThreadQueueInputTypeLabel,
@@ -454,8 +455,10 @@ export class FeishuConversationAdapter {
     if (normalized === "add") {
       return renderScheduleCreateChoices();
     }
-    const createKind = /^add-(hourly|daily|weekdays|weekly)$/u.exec(normalized)?.[1] as
-      | "hourly"
+    const createKind = /^add-(interval|once|monthly|daily|weekdays|weekly)$/u.exec(normalized)?.[1] as
+      | "interval"
+      | "once"
+      | "monthly"
       | "daily"
       | "weekdays"
       | "weekly"
@@ -1089,7 +1092,9 @@ function renderScheduleCreateChoices(): FeishuCommandCenterChoices {
     title: "新增计划任务",
     description: "创建前会展示执行上下文预览，并要求二次确认。",
     choices: [
-      { label: "每 N 小时", action: "schedule", input: "add-hourly" },
+      { label: "每 N 分钟/小时", action: "schedule", input: "add-interval" },
+      { label: "一次性", action: "schedule", input: "add-once" },
+      { label: "每月指定日", action: "schedule", input: "add-monthly" },
       { label: "每天", action: "schedule", input: "add-daily" },
       { label: "工作日", action: "schedule", input: "add-weekdays" },
       { label: "每周指定日", action: "schedule", input: "add-weekly" },
@@ -1099,10 +1104,12 @@ function renderScheduleCreateChoices(): FeishuCommandCenterChoices {
 }
 
 function renderScheduleCreateForm(
-  kind: "hourly" | "daily" | "weekdays" | "weekly",
+  kind: "interval" | "once" | "monthly" | "daily" | "weekdays" | "weekly",
 ): FeishuCommandCenterForm {
   const inputs = {
-    hourly: ["每 N 小时", "小时数 时区 任务文本", "6 Asia/Shanghai 检查项目状态"],
+    interval: ["每 N 分钟/小时", "N(分钟或小时) 时区 任务文本", "30m Asia/Shanghai 检查项目状态"],
+    once: ["一次性", "日期 时间 时区 任务文本", "2026-09-01 09:00 Asia/Shanghai 发送报告"],
+    monthly: ["每月指定日", "日 时间 时区 任务文本", "1 09:00 Asia/Shanghai 汇总上月"],
     daily: ["每天", "HH:mm 时区 任务文本", "09:00 Asia/Shanghai 汇总昨日进展"],
     weekdays: ["工作日", "HH:mm 时区 任务文本", "09:00 Asia/Shanghai 检查待办"],
     weekly: ["每周指定日", "星期 HH:mm 时区 任务文本", "MO,FR 10:00 Asia/Shanghai 输出周报"],
@@ -1589,7 +1596,11 @@ function scheduleChoiceSummary(
   schedule: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>["result"]["tasks"][number]["schedule"],
 ): string {
   switch (schedule.type) {
-    case "hourly": return `每 ${schedule.intervalHours} 小时`;
+    case "interval": return `每 ${formatDelayMinutes(schedule.intervalMinutes)}`;
+    case "once": return "afterMinutes" in schedule
+      ? `一次性 ${formatDelayMinutes(schedule.afterMinutes)}后`
+      : `一次性 ${schedule.date} ${schedule.time}`;
+    case "monthly": return `每月 ${schedule.day} 号 ${schedule.time}`;
     case "daily": return `每天 ${schedule.time}`;
     case "weekdays": return `工作日 ${schedule.time}`;
     case "weekly": return `每周 ${schedule.days.join(",")} ${schedule.time}`;

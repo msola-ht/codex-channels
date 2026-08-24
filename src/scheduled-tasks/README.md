@@ -8,14 +8,18 @@
 - `index.ts`：公开导出入口。
 - `types.ts`：封闭 Schedule 联合、Task/Run 状态、无人值守权限和执行端口。
 - `schedule.ts`：IANA 时区校验、Schedule 规范化和下一次 occurrence 计算。
-- `sqlite-store.ts`：独立 Schema v1、任务/运行记录、原子领取、清理和崩溃收敛。
+- `sqlite-store.ts`：独立 Schema v2、任务/运行记录、原子领取、清理、崩溃收敛和显式 v1→v2 升级入口。
 - `scheduler.ts`：注入 Clock 与执行端口的有限调度循环。
 
-Schedule 目前只支持 `hourly`、`daily`、`weekdays` 和 `weekly`。Hourly 使用 UTC anchor 加固定小时
-间隔；其他类型按任务时区的 `HH:mm` 计算。不存在的 DST 本地时间跳过，重复的本地时间只选择较早的
-UTC occurrence。时间计算不会读取或改变进程的 `TZ`。
+Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间隔）、`once`（绝对日期时间，或
+`afterMinutes + anchorAt` 的“从现在起 N 分钟后/小时后执行一次”；触发一次后进入 `finished` 终态）、
+`monthly`（每月指定日，月份无该日时跳过）、`daily`、`weekdays` 和 `weekly`。后五者按任务时区的
+`HH:mm` 计算。不存在的 DST 本地时间跳过，重复的本地时间只选择较早的 UTC occurrence。相对延时以
+固定 UTC 分钟数计算，不随 DST 改变。时间计算不会读取或改变进程的 `TZ`。
 
-SQLite 只保存任务定义和最小 Run 元数据，目录和文件使用私有权限；运行时不隐式迁移未知 Schema。
+SQLite 只保存任务定义和最小 Run 元数据，目录和文件使用私有权限；运行时从不隐式迁移 Schema，
+v1 或未知版本在打开时失败关闭。`codexc update` 与 `codexc state upgrade` 在 Gateway 停止后预检、
+备份并显式执行唯一的 v1→v2 迁移（`hourly`→`interval`），迁移在同一事务中保留 `runs` 外键。
 调度器只通过执行端口请求运行，不建立第二套 App Server Thread/Turn 状态，也不自动重试结果未知的
 写请求；`uncertain` Run 会阻塞同一任务后续 occurrence，只有显式 `resolveUncertain` 或权威恢复路径
 才会解除。停止调度

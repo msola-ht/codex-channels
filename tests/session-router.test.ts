@@ -126,6 +126,42 @@ describe("SessionRouter", () => {
     }]);
   });
 
+  it("attaches dynamic tools to foreground threads and strips them from automation threads", async () => {
+    const store = new MemoryBindingStore();
+    const started: unknown[] = [];
+    const tool = {
+      type: "function" as const,
+      name: "schedule_task",
+      description: "Manage schedules",
+      inputSchema: { type: "object" },
+    };
+    const client = threadPort({
+      listThreads: async () => [],
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session(thread(`new-${started.length}`, { type: "idle" }));
+      },
+    });
+    const router = new SessionRouter(client, store, registry, [tool]);
+
+    await router.ensure(target);
+    await router.startBackground(target, {}, "main");
+
+    expect(started[0]).toMatchObject({
+      cwd: "/workspace",
+      options: { dynamicTools: [tool] },
+    });
+    expect(started[1]).toMatchObject({
+      options: {
+        threadSource: "automation",
+      },
+    });
+    expect((started[1] as { options: Record<string, unknown> }).options)
+      .not.toHaveProperty("dynamicTools");
+    expect(router.hasDynamicTools("new-1")).toBe(true);
+    expect(router.hasDynamicTools("new-2")).toBe(false);
+  });
+
   it("passes a configured permission profile instead of sandbox", async () => {
     const store = new MemoryBindingStore();
     const entitledRegistry = new WorkspaceRegistry([

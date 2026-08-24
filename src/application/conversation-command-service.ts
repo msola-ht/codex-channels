@@ -910,7 +910,7 @@ export class ConversationCommandService {
           case "natural":
             return {
               kind: "scheduled-confirmation",
-              preview: await scheduled.previewNaturalLanguage(target, actorId, operation.description),
+              preview: scheduled.previewNaturalLanguage(target, actorId, operation.description),
             };
           case "create":
             return {

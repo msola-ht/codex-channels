@@ -130,7 +130,8 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、Provider 感知的用量与额度等平台无关
 命令结果文案与状态文本；OpenAI `/usage` 以账户摘要为主，在当前 Thread 有效时追加有界的官方 Credits、可选美元、
 字段完整时的 Token 汇总和最多 8 个明细组，官方估算不可用或查询失败时只追加稳定提示；DeepSeek `/usage` 显示余额，
-未支持的 Provider 明确说明能力缺失。
+未支持的 Provider 明确说明能力缺失。计划任务确认、列表、运行记录和命令结果格式也通过本目录
+`index.ts` 供 Bootstrap 动态工具回调复用。
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
 `/mcp`、`/mcp health`、`/mcp reload`、`/mcp <名称或序号>`、工具/资源/模板分页搜索、`/mcp login ...` 与

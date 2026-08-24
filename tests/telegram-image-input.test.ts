@@ -1066,7 +1066,7 @@ describe("Telegram image input", () => {
       taskId: "task-1",
       name: "每小时检查",
       status: "active" as const,
-      schedule: { type: "hourly" as const, intervalHours: 1, anchorAt: 1 },
+      schedule: { type: "interval" as const, intervalMinutes: 60, anchorAt: 1 },
       timezone: "Asia/Shanghai",
       nextRunAt: 2,
       workspaceId: "main",

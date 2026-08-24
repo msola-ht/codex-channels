@@ -118,7 +118,7 @@ export const conversationCommandHelpSections = [
       "/rules <init|check> · /diff",
       "/release · /release force",
       "/schedule list · /schedule runs <任务> [页码]",
-      "/schedule add <hourly|daily|weekdays|weekly> ... · /schedule pause|resume|run|delete <任务>",
+      "/schedule add <interval|once|monthly|daily|weekdays|weekly> ... · /schedule pause|resume|run|delete <任务>",
       "/plan [规划需求] · /goal [set <目标>|clear]",
     ],
   },
@@ -237,7 +237,7 @@ export function formatConversationScheduledTasks(
     return toStructuredMarkdownList([
       "Gateway 计划任务为空",
       `第 ${page}/${pageCount} 页 · 共 ${totalTaskCount} 项`,
-      "新增：/schedule add daily <HH:mm> <时区> <文本>",
+      "新增：/schedule add interval <N>m|h <时区> <文本> · /schedule add once <YYYY-MM-DD> <HH:mm> <时区> <文本>",
     ].join("\n"));
   }
   return toStructuredMarkdownList([
@@ -696,12 +696,13 @@ function scheduledTaskOutcomeTitle(type: Extract<ConversationCommandOutcome, {
 }
 
 export function formatScheduledTaskStatusLabel(
-  status: "active" | "paused" | "blocked" | "deleted",
+  status: "active" | "paused" | "blocked" | "finished" | "deleted",
 ): string {
   switch (status) {
     case "active": return "已启用";
     case "paused": return "已暂停";
     case "blocked": return "已阻止";
+    case "finished": return "已完成";
     case "deleted": return "已删除";
   }
 }
@@ -728,11 +729,24 @@ function formatSchedule(
   timezone: string,
 ): string {
   switch (schedule.type) {
-    case "hourly": return `每 ${schedule.intervalHours} 小时 · ${timezone}`;
+    case "interval": return `每 ${formatIntervalMinutes(schedule.intervalMinutes)} · ${timezone}`;
+    case "once": return "afterMinutes" in schedule
+      ? `一次性 ${formatDelayMinutes(schedule.afterMinutes)}后 · ${timezone}`
+      : `一次性 ${schedule.date} ${schedule.time} · ${timezone}`;
+    case "monthly": return `每月 ${schedule.day} 号 ${schedule.time} · ${timezone}`;
     case "daily": return `每天 ${schedule.time} · ${timezone}`;
     case "weekdays": return `工作日 ${schedule.time} · ${timezone}`;
     case "weekly": return `每周 ${schedule.days.join(",")} ${schedule.time} · ${timezone}`;
   }
+}
+
+export function formatDelayMinutes(minutes: number): string {
+  if (minutes % 60 === 0 && minutes >= 60) return `${minutes / 60} 小时`;
+  return `${minutes} 分钟`;
+}
+
+function formatIntervalMinutes(minutes: number): string {
+  return `每 ${formatDelayMinutes(minutes)}`;
 }
 
 function formatScheduledAt(value: number | null): string {

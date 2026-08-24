@@ -5,7 +5,7 @@
  * explicit avoids accidental host-timezone conversions.
  */
 
-export const scheduledTasksSchemaVersion = 1 as const;
+export const scheduledTasksSchemaVersion = 2 as const;
 export const scheduledTaskDatabaseFileName = "scheduled-tasks.sqlite3" as const;
 
 export const scheduleWeekdays = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
@@ -13,10 +13,32 @@ export type ScheduleWeekday = (typeof scheduleWeekdays)[number];
 
 export type Schedule =
   | {
-      readonly type: "hourly";
-      readonly intervalHours: number;
+      readonly type: "interval";
+      /** Repeat every N minutes from anchorAt. */
+      readonly intervalMinutes: number;
       /** UTC epoch milliseconds. */
       readonly anchorAt: number;
+    }
+  | {
+      readonly type: "once";
+      /** A strict calendar date in YYYY-MM-DD form, resolved in the task timezone. */
+      readonly date: string;
+      /** A strict 24-hour local time in HH:mm form. */
+      readonly time: string;
+    }
+  | {
+      readonly type: "once";
+      /** Delay in whole minutes from anchorAt; converted to a fixed absolute instant. */
+      readonly afterMinutes: number;
+      /** UTC epoch milliseconds marking when the relative delay started. */
+      readonly anchorAt: number;
+    }
+  | {
+      readonly type: "monthly";
+      /** Day of month, 1..31; months without that day skip that occurrence. */
+      readonly day: number;
+      /** A strict 24-hour local time in HH:mm form. */
+      readonly time: string;
     }
   | {
       readonly type: "daily";
@@ -35,7 +57,12 @@ export type Schedule =
       readonly time: string;
     };
 
-export type ScheduledTaskStatus = "active" | "paused" | "blocked" | "deleted";
+export type ScheduledTaskStatus =
+  | "active"
+  | "paused"
+  | "blocked"
+  | "finished"
+  | "deleted";
 
 export type ScheduledTaskSandbox = "read-only" | "workspace-write";
 

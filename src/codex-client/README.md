@@ -19,8 +19,7 @@
   缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
-  Turn、Review 和 Goal 响应；`turn/start.outputSchema` 只接受 Application 内部可信 JSON Schema，
-  用于计划任务自然语言草案临时 Thread 的最终回答约束；缺少稳定结果必需字段时失败关闭。
+  Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；
   本地媒体、Skill、Mention 与其他非文本输入只返回安全摘要，不传播原始值或绝对路径。
 - `history-adapter.ts`：把官方分页 Turn 与 Revert 响应裁剪为有界摘要和稳定 Thread 快照；只提取
@@ -63,7 +62,8 @@
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
   Server Request 解码为 Approval 稳定请求；其中按固定版本的空对象 Schema 与
   `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
-  精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。
+  精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。实验
+  `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、全局分区 CRUD 与 Thread 分区移动、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill、账户与 Thread 用量及用户级配置
@@ -77,7 +77,8 @@
   `section_position` 排序，并显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用。
-  新 Thread 可显式携带官方 `modelProvider` 与受控的 `threadSource=automation`；Fork 只允许模型 Provider。
+  新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
+  `dynamicTools`；Fork 只允许模型 Provider。
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
