@@ -853,6 +853,9 @@ describe("provider-aware conversation command formatting", () => {
     expect(runs).toContain("【2】run-2");
     expect(runs).toContain("### 运行记录");
     expect(runs).toContain("  - 计划时间：");
+    expect(runs).toContain("  - 触发时间：1970-01-01T00:00:00.001Z");
+    expect(runs).toContain("  - 开始时间：1970-01-01T00:00:00.001Z");
+    expect(runs).toContain("  - 完成时间：1970-01-01T00:00:00.002Z");
     expect(runs).toContain("  - Thread：thread-1");
     expect(runs).not.toContain("\n- 计划时间：");
   });
@@ -919,6 +922,55 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("模型：deepseek/deepseek-v4-flash");
     expect(rendered).toContain("/schedule confirm token-1");
+  });
+
+  it("renders the scheduled task outcome with its model and reasoning effort", () => {
+    const rendered = formatConversationCommandOutcome({
+      type: "scheduled-task.created",
+      task: {
+        taskId: "task-1",
+        name: "提醒我：收到消息",
+        status: "active",
+        schedule: { type: "once", date: "2026-08-24", time: "10:00" },
+        timezone: "Asia/Shanghai",
+        nextRunAt: Date.parse("2026-08-24T02:00:00.000Z"),
+        workspaceId: "main",
+        modelProvider: "deepseek",
+        model: "deepseek-v4-flash-vision-exp",
+        reasoningEffort: "high",
+        serviceTier: null,
+        sandbox: "workspace-write",
+        permissions: null,
+        promptPreview: "提醒我：收到消息",
+      },
+    });
+
+    expect(rendered).toContain("模型：deepseek/deepseek-v4-flash-vision-exp");
+    expect(rendered).toContain("思考等级：high");
+    expect(rendered).toContain("计划：一次性 2026-08-24 10:00 · Asia/Shanghai");
+    expect(rendered).toContain("下次运行：2026-08-24T02:00:00.000Z");
+  });
+
+  it("renders the scheduled run trigger time", () => {
+    const rendered = formatConversationCommandOutcome({
+      type: "scheduled-task.run-requested",
+      run: {
+        runId: "run-1",
+        taskId: "task-1",
+        scheduledFor: Date.parse("2026-08-24T02:00:00.000Z"),
+        state: "dispatching",
+        threadId: null,
+        turnId: null,
+        dispatchStartedAt: Date.parse("2026-08-24T02:00:01.000Z"),
+        startedAt: null,
+        completedAt: null,
+        errorCategory: null,
+        errorMessage: null,
+      },
+    });
+
+    expect(rendered).toContain("计划时间：2026-08-24T02:00:00.000Z");
+    expect(rendered).toContain("触发时间：2026-08-24T02:00:01.000Z");
   });
 
   it("renders updated workspace permissions with the hot reload notice", () => {

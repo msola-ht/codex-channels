@@ -50,7 +50,6 @@ export class SessionRouter {
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
   private readonly contextCompactionItemIdsByThread = new Map<string, readonly string[]>();
-  private readonly dynamicToolThreadIds = new Set<string>();
 
   constructor(
     private readonly codex: ThreadLifecyclePort,
@@ -104,10 +103,6 @@ export class SessionRouter {
 
   targetForThread(threadId: string): ConversationTarget | undefined {
     return this.bindings.getByThread(threadId)?.target;
-  }
-
-  hasDynamicTools(threadId: string): boolean {
-    return this.dynamicToolThreadIds.has(threadId);
   }
 
   readThread(threadId: string): Promise<ThreadSnapshot> {
@@ -307,9 +302,6 @@ export class SessionRouter {
         ? { dynamicTools: this.dynamicTools }
         : {}),
     });
-    if (this.dynamicTools.length > 0) {
-      this.dynamicToolThreadIds.add(started.thread.id);
-    }
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier);
     this.contextCompactionItemIdsByThread.set(
       started.thread.id,

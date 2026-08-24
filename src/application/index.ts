@@ -64,7 +64,6 @@ export {
 } from "./scheduled-task-service.js";
 export {
   ScheduledTaskToolService,
-  isLikelyScheduledTaskInput,
   scheduledTaskToolName,
   scheduledTaskToolSpec,
   type ScheduledTaskToolResult,

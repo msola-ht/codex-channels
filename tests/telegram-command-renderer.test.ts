@@ -223,6 +223,42 @@ describe("Telegram command renderer", () => {
     ]);
   });
 
+  it("renders a scheduled-task creation outcome as HTML instead of raw Markdown", async () => {
+    const reply = vi.fn(async () => undefined);
+
+    await renderTelegramCommandResult(
+      { reply } as unknown as Context,
+      {
+        kind: "outcome",
+        outcome: {
+          type: "scheduled-task.created",
+          task: {
+            taskId: "task-1",
+            name: "提醒我收到",
+            status: "active",
+            schedule: { type: "once", date: "2026-08-24", time: "10:33" },
+            timezone: "Asia/Shanghai",
+            nextRunAt: Date.parse("2026-08-24T02:33:00.000Z"),
+            workspaceId: "main",
+            modelProvider: "opencode-go",
+            model: "deepseek-v4-flash-vision-exp",
+            reasoningEffort: "high",
+            serviceTier: null,
+            sandbox: "workspace-write",
+            permissions: null,
+            promptPreview: "提醒我收到",
+          },
+        },
+      },
+    );
+
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("<b>已创建 Gateway 计划任务</b>"),
+      expect.objectContaining({ parse_mode: "HTML" }),
+    );
+    expect(reply).not.toHaveBeenCalledWith(expect.stringContaining("##"));
+  });
+
   it("uses the dedicated diff renderer for artifact results", async () => {
     const reply = vi.fn(async () => undefined);
 

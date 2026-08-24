@@ -27,6 +27,11 @@ export interface ScheduledTaskToolLookup {
     actorId: string,
     args: unknown,
   ): Promise<ScheduledTaskToolResult>;
+  presentConfirmation?(
+    target: ConversationTarget,
+    actorId: string,
+    preview: Extract<ScheduledTaskToolResult, { kind: "confirmation" }>["preview"],
+  ): void;
 }
 
 /**
@@ -69,6 +74,9 @@ export function createScheduledTaskToolRequestHandler(
       );
     }
     const result = await lookup.execute(target, actors[0]!, params.arguments);
+    if (result.kind === "confirmation") {
+      lookup.presentConfirmation?.(target, actors[0]!, result.preview);
+    }
     return {
       contentItems: [{ type: "inputText", text: formatToolResult(result) }],
       success: result.kind !== "error",

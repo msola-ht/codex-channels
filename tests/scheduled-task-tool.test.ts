@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ConversationService,
   ScheduledTaskToolService,
-  isLikelyScheduledTaskInput,
   scheduledTaskToolSpec,
   type ScheduledTaskUseCases,
 } from "../src/application/index.js";
@@ -28,15 +27,6 @@ describe("ScheduledTaskToolService", () => {
   it("does not expose confirmation through the model tool", () => {
     const actions = scheduledTaskToolSpec.inputSchema.properties.action.enum;
     expect(actions).not.toContain("confirm");
-  });
-
-  it("detects common schedule-like natural language for the fresh-Thread upgrade path", () => {
-    expect(isLikelyScheduledTaskInput([{ type: "text", text: "每天 09:00 检查 CI" }]))
-      .toBe(true);
-    expect(isLikelyScheduledTaskInput([{ type: "text", text: "每天吃什么好" }]))
-      .toBe(false);
-    expect(isLikelyScheduledTaskInput([{ type: "text", text: "帮我看看这个仓库" }]))
-      .toBe(false);
   });
 
   it("turns interval arguments into an existing create preview", async () => {
@@ -158,25 +148,18 @@ describe("ScheduledTaskToolService", () => {
   });
 });
 
-describe("ConversationService schedule tool upgrade path", () => {
-  it("switches an old Thread to a tool-enabled fresh session before the turn", async () => {
+describe("ConversationService scheduled task input", () => {
+  it("keeps the current Thread when schedule-like text is submitted", async () => {
     const oldBinding = {
       target,
       workspaceId: "main",
       threadId: "old-thread",
       sessionId: "old-session",
     };
-    const newBinding = {
-      target,
-      workspaceId: "main",
-      threadId: "new-thread",
-      sessionId: "new-session",
-    };
     const router = {
       current: () => oldBinding,
-      hasDynamicTools: () => false,
       newSession: vi.fn(async () => {}),
-      ensure: vi.fn(async () => newBinding),
+      ensure: vi.fn(async () => oldBinding),
       workspace: () => ({ id: "main", name: "Main", cwd: "/workspace" }),
     } as unknown as SessionRouter;
     const core = {
@@ -210,17 +193,13 @@ describe("ConversationService schedule tool upgrade path", () => {
       undefined,
       undefined,
       undefined,
-      {
-        enabled: true,
-        isLikelyScheduleInput: isLikelyScheduledTaskInput,
-      },
     );
 
     await service.submit(target, "每天 09:00 检查 CI");
 
-    expect(router.newSession).toHaveBeenCalledWith(target);
+    expect(router.newSession).not.toHaveBeenCalled();
     expect(codex.startTurn).toHaveBeenCalledWith(
-      "new-thread",
+      "old-thread",
       [{ type: "text", text: "每天 09:00 检查 CI" }],
       expect.stringMatching(/^codex_connect:/u),
       "/workspace",
@@ -231,14 +210,17 @@ describe("ConversationService schedule tool upgrade path", () => {
 
 describe("createScheduledTaskToolRequestHandler", () => {
   it("formats a dynamic tool call as protocol content", async () => {
+    const preview = createPreview();
     const execute = vi.fn(async () => ({
       kind: "confirmation" as const,
-      preview: createPreview(),
+      preview,
     }));
+    const presentConfirmation = vi.fn();
     const handle = createScheduledTaskToolRequestHandler({
       targetForThread: () => target,
       actorsForTarget: () => ["actor-1"],
       execute,
+      presentConfirmation,
     });
 
     const response = await handle({
@@ -259,6 +241,11 @@ describe("createScheduledTaskToolRequestHandler", () => {
       success: true,
     });
     expect(JSON.stringify(response)).toContain("/schedule confirm");
+    expect(presentConfirmation).toHaveBeenCalledWith(
+      target,
+      "actor-1",
+      preview,
+    );
   });
 
   it("rejects an unknown dynamic tool", async () => {

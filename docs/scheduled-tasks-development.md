@@ -235,8 +235,9 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 `ScheduledTaskToolService` 不复写任何存储或调度逻辑，只把模型参数解析为现有的
 `previewCreate`、`list`、`runs`、`rename`、`pause`、`resume`、`run`、`retry` 和
 `previewDelete` 用例。`create` 与 `delete` 只返回一次性确认令牌；`confirm` 不在动态工具中暴露，
-必须由用户通过现有 `/schedule confirm <令牌>` 命令完成。
-工具结果复用现有 Surface 命令渲染格式，因此 Agent 能看到与 `/schedule` 相同的预览文本。
+必须由用户通过现有确认边界完成。工具处理器在把相同预览文本返回 Agent 的同时，把结构化预览按
+`surface + accountId` 精确交给当前 Surface；飞书复用 CardKit 2.0 确认卡，Telegram 复用内联按钮，
+微信保留 `/schedule confirm <令牌>` 文本输入。三条路径使用同一个五分钟令牌。
 
 该工具只在 Gateway 前台会话注册；后台计划任务 Thread 不携带 `dynamicTools`，且
 `createScheduledTaskServerRequestHandler` 会把后台 Thread 上的 `item/tool/call` 安全拒绝，防止
@@ -250,9 +251,10 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 `deepseek/deepseek-v4-flash`）；不传时使用当前会话的模型与 Provider。显式指定的 Provider 未配置时
 直接返回可操作错误，确认预览把 Provider 与模型合并展示，避免创建后才发现跨 Provider 不匹配。
 
-官方 `dynamicTools` 只能在 `thread/start` 时注册，不能向已经存在的 Thread 注入。Gateway 会在
-当前绑定 Thread 尚未注册工具时，对计划类自然语言消息先切换到一个带工具的新前台 Thread，再启动
-当前 Agent；因此用户不需要先手动执行 `/new`。旧 Thread 的对话历史不会被删除，只是不会获得该工具。
+官方 `dynamicTools` 只能在 `thread/start` 时注册，不能向已经存在的 Thread 注入。Gateway 不会为了
+计划任务工具自动替换、解绑或改变当前前台 Thread；启用计划任务前已经存在的 Thread 继续保持原
+Provider、模型和上下文，并可使用 `/schedule` 确定性入口。只有用户显式新建的前台 Thread 才会在
+启动时获得该工具。
 
 ## 公开命令与渠道交互
 
@@ -284,7 +286,7 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 
 `add` 和 `delete` 先返回预览，再由 `confirm` 执行。序号只在当前 Conversation 最近五分钟的列表
 快照内有效；任务列表与 Run 列表分别维护快照。多行列表使用不会被渠道 Markdown 重编号的显式
-`【序号】` 标记，Run 的计划时间、Thread 和错误分类使用二级列表。Surface 只渲染结构化结果；飞书和 Telegram 的创建/删除预览提供确认与取消按钮，
+`【序号】` 标记，Run 的计划、触发、开始、完成时间以及 Thread 和错误分类使用二级列表。Surface 只渲染结构化结果；无论预览来自显式命令还是 `schedule_task`，飞书和 Telegram 的创建/删除预览都提供确认与取消按钮，微信使用文本确认，
 确认按钮与文本命令调用同一 Application 用例和五分钟令牌，不能复制或绕过调度逻辑。飞书预览使用 CardKit 2.0；动作被接受后原卡片更新为不含按钮的终态，
 实际创建或删除结果仍由 Application 结果消息确认。重命名、暂停和恢复不改变列表顺序，
 成功后保留当前任务快照；创建和删除会使任务快照失效。

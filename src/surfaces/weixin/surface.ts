@@ -1,6 +1,9 @@
 import type { Logger } from "pino";
 
-import type { ConversationUseCases } from "../../application/index.js";
+import type {
+  ConversationUseCases,
+  ScheduledTaskUseCases,
+} from "../../application/index.js";
 import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
@@ -63,6 +66,7 @@ export interface WeixinSurfaceOptions {
   lifecycleClient?: WeixinLifecycleProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   service: ConversationUseCases;
+  scheduledTasks?: ScheduledTaskUseCases;
   access: SurfaceAccessPolicy;
   logger: Logger;
   onFatal: (error: WeixinInputFatalError) => void;
@@ -195,6 +199,9 @@ export class WeixinSurface implements SurfaceAdapter {
       client: options.client,
       cursorStore: options.cursorStore,
       service: options.service,
+      ...(options.scheduledTasks === undefined
+        ? {}
+        : { scheduledTasks: options.scheduledTasks }),
       outbox: this.output,
       access: options.access,
       replyContexts,

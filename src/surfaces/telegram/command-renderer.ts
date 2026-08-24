@@ -473,6 +473,13 @@ function renderOutcome(
       "thread.forked",
       "review.started",
       "goal.updated",
+      "scheduled-task.created",
+      "scheduled-task.deleted",
+      "scheduled-task.renamed",
+      "scheduled-task.paused",
+      "scheduled-task.resumed",
+      "scheduled-task.run-requested",
+      "scheduled-task.retry-requested",
     ].includes(outcome.type),
   };
 }

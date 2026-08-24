@@ -76,15 +76,6 @@ export const scheduledTaskToolSpec = {
   },
 } as const;
 
-export function isLikelyScheduledTaskInput(input: readonly {
-  readonly type: string;
-  readonly text?: string;
-}[]): boolean {
-  const text = input.map((item) => item.text ?? "").join("\n");
-  return /计划任务|定时任务|提醒我|每(?:隔)?\s*\d+\s*(?:分钟|小时)|(?:\d+\s*(?:分钟|小时)(?:后|之后))|每天(?:早上|上午|中午|下午|晚上|深夜)?\s*\d|每周\s*[周一二三四五六日]|每月\s*\d+\s*号|工作日\s*\d|(?:明天|后天)(?:早上|上午|中午|下午|晚上|深夜)?\s*\d|下周[一二三四五六日]|周[一二三四五六日]\s*\d|星期[一二三四五六日]\s*\d/u
-    .test(text);
-}
-
 export type ScheduledTaskToolTaskOutcome = {
   action: "created" | "deleted" | "renamed" | "paused" | "resumed";
   task: ScheduledTaskView;

@@ -12,6 +12,7 @@ import {
   type DisplayPriceCurrency,
   type ExchangeRateSnapshot,
   type ProviderModelUsageEstimate,
+  type ScheduledTaskConfirmation,
   type ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
@@ -27,7 +28,10 @@ import type {
   OperationUpdateDisplay,
   SurfaceConfigurationChange,
 } from "../types.js";
-import { conversationCommandHelpLines } from "../conversation-command-format.js";
+import {
+  conversationCommandHelpLines,
+  formatConversationScheduledConfirmation,
+} from "../conversation-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatOperationFailure,
@@ -45,6 +49,7 @@ import {
 } from "./format.js";
 import {
   renderTelegramCommandResult,
+  scheduledTaskConfirmationKeyboard,
   formatTelegramThreadQueueDeleteConfirmation,
   formatTelegramThreadQueueItemAction,
   replyTelegramPanel,
@@ -299,6 +304,26 @@ export class TelegramSurface {
 
   sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
     return this.output.sendChannelImage(conversationId, imagePath);
+  }
+
+  async presentScheduledTaskConfirmation(
+    target: ConversationTarget,
+    actorId: string,
+    preview: ScheduledTaskConfirmation,
+  ): Promise<void> {
+    if (
+      target.surface !== this.surface
+      || target.accountId !== this.accountId
+      || !this.access.isAllowed({ target, actorId })
+    ) {
+      return;
+    }
+    const result = { kind: "scheduled-confirmation" as const, preview };
+    await this.outbox.deliverPanel(
+      target.conversationId,
+      formatConversationScheduledConfirmation(result),
+      scheduledTaskConfirmationKeyboard(result),
+    );
   }
 
   async start(): Promise<void> {

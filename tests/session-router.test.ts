@@ -158,8 +158,6 @@ describe("SessionRouter", () => {
     });
     expect((started[1] as { options: Record<string, unknown> }).options)
       .not.toHaveProperty("dynamicTools");
-    expect(router.hasDynamicTools("new-1")).toBe(true);
-    expect(router.hasDynamicTools("new-2")).toBe(false);
   });
 
   it("passes a configured permission profile instead of sandbox", async () => {

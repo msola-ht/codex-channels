@@ -5,6 +5,7 @@ import {
   isFastServiceTier,
   type ConversationCommandResult,
   type ConversationUseCases,
+  type ScheduledTaskConfirmation,
   type ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
@@ -127,6 +128,21 @@ export class FeishuConversationAdapter {
       (target, input) => conversations.submit(target, input),
       inputOptions,
     );
+  }
+
+  async presentScheduledTaskConfirmation(
+    target: ConversationTarget,
+    actorId: string,
+    preview: ScheduledTaskConfirmation,
+  ): Promise<void> {
+    if (!this.commandCenter) return;
+    const response = renderCommandCenterChoices("schedule", {
+      kind: "scheduled-confirmation",
+      preview,
+    });
+    if (response) {
+      await this.commandCenter.openResponse(target, actorId, response);
+    }
   }
 
   async handle(message: FeishuInboxMessage): Promise<void> {

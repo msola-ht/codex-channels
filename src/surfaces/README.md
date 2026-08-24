@@ -30,7 +30,7 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 字符串记录机制；平台模块仍各自拥有 Service、目录、记录键、载荷校验和错误语义。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
-`surface + accountId` 标识，分别提供启停、输出、可选配置变更通知与 `InteractionPort`；Bootstrap
+`surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
 只通过编译期内置插件注册表显式注册。
 Bootstrap 的内置插件注册表负责把一个渠道插件展开为零到多个账号实例并验证身份唯一性；
 Telegram、飞书目录仍只实现平台 Adapter，不导入插件宿主或组合根类型。
@@ -57,8 +57,9 @@ Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和�
 统一提示仅支持新建分页历史 Thread、执行前会复核并且不会恢复工作区文件。Surface 不保存 Turn 历史、
 确认令牌或 Queue/历史快照；按钮和菜单只能提交当前绑定 Actor 的规范选择器。
 Gateway 计划任务同样由 Application 统一编排；三个 Surface 只渲染 `/schedule` 的类型化列表、Run、
-预览与操作结果。飞书管理按钮携带完整任务或 Run ID 并继续走共享命令；飞书与 Telegram 的创建/删除
-确认按钮提交同一五分钟令牌，飞书按钮被接受后会把原卡片更新为无按钮终态，微信保留同一文本语法；
+预览与操作结果。飞书管理按钮携带完整任务或 Run ID 并继续走共享命令；显式命令和 `schedule_task`
+工具预览都按精确 Surface 复用同一呈现入口，飞书与 Telegram 的创建/删除确认按钮提交同一五分钟令牌，
+飞书按钮被接受后会把原卡片更新为无按钮终态，微信保留同一文本语法；
 Surface 不保存任务定义、Prompt、选择快照或确认令牌。
 审批卡片和其他需要等待结果的 `runOrdered` 操作排在所有既有关键消息之后，但会越过尚未执行的
 非关键过程输出；关键消息与非关键消息各自保持原顺序，已经开始的平台请求不会被中断。

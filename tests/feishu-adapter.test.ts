@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   conversationCommandNames,
   type ConversationUseCases,
+  type ScheduledTaskConfirmation,
 } from "../src/application/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
 import { ThreadSectionAccessPolicy } from "../src/policy/index.js";
@@ -299,6 +300,43 @@ describe("Feishu conversation adapter", () => {
       }),
     );
     expect(fixture.sent).toEqual([]);
+  });
+
+  it("opens the native CardKit confirmation for a schedule_task preview", async () => {
+    const fixture = createOutbox();
+    const openResponse = vi.fn(async () => {});
+    const adapter = new FeishuConversationAdapter(
+      {} as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      { open: vi.fn(async () => {}), openResponse } as never,
+    );
+    const preview = scheduledTaskPreview();
+
+    await adapter.presentScheduledTaskConfirmation(
+      message.target,
+      message.actorId,
+      preview,
+    );
+    await fixture.outbox.close();
+
+    expect(openResponse).toHaveBeenCalledWith(
+      message.target,
+      message.actorId,
+      expect.objectContaining({
+        title: "确认创建计划任务",
+        descriptionFormat: "markdown",
+        choices: expect.arrayContaining([
+          expect.objectContaining({
+            label: "确认",
+            input: `confirm ${preview.token}`,
+          }),
+          expect.objectContaining({ label: "取消" }),
+        ]),
+      }),
+    );
   });
 
   it("provides concise Feishu status and doctor commands without starting a Turn", async () => {
@@ -2075,6 +2113,30 @@ describe("Feishu conversation adapter", () => {
     expect(JSON.stringify(fixture.sent)).not.toContain("secret");
   });
 });
+
+function scheduledTaskPreview(): ScheduledTaskConfirmation {
+  return {
+    action: "create",
+    token: "12345678-1234-1234-1234-123456789abc",
+    expiresAt: 2,
+    task: {
+      taskId: "task-preview",
+      name: "检查 CI",
+      status: "active",
+      schedule: { type: "interval", intervalMinutes: 60, anchorAt: 1 },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 2,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      serviceTier: null,
+      sandbox: "workspace-write",
+      permissions: null,
+      promptPreview: "检查 CI",
+    },
+  };
+}
 
 function createOutbox(): {
   outbox: FeishuOutbox;

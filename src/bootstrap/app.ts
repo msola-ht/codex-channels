@@ -63,7 +63,6 @@ import {
   ProviderAccountService,
   ScheduledTaskApplicationService,
   ScheduledTaskToolService,
-  isLikelyScheduledTaskInput,
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
@@ -627,10 +626,6 @@ export class GatewayApplication {
       },
       this.codex,
       this.codex,
-      {
-        enabled: config.scheduledTasksEnabled,
-        isLikelyScheduleInput: (input) => isLikelyScheduledTaskInput(input),
-      },
     );
     this.output.subscribe("conversation-background-release", async (event) => {
       if (event.type !== "turn.completed" || !this.router.isBackgroundThread(event.threadId)) {
@@ -786,6 +781,13 @@ export class GatewayApplication {
             actorsForTarget: (target) => this.bindings.actors(target),
             execute: (target, actorId, args) =>
               toolService.execute(target, actorId, args),
+            presentConfirmation: (target, actorId, preview) => {
+              this.surfaceManager.presentScheduledTaskConfirmation(
+                target,
+                actorId,
+                preview,
+              );
+            },
           });
           return {
             service: scheduledTaskService,

@@ -5,6 +5,7 @@ import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
   ProviderModelUsageEstimate,
+  ScheduledTaskConfirmation,
   ScheduledTaskUseCases,
 } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
@@ -512,6 +513,18 @@ export class FeishuSurface implements SurfaceAdapter {
 
   sendChannelImage(conversationId: string, imagePath: string): Promise<void> {
     return this.output.sendChannelImage(conversationId, imagePath);
+  }
+
+  presentScheduledTaskConfirmation(
+    target: ConversationTarget,
+    actorId: string,
+    preview: ScheduledTaskConfirmation,
+  ): Promise<void> {
+    return this.adapter.presentScheduledTaskConfirmation(
+      target,
+      actorId,
+      preview,
+    );
   }
 
   async start(): Promise<void> {

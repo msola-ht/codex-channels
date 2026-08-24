@@ -1,6 +1,7 @@
 import pino, { type Logger } from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ScheduledTaskConfirmation } from "../src/application/index.js";
 import type { InteractionPort } from "../src/approval/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
@@ -382,6 +383,40 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("routes a scheduled-task confirmation only to the exact interactive Surface", () => {
+    const telegram = surface("telegram", "default", []);
+    const feishu = surface("feishu", "tenant-a", []);
+    const weixin = surface("weixin", "wx-a", []);
+    const telegramPresentation = vi.fn();
+    const feishuPresentation = vi.fn();
+    telegram.presentScheduledTaskConfirmation = telegramPresentation;
+    feishu.presentScheduledTaskConfirmation = feishuPresentation;
+    const manager = createManager([telegram, feishu, weixin]);
+    const target = {
+      surface: "feishu",
+      accountId: "tenant-a",
+      conversationId: "chat-1",
+    };
+    const preview = scheduledTaskPreview();
+
+    expect(manager.presentScheduledTaskConfirmation(
+      target,
+      "actor-1",
+      preview,
+    )).toBe(true);
+    expect(feishuPresentation).toHaveBeenCalledWith(
+      target,
+      "actor-1",
+      preview,
+    );
+    expect(telegramPresentation).not.toHaveBeenCalled();
+    expect(manager.presentScheduledTaskConfirmation(
+      { surface: "weixin", accountId: "wx-a", conversationId: "wx-chat" },
+      "wx-actor",
+      preview,
+    )).toBe(false);
+  });
+
   it("does not amplify per-token text deltas in debug logs", async () => {
     const debug = vi.fn();
     const diagnosticLogger = {
@@ -683,4 +718,28 @@ function surface(
 async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+function scheduledTaskPreview(): ScheduledTaskConfirmation {
+  return {
+    action: "create",
+    token: "12345678-1234-1234-1234-123456789abc",
+    expiresAt: 2,
+    task: {
+      taskId: "task-preview",
+      name: "检查 CI",
+      status: "active",
+      schedule: { type: "interval", intervalMinutes: 60, anchorAt: 1 },
+      timezone: "Asia/Shanghai",
+      nextRunAt: 2,
+      workspaceId: "main",
+      modelProvider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      serviceTier: null,
+      sandbox: "workspace-write",
+      permissions: null,
+      promptPreview: "检查 CI",
+    },
+  };
 }

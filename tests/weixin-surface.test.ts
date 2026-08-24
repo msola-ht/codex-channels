@@ -8,7 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationUseCases } from "../src/application/index.js";
+import type {
+  ConversationUseCases,
+  ScheduledTaskUseCases,
+} from "../src/application/index.js";
 import type {
   OutputEvent,
 } from "../src/conversation-core/index.js";
@@ -153,6 +156,47 @@ describe("WeixinSurface", () => {
       "**本次运行 · 已完成**",
     ]);
     expect(onFatal).not.toHaveBeenCalled();
+  });
+
+  it("passes scheduled tasks through the surface to the text confirmation command", async () => {
+    const token = "12345678-1234-1234-1234-123456789abc";
+    let pollCount = 0;
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return inboundBatch(`/schedule confirm ${token}`);
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText,
+    };
+    const confirm = vi.fn(() => ({
+      action: "created" as const,
+      task: scheduledTaskView(),
+    }));
+    const surface = new WeixinSurface({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      scheduledTasks: { confirm } as unknown as ScheduledTaskUseCases,
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+
+    await surface.start();
+    await vi.waitFor(() => {
+      expect(confirm).toHaveBeenCalledWith(target, actorId, token);
+    });
+    await vi.waitFor(() => {
+      expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+        text: expect.stringContaining("已创建 Gateway 计划任务"),
+      }));
+    });
+    await surface.stop();
   });
 
   it("keeps an exact approval command in one message through the live input loop", async () => {
@@ -901,6 +945,25 @@ function turnCompleted(): Extract<OutputEvent, { type: "turn.completed" }> {
     threadId: "thread",
     turnId: "turn",
     status: "completed",
+  };
+}
+
+function scheduledTaskView() {
+  return {
+    taskId: "task-1",
+    name: "提醒我：收到",
+    status: "active" as const,
+    schedule: { type: "once" as const, date: "2026-08-24", time: "10:31" },
+    timezone: "Asia/Shanghai",
+    nextRunAt: Date.parse("2026-08-24T02:31:00.000Z"),
+    workspaceId: "main",
+    modelProvider: "opencode-go",
+    model: "deepseek-v4-flash-vision-exp",
+    reasoningEffort: "high",
+    serviceTier: null,
+    sandbox: "workspace-write" as const,
+    permissions: null,
+    promptPreview: "提醒我：收到",
   };
 }
 

@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 
+import type { ScheduledTaskConfirmation } from "../application/index.js";
 import {
   isCriticalOutputEvent,
   surfaceAccountKey,
@@ -112,6 +113,33 @@ export class SurfaceManager {
       throw new Error(`${target.surface} 渠道不支持发送图片`);
     }
     return surface.sendChannelImage(target.conversationId, imagePath);
+  }
+
+  presentScheduledTaskConfirmation(
+    target: ConversationTarget,
+    actorId: string,
+    preview: ScheduledTaskConfirmation,
+  ): boolean {
+    const surface = this.surfacesByAccount.get(
+      surfaceAccountKey(target.surface, target.accountId),
+    );
+    if (surface?.presentScheduledTaskConfirmation === undefined) {
+      return false;
+    }
+    void Promise.resolve(
+      surface.presentScheduledTaskConfirmation(target, actorId, preview),
+    ).catch((error: unknown) => {
+      this.logger.warn(
+        {
+          err: error,
+          surface: target.surface,
+          accountId: target.accountId,
+          conversationId: target.conversationId,
+        },
+        "计划任务确认界面发送失败",
+      );
+    });
+    return true;
   }
 
   reportFatal(surfaceId: string, accountId: string, error: Error): void {

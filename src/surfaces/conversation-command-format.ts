@@ -271,6 +271,15 @@ export function formatConversationScheduledRuns(
       : runs.map((run) => [
           `- 【${run.selector}】${run.runId} · ${scheduledRunStateLabel(run.state)}`,
           `  - 计划时间：${formatScheduledAt(run.scheduledFor)}`,
+          ...(run.dispatchStartedAt === null
+            ? []
+            : [`  - 触发时间：${formatScheduledAt(run.dispatchStartedAt)}`]),
+          ...(run.startedAt === null
+            ? []
+            : [`  - 开始时间：${formatScheduledAt(run.startedAt)}`]),
+          ...(run.completedAt === null
+            ? []
+            : [`  - 完成时间：${formatScheduledAt(run.completedAt)}`]),
           ...(run.threadId ? [`  - Thread：${run.threadId}`] : []),
           ...(run.errorCategory ? [`  - 分类：${run.errorCategory}`] : []),
         ].join("\n"))),
@@ -663,6 +672,10 @@ export function formatConversationCommandOutcome(
         `名称：${outcome.task.name}`,
         `任务：${outcome.task.taskId}`,
         `状态：${formatScheduledTaskStatusLabel(outcome.task.status)}`,
+        `计划：${formatSchedule(outcome.task.schedule, outcome.task.timezone)}`,
+        `下次运行：${formatScheduledAt(outcome.task.nextRunAt)}`,
+        `模型：${outcome.task.modelProvider}/${outcome.task.model ?? "默认"}`,
+        `思考等级：${outcome.task.reasoningEffort ?? "默认"}`,
       ].join("\n"));
     case "scheduled-task.run-requested":
     case "scheduled-task.retry-requested":
@@ -672,6 +685,16 @@ export function formatConversationCommandOutcome(
           : "已解除 uncertain Run 并请求重试",
         `Run：${outcome.run.runId}`,
         `状态：${scheduledRunStateLabel(outcome.run.state)}`,
+        `计划时间：${formatScheduledAt(outcome.run.scheduledFor)}`,
+        ...(outcome.run.dispatchStartedAt === null
+          ? []
+          : [`触发时间：${formatScheduledAt(outcome.run.dispatchStartedAt)}`]),
+        ...(outcome.run.startedAt === null
+          ? []
+          : [`开始时间：${formatScheduledAt(outcome.run.startedAt)}`]),
+        ...(outcome.run.completedAt === null
+          ? []
+          : [`完成时间：${formatScheduledAt(outcome.run.completedAt)}`]),
         ...(outcome.run.threadId ? [`Thread：${outcome.run.threadId}`] : []),
       ].join("\n"));
   }

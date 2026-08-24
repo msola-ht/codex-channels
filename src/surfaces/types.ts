@@ -1,9 +1,14 @@
 import type { InteractionPort } from "../approval/index.js";
+import type { ScheduledTaskConfirmation } from "../application/index.js";
 import type {
   ConfigChange,
   OperationUpdateDisplay,
 } from "../config/index.js";
-import type { OutputEvent, SurfaceId } from "../conversation-core/index.js";
+import type {
+  ConversationTarget,
+  OutputEvent,
+  SurfaceId,
+} from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
 
 export interface SurfaceConfigurationChange {
@@ -33,6 +38,11 @@ export interface SurfaceAdapter {
   readonly interactions: InteractionPort;
   readonly output: SurfaceOutputPort;
   sendChannelImage?(conversationId: string, imagePath: string): Promise<void>;
+  presentScheduledTaskConfirmation?(
+    target: ConversationTarget,
+    actorId: string,
+    preview: ScheduledTaskConfirmation,
+  ): Promise<void> | void;
   start(): Promise<void>;
   stop(): Promise<void>;
   configurationChanged?(change: SurfaceConfigurationChange): void;
