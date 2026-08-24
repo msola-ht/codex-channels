@@ -97,6 +97,8 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 - 显式发送 `threadSource: "automation"`，并由 Client 稳定映射该来源。
 - 使用任务创建时冻结的 `modelProvider`、模型、思考等级和服务层级；运行前重新校验模型仍可见且
   Provider 可用，不能静默换模型。
+- 不指定模型时冻结创建时当前会话的模型与 Provider；明确给定时接受模型 ID 或 `provider/model`
+  复合串，所选 Provider 未配置时创建预览直接失败关闭，不静默回退默认。
 - Workspace 权限使用运行时重新读取的当前配置，不复制创建时的旧权限快照。
 - 新 Thread 作为当前 Conversation 的后台绑定；不替换前台绑定。完成后沿用现有后台释放逻辑，
   Thread 历史仍由 App Server 保存，用户可显式 `/resume`。
@@ -243,6 +245,10 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 时区不得猜测。用户明确表达“北京时间”等地区或时区时，模型可以规范化为 IANA 名称；完全没有表达
 时区时工具返回可操作提示，不创建任务。每两周、每月第 N 个星期几或更复杂日历规则返回固定的不支持
 提示，不近似为其他计划。固定句式仍可在 Application 内确定性解析并直接创建预览，不依赖工具或模型。
+
+`create` 可选的 `model` 支持模型 ID 或 `provider/model` 复合串（如
+`deepseek/deepseek-v4-flash`）；不传时使用当前会话的模型与 Provider。显式指定的 Provider 未配置时
+直接返回可操作错误，确认预览把 Provider 与模型合并展示，避免创建后才发现跨 Provider 不匹配。
 
 官方 `dynamicTools` 只能在 `thread/start` 时注册，不能向已经存在的 Thread 注入。Gateway 会在
 当前绑定 Thread 尚未注册工具时，对计划类自然语言消息先切换到一个带工具的新前台 Thread，再启动
