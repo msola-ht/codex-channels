@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -243,6 +243,7 @@ describe("state database upgrade", () => {
     const scheduled = new DatabaseSync(scheduledPath);
     scheduled.exec("PRAGMA user_version = 3;");
     scheduled.close();
+    chmodSync(scheduledPath, 0o600);
 
     expect(() => validateStateDatabaseStructure(environment)).toThrow(/计划任务数据库 Schema 3/u);
     expect(() => upgradeStateDatabase(environment)).toThrow(/计划任务数据库 Schema 3/u);
@@ -331,4 +332,5 @@ function createScheduledTaskV1Database(path: string): void {
     INSERT INTO runs (run_id, task_id, scheduled_for, state) VALUES (?, ?, ?, ?)
   `).run("run-1", "v1-hourly", anchorAt, "completed");
   db.close();
+  chmodSync(path, 0o600);
 }

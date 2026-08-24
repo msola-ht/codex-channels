@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -178,6 +178,7 @@ describe("SqliteScheduledTaskStore", () => {
     const unknownDb = new DatabaseSync(unknown.path);
     unknownDb.exec("CREATE TABLE unrelated (value TEXT)");
     unknownDb.close();
+    chmodSync(unknown.path, 0o600);
     expect(() => new SqliteScheduledTaskStore(unknown.path)).toThrow(ScheduledTaskSchemaError);
 
     const incomplete = databasePath();
@@ -190,6 +191,7 @@ describe("SqliteScheduledTaskStore", () => {
       PRAGMA user_version = 2;
     `);
     incompleteDb.close();
+    chmodSync(incomplete.path, 0o600);
     expect(() => new SqliteScheduledTaskStore(incomplete.path))
       .toThrow(/Schema 2.*结构不完整/);
 
@@ -197,6 +199,7 @@ describe("SqliteScheduledTaskStore", () => {
     const wrongVersionDb = new DatabaseSync(wrongVersion.path);
     wrongVersionDb.exec("PRAGMA user_version = 2");
     wrongVersionDb.close();
+    chmodSync(wrongVersion.path, 0o600);
     expect(() => new SqliteScheduledTaskStore(wrongVersion.path)).toThrow(ScheduledTaskSchemaError);
   });
 
@@ -222,6 +225,28 @@ describe("SqliteScheduledTaskStore", () => {
     const privateStore = new SqliteScheduledTaskStore(join(privateDirectory, "scheduled-tasks.sqlite3"));
     expect(statSync(privateDirectory).mode & 0o777).toBe(0o700);
     privateStore.close();
+  });
+
+  it("allows a real private directory below a symlinked system ancestor but rejects a symlinked final directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-scheduled-symlink-parent-"));
+    directories.push(root);
+    const realParent = join(root, "real-parent");
+    const privateDirectory = join(realParent, "private");
+    mkdirSync(privateDirectory, { recursive: true, mode: 0o700 });
+    chmodSync(privateDirectory, 0o700);
+
+    const linkedParent = join(root, "linked-parent");
+    symlinkSync(realParent, linkedParent);
+    const store = new SqliteScheduledTaskStore(
+      join(linkedParent, "private", "scheduled-tasks.sqlite3"),
+    );
+    store.close();
+
+    const linkedFinal = join(root, "linked-final");
+    symlinkSync(privateDirectory, linkedFinal);
+    expect(() => new SqliteScheduledTaskStore(
+      join(linkedFinal, "scheduled-tasks.sqlite3"),
+    )).toThrow(/目录无效/u);
   });
 
   it("backs up exclusively and rejects symlink targets", () => {
@@ -933,6 +958,7 @@ function createV1Database(
     `).run("v1-run", "v1-task", anchorAt, "completed");
   }
   db.close();
+  chmodSync(path, 0o600);
 }
 
 async function delay(milliseconds: number): Promise<void> {

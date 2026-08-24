@@ -1510,10 +1510,13 @@ function ensurePrivateDirectory(directory: string): void {
   let current = resolve(directory);
   while (true) {
     const entry = tryLstat(current);
-    if (entry !== undefined && (entry.isSymbolicLink() || !entry.isDirectory())) {
-      throw new Error("计划任务数据库目录无效");
+    if (entry !== undefined) {
+      if (entry.isSymbolicLink() || !entry.isDirectory()) {
+        throw new Error("计划任务数据库目录无效");
+      }
+      break;
     }
-    if (entry === undefined) missing.push(current);
+    missing.push(current);
     const parent = dirname(current);
     if (parent === current) break;
     current = parent;
