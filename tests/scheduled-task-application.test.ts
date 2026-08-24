@@ -50,6 +50,18 @@ describe("ScheduledTaskApplicationService", () => {
     store.close();
   });
 
+  it("carries a trailing model from natural language into the create preview", () => {
+    const { store, service } = createService();
+    const preview = service.previewNaturalLanguage(
+      target,
+      "actor-1",
+      "1 分钟后 Asia/Shanghai 回复测试成功 用 deepseek/deepseek-v4-flash",
+    );
+    expect(preview.task.modelProvider).toBe("deepseek");
+    expect(preview.task.model).toBe("deepseek-v4-flash");
+    store.close();
+  });
+
   it("rejects an unrecognized natural description without starting a model draft", async () => {
     const { store, service } = createService(() => now);
     expect(() => service.previewNaturalLanguage(
@@ -174,6 +186,43 @@ describe("ScheduledTaskApplicationService", () => {
     expect(runTaskNow).toHaveBeenCalledWith(task.taskId);
     store.close();
   });
+
+  it("resolves an explicit provider/model selection and fails closed on an unconfigured Provider", () => {
+    const { store, service } = createService();
+    const preview = service.previewCreate(target, "actor-1", {
+      schedule: { type: "daily", time: "09:00" },
+      timezone: "UTC",
+      prompt: "用 deepseek 模型检查",
+      model: "deepseek/deepseek-v4-flash",
+    });
+    expect(preview.task.modelProvider).toBe("deepseek");
+    expect(preview.task.model).toBe("deepseek-v4-flash");
+    expect(service.confirm(target, "actor-1", preview.token)).toMatchObject({
+      action: "created",
+      task: { modelProvider: "deepseek", model: "deepseek-v4-flash" },
+    });
+
+    expect(() => service.previewCreate(target, "actor-1", {
+      schedule: { type: "daily", time: "09:00" },
+      timezone: "UTC",
+      prompt: "测试",
+      model: "unknown/model-x",
+    })).toThrow(expect.objectContaining({ code: "scheduled-task.command.invalid" }));
+    store.close();
+  });
+
+  it("uses the current session Provider when only a bare model ID is given", () => {
+    const { store, service } = createService();
+    const preview = service.previewCreate(target, "actor-1", {
+      schedule: { type: "daily", time: "09:00" },
+      timezone: "UTC",
+      prompt: "检查",
+      model: "gpt-5.6-terra",
+    });
+    expect(preview.task.modelProvider).toBe("openai");
+    expect(preview.task.model).toBe("gpt-5.6-terra");
+    store.close();
+  });
 });
 
 describe("parseScheduledTaskOperation", () => {
@@ -217,6 +266,31 @@ describe("parseScheduledTaskOperation", () => {
     });
     expect(parseNaturalScheduledTaskDraft("这不是可解析的计划描述", now)).toBeNull();
   });
+
+  it("parses an optional trailing model marker on add forms", () => {
+    expect(parseScheduledTaskOperation(
+      "add daily 09:00 Asia/Shanghai 检查 CI 用 deepseek/deepseek-v4-flash",
+      now,
+    )).toMatchObject({
+      type: "create",
+      request: {
+        schedule: { type: "daily", time: "09:00" },
+        timezone: "Asia/Shanghai",
+        prompt: "检查 CI",
+        model: "deepseek/deepseek-v4-flash",
+      },
+    });
+    expect(parseScheduledTaskOperation(
+      "add interval 5m Asia/Shanghai 检查 用 gpt-5.6-terra",
+      now,
+    )).toMatchObject({
+      type: "create",
+      request: {
+        schedule: { type: "interval", intervalMinutes: 5 },
+        model: "gpt-5.6-terra",
+      },
+    });
+  });
 });
 
 function createService(
@@ -235,6 +309,7 @@ function createService(
   );
   const application: ScheduledTaskApplicationPort = {
     isActorAuthorized: (_target, actorId) => actorId === "actor-1",
+    isProviderConfigured: (provider) => provider === "openai" || provider === "deepseek",
     creationContext: () => ({
       workspaceId: "main",
       workspaceName: "Main",

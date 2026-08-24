@@ -26,6 +26,7 @@ export const scheduledTaskToolSpec = {
     "用户用日常语言描述计划时，由你提取 scheduleType、时区、提示词和规则字段。",
     "action=create 只创建确认预览，不会立即保存；必须把返回的确认令牌展示给用户，并提示回复 /schedule confirm <令牌>。",
     "确认必须由用户通过 /schedule confirm <令牌> 完成；你不得在工具内直接创建任务。",
+    "model 为可选：可以是模型 ID，或 provider/model 复合串（如 deepseek/deepseek-v4-flash）；不传则使用当前会话的模型和 Provider。",
     "时间格式：intervalMinutes 为分钟数；afterMinutes 为一次性延后分钟数；date 使用 YYYY-MM-DD；time 使用 HH:mm；days 使用 MO/TU/WE/TH/FR/SA/SU。",
     "时区必须是 IANA 名称；用户说北京时间可转换为 Asia/Shanghai、纽约时间转换为 America/New_York。绝不猜测未提供的时区。",
   ].join(""),
@@ -66,6 +67,7 @@ export const scheduledTaskToolSpec = {
       },
       timezone: { type: "string", maxLength: 128 },
       prompt: { type: "string", maxLength: 20000 },
+      model: { type: "string", maxLength: 128 },
       selector: { type: "string", maxLength: 256 },
       page: { type: "integer", minimum: 1, maximum: 100 },
       name: { type: "string", maxLength: 80 },
@@ -124,6 +126,7 @@ export class ScheduledTaskToolService {
               schedule: request.schedule,
               timezone: request.timezone,
               prompt: request.prompt,
+              ...(request.model === undefined ? {} : { model: request.model }),
             }),
           };
         case "list":
@@ -164,6 +167,7 @@ type ToolRequest =
       schedule: Schedule;
       timezone: string;
       prompt: string;
+      model?: string;
     }
   | { action: "list"; page: number }
   | { action: "runs"; selector: string; page: number }
@@ -209,6 +213,7 @@ function parseCreate(
   const timezone = validateIanaTimeZone(requiredString(value.timezone, "timezone"));
   const prompt = requiredString(value.prompt, "prompt").trim();
   if (!prompt) throw toolError("计划任务内容不能为空");
+  const model = optionalString(value.model);
 
   switch (scheduleType) {
     case "interval": {
@@ -218,6 +223,7 @@ function parseCreate(
         schedule: { type: "interval", intervalMinutes, anchorAt: nowMs },
         timezone,
         prompt,
+        ...(model === undefined ? {} : { model }),
       };
     }
     case "once": {
@@ -233,6 +239,7 @@ function parseCreate(
           schedule: { type: "once", date, time },
           timezone,
           prompt,
+          ...(model === undefined ? {} : { model }),
         };
       }
       if (afterMinutes !== null) {
@@ -241,6 +248,7 @@ function parseCreate(
           schedule: { type: "once", afterMinutes, anchorAt: nowMs },
           timezone,
           prompt,
+          ...(model === undefined ? {} : { model }),
         };
       }
       throw toolError("一次性任务需要 date+time 或 afterMinutes");
@@ -253,6 +261,7 @@ function parseCreate(
         schedule: { type: "monthly", day, time },
         timezone,
         prompt,
+        ...(model === undefined ? {} : { model }),
       };
     }
     case "daily":
@@ -263,6 +272,7 @@ function parseCreate(
         schedule: { type: scheduleType, time },
         timezone,
         prompt,
+        ...(model === undefined ? {} : { model }),
       };
     }
     case "weekly": {
@@ -273,6 +283,7 @@ function parseCreate(
         schedule: { type: "weekly", days, time },
         timezone,
         prompt,
+        ...(model === undefined ? {} : { model }),
       };
     }
     default:

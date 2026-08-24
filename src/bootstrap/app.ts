@@ -739,6 +739,7 @@ export class GatewayApplication {
                   === surfaceAccountKey(target.surface, target.accountId)
                 && candidate.conversationId === target.conversationId)
               && this.bindings.actors(target).includes(actorId),
+            isProviderConfigured: (provider) => this.codex.isProviderConfigured(provider),
             creationContext: (target) => {
               const status = service.status(target);
               const workspace = this.workspaces.require(status.workspaceId);

@@ -92,6 +92,28 @@ describe("ScheduledTaskToolService", () => {
     expect(tasks.confirm).not.toHaveBeenCalled();
   });
 
+  it("forwards an explicit model selector to the create preview", async () => {
+    const tasks = fakeTasks();
+    const service = new ScheduledTaskToolService(tasks);
+
+    await service.execute(target, "actor-1", {
+      action: "create",
+      scheduleType: "once",
+      afterMinutes: 1,
+      timezone: "Asia/Shanghai",
+      prompt: "回复测试成功",
+      model: "deepseek/deepseek-v4-flash",
+    });
+
+    expect(tasks.previewCreate).toHaveBeenCalledWith(
+      target,
+      "actor-1",
+      expect.objectContaining({
+        model: "deepseek/deepseek-v4-flash",
+      }),
+    );
+  });
+
   it("returns a safe error instead of throwing for invalid tool arguments", async () => {
     const service = new ScheduledTaskToolService(fakeTasks());
     await expect(service.execute(target, "actor-1", {

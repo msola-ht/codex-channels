@@ -17,6 +17,7 @@ import {
   formatConversationPluginDetail,
   formatConversationPluginHealth,
   formatConversationPlugins,
+  formatConversationScheduledConfirmation,
   formatConversationScheduledTasks,
   formatConversationScheduledRuns,
   formatScheduledTaskStatusLabel,
@@ -888,6 +889,36 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain("一次性 1 分钟后");
+  });
+
+  it("renders the scheduled confirmation with a combined provider/model", () => {
+    const rendered = formatConversationScheduledConfirmation({
+      kind: "scheduled-confirmation",
+      preview: {
+        action: "create",
+        token: "token-1",
+        expiresAt: Date.parse("2026-08-23T12:05:00.000Z"),
+        task: {
+          taskId: "task-1",
+          name: "每日检查",
+          status: "active",
+          schedule: { type: "daily", time: "09:00" },
+          timezone: "Asia/Shanghai",
+          nextRunAt: Date.parse("2026-08-24T01:00:00.000Z"),
+          workspaceId: "main",
+          modelProvider: "deepseek",
+          model: "deepseek-v4-flash",
+          reasoningEffort: "high",
+          serviceTier: null,
+          sandbox: "workspace-write",
+          permissions: null,
+          promptPreview: "检查项目状态",
+        },
+      },
+    });
+
+    expect(rendered).toContain("模型：deepseek/deepseek-v4-flash");
+    expect(rendered).toContain("/schedule confirm token-1");
   });
 
   it("renders updated workspace permissions with the hot reload notice", () => {

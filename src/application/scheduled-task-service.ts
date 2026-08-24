@@ -19,6 +19,7 @@ import {
 import {
   parseNaturalScheduledTaskDraft,
   scheduledTaskCommandUsageText,
+  splitModelMarker,
 } from "./scheduled-task-command.js";
 
 const taskPageSize = 8;
@@ -51,12 +52,16 @@ export interface ScheduledTaskApplicationPort {
   isActorAuthorized(target: ConversationTarget, actorId: string): boolean;
   creationContext(target: ConversationTarget): ScheduledTaskCreationContext;
   runTaskNow(taskId: string): Promise<ScheduledRun>;
+  /** Synchronous fail-closed check used when a Provider is explicitly requested. */
+  isProviderConfigured(provider: string): boolean;
 }
 
 export interface ScheduledTaskCreateRequest {
   readonly schedule: Schedule;
   readonly timezone: string;
   readonly prompt: string;
+  /** Optional explicit model ID or a provider/model composite; defaults to the current session. */
+  readonly model?: string;
 }
 
 export interface ScheduledTaskView {
@@ -121,6 +126,8 @@ interface PendingCreate {
   readonly actorId: string;
   readonly expiresAt: number;
   readonly input: Parameters<ScheduledTaskStore["createTask"]>[0];
+  /** True when the caller explicitly chose a model independent of the snapshot. */
+  readonly modelExplicit: boolean;
 }
 
 interface PendingDelete {
@@ -194,8 +201,15 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     this.requireActor(target, actorId);
     this.requireTaskCapacity(target, actorId);
     const normalizedDescription = normalizeDraftDescription(description);
-    const deterministic = parseNaturalScheduledTaskDraft(normalizedDescription, this.now());
-    if (deterministic) return this.previewCreate(target, actorId, deterministic);
+    const { rest, model } = splitModelMarker(normalizedDescription);
+    const deterministic = parseNaturalScheduledTaskDraft(rest, this.now());
+    if (deterministic) {
+      return this.previewCreate(
+        target,
+        actorId,
+        model === undefined ? deterministic : { ...deterministic, model },
+      );
+    }
     throw scheduledError(
       "scheduled-task.command.invalid",
       scheduledTaskCommandUsageText,
@@ -214,6 +228,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     const timezone = validateIanaTimeZone(request.timezone);
     const schedule = normalizeSchedule(request.schedule);
     const context = this.requireCreationContext(target);
+    const modelSelection = resolveCreationModel(request.model, context, this.application);
     const previewNextRunAt = calculateNextRunAt(schedule, timezone, now);
     if (previewNextRunAt === null) {
       throw scheduledError("scheduled-task.command.invalid", "一次性计划时间已过去，请选择未来时间");
@@ -228,8 +243,8 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       prompt,
       schedule,
       timezone,
-      modelProvider: context.modelProvider,
-      model: context.model,
+      modelProvider: modelSelection.modelProvider,
+      model: modelSelection.model,
       reasoningEffort: context.reasoningEffort,
       serviceTier: context.serviceTier,
       sandbox: context.sandbox,
@@ -239,7 +254,15 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     } satisfies Parameters<ScheduledTaskStore["createTask"]>[0];
     const token = randomUUID();
     const expiresAt = now + confirmationLifetimeMs;
-    this.rememberConfirmation({ kind: "create", token, target, actorId, expiresAt, input });
+    this.rememberConfirmation({
+      kind: "create",
+      token,
+      target,
+      actorId,
+      expiresAt,
+      input,
+      modelExplicit: request.model !== undefined && request.model.trim() !== "",
+    });
     return {
       action: "create",
       token,
@@ -279,8 +302,9 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       const current = this.application.creationContext(target);
       if (
         current.workspaceId !== confirmation.input.workspaceId
-        || current.modelProvider !== confirmation.input.modelProvider
-        || current.model !== confirmation.input.model
+        || (!confirmation.modelExplicit
+          && (current.modelProvider !== confirmation.input.modelProvider
+            || current.model !== confirmation.input.model))
         || current.reasoningEffort !== confirmation.input.reasoningEffort
         || current.serviceTier !== confirmation.input.serviceTier
         || current.sandbox !== confirmation.input.sandbox
@@ -631,6 +655,35 @@ function normalizeName(value: string): string {
     throw scheduledError("scheduled-task.command.invalid", `计划任务名称不能超过 ${maximumTaskNameCharacters} 个字符`);
   }
   return normalized;
+}
+
+function resolveCreationModel(
+  selector: string | undefined,
+  context: ScheduledTaskCreationContext,
+  application: ScheduledTaskApplicationPort,
+): { model: string; modelProvider: string } {
+  if (selector === undefined || selector.trim() === "") {
+    return { model: context.model, modelProvider: context.modelProvider };
+  }
+  const normalized = selector.trim();
+  const separator = normalized.indexOf("/");
+  const model = separator >= 0 ? normalized.slice(separator + 1).trim() : normalized;
+  const provider = separator >= 0
+    ? normalized.slice(0, separator).trim()
+    : context.modelProvider;
+  if (!model) {
+    throw scheduledError("scheduled-task.command.invalid", "计划任务模型不能为空");
+  }
+  if (!provider) {
+    throw scheduledError("scheduled-task.command.invalid", "计划任务模型 Provider 不能为空");
+  }
+  if (!application.isProviderConfigured(provider)) {
+    throw scheduledError(
+      "scheduled-task.command.invalid",
+      `所选模型 Provider 未配置：${provider}`,
+    );
+  }
+  return { model, modelProvider: provider };
 }
 
 function defaultTaskName(prompt: string): string {
