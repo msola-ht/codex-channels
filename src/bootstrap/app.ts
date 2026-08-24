@@ -127,7 +127,10 @@ import { RemoteExchangeRate } from "./exchange-rate.js";
 import {
   ProviderModelPricingResolver,
 } from "./deepseek-model-pricing.js";
-import { mergeSessionReferenceCost } from "./reference-cost-summary.js";
+import {
+  mergeCompletionTiming,
+  mergeSessionReferenceCost,
+} from "./reference-cost-summary.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { ScheduledTaskExecutor } from "./scheduled-task-executor.js";
@@ -849,6 +852,11 @@ export class GatewayApplication {
             turnId,
             current,
           ),
+        completionTiming: async (threadId, turnId, current) => {
+          await metricsWriter.waitForCurrentWrites(threadId);
+          const summary = metricsStore.threadSummary(threadId);
+          return mergeCompletionTiming(summary.latestTurn, turnId, current);
+        },
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
           let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
