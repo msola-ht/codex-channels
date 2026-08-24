@@ -1,4 +1,7 @@
-import type { OperationUpdate } from "../conversation-core/index.js";
+import type {
+  OperationUpdate,
+  OutputEvent,
+} from "../conversation-core/index.js";
 import { mcpToolCapabilityLabel } from "./operation-presentation.js";
 
 const maximumBufferedTurns = 100;
@@ -38,10 +41,18 @@ interface BufferedTurn<T> {
   records: Map<string, OperationUpdate>;
 }
 
+type OperationUpdatedEvent = Extract<OutputEvent, { type: "operation.updated" }>;
+type OperationFlushEvent = Extract<
+  OutputEvent,
+  { type: "text.completed" | "turn.completed" }
+>;
+
 export class OperationUpdateBuffer<T> {
   private readonly turns = new Map<string, BufferedTurn<T>>();
 
-  accept(turnKey: string, operation: OperationUpdate, target: T): boolean {
+  accept(event: OperationUpdatedEvent, target: T): boolean {
+    const operation = event.operation;
+    const turnKey = outputTurnKey(event.threadId, event.turnId);
     if (!isBufferedOperation(operation)) {
       return false;
     }
@@ -67,7 +78,14 @@ export class OperationUpdateBuffer<T> {
     return operation.status === "running" || operation.status === "completed";
   }
 
-  take(turnKey: string): BufferedOperationSummary<T> | null {
+  flush(event: OperationFlushEvent): BufferedOperationSummary<T> | null {
+    if (event.type === "text.completed" && event.phase === "commentary") {
+      return null;
+    }
+    return this.take(outputTurnKey(event.threadId, event.turnId));
+  }
+
+  private take(turnKey: string): BufferedOperationSummary<T> | null {
     const buffered = this.turns.get(turnKey);
     this.turns.delete(turnKey);
     if (buffered === undefined || buffered.records.size === 0) {
@@ -165,4 +183,8 @@ function isBufferedOperation(
   return operation.kind === "mcpTool"
     || operation.kind === "dynamicTool"
     || operation.kind === "webSearch";
+}
+
+function outputTurnKey(threadId: string, turnId: string): string {
+  return `${threadId}:${turnId}`;
 }

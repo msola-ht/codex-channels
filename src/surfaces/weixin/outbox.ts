@@ -45,7 +45,7 @@ import {
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
-import { PlanProgressTracker } from "../plan-presentation.js";
+import { TurnPlanProgressState } from "../plan-presentation.js";
 
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
@@ -118,7 +118,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly operationUpdates =
     new OperationUpdateBuffer<ConversationTarget>();
-  private readonly planUpdates = new Map<string, PlanProgressTracker>();
+  private readonly planProgress = new TurnPlanProgressState();
   private readonly accountId: string;
   private closed = false;
 
@@ -213,11 +213,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return;
       }
       if (
-        this.operationUpdates.accept(
-          turnKey(event.threadId, event.turnId),
-          event.operation,
-          event.target,
-        )
+        this.operationUpdates.accept(event, event.target)
       ) {
         return;
       }
@@ -238,10 +234,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       if (!this.options.planUpdatesEnabled) {
         return;
       }
-      const key = turnKey(event.threadId, event.turnId);
-      const tracker = this.planUpdates.get(key) ?? new PlanProgressTracker();
-      this.planUpdates.set(key, tracker);
-      for (const presentation of tracker.accept(event)) {
+      for (const presentation of this.planProgress.accept(event)) {
         this.delivery.enqueue(
           event.target.conversationId,
           () => this.send(
@@ -261,12 +254,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
       || event.type === "turn.completed"
     ) {
       if (event.type === "turn.completed") {
-        this.planUpdates.delete(turnKey(event.threadId, event.turnId));
+        this.planProgress.complete(event);
       }
-      this.flushOperationUpdates(
-        event.target,
-        turnKey(event.threadId, event.turnId),
-      );
+      this.flushOperationUpdates(event.target, event);
     }
     const rendered = await this.render(event);
     if (rendered === null) {
@@ -329,15 +319,15 @@ export class WeixinOutbox implements SurfaceOutputPort {
     await this.options.typing?.close();
     await this.delivery.close();
     this.operationUpdates.clear();
-    this.planUpdates.clear();
+    this.planProgress.clear();
     this.contexts.clear();
   }
 
   private flushOperationUpdates(
     target: ConversationTarget,
-    key: string,
+    event: Extract<OutputEvent, { type: "text.completed" | "turn.completed" }>,
   ): void {
-    const buffered = this.operationUpdates.take(key);
+    const buffered = this.operationUpdates.flush(event);
     if (buffered === null) {
       return;
     }
@@ -613,10 +603,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
       && target.accountId === this.accountId;
   }
 
-}
-
-function turnKey(threadId: string, turnId: string): string {
-  return `${threadId}:${turnId}`;
 }
 
 function splitWeixinText(
