@@ -52,7 +52,7 @@ export function renderFeishuInputOutcomeCard(
   outcome: string,
 ): FeishuCardDocument {
   if (request.type === "elicitation" && request.mode === "url") {
-    return legacyCard(
+    return cardKitWithTitle(
       interactionProcessedTitle,
       request.title,
       [note(`处理结果：${outcome}`)],
@@ -201,7 +201,7 @@ function renderToolApprovalCard(
       : []),
     actionButton("取消", "danger", interactionToken, "cancel"),
   ];
-  return legacyCard(
+  return cardKitWithTitle(
     "MCP 工具请求批准",
     request.title,
     [
@@ -220,10 +220,7 @@ function renderToolApprovalCard(
             ))}`,
           )]
         : []),
-      {
-        tag: "action",
-        actions,
-      },
+      ...buttonRows(actions),
     ],
   );
 }
@@ -236,14 +233,12 @@ function renderUrlElicitationCard(
   if (!url) {
     throw new Error("飞书 MCP URL 无效");
   }
-  return legacyCard(
+  return cardKitWithTitle(
     "MCP 请求确认",
     request.title,
     [
       plainText(truncate(request.message, maximumDisplayLength)),
-      {
-        tag: "action",
-        actions: [
+      ...buttonRows([
           {
             tag: "button",
             type: "primary",
@@ -255,19 +250,19 @@ function renderUrlElicitationCard(
           },
           actionButton("完成", "default", interactionToken, "complete"),
           actionButton("取消", "danger", interactionToken, "cancel"),
-        ],
-      },
+      ]),
     ],
   );
 }
 
-function legacyCard(
+function cardKitWithTitle(
   header: string,
   title: string,
   elements: Array<Record<string, unknown>>,
   template: "blue" | "green" | "grey" = "blue",
 ): FeishuCardDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -279,10 +274,12 @@ function legacyCard(
         content: header,
       },
     },
-    elements: [
-      plainText(truncate(title, maximumDisplayLength)),
-      ...elements,
-    ],
+    body: {
+      elements: [
+        plainText(truncate(title, maximumDisplayLength)),
+        ...elements,
+      ],
+    },
   };
 }
 
@@ -368,6 +365,26 @@ function actionButton(
       decision,
     },
   };
+}
+
+function buttonRows(
+  actions: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < actions.length; index += 3) {
+    rows.push({
+      tag: "column_set",
+      flex_mode: "stretch",
+      horizontal_spacing: "8px",
+      columns: actions.slice(index, index + 3).map((action) => ({
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        elements: [action],
+      })),
+    });
+  }
+  return rows;
 }
 
 function input(

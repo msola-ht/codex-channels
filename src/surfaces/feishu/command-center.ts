@@ -470,6 +470,7 @@ function renderFeishuCommandChoicesCard(
     };
   }
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -481,15 +482,17 @@ function renderFeishuCommandChoicesCard(
         content: selection.title,
       },
     },
-    elements: [
+    body: { elements: [
       ...(selection.description
-        ? [{
-            tag: "div",
-            text: {
-              tag: selection.descriptionFormat ?? "plain_text",
-              content: selection.description,
-            },
-          }]
+        ? selection.descriptionFormat === "lark_md"
+          ? [{ tag: "markdown", content: selection.description }]
+          : [{
+              tag: "div",
+              text: {
+                tag: "plain_text",
+                content: selection.description,
+              },
+            }]
         : []),
       ...chunkChoices(choices, 3).map((row) =>
         actionRow(
@@ -511,7 +514,7 @@ function renderFeishuCommandChoicesCard(
             },
           }]
         : []),
-    ],
+    ] },
   };
 }
 
@@ -643,6 +646,7 @@ function renderFeishuCategorizedCommandsCard(
   token: string,
 ): FeishuCardDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -654,7 +658,7 @@ function renderFeishuCategorizedCommandsCard(
         content: "更多 Codex 命令",
       },
     },
-    elements: [
+    body: { elements: [
       sectionTitle("会话查询"),
       actionRow(token, [
         ["会话列表", "sessions", "primary"],
@@ -709,7 +713,7 @@ function renderFeishuCategorizedCommandsCard(
           content: "带文本参数的命令将在下一步打开输入卡片。",
         },
       },
-    ],
+    ] },
   };
 }
 
@@ -717,6 +721,7 @@ export function renderFeishuCommandCenterCard(
   token: string,
 ): FeishuCardDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -728,7 +733,7 @@ export function renderFeishuCommandCenterCard(
         content: "Codex 命令中心",
       },
     },
-    elements: [
+    body: { elements: [
       {
         tag: "div",
         text: {
@@ -761,19 +766,16 @@ export function renderFeishuCommandCenterCard(
       ]),
       sectionTitle("更多"),
       actionRow(token, [
-        ["更多命令", "help", "default"],
+        ["帮助与更多命令", "help", "default"],
       ]),
-    ],
+    ] },
   };
 }
 
 function sectionTitle(title: string): Record<string, unknown> {
   return {
-    tag: "div",
-    text: {
-      tag: "lark_md",
-      content: `**${title}**`,
-    },
+    tag: "markdown",
+    content: `**${title}**`,
   };
 }
 
@@ -787,15 +789,22 @@ function actionRow(
   ]>,
 ): Record<string, unknown> {
   return {
-    tag: "action",
-    actions: actions.map(([label, action, type, input]) => ({
-      tag: "button",
-      text: {
-        tag: "plain_text",
-        content: label,
-      },
-      type,
-      value: commandValue(token, action, input),
+    tag: "column_set",
+    flex_mode: "stretch",
+    horizontal_spacing: "8px",
+    columns: actions.map(([label, action, type, input]) => ({
+      tag: "column",
+      width: "weighted",
+      weight: 1,
+      elements: [{
+        tag: "button",
+        text: {
+          tag: "plain_text",
+          content: label,
+        },
+        type,
+        value: commandValue(token, action, input),
+      }],
     })),
   };
 }

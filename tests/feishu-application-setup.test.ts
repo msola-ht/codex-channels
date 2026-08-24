@@ -24,6 +24,7 @@ describe("Feishu application setup controller", () => {
       runtimeStatus(),
     );
     const card = fixture.cards[0]!;
+    expect(card.card).toMatchObject({ schema: "2.0" });
     const value = setupAction(card.card);
 
     expect(fixture.controller.handleCardAction({
@@ -48,6 +49,7 @@ describe("Feishu application setup controller", () => {
     ).at(-1)?.card;
     expect(doctorOutcome?.header.title.content)
       .toBe("飞书配置完成");
+    expect(doctorOutcome).toMatchObject({ schema: "2.0" });
     const outcome = JSON.stringify(doctorOutcome);
     expect(outcome).toContain("菜单、事件与回调已自动配置并提交发布");
     expect(fixture.controller.handleCardAction({
@@ -105,6 +107,7 @@ describe("Feishu application setup controller", () => {
     );
     expect(fixture.cards[1]?.card.header.title.content)
       .toBe("授权飞书应用");
+    expect(fixture.cards[1]?.card).toMatchObject({ schema: "2.0" });
     const authorizationCard = JSON.stringify(fixture.cards[1]?.card);
     expect(authorizationCard).toContain(
       "https://applink.feishu.cn/client/web_url/open",
@@ -542,23 +545,33 @@ function runtimeStatus() {
 function setupAction(
   card: FeishuCardDocument,
 ): Readonly<Record<string, string>> {
-  for (const element of feishuCardElements(card)) {
-    if (!Array.isArray(element.actions)) {
-      continue;
-    }
-    for (const action of element.actions) {
-      if (
-        typeof action === "object"
-        && action !== null
-        && "value" in action
-      ) {
-        return (action as {
-          value: Readonly<Record<string, string>>;
-        }).value;
-      }
-    }
+  const value = findSetupAction(feishuCardElements(card));
+  if (value) {
+    return value;
   }
   throw new Error("飞书 Doctor 卡片缺少配置动作");
+}
+
+function findSetupAction(
+  value: unknown,
+): Readonly<Record<string, string>> | undefined {
+  if (Array.isArray(value)) {
+    return value.map(findSetupAction).find((entry) => entry !== undefined);
+  }
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.tag === "button"
+    && typeof record.value === "object"
+    && record.value !== null
+  ) {
+    return record.value as Readonly<Record<string, string>>;
+  }
+  return Object.values(record)
+    .map(findSetupAction)
+    .find((entry) => entry !== undefined);
 }
 
 async function settle(): Promise<void> {

@@ -554,6 +554,7 @@ function mapElicitationFormDecision(
 
 function renderMismatchedOutcomeCard(title: string): FeishuCardDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -565,13 +566,15 @@ function renderMismatchedOutcomeCard(title: string): FeishuCardDocument {
         content: interactionCancelledTitle,
       },
     },
-    elements: [{
-      tag: "div",
-      text: {
-        tag: "plain_text",
-        content: title,
-      },
-    }],
+    body: {
+      elements: [{
+        tag: "div",
+        text: {
+          tag: "plain_text",
+          content: title,
+        },
+      }],
+    },
   };
 }
 

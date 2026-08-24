@@ -116,6 +116,7 @@ describe("Feishu outbox", () => {
       markdown: "## 已使用 GitHub Plugin 开始处理。",
     }]);
     expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ schema: "2.0" });
     expect(sent[0]?.header.title.content).toBe("Thread 状态");
     expect(statusCardText(sent[0]!)).toBe("GitHub Plugin · 运行中");
   });
@@ -1897,6 +1898,7 @@ describe("Feishu outbox", () => {
     expect(sent).toEqual([{
       chatId: "oc_chat",
       card: {
+        schema: "2.0",
         config: {
           update_multi: true,
           wide_screen_mode: true,
@@ -1908,18 +1910,21 @@ describe("Feishu outbox", () => {
             content: "Thread 状态",
           },
         },
-        elements: [{
-          tag: "div",
-          text: {
-            tag: "plain_text",
-            content: "运行中",
-          },
-        }],
+        body: {
+          elements: [{
+            tag: "div",
+            text: {
+              tag: "plain_text",
+              content: "运行中",
+            },
+          }],
+        },
       },
     }]);
     expect(updated).toEqual([{
       messageId: "om_status",
       card: {
+        schema: "2.0",
         config: {
           update_multi: true,
           wide_screen_mode: true,
@@ -1931,13 +1936,15 @@ describe("Feishu outbox", () => {
             content: "Thread 状态",
           },
         },
-        elements: [{
-          tag: "div",
-          text: {
-            tag: "plain_text",
-            content: "处理结束 · 结果见下方消息",
-          },
-        }],
+        body: {
+          elements: [{
+            tag: "div",
+            text: {
+              tag: "plain_text",
+              content: "处理结束 · 结果见下方消息",
+            },
+          }],
+        },
       },
     }]);
   });
@@ -1978,11 +1985,13 @@ describe("Feishu outbox", () => {
       "om_status",
       expect.objectContaining({
         header: expect.objectContaining({ template: "green" }),
-        elements: [expect.objectContaining({
-          text: expect.objectContaining({
-            content: "GitHub Plugin · 处理结束 · 结果见下方消息",
-          }),
-        })],
+        body: expect.objectContaining({
+          elements: [expect.objectContaining({
+            text: expect.objectContaining({
+              content: "GitHub Plugin · 处理结束 · 结果见下方消息",
+            }),
+          })],
+        }),
       }),
     );
   });
@@ -2019,11 +2028,13 @@ describe("Feishu outbox", () => {
     expect(updateCard).toHaveBeenCalledWith(
       "om_status",
       expect.objectContaining({
-        elements: [expect.objectContaining({
-          text: expect.objectContaining({
-            content: "GitHub Plugin · 运行中",
-          }),
-        })],
+        body: expect.objectContaining({
+          elements: [expect.objectContaining({
+            text: expect.objectContaining({
+              content: "GitHub Plugin · 运行中",
+            }),
+          })],
+        }),
       }),
     );
   });

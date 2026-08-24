@@ -610,6 +610,7 @@ describe("Feishu OAuth card", () => {
     );
     const serialized = JSON.stringify(card);
 
+    expect(card).toMatchObject({ schema: "2.0" });
     expect(serialized).toContain(
       "https://applink.feishu.cn/client/web_url/open",
     );

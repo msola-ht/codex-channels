@@ -26,11 +26,11 @@ Application 的内联 Data URL 输入，同一 Thread 的
   长审批在待处理与处理结果中显示最多三行、150 字符的预览，完整命令、权限与持久规则保留在默认
   收起的核对面板中。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
-- `command-center.ts`：生成分类命令中心卡片，维护有界短期令牌与菜单事件去重，并复用
+- `command-center.ts`：生成 CardKit 2.0 分类命令中心、帮助、选择与输入卡片，维护有界短期令牌与菜单事件去重，并复用
   Application 的唯一命令目录与执行入口；选择卡和通用输入卡不解析第二套命令语法。
 - `application-api.ts`：隔离应用权限与已发布配置读取及 SDK 增量授权，严格裁剪远端应用及
   版本响应。
-- `application-setup.ts`：生成精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
+- `application-setup.ts`：生成 CardKit 2.0 精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和
   一次性令牌，管理有限任务、取消和安全结果。
 - `client.ts`：隔离官方 HTTP SDK，提供消息读取/发送、生成图片上传、CardKit 与 OAuth 窄客户端。
 - `audio.ts`：通过既有消息资源权限下载独立音频，限制为 5 分钟、20 MiB 和 Codex CLI
@@ -48,14 +48,14 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
-- `input-card.ts`：生成有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片。
+- `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
   请求去重、过期、取消和跨客户端失效。
 - `media.ts`：通过官方消息资源 API 下载私聊图片，并调用 Surface 共用暂存器完成大小、签名、
   权限和过期清理。
 - `permissions.ts`：渲染当前进程权限观测和 Doctor 无配置快照时的精简回退摘要。
 - `oauth-device-flow.ts`：严格裁剪应用用户 Scope、Device Authorization、有限轮询和授权身份查询。
-- `oauth-card.ts`：把 Device Flow 映射为飞书内嵌授权卡片及稳定结果卡片。
+- `oauth-card.ts`：把 Device Flow 映射为 CardKit 2.0 飞书内嵌授权卡片及稳定结果卡片。
 - `oauth-token-store.ts`：macOS Keychain 与 Linux AES-256-GCM 私有凭据后端。
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
@@ -64,7 +64,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
   原始输入消息，使开始确认、短回复及首张流式卡片原生回复同一输入；完成的原生生成图片
   独立于操作显示档位上传并发送。
-- `status-card.ts`：把 Thread 状态映射为可原地更新的轻量交互卡片。
+- `status-card.ts`：把 Thread 状态和计划进度映射为可原地更新的轻量 CardKit 2.0 卡片。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
 
@@ -263,7 +263,9 @@ StateStore 中已知且仍有授权 Actor 的精确 Chat 生成消息，不要�
 图片记录（路径、可信 MIME 与字节数），再由共享输入批处理器读取为 PNG/JPEG/WebP/非动画 GIF Data URL；富文本内的全部图片按原顺序与说明文字在同一次
 提交中传入，没有说明文字时才使用稳定图片提示。对已知平台无关命令调用
 `ConversationCommandService.execute()`；手动输入的 `/h`、`/work`、`/r` 分别规范化为
-`/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。`/start`、`/help` 打开同一命令中心卡片；
+`/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。飞书客户端不会像 Telegram 一样把
+斜杠文本注册成原生命令入口，因此命令发现以 CardKit 2.0 按钮为主；主卡的“帮助与更多命令”打开
+完整分类按钮页，手动输入的 `/start`、`/help` 仍打开同一命令中心卡片；
 `/stop` 优先停止当前 Actor 在本私聊中的最新待处理交互，没有待处理交互时调用共享 Turn
 停止命令；`/whoami` 和
 `/fs <status|doctor|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的
@@ -276,8 +278,8 @@ Token，只用当前能力缺失的差集发起 Device Flow，不提供预授权
 原始应用权限条目与 token 响应返回的完整 Scope 列表均按响应条目与字节安全上限裁剪（不受单次
 授权上限约束）；单次授权请求仍限制为最多 100 项用户 Scope，并自动附加 `offline_access`。
 完成后校验返回 Token 所属 `open_id` 必须与消息 Actor
-一致；`status` 会优先显示当前 Actor 正在进行的授权。未知或畸形斜杠命令失败关闭，
-不能作为普通消息提交给 Codex。新 Turn 的一次启动确认由共享生命周期事件驱动，并保留 Skill、
+一致；`status` 会优先显示当前 Actor 正在进行的授权。只有当前明确支持的斜杠命令进入命令链路；
+未知、非 ASCII 或畸形的 `/` 前缀内容按普通消息提交给 Codex。新 Turn 的一次启动确认由共享生命周期事件驱动，并保留 Skill、
 Plugin 或子代理的具体类型与名称，
 并通过 Outbox 原生回复当前输入，同时作为后续 Thread 结束状态的原地更新目标；Adapter 不自行
 重复发送，Skill、Plugin 与子代理命令的新建 Turn 结果也不再追加第二份启动确认。后续回复由 Core 输出驱动；追加到

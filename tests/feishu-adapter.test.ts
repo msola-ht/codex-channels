@@ -117,8 +117,14 @@ describe("Feishu conversation adapter", () => {
     );
 
     await adapter.handle({ ...message, text: "/status" });
+    status.mockImplementationOnce(() => {
+      throw new UserFacingError(
+        "command.unsupported",
+        "飞书命令不受支持",
+      );
+    });
     await expect(
-      adapter.handle({ ...message, text: "/unknown" }),
+      adapter.handle({ ...message, text: "/status" }),
     ).rejects.toMatchObject({ code: "command.unsupported" });
 
     expect(notifyMarkdown).toHaveBeenCalledOnce();
@@ -1371,33 +1377,41 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent[0]?.text).toContain("长连接：未就绪");
   });
 
-  it("rejects an unknown slash command instead of submitting it as model input", async () => {
+  it("submits unsupported slash-prefixed text as model input", async () => {
     const fixture = createOutbox();
-    const submit = vi.fn();
+    const submit = vi.fn(async (target: unknown, text: string) => {
+      void [target, text];
+      return {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        steered: false,
+      };
+    });
     const adapter = new FeishuConversationAdapter(
       { submit } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
 
-    for (const text of [
+    const texts = [
       "/unknown",
       "/unknown-command",
       "/feishu status",
       "/STATUS",
       "/",
-    ]) {
-      await expect(
-        adapter.handle({ ...message, text }),
-      ).rejects.toMatchObject({ code: "command.unsupported" });
+      "/测试",
+    ];
+    for (const [index, text] of texts.entries()) {
+      await expect(adapter.handle({
+        ...message,
+        messageId: `om_message_${index}`,
+        text,
+      })).resolves.toBeUndefined();
     }
     await fixture.outbox.close();
 
-    expect(submit).not.toHaveBeenCalled();
-    expect(fixture.sent).toEqual(Array.from({ length: 5 }, () => ({
-      chatId: "oc_chat",
-      text: "操作失败：不支持该飞书命令，请发送 /help 查看可用命令。",
-    })));
+    expect(submit.mock.calls.map((call) => call[1])).toEqual(texts);
+    expect(fixture.sent).toEqual([]);
   });
 
   it("routes an authorized status command through Application instead of starting a Turn", async () => {
