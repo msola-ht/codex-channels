@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ConversationUseCases,
+  ScheduledTaskConfirmation,
   ScheduledTaskUseCases,
 } from "../src/application/index.js";
 import type {
@@ -196,6 +197,47 @@ describe("WeixinSurface", () => {
         text: expect.stringContaining("已创建 Gateway 计划任务"),
       }));
     });
+    await surface.stop();
+  });
+
+  it("presents a complete schedule_task preview as native Weixin text", async () => {
+    let pollCount = 0;
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    const client: WeixinProtocolClient = {
+      getUpdates: vi.fn(async (_cursor, signal) => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return inboundBatch("建立计划任务上下文");
+        }
+        return await waitForAbort(signal);
+      }),
+      sendText,
+    };
+    const surface = new WeixinSurface({
+      accountId,
+      client,
+      cursorStore: cursorStoreFixture(),
+      service: serviceFixture(),
+      access: accessFixture(true),
+      logger: pino({ level: "silent" }),
+      onFatal: vi.fn(),
+    });
+    const preview: ScheduledTaskConfirmation = {
+      action: "create",
+      token: "12345678-1234-1234-1234-123456789abc",
+      expiresAt: Date.now() + 60_000,
+      task: scheduledTaskView(),
+    };
+
+    await surface.start();
+    await vi.waitFor(() => {
+      expect(surface.output).toBeDefined();
+    });
+    await surface.presentScheduledTaskConfirmation(target, actorId, preview);
+
+    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringMatching(/Workspace：main[\s\S]*模型：opencode-go\/deepseek-v4-flash-vision-exp[\s\S]*思考等级：high[\s\S]*\/schedule confirm 12345678-1234-1234-1234-123456789abc/u),
+    }));
     await surface.stop();
   });
 

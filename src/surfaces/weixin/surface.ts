@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import type {
   ConversationUseCases,
+  ScheduledTaskConfirmation,
   ScheduledTaskUseCases,
 } from "../../application/index.js";
 import type {
@@ -47,7 +48,10 @@ import type {
 import { WeixinProtocolError } from "./protocol-client.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
 import type { WeixinReplyContextPersistence } from "./reply-context-persistence.js";
-import { formatWeixinCommandText } from "./command-renderer.js";
+import {
+  formatWeixinCommandText,
+  renderWeixinCommandResult,
+} from "./command-renderer.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import type { WeixinUpdatesRetryEvent } from "./updates-monitor.js";
 import { WeixinTypingController } from "./typing-controller.js";
@@ -272,6 +276,29 @@ export class WeixinSurface implements SurfaceAdapter {
         conversationId,
       },
       imagePath,
+    );
+  }
+
+  async presentScheduledTaskConfirmation(
+    target: ConversationTarget,
+    actorId: string,
+    preview: ScheduledTaskConfirmation,
+  ): Promise<void> {
+    if (
+      target.surface !== this.surface
+      || target.accountId !== this.accountId
+      || !this.access.isAllowed({ target, actorId })
+    ) {
+      return;
+    }
+    const rendered = renderWeixinCommandResult({
+      kind: "scheduled-confirmation",
+      preview,
+    });
+    if (rendered === null) return;
+    await this.output.deliverText(
+      target,
+      formatWeixinCommandText(rendered, { structuredFields: true }),
     );
   }
 
