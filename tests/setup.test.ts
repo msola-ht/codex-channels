@@ -193,7 +193,7 @@ describe("Codex Connect setup", () => {
     expect(categoryOptions).toContainEqual({
       value: "third_party",
       label: "第三方",
-      hint: "自定义 第三方、DeepSeek 官方、OpenCode Go 官方等",
+      hint: "自定义第三方、DeepSeek 官方、OpenCode Go 官方等",
     });
     const officialOptions = prompts.select.mock.calls[2]?.[0]?.options ?? [];
     expect(officialOptions).toContainEqual({

@@ -17,12 +17,31 @@ describe("Codex Remote options", () => {
 
   it("keeps unmanaged profiles and arguments after -- for Codex", () => {
     expect(parseCodexRemoteOptions([
-      "--profile", "custom",
+      "--profile", "personal",
       "--",
       "--profile", "opencode-go",
     ])).toEqual({
-      passthrough: ["--profile", "custom", "--", "--profile", "opencode-go"],
+      passthrough: ["--profile", "personal", "--", "--profile", "opencode-go"],
       selectedProfile: undefined,
+      workspaceId: undefined,
+    });
+  });
+
+  it("keeps the native custom Profile for Codex", () => {
+    expect(parseCodexRemoteOptions(["--profile", "custom"])).toEqual({
+      passthrough: ["--profile", "custom"],
+      selectedProfile: undefined,
+      workspaceId: undefined,
+    });
+  });
+
+  it("selects a custom switching Profile from one supplied runtime snapshot", () => {
+    expect(parseCodexRemoteOptions(
+      ["--profile", "sf-custom-proxy-a"],
+      { customSwitchingProfiles: ["sf-custom-proxy-a"] },
+    )).toEqual({
+      passthrough: [],
+      selectedProfile: "sf-custom-proxy-a",
       workspaceId: undefined,
     });
   });
@@ -35,8 +54,8 @@ describe("Codex Remote options", () => {
   });
 
   it.each([
-    [["--profile", "custom", "--profile", "opencode-go"]],
-    [["--profile=deepseek", "-pcustom"]],
+    [["--profile", "personal", "--profile", "opencode-go"]],
+    [["--profile=deepseek", "-ppersonal"]],
   ])("rejects mixing managed and unmanaged profiles in %j", (args) => {
     expect(() => parseCodexRemoteOptions(args))
       .toThrow("受管模型 Provider --profile 不能与其他 --profile 同时使用");

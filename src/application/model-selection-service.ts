@@ -31,6 +31,12 @@ export interface ModelSelectionPreference {
   serviceTier: string | null;
 }
 
+export interface OfficialModelCatalogProvider {
+  provider: string;
+  displayName: string;
+  defaultModel: string;
+}
+
 const standardServiceTierRequestValue = "default";
 
 export class ModelSelectionService {
@@ -42,6 +48,7 @@ export class ModelSelectionService {
     private readonly configuredDefaultModel?: string,
     private readonly supplementaryModels: readonly ModelOption[] = [],
     private readonly primaryProvider = "openai",
+    private readonly officialCatalogProviders: readonly OfficialModelCatalogProvider[] = [],
   ) {}
 
   async state(target: ConversationTarget): Promise<ModelSelectionState> {
@@ -367,6 +374,17 @@ export class ModelSelectionService {
         ? model
         : { ...model, provider: this.primaryProvider });
     const combined = new Map(primary.map((model) => [modelKey(model), model]));
+    for (const provider of this.officialCatalogProviders) {
+      for (const model of primary) {
+        const aliased = {
+          ...model,
+          provider: provider.provider,
+          displayName: `${provider.displayName} · ${model.displayName}`,
+          isDefault: model.model === provider.defaultModel,
+        };
+        combined.set(modelKey(aliased), aliased);
+      }
+    }
     for (const model of this.supplementaryModels) {
       combined.set(modelKey(model), model);
     }

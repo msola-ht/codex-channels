@@ -21,6 +21,8 @@
   扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile
   均使用稳定结果。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  可把主 App Server 的 Codex 官方模型目录以精确自定义 Provider ID 克隆为切换菜单项，不复制或
+  持久化模型目录；
   在 Workspace、新会话或同 Provider 历史 Thread 切换前后捕获并恢复当前模型、思考等级与服务层级，
   显式恢复不同 Provider 的历史 Thread 时则尊重该 Thread 的 Provider；偏好只保留在运行内存中；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确

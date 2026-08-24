@@ -1,9 +1,13 @@
 import { usesOpenAiAccount } from "../conversation-core/index.js";
 
-let configuredCustomPrimaryProviderId: string | undefined;
+let configuredCustomPrimaryProviderIds = new Set<string>();
 
-export function setConfiguredCustomPrimaryProviderId(providerId: string | undefined): void {
-  configuredCustomPrimaryProviderId = providerId;
+export function setConfiguredCustomPrimaryProviderId(
+  providerId: string | readonly string[] | undefined,
+): void {
+  configuredCustomPrimaryProviderIds = new Set(
+    providerId === undefined ? [] : typeof providerId === "string" ? [providerId] : providerId,
+  );
 }
 
 export function formatProviderLabel(provider: string): string {
@@ -21,12 +25,12 @@ export function formatProviderLabel(provider: string): string {
 export function formatCodexProviderLabel(provider?: string): string {
   return provider === undefined || provider === "openai"
     ? "OpenAI 官方"
-    : provider === configuredCustomPrimaryProviderId
+    : configuredCustomPrimaryProviderIds.has(provider)
       ? `${formatProviderLabel(provider)} · 自定义`
       : formatProviderLabel(provider);
 }
 
 export function supportsFastMode(modelProvider?: string): boolean {
   return usesOpenAiAccount(modelProvider)
-    || (modelProvider !== undefined && modelProvider === configuredCustomPrimaryProviderId);
+    || (modelProvider !== undefined && configuredCustomPrimaryProviderIds.has(modelProvider));
 }

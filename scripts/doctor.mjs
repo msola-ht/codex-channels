@@ -30,6 +30,7 @@ import {
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import {
+  loadConfiguredCustomSwitchingModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   validateConfiguredModelProviders,
@@ -369,6 +370,14 @@ if (document) {
   let appServerTopology;
   let managedProviders = [];
   try {
+    const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders(process.env);
+    for (const customSwitchingProvider of customSwitchingProviders) {
+      record(
+        `${customSwitchingProvider.provider} 模型提供商配置`,
+        true,
+        `${customSwitchingProvider.provider} 自定义切换模式有效（Codex 官方模型目录）`,
+      );
+    }
     const configuredProviders = validateConfiguredModelProviders(process.env);
     for (const configuredProvider of configuredProviders) {
       record(

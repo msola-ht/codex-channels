@@ -33,8 +33,11 @@ const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
 const managedThirdPartyRoleName = "external";
 const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
+export const customPrimaryProviderProfileName = "sf-custom";
 const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon-bedrock"]);
 const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
+const customSwitchingRegistryMaximumBytes = 262_144;
+const customSwitchingDefaultReasoningEffort = "medium";
 
 const deepseekProvider = providerDescriptor(deepseekProviderDefinition);
 
@@ -385,6 +388,410 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     id,
     baseUrl: normalizedBaseUrl,
   };
+}
+
+export function customPrimaryProviderProfilePath(environment = process.env, provider) {
+  if (typeof provider !== "string" || !customProviderIdPattern.test(provider)) {
+    throw new Error("自定义切换 Provider ID 无效");
+  }
+  return join(
+    codexHomePath(environment),
+    `${customPrimaryProviderProfileName}-${provider}.config.toml`,
+  );
+}
+
+export function customSwitchingProviderRegistryPath(environment = process.env) {
+  return join(providerStorageRoot(environment), "custom", "providers.json");
+}
+
+export function loadCustomSwitchingProviderIds(environment = process.env) {
+  const path = customSwitchingProviderRegistryPath(environment);
+  if (!existsSync(path)) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(readPrivateFileSync(path, customSwitchingRegistryMaximumBytes));
+  } catch {
+    throw new Error("自定义切换 Provider 注册表无法安全读取");
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error("自定义切换 Provider 注册表无效");
+  }
+  const seen = new Set();
+  return parsed.map((entry) => {
+    const provider = record(entry);
+    const id = provider.id;
+    if (
+      Object.keys(provider).length !== 1
+      || typeof id !== "string"
+      || validateCustomPrimaryModelProviderId(id, environment) !== null
+      || seen.has(id)
+    ) {
+      throw new Error("自定义切换 Provider 注册表包含重复或无效 Provider");
+    }
+    seen.add(id);
+    return id;
+  });
+}
+
+function writeCustomSwitchingProviderIds(environment, providers) {
+  if (providers.length === 0) {
+    const path = customSwitchingProviderRegistryPath(environment);
+    try {
+      unlinkSync(path);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    return;
+  }
+  writePrivateFileAtomicSync(
+    customSwitchingProviderRegistryPath(environment),
+    `${JSON.stringify(providers.map((id) => ({ id })), null, 2)}\n`,
+  );
+}
+
+export function isCustomSwitchingModelProviderConfigCompatible(config, providerId) {
+  const source = record(config);
+  if (source.model_provider !== undefined && source.model_provider !== "openai") return false;
+  if (typeof source.openai_base_url === "string" && source.openai_base_url.trim() !== "") {
+    return false;
+  }
+  return !Object.prototype.hasOwnProperty.call(record(source.model_providers), providerId);
+}
+
+export function loadConfiguredCustomSwitchingModelProviders(environment = process.env) {
+  const providers = loadCustomSwitchingProviderIds(environment);
+  if (providers.length === 0) return [];
+  if (exclusiveManagedProviders(environment).length > 0) {
+    throw new Error("受管第三方固定模式不能同时启用自定义 Provider 切换模式");
+  }
+  const configPath = join(codexHomePath(environment), "config.toml");
+  let config;
+  try {
+    config = record(parse(readCodexConfigFile(configPath)));
+  } catch {
+    throw new Error("Codex 主模型 Provider 配置无法安全读取");
+  }
+  if (config.model_provider !== undefined && config.model_provider !== "openai") {
+    throw new Error("自定义 Provider 切换模式要求主 Provider 为官方 openai");
+  }
+  if (typeof config.openai_base_url === "string" && config.openai_base_url.trim() !== "") {
+    throw new Error(
+      "官方顶层 openai_base_url 与自定义 Provider 切换模式不能同时配置；请移除顶层 openai_base_url",
+    );
+  }
+  for (const id of providers) {
+    if (Object.prototype.hasOwnProperty.call(record(config.model_providers), id)) {
+      throw new Error(`自定义切换 Provider ${id} 不得写入 Codex 主配置`);
+    }
+  }
+  return providers.map((provider) => loadCustomSwitchingProfile(environment, provider));
+}
+
+function loadCustomSwitchingProfile(environment, registeredProvider) {
+  const path = customPrimaryProviderProfilePath(environment, registeredProvider);
+  let profileContent;
+  try {
+    profileContent = readPrivateFileSync(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      // 缺失路径属于稳定配置错误，不能把用户目录作为 cause 暴露。
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error(`自定义切换 Provider ${registeredProvider} 的 Profile 缺失`);
+    }
+    // Profile 解析错误可能包含用户配置原文，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("Codex 自定义切换 Provider Profile 无法安全读取");
+  }
+  return configuredCustomSwitchingProfileFromContent(
+    environment,
+    registeredProvider,
+    profileContent,
+  );
+}
+
+function configuredCustomSwitchingProfileFromContent(
+  environment,
+  registeredProvider,
+  profileContent,
+) {
+  let profile;
+  try {
+    profile = record(parse(profileContent));
+  } catch {
+    throw new Error("Codex 自定义切换 Provider Profile 无法安全读取");
+  }
+  if (profile.model_catalog_json !== undefined) {
+    throw new Error("自定义切换 Provider 当前只支持 Codex 官方模型目录");
+  }
+  const supportedProfileKeys = new Set([
+    "model",
+    "model_provider",
+    "model_reasoning_effort",
+    "service_tier",
+    "model_providers",
+  ]);
+  if (
+    Object.keys(profile).some((key) => !supportedProfileKeys.has(key))
+    || profile.service_tier !== "default"
+    || profile.model_reasoning_effort !== customSwitchingDefaultReasoningEffort
+  ) {
+    throw new Error("Codex 自定义切换 Provider Profile 包含不受支持的配置");
+  }
+  const id = profile.model_provider;
+  const model = profile.model;
+  const validationError = validateCustomPrimaryModelProviderId(id, environment);
+  if (
+    validationError !== null
+    || id !== registeredProvider
+    || typeof model !== "string"
+    || model.trim() === ""
+  ) {
+    throw new Error("Codex 自定义切换 Provider Profile 无效");
+  }
+  const profileProviders = record(profile.model_providers);
+  if (
+    Object.keys(profileProviders).length !== 1
+    || !Object.prototype.hasOwnProperty.call(profileProviders, id)
+  ) {
+    throw new Error("Codex 自定义切换 Provider Profile 只能包含已注册的 Provider 块");
+  }
+  const provider = record(profileProviders[id]);
+  const supportedProviderKeys = new Set([
+    "name",
+    "base_url",
+    "wire_api",
+    "requires_openai_auth",
+    "supports_websockets",
+    "experimental_bearer_token",
+  ]);
+  if (Object.keys(provider).some((key) => !supportedProviderKeys.has(key))) {
+    throw new Error("Codex 自定义切换 Provider Profile 的 Provider 块包含不受支持的配置");
+  }
+  if (typeof provider.base_url !== "string") {
+    throw new Error(`Codex 自定义切换 Provider ${id} 缺少 base_url`);
+  }
+  if (provider.wire_api !== undefined && provider.wire_api !== "responses") {
+    throw new Error(`Codex 自定义切换 Provider ${id} 只支持 Responses API`);
+  }
+  if (
+    provider.supports_websockets !== undefined
+    && typeof provider.supports_websockets !== "boolean"
+  ) {
+    throw new Error(`Codex 自定义切换 Provider ${id} 的 supports_websockets 无效`);
+  }
+  if (
+    provider.requires_openai_auth !== undefined
+    && provider.requires_openai_auth !== false
+  ) {
+    throw new Error(`Codex 自定义切换 Provider ${id} 的 requires_openai_auth 无效`);
+  }
+  const apiKey = provider.experimental_bearer_token;
+  if (typeof apiKey !== "string" || apiKey.trim() === "" || /[\r\n]/u.test(apiKey)) {
+    throw new Error(`Codex 自定义切换 Provider ${id} API Key 缺失或无效`);
+  }
+  const name = typeof provider.name === "string" && provider.name.trim() !== ""
+    ? provider.name.trim()
+    : id;
+  const supportsWebsockets = provider.supports_websockets === true;
+  const environmentKey = customSwitchingProviderEnvironmentKey(id);
+  const profileName = `${customPrimaryProviderProfileName}-${id}`;
+  return {
+    id,
+    provider: id,
+    model: model.trim(),
+    name,
+    baseUrl: validProviderBaseUrl(provider.base_url, `Codex 自定义切换 Provider ${id}`),
+    apiKey,
+    supportsWebsockets,
+    profileName,
+    profileContent,
+    reasoningEffort: customSwitchingDefaultReasoningEffort,
+    catalogSource: { kind: "official" },
+    arguments: [
+      "-c", `model=${JSON.stringify(model.trim())}`,
+      "-c", `model_provider=${JSON.stringify(id)}`,
+      "-c", 'service_tier="default"',
+      "-c", `model_reasoning_effort=${JSON.stringify(customSwitchingDefaultReasoningEffort)}`,
+      "-c", `model_providers.${id}.name=${JSON.stringify(name)}`,
+      "-c", `model_providers.${id}.base_url=${JSON.stringify(validProviderBaseUrl(provider.base_url, `Codex 自定义切换 Provider ${id}`))}`,
+      "-c", `model_providers.${id}.wire_api="responses"`,
+      "-c", `model_providers.${id}.env_key=${JSON.stringify(environmentKey)}`,
+      "-c", `model_providers.${id}.requires_openai_auth=false`,
+      "-c", `model_providers.${id}.supports_websockets=${supportsWebsockets}`,
+    ],
+    childEnvironment: { [environmentKey]: apiKey },
+  };
+}
+
+export function writeCustomPrimaryProviderSwitchingProfile(
+  {
+    provider,
+    model,
+    name = provider,
+    baseUrl,
+    apiKey,
+    supportsWebsockets = false,
+    catalogSource = { kind: "official" },
+  },
+  environment = process.env,
+) {
+  const validationError = validateCustomPrimaryModelProviderId(provider, environment);
+  if (validationError !== null) throw new Error(validationError);
+  if (typeof model !== "string" || model.trim() === "") {
+    throw new Error("自定义 Provider 默认模型不能为空");
+  }
+  if (catalogSource?.kind !== "official") {
+    throw new Error("自定义 Provider 当前只支持 Codex 官方模型目录");
+  }
+  const normalizedBaseUrl = validProviderBaseUrl(
+    baseUrl,
+    `Codex 自定义切换 Provider ${provider}`,
+  );
+  if (typeof apiKey !== "string" || apiKey.trim() === "" || /[\r\n]/u.test(apiKey)) {
+    throw new Error("自定义 Provider API Key 不能为空");
+  }
+  if (typeof name !== "string" || name.trim() === "") {
+    throw new Error("自定义 Provider 显示名称不能为空");
+  }
+  const ids = loadCustomSwitchingProviderIds(environment);
+  const profilePath = customPrimaryProviderProfilePath(environment, provider);
+  let previousProfile;
+  try {
+    previousProfile = readPrivateFileSync(profilePath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  writePrivateFileAtomicSync(
+    profilePath,
+    stringify({
+      model: model.trim(),
+      model_provider: provider,
+      model_reasoning_effort: customSwitchingDefaultReasoningEffort,
+      service_tier: "default",
+      model_providers: {
+        [provider]: {
+          name,
+          base_url: normalizedBaseUrl,
+          wire_api: "responses",
+          requires_openai_auth: false,
+          supports_websockets: supportsWebsockets === true,
+          experimental_bearer_token: apiKey,
+        },
+      },
+    }),
+  );
+  if (!ids.includes(provider)) {
+    try {
+      writeCustomSwitchingProviderIds(environment, [...ids, provider]);
+    } catch (error) {
+      try {
+        if (previousProfile === undefined) {
+          unlinkSync(profilePath);
+        } else {
+          writePrivateFileAtomicSync(profilePath, previousProfile);
+        }
+      } catch (rollbackError) {
+        // AggregateError 已保留注册表写入与 Profile 回滚两个原始错误。
+        // eslint-disable-next-line preserve-caught-error
+        throw new AggregateError(
+          [error, rollbackError],
+          "自定义切换 Provider 注册失败，且 Profile 回滚失败",
+        );
+      }
+      throw error;
+    }
+  }
+}
+
+export function removeCustomPrimaryProviderSwitchingProfile(
+  environment = process.env,
+  provider,
+  expectedProfileContent,
+) {
+  const ids = loadCustomSwitchingProviderIds(environment);
+  const registered = ids.includes(provider);
+  const path = customPrimaryProviderProfilePath(environment, provider);
+  try {
+    const profileContent = readPrivateFileSync(path);
+    if (
+      expectedProfileContent !== undefined
+      && profileContent !== expectedProfileContent
+    ) {
+      throw customSwitchingProfileChangedError(provider);
+    }
+    const remaining = ids.filter((id) => id !== provider);
+    writeCustomSwitchingProviderIds(environment, remaining);
+    try {
+      unlinkSync(path);
+    } catch (error) {
+      try {
+        writeCustomSwitchingProviderIds(environment, ids);
+      } catch (rollbackError) {
+        // AggregateError 已保留 Profile 删除与注册表回滚两个原始错误。
+        // eslint-disable-next-line preserve-caught-error
+        throw new AggregateError(
+          [error, rollbackError],
+          "自定义切换 Provider Profile 删除失败，且注册表回滚失败",
+        );
+      }
+      throw error;
+    }
+    return true;
+  } catch (error) {
+    if (error?.code === "CUSTOM_SWITCHING_PROFILE_CHANGED") throw error;
+    if (error instanceof AggregateError) throw error;
+    if (error?.code === "ENOENT") {
+      if (!registered) return false;
+      try {
+        writeCustomSwitchingProviderIds(environment, ids.filter((id) => id !== provider));
+      } catch {
+        throw new Error("Codex 自定义切换 Provider 注册表无法安全更新");
+      }
+      return true;
+    }
+    // 私有文件错误可能包含用户路径或配置细节，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("Codex 自定义切换 Provider Profile 无法安全删除");
+  }
+}
+
+export function restoreCustomPrimaryProviderSwitchingProfile(
+  environment = process.env,
+  provider,
+  profileContent,
+) {
+  configuredCustomSwitchingProfileFromContent(environment, provider, profileContent);
+  const ids = loadCustomSwitchingProviderIds(environment);
+  const path = customPrimaryProviderProfilePath(environment, provider);
+  if (ids.includes(provider) || existsSync(path)) {
+    throw customSwitchingProfileChangedError(provider);
+  }
+  writePrivateFileAtomicSync(path, profileContent);
+  try {
+    writeCustomSwitchingProviderIds(environment, [...ids, provider]);
+  } catch (error) {
+    try {
+      unlinkSync(path);
+    } catch (rollbackError) {
+      // AggregateError 已保留注册表写入与 Profile 回滚两个原始错误。
+      // eslint-disable-next-line preserve-caught-error
+      throw new AggregateError(
+        [error, rollbackError],
+        "自定义切换 Provider Profile 恢复失败，且文件回滚失败",
+      );
+    }
+    throw error;
+  }
+}
+
+function customSwitchingProfileChangedError(provider) {
+  const error = new Error(`自定义切换 Provider ${provider} 的 Profile 在事务期间发生变化`);
+  error.code = "CUSTOM_SWITCHING_PROFILE_CHANGED";
+  return error;
+}
+
+function customSwitchingProviderEnvironmentKey(provider) {
+  return `CODEX_CONNECT_CUSTOM_${Buffer.from(provider, "utf8").toString("hex").toUpperCase()}_API_KEY`;
 }
 
 export function loadOpenAiBaseUrl(environment = process.env) {

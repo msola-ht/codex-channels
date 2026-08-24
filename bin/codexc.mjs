@@ -143,7 +143,7 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → 官方 → 登录并恢复官方 / 默认模型与思考等级
-  codexc setup → 模型与提供商 → 第三方 → 自定义 第三方 / DeepSeek 官方 / OpenCode Go 官方等
+  codexc setup → 模型与提供商 → 第三方 → 自定义第三方 / DeepSeek 官方 / OpenCode Go 官方等
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 技能（安装或卸载项目技能）`,
   start: `用法：codexc start
@@ -601,10 +601,14 @@ async function runServiceAppServer(args) {
   const {
     primarySocketPath: socketPath,
     managedProviders,
+    customSwitchingProviders,
     managedSocketPaths,
     primaryProvider,
   } = appServerRuntime;
   const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
+  const customSwitchingProvidersById = new Map(
+    customSwitchingProviders.map((provider) => [provider.provider, provider]),
+  );
   const {
     ProviderProxy,
     sendProviderProxyMetrics,
@@ -771,7 +775,8 @@ async function runServiceAppServer(args) {
       }
       const managed = managedByProvider.get(provider);
       const definition = providerDefinitions.get(provider);
-      if (!managed || !definition || !managed.socketPath) {
+      const customDefinition = customSwitchingProvidersById.get(provider);
+      if (!managed || (!definition && !customDefinition) || !managed.socketPath) {
         throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
       }
       if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
@@ -781,7 +786,7 @@ async function runServiceAppServer(args) {
         proxyKey,
         isGoProvider(provider)
           ? goProxyOptions
-          : proxyOptionsForUrl(new URL(definition.baseUrl)),
+          : proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl)),
       );
       const providerBaseUrl = isGoProvider(provider)
         ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(provider)}`

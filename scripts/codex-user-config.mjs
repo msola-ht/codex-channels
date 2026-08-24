@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { resolveOptionalExecutable } from "../runtime/executable.mjs";
 
@@ -29,6 +31,13 @@ export async function readCodexUserConfigSnapshot(
   } finally {
     await client.close().catch(() => undefined);
   }
+}
+
+export function areCodexUserConfigEditsApplied(config, edits) {
+  return edits.every(({ keyPath, value }) => {
+    const current = configValueAtPath(config, keyPath);
+    return value === null ? current === undefined : isDeepStrictEqual(current, value);
+  });
 }
 
 export async function writeCodexUserConfigEdits(
@@ -66,4 +75,20 @@ export async function createCodexUserConfigClient({
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function configValueAtPath(config, keyPath) {
+  let current = config;
+  for (const segment of keyPath.split(".")) {
+    if (
+      current === null
+      || typeof current !== "object"
+      || Array.isArray(current)
+      || !Object.prototype.hasOwnProperty.call(current, segment)
+    ) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current;
 }

@@ -14,6 +14,7 @@ import {
 } from "../../runtime/model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
+  loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
   loadManagedModelProviderRole,
@@ -213,6 +214,7 @@ export class GatewayApplication {
       : new TomlWorkspacePermissionWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
     const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
+    const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
     const managedProviders = loadManagedModelProviders();
     const providerDefinitions = loadManagedModelProviderDefinitions();
     const configuredProviders = new Set<string>([
@@ -227,8 +229,11 @@ export class GatewayApplication {
       ));
     this.transport = new UnixWebSocketTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
+    const customProviderIds = customPrimaryProvider === undefined
+      ? customSwitchingProviders.map(({ id }) => id)
+      : [customPrimaryProvider.id];
     this.customPrimaryProviderId = customPrimaryProvider?.id;
-    setConfiguredCustomPrimaryProviderId(customPrimaryProvider?.id);
+    setConfiguredCustomPrimaryProviderId(customProviderIds);
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger),
@@ -246,6 +251,15 @@ export class GatewayApplication {
         {
           sandbox: config.codexSandbox,
         },
+      ));
+    }
+    for (const customSwitchingProvider of customSwitchingProviders) {
+      const providerTransport = new UnixWebSocketTransport(
+        providerAppServerSocketPath(config.codexSocketPath, customSwitchingProvider.provider),
+      );
+      clients.set(customSwitchingProvider.provider, new CodexAppServerClient(
+        new JsonRpcClient(providerTransport, 60_000, logger),
+        { sandbox: config.codexSandbox },
       ));
     }
     this.codex = new ProviderRoutingClient(
@@ -352,6 +366,7 @@ export class GatewayApplication {
       providers: [
         customPrimaryProvider?.id ?? primaryProvider,
         ...managedProviders.map(({ provider }) => provider),
+        ...customSwitchingProviders.map(({ provider }) => provider),
       ],
       socketPath: (provider) =>
         providerMetricsSocketPath(
@@ -431,6 +446,11 @@ export class GatewayApplication {
       config.codexModel,
       supplementaryModels,
       customPrimaryProvider?.id ?? primaryProvider,
+      customSwitchingProviders.map((provider) => ({
+        provider: provider.provider,
+        displayName: provider.provider,
+        defaultModel: provider.model,
+      })),
     );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
