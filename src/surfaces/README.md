@@ -97,7 +97,8 @@ Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正�
 Turn、Thread 或 Surface 关闭时清理。
 `quoted-input.ts` 把各平台已验证的回复/引用正文转换为有界、明确标记且与当前消息分离的上下文；
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
-`plan-presentation.ts` 统一完整计划与新增完成步骤的有界展示、状态符号和去重指纹；各渠道只决定
+`plan-presentation.ts` 统一完整计划与新增完成步骤的有界展示、状态符号和去重指纹；Telegram 与微信
+复用同一个按 Turn 隔离并在完成时释放的进度状态，飞书保留原地更新卡片所需的平台消息状态；各渠道只决定
 完整计划是原地更新还是追加紧凑进度。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认、子代理
 开始/继续/完成通知和 Turn 结束汇报；OpenAI 启动传输探测全部失败时，上线通知增加代理检查提醒，
@@ -174,7 +175,8 @@ Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击
 `operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、上游敏感占位符和单行摘要；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
 Adapter 负责。
-`operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的查询操作；最终回复前单项
+`operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的查询操作，并统一在非 Commentary
+最终文本或 Turn 完成前 Flush；最终回复前单项
 保持原详情，多项生成一次分类计数汇总，并展示最多 8 个去重后的详情及各自次数；
 超出时明确省略数量。飞书网页搜索完成后直接发送，不进入该缓冲；失败、拒绝和其他操作同样
 不进入缓冲。

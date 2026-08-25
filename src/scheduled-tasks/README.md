@@ -8,7 +8,9 @@
 - `index.ts`：公开导出入口。
 - `types.ts`：封闭 Schedule 联合、Task/Run 状态、无人值守权限和执行端口。
 - `schedule.ts`：IANA 时区校验、Schedule 规范化和下一次 occurrence 计算。
-- `sqlite-store.ts`：独立 Schema v2、任务/运行记录、原子领取、清理、崩溃收敛和显式 v1→v2 升级入口。
+- `sqlite-row-codec.ts`：数据库 Task/Run Row 的严格领域映射、持久化枚举和时间戳校验。
+- `sqlite-schema.ts`：Schema v2 SQL、版本读取和数据库严格结构校验。
+- `sqlite-store.ts`：数据库文件与事务、原子领取、清理、崩溃收敛和显式 v1→v2 升级入口。
 - `scheduler.ts`：注入 Clock 与执行端口的有限调度循环。
 
 Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间隔）、`once`（绝对日期时间，或

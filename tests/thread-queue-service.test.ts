@@ -86,6 +86,7 @@ function queryPort(): ConversationQueryPort {
 
 function queuePort(initial: ThreadQueueItem[]): ThreadQueuePort & {
   items: ThreadQueueItem[];
+  addQueueItem: ReturnType<typeof vi.fn>;
   listQueue: ReturnType<typeof vi.fn>;
   reorderQueue: ReturnType<typeof vi.fn>;
   startQueueItem: ReturnType<typeof vi.fn>;
@@ -254,6 +255,45 @@ describe("ConversationService native Thread Queue", () => {
     );
   });
 
+  it("shares the Conversation lock with binding lifecycle operations", async () => {
+    const queue = queuePort([]);
+    let releaseAdd: (() => void) | undefined;
+    const addBlocked = new Promise<void>((resolve) => {
+      releaseAdd = resolve;
+    });
+    queue.addQueueItem.mockImplementationOnce(async (
+      _threadId: string,
+      text: string,
+      clientUserMessageId: string,
+    ) => {
+      await addBlocked;
+      const added = {
+        id: "queued-1",
+        clientUserMessageId,
+        inputType: "text" as const,
+        textPreview: text,
+        editable: true,
+      };
+      queue.items.push(added);
+      return added;
+    });
+    const newSession = vi.fn(async () => undefined);
+    const service = serviceWithQueue(queue, { router: { newSession } });
+
+    const adding = service.queueAdd(target, "queued while switching");
+    await vi.waitFor(() => expect(queue.addQueueItem).toHaveBeenCalledOnce());
+    const switching = service.newSession(target);
+    await Promise.resolve();
+    expect(newSession).not.toHaveBeenCalled();
+
+    releaseAdd?.();
+    await expect(adding).resolves.toMatchObject({ id: "queued-1" });
+    await expect(switching).rejects.toMatchObject({
+      code: "conversation.background-queued",
+    });
+    expect(newSession).not.toHaveBeenCalled();
+  });
+
   it("uses 25-item pages and rejects an App Server response over the native 100 limit", async () => {
     const queue = queuePort(Array.from({ length: 100 }, (_value, index) => item(index + 1)));
     const service = serviceWithQueue(queue);
@@ -323,8 +363,10 @@ describe("ConversationService native Thread Queue", () => {
       await service.queueList(conversation);
     }
     const snapshots = (service as unknown as {
-      queueSelectionSnapshots: Map<string, { itemIds: string[]; capturedAtMs: number }>;
-    }).queueSelectionSnapshots;
+      queueUseCases: {
+        selectionSnapshots: Map<string, { itemIds: string[]; capturedAtMs: number }>;
+      };
+    }).queueUseCases.selectionSnapshots;
     expect(snapshots.size).toBe(128);
     expect([...snapshots.values()].every((snapshot) => {
       return Array.isArray(snapshot.itemIds)

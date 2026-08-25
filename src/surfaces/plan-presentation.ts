@@ -14,6 +14,27 @@ export interface PlanPresentation {
   fingerprint: string;
 }
 
+export class TurnPlanProgressState {
+  private readonly trackers = new Map<string, PlanProgressTracker>();
+
+  accept(
+    event: Extract<OutputEvent, { type: "plan.updated" }>,
+  ): readonly PlanPresentation[] {
+    const key = planTurnKey(event.threadId, event.turnId);
+    const tracker = this.trackers.get(key) ?? new PlanProgressTracker();
+    this.trackers.set(key, tracker);
+    return tracker.accept(event);
+  }
+
+  complete(event: Extract<OutputEvent, { type: "turn.completed" }>): void {
+    this.trackers.delete(planTurnKey(event.threadId, event.turnId));
+  }
+
+  clear(): void {
+    this.trackers.clear();
+  }
+}
+
 export class PlanProgressTracker {
   private initialized = false;
   private readonly completedSteps = new Set<string>();
@@ -118,4 +139,8 @@ function boundedText(value: string, maximumCharacters: number): string {
   return characters.length <= maximumCharacters
     ? value
     : `${characters.slice(0, Math.max(0, maximumCharacters - 1)).join("")}…`;
+}
+
+function planTurnKey(threadId: string, turnId: string): string {
+  return `${threadId}:${turnId}`;
 }

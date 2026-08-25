@@ -76,19 +76,30 @@ import type {
 } from "./turn-port.js";
 import type {
   ThreadQueueItem,
-  ThreadQueuePage,
   ThreadQueuePort,
 } from "./thread-queue-port.js";
 import type {
   ThreadHistoryPort,
   ThreadRevertListResult,
   ThreadRevertPreview,
-  ThreadTurnSummary,
 } from "./thread-history-port.js";
 import type {
   CollaborationModeSelectionService,
   CollaborationModeState,
 } from "./collaboration-mode-service.js";
+import { ConversationLockCoordinator } from "./conversation-lock-coordinator.js";
+import {
+  ThreadQueueService,
+  queueUserFacingError,
+  type ThreadQueueListResult,
+  type ThreadQueueReorderResult,
+} from "./thread-queue-service.js";
+import { ThreadRevertService } from "./thread-revert-service.js";
+
+export type {
+  ThreadQueueListResult,
+  ThreadQueueReorderResult,
+} from "./thread-queue-service.js";
 
 export interface Submission {
   threadId: string;
@@ -161,20 +172,6 @@ export interface ConversationResumeResult {
   queuePending?: boolean;
 }
 
-export interface ThreadQueueListResult {
-  items: ThreadQueueItem[];
-  selectors: string[];
-  page: number;
-  pageCount: number;
-  totalItemCount: number;
-}
-
-export interface ThreadQueueReorderResult {
-  itemId: string;
-  position: number;
-  totalItemCount: number;
-}
-
 export type ConversationQueryPort =
   & AccountQueryPort
   & SkillQueryPort
@@ -197,16 +194,6 @@ const builtInAgentRoles: AgentRoleEntry[] = [
   { name: "worker", description: "执行与实现：完成归属明确的实现、修复或测试任务" },
 ];
 
-const maximumNativeQueueItems = 100;
-const nativeQueuePageSize = 25;
-const maximumNativeQueuePages = 4;
-const queueSelectionSnapshotLifetimeMs = 5 * 60_000;
-const maximumQueueSelectionSnapshots = 128;
-const revertPageSize = 25;
-const maximumRevertPages = 20;
-const revertSelectionSnapshotLifetimeMs = 5 * 60_000;
-const maximumRevertSelectionSnapshots = 128;
-const maximumRevertConfirmations = 500;
 const maximumBackgroundThreadsPerConversation = 3;
 
 export interface ConversationStatus {
@@ -361,35 +348,9 @@ export interface ConversationUseCases {
 }
 
 export class ConversationService implements ConversationUseCases {
-  private readonly locks = new Map<string, Promise<void>>();
-  private readonly threadSectionsLockKey = "global:thread-sections";
-  private readonly queueSelectionSnapshots = new Map<string, {
-    threadId: string;
-    itemIds: string[];
-    capturedAtMs: number;
-  }>();
-  private readonly revertSelectionSnapshots = new Map<string, {
-    threadId: string;
-    workspaceId: string;
-    page: number;
-    turns: ThreadTurnSummary[];
-    latestTurnId: string | null;
-    activeTurnId: string | null;
-    capturedAtMs: number;
-  }>();
-  private readonly revertConfirmations = new Map<string, {
-    targetKey: string;
-    actorId: string;
-    threadId: string;
-    workspaceId: string;
-    page: number;
-    beforeTurnId: string;
-    turn: ThreadTurnSummary;
-    latestTurnId: string | null;
-    activeTurnId: string | null;
-    queueFingerprint: string;
-    capturedAtMs: number;
-  }>();
+  private readonly locks = new ConversationLockCoordinator();
+  private readonly queueUseCases: ThreadQueueService;
+  private readonly revertUseCases: ThreadRevertService;
   private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
 
@@ -413,8 +374,22 @@ export class ConversationService implements ConversationUseCases {
     },
     private readonly threadOccupancy?: ThreadOccupancyPort,
     private readonly threadQueue?: ThreadQueuePort,
-    private readonly threadHistory?: ThreadHistoryPort,
-  ) {}
+    threadHistory?: ThreadHistoryPort,
+  ) {
+    this.queueUseCases = new ThreadQueueService(
+      this.locks,
+      router,
+      models,
+      collaborationModes,
+      threadQueue,
+    );
+    this.revertUseCases = new ThreadRevertService(
+      this.locks,
+      router,
+      threadQueue,
+      threadHistory,
+    );
+  }
 
   releaseThread(
     target: ConversationTarget,
@@ -644,45 +619,11 @@ export class ConversationService implements ConversationUseCases {
   }
 
   queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem> {
-    return this.locked(target, async () => {
-      const threadId = this.requireCurrentThread(target);
-      const queue = this.requireThreadQueue();
-      this.rejectQueuePendingOverrides(target);
-      const text = normalizeQueueText(value);
-      try {
-        const item = await queue.addQueueItem(
-          threadId,
-          text,
-          `${gatewayUserMessageClientIdPrefix}${randomUUID()}`,
-        );
-        this.invalidateQueueSnapshot(threadId);
-        return item;
-      } catch (error) {
-        throw queueUserFacingError(error, "add");
-      }
-    });
+    return this.queueUseCases.add(target, value);
   }
 
   queueList(target: ConversationTarget, page = 1): Promise<ThreadQueueListResult> {
-    return this.locked(target, async () => {
-      if (!Number.isSafeInteger(page) || page < 1 || page > maximumNativeQueuePages) {
-        throw new UserFacingError("queue.usage", "Queue 页码无效");
-      }
-      const threadId = this.requireCurrentThread(target);
-      const snapshot = await this.readQueueSnapshot(target, threadId);
-      const pageCount = Math.max(1, Math.ceil(snapshot.items.length / nativeQueuePageSize));
-      const start = (page - 1) * nativeQueuePageSize;
-      const items = page <= pageCount
-        ? snapshot.items.slice(start, start + nativeQueuePageSize)
-        : [];
-      return {
-        items,
-        selectors: items.map((_item, index) => String(start + index + 1)),
-        page,
-        pageCount,
-        totalItemCount: snapshot.items.length,
-      };
-    });
+    return this.queueUseCases.list(target, page);
   }
 
   queueUpdate(
@@ -690,40 +631,11 @@ export class ConversationService implements ConversationUseCases {
     selector: string,
     value: string,
   ): Promise<ThreadQueueItem> {
-    return this.locked(target, async () => {
-      const threadId = this.requireCurrentThread(target);
-      const queue = this.requireThreadQueue();
-      const item = await this.resolveQueueSelector(target, threadId, selector);
-      if (!item.editable) {
-        throw new UserFacingError(
-          "queue.item-not-editable",
-          "该 Queue 条目不是纯文本，不能更新",
-        );
-      }
-      const text = normalizeQueueText(value);
-      try {
-        const updated = await queue.updateQueueItem(threadId, item.id, text);
-        this.invalidateQueueSnapshot(threadId);
-        return updated;
-      } catch (error) {
-        throw queueUserFacingError(error, "update");
-      }
-    });
+    return this.queueUseCases.update(target, selector, value);
   }
 
   queueDelete(target: ConversationTarget, selector: string): Promise<{ deleted: boolean }> {
-    return this.locked(target, async () => {
-      const threadId = this.requireCurrentThread(target);
-      const queue = this.requireThreadQueue();
-      const item = await this.resolveQueueSelector(target, threadId, selector);
-      try {
-        const result = await queue.deleteQueueItem(threadId, item.id);
-        this.invalidateQueueSnapshot(threadId);
-        return result;
-      } catch (error) {
-        throw queueUserFacingError(error, "delete");
-      }
-    });
+    return this.queueUseCases.delete(target, selector);
   }
 
   queueReorder(
@@ -731,235 +643,41 @@ export class ConversationService implements ConversationUseCases {
     selector: string,
     position: number,
   ): Promise<ThreadQueueReorderResult> {
-    return this.locked(target, async () => {
-      const threadId = this.requireCurrentThread(target);
-      const queue = this.requireThreadQueue();
-      const resolved = await this.resolveQueueSelectorSnapshot(target, threadId, selector);
-      const snapshot = resolved.snapshot;
-      const item = resolved.item;
-      if (!Number.isSafeInteger(position) || position < 1 || position > snapshot.items.length) {
-        throw new UserFacingError("queue.position.invalid", "Queue 目标位置超出当前队列范围");
-      }
-      const ids = snapshot.items.map((entry) => entry.id).filter((id) => id !== item.id);
-      ids.splice(position - 1, 0, item.id);
-      try {
-        await queue.reorderQueue(threadId, ids);
-        this.invalidateQueueSnapshot(threadId);
-        return { itemId: item.id, position, totalItemCount: snapshot.items.length };
-      } catch (error) {
-        this.invalidateQueueSnapshot(threadId);
-        throw queueUserFacingError(error, "reorder");
-      }
-    });
+    return this.queueUseCases.reorder(target, selector, position);
   }
 
   queueStart(target: ConversationTarget, selector?: string): Promise<{ turnId: string }> {
-    return this.locked(target, async () => {
-      const threadId = this.requireCurrentThread(target);
-      const queue = this.requireThreadQueue();
-      this.rejectQueuePendingOverrides(target);
-      let queuedSubmissionId: string | undefined;
-      if (selector?.trim()) {
-        queuedSubmissionId = (await this.resolveQueueSelectorSnapshot(target, threadId, selector)).item.id;
-      }
-      try {
-        const result = await queue.startQueueItem(threadId, queuedSubmissionId);
-        this.invalidateQueueSnapshot(threadId);
-        return result;
-      } catch (error) {
-        throw queueUserFacingError(error, "start");
-      }
-    });
+    return this.queueUseCases.start(target, selector);
   }
 
-  async revertList(target: ConversationTarget, page = 1): Promise<ThreadRevertListResult> {
-    return this.locked(target, async () => {
-      if (!Number.isSafeInteger(page) || page < 1 || page > maximumRevertPages) {
-        throw new UserFacingError("revert.usage", "Revert 页码无效");
-      }
-      const binding = this.requireCurrentBinding(target);
-      const threadId = binding.threadId;
-      await this.requirePaginatedThread(threadId);
-      const result = await this.readRevertPage(threadId, page);
-      this.rememberRevertSelectionSnapshot(target, {
-        threadId,
-        workspaceId: binding.workspaceId,
-        page,
-        turns: result.turns,
-        latestTurnId: result.latestTurnId,
-        activeTurnId: result.activeTurnId,
-        capturedAtMs: Date.now(),
-      });
-      return {
-        threadId,
-        turns: result.turns,
-        selectors: result.turns.map((_turn, index) => String((page - 1) * revertPageSize + index + 1)),
-        page,
-        hasNextPage: result.nextCursor !== null,
-      };
-    });
+  revertList(target: ConversationTarget, page = 1): Promise<ThreadRevertListResult> {
+    return this.revertUseCases.list(target, page);
   }
 
-  async revertPreview(
+  revertPreview(
     target: ConversationTarget,
     selector: string,
     actorId?: string,
   ): Promise<ThreadRevertPreview> {
-    return this.locked(target, async () => {
-      const binding = this.requireCurrentBinding(target);
-      const threadId = binding.threadId;
-      await this.requirePaginatedThread(threadId);
-      const selection = this.resolveRevertSelection(target, threadId, selector);
-      if (selection.workspaceId !== binding.workspaceId) {
-        this.invalidateRevertSnapshot(target);
-        throw new UserFacingError(
-          "revert.snapshot-required",
-          "Workspace 已发生变化，请重新执行 /revert list",
-        );
-      }
-      const currentPage = await this.readRevertPage(threadId, selection.page);
-      if (
-        !sameTurnIds(currentPage.turns, selection.turns)
-        || currentPage.latestTurnId !== selection.latestTurnId
-        || currentPage.activeTurnId !== selection.activeTurnId
-      ) {
-        this.invalidateRevertSnapshot(target);
-        throw new UserFacingError(
-          "revert.concurrent",
-          "Thread 历史已发生变化，请重新执行 /revert list",
-        );
-      }
-      const turn = currentPage.turns.find((candidate) => candidate.id === selection.beforeTurnId);
-      if (!turn) {
-        throw new UserFacingError("revert.turn-not-found", "找不到指定 Turn，请重新执行 /revert list");
-      }
-      const queue = await this.readRevertQueue(threadId);
-      const actor = actorId ?? target.accountId;
-      const token = randomUUID();
-      this.rememberRevertConfirmation(token, {
-        targetKey: conversationTargetKey(target),
-        actorId: actor,
-        threadId,
-        workspaceId: binding.workspaceId,
-        page: selection.page,
-        beforeTurnId: turn.id,
-        turn,
-        latestTurnId: currentPage.latestTurnId,
-        activeTurnId: currentPage.activeTurnId,
-        queueFingerprint: queue.fingerprint,
-        capturedAtMs: Date.now(),
-      });
-      return {
-        threadId,
-        beforeTurnId: turn.id,
-        turn,
-        affectedTurnCount: (selection.page - 1) * revertPageSize
-          + currentPage.turns.indexOf(turn) + 1,
-        activeTurnId: currentPage.activeTurnId,
-        queueItemCount: queue.count,
-        token,
-      };
-    });
+    return this.revertUseCases.preview(target, selector, actorId);
   }
 
-  async revertConfirm(
+  revertConfirm(
     target: ConversationTarget,
     token: string,
     actorId?: string,
   ): Promise<{ threadId: string; beforeTurnId: string }> {
-    return this.locked(target, async () => {
-      const confirmation = this.revertConfirmations.get(token);
-      if (!confirmation) {
-        throw new UserFacingError("revert.confirmation-invalid", "Revert 确认已失效，请重新生成预览");
-      }
-      // Consume before all checks: a token is single-use even when a
-      // concurrent change makes the destructive request fail closed.
-      this.revertConfirmations.delete(token);
-      const actor = actorId ?? target.accountId;
-      if (
-        confirmation.targetKey !== conversationTargetKey(target)
-        || confirmation.actorId !== actor
-        || Date.now() - confirmation.capturedAtMs > revertSelectionSnapshotLifetimeMs
-      ) {
-        throw new UserFacingError("revert.confirmation-invalid", "Revert 确认已失效，请重新生成预览");
-      }
-      const binding = this.router.current(target);
-      if (
-        !binding
-        || binding.threadId !== confirmation.threadId
-        || binding.workspaceId !== confirmation.workspaceId
-      ) {
-        this.invalidateRevertSnapshot(target);
-        throw new UserFacingError(
-          "revert.confirmation-invalid",
-          "当前 Thread 或 Workspace 已发生变化，请重新生成 Revert 预览",
-        );
-      }
-      await this.requirePaginatedThread(confirmation.threadId);
-      const selection = this.revertSelectionSnapshots.get(conversationTargetKey(target));
-      if (
-        !selection
-        || selection.threadId !== confirmation.threadId
-        || selection.page !== confirmation.page
-        || Date.now() - selection.capturedAtMs > revertSelectionSnapshotLifetimeMs
-      ) {
-        throw new UserFacingError("revert.confirmation-invalid", "Revert 列表已失效，请重新生成预览");
-      }
-      const currentPage = await this.readRevertPage(confirmation.threadId, confirmation.page);
-      const queue = await this.readRevertQueue(confirmation.threadId);
-      const currentTurn = currentPage.turns.find((turn) => turn.id === confirmation.beforeTurnId);
-      if (
-        !sameTurnIds(currentPage.turns, selection.turns)
-        || currentPage.latestTurnId !== confirmation.latestTurnId
-        || currentPage.activeTurnId !== confirmation.activeTurnId
-        || !currentTurn
-        || queue.fingerprint !== confirmation.queueFingerprint
-      ) {
-        this.invalidateRevertSnapshot(target);
-        throw new UserFacingError(
-          "revert.concurrent",
-          "Thread 历史、活动任务或 Queue 已发生变化，请重新执行 /revert list",
-        );
-      }
-      const history = this.requireThreadHistory();
-      try {
-        await history.revertThread(confirmation.threadId, confirmation.beforeTurnId);
-      } catch (error) {
-        throw revertUserFacingError(error);
-      }
-      this.invalidateRevertSnapshot(target);
-      return {
-        threadId: confirmation.threadId,
-        beforeTurnId: confirmation.beforeTurnId,
-      };
-    });
+    return this.revertUseCases.confirm(target, token, actorId);
   }
 
   invalidateQueueSnapshot(threadId: string): void {
-    for (const [key, snapshot] of this.queueSelectionSnapshots) {
-      if (snapshot.threadId === threadId) {
-        this.queueSelectionSnapshots.delete(key);
-      }
-    }
+    this.queueUseCases.invalidateSnapshot(threadId);
   }
 
   invalidateRevertSnapshot(threadId: string): void;
   invalidateRevertSnapshot(target: ConversationTarget): void;
   invalidateRevertSnapshot(value: string | ConversationTarget): void {
-    if (typeof value !== "string") {
-      const targetKey = conversationTargetKey(value);
-      this.revertSelectionSnapshots.delete(targetKey);
-      for (const [token, confirmation] of this.revertConfirmations) {
-        if (confirmation.targetKey === targetKey) this.revertConfirmations.delete(token);
-      }
-      return;
-    }
-    for (const [key, snapshot] of this.revertSelectionSnapshots) {
-      if (snapshot.threadId === value) this.revertSelectionSnapshots.delete(key);
-    }
-    for (const [token, confirmation] of this.revertConfirmations) {
-      if (confirmation.threadId === value) this.revertConfirmations.delete(token);
-    }
+    this.revertUseCases.invalidate(value);
   }
 
   /**
@@ -2055,379 +1773,12 @@ export class ConversationService implements ConversationUseCases {
     this.collaborationModes?.clear(target);
   }
 
-  private requireThreadQueue(): ThreadQueuePort {
-    if (!this.threadQueue) {
-      throw new UserFacingError(
-        "queue.unavailable",
-        "当前 App Server 不提供持久队列",
-      );
-    }
-    return this.threadQueue;
-  }
-
-  private requireThreadHistory(): ThreadHistoryPort {
-    if (!this.threadHistory) {
-      throw new UserFacingError("revert.unavailable", "当前 App Server 不支持分页历史回退");
-    }
-    return this.threadHistory;
-  }
-
-  private async requirePaginatedThread(threadId: string): Promise<void> {
-    const thread = await this.router.readThread(threadId);
-    if (thread.historyMode !== "paginated") {
-      throw new UserFacingError(
-        "revert.legacy-thread",
-        "当前 Thread 不支持回退；请新建分页历史会话",
-      );
-    }
-  }
-
-  private async readRevertPage(
-    threadId: string,
-    page: number,
-  ): Promise<{
-    turns: ThreadTurnSummary[];
-    nextCursor: string | null;
-    latestTurnId: string | null;
-    activeTurnId: string | null;
-  }> {
-    const history = this.requireThreadHistory();
-    let cursor: string | null = null;
-    let latestTurnId: string | null = null;
-    let activeTurnId: string | null = null;
-    const seenCursors = new Set<string>();
-    const seenTurnIds = new Set<string>();
-    for (let currentPage = 1; currentPage <= page; currentPage += 1) {
-      if (cursor !== null) {
-        if (seenCursors.has(cursor)) {
-          throw new UserFacingError("revert.unavailable", "Codex Turn 列表返回了循环分页游标");
-        }
-        seenCursors.add(cursor);
-      }
-      let result: Awaited<ReturnType<ThreadHistoryPort["listThreadTurns"]>>;
-      try {
-        result = await history.listThreadTurns(threadId, {
-          cursor,
-          limit: revertPageSize,
-          sortDirection: "desc",
-        });
-      } catch (error) {
-        throw revertListUserFacingError(error);
-      }
-      for (const turn of result.turns) {
-        if (seenTurnIds.has(turn.id)) {
-          throw new UserFacingError("revert.unavailable", "Codex Turn 分页包含重复 Turn");
-        }
-        seenTurnIds.add(turn.id);
-      }
-      if (currentPage === 1) {
-        latestTurnId = result.turns[0]?.id ?? null;
-        const activeTurns = result.turns.filter((turn) => turn.status === "inProgress");
-        if (activeTurns.length > 1) {
-          throw new UserFacingError(
-            "revert.unavailable",
-            "Codex Turn 列表包含多个活动 Turn",
-          );
-        }
-        activeTurnId = activeTurns[0]?.id ?? null;
-      }
-      if (currentPage === page) {
-        if (result.nextCursor !== null && !result.nextCursor.trim()) {
-          throw new UserFacingError("revert.unavailable", "Codex Turn 列表返回了无效分页游标");
-        }
-        if (result.nextCursor !== null && seenCursors.has(result.nextCursor)) {
-          throw new UserFacingError("revert.unavailable", "Codex Turn 列表返回了循环分页游标");
-        }
-        return {
-          turns: result.turns,
-          nextCursor: result.nextCursor,
-          latestTurnId,
-          activeTurnId,
-        };
-      }
-      if (result.nextCursor === null) {
-        return {
-          turns: [],
-          nextCursor: null,
-          latestTurnId,
-          activeTurnId,
-        };
-      }
-      if (!result.nextCursor.trim() || seenCursors.has(result.nextCursor)) {
-        throw new UserFacingError("revert.unavailable", "Codex Turn 列表返回了循环分页游标");
-      }
-      cursor = result.nextCursor;
-    }
-    throw new UserFacingError("revert.unavailable", "Codex Turn 列表页码超出安全范围");
-  }
-
-  private resolveRevertSelection(
-    target: ConversationTarget,
-    threadId: string,
-    selector: string,
-  ): {
-    page: number;
-    beforeTurnId: string;
-    workspaceId: string;
-    turns: ThreadTurnSummary[];
-    latestTurnId: string | null;
-    activeTurnId: string | null;
-  } {
-    const key = conversationTargetKey(target);
-    const snapshot = this.revertSelectionSnapshots.get(key);
-    if (
-      !snapshot
-      || snapshot.threadId !== threadId
-      || Date.now() - snapshot.capturedAtMs > revertSelectionSnapshotLifetimeMs
-    ) {
-      throw new UserFacingError(
-        "revert.snapshot-required",
-        "Turn 选择器只对最近五分钟的 /revert list 页面有效，请先执行 /revert list",
-      );
-    }
-    const normalized = selector.trim();
-    const index = /^\d+$/u.test(normalized)
-      ? Number(normalized) - 1 - (snapshot.page - 1) * revertPageSize
-      : snapshot.turns.findIndex((turn) => turn.id === normalized);
-    const turn = Number.isSafeInteger(index) && index >= 0
-      ? snapshot.turns[index]
-      : undefined;
-    if (!turn) {
-      throw new UserFacingError(
-        "revert.turn-not-found",
-        "找不到指定 Turn；完整 ID 也必须来自最近一次 /revert list 页面",
-      );
-    }
-    return {
-      page: snapshot.page,
-      beforeTurnId: turn.id,
-      workspaceId: snapshot.workspaceId,
-      turns: snapshot.turns,
-      latestTurnId: snapshot.latestTurnId,
-      activeTurnId: snapshot.activeTurnId,
-    };
-  }
-
-  private async readRevertQueue(threadId: string): Promise<{ count: number; fingerprint: string }> {
-    if (!this.threadQueue) {
-      throw new UserFacingError("revert.queue-unknown", "无法确认当前 Queue，Revert 已失败关闭");
-    }
-    let page: ThreadQueuePage;
-    try {
-      page = await this.threadQueue.listQueue(threadId, { limit: maximumNativeQueueItems });
-    } catch (error) {
-      throw queueUserFacingError(error, "list");
-    }
-    if (
-      page.nextCursor !== null
-      || page.items.length > maximumNativeQueueItems
-      || typeof page.fingerprint !== "string"
-      || page.fingerprint.length !== 64
-    ) {
-      throw new UserFacingError("revert.queue-unknown", "无法确认当前 Queue，Revert 已失败关闭");
-    }
-    return {
-      count: page.items.length,
-      fingerprint: page.fingerprint,
-    };
-  }
-
-  private rememberRevertSelectionSnapshot(
-    target: ConversationTarget,
-    snapshot: {
-      threadId: string;
-      workspaceId: string;
-      page: number;
-      turns: ThreadTurnSummary[];
-      latestTurnId: string | null;
-      activeTurnId: string | null;
-      capturedAtMs: number;
-    },
-  ): void {
-    const now = Date.now();
-    for (const [key, value] of this.revertSelectionSnapshots) {
-      if (now - value.capturedAtMs > revertSelectionSnapshotLifetimeMs) {
-        this.revertSelectionSnapshots.delete(key);
-      }
-    }
-    const key = conversationTargetKey(target);
-    for (const [token, confirmation] of this.revertConfirmations) {
-      if (confirmation.targetKey === key) this.revertConfirmations.delete(token);
-    }
-    this.revertSelectionSnapshots.delete(key);
-    this.revertSelectionSnapshots.set(key, snapshot);
-    while (this.revertSelectionSnapshots.size > maximumRevertSelectionSnapshots) {
-      const oldest = this.revertSelectionSnapshots.keys().next().value;
-      if (oldest === undefined) break;
-      this.revertSelectionSnapshots.delete(oldest);
-    }
-  }
-
-  private rememberRevertConfirmation(
-    token: string,
-    confirmation: {
-      targetKey: string;
-      actorId: string;
-      threadId: string;
-      workspaceId: string;
-      page: number;
-      beforeTurnId: string;
-      turn: ThreadTurnSummary;
-      latestTurnId: string | null;
-      activeTurnId: string | null;
-      queueFingerprint: string;
-      capturedAtMs: number;
-    },
-  ): void {
-    const now = Date.now();
-    for (const [currentToken, value] of this.revertConfirmations) {
-      if (now - value.capturedAtMs > revertSelectionSnapshotLifetimeMs) {
-        this.revertConfirmations.delete(currentToken);
-      }
-    }
-    this.revertConfirmations.set(token, confirmation);
-    while (this.revertConfirmations.size > maximumRevertConfirmations) {
-      const oldest = this.revertConfirmations.keys().next().value;
-      if (oldest === undefined) break;
-      this.revertConfirmations.delete(oldest);
-    }
-  }
-
-  private requireCurrentThread(target: ConversationTarget): string {
-    return this.requireCurrentBinding(target).threadId;
-  }
-
-  private requireCurrentBinding(
-    target: ConversationTarget,
-  ): { threadId: string; workspaceId: string } {
-    const binding = this.router.current(target);
-    if (!binding) {
-      throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
-    }
-    return { threadId: binding.threadId, workspaceId: binding.workspaceId };
-  }
-
-  private rejectQueuePendingOverrides(target: ConversationTarget): void {
-    if (this.models.hasPending?.(target) || this.collaborationModes?.hasPending?.(target)) {
-      throw new UserFacingError(
-        "queue.pending-overrides",
-        "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成",
-      );
-    }
-  }
-
   private async rejectQueueWhenPendingOverrideChanges(target: ConversationTarget): Promise<void> {
-    const threadId = this.router.current?.(target)?.threadId;
-    if (!threadId || !this.threadQueue) return;
-    if (await this.probeNativeQueueItems(threadId)) {
-      throw new UserFacingError(
-        "queue.pending-overrides",
-        "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成",
-      );
-    }
-  }
-
-  private async readQueueSnapshot(
-    target: ConversationTarget,
-    threadId: string,
-  ): Promise<{ items: ThreadQueueItem[] }> {
-    const queue = this.requireThreadQueue();
-    let response: ThreadQueuePage;
-    try {
-      response = await queue.listQueue(threadId, { limit: maximumNativeQueueItems });
-    } catch (error) {
-      throw queueUserFacingError(error, "list");
-    }
-    if (response.items.length > maximumNativeQueueItems || response.nextCursor !== null) {
-      throw new UserFacingError(
-        "queue.unavailable",
-        "当前 App Server 返回了不完整或超过 100 条的 Queue 页面",
-      );
-    }
-    const items = response.items;
-    this.rememberQueueSelectionSnapshot(target, threadId, items.map((item) => item.id));
-    return { items };
-  }
-
-  private async resolveQueueSelectorSnapshot(
-    target: ConversationTarget,
-    threadId: string,
-    selector: string,
-  ): Promise<{ snapshot: { items: ThreadQueueItem[] }; item: ThreadQueueItem }> {
-    const normalized = selector.trim();
-    let selectedId = normalized;
-    if (/^\d+$/u.test(normalized)) {
-      const selection = this.queueSelectionSnapshots.get(conversationTargetKey(target));
-      if (
-        !selection
-        || selection.threadId !== threadId
-        || Date.now() - selection.capturedAtMs > queueSelectionSnapshotLifetimeMs
-      ) {
-        throw new UserFacingError(
-          "queue.snapshot.required",
-          "数字选择器只对最近五分钟的 Queue 列表有效，请先执行 /queue list",
-        );
-      }
-      const index = Number(normalized) - 1;
-      selectedId = Number.isSafeInteger(index) && index >= 0
-        ? selection.itemIds[index] ?? ""
-        : "";
-    }
-    const snapshot = await this.readQueueSnapshot(target, threadId);
-    const item = snapshot.items.find((candidate) => candidate.id === selectedId);
-    if (!item) {
-      throw new UserFacingError(
-        "queue.item-not-found",
-        "找不到指定 Queue 条目，请使用完整 ID 或刷新 /queue list",
-      );
-    }
-    return { snapshot, item };
-  }
-
-  private async resolveQueueSelector(
-    target: ConversationTarget,
-    threadId: string,
-    selector: string,
-  ): Promise<ThreadQueueItem> {
-    return (await this.resolveQueueSelectorSnapshot(target, threadId, selector)).item;
-  }
-
-  private rememberQueueSelectionSnapshot(
-    target: ConversationTarget,
-    threadId: string,
-    itemIds: string[],
-  ): void {
-    const now = Date.now();
-    for (const [key, snapshot] of this.queueSelectionSnapshots) {
-      if (now - snapshot.capturedAtMs > queueSelectionSnapshotLifetimeMs) {
-        this.queueSelectionSnapshots.delete(key);
-      }
-    }
-    const key = conversationTargetKey(target);
-    this.queueSelectionSnapshots.delete(key);
-    this.queueSelectionSnapshots.set(key, {
-      threadId,
-      itemIds,
-      capturedAtMs: now,
-    });
-    while (this.queueSelectionSnapshots.size > maximumQueueSelectionSnapshots) {
-      const oldest = this.queueSelectionSnapshots.keys().next().value;
-      if (oldest === undefined) break;
-      this.queueSelectionSnapshots.delete(oldest);
-    }
+    await this.queueUseCases.rejectPendingOverrideChange(target);
   }
 
   private async probeNativeQueueItems(threadId: string): Promise<boolean> {
-    const queue = this.threadQueue;
-    if (!queue) return false;
-    try {
-      const page = await queue.listQueue(threadId, { limit: 1 });
-      return page.items.length > 0 || page.nextCursor !== null;
-    } catch (error) {
-      const mapped = queueUserFacingError(error, "list");
-      if (mapped.code === "queue.unavailable") return false;
-      throw mapped;
-    }
+    return this.queueUseCases.hasItems(threadId);
   }
 
   async releaseBackgroundIfComplete(
@@ -2531,7 +1882,7 @@ export class ConversationService implements ConversationUseCases {
 
   private clearConversationState(target: ConversationTarget): void {
     this.clearPendingSelections(target);
-    this.queueSelectionSnapshots.delete(conversationTargetKey(target));
+    this.queueUseCases.clearSnapshot(target);
     this.invalidateRevertSnapshot(target);
   }
 
@@ -2552,53 +1903,21 @@ export class ConversationService implements ConversationUseCases {
     target: ConversationTarget,
     action: () => Promise<T> | T,
   ): Promise<T> {
-    return this.lockedKey(conversationTargetKey(target), action);
+    return this.locks.forConversation(target, action);
   }
 
   private lockedThreadSections<T>(
     target: ConversationTarget,
     action: () => Promise<T>,
   ): Promise<T> {
-    return this.lockedKey(
-      this.threadSectionsLockKey,
-      () => this.locked(target, action),
-    );
+    return this.locks.forThreadSections(target, action);
   }
 
   private lockedTargets<T>(
     targets: readonly ConversationTarget[],
     action: () => Promise<T> | T,
   ): Promise<T> {
-    const keys = [...new Set(targets.map(conversationTargetKey))].sort();
-    const acquire = (index: number): Promise<T> => {
-      const key = keys[index];
-      return key === undefined
-        ? Promise.resolve(action())
-        : this.lockedKey(key, () => acquire(index + 1));
-    };
-    return acquire(0);
-  }
-
-  private async lockedKey<T>(
-    key: string,
-    action: () => Promise<T> | T,
-  ): Promise<T> {
-    const previous = this.locks.get(key) ?? Promise.resolve();
-    let release: (() => void) | undefined;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const chain = previous.then(() => current);
-    this.locks.set(key, chain);
-    await previous;
-    try {
-      return await action();
-    } finally {
-      release?.();
-      if (this.locks.get(key) === chain) {
-        this.locks.delete(key);
-      }
-    }
+    return this.locks.forConversations(targets, action);
   }
 }
 
@@ -2652,87 +1971,6 @@ function normalizeInput(value: string | ConversationInput): TurnInput[] {
 
 function isInlineImageDataUrl(value: string): boolean {
   return /^data:image\/(?:png|jpeg|gif|webp);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/u.test(value);
-}
-
-function normalizeQueueText(value: string): string {
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    throw new UserFacingError("message.empty", "消息不能为空");
-  }
-  return normalized;
-}
-
-function queueUserFacingError(
-  error: unknown,
-  operation: "add" | "list" | "update" | "delete" | "reorder" | "start",
-): UserFacingError {
-  if (error instanceof UserFacingError) return error;
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  if (message.includes("user message queue is unavailable")) {
-    return new UserFacingError("queue.unavailable", "当前 App Server 不提供持久队列");
-  }
-  if (message.includes("queue is empty")) {
-    return new UserFacingError("queue.empty", "App Server Queue 为空");
-  }
-  if (message.includes("cannot contain more than 100")) {
-    return new UserFacingError("queue.full", "原生 Queue 已达到 100 条上限");
-  }
-  if (message.includes("active or pending turn")) {
-    return new UserFacingError(
-      "queue.busy",
-      "当前 Thread 有活动或待触发 Turn，请稍后重试",
-    );
-  }
-  if (message.includes("queued submission not found")) {
-    return new UserFacingError(
-      "queue.item-not-found",
-      "找不到指定 Queue 条目，请刷新 /queue list",
-    );
-  }
-  if (message.includes("reorder must include every")) {
-    return new UserFacingError(
-      "queue.reorder-conflict",
-      "Queue 已发生变化，请刷新 /queue list 后重试排序",
-    );
-  }
-  const labels: Record<typeof operation, string> = {
-    add: "新增",
-    list: "读取",
-    update: "更新",
-    delete: "删除",
-    reorder: "排序",
-    start: "启动",
-  };
-  return new UserFacingError("queue.failed", `Queue ${labels[operation]}失败，请稍后重试`);
-}
-
-function sameTurnIds(left: readonly ThreadTurnSummary[], right: readonly ThreadTurnSummary[]): boolean {
-  return left.length === right.length && left.every((turn, index) => turn.id === right[index]?.id);
-}
-
-function revertUserFacingError(error: unknown): UserFacingError {
-  const message = error instanceof Error ? error.message : "";
-  if (message.includes("turn not found")) {
-    return new UserFacingError("revert.turn-not-found", "指定 Turn 不存在，Revert 未执行");
-  }
-  if (message.includes("legacy") || message.includes("paginated")) {
-    return new UserFacingError("revert.legacy-thread", "当前 Thread 不支持回退；请新建分页历史会话");
-  }
-  return new UserFacingError(
-    "revert.result-unknown",
-    "Revert 结果未知；请求不会自动重试，请重新执行 /revert list 核对历史",
-  );
-}
-
-function revertListUserFacingError(error: unknown): UserFacingError {
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  if (message.includes("before first user message") || message.includes("not materialized")) {
-    return new UserFacingError("revert.empty-history", "当前 Thread 还没有可回退的 Turn");
-  }
-  if (message.includes("paginated")) {
-    return new UserFacingError("revert.legacy-thread", "当前 Thread 不支持回退；请新建分页历史会话");
-  }
-  return new UserFacingError("revert.unavailable", "当前 App Server 无法读取分页历史");
 }
 
 export function resolveThread<T extends Pick<ConversationSession, "id" | "name">>(
