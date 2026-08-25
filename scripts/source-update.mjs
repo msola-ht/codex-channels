@@ -155,8 +155,9 @@ export async function updateManagedSourceInstallation(
       version: targetVersion,
     };
   } catch (error) {
+    let updateError = error;
     if (switched && backupPath) {
-      throw new Error(
+      updateError = new Error(
         `main 源码已切换，但本地更新未完成；旧源码保留在 ${backupPath}。${errorMessage(error)}`,
         { cause: error },
       );
@@ -167,13 +168,15 @@ export async function updateManagedSourceInstallation(
         servicesStopped = false;
       } catch (startError) {
         throw new AggregateError(
-          [error, startError],
-          "源码更新失败，且原核心服务未能恢复运行",
+          [updateError, startError],
+          switched
+            ? "源码已切换但本地更新失败，且核心服务未能恢复运行"
+            : "源码更新失败，且原核心服务未能恢复运行",
           { cause: startError },
         );
       }
     }
-    throw error;
+    throw updateError;
   } finally {
     if (existsSync(stagingRoot)) {
       rmSync(stagingRoot, { recursive: true, force: true });

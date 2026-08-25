@@ -167,6 +167,57 @@ describe("Git 源码更新", () => {
       .toBe("0.147.0");
   });
 
+  it("restores services when the global command refresh fails after switching source", async () => {
+    const fixture = createInstalledFixture("codexc-source-global-install-failure-");
+    let startCalls = 0;
+    let localUpdateCalls = 0;
+
+    await expect(updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => undefined,
+      inspectStaged: async () => ({ services: { installed: true } }),
+      installGlobalPackage: () => { throw new Error("global install failed"); },
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      runLocalUpdate: () => { localUpdateCalls += 1; },
+      startServices: () => { startCalls += 1; },
+      stopServices: () => undefined,
+    })).rejects.toThrow("main 源码已切换，但本地更新未完成");
+
+    expect(startCalls).toBe(1);
+    expect(localUpdateCalls).toBe(0);
+    expect(readFileSync(join(fixture.checkout, "fix.txt"), "utf8")).toBe("fixed");
+    expect(readdirSync(fixture.installRoot).some((name) => name.includes("pre-update")))
+      .toBe(true);
+  });
+
+  it("reports both failures when services cannot recover after switching source", async () => {
+    const fixture = createInstalledFixture("codexc-source-global-install-start-failure-");
+    let failure: unknown;
+
+    try {
+      await updateManagedSourceInstallation(fixture.environment, {
+        buildCheckout: () => undefined,
+        inspectStaged: async () => ({ services: { installed: true } }),
+        installGlobalPackage: () => { throw new Error("global install failed"); },
+        projectDir: fixture.checkout,
+        repository: fixture.repository,
+        startServices: () => { throw new Error("service start failed"); },
+        stopServices: () => undefined,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).message)
+      .toBe("源码已切换但本地更新失败，且核心服务未能恢复运行");
+    expect((failure as AggregateError).errors.map((error) => (error as Error).message))
+      .toEqual([
+        expect.stringContaining("main 源码已切换，但本地更新未完成"),
+        "service start failed",
+      ]);
+  });
+
   it("rejects a dirty checkout before resolving or stopping anything", async () => {
     const fixture = createInstalledFixture("codexc-source-dirty-");
     writeFileSync(join(fixture.checkout, "local-change.txt"), "dirty");

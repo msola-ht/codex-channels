@@ -68,6 +68,7 @@
 - `event-bus`：提供进程内有界队列和消费者隔离。
 - `observability`：提供结构化日志和敏感字段脱敏。
 - `policy`：执行 Surface Actor 与 Workspace 授权。
+- `provider-proxy`：转发模型 Provider 请求并采集脱敏流式指标。
 - `scheduled-tasks`：保存 Gateway 计划任务领域类型、Schedule 计算、SQLite Store 与调度器。
 - `session-routing`：维护 Conversation、Workspace、Thread 的绑定和订阅状态。
 - `storage`：持久化恢复绑定所需的最小业务状态。
