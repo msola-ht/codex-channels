@@ -279,7 +279,8 @@
   实际版本匹配、飞书凭据/Bot
   身份有限探测、微信安全凭据只读校验、敏感错误清洗和只读诊断；微信 Doctor 的配置与允许人数、
   Bot 凭据、游标检查点、加密上线通知上下文覆盖数和最近保存时间摘要，以及 Token、
-  `context_token` 和实际游标不进入输出；项目规则限定当前 Workspace、
+  `context_token` 和实际游标不进入输出；项目规则限定当前 Workspace、JSON 成功与失败结果保持可解析且
+  不混入底层检查文本；Config JSON 只输出配置路径与文件存在状态且不进入交互菜单；
   拒绝远程覆盖和符号链接路径逃逸；CLI 分级帮助、规范命令名称及 macOS/Linux 服务目标选择；
   一级模块使用完整依赖允许列表并要求跨模块只导入公开入口；Session Routing 不得依赖具体
   Client 或生成协议，Conversation Turn 测试不得伪装成完整 Client；生产源码只有 Codex Client

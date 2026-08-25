@@ -78,7 +78,8 @@
   路径或受控 `PATH` 解析本机可执行文件；供 CLI、Bootstrap、服务安装器和 Doctor 复用，不依赖
   平台固定位置的 `which`。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
-  并拒绝通过符号链接把写入转移到 Workspace 外。
+  并拒绝通过符号链接把写入转移到 Workspace 外；CLI 的 JSON 模式可静默底层 Codex 展示，普通模式
+  继续原样转发检查输出。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。
 - `agent-roles.mjs`：读取 `~/.codex/config.toml` 的 `[agents]` 配置，返回带描述的子代理角色
   列表，供渠道 `/agents` 命令展示与调用；不含任何角色实现。

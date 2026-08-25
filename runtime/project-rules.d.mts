@@ -16,11 +16,13 @@ export interface ProjectRulesAtRootOptions {
 export interface ProjectRulesCheckOptions {
   cwd?: string;
   codexBinary?: string;
+  quiet?: boolean;
 }
 
 export interface ProjectRulesCheckAtRootOptions {
   projectRoot: string;
   codexBinary?: string;
+  quiet?: boolean;
 }
 
 export class ProjectRulesError extends Error {

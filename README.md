@@ -302,7 +302,8 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 脚本还可使用 `codexc agents status --json` 查看共享第三方子代理状态，使用
 `codexc center info --json` 查看不含令牌内容的指标中心运行与端点信息，使用
 `codexc service status [目标] --json` 获取 macOS launchd 或 Linux systemd 的统一服务状态，使用
-`codexc doctor --json` 获取完整的脱敏诊断检查结果。
+`codexc doctor --json` 获取完整的脱敏诊断检查结果，使用 `codexc rules check --json` 获取项目规则
+校验结果，使用 `codexc config --json` 获取配置路径与文件存在状态。
 
 ### 常用聊天命令
 

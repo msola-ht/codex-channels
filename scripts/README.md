@@ -163,7 +163,7 @@
   （本地保留策略、本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用接入）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
-  配置文件路径。
+  配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
   只修改对应展示配置段。
 - `config-system-menu.mjs`：独立管理调试入口、审批超时、全局 Sandbox、默认 Workspace 和

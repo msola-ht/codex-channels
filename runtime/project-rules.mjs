@@ -55,16 +55,19 @@ export function initializeProjectRulesAtRoot({ projectRoot, force = false }) {
 export function checkProjectRules({
   cwd = process.cwd(),
   codexBinary = process.env.CODEX_BINARY?.trim() || "codex",
+  quiet = false,
 } = {}) {
   return checkProjectRulesAtRoot({
     projectRoot: findProjectRoot(cwd),
     codexBinary,
+    quiet,
   });
 }
 
 export function checkProjectRulesAtRoot({
   projectRoot,
   codexBinary = process.env.CODEX_BINARY?.trim() || "codex",
+  quiet = false,
 }) {
   const resolvedRoot = realpathSync(resolve(projectRoot));
   const unresolvedRulesPath = safeRulesPath(resolvedRoot);
@@ -88,7 +91,7 @@ export function checkProjectRulesAtRoot({
   ], {
     cwd: resolvedRoot,
     env: process.env,
-    stdio: "inherit",
+    stdio: quiet ? "ignore" : "inherit",
   });
   if (result.error) {
     throw result.error;

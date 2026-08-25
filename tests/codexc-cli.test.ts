@@ -180,6 +180,7 @@ describe("codexc CLI", () => {
     }
 
     const configHelp = spawnSync(process.execPath, [cli, "config", "--help"], { encoding: "utf8" });
+    expect(configHelp.stdout).toContain("codexc config [--json]");
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
     expect(setupHelp.stdout).toContain("登录并恢复官方 / 默认模型与思考等级");
@@ -190,6 +191,10 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
     expect(workAddHelp.stdout).toContain("--cwd 指定的目录");
+    const rulesHelp = spawnSync(process.execPath, [cli, "rules", "--help"], {
+      encoding: "utf8",
+    });
+    expect(rulesHelp.stdout).toContain("codexc rules check [--json]");
     for (const subcommand of ["run", "turns", "threads", "report", "export"]) {
       const metricsHelp = spawnSync(
         process.execPath,
@@ -597,6 +602,7 @@ describe("codexc CLI", () => {
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
       "writeFileSync(process.env.CODEX_RULES_CAPTURE, JSON.stringify(process.argv.slice(2)));",
+      "process.stdout.write('底层规则检查输出\\n');",
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
 
@@ -621,7 +627,28 @@ describe("codexc CLI", () => {
       "status",
       "-sb",
     ]);
+    expect(output).toContain("底层规则检查输出");
     expect(output).toContain("项目 Codex 规则检查通过");
+
+    const jsonOutput = execFileSync(
+      process.execPath,
+      [cli, "rules", "check", "--json"],
+      {
+        cwd: project,
+        env: {
+          ...process.env,
+          CODEX_BINARY: fakeCodex,
+          CODEX_RULES_CAPTURE: capturePath,
+        },
+        encoding: "utf8",
+      },
+    );
+    expect(JSON.parse(jsonOutput)).toEqual({
+      valid: true,
+      projectRoot: realpathSync(project),
+      rulesPath: realpathSync(rulesPath),
+      error: null,
+    });
   });
 
   it("reports a signaled project-rules check without terminating the CLI host", () => {
@@ -646,6 +673,28 @@ describe("codexc CLI", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("项目 Codex 规则检查被信号终止：SIGTERM");
     expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
+
+    const jsonResult = spawnSync(
+      process.execPath,
+      [cli, "rules", "check", "--json"],
+      {
+        cwd: project,
+        env: { ...process.env, CODEX_BINARY: fakeCodex },
+        encoding: "utf8",
+      },
+    );
+    expect(jsonResult.signal).toBeNull();
+    expect(jsonResult.status).toBe(1);
+    expect(JSON.parse(jsonResult.stdout)).toEqual({
+      valid: false,
+      projectRoot: null,
+      rulesPath: null,
+      error: {
+        code: "check-signaled",
+        message: "项目 Codex 规则检查被信号终止：SIGTERM",
+      },
+    });
+    expect(jsonResult.stderr).toBe("");
   });
 
   it.each(["check", "init"])(
@@ -784,6 +833,22 @@ describe("codexc CLI", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("尚未生成项目规则");
     expect(result.stderr).toContain("codexc rules init");
+
+    const jsonResult = spawnSync(process.execPath, [cli, "rules", "check", "--json"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(jsonResult.status).toBe(1);
+    expect(JSON.parse(jsonResult.stdout)).toEqual({
+      valid: false,
+      projectRoot: null,
+      rulesPath: null,
+      error: {
+        code: "missing",
+        message: expect.stringContaining("尚未生成项目规则"),
+      },
+    });
+    expect(jsonResult.stderr).toBe("");
   });
 
   it("initializes an isolated user directory and registers another workspace", () => {
@@ -2342,6 +2407,8 @@ describe("codexc CLI", () => {
       [["agents"], "用法：codexc agents"],
       [["agents", "unknown"], "用法：codexc agents"],
       [["agents", "status", "--json", "unexpected"], "用法：codexc agents"],
+      [["rules", "check", "--json", "unexpected"], "用法：codexc rules"],
+      [["config", "--json", "unexpected"], "用法：codexc config [--json]"],
       [["doctor", "--json", "unexpected"], "用法：codexc doctor [--json]"],
       [["service", "status", "--json", "gateway"], "用法：codexc service status"],
       [["service", "status", "gateway", "--json", "unexpected"], "用法：codexc service status"],
@@ -3212,6 +3279,16 @@ describe("codexc CLI", () => {
 
     expect(output).toContain(`用户目录：${join(root, "profile")}`);
     expect(output).toContain(`配置文件：${configPath}`);
+
+    const jsonOutput = execFileSync(process.execPath, [cli, "config", "--json"], {
+      env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
+      encoding: "utf8",
+    });
+    expect(JSON.parse(jsonOutput)).toEqual({
+      dataDir: join(root, "profile"),
+      configPath,
+      exists: false,
+    });
   });
 
   it("initializes an explicitly configured Gateway config file", () => {
@@ -3240,7 +3317,16 @@ describe("codexc CLI", () => {
     });
 
     const parsed = readGatewayConfig(configPath);
+    const jsonOutput = execFileSync(process.execPath, [cli, "config", "--json"], {
+      env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
+      encoding: "utf8",
+    });
     expect(output).toContain(`配置文件：${configPath}`);
+    expect(JSON.parse(jsonOutput)).toEqual({
+      dataDir: profile,
+      configPath,
+      exists: true,
+    });
     expect(table(parsed.codex).socket_path).toBe("runtime/codex-app-server.sock");
     expect(table(parsed.storage).database_path).toBe("data/gateway.sqlite3");
     expect(statSync(profile).mode & 0o777).toBe(0o755);

@@ -76,7 +76,11 @@ import {
   requireUserConfig,
   userDataDir,
 } from "../scripts/runtime-config.mjs";
-import { checkProjectRules, initializeProjectRules } from "../scripts/codex-rules.mjs";
+import {
+  checkProjectRules,
+  initializeProjectRules,
+  ProjectRulesError,
+} from "../scripts/codex-rules.mjs";
 import {
   CODEX_REMOTE_USAGE,
   parseCodexRemoteOptions,
@@ -175,12 +179,12 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "service.restart": `用法：codexc service restart [${serviceTargetUsage}]`,
   "service.status": `用法：codexc service status [${serviceTargetUsage}] [--json]`,
   "service.logs": `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
-  config: `用法：codexc config
+  config: `用法：codexc config [--json]
 
 打开日常 Gateway 配置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
 （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、WebUI 设置、
 指标设置（本地保留、设备接入中心与全局视图）、Telegram 消息格式与配置路径查看。
-非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
+非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
   doctor: `用法：codexc doctor [--json]
 
 只诊断当前安装、配置和服务状态，不修改配置；--json 输出结构化检查结果；
@@ -189,7 +193,7 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 
 具体用法：
   codexc rules init [--force]
-  codexc rules check`,
+  codexc rules check [--json]`,
   agents: `用法：codexc agents <configure|disable|status> [参数]
 
   configure <Provider> [模型]  配置共享第三方子代理（agents.external）
@@ -223,9 +227,9 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   "rules.init": `用法：codexc rules init [--force]
 
 为当前项目生成安全命令预设；已有文件默认不覆盖。`,
-  "rules.check": `用法：codexc rules check
+  "rules.check": `用法：codexc rules check [--json]
 
-使用当前 Codex CLI 检查项目规则。`,
+使用当前 Codex CLI 检查项目规则；--json 输出结构化校验结果。`,
   update: `用法：codexc update
 
 Git 源码安装会先检查并构建官方 main 的最新提交；随后只读审查 config.toml 与数据库结构，自动停止
@@ -421,10 +425,12 @@ try {
       if (showRequestedHelp(args, "config")) {
         break;
       }
-      requireNoArguments(args, "用法：codexc config");
+      if (!(args.length === 0 || (args.length === 1 && args[0] === "--json"))) {
+        throw new Error("用法：codexc config [--json]");
+      }
       run(
         process.execPath,
-        [join(packageDir, "scripts/config.mjs")],
+        [join(packageDir, "scripts/config.mjs"), ...args],
         process.env,
         process.cwd(),
         { failureReportedByChild: true },
@@ -1227,11 +1233,41 @@ function projectRules(args) {
     showSubcommandHelp(args, "check", "rules.check")) {
     return;
   }
-  if (args[0] === "check" && args.length === 1) {
-    const result = checkProjectRules({
-      cwd: process.cwd(),
-      codexBinary: projectRulesCodexBinary(),
-    });
+  if (
+    args[0] === "check"
+    && (args.length === 1 || (args.length === 2 && args[1] === "--json"))
+  ) {
+    const json = args[1] === "--json";
+    let result;
+    try {
+      result = checkProjectRules({
+        cwd: process.cwd(),
+        codexBinary: projectRulesCodexBinary(),
+        quiet: json,
+      });
+    } catch (error) {
+      if (!json) throw error;
+      process.stdout.write(`${JSON.stringify({
+        valid: false,
+        projectRoot: null,
+        rulesPath: null,
+        error: {
+          code: error instanceof ProjectRulesError ? error.code : "check-unavailable",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      }, null, 2)}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    if (json) {
+      process.stdout.write(`${JSON.stringify({
+        valid: true,
+        projectRoot: result.projectRoot,
+        rulesPath: result.rulesPath,
+        error: null,
+      }, null, 2)}\n`);
+      return;
+    }
     printCliMessage("success", "项目 Codex 规则检查通过。");
     console.log(`项目目录：${result.projectRoot}`);
     console.log(`规则文件：${result.rulesPath}`);
@@ -1240,7 +1276,7 @@ function projectRules(args) {
   if (args[0] !== "init" || args.some((argument, index) =>
     index > 0 && argument !== "--force"
   )) {
-    throw new Error("用法：codexc rules <init [--force]|check>");
+    throw new Error("用法：codexc rules <init [--force]|check [--json]>");
   }
   const force = args.includes("--force");
   const result = initializeProjectRules({ cwd: process.cwd(), force });

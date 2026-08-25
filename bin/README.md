@@ -12,7 +12,7 @@
 - `init`、`setup`、`config`：初始化、从统一菜单选择配置模块，或打开交互式配置与设置菜单
   （操作详情、计划更新、按提供商的价格显示方式、调试模式、审批超时、Sandbox、默认工作区与
   模型、WebUI、指标、Telegram 消息格式等配置文件参数，以及配置路径）；`config` 在非交互终端仍直接显示
-  用户级 `.codex-connect` 配置路径。
+  用户级 `.codex-connect` 配置路径；`--json` 只输出路径与文件存在状态，不读取或输出配置正文。
 - `doctor`：诊断当前 TOML 配置、安装、Linux `bubblewrap` 沙箱前置条件、主 App Server 与已配置
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
   交互终端使用不同颜色并汇总结果；`--json` 输出全部脱敏检查、分类计数与健康状态；Linux 缺少
@@ -27,7 +27,8 @@
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
-- `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
+- `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry；
+  `check --json` 静默底层 Codex 展示并返回可解析的成功或失败结果。
 - `agents`：选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
   `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化，`--json` 返回稳定状态对象。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
