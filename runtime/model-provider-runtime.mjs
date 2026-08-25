@@ -1019,11 +1019,24 @@ export function loadManagedModelProviderRole(environment = process.env) {
   }
   const provider = document.model_provider;
   const model = document.model;
+  const reasoningEffort = document.model_reasoning_effort;
   const definition = findManagedProviderDefinition(environment, provider);
-  if (!definition || typeof model !== "string") {
+  if (
+    !definition
+    || typeof model !== "string"
+    || typeof reasoningEffort !== "string"
+    || reasoningEffort.length === 0
+    || reasoningEffort.length > 128
+    || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(reasoningEffort)
+  ) {
     throw new Error("第三方子代理角色配置无效");
   }
-  return { role: managedThirdPartyRoleName, provider: definition.id, model };
+  return {
+    role: managedThirdPartyRoleName,
+    provider: definition.id,
+    model,
+    reasoningEffort,
+  };
 }
 
 export function loadConfiguredProviderCredential(provider, environment = process.env) {

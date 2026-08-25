@@ -40,7 +40,9 @@
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联，并只识别精确的
   `request_kind=compaction` 操作标记和不计指标的 `request_kind=prewarm`；其他值保持普通响应语义。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，
-  正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，由组合层按 Thread 设置回退；
+  正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，普通 Thread 由组合层按
+  Thread 设置回退，`agents.external` 则只通过本地私有 `/role/external` 路径附加角色配置中的
+  默认思考等级；
   超限或畸形响应只保留基础 HTTP 状态与本机耗时。上游模型、服务层级及错误标识符只接受受限字符，
   不能把控制字符带入指标展示。WebSocket 在完成事件投递前先解除活动指标引用，
   避免紧随其后的关闭事件重复写入。
@@ -48,8 +50,8 @@
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
   `network.proxy` 选择传入上游 Agent。OpenCode Go 共享代理额外接受
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
-  携带账户标识供服务侧按 `opencode-go-<账户>` Socket 上报；无前缀请求归属配置的默认账户
-  （`agents.external` 角色请求）。
+  携带账户标识供服务侧按 `opencode-go-<账户>` Socket 上报；私有 `/role/external` 请求归属
+  `agents.external` 选择的默认账户并在转发前剥离该前缀。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的 `0600` Unix Socket，

@@ -705,6 +705,16 @@ async function runServiceAppServer(args) {
       .map((definition) => [definition.id, definition]),
   );
   const managedRole = loadManagedModelProviderRole(runtime.environment);
+  const externalRoleBaseUrl = (baseUrl) =>
+    `${baseUrl.replace(/\/+$/u, "")}/role/external`;
+  const withExternalRoleMetrics = (provider, options) =>
+    managedRole
+      && sharedProviderProxyKey(managedRole.provider) === sharedProviderProxyKey(provider)
+      ? {
+          ...options,
+          externalRoleReasoningEffort: managedRole.reasoningEffort,
+        }
+      : options;
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
   const goAccountIds = goAccounts.map((account) => account.id);
   const goDefaultAccount = managedRole
@@ -785,16 +795,16 @@ async function runServiceAppServer(args) {
       const proxyKey = sharedProviderProxyKey(provider);
       const { baseUrl: localBaseUrl, proxy, created: proxyCreated } = await startProviderProxy(
         proxyKey,
-        isGoProvider(provider)
+        withExternalRoleMetrics(provider, isGoProvider(provider)
           ? goProxyOptions
-          : proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl)),
+          : proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl))),
       );
       const providerBaseUrl = isGoProvider(provider)
         ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(provider)}`
         : localBaseUrl;
       let child;
       try {
-        refreshManagedRoleConfig(provider, providerBaseUrl);
+        refreshManagedRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
         const argumentsList = withProviderBaseUrl(
           managed.runtime.arguments,
           provider,
@@ -876,16 +886,10 @@ async function runServiceAppServer(args) {
     childrenByProvider.delete(provider);
     if (isGoProvider(provider)) {
       const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
-      if (!remainingGoChild) {
+      const roleUsesGoProxy = managedRole && isGoProvider(managedRole.provider);
+      if (!remainingGoChild && !roleUsesGoProxy) {
         const goProxy = providerProxyRuntimes.get("opencode-go")?.proxy;
         if (goProxy) await closeProviderProxy(goProxy);
-        if (managedRole && isGoProvider(managedRole.provider)) {
-          const { baseUrl: roleProxyBaseUrl } = await startProviderProxy(
-            "opencode-go",
-            goProxyOptions,
-          );
-          refreshManagedRoleConfig(managedRole.provider, roleProxyBaseUrl);
-        }
       }
     }
     console.log(`${provider} App Server 已释放：${managedByProvider.get(provider).socketPath}`);
@@ -896,12 +900,19 @@ async function runServiceAppServer(args) {
     if (customPrimaryProvider) {
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         primaryProvider,
-        proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
+        withExternalRoleMetrics(
+          customPrimaryProvider.id,
+          proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
+        ),
       );
       primaryArguments = withProviderBaseUrl(
         ["-c", `model_provider=${JSON.stringify(customPrimaryProvider.id)}`],
         customPrimaryProvider.id,
         localBaseUrl,
+      );
+      refreshManagedRoleConfig(
+        customPrimaryProvider.id,
+        externalRoleBaseUrl(localBaseUrl),
       );
     } else if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
@@ -940,9 +951,9 @@ async function runServiceAppServer(args) {
       const providerKey = isGoProvider(definition.id) ? "opencode-go" : definition.id;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
-        isGoProvider(definition.id)
+        withExternalRoleMetrics(definition.id, isGoProvider(definition.id)
           ? goProxyOptions
-          : proxyOptionsForUrl(new URL(definition.baseUrl)),
+          : proxyOptionsForUrl(new URL(definition.baseUrl))),
       );
       const primaryBaseUrl = isGoProvider(definition.id)
         ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(definition.id)}`
@@ -952,9 +963,10 @@ async function runServiceAppServer(args) {
         definition.id,
         primaryBaseUrl,
       );
-      refreshManagedRoleConfig(definition.id, providerKey === "opencode-go"
-        ? localBaseUrl
-        : primaryBaseUrl);
+      refreshManagedRoleConfig(
+        definition.id,
+        externalRoleBaseUrl(localBaseUrl),
+      );
     }
     if (managedRole && managedByProvider.has(managedRole.provider)) {
       const provider = managedRole.provider;
@@ -963,11 +975,11 @@ async function runServiceAppServer(args) {
       const providerKey = isGoProvider(provider) ? "opencode-go" : provider;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
-        isGoProvider(provider)
+        withExternalRoleMetrics(provider, isGoProvider(provider)
           ? goProxyOptions
-          : proxyOptionsForUrl(new URL(definition.baseUrl)),
+          : proxyOptionsForUrl(new URL(definition.baseUrl))),
       );
-      refreshManagedRoleConfig(provider, localBaseUrl);
+      refreshManagedRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
     }
     supervisorOwner = new AppServerSupervisorOwner(
       socketPath,

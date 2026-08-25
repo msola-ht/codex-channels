@@ -10,6 +10,11 @@ const defaultIdleThresholdMs = 5 * 60 * 1_000;
 const defaultScanIntervalMs = 60 * 1_000;
 const maximumRecentTargets = 8;
 
+export function providerIdleReleaseMessage(label: string): string {
+  return `${label} 的渠道会话实例已空闲停止；第三方子代理不受影响。`
+    + "再次选择该账户、恢复 Thread 或使用对应 Remote TUI 时将自动启动。";
+}
+
 export interface ProviderIdleReleaserOptions {
   logger: Logger;
   isAccountProvider: (provider: string) => boolean;
@@ -17,7 +22,6 @@ export interface ProviderIdleReleaserOptions {
   releaseProvider: (provider: string) => Promise<boolean>;
   providerForThread: (threadId: string) => string | undefined;
   listBindings: () => readonly ConversationBinding[];
-  defaultRoleProvider: () => string | undefined;
   notify: (provider: string, targets: readonly ConversationTarget[]) => void;
   idleThresholdMs?: number;
   scanIntervalMs?: number;
@@ -31,7 +35,6 @@ export class ProviderIdleReleaser {
   private readonly releaseProvider: (provider: string) => Promise<boolean>;
   private readonly providerForThread: (threadId: string) => string | undefined;
   private readonly listBindings: () => readonly ConversationBinding[];
-  private readonly defaultRoleProvider: () => string | undefined;
   private readonly notify: (
     provider: string,
     targets: readonly ConversationTarget[],
@@ -55,7 +58,6 @@ export class ProviderIdleReleaser {
     this.releaseProvider = options.releaseProvider;
     this.providerForThread = options.providerForThread;
     this.listBindings = options.listBindings;
-    this.defaultRoleProvider = options.defaultRoleProvider;
     this.notify = options.notify;
     this.idleThresholdMs = options.idleThresholdMs ?? defaultIdleThresholdMs;
     this.scanIntervalMs = options.scanIntervalMs ?? defaultScanIntervalMs;
@@ -163,7 +165,6 @@ export class ProviderIdleReleaser {
     if (
       this.stopped
       || this.launching.has(provider)
-      || provider === this.defaultRoleProvider()
     ) {
       return;
     }

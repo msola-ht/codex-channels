@@ -184,7 +184,7 @@ codexc agents status
 codexc agents disable
 ```
 
-角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型和 `env_key`
+角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型、默认思考等级和 `env_key`
 引用，不保存 API Key。App Server 服务启动时只为当前角色选择的 Provider 启动统计代理并刷新本机
 地址；未选作子代理且尚未用于会话的第三方 Provider 不增加进程。认证密钥只进入 App Server
 子进程环境。

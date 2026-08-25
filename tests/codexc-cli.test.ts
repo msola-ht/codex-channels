@@ -13,7 +13,9 @@ import { WebSocketServer } from "ws";
 
 import {
   AppServerSupervisorOwner,
+  ensureAppServerProvider,
   inspectAppServerSupervisor,
+  releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsActive, GatewayOwner } from "../runtime/gateway-owner.mjs";
@@ -1478,7 +1480,7 @@ describe("codexc CLI", () => {
     );
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -1532,9 +1534,107 @@ describe("codexc CLI", () => {
     expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-opencode-secret");
     const roleConfigPath = join(codexHome, "sf-agent.config.toml");
     expect(readFileSync(roleConfigPath, "utf8")).toMatch(
-      /base_url = "http:\/\/127\.0\.0\.1:\d+\/"/u,
+      /base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u,
     );
   });
+
+  it("keeps the shared GO proxy running when releasing the role account App Server", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-role-release-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { createServer } from 'node:http';",
+      `const { WebSocketServer } = await import(${JSON.stringify(pathToFileURL(resolve("node_modules/ws/wrapper.mjs")).href)});`,
+      "const listenUrl = process.argv.at(-1);",
+      "const socketPath = listenUrl?.startsWith('unix://') ? listenUrl.slice('unix://'.length) : undefined;",
+      "if (!socketPath) process.exit(2);",
+      "const server = createServer();",
+      "const webSocketServer = new WebSocketServer({ server });",
+      "server.listen(socketPath);",
+      "const stop = () => {",
+      "  for (const client of webSocketServer.clients) client.terminate();",
+      "  webSocketServer.close(() => server.close(() => process.exit(0)));",
+      "};",
+      "process.once('SIGTERM', stop);",
+      "process.once('SIGINT', stop);",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    writeManagedProviderFixture(
+      codexHome,
+      home,
+      opencodeGoProviderDefinition,
+      "switching",
+      "sk-opencode-secret",
+    );
+    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
+    writeFileSync(
+      roleConfigPath,
+      'model = "deepseek-v4-flash"\nmodel_provider = "opencode-go"\nmodel_reasoning_effort = "high"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `[agents.external]\nconfig_file = ${JSON.stringify(roleConfigPath)}\n`,
+      { mode: 0o600 },
+    );
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const service = spawn(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    service.stdout.setEncoding("utf8");
+    service.stderr.setEncoding("utf8");
+    let stderr = "";
+    service.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const primarySocketPath = join(home, "runtime", "codex-app-server.sock");
+    const exited = new Promise<void>((resolveExit) => service.once("exit", () => resolveExit()));
+
+    try {
+      await waitForCondition(
+        () => existsSync(primarySocketPath),
+        5_000,
+        () => service.exitCode === null
+          ? undefined
+          : new Error(`App Server 服务提前退出：${stderr}`),
+      );
+      await ensureAppServerProvider(primarySocketPath, "opencode-go");
+      const beforeRelease = readFileSync(roleConfigPath, "utf8");
+      const roleBaseUrl = /base_url = "([^"]+)"/u.exec(beforeRelease)?.[1];
+      expect(roleBaseUrl).toBeDefined();
+      if (!roleBaseUrl) throw new Error("第三方子代理角色缺少本地代理地址");
+      await expect(fetch(new URL("/health", roleBaseUrl)).then((response) => response.status))
+        .resolves.toBe(404);
+
+      await expect(releaseAppServerProvider(primarySocketPath, "opencode-go"))
+        .resolves.toEqual({ released: true, reason: "released" });
+
+      expect(readFileSync(roleConfigPath, "utf8")).toBe(beforeRelease);
+      await expect(fetch(new URL("/health", roleBaseUrl)).then((response) => response.status))
+        .resolves.toBe(404);
+    } finally {
+      if (service.exitCode === null && service.signalCode === null) service.kill("SIGTERM");
+      await exited;
+    }
+  }, 15_000);
 
   it("fails closed when the managed subagent role cannot be refreshed", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-role-write-"));
@@ -1571,7 +1671,7 @@ describe("codexc CLI", () => {
     );
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -2406,7 +2506,7 @@ describe("codexc CLI", () => {
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(

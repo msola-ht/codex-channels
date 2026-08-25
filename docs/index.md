@@ -179,7 +179,8 @@ DeepSeek V4 Flash 每月 $30、V4 Pro 每月 $15）计算已用百分比与剩�
 `config/batchWrite` 事务。角色只保存当前选择的 Provider 与模型；DeepSeek、OpenCode Go 的
 切换和固定模式都复用同一角色机制；切换模式受管 Profile 镜像所选模型的默认思考等级，第三方
 App Server 启动时读取 Profile 的该设置并显式携带，原生 `codex --profile sf-*` 与 Remote/
-App Server 保持一致，避免继承全局 `config.toml` 的官方思考等级。
+App Server 保持一致，避免继承全局 `config.toml` 的官方思考等级。角色模型请求还使用本地私有
+`/role/external` 代理路径携带该默认思考等级进入脱敏指标；普通渠道和 Remote TUI 不走此路径。
 受控角色的读改写从同一 Client 的原始用户层取得版本并传入 `expectedVersion`，版本冲突失败关闭，
 不自动重试或覆盖用户并发修改。
 DeepSeek 完整安装、备份恢复和 App Server 无法管理的专属文件仍由 Setup 执行私有文件级事务。

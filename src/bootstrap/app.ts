@@ -17,7 +17,6 @@ import {
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
-  loadManagedModelProviderRole,
   loadPrimaryModelProvider,
   managedProviderDirectory,
   providerAppServerSocketPath,
@@ -113,7 +112,10 @@ import {
   type OpenAiConnectivityStatus,
 } from "./openai-connectivity.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
-import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
+import {
+  ProviderIdleReleaser,
+  providerIdleReleaseMessage,
+} from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
@@ -609,13 +611,12 @@ export class GatewayApplication {
       providerForThread: (threadId) =>
         this.router.modelSettingsForThread(threadId)?.modelProvider,
       listBindings: () => this.bindings.list(),
-      defaultRoleProvider: () => loadManagedModelProviderRole()?.provider,
       notify: (provider, targets) => {
         const accountId = opencodeGoAccountIdFromProvider(provider);
         const label = accountId === undefined
           ? provider
           : `OpenCode Go 账户 ${accountId}`;
-        const message = `${label} 已空闲停止；再次选择该账户、恢复 Thread 或使用对应 Remote TUI 时将自动启动。`;
+        const message = providerIdleReleaseMessage(label);
         if (targets.length === 0) {
           this.logger.info({ provider }, "OpenCode Go 账户已释放，无渠道会话需要通知");
           return;

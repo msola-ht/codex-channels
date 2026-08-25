@@ -1,13 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ProviderIdleReleaser } from "../src/bootstrap/provider-idle-releaser.js";
+import {
+  ProviderIdleReleaser,
+  providerIdleReleaseMessage,
+} from "../src/bootstrap/provider-idle-releaser.js";
 
 function conversationTarget(surface: string, conversationId: string) {
   return { surface, accountId: "account", conversationId };
 }
 
 describe("ProviderIdleReleaser", () => {
-  it("releases an idle GO account and notifies recent targets once", async () => {
+  it("states that idle release only stops the channel session instance", () => {
+    expect(providerIdleReleaseMessage("OpenCode Go 账户 main")).toBe(
+      "OpenCode Go 账户 main 的渠道会话实例已空闲停止；第三方子代理不受影响。"
+      + "再次选择该账户、恢复 Thread 或使用对应 Remote TUI 时将自动启动。",
+    );
+  });
+
+  it("releases idle GO account App Servers even when one backs agents.external", async () => {
     const released: string[] = [];
     const notified: Array<{ provider: string; targets: unknown[] }> = [];
     let nowMs = 1_000_000;
@@ -22,7 +32,6 @@ describe("ProviderIdleReleaser", () => {
       },
       providerForThread: () => undefined,
       listBindings: () => [],
-      defaultRoleProvider: () => "opencode-go-main",
       notify: (provider, targets) => notified.push({ provider, targets: [...targets] }),
       idleThresholdMs: 60_000,
       nowMs: now,
@@ -33,14 +42,17 @@ describe("ProviderIdleReleaser", () => {
 
     await releaser.scan();
 
-    expect(released).toEqual(["opencode-go-b"]);
+    expect(released).toEqual(["opencode-go-main", "opencode-go-b"]);
     expect(notified).toEqual([{
+      provider: "opencode-go-main",
+      targets: [],
+    }, {
       provider: "opencode-go-b",
       targets: [target],
     }]);
   });
 
-  it("skips launching, default-role, bound and recently active accounts", async () => {
+  it("skips launching, bound and recently active accounts", async () => {
     const released: string[] = [];
     let nowMs = 1_000_000;
     const now = () => nowMs;
@@ -55,7 +67,6 @@ describe("ProviderIdleReleaser", () => {
       isAccountProvider: (provider) => provider.startsWith("opencode-go"),
       listRunningProviders: async () => [
         "opencode-go-launching",
-        "opencode-go-default",
         "opencode-go-bound",
         "opencode-go-recent",
         "opencode-go-idle",
@@ -67,7 +78,6 @@ describe("ProviderIdleReleaser", () => {
       providerForThread: (threadId) =>
         threadId === "thread-bound" ? "opencode-go-bound" : undefined,
       listBindings: () => [binding],
-      defaultRoleProvider: () => "opencode-go-default",
       notify: () => undefined,
       idleThresholdMs: 60_000,
       nowMs: now,
@@ -101,7 +111,6 @@ describe("ProviderIdleReleaser", () => {
       },
       providerForThread: () => "opencode-go",
       listBindings: () => [binding],
-      defaultRoleProvider: () => undefined,
       notify: () => undefined,
       idleThresholdMs: 0,
       nowMs: () => 1_000,
@@ -125,7 +134,6 @@ describe("ProviderIdleReleaser", () => {
       },
       providerForThread: () => undefined,
       listBindings: () => [],
-      defaultRoleProvider: () => undefined,
       notify: () => undefined,
       idleThresholdMs: 60_000,
       nowMs: () => nowMs,
@@ -155,7 +163,6 @@ describe("ProviderIdleReleaser", () => {
       },
       providerForThread: () => undefined,
       listBindings: () => [],
-      defaultRoleProvider: () => undefined,
       notify: () => undefined,
       idleThresholdMs: 60_000,
       nowMs: () => 1_000_000,
@@ -187,7 +194,6 @@ describe("ProviderIdleReleaser", () => {
       releaseProvider: async () => true,
       providerForThread: () => undefined,
       listBindings: () => [],
-      defaultRoleProvider: () => undefined,
       notify: () => undefined,
       idleThresholdMs: 0,
       nowMs: () => 1_000_000,
@@ -220,7 +226,6 @@ describe("ProviderIdleReleaser", () => {
       },
       providerForThread: () => undefined,
       listBindings: () => [],
-      defaultRoleProvider: () => undefined,
       notify: () => undefined,
       idleThresholdMs: 60_000,
       nowMs: () => nowMs,
@@ -255,7 +260,6 @@ describe("ProviderIdleReleaser", () => {
       },
       providerForThread: () => undefined,
       listBindings: () => [],
-      defaultRoleProvider: () => undefined,
       notify: () => undefined,
       idleThresholdMs: 0,
       nowMs: () => 1_000_000,
@@ -290,7 +294,6 @@ describe("ProviderIdleReleaser", () => {
       },
       providerForThread: () => undefined,
       listBindings: () => [],
-      defaultRoleProvider: () => undefined,
       notify: () => undefined,
       idleThresholdMs: 0,
       nowMs: () => 1_000,

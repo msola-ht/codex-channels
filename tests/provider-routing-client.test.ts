@@ -204,7 +204,6 @@ describe("ProviderRoutingClient", () => {
       },
       providerForThread: () => undefined,
       listBindings: () => [],
-      defaultRoleProvider: () => undefined,
       notify: () => undefined,
       idleThresholdMs: 0,
       nowMs: () => 1_000,

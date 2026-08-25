@@ -103,14 +103,15 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 - 受管 Provider 的统计代理与隔离 App Server 支持按需启动；当前只有 OpenCode Go 账户实例启用
   空闲自动停止，避免使用过的账户无限常驻；
-- 自动停止条件（全部满足）：无 Conversation 绑定、不是 `agents.external` 当前默认 Provider、
-  Gateway 最近无 Turn 活动、没有受管 Remote TUI 租约，且空闲超过固定阈值 5 分钟；
+- 自动停止条件（全部满足）：无 Conversation 绑定、Gateway 最近无 Turn 活动、没有受管 Remote
+  TUI 租约，且空闲超过固定阈值 5 分钟；`agents.external` 使用主 App Server 和统计代理，不锁定
+  同 Provider 的渠道隔离 App Server；
 - 停止只终止隔离 App Server 子进程与启动记录，保留 Profile、模型目录与 Thread
   持久数据；再次选择模型、恢复 Thread 或使用对应 Remote TUI 时自动按需拉起；
 - `codexc remote` 必须在 TUI 生命周期内持有 Supervisor Provider 租约；租约存在时自动释放和
   手动停止都必须失败关闭，连接退出或异常断开时自动撤销租约；
-- **释放通知**：每次成功自动释放后必须向渠道通知一次，说明该 Provider/账户已空闲停止
-  及自动恢复行为，不静默释放；同一次释放只通知一次。
+- **释放通知**：每次成功自动释放后必须向渠道通知一次，明确只有渠道会话实例已空闲停止、
+  `agents.external` 不受影响，并说明自动恢复行为；同一次释放只通知一次。
 
 ### 3.6 Setup
 

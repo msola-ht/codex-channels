@@ -94,9 +94,11 @@ Gateway 默认每 60 秒扫描一次已运行的 OpenCode Go 账户；同时满�
 才请求 Supervisor 自动释放：
 
 1. 没有 Conversation 绑定该账户的 Thread；
-2. 不是 `agents.external` 当前默认 Provider；
-3. Gateway 最近没有观察到该账户的 Turn 活动；
-4. 没有通过 `codexc remote` 启动的受管 Remote TUI 持有该账户租约。
+2. Gateway 最近没有观察到该账户的 Turn 活动；
+3. 没有通过 `codexc remote` 启动的受管 Remote TUI 持有该账户租约。
+
+`agents.external` 通过主 App Server 直接复用该账户 Key 与共享统计代理，不依赖账户隔离 App
+Server，因此角色仍可连续或并发启动子 Thread，同时不阻止同账户的隔离实例按上述条件释放。
 
 渠道 Turn 在运行期间保留 Conversation 绑定；`codexc remote` 在 TUI 整个生命周期内通过私有
 Supervisor Socket 持有租约，进程正常退出或异常断开时租约自动撤销。Supervisor 在存在租约时

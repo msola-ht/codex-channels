@@ -123,8 +123,9 @@
   Setup、同名模型按 Provider 独立选择、按需 App Server 启动、共享统计代理的 `/go/<账户>` 前缀
   路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、账户适配器按 `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与
   SDK 协议基线校验。
-- OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、Gateway 最近无 Turn 活动、非
-  `agents.external` 默认账户且超过空闲阈值时经 supervisor `releaseProvider` 释放；受管 Remote TUI
+- OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、Gateway 最近无 Turn 活动且超过空闲阈值时
+  经 supervisor `releaseProvider` 释放；`agents.external` 复用主 App Server 和共享统计代理，不锁定
+  同账户隔离实例；受管 Remote TUI
   通过私有连接持有 Provider 租约，租约存在时拒绝释放，退出时自动撤销。监管状态区分运行中、主动
   释放与持有租约；测试还覆盖释放与租约并发时按 Provider 串行、租约有限关闭、释放结果区分实例
   未运行、监管关闭等待已开始的 Provider 操作且拒绝排队操作、子进程温和终止超时后的强制终止和
@@ -299,7 +300,8 @@
 - 开发入口和后台入口只等待主 App Server 就绪；受管 DeepSeek/OpenCode Go Socket 不会阻塞初始
   启动，并由私有监管请求在首次选择模型、恢复 Thread 或启动对应 Remote TUI 时创建。共享
   `agents.external` 当前选择的第三方 Provider 会随服务启动统计代理并刷新角色端口，但不提前启动
-  其隔离 App Server；其他第三方 Provider 代理保持按需。
+  其隔离 App Server；角色使用私有代理路径标注默认思考等级，普通渠道请求不被误标；其他第三方
+  Provider 代理保持按需。
 - 仓库 Git hooks 自动安装与重复执行安全性、完整提交验证工作流先安装 WebUI 锁定依赖，以及
   无本地依赖时的源码安装准备。
 - 协议临时生成失败时保留现有类型目录、生成树逐文件比较和安全替换。
