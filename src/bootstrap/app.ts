@@ -266,6 +266,12 @@ export class GatewayApplication {
         ? undefined
         : new Set([customPrimaryProvider.id]),
       customPrimaryProvider?.id ?? primaryProvider,
+      (provider, mode, operation) => {
+        if (!this.providerIdleReleaser) return operation();
+        return mode === "activity"
+          ? this.providerIdleReleaser.runActivity(provider, operation)
+          : this.providerIdleReleaser.runOperation(provider, operation);
+      },
     );
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
@@ -366,7 +372,10 @@ export class GatewayApplication {
         enqueue: (sample) => {
           metricsWriter.enqueue(sample);
           if (sample.threadId) {
-            this.subagentCompletion?.metricsAvailable(sample.threadId);
+            this.subagentCompletion?.metricsAvailable(
+              sample.threadId,
+              sample.turnId ?? undefined,
+            );
           }
         },
         close: () => metricsWriter.close(),
@@ -378,9 +387,38 @@ export class GatewayApplication {
       logger,
     });
     this.subagentCompletion = new SubagentCompletionTracker({
-      readSummary: (agentThreadId) => metricsStore.threadSummary(agentThreadId),
-      waitForMetrics: (agentThreadId) =>
-        metricsWriter.waitForCurrentWrites(agentThreadId),
+      readSummary: (agentThreadId, terminalTurnId) => {
+        if (!terminalTurnId) return metricsStore.threadSummary(agentThreadId);
+        const latestTurn = metricsStore.threadTurnSummary(
+          agentThreadId,
+          terminalTurnId,
+        );
+        return {
+          latestTurn,
+          threadAggregate: metricsStore.threadTurnTaskSummary(
+            agentThreadId,
+            terminalTurnId,
+          ) ?? latestTurn,
+        };
+      },
+      waitForMetrics: (agentThreadId, agentTurnId) =>
+        metricsWriter.waitForCurrentWrites(agentThreadId, agentTurnId),
+      onRunStarted: (details) => {
+        try {
+          metricsStore.recordSubagentTurn(details);
+        } catch (error) {
+          logger.warn(
+            {
+              err: error,
+              agentThreadId: details.agentThreadId,
+              agentTurnId: details.agentTurnId,
+              parentThreadId: details.parentThreadId,
+              parentTurnId: details.parentTurnId,
+            },
+            "子代理运行指标归属写入失败",
+          );
+        }
+      },
       publish: (event) => {
         this.output.publish(event, isCriticalOutputEvent(event));
       },
@@ -557,9 +595,17 @@ export class GatewayApplication {
         opencodeGoAccountIdFromProvider(provider) !== undefined,
       listRunningProviders: async () =>
         (await inspectAppServerSupervisor(config.codexSocketPath))?.runningProviders ?? [],
-      releaseProvider: (provider) =>
-        releaseAppServerProvider(config.codexSocketPath, provider)
-          .then((result) => result.released),
+      releaseProvider: async (provider) => {
+        const result = await releaseAppServerProvider(config.codexSocketPath, provider);
+        if (!result.released) return false;
+        await this.codex.closeProvider(provider).catch((error) => {
+          logger.warn(
+            { err: error, provider },
+            "空闲 Provider 路由 Client 关闭失败，已保留按需重连状态",
+          );
+        });
+        return true;
+      },
       providerForThread: (threadId) =>
         this.router.modelSettingsForThread(threadId)?.modelProvider,
       listBindings: () => this.bindings.list(),

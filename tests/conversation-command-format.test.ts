@@ -995,6 +995,15 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationCommandOutcome({
       type: "session.new",
       nextModel,
+    })).toContain("发送下一条普通消息时才会创建新的 Codex Thread");
+    expect(formatConversationCommandOutcome({
+      type: "session.new",
+      backgroundedThreadId: "thread-running",
+      nextModel,
+    })).toContain("新会话已准备，原任务继续在后台运行");
+    expect(formatConversationCommandOutcome({
+      type: "session.new",
+      nextModel,
     })).toContain("下一条消息模型：gpt-5.6 · Provider：openai");
     expect(formatConversationCommandOutcome({
       type: "workspace.selected",

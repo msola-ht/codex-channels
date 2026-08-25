@@ -139,6 +139,141 @@ describe("ProviderIdleReleaser", () => {
     expect(released).toEqual(["opencode-go-b"]);
   });
 
+  it("skips a busy Provider without making the idle scan wait for its activity", async () => {
+    let finishActivity!: () => void;
+    const activityGate = new Promise<void>((resolve) => {
+      finishActivity = resolve;
+    });
+    const released: string[] = [];
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
+      listRunningProviders: async () => ["opencode-go-b"],
+      releaseProvider: async (provider) => {
+        released.push(provider);
+        return true;
+      },
+      providerForThread: () => undefined,
+      listBindings: () => [],
+      defaultRoleProvider: () => undefined,
+      notify: () => undefined,
+      idleThresholdMs: 60_000,
+      nowMs: () => 1_000_000,
+    });
+
+    const activity = releaser.runActivity("opencode-go-b", () => activityGate);
+    await Promise.resolve();
+    const scan = releaser.scan();
+    const scanSettled = vi.fn();
+    void scan.then(scanSettled);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(released).toEqual([]);
+    expect(scanSettled).toHaveBeenCalledOnce();
+
+    finishActivity();
+    await Promise.all([activity, scan]);
+    expect(released).toEqual([]);
+  });
+
+  it("does not make shutdown wait for an unrelated Provider activity", async () => {
+    let finishActivity!: () => void;
+    const activityGate = new Promise<void>((resolve) => {
+      finishActivity = resolve;
+    });
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
+      listRunningProviders: async () => ["opencode-go-b"],
+      releaseProvider: async () => true,
+      providerForThread: () => undefined,
+      listBindings: () => [],
+      defaultRoleProvider: () => undefined,
+      notify: () => undefined,
+      idleThresholdMs: 0,
+      nowMs: () => 1_000_000,
+    });
+
+    const activity = releaser.runActivity("opencode-go-b", () => activityGate);
+    await Promise.resolve();
+    const scan = releaser.scan();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const stop = releaser.stop();
+    const stopSettled = vi.fn();
+    void stop.then(stopSettled);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(stopSettled).toHaveBeenCalledOnce();
+    finishActivity();
+    await Promise.all([activity, scan, stop]);
+  });
+
+  it("protects a read operation from release without refreshing its idle time", async () => {
+    const released: string[] = [];
+    let nowMs = 1_000;
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
+      listRunningProviders: async () => ["opencode-go-b"],
+      releaseProvider: async (provider) => {
+        released.push(provider);
+        return true;
+      },
+      providerForThread: () => undefined,
+      listBindings: () => [],
+      defaultRoleProvider: () => undefined,
+      notify: () => undefined,
+      idleThresholdMs: 60_000,
+      nowMs: () => nowMs,
+    });
+    await releaser.runActivity("opencode-go-b", async () => undefined);
+    nowMs += 60_001;
+
+    await releaser.runOperation("opencode-go-b", async () => undefined);
+    await releaser.scan();
+
+    expect(released).toEqual(["opencode-go-b"]);
+  });
+
+  it("queues new Provider activity until an in-flight release has finished", async () => {
+    let reportReleaseStarted!: () => void;
+    let finishRelease!: () => void;
+    const releaseStarted = new Promise<void>((resolve) => {
+      reportReleaseStarted = resolve;
+    });
+    const releaseGate = new Promise<void>((resolve) => {
+      finishRelease = resolve;
+    });
+    let activityStarted = false;
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
+      listRunningProviders: async () => ["opencode-go-b"],
+      releaseProvider: async () => {
+        reportReleaseStarted();
+        await releaseGate;
+        return true;
+      },
+      providerForThread: () => undefined,
+      listBindings: () => [],
+      defaultRoleProvider: () => undefined,
+      notify: () => undefined,
+      idleThresholdMs: 0,
+      nowMs: () => 1_000_000,
+    });
+
+    const scan = releaser.scan();
+    await releaseStarted;
+    const activity = releaser.runActivity("opencode-go-b", async () => {
+      activityStarted = true;
+    });
+    await Promise.resolve();
+    expect(activityStarted).toBe(false);
+
+    finishRelease();
+    await Promise.all([scan, activity]);
+    expect(activityStarted).toBe(true);
+  });
+
   it("waits for an in-flight scan and prevents releases after stop begins", async () => {
     let resolveRunning!: (providers: readonly string[]) => void;
     const running = new Promise<readonly string[]>((resolve) => {

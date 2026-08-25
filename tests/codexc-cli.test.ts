@@ -32,6 +32,7 @@ import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { readWorkspaceConfig } from "../scripts/workspace-config.mjs";
 import {
+  modelRequestMetricsSchemaVersion,
   requestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
   type ModelRequestMetricSample,
@@ -89,7 +90,7 @@ describe("codexc CLI", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("Schema：10");
+    expect(result.stdout).toContain(`Schema：${modelRequestMetricsSchemaVersion}`);
     expect(result.stderr).toBe("");
   });
 

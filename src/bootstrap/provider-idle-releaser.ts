@@ -42,6 +42,8 @@ export class ProviderIdleReleaser {
   private readonly lastActivityAt = new Map<string, number>();
   private readonly launching = new Set<string>();
   private readonly recentTargets = new Map<string, ConversationTarget[]>();
+  private readonly activeOperations = new Map<string, number>();
+  private readonly providerReleases = new Map<string, Promise<void>>();
   private timer: NodeJS.Timeout | undefined;
   private scanTask: Promise<void> | undefined;
   private stopped = false;
@@ -106,6 +108,16 @@ export class ProviderIdleReleaser {
     this.launching.delete(provider);
   }
 
+  runActivity<T>(provider: string, operation: () => Promise<T>): Promise<T> {
+    if (!this.isAccountProvider(provider)) return operation();
+    return this.runProviderOperation(provider, operation, true);
+  }
+
+  runOperation<T>(provider: string, operation: () => Promise<T>): Promise<T> {
+    if (!this.isAccountProvider(provider)) return operation();
+    return this.runProviderOperation(provider, operation, false);
+  }
+
   scan(): Promise<void> {
     if (this.stopped) return Promise.resolve();
     if (this.scanTask) return this.scanTask;
@@ -128,42 +140,80 @@ export class ProviderIdleReleaser {
       return;
     }
     if (this.stopped) return;
-    const defaultProvider = this.defaultRoleProvider();
-    const nowMs = this.nowMs();
     for (const provider of running) {
       if (this.stopped) return;
-      if (
-        !this.isAccountProvider(provider)
-        || this.launching.has(provider)
-        || provider === defaultProvider
-      ) {
-        continue;
+      if (!this.isAccountProvider(provider)) continue;
+      await this.tryRelease(provider);
+    }
+  }
+
+  private async tryRelease(provider: string): Promise<void> {
+    if ((this.activeOperations.get(provider) ?? 0) > 0) return;
+    if (this.providerReleases.has(provider)) return;
+    const task = this.releaseIfIdle(provider).finally(() => {
+      if (this.providerReleases.get(provider) === task) {
+        this.providerReleases.delete(provider);
       }
-      if (this.hasBindings(provider)) {
-        this.touch(provider);
-        continue;
-      }
-      const lastActivityAt = this.lastActivityAt.get(provider) ?? 0;
-      if (nowMs - lastActivityAt < this.idleThresholdMs) continue;
-      try {
-        const released = await this.releaseProvider(provider);
-        if (released) {
-          const targets = this.recentTargets.get(provider) ?? [];
-          this.lastActivityAt.delete(provider);
-          this.recentTargets.delete(provider);
-          if (this.stopped) return;
-          this.notify(provider, targets);
-          this.logger.info(
-            { provider },
-            "OpenCode Go 账户隔离 App Server 已空闲停止",
-          );
-        }
-      } catch (error) {
-        this.logger.warn(
-          { err: error, provider },
-          "OpenCode Go 账户隔离 App Server 空闲释放失败",
-        );
-      }
+    });
+    this.providerReleases.set(provider, task);
+    await task;
+  }
+
+  private async releaseIfIdle(provider: string): Promise<void> {
+    if (
+      this.stopped
+      || this.launching.has(provider)
+      || provider === this.defaultRoleProvider()
+    ) {
+      return;
+    }
+    if (this.hasBindings(provider)) {
+      this.touch(provider);
+      return;
+    }
+    const lastActivityAt = this.lastActivityAt.get(provider) ?? 0;
+    if (this.nowMs() - lastActivityAt < this.idleThresholdMs) return;
+    try {
+      const released = await this.releaseProvider(provider);
+      if (!released) return;
+      const targets = this.recentTargets.get(provider) ?? [];
+      this.lastActivityAt.delete(provider);
+      this.recentTargets.delete(provider);
+      if (this.stopped) return;
+      this.notify(provider, targets);
+      this.logger.info(
+        { provider },
+        "OpenCode Go 账户隔离 App Server 已空闲停止",
+      );
+    } catch (error) {
+      this.logger.warn(
+        { err: error, provider },
+        "OpenCode Go 账户隔离 App Server 空闲释放失败",
+      );
+    }
+  }
+
+  private async runProviderOperation<T>(
+    provider: string,
+    operation: () => Promise<T>,
+    refreshActivity: boolean,
+  ): Promise<T> {
+    while (true) {
+      const release = this.providerReleases.get(provider);
+      if (!release) break;
+      await release.catch(() => undefined);
+    }
+    this.activeOperations.set(
+      provider,
+      (this.activeOperations.get(provider) ?? 0) + 1,
+    );
+    if (refreshActivity) this.touch(provider);
+    try {
+      return await operation();
+    } finally {
+      const remaining = (this.activeOperations.get(provider) ?? 1) - 1;
+      if (remaining === 0) this.activeOperations.delete(provider);
+      else this.activeOperations.set(provider, remaining);
     }
   }
 

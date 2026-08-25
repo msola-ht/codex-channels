@@ -158,6 +158,7 @@
   `reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及
   跨价格档位聚合；失败和未完整请求保留原始价格快照但不进入费用汇总，CSV 导出统一中和
   电子表格公式前缀；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、可配置保留策略与备份清理、
+  Schema v10→v11 的运行级子代理关系备份迁移与结构异常事务回滚、同一子 Thread 多轮运行的精确父 Turn 归属、
   有界内部读取，以及
   Schema v2 enriched View 的耗时、速度、缓存、费用计算和 `/M Token` 单价一致性。回归测试还覆盖 WebSocket 完成后立即
   关闭不重复、指标确认不等待延迟分片 SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪

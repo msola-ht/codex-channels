@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ProviderIdleReleaser } from "../src/bootstrap/provider-idle-releaser.js";
 import {
   ProviderRoutingClient,
   type ProviderClientInstance,
@@ -90,6 +91,153 @@ describe("ProviderRoutingClient", () => {
     expect(openai.startThread).not.toHaveBeenCalled();
     expect(deepseek.startThread).toHaveBeenCalledOnce();
     expect(deepseek.startTurn).toHaveBeenCalledOnce();
+  });
+
+  it("runs Provider Thread creation and operations inside the activity boundary", async () => {
+    const openai = client();
+    const deepseek = client();
+    deepseek.startThread.mockResolvedValue(
+      session("thread-deepseek", "deepseek", "idle"),
+    );
+    deepseek.startTurn.mockResolvedValue({ turnId: "turn-1" });
+    const activity: string[] = [];
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([
+        ["openai", openai],
+        ["deepseek", deepseek],
+      ]),
+      async () => undefined,
+      new Set(),
+      "openai",
+      async (provider, mode, operation) => {
+        activity.push(`start:${provider}:${mode}`);
+        try {
+          return await operation();
+        } finally {
+          activity.push(`end:${provider}:${mode}`);
+        }
+      },
+    );
+
+    await routed.startThread(cwd, {
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    });
+    await routed.startTurn(
+      "thread-deepseek",
+      [{ type: "text", text: "hello" }],
+      "client-1",
+      cwd,
+    );
+
+    expect(activity).toEqual([
+      "start:deepseek:activity",
+      "end:deepseek:activity",
+      "start:deepseek:activity",
+      "end:deepseek:activity",
+    ]);
+  });
+
+  it("protects aggregate reads without marking them active and marks reconnect as activity", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.listThreads.mockResolvedValue([]);
+    deepseek.listThreads.mockResolvedValue([]);
+    openai.reloadMcpServers.mockResolvedValue(undefined);
+    deepseek.reloadMcpServers.mockResolvedValue(undefined);
+    deepseek.reconnect.mockResolvedValue({ userAgent: "codex-cli/0.148.0" });
+    const operations: string[] = [];
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([
+        ["openai", openai],
+        ["deepseek", deepseek],
+      ]),
+      undefined,
+      new Set(),
+      "openai",
+      async (provider, mode, operation) => {
+        operations.push(`${provider}:${mode}`);
+        return operation();
+      },
+    );
+
+    await routed.listThreads(cwd);
+    await routed.reloadMcpServers();
+    await routed.reconnectProvider("deepseek");
+
+    expect(operations).toEqual([
+      "openai:operation",
+      "deepseek:operation",
+      "openai:operation",
+      "deepseek:operation",
+      "deepseek:activity",
+    ]);
+  });
+
+  it("closes an idle Provider before a queued request restarts and reconnects it", async () => {
+    const openai = client();
+    const deepseek = client();
+    deepseek.startThread.mockResolvedValue(
+      session("thread-deepseek", "deepseek", "idle"),
+    );
+    const ensureProvider = vi.fn(async () => undefined);
+    let releaseStarted!: () => void;
+    let finishRelease!: () => void;
+    const releaseDidStart = new Promise<void>((resolve) => {
+      releaseStarted = resolve;
+    });
+    const releaseGate = new Promise<void>((resolve) => {
+      finishRelease = resolve;
+    });
+    const routedRef: { current?: ProviderRoutingClient } = {};
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      isAccountProvider: (provider) => provider === "deepseek",
+      listRunningProviders: async () => ["deepseek"],
+      releaseProvider: async (provider) => {
+        releaseStarted();
+        await releaseGate;
+        await routedRef.current!.closeProvider(provider);
+        return true;
+      },
+      providerForThread: () => undefined,
+      listBindings: () => [],
+      defaultRoleProvider: () => undefined,
+      notify: () => undefined,
+      idleThresholdMs: 0,
+      nowMs: () => 1_000,
+    });
+    const routed = new ProviderRoutingClient(
+      "openai",
+      new Map([
+        ["openai", openai],
+        ["deepseek", deepseek],
+      ]),
+      ensureProvider,
+      new Set(),
+      "openai",
+      (provider, mode, operation) => mode === "activity"
+        ? releaser.runActivity(provider, operation)
+        : releaser.runOperation(provider, operation),
+    );
+    routedRef.current = routed;
+    await routed.connect();
+    await routed.startThread(cwd, { modelProvider: "deepseek" });
+
+    const scan = releaser.scan();
+    await releaseDidStart;
+    const restarted = routed.startThread(cwd, { modelProvider: "deepseek" });
+    await Promise.resolve();
+    expect(deepseek.startThread).toHaveBeenCalledOnce();
+
+    finishRelease();
+    await Promise.all([scan, restarted]);
+    expect(deepseek.close).toHaveBeenCalledOnce();
+    expect(deepseek.connect).toHaveBeenCalledTimes(2);
+    expect(ensureProvider).toHaveBeenCalledTimes(2);
+    expect(deepseek.startThread).toHaveBeenCalledTimes(2);
   });
 
   it("releases an ephemeral Thread through its owning Provider and forgets the route", async () => {
@@ -796,6 +944,14 @@ function routing(openai: MockClient, deepseek: MockClient): ProviderRoutingClien
     ["openai", openai],
     ["deepseek", deepseek],
   ]));
+}
+
+function silentLogger(): import("pino").Logger {
+  return {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } as unknown as import("pino").Logger;
 }
 
 function snapshot(
