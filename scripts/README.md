@@ -100,18 +100,34 @@
   `parent_turn_id`；历史 Cloudflare D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
   “技能”流程委派给具体适配器；模型与提供商下分官方与第三方两级：官方含登录与默认模型，
-  第三方含自定义 第三方、DeepSeek 官方、OpenCode Go 官方、第三方模型设置与第三方 API。
-- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 → 自定义 第三方”；
-  引导填写上游 `base_url`、认证方式、WebSocket 开关与默认模型（Provider ID 固定为 `OpenAI`，
-  避免手输填错），通过 Codex
-  `config/batchWrite` 原子写入 `~/.codex/config.toml` 的自定义主 Provider 块并激活；认证方式支持
-  “直接写入 API Key”（`experimental_bearer_token`，明文入 0600 config）与当前 API Key、`env_key`、
-  无认证；保留其他候选块，只移除与自定义主 Provider 冲突的顶层 `openai_base_url`。
+  第三方含自定义第三方、DeepSeek 官方、OpenCode Go 官方、第三方模型设置与第三方 API。
+- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 → 自定义第三方”；
+  新增时从 URL 主机名派生 Provider ID 或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
+  上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
+  必须属于 App Server 返回的 Codex 官方目录；不调用第三方 `/models`，不生成 `models.json` 或
+  `model_catalog_json`，目录来源保留为可辨识的 `official` 接口。
+  `OpenAI` 选项固定写入同名 `name` 以允许 Codex 使用远程压缩，上游仍须兼容对应接口。新增默认推荐
+  切换模式，编辑保持原模式；确认预览明确显示配置位置、API Key 明文存储、默认思考等级和服务层级。固定模式通过 Codex
+  `config/batchWrite` 原子写入并激活 `~/.codex/config.toml` 的自定义主 Provider；切换模式保持主
+  Provider 为 `openai` 且不修改主配置，为每个 Provider 写入包含完整 Provider 块、Key、模型、
+  `model_reasoning_effort = "medium"` 和服务层级的 0600 `~/.codex/sf-custom-<Provider ID>.config.toml`，
+  并通过私有显式注册表支持多个隔离实例。自定义固定模式不能保留其他自定义切换 Profile；转为固定
+  模式前用户须先删除其他自定义切换 Provider。受管切换 Provider 可共存；受管固定模式必须先恢复
+  官方模式，写入响应丢失时只读确认固定配置事务。只支持
+  `experimental_bearer_token` 直接写入 API Key（明文入 0600 config）。远程上游强制 HTTPS，HTTP 仅允许本机回环地址。同一 URL Origin 编辑时留空
+  保留原 Key，Origin 变化时强制重新输入且写入前不复用旧 Key；新增拒绝覆盖 config 或私有备份中的已有 Provider ID。
+  无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
+  主 Provider 冲突的顶层 `openai_base_url`。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
   list / add / switch / remove 子命令；list 与 switch / remove 复用 Codex 用户配置事务读取和
-  原子写入，add 复用自定义主 Provider Setup 的交互流程；`switch openai` 不运行登录直接切回官方
-  并把候选移入私有备份，`switch <ID>` 对已清理的候选从备份自动恢复并消费该备份项；删除候选
-  同时清理同名备份，配置写入失败时回滚备份。从第三方切回官方时清除第三方顶层模型，已在官方
+  原子写入，add 复用自定义 Responses Provider Setup 的交互流程，Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
+  并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
+  Provider 时，交互菜单须经二次确认后移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
+  编辑备份候选并恢复、修改和激活，也可经二次确认删除备份候选。恢复、编辑或删除时先提交配置，
+  成功后才消费同名备份；配置写入失败时保留原备份，配置已提交但清理失败时显示部分成功警告。备份
+  不可安全读取时只允许编辑当前 config 候选，切换和删除失败关闭；注册表仍登记但 Profile 已缺失的
+  切换 Provider 可由精确 `remove` 命令清理。删除切换 Provider 时同时清理同 ID 私有备份；Profile
+  或注册项已经删除但备份无法安全清理时显示部分成功，不恢复已删除的切换配置。从第三方切回官方时清除第三方顶层模型，已在官方
   模式时保留官方模型。
 - `primary-provider-usage.mjs`：`codexc primary-provider` 的规范帮助文案，供脚本与入口帮助共用，
   避免两份文案漂移。
@@ -232,7 +248,7 @@
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  受管 `--profile`（当前公开为 `deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
+  Provider `--profile`（当前公开为自定义第三方的 `sf-custom-<Provider ID>`、`deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
   磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，

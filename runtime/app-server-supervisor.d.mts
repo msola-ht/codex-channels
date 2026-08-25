@@ -1,8 +1,6 @@
-import type { ManagedModelProviderId } from "./model-provider-definitions.mjs";
-
 export interface AppServerTopology {
   primaryProvider: string;
-  managedProviders: ManagedModelProviderId[];
+  managedProviders: string[];
   socketPaths: string[];
 }
 
@@ -10,11 +8,11 @@ export interface InspectedAppServerTopology {
   version: 4;
   pid: number;
   primaryProvider: string;
-  managedProviders: ManagedModelProviderId[];
+  managedProviders: string[];
   socketPaths: string[];
-  runningProviders: ManagedModelProviderId[];
-  releasedProviders: ManagedModelProviderId[];
-  leasedProviders: ManagedModelProviderId[];
+  runningProviders: string[];
+  releasedProviders: string[];
+  leasedProviders: string[];
 }
 
 export interface AppServerProviderLease {

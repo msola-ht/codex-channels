@@ -60,6 +60,10 @@ export function removePrimaryProviderBackupCandidate(
   environment?: NodeJS.ProcessEnv,
 ): Record<string, unknown> | undefined;
 export function validProviderBaseUrl(value: string, label: string): string;
+export function isCustomSwitchingModelProviderConfigCompatible(
+  config: Record<string, unknown> | undefined,
+  providerId: string,
+): boolean;
 
 export interface ManagedModelProviderSettings {
   provider: ManagedModelProviderId;
@@ -161,6 +165,59 @@ export interface ConfiguredCustomPrimaryModelProvider {
   id: string;
   baseUrl: string;
 }
+
+export const customPrimaryProviderProfileName: "sf-custom";
+export function customPrimaryProviderProfilePath(
+  environment: NodeJS.ProcessEnv | undefined,
+  provider: string,
+): string;
+export function customSwitchingProviderRegistryPath(environment?: NodeJS.ProcessEnv): string;
+export function loadCustomSwitchingProviderIds(environment?: NodeJS.ProcessEnv): string[];
+
+export interface ConfiguredCustomSwitchingModelProvider {
+  id: string;
+  provider: string;
+  model: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  supportsWebsockets: boolean;
+  profileName: string;
+  profileContent: string;
+  reasoningEffort: "medium";
+  catalogSource: { kind: "official" };
+  arguments: string[];
+  childEnvironment: Record<string, string>;
+}
+
+export function loadConfiguredCustomSwitchingModelProviders(
+  environment?: NodeJS.ProcessEnv,
+): ConfiguredCustomSwitchingModelProvider[];
+
+export function writeCustomPrimaryProviderSwitchingProfile(
+  options: {
+    provider: string;
+    model: string;
+    name?: string;
+    baseUrl: string;
+    apiKey: string;
+    supportsWebsockets?: boolean;
+    catalogSource?: { kind: "official" };
+  },
+  environment?: NodeJS.ProcessEnv,
+): void;
+
+export function removeCustomPrimaryProviderSwitchingProfile(
+  environment: NodeJS.ProcessEnv | undefined,
+  provider: string,
+  expectedProfileContent?: string,
+): boolean;
+
+export function restoreCustomPrimaryProviderSwitchingProfile(
+  environment: NodeJS.ProcessEnv | undefined,
+  provider: string,
+  profileContent: string,
+): void;
 
 export function loadConfiguredCustomPrimaryModelProvider(
   environment?: NodeJS.ProcessEnv,

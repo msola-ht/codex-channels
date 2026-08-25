@@ -86,6 +86,11 @@ export function readCodexUserConfigSnapshot(
   version: string;
 }>;
 
+export function areCodexUserConfigEditsApplied(
+  config: Record<string, CodexUserConfigValue | undefined>,
+  edits: CodexUserConfigEdit[],
+): boolean;
+
 export function createCodexUserConfigClient(options?: {
   environment?: NodeJS.ProcessEnv;
   cwd?: string;

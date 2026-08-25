@@ -9,7 +9,7 @@ const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 1_024;
 const connectionTimeoutMs = 1_000;
 const minimumUnixSocketPathLimitBytes = 104;
-const providerIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
+const providerIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 
 export class AppServerSupervisorOwner {
   #identity;

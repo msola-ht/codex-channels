@@ -86,6 +86,70 @@ describe("ModelSelectionService", () => {
     expect(state.model).toBe("gpt-main");
   });
 
+  it("exposes the official catalog under a custom switching Provider alias", async () => {
+    const newSession = vi.fn(async () => undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      current: () => ({
+        target,
+        workspaceId: "main",
+        threadId: "thread-1",
+        sessionId: "session-1",
+      }),
+      modelSettings: () => ({
+        model: "gpt-main",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: "default",
+      }),
+      newSession,
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(
+      codex,
+      router,
+      undefined,
+      [],
+      "openai",
+      [{ provider: "OpenAI", displayName: "OpenAI", defaultModel: "gpt-deep" }],
+    );
+
+    const state = await service.state(target);
+
+    expect(state.models.map(({ model, provider, displayName, isDefault }) => ({
+      model,
+      provider: provider ?? "openai",
+      displayName,
+      isDefault,
+    }))).toEqual([
+      { model: "gpt-main", provider: "openai", displayName: "gpt-main", isDefault: true },
+      { model: "gpt-deep", provider: "openai", displayName: "gpt-deep", isDefault: false },
+      {
+        model: "gpt-main",
+        provider: "OpenAI",
+        displayName: "OpenAI · gpt-main",
+        isDefault: false,
+      },
+      {
+        model: "gpt-deep",
+        provider: "OpenAI",
+        displayName: "OpenAI · gpt-deep",
+        isDefault: true,
+      },
+    ]);
+
+    await service.selectModel(target, "4");
+    expect(newSession).toHaveBeenCalledOnce();
+    expect(service.turnOverrides(target)).toMatchObject({
+      model: "gpt-deep",
+      modelProvider: "OpenAI",
+      effort: "high",
+    });
+  });
+
   it("keeps identical model IDs from different Providers independently selectable", async () => {
     const sharedModel = "deepseek-v4-flash";
     const deepseek = { ...model(sharedModel, ["high"], "high"), provider: "deepseek" };

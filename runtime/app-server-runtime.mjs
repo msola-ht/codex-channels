@@ -1,6 +1,7 @@
 import { isAbsolute, join, resolve } from "node:path";
 
 import {
+  loadConfiguredCustomSwitchingModelProviders,
   loadManagedProviderAppServers,
   loadPrimaryModelProvider,
   providerAppServerSocketPath,
@@ -16,7 +17,12 @@ export function resolvePrimaryAppServerSocketPath(document, dataDir) {
 export function resolveAppServerRuntime(document, dataDir, environment = process.env) {
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
   const managedProviders = loadManagedProviderAppServers(environment);
-  const managedSocketPaths = managedProviders.map(({ provider }) =>
+  const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
+  const isolatedProviders = [
+    ...managedProviders,
+    ...customSwitchingProviders,
+  ];
+  const managedSocketPaths = isolatedProviders.map(({ provider }) =>
     providerAppServerSocketPath(primarySocketPath, provider));
   const primaryProvider = loadPrimaryModelProvider(environment);
   const socketPaths = [
@@ -26,12 +32,13 @@ export function resolveAppServerRuntime(document, dataDir, environment = process
   return {
     primarySocketPath,
     primaryProvider,
-    managedProviders,
+    managedProviders: isolatedProviders,
+    customSwitchingProviders,
     managedSocketPaths,
     socketPaths,
     topology: {
       primaryProvider,
-      managedProviders: managedProviders.map(({ provider }) => provider),
+      managedProviders: isolatedProviders.map(({ provider }) => provider),
       socketPaths,
     },
   };
