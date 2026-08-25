@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Context } from "grammy";
 
 import {
+  modelEffortKeyboard,
   renderTelegramCommandResult,
   threadQueueDeleteConfirmationKeyboard,
   threadQueueItemKeyboard,
@@ -12,6 +13,55 @@ import {
 import { formatRuntimeMcpStatusUpdate } from "../src/surfaces/runtime-status-format.js";
 
 describe("Telegram command renderer", () => {
+  it("renders reasoning-effort buttons after model selection", async () => {
+    const result = {
+      kind: "models" as const,
+      view: "effort" as const,
+      nextSelection: "effort" as const,
+      state: {
+        models: [{
+          id: "gpt-test",
+          model: "gpt-test",
+          displayName: "GPT Test",
+          supportedReasoningEfforts: [
+            { effort: "medium", description: "Medium" },
+            { effort: "high", description: "High" },
+          ],
+          defaultReasoningEffort: "medium",
+          serviceTiers: [],
+          defaultServiceTier: null,
+          isDefault: true,
+          inputModalities: ["text" as const],
+        }],
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: null,
+        pending: true,
+        modelPending: true,
+        effortPending: true,
+        serviceTierPending: false,
+      },
+    };
+    const keyboard = modelEffortKeyboard(result);
+
+    expect(keyboard?.inline_keyboard.flat().map((button) => button.text)).toEqual([
+      "✓ medium",
+      "high",
+    ]);
+    expect(
+      (keyboard?.inline_keyboard[0]?.[0] as { callback_data?: string } | undefined)
+        ?.callback_data,
+    ).toMatch(/^me:1:/);
+
+    const reply = vi.fn(async () => undefined);
+    await renderTelegramCommandResult({ reply } as unknown as Context, result);
+    expect(reply).toHaveBeenCalledWith(
+      expect.stringContaining("模型已选择，请继续选择思考等级"),
+      expect.objectContaining({ reply_markup: keyboard }),
+    );
+  });
+
   it("does not duplicate the Turn lifecycle acknowledgement for a new Plugin task", async () => {
     const reply = vi.fn(async () => undefined);
 

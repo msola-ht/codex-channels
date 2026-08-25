@@ -611,7 +611,30 @@ describe("ConversationCommandService", () => {
   });
 
   it("routes model and account queries without Surface-specific branching", async () => {
-    const state = { model: "gpt-test" };
+    const state = {
+      models: [{
+        id: "gpt-test",
+        model: "gpt-test",
+        displayName: "GPT Test",
+        supportedReasoningEfforts: [
+          { effort: "medium", description: "Medium" },
+          { effort: "high", description: "High" },
+        ],
+        defaultReasoningEffort: "medium",
+        serviceTiers: [],
+        defaultServiceTier: null,
+        isDefault: true,
+        inputModalities: ["text" as const],
+      }],
+      model: "gpt-test",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: null,
+      pending: true,
+      modelPending: true,
+      effortPending: false,
+      serviceTierPending: false,
+    };
     const modelState = vi.fn(async () => state);
     const selectModel = vi.fn(async () => state);
     const selectEffort = vi.fn(async () => state);
@@ -640,8 +663,21 @@ describe("ConversationCommandService", () => {
 
     await expect(commands.execute(target, "model", "gpt-test")).resolves.toMatchObject({
       kind: "models",
-      view: "model",
+      view: "effort",
+      nextSelection: "effort",
       state,
+    });
+    selectModel.mockResolvedValueOnce({
+      ...state,
+      models: [{
+        ...state.models[0]!,
+        supportedReasoningEfforts: [{ effort: "medium", description: "Medium" }],
+      }],
+    });
+    await expect(commands.execute(target, "model", "gpt-test")).resolves.toMatchObject({
+      kind: "models",
+      view: "model",
+      state: expect.any(Object),
     });
     await expect(commands.execute(target, "effort", "high")).resolves.toMatchObject({
       kind: "models",
@@ -1105,7 +1141,27 @@ describe("ConversationCommandService", () => {
       compact: vi.fn(async () => undefined),
       fork: vi.fn(async () => "thread-forked"),
       review: vi.fn(async () => ({ threadId: "review-thread", turnId: "review-turn" })),
-      selectModel: vi.fn(async () => ({ model: "gpt-test" })),
+      selectModel: vi.fn(async () => ({
+        models: [{
+          id: "gpt-test",
+          model: "gpt-test",
+          displayName: "GPT Test",
+          supportedReasoningEfforts: [{ effort: "medium", description: "Medium" }],
+          defaultReasoningEffort: "medium",
+          serviceTiers: [],
+          defaultServiceTier: null,
+          isDefault: true,
+          inputModalities: ["text" as const],
+        }],
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: null,
+        pending: true,
+        modelPending: true,
+        effortPending: true,
+        serviceTierPending: false,
+      })),
       selectEffort: vi.fn(async () => ({ model: "gpt-test" })),
       selectFastMode: vi.fn(async () => ({ model: "gpt-test" })),
       listSkills: vi.fn(async () => []),

@@ -1051,6 +1051,41 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("下一条消息模型：deepseek-v4-flash · Provider：deepseek");
   });
 
+  it("prompts for reasoning effort after selecting a model with multiple choices", () => {
+    const rendered = formatConversationModels({
+      kind: "models",
+      view: "effort",
+      nextSelection: "effort",
+      state: {
+        models: [{
+          id: "gpt-test",
+          model: "gpt-test",
+          displayName: "GPT Test",
+          supportedReasoningEfforts: [
+            { effort: "medium", description: "平衡" },
+            { effort: "high", description: "深入" },
+          ],
+          defaultReasoningEffort: "medium",
+          serviceTiers: [],
+          defaultServiceTier: null,
+          isDefault: true,
+          inputModalities: ["text"],
+        }],
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: null,
+        pending: true,
+        modelPending: true,
+        effortPending: true,
+        serviceTierPending: false,
+      },
+    });
+
+    expect(rendered).toContain("模型已选择，请继续选择思考等级");
+    expect(rendered).toContain("切换：/effort <序号或档位>");
+  });
+
   it("renders DeepSeek balance instead of OpenAI account usage", () => {
     const rendered = formatConversationUsage({
       kind: "usage",

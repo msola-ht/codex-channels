@@ -143,6 +143,7 @@ export type ConversationCommandResult =
   | {
       kind: "models";
       view: "model" | "effort" | "fast";
+      nextSelection?: "effort";
       state: Awaited<ReturnType<ConversationUseCases["modelState"]>>;
     }
   | {
@@ -680,16 +681,28 @@ export class ConversationCommandService {
           outcome: { type: "review.started", turnId: submission.turnId },
         };
       }
-      case "model":
+      case "model": {
+        if (!argumentsText || argumentsText === "clear") {
+          return {
+            kind: "models",
+            view: "model",
+            state: argumentsText === "clear"
+              ? await this.conversations.clearModelSelection(target)
+              : await this.conversations.modelState(target),
+          };
+        }
+        const state = await this.conversations.selectModel(target, argumentsText);
+        const selected = state.models.find((model) =>
+          model.model === state.model
+          && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
+        const shouldSelectEffort = (selected?.supportedReasoningEfforts.length ?? 0) > 1;
         return {
           kind: "models",
-          view: "model",
-          state: argumentsText === "clear"
-            ? await this.conversations.clearModelSelection(target)
-            : argumentsText
-              ? await this.conversations.selectModel(target, argumentsText)
-              : await this.conversations.modelState(target),
+          view: shouldSelectEffort ? "effort" : "model",
+          ...(shouldSelectEffort ? { nextSelection: "effort" as const } : {}),
+          state,
         };
+      }
       case "effort":
         return {
           kind: "models",

@@ -466,9 +466,16 @@ describe("Feishu conversation adapter", () => {
       ...(await modelState()),
       effort: "high",
     }));
+    const selectModel = vi.fn(async () => ({
+      ...(await modelState()),
+      pending: true,
+      modelPending: true,
+      effortPending: true,
+    }));
     const adapter = new FeishuConversationAdapter(
       {
         modelState,
+        selectModel,
         selectEffort,
       } as unknown as ConversationUseCases,
       fixture.outbox,
@@ -499,6 +506,68 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
     expect(selectEffort).toHaveBeenCalledWith(message.target, "high");
     expect(fixture.sent[0]?.text).toContain("当前思考等级：high");
+
+    const followUp = await adapter.handleCommandCenterAction(
+      message.target,
+      "model",
+      message.actorId,
+      "1",
+    );
+    expect(selectModel).toHaveBeenCalledWith(message.target, "1");
+    expect(followUp).toMatchObject({
+      title: "选择思考等级",
+      choices: [
+        expect.objectContaining({ action: "effort", input: "medium" }),
+        expect.objectContaining({ action: "effort", input: "high" }),
+      ],
+    });
+  });
+
+  it("opens a reasoning-effort card after a directly typed model selection", async () => {
+    const fixture = createOutbox();
+    const openResponse = vi.fn(async () => {});
+    const selectModel = vi.fn(async () => ({
+      models: [{
+        id: "gpt-test",
+        model: "gpt-test",
+        displayName: "GPT Test",
+        supportedReasoningEfforts: [
+          { effort: "medium", description: "平衡" },
+          { effort: "high", description: "深入" },
+        ],
+        defaultReasoningEffort: "medium",
+        serviceTiers: [],
+        defaultServiceTier: null,
+        isDefault: true,
+        inputModalities: ["text"],
+      }],
+      model: "gpt-test",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: null,
+      pending: true,
+      modelPending: true,
+      effortPending: true,
+      serviceTierPending: false,
+    }));
+    const adapter = new FeishuConversationAdapter(
+      { selectModel } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+      undefined,
+      undefined,
+      { open: vi.fn(async () => {}), openResponse } as never,
+    );
+
+    await adapter.handle({ ...message, text: "/model 1" });
+    await fixture.outbox.close();
+
+    expect(openResponse).toHaveBeenCalledWith(
+      message.target,
+      message.actorId,
+      expect.objectContaining({ title: "选择思考等级" }),
+    );
+    expect(fixture.sent).toEqual([]);
   });
 
   it("uses the shared Skill list and explicit invocation commands", async () => {
