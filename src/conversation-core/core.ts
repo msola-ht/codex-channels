@@ -413,6 +413,7 @@ export class ConversationCore {
           ? this.usageByThread.get(event.threadId)
           : undefined;
         const modelSettings = this.router.modelSettingsForThread(event.threadId);
+        const workspace = this.router.workspaceForThread?.(event.threadId);
         const weeklyLimit = usesOpenAiAccount(modelSettings?.modelProvider)
           ? this.weeklyRateLimit()
           : undefined;
@@ -449,6 +450,9 @@ export class ConversationCore {
           ...(weeklyLimit ? { weeklyLimit } : {}),
           ...(goal ? { goal } : {}),
           ...(contextCompactionCount !== undefined ? { contextCompactionCount } : {}),
+          ...(workspace
+            ? { workspaceId: workspace.id, workspaceName: workspace.name }
+            : {}),
           ...(this.isBackgroundThread(event.threadId) ? { background: true } : {}),
         });
         return;

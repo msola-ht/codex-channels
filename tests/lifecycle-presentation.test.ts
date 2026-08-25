@@ -578,6 +578,8 @@ describe("shared Surface lifecycle presentation", () => {
         effort: "medium",
         serviceTier: "priority",
         contextCompactionCount: 2,
+        workspaceId: "main",
+        workspaceName: "Main",
         weeklyLimit: {
           usedPercent: 37,
           windowDurationMins: 10_080,
@@ -608,6 +610,8 @@ describe("shared Surface lifecycle presentation", () => {
       "  总耗时：1分5秒",
       "",
       "当前会话累计：",
+      "当前工作区：Main (main)",
+      "会话 ID：thread-1",
       "上下文：10 K / 100 K（10%）",
       "上下文压缩：2 次",
       "Goal：进行中 · 12.5 K / 100 K",

@@ -154,7 +154,7 @@ describe("WeixinSurface", () => {
     );
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "final reply",
-      "**本次运行 · 已完成**",
+      "**本次运行 · 已完成**\n\n- 会话 ID：thread",
     ]);
     expect(onFatal).not.toHaveBeenCalled();
   });

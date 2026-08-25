@@ -408,6 +408,8 @@ describe("Feishu output renderer", () => {
       modelProvider: "openai",
       effort: "medium",
       serviceTier: "priority",
+      workspaceId: "main",
+      workspaceName: "Main",
       gitBranch: "feature/weixin-surface",
       contextCompactionCount: 2,
       weeklyLimit: {
@@ -427,6 +429,8 @@ describe("Feishu output renderer", () => {
       "  - 总耗时：1分5秒",
       "",
       "### 当前会话累计",
+      "- 当前工作区：Main (main)",
+      "- 会话 ID：thread-1",
       "- 上下文：100 / 200（50%）",
       "- 上下文压缩：2 次",
       "- Git 分支：feature/weixin-surface",

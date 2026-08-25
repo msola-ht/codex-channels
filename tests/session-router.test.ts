@@ -570,6 +570,7 @@ describe("SessionRouter", () => {
     expect(router.current(target)?.threadId).toBe("selected");
     expect(router.backgroundBindings(target).map(({ threadId }) => threadId)).toEqual(["running"]);
     expect(router.targetForThread("running")).toEqual(target);
+    expect(router.workspaceForThread("running")).toEqual({ id: "main", name: "Main" });
     expect(unsubscribed).toEqual([]);
   });
 
