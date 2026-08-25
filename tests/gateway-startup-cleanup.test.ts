@@ -188,10 +188,12 @@ describe("GatewayApplication startup cleanup", () => {
       codex: { knownProvider: () => undefined },
       output: { publish: () => undefined },
       core: { markTurnStarted: () => undefined },
-      scheduledRunCoordinator: {
-        runningThreadIds: () => new Set([binding.threadId]),
-        taskForThread: () => ({ modelProvider: "deepseek" }),
-        recoverRunning,
+      scheduledTasks: {
+        coordinator: {
+          runningThreadIds: () => new Set([binding.threadId]),
+          taskForThread: () => ({ modelProvider: "deepseek" }),
+          recoverRunning,
+        },
       },
       router: {
         allBindings: () => [binding],
@@ -235,9 +237,11 @@ describe("GatewayApplication startup cleanup", () => {
     Object.assign(application, {
       stopping: false,
       surfaces: [],
-      scheduledRunCoordinator: {
-        runningThreadIds: () => new Set(["missing-thread"]),
-        recoverRunning,
+      scheduledTasks: {
+        coordinator: {
+          runningThreadIds: () => new Set(["missing-thread"]),
+          recoverRunning,
+        },
       },
       router: { allBindings: () => [] },
       codex: { knownProvider: () => undefined },
@@ -279,22 +283,22 @@ describe("GatewayApplication startup cleanup", () => {
         return [];
       },
       overrides: {
-        scheduledTaskScheduler: {
-          recoverAfterCrash: () => calls.push("runs:recovered"),
+        scheduledTasks: {
+          prepareRecovery: async () => {
+            calls.push("runs:recovered");
+            calls.push("coordinator:initialized");
+            calls.push("coordinator:prepared");
+          },
           start: () => calls.push("scheduler:started"),
           stop: async () => {
             calls.push("scheduler:stopped");
           },
-        },
-        scheduledRunCoordinator: {
-          initialize: () => calls.push("coordinator:initialized"),
-          prepareRecovery: async () => calls.push("coordinator:prepared"),
-          runningThreadIds: () => new Set<string>(),
-          taskForThread: () => undefined,
-          recoverRunning: async () => undefined,
-        },
-        scheduledTaskStore: {
           close: () => calls.push("store:closed"),
+          coordinator: {
+            runningThreadIds: () => new Set<string>(),
+            taskForThread: () => undefined,
+            recoverRunning: async () => undefined,
+          },
         },
       },
     }));

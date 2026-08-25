@@ -44,7 +44,7 @@ import {
   formatRuntimeMcpStatusUpdate,
   formatRuntimeRateLimitUpdate,
 } from "../runtime-status-format.js";
-import { PlanProgressTracker } from "../plan-presentation.js";
+import { TurnPlanProgressState } from "../plan-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
@@ -89,10 +89,6 @@ interface OperationLogState {
   timer: NodeJS.Timeout | undefined;
 }
 
-interface PlanMessageState {
-  tracker: PlanProgressTracker;
-}
-
 interface TelegramReasoningMessage {
   chatId: string;
   threadId: string;
@@ -130,7 +126,7 @@ export class TelegramOutbox {
   private readonly streams = new Map<string, StreamState>();
   private readonly operationLogs = new Map<string, OperationLogState>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
-  private readonly planMessages = new Map<string, PlanMessageState>();
+  private readonly planProgress = new TurnPlanProgressState();
   private readonly reasoningMessages = new Map<string, TelegramReasoningMessage>();
   private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
@@ -281,9 +277,7 @@ export class TelegramOutbox {
       }
       case "text.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
-        if (event.phase !== "commentary") {
-          this.flushOperationUpdates(chatId, turnKey);
-        }
+        this.flushOperationUpdates(chatId, event);
         this.sealOperationLog(chatId, turnKey);
         const key = this.streamKey(turnKey, event.itemId);
         const existing = this.streams.get(key);
@@ -353,7 +347,7 @@ export class TelegramOutbox {
           return;
         }
         flushStreamBeforeOutput();
-        if (this.operationUpdates.accept(turnKey, event.operation, chatId)) {
+        if (this.operationUpdates.accept(event, chatId)) {
           return;
         }
         const state = this.operationLogs.get(turnKey) ?? this.createOperationLog(chatId, turnKey);
@@ -386,12 +380,7 @@ export class TelegramOutbox {
         if (!this.options.planUpdatesEnabled) {
           return;
         }
-        const turnKey = this.turnKey(event.threadId, event.turnId);
-        const state = this.planMessages.get(turnKey) ?? {
-          tracker: new PlanProgressTracker(),
-        };
-        this.planMessages.set(turnKey, state);
-        for (const presentation of state.tracker.accept(event)) {
+        for (const presentation of this.planProgress.accept(event)) {
           this.enqueue(
             chatId,
             () => this.send(
@@ -460,8 +449,8 @@ export class TelegramOutbox {
         return;
       case "turn.completed": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
-        this.planMessages.delete(turnKey);
-        this.flushOperationUpdates(chatId, turnKey);
+        this.planProgress.complete(event);
+        this.flushOperationUpdates(chatId, event);
         this.sealOperationLog(chatId, turnKey);
         const keys = this.streamKeysForTurn(event.threadId, event.turnId);
         for (const key of keys) {
@@ -644,7 +633,7 @@ export class TelegramOutbox {
     this.streams.clear();
     this.operationLogs.clear();
     this.operationUpdates.clear();
-    this.planMessages.clear();
+    this.planProgress.clear();
     this.reasoningMessages.clear();
     this.replyTargets.clear();
     this.approvalOperations.clear();
@@ -956,12 +945,19 @@ export class TelegramOutbox {
     this.enqueue(chatId, () => this.flushOperationLog(state, true), true);
   }
 
-  private flushOperationUpdates(chatId: string, turnKey: string): void {
-    const buffered = this.operationUpdates.take(turnKey);
+  private flushOperationUpdates(
+    chatId: string,
+    event: Extract<OutputEvent, { type: "text.completed" | "turn.completed" }>,
+  ): void {
+    const buffered = this.operationUpdates.flush(event);
     if (buffered === null) {
       return;
     }
-    this.enqueueOperationSummary(chatId, buffered.summary, turnKey);
+    this.enqueueOperationSummary(
+      chatId,
+      buffered.summary,
+      this.turnKey(event.threadId, event.turnId),
+    );
   }
 
   private flushStreamsBeforeVisibleOutput(chatId: string, turnKey: string): void {

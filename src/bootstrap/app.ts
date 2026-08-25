@@ -62,14 +62,11 @@ import {
   ConversationService,
   ModelSelectionService,
   ProviderAccountService,
-  ScheduledTaskApplicationService,
-  ScheduledTaskToolService,
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
-  type RequestMetricsTimeRange,
 } from "../application/index.js";
 import {
   ConversationCore,
@@ -100,11 +97,6 @@ import {
   type ConversationBinding,
 } from "../storage/index.js";
 import {
-  ScheduledTaskScheduler,
-  scheduledTaskDatabasePath,
-  SqliteScheduledTaskStore,
-} from "../scheduled-tasks/index.js";
-import {
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
@@ -134,10 +126,9 @@ import {
 } from "./reference-cost-summary.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
-import { ScheduledTaskExecutor } from "./scheduled-task-executor.js";
-import { ScheduledTaskRunCoordinator } from "./scheduled-task-run-coordinator.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
-import { createScheduledTaskToolRequestHandler } from "./scheduled-task-tool-request.js";
+import { ScheduledTaskComposition } from "./scheduled-task-composition.js";
+import { RequestMetricsQueryAdapter } from "./request-metrics-query-adapter.js";
 import {
   createManagedProviderAccountAdapters,
   createManagedProviderPricingResolvers,
@@ -180,9 +171,7 @@ export class GatewayApplication {
   private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private readonly subagentCompletion: SubagentCompletionTracker;
-  private readonly scheduledTaskStore: SqliteScheduledTaskStore | undefined;
-  private readonly scheduledTaskScheduler: ScheduledTaskScheduler | undefined;
-  private readonly scheduledRunCoordinator: ScheduledTaskRunCoordinator | undefined;
+  private readonly scheduledTasks: ScheduledTaskComposition | undefined;
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private startTask: Promise<void> | undefined;
@@ -506,121 +495,7 @@ export class GatewayApplication {
         },
       },
       providerAccounts,
-      {
-        forThread: (threadId) => {
-          const summary = metricsStore.threadSummary(threadId);
-          const direct = summary.latestDirectApi;
-          const providerName = direct === null
-            ? undefined
-            : config.apiProviders.find(
-                (candidate) => candidate.id === direct.provider,
-              )?.name;
-          return {
-            threadId: summary.threadId,
-            modelProvider: this.router.modelSettingsForThread(threadId)
-              ?.modelProvider ?? "openai",
-            latestTurn: summary.latestTurn,
-            threadAggregate: summary.threadAggregate,
-            latestDirectApi: direct === null
-              ? null
-              : {
-                  provider: direct.provider,
-                  ...(providerName === undefined ? {} : { providerName }),
-                  model: direct.model,
-                  status: direct.status,
-                  httpStatus: direct.httpStatus,
-                  requestDurationMs: direct.requestDurationMs,
-                  inputTokens: direct.inputTokens,
-                  cachedInputTokens: direct.cachedInputTokens,
-                  outputTokens: direct.outputTokens,
-                  reasoningOutputTokens: direct.reasoningOutputTokens,
-                  totalTokens: direct.totalTokens,
-                  pricingCurrency: direct.pricing?.currency ?? null,
-                  totalCostNanos: direct.totalCostNanos,
-                  inputCostNanos: direct.uncachedInputCostNanos,
-                  cachedInputCostNanos: direct.cachedInputCostNanos,
-                  outputCostNanos: direct.outputCostNanos,
-                  uncachedInputPricePerMillionNanos:
-                    direct.pricing?.uncachedInputPricePerMillionNanos ?? null,
-                  cachedInputPricePerMillionNanos:
-                    direct.pricing?.cachedInputPricePerMillionNanos ?? null,
-                  outputPricePerMillionNanos:
-                    direct.pricing?.outputPricePerMillionNanos ?? null,
-                  ...(direct.pricing?.bucket === undefined
-                    || direct.pricing.bucket === null
-                    ? {}
-                    : { pricingBucket: direct.pricing.bucket }),
-                },
-          };
-        },
-        aggregate: (view, range) => {
-          const resolvedRange = resolveRequestMetricsRange(range);
-          const report = metricsStore.aggregate({
-            dimension: view === "providers"
-              ? "provider"
-              : view === "models"
-                ? "model"
-                : "global",
-            startAtMs: resolvedRange.startAtMs,
-            endAtMs: resolvedRange.endAtMs,
-          });
-          return {
-            view,
-            range,
-            startAtMs: report.startAtMs,
-            endAtMs: report.endAtMs,
-            aggregate: report.aggregate,
-            groups: report.groups.map((group) => {
-              const providerName = group.provider === null
-                ? undefined
-                : config.apiProviders.find(
-                    (candidate) => candidate.id === group.provider,
-                  )?.name;
-              return {
-                provider: group.provider,
-                ...(providerName === undefined ? {} : { providerName }),
-                model: group.model,
-                aggregate: group.aggregate,
-              };
-            }),
-            totalGroupCount: report.totalGroupCount,
-          };
-        },
-        weeklyQuotaEstimate: (provider, limitId, resetsAt, nowMs) =>
-          metricsStore.weeklyQuotaEstimate({ provider, limitId, resetsAt, nowMs }),
-        errors: (range) => {
-          const resolvedRange = resolveRequestMetricsRange(range);
-          const report = metricsStore.errors({
-            startAtMs: resolvedRange.startAtMs,
-            endAtMs: resolvedRange.endAtMs,
-          });
-          return {
-            view: "errors",
-            range,
-            startAtMs: report.startAtMs,
-            endAtMs: report.endAtMs,
-            requestCount: report.requestCount,
-            unsuccessfulRequestCount: report.unsuccessfulRequestCount,
-            groups: report.groups.map((group) => {
-              const providerName = config.apiProviders.find(
-                (candidate) => candidate.id === group.provider,
-              )?.name;
-              return {
-                provider: group.provider,
-                ...(providerName === undefined ? {} : { providerName }),
-                model: group.model,
-                status: group.status,
-                httpStatus: group.httpStatus,
-                errorType: group.errorType,
-                lastErrorMessage: group.lastErrorMessage,
-                requestCount: group.requestCount,
-                lastOccurredAtMs: group.lastOccurredAtMs,
-              };
-            }),
-            totalGroupCount: report.totalGroupCount,
-          };
-        },
-      },
+      new RequestMetricsQueryAdapter(metricsStore, this.router, config.apiProviders),
       this.workspacePermissions,
       {
         recordTurnError: (record) => {
@@ -709,122 +584,60 @@ export class GatewayApplication {
       const provider = this.router.modelSettingsForThread(event.threadId)?.modelProvider;
       this.providerIdleReleaser.touch(provider, event.target);
     });
-    const scheduledTaskModule = config.scheduledTasksEnabled
-      ? (() => {
-          const store = new SqliteScheduledTaskStore(
-            scheduledTaskDatabasePath(config.stateDatabasePath),
-          );
-          const executor: ScheduledTaskExecutor = new ScheduledTaskExecutor(
-            this.router,
-            this.codex,
-            this.bindings,
-            this.workspaces,
-            {
-              isProviderConfigured: (provider) => this.codex.isProviderConfigured(provider),
-              ensureProvider: (provider) => this.codex.ensureProviderAvailable(provider),
-              isModelAvailable: (provider, model) =>
-                this.codex.isModelAvailable(provider, model),
-            },
-            this.core,
-            {
-              isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
-                surface.surface === target.surface && surface.accountId === target.accountId),
-              onThreadStarted: (run, target, threadId) =>
-                coordinator.onThreadStarted(run, target, threadId),
-              onTurnStarted: (run, target, threadId, turnId) =>
-                coordinator.onTurnStarted(run, target, threadId, turnId),
-              onRunStateChanged: (run) => coordinator.onRunStateChanged(run),
-              logger,
-            },
-          );
-          const coordinator = new ScheduledTaskRunCoordinator(store, this.router, this.codex, {
-            validateRun: (task) => executor.validateRun(task),
-            logger,
-          });
-          const scheduler = new ScheduledTaskScheduler(store, executor, {
-            onError: (error) => logger.error({ err: error }, "Gateway 计划任务调度失败"),
-          });
-          this.scheduledTaskStore = store;
-          this.scheduledRunCoordinator = coordinator;
-          this.scheduledTaskScheduler = scheduler;
-          this.output.subscribe("scheduled-task-run-coordinator", (event) => {
-            coordinator.handleOutput(event);
-          });
-          const scheduledTaskService = new ScheduledTaskApplicationService(store, {
-            isActorAuthorized: (target, actorId) =>
-              this.bindings.conversations().some((candidate) =>
-                surfaceAccountKey(candidate.surface, candidate.accountId)
-                  === surfaceAccountKey(target.surface, target.accountId)
-                && candidate.conversationId === target.conversationId)
-              && this.bindings.actors(target).includes(actorId),
-            isProviderConfigured: (provider) => this.codex.isProviderConfigured(provider),
-            creationContext: (target) => {
-              const status = service.status(target);
-              const workspace = this.workspaces.require(status.workspaceId);
-              const sandbox = workspace.sandbox ?? "read-only";
-              if (sandbox === "danger-full-access") {
-                throw new UserFacingError(
-                  "scheduled-task.state.invalid",
-                  "计划任务不允许使用 danger-full-access Workspace",
-                );
-              }
-              if (
-                workspace.approvalPolicy !== undefined
-                && workspace.approvalPolicy !== "never"
-              ) {
-                throw new UserFacingError(
-                  "scheduled-task.state.invalid",
-                  "当前 Workspace 不能形成 approvalPolicy=never 的无人值守环境",
-                );
-              }
-              return {
-                workspaceId: workspace.id,
-                workspaceName: workspace.name,
-                cwd: workspace.cwd,
-                modelProvider: status.modelProvider ?? "openai",
-                model: status.model,
-                reasoningEffort: status.effort,
-                serviceTier: status.serviceTier,
-                sandbox,
-                approvalPolicy: "never",
-                permissions: workspace.permissions ?? null,
-                modelPending: status.modelPending,
-                effortPending: status.effortPending,
-                serviceTierPending: status.fastModePending,
-              };
-            },
-            runTaskNow: (taskId) => scheduler.runTaskNow(taskId),
-          }, Date.now);
-          const toolService = new ScheduledTaskToolService(
-            scheduledTaskService,
-            Date.now,
-          );
-          const scheduledTaskToolHandler = createScheduledTaskToolRequestHandler({
-            targetForThread: (threadId) => this.router.targetForThread(threadId),
-            actorsForTarget: (target) => this.bindings.actors(target),
-            execute: (target, actorId, args) =>
-              toolService.execute(target, actorId, args),
-            presentConfirmation: (target, actorId, preview) => {
-              this.surfaceManager.presentScheduledTaskConfirmation(
-                target,
-                actorId,
-                preview,
+    this.scheduledTasks = config.scheduledTasksEnabled
+      ? new ScheduledTaskComposition({
+          stateDatabasePath: config.stateDatabasePath,
+          router: this.router,
+          codex: this.codex,
+          bindings: this.bindings,
+          workspaces: this.workspaces,
+          core: this.core,
+          output: this.output,
+          logger,
+          isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
+            surface.surface === target.surface && surface.accountId === target.accountId),
+          creationContext: (target) => {
+            const status = service.status(target);
+            const workspace = this.workspaces.require(status.workspaceId);
+            const sandbox = workspace.sandbox ?? "read-only";
+            if (sandbox === "danger-full-access") {
+              throw new UserFacingError(
+                "scheduled-task.state.invalid",
+                "计划任务不允许使用 danger-full-access Workspace",
               );
-            },
-          });
-          return {
-            service: scheduledTaskService,
-            handler: scheduledTaskToolHandler,
-          };
-        })()
+            }
+            if (
+              workspace.approvalPolicy !== undefined
+              && workspace.approvalPolicy !== "never"
+            ) {
+              throw new UserFacingError(
+                "scheduled-task.state.invalid",
+                "当前 Workspace 不能形成 approvalPolicy=never 的无人值守环境",
+              );
+            }
+            return {
+              workspaceId: workspace.id,
+              workspaceName: workspace.name,
+              cwd: workspace.cwd,
+              modelProvider: status.modelProvider ?? "openai",
+              model: status.model,
+              reasoningEffort: status.effort,
+              serviceTier: status.serviceTier,
+              sandbox,
+              approvalPolicy: "never",
+              permissions: workspace.permissions ?? null,
+              modelPending: status.modelPending,
+              effortPending: status.effortPending,
+              serviceTierPending: status.fastModePending,
+            };
+          },
+          presentConfirmation: (target, actorId, preview) => {
+            this.surfaceManager.presentScheduledTaskConfirmation(target, actorId, preview);
+          },
+        })
       : undefined;
-    if (!config.scheduledTasksEnabled) {
-      this.scheduledTaskStore = undefined;
-      this.scheduledRunCoordinator = undefined;
-      this.scheduledTaskScheduler = undefined;
-    }
-    const scheduledTaskUseCases = scheduledTaskModule?.service;
-    const scheduledTaskToolHandler = scheduledTaskModule?.handler;
+    const scheduledTaskUseCases = this.scheduledTasks?.service;
+    const scheduledTaskToolHandler = this.scheduledTasks?.toolHandler;
     this.surfaceModules = createSurfaceModules({
       config,
       service,
@@ -1018,10 +831,10 @@ export class GatewayApplication {
         return approvalHandler(request);
       };
     this.codex.setServerRequestHandler(
-      this.scheduledRunCoordinator === undefined
+      this.scheduledTasks === undefined
         ? appServerRequestHandler
         : createScheduledTaskServerRequestHandler(
-            this.scheduledRunCoordinator,
+            this.scheduledTasks.coordinator,
             appServerRequestHandler,
           ),
     );
@@ -1145,9 +958,7 @@ export class GatewayApplication {
         }
       }
       this.requireRunning();
-      this.scheduledTaskScheduler?.recoverAfterCrash();
-      this.scheduledRunCoordinator?.initialize();
-      await this.scheduledRunCoordinator?.prepareRecovery();
+      await this.scheduledTasks?.prepareRecovery();
       await this.restoreBindings();
       this.requireRunning();
       this.logger.info(
@@ -1161,7 +972,7 @@ export class GatewayApplication {
       );
       await this.surfaceManager.start();
       await this.channelImageSpool.start();
-      this.scheduledTaskScheduler?.start();
+      this.scheduledTasks?.start();
       this.providerIdleReleaser?.start();
       this.scheduleBindingRestore();
       this.requireRunning();
@@ -1188,7 +999,7 @@ export class GatewayApplication {
     this.subagentCompletion?.close();
     const failures: unknown[] = [];
     for (const [component, close] of [
-      ["Scheduled Task Scheduler", () => this.scheduledTaskScheduler?.stop()],
+      ["Scheduled Task Scheduler", () => this.scheduledTasks?.stop()],
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
@@ -1201,7 +1012,7 @@ export class GatewayApplication {
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
       ["Binding Store", () => Promise.resolve(this.bindings.close())],
-      ["Scheduled Task Store", () => Promise.resolve(this.scheduledTaskStore?.close())],
+      ["Scheduled Task Store", () => Promise.resolve(this.scheduledTasks?.close())],
     ] as const) {
       try {
         await close();
@@ -1519,7 +1330,7 @@ export class GatewayApplication {
     const enabledSurfaces = new Set(
       this.surfaces.map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
     );
-    const scheduledThreadIds = this.scheduledRunCoordinator?.runningThreadIds()
+    const scheduledThreadIds = this.scheduledTasks?.coordinator.runningThreadIds()
       ?? new Set<string>();
     const candidateThreadIds = new Set(
       this.router.allBindings()
@@ -1545,7 +1356,7 @@ export class GatewayApplication {
     );
     if (candidateThreadIds.size === 0) {
       if (provider === undefined && requestedThreadIds === undefined) {
-        await this.scheduledRunCoordinator?.recoverRunning(scheduledThreadIds);
+        await this.scheduledTasks?.coordinator.recoverRunning(scheduledThreadIds);
       }
       return;
     }
@@ -1593,7 +1404,7 @@ export class GatewayApplication {
           }
         },
         (binding) => {
-          const task = this.scheduledRunCoordinator?.taskForThread(binding.threadId);
+          const task = this.scheduledTasks?.coordinator.taskForThread(binding.threadId);
           return task?.modelProvider == null
             ? {}
             : { modelProvider: task.modelProvider };
@@ -1615,7 +1426,7 @@ export class GatewayApplication {
         this.publishThreadAvailability(pending.binding, "available");
       }
     }
-    await this.scheduledRunCoordinator?.recoverRunning(restoredThreadIds);
+    await this.scheduledTasks?.coordinator.recoverRunning(restoredThreadIds);
     for (const failure of failures) {
       this.logger.warn(
         {
@@ -1790,44 +1601,6 @@ function isReleaseableThreadWriterHolder(holder: ThreadLockHolder): boolean {
   return /^(?:codex|[^\s]*[/\\]codex)(?:\s|$)/u.test(holder.command);
 }
 
-function resolveRequestMetricsRange(
-  range: RequestMetricsTimeRange,
-  nowMs = Date.now(),
-): { startAtMs: number; endAtMs: number } {
-  const durations: Partial<Record<RequestMetricsTimeRange, number>> = {
-    "24h": 24 * 60 * 60 * 1_000,
-    "7d": 7 * 24 * 60 * 60 * 1_000,
-    "30d": 30 * 24 * 60 * 60 * 1_000,
-    "90d": 90 * 24 * 60 * 60 * 1_000,
-    "365d": 365 * 24 * 60 * 60 * 1_000,
-  };
-  const duration = durations[range];
-  if (duration !== undefined) {
-    return { startAtMs: Math.max(0, nowMs - duration), endAtMs: nowMs };
-  }
-  if (range === "all") return { startAtMs: 0, endAtMs: nowMs };
-  const day = new Date(nowMs);
-  day.setHours(0, 0, 0, 0);
-  const today = day.getTime();
-  if (range === "today") return { startAtMs: today, endAtMs: nowMs };
-  if (range === "yesterday") {
-    day.setDate(day.getDate() - 1);
-    return { startAtMs: day.getTime(), endAtMs: today };
-  }
-  const month = new Date(day.getFullYear(), day.getMonth(), 1);
-  if (range === "this-month") return { startAtMs: month.getTime(), endAtMs: nowMs };
-  if (range === "last-month") {
-    return {
-      startAtMs: new Date(day.getFullYear(), day.getMonth() - 1, 1).getTime(),
-      endAtMs: month.getTime(),
-    };
-  }
-  day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
-  const week = day.getTime();
-  if (range === "this-week") return { startAtMs: week, endAtMs: nowMs };
-  day.setDate(day.getDate() - 7);
-  return { startAtMs: day.getTime(), endAtMs: week };
-}
 
 function surfaceLabel(surface: string): string {
   switch (surface) {

@@ -20,9 +20,16 @@
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
   标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；按已启用
-  Provider 装配模型指标组件，不持有模型转发数据通路；把同一指标库的精确 Thread 查询映射为
-  Application `/metrics` 窄端口，并为 OpenAI `/limits` 提供当前周窗口的精确 Provider 聚合；
-  Core 根据编译期 Provider 能力决定哪些详细计时可以进入完成事件。
+  Provider 装配模型指标组件，不持有模型转发数据通路；通过 `request-metrics-query-adapter.ts`
+  把同一指标库的精确 Thread 查询映射为 Application `/metrics` 窄端口，并为 OpenAI `/limits`
+  提供当前周窗口的精确 Provider 聚合；
+  Core 根据编译期 Provider 能力决定哪些详细计时可以进入完成事件；计划任务的内部组件、恢复顺序和
+  Store 生命周期委托给 `scheduled-task-composition.ts`。
+- `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
+  Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
+  Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
+- `request-metrics-query-adapter.ts`：把 Observability 指标查询、时间范围和 Provider 显示名映射为
+  Application 的 `/metrics` 窄端口；不改变 Store 查询模型，也不让 Application 依赖 SQLite 实现。
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
   有界装配 DeepSeek、OpenCode Go 的计价与账户适配器；解析器以精确 Provider ID 登记，`none`
   明确不提供价格或账户，`remote` 才使用通用价格目录；未知能力或适配器冲突启动时失败关闭，

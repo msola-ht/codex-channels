@@ -5,7 +5,7 @@
 
 ## 文件
 
-- `proxy.ts`：HTTP/SSE 与 WebSocket 转发实现。监听自动分配的回环地址，把精确
+- `proxy.ts`：HTTP/SSE 与 WebSocket 转发和指标观测实现。监听自动分配的回环地址，把精确
   `/responses`、HTTP `/responses/compact` 与只读 `/models` 路径转发到上游；官方 OpenAI
   主代理还按 Codex 0.148.0 固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
@@ -50,6 +50,8 @@
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
   携带账户标识供服务侧按 `opencode-go-<账户>` Socket 上报；无前缀请求归属配置的默认账户
   （`agents.external` 角色请求）。
+- `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
+  以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的 `0600` Unix Socket，
   接收端归约后返回确认，保证短回复的 Turn 完成事件不会抢先清理计时状态；Gateway 不在线时指标
   直接丢弃并继续模型响应。接收端拒绝非 Socket、非当前用户或已被活动进程占用的路径，并只删除
