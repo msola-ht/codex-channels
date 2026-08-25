@@ -23,12 +23,12 @@ const helpText = {
 ~/.codex-connect/<id>-work，不更改默认工作区。
 
 其他用法：
-  codexc work list
+  codexc work list [--json]
   codexc work add [--id ID] [--name 名称] [--cwd 目录] [--prune-missing]
   codexc work remove <序号|ID|名称>`,
-  list: `用法：codexc work list
+  list: `用法：codexc work list [--json]
 
-列出全部 Workspace 与当前默认项。`,
+  列出全部 Workspace 与当前默认项；--json 输出稳定 JSON。`,
   add: `用法：codexc work add [--id ID] [--name 名称] [--cwd 目录] [--prune-missing]
 
 把 --cwd 指定的目录注册为 Workspace，未指定时使用当前目录；交互式新建请运行 codexc work。`,
@@ -47,8 +47,9 @@ export async function runWorkspaceCommand(args, {
   if (showRequestedHelp(args)) return;
   const [subcommand] = args;
   let addOptions;
+  const json = subcommand === "list" && args.length === 2 && args[1] === "--json";
   if (subcommand === "list") {
-    if (args.length !== 1) throw new Error(helpText.list);
+    if (args.length !== 1 && !json) throw new Error(helpText.list);
   } else if (subcommand === "add") {
     addOptions = parseWorkspaceAddOptions(args.slice(1));
   } else if (subcommand === "remove") {
@@ -117,7 +118,7 @@ export async function runWorkspaceCommand(args, {
     });
     return;
   }
-  listWorkspaces(runtime.configPath);
+  listWorkspaces(runtime.configPath, { json, output });
 }
 
 function showRequestedHelp(args) {
@@ -292,9 +293,25 @@ async function removeWorkspaceInteractively({
   writeCliMessage("note", gatewayConfigActivationNotice);
 }
 
-function listWorkspaces(configPath) {
+function listWorkspaces(configPath, {
+  json = false,
+  output = process.stdout,
+} = {}) {
   const document = readGatewayConfig(configPath);
   const { workspaces, defaultWorkspaceId } = inspectWorkspaceConfig(document);
+  if (json) {
+    output.write(`${JSON.stringify({
+      defaultWorkspaceId,
+      workspaces: workspaces.map((item) => ({
+        id: item.id,
+        name: item.name,
+        cwd: item.cwd,
+        status: item.status,
+        default: item.id === defaultWorkspaceId,
+      })),
+    })}\n`);
+    return;
+  }
   console.log(`Workspace（${workspaces.length}）：`);
   workspaces.forEach((item, index) => {
     const status = item.status === "missing"

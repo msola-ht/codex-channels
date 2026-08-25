@@ -195,7 +195,9 @@ supports_websockets = false
 该候选，显式配置为 `openai` 时锁定官方 OpenAI；`model_provider` 未配置且只有一个候选时仍沿用
 该候选兼容旧配置。配置自定义主 Provider 时不能同时设置顶层 `openai_base_url`。通过
 `codexc primary-provider` 的
-`add` / `switch` / `remove` 管理候选与激活状态。`codexc primary-provider switch openai` 不运行
+`list` / `add` / `switch` / `remove` 管理候选与激活状态。`list --json` 提供稳定的脚本输出，包含当前
+主实例、固定候选、切换 Provider 与备份候选摘要，不包含 API Key 或其他认证字段。
+`codexc primary-provider switch openai` 不运行
 登录直接切回官方 OpenAI，官方凭据保留；切回时自定义候选块移入
 `~/.codex-connect/private/primary-providers.json`（0600）并从 config 清理，之后
 `codexc primary-provider switch <ID>` 会从备份自动恢复。`codexc setup` 的“官方 → 登录并恢复官方”

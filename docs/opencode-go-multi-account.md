@@ -57,10 +57,13 @@ Profile 保存该账户的 Key、Provider 配置、模型目录、默认模型�
 ```bash
 codexc opencode-go account add <id>
 codexc opencode-go account list
+codexc opencode-go account list --json
 codexc opencode-go account remove <id>
 codexc opencode-go account default <id>
 codexc opencode-go account stop <id>
 ```
+
+`list --json` 只输出账户 ID、默认标记、Provider ID 与运行模式，不包含 API Key 或 Profile 路径。
 
 - `add` 下载或复用共享模型目录，写入账户 Profile、管理标记与注册表；失败时按写入前快照回滚；
 - `remove` 先停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败

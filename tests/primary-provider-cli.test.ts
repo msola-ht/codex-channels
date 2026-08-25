@@ -131,6 +131,126 @@ describe("primary provider CLI", () => {
     );
   });
 
+  it("lists providers as JSON without exposing credentials", async () => {
+    const { createClient } = clientFixture({
+      config: {
+        model_provider: "thirdparty",
+        model_providers: {
+          thirdparty: {
+            name: "Third-party",
+            base_url: "https://third.example.test/v1",
+            wire_api: "responses",
+            experimental_bearer_token: "sk-secret",
+          },
+        },
+      },
+      version: "v1",
+    });
+    const output = { write: vi.fn() };
+
+    await runPrimaryProviderCli(["list", "--json"], {
+      environment: isolatedEnvironment("codexc-primary-provider-json-"),
+      output,
+      createClient,
+    });
+
+    const value = JSON.parse(output.write.mock.calls.map(([chunk]) => chunk).join(""));
+    expect(value.active).toMatchObject({ id: "thirdparty", mode: "exclusive" });
+    expect(value.fixedCandidates).toEqual([expect.objectContaining({
+      id: "thirdparty",
+      baseUrl: "https://third.example.test/v1",
+      active: true,
+    })]);
+    expect(JSON.stringify(value)).not.toContain("sk-secret");
+  });
+
+  it("lists switching providers as JSON without exposing profile credentials", async () => {
+    const environment = isolatedEnvironment("codexc-primary-provider-json-switching-");
+    writeFileSync(join(environment.CODEX_HOME!, "config.toml"), 'model_provider = "openai"\n', {
+      mode: 0o600,
+    });
+    writeCustomPrimaryProviderSwitchingProfile({
+      provider: "thirdparty",
+      model: "gpt-5.6-sol",
+      name: "Third-party",
+      baseUrl: "https://switch.example.test/v1",
+      apiKey: "sk-switch-secret",
+    }, environment);
+    const { createClient } = clientFixture({
+      config: { model_provider: "openai", model_providers: {} },
+      version: "v1",
+    });
+    const output = { write: vi.fn() };
+
+    await runPrimaryProviderCli(["list", "--json"], {
+      environment,
+      output,
+      createClient,
+    });
+
+    const value = JSON.parse(output.write.mock.calls.map(([chunk]) => chunk).join(""));
+    expect(value.active).toMatchObject({ id: "openai", mode: "switching" });
+    expect(value.switchingProviders).toEqual([{
+      id: "thirdparty",
+      name: "Third-party",
+      baseUrl: "https://switch.example.test/v1",
+      profileName: "sf-custom-thirdparty",
+    }]);
+    expect(JSON.stringify(value)).not.toContain("sk-switch-secret");
+  });
+
+  it("does not expose credentials from a legacy backup URL in JSON", async () => {
+    const environment = isolatedEnvironment("codexc-primary-provider-json-backup-");
+    backupPrimaryProviderCandidates({
+      thirdparty: {
+        name: "Third-party",
+        base_url: "https://user:password@third.example.test/v1",
+        wire_api: "responses",
+      },
+    }, environment);
+    const { createClient } = clientFixture({
+      config: { model_providers: {} },
+      version: "v1",
+    });
+    const output = { write: vi.fn() };
+
+    await runPrimaryProviderCli(["list", "--json"], {
+      environment,
+      output,
+      createClient,
+    });
+
+    const value = JSON.parse(output.write.mock.calls.map(([chunk]) => chunk).join(""));
+    expect(value.backupCandidates).toEqual([expect.objectContaining({
+      id: "thirdparty",
+      baseUrl: "",
+    })]);
+    expect(JSON.stringify(value)).not.toContain("user:password");
+  });
+
+  it.each([
+    ["stale-provider", "unknown"],
+    ["openai", "official"],
+  ] as const)("reports active provider mode for %s", async (providerId, mode) => {
+    const { createClient } = clientFixture({
+      config: {
+        model_provider: providerId,
+        model_providers: {},
+      },
+      version: "v1",
+    });
+    const output = { write: vi.fn() };
+
+    await runPrimaryProviderCli(["list", "--json"], {
+      environment: isolatedEnvironment("codexc-primary-provider-json-state-"),
+      output,
+      createClient,
+    });
+
+    expect(JSON.parse(output.write.mock.calls.map(([chunk]) => chunk).join("")))
+      .toMatchObject({ active: { id: providerId, mode } });
+  });
+
   it("switches to a configured candidate and optionally updates the model", async () => {
     const { createClient, writeUserConfigEdits } = clientFixture({
       config: {
