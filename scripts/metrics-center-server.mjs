@@ -156,6 +156,7 @@ export function createMetricsCenterServer({
 export async function runCenterInfo({
   environment = process.env,
   output = process.stdout,
+  json = false,
 } = {}) {
   const settings = resolveMetricsCenterSettings({ environment });
   const listening = await probeListening(settings.host, settings.port);
@@ -165,6 +166,22 @@ export async function runCenterInfo({
   const viewHost = settings.host === "0.0.0.0"
     ? candidates[0] ?? "0.0.0.0"
     : formatHost(settings.host);
+  const ingestEndpoints = (candidates.length > 0 ? candidates : [formatHost(settings.host)])
+    .map((address) => `http://${address}:${settings.port}/api/ingest`);
+  if (json) {
+    output.write(`${JSON.stringify({
+      running: listening,
+      host: settings.host,
+      port: settings.port,
+      ingestEndpoints,
+      viewEndpoint: `http://${viewHost}:${settings.port}`,
+      viewTokenConfigured: settings.token !== null,
+      deviceTokenConfigured: settings.deviceToken !== null,
+      databasePath: settings.databasePath,
+      configPath: settings.configPath,
+    }, null, 2)}\n`);
+    return settings;
+  }
   output.write(`中心服务：${listening ? "运行中" : "未运行"}\n`);
   output.write(`监听地址：${formatHost(settings.host)}:${settings.port}\n`);
   output.write("设备上报端点：\n");
@@ -557,7 +574,7 @@ function main() {
   try {
     const args = process.argv.slice(2);
     if (args[0] === "info") {
-      runCenterInfo().catch((error) => {
+      runCenterInfo({ json: args[1] === "--json" }).catch((error) => {
         writeCliMessage("failure", error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
       });
@@ -583,7 +600,7 @@ function main() {
     }
     if (args[0] === "--help" || args[0] === "-h") {
       console.log("用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]");
-      console.log("      codexc center info     查看中心地址、双令牌状态与运行状态");
+      console.log("      codexc center info [--json]     查看中心地址、双令牌状态与运行状态");
       console.log("      codexc center config   交互配置 [metrics.center]");
       return;
     }

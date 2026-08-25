@@ -162,7 +162,7 @@ sf-custom-<Provider ID> 连接对应的隔离 App Server。`,
   stop [目标]                  停止 gateway、app-server、webui、center 或 all
   reload                       通知 Gateway 重新读取配置
   restart [目标]               重启 gateway、app-server、webui、center 或 all
-  status [目标]                查看 gateway、app-server、webui、center 或 all
+  status [目标] [--json]       查看 gateway、app-server、webui、center 或 all
   logs [目标] [-f] [-n 行数]   查看后台日志
 
 目标默认值：start/stop/status 为 all，restart/logs 为 gateway。
@@ -173,7 +173,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "service.stop": `用法：codexc service stop [${serviceTargetUsage}]`,
   "service.reload": "用法：codexc service reload",
   "service.restart": `用法：codexc service restart [${serviceTargetUsage}]`,
-  "service.status": `用法：codexc service status [${serviceTargetUsage}]`,
+  "service.status": `用法：codexc service status [${serviceTargetUsage}] [--json]`,
   "service.logs": `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config
 
@@ -181,9 +181,10 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、WebUI 设置、
 指标设置（本地保留、设备接入中心与全局视图）、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
-  doctor: `用法：codexc doctor
+  doctor: `用法：codexc doctor [--json]
 
-只诊断当前安装、配置和服务状态，不修改配置；Linux 缺少 bubblewrap 时输出 [处理] 安装建议。`,
+只诊断当前安装、配置和服务状态，不修改配置；--json 输出结构化检查结果；
+Linux 缺少 bubblewrap 时输出安装建议。`,
   rules: `用法：codexc rules <init|check>
 
 具体用法：
@@ -193,7 +194,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 
   configure <Provider> [模型]  配置共享第三方子代理（agents.external）
   disable                    移除共享第三方子代理
-  status                     查看当前状态`,
+  status [--json]            查看当前状态`,
   "primary-provider": primaryProviderUsage,
   "agents.configure": `用法：codexc agents configure <Provider> [模型]
 
@@ -201,9 +202,9 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "agents.disable": `用法：codexc agents disable
 
 移除本项目管理的 agents.external；没有其他角色时同时关闭 multi_agent_v2。`,
-  "agents.status": `用法：codexc agents status
+  "agents.status": `用法：codexc agents status [--json]
 
-查看 multi_agent_v2 与共享第三方子代理配置状态。`,
+查看 multi_agent_v2 与共享第三方子代理配置状态；--json 输出稳定 JSON。`,
   opencode_go: `用法：codexc opencode-go account <add|list|remove|default|stop> [id]
 
 管理 OpenCode Go 多账户。Key 只写入 0600 私有 Codex Profile，不进入 Gateway config.toml、命令行或日志。
@@ -249,7 +250,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   ${metricsCommandUsage.threads.slice("用法：".length)}   列出有指标的会话
   ${metricsCommandUsage.report.slice("用法：".length)}   聚合汇报
   ${metricsCommandUsage.export.slice("用法：".length)}   请求明细导出
-  codexc metrics status   指标数据库状态
+  codexc metrics status [--json]   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史
@@ -274,7 +275,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 也可以使用 codexc config 的 WebUI 设置，或手工编辑 [webui] 段。
 页面与 JSON API 均来自指标数据库，不提供任何写接口。`,
   center: `用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]
-      codexc center info      查看中心地址、双令牌状态与运行状态
+      codexc center info [--json]      查看中心地址、双令牌状态与运行状态
       codexc center config    交互配置 [metrics.center]
 
 启动多设备指标中心服务：接收各设备 Gateway 的增量上报，写入中心 SQLite，
@@ -287,15 +288,15 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 --database 指定中心 SQLite 路径，默认 <配置目录>/data/central-metrics.sqlite3。
 上报接口：POST /api/ingest（Bearer 上报令牌）；查询接口使用 Bearer 查看令牌：/api/overview、/api/requests、
 /api/subagents、/api/devices、/api/health。`,
-  "center.info": `用法：codexc center info
+  "center.info": `用法：codexc center info [--json]
 
-查看中心服务地址、双令牌配置状态、数据库路径与当前运行状态。`,
+查看中心服务地址、双令牌配置状态、数据库路径与当前运行状态；--json 不输出令牌内容。`,
   "center.config": `用法：codexc center config
 
 交互配置中心服务端的 [metrics.center]；设备接入中心仍通过 codexc config 配置。`,
-  "metrics.status": `用法：codexc metrics status
+  "metrics.status": `用法：codexc metrics status [--json]
 
-只读显示指标数据库路径、Schema 兼容性和记录数量。`,
+只读显示指标数据库路径、Schema 兼容性和记录数量；--json 输出稳定 JSON。`,
   "metrics.run": `${metricsCommandUsage.run}
 
 导出指定 Thread 的本次运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度、费用与耗时，
@@ -491,7 +492,10 @@ try {
         || showSubcommandHelp(args, "config", "center.config")) {
         break;
       }
-      if (args[0] === "info" && args.length !== 1) {
+      if (
+        args[0] === "info"
+        && !(args.length === 1 || (args.length === 2 && args[1] === "--json"))
+      ) {
         throw new Error(helpText["center.info"]);
       }
       if (args[0] === "config" && args.length !== 1) {
@@ -1096,6 +1100,10 @@ async function service(args) {
   }
   const serviceArgs = parseServiceArguments(action, rest);
   rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
+  if (action === "status" && serviceArgs[1] === "--json") {
+    runStandaloneScript("scripts/service-status.mjs", [serviceArgs[0]]);
+    return;
+  }
   if (action === "install") {
     runScript("scripts/validate-config.mjs", [], { failureReportedByChild: true });
   }
@@ -1197,8 +1205,8 @@ function rejectUnsafeAppServerServiceAction(action, serviceArgs, environment) {
 }
 
 function runDoctor(args) {
-  if (args.length > 0) {
-    throw new Error("用法：codexc doctor");
+  if (!(args.length === 0 || (args.length === 1 && args[0] === "--json"))) {
+    throw new Error("用法：codexc doctor [--json]");
   }
   const result = spawnSync(process.execPath, nodeArguments([
     join(packageDir, "scripts/doctor.mjs"),
@@ -1267,7 +1275,8 @@ function agents(args) {
   }
   if (
     !(
-      (args[0] === "status" && args.length === 1)
+      (args[0] === "status"
+        && (args.length === 1 || (args.length === 2 && args[1] === "--json")))
       || (args[0] === "disable" && args.length === 1)
       || (args[0] === "configure" && (args.length === 2 || args.length === 3))
     )
@@ -1533,10 +1542,13 @@ async function metrics(args) {
     throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export>");
   }
   validateMetricsCommandArgs(subcommand, rest);
-  if (subcommand === "status" && rest.length === 0) {
+  if (
+    subcommand === "status"
+    && (rest.length === 0 || (rest.length === 1 && rest[0] === "--json"))
+  ) {
     run(
       process.execPath,
-      [join(packageDir, "scripts/metrics-database.mjs"), subcommand],
+      [join(packageDir, "scripts/metrics-database.mjs"), subcommand, ...rest],
       process.env,
       process.cwd(),
       { failureReportedByChild: true },
@@ -1875,6 +1887,15 @@ function parseServiceArguments(action, args) {
       throw new Error(helpText[`service.${action}`]);
     }
     return [];
+  }
+  if (action === "status") {
+    const json = args.at(-1) === "--json";
+    const positional = json ? args.slice(0, -1) : args;
+    if (positional.length > 1) {
+      throw new Error(helpText["service.status"]);
+    }
+    const target = parseServiceTarget(positional[0] ?? defaultServiceTarget(action));
+    return json ? [target, "--json"] : [target];
   }
   if (args.length > 1) {
     throw new Error(helpText[`service.${action}`]);

@@ -263,6 +263,7 @@ codexc channel send-image /tmp/截图.png --thread <Thread ID>  # 指定会话
 ```bash
 codexc start                          # 前台启动 App Server 与 Gateway（调试用）
 codexc service status                 # 查看全部核心服务
+codexc service status --json          # 输出统一的 macOS/Linux 服务状态对象
 codexc service reload                 # 重新读取配置
 codexc service restart                # 只重启 Gateway
 codexc service restart all            # 重启 Gateway 和 App Server
@@ -287,6 +288,7 @@ Gateway 会自动监听第三方 Provider 的模型目录与 Profile 变化，�
 
 ```bash
 codexc metrics status
+codexc metrics status --json                     # 稳定 JSON 数据库状态
 codexc metrics threads                            # 会话归纳总览（模型、Token、费用）
 codexc metrics report --range 30d --group models  # 聚合汇报
 codexc metrics export --range 30d --format json   # 脱敏明细导出；--thread 可按 Thread 过滤
@@ -296,6 +298,11 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 
 导出格式、时间范围、价格换算、保留策略和数据边界见 [`docs/display.md`](docs/display.md)；
 多设备修复与同步命令见 [`docs/metrics-sync.md`](docs/metrics-sync.md)。
+
+脚本还可使用 `codexc agents status --json` 查看共享第三方子代理状态，使用
+`codexc center info --json` 查看不含令牌内容的指标中心运行与端点信息，使用
+`codexc service status [目标] --json` 获取 macOS launchd 或 Linux systemd 的统一服务状态，使用
+`codexc doctor --json` 获取完整的脱敏诊断检查结果。
 
 ### 常用聊天命令
 
@@ -333,6 +340,7 @@ App Server 历史，不恢复工作区文件。完整边界与条件式真实合
 
 ```bash
 codexc doctor
+codexc doctor --json
 codexc service status
 codexc service logs -n 100
 ```

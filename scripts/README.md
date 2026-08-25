@@ -46,7 +46,8 @@
   `run`、`turns`、`threads`、`report`、`export` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
   组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
-  只读端口，渲染复用 `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
+  只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
+  `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
   派生上下文压缩模型、请求数、Token 和费用摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
   与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v10 备份后
   逐版本事务升级到 v11（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
@@ -87,7 +88,8 @@
   接收各设备 Gateway 的增量上报（独立 Bearer 上报令牌校验、载荷校验、按 `device_id + local_id`
   upsert 覆盖写入），写入中心 SQLite（复用 `metrics-center-schema.sql` 表结构，
   WAL、`0600`），并提供 `/api/overview`、`/api/requests`、`/api/subagents`、
-  `/api/devices`、`/api/health`；查询使用独立只读令牌，WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端。
+  `/api/devices`、`/api/health`；查询使用独立只读令牌，WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端；
+  `center info --json` 返回运行状态、端点和双令牌配置布尔值，不返回令牌或掩码片段。
   子命令 `codexc center config` 交互设置 `[metrics.center]`、`codexc center info` 输出
   中心地址（含设备上报端点）、双令牌状态与运行状态；监听参数优先命令行，其次
   `config.toml` 的 `[metrics.center]` 段，默认回环 `127.0.0.1:8790`。
@@ -135,6 +137,8 @@
   模式时保留官方模型。
 - `primary-provider-usage.mjs`：`codexc primary-provider` 的规范帮助文案，供脚本与入口帮助共用，
   避免两份文案漂移。
+- `agents.mjs`：配置、停用或查看共享第三方子代理；`status --json` 返回稳定配置状态，Provider
+  与模型未配置时显式使用 `null`，不要求 Gateway 已初始化。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
   `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
@@ -354,7 +358,7 @@
   `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
-  不输出完整 User-Agent、飞书
+  `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `install-launchd.mjs`：渲染并安装 launchd plist；Codex 路径复用共享可执行文件解析，代理由 CLI
   服务入口在每次启动时解析。
@@ -373,6 +377,8 @@
   解析，代理由 CLI 服务入口在每次启动时解析。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
   控制脚本，避免 Shell 维护第二份服务标识。
+- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性或 launchd Job 字段生成统一、无配置
+  依赖的 JSON 服务状态；目标异常时保留可解析输出并返回非零状态，查询器故障则失败关闭。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；

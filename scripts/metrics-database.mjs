@@ -880,8 +880,14 @@ if (
 ) {
   try {
     const command = process.argv[2];
-    if (command === "status" && process.argv.length === 3) {
-      printStatus(inspectMetricsDatabase());
+    if (
+      command === "status"
+      && (
+        process.argv.length === 3
+        || (process.argv.length === 4 && process.argv[3] === "--json")
+      )
+    ) {
+      printStatus(inspectMetricsDatabase(), { json: process.argv[3] === "--json" });
     } else if (command === "reset" && process.argv.length === 3) {
       const result = resetMetricsDatabase();
       if (!result.changed) {
