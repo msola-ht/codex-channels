@@ -611,7 +611,7 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "当前会话累计：",
       "当前工作区：Main (main)",
-      "会话 ID：thread-1",
+      "Thread ID：thread-1",
       "上下文：10 K / 100 K（10%）",
       "上下文压缩：2 次",
       "Goal：进行中 · 12.5 K / 100 K",

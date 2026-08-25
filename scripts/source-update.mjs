@@ -79,7 +79,7 @@ export async function updateManagedSourceInstallation(
   const stagingRoot = mkdtempSync(join(installRoot, ".codex-channels-update."));
   const stagedCheckout = join(stagingRoot, "codex-channels");
   let switched = false;
-  let servicesStopped = false;
+  let servicesMayNeedRestore = false;
   let backupPath;
   const renamePath = options.renamePath ?? renameSync;
   try {
@@ -120,8 +120,8 @@ export async function updateManagedSourceInstallation(
     );
     writeMessage("note", "候选源码已通过校验，准备切换。");
     if (inspection.services.installed) {
+      servicesMayNeedRestore = true;
       await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
-      servicesStopped = true;
     }
 
     backupPath = `${checkout}.pre-update-${Date.now()}`;
@@ -162,10 +162,9 @@ export async function updateManagedSourceInstallation(
         { cause: error },
       );
     }
-    if (servicesStopped) {
+    if (servicesMayNeedRestore) {
       try {
         await (options.startServices ?? startCoreServices)(checkout, environment, options);
-        servicesStopped = false;
       } catch (startError) {
         throw new AggregateError(
           [updateError, startError],

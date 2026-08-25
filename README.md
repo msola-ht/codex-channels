@@ -277,7 +277,7 @@ codexc channel send-image /tmp/截图.png                   # 自动选择唯一
 codexc channel send-image /tmp/截图.png --thread <Thread ID>  # 指定会话
 ```
 
-把本地 PNG/JPEG 图片交给 Gateway，由当前飞书/微信/Telegram 会话的机器人凭据发送，
+把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据发送回对应会话，
 不依赖 lark-cli 等外部工具。详细说明见 [`docs/channel-image.md`](docs/channel-image.md)。
 
 ### 管理后台服务

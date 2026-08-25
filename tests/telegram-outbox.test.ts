@@ -12,7 +12,7 @@ const turnCompletedTitle = "<b>本次运行 · 已完成</b>";
 const turnCompletedPanel = [
   turnCompletedTitle,
   "",
-  "• <b>会话 ID：</b>thread-1",
+  "• <b>Thread ID：</b>thread-1",
 ].join("\n");
 
 class FakeTelegramApi {
@@ -460,7 +460,7 @@ describe("TelegramOutbox", () => {
         "• <b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
         "",
         "<b>当前会话累计</b>",
-        "• <b>会话 ID：</b>thread-1",
+        "• <b>Thread ID：</b>thread-1",
       ].join("\n"),
     ]);
     expect(api.actions).toEqual([]);
@@ -1220,7 +1220,7 @@ describe("TelegramOutbox", () => {
         "• <b>提供商：</b>OpenAI 官方",
         "",
         "<b>当前会话累计</b>",
-        "• <b>会话 ID：</b>thread-1",
+        "• <b>Thread ID：</b>thread-1",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
         "• <b>上下文压缩：</b>2 次",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
@@ -1252,7 +1252,7 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedTitle,
         "",
-        "• <b>会话 ID：</b>thread-1",
+        "• <b>Thread ID：</b>thread-1",
         "• <b>Git 分支：</b>feature/weixin-surface",
       ].join("\n"),
     ]);

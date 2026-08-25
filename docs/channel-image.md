@@ -1,7 +1,7 @@
 # 渠道图片发送
 
-模型或本机把本地图片发回当前渠道会话的固定方式：`codexc channel send-image` 把图片
-交给 Gateway，由 Gateway 使用各渠道机器人凭据发送，不依赖 lark-cli 等外部 CLI，也
+模型或本机把本地图片发回 Thread 绑定渠道会话的固定方式：`codexc channel send-image` 把图片
+交给 Gateway，由 Gateway 使用对应渠道的机器人凭据发送，不依赖 lark-cli 等外部 CLI，也
 不存在用户 OAuth 权限不一致的问题。
 
 ## 命令

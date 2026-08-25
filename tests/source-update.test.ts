@@ -167,6 +167,48 @@ describe("Git 源码更新", () => {
       .toBe("0.147.0");
   });
 
+  it("restores services when stopping them fails before switching source", async () => {
+    const fixture = createInstalledFixture("codexc-source-stop-failure-");
+    let startCalls = 0;
+
+    await expect(updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => undefined,
+      inspectStaged: async () => ({ services: { installed: true } }),
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      startServices: () => { startCalls += 1; },
+      stopServices: () => { throw new Error("stop failed"); },
+    })).rejects.toThrow("stop failed");
+
+    expect(startCalls).toBe(1);
+    expect(JSON.parse(readFileSync(join(fixture.checkout, "package.json"), "utf8")).version)
+      .toBe("0.147.0");
+  });
+
+  it("reports both failures when stopping and restoring services fail before switching source", async () => {
+    const fixture = createInstalledFixture("codexc-source-stop-and-restore-failure-");
+    let failure: unknown;
+
+    try {
+      await updateManagedSourceInstallation(fixture.environment, {
+        buildCheckout: () => undefined,
+        inspectStaged: async () => ({ services: { installed: true } }),
+        projectDir: fixture.checkout,
+        repository: fixture.repository,
+        startServices: () => { throw new Error("start failed"); },
+        stopServices: () => { throw new Error("stop failed"); },
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).message)
+      .toBe("源码更新失败，且原核心服务未能恢复运行");
+    expect((failure as AggregateError).errors.map((error) => (error as Error).message))
+      .toEqual(["stop failed", "start failed"]);
+  });
+
   it("restores services when the global command refresh fails after switching source", async () => {
     const fixture = createInstalledFixture("codexc-source-global-install-failure-");
     let startCalls = 0;
