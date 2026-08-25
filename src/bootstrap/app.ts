@@ -17,7 +17,6 @@ import {
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
-  loadManagedModelProviderRole,
   loadPrimaryModelProvider,
   managedProviderDirectory,
   providerAppServerSocketPath,
@@ -113,7 +112,10 @@ import {
   type OpenAiConnectivityStatus,
 } from "./openai-connectivity.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
-import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
+import {
+  ProviderIdleReleaser,
+  providerIdleReleaseMessage,
+} from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
@@ -266,6 +268,12 @@ export class GatewayApplication {
         ? undefined
         : new Set([customPrimaryProvider.id]),
       customPrimaryProvider?.id ?? primaryProvider,
+      (provider, mode, operation) => {
+        if (!this.providerIdleReleaser) return operation();
+        return mode === "activity"
+          ? this.providerIdleReleaser.runActivity(provider, operation)
+          : this.providerIdleReleaser.runOperation(provider, operation);
+      },
     );
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
@@ -366,7 +374,10 @@ export class GatewayApplication {
         enqueue: (sample) => {
           metricsWriter.enqueue(sample);
           if (sample.threadId) {
-            this.subagentCompletion?.metricsAvailable(sample.threadId);
+            this.subagentCompletion?.metricsAvailable(
+              sample.threadId,
+              sample.turnId ?? undefined,
+            );
           }
         },
         close: () => metricsWriter.close(),
@@ -378,9 +389,38 @@ export class GatewayApplication {
       logger,
     });
     this.subagentCompletion = new SubagentCompletionTracker({
-      readSummary: (agentThreadId) => metricsStore.threadSummary(agentThreadId),
-      waitForMetrics: (agentThreadId) =>
-        metricsWriter.waitForCurrentWrites(agentThreadId),
+      readSummary: (agentThreadId, terminalTurnId) => {
+        if (!terminalTurnId) return metricsStore.threadSummary(agentThreadId);
+        const latestTurn = metricsStore.threadTurnSummary(
+          agentThreadId,
+          terminalTurnId,
+        );
+        return {
+          latestTurn,
+          threadAggregate: metricsStore.threadTurnTaskSummary(
+            agentThreadId,
+            terminalTurnId,
+          ) ?? latestTurn,
+        };
+      },
+      waitForMetrics: (agentThreadId, agentTurnId) =>
+        metricsWriter.waitForCurrentWrites(agentThreadId, agentTurnId),
+      onRunStarted: (details) => {
+        try {
+          metricsStore.recordSubagentTurn(details);
+        } catch (error) {
+          logger.warn(
+            {
+              err: error,
+              agentThreadId: details.agentThreadId,
+              agentTurnId: details.agentTurnId,
+              parentThreadId: details.parentThreadId,
+              parentTurnId: details.parentTurnId,
+            },
+            "子代理运行指标归属写入失败",
+          );
+        }
+      },
       publish: (event) => {
         this.output.publish(event, isCriticalOutputEvent(event));
       },
@@ -557,19 +597,26 @@ export class GatewayApplication {
         opencodeGoAccountIdFromProvider(provider) !== undefined,
       listRunningProviders: async () =>
         (await inspectAppServerSupervisor(config.codexSocketPath))?.runningProviders ?? [],
-      releaseProvider: (provider) =>
-        releaseAppServerProvider(config.codexSocketPath, provider)
-          .then((result) => result.released),
+      releaseProvider: async (provider) => {
+        const result = await releaseAppServerProvider(config.codexSocketPath, provider);
+        if (!result.released) return false;
+        await this.codex.closeProvider(provider).catch((error) => {
+          logger.warn(
+            { err: error, provider },
+            "空闲 Provider 路由 Client 关闭失败，已保留按需重连状态",
+          );
+        });
+        return true;
+      },
       providerForThread: (threadId) =>
         this.router.modelSettingsForThread(threadId)?.modelProvider,
       listBindings: () => this.bindings.list(),
-      defaultRoleProvider: () => loadManagedModelProviderRole()?.provider,
       notify: (provider, targets) => {
         const accountId = opencodeGoAccountIdFromProvider(provider);
         const label = accountId === undefined
           ? provider
           : `OpenCode Go 账户 ${accountId}`;
-        const message = `${label} 已空闲停止；再次选择该账户、恢复 Thread 或使用对应 Remote TUI 时将自动启动。`;
+        const message = providerIdleReleaseMessage(label);
         if (targets.length === 0) {
           this.logger.info({ provider }, "OpenCode Go 账户已释放，无渠道会话需要通知");
           return;

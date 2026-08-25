@@ -246,7 +246,7 @@ describe("OpenCode Go account CLI", () => {
         );
         writeFileSync(
           rolePath,
-          `model = ${JSON.stringify(model)}\nmodel_provider = ${JSON.stringify(provider)}\n`,
+          `model = ${JSON.stringify(model)}\nmodel_provider = ${JSON.stringify(provider)}\nmodel_reasoning_effort = "high"\n`,
           { mode: 0o600 },
         );
       },
@@ -296,7 +296,7 @@ describe("OpenCode Go account CLI", () => {
     );
     writeFileSync(
       rolePath,
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     const configureRole = vi.fn(async () => undefined);

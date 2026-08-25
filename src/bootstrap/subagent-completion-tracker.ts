@@ -11,9 +11,12 @@ type SubagentCompletedEvent = Extract<OutputEvent, { type: "subagent.completed" 
 interface ActiveSubagent {
   target: ConversationTarget;
   parentThreadId: string;
+  parentTurnId: string;
   agentPath: string;
   startedAtMs: number;
+  activeTurnId: string | undefined;
   terminalStatus?: SubagentCompletedEvent["status"];
+  terminalTurnId: string | undefined;
   terminalAtMs?: number;
   metricsCheckpoint?: Promise<boolean>;
   waitObservedAfterTerminal: boolean;
@@ -51,13 +54,34 @@ interface SubagentMetricsSummary {
 
 interface PendingTerminal {
   status: SubagentTerminalStatus;
+  terminalTurnId: string | undefined;
   terminalAtMs: number;
   expiresAtMs: number;
 }
 
+interface PendingStart {
+  turnId: string;
+  expiresAtMs: number;
+}
+
+interface PendingActivity {
+  event: Extract<OutputEvent, { type: "subagent.contacted" }>;
+  expiresAtMs: number;
+}
+
 export interface SubagentCompletionTrackerOptions {
-  readSummary: (agentThreadId: string) => SubagentMetricsSummary;
-  waitForMetrics?: (agentThreadId: string) => Promise<boolean>;
+  readSummary: (
+    agentThreadId: string,
+    terminalTurnId?: string,
+  ) => SubagentMetricsSummary;
+  waitForMetrics?: (agentThreadId: string, agentTurnId?: string) => Promise<boolean>;
+  onRunStarted?: (details: {
+    agentThreadId: string;
+    agentTurnId: string;
+    parentThreadId: string;
+    parentTurnId: string;
+    agentPath: string;
+  }) => void;
   publish: (event: SubagentCompletedEvent) => void;
   settleDelayMs?: number;
   onReadError?: (error: unknown, agentThreadId: string) => void;
@@ -72,6 +96,8 @@ const maxPendingTerminals = 128;
 export class SubagentCompletionTracker {
   private readonly active = new Map<string, ActiveSubagent>();
   private readonly pendingTerminals = new Map<string, PendingTerminal>();
+  private readonly pendingStarts = new Map<string, PendingStart>();
+  private readonly pendingActivities = new Map<string, PendingActivity>();
   private closed = false;
 
   constructor(private readonly options: SubagentCompletionTrackerOptions) {}
@@ -92,6 +118,8 @@ export class SubagentCompletionTracker {
         this.active.delete(event.agentThreadId);
         void this.complete(event.agentThreadId, previous, previous.revision, true);
         this.register(event);
+      } else {
+        this.rememberPendingActivity(event);
       }
       return;
     }
@@ -99,11 +127,7 @@ export class SubagentCompletionTracker {
     for (const state of event.operation.subagentStates ?? []) {
       const terminalStatus = completionStatus(state.status);
       if (!terminalStatus) continue;
-      const entry = this.active.get(state.threadId);
-      if (!entry || entry.terminalStatus) continue;
-      entry.terminalStatus = terminalStatus;
-      entry.terminalAtMs = Date.now();
-      this.schedule(state.threadId, entry);
+      this.markTerminal(state.threadId, terminalStatus, false);
     }
     if (
       event.operation.kind === "subagent"
@@ -111,7 +135,11 @@ export class SubagentCompletionTracker {
       && event.operation.status === "completed"
     ) {
       for (const [agentThreadId, entry] of this.active) {
-        if (entry.parentThreadId !== event.threadId || !entry.terminalStatus) continue;
+        if (
+          entry.parentThreadId !== event.threadId
+          || entry.parentTurnId !== event.turnId
+          || !entry.terminalStatus
+        ) continue;
         entry.waitObservedAfterTerminal = true;
         this.schedule(agentThreadId, entry);
       }
@@ -120,10 +148,20 @@ export class SubagentCompletionTracker {
 
   handleInput(event: ConversationInputEvent): void {
     if (this.closed) return;
+    if (event.type === "turn.started") {
+      const entry = this.active.get(event.threadId);
+      if (entry && entry.activeTurnId === undefined) {
+        this.assignTurn(event.threadId, entry, event.turnId);
+      } else if (!entry || entry.activeTurnId !== event.turnId) {
+        this.rememberPendingStart(event.threadId, event.turnId);
+        this.promotePendingFollowup(event.threadId);
+      }
+      return;
+    }
     if (event.type === "turn.completed") {
       const status = turnCompletionStatus(event.status);
       if (status) {
-        this.markTerminal(event.threadId, status, true);
+        this.markTerminal(event.threadId, status, true, event.turnId);
       }
       return;
     }
@@ -132,11 +170,16 @@ export class SubagentCompletionTracker {
     }
   }
 
-  metricsAvailable(agentThreadId: string): void {
+  metricsAvailable(agentThreadId: string, agentTurnId?: string): void {
     if (this.closed) return;
     const entry = this.active.get(agentThreadId);
     if (!entry) return;
-    const checkpoint = this.options.waitForMetrics?.(agentThreadId)
+    if (
+      agentTurnId !== undefined
+      && agentTurnId !== entry.activeTurnId
+      && agentTurnId !== entry.terminalTurnId
+    ) return;
+    const checkpoint = this.options.waitForMetrics?.(agentThreadId, agentTurnId)
       ?? Promise.resolve(true);
     entry.metricsCheckpoint = Promise.all([
       entry.metricsCheckpoint ?? Promise.resolve(true),
@@ -155,26 +198,62 @@ export class SubagentCompletionTracker {
     }
     this.active.clear();
     this.pendingTerminals.clear();
+    this.pendingStarts.clear();
+    this.pendingActivities.clear();
   }
 
   private markTerminal(
     agentThreadId: string,
     status: SubagentTerminalStatus,
     retainIfMissing: boolean,
+    terminalTurnId?: string,
   ): void {
     const entry = this.active.get(agentThreadId);
     if (entry) {
-      if (entry.terminalStatus) return;
+      const resolvedTerminalTurnId = terminalTurnId ?? entry.activeTurnId;
+      if (
+        terminalTurnId !== undefined
+        && entry.activeTurnId !== undefined
+        && entry.activeTurnId !== terminalTurnId
+      ) {
+        if (retainIfMissing) {
+          this.rememberPendingTerminal(agentThreadId, status, terminalTurnId);
+        }
+        return;
+      }
+      if (terminalTurnId !== undefined && entry.activeTurnId === undefined) {
+        this.assignTurn(agentThreadId, entry, terminalTurnId);
+      }
+      if (entry.terminalStatus) {
+        if (!entry.terminalTurnId && resolvedTerminalTurnId) {
+          entry.terminalTurnId = resolvedTerminalTurnId;
+          entry.terminalStatus = status;
+          this.schedule(agentThreadId, entry);
+        }
+        return;
+      }
       entry.terminalStatus = status;
+      entry.terminalTurnId = resolvedTerminalTurnId;
       entry.terminalAtMs = Date.now();
       this.schedule(agentThreadId, entry);
+      this.promotePendingFollowup(agentThreadId);
       return;
     }
     if (!retainIfMissing) return;
+    this.rememberPendingTerminal(agentThreadId, status, terminalTurnId);
+  }
+
+  private rememberPendingTerminal(
+    agentThreadId: string,
+    status: SubagentTerminalStatus,
+    terminalTurnId?: string,
+  ): void {
     this.prunePendingTerminals();
-    this.pendingTerminals.delete(agentThreadId);
-    this.pendingTerminals.set(agentThreadId, {
+    const key = pendingTerminalKey(agentThreadId, terminalTurnId);
+    this.pendingTerminals.delete(key);
+    this.pendingTerminals.set(key, {
       status,
+      terminalTurnId,
       terminalAtMs: Date.now(),
       expiresAtMs: Date.now() + pendingTerminalTtlMs,
     });
@@ -185,10 +264,27 @@ export class SubagentCompletionTracker {
     }
   }
 
-  private takePendingTerminal(agentThreadId: string): PendingTerminal | undefined {
+  private takePendingTerminal(
+    agentThreadId: string,
+    agentTurnId?: string,
+  ): PendingTerminal | undefined {
     this.prunePendingTerminals();
-    const pending = this.pendingTerminals.get(agentThreadId);
-    this.pendingTerminals.delete(agentThreadId);
+    const exactKey = pendingTerminalKey(agentThreadId, agentTurnId);
+    const legacyKey = pendingTerminalKey(agentThreadId);
+    const pending = this.pendingTerminals.get(exactKey)
+      ?? this.pendingTerminals.get(legacyKey)
+      ?? (agentTurnId === undefined
+        ? [...this.pendingTerminals.entries()].reverse().find(
+            ([key]) => key.startsWith(`${agentThreadId}\u0000`),
+          )?.[1]
+        : undefined);
+    this.pendingTerminals.delete(exactKey);
+    this.pendingTerminals.delete(legacyKey);
+    if (pending?.terminalTurnId) {
+      this.pendingTerminals.delete(
+        pendingTerminalKey(agentThreadId, pending.terminalTurnId),
+      );
+    }
     return pending;
   }
 
@@ -198,18 +294,120 @@ export class SubagentCompletionTracker {
     const entry: ActiveSubagent = {
       target: event.target,
       parentThreadId: event.threadId,
+      parentTurnId: event.turnId,
       agentPath: event.agentPath,
       startedAtMs: Date.now(),
+      activeTurnId: undefined,
+      terminalTurnId: undefined,
       waitObservedAfterTerminal: false,
       timer: undefined,
       revision: 0,
     };
     this.active.set(event.agentThreadId, entry);
-    const pending = this.takePendingTerminal(event.agentThreadId);
+    const pendingStart = this.takePendingStart(event.agentThreadId);
+    if (pendingStart) {
+      this.assignTurn(event.agentThreadId, entry, pendingStart.turnId);
+    }
+    const pending = this.takePendingTerminal(
+      event.agentThreadId,
+      entry.activeTurnId,
+    );
     if (pending) {
+      if (entry.activeTurnId === undefined && pending.terminalTurnId) {
+        this.assignTurn(event.agentThreadId, entry, pending.terminalTurnId);
+      }
       entry.terminalStatus = pending.status;
+      entry.terminalTurnId = pending.terminalTurnId ?? entry.activeTurnId;
       entry.terminalAtMs = pending.terminalAtMs;
       this.schedule(event.agentThreadId, entry);
+    }
+  }
+
+  private assignTurn(
+    agentThreadId: string,
+    entry: ActiveSubagent,
+    agentTurnId: string,
+  ): void {
+    entry.activeTurnId = agentTurnId;
+    if (entry.terminalStatus && entry.terminalTurnId === undefined) {
+      entry.terminalTurnId = agentTurnId;
+      this.schedule(agentThreadId, entry);
+    }
+    this.options.onRunStarted?.({
+      agentThreadId,
+      agentTurnId,
+      parentThreadId: entry.parentThreadId,
+      parentTurnId: entry.parentTurnId,
+      agentPath: entry.agentPath,
+    });
+  }
+
+  private rememberPendingStart(agentThreadId: string, turnId: string): void {
+    this.prunePendingStarts();
+    this.pendingStarts.delete(agentThreadId);
+    this.pendingStarts.set(agentThreadId, {
+      turnId,
+      expiresAtMs: Date.now() + pendingTerminalTtlMs,
+    });
+    while (this.pendingStarts.size > maxPendingTerminals) {
+      const oldest = this.pendingStarts.keys().next().value;
+      if (!oldest) break;
+      this.pendingStarts.delete(oldest);
+    }
+  }
+
+  private rememberPendingActivity(
+    event: Extract<OutputEvent, { type: "subagent.contacted" }>,
+  ): void {
+    this.prunePendingActivities();
+    this.pendingActivities.delete(event.agentThreadId);
+    this.pendingActivities.set(event.agentThreadId, {
+      event,
+      expiresAtMs: Date.now() + pendingTerminalTtlMs,
+    });
+    while (this.pendingActivities.size > maxPendingTerminals) {
+      const oldest = this.pendingActivities.keys().next().value;
+      if (!oldest) break;
+      this.pendingActivities.delete(oldest);
+    }
+  }
+
+  private promotePendingFollowup(agentThreadId: string): void {
+    this.prunePendingActivities();
+    this.prunePendingStarts();
+    const previous = this.active.get(agentThreadId);
+    const pendingActivity = this.pendingActivities.get(agentThreadId);
+    if (
+      !previous?.terminalStatus
+      || !pendingActivity
+      || !this.pendingStarts.has(agentThreadId)
+    ) return;
+    this.pendingActivities.delete(agentThreadId);
+    if (previous.timer) clearTimeout(previous.timer);
+    previous.timer = undefined;
+    this.active.delete(agentThreadId);
+    void this.complete(agentThreadId, previous, previous.revision, true);
+    this.register(pendingActivity.event);
+  }
+
+  private prunePendingActivities(): void {
+    const now = Date.now();
+    for (const [threadId, pending] of this.pendingActivities) {
+      if (pending.expiresAtMs <= now) this.pendingActivities.delete(threadId);
+    }
+  }
+
+  private takePendingStart(agentThreadId: string): PendingStart | undefined {
+    this.prunePendingStarts();
+    const pending = this.pendingStarts.get(agentThreadId);
+    this.pendingStarts.delete(agentThreadId);
+    return pending;
+  }
+
+  private prunePendingStarts(): void {
+    const now = Date.now();
+    for (const [threadId, pending] of this.pendingStarts) {
+      if (pending.expiresAtMs <= now) this.pendingStarts.delete(threadId);
     }
   }
 
@@ -260,7 +458,7 @@ export class SubagentCompletionTracker {
     let metricsStatus: SubagentCompletedEvent["metricsStatus"] = "unavailable";
     if (metricsPersisted) {
       try {
-        summary = this.options.readSummary(agentThreadId);
+        summary = this.options.readSummary(agentThreadId, entry.terminalTurnId);
         metricsStatus = summary.threadAggregate?.requestCount
           ? "available"
           : "empty";
@@ -326,4 +524,8 @@ function completionStatus(
   return status === "pendingInit" || status === "running"
     ? undefined
     : status;
+}
+
+function pendingTerminalKey(agentThreadId: string, agentTurnId?: string): string {
+  return `${agentThreadId}\u0000${agentTurnId ?? ""}`;
 }

@@ -184,7 +184,7 @@ codexc agents status
 codexc agents disable
 ```
 
-角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型和 `env_key`
+角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型、默认思考等级和 `env_key`
 引用，不保存 API Key。App Server 服务启动时只为当前角色选择的 Provider 启动统计代理并刷新本机
 地址；未选作子代理且尚未用于会话的第三方 Provider 不增加进程。认证密钥只进入 App Server
 子进程环境。
@@ -195,8 +195,9 @@ codexc agents disable
 
 子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
 线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
-页面显示“子代理 · <代理路径>”。子代理线程标注自指标库 Schema v7 起可用；当前 Schema v10
-另以可空 `parent_turn_id` 保存新标注的显式父 Turn 关系，v7–v9 历史标注该字段保持 `NULL`，不按时间推断；从本机终端
+页面显示“子代理 · <代理路径>”。子代理线程标注自指标库 Schema v7 起可用；Schema v10
+以可空 `parent_turn_id` 保存线程级父 Turn 关系，当前 Schema v11 另以 `subagent_turns` 保存每次
+子代理运行的精确子 Turn 与父 Turn；v7–v10 历史运行关系不按时间推断。从本机终端
 运行 `codexc update` 会统一预检、自动备份升级并恢复 App Server 与 Gateway，也可单独运行
 `codexc metrics upgrade`。
 

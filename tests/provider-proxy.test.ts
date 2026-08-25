@@ -120,6 +120,46 @@ describe("ProviderProxy", () => {
     expect(metricsAccounts).toEqual(["b", "main"]);
   });
 
+  it("attributes configured reasoning effort only to the private external-role route", async () => {
+    const seenPaths: string[] = [];
+    const upstream = createServer((request, response) => {
+      seenPaths.push(request.url ?? "");
+      request.resume();
+      request.on("end", () => response.end("ok"));
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      externalRoleReasoningEffort: "high",
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const proxyPort = Number(proxy.address().split(":")[1]);
+
+    await requestProxy(proxyPort, "/role/external/responses", "POST");
+    await requestProxy(proxyPort, "/responses", "POST");
+
+    expect(seenPaths).toEqual(["/responses", "/responses"]);
+    expect(metrics.map(({ reasoningEffort }) => reasoningEffort)).toEqual([
+      "high",
+      null,
+    ]);
+  });
+
   it("streams the request body upstream before the client finishes sending", async () => {
     let resolveFirstChunk: () => void = () => undefined;
     const firstChunk = new Promise<void>((resolve) => {

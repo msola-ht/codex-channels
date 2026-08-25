@@ -17,7 +17,7 @@ import {
 } from "./metrics-command-options.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
-export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9]);
+export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10]);
 const baseMetricsColumns = Object.freeze([
   "id", "provider", "billing_mode", "pricing_currency", "pricing_source",
   "pricing_effective_at_ms", "uncached_input_price_per_million_nanos",
@@ -99,6 +99,10 @@ export function validateMetricsDatabaseStructure(
     if (status.compatible) {
       requireColumns(database, "subagent_threads", [
         "thread_id", "parent_thread_id", "parent_turn_id", "agent_path", "recorded_at_ms",
+      ]);
+      requireColumns(database, "subagent_turns", [
+        "thread_id", "turn_id", "parent_thread_id", "parent_turn_id", "agent_path",
+        "recorded_at_ms",
       ]);
     }
     database.prepare(`

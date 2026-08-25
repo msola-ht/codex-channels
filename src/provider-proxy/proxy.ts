@@ -101,8 +101,10 @@ export interface ProviderProxyOptions {
   allowOpenAiApiPaths?: boolean;
   /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
   accountIds?: readonly string[];
-  /** 无账户前缀请求归属的默认账户（agents.external 等角色请求） */
+  /** 共享代理无账户前缀请求归属的默认账户。 */
   defaultAccountId?: string;
+  /** 私有 `/role/external` 路径对应的 agents.external 默认思考等级。 */
+  externalRoleReasoningEffort?: string;
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
   timeoutMs?: number;
   quotaWindowsProvider?: (
@@ -135,6 +137,7 @@ export class ProviderProxy {
     | undefined;
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
+  private readonly externalRoleReasoningEffort: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
   private readonly quotaWindowsProvider:
     | ((accountId?: string) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
@@ -160,6 +163,16 @@ export class ProviderProxy {
     this.resolveUpstream = options.resolveUpstream;
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
+    const externalRoleReasoningEffort = boundedReasoningEffort(
+      options.externalRoleReasoningEffort,
+    );
+    if (
+      options.externalRoleReasoningEffort !== undefined
+      && externalRoleReasoningEffort === null
+    ) {
+      throw new Error("第三方子代理默认思考等级无效");
+    }
+    this.externalRoleReasoningEffort = externalRoleReasoningEffort ?? undefined;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
     this.quotaWindowsProvider = options.quotaWindowsProvider;
     this.timeoutMs = options.timeoutMs ?? 60_000;
@@ -213,6 +226,7 @@ export class ProviderProxy {
       request.url,
       this.accountIds,
       this.defaultAccountId,
+      this.externalRoleReasoningEffort !== undefined,
     );
     if (!account || !isSupportedHttpRequest(
       request.method,
@@ -233,6 +247,9 @@ export class ProviderProxy {
       "http",
       responseOperation(account.path, turnMetadata.operation),
     );
+    if (account.externalRole) {
+      metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
+    }
     const recordsResponseMetrics = isResponsesRequestPath(account.path);
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
@@ -398,6 +415,7 @@ export class ProviderProxy {
       request.url,
       this.accountIds,
       this.defaultAccountId,
+      this.externalRoleReasoningEffort !== undefined,
     );
     const recordsResponseMetrics = account
       ? isResponsesPath(account.path)
@@ -434,6 +452,7 @@ export class ProviderProxy {
       request.url,
       this.accountIds,
       this.defaultAccountId,
+      this.externalRoleReasoningEffort !== undefined,
     );
     const url = `${scheme}://${target.host}${port}${upstreamWebSocketPath(
       target.basePath,
@@ -468,7 +487,10 @@ export class ProviderProxy {
         if (activeMetrics) {
           activeMetrics.model = sanitized.model ?? null;
           activeMetrics.serviceTier = sanitized.serviceTier ?? null;
-          activeMetrics.reasoningEffort = sanitized.reasoningEffort ?? null;
+          activeMetrics.reasoningEffort = sanitized.reasoningEffort
+            ?? (account?.externalRole
+              ? this.externalRoleReasoningEffort ?? null
+              : null);
         }
       }
       if (upstream.readyState === WebSocket.OPEN) {
@@ -504,6 +526,9 @@ export class ProviderProxy {
           "websocket",
           "response",
         );
+        if (account?.externalRole) {
+          fallback.reasoningEffort = this.externalRoleReasoningEffort ?? null;
+        }
         fallback.httpStatus = statusCode;
         markMetricsFailed(fallback, "upstream_handshake_error");
         fallback.responseCompletedAtMs = receivedAtMs;

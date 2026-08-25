@@ -207,7 +207,7 @@ describe("local update", () => {
   });
 
   it("accepts every metrics schema with an explicit migration path", () => {
-    for (const schemaVersion of [3, 4, 5, 6, 7, 8, 9]) {
+    for (const schemaVersion of [3, 4, 5, 6, 7, 8, 9, 10]) {
       expect(inspectDatabaseUpdates(process.env, {
         inspectState: () => ({
           schemaVersion: 4,
@@ -243,7 +243,7 @@ describe("local update", () => {
       inspectMetrics: () => ({
         compatible: true,
         exists: true,
-        schemaVersion: 10,
+          schemaVersion: 11,
       }),
       validateMetrics: () => undefined,
     })).toThrow(/计划任务数据库 Schema 3/u);

@@ -255,7 +255,12 @@ export function writeManagedModelProviderRoleConfig(
 
 export function loadManagedModelProviderRole(
   environment?: NodeJS.ProcessEnv,
-): { role: "external"; provider: ManagedModelProviderId; model: string } | undefined;
+): {
+  role: "external";
+  provider: ManagedModelProviderId;
+  model: string;
+  reasoningEffort: string;
+} | undefined;
 
 export function loadConfiguredProviderCredential(
   provider: ManagedModelProviderId,

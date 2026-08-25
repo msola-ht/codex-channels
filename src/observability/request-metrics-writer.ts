@@ -11,6 +11,7 @@ const flushDelayMs = 10;
 interface WriteCheckpoint {
   target: number;
   threadId: string | undefined;
+  turnId: string | undefined;
   succeeded: boolean;
   resolve: (succeeded: boolean) => void;
 }
@@ -38,11 +39,11 @@ export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWri
     this.scheduleFlush();
   }
 
-  waitForCurrentWrites(threadId?: string): Promise<boolean> {
+  waitForCurrentWrites(threadId?: string, turnId?: string): Promise<boolean> {
     const target = this.enqueuedCount;
     if (this.processedCount >= target) return Promise.resolve(true);
     return new Promise((resolve) => {
-      this.checkpoints.push({ target, threadId, succeeded: true, resolve });
+      this.checkpoints.push({ target, threadId, turnId, succeeded: true, resolve });
     });
   }
 
@@ -79,6 +80,8 @@ export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWri
             sequence <= checkpoint.target
             && (checkpoint.threadId === undefined
               || checkpoint.threadId === sample.threadId)
+            && (checkpoint.turnId === undefined
+              || checkpoint.turnId === sample.turnId)
           ) checkpoint.succeeded = false;
         }
         this.onError?.(asError(error));

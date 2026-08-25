@@ -27,13 +27,13 @@
   旧锁继续失败关闭。
 - `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
   Row 类型和纯领域映射，包括历史未观测响应归一化、额度窗口解析与价格快照映射。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v10 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v11 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 继续持有初始化事务，停机升级继续由指标脚本管理。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、上游
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v10、`0600` 文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
+  严格 Schema v11、`0600` 文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录默认保留
@@ -46,9 +46,11 @@
   币种单位，避免浮点金额落库和历史价格回算。内部读取限制为每次最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计和最近一条无 Turn 的直接 API 请求分开返回，由
   Bootstrap 映射到 Application 的 `/metrics` 只读端口；会话归纳（模型、思考等级、Token 与费用）
-  递归纳入显式父 Thread 的子代理后代，父 Turn 任务合计只纳入显式 `parent_turn_id` 关联；
+  递归纳入显式父 Thread 的子代理后代；Schema v11 的 `subagent_turns` 按子 Thread 与子 Turn
+  保存运行级父 Turn 关系，父 Turn 任务合计只纳入这些精确运行关系；
   与每次对话明细查询由 `threadList()`、`threadTurnSummaries()` 提供，父 Turn 任务窄查询由
-  `threadTurnTaskSummary()` 提供完成卡片窄查询；`threadList()` 与 `threadTurnSummaries()` 供
+  `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
+  Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
   `codexc metrics threads` 和 `turns` 导出复用。时间范围聚合统一覆盖 Codex Provider 与
   直接 API，可按全局、提供商或“提供商 + 模型”分组；支持自然日/周/月、24 小时至 365 天滚动窗口、全部保留历史和 CLI 自定义日期范围，最多
   返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
@@ -83,11 +85,12 @@
 协议、Surface 或业务 Storage。本模块不直接暴露 HTTP API；`codexc metrics` 的
 `report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。Schema v3/v4/v5/v6/v7/v8/v9 可在停止 Gateway 后用
-`codexc update` 统一预检，并先创建 `0600` 备份再逐版本事务升级到 v10 并保留原记录；v8 升级
+HTTP API 复用相同查询，不向本模块写入状态。Schema v3/v4/v5/v6/v7/v8/v9/v10 可在停止 Gateway 后用
+`codexc update` 统一预检，并先创建 `0600` 备份再逐版本事务升级到 v11 并保留原记录；v8 升级
 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为 `subagent_threads` 新增可空
-`parent_turn_id`。历史 NULL 不按时间推断父 Turn；递归会话累计使用显式父 Thread 关系，父 Turn
-任务合计只使用显式父 Turn 关系。单库排障可用
+`parent_turn_id`，v10 升级 v11 新增运行级 `subagent_turns`。历史 NULL 和 v10 以前不存在的运行关系
+均不按时间推断；递归会话累计继续使用显式父 Thread 关系，父 Turn 任务合计只使用 v11 起记录的
+精确父子 Turn 关系。单库排障可用
 `codexc metrics upgrade`。未知版本继续失败关闭，
 使用 `codexc metrics reset` 归档后重建，不执行隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按

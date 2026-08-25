@@ -87,7 +87,7 @@ describe("DeepSeek setup", () => {
     );
     writeFileSync(
       rolePath,
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "max"\n',
       { mode: 0o600 },
     );
 
@@ -145,6 +145,7 @@ describe("DeepSeek setup", () => {
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
       model: "deepseek-v4-flash-vision-exp",
       model_provider: "deepseek",
+      model_reasoning_effort: "high",
     });
 
     writeManagedModelProviderProfileDefault("deepseek", {
@@ -158,7 +159,7 @@ describe("DeepSeek setup", () => {
     });
     writeFileSync(
       rolePath,
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "max"\n',
       { mode: 0o600 },
     );
     const repeated = await refreshDeepseekCatalogForUpdate({
@@ -187,6 +188,7 @@ describe("DeepSeek setup", () => {
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
       model: "deepseek-v4-flash",
       model_provider: "deepseek",
+      model_reasoning_effort: "max",
     });
     expect(JSON.parse(readFileSync(
       join(connectHome, "providers", "deepseek", "models.manifest.json"),

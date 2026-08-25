@@ -115,12 +115,15 @@ function state(status: "running" | "completed" | "errored"): OutputEvent {
   };
 }
 
-function waitCompleted(parentThreadId = "parent-1"): OutputEvent {
+function waitCompleted(
+  parentThreadId = "parent-1",
+  parentTurnId = "turn-1",
+): OutputEvent {
   return {
     type: "operation.updated",
     target,
     threadId: parentThreadId,
-    turnId: "turn-1",
+    turnId: parentTurnId,
     operation: {
       itemId: "wait-v2",
       kind: "subagent",
@@ -353,6 +356,310 @@ describe("SubagentCompletionTracker", () => {
       "interrupted",
       "completed",
     ]);
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("attributes repeated subagent completions to their exact child Turns", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const readSummary = vi.fn((_threadId: string, turnId?: string) => {
+      const value = summary();
+      const requestCount = turnId === "agent-turn-1" ? 1 : 2;
+      return {
+        latestTurn: value.latestTurn,
+        threadAggregate: {
+          ...value.threadAggregate,
+          requestCount,
+        },
+      };
+    });
+    const onRunStarted = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary,
+      publish,
+      onRunStarted,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+    });
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    tracker.handle(contacted());
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+    });
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(readSummary.mock.calls).toEqual([
+      ["agent-1", "agent-turn-1"],
+      ["agent-1", "agent-turn-2"],
+    ]);
+    expect(onRunStarted.mock.calls).toEqual([
+      [{
+        agentThreadId: "agent-1",
+        agentTurnId: "agent-turn-1",
+        parentThreadId: "parent-1",
+        parentTurnId: "turn-1",
+        agentPath: "/root/review",
+      }],
+      [{
+        agentThreadId: "agent-1",
+        agentTurnId: "agent-turn-2",
+        parentThreadId: "parent-1",
+        parentTurnId: "turn-2",
+        agentPath: "/root/review",
+      }],
+    ]);
+    expect(publish.mock.calls.map(([event]) => event.requestCount)).toEqual([1, 2]);
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("uses the active child Turn for a legacy terminal without a Turn ID", async () => {
+    vi.useFakeTimers();
+    const readSummary = vi.fn(() => summary());
+    const tracker = new SubagentCompletionTracker({
+      readSummary,
+      publish: vi.fn(),
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+    });
+    tracker.handle(state("completed"));
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(readSummary).toHaveBeenCalledWith("agent-1", "agent-turn-1");
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("does not apply a delayed metric from the previous child Turn to a follow-up", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => ({ latestTurn: null, threadAggregate: null }),
+      waitForMetrics: async () => true,
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+    });
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    tracker.handle(contacted());
+    await vi.advanceTimersByTimeAsync(0);
+
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+    });
+    tracker.metricsAvailable("agent-1", "agent-turn-1");
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+      status: "completed",
+      error: null,
+    });
+    tracker.handle(waitCompleted("parent-1", "turn-2"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(publish).toHaveBeenCalledTimes(2);
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("pairs a follow-up child Turn that starts before its interacted activity", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const onRunStarted = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: (_threadId, turnId) => {
+        const value = summary();
+        return {
+          latestTurn: value.latestTurn,
+          threadAggregate: {
+            ...value.threadAggregate,
+            requestCount: turnId === "agent-turn-1" ? 1 : 2,
+          },
+        };
+      },
+      onRunStarted,
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+    });
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+    });
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    tracker.handle(contacted());
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(onRunStarted.mock.calls.map(([details]) => details.agentTurnId)).toEqual([
+      "agent-turn-1",
+      "agent-turn-2",
+    ]);
+    expect(publish.mock.calls.map(([event]) => event.requestCount)).toEqual([1, 2]);
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("ignores a stale completion from the previous child Turn", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+    });
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    tracker.handle(contacted());
+    await vi.advanceTimersByTimeAsync(0);
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+    });
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(publish).toHaveBeenCalledTimes(1);
+
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(publish).toHaveBeenCalledTimes(2);
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("retains an interacted activity until the previous child Turn completes", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const onRunStarted = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      onRunStarted,
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+    });
+    tracker.handle(contacted());
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+    });
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-1",
+      status: "completed",
+      error: null,
+    });
+    tracker.handleInput({
+      type: "turn.completed",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+      status: "completed",
+      error: null,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(onRunStarted.mock.calls.map(([details]) => details.agentTurnId)).toEqual([
+      "agent-turn-1",
+      "agent-turn-2",
+    ]);
+    expect(publish).toHaveBeenCalledTimes(2);
     tracker.close();
     vi.useRealTimers();
   });

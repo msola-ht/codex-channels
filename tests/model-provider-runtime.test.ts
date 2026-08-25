@@ -52,6 +52,7 @@ import {
 import {
   customPrimaryProviderProfilePath,
   loadManagedModelProvider,
+  loadManagedModelProviderRole,
   loadManagedModelProviders,
   loadManagedProviderAppServer,
   loadManagedProviderAppServers,
@@ -840,6 +841,11 @@ describe("model provider runtime topology", () => {
       provider: "deepseek",
       baseUrl: "http://127.0.0.1:39491/",
     });
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n`,
+      { mode: 0o600 },
+    );
 
     const content = readFileSync(rolePath, "utf8");
     expect(content).toContain('model = "deepseek-v4-flash"');
@@ -857,6 +863,12 @@ describe("model provider runtime topology", () => {
     expect(content).not.toContain("model_auto_compact_token_limit");
     expect(content).not.toContain("experimental_bearer_token");
     expect(content).not.toContain("sk-test-secret");
+    expect(loadManagedModelProviderRole(environment)).toEqual({
+      role: "external",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      reasoningEffort: "high",
+    });
 
     expect(statSync(rolePath).mode & 0o777).toBe(0o600);
     const firstRoleInode = statSync(rolePath).ino;

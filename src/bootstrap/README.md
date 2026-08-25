@@ -38,8 +38,9 @@
   既有计时端口。所有脱敏请求样本都会持久化；具备 Thread、Turn 与 Token 窗口的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
   既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照；优先使用
-  代理指标携带的 WebSocket `reasoning.effort`，仅在缺失时由可选 `resolveModelSettings` 按 Thread
-  关联回填路由层维护的思考等级；代理、Core 和数据库 View 都不读取设置或内置模型价格。
+  代理指标携带的 WebSocket `reasoning.effort` 或私有第三方角色路径标注，普通 Thread 仅在缺失时
+  由可选 `resolveModelSettings` 按 Thread 关联回填路由层维护的思考等级；代理、Core 和数据库
+  View 都不读取请求正文、设置文件或内置模型价格。
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
 - `model-pricing-catalog.ts`：实现组合根注入的远程价格目录。启动时先读取 Gateway 数据目录下的
@@ -65,7 +66,9 @@
   子线程 `turn/completed` 作为正常终态，并接受官方中断活动与旧版
   `collabAgentToolCall.agentsStates` 终态；极快子线程先完成后登记时只在有界短期缓存中保留终态。
   `interacted` 到达时若该子线程仍有活动轮次则不重复登记；上一轮已经终止时开启新一轮完成跟踪，
-  上一轮仍在指标结算窗口内则分离结算，避免快速继续时覆盖任一轮终态。
+  上一轮仍在指标结算窗口内则分离结算；子线程 `turn/started` 会把本轮精确 Turn 与父 Turn 记入
+  Observability，官方完成通知按同一子 Turn 读取本轮统计，避免通知乱序或快速继续时覆盖终态，
+  也不会把多轮 Thread 累计误报为单轮用量。
   已观察到模型指标且终态后出现父线程官方 `wait` Item 时，立即等待 Observability Writer 当前
   水位落库并发布，保持该等待操作先于完成卡片；终态到达时尚无指标或之后未出现父线程等待时
   保留有界收敛窗口，后续新指标使旧结算失效；指标到达或静默本身不推断子代理结束。无指标
@@ -97,10 +100,13 @@
   Off-Peak / Peak 两档、各自对照官方包含额度；重算优先使用请求保存的价格快照档位，缺失时才按
   当前基线判定；Key、响应正文和解析异常同样不进入日志或业务事件。
 - `provider-idle-releaser.ts`：定期扫描已启动的 OpenCode Go 账户隔离 App Server，无 Conversation
-  绑定、非 `agents.external` 默认账户、Gateway 最近无 Turn 活动且空闲超过 5 分钟时通过 supervisor
-  `releaseProvider` 释放；Supervisor 还会拒绝释放存在受管 Remote TUI 租约的账户。成功自动释放后
+  绑定、Gateway 最近无 Turn 活动且空闲超过 5 分钟时通过 supervisor `releaseProvider` 释放；
+  `agents.external` 复用主 App Server 和共享统计代理，不锁定同账户的隔离实例；Supervisor 还会
+  拒绝释放存在受管 Remote TUI 租约的账户。成功自动释放后
   向最近使用过该账户的渠道会话通知一次；正在拉起的账户只跳过启动期间的扫描，主动释放造成的
-  断线不进入自动重连；关闭时停止新扫描并等待已开始的扫描退出，释放失败只记录日志不阻塞请求。
+  断线不进入自动重连。扫描遇到正在执行的 Provider 请求时立即跳过，不排队等待；释放已经开始时，
+  新请求等待 Client 关闭完成后再按需拉起。聚合只读操作只保护进程不被并发释放，不刷新空闲时间；
+  关闭时停止新扫描并只等待已经进入释放阶段的扫描退出，释放失败只记录日志不阻塞请求。
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存错误原文与分类；结构化 `misalignmentPolicyViolation` 使用独立分类并
   保留协议代码，不携带任何平台上下文或敏感凭据。

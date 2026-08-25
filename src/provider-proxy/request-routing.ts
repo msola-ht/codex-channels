@@ -29,7 +29,8 @@ export function resolveAccountPath(
   value: string | undefined,
   accounts: readonly string[] | undefined,
   defaultAccountId: string | undefined,
-): { accountId?: string; path: string } | undefined {
+  externalRoleEnabled = false,
+): { accountId?: string; path: string; externalRole?: true } | undefined {
   if (!value) return undefined;
   let url: URL;
   try {
@@ -38,6 +39,19 @@ export function resolveAccountPath(
     return undefined;
   }
   const pathname = url.pathname;
+  const externalRolePrefix = "/role/external";
+  if (
+    pathname === externalRolePrefix
+    || pathname.startsWith(`${externalRolePrefix}/`)
+  ) {
+    if (!externalRoleEnabled) return undefined;
+    const rest = pathname.slice(externalRolePrefix.length);
+    return {
+      ...(defaultAccountId === undefined ? {} : { accountId: defaultAccountId }),
+      path: `${rest || "/"}${url.search}`,
+      externalRole: true,
+    };
+  }
   if (pathname === "/go" || pathname.startsWith("/go/")) {
     const segments = pathname.split("/");
     const accountId = segments[2];

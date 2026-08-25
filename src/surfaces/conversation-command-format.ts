@@ -482,13 +482,14 @@ export function formatConversationCommandOutcome(
     case "session.new":
       return outcome.backgroundedThreadId
         ? toStructuredMarkdownList([
-            "已切换到新会话，原任务继续在后台运行。",
+            "新会话已准备，原任务继续在后台运行。",
             `后台 Thread：${outcome.backgroundedThreadId}`,
-            "下一条普通消息将创建新的 Codex Thread。",
+            "发送下一条普通消息时才会创建新的 Codex Thread。",
             formatNextMessageModel(outcome.nextModel),
           ].join("\n"))
         : toStructuredMarkdownList([
-            "已退出当前会话，下一条普通消息将创建新的 Codex Thread。",
+            "已退出当前会话。",
+            "发送下一条普通消息时才会创建新的 Codex Thread。",
             formatNextMessageModel(outcome.nextModel),
           ].join("\n"));
     case "thread.archived":
