@@ -13,14 +13,23 @@
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
 - `conversation-service.ts`：通过稳定的 `ConversationUseCases` 公开 Surface 和命令层所需用例，
   具体 `ConversationService` 负责新建、恢复、切换、归档、固定、原生分区和分页筛选 Thread，提交、steer 或将纯文本
-  写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物，并通过注入端口把项目规则操作限制
+  写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
+  并通过注入端口把项目规则操作限制
   到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
   扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile
   均使用稳定结果。
+- `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁和全局 Thread Section
+  写操作提供共享串行化；Queue、Revert 与主会话生命周期共用同一实例。
+- `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；
+  不负责 Thread 绑定切换或后台释放。
+- `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
+  Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  可把主 App Server 的 Codex 官方模型目录以精确自定义 Provider ID 克隆为切换菜单项，不复制或
+  持久化模型目录；
   在 Workspace、新会话或同 Provider 历史 Thread 切换前后捕获并恢复当前模型、思考等级与服务层级，
   显式恢复不同 Provider 的历史 Thread 时则尊重该 Thread 的 Provider；偏好只保留在运行内存中；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确

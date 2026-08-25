@@ -168,13 +168,13 @@ codexc doctor
 
 ## 6. 用户配置的主 Provider
 
-Gateway 支持 Codex 用户配置中的一个自定义主 Provider，不要求模型目录或 Gateway
-Setup。它读取 `~/.codex/config.toml` 的 `model_provider` 和 `[model_providers.<id>]`；若
+Gateway 支持 Codex 用户配置中的自定义 Responses Provider，并提供固定与切换两种运行模式。
+它读取 `~/.codex/config.toml` 的 `model_provider` 和 `[model_providers.<id>]`；若
 `model_provider` 显式配置为 `openai` 时锁定官方 OpenAI，不自动激活候选；未配置且只存在一个候选
 时沿用该候选兼容旧配置。自定义 Provider 只在 Gateway 监管的 App Server 子进程中选择。
 Gateway 在 App Server 前启动本地统计代理；原配置中的认证方式、模型名、
-`supports_websockets` 等字段仍由 Codex 处理。当前只支持 `wire_api = "responses"`，不把该 Provider
-加入 `/model` 的跨 Provider 菜单，也不为它伪造账户余额或用量接口。
+`supports_websockets` 等字段仍由 Codex 处理。当前只支持 `wire_api = "responses"`，不为它伪造
+账户余额或用量接口。
 
 示例：
 
@@ -199,7 +199,10 @@ supports_websockets = false
 `codexc primary-provider switch <ID>` 会从备份自动恢复。`codexc setup` 的“官方 → 登录并恢复官方”
 会运行 `codex login --device-auth`（打开终端显示的链接并输入验证码）并执行相同的备份与清理。
 从自定义候选切回官方时同时清除该候选留下的顶层 `model`；当前已经是官方模式时保留官方模型。
-候选从备份恢复后会消费对应备份项；`remove` 同时删除配置候选和同名备份，配置事务失败时恢复备份。
+候选从备份恢复后会消费对应备份项；官方模式下可从 Setup 直接把备份候选编辑为固定或切换模式，或经二次确认删除
+备份候选，不需要先切换到第三方。恢复、编辑或 `remove` 都先提交配置，成功后才消费同名备份；
+配置写入失败时原备份保持不变，配置已提交但备份清理失败时明确提示部分成功。备份不可安全读取时，
+只允许编辑当前 config 中的候选，切换和删除失败关闭。
 
 `requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；也可以按 Codex 官方配置使用
 `env_key`，或写入 `experimental_bearer_token` 直接使用 API Key（Key 明文保存在 0600 的
@@ -222,18 +225,37 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 
 会话内通过 `/model` 选择的模型和 Provider 会作为该会话的待生效偏好，覆盖配置文件默认值；
 `/model clear` 可清除该偏好，让下一个新 Thread 重新使用 `model_provider` 默认值。Gateway
-会把自定义主 Provider 的 Thread 路由到主 App Server 实例，不会为它启动独立实例。
+在固定模式把自定义 Thread 路由到主 App Server；切换模式保持官方 `openai` 主实例，并通过
+`~/.codex/sf-custom-<Provider ID>.config.toml` 启动独立自定义 App Server。每个 Profile 完整保存该
+Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"` 和服务层级，主
+`~/.codex/config.toml` 保持官方配置。`codexc remote --profile sf-custom-<Provider ID>`
+连接该隔离实例；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
+跨 Provider 选择沿用现有新 Thread 路由边界。锁定版 App Server 不接受 `--profile`，后台服务会先
+严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，
+不进入命令行。多个切换模式 Provider 通过私有显式注册表同时保留，并使用独立 Socket 与统计代理。
 
-该模式不支持自定义 Provider 的独立模型目录、`/usage` 账户适配、价格专用计价器或 Gateway 内跨 Provider
-切换；自定义主 Provider 也不能作为共享 `agents.external` 角色使用，该角色仍由 DeepSeek / OpenCode Go
-等受管 Provider 提供，可与自定义主 Provider 配置共存。需要这些能力时必须按本指南前述的编译期受管
-Provider 流程接入。
+当前不支持自定义模型目录、`model_catalog_json`、`/usage` 账户适配、价格专用计价器或
+`agents.external` 角色；后者仍由 DeepSeek / OpenCode Go 等受管 Provider 提供。自定义 Provider
+切换模式可以与受管切换模式共存，但不能与任何受管固定模式同时启用。需要自定义目录、账户或共享
+子代理能力时，仍必须按本指南前述的编译期受管 Provider 流程接入。
 
-可以通过 `codexc setup` 的“模型与提供商 → 第三方 → 自定义 第三方”引导写入上述配置：填写 Provider ID、
-上游 `base_url`、认证方式（直接写入 API Key / 当前 API Key / `env_key` / 无认证）、是否支持
-Responses WebSocket 和默认模型；Provider ID 固定为 `OpenAI`，避免手输填错（小写 `openai` 是
-Codex 内置保留 ID，不能作为自定义 Provider）。Setup 通过 Codex 的 `config/batchWrite` 原子写入用户配置，
-Key 输入不显示不回显；写入后仍需运行 `codexc service restart all` 生效。
+可以通过 `codexc setup` 的“模型与提供商 → 第三方 → 自定义第三方”新增或编辑固定、切换模式 Provider：填写上游
+`base_url`，从 URL 主机名派生的 Provider ID 与推荐的 `OpenAI` 中选择，只以直接写入 API Key
+（`experimental_bearer_token`）认证，再选择固定/切换模式、Responses WebSocket，并手工输入上游
+模型 ID。该 ID 必须存在于 App Server 返回的 Codex 官方模型目录；Setup 不请求第三方 `/models`，
+也不写入 `models.json` 或 `model_catalog_json`。新增拒绝覆盖
+config 或私有备份中的已有 ID；编辑保持 ID 不变，同一 URL Origin 可留空保留 Key，Origin 变化时必须重新输入，旧 Key
+不会用于新上游；无效旧 URL 同样要求新 Key，但不阻止修复。远程上游强制 HTTPS，HTTP 仅允许本机回环地址。
+选择 `OpenAI` 时固定同名 `name`，允许 Codex 使用远程压缩；上游仍须兼容对应接口。小写 `openai` 是
+Codex 内置保留 ID。固定模式通过 Codex 的 `config/batchWrite` 原子写入用户配置；切换模式不修改
+主配置，而维护逐 Provider 的私有 Profile 和注册表。新增默认推荐切换模式，编辑保持原模式；确认预览
+明确显示 Key 明文写入的 0600 配置位置。Key 输入不显示不回显；自定义固定模式不能保留其他自定义
+切换 Profile，从切换模式改为固定模式前必须先删除其他自定义切换 Provider；受管切换 Provider 可以
+共存，受管固定模式必须先恢复官方模式。写入后仍需运行
+`codexc service restart all` 生效。自定义第三方入口只接受上述直接 API Key 字段，不接受额外
+Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍是主配置候选，需先运行
+`codexc primary-provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
+同名主配置块和切换 Profile。
 
 ## 关联文档
 

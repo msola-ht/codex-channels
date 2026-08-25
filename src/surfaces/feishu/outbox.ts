@@ -218,12 +218,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "text.completed") {
-      if (event.phase !== "commentary") {
-        this.flushOperationUpdates(
-          event.target.conversationId,
-          turnKey(event.threadId, event.turnId),
-        );
-      }
+      this.flushOperationUpdates(event.target.conversationId, event);
       if (this.completeStream(event)) {
         this.enqueueCompletedAnswerFile(event);
         return;
@@ -280,11 +275,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       if (
-        this.operationUpdates.accept(
-          turnKey(event.threadId, event.turnId),
-          event.operation,
-          event.target.conversationId,
-        )
+        this.operationUpdates.accept(event, event.target.conversationId)
       ) {
         return;
       }
@@ -326,10 +317,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "turn.completed") {
       this.planMessages.delete(turnKey(event.threadId, event.turnId));
-      this.flushOperationUpdates(
-        event.target.conversationId,
-        turnKey(event.threadId, event.turnId),
-      );
+      this.flushOperationUpdates(event.target.conversationId, event);
       const remainingUsage = event.model && this.options.remainingUsage
         ? (await this.options.remainingUsage?.(
             event.model,
@@ -673,8 +661,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.replyTargets.clear();
   }
 
-  private flushOperationUpdates(chatId: string, key: string): void {
-    const buffered = this.operationUpdates.take(key);
+  private flushOperationUpdates(
+    chatId: string,
+    event: Extract<OutputEvent, { type: "text.completed" | "turn.completed" }>,
+  ): void {
+    const buffered = this.operationUpdates.flush(event);
     if (buffered === null) {
       return;
     }

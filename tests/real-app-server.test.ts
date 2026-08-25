@@ -25,7 +25,10 @@ import {
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
-import { providerAppServerSocketPath } from "../runtime/model-provider-runtime.mjs";
+import {
+  providerAppServerSocketPath,
+  writeCustomPrimaryProviderSwitchingProfile,
+} from "../runtime/model-provider-runtime.mjs";
 import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
 import type { ApprovalRequest } from "../src/approval/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
@@ -1567,6 +1570,140 @@ contractSuite("real supervised App Server service", () => {
         });
         rmSync(testRuntime, { recursive: true, force: true });
       }
+    }
+  }, 30_000);
+
+  it("starts an on-demand custom switching App Server with the official catalog", async () => {
+    const testRuntime = mkdtempSync(join(tmpdir(), "codex-custom-switching-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const workspace = join(testRuntime, "workspace");
+    const configPath = join(testRuntime, "config.toml");
+    const socketPath = join(testRuntime, "codex-app-server.sock");
+    const customSocketPath = providerAppServerSocketPath(socketPath, "OpenAI");
+    const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
+    const apiServer = createServer((request, response) => {
+      request.resume();
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "fixture endpoint" } }));
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      apiServer.once("error", rejectListen);
+      apiServer.listen(0, "127.0.0.1", () => resolveListen());
+    });
+    const apiAddress = apiServer.address();
+    if (!apiAddress || typeof apiAddress === "string") {
+      throw new Error("自定义切换 Provider 合同无法创建本机 Responses 夹具");
+    }
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "config.toml"), 'model_provider = "openai"\n', {
+      mode: 0o600,
+    });
+    writeCustomPrimaryProviderSwitchingProfile({
+      provider: "OpenAI",
+      model: "gpt-5.6-terra",
+      name: "OpenAI",
+      baseUrl: `http://127.0.0.1:${apiAddress.port}/v1`,
+      apiKey: "sk-integration-placeholder",
+      supportsWebsockets: false,
+    }, {
+      ...process.env,
+      CODEX_CONNECT_HOME: testRuntime,
+      CODEX_HOME: codexHome,
+    });
+    writeGatewayConfig(configPath, {
+      version: 1,
+      default_workspace: "integration",
+      telegram: {
+        bot_token: "integration-token",
+        allowed_user_ids: [123],
+        message_format: "html",
+      },
+      network: {},
+      codex: {
+        binary: process.env.CODEX_BINARY ?? "codex",
+        socket_path: socketPath,
+        sandbox: "workspace-write",
+      },
+      approval: { timeout_seconds: 300 },
+      storage: { database_path: join(testRuntime, "gateway.sqlite3") },
+      logging: { level: "info" },
+      workspaces: [{ id: "integration", name: "Integration", cwd: workspace }],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let customClient: CodexAppServerClient | undefined;
+    let threadId: string | undefined;
+    const service = spawn(
+      process.execPath,
+      [resolve("bin/codexc.mjs"), "service-app-server"],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          CODEX_CONNECT_HOME: testRuntime,
+          CODEX_CONNECT_CONFIG_FILE: configPath,
+          CODEX_HOME: codexHome,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+      },
+    );
+    service.stdout?.setEncoding("utf8");
+    service.stderr?.setEncoding("utf8");
+    service.stdout?.on("data", (chunk: string) => {
+      stdout = appendDiagnostic(stdout, chunk);
+    });
+    service.stderr?.on("data", (chunk: string) => {
+      stderr = appendDiagnostic(stderr, chunk);
+    });
+
+    try {
+      await waitFor(
+        () => existsSync(socketPath) && stdout.includes("openai 模型统计代理已启动"),
+        15_000,
+        () => service.exitCode === null && service.signalCode === null
+          ? undefined
+          : new Error(appServerFailure(
+              "自定义切换主 App Server 在就绪前退出",
+              `${stdout}\n${stderr}`,
+            )),
+      );
+      expect(sameAppServerTopology(await inspectAppServerSupervisor(socketPath), {
+        primaryProvider: "openai",
+        managedProviders: ["OpenAI"],
+        socketPaths: [socketPath, customSocketPath],
+      })).toBe(true);
+
+      await ensureAppServerProvider(socketPath, "OpenAI").catch((error) => {
+        throw new Error(appServerFailure(
+          error instanceof Error ? error.message : String(error),
+          `${stdout}\n${stderr}`,
+        ), { cause: error });
+      });
+      customClient = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(customSocketPath)),
+        { sandbox: "read-only" },
+      );
+      await customClient.connect();
+      expect((await customClient.listModels()).some(({ model }) => model === "gpt-5.6-terra"))
+        .toBe(true);
+      const started = await customClient.startThread(workspace);
+      threadId = started.thread.id;
+      expect(started.thread.modelProvider).toBe("OpenAI");
+    } finally {
+      if (threadId) {
+        await customClient?.unsubscribeThread(threadId).catch(() => undefined);
+        await customClient?.deleteThread(threadId).catch(() => undefined);
+      }
+      await customClient?.close().catch(() => undefined);
+      await stopDetachedTestProcess(service, 10_000);
+      await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
+      await new Promise<void>((resolveClose, rejectClose) => {
+        apiServer.close((error) => error ? rejectClose(error) : resolveClose());
+      });
+      rmSync(testRuntime, { recursive: true, force: true });
     }
   }, 30_000);
 

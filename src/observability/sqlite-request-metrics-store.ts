@@ -4,10 +4,28 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import {
   acquireRequestMetricsDatabaseLock,
-  modelRequestMetricsSchemaVersion,
   requestMetricsDatabasePath,
   type RequestMetricsDatabaseLock,
 } from "./request-metrics-database.js";
+import {
+  toStoredCompactSummary,
+  toStoredMetric,
+  toStoredMetricsAggregate,
+  toStoredMetricsGroup,
+  toStoredThreadAggregate,
+  toStoredTurnSummary,
+  type AggregateRow,
+  type CompactSummaryRow,
+  type ErrorGroupRow,
+  type ErrorSummaryRow,
+  type MetricRow,
+  type TurnSummaryRow,
+} from "./sqlite-request-metrics-row-codec.js";
+import {
+  ensureCurrentModelRequestMetricsSchema,
+  metricStorageColumnsSql,
+  requireCurrentModelRequestMetricsSchema,
+} from "./sqlite-request-metrics-schema.js";
 
 import type {
   ModelRequestMetricSample,
@@ -16,16 +34,11 @@ import type {
   ModelRequestMetricsErrorQuery,
   ModelRequestMetricsPageQuery,
   ModelRequestMetricsStore,
-  ModelRequestPricingSnapshot,
-  StoredCompactRequestMetricsSummary,
   StoredModelRequestMetric,
-  StoredModelRequestMetricsAggregate,
   StoredModelRequestMetricsErrorReport,
-  StoredModelRequestMetricsGroup,
   StoredModelRequestMetricsPage,
   StoredModelRequestMetricsReport,
   StoredThreadRequestMetricsSummary,
-  StoredThreadRequestMetricsAggregate,
   StoredThreadListItem,
   StoredThreadTurnSummary,
   StoredSubagentThreadRecord,
@@ -35,30 +48,12 @@ import type {
   WeeklyQuotaEstimateQuery,
 } from "./request-metrics.js";
 
-const schemaVersion = modelRequestMetricsSchemaVersion;
 const dayMs = 24 * 60 * 60 * 1_000;
 const defaultRetentionDays = 365;
 const defaultMaximumRows = 1_000_000;
 const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
-const metricStorageColumnsSql = `
-  provider, billing_mode, pricing_currency, pricing_source, pricing_effective_at_ms,
-  pricing_bucket,
-  uncached_input_price_per_million_nanos,
-  cached_input_price_per_million_nanos, output_price_per_million_nanos,
-  transport, response_format, operation, thread_id, turn_id, model, service_tier,
-  reasoning_effort, status, http_status, error_type, error_code, error_message,
-  incomplete_reason,
-  input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
-  total_tokens, upstream_created_at, upstream_completed_at,
-  request_started_at_ms, first_token_at_ms,
-  first_reasoning_delta_at_ms, last_reasoning_delta_at_ms,
-  first_output_delta_at_ms, last_output_delta_at_ms,
-  response_completed_at_ms, recorded_at_ms,
-  weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at,
-  weekly_quota_plan_type, quota_windows
-`;
 const pageSortSql = {
   recordedAtMs: "recorded_at_ms",
   provider: "provider",
@@ -173,151 +168,6 @@ const normalizedStatusSql = `
   END
 `;
 
-interface MetricRow {
-  id: number;
-  provider: string;
-  billing_mode: "api" | "subscription" | "unknown" | null;
-  pricing_currency: string | null;
-  pricing_source: string | null;
-  pricing_effective_at_ms: number | null;
-  pricing_bucket: "peak" | "off-peak" | null;
-  uncached_input_price_per_million_nanos: number | null;
-  cached_input_price_per_million_nanos: number | null;
-  output_price_per_million_nanos: number | null;
-  transport: "http" | "websocket";
-  response_format: "sse" | "json" | "websocket" | "unknown";
-  operation: "response" | "compact";
-  thread_id: string | null;
-  turn_id: string | null;
-  model: string | null;
-  service_tier: string | null;
-  reasoning_effort: string | null;
-  status: "completed" | "failed" | "incomplete" | "unknown";
-  http_status: number | null;
-  error_type: string | null;
-  error_code: string | null;
-  error_message: string | null;
-  incomplete_reason: string | null;
-  input_tokens: number | null;
-  cached_input_tokens: number | null;
-  output_tokens: number | null;
-  reasoning_output_tokens: number | null;
-  total_tokens: number | null;
-  upstream_created_at: number | null;
-  upstream_completed_at: number | null;
-  request_started_at_ms: number;
-  first_token_at_ms: number | null;
-  first_reasoning_delta_at_ms: number | null;
-  last_reasoning_delta_at_ms: number | null;
-  first_output_delta_at_ms: number | null;
-  last_output_delta_at_ms: number | null;
-  response_completed_at_ms: number;
-  recorded_at_ms: number;
-  weekly_quota_limit_id: "codex" | null;
-  weekly_used_percent_millionths: number | null;
-  weekly_resets_at: number | null;
-  weekly_quota_plan_type: string | null;
-  quota_windows: string | null;
-  request_duration_ms: number | null;
-  ttft_ms: number | null;
-  thinking_duration_ms: number | null;
-  output_duration_ms: number | null;
-  generation_duration_ms: number | null;
-  completion_gap_ms: number | null;
-  upstream_duration_ms: number | null;
-  uncached_input_tokens: number | null;
-  non_reasoning_output_tokens: number | null;
-  cache_hit_rate: number | null;
-  thinking_tokens_per_second: number | null;
-  output_tokens_per_second: number | null;
-  generation_tokens_per_second: number | null;
-  uncached_input_cost_nanos: number | null;
-  cached_input_cost_nanos: number | null;
-  output_cost_nanos: number | null;
-  total_cost_nanos: number | null;
-}
-
-interface CompactSummaryRow {
-  compact_request_count: number;
-  compact_unsuccessful_request_count: number;
-  compact_model: string | null;
-  compact_model_count: number;
-  compact_input_tokens: number | null;
-  compact_cached_input_tokens: number | null;
-  compact_input_token_count: number;
-  compact_cached_input_token_count: number;
-  compact_output_tokens: number | null;
-  compact_pricing_currency: string | null;
-  compact_pricing_currency_count: number;
-  compact_priced_request_count: number;
-  compact_total_cost_nanos: number | null;
-}
-
-interface TurnSummaryRow extends CompactSummaryRow {
-  provider?: string | null;
-  model?: string | null;
-  reasoning_effort?: string | null;
-  turn_id: string | null;
-  turn_count: number;
-  request_count: number;
-  unsuccessful_request_count: number;
-  request_duration_ms: number | null;
-  input_tokens: number | null;
-  cached_input_tokens: number | null;
-  input_token_count: number;
-  cached_input_token_count: number;
-  output_tokens: number | null;
-  reasoning_output_tokens: number | null;
-  non_reasoning_output_tokens: number | null;
-  output_duration_ms: number | null;
-  output_speed_sample_count: number;
-  output_speed_timed_count: number;
-  pricing_currency: string | null;
-  pricing_currency_count: number;
-  pricing_bucket: "peak" | "off-peak" | null;
-  pricing_bucket_count: number;
-  priced_request_count: number;
-  priced_input_tokens: number | null;
-  priced_output_tokens: number | null;
-  total_cost_nanos: number | null;
-  uncached_input_cost_nanos: number | null;
-  cached_input_cost_nanos: number | null;
-  output_cost_nanos: number | null;
-  uncached_input_price_per_million_nanos: number | null;
-  uncached_input_price_count: number;
-  cached_input_price_per_million_nanos: number | null;
-  cached_input_price_count: number;
-  output_price_per_million_nanos: number | null;
-  output_price_count: number;
-}
-
-interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count"> {
-  provider: string | null;
-  model: string | null;
-  ttft_average_ms: number | null;
-  ttft_p50_ms: number | null;
-  ttft_p95_ms: number | null;
-  ttft_sample_count: number;
-  total_group_count: number;
-}
-
-interface ErrorSummaryRow {
-  request_count: number;
-  unsuccessful_request_count: number;
-}
-
-interface ErrorGroupRow {
-  provider: string;
-  model: string | null;
-  status: "failed" | "incomplete" | "unknown";
-  http_status: number | null;
-  error_type: string | null;
-  last_error_message: string | null;
-  request_count: number;
-  last_occurred_at_ms: number;
-  total_group_count: number;
-}
-
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
   private readonly database: DatabaseSync;
   private readonly insert?: StatementSync;
@@ -351,7 +201,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       this.database = database;
       try {
         this.database.exec("PRAGMA busy_timeout = 1000; PRAGMA query_only = ON;");
-        this.requireCurrentSchema();
+        requireCurrentModelRequestMetricsSchema(this.database);
         this.rowCount = this.currentCount();
       } catch (error) {
         database.close();
@@ -1343,266 +1193,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   private initializeSchema(): void {
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      this.database.exec(`
-        CREATE TABLE IF NOT EXISTS schema_metadata (
-          name TEXT PRIMARY KEY,
-          value INTEGER NOT NULL
-        );
-      `);
-      const version = this.database.prepare(`
-        SELECT value FROM schema_metadata WHERE name = 'schema_version'
-      `).get() as { value: number } | undefined;
-      if (version && version.value !== schemaVersion) {
-        throw new ModelRequestMetricsSchemaError(version.value, schemaVersion);
-      }
-      if (!version) {
-        this.database.exec(`
-          CREATE TABLE subagent_threads (
-            thread_id TEXT PRIMARY KEY,
-            parent_thread_id TEXT NOT NULL,
-            parent_turn_id TEXT,
-            agent_path TEXT NOT NULL,
-            recorded_at_ms INTEGER NOT NULL
-          );
-          CREATE TABLE model_request_metrics (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            provider TEXT NOT NULL,
-            billing_mode TEXT CHECK (
-              billing_mode IS NULL OR billing_mode IN ('api', 'subscription', 'unknown')
-            ),
-            pricing_currency TEXT,
-            pricing_source TEXT,
-            pricing_effective_at_ms INTEGER,
-            pricing_bucket TEXT CHECK (
-              pricing_bucket IS NULL OR pricing_bucket IN ('peak', 'off-peak')
-            ),
-            uncached_input_price_per_million_nanos INTEGER CHECK (
-              uncached_input_price_per_million_nanos IS NULL
-              OR uncached_input_price_per_million_nanos >= 0
-            ),
-            cached_input_price_per_million_nanos INTEGER CHECK (
-              cached_input_price_per_million_nanos IS NULL
-              OR cached_input_price_per_million_nanos >= 0
-            ),
-            output_price_per_million_nanos INTEGER CHECK (
-              output_price_per_million_nanos IS NULL
-              OR output_price_per_million_nanos >= 0
-            ),
-            transport TEXT NOT NULL CHECK (transport IN ('http', 'websocket')),
-            response_format TEXT NOT NULL CHECK (
-              response_format IN ('sse', 'json', 'websocket', 'unknown')
-            ),
-            operation TEXT NOT NULL CHECK (operation IN ('response', 'compact')),
-            thread_id TEXT,
-            turn_id TEXT,
-            model TEXT,
-            service_tier TEXT,
-            reasoning_effort TEXT,
-            status TEXT NOT NULL CHECK (status IN ('completed', 'failed', 'incomplete', 'unknown')),
-            http_status INTEGER,
-            error_type TEXT,
-            error_code TEXT,
-            error_message TEXT,
-            incomplete_reason TEXT,
-            input_tokens INTEGER,
-            cached_input_tokens INTEGER,
-            output_tokens INTEGER,
-            reasoning_output_tokens INTEGER,
-            total_tokens INTEGER,
-            upstream_created_at REAL,
-            upstream_completed_at REAL,
-            request_started_at_ms INTEGER NOT NULL,
-            first_token_at_ms INTEGER,
-            first_reasoning_delta_at_ms INTEGER,
-            last_reasoning_delta_at_ms INTEGER,
-            first_output_delta_at_ms INTEGER,
-            last_output_delta_at_ms INTEGER,
-            response_completed_at_ms INTEGER NOT NULL,
-            recorded_at_ms INTEGER NOT NULL,
-            weekly_quota_limit_id TEXT CHECK (
-              weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex'
-            ),
-            weekly_used_percent_millionths INTEGER CHECK (
-              weekly_used_percent_millionths IS NULL
-              OR weekly_used_percent_millionths BETWEEN 0 AND 100000000
-            ),
-            weekly_resets_at INTEGER CHECK (
-              weekly_resets_at IS NULL OR weekly_resets_at >= 0
-            ),
-            weekly_quota_plan_type TEXT,
-            quota_windows TEXT,
-            CHECK (
-              (
-                billing_mode IS NULL
-                AND pricing_currency IS NULL
-                AND pricing_source IS NULL
-                AND pricing_effective_at_ms IS NULL
-                AND uncached_input_price_per_million_nanos IS NULL
-                AND cached_input_price_per_million_nanos IS NULL
-                AND output_price_per_million_nanos IS NULL
-              ) OR (
-                billing_mode IS NOT NULL
-                AND pricing_source IS NOT NULL
-                AND pricing_effective_at_ms IS NOT NULL
-                AND (
-                  (
-                    uncached_input_price_per_million_nanos IS NULL
-                    AND cached_input_price_per_million_nanos IS NULL
-                    AND output_price_per_million_nanos IS NULL
-                  ) OR pricing_currency IS NOT NULL
-                )
-              )
-            )
-          );
-          CREATE INDEX model_request_metrics_recorded_at
-            ON model_request_metrics (recorded_at_ms);
-          CREATE INDEX model_request_metrics_thread_turn
-            ON model_request_metrics (thread_id, turn_id, id);
-          CREATE INDEX model_request_metrics_provider_model
-            ON model_request_metrics (provider, model, id);
-          CREATE VIEW model_request_metrics_enriched AS
-          WITH metric_base AS (
-            SELECT
-              metric.*,
-              CASE
-                WHEN last_reasoning_delta_at_ms IS NULL THEN last_output_delta_at_ms
-                WHEN last_output_delta_at_ms IS NULL THEN last_reasoning_delta_at_ms
-                WHEN last_reasoning_delta_at_ms >= last_output_delta_at_ms
-                  THEN last_reasoning_delta_at_ms
-                ELSE last_output_delta_at_ms
-              END AS last_token_at_ms,
-              CASE
-                WHEN input_tokens IS NOT NULL
-                  AND cached_input_tokens IS NOT NULL
-                  AND input_tokens >= cached_input_tokens
-                  THEN input_tokens - cached_input_tokens
-                ELSE NULL
-              END AS uncached_input_tokens,
-              CASE
-                WHEN output_tokens IS NOT NULL
-                  AND output_tokens >= COALESCE(reasoning_output_tokens, 0)
-                  THEN output_tokens - COALESCE(reasoning_output_tokens, 0)
-                ELSE NULL
-              END AS non_reasoning_output_tokens
-            FROM model_request_metrics AS metric
-          ), derived AS (
-            SELECT
-              metric_base.*,
-              CASE WHEN response_completed_at_ms >= request_started_at_ms
-                THEN response_completed_at_ms - request_started_at_ms
-              END AS request_duration_ms,
-              CASE WHEN first_token_at_ms >= request_started_at_ms
-                THEN first_token_at_ms - request_started_at_ms END AS ttft_ms,
-              CASE WHEN last_reasoning_delta_at_ms >= first_reasoning_delta_at_ms
-                THEN last_reasoning_delta_at_ms - first_reasoning_delta_at_ms
-              END AS thinking_duration_ms,
-              CASE WHEN last_output_delta_at_ms >= first_output_delta_at_ms
-                THEN last_output_delta_at_ms - first_output_delta_at_ms
-              END AS output_duration_ms,
-              CASE WHEN last_token_at_ms >= first_token_at_ms
-                THEN last_token_at_ms - first_token_at_ms
-              END AS generation_duration_ms,
-              CASE WHEN response_completed_at_ms >= last_token_at_ms
-                THEN response_completed_at_ms - last_token_at_ms
-              END AS completion_gap_ms,
-              CASE WHEN upstream_completed_at >= upstream_created_at
-                THEN (upstream_completed_at - upstream_created_at) * 1000
-              END AS upstream_duration_ms,
-              CASE WHEN input_tokens > 0 AND cached_input_tokens IS NOT NULL
-                THEN cached_input_tokens * 1.0 / input_tokens
-              END AS cache_hit_rate
-            FROM metric_base
-          ), rates AS (
-            SELECT
-              derived.*,
-              CASE WHEN thinking_duration_ms > 0 AND reasoning_output_tokens IS NOT NULL
-                THEN reasoning_output_tokens * 1000.0 / thinking_duration_ms
-              END AS thinking_tokens_per_second,
-              CASE WHEN output_duration_ms > 0 AND non_reasoning_output_tokens IS NOT NULL
-                THEN non_reasoning_output_tokens * 1000.0 / output_duration_ms
-              END AS output_tokens_per_second,
-              CASE WHEN generation_duration_ms > 0 AND output_tokens IS NOT NULL
-                THEN output_tokens * 1000.0 / generation_duration_ms
-              END AS generation_tokens_per_second,
-              CASE
-                WHEN uncached_input_tokens = 0 THEN 0
-                WHEN uncached_input_tokens IS NOT NULL
-                  AND uncached_input_price_per_million_nanos IS NOT NULL
-                  THEN CAST(ROUND(
-                    uncached_input_tokens
-                    * uncached_input_price_per_million_nanos / 1000000.0
-                  ) AS INTEGER)
-              END AS uncached_input_cost_nanos,
-              CASE
-                WHEN cached_input_tokens = 0 THEN 0
-                WHEN cached_input_tokens IS NOT NULL
-                  AND cached_input_price_per_million_nanos IS NOT NULL
-                  THEN CAST(ROUND(
-                    cached_input_tokens
-                    * cached_input_price_per_million_nanos / 1000000.0
-                  ) AS INTEGER)
-              END AS cached_input_cost_nanos,
-              CASE
-                WHEN output_tokens = 0 THEN 0
-                WHEN output_tokens IS NOT NULL
-                  AND output_price_per_million_nanos IS NOT NULL
-                  THEN CAST(ROUND(
-                    output_tokens * output_price_per_million_nanos / 1000000.0
-                  ) AS INTEGER)
-              END AS output_cost_nanos
-            FROM derived
-          )
-          SELECT
-            rates.*,
-            CASE
-              WHEN uncached_input_cost_nanos IS NOT NULL
-                AND cached_input_cost_nanos IS NOT NULL
-                AND output_cost_nanos IS NOT NULL
-                THEN uncached_input_cost_nanos
-                  + cached_input_cost_nanos
-                  + output_cost_nanos
-            END AS total_cost_nanos
-          FROM rates;
-          INSERT INTO schema_metadata (name, value) VALUES ('schema_version', ${schemaVersion});
-        `);
-      }
+      ensureCurrentModelRequestMetricsSchema(this.database);
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
-    }
-  }
-
-  private requireCurrentSchema(): void {
-    let value: number | undefined;
-    try {
-      value = (this.database.prepare(`
-        SELECT value FROM schema_metadata WHERE name = 'schema_version'
-      `).get() as { value: number } | undefined)?.value;
-    } catch {
-      throw new ModelRequestMetricsSchemaError(0, schemaVersion);
-    }
-    if (value !== schemaVersion) {
-      throw new ModelRequestMetricsSchemaError(value ?? 0, schemaVersion);
-    }
-    try {
-      this.database.prepare(`
-        SELECT id, ${metricStorageColumnsSql}
-        FROM model_request_metrics
-        LIMIT 0
-      `).all();
-      this.database.prepare(`
-        SELECT thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms
-        FROM subagent_threads
-        LIMIT 0
-      `).all();
-      this.database.prepare(`
-        SELECT id, total_cost_nanos
-        FROM model_request_metrics_enriched
-        LIMIT 0
-      `).all();
-    } catch (error) {
-      throw new ModelRequestMetricsSchemaError(value, schemaVersion, { cause: error });
     }
   }
 
@@ -1644,208 +1239,7 @@ export function modelRequestMetricsDatabasePath(stateDatabasePath: string): stri
   return requestMetricsDatabasePath(stateDatabasePath);
 }
 
-export class ModelRequestMetricsSchemaError extends Error {
-  readonly code = "METRICS_SCHEMA_UNSUPPORTED";
-
-  constructor(
-    readonly actualVersion: number,
-    readonly expectedVersion: number,
-    options?: ErrorOptions,
-  ) {
-    const detail = options?.cause === undefined
-      ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
-      : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = options?.cause === undefined
-      && actualVersion >= 3
-      && actualVersion < expectedVersion
-      ? "codexc metrics upgrade 备份并升级指标库"
-      : "codexc metrics reset 重建指标库";
-    super(
-      `模型请求指标数据库${detail}请运行 ${remedy}`,
-      options,
-    );
-    this.name = "ModelRequestMetricsSchemaError";
-  }
-}
-
-function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
-  const responseNotObserved = row.operation === "response"
-    && row.status === "completed"
-    && row.response_format === "unknown"
-    && row.model === null
-    && row.input_tokens === null
-    && row.output_tokens === null
-    && row.total_tokens === null;
-  return {
-    id: row.id,
-    provider: row.provider,
-    pricing: toPricingSnapshot(row),
-    transport: row.transport,
-    responseFormat: row.response_format,
-    operation: row.operation,
-    threadId: row.thread_id,
-    turnId: row.turn_id,
-    model: row.model,
-    serviceTier: row.service_tier,
-    reasoningEffort: row.reasoning_effort,
-    status: responseNotObserved ? "incomplete" : row.status,
-    httpStatus: row.http_status,
-    errorType: row.error_type,
-    errorCode: row.error_code,
-    errorMessage: row.error_message,
-    incompleteReason: responseNotObserved
-      ? "response_not_observed"
-      : row.incomplete_reason,
-    inputTokens: row.input_tokens,
-    cachedInputTokens: row.cached_input_tokens,
-    outputTokens: row.output_tokens,
-    reasoningOutputTokens: row.reasoning_output_tokens,
-    totalTokens: row.total_tokens,
-    upstreamCreatedAt: row.upstream_created_at,
-    upstreamCompletedAt: row.upstream_completed_at,
-    requestStartedAtMs: row.request_started_at_ms,
-    firstTokenAtMs: row.first_token_at_ms,
-    firstReasoningDeltaAtMs: row.first_reasoning_delta_at_ms,
-    lastReasoningDeltaAtMs: row.last_reasoning_delta_at_ms,
-    firstOutputDeltaAtMs: row.first_output_delta_at_ms,
-    lastOutputDeltaAtMs: row.last_output_delta_at_ms,
-    responseCompletedAtMs: row.response_completed_at_ms,
-    weeklyQuota: row.weekly_quota_limit_id === null
-      || row.weekly_used_percent_millionths === null
-      || row.weekly_resets_at === null
-      ? null
-      : {
-          limitId: row.weekly_quota_limit_id,
-          usedPercentMillionths: row.weekly_used_percent_millionths,
-          resetsAt: row.weekly_resets_at,
-          planType: row.weekly_quota_plan_type,
-        },
-    quotaWindows: parseQuotaWindows(row.quota_windows),
-    recordedAtMs: row.recorded_at_ms,
-    requestDurationMs: row.request_duration_ms,
-    ttftMs: row.ttft_ms,
-    thinkingDurationMs: row.thinking_duration_ms,
-    outputDurationMs: row.output_duration_ms,
-    generationDurationMs: row.generation_duration_ms,
-    completionGapMs: row.completion_gap_ms,
-    upstreamDurationMs: row.upstream_duration_ms,
-    uncachedInputTokens: row.uncached_input_tokens,
-    nonReasoningOutputTokens: row.non_reasoning_output_tokens,
-    cacheHitRate: row.cache_hit_rate,
-    thinkingTokensPerSecond: row.thinking_tokens_per_second,
-    outputTokensPerSecond: row.output_tokens_per_second,
-    generationTokensPerSecond: row.generation_tokens_per_second,
-    uncachedInputCostNanos: row.uncached_input_cost_nanos,
-    cachedInputCostNanos: row.cached_input_cost_nanos,
-    outputCostNanos: row.output_cost_nanos,
-    totalCostNanos: row.total_cost_nanos,
-  };
-}
-
-function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
-  const outputDurationMs = row.output_duration_ms ?? 0;
-  const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
-  const pricing = toStoredAggregatePricing(row);
-  return {
-    provider: row.provider ?? null,
-    model: row.model ?? null,
-    reasoningEffort: row.reasoning_effort ?? null,
-    turnId: row.turn_id!,
-    requestCount: row.request_count,
-    unsuccessfulRequestCount: row.unsuccessful_request_count,
-    requestDurationMs: row.request_duration_ms ?? 0,
-    inputTokens: row.input_tokens ?? 0,
-    cachedInputTokens: row.input_token_count > 0
-      && row.cached_input_token_count === row.input_token_count
-      ? row.cached_input_tokens ?? 0
-      : null,
-    outputTokens: row.output_tokens ?? 0,
-    reasoningOutputTokens: row.reasoning_output_tokens ?? 0,
-    outputTokensPerSecond: outputDurationMs > 0 && nonReasoningOutputTokens > 0
-      ? nonReasoningOutputTokens / (outputDurationMs / 1_000)
-      : null,
-    outputSpeedSampleCount: row.output_speed_sample_count,
-    outputSpeedTimedCount: row.output_speed_timed_count,
-    pricedInputTokens: row.priced_input_tokens ?? 0,
-    pricedOutputTokens: row.priced_output_tokens ?? 0,
-    ...pricing,
-    compact: toStoredCompactSummary(row),
-  };
-}
-
-function parseQuotaWindows(
-  value: string | null,
-): ReadonlyArray<{ windowId: string; resetsAt: number | null }> | null {
-  if (value === null) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed)) return null;
-  return parsed.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-    const window = entry as Record<string, unknown>;
-    if (typeof window.windowId !== "string" || window.windowId.length === 0) {
-      return [];
-    }
-    const resetsAt = window.resetsAt;
-    if (
-      resetsAt !== null
-      && !(
-        typeof resetsAt === "number"
-        && Number.isSafeInteger(resetsAt)
-        && resetsAt >= 0
-      )
-    ) {
-      return [];
-    }
-    return [{
-      windowId: window.windowId,
-      resetsAt,
-    }];
-  });
-}
-
-function toStoredThreadAggregate(
-  row: TurnSummaryRow,
-): StoredThreadRequestMetricsAggregate {
-  const summary = toStoredTurnSummary({
-    ...row,
-    turn_id: "aggregate",
-  });
-  return {
-    provider: summary.provider,
-    turnCount: row.turn_count,
-    requestCount: summary.requestCount,
-    unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
-    requestDurationMs: summary.requestDurationMs,
-    inputTokens: summary.inputTokens,
-    cachedInputTokens: summary.cachedInputTokens,
-    outputTokens: summary.outputTokens,
-    reasoningOutputTokens: summary.reasoningOutputTokens,
-    outputTokensPerSecond: summary.outputTokensPerSecond,
-    outputSpeedSampleCount: summary.outputSpeedSampleCount,
-    outputSpeedTimedCount: summary.outputSpeedTimedCount,
-    pricingCurrency: summary.pricingCurrency,
-    pricedRequestCount: summary.pricedRequestCount,
-    pricedInputTokens: summary.pricedInputTokens,
-    pricedOutputTokens: summary.pricedOutputTokens,
-    totalCostNanos: summary.totalCostNanos,
-    inputCostNanos: summary.inputCostNanos,
-    cachedInputCostNanos: summary.cachedInputCostNanos,
-    outputCostNanos: summary.outputCostNanos,
-    uncachedInputPricePerMillionNanos:
-      summary.uncachedInputPricePerMillionNanos,
-    cachedInputPricePerMillionNanos:
-      summary.cachedInputPricePerMillionNanos,
-    outputPricePerMillionNanos: summary.outputPricePerMillionNanos,
-    hasMixedPrices: summary.hasMixedPrices,
-    pricingBuckets: summary.pricingBuckets,
-    compact: summary.compact,
-  };
-}
+export { ModelRequestMetricsSchemaError } from "./sqlite-request-metrics-schema.js";
 
 function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): void {
   validateMetricsTimeRange(query);
@@ -2024,141 +1418,4 @@ function aggregationGrouping(
     case "model":
       return { provider: "provider", model: "model" };
   }
-}
-
-function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetricsGroup {
-  return {
-    provider: row.provider,
-    model: row.model,
-    aggregate: toStoredMetricsAggregate(row),
-  };
-}
-
-function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
-  const outputDurationMs = row.output_duration_ms ?? 0;
-  const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
-  const pricing = toStoredAggregatePricing(row);
-  return {
-    requestCount: row.request_count,
-    unsuccessfulRequestCount: row.unsuccessful_request_count,
-    requestDurationMs: row.request_duration_ms ?? 0,
-    inputTokens: row.input_tokens ?? 0,
-    cachedInputTokens: row.input_token_count > 0
-      && row.cached_input_token_count === row.input_token_count
-      ? row.cached_input_tokens ?? 0
-      : null,
-    outputTokens: row.output_tokens ?? 0,
-    reasoningOutputTokens: row.reasoning_output_tokens ?? 0,
-    outputTokensPerSecond: outputDurationMs > 0 && nonReasoningOutputTokens > 0
-      ? nonReasoningOutputTokens / (outputDurationMs / 1_000)
-      : null,
-    outputSpeedSampleCount: row.output_speed_sample_count,
-    outputSpeedTimedCount: row.output_speed_timed_count,
-    ttftAverageMs: row.ttft_average_ms,
-    ttftP50Ms: row.ttft_p50_ms,
-    ttftP95Ms: row.ttft_p95_ms,
-    ttftSampleCount: row.ttft_sample_count,
-    ...pricing,
-    compact: toStoredCompactSummary(row),
-  };
-}
-
-function toStoredCompactSummary(
-  row: CompactSummaryRow,
-): StoredCompactRequestMetricsSummary | null {
-  if (row.compact_request_count === 0) return null;
-  return {
-    model: row.compact_model_count === 1 ? row.compact_model : null,
-    hasMixedModels: row.compact_model_count > 1,
-    requestCount: row.compact_request_count,
-    unsuccessfulRequestCount: row.compact_unsuccessful_request_count,
-    inputTokens: row.compact_input_tokens ?? 0,
-    cachedInputTokens: row.compact_input_token_count > 0
-      && row.compact_cached_input_token_count === row.compact_input_token_count
-      ? row.compact_cached_input_tokens ?? 0
-      : null,
-    outputTokens: row.compact_output_tokens ?? 0,
-    pricingCurrency: row.compact_pricing_currency_count === 1
-      ? row.compact_pricing_currency
-      : null,
-    pricedRequestCount: row.compact_priced_request_count,
-    totalCostNanos: row.compact_pricing_currency_count === 1
-      ? row.compact_total_cost_nanos
-      : null,
-  };
-}
-
-function toStoredAggregatePricing(row: TurnSummaryRow | AggregateRow): Pick<
-  StoredModelRequestMetricsAggregate,
-  | "pricingCurrency"
-  | "pricedRequestCount"
-  | "totalCostNanos"
-  | "inputCostNanos"
-  | "cachedInputCostNanos"
-  | "outputCostNanos"
-  | "uncachedInputPricePerMillionNanos"
-  | "cachedInputPricePerMillionNanos"
-  | "outputPricePerMillionNanos"
-  | "hasMixedPrices"
-  | "pricingBuckets"
-> {
-  const hasMixedPrices = row.pricing_currency_count > 1
-    || row.uncached_input_price_count > 1
-    || row.cached_input_price_count > 1
-    || row.output_price_count > 1;
-  const hasSinglePrice = row.pricing_currency_count === 1 && !hasMixedPrices;
-  const pricingBuckets: Array<"peak" | "off-peak"> =
-    row.pricing_bucket_count >= 2
-      ? ["off-peak", "peak"]
-      : row.pricing_bucket_count === 1 && row.pricing_bucket !== null
-        ? [row.pricing_bucket]
-        : [];
-  return {
-    pricingCurrency: row.pricing_currency_count === 1
-      ? row.pricing_currency
-      : null,
-    pricedRequestCount: row.priced_request_count,
-    totalCostNanos: row.pricing_currency_count === 1
-      ? row.total_cost_nanos
-      : null,
-    inputCostNanos: row.pricing_currency_count === 1
-      ? row.uncached_input_cost_nanos
-      : null,
-    cachedInputCostNanos: row.pricing_currency_count === 1
-      ? row.cached_input_cost_nanos
-      : null,
-    outputCostNanos: row.pricing_currency_count === 1
-      ? row.output_cost_nanos
-      : null,
-    uncachedInputPricePerMillionNanos: hasSinglePrice
-      ? row.uncached_input_price_per_million_nanos
-      : null,
-    cachedInputPricePerMillionNanos: hasSinglePrice
-      ? row.cached_input_price_per_million_nanos
-      : null,
-    outputPricePerMillionNanos: hasSinglePrice
-      ? row.output_price_per_million_nanos
-      : null,
-    hasMixedPrices,
-    pricingBuckets,
-  };
-}
-
-function toPricingSnapshot(row: MetricRow): ModelRequestPricingSnapshot | null {
-  if (row.billing_mode === null) return null;
-  if (row.pricing_source === null || row.pricing_effective_at_ms === null) {
-    throw new Error(`模型请求指标 ${row.id} 的价格快照不完整`);
-  }
-  return {
-    billingMode: row.billing_mode,
-    currency: row.pricing_currency,
-    source: row.pricing_source,
-    effectiveAtMs: row.pricing_effective_at_ms,
-    bucket: row.pricing_bucket,
-    uncachedInputPricePerMillionNanos:
-      row.uncached_input_price_per_million_nanos,
-    cachedInputPricePerMillionNanos:
-      row.cached_input_price_per_million_nanos,
-    outputPricePerMillionNanos: row.output_price_per_million_nanos,
-  };
 }

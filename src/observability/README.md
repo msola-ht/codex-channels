@@ -20,17 +20,21 @@
   定时上报，429/5xx 且服务端返回 `Retry-After` 时优先按服务端要求延后；只有收到
   HTTP 2xx 才推进水位。载荷只含脱敏指标，不上传 `errorMessage`，不包含消息正文、提示词
   或审批内容；本模块不依赖代理、Surface 或业务 Storage，网络与状态路径由 Bootstrap 注入。
-- `request-metrics-database.ts`：集中保存指标 Schema、固定路径和进程级独占锁；Gateway 与 reset
+- `request-metrics-database.ts`：集中保存指标 Schema 版本、固定路径和进程级独占锁；Gateway 与 reset
   共用独立 SQLite 锁库中的排他事务，由操作系统在进程退出时释放，不依赖 PID 或失效锁删除；真实
   运行中持有者与并发重建均失败关闭。升级时会检查旧 JSON 锁：失效 PID、Linux 跨系统重启遗留锁
   和超过保护期的残缺锁可清理；近期残缺锁、仍在运行的旧 Gateway，以及非 Linux 上 PID 仍存活的
   旧锁继续失败关闭。
+- `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
+  Row 类型和纯领域映射，包括历史未观测响应归一化、额度窗口解析与价格快照映射。
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v10 建库 SQL、存储列定义、版本错误和
+  严格结构校验；Store 继续持有初始化事务，停机升级继续由指标脚本管理。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、上游
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v10、`0600` 文件权限，只接受当前
-Schema；首次初始化在单一事务内完成；使用 WAL 允许后续只读查询与采集并行，锁等待限制为
+  严格 Schema v10、`0600` 文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
+  允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录默认保留
   365 天、以 1,000,000 条为清理目标，可由 `[metrics.storage]` 收窄或扩大；每 100 次写入分批清理，两个清理周期之间

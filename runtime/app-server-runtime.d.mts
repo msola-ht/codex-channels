@@ -1,15 +1,18 @@
-import type { ManagedProviderAppServerRuntime } from "./model-provider-runtime.mjs";
+import type {
+  ConfiguredCustomSwitchingModelProvider,
+  ManagedProviderAppServerRuntime,
+} from "./model-provider-runtime.mjs";
 import type { ManagedModelProviderId } from "./model-provider-definitions.mjs";
-
 export interface AppServerRuntimeDescriptor {
   primarySocketPath: string;
   primaryProvider: "openai" | ManagedModelProviderId;
-  managedProviders: ManagedProviderAppServerRuntime[];
+  managedProviders: Array<ManagedProviderAppServerRuntime | ConfiguredCustomSwitchingModelProvider>;
+  customSwitchingProviders: ConfiguredCustomSwitchingModelProvider[];
   managedSocketPaths: string[];
   socketPaths: string[];
   topology: {
     primaryProvider: "openai" | ManagedModelProviderId;
-    managedProviders: ManagedModelProviderId[];
+    managedProviders: string[];
     socketPaths: string[];
   };
 }

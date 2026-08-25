@@ -100,6 +100,7 @@ export {
   resolveModel,
   type ModelSelectionPreference,
   type ModelSelectionState,
+  type OfficialModelCatalogProvider,
 } from "./model-selection-service.js";
 export {
   type ModelInputModality,

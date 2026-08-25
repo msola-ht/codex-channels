@@ -6,6 +6,7 @@ import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { acquireAppServerProviderLease } from "../runtime/app-server-supervisor.mjs";
 import {
+  loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
@@ -40,8 +41,14 @@ async function runRemoteCli() {
   const document = readGatewayConfig(runtime.configPath);
   const codex = table(document.codex);
   const { workspaces } = readWorkspaceConfig(document);
+  const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
   const { passthrough, selectedProfile, workspaceId } = parseCodexRemoteOptions(
     process.argv.slice(2),
+    {
+      customSwitchingProfiles: customSwitchingProviders.map(
+        ({ profileName }) => profileName,
+      ),
+    },
   );
   let workdir = realpathSync(process.cwd());
   if (workspaceId !== undefined) {
@@ -54,14 +61,29 @@ async function runRemoteCli() {
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
   let socketPath = primarySocketPath;
   let providerLease;
-  const selectedDefinition = [
+  const customSwitchingProvider = customSwitchingProviders.find(
+    ({ profileName }) => profileName === selectedProfile,
+  );
+  const selectedDefinition = customSwitchingProvider !== undefined
+    ? {
+        id: customSwitchingProvider.provider,
+        profileName: customSwitchingProvider.profileName,
+        codexProfileName: customSwitchingProvider.profileName,
+        displayName: customSwitchingProvider.provider,
+      }
+    : [
     ...loadManagedModelProviderDefinitions(process.env),
     opencodeGoProviderDefinition,
-  ].find(({ profileName }) => profileName === selectedProfile);
+    ].find(({ profileName }) => profileName === selectedProfile);
+  if (selectedProfile !== undefined && selectedDefinition === undefined) {
+    throw new Error(`模型 Provider Profile ${selectedProfile} 已不再可用`);
+  }
   if (selectedDefinition) {
-    const managedProvider = loadManagedModelProviders().find(
-      ({ provider }) => provider === selectedDefinition.id,
-    );
+    const managedProvider = customSwitchingProvider?.provider === selectedDefinition.id
+      ? customSwitchingProvider
+      : loadManagedModelProviders().find(
+          ({ provider }) => provider === selectedDefinition.id,
+        );
     if (!managedProvider) {
       throw new Error(`${selectedDefinition.displayName} 尚未配置，请先运行 codexc setup`);
     }

@@ -2,10 +2,17 @@ import {
   loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
+import { loadConfiguredCustomSwitchingModelProviders } from "../runtime/model-provider-runtime.mjs";
 
 export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
 
-export function parseCodexRemoteOptions(args) {
+export function parseCodexRemoteOptions(
+  args,
+  {
+    customSwitchingProfiles = loadConfiguredCustomSwitchingModelProviders(process.env)
+      .map(({ profileName }) => profileName),
+  } = {},
+) {
   const passthrough = [];
   let workspaceId;
   let selectedProfile;
@@ -27,7 +34,7 @@ export function parseCodexRemoteOptions(args) {
     if (argument.startsWith("--workspace=")) {
       throw new Error(CODEX_REMOTE_USAGE);
     }
-    const profileArgument = managedProfileArgument(args, index);
+    const profileArgument = managedProfileArgument(args, index, customSwitchingProfiles);
     if (profileArgument) {
       if (selectedProfile !== undefined || hasUnmanagedProfile) {
         throw new Error("受管模型 Provider --profile 不能与其他 --profile 同时使用");
@@ -59,9 +66,10 @@ function codexProfileArgument(args, index) {
   return undefined;
 }
 
-function managedProfileArgument(args, index) {
+function managedProfileArgument(args, index, customSwitchingProfiles) {
   const argument = args[index];
   const definitions = [
+    ...customSwitchingProfiles.map((profileName) => ({ profileName })),
     ...loadManagedModelProviderDefinitions(process.env),
     opencodeGoProviderDefinition,
   ];

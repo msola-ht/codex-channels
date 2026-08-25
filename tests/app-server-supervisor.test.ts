@@ -64,6 +64,32 @@ describe("App Server supervisor", () => {
     await owner.close();
   });
 
+  it("accepts the exact uppercase OpenAI custom Provider ID", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-openai-alias-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
+    const ensured: string[] = [];
+    const owner = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["OpenAI"],
+      socketPaths: [
+        primarySocketPath,
+        join(runtimeDir, "codex-app-server-OpenAI.sock"),
+      ],
+    }, {
+      ensureProvider: async (provider) => { ensured.push(provider); },
+    });
+    await owner.start();
+
+    await ensureAppServerProvider(primarySocketPath, "OpenAI");
+
+    expect(ensured).toEqual(["OpenAI"]);
+    await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
+      managedProviders: ["OpenAI"],
+    });
+    await owner.close();
+  });
+
   it("rejects a supervisor socket path that exceeds the platform length limit", async () => {
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-long-"));
     temporaryDirectories.push(runtimeDir);
