@@ -37,6 +37,17 @@ const initialSchemaSql = `
     agent_path TEXT NOT NULL,
     recorded_at_ms INTEGER NOT NULL
   );
+  CREATE TABLE subagent_turns (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    parent_thread_id TEXT NOT NULL,
+    parent_turn_id TEXT NOT NULL,
+    agent_path TEXT NOT NULL,
+    recorded_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, turn_id)
+  );
+  CREATE INDEX subagent_turns_parent_turn
+    ON subagent_turns (parent_thread_id, parent_turn_id);
   CREATE TABLE model_request_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider TEXT NOT NULL,
@@ -295,6 +306,12 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     database.prepare(`
       SELECT thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms
       FROM subagent_threads
+      LIMIT 0
+    `).all();
+    database.prepare(`
+      SELECT thread_id, turn_id, parent_thread_id, parent_turn_id,
+        agent_path, recorded_at_ms
+      FROM subagent_turns
       LIMIT 0
     `).all();
     database.prepare(`

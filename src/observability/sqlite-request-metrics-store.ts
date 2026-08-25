@@ -172,6 +172,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   private readonly database: DatabaseSync;
   private readonly insert?: StatementSync;
   private readonly insertSubagentThread?: StatementSync;
+  private readonly insertSubagentTurn?: StatementSync;
   private readonly lock?: RequestMetricsDatabaseLock;
   private closed = false;
   private rowCount = 0;
@@ -238,6 +239,18 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         )
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(thread_id) DO UPDATE SET
+          parent_thread_id = excluded.parent_thread_id,
+          parent_turn_id = excluded.parent_turn_id,
+          agent_path = excluded.agent_path,
+          recorded_at_ms = excluded.recorded_at_ms
+      `);
+      this.insertSubagentTurn = this.database.prepare(`
+        INSERT INTO subagent_turns (
+          thread_id, turn_id, parent_thread_id, parent_turn_id, agent_path,
+          recorded_at_ms
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(thread_id, turn_id) DO UPDATE SET
           parent_thread_id = excluded.parent_thread_id,
           parent_turn_id = excluded.parent_turn_id,
           agent_path = excluded.agent_path,
@@ -342,6 +355,41 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     }
     this.insertSubagentThread.run(
       agentThreadId,
+      parentThreadId,
+      parentTurnId,
+      agentPath,
+      Date.now(),
+    );
+  }
+
+  recordSubagentTurn(details: {
+    agentThreadId: string;
+    agentTurnId: string;
+    parentThreadId: string;
+    parentTurnId: string;
+    agentPath: string;
+  }): void {
+    const {
+      agentThreadId,
+      agentTurnId,
+      parentThreadId,
+      parentTurnId,
+      agentPath,
+    } = details;
+    this.requireOpen();
+    if (!this.insertSubagentTurn) {
+      throw new Error("只读模型请求指标数据库不能写入");
+    }
+    validateThreadId(agentThreadId, "子代理 Thread ID");
+    validateThreadId(agentTurnId, "子代理 Turn ID");
+    validateThreadId(parentThreadId, "子代理父 Thread ID");
+    validateThreadId(parentTurnId, "子代理父 Turn ID");
+    if (!agentPath.trim() || agentPath.length > 512) {
+      throw new Error("子代理路径无效");
+    }
+    this.insertSubagentTurn.run(
+      agentThreadId,
+      agentTurnId,
       parentThreadId,
       parentTurnId,
       agentPath,
@@ -611,72 +659,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     `).get(threadId) as { turn_id: string } | undefined;
     const turn = latestTurn === undefined
       ? undefined
-      : this.database.prepare(`
-          SELECT
-            (
-              SELECT provider
-              FROM model_request_metrics_enriched AS latest_provider
-              WHERE latest_provider.thread_id
-                  = model_request_metrics_enriched.thread_id
-                AND latest_provider.turn_id
-                  = model_request_metrics_enriched.turn_id
-                AND latest_provider.operation = 'response'
-              ORDER BY latest_provider.id DESC
-              LIMIT 1
-            ) AS provider,
-            (
-              SELECT model
-              FROM model_request_metrics_enriched AS latest_model
-              WHERE latest_model.thread_id
-                  = model_request_metrics_enriched.thread_id
-                AND latest_model.turn_id
-                  = model_request_metrics_enriched.turn_id
-                AND latest_model.operation = 'response'
-              ORDER BY latest_model.id DESC
-              LIMIT 1
-            ) AS model,
-            (
-              SELECT reasoning_effort
-              FROM model_request_metrics_enriched AS latest_effort
-              WHERE latest_effort.thread_id
-                  = model_request_metrics_enriched.thread_id
-                AND latest_effort.turn_id
-                  = model_request_metrics_enriched.turn_id
-                AND latest_effort.operation = 'response'
-              ORDER BY latest_effort.id DESC
-              LIMIT 1
-            ) AS reasoning_effort,
-            turn_id,
-            COUNT(DISTINCT turn_id) AS turn_count,
-            COUNT(*) AS request_count,
-            SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-              AS unsuccessful_request_count,
-            SUM(request_duration_ms) AS request_duration_ms,
-            SUM(input_tokens) AS input_tokens,
-            SUM(cached_input_tokens) AS cached_input_tokens,
-            COUNT(input_tokens) AS input_token_count,
-            COUNT(cached_input_tokens) AS cached_input_token_count,
-            SUM(output_tokens) AS output_tokens,
-            SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-            SUM(CASE WHEN non_reasoning_output_tokens > 0
-                  AND output_duration_ms > 0
-                THEN non_reasoning_output_tokens ELSE 0 END)
-              AS non_reasoning_output_tokens,
-            SUM(CASE WHEN non_reasoning_output_tokens > 0
-                  AND output_duration_ms > 0
-                THEN output_duration_ms ELSE 0 END)
-              AS output_duration_ms,
-            SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
-              AS output_speed_sample_count,
-            SUM(CASE WHEN non_reasoning_output_tokens > 0
-                  AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-              AS output_speed_timed_count,
-            ${successfulCostAggregateSql},
-            ${compactAggregateSql}
-          FROM model_request_metrics_enriched
-          WHERE thread_id = ? AND turn_id = ?
-          GROUP BY turn_id
-        `).get(threadId, latestTurn.turn_id) as TurnSummaryRow | undefined;
+      : this.queryThreadTurnSummary(threadId, latestTurn.turn_id);
     const threadAggregate = this.database.prepare(`
       WITH RECURSIVE thread_tree(thread_id) AS (
         SELECT ?
@@ -754,31 +737,36 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     validateThreadId(turnId, "Turn ID");
     const child = this.database.prepare(`
       SELECT 1
-      FROM subagent_threads
+      FROM subagent_turns
       WHERE parent_thread_id = ?
         AND parent_turn_id = ?
       LIMIT 1
     `).get(threadId, turnId);
     if (child === undefined) return null;
     const row = this.database.prepare(`
-      WITH RECURSIVE task_threads(thread_id) AS (
-        SELECT child.thread_id
-        FROM subagent_threads AS child
+      WITH RECURSIVE task_threads(thread_id, turn_id) AS (
+        SELECT child.thread_id, child.turn_id
+        FROM subagent_turns AS child
         WHERE child.parent_thread_id = ?
           AND child.parent_turn_id = ?
         UNION
-        SELECT child.thread_id
-        FROM subagent_threads AS child
+        SELECT child.thread_id, child.turn_id
+        FROM subagent_turns AS child
         JOIN task_threads AS parent
           ON child.parent_thread_id = parent.thread_id
+          AND child.parent_turn_id = parent.turn_id
       ), scoped AS (
         SELECT metric.*
         FROM model_request_metrics_enriched AS metric
         WHERE (
           metric.thread_id = ? AND metric.turn_id = ?
         ) OR (
-          metric.thread_id IN (SELECT thread_id FROM task_threads)
-          AND metric.turn_id IS NOT NULL
+          EXISTS (
+            SELECT 1
+            FROM task_threads AS task
+            WHERE task.thread_id = metric.thread_id
+              AND task.turn_id = metric.turn_id
+          )
         )
       )
       SELECT
@@ -819,6 +807,89 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     // when a child has not produced any model rows yet so the parent card can
     // distinguish an observed child from an absent task aggregate.
     return row === undefined ? null : toStoredTurnSummary(row);
+  }
+
+  threadTurnSummary(
+    threadId: string,
+    turnId: string,
+  ): StoredTurnRequestMetricsSummary | null {
+    this.requireOpen();
+    validateThreadId(threadId, "Thread ID");
+    validateThreadId(turnId, "Turn ID");
+    const row = this.queryThreadTurnSummary(threadId, turnId);
+    return row === undefined ? null : toStoredTurnSummary(row);
+  }
+
+  private queryThreadTurnSummary(
+    threadId: string,
+    turnId: string,
+  ): TurnSummaryRow | undefined {
+    return this.database.prepare(`
+      SELECT
+        (
+          SELECT provider
+          FROM model_request_metrics_enriched AS latest_provider
+          WHERE latest_provider.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_provider.turn_id
+              = model_request_metrics_enriched.turn_id
+            AND latest_provider.operation = 'response'
+          ORDER BY latest_provider.id DESC
+          LIMIT 1
+        ) AS provider,
+        (
+          SELECT model
+          FROM model_request_metrics_enriched AS latest_model
+          WHERE latest_model.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_model.turn_id
+              = model_request_metrics_enriched.turn_id
+            AND latest_model.operation = 'response'
+          ORDER BY latest_model.id DESC
+          LIMIT 1
+        ) AS model,
+        (
+          SELECT reasoning_effort
+          FROM model_request_metrics_enriched AS latest_effort
+          WHERE latest_effort.thread_id
+              = model_request_metrics_enriched.thread_id
+            AND latest_effort.turn_id
+              = model_request_metrics_enriched.turn_id
+            AND latest_effort.operation = 'response'
+          ORDER BY latest_effort.id DESC
+          LIMIT 1
+        ) AS reasoning_effort,
+        turn_id,
+        COUNT(DISTINCT turn_id) AS turn_count,
+        COUNT(*) AS request_count,
+        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
+          AS unsuccessful_request_count,
+        SUM(request_duration_ms) AS request_duration_ms,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        COUNT(input_tokens) AS input_token_count,
+        COUNT(cached_input_tokens) AS cached_input_token_count,
+        SUM(output_tokens) AS output_tokens,
+        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0
+            THEN non_reasoning_output_tokens ELSE 0 END)
+          AS non_reasoning_output_tokens,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0
+            THEN output_duration_ms ELSE 0 END)
+          AS output_duration_ms,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
+          AS output_speed_sample_count,
+        SUM(CASE WHEN non_reasoning_output_tokens > 0
+              AND output_duration_ms > 0 THEN 1 ELSE 0 END)
+          AS output_speed_timed_count,
+        ${successfulCostAggregateSql},
+        ${compactAggregateSql}
+      FROM model_request_metrics_enriched
+      WHERE thread_id = ? AND turn_id = ?
+      GROUP BY turn_id
+    `).get(threadId, turnId) as TurnSummaryRow | undefined;
   }
 
   threadTurnSummaries(threadId: string): StoredThreadTurnSummary[] {
@@ -1207,6 +1278,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     try {
       this.database.prepare(`
         DELETE FROM model_request_metrics WHERE recorded_at_ms < ?
+      `).run(Math.max(0, nowMs - this.retentionMs));
+      this.database.prepare(`
+        DELETE FROM subagent_turns WHERE recorded_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
       this.database.prepare(`
         DELETE FROM model_request_metrics

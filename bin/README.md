@@ -47,9 +47,9 @@
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一非主动释放的受监管组件异常
-退出都会共同重建。OpenCode Go 账户隔离实例在无绑定、Gateway 最近无 Turn 活动、非
-`agents.external` 默认账户且无受管 Remote TUI 租约的状态下空闲超过 5 分钟，由
-`releaseProvider` 释放。监管入口记录运行、主动释放与租约状态，防止 Gateway 立即把实例重新拉起，
+退出都会共同重建。OpenCode Go 账户隔离实例在无绑定、Gateway 最近无 Turn 活动且无受管 Remote
+TUI 租约的状态下空闲超过 5 分钟，由 `releaseProvider` 释放；`agents.external` 复用主 App Server
+和共享统计代理，不锁定同账户的隔离实例。监管入口记录运行、主动释放与租约状态，防止 Gateway 立即把实例重新拉起，
 并按 Provider 串行处理启动、释放和租约获取；释放结果区分已释放、租约占用与实例未运行，防止
 并发租约误停 Remote TUI。再次使用自动启动。代理指标通过私有 Unix Socket
 发送给 Gateway，Gateway 生命周期不再控制模型数据通路。入口持有独立 `0600` 监管 Socket，

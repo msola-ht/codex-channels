@@ -166,7 +166,7 @@ export function upgradeMetricsDatabase(
     if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7/v8/v9 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
     checkpoint(status.databasePath);
@@ -226,6 +226,23 @@ export function upgradeMetricsDatabase(
           ALTER TABLE subagent_threads ADD COLUMN parent_turn_id TEXT;
         `);
       }
+      if (!databaseHasTable(database, "subagent_turns")) {
+        statements.push(`
+          CREATE TABLE subagent_turns (
+            thread_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            parent_thread_id TEXT NOT NULL,
+            parent_turn_id TEXT NOT NULL,
+            agent_path TEXT NOT NULL,
+            recorded_at_ms INTEGER NOT NULL,
+            PRIMARY KEY (thread_id, turn_id)
+          );
+        `);
+      }
+      statements.push(`
+        CREATE INDEX IF NOT EXISTS subagent_turns_parent_turn
+          ON subagent_turns (parent_thread_id, parent_turn_id);
+      `);
       statements.push(`
         UPDATE schema_metadata SET value = ${modelRequestMetricsSchemaVersion}
           WHERE name = 'schema_version';
@@ -837,6 +854,19 @@ function requireMigratedMetricsColumns(database) {
   ].filter((column) => !subagentColumns.includes(column));
   if (missingSubagent.length > 0) {
     throw new Error(`subagent_threads 缺少 ${missingSubagent.join("、")}`);
+  }
+  if (!databaseHasTable(database, "subagent_turns")) {
+    throw new Error("subagent_turns 表缺失");
+  }
+  const subagentTurnColumns = database.prepare("PRAGMA table_info(subagent_turns)")
+    .all()
+    .map((column) => column.name);
+  const missingSubagentTurns = [
+    "thread_id", "turn_id", "parent_thread_id", "parent_turn_id", "agent_path",
+    "recorded_at_ms",
+  ].filter((column) => !subagentTurnColumns.includes(column));
+  if (missingSubagentTurns.length > 0) {
+    throw new Error(`subagent_turns 缺少 ${missingSubagentTurns.join("、")}`);
   }
 }
 

@@ -334,7 +334,7 @@ describe("OpenCode Go setup", () => {
     );
     writeFileSync(
       rolePath,
-      'model = "deepseek-v4-flash"\nmodel_provider = "opencode-go"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "opencode-go"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
 
@@ -358,6 +358,7 @@ describe("OpenCode Go setup", () => {
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
       model: "deepseek-v4-flash-vision-exp",
       model_provider: "opencode-go",
+      model_reasoning_effort: "high",
     });
     expect(JSON.parse(readFileSync(
       join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"),

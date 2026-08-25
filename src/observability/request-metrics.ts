@@ -431,6 +431,13 @@ export interface ModelRequestMetricsStore {
     parentTurnId: string;
     agentPath: string;
   }): void;
+  recordSubagentTurn(details: {
+    agentThreadId: string;
+    agentTurnId: string;
+    parentThreadId: string;
+    parentTurnId: string;
+    agentPath: string;
+  }): void;
   requestRowsAfter(afterLocalId: number, limit: number): StoredModelRequestMetric[];
   subagentThreadsAfter(
     recordedAtMs: number,

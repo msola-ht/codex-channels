@@ -1725,6 +1725,7 @@ contractSuite("real supervised App Server service", () => {
       [
         'model = "deepseek-v4-flash"',
         'model_provider = "opencode-go"',
+        'model_reasoning_effort = "high"',
         'developer_instructions = "Integration fixture role"',
         "",
       ].join("\n"),

@@ -467,7 +467,7 @@ describe("Feishu output renderer", () => {
           type: "session.new",
           nextModel: { model: "gpt-test", modelProvider: "openai" },
         },
-        expected: "下一条普通消息将创建新的 Codex Thread",
+        expected: "发送下一条普通消息时才会创建新的 Codex Thread",
       },
       {
         outcome: { type: "thread.archived", threadId: "thread-archived" },

@@ -279,6 +279,7 @@ function createStore(options: {
   return {
     record: vi.fn(),
     recordSubagentThread: vi.fn(),
+    recordSubagentTurn: vi.fn(),
     requestRowsAfter: vi.fn(() => rows),
     subagentThreadsAfter: vi.fn(() => subagents),
     recent: vi.fn(() => []),

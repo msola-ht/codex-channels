@@ -567,7 +567,8 @@ describe("WeixinConversationAdapter", () => {
       2,
       target,
       [
-        "**已退出当前会话，下一条普通消息将创建新的 Codex Thread。**",
+        "**已退出当前会话。**",
+        "- 发送下一条普通消息时才会创建新的 Codex Thread。",
         "- 下一条消息模型：gpt-test · Provider：openai",
       ].join("\n"),
     );
