@@ -2,6 +2,7 @@ import {
   UserFacingError,
   conversationTargetKey,
   type ConversationTarget,
+  type RoutedWorkspace,
 } from "../conversation-core/index.js";
 import type { Workspace, WorkspaceRegistry } from "../policy/index.js";
 import type {
@@ -103,6 +104,15 @@ export class SessionRouter {
 
   targetForThread(threadId: string): ConversationTarget | undefined {
     return this.bindings.getByThread(threadId)?.target;
+  }
+
+  workspaceForThread(threadId: string): RoutedWorkspace | undefined {
+    const binding = this.bindings.getByThread(threadId);
+    if (!binding) {
+      return undefined;
+    }
+    const workspace = this.workspaces.get(binding.workspaceId);
+    return workspace ? { id: workspace.id, name: workspace.name } : undefined;
   }
 
   readThread(threadId: string): Promise<ThreadSnapshot> {

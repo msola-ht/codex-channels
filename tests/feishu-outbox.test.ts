@@ -19,6 +19,8 @@ const target = {
   conversationId: "oc_chat",
 } as const;
 
+const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- 会话 ID：thread-1";
+
 const cardMethods = {
   sendCard: async () => "om_card",
   sendMarkdownCard: async () => {},
@@ -824,7 +826,7 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(finished).toEqual([{ summary: "处理中" }]);
-    expect(staticCards).toEqual(["## 本次运行 · 已完成"]);
+    expect(staticCards).toEqual([turnCompletedMarkdown]);
   });
 
   it("streams coalesced deltas through one native CardKit card", async () => {
@@ -963,7 +965,7 @@ describe("Feishu outbox", () => {
     expect(created).toEqual(["正在处理"]);
     expect(updated).toEqual(["正在处理。"]);
     expect(finished).toEqual([
-      "正在处理。|## 本次运行 · 已完成",
+      `正在处理。|${turnCompletedMarkdown}`,
     ]);
     expect(markdownCards[0]).not.toContain("工作中");
     expect(markdownCards.at(-1)).toContain("**运行命令 · 已完成**");
@@ -1533,7 +1535,7 @@ describe("Feishu outbox", () => {
     expect(operations).toEqual([
       "create:部分正文",
       "finish:部分正文|",
-      "finish:部分正文|## 本次运行 · 已完成",
+      `finish:部分正文|${turnCompletedMarkdown}`,
     ]);
   });
 
@@ -1562,7 +1564,7 @@ describe("Feishu outbox", () => {
     outbox.handle(turnCompleted());
     await outbox.close();
 
-    expect(markdownCards).toEqual(["## 本次运行 · 已完成"]);
+    expect(markdownCards).toEqual([turnCompletedMarkdown]);
     expect(streamCount(outbox)).toBe(0);
   });
 
@@ -1592,7 +1594,7 @@ describe("Feishu outbox", () => {
 
     expect(operations).toEqual([
       "static:部分正文",
-      "static:## 本次运行 · 已完成",
+      `static:${turnCompletedMarkdown}`,
     ]);
   });
 
@@ -1627,7 +1629,7 @@ describe("Feishu outbox", () => {
     expect(operations[1]).toContain("static:**运行命令 · 已完成**");
     expect(operations[1]).toContain("git status --short");
     expect(operations[2]).toBe("static:工具执行结果");
-    expect(operations[3]).toBe("static:## 本次运行 · 已完成");
+    expect(operations[3]).toBe(`static:${turnCompletedMarkdown}`);
   });
 
   it("ignores running operation frames and sends one static terminal card", async () => {
@@ -1654,7 +1656,7 @@ describe("Feishu outbox", () => {
     expect(markdownCards[0]).not.toContain("**执行进度**");
     expect(markdownCards[0]).toContain("git status --short");
     expect(markdownCards[0]).toContain("已完成");
-    expect(markdownCards[1]).toBe("## 本次运行 · 已完成");
+    expect(markdownCards[1]).toBe(turnCompletedMarkdown);
   });
 
   it("does not send operation updates in hidden mode", async () => {
@@ -1682,7 +1684,7 @@ describe("Feishu outbox", () => {
     outbox.handle(turnCompleted());
     await outbox.close();
 
-    expect(markdownCards).toEqual(["## 本次运行 · 已完成"]);
+    expect(markdownCards).toEqual([turnCompletedMarkdown]);
   });
 
   it("sends a compact operation body with a duration footer", async () => {
@@ -1801,7 +1803,7 @@ describe("Feishu outbox", () => {
       + "  - `codex_apps.github.fetch_pr · 读写属性未知`：2 次\n"
       + "  - `codex_apps.github.update_pull_request · 读写属性未知`：1 次\n\n"
       + "---\n**耗时：** 375毫秒",
-      "## 本次运行 · 已完成",
+      turnCompletedMarkdown,
     ]);
   });
 
@@ -2448,7 +2450,7 @@ describe("Feishu outbox", () => {
 
     expect(replies).toHaveLength(1);
     expect(replies[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
-    expect(ordinaryCards.at(-1)).toBe("## 本次运行 · 已完成");
+    expect(ordinaryCards.at(-1)).toBe(turnCompletedMarkdown);
   });
 
   it("does not upload a final answer beyond the bounded file limit", async () => {

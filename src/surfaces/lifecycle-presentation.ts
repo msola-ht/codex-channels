@@ -441,9 +441,17 @@ export function createTurnCompletedPresentation(
   remainingUsage?: ProviderModelUsageEstimate | null,
 ): LifecyclePresentation {
   const currency = priceCurrency?.(event.modelProvider) ?? "usd";
-  const sessionFields: LifecyclePresentationField[] = event.background
-    ? [{ label: "Thread", value: event.threadId }]
-    : [];
+  const sessionFields: LifecyclePresentationField[] = [
+    ...(event.workspaceId
+      ? [{
+          label: "当前工作区",
+          value: event.workspaceName
+            ? `${event.workspaceName} (${event.workspaceId})`
+            : event.workspaceId,
+        }]
+      : []),
+    { label: "会话 ID", value: event.threadId },
+  ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
   let fallbackCacheField: LifecyclePresentationField | undefined;

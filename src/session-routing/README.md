@@ -12,7 +12,8 @@
   压缩 Item ID，不向业务层暴露完整官方 Turn。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
   权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
-  压缩 Item ID、新建前台 Thread 的动态工具注册及 `thread/unsubscribe`；动态工具不会触发既有前台 Thread 的替换或解绑；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
+  压缩 Item ID、新建前台 Thread 的动态工具注册及 `thread/unsubscribe`，并按 Thread 向 Core 提供已绑定
+  Workspace 的稳定 ID 与名称；动态工具不会触发既有前台 Thread 的替换或解绑；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
   已删除或已归档时才移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许
   当前 Thread 与目标 Conversation 原 Thread 都由 App Server 报告为空闲时执行；保留被接管
   Thread 的现有订阅，只取消目标 Conversation 被替换 Thread 的订阅。跨 Provider 模型切换通过

@@ -12,11 +12,17 @@ export interface RoutedThreadModelSettings {
   serviceTier: string | null;
 }
 
+export interface RoutedWorkspace {
+  id: string;
+  name: string;
+}
+
 export interface ConversationRoutingPort {
   allBindings(): RoutedThread[];
   foregroundThreadId?(target: ConversationTarget): string | undefined;
   isBackgroundThread?(threadId: string): boolean;
   targetForThread(threadId: string): ConversationTarget | undefined;
+  workspaceForThread?(threadId: string): RoutedWorkspace | undefined;
   modelSettingsForThread(threadId: string): RoutedThreadModelSettings | undefined;
   contextCompactionItemIdsForThread(threadId: string): readonly string[] | undefined;
 }

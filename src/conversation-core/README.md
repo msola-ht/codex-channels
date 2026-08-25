@@ -7,7 +7,7 @@
 - `index.ts`：本模块的公开导出入口。
 - `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan、推理段状态和事件去重状态，
   把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
-  `durationMs` 与 Router 已确认的 `modelProvider`；结构化 `misalignmentPolicyViolation` 只以窄分类
+  `durationMs` 与 Router 已确认的 Workspace、`modelProvider`；结构化 `misalignmentPolicyViolation` 只以窄分类
   传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定计时输入交给
   `turn-timing-accumulator.ts`，不读取 SQLite；
   三类综合速度只聚合同时具有对应
@@ -29,7 +29,7 @@
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；`turn.reasoning`
   输出只携带“思考中…”状态、每段独立耗时与最终标记，不携带摘要或原始思维链内容；同一 Thread
   开始新 Turn 时会结束并释放旧 Turn 遗留的推理段定时器。
-- `routing-port.ts`：Core 查询 Thread 路由所需的窄接口。
+- `routing-port.ts`：Core 查询 Thread 的 Conversation、Workspace 和模型设置所需的窄路由接口。
 - `user-facing-error.ts`：用稳定错误代码和最小参数描述预期输入与状态错误；Surface 按平台独立渲染，未标记异常默认隐藏详情。
 
 本模块不得依赖 Telegram SDK、具体数据库、launchd 或底层 JSON-RPC Transport。完整历史和 Thread 权威状态始终由 App Server 持有。

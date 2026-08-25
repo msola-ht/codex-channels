@@ -22,6 +22,8 @@ const target = {
   accountId,
   conversationId: actorId,
 } as const;
+const turnCompletedText = "**本次运行 · 已完成**\n\n- 会话 ID：thread";
+const turnStoppedText = "**本次运行 · 已停止**\n\n- 会话 ID：thread";
 
 describe("WeixinOutbox", () => {
   it("shows one initial plan and one message for each completed step", async () => {
@@ -82,7 +84,7 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "已开始处理。",
       "final reply",
-      "**本次运行 · 已完成**",
+      turnCompletedText,
     ]);
   });
 
@@ -425,7 +427,7 @@ describe("WeixinOutbox", () => {
     expect(sendText).toHaveBeenCalledWith({
       actorId,
       contextToken: "context-secret",
-      text: "**本次运行 · 已完成**",
+      text: turnCompletedText,
     });
   });
 
@@ -440,8 +442,12 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "**本次运行 · 已停止**",
-      "**本次运行 · 失败**\n\n- 错误：受控错误",
+      turnStoppedText,
+      "**本次运行 · 失败**\n\n"
+        + "**本次运行**\n"
+        + "- 错误：受控错误\n\n"
+        + "**当前会话累计**\n"
+        + "- 会话 ID：thread",
     ]);
   });
 
@@ -513,7 +519,7 @@ describe("WeixinOutbox", () => {
       + "具体内容：\n\n"
       + "git status --short\n\n"
       + "耗时：125毫秒",
-      "**本次运行 · 已完成**",
+      turnCompletedText,
     ]);
   });
 
@@ -624,7 +630,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "**本次运行 · 已完成**",
+      turnCompletedText,
     ]);
   });
 
@@ -740,7 +746,7 @@ describe("WeixinOutbox", () => {
       + "动态工具：1 次\n"
       + "  - codex＿apps.github.update＿pull＿request：1 次\n\n"
       + "总耗时：250毫秒",
-      "**本次运行 · 已完成**",
+      turnCompletedText,
     ]);
   });
 

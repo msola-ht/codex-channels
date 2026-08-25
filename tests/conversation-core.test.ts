@@ -446,6 +446,7 @@ describe("ConversationCore", () => {
     const router = {
       allBindings: () => [],
       targetForThread: () => target,
+      workspaceForThread: () => ({ id: "main", name: "Main" }),
       modelSettingsForThread: () => ({
         model: "gpt-main",
         modelProvider: "openai",
@@ -502,6 +503,8 @@ describe("ConversationCore", () => {
       modelProvider: "openai",
       effort: "high",
       serviceTier: "fast",
+      workspaceId: "main",
+      workspaceName: "Main",
       weeklyLimit: {
         usedPercent: 42,
         windowDurationMins: 10_080,

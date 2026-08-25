@@ -50,4 +50,5 @@ export type {
   ConversationRoutingPort,
   RoutedThread,
   RoutedThreadModelSettings,
+  RoutedWorkspace,
 } from "./routing-port.js";
