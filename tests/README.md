@@ -109,7 +109,8 @@
   远程 HTTPS/回环 HTTP 边界、无效旧 URL 修复与探测发送时点提示；私有候选备份读取覆盖普通文件、
   当前属主、`0600`、大小和非符号链接校验，官方模式直接编辑/确认删除备份候选，恢复/删除候选在配置提交后消费同名
   备份，配置失败时保持原备份，配置成功但清理失败时报告部分成功；从第三方恢复官方清除第三方模型覆盖，已在
-  官方模式时保留官方模型；共享私有文件读取以同一描述符完成 `O_NOFOLLOW` 与权限校验；DeepSeek 官方脚本目录提取、两种 Setup 模式、
+  官方模式时保留官方模型；主 Provider JSON 列表覆盖固定、切换、备份与未知状态，并保证凭据不进入输出；
+  共享私有文件读取以同一描述符完成 `O_NOFOLLOW` 与权限校验；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash、Flash Vision Exp 与 Pro 可选、受控目录输入能力校验，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。
@@ -119,7 +120,7 @@
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
   不进入 DeepSeek 状态或完成卡片；OpenCode Go 配额窗口快照按未来最早重置缓存，上游返回已过期
   重置时间时短时退避，避免逐请求查询 usage 接口。
-- OpenCode Go 的账户注册表与旧版单账户迁移、账户 CLI（add/list/remove/default/stop）、切换/固定
+- OpenCode Go 的账户注册表与旧版单账户迁移、账户 CLI（add/list/remove/default/stop）及不含凭据的 JSON 列表、切换/固定
   Setup、同名模型按 Provider 独立选择、按需 App Server 启动、共享统计代理的 `/go/<账户>` 前缀
   路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、账户适配器按 `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与
   SDK 协议基线校验。
@@ -192,7 +193,7 @@
   模块依赖方向、`runtime` 导入白名单及公开入口边界。
 - 微信 Setup 的替换风险取消门槛、扫码结果到禁用态非敏感配置和独立安全凭据的原子提交、配置失败
   凭据恢复，以及微信/飞书分离的 Keychain Service、Linux 密文私有权限、严格版本和损坏失败关闭。
-- Workspace 不可变授权快照、热加载失败回滚、选择歧义，以及 Telegram Surface、账号和规范
+- Workspace 不可变授权快照、热加载失败回滚、选择歧义、稳定 JSON 注册列表，以及 Telegram Surface、账号和规范
   Actor ID 的联合授权；飞书 Surface、App 账号和 `open_id` 精确允许名单及原子替换。
 - 微信二维码合同探针的固定请求 Header/路径/Body、严格响应裁剪、未知和残缺状态失败
   关闭、请求超时与外部取消区分、官方域名重定向、配对码、刷新上限、整体时限，以及默认离线、

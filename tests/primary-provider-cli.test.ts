@@ -164,6 +164,41 @@ describe("primary provider CLI", () => {
     expect(JSON.stringify(value)).not.toContain("sk-secret");
   });
 
+  it("lists switching providers as JSON without exposing profile credentials", async () => {
+    const environment = isolatedEnvironment("codexc-primary-provider-json-switching-");
+    writeFileSync(join(environment.CODEX_HOME!, "config.toml"), 'model_provider = "openai"\n', {
+      mode: 0o600,
+    });
+    writeCustomPrimaryProviderSwitchingProfile({
+      provider: "thirdparty",
+      model: "gpt-5.6-sol",
+      name: "Third-party",
+      baseUrl: "https://switch.example.test/v1",
+      apiKey: "sk-switch-secret",
+    }, environment);
+    const { createClient } = clientFixture({
+      config: { model_provider: "openai", model_providers: {} },
+      version: "v1",
+    });
+    const output = { write: vi.fn() };
+
+    await runPrimaryProviderCli(["list", "--json"], {
+      environment,
+      output,
+      createClient,
+    });
+
+    const value = JSON.parse(output.write.mock.calls.map(([chunk]) => chunk).join(""));
+    expect(value.active).toMatchObject({ id: "openai", mode: "switching" });
+    expect(value.switchingProviders).toEqual([{
+      id: "thirdparty",
+      name: "Third-party",
+      baseUrl: "https://switch.example.test/v1",
+      profileName: "sf-custom-thirdparty",
+    }]);
+    expect(JSON.stringify(value)).not.toContain("sk-switch-secret");
+  });
+
   it("does not expose credentials from a legacy backup URL in JSON", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-json-backup-");
     backupPrimaryProviderCandidates({

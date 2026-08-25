@@ -122,7 +122,8 @@
   无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
   主 Provider 冲突的顶层 `openai_base_url`。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
-  list / add / switch / remove 子命令；list 与 switch / remove 复用 Codex 用户配置事务读取和
+  list / add / switch / remove 子命令；`list --json` 返回不含凭据的稳定主实例与候选摘要；list 与
+  switch / remove 复用 Codex 用户配置事务读取和
   原子写入，add 复用自定义 Responses Provider Setup 的交互流程，Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
   Provider 时，交互菜单须经二次确认后移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
@@ -197,8 +198,9 @@
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   切换 Profile、固定配置与受管字段恢复逻辑。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
-  （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；配置
-  切换/固定模式或恢复首次配置前状态，从同一受审查来源生成共享模型目录并复用共享子代理机制，
+  （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
+  返回不含 Key 与 Profile 路径的稳定账户摘要；配置切换/固定模式或恢复首次配置前状态，从同一受审查来源
+  生成共享模型目录并复用共享子代理机制，
   但不复用凭据、Provider 身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
   默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
   Pro 的账户保持不变。
@@ -228,7 +230,8 @@
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份、应用权限、
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误。
-- `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单和目录创建，并调用统一的 Workspace 权限设置用例；CLI 入口只负责分发。
+- `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单和目录创建，并调用统一的 Workspace 权限设置用例；
+  `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `agents.mjs` / `agents.d.mts`：`codexc agents` 的执行脚本与公开声明，在 `~/.codex/config.toml` 中开启或关闭
   `features.multi_agent_v2` 并注册单次共享 `agents.external` 角色；命令按已配置 Provider 与模型

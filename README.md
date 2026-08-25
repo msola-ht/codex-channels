@@ -143,43 +143,21 @@ plugin_api = true
 
 ### 自定义第三方 Provider
 
-渠道支持使用 Codex 主配置中选中的 OpenAI 兼容 Responses Provider。运行
-`codexc setup`，选择“模型与提供商 → 第三方 → 自定义第三方”，可新增或编辑固定、切换模式 Provider。新增时
-Provider ID 可选择从上游 URL 主机名提取，或使用推荐的 `OpenAI`（内置保留 ID `openai` 仍不可用）；
-选择 `OpenAI` 时同时固定 `name = "OpenAI"`，允许 Codex 使用远程压缩；上游仍须兼容对应接口。Setup 的自定义第三方只支持
-直接写入 API Key；上游模型 ID 由用户输入，并且当前必须存在于 Codex 官方模型目录，不请求第三方
-`/models`，也不生成自定义模型文件。可选择“OpenAI + 自定义切换模式”或“仅自定义固定模式”：
-切换模式保留官方 OpenAI 主实例，并为自定义 Provider 创建独立 App Server，可在 `/model` 中从
-官方目录的同名模型切换；固定模式把该 Provider 设为主实例。编辑会保留原 Provider ID，可修改地址、
-名称（`OpenAI` 除外）、API Key、WebSocket、模式与默认模型。同一
-URL Origin 编辑时可留空保留原 Key；主机、协议或端口变化时必须重新输入，旧 Key 不会发送到新上游。
-远程上游必须使用 HTTPS，HTTP 仅允许 `localhost`、`127.*` 或 `::1` 本机回环地址。
-固定模式把 `experimental_bearer_token` 明文写入 0600 的 `~/.codex/config.toml`；切换模式不修改
-主配置，而为每个 Provider 写入完整的 0600 `~/.codex/sf-custom-<Provider ID>.config.toml`，默认
-`model_reasoning_effort = "medium"`。第三方主 API 不依赖
-官方 auth.json，官方凭据不受影响。新增不会覆盖 config 或私有备份中的已有 Provider ID，需从“编辑”入口修改；也可手写配置，示例和能力边界见
-[`第三方模型 Provider 接入指南`](docs/provider-integration-guide.md)。可同时配置多个切换模式 Provider；
-固定模式仍只激活一个主 Provider，且不能保留其他自定义切换 Profile；切成固定模式前需先删除其他
-自定义切换 Provider。自定义固定模式可与受管切换 Provider 共存；若当前是受管固定模式，需先从对应
-Provider Setup 恢复官方模式。通过 `codexc primary-provider` 管理：
+运行 `codexc setup`，选择“模型与提供商 → 第三方 → 自定义第三方”，可新增或编辑 OpenAI Responses
+兼容 Provider，并选择保留官方 OpenAI 的切换模式或仅使用第三方的固定模式。Provider ID、模型与认证、
+配置文件、安全限制和模式切换边界见
+[`第三方模型 Provider 接入指南`](docs/provider-integration-guide.md)。常用管理命令：
+
+```bash
+codexc primary-provider list [--json]                # 查看配置
+codexc primary-provider add                          # 新增 Provider
+codexc primary-provider switch openai                # 切回官方主 Provider
+codexc primary-provider switch <Provider ID> [模型]  # 切换主 Provider
+codexc primary-provider remove <Provider ID>         # 删除 Provider
+```
 
 旧版单文件 `sf-custom.config.toml` 不自动迁移；删除旧配置后重新运行 Setup 即可。
 
-```bash
-codexc primary-provider list [--json]        # 查看主实例、切换 Provider、固定候选与备份
-codexc primary-provider add                  # 交互式新增固定或切换 Provider；已有项从 Setup 编辑
-codexc primary-provider switch openai        # 恢复官方主 Provider；切换 Provider 保持启用
-codexc primary-provider switch <Provider ID> [模型]   # 转换为固定主 Provider；切换 Profile 会被移除
-codexc primary-provider remove <Provider ID> # 删除配置或备份候选；删除激活项时恢复官方
-```
-
-选择“模型与提供商 → 官方 → 登录并恢复官方”会运行 `codex login --device-auth`，打开终端显示的
-链接并输入验证码完成登录，然后停用自定义主 Provider：候选块移入
-`~/.codex-connect/private/` 私有备份并从 config 清理，之后可用
-`codexc primary-provider switch <Provider ID>` 可恢复并设为固定主 Provider，也可从 Setup 直接编辑或经确认删除，
-不需要先切换到可能已经失效的第三方上游。
-从自定义主 Provider 切回官方时会同时清除第三方顶层默认模型，让官方模型目录默认值重新接管；
-当前本来就是官方模式时保留已配置的官方模型。
 修改后运行：
 
 ```bash
@@ -240,7 +218,7 @@ codexc opencode-go account stop <id>
 ```bash
 codexc work                          # 交互式管理 Workspace
 codexc work add                      # 注册当前目录
-codexc work list [--json]             # 列出 Workspace
+codexc work list [--json]            # 列出 Workspace
 codexc work remove <序号|ID|名称>    # 删除注册，不删除项目文件
 ```
 
