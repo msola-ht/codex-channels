@@ -31,7 +31,7 @@ const helpText = {
 列出全部 Workspace 与当前默认项。`,
   add: `用法：codexc work add [--id ID] [--name 名称] [--cwd 目录] [--prune-missing]
 
-把当前目录注册为 Workspace；交互式新建请运行 codexc work。`,
+把 --cwd 指定的目录注册为 Workspace，未指定时使用当前目录；交互式新建请运行 codexc work。`,
   remove: `用法：codexc work remove <序号|ID|名称>
 
 删除 Workspace 注册，不删除磁盘目录。`,

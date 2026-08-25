@@ -119,9 +119,9 @@ const helpText = {
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
-  channel                      使用渠道工具
+  channel                      发送渠道图片
   webui                        启动指标 WebUI
-  center                       管理多设备指标中心（交互菜单或子命令）
+  center                       启动或配置多设备指标中心
 
 服务与维护：
   start                        前台启动核心服务
@@ -143,7 +143,7 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → 官方 → 登录并恢复官方 / 默认模型与思考等级
-  codexc setup → 模型与提供商 → 第三方 → 自定义第三方 / DeepSeek 官方 / OpenCode Go 官方等
+  codexc setup → 模型与提供商 → 第三方 → 自定义第三方 / DeepSeek 官方 / OpenCode Go 官方 / 第三方模型设置 / 第三方 API
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 技能（安装或卸载项目技能）`,
   start: `用法：codexc start
@@ -151,12 +151,13 @@ const helpText = {
 在前台启动 Codex App Server 与 Gateway。`,
   remote: `${CODEX_REMOTE_USAGE}
 
-连接共享 App Server，并把其余参数传给原生 Codex CLI。
-切换模式下使用 --profile deepseek 连接隔离的 DeepSeek App Server。`,
+连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
+切换模式可用 --profile deepseek、opencode-go、opencode-go-<账户> 或
+sf-custom-<Provider ID> 连接对应的隔离 App Server。`,
   service: `用法：codexc service <命令>
 
-  install                      安装并启动整套后台服务
-  uninstall                    卸载整套后台服务并保留用户数据
+  install                      生成全部后台服务定义，并启动 App Server 与 Gateway
+  uninstall                    卸载全部后台服务并保留用户数据
   start [目标]                 启动 gateway、app-server、webui、center 或 all
   stop [目标]                  停止 gateway、app-server、webui、center 或 all
   reload                       通知 Gateway 重新读取配置
@@ -176,9 +177,9 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "service.logs": `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config
 
-打开交互式配置与设置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
+打开日常 Gateway 配置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
 （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、WebUI 设置、
-多设备指标（本机接入中心、接入状态、停用接入）、Telegram 消息格式与配置路径查看。
+指标设置（本地保留、设备接入中心与全局视图）、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径。`,
   doctor: `用法：codexc doctor
 
@@ -205,7 +206,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 查看 multi_agent_v2 与共享第三方子代理配置状态。`,
   opencode_go: `用法：codexc opencode-go account <add|list|remove|default|stop> [id]
 
-管理 OpenCode Go 多账户。Key 只写入 0600 私有 Profile，不进入配置或日志。
+管理 OpenCode Go 多账户。Key 只写入 0600 私有 Codex Profile，不进入 Gateway config.toml、命令行或日志。
 
   add <id>     新增账户（交互输入 API Key）
   list         列出账户与默认标记
@@ -228,7 +229,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 
 Git 源码安装会先检查并构建官方 main 的最新提交；随后只读审查 config.toml 与数据库结构，自动停止
 App Server 与 Gateway，在停机窗口内更新程序、配置和数据库，最后恢复并确认核心服务就绪。
-npm 安装不会修改程序包。必须从本机终端执行。`,
+npm 安装不会修改程序包。更新失败也会尝试恢复已停止的核心服务。必须从本机终端执行。`,
   uninstall: `用法：codexc uninstall
 
 卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令，并清理旧安装写入的 Shell PATH 配置；保留
@@ -242,7 +243,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 停止 Gateway 后，备份并显式升级状态数据库。`,
   metrics: `用法：codexc metrics
 
-无参数时进入交互菜单。查看与导出模型请求指标：
+无参数时进入交互菜单。查询、导出与维护模型请求指标：
   ${metricsCommandUsage.run.slice("用法：".length)}   本次运行汇总（最近 Turn + 会话累计）
   ${metricsCommandUsage.turns.slice("用法：".length)}   会话每次对话明细
   ${metricsCommandUsage.threads.slice("用法：".length)}   列出有指标的会话
@@ -256,7 +257,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（自动重启 Gateway 与中心）`,
   channel: `用法：codexc channel <send-image>
 
-渠道能力：由 Gateway 使用渠道机器人凭据发送图片等媒体。`,
+渠道图片能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地 PNG/JPEG 图片。`,
   "channel.send_image": `用法：codexc channel send-image <图片路径> [--thread <Thread ID>]
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的

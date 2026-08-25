@@ -450,7 +450,7 @@ export function createTurnCompletedPresentation(
             : event.workspaceId,
         }]
       : []),
-    { label: "会话 ID", value: event.threadId },
+    { label: "Thread ID", value: event.threadId },
   ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];

@@ -165,8 +165,13 @@ describe("codexc CLI", () => {
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
     expect(setupHelp.stdout).toContain("登录并恢复官方 / 默认模型与思考等级");
+    expect(setupHelp.stdout).toContain("模型设置 / 第三方 API");
     const workHelp = spawnSync(process.execPath, [cli, "work", "--help"], { encoding: "utf8" });
     expect(workHelp.stdout).toContain("权限");
+    const workAddHelp = spawnSync(process.execPath, [cli, "work", "add", "--help"], {
+      encoding: "utf8",
+    });
+    expect(workAddHelp.stdout).toContain("--cwd 指定的目录");
     for (const subcommand of ["run", "turns", "threads", "report", "export"]) {
       const metricsHelp = spawnSync(
         process.execPath,
@@ -179,8 +184,26 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
     expect(serviceHelp.stdout).toContain("all 只包含 App Server 与 Gateway");
+    expect(serviceHelp.stdout).toContain("生成全部后台服务定义，并启动 App Server 与 Gateway");
+    expect(serviceHelp.stdout).toContain("卸载全部后台服务并保留用户数据");
+    const remoteHelp = spawnSync(process.execPath, [cli, "remote", "--help"], {
+      encoding: "utf8",
+    });
+    expect(remoteHelp.stdout).toContain("opencode-go-<账户>");
+    expect(remoteHelp.stdout).toContain("sf-custom-<Provider ID>");
+    const channelHelp = spawnSync(process.execPath, [cli, "channel", "--help"], {
+      encoding: "utf8",
+    });
+    expect(channelHelp.stdout).toContain("渠道图片能力");
+    expect(channelHelp.stdout).toContain("Thread 绑定渠道的机器人凭据");
+    expect(channelHelp.stdout).not.toContain("图片等媒体");
+    const updateHelp = spawnSync(process.execPath, [cli, "update", "--help"], {
+      encoding: "utf8",
+    });
+    expect(updateHelp.stdout).toContain("更新失败也会尝试恢复已停止的核心服务");
     const mainHelp = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
     expect(mainHelp.stdout).toContain("version, -v, --version");
+    expect(mainHelp.stdout).toContain("center                       启动或配置多设备指标中心");
   }, 30_000);
 
   it("keeps top-level help as a complete first-level command index", () => {

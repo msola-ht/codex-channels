@@ -18,7 +18,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 | 显示名称 | 1–64 字符 | 出现在 `/model`、WebUI 与完成卡片 |
 | wire API | `responses` / `chat_completions` / `messages` | 决定 App Server `model_providers.<id>.wire_api` 与本地代理透传方式 |
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
-| 认证 | `sk-` API Key | Key 只进入子进程环境或私有凭据存储，不写入命令行、日志或 Gateway 配置 |
+| 认证 | `sk-` API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |
 | 计价形态 | 无 / 通用远程目录 / 固定 USD / GO 式 USD 峰谷 + 包含额度 / DS 式 CNY 计划 + 汇率 | 决定计价器实现与是否需要汇率 |
 | 账户形态 | 无 / 余额 / GO 式用量窗口（5h/7d/月 + 本地重算 + 请求窗口快照） | 决定账户适配器实现与 `/usage` 展示 |
@@ -142,7 +142,8 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 - Provider id 与模型名使用受控列表，未知模型不开放；
 - base URL 只允许 HTTP(S)，不得包含用户名、密码、查询或片段；
-- API Key 只进入子进程环境或私有凭据存储，不进入命令行、配置、日志或平台消息；
+- 编译期受管 Provider 的 API Key 只进入目标子进程环境或专用私有凭据文件；用户自定义 Provider
+  可按第 6 节显式写入 `0600` Codex 私有配置。两类 Key 都不得进入命令行、Gateway 配置、日志或平台消息；
 - 受管文件必须 `0600`，读取使用 `O_NOFOLLOW` 与属主校验；
 - 配置、目录、基线校验失败时保留旧基线并等待修复，不允许部分启动或隐式回退；
 - 新增 Provider 不得动态加载 npm 包或执行任意代码。

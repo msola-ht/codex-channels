@@ -159,7 +159,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     if (help) {
       console.log(`${CHANNEL_SEND_IMAGE_USAGE}
 
-把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，由当前渠道机器人凭据发送回绑定会话。
+把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，由 Thread 绑定渠道的机器人凭据发送回对应会话。
 不指定 --thread 时，只有当前仅存在一个会话绑定才会自动选择目标。`);
       process.exit(0);
     }

@@ -994,7 +994,9 @@ if (
         loadDisplayContext(process.env),
       );
     } else {
-      throw new Error("用法：codexc metrics <status|run|threads|turns|report|export|upgrade|reset>");
+      throw new Error(
+        "用法：codexc metrics <status|run|threads|turns|report|export|upgrade|reset|sync-reset|cleanup|prune>",
+      );
     }
   } catch (error) {
     if (

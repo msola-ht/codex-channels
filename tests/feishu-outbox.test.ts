@@ -19,7 +19,7 @@ const target = {
   conversationId: "oc_chat",
 } as const;
 
-const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- 会话 ID：thread-1";
+const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- Thread ID：thread-1";
 
 const cardMethods = {
   sendCard: async () => "om_card",

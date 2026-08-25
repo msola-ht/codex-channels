@@ -20,8 +20,9 @@
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
-- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek` 或
-  `--profile opencode-go-<账户>` 选择隔离实例；
+- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek`、
+  `--profile opencode-go`、`--profile opencode-go-<账户>` 或 `--profile sf-custom-<Provider ID>`
+  选择隔离实例；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
@@ -35,10 +36,10 @@
   和旧 Shell PATH 配置，保留用户配置、数据库、凭据、日志和输出。Registry 安装交给 npm 卸载。
 - `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
 - `metrics`：查询、导出、清理或显式维护独立模型指标库；日常兼容升级使用 `update`。
-- `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由当前飞书/微信/Telegram
-  会话的机器人凭据发送回绑定会话；见 `docs/channel-image.md`。
+- `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
+  发送回对应会话；见 `docs/channel-image.md`。
 - `webui`、`center`：分别启动本机只读指标界面和多设备指标中心；监听参数在读取用户配置前完成校验。
-- `service`：完整校验配置后安装整套后台服务；启停、重启、状态和日志命令使用
+- `service`：完整校验配置后生成全部后台服务定义，并启动 App Server 与 Gateway；启停、重启、状态和日志命令使用
   `gateway`、`app-server`、`webui`、`center` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
   `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
