@@ -215,7 +215,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）`,
   "opencode_go.account": `用法：codexc opencode-go account <add|list|remove|default|stop> [id]`,
   "opencode_go.account.add": "用法：codexc opencode-go account add <id>",
-  "opencode_go.account.list": "用法：codexc opencode-go account list",
+  "opencode_go.account.list": "用法：codexc opencode-go account list [--json]",
   "opencode_go.account.remove": "用法：codexc opencode-go account remove <id>",
   "opencode_go.account.default": "用法：codexc opencode-go account default <id>",
   "opencode_go.account.stop": "用法：codexc opencode-go account stop <id>",
@@ -1299,7 +1299,7 @@ function opencodeGoAccount(args) {
   const [action, ...accountArgs] = rest;
   if (
     !new Set(["add", "list", "remove", "default", "stop"]).has(action)
-    || (action === "list" && accountArgs.length !== 0)
+    || (action === "list" && !(accountArgs.length === 0 || (accountArgs.length === 1 && accountArgs[0] === "--json")))
     || (action !== "list" && accountArgs.length !== 1)
   ) {
     throw new Error(helpText.opencode_go);

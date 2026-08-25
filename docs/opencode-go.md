@@ -12,6 +12,7 @@ API Key、上游地址、Thread 路由和价格来源。
 ```bash
 codexc opencode-go account add <id>      # 新增账户（交互输入 Key）
 codexc opencode-go account list          # 列出账户与默认标记
+codexc opencode-go account list --json   # 以 JSON 输出账户状态（不含凭据）
 codexc opencode-go account remove <id>   # 备份后删除账户
 codexc opencode-go account default <id>  # 设置新会话默认账户
 codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Server

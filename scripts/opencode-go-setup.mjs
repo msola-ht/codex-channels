@@ -362,8 +362,22 @@ export async function addOpencodeGoAccount(accountId, {
   return { action: "configured", mode, accountId, ...publicPaths(paths) };
 }
 
-export function printOpencodeGoAccounts(environment = process.env, output = process.stdout) {
+export function printOpencodeGoAccounts(environment = process.env, output = process.stdout, { json = false } = {}) {
   const accounts = loadOpencodeGoAccounts(environment);
+  if (json) {
+    output.write(`${JSON.stringify({
+      accounts: accounts.map((account) => {
+        const marker = readOpencodeGoAccountMarker(environment, account.id);
+        return {
+          id: account.id,
+          default: account.default,
+          provider: opencodeGoProviderId(account.id),
+          mode: marker?.mode ?? "unconfigured",
+        };
+      }),
+    })}\n`);
+    return;
+  }
   if (accounts.length === 0) {
     output.write("尚未配置 OpenCode Go 账户。\n");
     return;
@@ -675,16 +689,20 @@ export async function stopOpencodeGoAccount(accountId, {
 }
 
 export async function runOpencodeGoAccountCli(args, options = {}) {
-  const [command, action, id] = args;
+  const [command, action, id, ...extra] = args;
   if (command !== "account" || !["add", "list", "remove", "default", "stop"].includes(action)) {
     throw new Error(
       "用法：codexc opencode-go account <add|list|remove|default|stop> [id]",
     );
   }
   if (action === "list") {
+    if (id !== undefined && id !== "--json" || extra.length > 0) {
+      throw new Error("用法：codexc opencode-go account list [--json]");
+    }
     printOpencodeGoAccounts(
       options.environment ?? process.env,
       options.output ?? process.stdout,
+      { json: id === "--json" },
     );
     return;
   }

@@ -57,6 +57,7 @@ Profile 保存该账户的 Key、Provider 配置、模型目录、默认模型�
 ```bash
 codexc opencode-go account add <id>
 codexc opencode-go account list
+codexc opencode-go account list --json
 codexc opencode-go account remove <id>
 codexc opencode-go account default <id>
 codexc opencode-go account stop <id>

@@ -166,7 +166,7 @@ Provider Setup 恢复官方模式。通过 `codexc primary-provider` 管理：
 旧版单文件 `sf-custom.config.toml` 不自动迁移；删除旧配置后重新运行 Setup 即可。
 
 ```bash
-codexc primary-provider list                 # 查看主实例、切换 Provider、固定候选与备份
+codexc primary-provider list [--json]        # 查看主实例、切换 Provider、固定候选与备份
 codexc primary-provider add                  # 交互式新增固定或切换 Provider；已有项从 Setup 编辑
 codexc primary-provider switch openai        # 恢复官方主 Provider；切换 Provider 保持启用
 codexc primary-provider switch <Provider ID> [模型]   # 转换为固定主 Provider；切换 Profile 会被移除
@@ -218,7 +218,7 @@ OpenAI 的切换模式和仅 OpenCode Go 固定模式。账户管理命令：
 
 ```bash
 codexc opencode-go account add <id>
-codexc opencode-go account list
+codexc opencode-go account list [--json]
 codexc opencode-go account remove <id>
 codexc opencode-go account default <id>
 codexc opencode-go account stop <id>
@@ -240,7 +240,7 @@ codexc opencode-go account stop <id>
 ```bash
 codexc work                          # 交互式管理 Workspace
 codexc work add                      # 注册当前目录
-codexc work list                     # 列出 Workspace
+codexc work list [--json]             # 列出 Workspace
 codexc work remove <序号|ID|名称>    # 删除注册，不删除项目文件
 ```
 

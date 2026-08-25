@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -359,6 +359,46 @@ describe("OpenCode Go account CLI", () => {
     await runOpencodeGoAccountCli(["account", "list"], { environment, output });
 
     expect(output.write).toHaveBeenCalledWith(expect.stringContaining("opencode-go（默认）"));
+  });
+
+  it("prints a structured JSON account list without secrets", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    const emptyOutput = { write: vi.fn() };
+    await runOpencodeGoAccountCli(["account", "list", "--json"], {
+      environment,
+      output: emptyOutput,
+    });
+    expect(JSON.parse(emptyOutput.write.mock.calls[0]?.[0] as string)).toEqual({ accounts: [] });
+
+    await addOpencodeGoAccount("opencode-go", {
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      configureRole: async () => undefined,
+      downloadCatalog: successfulCatalog,
+    });
+    const configuredOutput = { write: vi.fn() };
+    await runOpencodeGoAccountCli(["account", "list", "--json"], {
+      environment,
+      output: configuredOutput,
+    });
+    expect(JSON.parse(configuredOutput.write.mock.calls[0]?.[0] as string).accounts[0].mode).toBe("switching");
+    const markerPath = opencodeGoAccountMarkerPath(environment, "opencode-go");
+    unlinkSync(markerPath);
+    const output = { write: vi.fn() };
+    await runOpencodeGoAccountCli(["account", "list", "--json"], { environment, output });
+    const payload = JSON.parse(output.write.mock.calls[0]?.[0] as string);
+    expect(payload).toEqual({
+      accounts: [{
+        id: "opencode-go",
+        default: true,
+        provider: "opencode-go",
+        mode: "unconfigured",
+      }],
+    });
+    expect(JSON.stringify(payload)).not.toContain("apiKey");
+    expect(JSON.stringify(payload)).not.toContain("Bearer");
   });
 
   it("reports the default-account change and required restart through the CLI", async () => {

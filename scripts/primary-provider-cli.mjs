@@ -36,6 +36,23 @@ function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
+function publicBaseUrl(value) {
+  if (typeof value !== "string") return "";
+  try {
+    const url = new URL(value);
+    if (
+      !["http:", "https:"].includes(url.protocol)
+      || url.username !== ""
+      || url.password !== ""
+      || url.search !== ""
+      || url.hash !== ""
+    ) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 function switchingProfileSnapshot(environment, providerId) {
   if (providerId === undefined) return undefined;
   const switching = loadConfiguredCustomSwitchingModelProviders(environment)
@@ -144,6 +161,7 @@ export async function listPrimaryProviders({
   environment = process.env,
   output = process.stdout,
   createClient = createCodexUserConfigClient,
+  json = false,
 } = {}) {
   const snapshot = await readCodexUserConfigSnapshot(environment, { createClient });
   const config = record(snapshot.config);
@@ -162,6 +180,49 @@ export async function listPrimaryProviders({
       : backupIds.includes(activeId)
         ? `${activeId} · 自定义（备份中）`
       : `${activeId}（未在候选列表中）`;
+
+  if (json) {
+    output.write(`${JSON.stringify({
+      active: {
+        id: activeId ?? "openai",
+        label: activeLabel,
+        mode: switchingProviders.length > 0
+          ? "switching"
+          : activeId === undefined || activeId === "openai"
+            ? "official"
+            : candidates.includes(activeId)
+              ? "exclusive"
+              : backupIds.includes(activeId)
+                ? "backup"
+                : "unknown",
+      },
+      fixedCandidates: candidates.map((id) => {
+        const provider = record(providers[id]);
+        return {
+          id,
+          name: optionalString(provider.name) ?? id,
+          baseUrl: publicBaseUrl(provider.base_url),
+          active: id === activeId,
+        };
+      }),
+      switchingProviders: switchingProviders.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        baseUrl: provider.baseUrl,
+        profileName: provider.profileName,
+      })),
+      backupCandidates: backupIds.map((id) => {
+        const provider = record(backup[id]);
+        return {
+          id,
+          name: optionalString(provider.name) ?? id,
+          baseUrl: publicBaseUrl(provider.base_url),
+          active: id === activeId,
+        };
+      }),
+    })}\n`);
+    return;
+  }
 
   output.write("\nCodex Connect 自定义 Responses Provider\n");
   output.write(`当前主实例：${activeLabel}\n`);
@@ -653,10 +714,11 @@ export async function runPrimaryProviderCli(
     return;
   }
   if (subcommand === "list") {
-    if (rest.length > 0) {
-      throw new Error("用法：codexc primary-provider list");
+    const json = rest.length === 1 && rest[0] === "--json";
+    if (rest.length > 0 && !json) {
+      throw new Error("用法：codexc primary-provider list [--json]");
     }
-    await listPrimaryProviders({ environment, output, createClient });
+    await listPrimaryProviders({ environment, output, createClient, json });
     return;
   }
   if (subcommand === "add") {
