@@ -132,7 +132,11 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "models":
-      await replyTelegramPanel(context, formatConversationModels(result));
+      await replyTelegramPanel(
+        context,
+        formatConversationModels(result),
+        modelEffortKeyboard(result),
+      );
       return;
     case "collaboration-mode":
       await replyTelegramPanel(
@@ -225,6 +229,34 @@ export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
       { text: "权限 Profile", callback_data: "wp:profile" },
     ]],
   };
+}
+
+export function modelEffortKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "models" }>,
+): InlineKeyboardMarkup | undefined {
+  if (result.nextSelection !== "effort") {
+    return undefined;
+  }
+  const model = result.state.models.find((candidate) =>
+    candidate.model === result.state.model
+    && (candidate.provider ?? "openai") === (result.state.modelProvider ?? "openai"));
+  if (!model || model.supportedReasoningEfforts.length <= 1) {
+    return undefined;
+  }
+  const token = telegramModelSelectionToken(
+    result.state.model,
+    result.state.modelProvider ?? "openai",
+  );
+  return {
+    inline_keyboard: model.supportedReasoningEfforts.map((option, index) => [{
+      text: `${option.effort === result.state.effort ? "✓ " : ""}${option.effort}`,
+      callback_data: `me:${index + 1}:${token}`,
+    }]),
+  };
+}
+
+export function telegramModelSelectionToken(model: string, provider: string): string {
+  return createHash("sha256").update(`${provider}\0${model}`).digest("base64url");
 }
 
 export function scheduledTaskConfirmationKeyboard(

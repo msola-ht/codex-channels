@@ -223,6 +223,17 @@ export class FeishuConversationAdapter {
             return;
           }
         }
+        if (
+          result.kind === "models"
+          && result.nextSelection === "effort"
+          && this.commandCenter
+        ) {
+          const response = renderCommandCenterChoices("effort", result);
+          if (response) {
+            await this.commandCenter.openResponse(message.target, message.actorId, response);
+            return;
+          }
+        }
         const rendered = renderFeishuCommandResult(
           result,
           this.inputOptions.priceCurrency,
@@ -429,16 +440,23 @@ export class FeishuConversationAdapter {
       const result = action === "fast" && input === ""
         ? await this.commands.execute(target, "model", "", actorId)
         : await this.commands.execute(target, action, input, actorId);
-      const choices = (
-        input === ""
-        || action === "sessions"
-        || action === "archived"
-        || (action === "plugin" && result.kind === "plugins")
-        || (action === "section" && result.kind === "thread-sections")
-        || action === "schedule"
-      )
-        ? renderCommandCenterChoices(action, result)
+      const followUpChoices = action === "model"
+        && result.kind === "models"
+        && result.nextSelection === "effort"
+        ? renderCommandCenterChoices("effort", result)
         : undefined;
+      const choices = followUpChoices ?? (
+        (
+          input === ""
+          || action === "sessions"
+          || action === "archived"
+          || (action === "plugin" && result.kind === "plugins")
+          || (action === "section" && result.kind === "thread-sections")
+          || action === "schedule"
+        )
+          ? renderCommandCenterChoices(action, result)
+          : undefined
+      );
       if (choices) {
         return choices;
       }

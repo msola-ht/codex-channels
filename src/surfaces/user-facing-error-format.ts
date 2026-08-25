@@ -169,6 +169,8 @@ export function formatSurfaceUserFacingError(
       return "模型选择不唯一";
     case "model.selector.not-found":
       return "找不到指定模型";
+    case "model.selection.expired":
+      return "模型已变化，请重新发送 /model 选择";
     case "effort.unsupported": {
       const options = error.details.options;
       return `当前模型不支持该思考等级，可选：${Array.isArray(options) ? options.join("、") : "无"}`;

@@ -116,7 +116,9 @@ HTML 和微信结构化字段渲染。
 
 `/resume` 恢复结果会显示该 Thread 的会话模型和 Provider；`/new` 与 Workspace 切换结果会显示
 下一条普通消息使用的模型和 Provider；`/model` 产生待生效选择时也使用“下一条消息模型”明确
-区分当前 Thread 设置。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
+区分当前 Thread 设置。模型支持多个思考等级时，选择模型后继续进入思考等级选择；飞书使用选择卡、
+Telegram 使用内联按钮，微信显示可输入的 `/effort` 选项。只支持一个等级时直接沿用该等级，独立
+`/effort` 命令保持可用。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
 
 `/release` 输出当前会话 Thread 的占用状态：未占用、被占用（含持锁进程 PID 与命令行、
 是否处于恢复失败）或已释放结果；

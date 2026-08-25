@@ -20,6 +20,7 @@ import {
   type TelegramAudioPort,
   type TelegramImagePort,
 } from "../src/surfaces/telegram/bot.js";
+import { telegramModelSelectionToken } from "../src/surfaces/telegram/command-renderer.js";
 import {
   maximumTelegramTextFileBytes,
   type TelegramTextFilePort,
@@ -781,6 +782,67 @@ describe("Telegram image input", () => {
     );
     expect(apiCalls).toContain("answerCallbackQuery");
     expect(sentTexts.join("\n")).toContain("已切换 Workspace");
+    await surface.stop();
+    await output.close();
+  });
+
+  it("applies a reasoning effort selected from the post-model buttons", async () => {
+    const state = {
+      models: [{
+        id: "gpt-test",
+        model: "gpt-test",
+        displayName: "GPT Test",
+        supportedReasoningEfforts: [
+          { effort: "medium", description: "Medium" },
+          { effort: "high", description: "High" },
+        ],
+        defaultReasoningEffort: "medium",
+        serviceTiers: [],
+        defaultServiceTier: null,
+        isDefault: true,
+        inputModalities: ["text" as const],
+      }],
+      model: "gpt-test",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: null,
+      pending: true,
+      modelPending: true,
+      effortPending: true,
+      serviceTierPending: false,
+    };
+    const selectEffort = vi.fn().mockResolvedValue({ ...state, effort: "high" });
+    const { surface, output, apiCalls, sentTexts } = createSurface(
+      vi.fn(),
+      vi.fn(),
+      {
+        modelState: vi.fn().mockResolvedValue(state),
+        selectEffort,
+      },
+    );
+
+    await surface.bot.handleUpdate({
+      update_id: 11,
+      callback_query: {
+        id: "model-effort",
+        from: telegramUser(),
+        chat_instance: "chat-instance",
+        data: `me:2:${telegramModelSelectionToken("gpt-test", "openai")}`,
+        message: {
+          message_id: 20,
+          date: 1,
+          chat: telegramChat(),
+          text: "选择思考等级",
+        },
+      },
+    });
+
+    expect(selectEffort).toHaveBeenCalledWith(
+      { surface: "telegram", accountId: "default", conversationId: "100" },
+      "high",
+    );
+    expect(apiCalls).toContain("editMessageReplyMarkup");
+    expect(sentTexts.join("\n")).toContain("high（下一次 Turn 生效）");
     await surface.stop();
     await output.close();
   });

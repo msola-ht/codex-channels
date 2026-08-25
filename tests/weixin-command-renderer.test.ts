@@ -11,6 +11,41 @@ import {
 } from "../src/surfaces/weixin/index.js";
 
 describe("Weixin command renderer", () => {
+  it("asks for a reasoning effort after model selection", () => {
+    const rendered = renderWeixinCommandResult({
+      kind: "models",
+      view: "effort",
+      nextSelection: "effort",
+      state: {
+        models: [{
+          id: "gpt-test",
+          model: "gpt-test",
+          displayName: "GPT Test",
+          supportedReasoningEfforts: [
+            { effort: "medium", description: "平衡" },
+            { effort: "high", description: "深入" },
+          ],
+          defaultReasoningEffort: "medium",
+          serviceTiers: [],
+          defaultServiceTier: null,
+          isDefault: true,
+          inputModalities: ["text"],
+        }],
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: null,
+        pending: true,
+        modelPending: true,
+        effortPending: true,
+        serviceTierPending: false,
+      },
+    });
+
+    expect(rendered).toContain("模型已选择，请继续选择思考等级");
+    expect(rendered).toContain("/effort <序号或档位>");
+  });
+
   it("keeps compact lines while preserving intentional paragraphs", () => {
     expect(formatWeixinCommandText(
       "标题\r\n字段一：值一\n字段二：值二\n\n\n段落二",

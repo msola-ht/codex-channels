@@ -52,6 +52,7 @@ import {
   scheduledTaskConfirmationKeyboard,
   formatTelegramThreadQueueDeleteConfirmation,
   formatTelegramThreadQueueItemAction,
+  telegramModelSelectionToken,
   replyTelegramPanel,
   telegramPluginSelectionToken,
   threadQueueDeleteConfirmationKeyboard,
@@ -433,6 +434,49 @@ export class TelegramSurface {
         this.exchangeRate?.() ?? null,
       );
     });
+    this.bot.callbackQuery(
+      /^me:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
+      async (context) => {
+        const modelTarget = target(context);
+        const state = await this.service.modelState(modelTarget);
+        if (
+          telegramModelSelectionToken(
+            state.model,
+            state.modelProvider ?? "openai",
+          ) !== context.match[2]
+        ) {
+          throw new UserFacingError(
+            "model.selection.expired",
+            "模型已变化，请重新发送 /model 选择",
+          );
+        }
+        const model = state.models.find((candidate) =>
+          candidate.model === state.model
+          && (candidate.provider ?? "openai") === (state.modelProvider ?? "openai"));
+        const effort = model?.supportedReasoningEfforts[Number(context.match[1]) - 1]?.effort;
+        if (!effort) {
+          throw new UserFacingError(
+            "model.selection.expired",
+            "模型已变化，请重新发送 /model 选择",
+          );
+        }
+        await context.answerCallbackQuery({ text: "正在选择思考等级" });
+        await context.editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: [] },
+        });
+        const result = await this.commands.execute(
+          modelTarget,
+          "effort",
+          effort,
+        );
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
+      },
+    );
     this.bot.callbackQuery(
       /^wp:(sandbox|approval)$/,
       async (context) => {

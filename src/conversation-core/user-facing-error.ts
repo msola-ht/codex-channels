@@ -80,6 +80,7 @@ export type UserFacingErrorCode =
   | "model.selector.required"
   | "model.selector.ambiguous"
   | "model.selector.not-found"
+  | "model.selection.expired"
   | "effort.unsupported"
   | "fast.usage"
   | "fast.unsupported"

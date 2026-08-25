@@ -1591,6 +1591,9 @@ export function formatConversationModels(
         : []),
       "",
       ...providerSwitchNotice,
+      ...(result.nextSelection === "effort"
+        ? ["模型已选择，请继续选择思考等级。", ""]
+        : []),
       "可用思考等级：",
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
