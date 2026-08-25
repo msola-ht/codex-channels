@@ -31,6 +31,8 @@
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
+- [`docs/user-agent-customization.md`](docs/user-agent-customization.md)：App Server 客户端身份与
+  模型上游 User-Agent 自定义的配置、生命周期、安全边界和验证方案。
 - [`docs/opencode-go-multi-account.md`](docs/opencode-go-multi-account.md)：OpenCode Go
   多账户实现（账户文件、CLI/Setup、共享代理、会话切换与租约生命周期）。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 当前设计决策与停止条件。
