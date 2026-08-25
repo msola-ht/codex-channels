@@ -380,6 +380,24 @@ describe("metrics center server", () => {
     expect(printed).toContain("中心数据库");
     expect(printed).not.toContain("center-token");
     expect(printed).not.toContain("device-token");
+
+    const jsonOutput: string[] = [];
+    await runCenterInfo({
+      environment,
+      json: true,
+      output: { write: (value: string) => jsonOutput.push(value) },
+    });
+    const payload = JSON.parse(jsonOutput.join(""));
+    expect(payload).toMatchObject({
+      host: "0.0.0.0",
+      port: 8790,
+      viewTokenConfigured: true,
+      deviceTokenConfigured: true,
+      databasePath: expect.any(String),
+      configPath,
+    });
+    expect(JSON.stringify(payload)).not.toContain("center-token");
+    expect(JSON.stringify(payload)).not.toContain("device-token");
   });
 });
 

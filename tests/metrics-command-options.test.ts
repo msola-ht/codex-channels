@@ -67,6 +67,13 @@ describe("metrics command options", () => {
       .toThrow("未知参数：thread-1");
   });
 
+  it("accepts only the documented metrics status JSON flag", () => {
+    expect(() => validateMetricsCommandArgs("status", [])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("status", ["--json"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("status", ["--json", "unexpected"]))
+      .toThrow("codexc metrics status [--json]");
+  });
+
   it("accepts a configured custom primary Provider for prune", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-metrics-prune-custom-"));
     temporaryDirectories.push(codexHome);

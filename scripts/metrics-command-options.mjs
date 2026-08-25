@@ -153,7 +153,13 @@ export function validateMetricsCommandArgs(subcommand, args, environment = proce
     }
     return;
   }
-  if ((subcommand === "status" || subcommand === "reset") && args.length > 0) {
+  if (
+    subcommand === "status"
+    && !(args.length === 0 || (args.length === 1 && args[0] === "--json"))
+  ) {
+    throw new Error("用法：codexc metrics status [--json]");
+  }
+  if (subcommand === "reset" && args.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
 }

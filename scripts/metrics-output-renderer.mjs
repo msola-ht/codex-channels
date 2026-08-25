@@ -11,7 +11,17 @@ import {
 } from "./metrics-export-format.mjs";
 import { metricsDatabaseCanUpgrade } from "./metrics-database-access.mjs";
 
-export function printStatus(result) {
+export function printStatus(result, { json = false, output = process.stdout } = {}) {
+  if (json) {
+    output.write(`${JSON.stringify({
+      databasePath: result.databasePath,
+      exists: result.exists,
+      schemaVersion: result.schemaVersion,
+      compatible: result.compatible,
+      count: result.count,
+    }, null, 2)}\n`);
+    return;
+  }
   console.log(`指标数据库：${result.databasePath}`);
   if (!result.exists) {
     console.log("状态：尚未创建");

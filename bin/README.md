@@ -12,10 +12,11 @@
 - `init`、`setup`、`config`：初始化、从统一菜单选择配置模块，或打开交互式配置与设置菜单
   （操作详情、计划更新、按提供商的价格显示方式、调试模式、审批超时、Sandbox、默认工作区与
   模型、WebUI、指标、Telegram 消息格式等配置文件参数，以及配置路径）；`config` 在非交互终端仍直接显示
-  用户级 `.codex-connect` 配置路径。
+  用户级 `.codex-connect` 配置路径；`--json` 只输出路径与文件存在状态，不读取或输出配置正文。
 - `doctor`：诊断当前 TOML 配置、安装、Linux `bubblewrap` 沙箱前置条件、主 App Server 与已配置
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
-  交互终端使用不同颜色并汇总结果；Linux 缺少 `bubblewrap` 时输出 `[处理]` 安装建议，不改写配置。
+  交互终端使用不同颜色并汇总结果；`--json` 输出全部脱敏检查、分类计数与健康状态；Linux 缺少
+  `bubblewrap` 时输出安装建议，不改写配置。
 - `start`：在前台复用内部 `service-app-server` 监管入口启动 App Server、Provider 统计代理与
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
@@ -26,9 +27,10 @@
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
-- `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry。
+- `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry；
+  `check --json` 静默底层 Codex 展示并返回可解析的成功或失败结果。
 - `agents`：选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
-  `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化。
+  `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化，`--json` 返回稳定状态对象。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
@@ -38,15 +40,18 @@
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
   和旧 Shell PATH 配置，保留用户配置、数据库、凭据、日志和输出。Registry 安装交给 npm 卸载。
 - `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
-- `metrics`：查询、导出、清理或显式维护独立模型指标库；日常兼容升级使用 `update`。
+- `metrics`：查询、导出、清理或显式维护独立模型指标库；`status --json` 返回稳定的路径、Schema
+  兼容性与记录数，日常兼容升级使用 `update`。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
-- `webui`、`center`：分别启动本机只读指标界面和多设备指标中心；监听参数在读取用户配置前完成校验。
+- `webui`、`center`：分别启动本机只读指标界面和多设备指标中心；监听参数在读取用户配置前完成校验，
+  `center info --json` 只输出令牌是否已配置，不输出令牌内容。
 - `service`：完整校验配置后生成全部后台服务定义，并启动 App Server 与 Gateway；启停、重启、状态和日志命令使用
   `gateway`、`app-server`、`webui`、`center` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
   `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
-  诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务。
+  诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务；`status --json`
+  把 macOS launchd 与 Linux systemd 归一为同一状态结构，服务异常时仍输出可解析 JSON 并返回非零状态。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一非主动释放的受监管组件异常

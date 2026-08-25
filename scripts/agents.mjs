@@ -252,22 +252,34 @@ function sameOptionalContent(left, right) {
   return left.equals(right);
 }
 
-function printStatus(environment) {
+function printStatus(environment, { json = false, output = process.stdout } = {}) {
   const status = agentsStatus(environment);
-  console.log(`配置：${status.configPath}`);
-  console.log(`multi_agent_v2：${status.multiAgentV2Enabled ? "已启用" : "未启用"}`);
-  console.log(`第三方子代理：${status.externalRoleConfigured ? "已配置" : "未配置"}`);
-  console.log(`旧版 DS 子代理角色：${status.legacyDsRoleConfigured ? "已配置（迁移前状态）" : "未配置"}`);
-  if (status.provider) console.log(`Provider：${status.provider}`);
-  if (status.model) console.log(`模型：${status.model}`);
-  console.log(`角色配置文件：${status.roleConfigPath}`);
+  if (json) {
+    output.write(`${JSON.stringify({
+      configPath: status.configPath,
+      roleConfigPath: status.roleConfigPath,
+      multiAgentV2Enabled: status.multiAgentV2Enabled,
+      externalRoleConfigured: status.externalRoleConfigured,
+      legacyDsRoleConfigured: status.legacyDsRoleConfigured,
+      provider: status.provider ?? null,
+      model: status.model ?? null,
+    }, null, 2)}\n`);
+    return;
+  }
+  output.write(`配置：${status.configPath}\n`);
+  output.write(`multi_agent_v2：${status.multiAgentV2Enabled ? "已启用" : "未启用"}\n`);
+  output.write(`第三方子代理：${status.externalRoleConfigured ? "已配置" : "未配置"}\n`);
+  output.write(`旧版 DS 子代理角色：${status.legacyDsRoleConfigured ? "已配置（迁移前状态）" : "未配置"}\n`);
+  if (status.provider) output.write(`Provider：${status.provider}\n`);
+  if (status.model) output.write(`模型：${status.model}\n`);
+  output.write(`角色配置文件：${status.roleConfigPath}\n`);
 }
 
 const usage = `用法：codexc agents <configure|disable|status> [参数]
 
   configure <Provider> [模型]  配置共享第三方子代理（agents.external）
   disable                    移除共享第三方子代理
-  status                     查看当前状态
+  status [--json]            查看当前状态
 
 Provider：${loadManagedModelProviderDefinitions(process.env)
   .map((definition) => definition.id).join("、")}`;
@@ -300,8 +312,13 @@ async function runAgentsCli() {
     } else {
       writeCliMessage("note", "当前没有本项目管理的第三方子代理，无需处理。");
     }
-  } else if (command === "status" && provider === undefined) {
-    printStatus(process.env);
+  } else if (
+    command === "status"
+    && (provider === undefined || provider === "--json")
+    && model === undefined
+    && rest.length === 0
+  ) {
+    printStatus(process.env, { json: provider === "--json" });
   } else {
     throw new Error(usage);
   }

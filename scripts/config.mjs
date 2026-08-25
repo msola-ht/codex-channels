@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -23,13 +24,19 @@ export { runCenterSettings } from "./metrics-config-menu.mjs";
 export async function runConfig({
   environment = process.env,
   input = process.stdin,
+  json = false,
   output = process.stdout,
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
   debugSetup = runDebugSetup,
 } = {}) {
-  if (!prompts) throw new Error("Config 菜单缺少交互实现");
   const { configPath, dataDir } = resolveConfigPaths(environment);
+  if (json) {
+    const result = { dataDir, configPath, exists: pathExists(configPath) };
+    output.write(`${JSON.stringify(result, null, 2)}\n`);
+    return { action: "paths", ...result };
+  }
+  if (!prompts) throw new Error("Config 菜单缺少交互实现");
   if (!output.isTTY) {
     output.write(`用户目录：${dataDir}\n配置文件：${configPath}\n`);
     return { action: "paths", configPath, dataDir };
@@ -107,6 +114,18 @@ function resolveConfigPaths(environment) {
   return { configPath: join(home, "config.toml"), dataDir: home };
 }
 
+function pathExists(path) {
+  try {
+    statSync(path);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
 function isBackResult(value) {
   return value !== null && typeof value === "object" && value.action === "back";
 }
@@ -119,8 +138,15 @@ if (
   process.argv[1]
   && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
-  runConfig().catch((error) => {
-    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+  const args = process.argv.slice(2);
+  const json = args.length === 1 && args[0] === "--json";
+  if (!(args.length === 0 || json)) {
+    writeCliMessage("failure", "用法：codexc config [--json]");
     process.exitCode = 1;
-  });
+  } else {
+    runConfig({ json }).catch((error) => {
+      writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+  }
 }

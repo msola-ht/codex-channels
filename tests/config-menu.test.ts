@@ -61,6 +61,32 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain(`配置文件：${fixture.configPath}`);
   });
 
+  it("prints JSON paths without requiring prompts or reading configuration", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-config-json-"));
+    roots.push(root);
+    const configPath = join(root, "missing", "config.toml");
+    const output: string[] = [];
+
+    const result = await runConfig({
+      environment: { CODEX_CONNECT_CONFIG_FILE: configPath },
+      json: true,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: null,
+    });
+
+    expect(result).toEqual({
+      action: "paths",
+      dataDir: join(root, "missing"),
+      configPath,
+      exists: false,
+    });
+    expect(JSON.parse(output.join(""))).toEqual({
+      dataDir: join(root, "missing"),
+      configPath,
+      exists: false,
+    });
+  });
+
   it("sets the global price currency display through the menu", async () => {
     const fixture = createFixture();
     const output: string[] = [];
