@@ -367,24 +367,22 @@ export function renderDoctorCard(
   }
   if (setupToken) {
     elements.push({
-      tag: "action",
-      actions: [{
-        tag: "button",
-          text: {
-            tag: "plain_text",
-            content: missingScopes.length > 0
-              ? snapshot ? "授权并自动配置" : "授权并重新检测"
-              : "自动配置",
-        },
-        type: "primary",
-        value: {
-          codexc_feishu_setup_token: setupToken,
-          codexc_feishu_setup_action: "authorize",
-        },
-      }],
+      tag: "button",
+      text: {
+        tag: "plain_text",
+        content: missingScopes.length > 0
+          ? snapshot ? "授权并自动配置" : "授权并重新检测"
+          : "自动配置",
+      },
+      type: "primary",
+      value: {
+        codexc_feishu_setup_token: setupToken,
+        codexc_feishu_setup_action: "authorize",
+      },
     });
   }
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -398,7 +396,7 @@ export function renderDoctorCard(
         content: "飞书 Doctor",
       },
     },
-    elements,
+    body: { elements },
   };
 }
 
@@ -408,6 +406,7 @@ function renderConfigurationAuthorizationCard(
 ): FeishuCardDocument {
   const inAppUrl = toConfigurationInAppUrl(url);
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -419,7 +418,7 @@ function renderConfigurationAuthorizationCard(
         content: "授权飞书应用",
       },
     },
-    elements: [
+    body: { elements: [
       {
         tag: "markdown",
         content: [
@@ -430,23 +429,20 @@ function renderConfigurationAuthorizationCard(
         ].join("\n"),
       },
       {
-        tag: "action",
-        actions: [{
-          tag: "button",
-          text: {
-            tag: "plain_text",
-            content: "在飞书内确认",
-          },
-          type: "primary",
-          multi_url: {
-            url: inAppUrl,
-            pc_url: inAppUrl,
-            android_url: inAppUrl,
-            ios_url: inAppUrl,
-          },
-        }],
+        tag: "button",
+        text: {
+          tag: "plain_text",
+          content: "在飞书内确认",
+        },
+        type: "primary",
+        multi_url: {
+          url: inAppUrl,
+          pc_url: inAppUrl,
+          android_url: inAppUrl,
+          ios_url: inAppUrl,
+        },
       },
-    ],
+    ] },
   };
 }
 
@@ -460,6 +456,7 @@ function toConfigurationInAppUrl(url: string): string {
 
 function renderSetupProgressCard(text: string): FeishuCardDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -471,10 +468,12 @@ function renderSetupProgressCard(text: string): FeishuCardDocument {
         content: "飞书应用授权",
       },
     },
-    elements: [{
-      tag: "markdown",
-      content: text,
-    }],
+    body: {
+      elements: [{
+        tag: "markdown",
+        content: text,
+      }],
+    },
   };
 }
 
@@ -483,6 +482,7 @@ function renderSetupOutcomeCard(
   text: string,
 ): FeishuCardDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -494,10 +494,12 @@ function renderSetupOutcomeCard(
         content: success ? "飞书配置完成" : "飞书配置未完成",
       },
     },
-    elements: [{
-      tag: "markdown",
-      content: text,
-    }],
+    body: {
+      elements: [{
+        tag: "markdown",
+        content: text,
+      }],
+    },
   };
 }
 

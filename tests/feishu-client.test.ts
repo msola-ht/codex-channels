@@ -1942,6 +1942,7 @@ async function successfulDownload() {
 
 function approvalCard(): FeishuCardDocument {
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -1953,6 +1954,6 @@ function approvalCard(): FeishuCardDocument {
         content: "Codex 请求批准",
       },
     },
-    elements: [],
+    body: { elements: [] },
   };
 }

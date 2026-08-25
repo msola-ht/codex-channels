@@ -7,6 +7,7 @@ export function renderFeishuOAuthCard(
 ): FeishuCardDocument {
   const inAppUrl = toFeishuInAppUrl(verificationUriComplete);
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -18,41 +19,35 @@ export function renderFeishuOAuthCard(
         content: "请授权飞书账号",
       },
     },
-    elements: [
+    body: { elements: [
       {
-        tag: "div",
+        tag: "markdown",
+        content: [
+          "授权后，Codex Gateway 可以使用当前飞书账号执行已开通的用户级能力。",
+          "",
+          `本次请求 ${scopes.length} 项权限，授权链接约 ${
+            Math.max(1, Math.round(expiresInSeconds / 60))
+          } 分钟后失效。`,
+          "",
+          "请求的 Scope：",
+          ...scopes.map((scope) => `- ${scope}`),
+        ].join("\n"),
+      },
+      {
+        tag: "button",
+        type: "primary",
         text: {
-          tag: "lark_md",
-          content: [
-            "授权后，Codex Gateway 可以使用当前飞书账号执行已开通的用户级能力。",
-            "",
-            `本次请求 ${scopes.length} 项权限，授权链接约 ${
-              Math.max(1, Math.round(expiresInSeconds / 60))
-            } 分钟后失效。`,
-            "",
-            "请求的 Scope：",
-            ...scopes.map((scope) => `- ${scope}`),
-          ].join("\n"),
+          tag: "plain_text",
+          content: "在飞书内授权",
+        },
+        multi_url: {
+          url: inAppUrl,
+          pc_url: inAppUrl,
+          android_url: inAppUrl,
+          ios_url: inAppUrl,
         },
       },
-      {
-        tag: "action",
-        actions: [{
-          tag: "button",
-          type: "primary",
-          text: {
-            tag: "plain_text",
-            content: "在飞书内授权",
-          },
-          multi_url: {
-            url: inAppUrl,
-            pc_url: inAppUrl,
-            android_url: inAppUrl,
-            ios_url: inAppUrl,
-          },
-        }],
-      },
-    ],
+    ] },
   };
 }
 
@@ -68,6 +63,7 @@ export function renderFeishuOAuthOutcomeCard(
     failed: "授权处理失败，请稍后重试。",
   } as const;
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -79,13 +75,15 @@ export function renderFeishuOAuthOutcomeCard(
         content: successful ? "飞书授权成功" : "飞书授权未完成",
       },
     },
-    elements: [{
-      tag: "div",
-      text: {
-        tag: "plain_text",
-        content: descriptions[outcome],
-      },
-    }],
+    body: {
+      elements: [{
+        tag: "div",
+        text: {
+          tag: "plain_text",
+          content: descriptions[outcome],
+        },
+      }],
+    },
   };
 }
 

@@ -11,6 +11,7 @@ export function renderFeishuThreadStatusCard(
     ? `${formatTurnStartIdentityLabel(identity)} · `
     : "";
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -26,17 +27,19 @@ export function renderFeishuThreadStatusCard(
         content: "Thread 状态",
       },
     },
-    elements: [{
-      tag: "div",
-      text: {
-        tag: "plain_text",
-        content: status === "active"
-          ? `${identityPrefix}运行中`
-          : status === "idle"
-            ? `${identityPrefix}处理结束 · 结果见下方消息`
-            : "未知",
-      },
-    }],
+    body: {
+      elements: [{
+        tag: "div",
+        text: {
+          tag: "plain_text",
+          content: status === "active"
+            ? `${identityPrefix}运行中`
+            : status === "idle"
+              ? `${identityPrefix}处理结束 · 结果见下方消息`
+              : "未知",
+        },
+      }],
+    },
   };
 }
 
@@ -46,6 +49,7 @@ export function renderFeishuPlanCard(
   const detail = presentation.text.split("\n").slice(1).join("\n").trim()
     || "暂无步骤";
   return {
+    schema: "2.0",
     config: {
       update_multi: true,
       wide_screen_mode: true,
@@ -59,12 +63,14 @@ export function renderFeishuPlanCard(
         content: presentation.title,
       },
     },
-    elements: [{
-      tag: "div",
-      text: {
-        tag: "plain_text",
-        content: detail,
-      },
-    }],
+    body: {
+      elements: [{
+        tag: "div",
+        text: {
+          tag: "plain_text",
+          content: detail,
+        },
+      }],
+    },
   };
 }

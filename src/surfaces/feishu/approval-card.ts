@@ -5,21 +5,6 @@ import type {
 import { interactionProcessedTitle } from "../interaction-copy.js";
 import { contentTruncatedText } from "../output-copy.js";
 
-export interface FeishuLegacyCardDocument {
-  config: {
-    update_multi: true;
-    wide_screen_mode: true;
-  };
-  header: {
-    template: "blue" | "green" | "grey";
-    title: {
-      tag: "plain_text";
-      content: string;
-    };
-  };
-  elements: Array<Record<string, unknown>>;
-}
-
 export interface FeishuCardKitDocument {
   schema: "2.0";
   config: {
@@ -38,14 +23,12 @@ export interface FeishuCardKitDocument {
   };
 }
 
-export type FeishuCardDocument =
-  | FeishuLegacyCardDocument
-  | FeishuCardKitDocument;
+export type FeishuCardDocument = FeishuCardKitDocument;
 
 export function feishuCardElements(
   card: FeishuCardDocument,
 ): readonly Record<string, unknown>[] {
-  return "schema" in card ? card.body.elements : card.elements;
+  return card.body.elements;
 }
 
 export type FeishuApprovalAction =

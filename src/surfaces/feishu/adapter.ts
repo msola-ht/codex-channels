@@ -67,6 +67,12 @@ import {
 } from "./renderer.js";
 
 const maximumInboundImages = 4;
+const feishuLocalSlashCommands = new Set([
+  "start",
+  "help",
+  "whoami",
+  "fs",
+]);
 const unsupportedMessageLinkText = [
   "暂不支持通过飞书复制的消息链接读取内容。",
   "请直接回复目标消息，再发送你的要求。",
@@ -159,7 +165,7 @@ export class FeishuConversationAdapter {
         await this.handleImage(message);
         return;
       }
-      const command = parseSlashCommand(message.text);
+      const command = parseSupportedFeishuSlashCommand(message.text);
       if (command !== null) {
         if (command.name === "start" || command.name === "help") {
           if (this.commandCenter) {
@@ -912,6 +918,33 @@ export class FeishuConversationAdapter {
       throw new FeishuOutputQueueError();
     }
   }
+}
+
+function parseSupportedFeishuSlashCommand(
+  text: string,
+): ReturnType<typeof parseSlashCommand> {
+  let command: ReturnType<typeof parseSlashCommand>;
+  try {
+    command = parseSlashCommand(text);
+  } catch (error) {
+    if (
+      error instanceof UserFacingError
+      && error.code === "command.unsupported"
+    ) {
+      return null;
+    }
+    throw error;
+  }
+  if (
+    command === null
+    || (
+      !feishuLocalSlashCommands.has(command.name)
+      && !isConversationCommandName(command.name)
+    )
+  ) {
+    return null;
+  }
+  return command;
 }
 
 function containsFeishuCopiedMessageLink(text: string): boolean {

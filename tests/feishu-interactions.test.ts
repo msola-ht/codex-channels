@@ -790,8 +790,7 @@ describe("Feishu interaction port", () => {
     await settle();
 
     const cardJson = JSON.stringify(fixture.sentCards[0]!.card);
-    expect(fixture.sentCards[0]!.card).not.toHaveProperty("schema");
-    expect(fixture.sentCards[0]!.card).toHaveProperty("elements");
+    expect(fixture.sentCards[0]!.card).toMatchObject({ schema: "2.0" });
     expect(cardJson).toContain("Update pull request");
     expect(cardJson).toContain("允许一次");
     expect(cardJson).toContain("本会话允许");
@@ -846,6 +845,7 @@ describe("Feishu interaction port", () => {
     });
     await settle();
 
+    expect(fixture.sentCards[0]?.card).toMatchObject({ schema: "2.0" });
     expect(JSON.stringify(fixture.sentCards[0]?.card))
       .toContain("https://example.com/authorize");
     const token = interactionToken(fixture.sentCards[0]!.card, "complete");

@@ -29,22 +29,17 @@ describe("Feishu command center", () => {
 
   it("renders common actions first and groups the remaining actions", () => {
     const card = renderFeishuCommandCenterCard("opaque-token");
-    const values = feishuCardElements(card).flatMap((element) =>
-      Array.isArray(element.actions)
-        ? element.actions.flatMap((action) => {
-            if (
-              typeof action !== "object"
-              || action === null
-              || !("value" in action)
-            ) {
-              return [];
-            }
-            return [(action as {
-              value: Record<string, string>;
-            }).value];
-          })
-        : [],
-    );
+    expect(card).toMatchObject({ schema: "2.0" });
+    const values = collectCardActions(card).flatMap((action) => {
+      if (
+        typeof action !== "object"
+        || action === null
+        || !("value" in action)
+      ) {
+        return [];
+      }
+      return [(action as { value: Record<string, string> }).value];
+    });
 
     expect(values.map((value) => value.codexc_command)).toEqual(
       feishuCommandCenterActions,
@@ -68,6 +63,7 @@ describe("Feishu command center", () => {
     expect(JSON.stringify(card)).toContain("常用");
     expect(JSON.stringify(card)).toContain("模型与工作区");
     expect(JSON.stringify(card)).toContain("更多");
+    expect(JSON.stringify(card)).toContain("帮助与更多命令");
     expect(values.every(
       (value) => value.codexc_command_token === "opaque-token",
     )).toBe(true);
@@ -85,6 +81,7 @@ describe("Feishu command center", () => {
     expect(fixture.execute).not.toHaveBeenCalled();
     expect(fixture.cards).toHaveLength(2);
     const categorized = fixture.cards[1]!;
+    expect(categorized.card).toMatchObject({ schema: "2.0" });
     expect(JSON.stringify(categorized.card)).toContain("会话查询");
     expect(JSON.stringify(categorized.card)).toContain("会话操作");
     expect(JSON.stringify(categorized.card)).toContain("能力与集成");

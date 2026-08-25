@@ -1020,24 +1020,13 @@ function createFixture(
       if (!sentCard) {
         throw new Error("飞书命令中心卡片尚未发送");
       }
-      const value = feishuCardElements(sentCard.card).flatMap((element) =>
-        Array.isArray(element.actions) ? element.actions : [],
-      ).flatMap((action) => {
-        if (
-          typeof action !== "object"
-          || action === null
-          || !("value" in action)
-        ) {
-          return [];
-        }
-        const candidate = (action as {
-          value: Record<string, string>;
-        }).value;
-        return candidate.codexc_command === command
-          && (input === undefined || candidate.codexc_command_input === input)
-          ? [candidate]
-          : [];
-      })[0];
+      const value = collectButtonValues(feishuCardElements(sentCard.card))
+        .flatMap((candidate) => {
+          return candidate.codexc_command === command
+              && (input === undefined || candidate.codexc_command_input === input)
+            ? [candidate]
+            : [];
+        })[0];
       if (!value) {
         throw new Error("飞书命令中心动作不存在");
       }
@@ -1100,23 +1089,12 @@ function createFixture(
       if (!sentCard) {
         throw new Error("飞书 Doctor 配置卡片尚未发送");
       }
-      const value = feishuCardElements(sentCard.card).flatMap((element) =>
-        Array.isArray(element.actions) ? element.actions : [],
-      ).flatMap((action) => {
-        if (
-          typeof action !== "object"
-          || action === null
-          || !("value" in action)
-        ) {
-          return [];
-        }
-        const candidate = (action as {
-          value: Record<string, string>;
-        }).value;
-        return candidate.codexc_feishu_setup_action === "authorize"
-          ? [candidate]
-          : [];
-      })[0];
+      const value = collectButtonValues(feishuCardElements(sentCard.card))
+        .flatMap((candidate) => {
+          return candidate.codexc_feishu_setup_action === "authorize"
+            ? [candidate]
+            : [];
+        })[0];
       if (!value) {
         throw new Error("飞书 Doctor 授权动作不存在");
       }
@@ -1213,4 +1191,23 @@ function createFixture(
 
 async function settle(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function collectButtonValues(value: unknown): Array<Record<string, string>> {
+  if (Array.isArray(value)) {
+    return value.flatMap(collectButtonValues);
+  }
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  const record = value as Record<string, unknown>;
+  const own = record.tag === "button"
+      && typeof record.value === "object"
+      && record.value !== null
+    ? [record.value as Record<string, string>]
+    : [];
+  return [
+    ...own,
+    ...Object.values(record).flatMap(collectButtonValues),
+  ];
 }
