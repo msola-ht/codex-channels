@@ -41,7 +41,8 @@ codexc init
 codexc setup
 ```
 
-`codexc config` 可交互调整常用设置；在脚本或管道中运行时会输出用户目录与配置文件路径。
+`codexc config` 提供脱敏配置总览，并可交互调整 Gateway 的显示、系统、自动化、网络、WebUI
+和指标设置；在脚本或管道中运行时会输出用户目录与配置文件路径。
 
 注册需要让 Codex 操作的项目：
 
@@ -64,10 +65,10 @@ Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务�
 
 完成后，在已配置的聊天客户端中私聊机器人即可使用。发送 `/help` 查看聊天命令。
 
-## 配置通讯渠道
+## Setup 配置
 
-运行 `codexc setup`，按菜单配置模型与提供商、通讯渠道和技能安装（把项目技能安装到
-`~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
+运行 `codexc setup`，可先查看不显示凭据的配置总览，再按菜单配置模型与提供商、通讯渠道和项目
+技能（安装到 `~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
 
 ```text
 ~/.codex-connect/config.toml
@@ -101,7 +102,8 @@ https_proxy = "http://127.0.0.1:7890"
 ```
 
 运行 `codexc doctor` 可确认 OpenAI 请求会走代理还是直连；修改代理后运行
-`codexc service restart all`。Gateway 启动时还会做一次 OpenAI 传输探测；连接失败时会在
+`codexc service install`，重新生成包含当前网络环境的后台服务。Gateway 启动时还会做一次
+OpenAI 传输探测；连接失败时会在
 已有授权会话的上线通知中提醒检查代理，但不会停止 Gateway。
 
 ### 可选设置
@@ -122,9 +124,11 @@ price_currency = "cny"
 服务端配置、令牌边界和数据说明见 [`docs/metrics-sync.md`](docs/metrics-sync.md)。
 
 在 `codexc config` 中选择“系统设置 → 调试模式”，可开启脱敏的运行阶段、耗时和统计详情。
-修改后运行 `codexc service restart gateway`。调试内容不会包含消息正文、凭据或审批内容。
+后台服务运行时会自动重启 Gateway，未运行时在下次启动生效；前台运行时需重新启动。
+调试内容不会包含消息正文、凭据或审批内容。
 
-Codex 0.148.0 的 Plugin API 仍在开发中，Gateway 默认关闭。需要调试时显式开启并重启 Gateway：
+Codex 0.148.0 的 Plugin API 仍在开发中，Gateway 默认关闭。需要调试时可在
+`codexc config` 中选择“高级设置 → Plugin API”，或显式配置：
 
 ```toml
 [experimental]
@@ -137,13 +141,13 @@ plugin_api = true
 
 ### Codex 官方
 
-在 `codexc setup` 中选择“模型与提供商 → 官方 → 默认模型与思考等级”，可从当前 Codex 模型目录设置全局默认模型和
+在 `codexc setup` 中选择“模型与提供商 → OpenAI 官方 → 默认模型与思考等级”，可从当前 Codex 模型目录设置全局默认模型和
 思考等级。设置通过 App Server 写入 `~/.codex/config.toml`，不修改 Codex 登录状态；完成后运行
 `codexc service restart all`，让新 App Server 会话使用新的默认值。
 
 ### 自定义第三方 Provider
 
-运行 `codexc setup`，选择“模型与提供商 → 第三方 → 自定义第三方”，可新增或编辑 OpenAI Responses
+运行 `codexc setup`，选择“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”，可新增或编辑 OpenAI Responses
 兼容 Provider，并选择保留官方 OpenAI 的切换模式或仅使用第三方的固定模式。Provider ID、模型与认证、
 配置文件、安全限制和模式切换边界见
 [`第三方模型 Provider 接入指南`](docs/provider-integration-guide.md)。常用管理命令：
@@ -155,6 +159,9 @@ codexc primary-provider switch openai                # 切回官方主 Provider
 codexc primary-provider switch <Provider ID> [模型]  # 切换主 Provider
 codexc primary-provider remove <Provider ID>         # 删除 Provider
 ```
+
+切换模式下，终端使用 `codexc remote --profile custom-<Provider ID>` 连接对应隔离实例；
+`sf-custom-<Provider ID>` 是内部 Codex Profile 名称，不作为 `codexc remote` 的公开参数。
 
 旧版单文件 `sf-custom.config.toml` 不自动迁移；删除旧配置后重新运行 Setup 即可。
 
@@ -170,7 +177,7 @@ codexc service restart all
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型与提供商”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式
-或恢复原配置；选择“第三方模型设置”可按 Provider 和模型设置默认模型、思考等级与自动压缩阈值。两种模式都会
+或恢复原配置；选择“受管 Provider 模型设置”可按 Provider 和模型设置默认模型、思考等级与自动压缩阈值。两种模式都会
 启用共享第三方子代理 `agents.external`；配置后运行：
 
 ```bash
@@ -310,7 +317,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue add <文本>`、`/queue list [页码]`、`/queue update <ID 或列表序号> <文本>`、`/queue delete <ID 或列表序号>`、`/queue reorder <ID 或列表序号> <位置>`、`/queue start [ID 或列表序号]`、`/revert list [页码]`、`/revert <Turn ID 或列表序号>`、`/revert confirm <一次性令牌>`、`/compact`、`/fork`、`/review`、`/release`；Queue 由 App Server 持久保存，容量最多 100 条
-- 计划任务：启用 `[scheduled_tasks].enabled = true` 后使用 `/schedule` 查看；启用后新建的前台 Thread 可由 Agent 调用 `schedule_task` 工具创建确认预览，飞书和 Telegram 提供确认/取消按钮，微信使用 `/schedule confirm <令牌>`；既有 Thread 不会为注入工具而自动切换，仍可使用 `/schedule <自然语言>`、`/schedule add interval <N>m|h <时区> <文本>`、`/schedule add once <日期> <时间> <时区> <文本>` 等命令；支持每 N 分钟、每天、工作日、每周、每月与一次性，完整语法与安全边界见 [`docs/scheduled-tasks-development.md`](docs/scheduled-tasks-development.md)
+- 计划任务：在 `codexc config` 中选择“自动化 → 计划任务”启用后使用 `/schedule` 查看；启用后新建的前台 Thread 可由 Agent 调用 `schedule_task` 工具创建确认预览，飞书和 Telegram 提供确认/取消按钮，微信使用 `/schedule confirm <令牌>`；既有 Thread 不会为注入工具而自动切换，仍可使用 `/schedule <自然语言>`、`/schedule add interval <N>m|h <时区> <文本>`、`/schedule add once <日期> <时间> <时区> <文本>` 等命令；支持每 N 分钟、每天、工作日、每周、每月与一次性，完整语法与安全边界见 [`docs/scheduled-tasks-development.md`](docs/scheduled-tasks-development.md)
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`

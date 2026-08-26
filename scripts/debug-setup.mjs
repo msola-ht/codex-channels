@@ -41,15 +41,37 @@ export async function runDebugSetup({
   if (selected !== "enabled" && selected !== "disabled") {
     throw new Error(`未知调试模式：${String(selected)}`);
   }
+  const level = selected === "enabled" ? "debug" : "info";
+  const result = writeLoggingLevel({
+    environment,
+    output,
+    writeConfig,
+    level,
+    message: `全局调试模式已${selected === "enabled" ? "开启" : "关闭"}`,
+  });
+  return { enabled: selected === "enabled", configPath: result.configPath };
+}
+
+export function writeLoggingLevel({
+  environment = process.env,
+  output = process.stdout,
+  writeConfig = writeGatewayConfig,
+  level,
+  message = `日志等级已设为 ${level}`,
+}) {
+  if (!["fatal", "error", "warn", "info", "debug", "trace"].includes(level)) {
+    throw new Error(`未知日志等级：${String(level)}`);
+  }
+  const { configPath } = requireUserConfig(environment);
+  const document = readGatewayConfig(configPath);
   document.logging = {
     ...table(document.logging),
-    level: selected === "enabled" ? "debug" : "info",
+    level,
   };
   writeConfig(configPath, document);
-  const enabled = selected === "enabled";
-  output.write(`全局调试模式已${enabled ? "开启" : "关闭"}：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
-  return { enabled, configPath };
+  output.write(`${message}：${configPath}\n`);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
+  return { level, configPath };
 }
 
 function loggingLevel(document) {

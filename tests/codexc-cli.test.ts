@@ -24,6 +24,7 @@ import {
   opencodeGoProviderDefinition,
   type ModelProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
+import { writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
 import {
   acknowledgeConfigEvents,
   configEventQueuePath,
@@ -181,10 +182,13 @@ describe("codexc CLI", () => {
 
     const configHelp = spawnSync(process.execPath, [cli, "config", "--help"], { encoding: "utf8" });
     expect(configHelp.stdout).toContain("codexc config [--json]");
+    expect(configHelp.stdout).toContain("脱敏配置总览");
+    expect(configHelp.stdout).toContain("网络代理");
+    expect(configHelp.stdout).toContain("Thread 分区管理员");
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
     expect(setupHelp.stdout).toContain("登录并恢复官方 / 默认模型与思考等级");
-    expect(setupHelp.stdout).toContain("模型设置 / 第三方 API");
+    expect(setupHelp.stdout).toContain("受管 Provider 模型设置 / 直接 API Provider（预留）");
     const workHelp = spawnSync(process.execPath, [cli, "work", "--help"], { encoding: "utf8" });
     expect(workHelp.stdout).toContain("权限");
     const workAddHelp = spawnSync(process.execPath, [cli, "work", "add", "--help"], {
@@ -214,7 +218,7 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
     expect(remoteHelp.stdout).toContain("opencode-go-<账户>");
-    expect(remoteHelp.stdout).toContain("sf-custom-<Provider ID>");
+    expect(remoteHelp.stdout).toContain("custom-<Provider ID>");
     const channelHelp = spawnSync(process.execPath, [cli, "channel", "--help"], {
       encoding: "utf8",
     });
@@ -1331,6 +1335,83 @@ describe("codexc CLI", () => {
       "--workspace",
       "external",
     ]);
+  }, 30_000);
+
+  it("maps a public custom Profile to its isolated App Server and internal Codex Profile", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-remote-custom-profile-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    const fakeCodex = join(root, "fake-codex.mjs");
+    writeFileSync(
+      fakeCodex,
+      "#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(process.argv.slice(2)));\n",
+    );
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    writeFileSync(join(codexHome, "config.toml"), 'model_provider = "openai"\n', { mode: 0o600 });
+    writeCustomPrimaryProviderSwitchingProfile({
+      provider: "codeproxy-dev",
+      model: "gpt-5.6-sol",
+      name: "CodeProxy Dev",
+      baseUrl: "https://proxy.example.test/v1",
+      apiKey: "sk-test-secret",
+    }, environment);
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    const primarySocketPath = join(home, "runtime", "codex-app-server.sock");
+    const customSocketPath = join(home, "runtime", "codex-app-server-codeproxy-dev.sock");
+    const supervisor = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: ["codeproxy-dev"],
+      socketPaths: [primarySocketPath, customSocketPath],
+    }, { ensureProvider: async () => undefined });
+    await supervisor.start();
+    try {
+      const capturePath = join(root, "capture.json");
+      await execFileAsync(
+        process.execPath,
+        [cli, "remote", "--profile", "custom-codeproxy-dev", "resume"],
+        {
+          cwd: workspace,
+          env: { ...environment, CODEX_TEST_CAPTURE: capturePath },
+          encoding: "utf8",
+        },
+      );
+
+      expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
+        "--remote",
+        `unix://${customSocketPath}`,
+        "-C",
+        realpathSync(workspace),
+        "--profile",
+        "sf-custom-codeproxy-dev",
+        "resume",
+      ]);
+    } finally {
+      await supervisor.close();
+    }
+
+    const internal = spawnSync(
+      process.execPath,
+      [cli, "remote", "--profile", "sf-custom-codeproxy-dev"],
+      { cwd: workspace, env: environment, encoding: "utf8" },
+    );
+    expect(internal.status).toBe(1);
+    expect(internal.stderr).toContain(
+      "Codex Profile sf-custom-codeproxy-dev 是内部名称；请使用 --profile custom-codeproxy-dev",
+    );
   }, 30_000);
 
   it("starts the App Server with effective proxy settings and the official path allowlist", () => {
@@ -3063,7 +3144,7 @@ describe("codexc CLI", () => {
   it("describes Setup by its model, provider, channel, and skill responsibilities", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 
-    expect(output).toContain("配置模型、提供商、通讯渠道与技能");
+    expect(output).toContain("配置模型、提供商、通讯渠道与项目技能");
   });
 
   it("explains the Setup categories in scoped help", () => {
@@ -3071,7 +3152,9 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
 
-    expect(output).toContain("模型与提供商、通讯渠道和技能");
+    expect(output).toContain("脱敏配置总览");
+    expect(output).toContain("模型与提供商、通讯渠道和项目技能");
+    expect(output).toContain("直接 API Provider（预留）");
   });
 
   it("rejects invalid service log options before reading user configuration", () => {

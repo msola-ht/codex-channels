@@ -44,6 +44,7 @@ export async function runApiProviderSetup({
       prompts,
       output,
       writeConfig,
+      environment,
     });
   }
   if (action !== "upsert") throw new Error(`未知第三方 API 操作：${String(action)}`);
@@ -104,7 +105,7 @@ export async function runApiProviderSetup({
   }
   output.write(`第三方 API 提供商已保存：${nextProvider.name} (${providerId})\n`);
   output.write(`配置文件：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { action: existing ? "updated" : "created", provider: nextProvider, configPath };
 }
 
@@ -141,7 +142,7 @@ async function removeProvider(options) {
     throw error;
   }
   options.output.write(`已删除第三方 API 提供商：${provider.name} (${provider.id})\n`);
-  writeGatewayConfigActivationNotice(options.output);
+  writeGatewayConfigActivationNotice(options.output, options.environment, "restart");
   return { action: "removed", provider: provider.id, configPath: options.configPath };
 }
 

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runSetup } from "../scripts/setup.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { writeSetupConfigurationSummary } from "../scripts/setup-summary.mjs";
 
 describe("Codex Connect setup", () => {
   it("selects Telegram under the communication channels category", async () => {
@@ -37,16 +39,20 @@ describe("Codex Connect setup", () => {
       message: "选择设置类别",
       showInstructions: false,
       options: [{
+        value: "summary",
+        label: "配置总览",
+        hint: "脱敏显示 Provider、模型、通讯渠道与用户技能状态",
+      }, {
         value: "models",
         label: "模型与提供商",
-          hint: "设置 Codex 官方默认值、第三方模型与 API",
+        hint: "管理 OpenAI、第三方 Provider 与模型默认值",
       }, {
         value: "channels",
         label: "通讯渠道",
         hint: "配置外部消息入口",
       }, {
         value: "skills",
-        label: "技能",
+        label: "项目技能",
         hint: "安装或卸载项目技能到用户目录",
       }, {
         value: "cancel",
@@ -77,6 +83,28 @@ describe("Codex Connect setup", () => {
     });
     expect(telegramSetup).toHaveBeenCalledWith({ input, output });
     expect(feishuSetup).not.toHaveBeenCalled();
+  });
+
+  it("shows the redacted Setup summary and keeps the main menu open", async () => {
+    const output = {};
+    const setupSummary = vi.fn();
+    const select = vi.fn()
+      .mockResolvedValueOnce("summary")
+      .mockResolvedValueOnce("cancel");
+
+    await expect(runSetup({
+      output,
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+      setupSummary,
+    })).resolves.toBeUndefined();
+
+    expect(setupSummary).toHaveBeenCalledWith({ output });
+    expect(select).toHaveBeenCalledTimes(2);
   });
 
   it("selects Feishu under the communication channels category", async () => {
@@ -187,19 +215,19 @@ describe("Codex Connect setup", () => {
     const categoryOptions = prompts.select.mock.calls[1]?.[0]?.options ?? [];
     expect(categoryOptions).toContainEqual({
       value: "official",
-      label: "官方",
+      label: "OpenAI 官方",
       hint: "OpenAI 官方登录与默认模型",
     });
     expect(categoryOptions).toContainEqual({
       value: "third_party",
-      label: "第三方",
-      hint: "自定义第三方、DeepSeek 官方、OpenCode Go 官方等",
+      label: "第三方 Provider",
+      hint: "自定义 Responses、DeepSeek 官方、OpenCode Go 官方等",
     });
     const officialOptions = prompts.select.mock.calls[2]?.[0]?.options ?? [];
     expect(officialOptions).toContainEqual({
       value: "official_login",
       label: "登录并恢复官方",
-      hint: "运行 codex login --device-auth，输入终端显示的验证码并停用自定义主 Provider",
+      hint: "运行 codex login --device-auth，并停用自定义固定主 Provider",
     });
     expect(officialOptions).toContainEqual({
       value: "codex",
@@ -235,6 +263,11 @@ describe("Codex Connect setup", () => {
       output,
       prompts,
       allowBack: true,
+    });
+    expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
+      value: "custom_primary",
+      label: "自定义 Responses Provider",
+      hint: "管理固定或切换模式的 OpenAI Responses 兼容 Provider",
     });
   });
 
@@ -296,8 +329,8 @@ describe("Codex Connect setup", () => {
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "provider_default",
-      label: "第三方模型设置",
-      hint: "按 Provider 和模型设置默认值、思考等级与自动压缩",
+      label: "受管 Provider 模型设置",
+      hint: "设置 DeepSeek 与 OpenCode Go 的模型、思考等级和自动压缩",
     });
   });
 
@@ -324,6 +357,61 @@ describe("Codex Connect setup", () => {
 
     expect(apiProviderSetup).toHaveBeenCalledWith({ input: {}, output: {}, prompts });
     expect(deepseekSetup).not.toHaveBeenCalled();
+    expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
+      value: "api_provider",
+      label: "直接 API Provider（预留）",
+      hint: "只保存未来直接 API 注册；不进入 App Server 或 /model",
+    });
+  });
+
+  it("renders Setup provider and channel status without exposing credentials", async () => {
+    const output: string[] = [];
+    const summary = await writeSetupConfigurationSummary({
+      environment: {},
+      output: { write: (value: string) => output.push(value) },
+      loadGatewayDocument: () => ({
+        configPath: "/private/config.toml",
+        document: {
+          telegram: {
+            bot_token: "telegram-secret",
+            allowed_user_ids: [123456],
+          },
+        },
+      }),
+      loadManagedProviders: () => [{
+        provider: "deepseek",
+        displayName: "DeepSeek",
+        model: "deepseek-v4-flash-vision-exp",
+        reasoningEffort: "high",
+        mode: "switching",
+        apiKey: "managed-secret",
+      }],
+      loadCustomPrimary: () => undefined,
+      loadCustomSwitching: () => [{
+        id: "codeproxy",
+        name: "Code Proxy\u001b\nInjected",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "medium",
+        baseUrl: "https://secret.example/v1",
+        apiKey: "custom-secret",
+      }],
+      loadInstalledSkills: () => ["channel-image"],
+      loadCodexDefaults: async () => ({ model: "gpt-5.6-sol", effort: "medium" }),
+    });
+
+    const rendered = output.join("");
+    expect(summary.primary).toBe("OpenAI 官方");
+    expect(rendered).toContain("Codex 全局默认值：gpt-5.6-sol · medium");
+    expect(rendered).toContain("可切换 Provider：DeepSeek、Code Proxy Injected");
+    expect(rendered).toContain("DeepSeek · deepseek-v4-flash-vision-exp · high");
+    expect(rendered).toContain("通讯渠道：Telegram（已启用）");
+    expect(rendered).toContain("用户技能目录：1 个技能");
+    expect(rendered).not.toContain("telegram-secret");
+    expect(rendered).not.toContain("123456");
+    expect(rendered).not.toContain("managed-secret");
+    expect(rendered).not.toContain("custom-secret");
+    expect(rendered).not.toContain("secret.example");
+    expect(rendered).not.toContain("\u001b");
   });
 
   it("returns from the channel menu and can cancel at the category menu", async () => {
@@ -353,13 +441,15 @@ describe("Codex Connect setup", () => {
     expect(telegramSetup).not.toHaveBeenCalled();
   });
 
-  it("returns from the model menu to the category menu", async () => {
+  it("returns from a provider module to its submenu before the main Setup menu", async () => {
     const cancel = vi.fn();
     const deepseekSetup = vi.fn(async () => ({ action: "back" }));
     const select = vi.fn()
       .mockResolvedValueOnce("models")
       .mockResolvedValueOnce("third_party")
       .mockResolvedValueOnce("deepseek")
+      .mockResolvedValueOnce("back")
+      .mockResolvedValueOnce("back")
       .mockResolvedValueOnce("cancel");
 
     const result = await runSetup({
@@ -379,7 +469,7 @@ describe("Codex Connect setup", () => {
 
     expect(result).toBeUndefined();
     expect(deepseekSetup).toHaveBeenCalledWith(expect.objectContaining({ allowBack: true }));
-    expect(select).toHaveBeenCalledTimes(4);
+    expect(select).toHaveBeenCalledTimes(6);
     expect(cancel).toHaveBeenCalledWith("Setup 已取消");
   });
 

@@ -7,7 +7,7 @@ API Key、上游地址、Thread 路由和价格来源。
 
 ## 配置与使用
 
-运行 `codexc setup`，依次选择“模型与提供商 → 第三方 → OpenCode Go 官方”，或直接使用账户命令：
+运行 `codexc setup`，依次选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方”，或直接使用账户命令：
 
 ```bash
 codexc opencode-go account add <id>      # 新增账户（交互输入 Key）
@@ -40,8 +40,8 @@ codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Serve
 codexc service restart all
 ```
 
-初次配置默认使用 Flash Vision Exp。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 → OpenCode Go 官方 →
-修改模型设置（思考等级、自动压缩）”，或走原有的“模型与提供商 → 第三方 → 第三方模型设置 → OpenCode Go”，
+初次配置默认使用 Flash Vision Exp。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
+修改模型设置（思考等级、自动压缩）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
 再按模型设置默认思考等级和自动压缩百分比；每个模型按自己的上下文窗口计算
 阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，

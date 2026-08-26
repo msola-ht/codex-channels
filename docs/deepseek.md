@@ -9,7 +9,7 @@ Gateway 运行配置。
 
 ## 配置模式
 
-运行 `codexc setup`，选择“模型与提供商 → 第三方 → DeepSeek 官方”并填写 DeepSeek API Key。Setup 提供两种安装模式：
+运行 `codexc setup`，选择“模型与提供商 → 第三方 Provider → DeepSeek 官方”并填写 DeepSeek API Key。Setup 提供两种安装模式：
 
 ### OpenAI + DeepSeek 切换模式
 
@@ -34,8 +34,8 @@ DeepSeek Provider。
 ### 自动压缩阈值
 
 安装流程在填写 API Key 后会为初始 Flash Vision Exp 模型询问自动压缩阈值。后续有两种入口：`codexc setup`
-中选择“模型与提供商 → 第三方 → DeepSeek 官方 → 修改模型设置（思考等级、自动压缩）”，或走原有的
-“模型与提供商 → 第三方 → 第三方模型设置 → DeepSeek”，按 Provider 和模型分别选择默认思考等级与自动压缩百分比
+中选择“模型与提供商 → 第三方 Provider → DeepSeek 官方 → 修改模型设置（思考等级、自动压缩）”，或选择
+“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → DeepSeek”，按 Provider 和模型分别选择默认思考等级与自动压缩百分比
 （10–90%）；该百分比按模型自己的 `context_window` 换算为模型目录中的
 `auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖其他模型；切换模式 Profile 顶层只镜像
 所选模型的默认思考等级（校验必须与模型目录一致），上下文与自动压缩仍只由模型目录声明。
@@ -73,7 +73,7 @@ OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或�
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 和
 `deepseek-v4-pro` 均支持 Codex；三者都可通过
-`/model` 选择。初次配置默认使用 Flash Vision Exp；之后可在 `codexc setup` 的“模型与提供商 → 第三方 → 第三方模型设置”
+`/model` 选择。初次配置默认使用 Flash Vision Exp；之后可在 `codexc setup` 的“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置”
 中按模型设置 DeepSeek 新会话的默认模型、思考等级和自动压缩阈值。历史 Thread 仍保留自身模型。
 Setup 每次安装时下载最新官方目录；项目只开放人工审查并写入编译期定义的模型，不自动采用未知模型。
 

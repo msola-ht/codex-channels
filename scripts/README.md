@@ -103,10 +103,13 @@
   Worker 共用的上报载荷校验及类型声明。
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema，子代理标注包含可空
   `parent_turn_id`；历史 Cloudflare D1 migration 保留部署参考，不作为生产中心运行时依赖。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单，并把“模型与提供商”“通讯渠道”和
-  “技能”流程委派给具体适配器；模型与提供商下分官方与第三方两级：官方含登录与默认模型，
-  第三方含自定义第三方、DeepSeek 官方、OpenCode Go 官方、第三方模型设置与第三方 API。
-- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 → 自定义第三方”；
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“模型与提供商”
+  “通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方与第三方 Provider
+  两级，子模块返回时停留在所属层级。
+- `setup-summary.mjs`：通过既有 App Server `config/read` 读取 Codex 全局默认模型与思考等级，并汇总
+  主 Provider、可切换 Provider、第三方模型默认值、已启用渠道和用户技能数量；不显示 API Key、
+  Token、应用凭据、允许名单、代理值或 Provider URL。
+- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
   新增时从 URL 主机名派生 Provider ID 或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
   必须属于 App Server 返回的 Codex 官方目录；不调用第三方 `/models`，不生成 `models.json` 或
@@ -139,7 +142,7 @@
   避免两份文案漂移。
 - `agents.mjs`：配置、停用或查看共享第三方子代理；`status --json` 返回稳定配置状态，Provider
   与模型未配置时显式使用 `null`，不要求 Gateway 已初始化。
-- `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → 官方 → 登录并恢复官方”；运行
+- `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
   `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
   之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`，从第三方
@@ -153,17 +156,22 @@
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
   受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
-- `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“技能”类别；列出项目 `.codex/skills` 下带
+- `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
   hermes 运行时的 `.skill-lock.json`。
-- `config.mjs`：`codexc config` 的顶层交互编排，覆盖配置文件中可安全编辑的参数：
-  显示设置（操作详情、计划更新、全局价格显示方式）、系统设置（调试模式、审批超时、
-  Sandbox、默认工作区与渠道新会话模型覆盖）、WebUI 设置（监听地址、端口、访问令牌）、指标设置
+- `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
+  配置文件中可安全编辑的参数：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
+  （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、自动化（计划任务与
+  Thread 分区管理员）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标设置
   （本地保留策略、本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用接入）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
   配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
+- `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
+  和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
+- `config-advanced-menu.mjs`：管理计划任务、Thread 分区管理员、显式 HTTP(S) 代理、日志等级与
+  开发中的 Plugin API；管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
   只修改对应展示配置段。
 - `config-system-menu.mjs`：独立管理调试入口、审批超时、全局 Sandbox、默认 Workspace 和
@@ -172,8 +180,8 @@
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
   保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
-- `debug-setup.mjs`：在严格配置中原子切换 `logging.level` 的 `debug` / `info`，控制全局脱敏
-  调试日志和渠道技术字段，不改写显示设置或凭据。
+- `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
+  Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
   提供商，非敏感元数据写入主配置，API Key 按提供商隔离；当前没有运行时调用方，保留给后续
   明确设计的直接 API 功能。
@@ -256,9 +264,10 @@
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
-  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
+  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，统一拒绝把受管 Provider 的内部
+  `sf-*` 名称或保留的 `sf-custom-*` 名称误作公开参数，并尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  Provider `--profile`（当前公开为自定义第三方的 `sf-custom-<Provider ID>`、`deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
+  Provider `--profile`（当前公开为自定义第三方的 `custom-<Provider ID>`、`deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
   磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
@@ -364,9 +373,9 @@
   服务入口在每次启动时解析。
 - `service-install-context.mjs`：systemd 与 launchd 安装器共用的配置、默认 Workspace、主 Socket、
   Codex/Node 可执行文件及服务 PATH 解析；运行目录统一创建为 `0700`，平台模板和转义仍各自维护。
-- `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，明确运行中自动重新读取并在必要时
-  自动重启，未运行时由下次启动加载，并统一使用 CLI 提示状态渲染；WebUI、指标中心和 App Server
-  的专属重启要求继续单独提示。
+- `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
+  Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
+  WebUI 与指标中心的专属重启要求继续单独提示。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`center`、`all` 目标，
   WebUI 与指标中心独立不并入 `all`，

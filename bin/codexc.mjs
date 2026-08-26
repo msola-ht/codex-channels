@@ -109,7 +109,7 @@ const helpText = {
 
 初始化与配置：
   init                         初始化用户目录和配置
-  setup                        配置模型、提供商、通讯渠道与技能（交互菜单）
+  setup                        配置模型、提供商、通讯渠道与项目技能（交互菜单）
   config                       打开日常设置菜单（交互菜单）
   doctor                       诊断安装、配置和服务
 
@@ -143,13 +143,13 @@ const helpText = {
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
   setup: `用法：codexc setup
 
-打开模型与提供商、通讯渠道和技能设置菜单。
+打开脱敏配置总览，以及模型与提供商、通讯渠道和项目技能设置菜单。
 
 常用入口：
-  codexc setup → 模型与提供商 → 官方 → 登录并恢复官方 / 默认模型与思考等级
-  codexc setup → 模型与提供商 → 第三方 → 自定义第三方 / DeepSeek 官方 / OpenCode Go 官方 / 第三方模型设置 / 第三方 API
+  codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方 / 默认模型与思考等级
+  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 直接 API Provider（预留）
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
-  codexc setup → 技能（安装或卸载项目技能）`,
+  codexc setup → 项目技能（安装或卸载项目技能）`,
   start: `用法：codexc start
 
 在前台启动 Codex App Server 与 Gateway。`,
@@ -157,7 +157,7 @@ const helpText = {
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
 切换模式可用 --profile deepseek、opencode-go、opencode-go-<账户> 或
-sf-custom-<Provider ID> 连接对应的隔离 App Server。`,
+custom-<Provider ID> 连接对应的隔离 App Server。`,
   service: `用法：codexc service <命令>
 
   install                      生成全部后台服务定义，并启动 App Server 与 Gateway
@@ -181,9 +181,9 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "service.logs": `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config [--json]
 
-打开日常 Gateway 配置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
-（调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、WebUI 设置、
-指标设置（本地保留、设备接入中心与全局视图）、Telegram 消息格式与配置路径查看。
+打开日常 Gateway 配置菜单：脱敏配置总览、显示设置、系统设置、自动化（计划任务与
+Thread 分区管理员）、网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
+指标设置、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
   doctor: `用法：codexc doctor [--json]
 

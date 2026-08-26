@@ -46,8 +46,8 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、
 `error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果；
 消息正文、请求参数、上游响应、凭据和审批内容
-仍不得进入日志。可通过 Setup 的“系统设置 → 调试模式”在 `debug` 与 `info` 间切换，变化需要
-重启 Gateway，不需要重启 App Server。
+仍不得进入日志。可通过 `codexc config` 的“高级设置 → 日志等级”选择完整等级，变化需要重启
+Gateway，不需要重启 App Server。
 
 `experimental.plugin_api` 控制 Codex 0.148.0 开发中 Plugin 调试入口，默认关闭；未显式开启时
 `/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
@@ -84,6 +84,12 @@ Workspace 上配置。
 API Key 由 Setup 按提供商保存到独立私有凭据文件。它们不属于 Codex `modelProvider`，不接入
 App Server 或 `/model`，当前也没有运行时调用方；保留该注册表只为后续明确设计的直接 API 功能。
 提供商变化需要重启 Gateway，不需要重启 App Server；配置文件不保存 API Key。
+
+`codexc config` 只编辑以上严格 Schema 已支持且适合日常操作的 Gateway 设置，并提供不显示凭据、
+令牌或代理值的配置总览。需要重建渠道连接的变化在后台 Gateway 运行时自动重启，未运行时在下次
+启动生效，前台进程需重新启动；
+显式网络代理会改变 App Server 服务环境，因此保存后必须运行 `codexc service install` 重新生成
+服务定义。Codex 官方与第三方 Provider 配置仍由 `codexc setup` 管理。
 
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须

@@ -66,7 +66,7 @@ export async function runTelegramMessageFormat({
   document.telegram = telegram;
   writeConfig(configPath, document);
   output.write(`Telegram 消息格式已设为 ${selected}：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { messageFormat: selected, configPath };
 }
 
@@ -94,7 +94,7 @@ async function runOperationUpdatesToggle({ environment, output, prompts, writeCo
   document.display = display;
   writeConfig(configPath, document);
   output.write(`操作详情显示已设为${selected}：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { operationUpdates: selected, configPath };
 }
 
@@ -121,7 +121,7 @@ async function runPlanUpdatesToggle({ environment, output, prompts, writeConfig 
   document.display = display;
   writeConfig(configPath, document);
   output.write(`计划更新显示已${selected === "enabled" ? "开启" : "关闭"}：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { planUpdatesEnabled: selected === "enabled", configPath };
 }
 
@@ -148,7 +148,7 @@ async function runReasoningToggle({ environment, output, prompts, writeConfig })
   document.display = display;
   writeConfig(configPath, document);
   output.write(`思考状态显示已${selected === "enabled" ? "开启" : "关闭"}：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { reasoningEnabled: selected === "enabled", configPath };
 }
 
@@ -175,7 +175,7 @@ async function runPriceCurrency({ environment, output, prompts, writeConfig }) {
   document.display = display;
   writeConfig(configPath, document);
   output.write(`全局价格显示方式已设为 ${mode}：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { priceCurrency: mode, configPath };
 }
 

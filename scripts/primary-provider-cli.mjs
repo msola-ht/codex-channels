@@ -520,7 +520,7 @@ export async function runCustomPrimaryProviderMenu({
         { value: "official", label: "恢复官方主 Provider", hint: "固定候选移入备份；切换 Provider 保持启用" },
         { value: "remove", label: "删除", hint: "删除 Provider；删除当前固定主 Provider 时恢复官方" },
         ...(allowBack
-          ? [{ value: "back", label: "返回", hint: "返回模型与提供商设置" }]
+          ? [{ value: "back", label: "返回", hint: "返回第三方 Provider 设置" }]
           : []),
       ],
     });

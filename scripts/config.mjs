@@ -18,6 +18,12 @@ import { runSystemSettings } from "./config-system-menu.mjs";
 import { runWebuiSettings } from "./config-webui-menu.mjs";
 import { runDebugSetup } from "./debug-setup.mjs";
 import { runMetricsSettings } from "./metrics-config-menu.mjs";
+import { writeGatewayConfigSummary } from "./config-summary.mjs";
+import {
+  runAdvancedSettings,
+  runAutomationSettings,
+  runNetworkSettings,
+} from "./config-advanced-menu.mjs";
 
 export { runCenterSettings } from "./metrics-config-menu.mjs";
 
@@ -51,12 +57,16 @@ export async function runConfig({
       message: "选择配置项",
       showInstructions: false,
       options: [
+        { value: "summary", label: "配置总览", hint: "脱敏显示当前 Gateway 设置、来源与作用范围" },
         { value: "display", label: "显示设置", hint: "操作详情、计划更新、思考状态、参考价人民币换算" },
         {
           value: "system",
           label: "系统设置",
           hint: "调试模式、审批超时、Sandbox、默认工作区与渠道模型覆盖",
         },
+        { value: "automation", label: "自动化", hint: "计划任务与 Thread 分区管理员" },
+        { value: "network", label: "网络代理", hint: "显式 HTTP、HTTPS、通用代理与直连规则" },
+        { value: "advanced", label: "高级设置", hint: "日志等级与开发中功能" },
         { value: "webui", label: "WebUI 设置", hint: "监听地址、端口与访问令牌" },
         { value: "metrics", label: "指标设置", hint: "本地保留、中心接入与全局视图" },
         ...(telegramConfigured
@@ -72,6 +82,9 @@ export async function runConfig({
     }
     const common = { environment, output, prompts, writeConfig };
     switch (section) {
+      case "summary":
+        writeGatewayConfigSummary(output, document, configPath);
+        continue;
       case "display": {
         const result = await runDisplaySettings(common);
         if (isBackResult(result)) continue;
@@ -79,6 +92,21 @@ export async function runConfig({
       }
       case "system": {
         const result = await runSystemSettings({ ...common, input, debugSetup });
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      case "automation": {
+        const result = await runAutomationSettings(common);
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      case "network": {
+        const result = await runNetworkSettings(common);
+        if (isBackResult(result)) continue;
+        return result;
+      }
+      case "advanced": {
+        const result = await runAdvancedSettings(common);
         if (isBackResult(result)) continue;
         return result;
       }

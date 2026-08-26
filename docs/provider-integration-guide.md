@@ -44,7 +44,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 在 `runtime/model-provider-definitions.mjs` 新增冻结定义并加入
 `managedModelProviderDefinitions`：
 
-- `id`、`displayName`、`codexProfileName`、`profileFileName`、`catalogFileName`、
+- `id`、`displayName`、公开 `profileName`、内部 `codexProfileName`、`profileFileName`、`catalogFileName`、
   `catalogManifestFileName`、`managedMarkerFileName`、`backupDirectoryName`；
 - `baseUrl`、`wireApi`、`apiKeyEnvironmentKey`、`supportsWebsockets`；
 - `defaultModel`、`defaultReasoningEffort`、受控 `models` 列表。
@@ -53,7 +53,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
   静态或人工审查目录可把来源也设为 `none`；通用远程价格目录使用 `remote`，不得把任意 URL、
   脚本或动态插件放入定义。启用目录更新适配器时必须声明非空受控来源。
 
-注册后自动获得：watcher 目录路径、`codexc remote --profile <id>` 别名、
+注册后自动获得：watcher 目录路径、`codexc remote --profile <profileName>` 规范名称、
 `agents.external` 角色、文件迁移、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
 按计价适配器创建解析器并以精确 Provider ID 登记，按账户适配器创建账户窄适配器。未知能力和
@@ -232,8 +232,8 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 在固定模式把自定义 Thread 路由到主 App Server；切换模式保持官方 `openai` 主实例，并通过
 `~/.codex/sf-custom-<Provider ID>.config.toml` 启动独立自定义 App Server。每个 Profile 完整保存该
 Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"` 和服务层级，主
-`~/.codex/config.toml` 保持官方配置。`codexc remote --profile sf-custom-<Provider ID>`
-连接该隔离实例；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
+`~/.codex/config.toml` 保持官方配置。`codexc remote --profile custom-<Provider ID>`
+连接该隔离实例，并在内部映射到 `sf-custom-<Provider ID>` Codex Profile；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
 跨 Provider 选择沿用现有新 Thread 路由边界。锁定版 App Server 不接受 `--profile`，后台服务会先
 严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，
 不进入命令行。多个切换模式 Provider 通过私有显式注册表同时保留，并使用独立 Socket 与统计代理。
@@ -243,7 +243,7 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 切换模式可以与受管切换模式共存，但不能与任何受管固定模式同时启用。需要自定义目录、账户或共享
 子代理能力时，仍必须按本指南前述的编译期受管 Provider 流程接入。
 
-可以通过 `codexc setup` 的“模型与提供商 → 第三方 → 自定义第三方”新增或编辑固定、切换模式 Provider：填写上游
+可以通过 `codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”新增或编辑固定、切换模式 Provider：填写上游
 `base_url`，从 URL 主机名派生的 Provider ID 与推荐的 `OpenAI` 中选择，只以直接写入 API Key
 （`experimental_bearer_token`）认证，再选择固定/切换模式、Responses WebSocket，并手工输入上游
 模型 ID。该 ID 必须存在于 App Server 返回的 Codex 官方模型目录；Setup 不请求第三方 `/models`，
@@ -256,7 +256,7 @@ Codex 内置保留 ID。固定模式通过 Codex 的 `config/batchWrite` 原子�
 明确显示 Key 明文写入的 0600 配置位置。Key 输入不显示不回显；自定义固定模式不能保留其他自定义
 切换 Profile，从切换模式改为固定模式前必须先删除其他自定义切换 Provider；受管切换 Provider 可以
 共存，受管固定模式必须先恢复官方模式。写入后仍需运行
-`codexc service restart all` 生效。自定义第三方入口只接受上述直接 API Key 字段，不接受额外
+`codexc service restart all` 生效。自定义 Responses Provider 入口只接受上述直接 API Key 字段，不接受额外
 Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍是主配置候选，需先运行
 `codexc primary-provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
 同名主配置块和切换 Profile。

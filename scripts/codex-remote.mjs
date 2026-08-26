@@ -46,7 +46,7 @@ async function runRemoteCli() {
     process.argv.slice(2),
     {
       customSwitchingProfiles: customSwitchingProviders.map(
-        ({ profileName }) => profileName,
+        ({ profileName, codexProfileName }) => ({ profileName, codexProfileName }),
       ),
     },
   );
@@ -68,7 +68,7 @@ async function runRemoteCli() {
     ? {
         id: customSwitchingProvider.provider,
         profileName: customSwitchingProvider.profileName,
-        codexProfileName: customSwitchingProvider.profileName,
+        codexProfileName: customSwitchingProvider.codexProfileName,
         displayName: customSwitchingProvider.provider,
       }
     : [
