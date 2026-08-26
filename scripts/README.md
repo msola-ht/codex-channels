@@ -106,9 +106,10 @@
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“模型与提供商”
   “通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方与第三方 Provider
   两级，子模块返回时停留在所属层级。
-- `setup-summary.mjs`：通过既有 App Server `config/read` 读取 Codex 全局默认模型与思考等级，并汇总
-  主 Provider、可切换 Provider、第三方模型默认值、共享第三方子代理、已启用渠道和用户技能数量；不显示 API Key、
-  Token、应用凭据、允许名单、代理值或 Provider URL。
+- `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
+  不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
+  共享第三方子代理、直接 API Provider 数量、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
+  允许名单、代理值或 Provider URL。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
   新增时从 URL 主机名派生 Provider ID 或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
@@ -126,8 +127,12 @@
   保留原 Key，Origin 变化时强制重新输入且写入前不复用旧 Key；新增拒绝覆盖 config 或私有备份中的已有 Provider ID。
   无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
   主 Provider 冲突的顶层 `openai_base_url`。
+- `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
+  Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受控模型目录和共享
+  第三方子代理的脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
+  Provider CLI 列表共同复用。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
-  list / add / switch / remove 子命令；`list --json` 返回不含凭据的稳定主实例与候选摘要；list 与
+  list / add / switch / remove 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；list 与
   switch / remove 复用 Codex 用户配置事务读取和
   原子写入，add 复用自定义 Responses Provider Setup 的交互流程，Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
@@ -172,21 +177,27 @@
   配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
+- `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
+  设置脱敏读取与明确修改接口；只接受受控的显示、系统、自动化、网络、高级和 Telegram 格式输入，
+  返回稳定字段错误与 `restart-gateway` / `reinstall-services` 生效动作，网络读取只显示是否已配置。
 - `config-advanced-menu.mjs`：管理计划任务、Thread 分区管理员、显式 HTTP(S) 代理、日志等级与
-  开发中的 Plugin API；管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
+  开发中的 Plugin API；复用 Config 管理接口，管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
-  只修改对应展示配置段。
+  CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理调试入口、审批超时、全局 Sandbox、默认 Workspace 和
-  Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`。
+  Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`，两者复用同一 Config 管理接口。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
   保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
   Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
-- `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
-  提供商；Setup 通过独立的新增、编辑、删除选择管理，非敏感元数据写入主配置，API Key 按提供商隔离；当前没有运行时调用方，保留给后续
-  明确设计的直接 API 功能。
+- `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API
+  Provider 脱敏列表、输入校验、增改和删除事务；返回值只包含 `hasApiKey`，不返回凭据，供 Setup
+  与后续受保护的管理界面复用。
+- `api-provider-setup.mjs` / `api-provider-setup.d.mts`：编排多个 Responses 兼容直接 API Provider
+  的新增、编辑、删除 prompts，并调用共享管理用例；当前没有运行时调用方，保留给后续明确设计的
+  直接 API 功能。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与全部受控模型后写入

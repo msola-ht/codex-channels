@@ -1,13 +1,12 @@
-import {
-  readGatewayConfig,
-  writeGatewayConfig,
-} from "../runtime/gateway-config.mjs";
-import { resolveHttpProxyUrl } from "../runtime/network-proxy.mjs";
+import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   writeGatewayConfigActivationNotice,
 } from "./config-activation-notice.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
-import { writeLoggingLevel } from "./debug-setup.mjs";
+import {
+  loadGatewaySettings,
+  updateGatewaySetting,
+  validateNetworkProxyValue,
+} from "./config-management.mjs";
 
 const proxyFields = [
   ["http_proxy", "HTTP 代理"],
@@ -39,9 +38,7 @@ export async function runNetworkSettings({
   prompts,
   writeConfig = writeGatewayConfig,
 }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const network = { ...table(document.network) };
+  const settings = loadGatewaySettings(environment);
   const field = await prompts.select({
     message: "选择网络代理设置",
     showInstructions: false,
@@ -49,7 +46,7 @@ export async function runNetworkSettings({
       ...proxyFields.map(([value, label]) => ({
         value,
         label,
-        hint: stringValue(network[value]) ? "已显式配置（内容不显示）" : "未配置",
+        hint: settings.network[value].configured ? "已显式配置（内容不显示）" : "未配置",
       })),
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
@@ -58,7 +55,7 @@ export async function runNetworkSettings({
   if (!proxyFields.some(([value]) => value === field)) {
     throw new Error(`未知网络代理设置：${String(field)}`);
   }
-  const configured = Boolean(stringValue(network[field]));
+  const configured = settings.network[field].configured;
   const action = await prompts.select({
     message: proxyFields.find(([value]) => value === field)?.[1] ?? String(field),
     showInstructions: false,
@@ -69,34 +66,30 @@ export async function runNetworkSettings({
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  if (action === "clear") {
-    delete network[field];
-  } else if (action === "set") {
-    const value = field === "no_proxy"
+  let value;
+  if (action === "set") {
+    value = field === "no_proxy"
       ? await prompts.text({
           message: "NO_PROXY（逗号分隔主机；留空取消）",
-          validate: validateNoProxy,
+          validate: (candidate) => validateNetworkProxyValue(field, candidate),
         })
       : await prompts.password({
           message: "代理 URL（http:// 或 https://；留空取消）",
-          validate: validateProxyUrl,
+          validate: (candidate) => validateNetworkProxyValue(field, candidate),
         });
     if (prompts.isCancel(value) || stringValue(value) === "") return { action: "back" };
-    const normalized = stringValue(value);
-    const validation = field === "no_proxy"
-      ? validateNoProxy(normalized)
-      : validateProxyUrl(normalized);
-    if (validation) throw new Error(validation);
-    network[field] = normalized;
-  } else {
+  } else if (action !== "clear") {
     throw new Error(`未知网络代理操作：${String(action)}`);
   }
-  if (Object.keys(network).length > 0) document.network = network;
-  else delete document.network;
-  writeConfig(configPath, document);
-  output.write(`${proxyFields.find(([value]) => value === field)?.[1]}已${action === "clear" ? "清除" : "更新"}：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "network.proxy",
+    field,
+    action,
+    ...(action === "set" ? { value: stringValue(value) } : {}),
+  }, { environment, writeConfig });
+  output.write(`${proxyFields.find(([value]) => value === field)?.[1]}已${action === "clear" ? "清除" : "更新"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "reinstall");
-  return { field, configured: action !== "clear", configPath };
+  return { field, configured: action !== "clear", configPath: result.configPath };
 }
 
 export async function runAdvancedSettings(options) {
@@ -117,13 +110,11 @@ export async function runAdvancedSettings(options) {
 }
 
 async function runScheduledTasks({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const enabled = table(document.scheduled_tasks).enabled === true;
+  const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "Gateway 计划任务",
     showInstructions: false,
-    initialValue: enabled ? "enabled" : "disabled",
+    initialValue: settings.automation.scheduledTasksEnabled ? "enabled" : "disabled",
     options: [
       { value: "enabled", label: "开启", hint: "允许确认后的任务在后台无人值守执行" },
       { value: "disabled", label: "关闭", hint: "停止领取任务，不删除已有任务数据库" },
@@ -134,51 +125,53 @@ async function runScheduledTasks({ environment, output, prompts, writeConfig = w
   if (selected !== "enabled" && selected !== "disabled") {
     throw new Error(`未知计划任务设置：${String(selected)}`);
   }
-  document.scheduled_tasks = { ...table(document.scheduled_tasks), enabled: selected === "enabled" };
-  writeConfig(configPath, document);
-  output.write(`Gateway 计划任务已${selected === "enabled" ? "开启" : "关闭"}：${configPath}\n`);
+  const enabled = selected === "enabled";
+  const result = updateGatewaySetting({
+    kind: "automation.scheduled-tasks",
+    value: enabled,
+  }, { environment, writeConfig });
+  output.write(`Gateway 计划任务已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { scheduledTasksEnabled: selected === "enabled", configPath };
+  return { scheduledTasksEnabled: enabled, configPath: result.configPath };
 }
 
 async function runThreadSectionAdministrators({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const candidates = threadSectionAdministratorCandidates(document);
+  const settings = loadGatewaySettings(environment);
+  const candidates = settings.automation.threadSectionAdministratorCandidates;
   if (candidates.length === 0) {
     output.write("已启用渠道的允许名单为空；请先通过 codexc setup 配置渠道用户。\n");
     return { action: "back" };
   }
-  const current = Array.isArray(table(document.thread_sections).administrators)
-    ? table(document.thread_sections).administrators.filter((value) => typeof value === "string")
-    : [];
   const selected = await prompts.multiselect({
     message: "选择 Thread 分区管理员（可留空）",
     showInstructions: false,
     required: false,
-    initialValues: current,
-    options: candidates,
+    initialValues: settings.automation.threadSectionAdministrators,
+    options: candidates.map((candidate) => ({
+      value: candidate.value,
+      label: candidate.displayName,
+    })),
   });
   if (prompts.isCancel(selected)) return { action: "back" };
   if (!Array.isArray(selected) || selected.some((value) => !candidates.some((entry) => entry.value === value))) {
     throw new Error("Thread 分区管理员选择无效");
   }
-  document.thread_sections = { administrators: selected };
-  writeConfig(configPath, document);
-  output.write(`Thread 分区管理员已更新（${selected.length} 个）：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "automation.thread-section-administrators",
+    value: selected,
+  }, { environment, writeConfig });
+  output.write(`Thread 分区管理员已更新（${selected.length} 个）：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { threadSectionAdministrators: selected, configPath };
+  return { threadSectionAdministrators: selected, configPath: result.configPath };
 }
 
 async function runLoggingLevel({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const current = stringValue(table(document.logging).level) || "info";
+  const settings = loadGatewaySettings(environment);
   const levels = ["fatal", "error", "warn", "info", "debug", "trace"];
   const selected = await prompts.select({
     message: "日志等级",
     showInstructions: false,
-    initialValue: current,
+    initialValue: settings.advanced.loggingLevel,
     options: levels.map((value) => ({
       value,
       label: value,
@@ -187,18 +180,21 @@ async function runLoggingLevel({ environment, output, prompts, writeConfig = wri
   });
   if (prompts.isCancel(selected)) return { action: "back" };
   if (!levels.includes(selected)) throw new Error(`未知日志等级：${String(selected)}`);
-  const result = writeLoggingLevel({ environment, output, writeConfig, level: selected });
+  const result = updateGatewaySetting({
+    kind: "advanced.logging-level",
+    value: selected,
+  }, { environment, writeConfig });
+  output.write(`日志等级已设为 ${selected}：${result.configPath}\n`);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { logLevel: selected, configPath: result.configPath };
 }
 
 async function runPluginApi({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const enabled = table(document.experimental).plugin_api === true;
+  const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "开发中 Plugin API",
     showInstructions: false,
-    initialValue: enabled ? "enabled" : "disabled",
+    initialValue: settings.advanced.pluginApiEnabled ? "enabled" : "disabled",
     options: [
       { value: "enabled", label: "开启", hint: "仅支持 OpenAI Thread；开放已安装 Plugin 查询与 mention 调用" },
       { value: "disabled", label: "关闭", hint: "保持默认失败关闭" },
@@ -209,67 +205,16 @@ async function runPluginApi({ environment, output, prompts, writeConfig = writeG
   if (selected !== "enabled" && selected !== "disabled") {
     throw new Error(`未知 Plugin API 设置：${String(selected)}`);
   }
-  document.experimental = { ...table(document.experimental), plugin_api: selected === "enabled" };
-  writeConfig(configPath, document);
-  output.write(`Plugin API 已${selected === "enabled" ? "开启" : "关闭"}：${configPath}\n`);
+  const enabled = selected === "enabled";
+  const result = updateGatewaySetting({
+    kind: "advanced.plugin-api",
+    value: enabled,
+  }, { environment, writeConfig });
+  output.write(`Plugin API 已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { pluginApiEnabled: selected === "enabled", configPath };
-}
-
-function threadSectionAdministratorCandidates(document) {
-  return [
-    ...(stringValue(table(document.telegram).bot_token)
-      ? numberArray(table(document.telegram).allowed_user_ids).map((actorId) => ({
-          value: `telegram:${actorId}`,
-          label: `Telegram · ${actorId}`,
-        }))
-      : []),
-    ...(table(document.feishu).enabled === true
-      ? stringArray(table(document.feishu).allowed_open_ids).map((actorId) => ({
-          value: `feishu:${actorId}`,
-          label: `飞书 · ${actorId}`,
-        }))
-      : []),
-    ...(table(document.weixin).enabled === true
-      ? stringArray(table(document.weixin).allowed_user_ids).map((actorId) => ({
-          value: `weixin:${actorId}`,
-          label: `微信 · ${actorId}`,
-        }))
-      : []),
-  ];
-}
-
-function validateProxyUrl(value) {
-  const normalized = stringValue(value);
-  if (!normalized) return undefined;
-  if (normalized.length > 2_048 || /[\0\r\n]/u.test(normalized)) return "代理 URL 无效或过长";
-  try {
-    resolveHttpProxyUrl(normalized, {});
-    return undefined;
-  } catch (error) {
-    return error instanceof Error ? error.message : "代理 URL 无效";
-  }
-}
-
-function validateNoProxy(value) {
-  const normalized = stringValue(value);
-  return normalized.length <= 4_096 && !/[\0\r\n]/u.test(normalized)
-    ? undefined
-    : "NO_PROXY 无效或过长";
-}
-
-function numberArray(value) {
-  return Array.isArray(value) ? value.filter((entry) => Number.isInteger(entry) && entry > 0) : [];
-}
-
-function stringArray(value) {
-  return Array.isArray(value) ? value.filter((entry) => stringValue(entry)) : [];
+  return { pluginApiEnabled: enabled, configPath: result.configPath };
 }
 
 function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }

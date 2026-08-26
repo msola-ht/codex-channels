@@ -1,9 +1,9 @@
-import {
-  readGatewayConfig,
-  writeGatewayConfig,
-} from "../runtime/gateway-config.mjs";
+import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
+import {
+  loadGatewaySettings,
+  updateGatewaySetting,
+} from "./config-management.mjs";
 
 export async function runSystemSettings({
   environment,
@@ -47,12 +47,10 @@ export async function runSystemSettings({
 }
 
 async function runApprovalTimeout({ environment, output, prompts, writeConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const current = Number(table(document.approval).timeout_seconds) || 300;
+  const settings = loadGatewaySettings(environment);
   const value = await prompts.text({
     message: "审批超时（秒，30–3600）",
-    initialValue: String(current),
+    initialValue: String(settings.system.approvalTimeoutSeconds),
     validate: (input) => {
       const parsed = Number(input);
       return Number.isInteger(parsed) && parsed >= 30 && parsed <= 3600
@@ -65,21 +63,21 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
   if (!Number.isInteger(parsed) || parsed < 30 || parsed > 3600) {
     throw new Error("审批超时必须为 30–3600 之间的整数");
   }
-  document.approval = { ...table(document.approval), timeout_seconds: parsed };
-  writeConfig(configPath, document);
-  output.write(`审批超时已设为 ${parsed} 秒：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "system.approval-timeout",
+    value: parsed,
+  }, { environment, writeConfig });
+  output.write(`审批超时已设为 ${parsed} 秒：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { timeoutSeconds: parsed, configPath };
+  return { timeoutSeconds: parsed, configPath: result.configPath };
 }
 
 async function runSandbox({ environment, output, prompts, writeConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const current = table(document.codex).sandbox;
+  const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "Codex Sandbox",
     showInstructions: false,
-    initialValue: current === "read-only" ? "read-only" : "workspace-write",
+    initialValue: settings.system.sandbox,
     options: [
       { value: "read-only", label: "只读", hint: "禁止工作区写入" },
       { value: "workspace-write", label: "工作区可写", hint: "允许修改授权 Workspace" },
@@ -90,77 +88,65 @@ async function runSandbox({ environment, output, prompts, writeConfig }) {
   if (selected !== "read-only" && selected !== "workspace-write") {
     throw new Error(`未知 Codex Sandbox 设置：${String(selected)}`);
   }
-  const codex = table(document.codex);
-  codex.sandbox = selected;
-  document.codex = codex;
-  writeConfig(configPath, document);
-  output.write(`Codex Sandbox 已设为${selected}：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "system.sandbox",
+    value: selected,
+  }, { environment, writeConfig });
+  output.write(`Codex Sandbox 已设为${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { sandbox: selected, configPath };
+  return { sandbox: selected, configPath: result.configPath };
 }
 
 async function runDefaultWorkspace({ environment, output, prompts, writeConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const workspaces = Array.isArray(document.workspaces) ? document.workspaces : [];
+  const settings = loadGatewaySettings(environment);
+  const workspaces = settings.system.workspaces;
   if (workspaces.length === 0) {
     output.write("配置中没有已注册的 Workspace；请使用 codexc work add 注册后重试。\n");
     return { action: "back" };
   }
-  const current = typeof document.default_workspace === "string"
-    ? document.default_workspace
-    : undefined;
   const selected = await prompts.select({
     message: "默认工作区",
     showInstructions: false,
-    initialValue: workspaces.some((entry) => table(entry).id === current)
-      ? current
+    initialValue: workspaces.some((entry) => entry.id === settings.system.defaultWorkspace)
+      ? settings.system.defaultWorkspace
       : undefined,
     options: [
-      ...workspaces.map((entry) => {
-        const workspace = table(entry);
-        return {
-          value: String(workspace.id),
-          label: String(workspace.name || workspace.id),
-          hint: String(workspace.id),
-        };
-      }),
+      ...workspaces.map((workspace) => ({
+        value: workspace.id,
+        label: workspace.name,
+        hint: workspace.id,
+      })),
       { value: "back", label: "返回上一级" },
     ],
   });
   if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
-  document.default_workspace = selected;
-  writeConfig(configPath, document);
-  output.write(`默认工作区已设为 ${selected}：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "system.default-workspace",
+    value: selected,
+  }, { environment, writeConfig });
+  output.write(`默认工作区已设为 ${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { defaultWorkspace: selected, configPath };
+  return { defaultWorkspace: selected, configPath: result.configPath };
 }
 
 async function runDefaultModel({ environment, output, prompts, writeConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const current = table(document.codex).default_model;
+  const settings = loadGatewaySettings(environment);
   const value = await prompts.text({
     message: "渠道新会话模型覆盖（留空使用 Codex 全局默认）",
-    initialValue: typeof current === "string" ? current : "",
+    initialValue: settings.system.defaultModel ?? "",
     validate: (input) => input.length <= 256 ? undefined : "模型 ID 过长",
   });
   if (prompts.isCancel(value)) return { action: "back" };
-  const codex = table(document.codex);
   const normalized = value.trim();
-  if (normalized) codex.default_model = normalized;
-  else delete codex.default_model;
-  document.codex = codex;
-  writeConfig(configPath, document);
+  const result = updateGatewaySetting({
+    kind: "system.default-model",
+    value: normalized || null,
+  }, { environment, writeConfig });
   output.write(
     normalized
-      ? `渠道新会话模型已覆盖为 ${normalized}：${configPath}\n`
-      : `渠道新会话模型已恢复使用 Codex 全局默认：${configPath}\n`,
+      ? `渠道新会话模型已覆盖为 ${normalized}：${result.configPath}\n`
+      : `渠道新会话模型已恢复使用 Codex 全局默认：${result.configPath}\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { defaultModel: normalized || null, configPath };
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return { defaultModel: normalized || null, configPath: result.configPath };
 }

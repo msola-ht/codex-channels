@@ -73,20 +73,35 @@ export function gatewayConfigSummary(document, configPath) {
   };
 }
 
-function channelLabels(document) {
-  const labels = [];
+export function gatewayChannelStates(document) {
+  const channels = [];
   const telegram = table(document.telegram);
   if (stringValue(telegram.bot_token)) {
-    labels.push(channelStatusLabel("Telegram", true));
+    channels.push({ id: "telegram", displayName: "Telegram", configured: true, enabled: true });
   }
   const feishu = table(document.feishu);
   if (feishu.enabled === true || configuredFeishu(feishu)) {
-    labels.push(channelStatusLabel("飞书", feishu.enabled === true));
+    channels.push({
+      id: "feishu",
+      displayName: "飞书",
+      configured: true,
+      enabled: feishu.enabled === true,
+    });
   }
   if (isTable(document.weixin)) {
-    labels.push(channelStatusLabel("微信", table(document.weixin).enabled === true));
+    channels.push({
+      id: "weixin",
+      displayName: "微信",
+      configured: true,
+      enabled: table(document.weixin).enabled === true,
+    });
   }
-  return labels;
+  return channels;
+}
+
+function channelLabels(document) {
+  return gatewayChannelStates(document)
+    .map((channel) => channelStatusLabel(channel.displayName, channel.enabled));
 }
 
 function channelStatusLabel(label, enabled) {

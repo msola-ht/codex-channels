@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runSetup } from "../scripts/setup.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { writeSetupConfigurationSummary } from "../scripts/setup-summary.mjs";
+import {
+  loadSetupConfigurationSummary,
+  writeSetupConfigurationSummary,
+} from "../scripts/setup-summary.mjs";
 
 describe("Codex Connect setup", () => {
   it("selects Telegram under the communication channels category", async () => {
@@ -418,34 +420,75 @@ describe("Codex Connect setup", () => {
           }],
         },
       }),
-      loadManagedProviders: () => [{
-        provider: "deepseek",
-        displayName: "DeepSeek",
-        model: "deepseek-v4-flash-vision-exp",
-        reasoningEffort: "high",
-        mode: "switching",
-        apiKey: "managed-secret",
-      }],
-      loadCustomPrimary: () => undefined,
-      loadCustomSwitching: () => [{
-        id: "codeproxy",
-        name: "Code Proxy\u001b\nInjected",
-        model: "gpt-5.6-sol",
-        reasoningEffort: "medium",
-        baseUrl: "https://secret.example/v1",
-        apiKey: "custom-secret",
-      }],
-      loadInstalledSkills: () => ["channel-image"],
-      loadCodexDefaults: async () => ({ model: "gpt-5.6-sol", effort: "medium" }),
-      loadAgentsStatus: () => ({
-        externalRoleConfigured: true,
-        provider: "deepseek",
-        model: "deepseek-v4-pro",
+      loadProviderState: async () => ({
+        configVersion: "v1",
+        defaults: { model: "gpt-5.6-sol", reasoningEffort: "medium" },
+        primary: {
+          id: "openai",
+          displayName: "OpenAI 官方",
+          kind: "official",
+          mode: "official",
+        },
+        managedProviders: [{
+          id: "deepseek",
+          displayName: "DeepSeek",
+          kind: "managed",
+          model: "deepseek-v4-flash-vision-exp",
+          reasoningEffort: "high",
+          mode: "switching",
+          models: [],
+        }],
+        customProviders: {
+          fixedCandidates: [],
+          switchingProviders: [{
+            id: "codeproxy",
+            displayName: "Code Proxy Injected",
+            kind: "custom",
+            mode: "switching",
+            model: "gpt-5.6-sol",
+            reasoningEffort: "medium",
+            baseUrl: "https://secret.example/v1",
+            profileName: "custom-codeproxy",
+          }],
+          backupCandidates: [],
+        },
+        switchingProviders: [
+          {
+            id: "deepseek",
+            displayName: "DeepSeek",
+            kind: "managed",
+            model: "deepseek-v4-flash-vision-exp",
+            reasoningEffort: "high",
+            mode: "switching",
+            models: [],
+          },
+          {
+            id: "codeproxy",
+            displayName: "Code Proxy Injected",
+            kind: "custom",
+            mode: "switching",
+            model: "gpt-5.6-sol",
+            reasoningEffort: "medium",
+            baseUrl: "https://secret.example/v1",
+            profileName: "custom-codeproxy",
+          },
+        ],
+        externalAgent: {
+          status: "configured",
+          provider: "deepseek",
+          model: "deepseek-v4-pro",
+        },
       }),
+      loadInstalledSkills: () => ["channel-image"],
     });
 
     const rendered = output.join("");
-    expect(summary.primary).toBe("OpenAI 官方");
+    expect(summary.primary).toEqual({
+      id: "openai",
+      displayName: "OpenAI 官方",
+      kind: "official",
+      mode: "official",
+    });
     expect(rendered).toContain("Codex 全局默认值：gpt-5.6-sol · medium");
     expect(rendered).toContain("可切换 Provider：DeepSeek、Code Proxy Injected");
     expect(rendered).toContain("DeepSeek · deepseek-v4-flash-vision-exp · high");
@@ -461,6 +504,86 @@ describe("Codex Connect setup", () => {
     expect(rendered).not.toContain("secret.example");
     expect(rendered).not.toContain("api-secret.example");
     expect(rendered).not.toContain("\u001b");
+  });
+
+  it("loads the same Setup summary without requiring a terminal output adapter", async () => {
+    const summary = await loadSetupConfigurationSummary({
+      environment: {},
+      loadGatewayDocument: () => ({
+        configPath: "/private/config.toml",
+        document: { api_providers: [] },
+      }),
+      loadProviderState: async () => ({
+        configVersion: "v1",
+        defaults: { model: "gpt-5.6-sol", reasoningEffort: "medium" },
+        primary: {
+          id: "openai",
+          displayName: "OpenAI 官方",
+          kind: "official",
+          mode: "official",
+        },
+        managedProviders: [],
+        customProviders: {
+          fixedCandidates: [],
+          switchingProviders: [],
+          backupCandidates: [],
+        },
+        switchingProviders: [],
+        externalAgent: { status: "not-configured" },
+      }),
+      loadInstalledSkills: () => [],
+    });
+
+    expect(summary).toMatchObject({
+      primary: {
+        id: "openai",
+        displayName: "OpenAI 官方",
+        kind: "official",
+        mode: "official",
+      },
+      codexDefaults: { model: "gpt-5.6-sol", effort: "medium" },
+      switchingProviders: [],
+      modelDefaults: [],
+      channels: [],
+      installedSkillCount: 0,
+      agent: { status: "not-configured" },
+      apiProviderCount: 0,
+      configPath: "/private/config.toml",
+    });
+  });
+
+  it("renders an unknown primary Provider state without calling it fixed mode", async () => {
+    const output: string[] = [];
+    await writeSetupConfigurationSummary({
+      environment: {},
+      output: { write: (value: string) => output.push(value) },
+      loadGatewayDocument: () => ({
+        configPath: "/private/config.toml",
+        document: {},
+      }),
+      loadProviderState: async () => ({
+        configVersion: "v1",
+        defaults: { model: null, reasoningEffort: null },
+        primary: {
+          id: "stale-provider",
+          displayName: "stale-provider",
+          kind: "unknown",
+          mode: "unknown",
+        },
+        managedProviders: [],
+        customProviders: {
+          fixedCandidates: [],
+          switchingProviders: [],
+          backupCandidates: [],
+        },
+        switchingProviders: [],
+        externalAgent: { status: "not-configured" },
+      }),
+      loadInstalledSkills: () => [],
+    });
+
+    expect(output.join("")).toContain("主 Provider：stale-provider（状态未知）");
+    expect(output.join("")).not.toContain("stale-provider（固定模式）");
   });
 
   it("returns from the channel menu and can cancel at the category menu", async () => {

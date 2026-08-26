@@ -2,6 +2,7 @@ export interface ApiProviderSetupResult {
   action: "back" | "created" | "updated" | "removed";
   provider?: unknown;
   configPath?: string;
+  activation?: "restart-gateway";
 }
 
 export declare function runApiProviderSetup(options?: {

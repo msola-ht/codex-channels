@@ -26,6 +26,7 @@ import {
   readCodexUserConfigSnapshot,
 } from "./codex-user-config.mjs";
 import { runCustomPrimaryProviderSetup } from "./custom-primary-provider-setup.mjs";
+import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { primaryProviderUsage } from "./primary-provider-usage.mjs";
 import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 
@@ -35,23 +36,6 @@ function record(value) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function publicBaseUrl(value) {
-  if (typeof value !== "string") return "";
-  try {
-    const url = new URL(value);
-    if (
-      !["http:", "https:"].includes(url.protocol)
-      || url.username !== ""
-      || url.password !== ""
-      || url.search !== ""
-      || url.hash !== ""
-    ) return "";
-    return url.toString();
-  } catch {
-    return "";
-  }
 }
 
 function switchingProfileSnapshot(environment, providerId) {
@@ -164,96 +148,81 @@ export async function listPrimaryProviders({
   createClient = createCodexUserConfigClient,
   json = false,
 } = {}) {
-  const snapshot = await readCodexUserConfigSnapshot(environment, { createClient });
-  const config = record(snapshot.config);
-  const providers = record(config.model_providers);
-  const candidates = listCustomPrimaryProviderCandidates(providers);
-  const backup = readPrimaryProviderBackup(environment);
-  const backupIds = Object.keys(backup).filter((id) => !candidates.includes(id));
-  const activeId = optionalString(config.model_provider);
-  const switchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
+  const state = await loadModelProviderManagementState({
+    environment,
+    readUserConfig: (selectedEnvironment) => readCodexUserConfigSnapshot(
+      selectedEnvironment,
+      { createClient },
+    ),
+    loadManagedProviders: () => [],
+    loadAgentStatus: () => ({ externalRoleConfigured: false }),
+  });
+  const activeId = state.primary.id;
+  const switchingProviders = state.customProviders.switchingProviders;
   const activeLabel = switchingProviders.length > 0
     ? `OpenAI 官方 + ${switchingProviders.map(({ id }) => id).join("、")} · 自定义切换模式`
-    : activeId === undefined || activeId === "openai"
+    : state.primary.mode === "official"
       ? "OpenAI 官方"
-    : candidates.includes(activeId)
-      ? `${activeId} · 自定义固定模式`
-      : backupIds.includes(activeId)
-        ? `${activeId} · 自定义（备份中）`
-      : `${activeId}（未在候选列表中）`;
+      : state.primary.mode === "exclusive"
+        ? `${state.primary.displayName} · ${state.primary.kind === "managed" ? "受管" : "自定义"}固定模式`
+        : state.primary.mode === "backup"
+          ? `${activeId} · 自定义（备份中）`
+          : `${activeId}（未在候选列表中）`;
 
   if (json) {
     output.write(`${JSON.stringify({
       active: {
-        id: activeId ?? "openai",
+        id: activeId,
         label: activeLabel,
         mode: switchingProviders.length > 0
           ? "switching"
-          : activeId === undefined || activeId === "openai"
-            ? "official"
-            : candidates.includes(activeId)
-              ? "exclusive"
-              : backupIds.includes(activeId)
-                ? "backup"
-                : "unknown",
+          : state.primary.mode,
       },
-      fixedCandidates: candidates.map((id) => {
-        const provider = record(providers[id]);
-        return {
-          id,
-          name: optionalString(provider.name) ?? id,
-          baseUrl: publicBaseUrl(provider.base_url),
-          active: id === activeId,
-        };
-      }),
+      fixedCandidates: state.customProviders.fixedCandidates.map((provider) => ({
+        id: provider.id,
+        name: provider.displayName,
+        baseUrl: provider.baseUrl,
+        active: provider.active,
+      })),
       switchingProviders: switchingProviders.map((provider) => ({
         id: provider.id,
-        name: provider.name,
+        name: provider.displayName,
         baseUrl: provider.baseUrl,
         profileName: provider.profileName,
       })),
-      backupCandidates: backupIds.map((id) => {
-        const provider = record(backup[id]);
-        return {
-          id,
-          name: optionalString(provider.name) ?? id,
-          baseUrl: publicBaseUrl(provider.base_url),
-          active: id === activeId,
-        };
-      }),
+      backupCandidates: state.customProviders.backupCandidates.map((provider) => ({
+        id: provider.id,
+        name: provider.displayName,
+        baseUrl: provider.baseUrl,
+        active: provider.active,
+      })),
     })}\n`);
     return;
   }
 
   output.write("\nCodex Connect 自定义 Responses Provider\n");
   output.write(`当前主实例：${activeLabel}\n`);
-  if (candidates.length === 0) {
+  if (state.customProviders.fixedCandidates.length === 0) {
     output.write("自定义固定候选：无\n");
   } else {
     output.write("自定义固定候选：\n");
-    for (const id of candidates) {
-      const provider = record(providers[id]);
-      const name = optionalString(provider.name) ?? id;
-      const baseUrl = typeof provider.base_url === "string" ? provider.base_url : "";
-      const active = id === activeId
+    for (const provider of state.customProviders.fixedCandidates) {
+      const active = provider.active
           ? " · 当前固定模式"
           : "";
-      output.write(`- ${name}（${id}）· ${baseUrl}${active}\n`);
+      output.write(`- ${provider.displayName}（${provider.id}）· ${provider.baseUrl}${active}\n`);
     }
   }
   if (switchingProviders.length > 0) {
     output.write("已启用的自定义切换 Provider：\n");
     for (const provider of switchingProviders) {
-      output.write(`- ${provider.name}（${provider.id}）· ${provider.baseUrl} · Profile ${provider.profileName}\n`);
+      output.write(`- ${provider.displayName}（${provider.id}）· ${provider.baseUrl} · Profile ${provider.profileName}\n`);
     }
   }
-  if (backupIds.length > 0) {
+  if (state.customProviders.backupCandidates.length > 0) {
     output.write("备份候选（已从 config 清理，可切回）：\n");
-    for (const id of backupIds) {
-      const provider = record(backup[id]);
-      const name = optionalString(provider.name) ?? id;
-      const baseUrl = typeof provider.base_url === "string" ? provider.base_url : "";
-      output.write(`- ${name}（${id}）· ${baseUrl}\n`);
+    for (const provider of state.customProviders.backupCandidates) {
+      output.write(`- ${provider.displayName}（${provider.id}）· ${provider.baseUrl}\n`);
     }
   }
   output.write(

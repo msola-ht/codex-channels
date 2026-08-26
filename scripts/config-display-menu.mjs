@@ -1,9 +1,9 @@
-import {
-  readGatewayConfig,
-  writeGatewayConfig,
-} from "../runtime/gateway-config.mjs";
+import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
+import {
+  loadGatewaySettings,
+  updateGatewaySetting,
+} from "./config-management.mjs";
 
 export async function runDisplaySettings({
   environment,
@@ -44,13 +44,11 @@ export async function runTelegramMessageFormat({
   prompts,
   writeConfig = writeGatewayConfig,
 }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const current = table(document.telegram).message_format;
+  const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "Telegram 消息格式",
     showInstructions: false,
-    initialValue: current === "rich" ? "rich" : "html",
+    initialValue: settings.telegram.messageFormat,
     options: [
       { value: "html", label: "HTML", hint: "使用 HTML 格式" },
       { value: "rich", label: "富文本", hint: "使用富文本消息" },
@@ -61,23 +59,21 @@ export async function runTelegramMessageFormat({
   if (selected !== "html" && selected !== "rich") {
     throw new Error(`未知 Telegram 消息格式：${String(selected)}`);
   }
-  const telegram = table(document.telegram);
-  telegram.message_format = selected;
-  document.telegram = telegram;
-  writeConfig(configPath, document);
-  output.write(`Telegram 消息格式已设为 ${selected}：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "telegram.message-format",
+    value: selected,
+  }, { environment, writeConfig });
+  output.write(`Telegram 消息格式已设为 ${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { messageFormat: selected, configPath };
+  return { messageFormat: selected, configPath: result.configPath };
 }
 
 async function runOperationUpdatesToggle({ environment, output, prompts, writeConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const current = table(document.display).operation_updates;
+  const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "操作详情显示",
     showInstructions: false,
-    initialValue: current === "full" || current === "hidden" ? current : "compact",
+    initialValue: settings.display.operationUpdates,
     options: [
       { value: "full", label: "完整详情", hint: "显示完整操作过程" },
       { value: "compact", label: "单行摘要", hint: "压缩为摘要行" },
@@ -89,23 +85,21 @@ async function runOperationUpdatesToggle({ environment, output, prompts, writeCo
   if (selected !== "full" && selected !== "compact" && selected !== "hidden") {
     throw new Error(`未知操作详情显示设置：${String(selected)}`);
   }
-  const display = table(document.display);
-  display.operation_updates = selected;
-  document.display = display;
-  writeConfig(configPath, document);
-  output.write(`操作详情显示已设为${selected}：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "display.operation-updates",
+    value: selected,
+  }, { environment, writeConfig });
+  output.write(`操作详情显示已设为${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { operationUpdates: selected, configPath };
+  return { operationUpdates: selected, configPath: result.configPath };
 }
 
 async function runPlanUpdatesToggle({ environment, output, prompts, writeConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const enabled = table(document.display).plan_updates !== false;
+  const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "计划更新显示",
     showInstructions: false,
-    initialValue: enabled ? "enabled" : "disabled",
+    initialValue: settings.display.planUpdatesEnabled ? "enabled" : "disabled",
     options: [
       { value: "enabled", label: "开启", hint: "显示 Codex 计划" },
       { value: "disabled", label: "关闭", hint: "隐藏 Codex 计划" },
@@ -116,23 +110,22 @@ async function runPlanUpdatesToggle({ environment, output, prompts, writeConfig 
   if (selected !== "enabled" && selected !== "disabled") {
     throw new Error(`未知计划更新显示设置：${String(selected)}`);
   }
-  const display = table(document.display);
-  display.plan_updates = selected === "enabled";
-  document.display = display;
-  writeConfig(configPath, document);
-  output.write(`计划更新显示已${selected === "enabled" ? "开启" : "关闭"}：${configPath}\n`);
+  const enabled = selected === "enabled";
+  const result = updateGatewaySetting({
+    kind: "display.plan-updates",
+    value: enabled,
+  }, { environment, writeConfig });
+  output.write(`计划更新显示已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { planUpdatesEnabled: selected === "enabled", configPath };
+  return { planUpdatesEnabled: enabled, configPath: result.configPath };
 }
 
 async function runReasoningToggle({ environment, output, prompts, writeConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const enabled = table(document.display).reasoning !== false;
+  const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "思考状态显示",
     showInstructions: false,
-    initialValue: enabled ? "enabled" : "disabled",
+    initialValue: settings.display.reasoningEnabled ? "enabled" : "disabled",
     options: [
       { value: "enabled", label: "开启", hint: "显示“思考中”状态卡" },
       { value: "disabled", label: "关闭", hint: "隐藏“思考中”状态卡" },
@@ -143,23 +136,22 @@ async function runReasoningToggle({ environment, output, prompts, writeConfig })
   if (selected !== "enabled" && selected !== "disabled") {
     throw new Error(`未知思考状态显示设置：${String(selected)}`);
   }
-  const display = table(document.display);
-  display.reasoning = selected === "enabled";
-  document.display = display;
-  writeConfig(configPath, document);
-  output.write(`思考状态显示已${selected === "enabled" ? "开启" : "关闭"}：${configPath}\n`);
+  const enabled = selected === "enabled";
+  const result = updateGatewaySetting({
+    kind: "display.reasoning",
+    value: enabled,
+  }, { environment, writeConfig });
+  output.write(`思考状态显示已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { reasoningEnabled: selected === "enabled", configPath };
+  return { reasoningEnabled: enabled, configPath: result.configPath };
 }
 
 async function runPriceCurrency({ environment, output, prompts, writeConfig }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const display = table(document.display);
+  const settings = loadGatewaySettings(environment);
   const mode = await prompts.select({
     message: "全局价格显示方式",
     showInstructions: false,
-    initialValue: display.price_currency === "usd" ? "usd" : "cny",
+    initialValue: settings.display.priceCurrency,
     options: [
       { value: "cny", label: "人民币", hint: "全局统一人民币（需要汇率缓存）" },
       { value: "usd", label: "美元", hint: "全局统一美元" },
@@ -170,15 +162,11 @@ async function runPriceCurrency({ environment, output, prompts, writeConfig }) {
   if (mode !== "cny" && mode !== "usd") {
     throw new Error(`未知价格显示方式：${String(mode)}`);
   }
-  display.price_currency = mode;
-  delete display.price_currency_by_provider;
-  document.display = display;
-  writeConfig(configPath, document);
-  output.write(`全局价格显示方式已设为 ${mode}：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "display.price-currency",
+    value: mode,
+  }, { environment, writeConfig });
+  output.write(`全局价格显示方式已设为 ${mode}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { priceCurrency: mode, configPath };
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return { priceCurrency: mode, configPath: result.configPath };
 }

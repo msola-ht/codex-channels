@@ -16,6 +16,7 @@
 ## 协议与设计
 
 - [`docs/architecture-optimization.md`](docs/architecture-optimization.md)：全项目链路审查、结构性优化原则、实施顺序与进度。
+- [`docs/management-interfaces-development.md`](docs/management-interfaces-development.md)：Setup、Config、安装和更新命令面向未来本机可视化的结构化接口演进计划与进度。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。
