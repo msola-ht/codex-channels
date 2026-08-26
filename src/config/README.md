@@ -46,8 +46,8 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、
 `error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果；
 消息正文、请求参数、上游响应、凭据和审批内容
-仍不得进入日志。可通过 Setup 的“系统设置 → 调试模式”在 `debug` 与 `info` 间切换，变化需要
-重启 Gateway，不需要重启 App Server。
+仍不得进入日志。可通过 `codexc config` 的“高级设置 → 日志等级”选择完整等级，变化需要重启
+Gateway，不需要重启 App Server。
 
 `experimental.plugin_api` 控制 Codex 0.148.0 开发中 Plugin 调试入口，默认关闭；未显式开启时
 `/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention

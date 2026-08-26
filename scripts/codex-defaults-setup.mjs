@@ -41,7 +41,7 @@ export async function runCodexDefaultsSetup({
           label: model.displayName,
           hint: model.model,
         })),
-        ...(allowBack ? [{ value: "back", label: "返回", hint: "返回设置类别" }] : []),
+        ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 OpenAI 官方设置" }] : []),
       ],
     });
     if (prompts.isCancel(selectedModel) || selectedModel === "back") {
@@ -68,7 +68,7 @@ export async function runCodexDefaultsSetup({
           label: option.effort,
           hint: option.description,
         })),
-        ...(allowBack ? [{ value: "back", label: "返回", hint: "返回设置类别" }] : []),
+        ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 OpenAI 官方设置" }] : []),
       ],
     });
     if (prompts.isCancel(selectedEffort) || selectedEffort === "back") {

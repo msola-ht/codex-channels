@@ -65,10 +65,10 @@ Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务�
 
 完成后，在已配置的聊天客户端中私聊机器人即可使用。发送 `/help` 查看聊天命令。
 
-## 配置通讯渠道
+## Setup 配置
 
-运行 `codexc setup`，按菜单配置模型与提供商、通讯渠道和技能安装（把项目技能安装到
-`~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
+运行 `codexc setup`，可先查看不显示凭据的配置总览，再按菜单配置模型与提供商、通讯渠道和项目
+技能（安装到 `~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
 
 ```text
 ~/.codex-connect/config.toml
@@ -141,13 +141,13 @@ plugin_api = true
 
 ### Codex 官方
 
-在 `codexc setup` 中选择“模型与提供商 → 官方 → 默认模型与思考等级”，可从当前 Codex 模型目录设置全局默认模型和
+在 `codexc setup` 中选择“模型与提供商 → OpenAI 官方 → 默认模型与思考等级”，可从当前 Codex 模型目录设置全局默认模型和
 思考等级。设置通过 App Server 写入 `~/.codex/config.toml`，不修改 Codex 登录状态；完成后运行
 `codexc service restart all`，让新 App Server 会话使用新的默认值。
 
 ### 自定义第三方 Provider
 
-运行 `codexc setup`，选择“模型与提供商 → 第三方 → 自定义第三方”，可新增或编辑 OpenAI Responses
+运行 `codexc setup`，选择“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”，可新增或编辑 OpenAI Responses
 兼容 Provider，并选择保留官方 OpenAI 的切换模式或仅使用第三方的固定模式。Provider ID、模型与认证、
 配置文件、安全限制和模式切换边界见
 [`第三方模型 Provider 接入指南`](docs/provider-integration-guide.md)。常用管理命令：
@@ -174,7 +174,7 @@ codexc service restart all
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型与提供商”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式
-或恢复原配置；选择“第三方模型设置”可按 Provider 和模型设置默认模型、思考等级与自动压缩阈值。两种模式都会
+或恢复原配置；选择“受管 Provider 模型设置”可按 Provider 和模型设置默认模型、思考等级与自动压缩阈值。两种模式都会
 启用共享第三方子代理 `agents.external`；配置后运行：
 
 ```bash

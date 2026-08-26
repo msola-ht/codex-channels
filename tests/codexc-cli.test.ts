@@ -187,7 +187,7 @@ describe("codexc CLI", () => {
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
     expect(setupHelp.stdout).toContain("登录并恢复官方 / 默认模型与思考等级");
-    expect(setupHelp.stdout).toContain("模型设置 / 第三方 API");
+    expect(setupHelp.stdout).toContain("受管 Provider 模型设置 / 直接 API Provider（预留）");
     const workHelp = spawnSync(process.execPath, [cli, "work", "--help"], { encoding: "utf8" });
     expect(workHelp.stdout).toContain("权限");
     const workAddHelp = spawnSync(process.execPath, [cli, "work", "add", "--help"], {
@@ -3066,7 +3066,7 @@ describe("codexc CLI", () => {
   it("describes Setup by its model, provider, channel, and skill responsibilities", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 
-    expect(output).toContain("配置模型、提供商、通讯渠道与技能");
+    expect(output).toContain("配置模型、提供商、通讯渠道与项目技能");
   });
 
   it("explains the Setup categories in scoped help", () => {
@@ -3074,7 +3074,9 @@ describe("codexc CLI", () => {
       encoding: "utf8",
     });
 
-    expect(output).toContain("模型与提供商、通讯渠道和技能");
+    expect(output).toContain("脱敏配置总览");
+    expect(output).toContain("模型与提供商、通讯渠道和项目技能");
+    expect(output).toContain("直接 API Provider（预留）");
   });
 
   it("rejects invalid service log options before reading user configuration", () => {
