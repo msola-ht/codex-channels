@@ -126,6 +126,8 @@ try {
     "scripts/cli-status.mjs",
     "scripts/service-target-query.mjs",
     "scripts/codex-rules.mjs",
+    "scripts/telegram-setup-session.d.mts",
+    "scripts/telegram-setup-session.mjs",
     "scripts/telegram-setup.mjs",
     "scripts/terminal-prompter.mjs",
     "scripts/validate-config.mjs",

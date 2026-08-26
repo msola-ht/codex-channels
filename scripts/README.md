@@ -263,9 +263,13 @@
   `codexc update` 的停机窗口会自动以 `--apply` 方式调用。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口，并允许
   长流程通过 `AbortSignal` 中止尚未完成的问题。
-- `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
-  复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
-  继续脱敏；新建 Bot 仅引导使用官方 BotFather。
+- `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
+  `telegram-setup-session.mjs` 的结构化会话；复用统一 TOML、环境变量和系统代理解析；交互输入的
+  Token 在当前终端明文显示，但验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
+- `telegram-setup-session.mjs` / `telegram-setup-session.d.mts`：提供所有者绑定的 Telegram Setup
+  开始、状态、自动配对、允许名单预览、确认与取消接口；Bot Token 和一次性配对码只保存在有期限的
+  进程内会话中，状态、预览和结果不返回 Token，取消和超时通过 grammY `AbortSignal` 中止验证或
+  长轮询，确认时检查 Telegram 配置未被并发改动后再原子写入。
 - `feishu-setup.mjs`：提供手动输入凭据和 Device Authorization 扫码两种方式；扫码时由飞书授权页
   选择新建或已有企业自建应用，只申请私聊接收与发送、流式卡片、应用自管理检测、受控配置写入和
   命令中心所需权限、事件与回调。
