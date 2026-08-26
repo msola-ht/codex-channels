@@ -1101,14 +1101,17 @@ describe("codexc CLI", () => {
     ]);
   });
 
-  it("runs remote in the invocation directory unless a workspace is explicit", () => {
+  it("runs remote with the current or explicitly selected Workspace permissions", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
     const first = join(root, "First Project");
     const second = join(root, "Second Project");
+    const nestedWorkspace = join(first, "Nested Project");
+    const nestedWorkdir = join(nestedWorkspace, "src");
     mkdirSync(first);
     mkdirSync(second);
+    mkdirSync(nestedWorkdir, { recursive: true });
     const fakeCodex = join(root, "fake-codex.mjs");
     writeFileSync(
       fakeCodex,
@@ -1127,6 +1130,31 @@ describe("codexc CLI", () => {
       table(document.codex).binary = fakeCodex;
     });
     execFileSync(process.execPath, [cli, "work", "add", "--cwd", second], { cwd: second, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", nestedWorkspace], {
+      cwd: nestedWorkspace,
+      env: environment,
+    });
+    updateGatewayConfig(configPath, (document) => {
+      const configuredWorkspaces = document.workspaces as Array<Record<string, unknown>>;
+      const firstWorkspace = configuredWorkspaces.find(
+        (candidate) => candidate.cwd === realpathSync(first),
+      );
+      const secondWorkspace = configuredWorkspaces.find(
+        (candidate) => candidate.cwd === realpathSync(second),
+      );
+      const configuredNestedWorkspace = configuredWorkspaces.find(
+        (candidate) => candidate.cwd === realpathSync(nestedWorkspace),
+      );
+      if (!firstWorkspace || !secondWorkspace || !configuredNestedWorkspace) {
+        throw new Error("测试 Workspace 未注册");
+      }
+      firstWorkspace.permissions = ":workspace";
+      firstWorkspace.approval_policy = "untrusted";
+      secondWorkspace.sandbox = "read-only";
+      secondWorkspace.approval_policy = "never";
+      configuredNestedWorkspace.sandbox = "danger-full-access";
+      configuredNestedWorkspace.approval_policy = "untrusted";
+    });
 
     const currentCapture = join(root, "current.json");
     execFileSync(process.execPath, [cli, "remote", "resume"], {
@@ -1138,12 +1166,52 @@ describe("codexc CLI", () => {
       cwd: first,
       env: { ...environment, CODEX_TEST_CAPTURE: explicitCapture },
     });
+    const overriddenCapture = join(root, "overridden.json");
+    execFileSync(process.execPath, [
+      cli,
+      "remote",
+      "--sandbox",
+      "danger-full-access",
+      "--ask-for-approval",
+      "on-request",
+      "resume",
+    ], {
+      cwd: first,
+      env: { ...environment, CODEX_TEST_CAPTURE: overriddenCapture },
+    });
+    const personalProfileCapture = join(root, "personal-profile.json");
+    execFileSync(process.execPath, [cli, "remote", "--profile", "personal", "resume"], {
+      cwd: first,
+      env: { ...environment, CODEX_TEST_CAPTURE: personalProfileCapture },
+    });
+    const nestedCapture = join(root, "nested.json");
+    execFileSync(process.execPath, [cli, "remote", "resume"], {
+      cwd: nestedWorkdir,
+      env: { ...environment, CODEX_TEST_CAPTURE: nestedCapture },
+    });
+    const workspaceWriteModifierCapture = join(root, "workspace-write-modifier.json");
+    execFileSync(process.execPath, [
+      cli,
+      "remote",
+      "--workspace",
+      "second-project",
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+      "resume",
+    ], {
+      cwd: first,
+      env: { ...environment, CODEX_TEST_CAPTURE: workspaceWriteModifierCapture },
+    });
 
     expect(JSON.parse(readFileSync(currentCapture, "utf8"))).toEqual([
       "--remote",
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
       "-C",
       realpathSync(first),
+      "-c",
+      'default_permissions=":workspace"',
+      "--ask-for-approval",
+      "untrusted",
       "resume",
     ]);
     expect(JSON.parse(readFileSync(explicitCapture, "utf8"))).toEqual([
@@ -1151,9 +1219,61 @@ describe("codexc CLI", () => {
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
       "-C",
       realpathSync(second),
+      "--sandbox",
+      "read-only",
+      "--ask-for-approval",
+      "never",
       "resume",
     ]);
-  });
+    expect(JSON.parse(readFileSync(overriddenCapture, "utf8"))).toEqual([
+      "--remote",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      "-C",
+      realpathSync(first),
+      "--sandbox",
+      "danger-full-access",
+      "--ask-for-approval",
+      "on-request",
+      "resume",
+    ]);
+    expect(JSON.parse(readFileSync(personalProfileCapture, "utf8"))).toEqual([
+      "--remote",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      "-C",
+      realpathSync(first),
+      "-c",
+      'default_permissions=":workspace"',
+      "--ask-for-approval",
+      "untrusted",
+      "--profile",
+      "personal",
+      "resume",
+    ]);
+    expect(JSON.parse(readFileSync(nestedCapture, "utf8"))).toEqual([
+      "--remote",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      "-C",
+      realpathSync(nestedWorkdir),
+      "--sandbox",
+      "danger-full-access",
+      "--ask-for-approval",
+      "untrusted",
+      "resume",
+    ]);
+    expect(JSON.parse(readFileSync(workspaceWriteModifierCapture, "utf8"))).toEqual([
+      "--remote",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      "-C",
+      realpathSync(second),
+      "--sandbox",
+      "read-only",
+      "--ask-for-approval",
+      "never",
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+      "resume",
+    ]);
+  }, 15_000);
 
   it("reports an invalid remote Workspace exactly once without a Node stack", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-error-"));
@@ -1310,6 +1430,10 @@ describe("codexc CLI", () => {
           realpathSync(workspace),
           "--profile",
           "sf-deepseek",
+          "--sandbox",
+          "workspace-write",
+          "--ask-for-approval",
+          "on-request",
           "resume",
         ]);
       }
@@ -1333,6 +1457,10 @@ describe("codexc CLI", () => {
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
       "-C",
       realpathSync(workspace),
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "on-request",
       "resume",
       "--",
       "--profile",
@@ -1342,7 +1470,7 @@ describe("codexc CLI", () => {
     ]);
   }, 30_000);
 
-  it("maps a public custom Profile to its isolated App Server and internal Codex Profile", async () => {
+  it("maps a public custom Profile without dropping the current Workspace permissions", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-remote-custom-profile-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1363,6 +1491,10 @@ describe("codexc CLI", () => {
       CODEX_HOME: codexHome,
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", workspace], {
+      cwd: workspace,
+      env: environment,
+    });
     writeFileSync(join(codexHome, "config.toml"), 'model_provider = "openai"\n', { mode: 0o600 });
     writeCustomPrimaryProviderSwitchingProfile({
       provider: "codeproxy-dev",
@@ -1373,6 +1505,11 @@ describe("codexc CLI", () => {
     }, environment);
     updateGatewayConfig(join(home, "config.toml"), (document) => {
       table(document.codex).binary = fakeCodex;
+      const configuredWorkspace = (document.workspaces as Array<Record<string, unknown>>)
+        .find((candidate) => candidate.cwd === realpathSync(workspace));
+      if (!configuredWorkspace) throw new Error("测试 Workspace 未注册");
+      configuredWorkspace.sandbox = "read-only";
+      configuredWorkspace.approval_policy = "never";
     });
 
     const primarySocketPath = join(home, "runtime", "codex-app-server.sock");
@@ -1402,6 +1539,10 @@ describe("codexc CLI", () => {
         realpathSync(workspace),
         "--profile",
         "sf-custom-codeproxy-dev",
+        "--sandbox",
+        "read-only",
+        "--ask-for-approval",
+        "never",
         "resume",
       ]);
     } finally {

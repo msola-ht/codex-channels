@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
@@ -51,13 +51,15 @@ async function runRemoteCli() {
     },
   );
   let workdir = realpathSync(process.cwd());
+  let workspace = workspaceForWorkdir(workspaces, workdir);
   if (workspaceId !== undefined) {
-    const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+    workspace = workspaces.find((candidate) => candidate.id === workspaceId);
     if (!workspace) {
       throw new Error(`找不到 Workspace：${workspaceId}`);
     }
     workdir = workspace.cwd;
   }
+  const permissionArguments = workspacePermissionArguments(codex, workspace, passthrough);
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
   let socketPath = primarySocketPath;
   let providerLease;
@@ -108,6 +110,7 @@ async function runRemoteCli() {
         ...(selectedDefinition
           ? ["--profile", selectedDefinition.codexProfileName]
           : []),
+        ...permissionArguments,
         ...passthrough,
       ],
       { stdio: "inherit" },
@@ -119,6 +122,87 @@ async function runRemoteCli() {
   } finally {
     await providerLease?.close();
   }
+}
+
+function workspaceForWorkdir(workspaces, workdir) {
+  let selected;
+  for (const workspace of workspaces) {
+    const childPath = relative(workspace.cwd, workdir);
+    const containsWorkdir = childPath === ""
+      || (childPath !== ".." && !childPath.startsWith(`..${sep}`) && !isAbsolute(childPath));
+    if (containsWorkdir && (!selected || workspace.cwd.length > selected.cwd.length)) {
+      selected = workspace;
+    }
+  }
+  return selected;
+}
+
+function workspacePermissionArguments(codex, workspace, passthrough) {
+  const overrides = explicitPermissionOverrides(passthrough);
+  const permissions = stringValue(workspace?.permissions);
+  return [
+    ...(overrides.sandbox
+      ? []
+      : permissions
+        ? ["-c", `default_permissions=${JSON.stringify(permissions)}`]
+        : [
+            "--sandbox",
+            stringValue(workspace?.sandbox) || stringValue(codex.sandbox) || "workspace-write",
+          ]),
+    ...(overrides.approval
+      ? []
+      : [
+          "--ask-for-approval",
+          stringValue(workspace?.approval_policy) || "on-request",
+        ]),
+  ];
+}
+
+function explicitPermissionOverrides(args) {
+  let sandbox = false;
+  let approval = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--") break;
+    if (["--approve-for-me", "--dangerously-bypass-approvals-and-sandbox"].includes(argument)) {
+      sandbox = true;
+      approval = true;
+      continue;
+    }
+    if (argument === "--sandbox" || argument === "-s") {
+      sandbox = true;
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--sandbox=") || /^-s[^-]/u.test(argument)) {
+      sandbox = true;
+      continue;
+    }
+    if (argument === "--ask-for-approval" || argument === "-a") {
+      approval = true;
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--ask-for-approval=") || /^-a[^-]/u.test(argument)) {
+      approval = true;
+      continue;
+    }
+    let configOverride;
+    if (argument === "--config" || argument === "-c") {
+      configOverride = args[index + 1];
+      index += 1;
+    } else if (argument.startsWith("--config=")) {
+      configOverride = argument.slice("--config=".length);
+    } else if (/^-c[^-]/u.test(argument)) {
+      configOverride = argument.slice(2);
+    }
+    const key = stringValue(configOverride).split("=", 1)[0];
+    if (key === "sandbox_mode" || key === "default_permissions") {
+      sandbox = true;
+    }
+    if (key === "approval_policy") approval = true;
+  }
+  return { sandbox, approval };
 }
 
 function table(value) {

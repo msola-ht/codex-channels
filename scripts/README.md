@@ -337,7 +337,9 @@
   `sf-*` 名称或保留的 `sf-custom-*` 名称误作公开参数，并尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
   Provider `--profile`（当前公开为自定义第三方的 `custom-<Provider ID>`、`deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
-  磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；
+  磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；同时按当前目录或显式
+  `--workspace` 解析有效 Sandbox、审批策略与 Permission Profile，第三方 Profile 不复制权限，
+  用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。

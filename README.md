@@ -247,7 +247,11 @@ codexc remote --profile deepseek resume
 ```
 
 `codexc remote` 连接 Gateway 使用的 App Server。直接运行 `codex` 或 `codex --profile sf-deepseek`
-会启动独立 TUI，不共享 Gateway Thread。
+会启动独立 TUI，不共享 Gateway Thread。当前目录位于已注册 Workspace 内，或显式使用
+`--workspace <ID>` 时，Remote TUI 会沿用该 Workspace 的沙盒、审批策略或权限 Profile；未匹配
+Workspace 时使用全局 Sandbox 与按需审批。显式传给 Codex 的权限参数仍优先。
+未受管的个人 Codex Profile 仍可提供模型等设置；如需覆盖 Workspace 权限，须显式传入对应的
+Codex 权限参数。
 
 ### 查看指标 WebUI
 
