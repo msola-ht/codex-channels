@@ -14,9 +14,11 @@ import { parse, stringify } from "smol-toml";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  applyDeepseekRestore,
   deepseekSetupScriptUrl,
   downloadDeepseekCatalog,
   extractDeepseekCatalog,
+  previewDeepseekRestore,
   refreshDeepseekCatalogForUpdate,
   runDeepseekSetup as runDeepseekSetupImplementation,
   type DeepseekSetupOptions,
@@ -960,6 +962,51 @@ describe("DeepSeek setup", () => {
     expect(existsSync(join(fixture.home, "sf-agent.config.toml")))
       .toBe(false);
     expect(existsSync(join(fixture.connectHome, "providers", "deepseek", "models.json"))).toBe(false);
+  });
+
+  it("exposes a credential-free restore preview and requires explicit confirmation", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const environment = {
+      CODEX_HOME: fixture.home,
+      CODEX_CONNECT_HOME: fixture.connectHome,
+    };
+    await runDeepseekSetup({
+      environment,
+      output: fixture.output,
+      fetchImpl: successfulFetch,
+      prompter: prompter(["1", "2"], ["sk-preview"]),
+    });
+
+    await expect(previewDeepseekRestore({ environment })).resolves.toEqual({
+      operation: "restore",
+      provider: { id: "deepseek", name: "DeepSeek" },
+      effects: {
+        restoresInitialConfig: true,
+        removesManagedCatalog: true,
+        restoresExternalAgentConfig: true,
+        removesManagedAccounts: false,
+      },
+      confirmation: { required: true, field: "confirmRestore" },
+      activation: "restart-all",
+    });
+    await expect(applyDeepseekRestore({}, { environment })).rejects.toMatchObject({
+      code: "confirmation-required",
+      field: "confirmRestore",
+    });
+  });
+
+  it("returns a stable error when no restore backup exists", async () => {
+    const fixture = setupFixture("");
+
+    await expect(previewDeepseekRestore({
+      environment: {
+        CODEX_HOME: fixture.home,
+        CODEX_CONNECT_HOME: fixture.connectHome,
+      },
+    })).rejects.toMatchObject({
+      code: "backup-not-found",
+      field: "restore",
+    });
   });
 
   it("does not treat a user DeepSeek provider added after restore as legacy managed config", async () => {

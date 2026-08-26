@@ -1,4 +1,5 @@
 import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
+import type { ManagedModelProviderRestorePreview } from "./managed-model-provider-setup.mjs";
 
 export const deepseekSetupScriptUrl: string;
 
@@ -44,6 +45,17 @@ export interface DeepseekSetupBackResult {
   action: "back";
   mode?: never;
 }
+
+export function previewDeepseekRestore(options?: {
+  environment?: NodeJS.ProcessEnv;
+}): Promise<ManagedModelProviderRestorePreview>;
+
+export function applyDeepseekRestore(
+  input: { confirmRestore?: boolean },
+  options?: { environment?: NodeJS.ProcessEnv },
+): Promise<{
+  action: "restored";
+} & ManagedModelProviderRestorePreview>;
 
 export function runDeepseekSetup(options?: DeepseekSetupOptions): Promise<
   | DeepseekSetupResult

@@ -20,6 +20,32 @@ const managedRootKeys = Object.freeze([
   "forced_login_method",
 ]);
 
+export class ManagedModelProviderSetupError extends Error {
+  constructor(code, field, message, options) {
+    super(message, options);
+    this.name = "ManagedModelProviderSetupError";
+    this.code = code;
+    this.field = field;
+  }
+}
+
+export function createManagedProviderRestorePreview(definition, {
+  removesManagedAccounts = false,
+} = {}) {
+  return {
+    operation: "restore",
+    provider: { id: definition.id, name: definition.displayName },
+    effects: {
+      restoresInitialConfig: true,
+      removesManagedCatalog: true,
+      restoresExternalAgentConfig: true,
+      removesManagedAccounts,
+    },
+    confirmation: { required: true, field: "confirmRestore" },
+    activation: "restart-all",
+  };
+}
+
 export function createSwitchingProviderProfile(definition, {
   apiKey,
   catalogPath,

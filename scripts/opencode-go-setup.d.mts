@@ -1,4 +1,5 @@
 import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
+import type { ManagedModelProviderRestorePreview } from "./managed-model-provider-setup.mjs";
 
 export interface OpenCodeGoSetupPrompter {
   select(): Promise<string>;
@@ -9,6 +10,15 @@ export interface OpenCodeGoSetupPrompter {
   secret(message: string): Promise<string>;
   confirm(message: string, initialValue: boolean): Promise<boolean>;
 }
+
+export function previewOpencodeGoRestore(options?: {
+  environment?: NodeJS.ProcessEnv;
+}): ManagedModelProviderRestorePreview;
+
+export function applyOpencodeGoRestore(
+  input: { confirmRestore?: boolean },
+  options?: { environment?: NodeJS.ProcessEnv },
+): Promise<{ action: "restored" } & ManagedModelProviderRestorePreview>;
 
 export function runOpenCodeGoSetup(options?: {
   allowBack?: boolean;

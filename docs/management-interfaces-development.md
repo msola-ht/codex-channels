@@ -55,18 +55,21 @@
   - [x] 受管 Provider 的默认模型、思考等级与自动压缩设置已拆分，DeepSeek/OpenCode Go Setup 已复用。
   - [x] OpenCode Go 默认账户切换、运行实例停止与账户删除已拆分，Setup 和账户 CLI 已复用。
   - [x] OpenCode Go 账户新增已拆分为脱敏预览、明确输入与凭据隔离事务，Setup 和账户 CLI 已复用。
-  - [ ] 受管 Provider 安装/恢复仍待处理。
+  - [x] DeepSeek/OpenCode Go 恢复已拆分为脱敏预览、明确确认与无终端执行，现有 Setup 已复用。
+  - [ ] 受管 Provider 安装仍待处理。
 - [ ] 为所有结果补充稳定错误码、字段错误和生效动作。
   - [x] 自定义主 Provider 新增、编辑、切换与删除已返回稳定字段错误、生效动作和部分成功警告。
   - [x] 共享第三方子代理配置与停用已返回稳定字段错误和全部服务重启动作。
   - [x] 受管 Provider 默认设置已返回稳定字段错误、变更摘要和 App Server 重启动作。
   - [x] OpenCode Go 默认切换、停止与删除已返回稳定字段错误、变更/运行状态和生效动作。
   - [x] OpenCode Go 账户新增已返回稳定字段错误、配置影响和全部服务重启动作。
+  - [x] DeepSeek/OpenCode Go 恢复已返回统一影响摘要、稳定备份/确认错误和全部服务重启动作。
 - [ ] 保留凭据隔离，不让调用方读取已有 Key。
   - [x] 自定义主 Provider 预览与结果只返回脱敏目标和影响；同 Origin 保留 Key 由内部计划完成。
   - [x] 共享第三方子代理接口只返回 Provider、模型和生效动作，不返回角色配置内容或 Provider 凭据。
   - [x] OpenCode Go 默认切换、停止与删除只返回账户、Provider、影响和运行状态，不返回账户 Key；删除备份由内部事务完成。
   - [x] OpenCode Go 账户新增只把新 Key 传入内部执行事务，预览和结果均不返回 Key。
+  - [x] DeepSeek/OpenCode Go 恢复预览和结果不返回备份内容、配置内容或已有 Key。
 
 ### 阶段三：渠道 Setup 会话
 

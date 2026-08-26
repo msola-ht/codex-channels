@@ -57,7 +57,11 @@ import {
 } from "./opencode-go-account-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createManagedProviderCatalog } from "./managed-model-provider-setup.mjs";
+import {
+  ManagedModelProviderSetupError,
+  createManagedProviderCatalog,
+  createManagedProviderRestorePreview,
+} from "./managed-model-provider-setup.mjs";
 
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
@@ -66,6 +70,51 @@ const maximumPrivateConfigBytes = 2_097_152;
 const previousDefaultModel = "deepseek-v4-flash";
 
 class OpenCodeGoSetupCancelled extends Error {}
+
+export function previewOpencodeGoRestore({
+  environment = process.env,
+} = {}) {
+  try {
+    readOpencodeGoRestoreState(environment);
+  } catch (error) {
+    if (error instanceof ManagedModelProviderSetupError) throw error;
+    throw managedSetupInvalid(
+      "backup-unavailable",
+      "restore",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+  return createManagedProviderRestorePreview(definition, {
+    removesManagedAccounts: true,
+  });
+}
+
+export async function applyOpencodeGoRestore(
+  { confirmRestore = false },
+  { environment = process.env } = {},
+) {
+  const preview = previewOpencodeGoRestore({ environment });
+  if (confirmRestore !== true) {
+    throw managedSetupInvalid(
+      "confirmation-required",
+      "confirmRestore",
+      "恢复 OpenCode Go 初始配置前必须明确确认",
+    );
+  }
+  try {
+    await restoreOpencodeGoSetup(environment);
+  } catch (error) {
+    if (error instanceof ManagedModelProviderSetupError) throw error;
+    throw managedSetupInvalid(
+      "operation-failed",
+      "restore",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+  return { action: "restored", ...preview };
+}
 
 export async function runOpenCodeGoSetup({
   allowBack = false,
@@ -101,11 +150,12 @@ export async function runOpenCodeGoSetup({
       });
     }
     if (action === "restore") {
+      previewOpencodeGoRestore({ environment });
       if (!await prompt.confirm("确认恢复配置 OpenCode Go 前的文件？", false)) {
         output.write("已取消，未修改任何文件。\n");
         return undefined;
       }
-      await restoreOpencodeGoSetup(environment);
+      await applyOpencodeGoRestore({ confirmRestore: true }, { environment });
       output.write("已恢复配置 OpenCode Go 前的文件。\n");
       output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
       return { action: "restored" };
@@ -482,27 +532,7 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
 }
 
 async function restoreOpencodeGoSetup(environment) {
-  const legacyBackup = join(
-    managedProviderDirectory(environment, definition),
-    definition.backupDirectoryName,
-  );
-  const legacyStatePath = join(legacyBackup, "state.json");
-  if (!existsSync(legacyStatePath)) {
-    throw new Error("未找到可恢复的 OpenCode Go 初始配置");
-  }
-  const state = JSON.parse(readPrivateFileSync(legacyStatePath));
-  const legacyCatalogState = state.catalog === undefined && state.manifest === undefined;
-  const restoredState = {
-    config: state.config,
-    profile: state.profile,
-    marker: state.marker,
-    roleConfig: state.roleConfig,
-    catalog: legacyCatalogState ? false : state.catalog,
-    manifest: legacyCatalogState ? false : state.manifest,
-  };
-  if (Object.values(restoredState).some((value) => typeof value !== "boolean")) {
-    throw new Error("OpenCode Go 初始配置备份状态无效");
-  }
+  const { legacyBackup, state } = readOpencodeGoRestoreState(environment);
   const codexHome = codexHomePath(environment);
   const accountPathsValue = opencodeGoAccountPaths(environment, defaultAccountId);
   await restoreBackup(
@@ -572,6 +602,56 @@ async function restoreOpencodeGoSetup(environment) {
       }
     }
   }
+}
+
+function readOpencodeGoRestoreState(environment) {
+  const legacyBackup = join(
+    managedProviderDirectory(environment, definition),
+    definition.backupDirectoryName,
+  );
+  const legacyStatePath = join(legacyBackup, "state.json");
+  if (!existsSync(legacyStatePath)) {
+    throw managedSetupInvalid(
+      "backup-not-found",
+      "restore",
+      "未找到可恢复的 OpenCode Go 初始配置",
+    );
+  }
+  let state;
+  try {
+    state = JSON.parse(readPrivateFileSync(legacyStatePath));
+  } catch (error) {
+    throw managedSetupInvalid(
+      "backup-invalid",
+      "restore",
+      "OpenCode Go 初始配置备份状态无效",
+      error,
+    );
+  }
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    throw managedSetupInvalid(
+      "backup-invalid",
+      "restore",
+      "OpenCode Go 初始配置备份状态无效",
+    );
+  }
+  const legacyCatalogState = state.catalog === undefined && state.manifest === undefined;
+  const restoredState = {
+    config: state.config,
+    profile: state.profile,
+    marker: state.marker,
+    roleConfig: state.roleConfig,
+    catalog: legacyCatalogState ? false : state.catalog,
+    manifest: legacyCatalogState ? false : state.manifest,
+  };
+  if (Object.values(restoredState).some((value) => typeof value !== "boolean")) {
+    throw managedSetupInvalid(
+      "backup-invalid",
+      "restore",
+      "OpenCode Go 初始配置备份状态无效",
+    );
+  }
+  return { legacyBackup, state };
 }
 
 function backupKey(file) {
@@ -696,6 +776,15 @@ async function confirmPrompt(prompts, message, initialValue) {
   const value = await prompts.confirm({ message, initialValue });
   if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
   return value;
+}
+
+function managedSetupInvalid(code, field, message, cause) {
+  return new ManagedModelProviderSetupError(
+    code,
+    field,
+    message,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

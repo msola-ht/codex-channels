@@ -30,8 +30,10 @@ import {
 } from "./agents.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import {
+  ManagedModelProviderSetupError,
   applyExclusiveProviderConfig,
   createManagedProviderCatalog,
+  createManagedProviderRestorePreview,
   createSwitchingProviderProfile,
   hasProviderBaseConfig,
   restoreProviderBaseConfig,
@@ -50,6 +52,41 @@ const maximumAutoCompactPercent = 90;
 const previousDefaultModel = "deepseek-v4-flash";
 
 class DeepseekSetupCancelled extends Error {}
+
+export async function previewDeepseekRestore({
+  environment = process.env,
+} = {}) {
+  const paths = deepseekSetupPaths(environment);
+  await readDeepseekRestoreState(paths.backupStatePath);
+  return createManagedProviderRestorePreview(deepseekProviderDefinition);
+}
+
+export async function applyDeepseekRestore(
+  { confirmRestore = false },
+  { environment = process.env } = {},
+) {
+  const preview = await previewDeepseekRestore({ environment });
+  if (confirmRestore !== true) {
+    throw managedSetupInvalid(
+      "confirmation-required",
+      "confirmRestore",
+      "恢复 DeepSeek 初始配置前必须明确确认",
+    );
+  }
+  const paths = deepseekSetupPaths(environment);
+  try {
+    await restoreInitialConfig(paths);
+  } catch (error) {
+    if (error instanceof ManagedModelProviderSetupError) throw error;
+    throw managedSetupInvalid(
+      "operation-failed",
+      "restore",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+  return { action: "restored", ...preview };
+}
 
 export async function runDeepseekSetup({
   allowBack = false,
@@ -83,64 +120,32 @@ export async function runDeepseekSetup({
         prompts,
       });
     }
-    const codexHome = codexHomePath(environment);
-    const configPath = join(codexHome, "config.toml");
-    const roleConfigPath = managedModelProviderRoleConfigPath(environment);
-    const profilePath = join(codexHome, deepseekProviderDefinition.profileFileName);
-    const providerDirectory = managedProviderDirectory(
-      environment,
-      deepseekProviderDefinition,
-    );
-    const gatewayProfilePath = join(
-      providerDirectory,
-      deepseekProviderDefinition.managedMarkerFileName,
-    );
-    const catalogPath = join(
-      providerDirectory,
-      deepseekProviderDefinition.catalogFileName,
-    );
-    const manifestPath = join(
-      providerDirectory,
-      deepseekProviderDefinition.catalogManifestFileName,
-    );
-    const backupDirectory = join(
-      providerDirectory,
-      deepseekProviderDefinition.backupDirectoryName,
-    );
-    const backupPath = join(backupDirectory, "config.toml");
-    const profileBackupPath = join(
-      backupDirectory,
-      deepseekProviderDefinition.profileFileName,
-    );
-    const gatewayProfileBackupPath = join(
-      backupDirectory,
-      deepseekProviderDefinition.managedMarkerFileName,
-    );
-    const roleConfigBackupPath = join(
-      backupDirectory,
-      "sf-agent.config.toml",
-    );
-    const backupStatePath = join(backupDirectory, "state.json");
+    const paths = deepseekSetupPaths(environment);
+    const {
+      codexHome,
+      configPath,
+      roleConfigPath,
+      profilePath,
+      gatewayProfilePath,
+      catalogPath,
+      manifestPath,
+      backupPath,
+      profileBackupPath,
+      gatewayProfileBackupPath,
+      roleConfigBackupPath,
+      backupStatePath,
+    } = paths;
     if (choice === "3") {
+      await previewDeepseekRestore({ environment });
       output.write("恢复会覆盖 DeepSeek 安装后对 ~/.codex/config.toml 做的其他修改。\n");
       if (!await prompt.confirm("确认恢复首次安装前的配置？", false)) {
         output.write("已取消，未修改任何文件。\n");
         return undefined;
       }
-      return restoreInitialConfig({
-        configPath,
-        profilePath,
-        gatewayProfilePath,
-        catalogPath,
-        manifestPath,
-        roleConfigPath,
-        backupPath,
-        profileBackupPath,
-        gatewayProfileBackupPath,
-        roleConfigBackupPath,
-        backupStatePath,
-        output,
-      });
+      await applyDeepseekRestore({ confirmRestore: true }, { environment });
+      output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
+      output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+      return deepseekRestoreResult(paths);
     }
     const mode = choice === "1" ? "switching" : "exclusive";
     assertThirdPartyRoleAvailable(environment);
@@ -830,20 +835,8 @@ async function restoreInitialConfig({
   gatewayProfileBackupPath,
   roleConfigBackupPath,
   backupStatePath,
-  output,
 }) {
-  let state;
-  try {
-    state = JSON.parse(await readFile(backupStatePath, "utf8"));
-  } catch {
-    throw new Error("未找到可恢复的 Codex 初始配置");
-  }
-  if (
-    state.originalRoleConfigExisted !== undefined
-    && typeof state.originalRoleConfigExisted !== "boolean"
-  ) {
-    throw new Error("Codex 初始配置备份状态无效");
-  }
+  const state = await readDeepseekRestoreState(backupStatePath);
   if (state.originalConfigExisted === true) {
     await writePrivateFileAtomic(configPath, await readFile(backupPath));
   } else if (state.originalConfigExisted === false) {
@@ -874,16 +867,95 @@ async function restoreInitialConfig({
     throw new Error("Codex 初始配置备份状态无效");
   }
   await setBackupRestoredState(backupStatePath, true);
-  output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
-  output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+}
+
+async function readDeepseekRestoreState(backupStatePath) {
+  let state;
+  try {
+    state = JSON.parse(await readFile(backupStatePath, "utf8"));
+  } catch (error) {
+    throw managedSetupInvalid(
+      error?.code === "ENOENT" ? "backup-not-found" : "backup-invalid",
+      "restore",
+      error?.code === "ENOENT"
+        ? "未找到可恢复的 Codex 初始配置"
+        : "Codex 初始配置备份状态无效",
+    );
+  }
+  if (
+    typeof state?.originalConfigExisted !== "boolean"
+    || (state.originalProfileExisted !== undefined
+      && typeof state.originalProfileExisted !== "boolean")
+    || (state.originalGatewayProfileExisted !== undefined
+      && typeof state.originalGatewayProfileExisted !== "boolean")
+    || (state.originalRoleConfigExisted !== undefined
+      && typeof state.originalRoleConfigExisted !== "boolean")
+  ) {
+    throw managedSetupInvalid(
+      "backup-invalid",
+      "restore",
+      "Codex 初始配置备份状态无效",
+    );
+  }
+  return state;
+}
+
+function deepseekSetupPaths(environment) {
+  const codexHome = codexHomePath(environment);
+  const providerDirectory = managedProviderDirectory(
+    environment,
+    deepseekProviderDefinition,
+  );
+  const backupDirectory = join(
+    providerDirectory,
+    deepseekProviderDefinition.backupDirectoryName,
+  );
+  return {
+    codexHome,
+    configPath: join(codexHome, "config.toml"),
+    roleConfigPath: managedModelProviderRoleConfigPath(environment),
+    profilePath: join(codexHome, deepseekProviderDefinition.profileFileName),
+    gatewayProfilePath: join(
+      providerDirectory,
+      deepseekProviderDefinition.managedMarkerFileName,
+    ),
+    catalogPath: join(providerDirectory, deepseekProviderDefinition.catalogFileName),
+    manifestPath: join(
+      providerDirectory,
+      deepseekProviderDefinition.catalogManifestFileName,
+    ),
+    backupPath: join(backupDirectory, "config.toml"),
+    profileBackupPath: join(
+      backupDirectory,
+      deepseekProviderDefinition.profileFileName,
+    ),
+    gatewayProfileBackupPath: join(
+      backupDirectory,
+      deepseekProviderDefinition.managedMarkerFileName,
+    ),
+    roleConfigBackupPath: join(backupDirectory, "sf-agent.config.toml"),
+    backupStatePath: join(backupDirectory, "state.json"),
+  };
+}
+
+function deepseekRestoreResult(paths) {
   return {
     mode: "restored",
-    configPath,
-    profilePath,
-    gatewayProfilePath,
-    catalogPath,
-    backupPath,
+    configPath: paths.configPath,
+    profilePath: paths.profilePath,
+    gatewayProfilePath: paths.gatewayProfilePath,
+    catalogPath: paths.catalogPath,
+    backupPath: paths.backupPath,
   };
+}
+
+function managedSetupInvalid(code, field, message, cause) {
+  return new ManagedModelProviderSetupError(
+    code,
+    field,
+    message,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 async function replaceOptionalFile(path, content) {

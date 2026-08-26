@@ -29,6 +29,8 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
 
 import {
   addOpencodeGoAccount,
+  applyOpencodeGoRestore,
+  previewOpencodeGoRestore,
   refreshOpencodeGoCatalogForUpdate,
   runOpenCodeGoSetup,
 } from "../scripts/opencode-go-setup.mjs";
@@ -247,6 +249,52 @@ describe("OpenCode Go setup", () => {
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
   });
 
+  it("exposes a credential-free restore preview and requires explicit confirmation", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-restore-preview-"));
+    const environment = {
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+    };
+    await runOpenCodeGoSetup({
+      environment,
+      output: { write: () => undefined },
+      prompter: prompt("switching"),
+      configureRole: vi.fn(async () => undefined),
+      downloadCatalog: successfulCatalog,
+    });
+
+    expect(previewOpencodeGoRestore({ environment })).toEqual({
+      operation: "restore",
+      provider: { id: "opencode-go", name: "OpenCode Go" },
+      effects: {
+        restoresInitialConfig: true,
+        removesManagedCatalog: true,
+        restoresExternalAgentConfig: true,
+        removesManagedAccounts: true,
+      },
+      confirmation: { required: true, field: "confirmRestore" },
+      activation: "restart-all",
+    });
+    await expect(applyOpencodeGoRestore({}, { environment })).rejects.toMatchObject({
+      code: "confirmation-required",
+      field: "confirmRestore",
+    });
+  });
+
+  it("returns a stable error when no restore backup exists", () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-no-restore-"));
+
+    expect(() => previewOpencodeGoRestore({
+      environment: {
+        CODEX_HOME: codexHome,
+        CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+      },
+    })).toThrow(expect.objectContaining({
+      code: "backup-not-found",
+      field: "restore",
+    }));
+  });
+
   it("restores a legacy backup state created before catalog files were provider-owned", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-legacy-restore-"));
     await runOpenCodeGoSetup({
@@ -293,7 +341,7 @@ describe("OpenCode Go setup", () => {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("restore"),
-    })).rejects.toThrow("备份状态无效");
+    })).rejects.toMatchObject({ code: "backup-invalid", field: "restore" });
 
     expect(readFileSync(configPath, "utf8")).toBe(configBefore);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(true);
