@@ -1,19 +1,17 @@
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import qrcode from "qrcode";
 
-import {
-  readGatewayConfig,
-  writeGatewayConfig,
-} from "../runtime/gateway-config.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import {
-  FIXED_WEIXIN_QR_BASE_URL,
   createWeixinQrContractClient,
   runWeixinQrLoginContract,
 } from "./weixin-qr-contract-probe.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
+import {
+  WeixinSetupSessionError,
+  createWeixinSetupSession,
+} from "./weixin-setup-session.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 
 export async function runWeixinSetup({
@@ -26,13 +24,41 @@ export async function runWeixinSetup({
   renderQRCode = renderTerminalQRCode,
   createCredentialStore = loadCredentialStore,
   validateCredential = validatedCredential,
-  writeConfig = writeGatewayConfig,
+  writeConfig,
   now = Date.now,
+  createSetupSession = createWeixinSetupSession,
 } = {}) {
-  const { configPath, dataDir } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const existing = table(document.weixin);
   const prompt = prompter ?? createPrompter(input, output);
+  const ownerId = `codexc-setup:${randomUUID()}`;
+  let session;
+  let unsubscribe;
+  let verificationTask;
+  let lastVerificationRequestId;
+  let adapterError;
+  let promptAbortController;
+
+  const promptWithinSession = async (operation) => {
+    const before = session.status(ownerId);
+    if (isTerminatedSetupStatus(before)) throw weixinSetupFailure(before);
+    const controller = new AbortController();
+    promptAbortController = controller;
+    try {
+      const value = await operation(controller.signal);
+      const after = session.status(ownerId);
+      if (isTerminatedSetupStatus(after)) throw weixinSetupFailure(after);
+      return value;
+    } catch (error) {
+      const current = session.status(ownerId);
+      if (isTerminatedSetupStatus(current)) {
+        throw weixinSetupFailure(current);
+      }
+      throw error;
+    } finally {
+      if (promptAbortController === controller) {
+        promptAbortController = undefined;
+      }
+    }
+  };
 
   try {
     output.write("\nCodex Connect 微信 Setup\n\n");
@@ -43,82 +69,133 @@ export async function runWeixinSetup({
       return undefined;
     }
 
-    const result = await runLogin({
+    session = createSetupSession({ ownerId }, {
+      environment,
       client,
-      baseUrl: FIXED_WEIXIN_QR_BASE_URL,
-      displayQr: async (value) => {
-        output.write("\n请使用微信扫描下面的二维码：\n\n");
-        renderQRCode(value, output);
-      },
-      readVerifyCode: () => prompt.ask("请输入手机微信显示的数字"),
-      onStatus: (status) => renderStatus(status, output),
+      runLogin,
+      createCredentialStore,
+      validateCredential,
+      ...(writeConfig === undefined ? {} : { writeConfig }),
+      now,
     });
-    if (result.kind !== "confirmed") {
+    let lastQrCode;
+    let lastUpstreamStatus;
+    unsubscribe = session.subscribe(ownerId, (status) => {
+      if (status.qrCode && status.qrCode !== lastQrCode) {
+        lastQrCode = status.qrCode;
+        output.write("\n请使用微信扫描下面的二维码：\n\n");
+        renderQRCode(status.qrCode, output);
+      }
+      if (
+        status.upstreamStatus
+        && status.upstreamStatus !== lastUpstreamStatus
+      ) {
+        lastUpstreamStatus = status.upstreamStatus;
+        renderStatus(status.upstreamStatus, output);
+      }
+      if (
+        status.state === "verification-required"
+        && status.verificationRequestId !== lastVerificationRequestId
+      ) {
+        lastVerificationRequestId = status.verificationRequestId;
+        verificationTask = promptWithinSession((signal) =>
+          prompt.ask("请输入手机微信显示的数字", { signal }))
+          .then((code) => session.provideVerificationCode(ownerId, code))
+          .catch((error) => {
+            adapterError = error;
+            session.cancel(ownerId);
+          });
+      }
+      if (isTerminatedSetupStatus(status)) {
+        promptAbortController?.abort();
+      }
+    });
+    session.start(ownerId);
+    const status = await session.waitForLogin(ownerId);
+    await verificationTask;
+    if (adapterError) throw adapterError;
+    if (status.state === "already-connected") {
       output.write("微信返回已连接状态；未签发新凭据，配置未修改。\n");
       return undefined;
     }
-    const credential = await validateCredential(result, now());
-    const scannerId = validateActorId(result.userId);
-    const existingAllowed = existing.account_id === credential.accountId
-      ? validActorIds(existing.allowed_user_ids)
-      : [];
-    const allowedUserIds = existingAllowed.length > 0
-      && await prompt.confirm("保留当前微信允许名单并加入本次扫码用户？", true)
-      ? unique([scannerId, ...existingAllowed])
-      : [scannerId];
+    if (status.state !== "ready" || !status.preview) {
+      throw weixinSetupFailure(status);
+    }
+    const preserveExistingAllowedUsers = status.preview.existingAllowedUserCount > 0
+      && await promptWithinSession((signal) => prompt.confirm(
+        "保留当前微信允许名单并加入本次扫码用户？",
+        true,
+        { signal },
+      ))
+      ? true
+      : false;
 
     output.write("\n准备保存微信连接：\n");
-    output.write(`- 账号 ID：${credential.accountId}\n`);
-    output.write(`- 扫码用户：${scannerId}\n`);
+    output.write(`- 账号 ID：${status.preview.accountId}\n`);
+    output.write(`- 扫码用户：${status.preview.scannerId}\n`);
     output.write("- Bot Token：已获取（不显示）\n");
     output.write("- 运行状态：已配置，默认未启用\n");
-    if (!await prompt.confirm("确认安全保存以上连接？", true)) {
+    if (!await promptWithinSession((signal) =>
+      prompt.confirm("确认安全保存以上连接？", true, { signal }))) {
+      session.cancel(ownerId);
       output.write("未保存微信连接；本次 Token 已丢弃。\n");
       return undefined;
     }
 
-    const store = await createCredentialStore(
-      join(dataDir, "credentials", "weixin"),
-    );
-    const previous = await store.get(credential.accountId);
-    await store.set(credential);
-    try {
-      document.weixin = {
-        enabled: false,
-        account_id: credential.accountId,
-        allowed_user_ids: allowedUserIds,
-      };
-      writeConfig(configPath, document);
-    } catch (error) {
-      if (previous) {
-        await store.set(previous);
-      } else {
-        await store.remove(credential.accountId);
-      }
-      throw error;
-    }
-    const oldAccountId = stringValue(existing.account_id);
-    if (oldAccountId && oldAccountId !== credential.accountId) {
-      try {
-        await store.remove(oldAccountId);
-      } catch {
-        output.write("微信新连接已保存，但旧账号本地凭据清理失败；请运行 codexc doctor 检查。\n");
-      }
+    const result = await session.confirm(ownerId, {
+      preserveExistingAllowedUsers,
+    });
+    if (result.warnings.some((warning) =>
+      warning.code === "old-credential-cleanup-failed")) {
+      output.write("微信新连接已保存，但旧账号本地凭据清理失败；请运行 codexc doctor 检查。\n");
     }
 
-    output.write(`\n微信连接已安全保存：${configPath}\n`);
+    output.write(`\n微信连接已安全保存：${result.configPath}\n`);
     writeGatewayConfigActivationNotice(output);
     output.write(
       "如需启用消息接收，请将 weixin.enabled 改为 true，然后运行 codexc service reload。\n",
     );
     return {
-      accountId: credential.accountId,
-      allowedUserIds,
-      configPath,
+      accountId: result.accountId,
+      allowedUserIds: result.allowedUserIds,
+      configPath: result.configPath,
     };
   } finally {
+    unsubscribe?.();
+    if (session) {
+      const status = session.status(ownerId);
+      if (!["saved", "cancelled", "expired", "failed", "already-connected"]
+        .includes(status.state)) {
+        session.cancel(ownerId);
+      }
+    }
     prompt.close();
   }
+}
+
+function isTerminatedSetupStatus(status) {
+  return ["expired", "cancelled", "failed"].includes(status.state);
+}
+
+function weixinSetupFailure(status) {
+  const code = status.error?.code ?? status.state;
+  const messages = {
+    expired: "微信二维码登录合同验证超时",
+    cancelled: "微信 Setup 已取消",
+    "refresh-limit": "微信二维码刷新次数已达到上限",
+    timeout: "微信二维码请求超时",
+    "network-error": "微信二维码网络请求失败",
+    "http-error": "微信二维码请求失败",
+    "invalid-response": "微信二维码响应无效",
+    "invalid-input": "微信二维码登录参数无效",
+    aborted: "微信二维码登录已取消",
+    "login-failed": "微信二维码登录失败",
+  };
+  return new WeixinSetupSessionError(
+    code,
+    "session",
+    messages[code] ?? "微信二维码登录失败",
+  );
 }
 
 async function validatedCredential(result, grantedAt) {
@@ -135,16 +212,6 @@ async function validatedCredential(result, grantedAt) {
 async function loadCredentialStore(directory) {
   const module = await import("../dist/surfaces/weixin/index.js");
   return module.createWeixinCredentialStore(directory);
-}
-
-function validateActorId(value) {
-  if (
-    typeof value !== "string"
-    || !/^[^\s@]{1,1000}@im\.wechat$/u.test(value)
-  ) {
-    throw new Error("微信扫码用户 ID 无效");
-  }
-  return value;
 }
 
 function requiredString(value, message) {
@@ -174,26 +241,6 @@ function renderTerminalQRCode(value, output) {
     }
     output.write(`${rendered}\n`);
   });
-}
-
-function validActorIds(value) {
-  return Array.isArray(value)
-    ? value.filter((item) =>
-        typeof item === "string"
-        && /^[^\s@]{1,1000}@im\.wechat$/u.test(item))
-    : [];
-}
-
-function unique(values) {
-  return [...new Set(values)];
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function isDirectExecution(moduleUrl, argvPath) {

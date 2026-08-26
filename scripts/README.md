@@ -261,7 +261,8 @@
   备份目录，再执行文件布局与模型设置迁移；遇到新旧并存时先把现有 Provider 目录移到备份内
   的 `original-providers/`，迁移失败时恢复原目录。默认只预演，需显式 `--apply` 才写入；
   `codexc update` 的停机窗口会自动以 `--apply` 方式调用。
-- `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
+- `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口，并允许
+  长流程通过 `AbortSignal` 中止尚未完成的问题。
 - `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
   复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
   继续脱敏；新建 Bot 仅引导使用官方 BotFather。
@@ -274,8 +275,13 @@
   事件与卡片回调；失败时保留连接配置，并提示先使用终端 `codexc doctor` 检查、再重新扫码选择
   当前应用恢复，不能依赖尚未收到消息的 `/fs doctor`。手动凭据流程也先由终端 Doctor 检查。
 - `weixin-setup.mjs`：从统一 Setup 菜单执行连接替换风险确认、微信扫码和严格结果裁剪，把
-  Bot Token 原子写入微信独立安全凭据后端，并只向 TOML 写入禁用态账号与允许用户元数据；
+  终端输入输出适配到 `weixin-setup-session.mjs` 的结构化会话，把 Bot Token 原子写入微信独立安全凭据后端，
+  并只向 TOML 写入禁用态账号与允许用户元数据；
   Setup 不直接启动消息 Surface，操作者显式启用配置并重载 Gateway 后生效。
+- `weixin-setup-session.mjs` / `weixin-setup-session.d.mts`：提供所有者绑定的微信 Setup 开始、状态、
+  配对码提交、确认与取消接口；二维码和凭据只保存在有期限的进程内会话中，状态与保存预览不返回
+  Bot Token，取消和超时会中止底层请求并丢弃临时状态，确认时检查微信配置未被并发改动后复用原子
+  凭据/配置回滚事务。
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份、应用权限、
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误。

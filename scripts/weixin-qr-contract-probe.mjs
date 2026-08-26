@@ -181,7 +181,10 @@ async function runWeixinQrLoginContractLoop(options) {
         await abortableDelay(pollDelayMs, signal);
         break;
       case "need_verifycode":
-        verifyCode = requiredVerifyCode(await readVerifyCode());
+        verifyCode = requiredVerifyCode(await abortableResult(
+          readVerifyCode(signal),
+          signal,
+        ));
         break;
       case "scaned_but_redirect":
         currentBaseUrl = `https://${status.redirectHost}`;
@@ -592,6 +595,30 @@ function abortableDelay(delayMs, signal) {
       return;
     }
     signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function abortableResult(result, signal) {
+  if (!signal) return Promise.resolve(result);
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      reject(new WeixinQrContractError(
+        "aborted",
+        "微信二维码探针已取消",
+      ));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(result).then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
   });
 }
 
