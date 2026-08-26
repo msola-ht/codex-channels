@@ -11,12 +11,10 @@ import * as clackPrompts from "@clack/prompts";
 import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
-  inspectAppServerSupervisorState,
-  releaseAppServerProvider,
-} from "../runtime/app-server-supervisor.mjs";
+  applyOpencodeGoAccountStop,
+  applyOpencodeGoDefaultAccountChange,
+} from "./opencode-go-account-management.mjs";
 import {
   opencodeGoAccountDefinition,
   opencodeGoProviderDefinition,
@@ -52,7 +50,6 @@ import {
   writePrivateFileAtomic,
 } from "../runtime/private-file.mjs";
 import { configureThirdPartyRole } from "./agents.mjs";
-import { runtimeConfig } from "./runtime-config.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
@@ -475,35 +472,11 @@ export async function setOpencodeGoDefaultAccount(accountId, {
   environment = process.env,
   configureRole = configureThirdPartyRole,
 } = {}) {
-  validateOpencodeGoAccountId(accountId);
-  const accounts = loadOpencodeGoAccounts(environment);
-  if (!accounts.some((account) => account.id === accountId)) {
-    throw new Error(`OpenCode Go 账户不存在：${accountId}`);
-  }
-  const nextAccounts = accounts.map((account) => ({
-    id: account.id,
-    default: account.id === accountId,
-  }));
-  const role = loadManagedModelProviderRole(environment);
-  writeOpencodeGoAccounts(environment, nextAccounts);
-  if (role && isOpencodeGoProvider(role.provider)) {
-    const definition = opencodeGoAccountDefinition(accountId);
-    try {
-      await configureRole(opencodeGoProviderId(accountId), definition.defaultModel, environment);
-    } catch (error) {
-      try {
-        writeOpencodeGoAccounts(environment, accounts);
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          "共享第三方子代理更新失败，且默认账户回滚失败",
-          { cause: rollbackError },
-        );
-      }
-      throw error;
-    }
-  }
-  return { action: "default-set", accountId };
+  const result = await applyOpencodeGoDefaultAccountChange(
+    accountId,
+    { environment, configureRole },
+  );
+  return { action: result.action, accountId };
 }
 
 export async function refreshOpencodeGoCatalogForUpdate(
@@ -651,41 +624,23 @@ export async function stopOpencodeGoAccount(accountId, {
   output = process.stdout,
   silent = false,
 } = {}) {
-  validateOpencodeGoAccountId(accountId);
-  const { configPath, dataDir } = runtimeConfig(environment);
-  const primarySocketPath = resolvePrimaryAppServerSocketPath(
-    readGatewayConfig(configPath),
-    dataDir,
-  );
-  const inspection = await inspectAppServerSupervisorState(primarySocketPath);
-  if (inspection.status === "incompatible") {
-    throw new Error(
-      "App Server 监管协议不兼容或响应无效；请先运行 codexc service restart app-server",
-    );
-  }
-  const topology = inspection.status === "ready" ? inspection.topology : undefined;
-  const provider = opencodeGoProviderId(accountId);
-  if (!topology?.runningProviders.includes(provider)) {
+  const result = await applyOpencodeGoAccountStop(accountId, { environment });
+  if (result.action === "not-running") {
     if (!silent) output.write(`OpenCode Go 账户 ${accountId} 的 App Server 当前未运行。\n`);
-    return { action: "not-running", accountId };
+    return { action: result.action, accountId };
   }
-  const release = await releaseAppServerProvider(primarySocketPath, provider);
-  if (release.reason === "leased") {
+  if (result.action === "in-use") {
     if (!silent) {
       output.write(
         `OpenCode Go 账户 ${accountId} 正在被 Remote TUI 使用，未停止。请退出对应 TUI 后重试。\n`,
       );
     }
-    return { action: "in-use", accountId };
-  }
-  if (release.reason === "not-running") {
-    if (!silent) output.write(`OpenCode Go 账户 ${accountId} 的 App Server 当前未运行。\n`);
-    return { action: "not-running", accountId };
+    return { action: result.action, accountId };
   }
   if (!silent) {
     output.write(`OpenCode Go 账户 ${accountId} 的 App Server 已停止；再次使用时会自动启动。\n`);
   }
-  return { action: "stopped", accountId };
+  return { action: result.action, accountId };
 }
 
 export async function runOpencodeGoAccountCli(args, options = {}) {

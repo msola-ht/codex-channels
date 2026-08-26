@@ -132,8 +132,9 @@
   重置时间时短时退避，避免逐请求查询 usage 接口。
 - OpenCode Go 的账户注册表与旧版单账户迁移、账户 CLI（add/list/remove/default/stop）及不含凭据的 JSON 列表、切换/固定
   Setup、同名模型按 Provider 独立选择、按需 App Server 启动、共享统计代理的 `/go/<账户>` 前缀
-  路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、账户适配器按 `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与
-  SDK 协议基线校验。
+  路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、默认账户切换/运行实例停止的无 prompts
+  脱敏预览、稳定字段错误、共享子代理同步、未运行短路和 Remote TUI 占用结果、账户适配器按
+  `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与 SDK 协议基线校验。
 - OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、Gateway 最近无 Turn 活动且超过空闲阈值时
   经 supervisor `releaseProvider` 释放；`agents.external` 复用主 App Server 和共享统计代理，不锁定
   同账户隔离实例；受管 Remote TUI

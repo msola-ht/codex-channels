@@ -14,7 +14,8 @@
 - 结构化接口不得依赖 `@clack/prompts`、TTY、ANSI 文案或 `process.exitCode`。
 - 读取接口只返回完成管理操作所需的脱敏字段。API Key、Token、应用凭据和代理值只返回是否已配置。
 - 修改接口使用明确的可辨识输入，不接受任意 TOML 路径和值。
-- 修改结果必须返回生效动作：`none`、`restart-gateway`、`restart-all` 或 `reinstall-services`。
+- 修改结果必须返回生效动作：`none`、`restart-gateway`、`restart-app-server`、`restart-all` 或
+  `reinstall-services`。
 - 中文提示、选项标签和终端输出留在 CLI 适配器；领域接口不要求调用方解析文案。
 - 涉及二维码、OAuth、等待消息和自更新的长流程使用可取消的任务或会话，不伪装成普通 CRUD。
 - 在真正接入可视化写操作前，再单独设计管理认证、来源校验、并发修订和审计；本阶段不预设 HTTP API。
@@ -50,14 +51,17 @@
   - [x] 自定义主 Provider 的新增、编辑、切换与删除已拆分，CLI 已复用。
   - [x] 共享第三方子代理的 Provider/模型选择、配置与停用已拆分，Setup 和直接 CLI 已复用。
   - [x] 受管 Provider 的默认模型、思考等级与自动压缩设置已拆分，DeepSeek/OpenCode Go Setup 已复用。
-  - [ ] 受管 Provider 安装/恢复与 OpenCode Go 账户生命周期仍待处理。
+  - [x] OpenCode Go 默认账户切换与运行实例停止已拆分，Setup 和账户 CLI 已复用。
+  - [ ] 受管 Provider 安装/恢复及 OpenCode Go 账户新增/删除仍待处理。
 - [ ] 为所有结果补充稳定错误码、字段错误和生效动作。
   - [x] 自定义主 Provider 新增、编辑、切换与删除已返回稳定字段错误、生效动作和部分成功警告。
   - [x] 共享第三方子代理配置与停用已返回稳定字段错误和全部服务重启动作。
   - [x] 受管 Provider 默认设置已返回稳定字段错误、变更摘要和 App Server 重启动作。
+  - [x] OpenCode Go 默认切换与停止已返回稳定字段错误、变更/运行状态和生效动作。
 - [ ] 保留凭据隔离，不让调用方读取已有 Key。
   - [x] 自定义主 Provider 预览与结果只返回脱敏目标和影响；同 Origin 保留 Key 由内部计划完成。
   - [x] 共享第三方子代理接口只返回 Provider、模型和生效动作，不返回角色配置内容或 Provider 凭据。
+  - [x] OpenCode Go 默认切换与停止只返回账户、Provider 和运行状态，不读取或返回账户 Key。
 
 ### 阶段三：渠道 Setup 会话
 

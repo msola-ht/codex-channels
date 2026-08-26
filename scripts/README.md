@@ -237,9 +237,13 @@
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   切换 Profile、固定配置与受管字段恢复逻辑。
+- `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
+  默认账户切换与运行实例停止的无终端预览和执行接口；默认切换同步更新正在使用 OpenCode Go 的
+  共享子代理并保留失败回滚，停止明确区分未运行、Remote TUI 占用和已停止，结果不包含账户凭据。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
   （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
-  返回不含 Key 与 Profile 路径的稳定账户摘要；配置切换/固定模式或恢复首次配置前状态，从同一受审查来源
+  返回不含 Key 与 Profile 路径的稳定账户摘要；默认切换和停止复用账户管理接口；配置切换/固定模式
+  或恢复首次配置前状态，从同一受审查来源
   生成共享模型目录并复用共享子代理机制，
   但不复用凭据、Provider 身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
   默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
