@@ -181,9 +181,9 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "service.logs": `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config [--json]
 
-打开日常 Gateway 配置菜单：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
-（调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、WebUI 设置、
-指标设置（本地保留、设备接入中心与全局视图）、Telegram 消息格式与配置路径查看。
+打开日常 Gateway 配置菜单：脱敏配置总览、显示设置、系统设置、自动化（计划任务与
+Thread 分区管理员）、网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
+指标设置、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
   doctor: `用法：codexc doctor [--json]
 

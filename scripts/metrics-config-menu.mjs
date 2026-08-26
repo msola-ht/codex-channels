@@ -129,7 +129,7 @@ async function runMetricsStorage({ environment, output, prompts, writeConfig }) 
   document.metrics = metrics;
   writeConfig(configPath, document);
   output.write(`本地指标保留策略已更新：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   output.write("需要立即清理时运行 codexc metrics cleanup。\n");
   return { storage: next, configPath };
 }
@@ -217,7 +217,7 @@ async function runConnectToCenter({
   output.write(`已接入中心：${base}\n`);
   output.write(`设备 ID：${normalizedDeviceId || sync.device_id || "自动生成"}\n`);
   output.write("配置已写入并备份。\n");
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   output.write("WebUI 全局页将在重启 WebUI 后生效。\n");
   return { endpoint: base, deviceId: normalizedDeviceId || null, configPath };
 }
@@ -314,7 +314,7 @@ async function runSyncParams({
     document.metrics = metrics;
     writeConfig(configPath, document);
     output.write(`上报参数已更新：${configPath}\n`);
-    writeGatewayConfigActivationNotice(output);
+    writeGatewayConfigActivationNotice(output, environment, "restart");
     return { sync, configPath };
   }
 }
@@ -333,7 +333,7 @@ async function runDisableConnection({ environment, output, writeConfig }) {
   document.metrics = metrics;
   writeConfig(configPath, document);
   output.write("已停用中心接入（配置保留，可在「多设备指标」中重新配置）。\n");
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   output.write("WebUI 全局页将在重启 WebUI 后生效。\n");
   return { disabled: true, configPath };
 }

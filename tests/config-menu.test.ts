@@ -115,8 +115,298 @@ describe("Codex Connect config menu", () => {
     });
     expect(output.join("")).toContain("全局价格显示方式已设为 cny");
     expect(output.join("")).toContain(
-      "运行中的 Gateway 会自动重新读取配置；需要重建连接时，后台服务会自动重启，前台进程需重新启动；未运行时将在下次启动生效",
+      "该设置需要重建 Gateway 连接；后台服务运行时会自动重启，前台进程需重新启动；未运行时将在下次启动生效；现有 Thread 不会被修改",
     );
+  });
+
+  it("prints a redacted Gateway configuration summary and keeps the menu open", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.telegram = {
+      bot_token: "telegram-secret",
+      allowed_user_ids: [123],
+      message_format: "html",
+    };
+    document.network = { https_proxy: "http://proxy-user:proxy-secret@127.0.0.1:7890" };
+    document.scheduled_tasks = { enabled: true };
+    writeGatewayConfig(fixture.configPath, document);
+    const output: string[] = [];
+    const select = vi.fn()
+      .mockResolvedValueOnce("summary")
+      .mockResolvedValueOnce("cancel");
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    const rendered = output.join("");
+    expect(rendered).toContain("Gateway 配置总览");
+    expect(rendered).toContain("通讯渠道：Telegram");
+    expect(rendered).toContain("计划任务：开启");
+    expect(rendered).toContain("显式网络代理：https_proxy");
+    expect(rendered).toContain("Codex 官方与第三方 Provider 配置由 codexc setup 管理");
+    expect(rendered).not.toContain("telegram-secret");
+    expect(rendered).not.toContain("proxy-secret");
+    expect(select).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a configured but disabled Weixin channel in the Gateway summary", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.weixin = {
+      enabled: false,
+      account_id: "bot-fixture@im.bot",
+      allowed_user_ids: ["actor-fixture@im.wechat"],
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    const output: string[] = [];
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("summary")
+          .mockResolvedValueOnce("cancel"),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    const rendered = output.join("");
+    expect(rendered).toContain("微信（已配置，未启用）");
+    expect(rendered).not.toContain("Telegram（已配置，未启用）");
+    expect(rendered).not.toContain("bot-fixture@im.bot");
+    expect(rendered).not.toContain("actor-fixture@im.wechat");
+  });
+
+  it("formats the WebUI IPv6 loopback address unambiguously in the Gateway summary", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.webui = { host: "::1", port: 8787 };
+    writeGatewayConfig(fixture.configPath, document);
+    const output: string[] = [];
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("summary")
+          .mockResolvedValueOnce("cancel"),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    expect(output.join("")).toContain("WebUI：[::1]:8787");
+  });
+
+  it("toggles Gateway scheduled tasks through the automation menu", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("automation")
+          .mockResolvedValueOnce("scheduled_tasks")
+          .mockResolvedValueOnce("enabled"),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    expect(result).toEqual({ scheduledTasksEnabled: true, configPath: fixture.configPath });
+    expect(readGatewayConfig(fixture.configPath).scheduled_tasks).toEqual({ enabled: true });
+    expect(output.join("")).toContain("需要重建 Gateway 连接");
+  });
+
+  it("labels the scheduled task back button with its actual Config destination", async () => {
+    const fixture = createFixture();
+    const select = vi.fn()
+      .mockResolvedValueOnce("automation")
+      .mockResolvedValueOnce("scheduled_tasks")
+      .mockImplementationOnce(async (options: {
+        options: Array<{ value: string; label: string }>;
+      }) => {
+        expect(options.options).toContainEqual({ value: "back", label: "返回配置菜单" });
+        return "back";
+      })
+      .mockResolvedValueOnce("cancel");
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+  });
+
+  it("selects Thread Section administrators from enabled channel allowlists", async () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.telegram = {
+      bot_token: "telegram-secret",
+      allowed_user_ids: [123, 456],
+      message_format: "html",
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    const multiselect = vi.fn(async (options: {
+      options: Array<{ value: string; label: string }>;
+    }) => {
+      expect(options.options).toContainEqual({
+        value: "telegram:456",
+        label: "Telegram · 456",
+      });
+      return ["telegram:456"];
+    });
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("automation")
+          .mockResolvedValueOnce("thread_sections"),
+        multiselect,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    expect(result).toEqual({
+      threadSectionAdministrators: ["telegram:456"],
+      configPath: fixture.configPath,
+    });
+    expect(readGatewayConfig(fixture.configPath).thread_sections).toEqual({
+      administrators: ["telegram:456"],
+    });
+  });
+
+  it("updates a proxy without echoing credentials and requires service reinstall", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const proxy = "http://proxy-user:proxy-secret@127.0.0.1:7890";
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("network")
+          .mockResolvedValueOnce("https_proxy")
+          .mockResolvedValueOnce("set"),
+        password: vi.fn(async () => proxy),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    expect(result).toEqual({ field: "https_proxy", configured: true, configPath: fixture.configPath });
+    expect(readGatewayConfig(fixture.configPath).network).toMatchObject({ https_proxy: proxy });
+    expect(output.join("")).toContain("codexc service install");
+    expect(output.join("")).not.toContain("proxy-secret");
+  });
+
+  it("labels the network action back button with its actual Config destination", async () => {
+    const fixture = createFixture();
+    const select = vi.fn()
+      .mockResolvedValueOnce("network")
+      .mockResolvedValueOnce("https_proxy")
+      .mockImplementationOnce(async (options: {
+        options: Array<{ value: string; label: string }>;
+      }) => {
+        expect(options.options).toContainEqual({ value: "back", label: "返回配置菜单" });
+        return "back";
+      })
+      .mockResolvedValueOnce("cancel");
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+  });
+
+  it("configures the full log level and development Plugin API", async () => {
+    const fixture = createFixture();
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("advanced")
+          .mockResolvedValueOnce("logging")
+          .mockResolvedValueOnce("trace"),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("advanced")
+          .mockResolvedValueOnce("plugin_api")
+          .mockResolvedValueOnce("enabled"),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    const document = readGatewayConfig(fixture.configPath);
+    expect(document.logging).toEqual({ level: "trace" });
+    expect(document.experimental).toEqual({ plugin_api: true });
+  });
+
+  it("labels the Plugin API back button with its actual Config destination", async () => {
+    const fixture = createFixture();
+    const select = vi.fn()
+      .mockResolvedValueOnce("advanced")
+      .mockResolvedValueOnce("plugin_api")
+      .mockImplementationOnce(async (options: {
+        options: Array<{ value: string; label: string }>;
+      }) => {
+        expect(options.options).toContainEqual({ value: "back", label: "返回配置菜单" });
+        return "back";
+      })
+      .mockResolvedValueOnce("cancel");
+
+    await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
   });
 
   it("sets the global price currency to USD through the menu", async () => {
@@ -599,6 +889,10 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain(`配置文件：${fixture.configPath}`);
     const options = select.mock.calls[0]?.[0]?.options ?? [];
     const values = options.map((option: { value: string }) => option.value);
+    expect(values).toContain("summary");
+    expect(values).toContain("automation");
+    expect(values).toContain("network");
+    expect(values).toContain("advanced");
     expect(values).toContain("paths");
     expect(values).toContain("metrics");
     expect(values).not.toContain("workspaces");
@@ -649,9 +943,7 @@ describe("Codex Connect config menu", () => {
       token: "view-token",
     });
     expect(output.join("")).toContain("已接入中心");
-    expect(output.join("")).toContain(
-      "运行中的 Gateway 会自动重新读取配置；需要重建连接时，后台服务会自动重启，前台进程需重新启动；未运行时将在下次启动生效",
-    );
+    expect(output.join("")).toContain("需要重建 Gateway 连接");
     expect(output.join("")).toContain("WebUI 全局页将在重启 WebUI 后生效");
   });
 

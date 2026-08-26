@@ -54,9 +54,7 @@ describe("Debug setup", () => {
       `level = "${expectedLevel}"`,
     );
     expect(output.join("")).toContain(enabled ? "已开启" : "已关闭");
-    expect(output.join("")).toContain(
-      "运行中的 Gateway 会自动重新读取配置；需要重建连接时，后台服务会自动重启，前台进程需重新启动；未运行时将在下次启动生效",
-    );
+    expect(output.join("")).toContain("需要重建 Gateway 连接");
   });
 
   it("returns without changing config when going back", async () => {

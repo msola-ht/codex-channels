@@ -181,6 +181,9 @@ describe("codexc CLI", () => {
 
     const configHelp = spawnSync(process.execPath, [cli, "config", "--help"], { encoding: "utf8" });
     expect(configHelp.stdout).toContain("codexc config [--json]");
+    expect(configHelp.stdout).toContain("脱敏配置总览");
+    expect(configHelp.stdout).toContain("网络代理");
+    expect(configHelp.stdout).toContain("Thread 分区管理员");
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
     expect(setupHelp.stdout).toContain("登录并恢复官方 / 默认模型与思考等级");

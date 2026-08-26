@@ -41,7 +41,8 @@ codexc init
 codexc setup
 ```
 
-`codexc config` 可交互调整常用设置；在脚本或管道中运行时会输出用户目录与配置文件路径。
+`codexc config` 提供脱敏配置总览，并可交互调整 Gateway 的显示、系统、自动化、网络、WebUI
+和指标设置；在脚本或管道中运行时会输出用户目录与配置文件路径。
 
 注册需要让 Codex 操作的项目：
 
@@ -101,7 +102,8 @@ https_proxy = "http://127.0.0.1:7890"
 ```
 
 运行 `codexc doctor` 可确认 OpenAI 请求会走代理还是直连；修改代理后运行
-`codexc service restart all`。Gateway 启动时还会做一次 OpenAI 传输探测；连接失败时会在
+`codexc service install`，重新生成包含当前网络环境的后台服务。Gateway 启动时还会做一次
+OpenAI 传输探测；连接失败时会在
 已有授权会话的上线通知中提醒检查代理，但不会停止 Gateway。
 
 ### 可选设置
@@ -122,9 +124,11 @@ price_currency = "cny"
 服务端配置、令牌边界和数据说明见 [`docs/metrics-sync.md`](docs/metrics-sync.md)。
 
 在 `codexc config` 中选择“系统设置 → 调试模式”，可开启脱敏的运行阶段、耗时和统计详情。
-修改后运行 `codexc service restart gateway`。调试内容不会包含消息正文、凭据或审批内容。
+后台服务运行时会自动重启 Gateway，未运行时在下次启动生效；前台运行时需重新启动。
+调试内容不会包含消息正文、凭据或审批内容。
 
-Codex 0.148.0 的 Plugin API 仍在开发中，Gateway 默认关闭。需要调试时显式开启并重启 Gateway：
+Codex 0.148.0 的 Plugin API 仍在开发中，Gateway 默认关闭。需要调试时可在
+`codexc config` 中选择“高级设置 → Plugin API”，或显式配置：
 
 ```toml
 [experimental]
@@ -310,7 +314,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue add <文本>`、`/queue list [页码]`、`/queue update <ID 或列表序号> <文本>`、`/queue delete <ID 或列表序号>`、`/queue reorder <ID 或列表序号> <位置>`、`/queue start [ID 或列表序号]`、`/revert list [页码]`、`/revert <Turn ID 或列表序号>`、`/revert confirm <一次性令牌>`、`/compact`、`/fork`、`/review`、`/release`；Queue 由 App Server 持久保存，容量最多 100 条
-- 计划任务：启用 `[scheduled_tasks].enabled = true` 后使用 `/schedule` 查看；启用后新建的前台 Thread 可由 Agent 调用 `schedule_task` 工具创建确认预览，飞书和 Telegram 提供确认/取消按钮，微信使用 `/schedule confirm <令牌>`；既有 Thread 不会为注入工具而自动切换，仍可使用 `/schedule <自然语言>`、`/schedule add interval <N>m|h <时区> <文本>`、`/schedule add once <日期> <时间> <时区> <文本>` 等命令；支持每 N 分钟、每天、工作日、每周、每月与一次性，完整语法与安全边界见 [`docs/scheduled-tasks-development.md`](docs/scheduled-tasks-development.md)
+- 计划任务：在 `codexc config` 中选择“自动化 → 计划任务”启用后使用 `/schedule` 查看；启用后新建的前台 Thread 可由 Agent 调用 `schedule_task` 工具创建确认预览，飞书和 Telegram 提供确认/取消按钮，微信使用 `/schedule confirm <令牌>`；既有 Thread 不会为注入工具而自动切换，仍可使用 `/schedule <自然语言>`、`/schedule add interval <N>m|h <时区> <文本>`、`/schedule add once <日期> <时间> <时区> <文本>` 等命令；支持每 N 分钟、每天、工作日、每周、每月与一次性，完整语法与安全边界见 [`docs/scheduled-tasks-development.md`](docs/scheduled-tasks-development.md)
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`

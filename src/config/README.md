@@ -85,6 +85,12 @@ API Key 由 Setup 按提供商保存到独立私有凭据文件。它们不属�
 App Server 或 `/model`，当前也没有运行时调用方；保留该注册表只为后续明确设计的直接 API 功能。
 提供商变化需要重启 Gateway，不需要重启 App Server；配置文件不保存 API Key。
 
+`codexc config` 只编辑以上严格 Schema 已支持且适合日常操作的 Gateway 设置，并提供不显示凭据、
+令牌或代理值的配置总览。需要重建渠道连接的变化在后台 Gateway 运行时自动重启，未运行时在下次
+启动生效，前台进程需重新启动；
+显式网络代理会改变 App Server 服务环境，因此保存后必须运行 `codexc service install` 重新生成
+服务定义。Codex 官方与第三方 Provider 配置仍由 `codexc setup` 管理。
+
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须
 同时有效，Open ID 不得重复。群 Chat、`@Bot` 和其他未支持字段仍由严格 Schema 拒绝。

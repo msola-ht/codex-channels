@@ -68,7 +68,7 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
   document.approval = { ...table(document.approval), timeout_seconds: parsed };
   writeConfig(configPath, document);
   output.write(`审批超时已设为 ${parsed} 秒：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { timeoutSeconds: parsed, configPath };
 }
 
@@ -95,7 +95,7 @@ async function runSandbox({ environment, output, prompts, writeConfig }) {
   document.codex = codex;
   writeConfig(configPath, document);
   output.write(`Codex Sandbox 已设为${selected}：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { sandbox: selected, configPath };
 }
 
@@ -132,7 +132,7 @@ async function runDefaultWorkspace({ environment, output, prompts, writeConfig }
   document.default_workspace = selected;
   writeConfig(configPath, document);
   output.write(`默认工作区已设为 ${selected}：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { defaultWorkspace: selected, configPath };
 }
 
@@ -157,7 +157,7 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
       ? `渠道新会话模型已覆盖为 ${normalized}：${configPath}\n`
       : `渠道新会话模型已恢复使用 Codex 全局默认：${configPath}\n`,
   );
-  writeGatewayConfigActivationNotice(output);
+  writeGatewayConfigActivationNotice(output, environment, "restart");
   return { defaultModel: normalized || null, configPath };
 }
 
