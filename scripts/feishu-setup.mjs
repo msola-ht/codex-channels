@@ -1,107 +1,119 @@
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-import { registerApp } from "@larksuiteoapi/node-sdk";
 import qrcode from "qrcode";
 
-import {
-  readGatewayConfig,
-  writeGatewayConfig,
-} from "../runtime/gateway-config.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
-import { validateFeishuApplication } from "./feishu-application.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
+import {
+  FeishuSetupSessionError,
+  createFeishuSetupSession,
+  normalizeOpenIds,
+} from "./feishu-setup-session.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 
 const appIdPattern = /^cli_[0-9a-fA-F]{16}$/u;
-const openIdPattern = /^ou_.+$/u;
 const defaultTimeoutSeconds = 600;
+
+export { normalizeOpenIds };
 
 export async function runFeishuSetup({
   environment = process.env,
   input = process.stdin,
   output = process.stdout,
   prompter,
-  registerApplication = registerApp,
-  validateApplication = validateFeishuApplication,
-  configureApplication = configureFeishuApplication,
+  registerApplication,
+  validateApplication,
+  configureApplication,
   renderQRCode = renderTerminalQRCode,
-  createSignal = createTimeoutSignal,
   timeoutSeconds = defaultTimeoutSeconds,
+  createSetupSession = createFeishuSetupSession,
 } = {}) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const existing = table(document.feishu);
   const prompt = prompter ?? createPrompter(input, output);
+  const ownerId = `codexc-setup:${randomUUID()}`;
+  let session;
+  let unsubscribe;
+  let promptAbortController;
+
+  const promptWithinSession = async (operation) => {
+    const before = session.status(ownerId);
+    if (isTerminatedSetupStatus(before)) throw feishuSetupFailure(before);
+    const controller = new AbortController();
+    promptAbortController = controller;
+    try {
+      const value = await operation(controller.signal);
+      const after = session.status(ownerId);
+      if (isTerminatedSetupStatus(after)) throw feishuSetupFailure(after);
+      return value;
+    } catch (error) {
+      const current = session.status(ownerId);
+      if (isTerminatedSetupStatus(current)) throw feishuSetupFailure(current);
+      throw error;
+    } finally {
+      if (promptAbortController === controller) promptAbortController = undefined;
+    }
+  };
 
   try {
     output.write("\nCodex Connect 飞书 Setup\n\n");
     output.write("1. 手动输入应用凭据\n");
     output.write("2. 扫码授权\n");
     const choice = await askChoice(prompt, "请选择 [1-2]", 2);
-    const scanRegistration = choice === "2";
-
-    let result;
+    const mode = choice === "2" ? "scan" : "manual";
+    let manualCredential;
     if (choice === "1") {
-      result = await readManualRegistration(prompt, output);
+      manualCredential = await readManualRegistration(prompt, output);
     } else {
       output.write("\n扫码后请在飞书授权页选择新建应用或已有应用。\n");
       output.write("扫码只用于本次注册；短期授权信息不会保存。\n");
-      let registration;
-      try {
-        registration = await registerApplication({
-          source: "codexc",
-          signal: createSignal(timeoutSeconds),
-          addons: {
-            preset: false,
-            scopes: {
-              tenant: [
-                "application:application:self_manage",
-                "application:application:patch",
-                "im:message:send_as_bot",
-                "im:message.p2p_msg:readonly",
-                "im:resource",
-                "im:message:readonly",
-                "cardkit:card:write",
-              ],
-            },
-            events: {
-              items: {
-                tenant: [
-                  "im.message.receive_v1",
-                  "application.bot.menu_v6",
-                ],
-              },
-            },
-            callbacks: {
-              items: ["card.action.trigger"],
-            },
-          },
-          onQRCodeReady: ({ url, expireIn }) => {
-            const authorizationUrl = validateAuthorizationUrl(url);
-            output.write("\n请使用飞书扫描下面的二维码，并在确认页完成授权：\n\n");
-            renderQRCode(authorizationUrl, output);
-            output.write(`\n二维码有效期约 ${positiveInteger(expireIn, timeoutSeconds)} 秒。\n`);
-            output.write(`无法扫码时可在浏览器打开：${authorizationUrl}\n\n`);
-          },
-        });
-      } catch (error) {
-        throw registrationError(error);
-      }
-      result = validateRegistration(registration);
     }
 
-    const bot = await validateRegisteredApplication(
-      validateApplication,
-      result,
-    );
-    let allowedOpenIds = result.openId ? [result.openId] : [];
-    if (!scanRegistration) {
-      const existingAllowedOpenIds = validConfiguredOpenIds(
-        existing.allowed_open_ids,
-      );
+    session = createSetupSession({
+      ownerId,
+      timeoutMs: timeoutSeconds * 1_000,
+    }, {
+      environment,
+      ...(registerApplication === undefined ? {} : { registerApplication }),
+      ...(validateApplication === undefined ? {} : { validateApplication }),
+      ...(configureApplication === undefined ? {} : { configureApplication }),
+    });
+    let authorizationUrl;
+    unsubscribe = session.subscribe(ownerId, (status) => {
+      if (
+        status.authorization?.url
+        && status.authorization.url !== authorizationUrl
+      ) {
+        authorizationUrl = status.authorization.url;
+        output.write("\n请使用飞书扫描下面的二维码，并在确认页完成授权：\n\n");
+        renderQRCode(authorizationUrl, output);
+        output.write(
+          `\n二维码有效期约 ${status.authorization.expiresInSeconds} 秒。\n`,
+        );
+        output.write(`无法扫码时可在浏览器打开：${authorizationUrl}\n\n`);
+      }
+      if (isTerminatedSetupStatus(status)) promptAbortController?.abort();
+    });
+    session.start(ownerId, mode === "scan"
+      ? { mode }
+      : { mode, ...manualCredential });
+    let status = await session.waitForReady(ownerId);
+    if (
+      !new Set(["validated", "ready"]).has(status.state)
+      || !status.application
+    ) {
+      throw feishuSetupFailure(status);
+    }
+
+    let allowedOpenIds = status.preview?.allowedOpenIds;
+    if (mode === "manual") {
+      const existingAllowedOpenIds = status.application
+        .configuredAllowedOpenIds ?? [];
       if (
         existingAllowedOpenIds.length > 0
-        && await prompt.confirm("保留当前允许名单？", true)
+        && await promptWithinSession((signal) => prompt.confirm(
+          "保留当前允许名单？",
+          true,
+          { signal },
+        ))
       ) {
         allowedOpenIds = [...existingAllowedOpenIds];
       }
@@ -109,42 +121,40 @@ export async function runFeishuSetup({
         prompt,
         output,
         allowedOpenIds,
+        (operation) => promptWithinSession(operation),
       );
+      status = session.useAllowedOpenIds(ownerId, allowedOpenIds);
     }
+    const preview = status.preview;
+    if (!preview) throw feishuSetupFailure(status);
 
     output.write("\n准备保存飞书配置：\n");
     output.write("- 状态：启用\n");
-    output.write(`- App ID：${result.appId}\n`);
-    output.write(`- Bot：${bot.name}\n`);
+    output.write(`- App ID：${preview.appId}\n`);
+    output.write(`- Bot：${preview.botName}\n`);
     output.write("- App Secret：已获取（不显示）\n");
-    output.write(`- 允许用户：${allowedOpenIds.join(", ")}\n`);
-    if (!await prompt.confirm("确认保存以上配置？", true)) {
+    output.write(`- 允许用户：${preview.allowedOpenIds.join(", ")}\n`);
+    if (!await promptWithinSession((signal) => prompt.confirm(
+      "确认保存以上配置？",
+      true,
+      { signal },
+    ))) {
+      session.cancel(ownerId);
       output.write("未保存飞书配置。\n");
       return undefined;
     }
 
-    document.feishu = {
-      ...existing,
-      enabled: true,
-      app_id: result.appId,
-      app_secret: result.appSecret,
-      allowed_open_ids: allowedOpenIds,
-    };
-    writeGatewayConfig(configPath, document);
-    output.write(`\n飞书配置已保存：${configPath}\n`);
-    if (scanRegistration) {
+    const result = await session.confirm(ownerId);
+    output.write(`\n飞书配置已保存：${result.configPath}\n`);
+    if (mode === "scan") {
       output.write("正在自动配置并发布飞书机器人悬浮菜单…\n");
-      try {
-        const configured = await configureApplication({
-          appId: result.appId,
-          appSecret: result.appSecret,
-        });
+      if (result.applicationConfiguration !== "failed") {
         output.write(
-          configured?.changed
+          result.applicationConfiguration === "updated"
             ? "飞书机器人配置已提交发布；请运行 codexc doctor 确认权限、消息事件和版本均已生效。\n"
             : "飞书机器人配置无需修改；请运行 codexc doctor 确认权限、消息事件和版本均已生效。\n",
         );
-      } catch {
+      } else {
         output.write(
           "飞书连接配置已保存，但机器人菜单自动配置未完成；"
           + "机器人可能无法接收消息。请先运行 codexc doctor；"
@@ -154,7 +164,7 @@ export async function runFeishuSetup({
       }
     }
     output.write("下一步运行：codexc doctor\n");
-    if (!scanRegistration) {
+    if (mode === "manual") {
       output.write(
         "请先运行 codexc doctor 检查飞书权限和消息事件；"
         + "如有缺失，请重新运行 codexc setup，选择扫码授权并在飞书页面选择当前应用。\n",
@@ -163,48 +173,20 @@ export async function runFeishuSetup({
     writeGatewayConfigActivationNotice(output);
     return {
       appId: result.appId,
-      allowedOpenIds,
-      configPath,
+      allowedOpenIds: result.allowedOpenIds,
+      configPath: result.configPath,
     };
   } finally {
+    unsubscribe?.();
+    if (session) {
+      const status = session.status(ownerId);
+      if (!new Set(["saved", "cancelled", "expired", "failed"])
+        .has(status.state)) {
+        session.cancel(ownerId);
+      }
+    }
     prompt.close();
   }
-}
-
-export function normalizeOpenIds(values) {
-  const openIds = [];
-  for (const raw of values) {
-    const value = String(raw).trim();
-    if (!value) {
-      continue;
-    }
-    if (!openIdPattern.test(value)) {
-      throw new Error(`无效的飞书用户 Open ID：${value}`);
-    }
-    if (!openIds.includes(value)) {
-      openIds.push(value);
-    }
-  }
-  if (openIds.length === 0) {
-    throw new Error("至少需要一个飞书用户 Open ID");
-  }
-  return openIds;
-}
-
-function validateRegistration(value) {
-  if (!value || typeof value !== "object") {
-    throw new Error("飞书扫码注册返回无效");
-  }
-  const appId = stringValue(value.client_id);
-  const appSecret = stringValue(value.client_secret);
-  const openId = stringValue(value.user_info?.open_id);
-  if (!appIdPattern.test(appId) || !appSecret || !openIdPattern.test(openId)) {
-    throw new Error("飞书扫码注册返回缺少有效的应用凭据或用户 Open ID");
-  }
-  if (value.user_info?.tenant_brand === "lark") {
-    throw new Error("当前项目暂不支持 Lark 租户");
-  }
-  return { appId, appSecret, openId };
 }
 
 async function readManualRegistration(prompt, output) {
@@ -228,13 +210,14 @@ async function readManualRegistration(prompt, output) {
   return { appId, appSecret };
 }
 
-async function collectAllowedOpenIds(prompt, output, initial) {
+async function collectAllowedOpenIds(prompt, output, initial = [], runPrompt) {
   while (true) {
-    const entered = await prompt.ask(
+    const entered = await runPrompt((signal) => prompt.ask(
       initial.length === 0
         ? "允许的用户 Open ID（多个用逗号分隔）"
         : "其他允许的用户 Open ID（可选，多个用逗号分隔）",
-    );
+      { signal },
+    ));
     try {
       return normalizeOpenIds([
         ...initial,
@@ -243,68 +226,6 @@ async function collectAllowedOpenIds(prompt, output, initial) {
     } catch (error) {
       output.write(`${error instanceof Error ? error.message : String(error)}\n`);
     }
-  }
-}
-
-async function validateRegisteredApplication(validateApplication, result) {
-  try {
-    const bot = await validateApplication({
-      appId: result.appId,
-      appSecret: result.appSecret,
-    });
-    const openId = stringValue(bot?.openId);
-    if (!openIdPattern.test(openId)) {
-      throw new Error("invalid bot identity");
-    }
-    return {
-      openId,
-      name: stringValue(bot?.name) || "已验证",
-    };
-  } catch {
-    throw new Error("飞书应用凭据或机器人身份验证失败");
-  }
-}
-
-function validateAuthorizationUrl(value) {
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new Error("飞书扫码授权地址无效");
-  }
-  if (
-    parsed.protocol !== "https:"
-    || !isTrustedFeishuHostname(parsed.hostname)
-  ) {
-    throw new Error("飞书扫码授权地址来源无效");
-  }
-  return parsed.toString();
-}
-
-function isTrustedFeishuHostname(hostname) {
-  return [
-    "feishu.cn",
-    "larksuite.com",
-  ].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
-}
-
-function registrationError(error) {
-  const code = errorCode(error);
-  switch (code) {
-    case "access_denied":
-      return new Error("飞书扫码授权已被拒绝");
-    case "expired_token":
-      return new Error("飞书扫码授权已过期，请重新运行 Setup");
-    case "abort":
-      return new Error("飞书扫码授权已取消或超时");
-    default:
-      return error instanceof Error
-        && (
-          error.message === "飞书扫码授权地址无效"
-          || error.message === "飞书扫码授权地址来源无效"
-        )
-        ? error
-        : new Error("飞书扫码注册失败");
   }
 }
 
@@ -318,21 +239,6 @@ function renderTerminalQRCode(url, output) {
   });
 }
 
-function createTimeoutSignal(timeoutSeconds) {
-  return globalThis.AbortSignal.timeout(timeoutSeconds * 1_000);
-}
-
-function validConfiguredOpenIds(value) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  try {
-    return normalizeOpenIds(value);
-  } catch {
-    return [];
-  }
-}
-
 async function askChoice(prompt, label, maximum) {
   while (true) {
     const choice = await prompt.ask(label);
@@ -342,32 +248,27 @@ async function askChoice(prompt, label, maximum) {
   }
 }
 
-function positiveInteger(value, fallback) {
-  return Number.isInteger(value) && value > 0 ? value : fallback;
+function isTerminatedSetupStatus(status) {
+  return ["expired", "cancelled", "failed"].includes(status.state);
 }
 
-function errorCode(error) {
-  return error && typeof error === "object" && typeof error.code === "string"
-    ? error.code
-    : "";
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-async function configureFeishuApplication({ appId, appSecret }) {
-  const { FeishuApplicationHttpApi } = await import(
-    "../dist/surfaces/feishu/index.js"
+function feishuSetupFailure(status) {
+  const code = status.error?.code ?? status.state;
+  const messages = {
+    expired: "飞书扫码授权已过期，请重新运行 Setup",
+    cancelled: "飞书扫码授权已取消或超时",
+    "access-denied": "飞书扫码授权已被拒绝",
+    "registration-failed": "飞书扫码注册失败",
+    "invalid-registration": "飞书扫码注册返回无效",
+    "unsupported-tenant": "当前项目暂不支持 Lark 租户",
+    "validation-failed": "飞书应用凭据或机器人身份验证失败",
+    "save-failed": "飞书配置保存失败",
+  };
+  return new FeishuSetupSessionError(
+    code,
+    "session",
+    messages[code] ?? "飞书 Setup 失败",
   );
-  return new FeishuApplicationHttpApi({
-    appId,
-    appSecret,
-  }).configureApplication();
 }
 
 function isDirectExecution(moduleUrl, argvPath) {

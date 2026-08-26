@@ -9,6 +9,7 @@ export async function validateFeishuApplication(
   {
     createClient = createFeishuClient,
     requestTimeoutMs = defaultRequestTimeoutMs,
+    signal,
   } = {},
 ) {
   if (
@@ -30,6 +31,7 @@ export async function validateFeishuApplication(
       method: "GET",
       url: "/open-apis/bot/v3/info",
       timeout: requestTimeoutMs,
+      ...(signal ? { signal } : {}),
     });
     const openId = stringValue(response?.bot?.open_id);
     if (!openIdPattern.test(openId)) {

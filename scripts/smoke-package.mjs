@@ -109,6 +109,8 @@ try {
     "runtime/process-lifecycle.mjs",
     "runtime/service-targets.mjs",
     "scripts/feishu-application.mjs",
+    "scripts/feishu-setup-session.d.mts",
+    "scripts/feishu-setup-session.mjs",
     "scripts/feishu-setup.mjs",
     "scripts/model-provider-default-setup.d.mts",
     "scripts/model-provider-default-setup.mjs",
