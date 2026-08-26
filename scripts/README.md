@@ -170,9 +170,11 @@
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
-- `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：按已配置的第三方 Provider
-  和模型设置新会话默认模型、目录声明的上下文、默认思考等级及自动压缩阈值；切换模式同步更新
-  私有 Profile，固定模式复用官方用户配置事务并清除根级覆盖，历史 Thread 仍保留创建时的模型。
+- `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
+  默认模型、思考等级和自动压缩阈值的无终端校验、预览与执行接口；切换模式更新私有 Profile，固定
+  模式复用官方用户配置事务并在失败时恢复模型目录，结果明确返回 App Server 重启动作。
+- `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
+  Provider、模型、思考等级和自动压缩交互与中文渲染，写入复用管理接口；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
   受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。

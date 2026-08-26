@@ -118,6 +118,8 @@
   统一 Provider 管理状态对 OpenAI 默认值、受管与自定义 Provider、备份候选、模型目录和共享子代理的汇总与凭据隔离；
   自定义主 Provider 新增、编辑、切换与删除的无 prompts 脱敏预览、稳定字段错误、生效动作、
   同 Origin Key 内部保留、使用中保护和结构化部分成功；
+  受管 Provider 默认模型、思考等级与自动压缩的无 prompts 预览、稳定字段错误、切换模式写入、
+  固定模式配置失败回滚和 App Server 重启动作；
   共享私有文件读取以同一描述符完成 `O_NOFOLLOW` 与权限校验；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash、Flash Vision Exp 与 Pro 可选、受控目录输入能力校验，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
