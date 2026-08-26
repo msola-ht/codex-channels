@@ -38,8 +38,9 @@
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
   凭据；自定义主 Provider 的私有候选备份按普通私有文件同样校验类型、属主、权限、大小和符号链接；
   自定义切换模式使用显式私有注册表和逐 Provider 的 `sf-custom-<id>` 私有 Profile，仅接受 Codex
-  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段，Provider 块与 Key 不进入主配置；Remote TUI 使用对应 Profile，后台 App Server
-  则使用加载器生成的非敏感 `-c` 覆盖，并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；
+  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段，Provider 块与 Key 不进入主配置；Remote TUI
+  通过公开 `custom-<id>` 名称映射到该内部 Profile；后台 App Server 则使用加载器生成的非敏感 `-c`
+  覆盖，并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；
   读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
   共享第三方子代理只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个 Provider 使用独立

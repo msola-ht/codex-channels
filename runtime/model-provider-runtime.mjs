@@ -34,6 +34,7 @@ const maximumCatalogBytes = 2_097_152;
 const managedThirdPartyRoleName = "external";
 const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
 export const customPrimaryProviderProfileName = "sf-custom";
+const customSwitchingProviderProfileName = "custom";
 const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon-bedrock"]);
 const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 const customSwitchingRegistryMaximumBytes = 262_144;
@@ -594,7 +595,8 @@ function configuredCustomSwitchingProfileFromContent(
     : id;
   const supportsWebsockets = provider.supports_websockets === true;
   const environmentKey = customSwitchingProviderEnvironmentKey(id);
-  const profileName = `${customPrimaryProviderProfileName}-${id}`;
+  const profileName = `${customSwitchingProviderProfileName}-${id}`;
+  const codexProfileName = `${customPrimaryProviderProfileName}-${id}`;
   return {
     id,
     provider: id,
@@ -604,6 +606,7 @@ function configuredCustomSwitchingProfileFromContent(
     apiKey,
     supportsWebsockets,
     profileName,
+    codexProfileName,
     profileContent,
     reasoningEffort: customSwitchingDefaultReasoningEffort,
     catalogSource: { kind: "official" },

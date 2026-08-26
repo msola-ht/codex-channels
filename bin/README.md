@@ -22,7 +22,7 @@
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek`、
-  `--profile opencode-go`、`--profile opencode-go-<账户>` 或 `--profile sf-custom-<Provider ID>`
+  `--profile opencode-go`、`--profile opencode-go-<账户>` 或 `--profile custom-<Provider ID>`
   选择隔离实例；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；

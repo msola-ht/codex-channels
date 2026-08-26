@@ -264,9 +264,10 @@
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
-  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，尊重 `--` 后原样传给 Codex 的参数边界。
+  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，统一拒绝把受管 Provider 的内部
+  `sf-*` 名称或保留的 `sf-custom-*` 名称误作公开参数，并尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  Provider `--profile`（当前公开为自定义第三方的 `sf-custom-<Provider ID>`、`deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
+  Provider `--profile`（当前公开为自定义第三方的 `custom-<Provider ID>`、`deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
   磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，

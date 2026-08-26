@@ -44,7 +44,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 在 `runtime/model-provider-definitions.mjs` 新增冻结定义并加入
 `managedModelProviderDefinitions`：
 
-- `id`、`displayName`、`codexProfileName`、`profileFileName`、`catalogFileName`、
+- `id`、`displayName`、公开 `profileName`、内部 `codexProfileName`、`profileFileName`、`catalogFileName`、
   `catalogManifestFileName`、`managedMarkerFileName`、`backupDirectoryName`；
 - `baseUrl`、`wireApi`、`apiKeyEnvironmentKey`、`supportsWebsockets`；
 - `defaultModel`、`defaultReasoningEffort`、受控 `models` 列表。
@@ -53,7 +53,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
   静态或人工审查目录可把来源也设为 `none`；通用远程价格目录使用 `remote`，不得把任意 URL、
   脚本或动态插件放入定义。启用目录更新适配器时必须声明非空受控来源。
 
-注册后自动获得：watcher 目录路径、`codexc remote --profile <id>` 别名、
+注册后自动获得：watcher 目录路径、`codexc remote --profile <profileName>` 规范名称、
 `agents.external` 角色、文件迁移、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
 按计价适配器创建解析器并以精确 Provider ID 登记，按账户适配器创建账户窄适配器。未知能力和
@@ -232,8 +232,8 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 在固定模式把自定义 Thread 路由到主 App Server；切换模式保持官方 `openai` 主实例，并通过
 `~/.codex/sf-custom-<Provider ID>.config.toml` 启动独立自定义 App Server。每个 Profile 完整保存该
 Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"` 和服务层级，主
-`~/.codex/config.toml` 保持官方配置。`codexc remote --profile sf-custom-<Provider ID>`
-连接该隔离实例；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
+`~/.codex/config.toml` 保持官方配置。`codexc remote --profile custom-<Provider ID>`
+连接该隔离实例，并在内部映射到 `sf-custom-<Provider ID>` Codex Profile；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
 跨 Provider 选择沿用现有新 Thread 路由边界。锁定版 App Server 不接受 `--profile`，后台服务会先
 严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，
 不进入命令行。多个切换模式 Provider 通过私有显式注册表同时保留，并使用独立 Socket 与统计代理。

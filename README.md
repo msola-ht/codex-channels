@@ -160,6 +160,9 @@ codexc primary-provider switch <Provider ID> [模型]  # 切换主 Provider
 codexc primary-provider remove <Provider ID>         # 删除 Provider
 ```
 
+切换模式下，终端使用 `codexc remote --profile custom-<Provider ID>` 连接对应隔离实例；
+`sf-custom-<Provider ID>` 是内部 Codex Profile 名称，不作为 `codexc remote` 的公开参数。
+
 旧版单文件 `sf-custom.config.toml` 不自动迁移；删除旧配置后重新运行 Setup 即可。
 
 修改后运行：
