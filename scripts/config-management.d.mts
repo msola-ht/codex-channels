@@ -1,6 +1,8 @@
 export type GatewaySettingActivation =
   | "none"
   | "restart-gateway"
+  | "restart-webui"
+  | "restart-center"
   | "restart-all"
   | "reinstall-services";
 
@@ -43,6 +45,38 @@ export interface GatewaySettings {
     pluginApiEnabled: boolean;
   };
   telegram: { configured: boolean; messageFormat: "html" | "rich" };
+  webui: {
+    host: "127.0.0.1" | "::1" | "0.0.0.0";
+    port: number;
+    tokenConfigured: boolean;
+  };
+  metrics: {
+    storage: { retentionDays: number; maxRows: number };
+    sync: {
+      enabled: boolean;
+      endpoint: string | null;
+      deviceId: string | null;
+      deviceTokenConfigured: boolean;
+      intervalSeconds: number;
+      batchSize: number;
+    };
+    view: { enabled: boolean; endpoint: string | null; tokenConfigured: boolean };
+    center: {
+      enabled: boolean;
+      host: "127.0.0.1" | "::1" | "0.0.0.0";
+      port: number;
+      tokenConfigured: boolean;
+      deviceTokenConfigured: boolean;
+      databasePath: string;
+    };
+  };
+  workspaces: Array<{
+    id: string;
+    name: string;
+    sandbox: "read-only" | "workspace-write" | "danger-full-access" | null;
+    approvalPolicy: "untrusted" | "on-request" | "never" | null;
+    permissions: string | null;
+  }>;
   channels: Array<{
     id: "telegram" | "feishu" | "weixin";
     displayName: string;
@@ -70,6 +104,42 @@ export type GatewaySettingInput =
       field: "http_proxy" | "https_proxy" | "all_proxy" | "no_proxy";
       action: "set" | "clear";
       value?: string;
+    }
+  | { kind: "webui.host"; value: "127.0.0.1" | "::1" | "0.0.0.0" | null; token?: string }
+  | { kind: "webui.port"; value: number | null }
+  | { kind: "webui.token"; action: "set" | "clear"; value?: string }
+  | { kind: "metrics.storage"; retentionDays: number; maxRows: number }
+  | { kind: "metrics.sync-params"; intervalSeconds?: number; batchSize?: number }
+  | {
+      kind: "metrics.connect";
+      endpoint: string;
+      deviceToken: string;
+      viewToken: string;
+      deviceId?: string | null;
+    }
+  | { kind: "metrics.disconnect" }
+  | { kind: "metrics.center.enabled"; value: boolean }
+  | {
+      kind: "metrics.center.host";
+      value: "127.0.0.1" | "::1" | "0.0.0.0" | null;
+      token?: string;
+      deviceToken?: string;
+    }
+  | { kind: "metrics.center.port"; value: number | null }
+  | {
+      kind: "metrics.center.token";
+      field: "token" | "device_token";
+      action: "set" | "clear";
+      value?: string;
+    }
+  | { kind: "metrics.center.database-path"; value: string | null }
+  | {
+      kind: "workspace.permissions";
+      workspaceId: string;
+      update:
+        | { kind: "sandbox"; value: "read-only" | "workspace-write" | "danger-full-access" | null }
+        | { kind: "approval"; value: "untrusted" | "on-request" | "never" | null }
+        | { kind: "permissions"; value: string | null };
     };
 
 export function loadGatewaySettings(environment?: NodeJS.ProcessEnv): GatewaySettings;
@@ -91,6 +161,7 @@ export function updateGatewaySetting(
   kind: GatewaySettingInput["kind"];
   configPath: string;
   previousRevision: string;
+  backupPath?: string;
   value: unknown;
   activation: GatewaySettingActivation;
 };

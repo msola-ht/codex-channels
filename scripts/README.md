@@ -197,10 +197,13 @@
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
-  设置脱敏读取与明确修改接口；只接受受控的显示、系统、自动化、网络、高级和 Telegram 格式输入，
-  返回稳定字段错误与 `restart-gateway` / `reinstall-services` 生效动作，网络读取只显示是否已配置；
+  设置脱敏读取与明确修改接口；只接受受控的显示、系统、自动化、网络、高级、Telegram 格式、WebUI、
+  指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，凭据和网络读取只显示是否已配置；
   读取同时返回原始文件修订，修改必须携带并在应用前复核；最终提交复用 Gateway Config 的共享写锁
   和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置。
+- `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
+  `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
+  的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、Thread 分区管理员、显式 HTTP(S) 代理、日志等级与
   开发中的 Plugin API；复用 Config 管理接口，管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
@@ -211,6 +214,10 @@
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
   保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
+- `management-access.mjs`、`management-confirmations.mjs`、`management-audit.mjs`、
+  `management-security.mjs` / `management-security.d.mts`：未来本机管理适配器复用的无 HTTP 安全基础，
+  覆盖独立管理凭据、短期会话、Origin/CSRF、限速、请求上限、安全响应头、一次性高风险确认和脱敏审计；
+  当前不监听端口、不接入只读 WebUI，也不开放管理写路由。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
   Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
 - `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API

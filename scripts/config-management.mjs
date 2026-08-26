@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 
 import {
   GatewayConfigConflictError,
@@ -7,7 +7,21 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { resolveHttpProxyUrl } from "../runtime/network-proxy.mjs";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { invalidSetting } from "./config-management-error.mjs";
+import {
+  applyMetricsSetting,
+  projectMetricsSettings,
+} from "./config-metrics-management.mjs";
 import { gatewayChannelStates } from "./config-summary.mjs";
+import {
+  applyWebuiSetting,
+  projectWebuiSettings,
+} from "./config-webui-management.mjs";
+import {
+  applyWorkspaceSetting,
+  projectWorkspaceSettings,
+} from "./config-workspace-management.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 const operationUpdateValues = ["full", "compact", "hidden"];
@@ -17,14 +31,7 @@ const messageFormatValues = ["html", "rich"];
 const loggingLevelValues = ["fatal", "error", "warn", "info", "debug", "trace"];
 const proxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
 
-export class ConfigManagementError extends Error {
-  constructor(code, field, message) {
-    super(message);
-    this.name = "ConfigManagementError";
-    this.code = code;
-    this.field = field;
-  }
-}
+export { ConfigManagementError } from "./config-management-error.mjs";
 
 export function loadGatewaySettings(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
@@ -75,6 +82,9 @@ export function loadGatewaySettings(environment = process.env) {
       configured: stringValue(telegram.bot_token) !== "",
       messageFormat: telegram.message_format === "rich" ? "rich" : "html",
     },
+    webui: projectWebuiSettings(document),
+    metrics: projectMetricsSettings(document),
+    workspaces: projectWorkspaceSettings(document),
     channels: gatewayChannelStates(document),
   };
 }
@@ -99,9 +109,25 @@ export function updateGatewaySetting(
   if (readConfig(configPath, "utf8") !== snapshot.content) {
     throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
   }
+  const backupPath = result.backupRequired
+    ? writeConfigBackup(configPath, snapshot.content)
+    : null;
   try {
     writeConfig(configPath, document);
   } catch (error) {
+    if (backupPath !== null) {
+      try {
+        unlinkSync(backupPath);
+      } catch (cleanupError) {
+        if (cleanupError?.code !== "ENOENT") {
+          throw new AggregateError(
+            [error, cleanupError],
+            "Gateway 配置写入和备份清理均失败",
+            { cause: cleanupError },
+          );
+        }
+      }
+    }
     if (error instanceof GatewayConfigConflictError) {
       throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
     }
@@ -111,7 +137,9 @@ export function updateGatewaySetting(
     kind: input.kind,
     configPath,
     previousRevision: snapshot.revision,
-    ...result,
+    value: result.value,
+    activation: result.activation,
+    ...(backupPath === null ? {} : { backupPath }),
   };
 }
 
@@ -126,6 +154,10 @@ function applySetting(document, input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "设置输入必须是对象");
   }
+  const delegated = applyWebuiSetting(document, input)
+    ?? applyMetricsSetting(document, input)
+    ?? applyWorkspaceSetting(document, input);
+  if (delegated !== undefined) return delegated;
   switch (input.kind) {
     case "display.operation-updates": {
       const value = enumValue(input.value, operationUpdateValues, "value", "操作详情显示");
@@ -244,6 +276,13 @@ function readConfigSnapshot(configPath, readConfig = readFileSync) {
   };
 }
 
+function writeConfigBackup(configPath, content) {
+  const timestamp = new Date().toISOString().replace(/[:.]/gu, "-");
+  const backupPath = `${configPath}.bak-${timestamp}`;
+  writePrivateFileAtomicSync(backupPath, content);
+  return backupPath;
+}
+
 function assertExpectedRevision(value) {
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
     throw invalid("revision", "required-revision", "必须提供有效的 Gateway 配置修订值");
@@ -349,7 +388,7 @@ function uniqueStrings(value, field, label) {
 }
 
 function invalid(field, code, message) {
-  return new ConfigManagementError(code, field, message);
+  return invalidSetting(field, code, message);
 }
 
 function integerInRange(value, minimum, maximum) {

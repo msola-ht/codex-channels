@@ -1,10 +1,12 @@
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -170,6 +172,144 @@ describe("Gateway Config management", () => {
       code: "stale-revision",
       field: "revision",
     }));
+  });
+
+  it("removes a metrics backup when the config write conflicts", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+
+    expect(() => updateGatewaySetting({
+      kind: "metrics.disconnect",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+      writeConfig: () => {
+        throw new GatewayConfigConflictError();
+      },
+    })).toThrow(expect.objectContaining({ code: "stale-revision" }));
+    expect(readdirSync(dirname(fixture.configPath)).filter((name) => name.includes(".bak-"))).toEqual([]);
+  });
+
+  it("manages WebUI settings without returning the access token", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+
+    const result = updateGatewaySetting({
+      kind: "webui.host",
+      value: "0.0.0.0",
+      token: "private-webui-token",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+
+    expect(result.activation).toBe("restart-webui");
+    const updated = loadGatewaySettings(fixture.environment);
+    expect(updated.webui).toEqual({ host: "0.0.0.0", port: 8787, tokenConfigured: true });
+    expect(JSON.stringify(updated)).not.toContain("private-webui-token");
+  });
+
+  it("connects metrics with a private backup and credential-free status", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+
+    const result = updateGatewaySetting({
+      kind: "metrics.connect",
+      endpoint: "http://127.0.0.1:8790",
+      deviceToken: "private-device-token",
+      viewToken: "private-view-token",
+      deviceId: "device-a",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+
+    expect(result.backupPath).toEqual(expect.any(String));
+    expect(result.activation).toBe("restart-all");
+    expect(existsSync(result.backupPath!)).toBe(true);
+    const updated = loadGatewaySettings(fixture.environment);
+    expect(updated.metrics.sync).toMatchObject({
+      enabled: true,
+      endpoint: "http://127.0.0.1:8790/api/ingest",
+      deviceId: "device-a",
+      deviceTokenConfigured: true,
+    });
+    expect(updated.metrics.view).toMatchObject({
+      enabled: true,
+      endpoint: "http://127.0.0.1:8790",
+      tokenConfigured: true,
+    });
+    expect(JSON.stringify(updated)).not.toContain("private-device-token");
+    expect(JSON.stringify(updated)).not.toContain("private-view-token");
+  });
+
+  it("updates Workspace permissions and returns a stable conflict", () => {
+    const fixture = createFixture();
+    let settings = loadGatewaySettings(fixture.environment);
+    const workspaceId = settings.workspaces[0]!.id;
+
+    updateGatewaySetting({
+      kind: "workspace.permissions",
+      workspaceId,
+      update: { kind: "sandbox", value: "workspace-write" },
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+    settings = loadGatewaySettings(fixture.environment);
+    expect(settings.workspaces[0]).toMatchObject({ sandbox: "workspace-write" });
+
+    expect(() => updateGatewaySetting({
+      kind: "workspace.permissions",
+      workspaceId,
+      update: { kind: "permissions", value: ":read-only" },
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toThrow(expect.objectContaining({
+      code: "permission-conflict",
+      field: "update",
+    }));
+  });
+
+  it("keeps metrics center tokens distinct", () => {
+    const fixture = createFixture();
+    let settings = loadGatewaySettings(fixture.environment);
+    updateGatewaySetting({
+      kind: "metrics.center.token",
+      field: "token",
+      action: "set",
+      value: "shared-token",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+    settings = loadGatewaySettings(fixture.environment);
+
+    expect(() => updateGatewaySetting({
+      kind: "metrics.center.token",
+      field: "device_token",
+      action: "set",
+      value: "shared-token",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toThrow(expect.objectContaining({ code: "token-conflict" }));
+  });
+
+  it("returns the center-specific activation action", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+
+    const result = updateGatewaySetting({
+      kind: "metrics.center.enabled",
+      value: true,
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+
+    expect(result.activation).toBe("restart-center");
   });
 });
 

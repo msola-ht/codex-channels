@@ -1,27 +1,22 @@
 import {
-  readGatewayConfig,
-  writeGatewayConfig,
-} from "../runtime/gateway-config.mjs";
-import {
-  applyWorkspacePermissionUpdate,
-  WorkspacePermissionConflictError,
-} from "../runtime/workspace-permission.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
+  ConfigManagementError,
+  loadGatewaySettings,
+  updateGatewaySetting,
+} from "./config-management.mjs";
 
 export async function runWorkspaceSettings({
   environment,
   output,
   prompts,
-  writeConfig = writeGatewayConfig,
+  writeConfig,
 }) {
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const workspaces = Array.isArray(document.workspaces) ? document.workspaces : [];
+  const settings = loadGatewaySettings(environment);
+  const workspaces = settings.workspaces;
   if (workspaces.length === 0) {
     output.write("当前没有已配置的 Workspace。\n");
     return { action: "back" };
   }
-  const workspaceEntries = workspaces.map((entry) => table(entry));
+  const workspaceEntries = workspaces;
   const workspace =
     workspaceEntries.length === 1
       ? String(workspaceEntries[0].id)
@@ -57,7 +52,7 @@ export async function runWorkspaceSettings({
         {
           value: "approval_policy",
           label: "审批策略",
-          hint: `当前：${entry.approval_policy ?? "未配置（使用默认）"}`,
+          hint: `当前：${entry.approvalPolicy ?? "未配置（使用默认）"}`,
         },
         {
           value: "permissions",
@@ -92,7 +87,7 @@ export async function runWorkspaceSettings({
       const selected = await prompts.select({
         message: "审批策略",
         showInstructions: false,
-        initialValue: entry.approval_policy ?? "on-request",
+        initialValue: entry.approvalPolicy ?? "on-request",
         options: [
           { value: "untrusted", label: "不信任", hint: "更严格地要求审批" },
           { value: "on-request", label: "按需审批", hint: "需要时请求审批" },
@@ -118,31 +113,35 @@ export async function runWorkspaceSettings({
     } else {
       throw new Error(`未知工作区权限项：${String(field)}`);
     }
+    let result;
     try {
-      applyWorkspacePermissionUpdate(entry, update);
+      result = updateGatewaySetting({
+        kind: "workspace.permissions",
+        workspaceId: String(entry.id),
+        update,
+      }, {
+        environment,
+        expectedRevision: settings.revision,
+        writeConfig,
+      });
     } catch (error) {
-      if (error instanceof WorkspacePermissionConflictError) {
+      if (error instanceof ConfigManagementError && error.code === "permission-conflict") {
         output.write(`${error.message}\n`);
         continue;
       }
       throw error;
     }
-    document.workspaces = workspaces;
-    writeConfig(configPath, document);
+    const updated = result.value;
     output.write(
-      `已更新 ${entry.name ?? entry.id} 的权限：${configPath}\n`
+      `已更新 ${entry.name ?? entry.id} 的权限：${result.configPath}\n`
         + "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。\n",
     );
     return {
       workspaceId: String(entry.id),
-      sandbox: entry.sandbox,
-      approvalPolicy: entry.approval_policy,
-      permissions: entry.permissions,
-      configPath,
+      sandbox: updated.sandbox ?? undefined,
+      approvalPolicy: updated.approvalPolicy ?? undefined,
+      permissions: updated.permissions ?? undefined,
+      configPath: result.configPath,
     };
   }
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }

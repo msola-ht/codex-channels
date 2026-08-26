@@ -3,8 +3,8 @@
 ## 适用范围
 
 本文定义未来把 Setup、Config、服务安装和更新接入本机可视化管理入口前必须满足的安全边界。
-当前只确定接口约束，不修改只读指标 WebUI，不增加写路由，也不把现有 WebUI Bearer Token 直接升级为
-管理权限。
+当前已同时提供不依赖 HTTP Server 的安全共享基础，但不修改只读指标 WebUI，不增加写路由，也不把
+现有 WebUI Bearer Token 直接升级为管理权限。
 
 管理能力必须继续调用 `scripts/` 中不依赖终端的结构化接口。HTTP 层只负责认证、请求约束、预览确认、
 任务生命周期和结果映射，不复制配置、Provider、渠道 Setup、服务安装或更新语义。
@@ -72,3 +72,15 @@
 4. 只读指标 API 与管理 API 权限完全分离，既有 WebUI Token 无法获得写权限。
 5. 真实服务中断、源码替换和凭据事务继续在现有管理模块或独立任务中执行，HTTP 层不直接操作文件、
    服务管理器、数据库或 App Server Transport。
+
+## 当前实现映射
+
+- `management-access.mjs`：管理凭据私有文件、短期会话、精确 Origin、CSRF、登录与分类限速、请求元数据
+  上限、安全响应头和受限 Cookie。
+- `management-confirmations.mjs`：稳定 JSON 指纹与绑定会话、操作、输入、修订和预览的一次性确认令牌。
+- `management-audit.mjs`：固定事件版本、固定脱敏字段、`0600` 私有 JSONL 与有界轮转。
+- `management-security.mjs` / `management-security.d.mts`：未来本机管理适配器唯一应导入的共享入口。
+
+这些模块只提供组合原语，不会自行监听端口、读取 WebUI Token、执行配置修改或启动后台任务。未来增加
+管理路由时，路由必须在调用现有结构化管理接口之前依次完成请求约束、认证、限速、修订或确认检查，
+并按操作风险落实审计失败策略；不能因为共享原语已经存在而默认开放任何写能力。
