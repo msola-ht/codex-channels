@@ -72,13 +72,22 @@ export function snapshotOpencodeGoFiles(paths) {
   }));
 }
 
-export async function restoreOpencodeGoFileSnapshots(snapshots, guards) {
-  for (const guard of guards) {
-    const current = await readOptionalOpencodeGoFile(guard.path);
-    if (!sameOptionalContent(current, guard.content)) {
-      throw new Error(`OpenCode Go 配置文件在事务期间发生变化：${guard.path}`);
+export async function assertOpencodeGoFileSnapshots(snapshots) {
+  for (const snapshot of snapshots) {
+    const current = await readOptionalOpencodeGoFile(snapshot.path);
+    if (!sameOptionalContent(current, snapshot.content)) {
+      throw new Error(`OpenCode Go 配置文件在事务期间发生变化：${snapshot.path}`);
     }
   }
+}
+
+export function refreshOpencodeGoFileSnapshot(snapshots, path) {
+  const [current] = snapshotOpencodeGoFiles([path]);
+  return snapshots.map((snapshot) => snapshot.path === path ? current : snapshot);
+}
+
+export async function restoreOpencodeGoFileSnapshots(snapshots, guards) {
+  await assertOpencodeGoFileSnapshots(guards);
   for (const snapshot of snapshots) {
     await replaceOptionalOpencodeGoFile(snapshot.path, snapshot.content);
   }

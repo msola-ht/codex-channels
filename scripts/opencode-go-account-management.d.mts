@@ -62,6 +62,8 @@ export function applyOpencodeGoDefaultAccountChange(
     loadRole?: (environment: NodeJS.ProcessEnv) =>
       | { provider: ManagedModelProviderId; model: string }
       | undefined;
+    loadProviders?: typeof import("../runtime/model-provider-runtime.mjs")
+      .loadManagedModelProviderSettings;
     writeAccounts?: (
       environment: NodeJS.ProcessEnv,
       accounts: Array<{ id: string; default: boolean }>,

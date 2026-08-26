@@ -39,6 +39,7 @@ import {
   hasProviderBaseConfig,
   restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 export const deepseekSetupScriptUrl =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
@@ -116,6 +117,17 @@ export function previewDeepseekConfiguration(
 }
 
 export async function applyDeepseekConfiguration(
+  input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyDeepseekConfigurationUnlocked(input, options),
+  );
+}
+
+async function applyDeepseekConfigurationUnlocked(
   {
     mode = "switching",
     apiKey,
@@ -198,6 +210,17 @@ export async function previewDeepseekRestore({
 }
 
 export async function applyDeepseekRestore(
+  input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyDeepseekRestoreUnlocked(input, options),
+  );
+}
+
+async function applyDeepseekRestoreUnlocked(
   { confirmRestore = false },
   { environment = process.env } = {},
 ) {

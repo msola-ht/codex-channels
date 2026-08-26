@@ -1,10 +1,12 @@
 import {
   closeSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -14,6 +16,7 @@ import { z } from "zod";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const sourceByDocument = new WeakMap();
+const activeGatewayConfigLocks = new Set();
 const gatewayConfigLockTimeoutMs = 2_000;
 const staleGatewayConfigLockMs = 30_000;
 
@@ -489,31 +492,41 @@ function currentGatewayConfig(configPath) {
   }
 }
 
-function withGatewayConfigLock(configPath, operation) {
+export function withGatewayConfigLock(configPath, operation) {
   const normalizedPath = resolve(configPath);
+  if (activeGatewayConfigLocks.has(normalizedPath)) return operation();
   mkdirSync(dirname(normalizedPath), { recursive: true, mode: 0o700 });
   const lockPath = `${normalizedPath}.lock`;
-  const descriptor = acquireGatewayConfigLock(lockPath);
+  const lock = acquireGatewayConfigLock(lockPath);
+  activeGatewayConfigLocks.add(normalizedPath);
   let result;
   let operationFailed = false;
   let operationError;
   try {
     result = operation();
+    if (result && typeof result.then === "function") {
+      Promise.resolve(result).catch(() => undefined);
+      throw new TypeError("withGatewayConfigLock 只接受同步操作");
+    }
   } catch (error) {
     operationFailed = true;
     operationError = error;
   }
   let releaseError;
   try {
-    closeSync(descriptor);
+    closeSync(lock.descriptor);
   } catch (error) {
     releaseError = error;
   }
   try {
-    unlinkSync(lockPath);
+    const current = statSync(lockPath);
+    if (current.dev === lock.dev && current.ino === lock.ino) {
+      unlinkSync(lockPath);
+    }
   } catch (error) {
     if (error?.code !== "ENOENT" && releaseError === undefined) releaseError = error;
   }
+  activeGatewayConfigLocks.delete(normalizedPath);
   if (operationFailed) throw operationError;
   if (releaseError !== undefined) throw releaseError;
   return result;
@@ -523,7 +536,20 @@ function acquireGatewayConfigLock(lockPath) {
   const startedAt = Date.now();
   while (true) {
     try {
-      return openSync(lockPath, "wx", 0o600);
+      const descriptor = openSync(lockPath, "wx", 0o600);
+      try {
+        writeFileSync(descriptor, `${process.pid}\n`);
+        const metadata = fstatSync(descriptor);
+        return { descriptor, dev: metadata.dev, ino: metadata.ino };
+      } catch (error) {
+        closeSync(descriptor);
+        try {
+          unlinkSync(lockPath);
+        } catch (unlinkError) {
+          if (unlinkError?.code !== "ENOENT") throw unlinkError;
+        }
+        throw error;
+      }
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
       if (staleGatewayConfigLock(lockPath)) {
@@ -544,10 +570,21 @@ function acquireGatewayConfigLock(lockPath) {
 
 function staleGatewayConfigLock(lockPath) {
   try {
-    return Date.now() - statSync(lockPath).mtimeMs > staleGatewayConfigLockMs;
+    if (Date.now() - statSync(lockPath).mtimeMs <= staleGatewayConfigLockMs) return false;
+    const ownerPid = Number.parseInt(readFileSync(lockPath, "utf8").trim(), 10);
+    return !Number.isSafeInteger(ownerPid) || ownerPid <= 0 || !processIsAlive(ownerPid);
   } catch (error) {
     if (error?.code === "ENOENT") return false;
     throw error;
+  }
+}
+
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
   }
 }
 

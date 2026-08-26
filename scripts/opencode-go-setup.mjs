@@ -62,6 +62,7 @@ import {
   createManagedProviderCatalog,
   createManagedProviderRestorePreview,
 } from "./managed-model-provider-setup.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
@@ -91,6 +92,17 @@ export function previewOpencodeGoRestore({
 }
 
 export async function applyOpencodeGoRestore(
+  input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyOpencodeGoRestoreUnlocked(input, options),
+  );
+}
+
+async function applyOpencodeGoRestoreUnlocked(
   { confirmRestore = false },
   { environment = process.env } = {},
 ) {

@@ -16,6 +16,7 @@ import {
   backupPrimaryProviderCandidates,
   customPrimaryProviderProfilePath,
   primaryProviderBackupPath,
+  writeCustomPrimaryProviderSwitchingProfile,
 } from "../runtime/model-provider-runtime.mjs";
 
 const officialModels = ["gpt-5.6-sol", "model-a"].map((model) => ({
@@ -133,6 +134,7 @@ describe("custom primary Provider management", () => {
       },
     }, environment);
     const config = { model_provider: "openai", model_providers: {} };
+    const { createClient } = clientFixture(config);
     const prepared = await prepareCustomPrimaryProviderSave({
       operation: "update",
       providerId: "codeproxy",
@@ -142,7 +144,7 @@ describe("custom primary Provider management", () => {
       model: "model-a",
       supportsWebsockets: false,
       credential: { action: "preserve" },
-    }, { environment, loadContext: context(config) });
+    }, { environment, createClient, loadContext: context(config) });
     chmodSync(primaryProviderBackupPath(environment), 0o644);
 
     const result = await prepared.apply();
@@ -161,6 +163,39 @@ describe("custom primary Provider management", () => {
         codeproxy: { experimental_bearer_token: "existing-secret" },
       },
     });
+  });
+
+  it("rejects a prepared switching save after its private Provider state changes", async () => {
+    const environment = isolatedEnvironment("custom-provider-management-stale-switching-");
+    const config = { model_provider: "openai", model_providers: {} };
+    const { createClient } = clientFixture(config);
+    const prepared = await prepareCustomPrimaryProviderSave({
+      operation: "create",
+      providerId: "codeproxy",
+      name: "CodeProxy",
+      baseUrl: "https://proxy.example.test/v1",
+      mode: "switching",
+      model: "model-a",
+      supportsWebsockets: false,
+      credential: { action: "replace", apiKey: "prepared-secret" },
+    }, { environment, createClient, loadContext: context(config) });
+    writeCustomPrimaryProviderSwitchingProfile({
+      provider: "codeproxy",
+      name: "Concurrent Provider",
+      baseUrl: "https://concurrent.example.test/v1",
+      model: "model-a",
+      supportsWebsockets: false,
+      apiKey: "concurrent-secret",
+    }, environment);
+
+    await expect(prepared.apply()).rejects.toMatchObject({
+      code: "stale-preview",
+      field: "operation",
+    });
+    expect(readFileSync(
+      customPrimaryProviderProfilePath(environment, "codeproxy"),
+      "utf8",
+    )).toContain("concurrent-secret");
   });
 
   it("requires replacing the Key when the URL origin changes", async () => {

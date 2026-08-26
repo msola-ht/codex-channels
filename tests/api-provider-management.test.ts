@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { readApiProviderKey } from "../runtime/api-provider-credential.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   deleteApiProvider,
   listApiProviders,
@@ -100,6 +100,27 @@ describe("direct API Provider management", () => {
 
     expect(readGatewayConfig(fixture.configPath).api_providers).toBeUndefined();
     expect(() => readApiProviderKey(fixture.credentialsDirectory, "relay-a")).toThrow();
+  });
+
+  it("keeps a credential when the config committed before reporting an error", () => {
+    const fixture = createFixture();
+
+    expect(saveApiProvider({
+      operation: "create",
+      id: "relay-a",
+      name: "中转 A",
+      endpoint: "https://a.example/v1/responses",
+      apiKey: "private-key-a",
+    }, {
+      environment: fixture.environment,
+      writeConfig: (path, document) => {
+        writeGatewayConfig(path, document);
+        throw new Error("配置响应丢失");
+      },
+    })).toMatchObject({ action: "created", provider: { id: "relay-a" } });
+
+    expect(readApiProviderKey(fixture.credentialsDirectory, "relay-a"))
+      .toBe("private-key-a");
   });
 });
 

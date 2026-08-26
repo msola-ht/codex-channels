@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   backupPrimaryProviderCandidates,
@@ -18,6 +19,7 @@ import {
   readCodexUserConfigSnapshot,
 } from "./codex-user-config.mjs";
 import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
 } from "./primary-provider-config-transaction.mjs";
@@ -42,7 +44,14 @@ export async function applyPrimaryProviderSwitch(
   input,
   options = {},
 ) {
-  const plan = await buildSwitchPlan(input, options);
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(environment, async () => {
+    const plan = await buildSwitchPlan(input, options);
+    return applyPrimaryProviderSwitchPlan(plan, options);
+  });
+}
+
+async function applyPrimaryProviderSwitchPlan(plan, options) {
   const {
     environment = process.env,
     createClient = createCodexUserConfigClient,
@@ -91,18 +100,40 @@ export async function applyPrimaryProviderRemoval(
   input,
   options = {},
 ) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(environment, async () => {
+    const plan = await removalPlanForExecution(input, options.preview, options);
+    return applyPrimaryProviderRemovalPlan(plan, options);
+  });
+}
+
+async function applyPrimaryProviderRemovalPlan(plan, options) {
   const {
     environment = process.env,
     createClient = createCodexUserConfigClient,
-    preview,
   } = options;
-  const plan = await removalPlanForExecution(input, preview, options);
   let backupCleaned = true;
   if (plan.target.state === "stale-switching") {
     removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id);
     backupCleaned = removeBackupCandidateSafely(plan.target.id, environment);
   } else if (plan.target.state === "switching") {
-    removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id);
+    try {
+      removeCustomPrimaryProviderSwitchingProfile(
+        environment,
+        plan.target.id,
+        plan.expectedProfileContent,
+      );
+    } catch (error) {
+      if (error?.code === "CUSTOM_SWITCHING_PROFILE_CHANGED") {
+        throw invalid(
+          "stale-preview",
+          "preview",
+          "Provider 状态已变化，请重新生成删除预览",
+          error,
+        );
+      }
+      throw error;
+    }
     backupCleaned = removeBackupCandidateSafely(plan.target.id, environment);
   } else if (plan.target.state === "backup") {
     removePrimaryProviderBackupCandidate(plan.target.id, environment);
@@ -148,11 +179,11 @@ async function removalPlanForExecution(input, preview, options) {
     if (!registered || profileExists) {
       throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成删除预览");
     }
-    return {
+    return currentRemovalPlan(preview, {
       target: preview.target,
       activation: "restart-all",
       effects: { restoresOfficial: false },
-    };
+    });
   }
   if (preview.target.state === "switching") {
     const switching = loadConfiguredCustomSwitchingModelProviders(environment)
@@ -160,7 +191,7 @@ async function removalPlanForExecution(input, preview, options) {
     if (switching === undefined) {
       throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成删除预览");
     }
-    return {
+    return currentRemovalPlan(preview, {
       target: {
         id: switching.id,
         displayName: switching.name,
@@ -170,7 +201,8 @@ async function removalPlanForExecution(input, preview, options) {
       },
       activation: "restart-all",
       effects: { restoresOfficial: false },
-    };
+      expectedProfileContent: switching.profileContent,
+    });
   }
   if (preview.target.state === "configured") {
     const {
@@ -188,7 +220,7 @@ async function removalPlanForExecution(input, preview, options) {
     const provider = record(providers[normalizedId]);
     const activeProviderId = optionalString(config.model_provider) ?? "openai";
     const restoresOfficial = activeProviderId === normalizedId;
-    return {
+    return currentRemovalPlan(preview, {
       target: {
         id: normalizedId,
         displayName: optionalString(provider.name) ?? normalizedId,
@@ -208,9 +240,16 @@ async function removalPlanForExecution(input, preview, options) {
             ]
           : []),
       ],
-    };
+    });
   }
-  return buildRemovalPlan(input, options);
+  return currentRemovalPlan(preview, await buildRemovalPlan(input, options));
+}
+
+function currentRemovalPlan(preview, plan) {
+  if (!isDeepStrictEqual(preview, publicRemovalPreview(plan))) {
+    throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成删除预览");
+  }
+  return plan;
 }
 
 async function buildSwitchPlan(
@@ -222,7 +261,23 @@ async function buildSwitchPlan(
 ) {
   const normalizedId = normalizeProviderId(providerId, { allowOfficial: true });
   const normalizedModel = optionalString(model);
-  const snapshot = await readCodexUserConfigSnapshot(environment, { createClient });
+  const { snapshot, officialModels } = await loadSwitchContext(
+    environment,
+    createClient,
+    normalizedModel !== undefined,
+  );
+  if (
+    normalizedModel !== undefined
+    && !officialModels.some(
+      (candidate) => candidate.available !== false && candidate.model === normalizedModel,
+    )
+  ) {
+    throw invalid(
+      "unknown-model",
+      "model",
+      `模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`,
+    );
+  }
   const config = record(snapshot.config);
   const providers = record(config.model_providers);
   const currentProvider = optionalString(config.model_provider) ?? "openai";
@@ -240,6 +295,7 @@ async function buildSwitchPlan(
         id: "openai",
         displayName: "OpenAI",
         source: "official",
+        ...(normalizedModel === undefined ? {} : { model: normalizedModel }),
       },
       providers,
       expectedVersion: snapshot.version,
@@ -248,7 +304,11 @@ async function buildSwitchPlan(
           ? [{ keyPath: "openai_base_url", value: null }]
           : []),
         { keyPath: "model_provider", value: "openai" },
-        ...(clearsCustomModel ? [{ keyPath: "model", value: null }] : []),
+        ...(normalizedModel !== undefined
+          ? [{ keyPath: "model", value: normalizedModel }]
+          : clearsCustomModel
+            ? [{ keyPath: "model", value: null }]
+            : []),
         ...candidateIds.map((id) => ({ keyPath: `model_providers.${id}`, value: null })),
       ],
       effects: {
@@ -256,7 +316,7 @@ async function buildSwitchPlan(
         restoresFromBackup: false,
         convertsSwitchingProfile: false,
         removesTopLevelBaseUrl,
-        clearsCustomModel,
+        clearsCustomModel: clearsCustomModel && normalizedModel === undefined,
         candidateIdsToBackup: candidateIds,
       },
     };
@@ -344,6 +404,20 @@ async function buildSwitchPlan(
   };
 }
 
+async function loadSwitchContext(environment, createClient, includeModels) {
+  const client = await createClient({ environment });
+  try {
+    await client.connect();
+    const [snapshot, officialModels] = await Promise.all([
+      client.readUserConfigSnapshot(),
+      includeModels ? client.listModels() : [],
+    ]);
+    return { snapshot, officialModels };
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 async function buildRemovalPlan(
   { providerId },
   {
@@ -386,15 +460,15 @@ async function buildRemovalPlan(
       `未找到自定义主 Provider：${normalizedId}；可用 codexc primary-provider list 查看候选`,
     );
   }
+  const state = switching !== undefined ? "switching" : configured ? "configured" : "backup";
   const provider = record(
     configured
       ? providers[normalizedId]
-      : backedUp
-        ? backup[normalizedId]
-        : { name: switching?.name, base_url: switching?.baseUrl },
+      : switching !== undefined
+        ? { name: switching.name, base_url: switching.baseUrl }
+        : backup[normalizedId],
   );
   const activeProviderId = optionalString(config.model_provider) ?? "openai";
-  const state = switching !== undefined ? "switching" : configured ? "configured" : "backup";
   const restoresOfficial = configured && activeProviderId === normalizedId;
   return {
     target: {
@@ -405,6 +479,7 @@ async function buildRemovalPlan(
       active: restoresOfficial,
     },
     expectedVersion: snapshot.version,
+    expectedProfileContent: switching?.profileContent,
     activation: state === "backup" ? "none" : "restart-all",
     effects: { restoresOfficial },
     edits: state === "configured" ? [

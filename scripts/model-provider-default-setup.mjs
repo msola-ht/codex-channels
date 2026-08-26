@@ -3,7 +3,10 @@ import * as clackPrompts from "@clack/prompts";
 import {
   loadManagedModelProviderSettings,
 } from "../runtime/model-provider-runtime.mjs";
-import { writeCodexUserConfigEdits } from "./codex-user-config.mjs";
+import {
+  readCodexUserConfigSnapshot,
+  writeCodexUserConfigEdits,
+} from "./codex-user-config.mjs";
 import {
   applyManagedProviderDefaultChange,
 } from "./model-provider-default-management.mjs";
@@ -17,6 +20,7 @@ export async function runModelProviderDefaultSetup({
   output = process.stdout,
   prompts = clackPrompts,
   prompter,
+  readConfigSnapshot = readCodexUserConfigSnapshot,
   writeConfigEdits = writeCodexUserConfigEdits,
 } = {}) {
   const configured = loadManagedModelProviderSettings(environment);
@@ -45,6 +49,7 @@ export async function runModelProviderDefaultSetup({
     }, {
       environment,
       loadProviders: () => configured,
+      readConfigSnapshot,
       writeConfigEdits,
     });
     output.write(`${selected.displayName} 默认模型已设为 ${model}。\n`);

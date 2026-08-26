@@ -1,9 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   applyOpencodeGoAccountConfiguration,
   previewOpencodeGoAccountConfiguration,
 } from "../scripts/opencode-go-account-provisioning.mjs";
+import {
+  assertOpencodeGoFileSnapshots,
+  refreshOpencodeGoFileSnapshot,
+  snapshotOpencodeGoFiles,
+} from "../scripts/opencode-go-account-files.mjs";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 describe("OpenCode Go account provisioning", () => {
   it("previews a first switching account without prompts or credentials", async () => {
@@ -77,6 +94,24 @@ describe("OpenCode Go account provisioning", () => {
       loadAccounts: () => [],
       loadPrimaryProvider: () => "openai",
     })).rejects.toMatchObject({ code: "invalid-api-key", field: "apiKey" });
+  });
+
+  it("keeps untouched file guards when one transaction file advances", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-opencode-go-guards-"));
+    temporaryDirectories.push(root);
+    const first = join(root, "first");
+    const second = join(root, "second");
+    writeFileSync(first, "before-a", { mode: 0o600 });
+    writeFileSync(second, "before-b", { mode: 0o600 });
+    const snapshots = snapshotOpencodeGoFiles([first, second]);
+
+    writeFileSync(first, "after-a", { mode: 0o600 });
+    const guards = refreshOpencodeGoFileSnapshot(snapshots, first);
+    await expect(assertOpencodeGoFileSnapshots(guards)).resolves.toBeUndefined();
+
+    writeFileSync(second, "external-b", { mode: 0o600 });
+    await expect(assertOpencodeGoFileSnapshots(guards))
+      .rejects.toThrow(`OpenCode Go 配置文件在事务期间发生变化：${second}`);
   });
 });
 

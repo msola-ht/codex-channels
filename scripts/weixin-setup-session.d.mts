@@ -1,3 +1,5 @@
+import type { TomlTable } from "smol-toml";
+
 export type WeixinSetupSessionState =
   | "created"
   | "starting"
@@ -111,7 +113,7 @@ export function createWeixinSetupSession(
     }>;
     writeConfig?: (
       configPath: string,
-      document: Record<string, unknown>,
+      document: TomlTable,
     ) => void;
   },
 ): WeixinSetupSession;

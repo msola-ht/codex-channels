@@ -1,3 +1,5 @@
+import type { TomlTable } from "smol-toml";
+
 export interface ApiProviderSummary {
   id: string;
   name: string;
@@ -21,7 +23,7 @@ export function saveApiProvider(
   },
   options?: {
     environment?: NodeJS.ProcessEnv;
-    writeConfig?: (configPath: string, document: unknown) => void;
+    writeConfig?: (configPath: string, document: TomlTable) => void;
   },
 ): {
   action: "created" | "updated";
@@ -34,7 +36,7 @@ export function deleteApiProvider(
   id: string,
   options?: {
     environment?: NodeJS.ProcessEnv;
-    writeConfig?: (configPath: string, document: unknown) => void;
+    writeConfig?: (configPath: string, document: TomlTable) => void;
   },
 ): {
   action: "removed";

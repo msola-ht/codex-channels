@@ -34,10 +34,13 @@ import {
   hasProviderBaseConfig,
   restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import {
+  assertOpencodeGoFileSnapshots,
   opencodeGoAccountPaths,
   opencodeGoProfileFileName,
   readOptionalOpencodeGoFile,
+  refreshOpencodeGoFileSnapshot,
   replaceOptionalOpencodeGoFile,
   restoreOpencodeGoFileSnapshots,
   snapshotOpencodeGoFiles,
@@ -74,6 +77,17 @@ export async function previewOpencodeGoAccountConfiguration(
 }
 
 export async function applyOpencodeGoAccountConfiguration(
+  input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyOpencodeGoAccountConfigurationUnlocked(input, options),
+  );
+}
+
+async function applyOpencodeGoAccountConfigurationUnlocked(
   {
     accountId,
     mode = "switching",
@@ -149,8 +163,9 @@ export async function applyOpencodeGoAccountConfiguration(
   } catch (error) {
     throw normalize("operation-failed", "action", error);
   }
-  let guards;
+  let guards = snapshots;
   try {
+    await assertOpencodeGoFileSnapshots(guards);
     mkdirSync(plan.paths.accountDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(plan.paths.backupDirectory, { recursive: true, mode: 0o700 });
     if (plan.accounts.length === 0) await preserveInitialFiles(plan.paths);
@@ -194,32 +209,41 @@ export async function applyOpencodeGoAccountConfiguration(
         { apiKey, catalogPath: plan.paths.catalogPath, model: selectedModel },
       );
     }
-    await writePrivateFileAtomic(
-      plan.paths.catalogPath,
-      `${JSON.stringify(managedCatalog, null, 2)}\n`,
-    );
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    await writePrivateFileAtomic(
+    const catalogContent = `${JSON.stringify(managedCatalog, null, 2)}\n`;
+    await assertOpencodeGoFileSnapshots(guards);
+    await writePrivateFileAtomic(plan.paths.catalogPath, catalogContent);
+    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.catalogPath);
+    await assertOpencodeGoFileSnapshots(guards);
+    await replaceOptionalOpencodeGoFile(
       plan.paths.manifestPath,
-      `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
+      catalogState.manifest === undefined
+        ? undefined
+        : `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
     );
-    guards = snapshotOpencodeGoFiles(transactionPaths);
+    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.manifestPath);
+    await assertOpencodeGoFileSnapshots(guards);
     await replaceOptionalOpencodeGoFile(
       plan.paths.configPath,
       Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
     );
-    guards = snapshotOpencodeGoFiles(transactionPaths);
+    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.configPath);
+    await assertOpencodeGoFileSnapshots(guards);
     await replaceOptionalOpencodeGoFile(plan.paths.profilePath, profileContent);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
+    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.profilePath);
+    await assertOpencodeGoFileSnapshots(guards);
     writeOpencodeGoAccountMarker(environment, accountId, mode);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
+    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.markerPath);
+    await assertOpencodeGoFileSnapshots(guards);
     writeOpencodeGoAccounts(environment, plan.nextAccounts);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
+    guards = refreshOpencodeGoFileSnapshot(
+      guards,
+      opencodeGoAccountsFilePath(environment),
+    );
     if (plan.updatesExternalAgent) {
+      await assertOpencodeGoFileSnapshots(guards);
       await configureRole(plan.account.provider, selectedModel, environment);
     }
   } catch (error) {
-    if (guards === undefined) throw normalize("operation-failed", "action", error);
     try {
       await restoreOpencodeGoFileSnapshots(snapshots, guards);
     } catch (rollbackError) {

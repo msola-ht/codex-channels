@@ -7,8 +7,10 @@ import {
   releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { opencodeGoAccountDefinition } from "../runtime/model-provider-definitions.mjs";
-import { loadManagedModelProviderRole } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadManagedModelProviderRole,
+  loadManagedModelProviderSettings,
+} from "../runtime/model-provider-runtime.mjs";
 import {
   isOpencodeGoProvider,
   loadOpencodeGoAccounts,
@@ -20,12 +22,15 @@ import {
 import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
 import { configureThirdPartyRole } from "./agents.mjs";
 import {
+  assertOpencodeGoFileSnapshots,
   opencodeGoAccountPaths,
   opencodeGoProfileFileName,
   readOptionalOpencodeGoFile,
+  refreshOpencodeGoFileSnapshot,
   restoreOpencodeGoFileSnapshots,
   snapshotOpencodeGoFiles,
 } from "./opencode-go-account-files.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 
 export class OpenCodeGoAccountManagementError extends Error {
@@ -54,23 +59,46 @@ export function previewOpencodeGoDefaultAccountChange(
 
 export async function applyOpencodeGoDefaultAccountChange(
   accountId,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyOpencodeGoDefaultAccountChangeUnlocked(accountId, options),
+  );
+}
+
+async function applyOpencodeGoDefaultAccountChangeUnlocked(
+  accountId,
   {
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
     loadRole = loadManagedModelProviderRole,
+    loadProviders = loadManagedModelProviderSettings,
     writeAccounts = writeOpencodeGoAccounts,
     configureRole = configureThirdPartyRole,
   } = {},
 ) {
   const plan = buildDefaultPlan(accountId, { environment, loadAccounts, loadRole });
   try {
+    const roleModel = plan.updatesExternalAgent
+      ? loadProviders(environment).find(
+          ({ provider }) => provider === opencodeGoProviderId(plan.account.id),
+        )?.model
+      : undefined;
+    if (plan.updatesExternalAgent && typeof roleModel !== "string") {
+      throw invalid(
+        "provider-state-unavailable",
+        "accountId",
+        `OpenCode Go 账户 ${plan.account.id} 的模型配置不可用`,
+      );
+    }
     writeAccounts(environment, plan.nextAccounts);
     if (plan.updatesExternalAgent) {
-      const definition = opencodeGoAccountDefinition(plan.account.id);
       try {
         await configureRole(
           opencodeGoProviderId(plan.account.id),
-          definition.defaultModel,
+          roleModel,
           environment,
         );
       } catch (error) {
@@ -181,6 +209,17 @@ export async function previewOpencodeGoAccountRemoval(
 }
 
 export async function applyOpencodeGoAccountRemoval(
+  input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyOpencodeGoAccountRemovalUnlocked(input, options),
+  );
+}
+
+async function applyOpencodeGoAccountRemovalUnlocked(
   {
     accountId,
     confirmHistoryLoss = false,
@@ -255,15 +294,20 @@ export async function applyOpencodeGoAccountRemoval(
       paths.markerPath,
     ];
     const snapshots = snapshotOpencodeGoFiles(transactionPaths);
-    let guards;
+    let guards = snapshots;
     try {
+      await assertOpencodeGoFileSnapshots(guards);
       writeAccounts(environment, plan.remainingAccounts);
-      guards = snapshotOpencodeGoFiles(transactionPaths);
+      guards = refreshOpencodeGoFileSnapshot(
+        guards,
+        opencodeGoAccountsFilePath(environment),
+      );
+      await assertOpencodeGoFileSnapshots(guards);
       if (existsSync(paths.profilePath)) unlinkSync(paths.profilePath);
-      guards = snapshotOpencodeGoFiles(transactionPaths);
+      guards = refreshOpencodeGoFileSnapshot(guards, paths.profilePath);
+      await assertOpencodeGoFileSnapshots(guards);
       if (existsSync(paths.markerPath)) unlinkSync(paths.markerPath);
     } catch (error) {
-      if (guards === undefined) throw error;
       try {
         await restoreOpencodeGoFileSnapshots(snapshots, guards);
       } catch (rollbackError) {

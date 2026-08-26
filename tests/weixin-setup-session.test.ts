@@ -297,6 +297,125 @@ describe("Weixin setup session", () => {
     expect(session.status("owner-1")).not.toHaveProperty("preview");
   });
 
+  it("keeps the credential when config committed before reporting an error", async () => {
+    const fixture = createFixture();
+    const store = memoryStore();
+    const session = createWeixinSetupSession({ ownerId: "owner-1" }, {
+      environment: fixture.environment,
+      createCredentialStore: async () => store,
+      validateCredential: async () => ({
+        version: 1,
+        accountId: "bot-fixture@im.bot",
+        botToken: "bot-secret",
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        grantedAt: 1_000,
+      }),
+      runLogin: async () => ({
+        kind: "confirmed",
+        accountId: "bot-fixture@im.bot",
+        userId: "actor-fixture@im.wechat",
+        botToken: "bot-secret",
+        baseUrl: "https://ilinkai.weixin.qq.com",
+      }),
+      writeConfig: (path, document) => {
+        writeGatewayConfig(path, document);
+        throw new Error("配置响应丢失");
+      },
+    });
+
+    session.start("owner-1");
+    await session.waitForLogin("owner-1");
+
+    await expect(session.confirm("owner-1")).resolves.toMatchObject({
+      action: "configured",
+      accountId: "bot-fixture@im.bot",
+    });
+    expect(store.remove).not.toHaveBeenCalledWith("bot-fixture@im.bot");
+    expect(readGatewayConfig(fixture.configPath).weixin).toEqual({
+      enabled: false,
+      account_id: "bot-fixture@im.bot",
+      allowed_user_ids: ["actor-fixture@im.wechat"],
+    });
+  });
+
+  it("serializes confirmations that share one Gateway config", async () => {
+    const fixture = createFixture();
+    const credentialWrites: string[] = [];
+    let currentCredential: unknown = null;
+    let releaseFirstWrite!: () => void;
+    const firstWriteMayFinish = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    let firstWriteStarted!: () => void;
+    const firstDidStart = new Promise<void>((resolve) => {
+      firstWriteStarted = resolve;
+    });
+    const store = {
+      get: vi.fn(async () => currentCredential),
+      set: vi.fn(async (credential: { botToken: string }) => {
+        credentialWrites.push(credential.botToken);
+        if (credential.botToken === "bot-secret-a") {
+          firstWriteStarted();
+          await firstWriteMayFinish;
+        }
+        currentCredential = credential;
+      }),
+      remove: vi.fn(async () => {
+        currentCredential = null;
+      }),
+    };
+    const session = (ownerId: string, botToken: string, userId: string) =>
+      createWeixinSetupSession({ ownerId }, {
+        environment: fixture.environment,
+        createCredentialStore: async () => store,
+        validateCredential: async (credential: {
+          kind: "confirmed";
+          accountId: string;
+          botToken: string;
+          baseUrl?: string;
+        }) => ({
+          version: 1,
+          accountId: credential.accountId,
+          botToken: credential.botToken,
+          baseUrl: credential.baseUrl ?? "https://ilinkai.weixin.qq.com",
+          grantedAt: 1_000,
+        }),
+        runLogin: async () => ({
+          kind: "confirmed",
+          accountId: "bot-fixture@im.bot",
+          userId,
+          botToken,
+          baseUrl: "https://ilinkai.weixin.qq.com",
+        }),
+      });
+    const first = session("owner-1", "bot-secret-a", "actor-a@im.wechat");
+    const second = session("owner-2", "bot-secret-b", "actor-b@im.wechat");
+    first.start("owner-1");
+    second.start("owner-2");
+    await Promise.all([
+      first.waitForLogin("owner-1"),
+      second.waitForLogin("owner-2"),
+    ]);
+
+    const firstConfirmation = first.confirm("owner-1");
+    await firstDidStart;
+    const secondConfirmation = second.confirm("owner-2");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const writesBeforeRelease = [...credentialWrites];
+    releaseFirstWrite();
+    const [firstResult, secondResult] = await Promise.allSettled([
+      firstConfirmation,
+      secondConfirmation,
+    ]);
+
+    expect(writesBeforeRelease).toEqual(["bot-secret-a"]);
+    expect(firstResult.status).toBe("fulfilled");
+    expect(secondResult).toMatchObject({
+      status: "rejected",
+      reason: { code: "stale-session" },
+    });
+  });
+
   it("rejects confirmation when the persisted Weixin config changed", async () => {
     const fixture = createFixture();
     const session = createWeixinSetupSession({ ownerId: "owner-1" }, {

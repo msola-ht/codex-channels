@@ -32,7 +32,10 @@ export interface ManagedProviderDefaultChangeOptions {
   writeConfigEdits?: (
     environment: NodeJS.ProcessEnv,
     edits: CodexUserConfigEdit[],
+    options?: { expectedVersion?: string },
   ) => Promise<void>;
+  readConfigSnapshot?: typeof import("./codex-user-config.mjs").readCodexUserConfigSnapshot;
+  withFileLock?: typeof import("../runtime/private-file-lock.mjs").withPrivateFileLock;
 }
 
 export class ModelProviderDefaultManagementError extends Error {

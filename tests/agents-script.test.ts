@@ -505,6 +505,12 @@ describe("codexc agents script", () => {
         "",
       ].join("\n"), { mode: 0o600 });
 
+      expect(agentsStatus(fixture.environment)).toMatchObject({
+        externalRoleConfigured: false,
+        provider: undefined,
+        model: undefined,
+      });
+
       await expect(configureThirdPartyRole(
         "deepseek",
         undefined,
@@ -537,6 +543,49 @@ describe("codexc agents script", () => {
       });
       expect(existsSync(fixture.rolePath)).toBe(false);
     } finally {
+      fixture.remove();
+    }
+  });
+
+  it("serializes concurrent role and config transactions", async () => {
+    const fixture = createFixture();
+    let releaseFirst!: () => void;
+    let markFirstEntered!: () => void;
+    const firstMayFinish = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstEntered = new Promise<void>((resolve) => { markFirstEntered = resolve; });
+    let updateCalls = 0;
+    const serializedUpdate: CodexUserConfigWriter = async (environment, createEdits) => {
+      updateCalls += 1;
+      if (updateCalls === 1) {
+        markFirstEntered();
+        await firstMayFinish;
+      }
+      await applyConfigUpdate(environment, createEdits);
+    };
+    try {
+      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, opencodeGoMainDefinition(), "switching");
+
+      const first = configureThirdPartyRole("deepseek", undefined, fixture.environment, {
+        updateConfig: serializedUpdate,
+      });
+      await firstEntered;
+      const second = configureThirdPartyRole("opencode-go", undefined, fixture.environment, {
+        updateConfig: serializedUpdate,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      expect(updateCalls).toBe(1);
+      releaseFirst();
+      await Promise.all([first, second]);
+      expect(agentsStatus(fixture.environment)).toMatchObject({
+        provider: "opencode-go",
+        model: "deepseek-v4-flash",
+      });
+      expect(readFileSync(fixture.rolePath, "utf8"))
+        .toContain('model_provider = "opencode-go"');
+    } finally {
+      releaseFirst();
       fixture.remove();
     }
   });

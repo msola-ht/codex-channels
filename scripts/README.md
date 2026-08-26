@@ -134,16 +134,20 @@
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
   Provider 新增与编辑的无终端校验、脱敏预览和执行接口；用 `preserve` / `replace` 明确表达 Key
   操作，现有 Key 只在内部计划闭包中用于同 Origin 保留，不进入预览或执行结果。固定模式复用 Codex
-  配置事务与 Profile 回滚，切换模式原子写入私有 Profile，并统一返回生效动作和备份清理警告；CLI
+  配置事务与 Profile 回滚，切换模式在写入前复核 Codex 配置版本、私有注册表和 Profile 快照，再在
+  同一文件锁内原子写入私有 Profile，并统一返回生效动作和备份清理警告；CLI
   继续负责字段询问、危险修改确认和中文渲染。
 - `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
   Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受控模型目录和共享
   第三方子代理的脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
   Provider CLI 列表共同复用。
+- `model-provider-management-transaction.mjs` / `model-provider-management-transaction.d.mts`：统一
+  串行 DeepSeek、OpenCode Go、自定义主 Provider、默认模型设置与共享第三方子代理的跨文件管理
+  事务；同一异步调用链中的嵌套操作复用事务，避免角色切换与 Provider/账户删除交叉提交。
 - `primary-provider-management.mjs` / `primary-provider-management.d.mts`：提供自定义主 Provider
   切换与删除的无终端预览和执行接口；预览仅返回脱敏目标、影响与生效动作，执行继续保护共享子代理
-  正在使用的 Provider、保持配置/Profile/私有备份事务顺序，并以稳定错误码和结构化警告报告失败或
-  备份清理部分成功。
+  正在使用的 Provider、校验显式模型属于 App Server 官方目录、保持配置/Profile/私有备份事务顺序，
+  并以稳定错误码和结构化警告报告失败或备份清理部分成功。
 - `primary-provider-config-transaction.mjs` / `primary-provider-config-transaction.d.mts`：统一自定义
   Provider 固定模式写入事务；切换与新增/编辑共同复用 Profile 移除、Codex 配置版本写入、响应丢失
   只读确认和安全回滚，避免两条管理链路复制高风险事务逻辑。
@@ -163,20 +167,24 @@
   避免两份文案漂移。
 - `agents.mjs`：提供不依赖终端提示的共享第三方子代理 Provider 列表、配置/停用预览与执行接口，
   `codexc agents` 复用该接口；`status --json` 返回稳定配置状态，Provider 与模型未配置时显式使用
-  `null`，不要求 Gateway 已初始化。管理结果只包含脱敏选择和全部服务重启动作。
+  `null`，不要求 Gateway 已初始化。角色文件和 Codex 主配置复用统一 Provider 管理事务，避免与
+  Provider/账户配置、切换或删除交叉提交；管理结果只包含脱敏选择和全部服务重启动作。
 - `agents-setup.mjs` / `agents-setup.d.mts`：向 Setup 提供共享第三方子代理的受管或自定义 Provider、
   模型选择和停用确认，只编排 `agents.mjs` 的管理接口；自定义 Provider 当前使用其已配置模型。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
   `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
   之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`，从第三方
-  模式恢复时清除第三方顶层模型。
+  模式恢复时清除第三方顶层模型。设备登录完成后在统一 Provider 管理事务内重新读取配置与角色
+  占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
   默认模型、思考等级和自动压缩阈值的无终端校验、预览与执行接口；切换模式更新私有 Profile，固定
-  模式复用官方用户配置事务并在失败时恢复模型目录，结果明确返回 App Server 重启动作。
+  模式与切换模式共用统一 Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读
+  确认写入结果，仅在确认未生效时恢复模型目录，
+  结果明确返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
   Provider、模型、思考等级和自动压缩交互与中文渲染，写入复用管理接口；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与

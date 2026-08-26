@@ -5,6 +5,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { withPrivateFileLock } from "../runtime/private-file-lock.mjs";
 import {
   FIXED_WEIXIN_QR_BASE_URL,
   createWeixinQrContractClient,
@@ -150,6 +151,14 @@ class WeixinSetupSession {
   }
 
   async confirm(ownerId, input = {}) {
+    return withPrivateFileLock(
+      `${this.#configPath}.weixin-setup-transaction`,
+      () => this.#confirmUnlocked(ownerId, input),
+      { label: "微信 Setup 配置" },
+    );
+  }
+
+  async #confirmUnlocked(ownerId, input) {
     this.#assertOwner(ownerId);
     if (this.#state !== "ready" || !this.#credential || !this.#scannerId) {
       throw invalidState("confirm", this.#state);
@@ -192,18 +201,34 @@ class WeixinSetupSession {
       };
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
-      try {
-        if (store && credentialWriteAttempted) {
-          if (previous) {
-            await store.set(previous);
-          } else {
-            await store.remove(credential.accountId);
-          }
-        }
-      } finally {
+      const confirmation = confirmWeixinConfig(
+        this.#configPath,
+        credential.accountId,
+        allowedUserIds,
+      );
+      if (confirmation.applied) {
+        // The atomic config write committed; only its caller response failed.
+      } else if (confirmation.error !== undefined) {
         this.#fail("save-failed");
+        throw new AggregateError(
+          [error, confirmation.error],
+          "微信配置保存结果无法确认；新凭据已保留，请检查配置后重试",
+          { cause: error },
+        );
+      } else {
+        try {
+          if (store && credentialWriteAttempted) {
+            if (previous) {
+              await store.set(previous);
+            } else {
+              await store.remove(credential.accountId);
+            }
+          }
+        } finally {
+          this.#fail("save-failed");
+        }
+        throw error;
       }
-      throw error;
     }
     const warnings = [];
     const oldAccountId = stringValue(currentExisting.account_id);
@@ -377,6 +402,25 @@ class WeixinSetupSession {
     if (ownerId !== this.#ownerId) {
       throw invalid("owner-mismatch", "ownerId", "微信 Setup 会话所有者不匹配");
     }
+  }
+}
+
+function confirmWeixinConfig(configPath, accountId, allowedUserIds) {
+  try {
+    const configured = table(readGatewayConfig(configPath).weixin);
+    const configuredAllowedUserIds = Array.isArray(configured.allowed_user_ids)
+      ? configured.allowed_user_ids
+      : [];
+    return {
+      applied: configured.enabled === false
+        && configured.account_id === accountId
+        && configuredAllowedUserIds.length === allowedUserIds.length
+        && configuredAllowedUserIds.every(
+          (value, index) => value === allowedUserIds[index],
+        ),
+    };
+  } catch (error) {
+    return { applied: false, error };
   }
 }
 

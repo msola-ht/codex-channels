@@ -221,6 +221,11 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     catalogSource?: { kind: "official" };
   },
   environment?: NodeJS.ProcessEnv,
+  guards?: {
+    expectedProfilePresent?: boolean;
+    expectedProfileContent?: string;
+    expectedProviderIds?: string[];
+  },
 ): void;
 
 export function removeCustomPrimaryProviderSwitchingProfile(

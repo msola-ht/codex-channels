@@ -3,7 +3,12 @@ import {
   writeManagedModelProviderCatalogSettings,
   writeManagedModelProviderProfileDefault,
 } from "../runtime/model-provider-runtime.mjs";
-import { writeCodexUserConfigEdits } from "./codex-user-config.mjs";
+import {
+  areCodexUserConfigEditsApplied,
+  readCodexUserConfigSnapshot,
+  writeCodexUserConfigEdits,
+} from "./codex-user-config.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 export class ModelProviderDefaultManagementError extends Error {
   constructor(code, field, message, options) {
@@ -26,12 +31,25 @@ export function previewManagedProviderDefaultChange(
 
 export async function applyManagedProviderDefaultChange(
   input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyManagedProviderDefaultChangeUnlocked(input, options),
+    { withFileLock: options.withFileLock },
+  );
+}
+
+async function applyManagedProviderDefaultChangeUnlocked(
+  input,
   {
     environment = process.env,
     loadProviders = loadManagedModelProviderSettings,
     writeProfileDefault = writeManagedModelProviderProfileDefault,
     writeCatalogSettings = writeManagedModelProviderCatalogSettings,
     writeConfigEdits = writeCodexUserConfigEdits,
+    readConfigSnapshot = readCodexUserConfigSnapshot,
   } = {},
 ) {
   const plan = buildPlan(input, loadProviders(environment));
@@ -39,20 +57,34 @@ export async function applyManagedProviderDefaultChange(
     if (plan.provider.mode === "switching") {
       writeProfileDefault(plan.provider.provider, plan.settings, environment);
     } else {
+      const edits = exclusiveConfigEdits(plan.model.model);
+      const snapshot = await readConfigSnapshot(environment);
       const previous = writeCatalogSettings(plan.provider.provider, plan.settings, environment);
       try {
-        await writeConfigEdits(environment, exclusiveConfigEdits(plan.model.model));
+        await writeConfigEdits(environment, edits, { expectedVersion: snapshot.version });
       } catch (error) {
+        let current;
         try {
-          writeCatalogSettings(plan.provider.provider, previous, environment);
-        } catch (rollbackError) {
+          current = await readConfigSnapshot(environment);
+        } catch (confirmationError) {
           throw new AggregateError(
-            [error, rollbackError],
-            "第三方模型设置失败，且未能恢复模型目录",
-            { cause: rollbackError },
+            [error, confirmationError],
+            "Codex 配置写入结果无法确认，模型目录保持新设置",
+            { cause: confirmationError },
           );
         }
-        throw error;
+        if (!areCodexUserConfigEditsApplied(current.config, edits)) {
+          try {
+            writeCatalogSettings(plan.provider.provider, previous, environment);
+          } catch (rollbackError) {
+            throw new AggregateError(
+              [error, rollbackError],
+              "第三方模型设置失败，且未能恢复模型目录",
+              { cause: rollbackError },
+            );
+          }
+          throw error;
+        }
       }
     }
   } catch (error) {

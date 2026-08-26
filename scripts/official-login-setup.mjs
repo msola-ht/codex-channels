@@ -9,6 +9,7 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -59,7 +60,6 @@ export async function runOfficialLoginSetup({
   if (currentProvider !== undefined && currentProvider !== "openai") {
     assertThirdPartyRoleDoesNotUseProvider(currentProvider, environment);
   }
-  const clearsCustomModel = currentProvider !== undefined && currentProvider !== "openai";
   const candidates = listCustomPrimaryProviderCandidates(record(config.model_providers));
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
 
@@ -91,22 +91,42 @@ export async function runOfficialLoginSetup({
     environment,
   });
 
-  const backedUp = backupPrimaryProviderCandidates(record(config.model_providers), environment);
-  const edits = [
-    ...(hasTopLevelBaseUrl
-      ? [{ keyPath: "openai_base_url", value: null }]
-      : []),
-    { keyPath: "model_provider", value: "openai" },
-    ...(clearsCustomModel ? [{ keyPath: "model", value: null }] : []),
-    ...backedUp.map((id) => ({ keyPath: `model_providers.${id}`, value: null })),
-  ];
-  const writer = await createClient({ environment });
-  try {
-    await writer.connect();
-    await writer.writeUserConfigEdits(edits, { expectedVersion: snapshot.version });
-  } finally {
-    await writer.close().catch(() => undefined);
-  }
+  const backedUp = await withModelProviderManagementTransaction(environment, async () => {
+    const writer = await createClient({ environment });
+    try {
+      await writer.connect();
+      const currentSnapshot = await writer.readUserConfigSnapshot();
+      const currentConfig = record(currentSnapshot.config);
+      const activeProvider = optionalString(currentConfig.model_provider);
+      if (activeProvider !== undefined && activeProvider !== "openai") {
+        assertThirdPartyRoleDoesNotUseProvider(activeProvider, environment);
+      }
+      const currentCandidates = backupPrimaryProviderCandidates(
+        record(currentConfig.model_providers),
+        environment,
+      );
+      const edits = [
+        ...(optionalString(currentConfig.openai_base_url) === undefined
+          ? []
+          : [{ keyPath: "openai_base_url", value: null }]),
+        { keyPath: "model_provider", value: "openai" },
+        ...(activeProvider !== undefined && activeProvider !== "openai"
+          ? [{ keyPath: "model", value: null }]
+          : []),
+        ...currentCandidates.map((id) => ({
+          keyPath: `model_providers.${id}`,
+          value: null,
+        })),
+      ];
+      await writer.writeUserConfigEdits(
+        edits,
+        { expectedVersion: currentSnapshot.version },
+      );
+      return currentCandidates;
+    } finally {
+      await writer.close().catch(() => undefined);
+    }
+  });
   output.write(
     backedUp.length === 0
       ? "已恢复官方 OpenAI 模式。请运行 codexc service restart all 生效。\n"

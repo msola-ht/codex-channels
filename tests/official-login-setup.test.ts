@@ -100,6 +100,46 @@ describe("official login setup", () => {
     expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
   });
 
+  it("rechecks the Provider snapshot after device login", async () => {
+    const connectHome = mkdtempSync(join(tmpdir(), "codexc-official-login-refresh-"));
+    const environment = { CODEX_CONNECT_HOME: connectHome };
+    const client = {
+      connect: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      readUserConfigSnapshot: vi.fn()
+        .mockResolvedValueOnce({
+          config: { model_provider: "openai", model_providers: {} },
+          version: "v1",
+        })
+        .mockResolvedValueOnce({
+          config: {
+            model_provider: "openai",
+            model_providers: {
+              lateprovider: {
+                base_url: "https://late.example.test/v1",
+                wire_api: "responses",
+              },
+            },
+          },
+          version: "v2",
+        }),
+      writeUserConfigEdits: vi.fn(async () => undefined),
+    };
+
+    await runOfficialLoginSetup({
+      environment,
+      output: { write: vi.fn() },
+      prompts: { isCancel: () => false, confirm: vi.fn(async () => true) },
+      createClient: vi.fn(async () => client),
+      runLogin: vi.fn(),
+    });
+
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model_providers.lateprovider", value: null },
+    ], { expectedVersion: "v2" });
+  });
+
   it("defaults to codex login --device-auth for remote login", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codexc-official-login-device-"));
     const argsPath = join(dir, "args.txt");

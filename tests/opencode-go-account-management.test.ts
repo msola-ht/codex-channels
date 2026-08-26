@@ -48,6 +48,14 @@ describe("OpenCode Go account management", () => {
         provider: "opencode-go" as const,
         model: "deepseek-v4-flash-vision-exp",
       }),
+      loadProviders: () => [{
+        provider: "opencode-go-b",
+        displayName: "OpenCode Go (b)",
+        model: "deepseek-v4-pro",
+        reasoningEffort: "medium",
+        mode: "switching",
+        models: [],
+      }],
       writeAccounts,
       configureRole,
     });
@@ -63,7 +71,7 @@ describe("OpenCode Go account management", () => {
     ]);
     expect(configureRole).toHaveBeenCalledWith(
       "opencode-go-b",
-      "deepseek-v4-flash-vision-exp",
+      "deepseek-v4-pro",
       {},
     );
   });

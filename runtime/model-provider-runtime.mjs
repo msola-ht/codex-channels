@@ -14,6 +14,7 @@ import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import { connectHomePath, providerStorageRoot } from "./connect-home.mjs";
+import { withGatewayConfigLock } from "./gateway-config.mjs";
 import {
   deepseekProviderDefinition,
   loadManagedModelProviderDefinitions,
@@ -678,6 +679,15 @@ function configuredCustomSwitchingProfileFromContent(
 }
 
 export function writeCustomPrimaryProviderSwitchingProfile(
+  options,
+  environment = process.env,
+  guards = {},
+) {
+  return withGatewayConfigLock(customSwitchingProviderRegistryPath(environment), () =>
+    writeCustomPrimaryProviderSwitchingProfileUnlocked(options, environment, guards));
+}
+
+function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   {
     provider,
     model,
@@ -688,6 +698,11 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     catalogSource = { kind: "official" },
   },
   environment = process.env,
+  {
+    expectedProfilePresent,
+    expectedProfileContent,
+    expectedProviderIds,
+  } = {},
 ) {
   const validationError = validateCustomPrimaryModelProviderId(provider, environment);
   if (validationError !== null) throw new Error(validationError);
@@ -714,6 +729,13 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     previousProfile = readPrivateFileSync(profilePath);
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
+  }
+  if (
+    (expectedProviderIds !== undefined && !sameStringArray(ids, expectedProviderIds))
+    || (expectedProfilePresent === true && previousProfile !== expectedProfileContent)
+    || (expectedProfilePresent === false && previousProfile !== undefined)
+  ) {
+    throw customSwitchingProfileChangedError(provider);
   }
   writePrivateFileAtomicSync(
     profilePath,
@@ -759,6 +781,19 @@ export function writeCustomPrimaryProviderSwitchingProfile(
 
 export function removeCustomPrimaryProviderSwitchingProfile(
   environment = process.env,
+  provider,
+  expectedProfileContent,
+) {
+  return withGatewayConfigLock(customSwitchingProviderRegistryPath(environment), () =>
+    removeCustomPrimaryProviderSwitchingProfileUnlocked(
+      environment,
+      provider,
+      expectedProfileContent,
+    ));
+}
+
+function removeCustomPrimaryProviderSwitchingProfileUnlocked(
+  environment,
   provider,
   expectedProfileContent,
 ) {
@@ -814,6 +849,15 @@ export function restoreCustomPrimaryProviderSwitchingProfile(
   provider,
   profileContent,
 ) {
+  return withGatewayConfigLock(customSwitchingProviderRegistryPath(environment), () =>
+    restoreCustomPrimaryProviderSwitchingProfileUnlocked(environment, provider, profileContent));
+}
+
+function restoreCustomPrimaryProviderSwitchingProfileUnlocked(
+  environment,
+  provider,
+  profileContent,
+) {
   configuredCustomSwitchingProfileFromContent(environment, provider, profileContent);
   const ids = loadCustomSwitchingProviderIds(environment);
   const path = customPrimaryProviderProfilePath(environment, provider);
@@ -836,6 +880,12 @@ export function restoreCustomPrimaryProviderSwitchingProfile(
     }
     throw error;
   }
+}
+
+function sameStringArray(left, right) {
+  return Array.isArray(right)
+    && left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function customSwitchingProfileChangedError(provider) {

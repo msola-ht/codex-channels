@@ -21,6 +21,7 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { updateCodexUserConfig } from "./codex-user-config.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 const managedRoleName = "external";
 const legacyManagedRoleName = "ds";
@@ -195,7 +196,7 @@ export function agentsStatus(environment = process.env) {
       const document = parse(readFileSync(configPath, "utf8"));
       const feature = document.features?.multi_agent_v2;
       multiAgentV2Enabled = feature === true || feature?.enabled === true;
-      externalRoleConfigured = document.agents?.[managedRoleName] !== undefined;
+      externalRoleConfigured = isManagedThirdPartyRole(document, environment);
       legacyDsRoleConfigured = record(document.agents?.[legacyManagedRoleName]).config_file
         === legacyRoleConfigPath;
     } catch {
@@ -225,49 +226,51 @@ export async function configureThirdPartyRole(
   environment = process.env,
   { updateConfig = updateCodexUserConfig } = {},
 ) {
-  const definition = providerDefinition(provider, environment);
-  assertThirdPartyRoleAvailable(environment);
-  const roleConfigPath = managedModelProviderRoleConfigPath(environment);
-  const legacyRoleConfigPath = join(dirname(roleConfigPath), legacyManagedRoleConfigFileName);
-  const previousRoleConfig = readOptionalFile(roleConfigPath);
-  const selection = writeThirdPartyModelProviderRoleConfig(
-    environment,
-    { provider, ...(model ? { model } : {}) },
-  );
-  const writtenRoleConfig = readOptionalFile(roleConfigPath);
-  let removeLegacyRole = false;
-  try {
-    await updateConfig(environment, (config) => {
-      assertThirdPartyRoleAvailableInConfig(config, environment);
-      removeLegacyRole = isLegacyManagedRole(config, legacyRoleConfigPath);
-      return [{
-        keyPath: "features.multi_agent_v2",
-        value: true,
-      }, {
-        keyPath: `agents.${managedRoleName}`,
-        value: {
-          description: roleDescription,
-          config_file: roleConfigPath,
-          nickname_candidates: [definition.displayName],
-        },
-      }, ...(removeLegacyRole
-        ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }]
-        : [])];
-    });
-  } catch (error) {
+  return withThirdPartyRoleTransaction(environment, async () => {
+    const definition = providerDefinition(provider, environment);
+    assertThirdPartyRoleAvailable(environment);
+    const roleConfigPath = managedModelProviderRoleConfigPath(environment);
+    const legacyRoleConfigPath = join(dirname(roleConfigPath), legacyManagedRoleConfigFileName);
+    const previousRoleConfig = readOptionalFile(roleConfigPath);
+    const selection = writeThirdPartyModelProviderRoleConfig(
+      environment,
+      { provider, ...(model ? { model } : {}) },
+    );
+    const writtenRoleConfig = readOptionalFile(roleConfigPath);
+    let removeLegacyRole = false;
     try {
-      restoreOptionalFile(roleConfigPath, previousRoleConfig, writtenRoleConfig);
-    } catch (rollbackError) {
-      throw new AggregateError(
-        [error, rollbackError],
-        "第三方子代理配置失败，且角色文件已被其他进程修改",
-        { cause: rollbackError },
-      );
+      await updateConfig(environment, (config) => {
+        assertThirdPartyRoleAvailableInConfig(config, environment);
+        removeLegacyRole = isLegacyManagedRole(config, legacyRoleConfigPath);
+        return [{
+          keyPath: "features.multi_agent_v2",
+          value: true,
+        }, {
+          keyPath: `agents.${managedRoleName}`,
+          value: {
+            description: roleDescription,
+            config_file: roleConfigPath,
+            nickname_candidates: [definition.displayName],
+          },
+        }, ...(removeLegacyRole
+          ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }]
+          : [])];
+      });
+    } catch (error) {
+      try {
+        restoreOptionalFile(roleConfigPath, previousRoleConfig, writtenRoleConfig);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "第三方子代理配置失败，且角色文件已被其他进程修改",
+          { cause: rollbackError },
+        );
+      }
+      throw error;
     }
-    throw error;
-  }
-  if (removeLegacyRole) removeLegacyRoleConfig(legacyRoleConfigPath);
-  return selection;
+    if (removeLegacyRole) removeLegacyRoleConfig(legacyRoleConfigPath);
+    return selection;
+  });
 }
 
 export function assertThirdPartyRoleAvailable(environment = process.env) {
@@ -306,35 +309,41 @@ export async function removeManagedThirdPartyRole(
   environment = process.env,
   { updateConfig = updateCodexUserConfig, provider, disableFeature = false } = {},
 ) {
-  const configPath = agentRolesConfigPath(environment);
-  if (!existsSync(configPath)) return false;
-  const selection = provider ? loadThirdPartyModelProviderRole(environment) : undefined;
-  if (provider && selection?.provider !== provider) return false;
-  const legacyRoleConfigPath = join(
-    dirname(managedModelProviderRoleConfigPath(environment)),
-    legacyManagedRoleConfigFileName,
-  );
-  let removed = false;
-  await updateConfig(environment, (config) => {
-    const managedExternal = isManagedThirdPartyRole(config, environment);
-    const managedLegacyDs = isLegacyManagedRole(config, legacyRoleConfigPath);
-    if (!managedExternal && !managedLegacyDs) return [];
-    removed = true;
-    const otherRoles = Object.keys(record(config.agents)).filter(
-      (name) => name !== managedRoleName && name !== legacyManagedRoleName,
+  return withThirdPartyRoleTransaction(environment, async () => {
+    const configPath = agentRolesConfigPath(environment);
+    if (!existsSync(configPath)) return false;
+    const selection = provider ? loadThirdPartyModelProviderRole(environment) : undefined;
+    if (provider && selection?.provider !== provider) return false;
+    const legacyRoleConfigPath = join(
+      dirname(managedModelProviderRoleConfigPath(environment)),
+      legacyManagedRoleConfigFileName,
     );
-    return [
-      ...(managedExternal ? [{ keyPath: `agents.${managedRoleName}`, value: null }] : []),
-      ...(managedLegacyDs ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }] : []),
-      ...(disableFeature && otherRoles.length === 0
-        ? [{ keyPath: "features.multi_agent_v2", value: false }]
-        : []),
-    ];
+    let removed = false;
+    await updateConfig(environment, (config) => {
+      const managedExternal = isManagedThirdPartyRole(config, environment);
+      const managedLegacyDs = isLegacyManagedRole(config, legacyRoleConfigPath);
+      if (!managedExternal && !managedLegacyDs) return [];
+      removed = true;
+      const otherRoles = Object.keys(record(config.agents)).filter(
+        (name) => name !== managedRoleName && name !== legacyManagedRoleName,
+      );
+      return [
+        ...(managedExternal ? [{ keyPath: `agents.${managedRoleName}`, value: null }] : []),
+        ...(managedLegacyDs ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }] : []),
+        ...(disableFeature && otherRoles.length === 0
+          ? [{ keyPath: "features.multi_agent_v2", value: false }]
+          : []),
+      ];
+    });
+    if (!removed) return false;
+    removeManagedModelProviderRoleConfig(environment);
+    removeLegacyRoleConfig(legacyRoleConfigPath);
+    return true;
   });
-  if (!removed) return false;
-  removeManagedModelProviderRoleConfig(environment);
-  removeLegacyRoleConfig(legacyRoleConfigPath);
-  return true;
+}
+
+async function withThirdPartyRoleTransaction(environment, operation) {
+  return withModelProviderManagementTransaction(environment, operation);
 }
 
 function providerDefinition(provider, environment = process.env) {

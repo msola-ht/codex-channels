@@ -28,6 +28,13 @@ export function replaceOptionalOpencodeGoFile(
 ): Promise<void>;
 export function removeOptionalOpencodeGoFile(path: string): Promise<void>;
 export function snapshotOpencodeGoFiles(paths: string[]): OpenCodeGoFileSnapshot[];
+export function assertOpencodeGoFileSnapshots(
+  snapshots: OpenCodeGoFileSnapshot[],
+): Promise<void>;
+export function refreshOpencodeGoFileSnapshot(
+  snapshots: OpenCodeGoFileSnapshot[],
+  path: string,
+): OpenCodeGoFileSnapshot[];
 export function restoreOpencodeGoFileSnapshots(
   snapshots: OpenCodeGoFileSnapshot[],
   guards: OpenCodeGoFileSnapshot[],

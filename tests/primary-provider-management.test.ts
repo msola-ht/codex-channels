@@ -34,6 +34,13 @@ function clientFixture(snapshot: {
     connect: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
     readUserConfigSnapshot: vi.fn(async () => snapshot),
+    listModels: vi.fn(async () => [{
+      model: "gpt-5.6-sol",
+      displayName: "GPT-5.6-Sol",
+      supportedReasoningEfforts: [],
+      defaultReasoningEffort: "medium",
+      isDefault: true,
+    }]),
     writeUserConfigEdits,
   };
   return {
@@ -140,6 +147,31 @@ describe("primary Provider management", () => {
     await expect(promise).rejects.toBeInstanceOf(PrimaryProviderManagementError);
   });
 
+  it("rejects a custom model outside the official App Server catalog", async () => {
+    const environment = isolatedEnvironment("primary-provider-management-model-");
+    const { createClient } = clientFixture({
+      config: {
+        model_provider: "openai",
+        model_providers: {
+          codeproxy: {
+            name: "CodeProxy",
+            base_url: "https://proxy.example.test/v1",
+            wire_api: "responses",
+          },
+        },
+      },
+      version: "v1",
+    });
+
+    await expect(previewPrimaryProviderSwitch(
+      { providerId: "codeproxy", model: "invented-model" },
+      { environment, createClient },
+    )).rejects.toMatchObject({
+      code: "unknown-model",
+      field: "model",
+    });
+  });
+
   it("removes a backup candidate without requiring a service restart", async () => {
     const environment = isolatedEnvironment("primary-provider-management-backup-");
     backupPrimaryProviderCandidates({
@@ -220,5 +252,40 @@ describe("primary Provider management", () => {
       activation: "restart-all",
       warnings: [{ code: "backup-cleanup-failed", providerId: "codeproxy" }],
     });
+  });
+
+  it("rejects a confirmed removal after the Provider details change", async () => {
+    const environment = isolatedEnvironment("primary-provider-management-stale-preview-");
+    const snapshot = {
+      config: {
+        model_provider: "openai",
+        model_providers: {
+          codeproxy: {
+            name: "CodeProxy",
+            base_url: "https://proxy.example.test/v1",
+            wire_api: "responses",
+          },
+        },
+      },
+      version: "v1",
+    } satisfies {
+      config: Record<string, CodexUserConfigValue | undefined>;
+      version: string;
+    };
+    const { createClient, writeUserConfigEdits } = clientFixture(snapshot);
+    const preview = await previewPrimaryProviderRemoval(
+      { providerId: "codeproxy" },
+      { environment, createClient },
+    );
+    snapshot.config.model_providers!.codeproxy = {
+      ...snapshot.config.model_providers!.codeproxy,
+      name: "Changed Provider",
+    };
+
+    await expect(applyPrimaryProviderRemoval(
+      { providerId: "codeproxy" },
+      { environment, createClient, preview },
+    )).rejects.toMatchObject({ code: "stale-preview", field: "preview" });
+    expect(writeUserConfigEdits).not.toHaveBeenCalled();
   });
 });

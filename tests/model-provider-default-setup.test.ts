@@ -78,6 +78,10 @@ describe("managed model provider default setup", () => {
         selectReasoningEffort: async () => "low",
         selectAutoCompactPercent: async () => 40,
       },
+      readConfigSnapshot: vi.fn(async () => ({
+        config: { model: "deepseek-v4-flash" },
+        version: "v1",
+      })),
       writeConfigEdits,
     })).resolves.toMatchObject({ mode: "exclusive", model: "deepseek-v4-pro" });
 
@@ -90,6 +94,7 @@ describe("managed model provider default setup", () => {
         { keyPath: "model_auto_compact_token_limit", value: null },
         { keyPath: "model_auto_compact_token_limit_scope", value: null },
       ],
+      { expectedVersion: "v1" },
     );
   });
 

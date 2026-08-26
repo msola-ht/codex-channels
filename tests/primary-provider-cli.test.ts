@@ -272,7 +272,7 @@ describe("primary provider CLI", () => {
     });
     const output = { write: vi.fn() };
 
-    await switchPrimaryProvider("thirdparty", "gpt-other", {
+    await switchPrimaryProvider("thirdparty", "model-a", {
       environment: isolatedEnvironment("codexc-primary-provider-test-"),
       output,
       createClient,
@@ -280,7 +280,7 @@ describe("primary provider CLI", () => {
 
     expect(writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "model_provider", value: "thirdparty" },
-      { keyPath: "model", value: "gpt-other" },
+      { keyPath: "model", value: "model-a" },
     ], { expectedVersion: "v1" });
     expect(output.write.mock.calls.flat().join("")).toContain(
       "已设为固定主 Provider：thirdparty",

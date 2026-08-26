@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 import {
   readGatewayConfig,
+  withGatewayConfigLock,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import {
@@ -23,11 +24,17 @@ export function listApiProviders(environment = process.env) {
 }
 
 export function saveApiProvider(
+  input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  const { configPath } = requireUserConfig(environment);
+  return withGatewayConfigLock(configPath, () => saveApiProviderLocked(input, options));
+}
+
+function saveApiProviderLocked(
   { operation, id, name, endpoint, apiKey },
-  {
-    environment = process.env,
-    writeConfig = writeGatewayConfig,
-  } = {},
+  { environment = process.env, writeConfig = writeGatewayConfig },
 ) {
   if (operation !== "create" && operation !== "update") {
     throw new Error(`未知直接 API Provider 保存操作：${String(operation)}`);
@@ -59,6 +66,17 @@ export function saveApiProvider(
     context.document.api_providers = nextProviders;
     writeConfig(context.configPath, context.document);
   } catch (error) {
+    const confirmation = confirmProviderSave(context.configPath, provider);
+    if (confirmation.applied) {
+      return savedProviderResult(existing, provider, context.configPath);
+    }
+    if (confirmation.error !== undefined) {
+      throw new AggregateError(
+        [error, confirmation.error],
+        "直接 API Provider 保存结果无法确认；新凭据已保留，请检查配置后重试",
+        { cause: error },
+      );
+    }
     context.document.api_providers = previousProviders;
     try {
       if (existingProviderKey === undefined) {
@@ -75,20 +93,30 @@ export function saveApiProvider(
     }
     throw error;
   }
+  return savedProviderResult(existing, provider, context.configPath);
+}
+
+function savedProviderResult(existing, provider, configPath) {
   return {
     action: existing === undefined ? "created" : "updated",
     provider: { ...provider, hasApiKey: true },
-    configPath: context.configPath,
+    configPath,
     activation: "restart-gateway",
   };
 }
 
 export function deleteApiProvider(
   id,
-  {
-    environment = process.env,
-    writeConfig = writeGatewayConfig,
-  } = {},
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  const { configPath } = requireUserConfig(environment);
+  return withGatewayConfigLock(configPath, () => deleteApiProviderLocked(id, options));
+}
+
+function deleteApiProviderLocked(
+  id,
+  { environment = process.env, writeConfig = writeGatewayConfig },
 ) {
   const context = loadApiProviderContext(environment);
   const providerId = normalizedProviderId(id);
@@ -103,6 +131,28 @@ export function deleteApiProvider(
     );
     writeConfig(context.configPath, context.document);
   } catch (error) {
+    const confirmation = confirmProviderRemoval(context.configPath, providerId);
+    if (confirmation.applied) {
+      return removedProviderResult(providerId, context.configPath);
+    }
+    if (confirmation.error !== undefined) {
+      try {
+        if (previousKey !== undefined) {
+          writeApiProviderKey(context.credentialsDirectory, providerId, previousKey);
+        }
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, confirmation.error, rollbackError],
+          "直接 API Provider 删除结果无法确认，且原凭据恢复失败",
+          { cause: rollbackError },
+        );
+      }
+      throw new AggregateError(
+        [error, confirmation.error],
+        "直接 API Provider 删除结果无法确认；原凭据已保留，请检查配置后重试",
+        { cause: error },
+      );
+    }
     context.document.api_providers = previousProviders;
     try {
       if (previousKey !== undefined) {
@@ -117,12 +167,43 @@ export function deleteApiProvider(
     }
     throw error;
   }
+  return removedProviderResult(providerId, context.configPath);
+}
+
+function removedProviderResult(providerId, configPath) {
   return {
     action: "removed",
     provider: providerId,
-    configPath: context.configPath,
+    configPath,
     activation: "restart-gateway",
   };
+}
+
+function confirmProviderSave(configPath, expectedProvider) {
+  return confirmProviderState(configPath, (providers) => {
+    const provider = providers.find(({ id }) => id === expectedProvider.id);
+    return provider !== undefined
+      && provider.name === expectedProvider.name
+      && provider.protocol === expectedProvider.protocol
+      && provider.endpoint === expectedProvider.endpoint;
+  });
+}
+
+function confirmProviderRemoval(configPath, providerId) {
+  return confirmProviderState(
+    configPath,
+    (providers) => providers.every(({ id }) => id !== providerId),
+  );
+}
+
+function confirmProviderState(configPath, predicate) {
+  try {
+    return {
+      applied: predicate(providerList(readGatewayConfig(configPath).api_providers)),
+    };
+  } catch (error) {
+    return { applied: false, error };
+  }
 }
 
 export function validateApiProviderId(value) {

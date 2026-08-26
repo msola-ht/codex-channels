@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   listCustomPrimaryProviderCandidates,
@@ -18,6 +19,7 @@ import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
 } from "./primary-provider-config-transaction.mjs";
 import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { PrimaryProviderManagementError } from "./primary-provider-management.mjs";
 
 export const primaryProviderId = "OpenAI";
@@ -75,9 +77,13 @@ export async function previewCustomPrimaryProviderSave(input, options = {}) {
 
 export async function prepareCustomPrimaryProviderSave(input, options = {}) {
   const plan = await buildSavePlan(input, options, { requireConfirmation: true });
+  const environment = options.environment ?? process.env;
   return {
     preview: publicSavePreview(input, plan),
-    apply: () => applySavePlan(input, plan, options),
+    apply: () => withModelProviderManagementTransaction(
+      environment,
+      () => applySavePlan(input, plan, options),
+    ),
   };
 }
 
@@ -96,22 +102,54 @@ function publicSavePreview(input, plan) {
 }
 
 export async function applyCustomPrimaryProviderSave(input, options = {}) {
-  const plan = await buildSavePlan(input, options, { requireConfirmation: true });
-  return applySavePlan(input, plan, options);
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(environment, async () => {
+    const plan = await buildSavePlan(input, options, { requireConfirmation: true });
+    return applySavePlan(input, plan, options);
+  });
 }
 
 async function applySavePlan(input, plan, options) {
   const { environment = process.env, createClient = createCodexUserConfigClient } = options;
+  if (plan.providerIdToDeactivate !== undefined) {
+    assertProviderNotInUse(plan.providerIdToDeactivate, environment);
+  }
   if (plan.provider.mode === "switching") {
-    writeCustomPrimaryProviderSwitchingProfile({
-      provider: plan.provider.id,
-      model: plan.provider.model,
-      name: plan.provider.displayName,
-      baseUrl: plan.provider.baseUrl,
-      apiKey: plan.apiKey,
-      supportsWebsockets: plan.provider.supportsWebsockets,
-      catalogSource: { kind: "official" },
-    }, environment);
+    const client = await createClient({ environment });
+    try {
+      await client.connect();
+      const current = await client.readUserConfigSnapshot();
+      if (!isDeepStrictEqual(current.version, plan.expectedVersion)) {
+        throw invalid("stale-preview", "operation", "Codex 配置已变化，请重新预览后再保存");
+      }
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+    try {
+      writeCustomPrimaryProviderSwitchingProfile({
+        provider: plan.provider.id,
+        model: plan.provider.model,
+        name: plan.provider.displayName,
+        baseUrl: plan.provider.baseUrl,
+        apiKey: plan.apiKey,
+        supportsWebsockets: plan.provider.supportsWebsockets,
+        catalogSource: { kind: "official" },
+      }, environment, {
+        expectedProfilePresent: plan.switchingProvider !== undefined,
+        expectedProfileContent: plan.switchingProvider?.profileContent,
+        expectedProviderIds: plan.registeredProviderIds,
+      });
+    } catch (error) {
+      if (error?.code === "CUSTOM_SWITCHING_PROFILE_CHANGED") {
+        throw invalid(
+          "stale-preview",
+          "operation",
+          "自定义切换 Provider 已变化，请重新预览后再保存",
+          error,
+        );
+      }
+      throw error;
+    }
   } else {
     await writePrimaryProviderConfigEditsWithProfileRemoval({
       environment,
@@ -312,6 +350,11 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     apiKey,
     expectedVersion: snapshot.version,
     switchingProvider,
+    registeredProviderIds: switchingProviders.map(({ id }) => id),
+    providerIdToDeactivate: hasCustomFixedMainProvider
+      && effectiveActiveProviderId !== providerId
+      ? effectiveActiveProviderId
+      : undefined,
     backupCandidateToRemove: input.operation === "update" && backedUp
       ? providerId
       : undefined,
