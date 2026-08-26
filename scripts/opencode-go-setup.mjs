@@ -14,6 +14,8 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   applyOpencodeGoAccountStop,
   applyOpencodeGoDefaultAccountChange,
+  applyOpencodeGoAccountRemoval,
+  previewOpencodeGoAccountRemoval,
 } from "./opencode-go-account-management.mjs";
 import {
   opencodeGoAccountDefinition,
@@ -34,9 +36,7 @@ import {
   loadOpencodeGoAccounts,
   migrateLegacyOpencodeGoAccount,
   opencodeGoDefaultAccountId,
-  opencodeGoAccountBackupDirectory,
   opencodeGoAccountDirectory,
-  opencodeGoAccountMarkerPath,
   opencodeGoAccountsFilePath,
   opencodeGoProviderId,
   readOpencodeGoAccountMarker,
@@ -50,6 +50,15 @@ import {
   writePrivateFileAtomic,
 } from "../runtime/private-file.mjs";
 import { configureThirdPartyRole } from "./agents.mjs";
+import {
+  opencodeGoAccountPaths,
+  opencodeGoProfileFileName,
+  readOptionalOpencodeGoFile,
+  removeOptionalOpencodeGoFile,
+  replaceOptionalOpencodeGoFile,
+  restoreOpencodeGoFileSnapshots,
+  snapshotOpencodeGoFiles,
+} from "./opencode-go-account-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
@@ -189,7 +198,7 @@ export async function addOpencodeGoAccount(accountId, {
       throw new Error("固定模式只允许一个 OpenCode Go 账户，其余账户必须使用切换模式");
     }
   }
-  const paths = accountPaths(environment, accountId);
+  const paths = opencodeGoAccountPaths(environment, accountId);
   await assertProfileOwnership(paths, accountId, environment);
   if (mode === "exclusive" && prompter) {
     if (!await prompter.confirm("固定模式会修改并备份 ~/.codex/config.toml，确认继续？", false)) {
@@ -262,7 +271,7 @@ export async function addOpencodeGoAccount(accountId, {
     paths.manifestPath,
     opencodeGoAccountsFilePath(environment),
   ];
-  const snapshots = snapshotFiles(transactionPaths);
+  const snapshots = snapshotOpencodeGoFiles(transactionPaths);
   let guards;
   try {
     mkdirSync(paths.accountDirectory, { recursive: true, mode: 0o700 });
@@ -313,18 +322,18 @@ export async function addOpencodeGoAccount(accountId, {
       paths.catalogPath,
       `${JSON.stringify(managedCatalogWithPreserved, null, 2)}\n`,
     );
-    guards = snapshotFiles(transactionPaths);
+    guards = snapshotOpencodeGoFiles(transactionPaths);
     await writePrivateFileAtomic(paths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    guards = snapshotFiles(transactionPaths);
-    await replaceOptionalFile(
+    guards = snapshotOpencodeGoFiles(transactionPaths);
+    await replaceOptionalOpencodeGoFile(
       paths.configPath,
       Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
     );
-    guards = snapshotFiles(transactionPaths);
-    await replaceOptionalFile(paths.profilePath, profileContent);
-    guards = snapshotFiles(transactionPaths);
+    guards = snapshotOpencodeGoFiles(transactionPaths);
+    await replaceOptionalOpencodeGoFile(paths.profilePath, profileContent);
+    guards = snapshotOpencodeGoFiles(transactionPaths);
     writeOpencodeGoAccountMarker(environment, accountId, mode);
-    guards = snapshotFiles(transactionPaths);
+    guards = snapshotOpencodeGoFiles(transactionPaths);
     const nextAccounts = accounts.some((account) => account.id === accountId)
       ? accounts.map((account) => account.id === accountId
           ? { id: accountId, default: account.default }
@@ -334,13 +343,13 @@ export async function addOpencodeGoAccount(accountId, {
           { id: accountId, default: accounts.length === 0 },
         ];
     writeOpencodeGoAccounts(environment, nextAccounts);
-    guards = snapshotFiles(transactionPaths);
+    guards = snapshotOpencodeGoFiles(transactionPaths);
     if (accounts.length === 0 || accounts.find((account) => account.id === accountId)?.default) {
       await configureRole(opencodeGoProviderId(accountId), selectedModel, environment);
     }
   } catch (error) {
     if (guards === undefined) throw error;
-    await restoreSnapshots(snapshots, guards).catch((rollbackError) => {
+    await restoreOpencodeGoFileSnapshots(snapshots, guards).catch((rollbackError) => {
       throw new AggregateError(
         [error, rollbackError],
         "OpenCode Go 账户配置失败，且未能完整恢复操作前文件",
@@ -393,77 +402,18 @@ export async function removeOpencodeGoAccount(accountId, {
   prompts = clackPrompts,
   confirm = true,
 } = {}) {
-  validateOpencodeGoAccountId(accountId);
-  const accounts = loadOpencodeGoAccounts(environment);
-  const account = accounts.find((candidate) => candidate.id === accountId);
-  if (!account) throw new Error(`OpenCode Go 账户不存在：${accountId}`);
-  if (accounts.length === 1) {
-    throw new Error("不能删除最后一个 OpenCode Go 账户；请在 Setup 中选择恢复配置");
-  }
-  const role = loadManagedModelProviderRole(environment);
-  if (role?.provider === opencodeGoProviderId(accountId)) {
-    throw new Error(
-      `OpenCode Go 账户 ${accountId} 是 agents.external 当前账户；请先运行 codexc opencode-go account default <其他账户> 或 codexc agents disable`,
-    );
-  }
+  const preview = await previewOpencodeGoAccountRemoval(accountId, { environment });
   if (confirm && !await confirmPrompt(prompts, `确认删除 OpenCode Go 账户 ${accountId}？历史 Thread 将不可恢复。`, false)) {
     output.write("已取消，未修改任何文件。\n");
     return { action: "cancelled" };
   }
-  const paths = accountPaths(environment, accountId);
-  const stopResult = await stopOpencodeGoAccount(accountId, {
+  const result = await applyOpencodeGoAccountRemoval({
+    accountId: preview.account.id,
+    confirmHistoryLoss: true,
+  }, {
     environment,
-    output,
-    silent: true,
   });
-  if (stopResult.action === "in-use") {
-    throw new Error(
-      `OpenCode Go 账户 ${accountId} 正在被 Remote TUI 使用；请退出对应 TUI 后再删除`,
-    );
-  }
-  mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
-  const profile = await readOptionalFile(paths.profilePath);
-  if (profile !== undefined) {
-    await writePrivateFileAtomic(
-      join(paths.backupDirectory, opencodeGoProfileFileName(accountId)),
-      profile,
-    );
-  }
-  const marker = await readOptionalFile(paths.markerPath);
-  if (marker !== undefined) {
-    await writePrivateFileAtomic(
-      join(paths.backupDirectory, "managed.toml"),
-      marker,
-    );
-  }
-  const remaining = accounts.filter((candidate) => candidate.id !== accountId);
-  if (account.default && remaining.length > 0) {
-    remaining[0] = { ...remaining[0], default: true };
-  }
-  const transactionPaths = [
-    opencodeGoAccountsFilePath(environment),
-    paths.profilePath,
-    paths.markerPath,
-  ];
-  const snapshots = snapshotFiles(transactionPaths);
-  let guards;
-  try {
-    writeOpencodeGoAccounts(environment, remaining);
-    guards = snapshotFiles(transactionPaths);
-    if (existsSync(paths.profilePath)) unlinkSync(paths.profilePath);
-    guards = snapshotFiles(transactionPaths);
-    if (existsSync(paths.markerPath)) unlinkSync(paths.markerPath);
-  } catch (error) {
-    if (guards === undefined) throw error;
-    await restoreSnapshots(snapshots, guards).catch((rollbackError) => {
-      throw new AggregateError(
-        [error, rollbackError],
-        "OpenCode Go 账户删除失败，且未能完整恢复操作前文件",
-      );
-    });
-    throw error;
-  }
-  output.write(`OpenCode Go 账户已删除：${accountId}（备份保留在 ${paths.backupDirectory}）。\n`);
+  output.write(`OpenCode Go 账户已删除：${accountId}（备份保留在 ${result.backupDirectory}）。\n`);
   output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
   return { action: "removed", accountId };
 }
@@ -536,7 +486,7 @@ export async function refreshOpencodeGoCatalogForUpdate(
     const provider = opencodeGoProviderId(account.id);
     const settings = settingsByProvider.get(provider);
     if (migrationAlreadyApplied || !settings || settings.model !== previousDefaultModel) continue;
-    const paths = accountPaths(environment, account.id);
+    const paths = opencodeGoAccountPaths(environment, account.id);
     const documentPath = settings.mode === "switching" ? paths.profilePath : paths.configPath;
     const document = await readTomlFile(documentPath);
     if (document.model !== previousDefaultModel || document.model_provider !== provider) {
@@ -566,11 +516,11 @@ export async function refreshOpencodeGoCatalogForUpdate(
     ...updates.map(({ path }) => path),
     ...(migrateRole ? [roleConfigPath] : []),
   ];
-  const snapshots = snapshotFiles(transactionPaths);
+  const snapshots = snapshotOpencodeGoFiles(transactionPaths);
   let guards = snapshots;
   try {
     await writePrivateFileAtomic(catalogPath, `${JSON.stringify(managedCatalog, null, 2)}\n`);
-    guards = snapshotFiles(transactionPaths);
+    guards = snapshotOpencodeGoFiles(transactionPaths);
     const updatedAt = (options.now ?? (() => new Date()))().toISOString();
     await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
       source: deepseekSetupScriptUrl,
@@ -584,21 +534,21 @@ export async function refreshOpencodeGoCatalogForUpdate(
             appliedAt: updatedAt,
           },
     }, null, 2)}\n`);
-    guards = snapshotFiles(transactionPaths);
+    guards = snapshotOpencodeGoFiles(transactionPaths);
     for (const update of updates) {
       await writePrivateFileAtomic(update.path, update.content);
-      guards = snapshotFiles(transactionPaths);
+      guards = snapshotOpencodeGoFiles(transactionPaths);
     }
     if (migrateRole) {
       writeManagedModelProviderRoleConfig(environment, {
         provider: role.provider,
         model: definition.defaultModel,
       });
-      guards = snapshotFiles(transactionPaths);
+      guards = snapshotOpencodeGoFiles(transactionPaths);
     }
   } catch (error) {
     try {
-      await restoreSnapshots(snapshots, guards);
+      await restoreOpencodeGoFileSnapshots(snapshots, guards);
     } catch (rollbackError) {
       throw new AggregateError(
         [error, rollbackError],
@@ -703,30 +653,6 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
   });
 }
 
-function accountPaths(environment, accountId) {
-  const codexHome = codexHomePath(environment);
-  const accountDefinition = opencodeGoAccountDefinition(accountId);
-  const providerDirectory = managedProviderDirectory(environment, accountDefinition);
-  const accountDirectory = opencodeGoAccountDirectory(environment, accountId);
-  const backupDirectory = opencodeGoAccountBackupDirectory(environment, accountId);
-  return {
-    codexHome,
-    providerDirectory,
-    accountDirectory,
-    backupDirectory,
-    configPath: join(codexHome, "config.toml"),
-    profilePath: join(codexHome, accountDefinition.profileFileName),
-    markerPath: opencodeGoAccountMarkerPath(environment, accountId),
-    catalogPath: join(providerDirectory, accountDefinition.catalogFileName),
-    manifestPath: join(providerDirectory, accountDefinition.catalogManifestFileName),
-    roleConfigPath: managedModelProviderRoleConfigPath(environment),
-  };
-}
-
-function opencodeGoProfileFileName(accountId) {
-  return opencodeGoAccountDefinition(accountId).profileFileName;
-}
-
 function publicPaths(paths) {
   return {
     configPath: paths.configPath,
@@ -759,7 +685,7 @@ async function restoreOpencodeGoSetup(environment) {
     throw new Error("OpenCode Go 初始配置备份状态无效");
   }
   const codexHome = codexHomePath(environment);
-  const accountPathsValue = accountPaths(environment, defaultAccountId);
+  const accountPathsValue = opencodeGoAccountPaths(environment, defaultAccountId);
   await restoreBackup(
     accountPathsValue.configPath,
     join(legacyBackup, "config.toml"),
@@ -843,7 +769,7 @@ async function restoreBackup(target, backup, existed) {
       readPrivateFileSync(backup, maximumPrivateConfigBytes),
     );
   } else if (existed === false) {
-    await removeOptionalFile(target);
+    await removeOptionalOpencodeGoFile(target);
   } else {
     throw new Error("OpenCode Go 初始配置备份状态无效");
   }
@@ -887,14 +813,14 @@ async function preserveInitialFiles(paths) {
 }
 
 async function backupOptional(source, target) {
-  const content = await readOptionalFile(source);
+  const content = await readOptionalOpencodeGoFile(source);
   if (content === undefined) return false;
   await writePrivateFileAtomic(target, content);
   return true;
 }
 
 async function readTomlFile(path) {
-  const content = await readOptionalFile(path);
+  const content = await readOptionalOpencodeGoFile(path);
   if (content === undefined) return {};
   try {
     return parse(content.toString("utf8"));
@@ -908,7 +834,7 @@ function currentMode(environment, accountId) {
 }
 
 async function assertProfileOwnership(paths, accountId, environment) {
-  const profile = await readOptionalFile(paths.profilePath);
+  const profile = await readOptionalOpencodeGoFile(paths.profilePath);
   const marker = readOpencodeGoAccountMarker(environment, accountId);
   if (profile === undefined && marker === undefined) return;
   if (marker === undefined) {
@@ -1012,17 +938,8 @@ async function confirmPrompt(prompts, message, initialValue) {
   return value;
 }
 
-async function readOptionalFile(path) {
-  try {
-    return Buffer.from(readPrivateFileSync(path, maximumPrivateConfigBytes));
-  } catch (error) {
-    if (error?.code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
 async function readOptionalJson(path, label) {
-  const content = await readOptionalFile(path);
+  const content = await readOptionalOpencodeGoFile(path);
   if (content === undefined) return undefined;
   try {
     const value = JSON.parse(content.toString("utf8"));
@@ -1046,45 +963,6 @@ function readDefaultModelMigration(manifest) {
     throw new Error("OpenCode Go 默认模型迁移标记无效");
   }
   return migration;
-}
-
-async function replaceOptionalFile(path, content) {
-  if (content === undefined) return removeOptionalFile(path);
-  await writePrivateFileAtomic(path, content);
-}
-
-async function removeOptionalFile(path) {
-  try {
-    await unlinkSync(path);
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-}
-
-function snapshotFiles(paths) {
-  return [...new Set(paths)].map((path) => ({
-    path,
-    content: existsSync(path)
-      ? Buffer.from(readPrivateFileSync(path, maximumPrivateConfigBytes))
-      : undefined,
-  }));
-}
-
-async function restoreSnapshots(snapshots, guards) {
-  for (const guard of guards) {
-    const current = await readOptionalFile(guard.path);
-    if (!sameOptionalContent(current, guard.content)) {
-      throw new Error(`OpenCode Go 配置文件在事务期间发生变化：${guard.path}`);
-    }
-  }
-  for (const snapshot of snapshots) {
-    await replaceOptionalFile(snapshot.path, snapshot.content);
-  }
-}
-
-function sameOptionalContent(left, right) {
-  if (left === undefined || right === undefined) return left === right;
-  return left.equals(right);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

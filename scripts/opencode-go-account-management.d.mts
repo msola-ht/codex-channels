@@ -26,6 +26,19 @@ export interface OpenCodeGoAccountStopPreview {
   activation: "none";
 }
 
+export interface OpenCodeGoAccountRemovalPreview {
+  operation: "remove";
+  account: { id: string; provider: string; default: boolean };
+  effects: {
+    stopsRunningAppServer: boolean;
+    promotesDefaultAccountId: string | null;
+    preservesPrivateBackup: true;
+    historyThreadsBecomeUnavailable: true;
+  };
+  confirmation: { required: true; field: "confirmHistoryLoss" };
+  activation: "restart-all";
+}
+
 interface AccountManagementOptions {
   environment?: NodeJS.ProcessEnv;
   loadAccounts?: (environment: NodeJS.ProcessEnv) => Array<{
@@ -87,3 +100,44 @@ export function applyOpencodeGoAccountStop(
   willChange: false;
   activation: "none";
 }>;
+
+interface RemovalOptions extends StopOptions {
+  loadRole?: (environment: NodeJS.ProcessEnv) =>
+    | { provider: ManagedModelProviderId; model: string }
+    | undefined;
+}
+
+export function previewOpencodeGoAccountRemoval(
+  accountId: string,
+  options?: RemovalOptions,
+): Promise<OpenCodeGoAccountRemovalPreview>;
+
+export function applyOpencodeGoAccountRemoval(
+  input: {
+    accountId: string;
+    confirmHistoryLoss?: boolean;
+  },
+  options?: RemovalOptions & {
+    writeAccounts?: (
+      environment: NodeJS.ProcessEnv,
+      accounts: Array<{ id: string; default: boolean }>,
+    ) => void;
+    releaseProvider?: (
+      socketPath: string,
+      provider: string,
+    ) => Promise<AppServerProviderReleaseResult>;
+    stopAccount?: (
+      accountId: string,
+      options: StopOptions & {
+        releaseProvider?: (
+          socketPath: string,
+          provider: string,
+        ) => Promise<AppServerProviderReleaseResult>;
+      },
+    ) => Promise<{ action: "stopped" | "not-running" | "in-use" }>;
+  },
+): Promise<{
+  action: "removed";
+  runtime: "stopped" | "not-running";
+  backupDirectory: string;
+} & OpenCodeGoAccountRemovalPreview>;

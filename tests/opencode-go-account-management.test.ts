@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   OpenCodeGoAccountManagementError,
+  applyOpencodeGoAccountRemoval,
   applyOpencodeGoAccountStop,
   applyOpencodeGoDefaultAccountChange,
+  previewOpencodeGoAccountRemoval,
   previewOpencodeGoAccountStop,
   previewOpencodeGoDefaultAccountChange,
 } from "../scripts/opencode-go-account-management.mjs";
@@ -152,5 +154,63 @@ describe("OpenCode Go account management", () => {
       activation: "none",
     });
     expect(releaseProvider).not.toHaveBeenCalled();
+  });
+
+  it("previews account removal without exposing credentials", async () => {
+    const preview = await previewOpencodeGoAccountRemoval("opencode-go", {
+      environment: {},
+      loadAccounts: () => accounts,
+      loadRole: () => undefined,
+      resolvePrimarySocket: () => "/tmp/app-server.sock",
+      inspectSupervisor: async () => ({ status: "missing" as const }),
+    });
+
+    expect(preview).toEqual({
+      operation: "remove",
+      account: {
+        id: "opencode-go",
+        provider: "opencode-go",
+        default: true,
+      },
+      effects: {
+        stopsRunningAppServer: false,
+        promotesDefaultAccountId: "b",
+        preservesPrivateBackup: true,
+        historyThreadsBecomeUnavailable: true,
+      },
+      confirmation: { required: true, field: "confirmHistoryLoss" },
+      activation: "restart-all",
+    });
+    expect(JSON.stringify(preview)).not.toContain("apiKey");
+  });
+
+  it("requires an explicit history-loss confirmation before account removal", async () => {
+    await expect(applyOpencodeGoAccountRemoval({ accountId: "b" }, {
+      environment: {},
+      loadAccounts: () => accounts,
+      loadRole: () => undefined,
+      resolvePrimarySocket: () => "/tmp/app-server.sock",
+      inspectSupervisor: async () => ({ status: "missing" as const }),
+    })).rejects.toMatchObject({
+      code: "confirmation-required",
+      field: "confirmHistoryLoss",
+    });
+  });
+
+  it("rejects removal when the account runtime is held by another client", async () => {
+    await expect(applyOpencodeGoAccountRemoval({
+      accountId: "b",
+      confirmHistoryLoss: true,
+    }, {
+      environment: {},
+      loadAccounts: () => accounts,
+      loadRole: () => undefined,
+      resolvePrimarySocket: () => "/tmp/app-server.sock",
+      inspectSupervisor: async () => ({ status: "missing" as const }),
+      stopAccount: async () => ({ action: "in-use" as const }),
+    })).rejects.toMatchObject({
+      code: "account-runtime-in-use",
+      field: "accountId",
+    });
   });
 });
