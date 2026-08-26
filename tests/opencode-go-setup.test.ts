@@ -28,6 +28,7 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
 });
 
 import {
+  addOpencodeGoAccount,
   refreshOpencodeGoCatalogForUpdate,
   runOpenCodeGoSetup,
 } from "../scripts/opencode-go-setup.mjs";
@@ -64,6 +65,29 @@ describe("OpenCode Go setup", () => {
       "OpenAI + OpenCode Go 切换模式（创建默认账户 opencode-go）",
       "仅 OpenCode Go 固定模式（创建默认账户 opencode-go）",
     ]);
+  });
+
+  it("requires fixed-mode confirmation when called without a custom prompter", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-confirm-"));
+    const password = vi.fn();
+    const output = { write: vi.fn() };
+
+    await expect(addOpencodeGoAccount("opencode-go", {
+      mode: "exclusive",
+      environment: {
+        CODEX_HOME: codexHome,
+        CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+      },
+      output,
+      prompts: {
+        confirm: async () => false,
+        password,
+        isCancel: () => false,
+      } as never,
+    })).resolves.toEqual({ action: "cancelled", accountId: "opencode-go" });
+
+    expect(password).not.toHaveBeenCalled();
+    expect(output.write).toHaveBeenCalledWith("已取消，未修改任何文件。\n");
   });
 
   it("opens model settings from the OpenCode Go menu when configured", async () => {

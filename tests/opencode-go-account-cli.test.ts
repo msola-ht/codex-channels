@@ -47,7 +47,7 @@ describe("OpenCode Go account CLI", () => {
     const configureRole = vi.fn(async () => undefined);
     const output = { write: vi.fn() };
 
-    await addOpencodeGoAccount("opencode-go", {
+    const result = await addOpencodeGoAccount("opencode-go", {
       environment,
       output,
       prompter: testPrompter(),
@@ -76,6 +76,7 @@ describe("OpenCode Go account CLI", () => {
       "deepseek-v4-flash-vision-exp",
       environment,
     );
+    expect(JSON.stringify(result)).not.toContain("sk-opencode-test");
   });
 
   it("lists accounts and prints the default marker", async () => {

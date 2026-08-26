@@ -1,6 +1,5 @@
 import {
   existsSync,
-  mkdirSync,
   rmSync,
   unlinkSync,
 } from "node:fs";
@@ -18,17 +17,17 @@ import {
   previewOpencodeGoAccountRemoval,
 } from "./opencode-go-account-management.mjs";
 import {
-  opencodeGoAccountDefinition,
-  opencodeGoProviderDefinition,
-} from "../runtime/model-provider-definitions.mjs";
+  applyOpencodeGoAccountConfiguration,
+  previewOpencodeGoAccountConfiguration,
+  readOpencodeGoDefaultModelMigration,
+  readOpencodeGoOptionalJson,
+} from "./opencode-go-account-provisioning.mjs";
+import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProviderRole,
   loadManagedModelProviderSettings,
-  loadPrimaryModelProvider,
   managedModelProviderRoleConfigPath,
   managedProviderDirectory,
-  withManagedModelCatalogSettings,
-  withPreservedManagedModelCatalogSettings,
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -41,8 +40,6 @@ import {
   opencodeGoProviderId,
   readOpencodeGoAccountMarker,
   validateOpencodeGoAccountId,
-  writeOpencodeGoAccountMarker,
-  writeOpencodeGoAccounts,
 } from "../runtime/opencode-go-accounts.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
@@ -55,18 +52,12 @@ import {
   opencodeGoProfileFileName,
   readOptionalOpencodeGoFile,
   removeOptionalOpencodeGoFile,
-  replaceOptionalOpencodeGoFile,
   restoreOpencodeGoFileSnapshots,
   snapshotOpencodeGoFiles,
 } from "./opencode-go-account-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import {
-  applyExclusiveProviderConfig,
-  createSwitchingProviderProfile,
-  hasProviderBaseConfig,
-  restoreProviderBaseConfig,
-} from "./managed-model-provider-setup.mjs";
+import { createManagedProviderCatalog } from "./managed-model-provider-setup.mjs";
 
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
@@ -180,28 +171,20 @@ export async function addOpencodeGoAccount(accountId, {
   prompter,
   configureRole = configureThirdPartyRole,
 } = {}) {
-  validateOpencodeGoAccountId(accountId);
-  const accounts = loadOpencodeGoAccounts(environment);
-    const existingAccount = accounts.some((account) => account.id === accountId);
-    if (existingAccount && !reconfigure) {
-      throw new Error(`OpenCode Go 账户已存在：${accountId}`);
-  }
-  if (!["switching", "exclusive"].includes(mode)) {
-    throw new Error("OpenCode Go 账户管理模式无效");
-  }
-    if (mode === "exclusive") {
-    const primary = loadPrimaryModelProvider(environment);
-    if (primary !== "openai" && primary !== opencodeGoProviderId(accountId)) {
-      throw new Error(`请先恢复当前固定 Provider：${primary}`);
-    }
-    if (accounts.length > 1) {
-      throw new Error("固定模式只允许一个 OpenCode Go 账户，其余账户必须使用切换模式");
-    }
-  }
-  const paths = opencodeGoAccountPaths(environment, accountId);
-  await assertProfileOwnership(paths, accountId, environment);
-  if (mode === "exclusive" && prompter) {
-    if (!await prompter.confirm("固定模式会修改并备份 ~/.codex/config.toml，确认继续？", false)) {
+  const preview = await previewOpencodeGoAccountConfiguration({
+    accountId,
+    mode,
+    reconfigure,
+  }, { environment });
+  if (mode === "exclusive") {
+    const confirmed = prompter
+      ? await prompter.confirm("固定模式会修改并备份 ~/.codex/config.toml，确认继续？", false)
+      : await confirmPrompt(
+          prompts,
+          "固定模式会修改并备份 ~/.codex/config.toml，确认继续？",
+          false,
+        );
+    if (!confirmed) {
       output.write("已取消，未修改任何文件。\n");
       return { action: "cancelled", accountId };
     }
@@ -209,163 +192,23 @@ export async function addOpencodeGoAccount(accountId, {
   const apiKey = prompter
     ? await prompter.secret("OpenCode Go API Key（以 sk- 开头）")
     : await secretPrompt(prompts);
-  if (!/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
-    throw new Error("OpenCode Go API Key 无效");
-  }
-  const previous = loadManagedModelProviderSettings(environment).find(
-    (candidate) => candidate.provider === opencodeGoProviderId(accountId),
-  );
-  const selectedModel = previous?.model ?? definition.defaultModel;
-  let managedCatalog;
-  let manifest;
-  if (existingAccount || !existsSync(paths.catalogPath)) {
-    const downloaded = await downloadCatalog(fetchImpl);
-    const model = downloaded.catalog.models.find(
-      (candidate) => candidate?.slug === definition.defaultModel,
-    );
-    const contextWindow = model?.context_window;
-    if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
-      throw new Error("OpenCode Go 模型目录缺少上下文窗口");
-    }
-    const autoCompactLimit = Math.round(contextWindow * defaultAutoCompactPercent / 100);
-    managedCatalog = withManagedModelCatalogSettings(
-      downloaded.catalog,
-      definition,
-      {
-        model: definition.defaultModel,
-        reasoningEffort: definition.defaultReasoningEffort,
-        autoCompactLimit,
-      },
-    );
-    const previousManifest = await readOptionalJson(
-      paths.manifestPath,
-      "OpenCode Go 模型目录清单",
-    );
-    const defaultModelMigration = readDefaultModelMigration(previousManifest);
-    manifest = {
-      source: deepseekSetupScriptUrl,
-      sha256: downloaded.sha256,
-      downloadedAt: new Date().toISOString(),
-      ...(defaultModelMigration === undefined ? {} : { defaultModelMigration }),
-    };
-  } else {
-    managedCatalog = JSON.parse(readPrivateFileSync(
-      paths.catalogPath,
-      maximumPrivateConfigBytes,
-    ));
-    manifest = existsSync(paths.manifestPath)
-      ? JSON.parse(readPrivateFileSync(paths.manifestPath, maximumPrivateConfigBytes))
-      : undefined;
-  }
-  const managedCatalogWithPreserved = withPreservedManagedModelCatalogSettings(
-    managedCatalog,
-    definition,
-    previous?.models,
-  );
-  const transactionPaths = [
-    paths.configPath,
-    paths.profilePath,
-    paths.markerPath,
-    paths.roleConfigPath,
-    paths.catalogPath,
-    paths.manifestPath,
-    opencodeGoAccountsFilePath(environment),
-  ];
-  const snapshots = snapshotOpencodeGoFiles(transactionPaths);
-  let guards;
-  try {
-    mkdirSync(paths.accountDirectory, { recursive: true, mode: 0o700 });
-    mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
-    if (accounts.length === 0) {
-      await preserveInitialFiles(paths);
-    }
-    const currentConfig = await readTomlFile(paths.configPath);
-    const initialConfig = await readBackupToml(paths);
-    let nextConfig = currentConfig;
-    let profileContent;
-    if (mode === "switching") {
-      if (currentMode(environment, accountId) === "exclusive") {
-        nextConfig = restoreProviderBaseConfig(
-          currentConfig,
-          initialConfig,
-          opencodeGoAccountDefinition(accountId),
-        );
-      }
-      if (hasProviderBaseConfig(nextConfig, opencodeGoAccountDefinition(accountId))) {
-        throw new Error(
-          `安装前的 Codex config.toml 已占用 ${opencodeGoProviderId(accountId)} Provider 或 Profile；请先手工移除或改名`,
-        );
-      }
-      const selectedModelEntry = managedCatalogWithPreserved.models?.find(
-        (entry) => entry?.slug === selectedModel,
-      );
-      const selectedModelReasoningEffort = selectedModelEntry?.default_reasoning_level;
-      if (typeof selectedModelReasoningEffort !== "string") {
-        throw new Error("OpenCode Go 模型目录缺少默认思考等级");
-      }
-      const accountDefinition = opencodeGoAccountDefinition(accountId);
-      profileContent = stringify(createSwitchingProviderProfile(accountDefinition, {
-        apiKey,
-        catalogPath: paths.catalogPath,
-        model: selectedModel,
-        reasoningEffort: selectedModelReasoningEffort,
-      }));
-    } else {
-      const accountDefinition = opencodeGoAccountDefinition(accountId);
-      nextConfig = applyExclusiveProviderConfig(currentConfig, accountDefinition, {
-        apiKey,
-        catalogPath: paths.catalogPath,
-        model: selectedModel,
-      });
-    }
-    await writePrivateFileAtomic(
-      paths.catalogPath,
-      `${JSON.stringify(managedCatalogWithPreserved, null, 2)}\n`,
-    );
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    await writePrivateFileAtomic(paths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    await replaceOptionalOpencodeGoFile(
-      paths.configPath,
-      Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
-    );
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    await replaceOptionalOpencodeGoFile(paths.profilePath, profileContent);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    writeOpencodeGoAccountMarker(environment, accountId, mode);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    const nextAccounts = accounts.some((account) => account.id === accountId)
-      ? accounts.map((account) => account.id === accountId
-          ? { id: accountId, default: account.default }
-          : account)
-      : [
-          ...accounts,
-          { id: accountId, default: accounts.length === 0 },
-        ];
-    writeOpencodeGoAccounts(environment, nextAccounts);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    if (accounts.length === 0 || accounts.find((account) => account.id === accountId)?.default) {
-      await configureRole(opencodeGoProviderId(accountId), selectedModel, environment);
-    }
-  } catch (error) {
-    if (guards === undefined) throw error;
-    await restoreOpencodeGoFileSnapshots(snapshots, guards).catch((rollbackError) => {
-      throw new AggregateError(
-        [error, rollbackError],
-        "OpenCode Go 账户配置失败，且未能完整恢复操作前文件",
-      );
-    });
-    throw error;
-  }
+  const result = await applyOpencodeGoAccountConfiguration({
+    accountId: preview.account.id,
+    mode,
+    reconfigure,
+    apiKey,
+    confirmExclusiveConfigChange: true,
+  }, { environment, fetchImpl, downloadCatalog, configureRole });
+  const paths = result.paths;
   output.write(mode === "switching"
     ? `OpenCode Go 账户 Profile 已保存：${paths.profilePath}\n`
     : `OpenCode Go 账户固定配置已保存：${paths.configPath}\n`);
   output.write(`模型目录：${paths.catalogPath}\n`);
-  if (accounts.length === 0) {
+  if (preview.effects.updatesExternalAgent && !preview.account.exists) {
     output.write("共享第三方子代理（agents.external）已切换到默认账户。\n");
   }
   output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
-  return { action: "configured", mode, accountId, ...publicPaths(paths) };
+  return { action: "configured", mode, accountId, ...paths };
 }
 
 export function printOpencodeGoAccounts(environment = process.env, output = process.stdout, { json = false } = {}) {
@@ -442,28 +285,10 @@ export async function refreshOpencodeGoCatalogForUpdate(
   const downloaded = await (options.downloadCatalog
     ? options.downloadCatalog()
     : downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch));
-  const models = Array.isArray(downloaded.catalog?.models)
-    ? downloaded.catalog.models
-    : [];
-  for (const { slug, available } of definition.models) {
-    if (available && !models.some((model) => model?.slug === slug)) {
-      throw new Error(`OpenCode Go 官方模型目录缺少 ${slug}`);
-    }
-  }
-  const defaultEntry = models.find((model) => model?.slug === definition.defaultModel);
-  const contextWindow = defaultEntry?.context_window;
-  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
-    throw new Error("OpenCode Go 模型目录缺少默认模型上下文窗口");
-  }
-  const managedCatalog = withPreservedManagedModelCatalogSettings(
-    withManagedModelCatalogSettings(downloaded.catalog, definition, {
-      model: definition.defaultModel,
-      reasoningEffort: definition.defaultReasoningEffort,
-      autoCompactLimit: Math.round(contextWindow * defaultAutoCompactPercent / 100),
-    }),
-    definition,
-    previousSettings[0]?.models,
-  );
+  const managedCatalog = createManagedProviderCatalog(downloaded.catalog, definition, {
+    previousModels: previousSettings[0]?.models,
+    autoCompactPercent: defaultAutoCompactPercent,
+  });
   const managedDefault = managedCatalog.models.find(
     (model) => model?.slug === definition.defaultModel,
   );
@@ -474,8 +299,11 @@ export async function refreshOpencodeGoCatalogForUpdate(
   const providerDirectory = managedProviderDirectory(environment, definition);
   const catalogPath = join(providerDirectory, definition.catalogFileName);
   const manifestPath = join(providerDirectory, definition.catalogManifestFileName);
-  const previousManifest = await readOptionalJson(manifestPath, "OpenCode Go 模型目录清单");
-  const previousMigration = readDefaultModelMigration(previousManifest);
+  const previousManifest = await readOpencodeGoOptionalJson(
+    manifestPath,
+    "OpenCode Go 模型目录清单",
+  );
+  const previousMigration = readOpencodeGoDefaultModelMigration(previousManifest);
   const migrationAlreadyApplied = previousMigration !== undefined;
   const settingsByProvider = new Map(
     previousSettings.map((settings) => [settings.provider, settings]),
@@ -653,15 +481,6 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
   });
 }
 
-function publicPaths(paths) {
-  return {
-    configPath: paths.configPath,
-    profilePath: paths.profilePath,
-    markerPath: paths.markerPath,
-    catalogPath: paths.catalogPath,
-  };
-}
-
 async function restoreOpencodeGoSetup(environment) {
   const legacyBackup = join(
     managedProviderDirectory(environment, definition),
@@ -775,50 +594,6 @@ async function restoreBackup(target, backup, existed) {
   }
 }
 
-async function readBackupToml(paths) {
-  const legacyStatePath = join(paths.providerDirectory, definition.backupDirectoryName, "state.json");
-  if (!existsSync(legacyStatePath)) return {};
-  const state = JSON.parse(readPrivateFileSync(legacyStatePath));
-  return state.config
-    ? readTomlFile(join(paths.providerDirectory, definition.backupDirectoryName, "config.toml"))
-    : {};
-}
-
-async function preserveInitialFiles(paths) {
-  const legacyBackup = join(paths.providerDirectory, definition.backupDirectoryName);
-  const statePath = join(legacyBackup, "state.json");
-  if (existsSync(statePath)) return;
-  mkdirSync(legacyBackup, { recursive: true, mode: 0o700 });
-  const state = {
-    config: await backupOptional(paths.configPath, join(legacyBackup, "config.toml")),
-    profile: await backupOptional(
-      paths.profilePath,
-      join(legacyBackup, opencodeGoProfileFileName(defaultAccountId)),
-    ),
-    marker: await backupOptional(paths.markerPath, join(legacyBackup, "managed.toml")),
-    roleConfig: await backupOptional(
-      paths.roleConfigPath,
-      join(legacyBackup, "sf-agent.config.toml"),
-    ),
-    catalog: await backupOptional(
-      paths.catalogPath,
-      join(legacyBackup, definition.catalogFileName),
-    ),
-    manifest: await backupOptional(
-      paths.manifestPath,
-      join(legacyBackup, definition.catalogManifestFileName),
-    ),
-  };
-  await writePrivateFileAtomic(statePath, `${JSON.stringify(state)}\n`);
-}
-
-async function backupOptional(source, target) {
-  const content = await readOptionalOpencodeGoFile(source);
-  if (content === undefined) return false;
-  await writePrivateFileAtomic(target, content);
-  return true;
-}
-
 async function readTomlFile(path) {
   const content = await readOptionalOpencodeGoFile(path);
   if (content === undefined) return {};
@@ -826,21 +601,6 @@ async function readTomlFile(path) {
     return parse(content.toString("utf8"));
   } catch {
     throw new Error("Codex config.toml 无法安全读取或解析");
-  }
-}
-
-function currentMode(environment, accountId) {
-  return readOpencodeGoAccountMarker(environment, accountId)?.mode;
-}
-
-async function assertProfileOwnership(paths, accountId, environment) {
-  const profile = await readOptionalOpencodeGoFile(paths.profilePath);
-  const marker = readOpencodeGoAccountMarker(environment, accountId);
-  if (profile === undefined && marker === undefined) return;
-  if (marker === undefined) {
-    throw new Error(
-      `OpenCode Go 账户管理标记不存在，拒绝覆盖现有 Profile：${paths.profilePath}`,
-    );
   }
 }
 
@@ -936,33 +696,6 @@ async function confirmPrompt(prompts, message, initialValue) {
   const value = await prompts.confirm({ message, initialValue });
   if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
   return value;
-}
-
-async function readOptionalJson(path, label) {
-  const content = await readOptionalOpencodeGoFile(path);
-  if (content === undefined) return undefined;
-  try {
-    const value = JSON.parse(content.toString("utf8"));
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
-    return value;
-  } catch {
-    throw new Error(`${label}无法安全读取或解析`);
-  }
-}
-
-function readDefaultModelMigration(manifest) {
-  const migration = manifest?.defaultModelMigration;
-  if (migration === undefined) return undefined;
-  if (!migration
-    || typeof migration !== "object"
-    || Array.isArray(migration)
-    || migration.from !== previousDefaultModel
-    || migration.to !== definition.defaultModel
-    || typeof migration.appliedAt !== "string"
-    || !Number.isFinite(Date.parse(migration.appliedAt))) {
-    throw new Error("OpenCode Go 默认模型迁移标记无效");
-  }
-  return migration;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

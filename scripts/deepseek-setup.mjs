@@ -15,8 +15,6 @@ import {
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
   managedModelProviderRoleConfigPath,
-  withManagedModelCatalogSettings,
-  withPreservedManagedModelCatalogSettings,
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -33,6 +31,7 @@ import {
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import {
   applyExclusiveProviderConfig,
+  createManagedProviderCatalog,
   createSwitchingProviderProfile,
   hasProviderBaseConfig,
   restoreProviderBaseConfig,
@@ -426,32 +425,13 @@ export function createManagedDeepseekCatalog(
   )) {
     throw new Error("DeepSeek 自动压缩百分比无效");
   }
-  const models = Array.isArray(catalog?.models) ? catalog.models : [];
-  for (const { slug, available } of deepseekProviderDefinition.models) {
-    if (available && !models.some((model) => model?.slug === slug)) {
-      throw new Error(`DeepSeek 官方模型目录缺少 ${slug}`);
-    }
-  }
-  const defaultEntry = models.find((model) => model?.slug === supportedModel);
-  const contextWindow = defaultEntry?.context_window;
-  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
-    throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
-  }
-  const defaultsApplied = withManagedModelCatalogSettings(
+  return createManagedProviderCatalog(
     catalog,
     deepseekProviderDefinition,
     {
-      model: supportedModel,
-      reasoningEffort: deepseekProviderDefinition.defaultReasoningEffort,
-      ...(autoCompactPercent === null
-        ? {}
-        : { autoCompactLimit: Math.round(contextWindow * autoCompactPercent / 100) }),
+      previousModels,
+      autoCompactPercent,
     },
-  );
-  return withPreservedManagedModelCatalogSettings(
-    defaultsApplied,
-    deepseekProviderDefinition,
-    previousModels,
   );
 }
 

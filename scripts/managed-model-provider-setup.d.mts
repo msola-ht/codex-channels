@@ -10,6 +10,15 @@ export function createSwitchingProviderProfile(
   },
 ): Record<string, unknown>;
 
+export function createManagedProviderCatalog(
+  catalog: { models?: Array<Record<string, unknown>> },
+  definition: ModelProviderDefinition,
+  options?: {
+    previousModels?: Array<Record<string, unknown>>;
+    autoCompactPercent?: number | null;
+  },
+): { models: Array<Record<string, unknown>> };
+
 export function applyExclusiveProviderConfig(
   current: Record<string, unknown>,
   definition: ModelProviderDefinition,

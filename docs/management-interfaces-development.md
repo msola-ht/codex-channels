@@ -25,6 +25,8 @@
 - `initializeUserData` 已返回初始化结果，可作为 `init` 的结构化基础。
 - Config 和 Setup 总览已提供不依赖终端的脱敏结构化读取，CLI 只负责展示。
 - OpenAI 默认值、受管 Provider、自定义主 Provider、OpenCode Go 账户和共享第三方子代理已统一为脱敏管理状态。
+- DeepSeek 与 OpenCode Go 共用受管模型目录和切换/固定模式配置核心；OpenCode Go 的多账户生命周期、
+  DeepSeek 的历史备份兼容和自定义主 Provider 的任意 URL/ID 语义保留在各自边界。
 - 直接 API Provider 已抽取脱敏列表、凭据事务和明确生效动作。
 - `local-update` 已区分配置、数据库检查与执行；源码更新已返回结构化结果并支持消息回调。
 - 服务安装仍由 CLI 直接组合平台脚本；渠道 Setup 仍是终端交互流程。
@@ -52,16 +54,19 @@
   - [x] 共享第三方子代理的 Provider/模型选择、配置与停用已拆分，Setup 和直接 CLI 已复用。
   - [x] 受管 Provider 的默认模型、思考等级与自动压缩设置已拆分，DeepSeek/OpenCode Go Setup 已复用。
   - [x] OpenCode Go 默认账户切换、运行实例停止与账户删除已拆分，Setup 和账户 CLI 已复用。
-  - [ ] 受管 Provider 安装/恢复及 OpenCode Go 账户新增仍待处理。
+  - [x] OpenCode Go 账户新增已拆分为脱敏预览、明确输入与凭据隔离事务，Setup 和账户 CLI 已复用。
+  - [ ] 受管 Provider 安装/恢复仍待处理。
 - [ ] 为所有结果补充稳定错误码、字段错误和生效动作。
   - [x] 自定义主 Provider 新增、编辑、切换与删除已返回稳定字段错误、生效动作和部分成功警告。
   - [x] 共享第三方子代理配置与停用已返回稳定字段错误和全部服务重启动作。
   - [x] 受管 Provider 默认设置已返回稳定字段错误、变更摘要和 App Server 重启动作。
   - [x] OpenCode Go 默认切换、停止与删除已返回稳定字段错误、变更/运行状态和生效动作。
+  - [x] OpenCode Go 账户新增已返回稳定字段错误、配置影响和全部服务重启动作。
 - [ ] 保留凭据隔离，不让调用方读取已有 Key。
   - [x] 自定义主 Provider 预览与结果只返回脱敏目标和影响；同 Origin 保留 Key 由内部计划完成。
   - [x] 共享第三方子代理接口只返回 Provider、模型和生效动作，不返回角色配置内容或 Provider 凭据。
   - [x] OpenCode Go 默认切换、停止与删除只返回账户、Provider、影响和运行状态，不返回账户 Key；删除备份由内部事务完成。
+  - [x] OpenCode Go 账户新增只把新 Key 传入内部执行事务，预览和结果均不返回 Key。
 
 ### 阶段三：渠道 Setup 会话
 
