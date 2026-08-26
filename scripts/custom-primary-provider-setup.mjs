@@ -21,6 +21,7 @@ import {
   createCodexUserConfigClient,
   readCodexUserConfigSnapshot,
 } from "./codex-user-config.mjs";
+import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 
 export const primaryProviderId = "OpenAI";
 
@@ -291,6 +292,12 @@ export async function runCustomPrimaryProviderSetup({
     );
   }
   if (mode === "exclusive") {
+    if (
+      hasCustomFixedMainProvider
+      && effectiveActiveProviderId !== normalizedId
+    ) {
+      assertThirdPartyRoleDoesNotUseProvider(effectiveActiveProviderId, environment);
+    }
     if (!hasOfficialMainProvider && !hasCustomFixedMainProvider) {
       throw new Error(
         `当前受管固定 Provider ${effectiveActiveProviderId} 必须先恢复官方模式，才能配置自定义固定 Provider`,

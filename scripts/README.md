@@ -107,7 +107,7 @@
   “通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方与第三方 Provider
   两级，子模块返回时停留在所属层级。
 - `setup-summary.mjs`：通过既有 App Server `config/read` 读取 Codex 全局默认模型与思考等级，并汇总
-  主 Provider、可切换 Provider、第三方模型默认值、已启用渠道和用户技能数量；不显示 API Key、
+  主 Provider、可切换 Provider、第三方模型默认值、共享第三方子代理、已启用渠道和用户技能数量；不显示 API Key、
   Token、应用凭据、允许名单、代理值或 Provider URL。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
   新增时从 URL 主机名派生 Provider ID 或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
@@ -142,6 +142,8 @@
   避免两份文案漂移。
 - `agents.mjs`：配置、停用或查看共享第三方子代理；`status --json` 返回稳定配置状态，Provider
   与模型未配置时显式使用 `null`，不要求 Gateway 已初始化。
+- `agents-setup.mjs` / `agents-setup.d.mts`：向 Setup 提供共享第三方子代理的受管或自定义 Provider、
+  模型选择和停用确认，只编排 `agents.mjs` 的既有配置事务；自定义 Provider 当前使用其已配置模型。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
   `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
@@ -183,7 +185,7 @@
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
   Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
-  提供商，非敏感元数据写入主配置，API Key 按提供商隔离；当前没有运行时调用方，保留给后续
+  提供商；Setup 通过独立的新增、编辑、删除选择管理，非敏感元数据写入主配置，API Key 按提供商隔离；当前没有运行时调用方，保留给后续
   明确设计的直接 API 功能。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；只下载、不执行
@@ -246,11 +248,11 @@
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `agents.mjs` / `agents.d.mts`：`codexc agents` 的执行脚本与公开声明，在 `~/.codex/config.toml` 中开启或关闭
-  `features.multi_agent_v2` 并注册单次共享 `agents.external` 角色；命令按已配置 Provider 与模型
+  `features.multi_agent_v2` 并注册单次共享 `agents.external` 角色；命令按已配置的受管或自定义 Provider 与模型
   更新同一角色，角色说明要求主模型以 `fork_turns=1` 传入当前用户消息；非托管同名角色会失败关闭，不会被覆盖。启用时先原子生成
   无凭据角色文件，再通过带用户层版本校验的官方键级配置事务更新主配置，事务失败时恢复角色文件；
   显式禁用同样拒绝删除非托管同名角色。App Server 服务启动时原子刷新角色文件为
-  当前 Provider 的本机统计代理地址，同时写入禁止
+  当前 Provider 的本机统计代理地址，只把该 Provider 的 Key 注入主 App Server 子进程，同时写入禁止
   解析加密正文和等待后续消息的受控指令。普通服务退出保留文件以维持 Codex 配置可解析，显式
   禁用或恢复首次配置时删除；只读 `status` 不依赖 Gateway 配置。
 

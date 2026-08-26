@@ -80,7 +80,7 @@ describe("Third-party API provider setup", () => {
     const fixture = createFixture();
     await addProvider(fixture, "relay-a", "中转 A", "https://a.example/v1/responses", "key-a");
     await addProvider(fixture, "relay-b", "中转 B", "https://b.example/v1/responses", "key-b");
-    await addProvider(fixture, "relay-a", "中转 A2", "https://a2.example/v1/responses", "");
+    await editProvider(fixture, "relay-a", "中转 A2", "https://a2.example/v1/responses", "");
 
     expect(readGatewayConfig(fixture.configPath).api_providers).toEqual([
       expect.objectContaining({ id: "relay-a", name: "中转 A2" }),
@@ -97,12 +97,31 @@ describe("Third-party API provider setup", () => {
       output: fixture.output as unknown as NodeJS.WritableStream,
       writeConfig: () => { throw new Error("配置写入失败"); },
       prompts: promptFixture({
-        selections: ["upsert"],
+        selections: ["create"],
         texts: ["relay-a", "中转 A", "https://a.example/v1/responses"],
         passwords: ["key-a"],
       }),
     })).rejects.toThrow("配置写入失败");
 
+    expect(() => readApiProviderKey(fixture.credentialsDirectory, "relay-a")).toThrow();
+  });
+
+  it("uses visual Provider selection for editing and structured confirmation for deletion", async () => {
+    const fixture = createFixture();
+    await addProvider(fixture, "relay-a", "中转 A", "https://a.example/v1/responses", "key-a");
+    const prompts = promptFixture({ selections: ["remove", "relay-a"], confirmations: [true] });
+
+    await expect(runApiProviderSetup({
+      environment: fixture.environment,
+      output: fixture.output as unknown as NodeJS.WritableStream,
+      prompts,
+    })).resolves.toMatchObject({ action: "removed", provider: "relay-a" });
+
+    expect(prompts.confirm).toHaveBeenCalledWith({
+      message: "确认删除 中转 A 及其 API Key？",
+      initialValue: false,
+    });
+    expect(readGatewayConfig(fixture.configPath).api_providers).toEqual([]);
     expect(() => readApiProviderKey(fixture.credentialsDirectory, "relay-a")).toThrow();
   });
 
@@ -133,8 +152,26 @@ async function addProvider(
     environment: fixture.environment,
     output: fixture.output as unknown as NodeJS.WritableStream,
     prompts: promptFixture({
-      selections: ["upsert"],
+      selections: ["create"],
       texts: [id, name, endpoint],
+      passwords: [apiKey],
+    }),
+  });
+}
+
+async function editProvider(
+  fixture: ReturnType<typeof createFixture>,
+  id: string,
+  name: string,
+  endpoint: string,
+  apiKey: string,
+) {
+  return runApiProviderSetup({
+    environment: fixture.environment,
+    output: fixture.output as unknown as NodeJS.WritableStream,
+    prompts: promptFixture({
+      selections: ["edit", id],
+      texts: [name, endpoint],
       passwords: [apiKey],
     }),
   });

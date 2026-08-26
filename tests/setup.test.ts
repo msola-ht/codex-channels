@@ -41,7 +41,7 @@ describe("Codex Connect setup", () => {
       options: [{
         value: "summary",
         label: "配置总览",
-        hint: "脱敏显示 Provider、模型、通讯渠道与用户技能状态",
+        hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
       }, {
         value: "models",
         label: "模型与提供商",
@@ -271,6 +271,40 @@ describe("Codex Connect setup", () => {
     });
   });
 
+  it("selects shared third-party agent setup under models and providers", async () => {
+    const input = {};
+    const output = {};
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("third_party")
+        .mockResolvedValueOnce("agents"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const agentsSetup = vi.fn(async () => "agents-configured");
+
+    await expect(runSetup({
+      input,
+      output,
+      prompts,
+      agentsSetup,
+    })).resolves.toBe("agents-configured");
+
+    expect(agentsSetup).toHaveBeenCalledWith({
+      input,
+      output,
+      prompts,
+      allowBack: true,
+    });
+    expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
+      value: "agents",
+      label: "共享第三方子代理",
+      hint: "选择已配置 Provider 与模型，或停用 agents.external",
+    });
+  });
+
   it("selects the official login setup under models and providers", async () => {
     const input = {};
     const output = {};
@@ -376,6 +410,12 @@ describe("Codex Connect setup", () => {
             bot_token: "telegram-secret",
             allowed_user_ids: [123456],
           },
+          api_providers: [{
+            id: "relay-a",
+            name: "Relay A",
+            protocol: "responses",
+            endpoint: "https://api-secret.example/v1/responses",
+          }],
         },
       }),
       loadManagedProviders: () => [{
@@ -397,6 +437,11 @@ describe("Codex Connect setup", () => {
       }],
       loadInstalledSkills: () => ["channel-image"],
       loadCodexDefaults: async () => ({ model: "gpt-5.6-sol", effort: "medium" }),
+      loadAgentsStatus: () => ({
+        externalRoleConfigured: true,
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+      }),
     });
 
     const rendered = output.join("");
@@ -406,11 +451,15 @@ describe("Codex Connect setup", () => {
     expect(rendered).toContain("DeepSeek · deepseek-v4-flash-vision-exp · high");
     expect(rendered).toContain("通讯渠道：Telegram（已启用）");
     expect(rendered).toContain("用户技能目录：1 个技能");
+    expect(rendered).toContain("共享第三方子代理：deepseek · deepseek-v4-pro");
+    expect(rendered).toContain("直接 API Provider（预留）：1 个");
+    expect(summary.apiProviderCount).toBe(1);
     expect(rendered).not.toContain("telegram-secret");
     expect(rendered).not.toContain("123456");
     expect(rendered).not.toContain("managed-secret");
     expect(rendered).not.toContain("custom-secret");
     expect(rendered).not.toContain("secret.example");
+    expect(rendered).not.toContain("api-secret.example");
     expect(rendered).not.toContain("\u001b");
   });
 

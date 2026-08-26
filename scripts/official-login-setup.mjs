@@ -8,6 +8,7 @@ import {
   listCustomPrimaryProviderCandidates,
 } from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -55,6 +56,9 @@ export async function runOfficialLoginSetup({
   }
   const config = record(snapshot.config);
   const currentProvider = optionalString(config.model_provider);
+  if (currentProvider !== undefined && currentProvider !== "openai") {
+    assertThirdPartyRoleDoesNotUseProvider(currentProvider, environment);
+  }
   const clearsCustomModel = currentProvider !== undefined && currentProvider !== "openai";
   const candidates = listCustomPrimaryProviderCandidates(record(config.model_providers));
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;

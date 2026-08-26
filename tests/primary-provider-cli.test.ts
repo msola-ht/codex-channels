@@ -26,6 +26,7 @@ import {
   primaryProviderBackupPath,
   readPrimaryProviderBackup,
   writeCustomPrimaryProviderSwitchingProfile,
+  writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 
 const officialModels = ["gpt-5.6-sol", "model-a", "model-new", "model-old"].map((model) => ({
@@ -558,6 +559,7 @@ describe("primary provider CLI", () => {
 
   it("switches back to official without login and backs up custom candidates", async () => {
     const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-official-"));
+    const environment = environmentForConnectHome(connectHome);
     const { createClient, writeUserConfigEdits } = clientFixture({
       config: {
         model: "custom-only-model",
@@ -580,7 +582,7 @@ describe("primary provider CLI", () => {
     const output = { write: vi.fn() };
 
     await switchPrimaryProvider("openai", undefined, {
-      environment: { CODEX_CONNECT_HOME: connectHome },
+      environment,
       output,
       createClient,
     });
@@ -600,6 +602,56 @@ describe("primary provider CLI", () => {
     );
     expect(backup.OpenAI.base_url).toBe("https://zzone.cc.cd/v1");
     expect(backup.thirdparty.base_url).toBe("https://third.example.test/v1");
+  });
+
+  it("refuses to replace a fixed custom Provider still used by agents.external", async () => {
+    const environment = isolatedEnvironment("codexc-primary-provider-role-switch-");
+    const config = {
+      model: "gpt-5.6-sol",
+      model_provider: "codeproxy-fixed",
+      model_reasoning_effort: "medium",
+      model_providers: {
+        "codeproxy-fixed": {
+          name: "CodeProxy Fixed",
+          base_url: "https://fixed.example.test/v1",
+          wire_api: "responses",
+          requires_openai_auth: false,
+          supports_websockets: false,
+          experimental_bearer_token: "custom-fixed-secret",
+        },
+      },
+    };
+    writeFileSync(join(environment.CODEX_HOME!, "config.toml"), [
+      'model = "gpt-5.6-sol"',
+      'model_provider = "codeproxy-fixed"',
+      'model_reasoning_effort = "medium"',
+      "",
+      "[model_providers.codeproxy-fixed]",
+      'name = "CodeProxy Fixed"',
+      'base_url = "https://fixed.example.test/v1"',
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      "supports_websockets = false",
+      'experimental_bearer_token = "custom-fixed-secret"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+    writeThirdPartyModelProviderRoleConfig(environment, { provider: "codeproxy-fixed" });
+    writeFileSync(join(environment.CODEX_HOME!, "config.toml"), [
+      readFileSync(join(environment.CODEX_HOME!, "config.toml"), "utf8").trimEnd(),
+      "",
+      "[agents.external]",
+      `config_file = ${JSON.stringify(join(environment.CODEX_HOME!, "sf-agent.config.toml"))}`,
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const { createClient, writeUserConfigEdits } = clientFixture({ config, version: "v1" });
+
+    await expect(switchPrimaryProvider("openai", undefined, {
+      environment,
+      output: { write: vi.fn() },
+      createClient,
+    })).rejects.toThrow("正由 agents.external 使用");
+
+    expect(writeUserConfigEdits).not.toHaveBeenCalled();
   });
 
   it("keeps the configured model when the primary Provider is already official", async () => {
@@ -863,6 +915,41 @@ describe("primary provider CLI", () => {
     expect(existsSync(customPrimaryProviderProfilePath(environment, "thirdparty"))).toBe(false);
     expect(loadCustomSwitchingProviderIds(environment)).toEqual([]);
     expect(readPrimaryProviderBackup(environment)).toEqual({});
+  });
+
+  it("refuses to delete a custom switching Provider still used by agents.external", async () => {
+    const environment = isolatedEnvironment("codexc-primary-provider-role-remove-");
+    writeFileSync(join(environment.CODEX_HOME!, "config.toml"), 'model_provider = "openai"\n', {
+      mode: 0o600,
+    });
+    writeCustomPrimaryProviderSwitchingProfile({
+      provider: "codeproxy-dev",
+      model: "gpt-5.6-sol",
+      name: "CodeProxy Dev",
+      baseUrl: "https://proxy.example.test/v1",
+      apiKey: "custom-agent-secret",
+    }, environment);
+    writeThirdPartyModelProviderRoleConfig(environment, { provider: "codeproxy-dev" });
+    writeFileSync(join(environment.CODEX_HOME!, "config.toml"), [
+      'model_provider = "openai"',
+      "",
+      "[agents.external]",
+      `config_file = ${JSON.stringify(join(environment.CODEX_HOME!, "sf-agent.config.toml"))}`,
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const createClient = vi.fn(async () => {
+      throw new Error("App Server should not be required");
+    });
+
+    await expect(removePrimaryProvider("codeproxy-dev", {
+      environment,
+      output: { write: vi.fn() },
+      createClient,
+    })).rejects.toThrow("正由 agents.external 使用");
+
+    expect(existsSync(customPrimaryProviderProfilePath(environment, "codeproxy-dev"))).toBe(true);
+    expect(loadCustomSwitchingProviderIds(environment)).toEqual(["codeproxy-dev"]);
+    expect(createClient).not.toHaveBeenCalled();
   });
 
   it("removes the same private backup when cleaning a missing switching Profile", async () => {
@@ -1262,6 +1349,7 @@ describe("primary provider CLI", () => {
 
   it("switches back to official from the setup menu", async () => {
     const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-menu-official-"));
+    const environment = environmentForConnectHome(connectHome);
     const { createClient, writeUserConfigEdits } = clientFixture({
       config: {
         model_provider: "OpenAI",
@@ -1286,7 +1374,7 @@ describe("primary provider CLI", () => {
     };
 
     await runCustomPrimaryProviderMenu({
-      environment: { CODEX_CONNECT_HOME: connectHome },
+      environment,
       output,
       prompts,
       createClient,

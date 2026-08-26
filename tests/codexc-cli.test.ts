@@ -24,7 +24,10 @@ import {
   opencodeGoProviderDefinition,
   type ModelProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
-import { writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
+import {
+  writeCustomPrimaryProviderSwitchingProfile,
+  writeThirdPartyModelProviderRoleConfig,
+} from "../runtime/model-provider-runtime.mjs";
 import {
   acknowledgeConfigEvents,
   configEventQueuePath,
@@ -188,7 +191,9 @@ describe("codexc CLI", () => {
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
     expect(setupHelp.stdout).toContain("登录并恢复官方 / 默认模型与思考等级");
-    expect(setupHelp.stdout).toContain("受管 Provider 模型设置 / 直接 API Provider（预留）");
+    expect(setupHelp.stdout).toContain(
+      "受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）",
+    );
     const workHelp = spawnSync(process.execPath, [cli, "work", "--help"], { encoding: "utf8" });
     expect(workHelp.stdout).toContain("权限");
     const workAddHelp = spawnSync(process.execPath, [cli, "work", "add", "--help"], {
@@ -1554,7 +1559,7 @@ describe("codexc CLI", () => {
     expect(captured.signals).toBeGreaterThanOrEqual(1);
   }, 15_000);
 
-  it("starts a selected custom Responses Provider through the local metrics proxy", () => {
+  it("starts a selected custom Responses Provider and its shared role through one metrics proxy", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-custom-provider-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1567,7 +1572,10 @@ describe("codexc CLI", () => {
     writeFileSync(fakeCodex, [
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
-      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(process.argv.slice(2)));",
+      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
+      "  args: process.argv.slice(2),",
+      "  customKeys: Object.keys(process.env).filter((key) => key.startsWith('CODEX_CONNECT_CUSTOM_')),",
+      "}));",
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
     const environment = {
@@ -1578,8 +1586,10 @@ describe("codexc CLI", () => {
       CODEX_TEST_CAPTURE: capturePath,
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
     writeFileSync(join(codexHome, "config.toml"), [
       'model = "gpt-5.6-terra"',
+      'model_reasoning_effort = "medium"',
       "",
       "[model_providers.thirdparty]",
       'name = "Third-party Responses"',
@@ -1587,8 +1597,13 @@ describe("codexc CLI", () => {
       'wire_api = "responses"',
       "requires_openai_auth = true",
       "supports_websockets = false",
+      'experimental_bearer_token = "custom-fixed-secret"',
+      "",
+      "[agents.external]",
+      `config_file = ${JSON.stringify(roleConfigPath)}`,
       "",
     ].join("\n"), { mode: 0o600 });
+    writeThirdPartyModelProviderRoleConfig(environment, { provider: "thirdparty" });
     updateGatewayConfig(join(home, "config.toml"), (document) => {
       table(document.codex).binary = fakeCodex;
     });
@@ -1598,15 +1613,21 @@ describe("codexc CLI", () => {
       env: environment,
     });
 
-    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
-      "-c",
-      'model_provider="thirdparty"',
-      "-c",
-      expect.stringMatching(/^model_providers\.thirdparty\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
-      "app-server",
-      "--listen",
-      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-    ]);
+    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual({
+      args: [
+        "-c",
+        'model_provider="thirdparty"',
+        "-c",
+        expect.stringMatching(/^model_providers\.thirdparty\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
+        "app-server",
+        "--listen",
+        `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      ],
+      customKeys: ["CODEX_CONNECT_CUSTOM_74686972647061727479_API_KEY"],
+    });
+    const roleContent = readFileSync(roleConfigPath, "utf8");
+    expect(roleContent).toMatch(/base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u);
+    expect(roleContent).not.toContain("custom-fixed-secret");
   });
 
   it("starts the DeepSeek proxy for subagents without eagerly starting its App Server", () => {
@@ -1702,6 +1723,76 @@ describe("codexc CLI", () => {
     expect(readFileSync(roleConfigPath, "utf8")).toMatch(
       /base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u,
     );
+  });
+
+  it("starts a custom Provider proxy for subagents and injects only its isolated API key", () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-custom-role-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const codexHome = join(root, ".codex");
+    const workspace = join(root, "Workspace");
+    const capturePath = join(root, "capture.json");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    mkdirSync(codexHome);
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "import { writeFileSync } from 'node:fs';",
+      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
+      "  args: process.argv.slice(2),",
+      "  customKeys: Object.keys(process.env).filter((key) => key.startsWith('CODEX_CONNECT_CUSTOM_')),",
+      "}));",
+    ].join("\n"));
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_HOME: codexHome,
+      CODEX_TEST_CAPTURE: capturePath,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    writeCustomPrimaryProviderSwitchingProfile({
+      provider: "codeproxy-dev",
+      model: "gpt-5.6-sol",
+      name: "CodeProxy Dev",
+      baseUrl: "https://proxy.example.test/v1",
+      apiKey: "custom-agent-secret",
+    }, environment);
+    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
+    writeFileSync(
+      roleConfigPath,
+      'model = "gpt-5.6-sol"\nmodel_provider = "codeproxy-dev"\nmodel_reasoning_effort = "medium"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `model_provider = "openai"\n[agents.external]\nconfig_file = ${JSON.stringify(roleConfigPath)}\n`,
+      { mode: 0o600 },
+    );
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+    });
+
+    execFileSync(process.execPath, [cli, "service-app-server"], {
+      cwd: root,
+      env: environment,
+    });
+
+    const capture = JSON.parse(readFileSync(capturePath, "utf8"));
+    expect(capture.args).toEqual([
+      "-c",
+      expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
+      "app-server",
+      "--listen",
+      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+    ]);
+    expect(capture.customKeys).toEqual([
+      "CODEX_CONNECT_CUSTOM_636F646570726F78792D646576_API_KEY",
+    ]);
+    const roleContent = readFileSync(roleConfigPath, "utf8");
+    expect(roleContent).toMatch(/base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u);
+    expect(roleContent).not.toContain("custom-agent-secret");
   });
 
   it("keeps the shared GO proxy running when releasing the role account App Server", async () => {
@@ -3153,7 +3244,7 @@ describe("codexc CLI", () => {
     });
 
     expect(output).toContain("脱敏配置总览");
-    expect(output).toContain("模型与提供商、通讯渠道和项目技能");
+    expect(output).toContain("模型与提供商、共享第三方子代理、通讯渠道和项目技能");
     expect(output).toContain("直接 API Provider（预留）");
   });
 

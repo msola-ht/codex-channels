@@ -67,8 +67,8 @@ Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务�
 
 ## Setup 配置
 
-运行 `codexc setup`，可先查看不显示凭据的配置总览，再按菜单配置模型与提供商、通讯渠道和项目
-技能（安装到 `~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
+运行 `codexc setup`，可先查看不显示凭据的配置总览，再按菜单配置模型与提供商、共享第三方子代理、
+通讯渠道和项目技能（安装到 `~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
 
 ```text
 ~/.codex-connect/config.toml
@@ -162,6 +162,8 @@ codexc primary-provider remove <Provider ID>         # 删除 Provider
 
 切换模式下，终端使用 `codexc remote --profile custom-<Provider ID>` 连接对应隔离实例；
 `sf-custom-<Provider ID>` 是内部 Codex Profile 名称，不作为 `codexc remote` 的公开参数。
+固定或切换模式的自定义 Provider 也可在 Setup 的“共享第三方子代理”中设为
+`agents.external`；当前使用该 Provider 时必须先切换或停用子代理，才能恢复官方模式或删除 Provider。
 
 旧版单文件 `sf-custom.config.toml` 不自动迁移；删除旧配置后重新运行 Setup 即可。
 
@@ -177,8 +179,9 @@ codexc service restart all
 ### DeepSeek
 
 在 `codexc setup` 中选择“模型与提供商”，可以配置 OpenAI 与 DeepSeek 切换模式、仅 DeepSeek 模式
-或恢复原配置；选择“受管 Provider 模型设置”可按 Provider 和模型设置默认模型、思考等级与自动压缩阈值。两种模式都会
-启用共享第三方子代理 `agents.external`；配置后运行：
+或恢复原配置；选择“受管 Provider 模型设置”可按 Provider 和模型设置默认模型、思考等级与自动压缩阈值，
+选择“共享第三方子代理”可切换其 Provider 与模型或停用 `agents.external`。DeepSeek 两种模式都会
+默认启用该共享子代理；配置后运行：
 
 ```bash
 codexc service restart all

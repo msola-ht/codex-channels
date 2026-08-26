@@ -29,7 +29,7 @@
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry；
   `check --json` 静默底层 Codex 展示并返回可解析的成功或失败结果。
-- `agents`：选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
+- `agents`：从已配置的受管或自定义 Provider 中选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
   `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化，`--json` 返回稳定状态对象。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；Key 只写入

@@ -137,7 +137,7 @@
 | 真实合同 | 模型、思考等级、Fast、`multi_agent_v2` 与 agents 用户设置、Skill/MCP/Plugin/Permission 稳定查询、Plugin 安全详情字段、结构化 Skill 与 Plugin mention Turn 输入、MCP 配置刷新、完整详情与工具读写属性、只读资源、OAuth PKCE 回调与完成通知、MCP 工具审批元数据与持久范围往返、Default/Plan 预设与 Plan Turn 设置通知、共享 Thread 设置通知、当前精确 Thread 官方用量估算、跨客户端 Thread 固定和自定义分区状态、分区删除解除归属、Turn 启动结果、跨客户端 Goal 请求与通知、重连后 resume Goal 恢复、双客户端连接恢复、动态工具注册与 `item/tool/call` 完整往返，以及真实 `service-app-server` 的 Provider 租约拒绝释放 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 自定义 Responses Provider Setup 的官方模型目录复用、手工模型 ID、固定/切换双模式、直接 API Key、
-独立 Profile、候选编辑和私有备份事务边界见
+独立 Profile、候选编辑、共享 `agents.external` 的无凭据角色文件与统计代理接入，以及私有备份事务边界见
 [`第三方模型 Provider 接入指南`](provider-integration-guide.md)；该本地 Setup 能力不新增 App Server RPC。
 
 上表“全 Provider 模型代理与速度统计”还包括仅官方 OpenAI 主代理启用的 0.148.0 固定端点清单：

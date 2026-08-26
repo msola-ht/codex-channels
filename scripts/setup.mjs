@@ -15,6 +15,7 @@ import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs
 import { runCustomPrimaryProviderMenu } from "./primary-provider-cli.mjs";
 import { runOfficialLoginSetup } from "./official-login-setup.mjs";
 import { writeSetupConfigurationSummary } from "./setup-summary.mjs";
+import { runThirdPartyAgentSetup } from "./agents-setup.mjs";
 
 export async function runSetup({
   input = process.stdin,
@@ -32,6 +33,7 @@ export async function runSetup({
   customPrimarySetup = runCustomPrimaryProviderMenu,
   officialLoginSetup = runOfficialLoginSetup,
   setupSummary = writeSetupConfigurationSummary,
+  agentsSetup = runThirdPartyAgentSetup,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -42,7 +44,7 @@ export async function runSetup({
         {
           value: "summary",
           label: "配置总览",
-          hint: "脱敏显示 Provider、模型、通讯渠道与用户技能状态",
+          hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
         },
         {
           value: "models",
@@ -98,6 +100,7 @@ export async function runSetup({
           modelProviderDefaultSetup,
           customPrimarySetup,
           officialLoginSetup,
+          agentsSetup,
         });
         if (isBackResult(result)) continue;
         return result;
@@ -128,6 +131,7 @@ async function runModelSetup({
   modelProviderDefaultSetup,
   customPrimarySetup,
   officialLoginSetup,
+  agentsSetup,
 }) {
   while (true) {
     const category = await prompts.select({
@@ -169,6 +173,7 @@ async function runModelSetup({
         openCodeGoSetup,
         modelProviderDefaultSetup,
         customPrimarySetup,
+        agentsSetup,
       });
       if (isBackResult(result)) continue;
       return result;
@@ -225,6 +230,7 @@ async function runThirdPartyModelSetup({
   openCodeGoSetup,
   modelProviderDefaultSetup,
   customPrimarySetup,
+  agentsSetup,
 }) {
   while (true) {
     const module = await prompts.select({
@@ -252,6 +258,11 @@ async function runThirdPartyModelSetup({
           hint: "设置 DeepSeek 与 OpenCode Go 的模型、思考等级和自动压缩",
         },
         {
+          value: "agents",
+          label: "共享第三方子代理",
+          hint: "选择已配置 Provider 与模型，或停用 agents.external",
+        },
+        {
           value: "api_provider",
           label: "直接 API Provider（预留）",
           hint: "只保存未来直接 API 注册；不进入 App Server 或 /model",
@@ -269,6 +280,8 @@ async function runThirdPartyModelSetup({
       result = await customPrimarySetup({ input, output, prompts, allowBack: true });
     } else if (module === "provider_default") {
       result = await modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
+    } else if (module === "agents") {
+      result = await agentsSetup({ input, output, prompts, allowBack: true });
     } else if (module === "api_provider") {
       result = await apiProviderSetup({ input, output, prompts });
     } else {

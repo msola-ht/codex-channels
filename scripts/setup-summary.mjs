@@ -8,6 +8,7 @@ import { gatewayConfigSummary } from "./config-summary.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { listInstalledSkills } from "./skill-setup.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
+import { agentsStatus } from "./agents.mjs";
 
 export async function writeSetupConfigurationSummary({
   environment = process.env,
@@ -18,6 +19,7 @@ export async function writeSetupConfigurationSummary({
   loadCustomSwitching = loadConfiguredCustomSwitchingModelProviders,
   loadInstalledSkills = listInstalledSkills,
   loadCodexDefaults = defaultCodexDefaultsLoader,
+  loadAgentsStatus = agentsStatus,
 } = {}) {
   const { configPath, document } = loadGatewayDocument(environment);
   const gateway = gatewayConfigSummary(document, configPath);
@@ -49,6 +51,15 @@ export async function writeSetupConfigurationSummary({
     ),
   ];
   const installedSkills = loadInstalledSkills({ environment });
+  const agent = loadAgentsStatus(environment);
+  const agentSummary = agent.provider && agent.model
+    ? `${agent.provider} · ${agent.model}`
+    : agent.externalRoleConfigured || agent.legacyDsRoleConfigured
+      ? "已配置（Provider 或模型状态不可用）"
+      : "未配置";
+  const apiProviderCount = Array.isArray(document.api_providers)
+    ? document.api_providers.length
+    : 0;
 
   output.write([
     "Setup 配置总览",
@@ -58,6 +69,8 @@ export async function writeSetupConfigurationSummary({
     `- 第三方模型默认值：${modelDefaults.join("；") || "未配置"}`,
     `- 通讯渠道：${gateway.channels.join("、") || "未配置"}`,
     `- 用户技能目录：${installedSkills.length} 个技能`,
+    `- 共享第三方子代理：${agentSummary}`,
+    `- 直接 API Provider（预留）：${apiProviderCount} 个`,
     `- Gateway 配置：${configPath}`,
     "- 作用范围：Provider、模型与登录由 Codex 配置管理；通讯渠道由 Gateway 配置管理。",
     "- 安全提示：API Key、Token、应用凭据、允许名单和代理值均不显示。",
@@ -70,6 +83,8 @@ export async function writeSetupConfigurationSummary({
     modelDefaults,
     channels: gateway.channels,
     installedSkillCount: installedSkills.length,
+    agent: agentSummary,
+    apiProviderCount,
     configPath,
   };
 }

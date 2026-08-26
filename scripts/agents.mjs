@@ -11,11 +11,12 @@ import {
 } from "../runtime/cli-presentation.mjs";
 import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import {
-  loadManagedModelProviderRole,
+  loadCustomModelProviderRoleCandidates,
+  loadThirdPartyModelProviderRole,
   managedModelProviderRoleConfigPath,
   removeManagedModelProviderRoleConfig,
   validateConfiguredModelProviders,
-  writeManagedModelProviderRoleConfig,
+  writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { updateCodexUserConfig } from "./codex-user-config.mjs";
@@ -47,7 +48,7 @@ export function agentsStatus(environment = process.env) {
   }
   let selection;
   try {
-    selection = loadManagedModelProviderRole(environment);
+    selection = loadThirdPartyModelProviderRole(environment);
   } catch {
     // 状态命令仍显示角色存在；详细错误由配置命令给出。
   }
@@ -69,14 +70,11 @@ export async function configureThirdPartyRole(
   { updateConfig = updateCodexUserConfig } = {},
 ) {
   const definition = providerDefinition(provider, environment);
-  if (!validateConfiguredModelProviders(environment).some((entry) => entry.provider === provider)) {
-    throw new Error(`${definition.displayName} Provider 尚未配置；请先运行 codexc setup`);
-  }
   assertThirdPartyRoleAvailable(environment);
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
   const legacyRoleConfigPath = join(dirname(roleConfigPath), legacyManagedRoleConfigFileName);
   const previousRoleConfig = readOptionalFile(roleConfigPath);
-  const selection = writeManagedModelProviderRoleConfig(
+  const selection = writeThirdPartyModelProviderRoleConfig(
     environment,
     { provider, ...(model ? { model } : {}) },
   );
@@ -136,13 +134,25 @@ export async function disableThirdPartyRole(
   return removeManagedThirdPartyRole(environment, { updateConfig, disableFeature: true });
 }
 
+export function assertThirdPartyRoleDoesNotUseProvider(
+  provider,
+  environment = process.env,
+) {
+  const selection = loadThirdPartyModelProviderRole(environment);
+  if (selection?.provider === provider) {
+    throw new Error(
+      `Provider ${provider} 正由 agents.external 使用；请先切换共享第三方子代理或运行 codexc agents disable`,
+    );
+  }
+}
+
 export async function removeManagedThirdPartyRole(
   environment = process.env,
   { updateConfig = updateCodexUserConfig, provider, disableFeature = false } = {},
 ) {
   const configPath = agentRolesConfigPath(environment);
   if (!existsSync(configPath)) return false;
-  const selection = provider ? loadManagedModelProviderRole(environment) : undefined;
+  const selection = provider ? loadThirdPartyModelProviderRole(environment) : undefined;
   if (provider && selection?.provider !== provider) return false;
   const legacyRoleConfigPath = join(
     dirname(managedModelProviderRoleConfigPath(environment)),
@@ -175,12 +185,16 @@ function providerDefinition(provider, environment = process.env) {
   const definitions = loadManagedModelProviderDefinitions(environment);
   const definition = definitions
     .find((candidate) => candidate.id === provider);
-  if (!definition) {
-    throw new Error(`未知第三方 Provider：${provider}；可选：${
-      definitions.map((candidate) => candidate.id).join("、")
-    }`);
+  if (definition !== undefined) {
+    if (!validateConfiguredModelProviders(environment).some((entry) => entry.provider === provider)) {
+      throw new Error(`${definition.displayName} Provider 尚未配置；请先运行 codexc setup`);
+    }
+    return definition;
   }
-  return definition;
+  const custom = loadCustomModelProviderRoleCandidates(environment)
+    .find((candidate) => candidate.provider === provider);
+  if (custom !== undefined) return { id: custom.provider, displayName: custom.displayName };
+  throw new Error(`未知或未配置的第三方 Provider：${provider}`);
 }
 
 function assertThirdPartyRoleAvailableInConfig(config, environment) {
@@ -281,8 +295,9 @@ const usage = `用法：codexc agents <configure|disable|status> [参数]
   disable                    移除共享第三方子代理
   status [--json]            查看当前状态
 
-Provider：${loadManagedModelProviderDefinitions(process.env)
-  .map((definition) => definition.id).join("、")}`;
+内置 Provider：${loadManagedModelProviderDefinitions(process.env)
+  .map((definition) => definition.id).join("、")}
+自定义 Provider：使用 codexc setup 已配置的固定或切换模式 Provider ID`;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await runAgentsCli().catch((error) => {

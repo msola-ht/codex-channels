@@ -1,4 +1,3 @@
-import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
 import type {
   CodexUserConfigEdit,
   CodexUserConfigValue,
@@ -17,27 +16,31 @@ export interface AgentsStatus {
   multiAgentV2Enabled: boolean;
   externalRoleConfigured: boolean;
   legacyDsRoleConfigured: boolean;
-  provider?: ManagedModelProviderId;
+  provider?: string;
   model?: string;
 }
 
 export function agentsStatus(environment?: NodeJS.ProcessEnv): AgentsStatus;
 export function assertThirdPartyRoleAvailable(environment?: NodeJS.ProcessEnv): void;
 export function configureThirdPartyRole(
-  provider: ManagedModelProviderId,
+  provider: string,
   model?: string,
   environment?: NodeJS.ProcessEnv,
   dependencies?: { updateConfig?: CodexUserConfigWriter },
-): Promise<{ role: "external"; provider: ManagedModelProviderId; model: string }>;
+): Promise<{ role: "external"; provider: string; model: string }>;
 export function disableThirdPartyRole(
   environment?: NodeJS.ProcessEnv,
   dependencies?: { updateConfig?: CodexUserConfigWriter },
 ): Promise<boolean>;
+export function assertThirdPartyRoleDoesNotUseProvider(
+  provider: string,
+  environment?: NodeJS.ProcessEnv,
+): void;
 export function removeManagedThirdPartyRole(
   environment?: NodeJS.ProcessEnv,
   dependencies?: {
     updateConfig?: CodexUserConfigWriter;
-    provider?: ManagedModelProviderId;
+    provider?: string;
     disableFeature?: boolean;
   },
 ): Promise<boolean>;

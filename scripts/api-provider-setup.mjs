@@ -24,14 +24,17 @@ export async function runApiProviderSetup({
   const document = readGatewayConfig(configPath);
   const providers = providerList(document.api_providers);
   const action = await prompts.select({
-    message: "第三方 API 提供商",
+    message: "直接 API Provider（预留）",
     showInstructions: false,
     options: [
-      { value: "upsert", label: "添加或更新", hint: "Responses 兼容接口与独立 API Key" },
+      { value: "create", label: "新增 Provider", hint: "Responses 兼容接口与独立 API Key" },
       ...(providers.length > 0
-        ? [{ value: "remove", label: "删除提供商", hint: "同时删除该提供商凭据" }]
+        ? [
+            { value: "edit", label: "编辑 Provider", hint: "修改名称、接口或 API Key" },
+            { value: "remove", label: "删除 Provider", hint: "同时删除该 Provider 凭据" },
+          ]
         : []),
-      { value: "back", label: "返回上一级" },
+      { value: "back", label: "返回", hint: "返回第三方 Provider 设置" },
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
@@ -47,15 +50,30 @@ export async function runApiProviderSetup({
       environment,
     });
   }
-  if (action !== "upsert") throw new Error(`未知第三方 API 操作：${String(action)}`);
+  if (action !== "create" && action !== "edit") {
+    throw new Error(`未知第三方 API 操作：${String(action)}`);
+  }
 
-  const id = await prompts.text({
-    message: "提供商 ID（小写字母、数字、-、_）",
-    validate: validateProviderId,
-  });
-  if (prompts.isCancel(id)) return { action: "back" };
-  const providerId = normalizedProviderId(id);
-  const existing = providers.find((provider) => provider.id === providerId);
+  let existing;
+  let providerId;
+  if (action === "edit") {
+    existing = await selectProvider(providers, prompts, "选择要编辑的 Provider");
+    if (existing === undefined) return { action: "back" };
+    providerId = existing.id;
+  } else {
+    const id = await prompts.text({
+      message: "Provider ID（小写字母、数字、-、_）",
+      validate: (value) => validateProviderId(value)
+        ?? (providers.some((provider) => provider.id === stringValue(value))
+          ? "Provider ID 已存在，请使用“编辑 Provider”"
+          : undefined),
+    });
+    if (prompts.isCancel(id)) return { action: "back" };
+    providerId = normalizedProviderId(id);
+    if (providers.some((provider) => provider.id === providerId)) {
+      throw new Error("Provider ID 已存在，请使用“编辑 Provider”");
+    }
+  }
   const name = await prompts.text({
     message: "显示名称",
     initialValue: existing?.name ?? providerId,
@@ -103,29 +121,24 @@ export async function runApiProviderSetup({
     else removeApiProviderKey(credentialsDirectory, providerId);
     throw error;
   }
-  output.write(`第三方 API 提供商已保存：${nextProvider.name} (${providerId})\n`);
+  output.write(`直接 API Provider 已保存：${nextProvider.name} (${providerId})\n`);
   output.write(`配置文件：${configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { action: existing ? "updated" : "created", provider: nextProvider, configPath };
 }
 
 async function removeProvider(options) {
-  const selected = await options.prompts.select({
-    message: "选择要删除的提供商",
-    showInstructions: false,
-    options: [
-      ...options.providers.map((provider) => ({
-        value: provider.id,
-        label: provider.name,
-        hint: provider.id,
-      })),
-      { value: "back", label: "返回上一级" },
-    ],
+  const provider = await selectProvider(
+    options.providers,
+    options.prompts,
+    "选择要删除的 Provider",
+  );
+  if (provider === undefined) return { action: "back" };
+  const confirmed = await options.prompts.confirm({
+    message: `确认删除 ${provider.name} 及其 API Key？`,
+    initialValue: false,
   });
-  if (options.prompts.isCancel(selected) || selected === "back") return { action: "back" };
-  const provider = options.providers.find((candidate) => candidate.id === selected);
-  if (!provider) throw new Error("找不到第三方 API 提供商");
-  if (!await options.prompts.confirm(`确认删除 ${provider.name} 及其 API Key？`, false)) {
+  if (options.prompts.isCancel(confirmed) || confirmed !== true) {
     return { action: "back" };
   }
   const previousKey = optionalProviderKey(options.credentialsDirectory, provider.id);
@@ -141,9 +154,28 @@ async function removeProvider(options) {
     if (previousKey) writeApiProviderKey(options.credentialsDirectory, provider.id, previousKey);
     throw error;
   }
-  options.output.write(`已删除第三方 API 提供商：${provider.name} (${provider.id})\n`);
+  options.output.write(`已删除直接 API Provider：${provider.name} (${provider.id})\n`);
   writeGatewayConfigActivationNotice(options.output, options.environment, "restart");
   return { action: "removed", provider: provider.id, configPath: options.configPath };
+}
+
+async function selectProvider(providers, prompts, message) {
+  const selected = await prompts.select({
+    message,
+    showInstructions: false,
+    options: [
+      ...providers.map((provider) => ({
+        value: provider.id,
+        label: provider.name,
+        hint: provider.id,
+      })),
+      { value: "back", label: "返回", hint: "返回直接 API Provider 操作" },
+    ],
+  });
+  if (prompts.isCancel(selected) || selected === "back") return undefined;
+  const provider = providers.find((candidate) => candidate.id === selected);
+  if (!provider) throw new Error("找不到直接 API Provider");
+  return provider;
 }
 
 function providerList(value) {

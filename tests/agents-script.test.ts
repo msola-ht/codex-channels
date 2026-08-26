@@ -14,9 +14,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   agentsStatus,
+  assertThirdPartyRoleDoesNotUseProvider,
   configureThirdPartyRole,
   disableThirdPartyRole,
 } from "../scripts/agents.mjs";
+import { runThirdPartyAgentSetup } from "../scripts/agents-setup.mjs";
 import type {
   CodexUserConfigValue,
 } from "../scripts/codex-user-config.mjs";
@@ -37,9 +39,102 @@ import {
   createManagedProviderMarker,
   createManagedProviderProfile,
 } from "../runtime/model-provider-profile.mjs";
+import { writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 describe("codexc agents script", () => {
+  it("configures the shared role through the Setup menu", async () => {
+    const configureRole = vi.fn(async () => ({
+      role: "external" as const,
+      provider: "deepseek" as const,
+      model: "deepseek-v4-pro",
+    }));
+    const output: string[] = [];
+    const prompts = {
+      select: vi.fn()
+        .mockResolvedValueOnce("configure")
+        .mockResolvedValueOnce("deepseek")
+        .mockResolvedValueOnce("deepseek-v4-pro"),
+      confirm: vi.fn(),
+      isCancel: () => false,
+    };
+
+    const result = await runThirdPartyAgentSetup({
+      environment: {},
+      output: { write: (value: string) => output.push(value) > 0 },
+      prompts,
+      loadProviders: () => [{
+        provider: "deepseek",
+        displayName: "DeepSeek",
+        model: "deepseek-v4-flash-vision-exp",
+        reasoningEffort: "high",
+        mode: "switching",
+        models: [{
+          model: "deepseek-v4-flash-vision-exp",
+          displayName: "DeepSeek V4 Flash Vision",
+          contextWindow: 1_048_576,
+          reasoningEffort: "high",
+          reasoningEfforts: [{ effort: "high", description: "High" }],
+        }, {
+          model: "deepseek-v4-pro",
+          displayName: "DeepSeek V4 Pro",
+          contextWindow: 1_048_576,
+          reasoningEffort: "high",
+          reasoningEfforts: [{ effort: "high", description: "High" }],
+        }],
+      }],
+      loadStatus: () => ({
+        configPath: "/private/config.toml",
+        roleConfigPath: "/private/sf-agent.config.toml",
+        multiAgentV2Enabled: false,
+        externalRoleConfigured: false,
+        legacyDsRoleConfigured: false,
+      }),
+      configureRole,
+    });
+
+    expect(result).toEqual({
+      action: "configured",
+      provider: "deepseek",
+      model: "deepseek-v4-pro",
+    });
+    expect(configureRole).toHaveBeenCalledWith("deepseek", "deepseek-v4-pro", {});
+    expect(output.join("")).toContain("已配置共享第三方子代理：deepseek / deepseek-v4-pro");
+    expect(output.join("")).toContain("codexc service restart all");
+  });
+
+  it("confirms before disabling the shared role through the Setup menu", async () => {
+    const disableRole = vi.fn(async () => true);
+    const output: string[] = [];
+    const prompts = {
+      select: vi.fn().mockResolvedValueOnce("disable"),
+      confirm: vi.fn().mockResolvedValueOnce(true),
+      isCancel: () => false,
+    };
+
+    const result = await runThirdPartyAgentSetup({
+      environment: {},
+      output: { write: (value: string) => output.push(value) > 0 },
+      prompts,
+      loadProviders: () => [],
+      loadStatus: () => ({
+        configPath: "/private/config.toml",
+        roleConfigPath: "/private/sf-agent.config.toml",
+        multiAgentV2Enabled: true,
+        externalRoleConfigured: true,
+        legacyDsRoleConfigured: false,
+        provider: "deepseek",
+        model: "deepseek-v4-pro",
+      }),
+      disableRole,
+    });
+
+    expect(result).toEqual({ action: "disabled" });
+    expect(prompts.confirm).toHaveBeenCalledOnce();
+    expect(disableRole).toHaveBeenCalledWith({});
+    expect(output.join("")).toContain("已移除共享第三方子代理");
+  });
+
   it.each([
     [deepseekProviderDefinition.id, deepseekProviderDefinition],
     [opencodeGoProviderId("opencode-go"), opencodeGoMainDefinition()],
@@ -113,6 +208,53 @@ describe("codexc agents script", () => {
       expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
         agents: { external: { nickname_candidates: ["OpenCode Go"] } },
       });
+    } finally {
+      fixture.remove();
+    }
+  });
+
+  it("binds the shared role to a configured custom switching Provider", async () => {
+    const fixture = createFixture();
+    try {
+      writeFileSync(fixture.configPath, 'model_provider = "openai"\n', { mode: 0o600 });
+      writeCustomPrimaryProviderSwitchingProfile({
+        provider: "codeproxy-dev",
+        model: "gpt-5.6-sol",
+        name: "CodeProxy Dev",
+        baseUrl: "https://proxy.example.test/v1",
+        apiKey: "custom-agent-secret",
+      }, fixture.environment);
+
+      const selected = await configureThirdPartyRole(
+        "codeproxy-dev",
+        "gpt-5.6-sol",
+        fixture.environment,
+        { updateConfig: applyConfigUpdate },
+      );
+
+      expect(selected).toEqual({
+        role: "external",
+        provider: "codeproxy-dev",
+        model: "gpt-5.6-sol",
+      });
+      expect(agentsStatus(fixture.environment)).toMatchObject({
+        externalRoleConfigured: true,
+        provider: "codeproxy-dev",
+        model: "gpt-5.6-sol",
+      });
+      const roleContent = readFileSync(fixture.rolePath, "utf8");
+      expect(roleContent).not.toContain("custom-agent-secret");
+      expect(parse(readFileSync(fixture.configPath, "utf8"))).toMatchObject({
+        agents: { external: { nickname_candidates: ["CodeProxy Dev"] } },
+      });
+      expect(() => assertThirdPartyRoleDoesNotUseProvider(
+        "codeproxy-dev",
+        fixture.environment,
+      )).toThrow("正由 agents.external 使用");
+      expect(() => assertThirdPartyRoleDoesNotUseProvider(
+        "another-provider",
+        fixture.environment,
+      )).not.toThrow();
     } finally {
       fixture.remove();
     }

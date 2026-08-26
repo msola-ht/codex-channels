@@ -27,6 +27,7 @@ import {
 } from "./codex-user-config.mjs";
 import { runCustomPrimaryProviderSetup } from "./custom-primary-provider-setup.mjs";
 import { primaryProviderUsage } from "./primary-provider-usage.mjs";
+import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -279,6 +280,9 @@ export async function switchPrimaryProvider(
   const switching = switchingProviders.find(({ id }) => id === normalizedId);
   if (normalizedId === "openai") {
     const currentProvider = optionalString(config.model_provider);
+    if (currentProvider !== undefined && currentProvider !== "openai") {
+      assertThirdPartyRoleDoesNotUseProvider(currentProvider, environment);
+    }
     const clearsCustomModel = currentProvider !== undefined && currentProvider !== "openai";
     const candidates = listCustomPrimaryProviderCandidates(providers);
     const backedUp = backupPrimaryProviderCandidates(providers, environment);
@@ -309,6 +313,14 @@ export async function switchPrimaryProvider(
     );
     writeCliRemediationRestartAll();
     return;
+  }
+  const currentProvider = optionalString(config.model_provider);
+  if (
+    currentProvider !== undefined
+    && currentProvider !== "openai"
+    && currentProvider !== normalizedId
+  ) {
+    assertThirdPartyRoleDoesNotUseProvider(currentProvider, environment);
   }
   const reservedError = validateCustomPrimaryModelProviderId(normalizedId);
   if (reservedError !== null) {
@@ -385,6 +397,7 @@ export async function removePrimaryProvider(
   } = {},
 ) {
   const normalizedId = String(providerId).trim();
+  assertThirdPartyRoleDoesNotUseProvider(normalizedId, environment);
   const switchingProviderIds = loadCustomSwitchingProviderIds(environment);
   const staleSwitchingRegistration = switchingProviderIds.includes(normalizedId)
     && !existsSync(customPrimaryProviderProfilePath(environment, normalizedId));
