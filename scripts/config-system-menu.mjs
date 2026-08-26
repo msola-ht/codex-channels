@@ -66,7 +66,7 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
   const result = updateGatewaySetting({
     kind: "system.approval-timeout",
     value: parsed,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`审批超时已设为 ${parsed} 秒：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { timeoutSeconds: parsed, configPath: result.configPath };
@@ -91,7 +91,7 @@ async function runSandbox({ environment, output, prompts, writeConfig }) {
   const result = updateGatewaySetting({
     kind: "system.sandbox",
     value: selected,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`Codex Sandbox 已设为${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { sandbox: selected, configPath: result.configPath };
@@ -123,7 +123,7 @@ async function runDefaultWorkspace({ environment, output, prompts, writeConfig }
   const result = updateGatewaySetting({
     kind: "system.default-workspace",
     value: selected,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`默认工作区已设为 ${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { defaultWorkspace: selected, configPath: result.configPath };
@@ -141,7 +141,7 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
   const result = updateGatewaySetting({
     kind: "system.default-model",
     value: normalized || null,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(
     normalized
       ? `渠道新会话模型已覆盖为 ${normalized}：${result.configPath}\n`

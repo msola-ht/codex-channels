@@ -43,6 +43,7 @@ export async function runDebugSetup({
   const level = selected === "enabled" ? "debug" : "info";
   const result = writeLoggingLevel({
     environment,
+    expectedRevision: settings.revision,
     output,
     writeConfig,
     level,
@@ -53,6 +54,7 @@ export async function runDebugSetup({
 
 export function writeLoggingLevel({
   environment = process.env,
+  expectedRevision,
   output = process.stdout,
   writeConfig = writeGatewayConfig,
   level,
@@ -64,7 +66,11 @@ export function writeLoggingLevel({
   const result = updateGatewaySetting({
     kind: "advanced.logging-level",
     value: level,
-  }, { environment, writeConfig });
+  }, {
+    environment,
+    expectedRevision: expectedRevision ?? loadGatewaySettings(environment).revision,
+    writeConfig,
+  });
   output.write(`${message}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { level, configPath: result.configPath };

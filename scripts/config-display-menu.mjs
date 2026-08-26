@@ -62,7 +62,7 @@ export async function runTelegramMessageFormat({
   const result = updateGatewaySetting({
     kind: "telegram.message-format",
     value: selected,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`Telegram 消息格式已设为 ${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { messageFormat: selected, configPath: result.configPath };
@@ -88,7 +88,7 @@ async function runOperationUpdatesToggle({ environment, output, prompts, writeCo
   const result = updateGatewaySetting({
     kind: "display.operation-updates",
     value: selected,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`操作详情显示已设为${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { operationUpdates: selected, configPath: result.configPath };
@@ -114,7 +114,7 @@ async function runPlanUpdatesToggle({ environment, output, prompts, writeConfig 
   const result = updateGatewaySetting({
     kind: "display.plan-updates",
     value: enabled,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`计划更新显示已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { planUpdatesEnabled: enabled, configPath: result.configPath };
@@ -140,7 +140,7 @@ async function runReasoningToggle({ environment, output, prompts, writeConfig })
   const result = updateGatewaySetting({
     kind: "display.reasoning",
     value: enabled,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`思考状态显示已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { reasoningEnabled: enabled, configPath: result.configPath };
@@ -165,7 +165,7 @@ async function runPriceCurrency({ environment, output, prompts, writeConfig }) {
   const result = updateGatewaySetting({
     kind: "display.price-currency",
     value: mode,
-  }, { environment, writeConfig });
+  }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`全局价格显示方式已设为 ${mode}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { priceCurrency: mode, configPath: result.configPath };

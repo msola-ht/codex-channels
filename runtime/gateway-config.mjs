@@ -1,4 +1,12 @@
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 import { z } from "zod";
@@ -6,6 +14,15 @@ import { z } from "zod";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const sourceByDocument = new WeakMap();
+const gatewayConfigLockTimeoutMs = 2_000;
+const staleGatewayConfigLockMs = 30_000;
+
+export class GatewayConfigConflictError extends Error {
+  constructor(message = "config.toml 在写入期间已发生变化") {
+    super(message);
+    this.name = "GatewayConfigConflictError";
+  }
+}
 
 const workspaceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
@@ -439,21 +456,99 @@ export function materializeGatewayConfigDefaults(configPath, document) {
 }
 
 export function writeGatewayConfig(configPath, document) {
-  const generated = stringify(document);
-  const source = sourceByDocument.get(document);
-  const content = source === undefined
-    ? generated
-    : preserveTomlComments(
-        source.content,
-        generated,
-        source.workspaceIds,
-        workspaceIds(document),
-      );
-  writePrivateFileAtomicSync(configPath, content);
-  sourceByDocument.set(document, {
-    content,
-    workspaceIds: workspaceIds(document),
+  return withGatewayConfigLock(configPath, () => {
+    const generated = stringify(document);
+    const source = sourceByDocument.get(document);
+    if (source !== undefined && currentGatewayConfig(configPath) !== source.content) {
+      throw new GatewayConfigConflictError();
+    }
+    const content = source === undefined
+      ? generated
+      : preserveTomlComments(
+          source.content,
+          generated,
+          source.workspaceIds,
+          workspaceIds(document),
+        );
+    writePrivateFileAtomicSync(configPath, content);
+    sourceByDocument.set(document, {
+      content,
+      workspaceIds: workspaceIds(document),
+    });
   });
+}
+
+function currentGatewayConfig(configPath) {
+  try {
+    return readFileSync(configPath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new GatewayConfigConflictError();
+    }
+    throw error;
+  }
+}
+
+function withGatewayConfigLock(configPath, operation) {
+  const normalizedPath = resolve(configPath);
+  mkdirSync(dirname(normalizedPath), { recursive: true, mode: 0o700 });
+  const lockPath = `${normalizedPath}.lock`;
+  const descriptor = acquireGatewayConfigLock(lockPath);
+  let result;
+  let operationFailed = false;
+  let operationError;
+  try {
+    result = operation();
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+  }
+  let releaseError;
+  try {
+    closeSync(descriptor);
+  } catch (error) {
+    releaseError = error;
+  }
+  try {
+    unlinkSync(lockPath);
+  } catch (error) {
+    if (error?.code !== "ENOENT" && releaseError === undefined) releaseError = error;
+  }
+  if (operationFailed) throw operationError;
+  if (releaseError !== undefined) throw releaseError;
+  return result;
+}
+
+function acquireGatewayConfigLock(lockPath) {
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      return openSync(lockPath, "wx", 0o600);
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (staleGatewayConfigLock(lockPath)) {
+        try {
+          unlinkSync(lockPath);
+          continue;
+        } catch (unlinkError) {
+          if (unlinkError?.code !== "ENOENT") throw unlinkError;
+        }
+      }
+      if (Date.now() - startedAt >= gatewayConfigLockTimeoutMs) {
+        throw new GatewayConfigConflictError("config.toml 正在由其他进程修改，请稍后重试");
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+}
+
+function staleGatewayConfigLock(lockPath) {
+  try {
+    return Date.now() - statSync(lockPath).mtimeMs > staleGatewayConfigLockMs;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 function mergeMissingDefaults(target, defaults) {

@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
 import {
-  readGatewayConfig,
+  GatewayConfigConflictError,
+  parseGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { resolveHttpProxyUrl } from "../runtime/network-proxy.mjs";
@@ -24,7 +28,8 @@ export class ConfigManagementError extends Error {
 
 export function loadGatewaySettings(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
+  const snapshot = readConfigSnapshot(configPath);
+  const document = snapshot.document;
   const display = table(document.display);
   const codex = table(document.codex);
   const approval = table(document.approval);
@@ -37,6 +42,7 @@ export function loadGatewaySettings(environment = process.env) {
   const workspaces = workspaceOptions(document);
   return {
     configPath,
+    revision: snapshot.revision,
     display: {
       operationUpdates: operationUpdateValues.includes(display.operation_updates)
         ? display.operation_updates
@@ -77,14 +83,36 @@ export function updateGatewaySetting(
   input,
   {
     environment = process.env,
+    expectedRevision,
+    readConfig = readFileSync,
     writeConfig = writeGatewayConfig,
   } = {},
 ) {
   const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
+  assertExpectedRevision(expectedRevision);
+  const snapshot = readConfigSnapshot(configPath, readConfig);
+  if (snapshot.revision !== expectedRevision) {
+    throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
+  }
+  const document = snapshot.document;
   const result = applySetting(document, input);
-  writeConfig(configPath, document);
-  return { kind: input.kind, configPath, ...result };
+  if (readConfig(configPath, "utf8") !== snapshot.content) {
+    throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
+  }
+  try {
+    writeConfig(configPath, document);
+  } catch (error) {
+    if (error instanceof GatewayConfigConflictError) {
+      throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
+    }
+    throw error;
+  }
+  return {
+    kind: input.kind,
+    configPath,
+    previousRevision: snapshot.revision,
+    ...result,
+  };
 }
 
 export function validateNetworkProxyValue(field, value) {
@@ -205,6 +233,21 @@ function applyNetworkProxy(document, input) {
 
 function changed(value, activation) {
   return { value, activation };
+}
+
+function readConfigSnapshot(configPath, readConfig = readFileSync) {
+  const content = readConfig(configPath, "utf8");
+  return {
+    content,
+    document: parseGatewayConfig(content, configPath),
+    revision: createHash("sha256").update(content).digest("hex"),
+  };
+}
+
+function assertExpectedRevision(value) {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
+    throw invalid("revision", "required-revision", "必须提供有效的 Gateway 配置修订值");
+  }
 }
 
 function workspaceOptions(document) {

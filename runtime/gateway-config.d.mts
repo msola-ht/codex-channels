@@ -97,6 +97,8 @@ export interface GatewayConfigDocument {
   }>;
 }
 
+export class GatewayConfigConflictError extends Error {}
+
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;

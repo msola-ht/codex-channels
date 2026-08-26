@@ -11,6 +11,7 @@ export class ConfigManagementError extends Error {
 
 export interface GatewaySettings {
   configPath: string;
+  revision: string;
   display: {
     operationUpdates: "full" | "compact" | "hidden";
     planUpdatesEnabled: boolean;
@@ -80,13 +81,16 @@ export function validateNetworkProxyValue(
 
 export function updateGatewaySetting(
   input: GatewaySettingInput,
-  options?: {
+  options: {
     environment?: NodeJS.ProcessEnv;
+    expectedRevision: string;
+    readConfig?: (configPath: string, encoding: "utf8") => string;
     writeConfig?: (configPath: string, document: unknown) => void;
   },
 ): {
   kind: GatewaySettingInput["kind"];
   configPath: string;
+  previousRevision: string;
   value: unknown;
   activation: GatewaySettingActivation;
 };

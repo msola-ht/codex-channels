@@ -198,7 +198,9 @@
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
   设置脱敏读取与明确修改接口；只接受受控的显示、系统、自动化、网络、高级和 Telegram 格式输入，
-  返回稳定字段错误与 `restart-gateway` / `reinstall-services` 生效动作，网络读取只显示是否已配置。
+  返回稳定字段错误与 `restart-gateway` / `reinstall-services` 生效动作，网络读取只显示是否已配置；
+  读取同时返回原始文件修订，修改必须携带并在应用前复核；最终提交复用 Gateway Config 的共享写锁
+  和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置。
 - `config-advanced-menu.mjs`：管理计划任务、Thread 分区管理员、显式 HTTP(S) 代理、日志等级与
   开发中的 Plugin API；复用 Config 管理接口，管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
