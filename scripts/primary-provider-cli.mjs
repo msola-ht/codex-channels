@@ -1,34 +1,27 @@
 import * as clackPrompts from "@clack/prompts";
-import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import {
-  backupPrimaryProviderCandidates,
-  customPrimaryProviderProfilePath,
   listCustomPrimaryProviderCandidates,
   loadConfiguredCustomSwitchingModelProviders,
-  loadCustomSwitchingProviderIds,
   readPrimaryProviderBackup,
-  removeCustomPrimaryProviderSwitchingProfile,
-  removePrimaryProviderBackupCandidate,
-  restoreCustomPrimaryProviderSwitchingProfile,
-  restorePrimaryProviderCandidateEdits,
-  validateCustomPrimaryModelProviderId,
 } from "../runtime/model-provider-runtime.mjs";
-import { modelProviderBlockEdits } from "../runtime/model-provider-profile.mjs";
 import {
   writeCliMessage,
   writeCliRemediationRestartAll,
 } from "../runtime/cli-presentation.mjs";
 import {
-  areCodexUserConfigEditsApplied,
   createCodexUserConfigClient,
   readCodexUserConfigSnapshot,
 } from "./codex-user-config.mjs";
 import { runCustomPrimaryProviderSetup } from "./custom-primary-provider-setup.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
+import {
+  applyPrimaryProviderRemoval,
+  applyPrimaryProviderSwitch,
+  previewPrimaryProviderRemoval,
+} from "./primary-provider-management.mjs";
 import { primaryProviderUsage } from "./primary-provider-usage.mjs";
-import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -36,103 +29,6 @@ function record(value) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function switchingProfileSnapshot(environment, providerId) {
-  if (providerId === undefined) return undefined;
-  const switching = loadConfiguredCustomSwitchingModelProviders(environment)
-    .find(({ id }) => id === providerId);
-  if (switching === undefined) {
-    return undefined;
-  }
-  return {
-    providerId: switching.id,
-    switching,
-  };
-}
-
-async function writeEditsWithProfileRemoval({
-  environment,
-  providerId,
-  edits,
-  expectedVersion,
-  createClient,
-}) {
-  const profile = switchingProfileSnapshot(environment, providerId);
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
-    if (profile !== undefined) {
-      removeCustomPrimaryProviderSwitchingProfile(
-        environment,
-        profile.providerId,
-        profile.switching.profileContent,
-      );
-    }
-    try {
-      await client.writeUserConfigEdits(edits, { expectedVersion });
-      return;
-    } catch (error) {
-      let currentConfig;
-      let applied;
-      try {
-        currentConfig = (await readCodexUserConfigSnapshot(environment, { createClient })).config;
-        applied = areCodexUserConfigEditsApplied(currentConfig, edits);
-      } catch (confirmationError) {
-        // AggregateError 已保留配置写入与结果确认两个原始错误。
-        // eslint-disable-next-line preserve-caught-error
-        throw new AggregateError(
-          [error, confirmationError],
-          "Codex 配置写入结果无法确认，自定义切换 Provider Profile 保持移除",
-        );
-      }
-      if (applied) return;
-      if (profile === undefined) throw error;
-      const currentProvider = optionalString(record(currentConfig).model_provider);
-      if (currentProvider !== undefined && currentProvider !== "openai") {
-        throw error;
-      }
-      try {
-        restoreCustomPrimaryProviderSwitchingProfile(
-          environment,
-          profile.switching.id,
-          profile.switching.profileContent,
-        );
-      } catch (rollbackError) {
-        // AggregateError 已保留配置写入与 Profile 回滚两个原始错误。
-        // eslint-disable-next-line preserve-caught-error
-        throw new AggregateError(
-          [error, rollbackError],
-          "Codex 配置写入失败，且自定义切换 Provider Profile 回滚失败",
-        );
-      }
-      throw error;
-    }
-  } finally {
-    await client.close().catch(() => undefined);
-  }
-}
-
-async function writeEditsRemovingBackupCandidate({
-  id,
-  environment,
-  edits,
-  expectedVersion,
-  createClient,
-}) {
-  await writeEditsWithProfileRemoval({
-    environment,
-    providerId: id,
-    edits,
-    expectedVersion,
-    createClient,
-  });
-  try {
-    removePrimaryProviderBackupCandidate(id, environment);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function writeBackupCleanupWarning(output, id) {
@@ -240,117 +136,32 @@ export async function switchPrimaryProvider(
     createClient = createCodexUserConfigClient,
   } = {},
 ) {
-  const normalizedId = String(providerId).trim();
-  const normalizedModel = optionalString(model);
-  const snapshot = await readCodexUserConfigSnapshot(environment, { createClient });
-  const config = record(snapshot.config);
-  const providers = record(config.model_providers);
-  const switchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
-  const switching = switchingProviders.find(({ id }) => id === normalizedId);
-  if (normalizedId === "openai") {
-    const currentProvider = optionalString(config.model_provider);
-    if (currentProvider !== undefined && currentProvider !== "openai") {
-      assertThirdPartyRoleDoesNotUseProvider(currentProvider, environment);
-    }
-    const clearsCustomModel = currentProvider !== undefined && currentProvider !== "openai";
-    const candidates = listCustomPrimaryProviderCandidates(providers);
-    const backedUp = backupPrimaryProviderCandidates(providers, environment);
-    const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
-    const edits = [
-      ...(removesTopLevelBaseUrl
-        ? [{ keyPath: "openai_base_url", value: null }]
-        : []),
-      { keyPath: "model_provider", value: "openai" },
-      ...(clearsCustomModel ? [{ keyPath: "model", value: null }] : []),
-      ...candidates.map((id) => ({ keyPath: `model_providers.${id}`, value: null })),
-    ];
-    await writeEditsWithProfileRemoval({
-      environment,
-      providerId: undefined,
-      edits,
-      expectedVersion: snapshot.version,
-      createClient,
-    });
-    if (removesTopLevelBaseUrl) {
-      output.write("已移除与官方主 Provider 冲突的顶层 openai_base_url。\n");
-    }
+  const result = await applyPrimaryProviderSwitch(
+    { providerId, model },
+    { environment, createClient },
+  );
+  if (result.effects.restoresFromBackup) {
+    output.write(`从备份恢复自定义主 Provider：${result.target.id}。\n`);
+  }
+  if (result.effects.removesTopLevelBaseUrl) {
     output.write(
-      backedUp.length === 0
+      result.target.source === "official"
+        ? "已移除与官方主 Provider 冲突的顶层 openai_base_url。\n"
+        : "已移除与自定义主 Provider 冲突的顶层 openai_base_url。\n",
+    );
+  }
+  if (result.target.source === "official") {
+    output.write(
+      result.effects.backedUpProviderIds.length === 0
         ? "已切换到官方 OpenAI 主 Provider（未运行 codex login，官方凭据保留）。\n"
-        : `已切换到官方 OpenAI 主 Provider（未运行 codex login，官方凭据保留）；`
-          + `自定义候选已移入私有备份：${backedUp.join("、")}。\n`,
+        : "已切换到官方 OpenAI 主 Provider（未运行 codex login，官方凭据保留）；"
+          + `自定义候选已移入私有备份：${result.effects.backedUpProviderIds.join("、")}。\n`,
     );
-    writeCliRemediationRestartAll();
-    return;
+  } else {
+    output.write(`已设为固定主 Provider：${result.target.id}。\n`);
   }
-  const currentProvider = optionalString(config.model_provider);
-  if (
-    currentProvider !== undefined
-    && currentProvider !== "openai"
-    && currentProvider !== normalizedId
-  ) {
-    assertThirdPartyRoleDoesNotUseProvider(currentProvider, environment);
-  }
-  const reservedError = validateCustomPrimaryModelProviderId(normalizedId);
-  if (reservedError !== null) {
-    throw new Error(reservedError);
-  }
-  const otherSwitchingProviderIds = switchingProviders
-    .map(({ id }) => id)
-    .filter((id) => id !== normalizedId);
-  if (otherSwitchingProviderIds.length > 0) {
-    throw new Error(
-      `固定模式不能保留其他自定义切换 Provider；请先删除其他自定义切换 Provider：${otherSwitchingProviderIds.join("、")}`,
-    );
-  }
-  const candidates = listCustomPrimaryProviderCandidates(providers);
-  const switchingEdits = switching === undefined
-    ? []
-    : modelProviderBlockEdits(normalizedId, {
-        name: switching.name,
-        base_url: switching.baseUrl,
-        wire_api: "responses",
-        requires_openai_auth: false,
-        supports_websockets: switching.supportsWebsockets,
-        experimental_bearer_token: switching.apiKey,
-      });
-  const restoreEdits = candidates.includes(normalizedId)
-    ? []
-    : switchingEdits.length > 0
-      ? switchingEdits
-      : restorePrimaryProviderCandidateEdits(normalizedId, environment) ?? [];
-  if (!candidates.includes(normalizedId) && restoreEdits.length === 0) {
-    throw new Error(
-      `未找到自定义主 Provider：${normalizedId}；可用 codexc primary-provider list 查看候选`,
-    );
-  }
-  if (!candidates.includes(normalizedId) && switching === undefined) {
-    output.write(`从备份恢复自定义主 Provider：${normalizedId}。\n`);
-  }
-  const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
-  const edits = [
-    ...restoreEdits,
-    ...(removesTopLevelBaseUrl
-      ? [{ keyPath: "openai_base_url", value: null }]
-      : []),
-    { keyPath: "model_provider", value: normalizedId },
-    ...(normalizedModel === undefined && switching === undefined
-      ? []
-      : [{ keyPath: "model", value: normalizedModel ?? switching?.model }]),
-  ];
-  const backupCleaned = await writeEditsRemovingBackupCandidate({
-    id: normalizedId,
-    environment,
-    edits,
-    expectedVersion: snapshot.version,
-    createClient,
-  });
-  if (removesTopLevelBaseUrl) {
-    output.write("已移除与自定义主 Provider 冲突的顶层 openai_base_url。\n");
-  }
-  output.write(`已设为固定主 Provider：${normalizedId}。\n`);
-  if (!backupCleaned) {
-    writeBackupCleanupWarning(output, normalizedId);
+  if (result.warnings.some(({ code }) => code === "backup-cleanup-failed")) {
+    writeBackupCleanupWarning(output, result.target.id);
   }
   writeCliRemediationRestartAll();
 }
@@ -365,115 +176,56 @@ export async function removePrimaryProvider(
     createClient = createCodexUserConfigClient,
   } = {},
 ) {
-  const normalizedId = String(providerId).trim();
-  assertThirdPartyRoleDoesNotUseProvider(normalizedId, environment);
-  const switchingProviderIds = loadCustomSwitchingProviderIds(environment);
-  const staleSwitchingRegistration = switchingProviderIds.includes(normalizedId)
-    && !existsSync(customPrimaryProviderProfilePath(environment, normalizedId));
-  if (staleSwitchingRegistration) {
-    if (confirmRemoval) {
-      const confirmed = await prompts.confirm({
-        message: `确认清理缺失 Profile 的自定义切换 Provider ${normalizedId}？`,
-        initialValue: false,
-      });
-      if (prompts.isCancel(confirmed) || confirmed !== true) return;
-    }
-    removeCustomPrimaryProviderSwitchingProfile(environment, normalizedId);
-    let backupCleaned = true;
-    try {
-      removePrimaryProviderBackupCandidate(normalizedId, environment);
-    } catch {
-      backupCleaned = false;
-    }
-    output.write(`已清理缺失 Profile 的自定义切换 Provider ${normalizedId}。\n`);
-    if (!backupCleaned) {
-      output.write(
-        "缺失 Profile 的注册项已清理，但私有备份无法安全检查或清理；"
-        + "请修复私有备份权限后再次执行删除。\n",
-      );
-    }
-    writeCliRemediationRestartAll();
-    return;
-  }
-  const snapshot = await readCodexUserConfigSnapshot(environment, { createClient });
-  const config = record(snapshot.config);
-  const providers = record(config.model_providers);
-  const candidates = listCustomPrimaryProviderCandidates(providers);
-  const backup = readPrimaryProviderBackup(environment);
-  const switching = loadConfiguredCustomSwitchingModelProviders(environment)
-    .find(({ id }) => id === normalizedId);
-  const configured = candidates.includes(normalizedId);
-  const backedUp = Object.prototype.hasOwnProperty.call(backup, normalizedId);
-  if (!configured && !backedUp && switching === undefined) {
-    throw new Error(`未找到自定义主 Provider：${normalizedId}；可用 codexc primary-provider list 查看候选`);
-  }
-  const provider = record(
-    configured
-      ? providers[normalizedId]
-      : backedUp
-        ? backup[normalizedId]
-        : { name: switching?.name, base_url: switching?.baseUrl },
+  const preview = await previewPrimaryProviderRemoval(
+    { providerId },
+    { environment, createClient },
   );
   if (confirmRemoval) {
-    const name = optionalString(provider.name) ?? normalizedId;
-    const baseUrl = typeof provider.base_url === "string" ? provider.base_url : "";
     const confirmed = await prompts.confirm({
-      message: `确认删除 ${name}（${normalizedId}）· ${baseUrl}？此操作无法撤销。`,
+      message: preview.target.state === "stale-switching"
+        ? `确认清理缺失 Profile 的自定义切换 Provider ${preview.target.id}？`
+        : `确认删除 ${preview.target.displayName}（${preview.target.id}）· ${preview.target.baseUrl}？此操作无法撤销。`,
       initialValue: false,
     });
     if (prompts.isCancel(confirmed) || confirmed !== true) {
       return;
     }
   }
-  if (switching !== undefined) {
-    removeCustomPrimaryProviderSwitchingProfile(environment, normalizedId);
-    let backupCleaned = true;
-    try {
-      removePrimaryProviderBackupCandidate(normalizedId, environment);
-    } catch {
-      backupCleaned = false;
-    }
-    output.write(`已删除自定义切换 Provider ${normalizedId}，保留官方 OpenAI 主 Provider。\n`);
-    if (!backupCleaned) {
+  const result = await applyPrimaryProviderRemoval(
+    { providerId },
+    { environment, createClient, preview },
+  );
+  if (result.target.state === "stale-switching") {
+    output.write(`已清理缺失 Profile 的自定义切换 Provider ${result.target.id}。\n`);
+  } else if (result.target.state === "switching") {
+    output.write(`已删除自定义切换 Provider ${result.target.id}，保留官方 OpenAI 主 Provider。\n`);
+  } else if (result.target.state === "backup") {
+    output.write(`已删除备份中的自定义主 Provider：${result.target.id}。\n`);
+  } else {
+    output.write(
+      result.effects.restoresOfficial
+        ? `已删除自定义主 Provider ${result.target.id} 并恢复官方 OpenAI 主 Provider。\n`
+        : `已删除自定义主 Provider 候选：${result.target.id}。\n`,
+    );
+  }
+  if (result.warnings.some(({ code }) => code === "backup-cleanup-failed")) {
+    if (result.target.state === "stale-switching") {
       output.write(
-        `自定义切换 Provider ${normalizedId} 已删除，但同名私有备份清理失败；`
+        "缺失 Profile 的注册项已清理，但私有备份无法安全检查或清理；"
         + "请修复私有备份权限后再次执行删除。\n",
       );
+    } else if (result.target.state === "switching") {
+      output.write(
+        `自定义切换 Provider ${result.target.id} 已删除，但同名私有备份清理失败；`
+        + "请修复私有备份权限后再次执行删除。\n",
+      );
+    } else {
+      writeBackupCleanupWarning(output, result.target.id);
     }
+  }
+  if (result.activation === "restart-all") {
     writeCliRemediationRestartAll();
-    return;
   }
-  if (!configured) {
-    removePrimaryProviderBackupCandidate(normalizedId, environment);
-    output.write(`已删除备份中的自定义主 Provider：${normalizedId}。\n`);
-    return;
-  }
-  const activeId = optionalString(config.model_provider);
-  const edits = [
-    { keyPath: `model_providers.${normalizedId}`, value: null },
-    ...(activeId === normalizedId
-      ? [
-          { keyPath: "model_provider", value: "openai" },
-          { keyPath: "model", value: null },
-        ]
-      : []),
-  ];
-  const backupCleaned = await writeEditsRemovingBackupCandidate({
-    id: normalizedId,
-    environment,
-    edits,
-    expectedVersion: snapshot.version,
-    createClient,
-  });
-  output.write(
-    activeId === normalizedId
-      ? `已删除自定义主 Provider ${normalizedId} 并恢复官方 OpenAI 主 Provider。\n`
-      : `已删除自定义主 Provider 候选：${normalizedId}。\n`,
-  );
-  if (!backupCleaned) {
-    writeBackupCleanupWarning(output, normalizedId);
-  }
-  writeCliRemediationRestartAll();
 }
 
 export async function addPrimaryProvider(options = {}) {

@@ -131,10 +131,14 @@
   Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受控模型目录和共享
   第三方子代理的脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
   Provider CLI 列表共同复用。
+- `primary-provider-management.mjs` / `primary-provider-management.d.mts`：提供自定义主 Provider
+  切换与删除的无终端预览和执行接口；预览仅返回脱敏目标、影响与生效动作，执行继续保护共享子代理
+  正在使用的 Provider、保持配置/Profile/私有备份事务顺序，并以稳定错误码和结构化警告报告失败或
+  备份清理部分成功。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
-  list / add / switch / remove 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；list 与
-  switch / remove 复用 Codex 用户配置事务读取和
-  原子写入，add 复用自定义 Responses Provider Setup 的交互流程，Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
+  list / add / switch / remove 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；
+  switch / remove 复用 Provider 管理接口并只负责中文确认与结果渲染，add 复用自定义 Responses Provider Setup 的交互流程，
+  Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
   Provider 时，交互菜单须经二次确认后移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
   编辑备份候选并恢复、修改和激活，也可经二次确认删除备份候选。恢复、编辑或删除时先提交配置，

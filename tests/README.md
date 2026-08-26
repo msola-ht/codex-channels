@@ -115,6 +115,7 @@
   直接 API Provider 的无 prompts 结构化管理用例、脱敏凭据状态、增改删除事务与失败回滚；
   Gateway Config 的无 prompts 脱敏读取、受控修改、生效动作、代理值隔离和稳定字段错误；
   统一 Provider 管理状态对 OpenAI 默认值、受管与自定义 Provider、备份候选、模型目录和共享子代理的汇总与凭据隔离；
+  自定义主 Provider 切换与删除的无 prompts 脱敏预览、稳定字段错误、生效动作、使用中保护和结构化部分成功；
   共享私有文件读取以同一描述符完成 `O_NOFOLLOW` 与权限校验；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash、Flash Vision Exp 与 Pro 可选、受控目录输入能力校验，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
