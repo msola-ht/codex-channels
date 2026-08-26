@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -124,28 +125,39 @@ export function inspectGatewayConfiguration(environment = process.env) {
 }
 
 export async function updateLocalInstallation(environment = process.env, options = {}) {
-  if (
-    environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
-    || environment.CODEX_CONNECT_SERVICE_ROLE === "gateway"
-  ) {
-    throw new Error("不能在运行中的 Codex 服务内执行更新；请在本机终端运行 codexc update");
+  const completedStages = [];
+  let activeStage = "inspect";
+  const runStage = async (stage, operation) => {
+    activeStage = stage;
+    emitLocalUpdateProgress(options, stage, "started", completedStages);
+    try {
+      const result = await operation();
+      completedStages.push(stage);
+      emitLocalUpdateProgress(options, stage, "completed", completedStages);
+      return result;
+    } catch (error) {
+      emitLocalUpdateProgress(options, stage, "failed", completedStages);
+      throw error;
+    }
+  };
+  let inspection;
+  try {
+    inspection = await runStage("inspect", async () => {
+      const current = await inspectLocalUpdatePlan(environment, options);
+      assertLocalUpdateRevision(options.expectedRevision, current.revision);
+      return current;
+    });
+  } catch (error) {
+    throw annotateLocalUpdateFailure(error, {
+      stage: "inspect",
+      completedStages,
+      services: "not-needed",
+    });
   }
-  const configInspection = (options.inspectConfig
-    ?? (() => inspectGatewayConfiguration(environment)))();
-  const databaseInspection = (options.inspectDatabases
-    ?? (() => inspectDatabaseUpdates(environment)))();
-  const serviceInspection = (options.inspectServices
-    ?? (() => inspectCoreServiceInstallation(environment)))();
-  if (
-    !serviceInspection.installed
-    && await gatewayOwnerIsActive(configInspection.configPath)
-  ) {
-    throw new Error(
-      "核心后台服务未安装，但检测到前台 Gateway 正在运行；"
-      + "请在运行 codexc start 的终端按 Ctrl-C，确认退出后再重试 codexc update",
-    );
-  }
-  (options.onInspected ?? (() => {}))({
+  const configInspection = inspection.config;
+  const databaseInspection = inspection.databases;
+  const serviceInspection = inspection.services;
+  notifySafely(options.onInspected, {
     config: configInspection,
     databases: databaseInspection,
     services: serviceInspection,
@@ -161,52 +173,153 @@ export async function updateLocalInstallation(environment = process.env, options
     inspect: options.databaseOptions?.inspect ?? (() => databaseInspection),
   };
   if (serviceInspection.installed) {
-    await stopCoreServices(stopServices, startServices, waitForServices);
+    try {
+      await runStage(
+        "stop-services",
+        () => stopCoreServices(stopServices, startServices, waitForServices),
+      );
+    } catch (error) {
+      throw annotateLocalUpdateFailure(error, {
+        stage: "stop-services",
+        completedStages,
+        services: error instanceof AggregateError ? "failed" : "restored",
+      });
+    }
   }
 
   let config;
   let databases;
   let providerCatalogs;
   let updateError;
+  let updateFailureStage;
   try {
-    (options.updateProviderFiles
-      ?? (() => backupAndMigrateProviderFiles(environment, { apply: true })))();
-    providerCatalogs = await (options.updateProviderCatalogs
-      ?? (() => refreshManagedProviderCatalogsForUpdate(environment)))();
-    config = (options.updateConfig
-      ?? (() => updateGatewayConfiguration(environment)))();
-    databases = (options.updateDatabases
-      ?? (() => updateDatabases(environment, databaseOptions)))();
-    (options.validateOffline
-      ?? (() => validateLocalInstallation(environment)))();
+    await runStage("provider-files", () =>
+      (options.updateProviderFiles
+        ?? (() => backupAndMigrateProviderFiles(environment, { apply: true })))());
+    providerCatalogs = await runStage("provider-catalogs", () =>
+      (options.updateProviderCatalogs
+        ?? (() => refreshManagedProviderCatalogsForUpdate(environment)))());
+    config = await runStage("config", () =>
+      (options.updateConfig
+        ?? (() => updateGatewayConfiguration(environment)))());
+    databases = await runStage("databases", () =>
+      (options.updateDatabases
+        ?? (() => updateDatabases(environment, databaseOptions)))());
+    await runStage("validate-offline", () =>
+      (options.validateOffline
+        ?? (() => validateLocalInstallation(environment)))());
   } catch (error) {
     updateError = error;
+    updateFailureStage = activeStage;
   }
 
   let startError;
   if (serviceInspection.installed) {
     try {
-      startServices();
-      await waitForServices();
+      await runStage("restore-services", async () => {
+        startServices();
+        await waitForServices();
+      });
     } catch (error) {
       startError = error;
     }
   }
   if (updateError !== undefined && startError !== undefined) {
-    throw new AggregateError(
+    throw annotateLocalUpdateFailure(new AggregateError(
       [updateError, startError],
       "本地更新失败，且核心服务未能恢复就绪",
       { cause: updateError },
-    );
+    ), {
+      stage: "restore-services",
+      completedStages,
+      services: "failed",
+    });
   }
-  if (updateError !== undefined) throw updateError;
-  if (startError !== undefined) throw startError;
+  if (updateError !== undefined) {
+    throw annotateLocalUpdateFailure(updateError, {
+      stage: updateFailureStage ?? activeStage,
+      completedStages,
+      services: serviceInspection.installed ? "restored" : "not-needed",
+    });
+  }
+  if (startError !== undefined) {
+    throw annotateLocalUpdateFailure(startError, {
+      stage: "restore-services",
+      completedStages,
+      services: "failed",
+    });
+  }
   return {
     config,
     databases,
     providerCatalogs,
     servicesRestored: serviceInspection.installed,
   };
+}
+
+export function getLocalUpdateFailure(error) {
+  return error instanceof Error && error.localUpdateFailure
+    ? error.localUpdateFailure
+    : undefined;
+}
+
+export async function inspectLocalUpdatePlan(
+  environment = process.env,
+  options = {},
+) {
+  if (
+    environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
+    || environment.CODEX_CONNECT_SERVICE_ROLE === "gateway"
+  ) {
+    throw new Error("不能在运行中的 Codex 服务内执行更新；请在本机终端运行 codexc update");
+  }
+  const config = (options.inspectConfig
+    ?? (() => inspectGatewayConfiguration(environment)))();
+  const databases = (options.inspectDatabases
+    ?? (() => inspectDatabaseUpdates(environment)))();
+  const services = (options.inspectServices
+    ?? (() => inspectCoreServiceInstallation(environment)))();
+  const gatewayIsActive = options.gatewayIsActive ?? gatewayOwnerIsActive;
+  if (!services.installed && await gatewayIsActive(config.configPath)) {
+    throw new Error(
+      "核心后台服务未安装，但检测到前台 Gateway 正在运行；"
+      + "请在运行 codexc start 的终端按 Ctrl-C，确认退出后再重试 codexc update",
+    );
+  }
+  const steps = [
+    "inspect",
+    ...(services.installed ? ["stop-services"] : []),
+    "provider-files",
+    "provider-catalogs",
+    "config",
+    "databases",
+    "validate-offline",
+    ...(services.installed ? ["restore-services"] : []),
+  ];
+  const plan = {
+    operation: "local-update",
+    config,
+    databases,
+    services,
+    requiresServiceInterruption: services.installed,
+    steps,
+  };
+  return {
+    ...plan,
+    revision: createHash("sha256")
+      .update(JSON.stringify(plan))
+      .digest("hex"),
+  };
+}
+
+function assertLocalUpdateRevision(expected, current) {
+  if (expected === undefined) return;
+  if (typeof expected !== "string" || !/^[0-9a-f]{64}$/u.test(expected)) {
+    throw new Error("本地更新计划修订值无效");
+  }
+  if (expected !== current) {
+    throw new Error("本地更新预检状态已变化，请重新生成更新计划");
+  }
 }
 
 export async function refreshManagedProviderCatalogsForUpdate(
@@ -475,6 +588,59 @@ function failureLabel(name) {
   if (name === "state") return "状态数据库";
   if (name === "metrics") return "指标数据库";
   return "核心服务恢复";
+}
+
+function emitLocalUpdateProgress(options, stage, status, completedStages) {
+  notifySafely(options.onProgress, {
+    operation: "local-update",
+    stage,
+    status,
+    completedStages: [...completedStages],
+  });
+}
+
+function notifySafely(listener, value) {
+  if (typeof listener !== "function") return;
+  try {
+    listener(value);
+  } catch {
+    // 观察者和展示适配器不得中断本地更新事务。
+  }
+}
+
+function annotateLocalUpdateFailure(error, details) {
+  const target = error instanceof Error ? error : new Error(String(error));
+  if (target.localUpdateFailure) return target;
+  const mutationStages = [
+    "provider-files",
+    "provider-catalogs",
+    "config",
+    "databases",
+    "validate-offline",
+  ];
+  const completedMutationStages = mutationStages.filter((stage) =>
+    details.completedStages.includes(stage));
+  const changes = completedMutationStages.length === 0
+    ? "unchanged"
+    : completedMutationStages.length === mutationStages.length
+      ? "applied"
+      : "partial";
+  Object.defineProperty(target, "localUpdateFailure", {
+    configurable: false,
+    enumerable: true,
+    value: {
+      operation: "local-update",
+      code: "local-update-failed",
+      stage: details.stage,
+      completedStages: [...details.completedStages],
+      recovery: { changes, services: details.services },
+      recommendation: details.services === "failed"
+        ? "运行 codexc service status all 检查后，再执行 codexc service start all"
+        : "修复失败原因后重新运行 codexc update",
+    },
+    writable: false,
+  });
+  return target;
 }
 
 function printDatabaseResult(name, result) {

@@ -46,7 +46,8 @@
   发送回对应会话；见 `docs/channel-image.md`。
 - `webui`、`center`：分别启动本机只读指标界面和多设备指标中心；监听参数在读取用户配置前完成校验，
   `center info --json` 只输出令牌是否已配置，不输出令牌内容。
-- `service`：完整校验配置后生成全部后台服务定义，并启动 App Server 与 Gateway；启停、重启、状态和日志命令使用
+- `service`：安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
+  与 Gateway；启停、重启、状态和日志命令使用
   `gateway`、`app-server`、`webui`、`center` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
   `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等

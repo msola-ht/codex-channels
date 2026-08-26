@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -35,21 +36,22 @@ export function managedSourceCheckout(environment = process.env, projectDir = pa
   return hasManagedSourceMarker(expected, environment) ? expected : undefined;
 }
 
-export async function updateManagedSourceInstallation(
+export function inspectManagedSourceUpdatePlan(
   environment = process.env,
   options = {},
 ) {
-  if (
-    environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
-    || environment.CODEX_CONNECT_SERVICE_ROLE === "gateway"
-  ) {
-    throw new Error("不能在运行中的 Codex 服务内执行更新；请在本机终端运行 codexc update");
-  }
+  assertSourceUpdateCaller(environment);
   const checkout = options.projectDir ?? managedSourceCheckout(environment);
-  if (!checkout) return { changed: false, managed: false };
+  if (!checkout) {
+    return withSourceUpdateRevision({
+      operation: "source-update",
+      managed: false,
+      steps: ["inspect"],
+    });
+  }
   const repository = options.repository ?? officialRepository;
   assertManagedRepository(checkout, repository, environment, options.captureCommand);
-  const remoteCommit = resolveMainCommit(
+  const targetCommit = resolveMainCommit(
     repository,
     checkout,
     environment,
@@ -63,96 +65,236 @@ export async function updateManagedSourceInstallation(
     options.captureCommand,
   ).trim();
   const currentVersion = packageVersion(checkout);
+  const updateAvailable = currentCommit !== targetCommit;
+  const refreshCommand = !updateAvailable
+    && hasManagedSourceLauncher(resolve(checkout, ".."));
+  return withSourceUpdateRevision({
+    operation: "source-update",
+    managed: true,
+    checkout,
+    currentCommit,
+    currentVersion,
+    targetCommit,
+    updateAvailable,
+    refreshCommand,
+    steps: [
+      "inspect",
+      ...(updateAvailable
+        ? [
+            "clone-candidate",
+            "validate-candidate",
+            "build-candidate",
+            "inspect-candidate",
+            "stop-services",
+            "switch-source",
+            "refresh-command",
+            "local-update",
+            "cleanup",
+          ]
+        : refreshCommand ? ["refresh-command"] : []),
+    ],
+  });
+}
+
+export async function updateManagedSourceInstallation(
+  environment = process.env,
+  options = {},
+) {
+  const completedStages = [];
+  let activeStage = "inspect";
+  const runStage = async (stage, operation) => {
+    activeStage = stage;
+    emitSourceUpdateProgress(options, stage, "started", completedStages);
+    try {
+      const result = await operation();
+      completedStages.push(stage);
+      emitSourceUpdateProgress(options, stage, "completed", completedStages);
+      return result;
+    } catch (error) {
+      emitSourceUpdateProgress(options, stage, "failed", completedStages);
+      throw error;
+    }
+  };
+  let plan;
+  try {
+    plan = await runStage(
+      "inspect",
+      () => {
+        const current = inspectManagedSourceUpdatePlan(environment, options);
+        assertSourceUpdateRevision(options.expectedRevision, current.revision);
+        return current;
+      },
+    );
+  } catch (error) {
+    throw annotateSourceUpdateFailure(error, {
+      stage: activeStage,
+      completedStages,
+      recovery: { services: "not-needed", source: "unchanged" },
+      recommendation: "重新检查源码安装状态后重试更新",
+    });
+  }
+  if (!plan.managed) return { changed: false, managed: false };
+  const checkout = plan.checkout;
+  const repository = options.repository ?? officialRepository;
+  const remoteCommit = plan.targetCommit;
+  const currentCommit = plan.currentCommit;
+  const currentVersion = plan.currentVersion;
   const writeMessage = options.writeMessage ?? writeCliMessage;
-  writeMessage(
+  writeMessageSafely(
+    writeMessage,
     "note",
     `Git 源码检查：当前 ${currentCommit.slice(0, 12)} · main ${remoteCommit.slice(0, 12)}`,
   );
   const installRoot = resolve(checkout, "..");
   if (currentCommit === remoteCommit) {
-    if (hasManagedSourceLauncher(installRoot)) {
-      await installManagedSourceCommand(checkout, installRoot, environment, writeMessage, options);
+    try {
+      if (plan.refreshCommand) {
+        await runStage(
+          "refresh-command",
+          () => installManagedSourceCommand(
+            checkout,
+            installRoot,
+            environment,
+            writeMessage,
+            options,
+          ),
+        );
+      }
+    } catch (error) {
+      throw annotateSourceUpdateFailure(error, {
+        stage: activeStage,
+        completedStages,
+        recovery: { services: "not-needed", source: "unchanged" },
+        recommendation: "修复全局命令安装后重新运行 codexc update",
+      });
     }
     return { changed: false, commit: currentCommit, managed: true, version: currentVersion };
   }
 
-  const stagingRoot = mkdtempSync(join(installRoot, ".codex-channels-update."));
-  const stagedCheckout = join(stagingRoot, "codex-channels");
+  let stagingRoot;
+  let stagedCheckout;
   let switched = false;
   let servicesMayNeedRestore = false;
+  let servicesRestored = false;
   let backupPath;
   const renamePath = options.renamePath ?? renameSync;
   try {
-    writeMessage("note", "正在克隆 Git main 候选源码。");
-    runQuiet(
-      "git",
-      [
-        "clone",
-        "--quiet",
-        "--branch",
-        "main",
-        "--single-branch",
-        repository,
+    writeMessageSafely(writeMessage, "note", "正在克隆 Git main 候选源码。");
+    await runStage("clone-candidate", () => {
+      stagingRoot = mkdtempSync(join(installRoot, ".codex-channels-update."));
+      stagedCheckout = join(stagingRoot, "codex-channels");
+      runQuiet(
+        "git",
+        [
+          "clone",
+          "--quiet",
+          "--branch",
+          "main",
+          "--single-branch",
+          repository,
+          stagedCheckout,
+        ],
+        installRoot,
+        environment,
+        options.runCommand,
+      );
+    });
+    const candidate = await runStage("validate-candidate", () => {
+      const targetVersion = packageVersion(stagedCheckout);
+      if (compareVersions(targetVersion, currentVersion) < 0) {
+        throw new Error(`拒绝降级源码安装：当前 ${currentVersion}，main 为 ${targetVersion}`);
+      }
+      assertCodexVersion(targetVersion, environment, options.captureCommand);
+      const targetCommit = capture(
+        "git",
+        ["rev-parse", "HEAD"],
         stagedCheckout,
-      ],
-      installRoot,
-      environment,
-      options.runCommand,
+        environment,
+        options.captureCommand,
+      ).trim();
+      if (targetCommit !== remoteCommit) {
+        throw new Error("官方 main 在预检后发生变化，请重新运行 codexc update");
+      }
+      assertFastForward(stagedCheckout, currentCommit, targetCommit, environment);
+      return { targetCommit, targetVersion };
+    });
+    writeMessageSafely(
+      writeMessage,
+      "note",
+      "正在构建并预检候选源码；详细日志仅在失败时显示。",
     );
-    const targetVersion = packageVersion(stagedCheckout);
-    if (compareVersions(targetVersion, currentVersion) < 0) {
-      throw new Error(`拒绝降级源码安装：当前 ${currentVersion}，main 为 ${targetVersion}`);
-    }
-    assertCodexVersion(targetVersion, environment, options.captureCommand);
-    const targetCommit = capture(
-      "git",
-      ["rev-parse", "HEAD"],
-      stagedCheckout,
-      environment,
-      options.captureCommand,
-    ).trim();
-    assertFastForward(stagedCheckout, currentCommit, targetCommit, environment);
-    writeMessage("note", "正在构建并预检候选源码；详细日志仅在失败时显示。");
-    await (options.buildCheckout ?? buildCheckout)(stagedCheckout, environment, options);
-    const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(
-      stagedCheckout,
-      environment,
+    await runStage(
+      "build-candidate",
+      () => (options.buildCheckout ?? buildCheckout)(stagedCheckout, environment, options),
     );
-    writeMessage("note", "候选源码已通过校验，准备切换。");
+    const inspection = await runStage(
+      "inspect-candidate",
+      () => (options.inspectStaged ?? inspectStagedInstallation)(stagedCheckout, environment),
+    );
+    notifySafely(options.onPrepared, withSourceUpdateRevision({
+      ...plan,
+      steps: inspection.services.installed
+        ? plan.steps
+        : plan.steps.filter((stage) => stage !== "stop-services"),
+      services: inspection.services,
+      requiresServiceInterruption: inspection.services.installed,
+      targetVersion: candidate.targetVersion,
+    }));
+    writeMessageSafely(writeMessage, "note", "候选源码已通过校验，准备切换。");
     if (inspection.services.installed) {
       servicesMayNeedRestore = true;
-      await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
+      await runStage(
+        "stop-services",
+        () => (options.stopServices ?? stopCoreServices)(checkout, environment, options),
+      );
     }
 
-    backupPath = `${checkout}.pre-update-${Date.now()}`;
-    renamePath(checkout, backupPath);
-    try {
-      renamePath(stagedCheckout, checkout);
-      switched = true;
-    } catch (error) {
+    const proposedBackupPath = `${checkout}.pre-update-${Date.now()}`;
+    await runStage("switch-source", () => {
+      renamePath(checkout, proposedBackupPath);
+      backupPath = proposedBackupPath;
       try {
-        renamePath(backupPath, checkout);
-        backupPath = undefined;
-      } catch (restoreError) {
-        throw new AggregateError(
-          [error, restoreError],
-          `候选源码切换失败，且旧源码未能恢复；旧源码仍位于 ${backupPath}`,
-          { cause: restoreError },
-        );
+        renamePath(stagedCheckout, checkout);
+        switched = true;
+      } catch (error) {
+        try {
+          renamePath(backupPath, checkout);
+          backupPath = undefined;
+        } catch (restoreError) {
+          throw new AggregateError(
+            [error, restoreError],
+            `候选源码切换失败，且旧源码未能恢复；旧源码仍位于 ${backupPath}`,
+            { cause: restoreError },
+          );
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
 
-    await installManagedSourceCommand(checkout, installRoot, environment, writeMessage, options);
-    await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
-    rmSync(backupPath, { recursive: true, force: true });
-    backupPath = undefined;
+    await runStage(
+      "refresh-command",
+      () => installManagedSourceCommand(
+        checkout,
+        installRoot,
+        environment,
+        writeMessage,
+        options,
+      ),
+    );
+    await runStage(
+      "local-update",
+      () => (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options),
+    );
+    await runStage("cleanup", () => {
+      rmSync(backupPath, { recursive: true, force: true });
+      backupPath = undefined;
+    });
     return {
       changed: true,
-      commit: targetCommit,
+      commit: candidate.targetCommit,
       managed: true,
       previousVersion: currentVersion,
-      version: targetVersion,
+      version: candidate.targetVersion,
     };
   } catch (error) {
     let updateError = error;
@@ -165,22 +307,135 @@ export async function updateManagedSourceInstallation(
     if (servicesMayNeedRestore) {
       try {
         await (options.startServices ?? startCoreServices)(checkout, environment, options);
+        servicesRestored = true;
       } catch (startError) {
-        throw new AggregateError(
+        const combinedError = new AggregateError(
           [updateError, startError],
           switched
             ? "源码已切换但本地更新失败，且核心服务未能恢复运行"
             : "源码更新失败，且原核心服务未能恢复运行",
           { cause: startError },
         );
+        throw annotateSourceUpdateFailure(combinedError, {
+          stage: activeStage,
+          completedStages,
+          recovery: {
+            services: "failed",
+            source: sourceRecoveryStatus(switched, backupPath),
+            ...(backupPath ? { backupPath } : {}),
+          },
+          recommendation: switched
+            ? "检查保留的旧源码并手动恢复核心服务"
+            : "修复核心服务后运行 codexc service start all",
+        });
       }
     }
-    throw updateError;
+    throw annotateSourceUpdateFailure(updateError, {
+      stage: activeStage,
+      completedStages,
+      recovery: {
+        services: servicesMayNeedRestore
+          ? servicesRestored ? "restored" : "unknown"
+          : "not-needed",
+        source: sourceRecoveryStatus(switched, backupPath),
+        ...(backupPath ? { backupPath } : {}),
+      },
+      recommendation: switched
+        ? "检查保留的旧源码后重新运行 codexc update"
+        : "修复失败原因后重新运行 codexc update",
+    });
   } finally {
-    if (existsSync(stagingRoot)) {
+    if (stagingRoot && existsSync(stagingRoot)) {
       rmSync(stagingRoot, { recursive: true, force: true });
     }
   }
+}
+
+export function getSourceUpdateFailure(error) {
+  return error instanceof Error && error.sourceUpdateFailure
+    ? error.sourceUpdateFailure
+    : undefined;
+}
+
+function assertSourceUpdateCaller(environment) {
+  if (
+    environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
+    || environment.CODEX_CONNECT_SERVICE_ROLE === "gateway"
+  ) {
+    throw new Error("不能在运行中的 Codex 服务内执行更新；请在本机终端运行 codexc update");
+  }
+}
+
+function withSourceUpdateRevision(plan) {
+  const document = { ...plan };
+  Reflect.deleteProperty(document, "revision");
+  return {
+    ...document,
+    revision: createHash("sha256")
+      .update(JSON.stringify(document))
+      .digest("hex"),
+  };
+}
+
+function assertSourceUpdateRevision(expected, current) {
+  if (expected === undefined) return;
+  if (typeof expected !== "string" || !/^[0-9a-f]{64}$/u.test(expected)) {
+    throw new Error("源码更新计划修订值无效");
+  }
+  if (expected !== current) {
+    throw new Error("源码更新预检状态已变化，请重新生成更新计划");
+  }
+}
+
+function emitSourceUpdateProgress(options, stage, status, completedStages) {
+  notifySafely(options.onProgress, {
+    operation: "source-update",
+    stage,
+    status,
+    completedStages: [...completedStages],
+  });
+}
+
+function notifySafely(observer, value) {
+  if (!observer) return;
+  try {
+    observer(value);
+  } catch {
+    // 观察者不属于更新事务，不能改变更新结果。
+  }
+}
+
+function writeMessageSafely(writeMessage, kind, message) {
+  try {
+    writeMessage(kind, message);
+  } catch {
+    // 命令行展示失败不能改变源码更新事务。
+  }
+}
+
+function sourceRecoveryStatus(switched, backupPath) {
+  if (switched) return backupPath ? "switched-backup-retained" : "switched";
+  return backupPath ? "restore-failed" : "unchanged";
+}
+
+function annotateSourceUpdateFailure(error, details) {
+  const target = error instanceof Error ? error : new Error(String(error));
+  if (!target.sourceUpdateFailure) {
+    Object.defineProperty(target, "sourceUpdateFailure", {
+      configurable: false,
+      enumerable: true,
+      value: {
+        operation: "source-update",
+        code: "source-update-failed",
+        stage: details.stage,
+        completedStages: [...details.completedStages],
+        recovery: details.recovery,
+        recommendation: details.recommendation,
+      },
+      writable: false,
+    });
+  }
+  return target;
 }
 
 function hasManagedSourceLauncher(installRoot) {
@@ -221,7 +476,11 @@ async function installManagedSourceCommand(
     if (existsSync(directory) && readdirSync(directory).length === 0) rmdirSync(directory);
   }
   removeLegacySourceShellPaths(environment);
-  writeMessage("note", "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。");
+  writeMessageSafely(
+    writeMessage,
+    "note",
+    "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。",
+  );
 }
 
 function installGlobalPackage(checkout, environment, options) {
@@ -312,7 +571,7 @@ function assertManagedRepository(checkout, repository, environment, captureComma
     captureCommand,
   ).trim();
   if (origin !== repository) {
-    throw new Error(`源码仓库 origin 不是官方地址，拒绝自动更新：${origin || "(缺失)"}`);
+    throw new Error(`源码仓库 origin 不是官方地址，拒绝自动更新：${origin ? "已配置其他地址" : "缺失"}`);
   }
 }
 

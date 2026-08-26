@@ -6,7 +6,59 @@ export interface SourceUpdateResult {
   version?: string;
 }
 
+export type SourceUpdateStage =
+  | "inspect"
+  | "clone-candidate"
+  | "validate-candidate"
+  | "build-candidate"
+  | "inspect-candidate"
+  | "stop-services"
+  | "switch-source"
+  | "refresh-command"
+  | "local-update"
+  | "cleanup";
+
+export interface SourceUpdatePlan {
+  operation: "source-update";
+  revision: string;
+  managed: boolean;
+  checkout?: string;
+  currentCommit?: string;
+  currentVersion?: string;
+  targetCommit?: string;
+  updateAvailable?: boolean;
+  refreshCommand?: boolean;
+  steps: SourceUpdateStage[];
+}
+
+export interface PreparedSourceUpdatePlan extends SourceUpdatePlan {
+  requiresServiceInterruption: boolean;
+  services: { installed: boolean };
+  targetVersion: string;
+}
+
+export interface SourceUpdateProgress {
+  operation: "source-update";
+  stage: SourceUpdateStage;
+  status: "started" | "completed" | "failed";
+  completedStages: SourceUpdateStage[];
+}
+
+export interface SourceUpdateFailure {
+  operation: "source-update";
+  code: "source-update-failed";
+  stage: SourceUpdateStage;
+  completedStages: SourceUpdateStage[];
+  recovery: {
+    services: "not-needed" | "restored" | "failed" | "unknown";
+    source: "unchanged" | "restore-failed" | "switched" | "switched-backup-retained";
+    backupPath?: string;
+  };
+  recommendation: string;
+}
+
 export interface SourceUpdateOptions {
+  expectedRevision?: string;
   projectDir?: string;
   repository?: string;
   captureCommand?: (
@@ -50,6 +102,8 @@ export interface SourceUpdateOptions {
     options: SourceUpdateOptions,
   ) => Promise<void> | void;
   renamePath?: (oldPath: string, newPath: string) => void;
+  onPrepared?: (plan: PreparedSourceUpdatePlan) => void;
+  onProgress?: (progress: SourceUpdateProgress) => void;
 }
 
 export function managedSourceCheckout(
@@ -61,3 +115,10 @@ export function updateManagedSourceInstallation(
   environment?: NodeJS.ProcessEnv,
   options?: SourceUpdateOptions,
 ): Promise<SourceUpdateResult>;
+
+export function inspectManagedSourceUpdatePlan(
+  environment?: NodeJS.ProcessEnv,
+  options?: Pick<SourceUpdateOptions, "projectDir" | "repository" | "captureCommand">,
+): SourceUpdatePlan;
+
+export function getSourceUpdateFailure(error: unknown): SourceUpdateFailure | undefined;

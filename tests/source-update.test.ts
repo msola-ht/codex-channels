@@ -16,6 +16,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  getSourceUpdateFailure,
+  inspectManagedSourceUpdatePlan,
   managedSourceCheckout,
   updateManagedSourceInstallation,
 } from "../scripts/source-update.mjs";
@@ -29,6 +31,134 @@ afterEach(() => {
 });
 
 describe("Git 源码更新", () => {
+  it("returns a redacted revisioned plan before changing a managed checkout", () => {
+    const fixture = createInstalledFixture("codexc-source-update-plan-");
+
+    const plan = inspectManagedSourceUpdatePlan(fixture.environment, {
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+    });
+
+    expect(plan).toMatchObject({
+      operation: "source-update",
+      managed: true,
+      checkout: fixture.checkout,
+      currentCommit: fixture.initialCommit,
+      currentVersion: "0.147.0",
+      targetCommit: fixture.latestCommit,
+      updateAvailable: true,
+      refreshCommand: false,
+      steps: [
+        "inspect",
+        "clone-candidate",
+        "validate-candidate",
+        "build-candidate",
+        "inspect-candidate",
+        "stop-services",
+        "switch-source",
+        "refresh-command",
+        "local-update",
+        "cleanup",
+      ],
+    });
+    expect(plan.revision).toMatch(/^[0-9a-f]{64}$/u);
+    expect(JSON.stringify(plan)).not.toContain(fixture.repository);
+  });
+
+  it("rejects a stale plan before cloning or stopping services", async () => {
+    const fixture = createInstalledFixture("codexc-source-update-stale-plan-");
+    const plan = inspectManagedSourceUpdatePlan(fixture.environment, {
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+    });
+    writeFileSync(join(fixture.repository, "later.txt"), "later");
+    runGit(fixture.repository, ["add", "."]);
+    runGit(fixture.repository, ["commit", "--quiet", "-m", "later"]);
+    let cloned = false;
+    let stopped = false;
+
+    await expect(updateManagedSourceInstallation(fixture.environment, {
+      expectedRevision: plan.revision,
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      runCommand: () => { cloned = true; },
+      stopServices: () => { stopped = true; },
+    })).rejects.toThrow("源码更新预检状态已变化");
+
+    expect(cloned).toBe(false);
+    expect(stopped).toBe(false);
+  });
+
+  it("does not echo credentials from a mismatched repository origin", () => {
+    const fixture = createInstalledFixture("codexc-source-update-origin-");
+    let failure: unknown;
+
+    try {
+      inspectManagedSourceUpdatePlan(fixture.environment, {
+        projectDir: fixture.checkout,
+        repository: "https://user:secret@example.invalid/private.git",
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("已配置其他地址");
+    expect((failure as Error).message).not.toContain("secret");
+    expect((failure as Error).message).not.toContain(fixture.repository);
+  });
+
+  it("reports prepared state and ordered progress without trusting observers", async () => {
+    const fixture = createInstalledFixture("codexc-source-update-progress-");
+    const progress: string[] = [];
+    let prepared: unknown;
+
+    const result = await updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => undefined,
+      inspectStaged: async () => ({ services: { installed: false } }),
+      installGlobalPackage: () => undefined,
+      onPrepared: (value) => { prepared = value; },
+      onProgress: (event) => {
+        progress.push(`${event.stage}:${event.status}`);
+        if (event.stage === "inspect" && event.status === "started") {
+          throw new Error("observer failed");
+        }
+      },
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      runLocalUpdate: () => undefined,
+    });
+
+    expect(result.changed).toBe(true);
+    expect(prepared).toMatchObject({
+      operation: "source-update",
+      services: { installed: false },
+      requiresServiceInterruption: false,
+      targetVersion: "0.147.0",
+    });
+    expect((prepared as { steps: string[] }).steps).not.toContain("stop-services");
+    expect(progress).toEqual([
+      "inspect:started",
+      "inspect:completed",
+      "clone-candidate:started",
+      "clone-candidate:completed",
+      "validate-candidate:started",
+      "validate-candidate:completed",
+      "build-candidate:started",
+      "build-candidate:completed",
+      "inspect-candidate:started",
+      "inspect-candidate:completed",
+      "switch-source:started",
+      "switch-source:completed",
+      "refresh-command:started",
+      "refresh-command:completed",
+      "local-update:started",
+      "local-update:completed",
+      "cleanup:started",
+      "cleanup:completed",
+    ]);
+  });
+
   it("updates to a newer main commit without requiring a version change", async () => {
     const fixture = createInstalledFixture("codexc-source-update-");
     let globalInstalls = 0;
@@ -92,6 +222,17 @@ describe("Git 源码更新", () => {
     runGit(fixture.checkout, ["reset", "--quiet", "--hard", fixture.latestCommit]);
     let globalInstalls = 0;
     const messages: Array<[string, string]> = [];
+    const plan = inspectManagedSourceUpdatePlan(fixture.environment, {
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+    });
+
+    expect(plan).toMatchObject({
+      managed: true,
+      updateAvailable: false,
+      refreshCommand: true,
+      steps: ["inspect", "refresh-command"],
+    });
 
     const result = await updateManagedSourceInstallation(fixture.environment, {
       buildCheckout: () => { throw new Error("不应重新构建"); },
@@ -214,17 +355,43 @@ describe("Git 源码更新", () => {
     let startCalls = 0;
     let localUpdateCalls = 0;
 
-    await expect(updateManagedSourceInstallation(fixture.environment, {
-      buildCheckout: () => undefined,
-      inspectStaged: async () => ({ services: { installed: true } }),
-      installGlobalPackage: () => { throw new Error("global install failed"); },
-      projectDir: fixture.checkout,
-      repository: fixture.repository,
-      runLocalUpdate: () => { localUpdateCalls += 1; },
-      startServices: () => { startCalls += 1; },
-      stopServices: () => undefined,
-    })).rejects.toThrow("main 源码已切换，但本地更新未完成");
+    let failure: unknown;
+    try {
+      await updateManagedSourceInstallation(fixture.environment, {
+        buildCheckout: () => undefined,
+        inspectStaged: async () => ({ services: { installed: true } }),
+        installGlobalPackage: () => { throw new Error("global install failed"); },
+        projectDir: fixture.checkout,
+        repository: fixture.repository,
+        runLocalUpdate: () => { localUpdateCalls += 1; },
+        startServices: () => { startCalls += 1; },
+        stopServices: () => undefined,
+      });
+    } catch (error) {
+      failure = error;
+    }
 
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("main 源码已切换，但本地更新未完成");
+    expect(getSourceUpdateFailure(failure)).toMatchObject({
+      operation: "source-update",
+      code: "source-update-failed",
+      stage: "refresh-command",
+      completedStages: expect.arrayContaining([
+        "inspect",
+        "clone-candidate",
+        "validate-candidate",
+        "build-candidate",
+        "inspect-candidate",
+        "stop-services",
+        "switch-source",
+      ]),
+      recovery: {
+        services: "restored",
+        source: "switched-backup-retained",
+        backupPath: expect.stringContaining("pre-update"),
+      },
+    });
     expect(startCalls).toBe(1);
     expect(localUpdateCalls).toBe(0);
     expect(readFileSync(join(fixture.checkout, "fix.txt"), "utf8")).toBe("fixed");

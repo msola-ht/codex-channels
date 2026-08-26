@@ -1112,7 +1112,31 @@ async function service(args) {
     return;
   }
   if (action === "install") {
-    runScript("scripts/validate-config.mjs", [], { failureReportedByChild: true });
+    const runtime = configuredEnvironment();
+    const { prepareServiceInstall } = await import(
+      "../scripts/service-install-management.mjs"
+    );
+    const task = prepareServiceInstall(runtime.environment, {
+      onProgress: ({ stage, status }) => {
+        if (status === "completed" && stage === "validate-config") {
+          console.log("Gateway 配置校验通过。");
+        }
+        if (status === "completed" && stage === "write-definitions") {
+          for (const managedService of task.preview.services) {
+            console.log(`生成：${managedService.destination}`);
+          }
+          printCliMessage(
+            "success",
+            task.preview.serviceManager === "systemd"
+              ? "systemd 用户服务配置已生成。"
+              : "launchd 配置已生成。",
+          );
+        }
+      },
+    });
+    await task.execute();
+    printCliMessage("success", coreServiceReadyMessage("all"));
+    return;
   }
   const controlEnvironment = serviceActionAllowsInvalidConfig(action)
     ? serviceControlEnvironment()

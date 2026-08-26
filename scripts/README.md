@@ -9,11 +9,13 @@
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
 - `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
   源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
-  版本不匹配；
+  版本不匹配；更新前返回不包含 origin 的修订计划，候选准备完成后再返回目标版本、服务中断要求和
+  精确执行阶段，预检状态变化时在克隆或停服前拒绝执行；
   候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，之后才停止服务并
   原子切换源码，最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
   明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
-  `.bin/codexc` 与 Shell PATH。Registry 安装直接委派现有本地更新，不修改程序包。
+  `.bin/codexc` 与 Shell PATH。阶段进度和失败对象包含已完成阶段、服务/源码恢复状态与修复建议，
+  观察者或 CLI 展示异常不改变更新事务。Registry 安装直接委派现有本地更新，不修改程序包。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
@@ -23,14 +25,16 @@
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
-  校验 `config.toml`、状态库、指标库、计划任务库及核心服务定义的完整状态；服务已安装时在同一个
+  校验 `config.toml`、状态库、指标库、计划任务库及核心服务定义的完整状态，并返回不含凭据的修订
+  计划、是否需要中断服务及八阶段进度；预检与进度观察者异常不影响更新事务。服务已安装时在同一个
   App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2），离线复核
   后启动并通过 Socket 与监管拓扑确认核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线
   更新，不擅自安装或启动，检测到
   `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按
   目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
   源码已经切换后刷新全局命令或本地更新失败时仍保留新源码与旧源码备份，并先尝试恢复核心服务；
-  服务恢复也失败时同时报告两个错误。
+  服务恢复也失败时同时报告两个错误；失败对象另附失败阶段、已完成阶段、已应用改动范围、服务恢复状态
+  和修复建议，不要求调用方解析异常文案。
   未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
   `backup-provider-migration.mjs` 先完整备份旧布局、现有新目录与被改写引用文件，再把受管
   第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
@@ -417,10 +421,15 @@
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
-- `install-launchd.mjs`：渲染并安装 launchd plist；Codex 路径复用共享可执行文件解析，代理由 CLI
-  服务入口在每次启动时解析。
-- `service-install-context.mjs`：systemd 与 launchd 安装器共用的配置、默认 Workspace、主 Socket、
-  Codex/Node 可执行文件及服务 PATH 解析；运行目录统一创建为 `0700`，平台模板和转义仍各自维护。
+- `install-launchd.mjs` / `install-systemd.mjs`：保留可直接生成平台服务定义的兼容脚本，实际模板计划、
+  转义与原子写入统一复用服务安装管理接口；代理仍由 CLI 服务入口在每次启动时解析。
+- `service-install-context.mjs` / `service-install-context.d.mts`：systemd 与 launchd 安装器共用的配置、
+  默认 Workspace、主 Socket、Codex/Node 可执行文件及服务 PATH 解析；读取计划不修改磁盘，执行时才把
+  运行目录创建为 `0700`。
+- `service-install-management.mjs` / `service-install-management.d.mts`：把服务安装拆成配置校验、平台
+  预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
+  完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
+  控制脚本实现 linger、旧 Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 明确失败关闭。
 - `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
   Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
   WebUI 与指标中心的专属重启要求继续单独提示。
@@ -430,8 +439,6 @@
   日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
-- `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；Codex 路径复用共享可执行文件
-  解析，代理由 CLI 服务入口在每次启动时解析。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
   控制脚本，避免 Shell 维护第二份服务标识。
 - `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性或 launchd Job 字段生成统一、无配置

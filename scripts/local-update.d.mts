@@ -42,6 +42,45 @@ export interface CoreServiceInstallation {
   installed: boolean;
 }
 
+export type LocalUpdateStage =
+  | "inspect"
+  | "stop-services"
+  | "provider-files"
+  | "provider-catalogs"
+  | "config"
+  | "databases"
+  | "validate-offline"
+  | "restore-services";
+
+export interface LocalUpdatePlan {
+  operation: "local-update";
+  revision: string;
+  config: { configPath: string; missingSafeDefaults?: string[]; removedPaths?: string[] };
+  databases: { state: DatabaseInspection; metrics: DatabaseInspection };
+  services: CoreServiceInstallation;
+  requiresServiceInterruption: boolean;
+  steps: LocalUpdateStage[];
+}
+
+export interface LocalUpdateProgress {
+  operation: "local-update";
+  stage: LocalUpdateStage;
+  status: "started" | "completed" | "failed";
+  completedStages: LocalUpdateStage[];
+}
+
+export interface LocalUpdateFailure {
+  operation: "local-update";
+  code: "local-update-failed";
+  stage: LocalUpdateStage;
+  completedStages: LocalUpdateStage[];
+  recovery: {
+    changes: "unchanged" | "partial" | "applied";
+    services: "not-needed" | "restored" | "failed";
+  };
+  recommendation: string;
+}
+
 export function inspectCoreServiceInstallation(
   environment?: LocalUpdateEnvironment,
   platform?: NodeJS.Platform,
@@ -92,6 +131,7 @@ export function updateLocalInstallation(
   environment?: LocalUpdateEnvironment,
   options?: {
     databaseOptions?: Parameters<typeof updateDatabases>[1];
+    expectedRevision?: string;
     inspectConfig?: () => {
       configPath: string;
       missingSafeDefaults?: string[];
@@ -99,11 +139,13 @@ export function updateLocalInstallation(
     };
     inspectDatabases?: () => { state: DatabaseInspection; metrics: DatabaseInspection };
     inspectServices?: () => CoreServiceInstallation;
+    gatewayIsActive?: (configPath: string) => boolean | Promise<boolean>;
     onInspected?: (inspection: {
       config: { configPath: string; missingSafeDefaults?: string[]; removedPaths?: string[] };
       databases: { state: DatabaseInspection; metrics: DatabaseInspection };
       services: CoreServiceInstallation;
     }) => void;
+    onProgress?: (progress: LocalUpdateProgress) => void;
     startServices?: () => void;
     stopServices?: () => void;
     updateProviderFiles?: () => unknown;
@@ -119,6 +161,18 @@ export function updateLocalInstallation(
   providerCatalogs: unknown;
   servicesRestored: boolean;
 }>;
+
+export function getLocalUpdateFailure(error: unknown): LocalUpdateFailure | undefined;
+
+export function inspectLocalUpdatePlan(
+  environment?: LocalUpdateEnvironment,
+  options?: {
+    inspectConfig?: () => LocalUpdatePlan["config"];
+    inspectDatabases?: () => LocalUpdatePlan["databases"];
+    inspectServices?: () => CoreServiceInstallation;
+    gatewayIsActive?: (configPath: string) => boolean | Promise<boolean>;
+  },
+): Promise<LocalUpdatePlan>;
 
 export function refreshManagedProviderCatalogsForUpdate(
   environment?: LocalUpdateEnvironment,
