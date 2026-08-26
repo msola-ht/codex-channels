@@ -9,17 +9,18 @@ import {
   readPrimaryProviderBackup,
   removeCustomPrimaryProviderSwitchingProfile,
   removePrimaryProviderBackupCandidate,
-  restoreCustomPrimaryProviderSwitchingProfile,
   restorePrimaryProviderCandidateEdits,
   validateCustomPrimaryModelProviderId,
 } from "../runtime/model-provider-runtime.mjs";
 import { modelProviderBlockEdits } from "../runtime/model-provider-profile.mjs";
 import {
-  areCodexUserConfigEditsApplied,
   createCodexUserConfigClient,
   readCodexUserConfigSnapshot,
 } from "./codex-user-config.mjs";
 import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
+import {
+  writePrimaryProviderConfigEditsWithProfileRemoval,
+} from "./primary-provider-config-transaction.mjs";
 
 export class PrimaryProviderManagementError extends Error {
   constructor(code, field, message, options) {
@@ -50,7 +51,7 @@ export async function applyPrimaryProviderSwitch(
   if (plan.target.source === "official") {
     backedUpProviderIds = backupPrimaryProviderCandidates(plan.providers, environment);
   }
-  await writeEditsWithProfileRemoval({
+  await writePrimaryProviderConfigEditsWithProfileRemoval({
     environment,
     providerId: plan.profileToRemove,
     edits: plan.edits,
@@ -106,7 +107,7 @@ export async function applyPrimaryProviderRemoval(
   } else if (plan.target.state === "backup") {
     removePrimaryProviderBackupCandidate(plan.target.id, environment);
   } else {
-    await writeEditsWithProfileRemoval({
+    await writePrimaryProviderConfigEditsWithProfileRemoval({
       environment,
       providerId: plan.target.id,
       edits: plan.edits,
@@ -434,71 +435,6 @@ function publicRemovalPreview(plan) {
     activation: plan.activation,
     effects: plan.effects,
   };
-}
-
-async function writeEditsWithProfileRemoval({
-  environment,
-  providerId,
-  edits,
-  expectedVersion,
-  createClient,
-}) {
-  const profile = switchingProfileSnapshot(environment, providerId);
-  const client = await createClient({ environment });
-  try {
-    await client.connect();
-    if (profile !== undefined) {
-      removeCustomPrimaryProviderSwitchingProfile(
-        environment,
-        profile.providerId,
-        profile.switching.profileContent,
-      );
-    }
-    try {
-      await client.writeUserConfigEdits(edits, { expectedVersion });
-      return;
-    } catch (error) {
-      let currentConfig;
-      let applied;
-      try {
-        currentConfig = (await readCodexUserConfigSnapshot(environment, { createClient })).config;
-        applied = areCodexUserConfigEditsApplied(currentConfig, edits);
-      } catch (confirmationError) {
-        throw new AggregateError(
-          [error, confirmationError],
-          "Codex 配置写入结果无法确认，自定义切换 Provider Profile 保持移除",
-          { cause: confirmationError },
-        );
-      }
-      if (applied) return;
-      if (profile === undefined) throw error;
-      const currentProvider = optionalString(record(currentConfig).model_provider);
-      if (currentProvider !== undefined && currentProvider !== "openai") throw error;
-      try {
-        restoreCustomPrimaryProviderSwitchingProfile(
-          environment,
-          profile.switching.id,
-          profile.switching.profileContent,
-        );
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          "Codex 配置写入失败，且自定义切换 Provider Profile 回滚失败",
-          { cause: rollbackError },
-        );
-      }
-      throw error;
-    }
-  } finally {
-    await client.close().catch(() => undefined);
-  }
-}
-
-function switchingProfileSnapshot(environment, providerId) {
-  if (providerId === undefined) return undefined;
-  const switching = loadConfiguredCustomSwitchingModelProviders(environment)
-    .find(({ id }) => id === providerId);
-  return switching === undefined ? undefined : { providerId: switching.id, switching };
 }
 
 function removeBackupCandidateSafely(providerId, environment) {

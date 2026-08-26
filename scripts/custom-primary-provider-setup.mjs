@@ -1,65 +1,24 @@
 import * as clackPrompts from "@clack/prompts";
-import { isIP } from "node:net";
 
 import {
   loadConfiguredCustomSwitchingModelProviders,
   listCustomPrimaryProviderCandidates,
   readPrimaryProviderBackup,
-  removeCustomPrimaryProviderSwitchingProfile,
-  removePrimaryProviderBackupCandidate,
-  restoreCustomPrimaryProviderSwitchingProfile,
-  validProviderBaseUrl,
   validateCustomPrimaryModelProviderId,
-  writeCustomPrimaryProviderSwitchingProfile,
 } from "../runtime/model-provider-runtime.mjs";
 import {
-  createCustomPrimaryProviderConfig,
-  modelProviderBlockEdits,
-} from "../runtime/model-provider-profile.mjs";
-import {
-  areCodexUserConfigEditsApplied,
   createCodexUserConfigClient,
-  readCodexUserConfigSnapshot,
 } from "./codex-user-config.mjs";
+import {
+  customPrimaryProviderIdFromBaseUrl,
+  customPrimaryProviderUrlsShareOrigin,
+  prepareCustomPrimaryProviderSave,
+  primaryProviderId,
+  validCustomPrimaryProviderBaseUrl,
+} from "./custom-primary-provider-management.mjs";
 import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 
-export const primaryProviderId = "OpenAI";
-
-function providerIdFromBaseUrl(baseUrl) {
-  const hostname = new URL(baseUrl).hostname.toLowerCase();
-  const id = hostname
-    .replaceAll(/[^a-z0-9]+/gu, "-")
-    .replaceAll(/^-+|-+$/gu, "")
-    .slice(0, 64);
-  const validationError = validateCustomPrimaryModelProviderId(id);
-  if (validationError !== null) {
-    throw new Error(`无法从 URL 提取 Provider ID：${validationError}`);
-  }
-  return id;
-}
-
-function validSetupProviderBaseUrl(value) {
-  const normalized = validProviderBaseUrl(value, "自定义主 Provider");
-  const url = new URL(normalized);
-  const hostname = url.hostname.toLowerCase();
-  const address = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
-  const addressFamily = isIP(address);
-  const isLoopback = hostname === "localhost"
-    || (addressFamily === 4 && address.startsWith("127."))
-    || (addressFamily === 6 && address === "::1");
-  if (url.protocol !== "https:" && !isLoopback) {
-    throw new Error("自定义主 Provider 远程地址必须使用 HTTPS；HTTP 仅限本机回环地址");
-  }
-  return normalized;
-}
-
-function sameUrlOrigin(left, right) {
-  try {
-    return new URL(left).origin === new URL(right).origin;
-  } catch {
-    return false;
-  }
-}
+export { primaryProviderId };
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -143,14 +102,12 @@ export async function runCustomPrimaryProviderSetup({
     && configuredProviderIds.includes(effectiveActiveProviderId);
   const fixedProviderId = optionalString(editingProviderId);
   let fixedProvider;
-  let fixedProviderFromBackup = false;
   let fixedProviderFromConfig = false;
   if (fixedProviderId !== undefined) {
     const validationError = validateCustomPrimaryModelProviderId(fixedProviderId, environment);
     const switchingCandidate = switchingProviders.find(({ id }) => id === fixedProviderId);
     const configured = Object.prototype.hasOwnProperty.call(currentProviders, fixedProviderId);
     fixedProviderFromConfig = switchingCandidate === undefined && configured;
-    fixedProviderFromBackup = switchingCandidate === undefined && !configured;
     fixedProvider = record(
       switchingCandidate === undefined
         ? configured
@@ -183,8 +140,9 @@ export async function runCustomPrimaryProviderSetup({
       : undefined;
   const currentBaseUrl = optionalString(currentProvider?.base_url) ?? "";
   const currentName = optionalString(currentProvider?.name) ?? "";
-  const currentBearerToken = optionalString(currentProvider?.experimental_bearer_token);
-  const hasCurrentBearerToken = currentBearerToken !== undefined;
+  const hasCurrentBearerToken = optionalString(
+    currentProvider?.experimental_bearer_token,
+  ) !== undefined;
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   const currentWebsockets = currentProvider?.supports_websockets === true ? "yes" : "no";
 
@@ -206,7 +164,7 @@ export async function runCustomPrimaryProviderSetup({
         return "base_url 不能为空";
       }
       try {
-        validSetupProviderBaseUrl(normalized);
+        validCustomPrimaryProviderBaseUrl(normalized);
         return undefined;
       } catch (error) {
         return error instanceof Error ? error.message : String(error);
@@ -216,10 +174,10 @@ export async function runCustomPrimaryProviderSetup({
   if (prompts.isCancel(baseUrl) || baseUrl === "back") {
     return { action: allowBack ? "back" : "cancel" };
   }
-  const normalizedBaseUrl = validSetupProviderBaseUrl(String(baseUrl).trim());
+  const normalizedBaseUrl = validCustomPrimaryProviderBaseUrl(String(baseUrl).trim());
   let normalizedId = fixedProviderId;
   if (normalizedId === undefined) {
-    const derivedProviderId = providerIdFromBaseUrl(normalizedBaseUrl);
+    const derivedProviderId = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl);
     const providerId = await prompts.select({
       message: "Provider ID",
       options: [
@@ -353,7 +311,7 @@ export async function runCustomPrimaryProviderSetup({
   }
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken
-    && sameUrlOrigin(currentBaseUrl, normalizedBaseUrl);
+    && customPrimaryProviderUrlsShareOrigin(currentBaseUrl, normalizedBaseUrl);
   const bearerTokenInput = await prompts.password({
     message: canPreserveCurrentBearerToken
       ? "API Key（留空保留当前 Key；不回显）"
@@ -367,9 +325,8 @@ export async function runCustomPrimaryProviderSetup({
   if (prompts.isCancel(bearerTokenInput) || bearerTokenInput === "back") {
     return { action: allowBack ? "back" : "cancel" };
   }
-  const bearerToken = String(bearerTokenInput).trim()
-    || (canPreserveCurrentBearerToken ? currentBearerToken : undefined);
-  if (bearerToken === undefined) {
+  const replacementApiKey = String(bearerTokenInput).trim();
+  if (replacementApiKey === "" && !canPreserveCurrentBearerToken) {
     throw new Error("API Key 不能为空");
   }
 
@@ -383,24 +340,36 @@ export async function runCustomPrimaryProviderSetup({
   }
 
   const supportsWebsockets = websockets === "yes";
-  const providerBlock = createCustomPrimaryProviderConfig({
+  const saveInput = {
+    operation: fixedProviderId === undefined ? "create" : "update",
+    providerId: normalizedId,
     name: normalizedName,
     baseUrl: normalizedBaseUrl,
-    auth: "bearer_token",
-    bearerToken,
+    mode,
+    model: normalizedModel,
     supportsWebsockets,
+    credential: replacementApiKey === ""
+      ? { action: "preserve" }
+      : { action: "replace", apiKey: replacementApiKey },
+    confirmRemoveTopLevelBaseUrl: removesTopLevelBaseUrl,
+  };
+  const prepared = await prepareCustomPrimaryProviderSave(saveInput, {
+    environment,
+    createClient,
+    loadContext: async () => ({ snapshot, officialModels }),
   });
-  output.write(mode === "switching"
+  const preview = prepared.preview;
+  output.write(preview.provider.mode === "switching"
     ? `\n将写入 ~/.codex/sf-custom-${normalizedId}.config.toml：\n`
     : "\n将写入 ~/.codex/config.toml：\n");
   const previewLines = [
-    `- Provider ID：${normalizedId}`,
-    `- 显示名称：${normalizedName}`,
-    `- 上游：${normalizedBaseUrl}`,
-    `- 默认模型：${normalizedModel}`,
-    `- 运行模式：${mode === "switching" ? "OpenAI + 自定义切换" : "仅自定义固定"}`,
+    `- Provider ID：${preview.provider.id}`,
+    `- 显示名称：${preview.provider.displayName}`,
+    `- 上游：${preview.provider.baseUrl}`,
+    `- 默认模型：${preview.provider.model}`,
+    `- 运行模式：${preview.provider.mode === "switching" ? "OpenAI + 自定义切换" : "仅自定义固定"}`,
     "- 模型目录：Codex 官方",
-    ...(mode === "switching"
+    ...(preview.provider.mode === "switching"
       ? [
           "- 主配置：保持官方 OpenAI",
           "- 默认思考等级：medium",
@@ -411,9 +380,9 @@ export async function runCustomPrimaryProviderSetup({
           "- 主配置：写入并启用该固定 Provider",
           "- 认证：API Key 将明文写入 0600 主配置（不回显、不进入命令行和日志）",
         ]),
-    `- WebSocket：${supportsWebsockets ? "是" : "否"}`,
+    `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
   ];
-  if (normalizedId === primaryProviderId) {
+  if (preview.provider.id === primaryProviderId) {
     previewLines.push("- 远程压缩：允许 Codex 使用；上游必须兼容对应接口");
   }
   output.write(previewLines.map((line) => `${line}\n`).join(""));
@@ -427,28 +396,14 @@ export async function runCustomPrimaryProviderSetup({
     return undefined;
   }
 
-  const switching = mode === "switching";
-  if (switching) {
-    writeCustomPrimaryProviderSwitchingProfile({
-      provider: normalizedId,
-      model: normalizedModel,
-      name: normalizedName,
-      baseUrl: normalizedBaseUrl,
-      apiKey: bearerToken,
-      supportsWebsockets,
-      catalogSource: { kind: "official" },
-    }, environment);
-    let backupCleanupFailed = false;
-    if (fixedProviderId !== undefined && fixedProviderFromBackup) {
-      try {
-        removePrimaryProviderBackupCandidate(fixedProviderId, environment);
-      } catch {
-        backupCleanupFailed = true;
-      }
-    }
+  const result = await prepared.apply();
+  const backupCleanupFailed = result.warnings.some(
+    ({ code }) => code === "backup-cleanup-failed",
+  );
+  if (result.provider.mode === "switching") {
     output.write(
       backupCleanupFailed
-        ? `配置已写入，但自定义主 Provider ${fixedProviderId} 的私有备份清理失败；`
+        ? `配置已写入，但自定义主 Provider ${result.provider.id} 的私有备份清理失败；`
           + "请修复私有备份权限后重试切换或删除。请运行 codexc service restart all 生效。\n"
         : "配置已写入。请运行 codexc service restart all 生效。\n",
     );
@@ -456,79 +411,11 @@ export async function runCustomPrimaryProviderSetup({
       "旧 Thread 不会改变；重启后，在 /model 选择该 Provider，"
       + "下一条消息会创建新的 Provider Thread。可用 /model clear 清除会话偏好。\n",
     );
-    return { provider: normalizedId, model: normalizedModel };
-  }
-  const edits = [
-    ...(removesTopLevelBaseUrl
-      ? [{ keyPath: "openai_base_url", value: null }]
-      : []),
-    { keyPath: "model_provider", value: normalizedId },
-    { keyPath: "model", value: normalizedModel },
-    ...modelProviderBlockEdits(normalizedId, providerBlock),
-  ];
-  const writer = await createClient({ environment });
-  try {
-    await writer.connect();
-    removeCustomPrimaryProviderSwitchingProfile(
-      environment,
-      normalizedId,
-      switchingProvider?.profileContent,
-    );
-    try {
-      await writer.writeUserConfigEdits(edits, { expectedVersion: snapshot.version });
-    } catch (error) {
-      let applied;
-      let currentProvider;
-      try {
-        const currentConfig = (await readCodexUserConfigSnapshot(environment, { createClient }))
-          .config;
-        applied = areCodexUserConfigEditsApplied(currentConfig, edits);
-        currentProvider = optionalString(currentConfig.model_provider);
-      } catch (confirmationError) {
-        // 写入状态未知时不能恢复 Profile，否则可能同时激活固定和切换模式。
-        // eslint-disable-next-line preserve-caught-error
-        throw new AggregateError(
-          [error, confirmationError],
-          "Codex 配置写入结果无法确认，自定义切换 Provider Profile 保持移除",
-        );
-      }
-      if (!applied) {
-        if (
-          switchingProvider !== undefined
-          && (currentProvider === undefined || currentProvider === "openai")
-        ) {
-          try {
-            restoreCustomPrimaryProviderSwitchingProfile(
-              environment,
-              switchingProvider.id,
-              switchingProvider.profileContent,
-            );
-          } catch (rollbackError) {
-            // AggregateError 已保留配置写入与 Profile 回滚两个原始错误。
-            // eslint-disable-next-line preserve-caught-error
-            throw new AggregateError(
-              [error, rollbackError],
-              "Codex 配置写入失败，且自定义切换 Provider Profile 回滚失败",
-            );
-          }
-        }
-        throw error;
-      }
-    }
-  } finally {
-    await writer.close().catch(() => undefined);
-  }
-  let backupCleanupFailed = false;
-  if (fixedProviderId !== undefined && fixedProviderFromBackup) {
-    try {
-      removePrimaryProviderBackupCandidate(fixedProviderId, environment);
-    } catch {
-      backupCleanupFailed = true;
-    }
+    return { provider: result.provider.id, model: result.provider.model };
   }
   output.write(
     backupCleanupFailed
-      ? `配置已写入，但自定义主 Provider ${fixedProviderId} 的私有备份清理失败；`
+      ? `配置已写入，但自定义主 Provider ${result.provider.id} 的私有备份清理失败；`
         + "请修复私有备份权限后重试切换或删除。请运行 codexc service restart all 生效。\n"
       : "配置已写入。请运行 codexc service restart all 生效。\n",
   );
@@ -536,5 +423,5 @@ export async function runCustomPrimaryProviderSetup({
     "旧 Thread 不会改变；重启后新 Thread 使用该固定 Provider。"
     + "会话内 /model 偏好可用 /model clear 清除。\n",
   );
-  return { provider: normalizedId, model: normalizedModel };
+  return { provider: result.provider.id, model: result.provider.model };
 }

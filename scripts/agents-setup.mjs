@@ -5,21 +5,21 @@ import {
   writeCliRemediationRestartAll,
 } from "../runtime/cli-presentation.mjs";
 import {
-  loadCustomModelProviderRoleCandidates,
-  loadManagedModelProviderSettings,
-} from "../runtime/model-provider-runtime.mjs";
-import {
+  applyThirdPartyAgentChange,
   agentsStatus,
   configureThirdPartyRole,
   disableThirdPartyRole,
+  loadThirdPartyAgentProviders,
 } from "./agents.mjs";
+
+export const loadThirdPartyAgentSetupProviders = loadThirdPartyAgentProviders;
 
 export async function runThirdPartyAgentSetup({
   allowBack = false,
   environment = process.env,
   output = process.stdout,
   prompts = clackPrompts,
-  loadProviders = loadThirdPartyAgentSetupProviders,
+  loadProviders = loadThirdPartyAgentProviders,
   loadStatus = agentsStatus,
   configureRole = configureThirdPartyRole,
   disableRole = disableThirdPartyRole,
@@ -60,8 +60,17 @@ export async function runThirdPartyAgentSetup({
       initialValue: false,
     });
     if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
-    const removed = await disableRole(environment);
-    if (removed) {
+    const result = await applyThirdPartyAgentChange(
+      { action: "disable" },
+      {
+        environment,
+        loadProviders: () => providers,
+        loadStatus: () => status,
+        configureRole,
+        disableRole,
+      },
+    );
+    if (result.action === "disabled") {
       writeCliMessage("success", "已移除共享第三方子代理。", {
         stdout: output,
         environment,
@@ -114,7 +123,17 @@ export async function runThirdPartyAgentSetup({
   if (!selectedProvider.models.some((candidate) => candidate.model === model)) {
     throw new Error(`${selectedProvider.displayName} 不支持模型：${String(model)}`);
   }
-  const selection = await configureRole(provider, model, environment);
+  const result = await applyThirdPartyAgentChange(
+    { action: "configure", provider, model },
+    {
+      environment,
+      loadProviders: () => providers,
+      loadStatus: () => status,
+      configureRole,
+      disableRole,
+    },
+  );
+  const selection = result.selection;
   writeCliMessage(
     "success",
     `已配置共享第三方子代理：${selection.provider} / ${selection.model}（agents.external）。`,
@@ -122,24 +141,4 @@ export async function runThirdPartyAgentSetup({
   );
   writeCliRemediationRestartAll({ stdout: output, environment });
   return { action: "configured", provider: selection.provider, model: selection.model };
-}
-
-export function loadThirdPartyAgentSetupProviders(environment = process.env) {
-  return [
-    ...loadManagedModelProviderSettings(environment),
-    ...loadCustomModelProviderRoleCandidates(environment).map((provider) => ({
-      provider: provider.provider,
-      displayName: provider.displayName,
-      model: provider.model,
-      reasoningEffort: provider.reasoningEffort,
-      mode: provider.mode,
-      models: [{
-        model: provider.model,
-        displayName: provider.model,
-        contextWindow: 0,
-        reasoningEffort: provider.reasoningEffort,
-        reasoningEfforts: [],
-      }],
-    })),
-  ];
 }

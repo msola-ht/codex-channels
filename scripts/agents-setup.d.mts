@@ -1,17 +1,5 @@
-export interface ThirdPartyAgentSetupProvider {
-  provider: string;
-  displayName: string;
-  model: string;
-  reasoningEffort: string;
-  mode: "switching" | "exclusive";
-  models: Array<{
-    model: string;
-    displayName: string;
-    contextWindow: number;
-    reasoningEffort: string;
-    reasoningEfforts: Array<{ effort: string; description: string }>;
-  }>;
-}
+export type ThirdPartyAgentSetupProvider =
+  import("./agents.mjs").ThirdPartyAgentProvider;
 
 export function runThirdPartyAgentSetup(options?: {
   allowBack?: boolean;
