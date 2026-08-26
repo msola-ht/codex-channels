@@ -120,7 +120,8 @@
   同 Origin Key 内部保留、使用中保护和结构化部分成功；
   受管 Provider 默认模型、思考等级与自动压缩的无 prompts 预览、稳定字段错误、切换模式写入、
   固定模式配置失败回滚和 App Server 重启动作；DeepSeek/OpenCode Go 恢复的无 prompts 脱敏预览、
-  明确确认、稳定备份错误和全部服务重启动作；
+  明确确认、稳定备份错误和全部服务重启动作；DeepSeek 安装的无 prompts 脱敏预览、字段校验、
+  固定模式确认、Key 结果隔离、分阶段并发保护回滚和全部服务重启动作；
   共享私有文件读取以同一描述符完成 `O_NOFOLLOW` 与权限校验；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash、Flash Vision Exp 与 Pro 可选、受控目录输入能力校验，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型

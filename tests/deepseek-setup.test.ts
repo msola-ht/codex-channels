@@ -11,13 +11,31 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 
 import { parse, stringify } from "smol-toml";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const privateFileFailure = vi.hoisted(() => ({ path: undefined as string | undefined }));
+
+vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../runtime/private-file.mjs")>();
+  return {
+    ...actual,
+    writePrivateFileAtomic: async (
+      ...args: Parameters<typeof actual.writePrivateFileAtomic>
+    ) => {
+      const [path] = args;
+      if (path === privateFileFailure.path) throw new Error("injected private write failure");
+      return actual.writePrivateFileAtomic(...args);
+    },
+  };
+});
 
 import {
+  applyDeepseekConfiguration,
   applyDeepseekRestore,
   deepseekSetupScriptUrl,
   downloadDeepseekCatalog,
   extractDeepseekCatalog,
+  previewDeepseekConfiguration,
   previewDeepseekRestore,
   refreshDeepseekCatalogForUpdate,
   runDeepseekSetup as runDeepseekSetupImplementation,
@@ -52,9 +70,159 @@ function runDeepseekSetup(options: DeepseekSetupOptions = {}) {
 }
 
 describe("DeepSeek setup", () => {
+  afterEach(() => {
+    privateFileFailure.path = undefined;
+  });
+
   it("extracts exactly one official model catalog heredoc", () => {
     expect(extractDeepseekCatalog(script).models).toHaveLength(3);
     expect(() => extractDeepseekCatalog("echo no-catalog")).toThrow("模型目录标记无效");
+  });
+
+  it("exposes a credential-free installation preview", () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const environment = {
+      CODEX_HOME: fixture.home,
+      CODEX_CONNECT_HOME: fixture.connectHome,
+    };
+
+    expect(previewDeepseekConfiguration({ mode: "switching" }, { environment }))
+      .toEqual({
+        operation: "add",
+        provider: { id: "deepseek", name: "DeepSeek" },
+        mode: "switching",
+        effects: {
+          writesMainConfig: false,
+          writesIsolatedProfile: true,
+          downloadsCatalog: true,
+          updatesExternalAgent: true,
+          preservesInitialConfig: true,
+        },
+        confirmation: {
+          required: false,
+          field: "confirmExclusiveConfigChange",
+        },
+        activation: "restart-all",
+      });
+  });
+
+  it("requires fixed-mode confirmation before downloading or writing", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const environment = {
+      CODEX_HOME: fixture.home,
+      CODEX_CONNECT_HOME: fixture.connectHome,
+    };
+    const downloadCatalog = vi.fn();
+
+    await expect(applyDeepseekConfiguration({
+      mode: "exclusive",
+      apiKey: "sk-secret",
+    }, { environment, downloadCatalog })).rejects.toMatchObject({
+      code: "confirmation-required",
+      field: "confirmExclusiveConfigChange",
+    });
+    expect(downloadCatalog).not.toHaveBeenCalled();
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8"))
+      .toBe('model = "gpt-5.4"\n');
+  });
+
+  it("validates installation fields before downloading", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const environment = {
+      CODEX_HOME: fixture.home,
+      CODEX_CONNECT_HOME: fixture.connectHome,
+    };
+    const downloadCatalog = vi.fn();
+
+    await expect(applyDeepseekConfiguration({
+      mode: "switching",
+      apiKey: "invalid",
+    }, { environment, downloadCatalog })).rejects.toMatchObject({
+      code: "invalid-api-key",
+      field: "apiKey",
+    });
+    await expect(applyDeepseekConfiguration({
+      mode: "switching",
+      apiKey: "sk-secret",
+      autoCompactPercent: 9,
+    }, { environment, downloadCatalog })).rejects.toMatchObject({
+      code: "invalid-auto-compact-percent",
+      field: "autoCompactPercent",
+    });
+    expect(downloadCatalog).not.toHaveBeenCalled();
+  });
+
+  it("applies a switching installation without exposing the API key in its result", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const environment = {
+      CODEX_HOME: fixture.home,
+      CODEX_CONNECT_HOME: fixture.connectHome,
+    };
+
+    const result = await applyDeepseekConfiguration({
+      mode: "switching",
+      apiKey: "sk-structured-secret",
+      autoCompactPercent: 60,
+    }, {
+      environment,
+      fetchImpl: successfulFetch,
+      configureRole: (provider, model, roleEnvironment) => configureThirdPartyRole(
+        provider,
+        model,
+        roleEnvironment,
+        { updateConfig: applyConfigUpdate },
+      ),
+    });
+
+    expect(result).toMatchObject({
+      action: "configured",
+      operation: "add",
+      mode: "switching",
+      model: "deepseek-v4-flash-vision-exp",
+      activation: "restart-all",
+    });
+    expect(JSON.stringify(result)).not.toContain("sk-structured-secret");
+    expect(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"))
+      .toContain("sk-structured-secret");
+  });
+
+  it("rolls back every installation target when an intermediate write fails", async () => {
+    const original = 'model = "gpt-5.4"\ncustom = true\n';
+    const fixture = setupFixture(original);
+    const environment = {
+      CODEX_HOME: fixture.home,
+      CODEX_CONNECT_HOME: fixture.connectHome,
+    };
+    privateFileFailure.path = join(
+      fixture.connectHome,
+      "providers",
+      "deepseek",
+      "models.manifest.json",
+    );
+
+    await expect(applyDeepseekConfiguration({
+      mode: "switching",
+      apiKey: "sk-secret",
+    }, {
+      environment,
+      fetchImpl: successfulFetch,
+      configureRole: vi.fn(),
+    })).rejects.toMatchObject({
+      code: "operation-failed",
+      field: "action",
+    });
+
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
+    for (const path of [
+      join(fixture.home, "sf-deepseek.config.toml"),
+      join(fixture.home, "sf-agent.config.toml"),
+      join(fixture.connectHome, "providers", "deepseek", "managed.toml"),
+      join(fixture.connectHome, "providers", "deepseek", "models.json"),
+      join(fixture.connectHome, "providers", "deepseek", "models.manifest.json"),
+      join(fixture.connectHome, "providers", "deepseek", "backup", "state.json"),
+    ]) {
+      expect(existsSync(path)).toBe(false);
+    }
   });
 
   it("refreshes the catalog and migrates the previous default once during codexc update", async () => {
