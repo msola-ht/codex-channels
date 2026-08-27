@@ -2169,8 +2169,10 @@ describe("codexc CLI", () => {
     const capturePath = join(root, "capture.json");
     const fakeCodex = join(root, "fake-codex.mjs");
     const expectedAppServerVersion = (
-      JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version: string }
-    ).version;
+      JSON.parse(
+        readFileSync(resolve("src/codex-protocol/version.json"), "utf8"),
+      ) as { codexCli: string }
+    ).codexCli.replace(/^codex-cli /u, "");
     mkdirSync(workspace);
     mkdirSync(codexHome);
     writeFileSync(fakeCodex, [

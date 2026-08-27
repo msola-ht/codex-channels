@@ -11,13 +11,18 @@ const protocolMetadata = JSON.parse(
 );
 const expectedVersion = codexPackageVersion(protocolMetadata.codexCli);
 
-if (packageMetadata.version !== expectedVersion || gatewayMetadata.version !== expectedVersion) {
+if (packageMetadata.version !== gatewayMetadata.version) {
   throw new Error(
-    `版本必须匹配 Codex CLI：codex=${expectedVersion}，package.json=${packageMetadata.version}，src/version.json=${gatewayMetadata.version}`,
+    `npm 包与 Gateway 运行时版本不一致：package.json=${packageMetadata.version}，src/version.json=${gatewayMetadata.version}`,
+  );
+}
+if (!isGatewayVersionCompatible(packageMetadata.version, expectedVersion)) {
+  throw new Error(
+    `Gateway 版本必须匹配 Codex CLI 基础版本：codex=${expectedVersion}，gateway=${packageMetadata.version}`,
   );
 }
 
-console.log(`包版本与 Codex CLI 匹配：${expectedVersion}`);
+console.log(`Gateway ${packageMetadata.version} 与 Codex CLI ${expectedVersion} 兼容`);
 
 function codexPackageVersion(value) {
   const match = /^codex-cli (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(String(value));
@@ -25,4 +30,13 @@ function codexPackageVersion(value) {
     throw new Error(`无法从协议版本解析 npm 版本：${value}`);
   }
   return match[1];
+}
+
+function isGatewayVersionCompatible(gatewayVersion, codexVersion) {
+  return gatewayVersion === codexVersion
+    || new RegExp(`^${escapeRegExp(codexVersion)}-fix[1-9]\\d*$`, "u").test(gatewayVersion);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

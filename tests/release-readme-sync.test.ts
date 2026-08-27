@@ -129,6 +129,25 @@ describe("published README synchronization", () => {
     expect(renderPublishedReadme(updated, "0.146.0")).toBe(updated);
   });
 
+  it("publishes a Gateway fix version without changing the Codex CLI version", () => {
+    const publishedReadme = renderPublishedReadme(readme, "0.146.0");
+    const fixReadme = renderPublishedReadme(
+      publishedReadme.replace(
+        "`main` 开发基线：`0.146.0`",
+        "`main` 开发基线：`0.146.0-fix1`",
+      ),
+      "0.146.0-fix1",
+    );
+
+    expect(fixReadme).toContain("`main` 开发基线：`0.146.0-fix1`");
+    expect(fixReadme).toContain("当前正式版：`0.146.0`");
+    expect(fixReadme).toContain("当前修复预览版：`0.146.0-fix1`");
+    expect(fixReadme).toContain("`codex-cli 0.146.0`");
+    expect(fixReadme).toContain("@openai/codex@0.146.0");
+    expect(fixReadme).toContain("@hegenai/codexc@0.146.0-fix1");
+    expect(renderPublishedReadme(fixReadme, "0.146.0-fix1")).toBe(fixReadme);
+  });
+
   it("keeps a newer main baseline marked as unpublished", () => {
     const nextBaseline = readme.replace(
       "`main` 开发基线：`0.146.0`",
@@ -140,11 +159,11 @@ describe("published README synchronization", () => {
     );
   });
 
-  it("fails closed for downgrade, prerelease, or an uncontrolled README", () => {
+  it("fails closed for downgrade, unsupported prerelease, or an uncontrolled README", () => {
     expect(() => renderPublishedReadme(readme, "0.144.0")).toThrow("降级");
     expect(() => renderPublishedReadme(readme, "0.147.0")).toThrow("开发基线");
     expect(() => renderPublishedReadme(readme, "0.146.0-alpha.1")).toThrow(
-      "正式版本",
+      "正式版本或 fix 修复版",
     );
     expect(() =>
       renderPublishedReadme("# Codex Connect Gateway\n", "0.146.0")

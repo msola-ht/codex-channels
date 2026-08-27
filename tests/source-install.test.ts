@@ -128,6 +128,22 @@ describe("Linux/macOS Git 源码安装", () => {
     expect(existsSync(join(root, "fake-bin", "codex"))).toBe(true);
   }, 15_000);
 
+  it("uses the protocol base version for a Gateway fix release", () => {
+    const root = temporaryDirectory("codexc-source-install-fix-");
+    const repository = createFixtureRepository(root, {
+      gatewayVersion: "0.147.0-fix1",
+    });
+    const home = join(root, "home");
+
+    const result = runInstaller(root, repository, home, { codexInstalled: false });
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    expect(result.stdout).toContain(
+      "未检测到 Codex CLI，正在安装 @openai/codex@0.147.0",
+    );
+    expect(result.stdout).not.toContain("@openai/codex@0.147.0-fix1");
+  }, 15_000);
+
   it("does not modify Shell PATH when no terminal is attached", () => {
     const root = temporaryDirectory("codexc-source-install-no-tty-");
     const repository = createFixtureRepository(root);
@@ -400,15 +416,17 @@ function temporaryDirectory(prefix: string): string {
 
 function createFixtureRepository(
   root: string,
-  options: { failBuild?: boolean } = {},
+  options: { failBuild?: boolean; gatewayVersion?: string } = {},
 ): string {
   const repository = join(root, "repository");
+  const gatewayVersion = options.gatewayVersion ?? "0.147.0";
   mkdirSync(join(repository, "bin"), { recursive: true });
   mkdirSync(join(repository, "scripts"), { recursive: true });
+  mkdirSync(join(repository, "src", "codex-protocol"), { recursive: true });
   mkdirSync(join(repository, "webui"), { recursive: true });
   writeFileSync(join(repository, "package.json"), JSON.stringify({
     name: "@hegenai/codexc",
-    version: "0.147.0",
+    version: gatewayVersion,
     type: "module",
     bin: { codexc: "bin/codexc.mjs" },
     scripts: {
@@ -416,10 +434,14 @@ function createFixtureRepository(
       check: "node scripts/check.mjs",
     },
   }));
+  writeFileSync(
+    join(repository, "src", "codex-protocol", "version.json"),
+    JSON.stringify({ codexCli: "codex-cli 0.147.0" }),
+  );
   writeFileSync(join(repository, "package-lock.json"), fixtureLock("@hegenai/codexc"));
   writeFileSync(
     join(repository, "bin", "codexc.mjs"),
-    "#!/usr/bin/env node\nconsole.log('0.147.0');\n",
+    `#!/usr/bin/env node\nconsole.log('${gatewayVersion}');\n`,
   );
   writeFileSync(
     join(repository, "scripts", "build.mjs"),

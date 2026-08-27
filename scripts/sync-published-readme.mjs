@@ -4,13 +4,13 @@ import { fileURLToPath } from "node:url";
 
 import { packageDir } from "./package-path.mjs";
 
-const stableVersionPattern = /^\d+\.\d+\.\d+$/u;
+const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*)?$/u;
 
 export function renderPublishedReadme(readme, targetVersion) {
-  if (!stableVersionPattern.test(targetVersion)) {
-    throw new Error(`README 只接受正式版本：${targetVersion}`);
+  if (!releaseVersionPattern.test(targetVersion)) {
+    throw new Error(`README 只接受正式版本或 fix 修复版：${targetVersion}`);
   }
-  const development = /`main` 开发基线：`(\d+\.\d+\.\d+)`(?:（尚未发布）)?/u
+  const development = /`main` 开发基线：`(\d+\.\d+\.\d+(?:-fix[1-9]\d*)?)`(?:（尚未发布）)?/u
     .exec(readme);
   if (!development) {
     throw new Error("README 缺少受控的 main 开发基线标记");
@@ -25,21 +25,33 @@ export function renderPublishedReadme(readme, targetVersion) {
     throw new Error("README 缺少受控的当前正式版标记");
   }
   const currentVersion = published[1];
+  if (targetVersion.includes("-fix")) {
+    return renderFixReadme(readme, targetVersion, development[1], currentVersion);
+  }
   if (compareStableVersions(targetVersion, currentVersion) < 0) {
     throw new Error(
       `拒绝把 README 正式版本降级：${currentVersion} -> ${targetVersion}`,
     );
   }
+  const currentCodexVersion = baseVersion(currentVersion);
+  const targetCodexVersion = baseVersion(targetVersion);
   for (const expected of [
-    `codex-cli ${currentVersion}`,
-    `@openai/codex@${currentVersion}`,
+    `codex-cli ${currentCodexVersion}`,
+    `@openai/codex@${currentCodexVersion}`,
     `@hegenai/codexc@${currentVersion}`,
   ]) {
     if (!readme.includes(expected)) {
       throw new Error(`README 正式安装说明缺少受控版本：${expected}`);
     }
   }
-  const rendered = readme.replaceAll(currentVersion, targetVersion);
+  const rendered = readme
+    .replaceAll(`codex-cli ${currentCodexVersion}`, `codex-cli ${targetCodexVersion}`)
+    .replaceAll(`@openai/codex@${currentCodexVersion}`, `@openai/codex@${targetCodexVersion}`)
+    .replaceAll(`@hegenai/codexc@${currentVersion}`, `@hegenai/codexc@${targetVersion}`)
+    .replace(
+      `当前正式版：\`${currentVersion}\``,
+      `当前正式版：\`${targetVersion}\``,
+    );
   return development[1] === targetVersion
     ? rendered.replace(
       `\`main\` 开发基线：\`${targetVersion}\`（尚未发布）`,
@@ -48,16 +60,71 @@ export function renderPublishedReadme(readme, targetVersion) {
     : rendered;
 }
 
+function renderFixReadme(readme, targetVersion, developmentVersion, publishedVersion) {
+  if (baseVersion(targetVersion) !== publishedVersion) {
+    throw new Error(
+      `README 修复版基础版本必须等于当前正式版：${targetVersion} 与 ${publishedVersion}`,
+    );
+  }
+  const preview = /当前修复预览版：`(\d+\.\d+\.\d+-fix[1-9]\d*)`/u.exec(readme);
+  const currentVersion = preview?.[1] ?? publishedVersion;
+  if (compareStableVersions(targetVersion, currentVersion) < 0) {
+    throw new Error(
+      `拒绝把 README 修复预览版本降级：${currentVersion} -> ${targetVersion}`,
+    );
+  }
+  for (const expected of [
+    `codex-cli ${publishedVersion}`,
+    `@openai/codex@${publishedVersion}`,
+    `@hegenai/codexc@${publishedVersion}`,
+  ]) {
+    if (!readme.includes(expected)) {
+      throw new Error(`README 正式安装说明缺少受控版本：${expected}`);
+    }
+  }
+
+  let rendered = preview
+    ? readme.replaceAll(currentVersion, targetVersion)
+    : readme
+      .replace(
+        `当前正式版：\`${publishedVersion}\``,
+        `当前正式版：\`${publishedVersion}\`\n当前修复预览版：\`${targetVersion}\``,
+      )
+      .replace(
+        `npm install -g @hegenai/codexc@${publishedVersion}`,
+        `npm install -g @hegenai/codexc@${publishedVersion}\n\`\`\`\n\n测试修复预览版：\n\n\`\`\`bash\nnpm install -g @hegenai/codexc@${targetVersion}`,
+      );
+  if (!rendered.includes(`@hegenai/codexc@${targetVersion}`)) {
+    throw new Error(`README 修复预览安装说明缺少受控版本：@hegenai/codexc@${targetVersion}`);
+  }
+  if (developmentVersion === targetVersion) {
+    rendered = rendered.replace(
+      `\`main\` 开发基线：\`${targetVersion}\`（尚未发布）`,
+      `\`main\` 开发基线：\`${targetVersion}\``,
+    );
+  }
+  return rendered;
+}
+
 function compareStableVersions(left, right) {
-  const leftParts = left.split(".").map(Number);
-  const rightParts = right.split(".").map(Number);
+  const leftParts = versionParts(left);
+  const rightParts = versionParts(right);
   for (let index = 0; index < 3; index += 1) {
     const difference = leftParts[index] - rightParts[index];
     if (difference !== 0) {
       return difference;
     }
   }
-  return 0;
+  return leftParts[3] - rightParts[3];
+}
+
+function baseVersion(value) {
+  return value.split("-", 1)[0];
+}
+
+function versionParts(value) {
+  const [stable, suffix] = value.split("-", 2);
+  return [...stable.split(".").map(Number), suffix ? Number(suffix.slice(3)) : 0];
 }
 
 function normalizeReleaseVersion(value) {

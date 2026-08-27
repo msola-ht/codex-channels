@@ -11,8 +11,9 @@
 通过 `codexc remote` 启动的原生 Codex TUI 与聊天客户端按模型提供商共享同一个 Codex App
 Server，因此可以继续使用对应的会话、Thread 和运行状态。
 
-`main` 开发基线：`0.148.0`
+`main` 开发基线：`0.148.0-fix1`
 当前正式版：`0.148.0`
+当前修复预览版：`0.148.0-fix1`
 要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.148.0`
 
 ## 快速开始
@@ -22,6 +23,12 @@ Server，因此可以继续使用对应的会话、Thread 和运行状态。
 ```bash
 npm install -g @openai/codex@0.148.0
 npm install -g @hegenai/codexc@0.148.0
+```
+
+测试修复预览版：
+
+```bash
+npm install -g @hegenai/codexc@0.148.0-fix1
 ```
 
 也可以在 Linux 或 macOS 上把官方 `main` 分支 Git 仓库安装到
