@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { connect } from "node:net";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -80,21 +81,63 @@ const upsertDeviceSql = `
 `;
 
 export function openCentralDatabase(databasePath) {
+  const existed = existsSync(databasePath);
   mkdirSync(dirname(databasePath), { recursive: true });
   const database = new DatabaseSync(databasePath);
   database.exec("PRAGMA journal_mode = WAL;");
   database.exec("PRAGMA busy_timeout = 10000;");
   database.exec(readFileSync(SCHEMA_PATH, "utf8"));
-  const deviceColumns = database.prepare("PRAGMA table_info(devices)").all();
-  if (!deviceColumns.some((column) => column.name === "display_name")) {
-    database.exec("ALTER TABLE devices ADD COLUMN display_name TEXT");
-  }
-  const subagentColumns = database.prepare("PRAGMA table_info(subagent_threads)").all();
-  if (!subagentColumns.some((column) => column.name === "parent_turn_id")) {
-    database.exec("ALTER TABLE subagent_threads ADD COLUMN parent_turn_id TEXT");
-  }
+  if (!existed) database.exec("PRAGMA user_version = 1");
   chmodSync(databasePath, 0o600);
+  const schemaVersion = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
+  if (schemaVersion !== 1) {
+    database.close();
+    throw new Error(
+      `指标中心数据库 Schema ${schemaVersion} 不受支持，请先运行 codexc center upgrade`,
+    );
+  }
   return database;
+}
+
+export function upgradeMetricsCenterDatabase(databasePath) {
+  if (!existsSync(databasePath)) {
+    throw new Error(`指标中心数据库不存在：${databasePath}`);
+  }
+  const backupPath = `${databasePath}.v0.${new Date().toISOString().replace(/[:.]/gu, "-")}.bak`;
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("PRAGMA busy_timeout = 10000;");
+    const version = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
+    if (version === 1) return { changed: false, backupPath: null, schemaVersion: 1 };
+    if (version !== 0) throw new Error(`指标中心数据库 Schema ${version} 不受支持`);
+    const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+    if (!tables.has("devices") || !tables.has("subagent_threads")) {
+      throw new Error("指标中心数据库结构不完整，无法升级");
+    }
+    if (existsSync(backupPath)) throw new Error(`升级备份已存在：${backupPath}`);
+    database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    copyFileSync(databasePath, backupPath);
+    chmodSync(backupPath, 0o600);
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const deviceColumns = database.prepare("PRAGMA table_info(devices)").all();
+      if (!deviceColumns.some((column) => column.name === "display_name")) {
+        database.exec("ALTER TABLE devices ADD COLUMN display_name TEXT");
+      }
+      const subagentColumns = database.prepare("PRAGMA table_info(subagent_threads)").all();
+      if (!subagentColumns.some((column) => column.name === "parent_turn_id")) {
+        database.exec("ALTER TABLE subagent_threads ADD COLUMN parent_turn_id TEXT");
+      }
+      database.exec("PRAGMA user_version = 1");
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return { changed: true, backupPath, schemaVersion: 1 };
+  } finally {
+    database.close();
+  }
 }
 
 export function createMetricsCenterServer({
@@ -598,10 +641,23 @@ function main() {
       });
       return;
     }
+    if (args[0] === "upgrade") {
+      const settings = resolveMetricsCenterSettings({ environment: process.env });
+      const result = upgradeMetricsCenterDatabase(settings.databasePath);
+      writeCliMessage(
+        result.changed ? "success" : "note",
+        result.changed
+          ? `指标中心数据库已升级到 Schema ${result.schemaVersion}`
+          : `指标中心数据库已经是 Schema ${result.schemaVersion}`,
+      );
+      if (result.backupPath !== null) console.log(`升级前备份：${result.backupPath}`);
+      return;
+    }
     if (args[0] === "--help" || args[0] === "-h") {
       console.log("用法：codexc center [--host 地址] [--port 端口] [--database 路径]");
       console.log("      codexc center info [--json]     查看中心地址、双令牌状态与运行状态");
       console.log("      codexc center config   交互配置 [metrics.center]");
+      console.log("      codexc center upgrade  升级中心数据库并保留备份");
       return;
     }
     const settings = resolveMetricsCenterSettings({ args });

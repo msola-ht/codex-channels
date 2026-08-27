@@ -2,11 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { createMetricsCenterServer, runCenterInfo } from "../scripts/metrics-center-server.mjs";
+import { createMetricsCenterServer, openCentralDatabase, runCenterInfo, upgradeMetricsCenterDatabase } from "../scripts/metrics-center-server.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 
@@ -21,6 +22,28 @@ afterEach(async () => {
 });
 
 describe("metrics center server", () => {
+  it("upgrades a legacy center database explicitly and keeps a backup", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-center-upgrade-"));
+    temporaryDirectories.push(directory);
+    const databasePath = join(directory, "central.sqlite3");
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      CREATE TABLE devices (device_id TEXT PRIMARY KEY, first_seen_at_ms INTEGER NOT NULL,
+        last_seen_at_ms INTEGER NOT NULL, last_ingested_at_ms INTEGER);
+      CREATE TABLE subagent_threads (device_id TEXT NOT NULL, thread_id TEXT NOT NULL,
+        parent_thread_id TEXT, agent_path TEXT, recorded_at_ms INTEGER NOT NULL,
+        ingested_at_ms INTEGER NOT NULL, PRIMARY KEY (device_id, thread_id));
+    `);
+    database.close();
+
+    const result = upgradeMetricsCenterDatabase(databasePath);
+    expect(result.changed).toBe(true);
+    expect(result.schemaVersion).toBe(1);
+    expect(result.backupPath).toBeTypeOf("string");
+    const upgraded = openCentralDatabase(databasePath);
+    upgraded.close();
+  });
+
   it("uses separate bearer tokens for device ingest and read queries", async () => {
     const { origin } = await startServer({
       token: "view-token",
