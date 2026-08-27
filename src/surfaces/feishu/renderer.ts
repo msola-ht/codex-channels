@@ -279,7 +279,7 @@ export function renderFeishuOutput(
         remainingUsage,
       );
     case "thread.status":
-      return `Thread 状态：${threadStatusLabel(event.status)}`;
+      return `Session 状态：${threadStatusLabel(event.status)}`;
     case "thread.availability":
       return formatThreadAvailability(
         event.availability,

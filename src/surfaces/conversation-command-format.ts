@@ -1929,7 +1929,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
   const lines = [
     "Codex 状态",
     `Workspace：${status.workspaceName} (${status.workspaceId})`,
-    `Thread：${status.threadId ?? "尚未绑定"}`,
+    `Session：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,

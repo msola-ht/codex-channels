@@ -62,9 +62,10 @@ Application 的内联 Data URL 输入，同一 Thread 的
   映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知、`/status` 与
   `turn.completed` 结束统计均包含当前 Workspace Git 分支。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
-  原始输入消息，使开始确认、短回复及首张流式卡片原生回复同一输入；完成的原生生成图片
+  原始输入消息，使开始确认、阶段性最终正文及首张流式卡片原生回复同一输入；回复目标
+  保留到 Turn 终态，完成的原生生成图片
   独立于操作显示档位上传并发送。
-- `status-card.ts`：把 Thread 状态和计划进度映射为可原地更新的轻量 CardKit 2.0 卡片。
+- `status-card.ts`：把 Session 状态和计划进度映射为可原地更新的轻量 CardKit 2.0 卡片。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
 
@@ -88,8 +89,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
   `form_submit` 回调。Plugin 列表只把已启用且可调用项变成受令牌约束的选择按钮，
   选择后通过一次性表单收集任务，再交回统一 `/plugin` Application 边界。
 - 普通消息发送使用 `im.v1.message.create` 的 `chat_id + text/post/interactive` 窄能力；
-  普通 Turn 输入的开始确认和首条最终正文使用官方 `im.v1.message.reply` 回复精确
-  `message_id`，不创建话题串；富文本只生成单个
+  普通 Turn 输入的开始确认、阶段性最终正文和最终正文使用官方 `im.v1.message.reply` 回复精确
+  `message_id`，不创建话题串；命令中心卡片保持独立发送；富文本只生成单个
   `md` 元素，不暴露 SDK Client。模型或上游文本中的飞书原生 `<at>` 标签会在平台边界被中和，
   避免非预期提醒。审批结束和 Thread 状态都只更新 `interactive` 卡片，并使用
   `im.v1.message.patch`；当前 Turn 的启动回复（包括 Skill、Plugin 或子代理身份）会登记为 Thread 状态消息，后续 `active`

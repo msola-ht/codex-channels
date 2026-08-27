@@ -473,23 +473,26 @@ export class TelegramOutbox {
             await this.flush(chatId, key, true);
           }
           const replyTo = this.replyTargets.get(turnKey);
-          await this.sendPanel(
-            chatId,
-            renderTelegramLifecyclePresentation(
-              createTurnCompletedPresentation(
-                event,
-                this.options.priceCurrency,
-                this.options.exchangeRate?.() ?? null,
-                this.options.debugEnabled ?? false,
-                remainingUsage,
+          try {
+            await this.sendPanel(
+              chatId,
+              renderTelegramLifecyclePresentation(
+                createTurnCompletedPresentation(
+                  event,
+                  this.options.priceCurrency,
+                  this.options.exchangeRate?.() ?? null,
+                  this.options.debugEnabled ?? false,
+                  remainingUsage,
+                ),
               ),
-            ),
-            replyTo,
-            true,
-          );
-          this.replyTargets.delete(turnKey);
-          this.notifiedTurns.delete(turnKey);
-          this.clearApprovalOperationsForTurn(turnKey);
+              replyTo,
+              true,
+            );
+          } finally {
+            this.replyTargets.delete(turnKey);
+            this.notifiedTurns.delete(turnKey);
+            this.clearApprovalOperationsForTurn(turnKey);
+          }
         }, true);
         return;
       }
@@ -956,7 +959,6 @@ export class TelegramOutbox {
     this.enqueueOperationSummary(
       chatId,
       buffered.summary,
-      this.turnKey(event.threadId, event.turnId),
     );
   }
 
@@ -974,7 +976,6 @@ export class TelegramOutbox {
   private enqueueOperationSummary(
     chatId: string,
     summary: OperationUpdateSummary,
-    turnKey?: string,
   ): void {
     const text = formatTelegramOperationSummary(
       summary,
@@ -986,7 +987,7 @@ export class TelegramOutbox {
         await this.sendOperationMessage(
           chatId,
           text,
-          turnKey === undefined ? undefined : this.replyTargets.get(turnKey),
+          undefined,
         );
       },
       true,
@@ -1028,7 +1029,7 @@ export class TelegramOutbox {
           state.messageId = await this.sendOperationMessage(
             chatId,
             text,
-            this.replyTargets.get(turnKey),
+            undefined,
           );
         }
       }
@@ -1036,7 +1037,7 @@ export class TelegramOutbox {
       state.messageId = await this.sendOperationMessage(
         chatId,
         text,
-        this.replyTargets.get(turnKey),
+        undefined,
       );
     }
     if (final && this.operationLogs.get(turnKey) === state) {
@@ -1183,9 +1184,7 @@ export class TelegramOutbox {
   }
 
   private async sendFirstChunk(chatId: string, state: StreamState, text: string): Promise<number> {
-    const replyTo = state.phase === "commentary"
-      ? undefined
-      : this.replyTargets.get(state.turnKey);
+    const replyTo = this.replyTargets.get(state.turnKey);
     const silent = state.phase === "commentary" || this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
@@ -1193,9 +1192,6 @@ export class TelegramOutbox {
     );
     if (!silent) {
       this.notifiedTurns.add(state.turnKey);
-    }
-    if (replyTo !== undefined) {
-      this.replyTargets.delete(state.turnKey);
     }
     return message.message_id;
   }
@@ -1223,9 +1219,6 @@ export class TelegramOutbox {
     if (!silent) {
       this.notifiedTurns.add(state.turnKey);
     }
-    if (replyTo !== undefined) {
-      this.replyTargets.delete(state.turnKey);
-    }
     return message.message_id;
   }
 
@@ -1250,9 +1243,6 @@ export class TelegramOutbox {
     );
     if (!silent) {
       this.notifiedTurns.add(state.turnKey);
-    }
-    if (replyTo !== undefined) {
-      this.replyTargets.delete(state.turnKey);
     }
     return message.message_id;
   }
@@ -1328,9 +1318,6 @@ export class TelegramOutbox {
       state.messageId = message.message_id;
       if (!silent) {
         this.notifiedTurns.add(state.turnKey);
-      }
-      if (replyTo !== undefined) {
-        this.replyTargets.delete(state.turnKey);
       }
     }
 

@@ -1602,7 +1602,7 @@ describe("Feishu conversation adapter", () => {
       text: [
         "## Codex 状态",
         "- Workspace：Main (main)",
-        "- Thread：thread-1",
+        "- Session：thread-1",
         "- Turn：turn-1",
         "- 工作目录：/workspace",
         "- Git 分支：未检测到",
