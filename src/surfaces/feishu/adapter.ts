@@ -16,6 +16,8 @@ import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatDelayMinutes,
+  formatConversationStatus,
+  formatConversationPermissions,
   formatScheduledTaskStatusLabel,
   formatSessionListCommand,
   formatThreadQueueInputTypeLabel,
@@ -229,6 +231,13 @@ export class FeishuConversationAdapter {
           && this.commandCenter
         ) {
           const response = renderCommandCenterChoices("effort", result);
+          if (response) {
+            await this.commandCenter.openResponse(message.target, message.actorId, response);
+            return;
+          }
+        }
+        if (result.kind === "permissions" && this.commandCenter) {
+          const response = renderCommandCenterChoices("permissions", result);
           if (response) {
             await this.commandCenter.openResponse(message.target, message.actorId, response);
             return;
@@ -1556,11 +1565,49 @@ function renderCommandCenterChoices(
     }
     return {
       title: "选择工作区",
+      description: [
+        "当前工作区",
+        `- ${result.currentWorkspaceId ?? "未选择"}`,
+        "",
+        "可切换工作区",
+      ].join("\n"),
+      descriptionFormat: "markdown",
       choices: result.workspaces.map((workspace) => ({
         label: `${workspace.id === result.currentWorkspaceId ? "✓ " : ""}${workspace.name}`,
         action: "workspace",
         input: workspace.id,
       })),
+    };
+  }
+  if (action === "permissions" && result.kind === "permissions") {
+    return {
+      title: "权限只读查询",
+      description: `${formatConversationPermissions(result)}\n\n点击下方按钮进入 Workspace 权限设置。`,
+      descriptionFormat: "markdown",
+      choices: [{
+        label: "修改 Workspace 权限",
+        action: "workspaceperm",
+        input: "",
+      }],
+    };
+  }
+  if (action === "status" && result.kind === "status") {
+    return {
+      title: "Codex 状态",
+      description: [
+        stripMarkdownHeading(formatConversationStatus(result.status)),
+        "",
+        "关联操作：",
+        "- 模型设置",
+        "- 工作区",
+        "- 权限查询",
+      ].join("\n"),
+      descriptionFormat: "markdown",
+      choices: [
+        { label: "模型设置", action: "model", input: "" },
+        { label: "工作区", action: "workspace", input: "" },
+        { label: "权限查询", action: "permissions", input: "" },
+      ],
     };
   }
   if (
@@ -1569,7 +1616,8 @@ function renderCommandCenterChoices(
   ) {
     return {
       title: "工作区权限",
-      description: `当前：${workspacePermissionSummary(result.workspace)}`,
+      description: `当前权限：\n${workspacePermissionSummary(result.workspace)}`,
+      descriptionFormat: "markdown",
       choices: [
         {
           label: `沙箱：${workspacePermissionLabel(
@@ -1609,7 +1657,15 @@ function renderCommandCenterChoices(
     }
     return {
       title: "选择模型",
-      description: `当前：${result.state.model}`,
+      description: [
+        "当前模型",
+        `- 模型：${result.state.model}`,
+        `- Provider：${result.state.modelProvider ?? "OpenAI 官方"}`,
+        `- 思考等级：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+        "",
+        "选择模型后将继续选择思考等级。",
+      ].join("\n"),
+      descriptionFormat: "markdown",
       choices: result.state.models.map((model, index) => ({
         label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
         action: "model",
@@ -1624,7 +1680,12 @@ function renderCommandCenterChoices(
     }
     return {
       title: "选择思考等级",
-      description: `当前：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+      description: [
+        "当前设置",
+        `- 模型：${result.state.model}`,
+        `- 思考等级：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+      ].join("\n"),
+      descriptionFormat: "markdown",
       choices: efforts.map(
         (option) => ({
           label: `${option.effort === result.state.effort ? "✓ " : ""}${option.effort}`,
@@ -1768,10 +1829,11 @@ function workspacePermissionSummary(
   >["workspace"],
 ): string {
   return [
-    `沙箱：${workspacePermissionLabel("sandbox", workspace.sandbox)}`,
-    `审批：${workspacePermissionLabel("approval", workspace.approvalPolicy)}`,
-    `Profile：${workspace.permissions ?? "未配置"}`,
-  ].join(" · ");
+    `- 沙箱：${workspacePermissionLabel("sandbox", workspace.sandbox)}`,
+    `- 审批：${workspacePermissionLabel("approval", workspace.approvalPolicy)}`,
+    `- Profile：${workspace.permissions ?? "未配置"}`,
+    "- 网络：跟随 Codex 用户默认设置",
+  ].join("\n");
 }
 
 function workspacePermissionLabel(
@@ -1800,6 +1862,10 @@ function escapeFeishuCardMarkdown(value: string): string {
     .replace(/[\r\n]+/gu, " ")
     .replaceAll("\\", "\\\\")
     .replaceAll(/([`*_~[\]()>#+\-.!|{}])/gu, "\\$1");
+}
+
+function stripMarkdownHeading(value: string): string {
+  return value.replace(/^## [^\n]+\n?/u, "");
 }
 
 class FeishuOutputQueueError extends Error {

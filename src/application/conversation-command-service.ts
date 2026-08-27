@@ -184,6 +184,7 @@ export type ConversationCommandResult =
   | {
       kind: "permissions";
       profiles: Awaited<ReturnType<ConversationUseCases["listPermissionProfiles"]>>;
+      workspace?: Awaited<ReturnType<ConversationUseCases["listWorkspaces"]>>[number];
     }
   | {
       kind: "project-rules";
@@ -856,10 +857,19 @@ export class ConversationCommandService {
           result: await this.conversations.providerAccountLimits(target),
         };
       case "permissions":
-        return {
-          kind: "permissions",
-          profiles: await this.conversations.listPermissionProfiles(target),
-        };
+        {
+          const status = typeof this.conversations.status === "function"
+            ? this.conversations.status(target)
+            : undefined;
+          const workspace = status && typeof this.conversations.listWorkspaces === "function"
+            ? this.conversations.listWorkspaces().find((entry) => entry.id === status.workspaceId)
+            : undefined;
+          return {
+            kind: "permissions",
+            profiles: await this.conversations.listPermissionProfiles(target),
+            ...(workspace ? { workspace } : {}),
+          };
+        }
       case "rules": {
         if (argumentsText === "init") {
           const result = await this.conversations.initializeProjectRules(target);

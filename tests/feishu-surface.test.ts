@@ -529,10 +529,14 @@ describe("Feishu Surface", () => {
     }, {
       includeGitBranch: true,
     });
-    expect(fixture.sent).toEqual([{
-      chatId: "oc_chat",
-      text: expect.stringContaining("Codex 状态"),
-    }]);
+    expect(fixture.sent).toEqual([]);
+    expect(fixture.cards).toHaveLength(2);
+    expect(fixture.cards[1]?.card).toMatchObject({
+      schema: "2.0",
+      header: expect.objectContaining({
+        title: expect.objectContaining({ content: "Codex 状态" }),
+      }),
+    });
   });
 
   it("selects an installed Plugin and submits its task from command cards", async () => {
