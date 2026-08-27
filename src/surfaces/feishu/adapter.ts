@@ -94,6 +94,8 @@ export class FeishuConversationAdapter {
         | "bindPendingTurnReplyTarget"
         | "discardPendingTurnReplyTarget"
         | "prepareTurnReplyTarget"
+        | "replyMarkdown"
+        | "replyToTurn"
       >>,
     private readonly images: Pick<FeishuImagePort, "download">,
     private readonly permissionStatus: () => FeishuPermissionRuntimeStatus =
@@ -291,9 +293,14 @@ export class FeishuConversationAdapter {
       if (!submission.steered) {
         return;
       }
-      this.notifyText(
+      if (!this.outbox.replyToTurn?.(
         message.target.conversationId,
-        formatTurnInputAppended("text"),
+        submission.threadId,
+        submission.turnId,
+        formatTurnInputAppended("text", false, message.text),
+      )) this.notifyText(
+        message.target.conversationId,
+        formatTurnInputAppended("text", false, message.text),
       );
     } catch (error) {
       if (error instanceof FeishuOutputQueueError) {
@@ -759,10 +766,12 @@ export class FeishuConversationAdapter {
       this.outbox.discardPendingTurnReplyTarget?.(
         message.target.conversationId,
       );
-      this.notifyText(
+      if (!this.outbox.replyToTurn?.(
         message.target.conversationId,
+        result.submission.threadId,
+        result.submission.turnId,
         formatTurnInputAppended("file"),
-      );
+      )) this.notifyText(message.target.conversationId, formatTurnInputAppended("file"));
       return;
     }
     this.outbox.bindPendingTurnReplyTarget?.(
@@ -820,10 +829,12 @@ export class FeishuConversationAdapter {
       this.outbox.discardPendingTurnReplyTarget?.(
         message.target.conversationId,
       );
-      this.notifyText(
+      if (!this.outbox.replyToTurn?.(
         message.target.conversationId,
+        submission.threadId,
+        submission.turnId,
         formatTurnInputAppended("audio"),
-      );
+      )) this.notifyText(message.target.conversationId, formatTurnInputAppended("audio"));
       return;
     }
     this.outbox.bindPendingTurnReplyTarget?.(
@@ -907,13 +918,16 @@ export class FeishuConversationAdapter {
       );
     }
     if (tail?.submission.steered) {
-      this.notifyText(
-        messages[0]!.target.conversationId,
-        formatTurnInputAppended(
-          "image",
-          messages.some((message) => Boolean(message.text?.trim())),
-        ),
+      const appended = formatTurnInputAppended(
+        "image",
+        messages.some((message) => Boolean(message.text?.trim())),
       );
+      if (!this.outbox.replyToTurn?.(
+        replyMessage.target.conversationId,
+        tail.submission.threadId,
+        tail.submission.turnId,
+        appended,
+      )) this.notifyText(messages[0]!.target.conversationId, appended);
     }
   }
 
