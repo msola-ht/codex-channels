@@ -12,6 +12,16 @@ export type CodexUserSettingInput =
     }
   | { kind: "defaults"; model: string; reasoningEffort: string }
   | { kind: "fast"; enabled: boolean }
+  | { kind: "web-search"; mode: "live" | "indexed" | "cached" | "disabled" }
+  | {
+      kind: "preferences";
+      reasoningSummary: "auto" | "concise" | "detailed" | "none";
+      planModeReasoningEffort: string;
+      verbosity: "low" | "medium" | "high";
+      personality: "none" | "friendly" | "pragmatic";
+      checkForUpdateOnStartup: boolean;
+      historyPersistence: "save-all" | "none";
+    }
   | {
       kind: "permissions";
       sandboxMode: "read-only" | "workspace-write";
@@ -34,6 +44,13 @@ export interface CodexUserSettingsState {
     model: string | null;
     reasoningEffort: string | null;
     fastEnabled: boolean;
+    webSearch: "live" | "indexed" | "cached" | "disabled" | null;
+    reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null;
+    planModeReasoningEffort?: string | null;
+    verbosity?: "low" | "medium" | "high" | null;
+    personality?: "none" | "friendly" | "pragmatic" | null;
+    checkForUpdateOnStartup?: boolean | null;
+    historyPersistence?: "save-all" | "none" | null;
   };
   permissions: {
     editable: boolean;

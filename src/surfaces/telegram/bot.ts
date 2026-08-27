@@ -891,7 +891,7 @@ export class TelegramSurface {
         );
       }
       if (result.tail && result.submission.steered) {
-        await context.reply(formatTurnInputAppended("text"), {
+        await context.reply(formatTurnInputAppended("text", false, context.message.text), {
           disable_notification: true,
           reply_parameters: {
             message_id: context.message.message_id,

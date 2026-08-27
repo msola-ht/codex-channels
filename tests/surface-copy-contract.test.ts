@@ -220,6 +220,8 @@ describe("shared surface copy contract", () => {
     })).toBe("剩余 56% · 重置 8月5日 12:34");
     expect(formatTurnInputAppended("text"))
       .toBe("已将补充要求追加到当前 Turn。");
+    expect(formatTurnInputAppended("text", false, "补充要求：只总结错误和风险。"))
+      .toBe("已将补充要求追加到当前 Turn：\n\n> 补充要求：只总结错误和风险。");
     expect(formatTurnInputAppended("file"))
       .toBe("已将文件追加到当前 Turn。");
     expect(formatTurnInputAppended("image", true))

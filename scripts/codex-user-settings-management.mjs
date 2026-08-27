@@ -3,6 +3,11 @@ import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 
 const sandboxModes = new Set(["read-only", "workspace-write"]);
 const approvalPolicies = new Set(["untrusted", "on-request", "never"]);
+const webSearchModes = new Set(["live", "indexed", "cached", "disabled"]);
+const reasoningSummaries = new Set(["auto", "concise", "detailed", "none"]);
+const verbosities = new Set(["low", "medium", "high"]);
+const personalities = new Set(["none", "friendly", "pragmatic"]);
+const historyPersistences = new Set(["save-all", "none"]);
 
 export class CodexUserSettingsError extends Error {
   constructor(code, field, message, options) {
@@ -45,7 +50,7 @@ export async function updateCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = primaryProvider(environment);
-  if (["all", "defaults"].includes(input?.kind)) {
+  if (["all", "defaults", "preferences"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
   const client = await createClient({ environment });
@@ -53,7 +58,7 @@ export async function updateCodexUserSetting(
     await client.connect();
     const [snapshot, models] = await Promise.all([
       client.readUserConfigSnapshot(),
-      ["all", "defaults"].includes(input?.kind)
+      ["all", "defaults", "preferences"].includes(input?.kind)
         ? client.listModels()
         : Promise.resolve([]),
     ]);
@@ -103,6 +108,16 @@ function projectSettings(snapshot, provider, rawModels) {
     ? configuredEffort
     : selectedModel?.defaultReasoningEffort ?? configuredEffort;
   const serviceTier = optionalString(config.service_tier);
+  const webSearch = webSearchModes.has(config.web_search) ? config.web_search : null;
+  const reasoningSummary = reasoningSummaries.has(config.model_reasoning_summary)
+    ? config.model_reasoning_summary : null;
+  const verbosity = verbosities.has(config.model_verbosity) ? config.model_verbosity : null;
+  const personality = personalities.has(config.personality) ? config.personality : null;
+  const history = record(config.history);
+  const configuredPlanEffort = optionalString(config.plan_mode_reasoning_effort);
+  const planModeReasoningEffort = models.some((model) => model.reasoningEfforts
+    .some((option) => option.effort === configuredPlanEffort))
+    ? configuredPlanEffort : null;
   const sandboxMode = sandboxModes.has(config.sandbox_mode) ? config.sandbox_mode : null;
   const approvalPolicy = approvalPolicies.has(config.approval_policy)
     ? config.approval_policy
@@ -117,6 +132,14 @@ function projectSettings(snapshot, provider, rawModels) {
       model: selectedModel?.model ?? optionalString(config.model),
       reasoningEffort: effort ?? null,
       fastEnabled: isFastServiceTier(serviceTier),
+      webSearch,
+      reasoningSummary,
+      planModeReasoningEffort,
+      verbosity,
+      personality,
+      checkForUpdateOnStartup: typeof config.check_for_update_on_startup === "boolean"
+        ? config.check_for_update_on_startup : null,
+      historyPersistence: historyPersistences.has(history.persistence) ? history.persistence : null,
     },
     permissions: {
       editable: optionalString(config.default_permissions) === null,
@@ -143,6 +166,10 @@ function createEdits(input, { config, provider, models }) {
       return fastEdits(input, provider, config, models);
     case "permissions":
       return permissionEdits(input, config);
+    case "web-search":
+      return webSearchEdits(input);
+    case "preferences":
+      return preferenceEdits(input, models);
     default:
       throw invalid("kind", "unknown-setting", `未知 Codex 用户设置：${String(input.kind)}`);
   }
@@ -153,12 +180,22 @@ function allEdits(input, provider, config, models) {
   const defaults = defaultEdits(input, provider, models);
   const fast = fastEdit(input.fastEnabled, "fastEnabled");
   const permissions = permissionEdits(input, config);
+  const webSearch = { keyPath: "web_search", value: "cached" };
+  const privacy = [
+    { keyPath: "analytics.enabled", value: false },
+    { keyPath: "feedback.enabled", value: false },
+  ];
+  const goals = { keyPath: "features.goals", value: true };
   return {
-    edits: [...defaults.edits, ...fast.edits, ...permissions.edits],
+    edits: [...defaults.edits, ...fast.edits, ...permissions.edits, webSearch, ...privacy, goals],
     value: {
       ...defaults.value,
       fastEnabled: fast.value.enabled,
       ...permissions.value,
+      webSearch: webSearch.value,
+      analyticsEnabled: false,
+      feedbackEnabled: false,
+      goalsEnabled: true,
     },
   };
 }
@@ -194,6 +231,48 @@ function defaultEdits(input, provider, models) {
 
 function fastEdits(input) {
   return fastEdit(input.enabled);
+}
+
+function webSearchEdits(input) {
+  if (!webSearchModes.has(input?.mode)) {
+    throw invalid("mode", "invalid-web-search", `联网搜索模式无效：${String(input?.mode)}`);
+  }
+  return {
+    edits: [{ keyPath: "web_search", value: input.mode }],
+    value: { mode: input.mode },
+  };
+}
+
+function preferenceEdits(input, models) {
+  const fields = [
+    ["reasoningSummary", reasoningSummaries],
+    ["verbosity", verbosities],
+    ["personality", personalities],
+    ["historyPersistence", historyPersistences],
+  ];
+  for (const [field, allowed] of fields) {
+    if (!allowed.has(input?.[field])) {
+      throw invalid(field, `invalid-${field}`, `用户偏好无效：${String(input?.[field])}`);
+    }
+  }
+  if (typeof input.checkForUpdateOnStartup !== "boolean") {
+    throw invalid("checkForUpdateOnStartup", "invalid-boolean", "启动更新检查必须是布尔值");
+  }
+  const effort = requiredString(input.planModeReasoningEffort, "planModeReasoningEffort", "Plan 思考等级");
+  if (!models.some((model) => model.supportedReasoningEfforts.some((option) => option.effort === effort))) {
+    throw invalid("planModeReasoningEffort", "invalid-reasoning-effort", `Plan 思考等级不可用：${effort}`);
+  }
+  return {
+    edits: [
+      { keyPath: "model_reasoning_summary", value: input.reasoningSummary },
+      { keyPath: "plan_mode_reasoning_effort", value: effort },
+      { keyPath: "model_verbosity", value: input.verbosity },
+      { keyPath: "personality", value: input.personality },
+      { keyPath: "check_for_update_on_startup", value: input.checkForUpdateOnStartup },
+      { keyPath: "history.persistence", value: input.historyPersistence },
+    ],
+    value: { ...input },
+  };
 }
 
 function fastEdit(enabled, field = "enabled") {

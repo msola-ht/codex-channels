@@ -6,6 +6,15 @@ import {
   updateCodexUserSetting,
 } from "./codex-user-settings-management.mjs";
 
+const reasoningSummaryLabels = { auto: "自动", concise: "简洁", detailed: "详细", none: "关闭" };
+const verbosityLabels = { low: "简短", medium: "适中", high: "详细" };
+const personalityLabels = { none: "默认", friendly: "友好", pragmatic: "务实" };
+const historyPersistenceLabels = { "save-all": "保存", none: "不保存" };
+const reasoningSummaryHints = { auto: "由 Codex 自动选择摘要方式", concise: "优先压缩为简短摘要", detailed: "保留更多推理摘要内容", none: "不生成推理摘要" };
+const verbosityHints = { low: "回复更简洁", medium: "在简洁和细节之间平衡", high: "提供更完整的解释" };
+const personalityHints = { none: "使用 Codex 默认人格", friendly: "语气更友好自然", pragmatic: "更直接、注重执行" };
+const historyPersistenceHints = { "save-all": "保存会话历史，便于恢复和接续", none: "不保存新的会话历史" };
+
 export async function runCodexUserSettingsSetup({
   environment = process.env,
   output = process.stdout,
@@ -40,6 +49,16 @@ export async function runCodexUserSettingsSetup({
         label: "Fast 默认状态",
         hint: settings.defaults.fastEnabled ? "当前：开启" : "当前：关闭",
       },
+      {
+        value: "web-search",
+        label: "联网搜索模式",
+        hint: settings.defaults.webSearch ?? "当前：未设置（默认缓存）",
+      },
+      ...(settings.defaultsEditable ? [{
+        value: "preferences",
+        label: "其他用户偏好",
+        hint: "Plan、推理摘要、输出详细程度、人格、更新检查与历史",
+      }] : []),
       {
         value: "permissions",
         label: "沙盒、审批与网络",
@@ -83,6 +102,20 @@ export async function runCodexUserSettingsSetup({
       primaryProvider,
     });
   }
+  if (section === "web-search") {
+    return runWebSearchSetting({
+      environment,
+      output,
+      prompts,
+      settings,
+      updateSetting,
+      createClient,
+      primaryProvider,
+    });
+  }
+  if (section === "preferences") {
+    return runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
   if (section === "permissions") {
     return runPermissionSettings({
       environment,
@@ -122,7 +155,11 @@ async function runAllSettings({
       `${modelDefaults.model.model} · ${modelDefaults.reasoningEffort}`,
       `Fast ${fastEnabled ? "开启" : "关闭"}`,
       `${permissions.sandboxMode} · ${permissions.approvalPolicy}`,
-      `网络${permissions.networkAccess ? "开启" : "关闭"}？`,
+      `网络${permissions.networkAccess ? "开启" : "关闭"}`,
+      "联网搜索：缓存？",
+      "分析关闭",
+      "反馈关闭",
+      "Goals 开启？",
     ].join(" · "),
     initialValue: true,
   });
@@ -143,7 +180,7 @@ async function runAllSettings({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(
-    `Codex 用户设置已全部更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}\n`,
+    `Codex 用户设置已全部更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"} · 联网搜索缓存 · 分析关闭 · 反馈关闭 · Goals 开启\n`,
   );
   output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
   return result;
@@ -169,6 +206,80 @@ async function runFastSetting({
   output.write(`Codex 新会话默认 Fast 已${enabled ? "开启" : "关闭"}。\n`);
   output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
   return result;
+}
+
+async function runWebSearchSetting({
+  environment,
+  output,
+  prompts,
+  settings,
+  updateSetting,
+  createClient,
+  primaryProvider,
+}) {
+  const mode = await prompts.select({
+    message: "选择联网搜索模式",
+    showInstructions: false,
+    initialValue: settings.defaults.webSearch ?? "cached",
+    options: [
+      { value: "cached", label: "缓存", hint: "使用 Codex 缓存搜索结果" },
+      { value: "live", label: "实时", hint: "执行实时联网搜索" },
+      { value: "indexed", label: "索引", hint: "使用索引搜索" },
+      { value: "disabled", label: "关闭", hint: "禁用联网搜索" },
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(mode) || mode === "back") return { action: "back" };
+  const confirmed = await prompts.confirm({
+    message: `保存联网搜索模式：${mode}？`,
+    initialValue: true,
+  });
+  if (prompts.isCancel(confirmed) || confirmed !== true) {
+    output.write("已取消，未修改联网搜索设置。\n");
+    return undefined;
+  }
+  const result = await updateSetting({ kind: "web-search", mode }, {
+    environment,
+    expectedVersion: settings.version,
+    ...(createClient === undefined ? {} : { createClient }),
+    ...(primaryProvider === undefined ? {} : { primaryProvider }),
+  });
+  output.write(`Codex 联网搜索模式已更新：${mode}\n`);
+  output.write("请运行 codexc service restart all，使新会话使用新设置。\n");
+  return result;
+}
+
+async function runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  const preferences = await promptPreferences(prompts, settings);
+  if (preferences === null) return { action: "back" };
+  const confirmed = await prompts.confirm({ message: `保存其他用户偏好：Plan 思考等级 ${preferences.planModeReasoningEffort} · 摘要 ${reasoningSummaryLabels[preferences.reasoningSummary]} · 输出详细程度 ${verbosityLabels[preferences.verbosity]} · 人格 ${personalityLabels[preferences.personality]} · 更新检查 ${preferences.checkForUpdateOnStartup ? "开启" : "关闭"} · 历史记录 ${historyPersistenceLabels[preferences.historyPersistence]}？`, initialValue: true });
+  if (prompts.isCancel(confirmed) || confirmed !== true) { output.write("已取消，未修改其他用户偏好。\n"); return undefined; }
+  const result = await updateSetting({ kind: "preferences", ...preferences }, { environment, expectedVersion: settings.version, ...(createClient === undefined ? {} : { createClient }), ...(primaryProvider === undefined ? {} : { primaryProvider }) });
+  output.write("Codex 其他用户偏好已更新。\n");
+  output.write("请运行 codexc service restart all，使新会话使用新设置。\n");
+  return result;
+}
+
+async function promptPreferences(prompts, settings) {
+  const pick = async (message, initialValue, options) => {
+    const value = await prompts.select({ message, showInstructions: false, initialValue, options: [...options, { value: "back", label: "返回" }] });
+    return prompts.isCancel(value) || value === "back" ? null : value;
+  };
+  const model = settings.models.find((item) => item.model === settings.defaults.model) ?? settings.models[0];
+  if (!model || model.reasoningEfforts.length === 0) throw new Error("当前没有可用模型思考等级");
+  const planModeReasoningEffort = await pick("Plan 默认思考等级", settings.defaults.planModeReasoningEffort ?? model.defaultReasoningEffort, model.reasoningEfforts.map((item) => ({ value: item.effort, label: item.effort, hint: item.description })));
+  if (planModeReasoningEffort === null) return null;
+  const reasoningSummary = await pick("推理摘要", settings.defaults.reasoningSummary ?? "auto", Object.entries(reasoningSummaryLabels).map(([value, label]) => ({ value, label, hint: reasoningSummaryHints[value] })));
+  if (reasoningSummary === null) return null;
+  const verbosity = await pick("输出详细程度", settings.defaults.verbosity ?? "medium", Object.entries(verbosityLabels).map(([value, label]) => ({ value, label, hint: verbosityHints[value] })));
+  if (verbosity === null) return null;
+  const personality = await pick("模型人格", settings.defaults.personality ?? "none", Object.entries(personalityLabels).map(([value, label]) => ({ value, label, hint: personalityHints[value] })));
+  if (personality === null) return null;
+  const checkForUpdateOnStartup = await pick("启动时检查更新", settings.defaults.checkForUpdateOnStartup ?? true, [{ value: true, label: "开启" }, { value: false, label: "关闭" }]);
+  if (checkForUpdateOnStartup === null) return null;
+  const historyPersistence = await pick("历史记录保存", settings.defaults.historyPersistence ?? "save-all", Object.entries(historyPersistenceLabels).map(([value, label]) => ({ value, label, hint: historyPersistenceHints[value] })));
+  if (historyPersistence === null) return null;
+  return { reasoningSummary, planModeReasoningEffort, verbosity, personality, checkForUpdateOnStartup, historyPersistence };
 }
 
 async function runPermissionSettings({
