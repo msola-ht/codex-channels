@@ -26,6 +26,7 @@ import {
 import { removeLegacySourceShellPaths } from "./source-shell-path.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
+const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*)?$/u;
 const stableVersionPattern = /^\d+\.\d+\.\d+$/u;
 const commitPattern = /^[0-9a-f]{40}$/u;
 
@@ -201,10 +202,16 @@ export async function updateManagedSourceInstallation(
     });
     const candidate = await runStage("validate-candidate", () => {
       const targetVersion = packageVersion(stagedCheckout);
+      const targetCodexVersion = codexVersion(stagedCheckout);
+      if (!isGatewayVersionCompatible(targetVersion, targetCodexVersion)) {
+        throw new Error(
+          `Gateway 与 Codex CLI 基础版本不匹配：gateway=${targetVersion}，codex=${targetCodexVersion}`,
+        );
+      }
       if (compareVersions(targetVersion, currentVersion) < 0) {
         throw new Error(`拒绝降级源码安装：当前 ${currentVersion}，main 为 ${targetVersion}`);
       }
-      assertCodexVersion(targetVersion, environment, options.captureCommand);
+      assertCodexVersion(targetCodexVersion, environment, options.captureCommand);
       const targetCommit = capture(
         "git",
         ["rev-parse", "HEAD"],
@@ -672,19 +679,47 @@ async function runLocalUpdate(checkout, environment, options) {
 
 function packageVersion(checkout) {
   const metadata = JSON.parse(readFileSync(join(checkout, "package.json"), "utf8"));
-  if (!stableVersionPattern.test(metadata.version ?? "")) {
-    throw new Error("源码 package.json 缺少正式版本号");
+  if (!releaseVersionPattern.test(metadata.version ?? "")) {
+    throw new Error("源码 package.json 缺少正式版本或 fix 修复版本号");
   }
   return metadata.version;
 }
 
+function codexVersion(checkout) {
+  const metadata = JSON.parse(
+    readFileSync(join(checkout, "src", "codex-protocol", "version.json"), "utf8"),
+  );
+  const value = typeof metadata.codexCli === "string"
+    ? metadata.codexCli.replace(/^codex-cli /u, "")
+    : "";
+  if (!stableVersionPattern.test(value)) {
+    throw new Error("源码协议元数据缺少正式 Codex CLI 版本");
+  }
+  return value;
+}
+
 function compareVersions(left, right) {
-  const leftParts = left.split(".").map(Number);
-  const rightParts = right.split(".").map(Number);
-  for (let index = 0; index < 3; index += 1) {
+  const leftParts = versionParts(left);
+  const rightParts = versionParts(right);
+  for (let index = 0; index < 4; index += 1) {
     if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
   }
   return 0;
+}
+
+function versionParts(value) {
+  const [stable, suffix] = value.split("-", 2);
+  return [...stable.split(".").map(Number), suffix ? Number(suffix.slice(3)) : 0];
+}
+
+function isGatewayVersionCompatible(gatewayVersion, expectedCodexVersion) {
+  return gatewayVersion === expectedCodexVersion
+    || new RegExp(`^${escapeRegExp(expectedCodexVersion)}-fix[1-9]\\d*$`, "u")
+      .test(gatewayVersion);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function capture(command, args, cwd, environment, implementation, options = {}) {
