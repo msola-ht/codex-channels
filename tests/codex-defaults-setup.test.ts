@@ -1,33 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { runCodexDefaultsSetup } from "../scripts/codex-defaults-setup.mjs";
+import type { CodexUserSettingsState } from "../scripts/codex-user-settings-management.mjs";
 
 describe("Codex official defaults setup", () => {
   it("writes the selected official model and supported reasoning effort together", async () => {
     const output: string[] = [];
-    const client = {
-      connect: vi.fn(async () => undefined),
-      listModels: vi.fn(async () => [{
-        id: "gpt-test",
-        model: "gpt-test",
-        displayName: "GPT Test",
-        supportedReasoningEfforts: [{ effort: "medium", description: "Balanced" }, {
-          effort: "high",
-          description: "Deeper reasoning",
-        }],
-        defaultReasoningEffort: "medium",
-        serviceTiers: [],
-        defaultServiceTier: null,
-        isDefault: true,
-        inputModalities: ["text"],
-      }]),
-      readDefaultModelSettings: vi.fn(async () => ({
-        model: "gpt-test",
-        effort: "medium",
-      })),
-      writeDefaultModelSettings: vi.fn(async () => undefined),
-      close: vi.fn(async () => undefined),
-    };
+    const loadSettings = vi.fn(async () => settingsState());
+    const updateSetting = vi.fn(async () => ({
+      kind: "defaults" as const,
+      previousVersion: "version-1",
+      value: { model: "gpt-test", reasoningEffort: "high" },
+      activation: "restart-all" as const,
+    }));
     const prompts = {
       select: vi.fn()
         .mockResolvedValueOnce("gpt-test")
@@ -35,28 +20,29 @@ describe("Codex official defaults setup", () => {
       confirm: vi.fn(async () => true),
       isCancel: () => false,
     };
-    const createClient = vi.fn(async () => client);
 
     await expect(runCodexDefaultsSetup({
       output: { write: (value: string) => output.push(value) },
       prompts,
       environment: { CODEX_HOME: "/tmp/codex-home" },
-      createClient,
-      primaryProvider: () => "openai",
+      loadSettings,
+      updateSetting,
     })).resolves.toEqual({ model: "gpt-test", effort: "high" });
 
-    expect(createClient).toHaveBeenCalledWith({
+    expect(updateSetting).toHaveBeenCalledWith({
+      kind: "defaults",
+      model: "gpt-test",
+      reasoningEffort: "high",
+    }, expect.objectContaining({
       environment: { CODEX_HOME: "/tmp/codex-home" },
-    });
-    expect(client.readDefaultModelSettings).toHaveBeenCalledWith();
-    expect(client.writeDefaultModelSettings).toHaveBeenCalledWith("gpt-test", "high");
-    expect(client.close).toHaveBeenCalledOnce();
+      expectedVersion: "version-1",
+    }));
     expect(output.join("")).toContain("Codex 全局默认设置已更新");
     expect(output.join("")).toContain("codexc service restart all");
   });
 
   it("does not write global defaults when the user rejects the final confirmation", async () => {
-    const client = setupClient();
+    const updateSetting = vi.fn();
     const output: string[] = [];
 
     await expect(runCodexDefaultsSetup({
@@ -68,57 +54,68 @@ describe("Codex official defaults setup", () => {
         confirm: vi.fn(async () => false),
         isCancel: () => false,
       },
-      createClient: async () => client,
-      primaryProvider: () => "openai",
+      loadSettings: async () => settingsState(),
+      updateSetting,
     })).resolves.toBeUndefined();
 
-    expect(client.writeDefaultModelSettings).not.toHaveBeenCalled();
-    expect(client.close).toHaveBeenCalledOnce();
+    expect(updateSetting).not.toHaveBeenCalled();
     expect(output.join("")).toContain("未修改 Codex 全局配置");
   });
 
   it("rejects official defaults setup while a third-party provider is the fixed primary", async () => {
-    const createClient = vi.fn();
+    const updateSetting = vi.fn();
 
     await expect(runCodexDefaultsSetup({
-      createClient,
-      primaryProvider: () => "deepseek",
+      loadSettings: async () => ({
+        ...settingsState(),
+        provider: "deepseek",
+        defaultsEditable: false,
+        models: [],
+      }),
+      updateSetting,
     })).rejects.toThrow("第三方固定模式（deepseek）");
 
-    expect(createClient).not.toHaveBeenCalled();
+    expect(updateSetting).not.toHaveBeenCalled();
   });
 
   it("names the actual provider when OpenCode Go is the fixed primary", async () => {
-    const createClient = vi.fn();
-
     await expect(runCodexDefaultsSetup({
-      createClient,
-      primaryProvider: () => "opencode-go",
+      loadSettings: async () => ({
+        ...settingsState(),
+        provider: "opencode-go",
+        defaultsEditable: false,
+        models: [],
+      }),
     })).rejects.toThrow("第三方固定模式（opencode-go）");
-
-    expect(createClient).not.toHaveBeenCalled();
   });
 });
 
-function setupClient() {
+function settingsState(): CodexUserSettingsState {
   return {
-    connect: vi.fn(async () => undefined),
-    listModels: vi.fn(async () => [{
-      id: "gpt-test",
+    version: "version-1",
+    provider: "openai",
+    defaultsEditable: true,
+    models: [{
       model: "gpt-test",
       displayName: "GPT Test",
-      supportedReasoningEfforts: [{ effort: "medium", description: "Balanced" }],
+      reasoningEfforts: [
+        { effort: "medium", description: "Balanced" },
+        { effort: "high", description: "Deeper reasoning" },
+      ],
       defaultReasoningEffort: "medium",
-      serviceTiers: [],
-      defaultServiceTier: null,
       isDefault: true,
-      inputModalities: ["text"],
-    }]),
-    readDefaultModelSettings: vi.fn(async () => ({
+    }],
+    defaults: {
       model: "gpt-test",
-      effort: "medium",
-    })),
-    writeDefaultModelSettings: vi.fn(async () => undefined),
-    close: vi.fn(async () => undefined),
+      reasoningEffort: "medium",
+      fastEnabled: false,
+    },
+    permissions: {
+      editable: true,
+      defaultPermissions: null,
+      sandboxMode: null,
+      approvalPolicy: null,
+      networkAccess: null,
+    },
   };
 }

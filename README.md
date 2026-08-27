@@ -67,8 +67,9 @@ Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务�
 
 ## Setup 配置
 
-运行 `codexc setup`，可先查看不显示凭据的配置总览，再按菜单配置模型与提供商、共享第三方子代理、
-通讯渠道和项目技能（安装到 `~/.agents/skills` 供当前 Codex 环境加载）。Gateway 与通讯渠道配置保存在：
+运行 `codexc setup`，可先查看不显示凭据的配置总览，再按菜单配置 Codex 用户设置、模型与提供商、
+共享第三方子代理、通讯渠道和项目技能（安装到 `~/.agents/skills` 供当前 Codex 环境加载）。
+Gateway 与通讯渠道配置保存在：
 
 ```text
 ~/.codex-connect/config.toml
@@ -139,11 +140,14 @@ plugin_api = true
 刷新配置。完整命令、限制和渠道显示规则见 [`docs/display.md`](docs/display.md)，协议采用范围见
 [`docs/index.md`](docs/index.md)。
 
-### Codex 官方
+### Codex 用户设置
 
-在 `codexc setup` 中选择“模型与提供商 → OpenAI 官方 → 默认模型与思考等级”，可从当前 Codex 模型目录设置全局默认模型和
-思考等级。设置通过 App Server 写入 `~/.codex/config.toml`，不修改 Codex 登录状态；完成后运行
-`codexc service restart all`，让新 App Server 会话使用新的默认值。
+在 `codexc setup` 中选择“Codex 用户设置”，可统一设置 OpenAI 默认模型与思考等级、Fast 默认状态，
+以及默认沙盒、审批策略和 Workspace Sandbox 网络权限；“一键配置全部”会在一次确认后原子写入
+全部字段。设置通过 App Server 的版本化事务写入
+`~/.codex/config.toml`，不会修改 Codex 登录状态或第三方 Provider 配置；第三方固定模式的模型、
+思考等级和服务层级仍在对应 Provider 设置中管理。完成后运行 `codexc service restart all`，让新
+App Server 会话使用新的默认值。
 
 ### 自定义第三方 Provider
 
@@ -249,7 +253,7 @@ codexc remote --profile deepseek resume
 `codexc remote` 连接 Gateway 使用的 App Server。直接运行 `codex` 或 `codex --profile sf-deepseek`
 会启动独立 TUI，不共享 Gateway Thread。当前目录位于已注册 Workspace 内，或显式使用
 `--workspace <ID>` 时，Remote TUI 会沿用该 Workspace 的沙盒、审批策略或权限 Profile；未匹配
-Workspace 时使用全局 Sandbox 与按需审批。显式传给 Codex 的权限参数仍优先。
+Workspace 时使用 `~/.codex/config.toml` 的 Codex 用户权限默认值。显式传给 Codex 的权限参数仍优先。
 未受管的个人 Codex Profile 仍可提供模型等设置；如需覆盖 Workspace 权限，须显式传入对应的
 Codex 权限参数。
 

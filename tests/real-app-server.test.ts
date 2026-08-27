@@ -30,6 +30,10 @@ import {
   writeCustomPrimaryProviderSwitchingProfile,
 } from "../runtime/model-provider-runtime.mjs";
 import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
+import {
+  loadCodexUserSettings,
+  updateCodexUserSetting,
+} from "../scripts/codex-user-settings-management.mjs";
 import type { ApprovalRequest } from "../src/approval/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
@@ -2903,6 +2907,70 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(after.marketplaces).toEqual(before.marketplaces);
     expect(after.plugins).toEqual(before.plugins);
     expect(after.model_providers).toEqual(before.model_providers);
+  }, 15_000);
+
+  it("persists every unified user default through one official config transaction", async () => {
+    const configPath = join(codexHome, "config.toml");
+    const before = parse(readFileSync(configPath, "utf8"));
+    const beforeWorkspace = before.sandbox_workspace_write as
+      | Record<string, unknown>
+      | undefined;
+    const createClient = async () => ({
+      connect: async () => undefined,
+      close: async () => undefined,
+      readUserConfigSnapshot: () => ownerClient.readUserConfigSnapshot(),
+      writeUserConfigEdits: (
+        edits: Parameters<typeof ownerClient.writeUserConfigEdits>[0],
+        options?: Parameters<typeof ownerClient.writeUserConfigEdits>[1],
+      ) => ownerClient.writeUserConfigEdits(edits, options),
+      listModels: () => ownerClient.listModels(),
+      readDefaultModelSettings: () => ownerClient.readDefaultModelSettings(),
+      writeDefaultModelSettings: (model: string, effort: string) =>
+        ownerClient.writeDefaultModelSettings(model, effort),
+    });
+
+    try {
+      const settings = await loadCodexUserSettings({
+        createClient,
+        primaryProvider: () => "openai",
+      });
+      const model = settings.models.find((candidate) => candidate.isDefault)
+        ?? settings.models[0];
+      if (!model) throw new Error("真实 App Server 没有返回可用模型");
+      await updateCodexUserSetting({
+        kind: "all",
+        model: model.model,
+        reasoningEffort: model.defaultReasoningEffort,
+        fastEnabled: true,
+        sandboxMode: "workspace-write",
+        approvalPolicy: "on-request",
+        networkAccess: true,
+      }, {
+        expectedVersion: settings.version,
+        createClient,
+        primaryProvider: () => "openai",
+      });
+
+      const after = parse(readFileSync(configPath, "utf8"));
+      expect(after.model).toBe(model.model);
+      expect(after.model_reasoning_effort).toBe(model.defaultReasoningEffort);
+      expect(after.service_tier).toBe("fast");
+      expect(after.sandbox_mode).toBe("workspace-write");
+      expect(after.approval_policy).toBe("on-request");
+      expect(after.sandbox_workspace_write).toMatchObject({ network_access: true });
+    } finally {
+      await ownerClient.writeUserConfigEdits([
+        { keyPath: "model", value: before.model ?? null },
+        { keyPath: "model_reasoning_effort", value: before.model_reasoning_effort ?? null },
+        { keyPath: "service_tier", value: before.service_tier ?? null },
+        { keyPath: "sandbox_mode", value: before.sandbox_mode ?? null },
+        { keyPath: "approval_policy", value: before.approval_policy ?? null },
+        {
+          keyPath: "sandbox_workspace_write.network_access",
+          value: beforeWorkspace?.network_access ?? null,
+        },
+      ]);
+    }
   }, 15_000);
 
   it("persists and removes an agent role through the official user config transaction", async () => {

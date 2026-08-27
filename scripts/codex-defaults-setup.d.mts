@@ -24,6 +24,8 @@ export function runCodexDefaultsSetup(options?: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexDefaultsClient>;
   primaryProvider?: (environment: NodeJS.ProcessEnv) => string;
+  loadSettings?: typeof import("./codex-user-settings-management.mjs").loadCodexUserSettings;
+  updateSetting?: typeof import("./codex-user-settings-management.mjs").updateCodexUserSetting;
 }): Promise<
   | CodexDefaultsSetupResult
   | CodexDefaultsSetupBackResult

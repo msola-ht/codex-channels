@@ -63,7 +63,7 @@ async function runRemoteCli() {
     }
     workdir = workspace.cwd;
   }
-  const permissionArguments = workspacePermissionArguments(codex, workspace, passthrough);
+  const permissionArguments = workspacePermissionArguments(workspace, passthrough);
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
   let socketPath = primarySocketPath;
   let providerLease;
@@ -141,7 +141,7 @@ function workspaceForWorkdir(workspaces, workdir) {
   return selected;
 }
 
-function workspacePermissionArguments(codex, workspace, passthrough) {
+function workspacePermissionArguments(workspace, passthrough) {
   const overrides = explicitPermissionOverrides(passthrough);
   const permissions = stringValue(workspace?.permissions);
   return [
@@ -149,16 +149,14 @@ function workspacePermissionArguments(codex, workspace, passthrough) {
       ? []
       : permissions
         ? ["-c", `default_permissions=${JSON.stringify(permissions)}`]
-        : [
-            "--sandbox",
-            stringValue(workspace?.sandbox) || stringValue(codex.sandbox) || "workspace-write",
-          ]),
+        : stringValue(workspace?.sandbox)
+          ? ["--sandbox", stringValue(workspace.sandbox)]
+          : []),
     ...(overrides.approval
       ? []
-      : [
-          "--ask-for-approval",
-          stringValue(workspace?.approval_policy) || "on-request",
-        ]),
+      : stringValue(workspace?.approval_policy)
+        ? ["--ask-for-approval", stringValue(workspace.approval_policy)]
+        : []),
   ];
 }
 

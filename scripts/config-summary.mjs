@@ -5,7 +5,7 @@ export function writeGatewayConfigSummary(output, document, configPath) {
     `- 配置来源：${summary.configPath}`,
     `- 默认 Workspace：${summary.defaultWorkspace}`,
     `- 渠道新会话模型：${summary.defaultModel}`,
-    `- 全局 Sandbox：${summary.sandbox}`,
+    `- Gateway 渠道 Sandbox：${summary.sandbox}`,
     `- 通讯渠道：${summary.channels.join("、") || "未配置"}`,
     `- 操作详情：${summary.operationUpdates}`,
     `- 计划显示：${enabledLabel(summary.planUpdates)}`,

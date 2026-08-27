@@ -45,6 +45,10 @@ describe("Codex Connect setup", () => {
         label: "配置总览",
         hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
       }, {
+        value: "codex_user",
+        label: "Codex 用户设置",
+        hint: "默认模型、思考等级、Fast、沙盒、审批与网络",
+      }, {
         value: "models",
         label: "模型与提供商",
         hint: "管理 OpenAI、第三方 Provider 与模型默认值",
@@ -187,55 +191,34 @@ describe("Codex Connect setup", () => {
     expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts, allowBack: true });
   });
 
-  it("selects official Codex global model settings under the official category", async () => {
-    const input = {};
+  it("selects unified Codex user settings from the main category", async () => {
+    const environment = { CODEX_HOME: "/tmp/codex-home" };
     const output = {};
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
-        .mockResolvedValueOnce("models")
-        .mockResolvedValueOnce("official")
-        .mockResolvedValueOnce("codex"),
+        .mockResolvedValueOnce("codex_user"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
     const codexDefaultsSetup = vi.fn(async () => "codex-defaults-configured");
+    const codexUserSettingsSetup = vi.fn(async () => "codex-user-configured");
 
     await expect(runSetup({
-      input,
+      environment,
       output,
       prompts,
       codexDefaultsSetup,
-    })).resolves.toBe("codex-defaults-configured");
+      codexUserSettingsSetup,
+    })).resolves.toBe("codex-user-configured");
 
-    expect(codexDefaultsSetup).toHaveBeenCalledWith({
-      input,
+    expect(codexUserSettingsSetup).toHaveBeenCalledWith({
+      environment,
       output,
       prompts,
-      allowBack: true,
+      defaultsSetup: codexDefaultsSetup,
     });
-    const categoryOptions = prompts.select.mock.calls[1]?.[0]?.options ?? [];
-    expect(categoryOptions).toContainEqual({
-      value: "official",
-      label: "OpenAI 官方",
-      hint: "OpenAI 官方登录与默认模型",
-    });
-    expect(categoryOptions).toContainEqual({
-      value: "third_party",
-      label: "第三方 Provider",
-      hint: "自定义 Responses、DeepSeek 官方、OpenCode Go 官方等",
-    });
-    const officialOptions = prompts.select.mock.calls[2]?.[0]?.options ?? [];
-    expect(officialOptions).toContainEqual({
-      value: "official_login",
-      label: "登录并恢复官方",
-      hint: "运行 codex login --device-auth，并停用自定义固定主 Provider",
-    });
-    expect(officialOptions).toContainEqual({
-      value: "codex",
-      label: "默认模型与思考等级",
-      hint: "设置 Codex 官方全局默认值",
-    });
+    expect(codexDefaultsSetup).not.toHaveBeenCalled();
   });
 
   it("selects the custom primary Provider setup under models and providers", async () => {
@@ -334,6 +317,14 @@ describe("Codex Connect setup", () => {
       output,
       prompts,
     });
+    expect(prompts.select.mock.calls[1]?.[0]?.options).toContainEqual({
+      value: "official",
+      label: "OpenAI 官方",
+      hint: "OpenAI 官方登录与固定主 Provider 恢复",
+    });
+    expect(prompts.select.mock.calls[2]?.[0]?.options).not.toContainEqual(
+      expect.objectContaining({ value: "codex" }),
+    );
   });
 
   it("selects managed third-party default model settings", async () => {

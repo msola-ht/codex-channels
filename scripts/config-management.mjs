@@ -192,7 +192,7 @@ function applySetting(document, input) {
       return changed(value, "restart-gateway");
     }
     case "system.sandbox": {
-      const value = enumValue(input.value, sandboxValues, "value", "Codex Sandbox");
+      const value = enumValue(input.value, sandboxValues, "value", "Gateway 渠道 Sandbox");
       document.codex = { ...table(document.codex), sandbox: value };
       return changed(value, "restart-gateway");
     }

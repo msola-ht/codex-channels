@@ -98,7 +98,9 @@
   单一 `/plugin` 命令、已安装列表和官方 mention 调用；飞书覆盖可调用项选择、一次性任务表单与
   提交闭环，搜索、安装、卸载与分享仍被边界测试禁止。
 - 官方模型目录到稳定 Application 模型选项的映射、不可见项过滤、必需字段失败关闭，模型、
-  思考等级和 Fast 的 Thread 覆盖、Codex 用户级模型/思考等级/Fast 默认值及受控 agents 设置持久化、共享客户端完整或残缺设置
+  思考等级和 Fast 的 Thread 覆盖、Codex 用户级模型/思考等级/Fast/Sandbox/审批/网络默认值的
+  脱敏读取、独立或一次写入全部的版本化受控事务、Permission Profile 冲突保护与 Remote 自然继承，
+  以及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；渠道当前模型在 Workspace、新会话及同 Provider
   历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；按第三方 Provider
   和模型独立设置新会话默认值、目录上下文、思考等级与自动压缩阈值，固定模式清除根级覆盖并使用

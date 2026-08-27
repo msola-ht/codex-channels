@@ -190,7 +190,10 @@ describe("codexc CLI", () => {
     expect(configHelp.stdout).toContain("Thread 分区管理员");
     expect(configHelp.stdout).not.toContain("工作区设置（沙箱、审批策略、权限 Profile）");
     const setupHelp = spawnSync(process.execPath, [cli, "setup", "--help"], { encoding: "utf8" });
-    expect(setupHelp.stdout).toContain("登录并恢复官方 / 默认模型与思考等级");
+    expect(setupHelp.stdout).toContain(
+      "Codex 用户设置 → 一键配置全部 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络",
+    );
+    expect(setupHelp.stdout).toContain("OpenAI 官方 → 登录并恢复官方");
     expect(setupHelp.stdout).toContain(
       "受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）",
     );
@@ -1430,10 +1433,6 @@ describe("codexc CLI", () => {
           realpathSync(workspace),
           "--profile",
           "sf-deepseek",
-          "--sandbox",
-          "workspace-write",
-          "--ask-for-approval",
-          "on-request",
           "resume",
         ]);
       }
@@ -1457,10 +1456,6 @@ describe("codexc CLI", () => {
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
       "-C",
       realpathSync(workspace),
-      "--sandbox",
-      "workspace-write",
-      "--ask-for-approval",
-      "on-request",
       "resume",
       "--",
       "--profile",
@@ -3386,7 +3381,7 @@ describe("codexc CLI", () => {
   it("describes Setup by its model, provider, channel, and skill responsibilities", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 
-    expect(output).toContain("配置模型、提供商、通讯渠道与项目技能");
+    expect(output).toContain("配置 Codex 用户设置、提供商、通讯渠道与项目技能");
   });
 
   it("explains the Setup categories in scoped help", () => {
