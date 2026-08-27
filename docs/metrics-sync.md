@@ -76,6 +76,7 @@ database_path = "data/central-metrics.sqlite3"
 ```bash
 codexc center config              # 远程端交互配置 [metrics.center]（监听、端口、双令牌、数据库）
 codexc center info                # 查看中心地址、双令牌状态与运行状态（获取设备上报地址）
+codexc center upgrade             # 升级已有中心数据库并保留升级前备份
 codexc service install               # 生成 WebUI 与指标中心服务单元（首次）
 codexc service start center          # 启动指标中心后台服务
 ```
@@ -84,6 +85,9 @@ codexc service start center          # 启动指标中心后台服务
   主键 `(device_id, local_id)`，按主键 `ON CONFLICT ... DO UPDATE` 覆盖写入；重复上报
   不会新增行，但会用最新值覆盖该条记录，因此重置本机水位后全量重放可修复云端历史。表结构与
   [`cloudflare/migrations/0001_init.sql`](../cloudflare/migrations/0001_init.sql) 一致。
+- 中心库使用独立 Schema 版本。服务启动不会自动修改已有表；升级时先停止中心服务，运行
+  `codexc center upgrade`，命令会在数据库旁创建带版本和时间戳的 `0600` 备份，完成受控升级后
+  才允许服务重新启动。Schema 不受支持或结构不完整时会失败关闭。
 - 接口：`POST /api/ingest` 接收上报，`GET /api/overview`、`/api/requests`、
   `/api/subagents`、`/api/devices`、`/api/health` 供查询。
 - WebUI 控制台的「全部设备 / 单设备」范围通过 `/api/v1/global/*` 由 WebUI 服务端

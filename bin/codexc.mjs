@@ -235,7 +235,8 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 
 Git 源码安装会先检查并构建官方 main 的最新提交；随后只读审查 config.toml 与数据库结构，自动停止
 App Server 与 Gateway，在停机窗口内更新程序、配置和数据库，最后恢复并确认核心服务就绪。
-npm 安装不会修改程序包。更新失败也会尝试恢复已停止的核心服务。必须从本机终端执行。`,
+npm 安装不会修改程序包。多设备指标中心使用独立数据库，需停止中心后另行执行
+codexc center upgrade。更新失败也会尝试恢复已停止的核心服务。必须从本机终端执行。`,
   uninstall: `用法：codexc uninstall
 
 卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令，并清理旧安装写入的 Shell PATH 配置；保留
@@ -281,6 +282,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   center: `用法：codexc center [--host 地址] [--port 端口] [--database 路径]
       codexc center info [--json]      查看中心地址、双令牌状态与运行状态
       codexc center config    交互配置 [metrics.center]
+      codexc center upgrade   升级中心数据库并保留备份
 
 启动多设备指标中心服务：接收各设备 Gateway 的增量上报，写入中心 SQLite，
 并提供全局查询 API。默认 http://127.0.0.1:8790/。
@@ -506,7 +508,10 @@ try {
       if (args[0] === "config" && args.length !== 1) {
         throw new Error(helpText["center.config"]);
       }
-      if (args[0] === "info" || args[0] === "config") {
+      if (args[0] === "upgrade" && args.length !== 1) {
+        throw new Error(helpText.center);
+      }
+      if (args[0] === "info" || args[0] === "config" || args[0] === "upgrade") {
         runScript("scripts/metrics-center-server.mjs", args, { failureReportedByChild: true });
         break;
       }
