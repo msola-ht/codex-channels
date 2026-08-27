@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -9,6 +9,9 @@ import { primaryProviderBackupPath } from "../runtime/model-provider-runtime.mjs
 describe("official login setup", () => {
   it("runs codex login, backs up custom candidates and disables them", async () => {
     const connectHome = mkdtempSync(join(tmpdir(), "codexc-official-login-home-"));
+    const codexHome = join(connectHome, "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    const environment = { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: connectHome };
     const client = {
       connect: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
@@ -37,7 +40,7 @@ describe("official login setup", () => {
     };
 
     const result = await runOfficialLoginSetup({
-      environment: { CODEX_CONNECT_HOME: connectHome },
+      environment,
       output,
       prompts,
       createClient,
@@ -47,7 +50,7 @@ describe("official login setup", () => {
     expect(result).toEqual({ mode: "official" });
     expect(runLogin).toHaveBeenCalledWith({
       codexBinary: "codex",
-      environment: { CODEX_CONNECT_HOME: connectHome },
+      environment,
     });
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "openai_base_url", value: null },
@@ -95,6 +98,46 @@ describe("official login setup", () => {
 
     expect(runLogin).not.toHaveBeenCalled();
     expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the Provider snapshot after device login", async () => {
+    const connectHome = mkdtempSync(join(tmpdir(), "codexc-official-login-refresh-"));
+    const environment = { CODEX_CONNECT_HOME: connectHome };
+    const client = {
+      connect: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      readUserConfigSnapshot: vi.fn()
+        .mockResolvedValueOnce({
+          config: { model_provider: "openai", model_providers: {} },
+          version: "v1",
+        })
+        .mockResolvedValueOnce({
+          config: {
+            model_provider: "openai",
+            model_providers: {
+              lateprovider: {
+                base_url: "https://late.example.test/v1",
+                wire_api: "responses",
+              },
+            },
+          },
+          version: "v2",
+        }),
+      writeUserConfigEdits: vi.fn(async () => undefined),
+    };
+
+    await runOfficialLoginSetup({
+      environment,
+      output: { write: vi.fn() },
+      prompts: { isCancel: () => false, confirm: vi.fn(async () => true) },
+      createClient: vi.fn(async () => client),
+      runLogin: vi.fn(),
+    });
+
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model_providers.lateprovider", value: null },
+    ], { expectedVersion: "v2" });
   });
 
   it("defaults to codex login --device-auth for remote login", async () => {

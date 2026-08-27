@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { locateOptionalUserConfig } from "../scripts/runtime-config.mjs";
+import { locateOptionalUserConfig, requireUserConfig } from "../scripts/runtime-config.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -34,5 +34,17 @@ describe("runtime config location", () => {
 
     expect(() => locateOptionalUserConfig({ CODEX_CONNECT_CONFIG_FILE: configPath }))
       .toThrow(configPath);
+  });
+
+  it("rejects a symbolic link before preparing a user config", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-runtime-config-link-"));
+    temporaryDirectories.push(root);
+    const targetPath = join(root, "target.toml");
+    const configPath = join(root, "config.toml");
+    writeFileSync(targetPath, "version = 1\n", { mode: 0o600 });
+    symlinkSync(targetPath, configPath);
+
+    expect(() => requireUserConfig({ CODEX_CONNECT_CONFIG_FILE: configPath }))
+      .toThrow("config.toml 必须是普通文件且不能是符号链接");
   });
 });

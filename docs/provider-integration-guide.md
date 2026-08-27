@@ -238,10 +238,13 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，
 不进入命令行。多个切换模式 Provider 通过私有显式注册表同时保留，并使用独立 Socket 与统计代理。
 
-当前不支持自定义模型目录、`model_catalog_json`、`/usage` 账户适配、价格专用计价器或
-`agents.external` 角色；后者仍由 DeepSeek / OpenCode Go 等受管 Provider 提供。自定义 Provider
-切换模式可以与受管切换模式共存，但不能与任何受管固定模式同时启用。需要自定义目录、账户或共享
-子代理能力时，仍必须按本指南前述的编译期受管 Provider 流程接入。
+当前不支持自定义模型目录、`model_catalog_json`、`/usage` 账户适配或价格专用计价器。固定与切换
+模式的自定义 Provider 可以作为共享 `agents.external`，当前使用其 Setup 已确认的模型和 `medium`
+思考等级；角色文件只保存 `env_key`，App Server 服务仅把该 Provider 的 Key 注入主进程，并提前启动
+同一 Provider 的 `/role/external` 统计代理。正在被共享子代理使用的 Provider 必须先切换或停用角色，
+才能恢复官方模式或删除，避免留下不可启动的角色配置。自定义 Provider 切换模式可以与受管切换模式
+共存，但不能与任何受管固定模式同时启用。需要自定义目录或账户能力时，仍必须按本指南前述的编译期
+受管 Provider 流程接入。
 
 可以通过 `codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”新增或编辑固定、切换模式 Provider：填写上游
 `base_url`，从 URL 主机名派生的 Provider ID 与推荐的 `OpenAI` 中选择，只以直接写入 API Key

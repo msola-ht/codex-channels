@@ -195,6 +195,21 @@ export function loadConfiguredCustomSwitchingModelProviders(
   environment?: NodeJS.ProcessEnv,
 ): ConfiguredCustomSwitchingModelProvider[];
 
+export interface CustomModelProviderRoleCandidate {
+  provider: string;
+  displayName: string;
+  model: string;
+  reasoningEffort: string;
+  mode: "switching" | "exclusive";
+  baseUrl: string;
+  apiKey: string;
+  apiKeyEnvironmentKey: string;
+  supportsWebsockets: boolean;
+}
+export function loadCustomModelProviderRoleCandidates(
+  environment?: NodeJS.ProcessEnv,
+): CustomModelProviderRoleCandidate[];
+
 export function writeCustomPrimaryProviderSwitchingProfile(
   options: {
     provider: string;
@@ -206,6 +221,11 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     catalogSource?: { kind: "official" };
   },
   environment?: NodeJS.ProcessEnv,
+  guards?: {
+    expectedProfilePresent?: boolean;
+    expectedProfileContent?: string;
+    expectedProviderIds?: string[];
+  },
 ): void;
 
 export function removeCustomPrimaryProviderSwitchingProfile(
@@ -253,6 +273,10 @@ export function writeManagedModelProviderRoleConfig(
   environment?: NodeJS.ProcessEnv,
   options?: { provider?: ManagedModelProviderId; model?: string; baseUrl?: string },
 ): { role: "external"; provider: ManagedModelProviderId; model: string };
+export function writeThirdPartyModelProviderRoleConfig(
+  environment?: NodeJS.ProcessEnv,
+  options?: { provider?: string; model?: string; baseUrl?: string },
+): { role: "external"; provider: string; model: string };
 
 export function loadManagedModelProviderRole(
   environment?: NodeJS.ProcessEnv,
@@ -262,9 +286,22 @@ export function loadManagedModelProviderRole(
   model: string;
   reasoningEffort: string;
 } | undefined;
+export function loadThirdPartyModelProviderRole(
+  environment?: NodeJS.ProcessEnv,
+): {
+  role: "external";
+  provider: string;
+  model: string;
+  reasoningEffort: string;
+  providerType: "managed" | "custom";
+} | undefined;
 
 export function loadConfiguredProviderCredential(
   provider: ManagedModelProviderId,
+  environment?: NodeJS.ProcessEnv,
+): { environmentKey: string; apiKey: string };
+export function loadThirdPartyProviderCredential(
+  provider: string,
   environment?: NodeJS.ProcessEnv,
 ): { environmentKey: string; apiKey: string };
 

@@ -1,77 +1,98 @@
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import {
-  loadConfiguredCustomPrimaryModelProvider,
-  loadConfiguredCustomSwitchingModelProviders,
-  loadManagedModelProviderSettings,
-} from "../runtime/model-provider-runtime.mjs";
-import { gatewayConfigSummary } from "./config-summary.mjs";
-import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { gatewayChannelStates } from "./config-summary.mjs";
+import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { listInstalledSkills } from "./skill-setup.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
-export async function writeSetupConfigurationSummary({
+export async function loadSetupConfigurationSummary({
   environment = process.env,
-  output = process.stdout,
   loadGatewayDocument = defaultGatewayDocumentLoader,
-  loadManagedProviders = loadManagedModelProviderSettings,
-  loadCustomPrimary = loadConfiguredCustomPrimaryModelProvider,
-  loadCustomSwitching = loadConfiguredCustomSwitchingModelProviders,
+  loadProviderState = defaultProviderStateLoader,
   loadInstalledSkills = listInstalledSkills,
-  loadCodexDefaults = defaultCodexDefaultsLoader,
 } = {}) {
   const { configPath, document } = loadGatewayDocument(environment);
-  const gateway = gatewayConfigSummary(document, configPath);
-  const managed = loadManagedProviders(environment);
-  const customPrimary = loadCustomPrimary(environment);
-  const customSwitching = loadCustomSwitching(environment);
-  const codexDefaults = await loadCodexDefaults(environment);
-  const exclusive = managed.filter((provider) => provider.mode === "exclusive");
-  if (exclusive.length > 1) {
-    throw new Error("只能有一个第三方 Provider 使用固定模式");
-  }
-  const primary = exclusive[0] === undefined
-    ? customPrimary === undefined
-      ? "OpenAI 官方"
-      : `${customPrimary.id}（自定义固定模式）`
-    : `${exclusive[0].displayName}（固定模式）`;
-  const switching = [
-    ...managed
-      .filter((provider) => provider.mode === "switching")
-      .map((provider) => provider.displayName),
-    ...customSwitching.map((provider) => displayLabel(provider.name, provider.id)),
-  ];
+  const providerState = await loadProviderState(environment);
+  const switchingProviders = providerState.switchingProviders.map((provider) => ({
+    id: provider.id,
+    displayName: provider.displayName,
+    kind: provider.kind,
+    mode: "switching",
+  }));
   const modelDefaults = [
-    ...managed.map((provider) =>
-      `${provider.displayName} · ${provider.model} · ${provider.reasoningEffort ?? "默认思考等级"}`
-    ),
-    ...customSwitching.map((provider) =>
-      `${displayLabel(provider.name, provider.id)} · ${provider.model} · ${provider.reasoningEffort ?? "默认思考等级"}`
-    ),
+    ...providerState.managedProviders.map((provider) => ({
+      providerId: provider.id,
+      providerName: provider.displayName,
+      model: provider.model,
+      reasoningEffort: provider.reasoningEffort,
+    })),
+    ...providerState.customProviders.switchingProviders.map((provider) => ({
+      providerId: provider.id,
+      providerName: provider.displayName,
+      model: provider.model,
+      reasoningEffort: provider.reasoningEffort,
+    })),
   ];
   const installedSkills = loadInstalledSkills({ environment });
+  const apiProviderCount = Array.isArray(document.api_providers)
+    ? document.api_providers.length
+    : 0;
+  return {
+    primary: providerState.primary,
+    codexDefaults: {
+      model: providerState.defaults.model ?? undefined,
+      effort: providerState.defaults.reasoningEffort ?? undefined,
+    },
+    switchingProviders,
+    modelDefaults,
+    channels: gatewayChannelStates(document),
+    installedSkillCount: installedSkills.length,
+    agent: providerState.externalAgent,
+    apiProviderCount,
+    configPath,
+  };
+}
 
+export async function writeSetupConfigurationSummary({
+  output = process.stdout,
+  ...options
+} = {}) {
+  const summary = await loadSetupConfigurationSummary(options);
   output.write([
     "Setup 配置总览",
-    `- 主 Provider：${primary}`,
-    `- Codex 全局默认值：${codexDefaults.model ?? "跟随 Provider 默认模型"} · ${codexDefaults.effort ?? "跟随模型默认思考等级"}`,
-    `- 可切换 Provider：${switching.join("、") || "未配置"}`,
-    `- 第三方模型默认值：${modelDefaults.join("；") || "未配置"}`,
-    `- 通讯渠道：${gateway.channels.join("、") || "未配置"}`,
-    `- 用户技能目录：${installedSkills.length} 个技能`,
-    `- Gateway 配置：${configPath}`,
+    `- 主 Provider：${primaryLabel(summary.primary)}`,
+    `- Codex 全局默认值：${summary.codexDefaults.model ?? "跟随 Provider 默认模型"} · ${summary.codexDefaults.effort ?? "跟随模型默认思考等级"}`,
+    `- 可切换 Provider：${summary.switchingProviders.map((provider) => provider.displayName).join("、") || "未配置"}`,
+    `- 第三方模型默认值：${summary.modelDefaults.map(modelDefaultLabel).join("；") || "未配置"}`,
+    `- 通讯渠道：${summary.channels.map(channelLabel).join("、") || "未配置"}`,
+    `- 用户技能目录：${summary.installedSkillCount} 个技能`,
+    `- 共享第三方子代理：${agentLabel(summary.agent)}`,
+    `- 直接 API Provider（预留）：${summary.apiProviderCount} 个`,
+    `- Gateway 配置：${summary.configPath}`,
     "- 作用范围：Provider、模型与登录由 Codex 配置管理；通讯渠道由 Gateway 配置管理。",
     "- 安全提示：API Key、Token、应用凭据、允许名单和代理值均不显示。",
     "",
   ].join("\n"));
-  return {
-    primary,
-    codexDefaults,
-    switching,
-    modelDefaults,
-    channels: gateway.channels,
-    installedSkillCount: installedSkills.length,
-    configPath,
-  };
+  return summary;
+}
+
+function primaryLabel(provider) {
+  if (provider.mode === "official") return provider.displayName;
+  if (provider.mode === "backup") return `${provider.displayName}（自定义备份状态）`;
+  if (provider.mode === "unknown") return `${provider.displayName}（状态未知）`;
+  return `${provider.displayName}（${provider.kind === "custom" ? "自定义" : ""}固定模式）`;
+}
+
+function modelDefaultLabel(entry) {
+  return `${entry.providerName} · ${entry.model} · ${entry.reasoningEffort ?? "默认思考等级"}`;
+}
+
+function channelLabel(channel) {
+  return `${channel.displayName}（${channel.enabled ? "已启用" : "已配置，未启用"}）`;
+}
+
+function agentLabel(agent) {
+  if (agent.status === "configured") return `${agent.provider} · ${agent.model}`;
+  return agent.status === "unavailable" ? "已配置（Provider 或模型状态不可用）" : "未配置";
 }
 
 function defaultGatewayDocumentLoader(environment) {
@@ -79,25 +100,6 @@ function defaultGatewayDocumentLoader(environment) {
   return { configPath, document: readGatewayConfig(configPath) };
 }
 
-async function defaultCodexDefaultsLoader(environment) {
-  const client = await createCodexUserConfigClient({ environment });
-  try {
-    await client.connect();
-    return await client.readDefaultModelSettings();
-  } finally {
-    await client.close().catch(() => undefined);
-  }
-}
-
-function displayLabel(value, fallback) {
-  let safe = "";
-  for (const character of typeof value === "string" ? value : "") {
-    const codePoint = character.codePointAt(0);
-    safe += codePoint !== undefined
-      && (codePoint < 32 || (codePoint >= 127 && codePoint <= 159))
-      ? " "
-      : character;
-  }
-  const normalized = safe.replace(/\s+/gu, " ").trim();
-  return (normalized || fallback).slice(0, 120);
+function defaultProviderStateLoader(environment) {
+  return loadModelProviderManagementState({ environment });
 }

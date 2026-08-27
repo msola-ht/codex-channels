@@ -1,4 +1,14 @@
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 import { z } from "zod";
@@ -6,6 +16,16 @@ import { z } from "zod";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const sourceByDocument = new WeakMap();
+const activeGatewayConfigLocks = new Set();
+const gatewayConfigLockTimeoutMs = 2_000;
+const staleGatewayConfigLockMs = 30_000;
+
+export class GatewayConfigConflictError extends Error {
+  constructor(message = "config.toml 在写入期间已发生变化") {
+    super(message);
+    this.name = "GatewayConfigConflictError";
+  }
+}
 
 const workspaceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
@@ -439,21 +459,133 @@ export function materializeGatewayConfigDefaults(configPath, document) {
 }
 
 export function writeGatewayConfig(configPath, document) {
-  const generated = stringify(document);
-  const source = sourceByDocument.get(document);
-  const content = source === undefined
-    ? generated
-    : preserveTomlComments(
-        source.content,
-        generated,
-        source.workspaceIds,
-        workspaceIds(document),
-      );
-  writePrivateFileAtomicSync(configPath, content);
-  sourceByDocument.set(document, {
-    content,
-    workspaceIds: workspaceIds(document),
+  return withGatewayConfigLock(configPath, () => {
+    const generated = stringify(document);
+    const source = sourceByDocument.get(document);
+    if (source !== undefined && currentGatewayConfig(configPath) !== source.content) {
+      throw new GatewayConfigConflictError();
+    }
+    const content = source === undefined
+      ? generated
+      : preserveTomlComments(
+          source.content,
+          generated,
+          source.workspaceIds,
+          workspaceIds(document),
+        );
+    writePrivateFileAtomicSync(configPath, content);
+    sourceByDocument.set(document, {
+      content,
+      workspaceIds: workspaceIds(document),
+    });
   });
+}
+
+function currentGatewayConfig(configPath) {
+  try {
+    return readFileSync(configPath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new GatewayConfigConflictError();
+    }
+    throw error;
+  }
+}
+
+export function withGatewayConfigLock(configPath, operation) {
+  const normalizedPath = resolve(configPath);
+  if (activeGatewayConfigLocks.has(normalizedPath)) return operation();
+  mkdirSync(dirname(normalizedPath), { recursive: true, mode: 0o700 });
+  const lockPath = `${normalizedPath}.lock`;
+  const lock = acquireGatewayConfigLock(lockPath);
+  activeGatewayConfigLocks.add(normalizedPath);
+  let result;
+  let operationFailed = false;
+  let operationError;
+  try {
+    result = operation();
+    if (result && typeof result.then === "function") {
+      Promise.resolve(result).catch(() => undefined);
+      throw new TypeError("withGatewayConfigLock 只接受同步操作");
+    }
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+  }
+  let releaseError;
+  try {
+    closeSync(lock.descriptor);
+  } catch (error) {
+    releaseError = error;
+  }
+  try {
+    const current = statSync(lockPath);
+    if (current.dev === lock.dev && current.ino === lock.ino) {
+      unlinkSync(lockPath);
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT" && releaseError === undefined) releaseError = error;
+  }
+  activeGatewayConfigLocks.delete(normalizedPath);
+  if (operationFailed) throw operationError;
+  if (releaseError !== undefined) throw releaseError;
+  return result;
+}
+
+function acquireGatewayConfigLock(lockPath) {
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      const descriptor = openSync(lockPath, "wx", 0o600);
+      try {
+        writeFileSync(descriptor, `${process.pid}\n`);
+        const metadata = fstatSync(descriptor);
+        return { descriptor, dev: metadata.dev, ino: metadata.ino };
+      } catch (error) {
+        closeSync(descriptor);
+        try {
+          unlinkSync(lockPath);
+        } catch (unlinkError) {
+          if (unlinkError?.code !== "ENOENT") throw unlinkError;
+        }
+        throw error;
+      }
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (staleGatewayConfigLock(lockPath)) {
+        try {
+          unlinkSync(lockPath);
+          continue;
+        } catch (unlinkError) {
+          if (unlinkError?.code !== "ENOENT") throw unlinkError;
+        }
+      }
+      if (Date.now() - startedAt >= gatewayConfigLockTimeoutMs) {
+        throw new GatewayConfigConflictError("config.toml 正在由其他进程修改，请稍后重试");
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+}
+
+function staleGatewayConfigLock(lockPath) {
+  try {
+    if (Date.now() - statSync(lockPath).mtimeMs <= staleGatewayConfigLockMs) return false;
+    const ownerPid = Number.parseInt(readFileSync(lockPath, "utf8").trim(), 10);
+    return !Number.isSafeInteger(ownerPid) || ownerPid <= 0 || !processIsAlive(ownerPid);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
 }
 
 function mergeMissingDefaults(target, defaults) {

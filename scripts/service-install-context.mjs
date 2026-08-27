@@ -8,7 +8,20 @@ import { packageDir, runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 export function prepareServiceInstallContext(additionalPathEntries) {
-  const runtime = runtimeConfig();
+  const context = resolveServiceInstallContext(additionalPathEntries);
+  ensureServiceInstallRuntimeDirectory(context);
+  return context;
+}
+
+export function resolveServiceInstallContext(
+  additionalPathEntries,
+  {
+    environment = process.env,
+    projectDir = packageDir,
+    nodeExecutable = process.execPath,
+  } = {},
+) {
+  const runtime = runtimeConfig(environment);
   const document = readGatewayConfig(runtime.configPath);
   const codex = table(document.codex);
   const { defaultWorkspace } = readWorkspaceConfig(document);
@@ -18,11 +31,11 @@ export function prepareServiceInstallContext(additionalPathEntries) {
   }
 
   const runtimeDir = dirname(socketPath);
-  mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-  chmodSync(runtimeDir, 0o700);
-
-  const codexBinary = resolveExecutable(stringValue(codex.binary) || "codex");
-  const nodeBinary = realpathSync(process.execPath);
+  const codexBinary = resolveExecutable(
+    stringValue(codex.binary) || "codex",
+    environment,
+  );
+  const nodeBinary = realpathSync(nodeExecutable);
   const executablePath = uniquePaths([
     dirname(nodeBinary),
     dirname(codexBinary),
@@ -30,16 +43,21 @@ export function prepareServiceInstallContext(additionalPathEntries) {
   ]).join(delimiter);
 
   return {
-    cliEntry: join(packageDir, "bin", "codexc.mjs"),
+    cliEntry: join(projectDir, "bin", "codexc.mjs"),
     codexBinary,
     executablePath,
     nodeBinary,
-    packageDir,
+    packageDir: projectDir,
     runtime,
     runtimeDir,
     socketPath,
     workdir: defaultWorkspace.cwd,
   };
+}
+
+export function ensureServiceInstallRuntimeDirectory(context) {
+  mkdirSync(context.runtimeDir, { recursive: true, mode: 0o700 });
+  chmodSync(context.runtimeDir, 0o700);
 }
 
 function uniquePaths(paths) {

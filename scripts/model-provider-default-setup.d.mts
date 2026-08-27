@@ -34,9 +34,11 @@ export interface ModelProviderDefaultSetupOptions {
       model: Record<string, unknown>,
     ): Promise<number>;
   };
+  readConfigSnapshot?: typeof import("./codex-user-config.mjs").readCodexUserConfigSnapshot;
   writeConfigEdits?: (
     environment: NodeJS.ProcessEnv,
     edits: CodexUserConfigEdit[],
+    options?: { expectedVersion?: string },
   ) => Promise<void>;
 }
 

@@ -1,4 +1,5 @@
 import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
+import type { ManagedModelProviderRestorePreview } from "./managed-model-provider-setup.mjs";
 
 export const deepseekSetupScriptUrl: string;
 
@@ -44,6 +45,71 @@ export interface DeepseekSetupBackResult {
   action: "back";
   mode?: never;
 }
+
+export interface DeepseekConfigurationPreview {
+  operation: "add" | "reconfigure";
+  provider: { id: "deepseek"; name: string };
+  mode: "switching" | "exclusive";
+  effects: {
+    writesMainConfig: boolean;
+    writesIsolatedProfile: boolean;
+    downloadsCatalog: true;
+    updatesExternalAgent: true;
+    preservesInitialConfig: true;
+  };
+  confirmation: {
+    required: boolean;
+    field: "confirmExclusiveConfigChange";
+  };
+  activation: "restart-all";
+}
+
+export function previewDeepseekConfiguration(
+  input: { mode?: "switching" | "exclusive" },
+  options?: { environment?: NodeJS.ProcessEnv },
+): DeepseekConfigurationPreview;
+
+export function applyDeepseekConfiguration(
+  input: {
+    mode?: "switching" | "exclusive";
+    apiKey: string;
+    autoCompactPercent?: number;
+    confirmExclusiveConfigChange?: boolean;
+  },
+  options?: {
+    environment?: NodeJS.ProcessEnv;
+    fetchImpl?: typeof fetch;
+    downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{
+      catalog: { models: Array<Record<string, unknown>> };
+      sha256: string;
+    }>;
+    configureRole?: (
+      provider: ManagedModelProviderId,
+      model: string | undefined,
+      environment: NodeJS.ProcessEnv,
+    ) => unknown | Promise<unknown>;
+  },
+): Promise<{
+  action: "configured";
+  model: string;
+  paths: {
+    configPath: string;
+    profilePath: string;
+    markerPath: string;
+    catalogPath: string;
+  };
+} & DeepseekConfigurationPreview>;
+
+export function previewDeepseekRestore(options?: {
+  environment?: NodeJS.ProcessEnv;
+}): Promise<ManagedModelProviderRestorePreview>;
+
+export function applyDeepseekRestore(
+  input: { confirmRestore?: boolean },
+  options?: { environment?: NodeJS.ProcessEnv },
+): Promise<{
+  action: "restored";
+} & ManagedModelProviderRestorePreview>;
 
 export function runDeepseekSetup(options?: DeepseekSetupOptions): Promise<
   | DeepseekSetupResult

@@ -1,9 +1,9 @@
-import {
-  readGatewayConfig,
-  writeGatewayConfig,
-} from "../runtime/gateway-config.mjs";
+import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
+import {
+  loadGatewaySettings,
+  updateGatewaySetting,
+} from "./config-management.mjs";
 
 export async function runDebugSetup({
   environment = process.env,
@@ -12,13 +12,12 @@ export async function runDebugSetup({
   writeConfig = writeGatewayConfig,
 } = {}) {
   if (!prompts) throw new Error("调试模式 Setup 缺少交互实现");
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  const currentLevel = loggingLevel(document);
+  const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "选择全局调试模式",
     showInstructions: false,
-    initialValue: currentLevel === "debug" || currentLevel === "trace"
+    initialValue: settings.advanced.loggingLevel === "debug"
+      || settings.advanced.loggingLevel === "trace"
       ? "enabled"
       : "disabled",
     options: [
@@ -44,6 +43,7 @@ export async function runDebugSetup({
   const level = selected === "enabled" ? "debug" : "info";
   const result = writeLoggingLevel({
     environment,
+    expectedRevision: settings.revision,
     output,
     writeConfig,
     level,
@@ -54,6 +54,7 @@ export async function runDebugSetup({
 
 export function writeLoggingLevel({
   environment = process.env,
+  expectedRevision,
   output = process.stdout,
   writeConfig = writeGatewayConfig,
   level,
@@ -62,23 +63,15 @@ export function writeLoggingLevel({
   if (!["fatal", "error", "warn", "info", "debug", "trace"].includes(level)) {
     throw new Error(`未知日志等级：${String(level)}`);
   }
-  const { configPath } = requireUserConfig(environment);
-  const document = readGatewayConfig(configPath);
-  document.logging = {
-    ...table(document.logging),
-    level,
-  };
-  writeConfig(configPath, document);
-  output.write(`${message}：${configPath}\n`);
+  const result = updateGatewaySetting({
+    kind: "advanced.logging-level",
+    value: level,
+  }, {
+    environment,
+    expectedRevision: expectedRevision ?? loadGatewaySettings(environment).revision,
+    writeConfig,
+  });
+  output.write(`${message}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { level, configPath };
-}
-
-function loggingLevel(document) {
-  const level = table(document.logging).level;
-  return typeof level === "string" ? level : "info";
-}
-
-function table(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return { level, configPath: result.configPath };
 }

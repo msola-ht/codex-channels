@@ -45,6 +45,30 @@ describe("Telegram setup", () => {
     prompt.close();
   });
 
+  it("aborts an in-flight terminal question", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const prompt = createPrompter(input, output);
+    const controller = new AbortController();
+    const answer = prompt.ask("等待输入", { signal: controller.signal });
+
+    controller.abort();
+    try {
+      const result = await Promise.race([
+        answer.then(
+          () => "resolved",
+          (error: Error) => error.name,
+        ),
+        new Promise<string>((resolve) => {
+          setTimeout(() => resolve("pending"), 25);
+        }),
+      ]);
+      expect(result).toBe("AbortError");
+    } finally {
+      prompt.close();
+    }
+  });
+
   it("validates an existing bot, discovers a private sender and preserves other configuration", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-setup-"));
     temporaryDirectories.push(root);

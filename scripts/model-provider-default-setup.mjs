@@ -2,10 +2,14 @@ import * as clackPrompts from "@clack/prompts";
 
 import {
   loadManagedModelProviderSettings,
-  writeManagedModelProviderCatalogSettings,
-  writeManagedModelProviderProfileDefault,
 } from "../runtime/model-provider-runtime.mjs";
-import { writeCodexUserConfigEdits } from "./codex-user-config.mjs";
+import {
+  readCodexUserConfigSnapshot,
+  writeCodexUserConfigEdits,
+} from "./codex-user-config.mjs";
+import {
+  applyManagedProviderDefaultChange,
+} from "./model-provider-default-management.mjs";
 
 class ModelProviderDefaultSetupCancelled extends Error {}
 
@@ -16,6 +20,7 @@ export async function runModelProviderDefaultSetup({
   output = process.stdout,
   prompts = clackPrompts,
   prompter,
+  readConfigSnapshot = readCodexUserConfigSnapshot,
   writeConfigEdits = writeCodexUserConfigEdits,
 } = {}) {
   const configured = loadManagedModelProviderSettings(environment);
@@ -36,51 +41,21 @@ export async function runModelProviderDefaultSetup({
     }
     const reasoningEffort = await prompt.selectReasoningEffort(selected, selectedModel);
     const autoCompactPercent = await prompt.selectAutoCompactPercent(selected, selectedModel);
-    if (
-      !Number.isInteger(autoCompactPercent)
-      || autoCompactPercent < 10
-      || autoCompactPercent > 90
-    ) {
-      throw new Error(`${selected.displayName} 模型自动压缩百分比无效`);
-    }
-    const settings = {
+    const result = await applyManagedProviderDefaultChange({
+      provider: selected.provider,
       model,
       reasoningEffort,
-      autoCompactLimit: Math.round(selectedModel.contextWindow * autoCompactPercent / 100),
-    };
-    if (selected.mode === "switching") {
-      writeManagedModelProviderProfileDefault(selected.provider, settings, environment);
-    } else {
-      const previous = writeManagedModelProviderCatalogSettings(
-        selected.provider,
-        settings,
-        environment,
-      );
-      try {
-        await writeConfigEdits(environment, [
-          { keyPath: "model", value: model },
-          { keyPath: "model_reasoning_effort", value: null },
-          { keyPath: "model_context_window", value: null },
-          { keyPath: "model_auto_compact_token_limit", value: null },
-          { keyPath: "model_auto_compact_token_limit_scope", value: null },
-        ]);
-      } catch (error) {
-        try {
-          writeManagedModelProviderCatalogSettings(selected.provider, previous, environment);
-        } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            "第三方模型设置失败，且未能恢复模型目录",
-            { cause: rollbackError },
-          );
-        }
-        throw error;
-      }
-    }
+      autoCompactPercent,
+    }, {
+      environment,
+      loadProviders: () => configured,
+      readConfigSnapshot,
+      writeConfigEdits,
+    });
     output.write(`${selected.displayName} 默认模型已设为 ${model}。\n`);
     output.write(`模型上下文：${selectedModel.contextWindow} tokens。\n`);
     output.write(`默认思考等级：${reasoningEffort}。\n`);
-    output.write(`自动压缩阈值：${autoCompactPercent}%（约 ${settings.autoCompactLimit} tokens）。\n`);
+    output.write(`自动压缩阈值：${autoCompactPercent}%（约 ${result.autoCompactLimit} tokens）。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
     output.write("请重启 App Server：codexc service restart app-server\n");
     return {
@@ -89,7 +64,7 @@ export async function runModelProviderDefaultSetup({
       model,
       reasoningEffort,
       autoCompactPercent,
-      mode: selected.mode,
+      mode: result.provider.mode,
     };
   } catch (error) {
     if (allowBack && error instanceof ModelProviderDefaultSetupCancelled) {

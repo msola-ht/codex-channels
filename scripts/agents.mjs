@@ -11,20 +11,178 @@ import {
 } from "../runtime/cli-presentation.mjs";
 import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import {
-  loadManagedModelProviderRole,
+  loadCustomModelProviderRoleCandidates,
+  loadManagedModelProviderSettings,
+  loadThirdPartyModelProviderRole,
   managedModelProviderRoleConfigPath,
   removeManagedModelProviderRoleConfig,
   validateConfiguredModelProviders,
-  writeManagedModelProviderRoleConfig,
+  writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { updateCodexUserConfig } from "./codex-user-config.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 const managedRoleName = "external";
 const legacyManagedRoleName = "ds";
 const legacyManagedRoleConfigFileName = "codex-connect-ds-subagent.config.toml";
 const roleDescription =
   "第三方模型单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息";
+
+export class AgentsManagementError extends Error {
+  constructor(code, field, message, options) {
+    super(message, options);
+    this.name = "AgentsManagementError";
+    this.code = code;
+    this.field = field;
+  }
+}
+
+export function loadThirdPartyAgentProviders(environment = process.env) {
+  return [
+    ...loadManagedModelProviderSettings(environment),
+    ...loadCustomModelProviderRoleCandidates(environment).map((provider) => ({
+      provider: provider.provider,
+      displayName: provider.displayName,
+      model: provider.model,
+      reasoningEffort: provider.reasoningEffort,
+      mode: provider.mode,
+      models: [{
+        model: provider.model,
+        displayName: provider.model,
+        contextWindow: 0,
+        reasoningEffort: provider.reasoningEffort,
+        reasoningEfforts: [],
+      }],
+    })),
+  ];
+}
+
+export function previewThirdPartyAgentChange(
+  input,
+  {
+    environment = process.env,
+    loadProviders = loadThirdPartyAgentProviders,
+    loadStatus = agentsStatus,
+    validateRoleAvailability = true,
+  } = {},
+) {
+  if (input?.action !== "configure" && input?.action !== "disable") {
+    throw agentInvalid("invalid-action", "action", "子代理操作必须是 configure 或 disable");
+  }
+  const status = loadStatus(environment);
+  const current = status.externalRoleConfigured || status.legacyDsRoleConfigured
+    ? {
+        configured: true,
+        provider: status.provider ?? null,
+        model: status.model ?? null,
+      }
+    : { configured: false, provider: null, model: null };
+  if (input.action === "disable") {
+    return {
+      operation: "disable",
+      current,
+      willChange: current.configured,
+      activation: current.configured ? "restart-all" : "none",
+    };
+  }
+  const providerId = requiredAgentString(input.provider, "provider", "Provider 不能为空");
+  const provider = loadProviders(environment)
+    .find((candidate) => candidate.provider === providerId);
+  if (provider === undefined) {
+    throw agentInvalid(
+      "provider-not-configured",
+      "provider",
+      `第三方 Provider 未配置：${providerId}`,
+    );
+  }
+  const model = optionalString(input.model) ?? provider.model;
+  const modelOption = provider.models.find((candidate) => candidate.model === model);
+  if (modelOption === undefined) {
+    throw agentInvalid(
+      "model-not-supported",
+      "model",
+      `${provider.displayName} 不支持模型：${model}`,
+    );
+  }
+  if (validateRoleAvailability) {
+    try {
+      assertThirdPartyRoleAvailable(environment);
+    } catch (error) {
+      throw agentInvalid(
+        "role-unavailable",
+        "action",
+        error instanceof Error ? error.message : String(error),
+        error,
+      );
+    }
+  }
+  return {
+    operation: "configure",
+    current,
+    selection: {
+      provider: provider.provider,
+      providerDisplayName: provider.displayName,
+      model: modelOption.model,
+      modelDisplayName: modelOption.displayName,
+    },
+    willChange: !current.configured
+      || current.provider !== provider.provider
+      || current.model !== modelOption.model,
+    activation: "restart-all",
+  };
+}
+
+export async function applyThirdPartyAgentChange(
+  input,
+  {
+    environment = process.env,
+    loadProviders = loadThirdPartyAgentProviders,
+    loadStatus = agentsStatus,
+    configureRole = configureThirdPartyRole,
+    disableRole = disableThirdPartyRole,
+    validateRoleAvailability = configureRole === configureThirdPartyRole,
+  } = {},
+) {
+  const preview = previewThirdPartyAgentChange(input, {
+    environment,
+    loadProviders,
+    loadStatus,
+    validateRoleAvailability,
+  });
+  try {
+    if (preview.operation === "disable") {
+      const removed = preview.willChange ? await disableRole(environment) : false;
+      return {
+        action: removed ? "disabled" : "unchanged",
+        activation: removed ? "restart-all" : "none",
+        previous: preview.current,
+      };
+    }
+    const selection = await configureRole(
+      preview.selection.provider,
+      preview.selection.model,
+      environment,
+    );
+    return {
+      action: "configured",
+      activation: "restart-all",
+      previous: preview.current,
+      selection: {
+        provider: selection.provider,
+        model: selection.model,
+      },
+    };
+  } catch (error) {
+    if (error instanceof AgentsManagementError) throw error;
+    throw agentInvalid(
+      "operation-failed",
+      "action",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+}
 
 export function agentsStatus(environment = process.env) {
   const configPath = agentRolesConfigPath(environment);
@@ -38,7 +196,7 @@ export function agentsStatus(environment = process.env) {
       const document = parse(readFileSync(configPath, "utf8"));
       const feature = document.features?.multi_agent_v2;
       multiAgentV2Enabled = feature === true || feature?.enabled === true;
-      externalRoleConfigured = document.agents?.[managedRoleName] !== undefined;
+      externalRoleConfigured = isManagedThirdPartyRole(document, environment);
       legacyDsRoleConfigured = record(document.agents?.[legacyManagedRoleName]).config_file
         === legacyRoleConfigPath;
     } catch {
@@ -47,7 +205,7 @@ export function agentsStatus(environment = process.env) {
   }
   let selection;
   try {
-    selection = loadManagedModelProviderRole(environment);
+    selection = loadThirdPartyModelProviderRole(environment);
   } catch {
     // 状态命令仍显示角色存在；详细错误由配置命令给出。
   }
@@ -68,52 +226,51 @@ export async function configureThirdPartyRole(
   environment = process.env,
   { updateConfig = updateCodexUserConfig } = {},
 ) {
-  const definition = providerDefinition(provider, environment);
-  if (!validateConfiguredModelProviders(environment).some((entry) => entry.provider === provider)) {
-    throw new Error(`${definition.displayName} Provider 尚未配置；请先运行 codexc setup`);
-  }
-  assertThirdPartyRoleAvailable(environment);
-  const roleConfigPath = managedModelProviderRoleConfigPath(environment);
-  const legacyRoleConfigPath = join(dirname(roleConfigPath), legacyManagedRoleConfigFileName);
-  const previousRoleConfig = readOptionalFile(roleConfigPath);
-  const selection = writeManagedModelProviderRoleConfig(
-    environment,
-    { provider, ...(model ? { model } : {}) },
-  );
-  const writtenRoleConfig = readOptionalFile(roleConfigPath);
-  let removeLegacyRole = false;
-  try {
-    await updateConfig(environment, (config) => {
-      assertThirdPartyRoleAvailableInConfig(config, environment);
-      removeLegacyRole = isLegacyManagedRole(config, legacyRoleConfigPath);
-      return [{
-        keyPath: "features.multi_agent_v2",
-        value: true,
-      }, {
-        keyPath: `agents.${managedRoleName}`,
-        value: {
-          description: roleDescription,
-          config_file: roleConfigPath,
-          nickname_candidates: [definition.displayName],
-        },
-      }, ...(removeLegacyRole
-        ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }]
-        : [])];
-    });
-  } catch (error) {
+  return withThirdPartyRoleTransaction(environment, async () => {
+    const definition = providerDefinition(provider, environment);
+    assertThirdPartyRoleAvailable(environment);
+    const roleConfigPath = managedModelProviderRoleConfigPath(environment);
+    const legacyRoleConfigPath = join(dirname(roleConfigPath), legacyManagedRoleConfigFileName);
+    const previousRoleConfig = readOptionalFile(roleConfigPath);
+    const selection = writeThirdPartyModelProviderRoleConfig(
+      environment,
+      { provider, ...(model ? { model } : {}) },
+    );
+    const writtenRoleConfig = readOptionalFile(roleConfigPath);
+    let removeLegacyRole = false;
     try {
-      restoreOptionalFile(roleConfigPath, previousRoleConfig, writtenRoleConfig);
-    } catch (rollbackError) {
-      throw new AggregateError(
-        [error, rollbackError],
-        "第三方子代理配置失败，且角色文件已被其他进程修改",
-        { cause: rollbackError },
-      );
+      await updateConfig(environment, (config) => {
+        assertThirdPartyRoleAvailableInConfig(config, environment);
+        removeLegacyRole = isLegacyManagedRole(config, legacyRoleConfigPath);
+        return [{
+          keyPath: "features.multi_agent_v2",
+          value: true,
+        }, {
+          keyPath: `agents.${managedRoleName}`,
+          value: {
+            description: roleDescription,
+            config_file: roleConfigPath,
+            nickname_candidates: [definition.displayName],
+          },
+        }, ...(removeLegacyRole
+          ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }]
+          : [])];
+      });
+    } catch (error) {
+      try {
+        restoreOptionalFile(roleConfigPath, previousRoleConfig, writtenRoleConfig);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "第三方子代理配置失败，且角色文件已被其他进程修改",
+          { cause: rollbackError },
+        );
+      }
+      throw error;
     }
-    throw error;
-  }
-  if (removeLegacyRole) removeLegacyRoleConfig(legacyRoleConfigPath);
-  return selection;
+    if (removeLegacyRole) removeLegacyRoleConfig(legacyRoleConfigPath);
+    return selection;
+  });
 }
 
 export function assertThirdPartyRoleAvailable(environment = process.env) {
@@ -136,51 +293,73 @@ export async function disableThirdPartyRole(
   return removeManagedThirdPartyRole(environment, { updateConfig, disableFeature: true });
 }
 
+export function assertThirdPartyRoleDoesNotUseProvider(
+  provider,
+  environment = process.env,
+) {
+  const selection = loadThirdPartyModelProviderRole(environment);
+  if (selection?.provider === provider) {
+    throw new Error(
+      `Provider ${provider} 正由 agents.external 使用；请先切换共享第三方子代理或运行 codexc agents disable`,
+    );
+  }
+}
+
 export async function removeManagedThirdPartyRole(
   environment = process.env,
   { updateConfig = updateCodexUserConfig, provider, disableFeature = false } = {},
 ) {
-  const configPath = agentRolesConfigPath(environment);
-  if (!existsSync(configPath)) return false;
-  const selection = provider ? loadManagedModelProviderRole(environment) : undefined;
-  if (provider && selection?.provider !== provider) return false;
-  const legacyRoleConfigPath = join(
-    dirname(managedModelProviderRoleConfigPath(environment)),
-    legacyManagedRoleConfigFileName,
-  );
-  let removed = false;
-  await updateConfig(environment, (config) => {
-    const managedExternal = isManagedThirdPartyRole(config, environment);
-    const managedLegacyDs = isLegacyManagedRole(config, legacyRoleConfigPath);
-    if (!managedExternal && !managedLegacyDs) return [];
-    removed = true;
-    const otherRoles = Object.keys(record(config.agents)).filter(
-      (name) => name !== managedRoleName && name !== legacyManagedRoleName,
+  return withThirdPartyRoleTransaction(environment, async () => {
+    const configPath = agentRolesConfigPath(environment);
+    if (!existsSync(configPath)) return false;
+    const selection = provider ? loadThirdPartyModelProviderRole(environment) : undefined;
+    if (provider && selection?.provider !== provider) return false;
+    const legacyRoleConfigPath = join(
+      dirname(managedModelProviderRoleConfigPath(environment)),
+      legacyManagedRoleConfigFileName,
     );
-    return [
-      ...(managedExternal ? [{ keyPath: `agents.${managedRoleName}`, value: null }] : []),
-      ...(managedLegacyDs ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }] : []),
-      ...(disableFeature && otherRoles.length === 0
-        ? [{ keyPath: "features.multi_agent_v2", value: false }]
-        : []),
-    ];
+    let removed = false;
+    await updateConfig(environment, (config) => {
+      const managedExternal = isManagedThirdPartyRole(config, environment);
+      const managedLegacyDs = isLegacyManagedRole(config, legacyRoleConfigPath);
+      if (!managedExternal && !managedLegacyDs) return [];
+      removed = true;
+      const otherRoles = Object.keys(record(config.agents)).filter(
+        (name) => name !== managedRoleName && name !== legacyManagedRoleName,
+      );
+      return [
+        ...(managedExternal ? [{ keyPath: `agents.${managedRoleName}`, value: null }] : []),
+        ...(managedLegacyDs ? [{ keyPath: `agents.${legacyManagedRoleName}`, value: null }] : []),
+        ...(disableFeature && otherRoles.length === 0
+          ? [{ keyPath: "features.multi_agent_v2", value: false }]
+          : []),
+      ];
+    });
+    if (!removed) return false;
+    removeManagedModelProviderRoleConfig(environment);
+    removeLegacyRoleConfig(legacyRoleConfigPath);
+    return true;
   });
-  if (!removed) return false;
-  removeManagedModelProviderRoleConfig(environment);
-  removeLegacyRoleConfig(legacyRoleConfigPath);
-  return true;
+}
+
+async function withThirdPartyRoleTransaction(environment, operation) {
+  return withModelProviderManagementTransaction(environment, operation);
 }
 
 function providerDefinition(provider, environment = process.env) {
   const definitions = loadManagedModelProviderDefinitions(environment);
   const definition = definitions
     .find((candidate) => candidate.id === provider);
-  if (!definition) {
-    throw new Error(`未知第三方 Provider：${provider}；可选：${
-      definitions.map((candidate) => candidate.id).join("、")
-    }`);
+  if (definition !== undefined) {
+    if (!validateConfiguredModelProviders(environment).some((entry) => entry.provider === provider)) {
+      throw new Error(`${definition.displayName} Provider 尚未配置；请先运行 codexc setup`);
+    }
+    return definition;
   }
-  return definition;
+  const custom = loadCustomModelProviderRoleCandidates(environment)
+    .find((candidate) => candidate.provider === provider);
+  if (custom !== undefined) return { id: custom.provider, displayName: custom.displayName };
+  throw new Error(`未知或未配置的第三方 Provider：${provider}`);
 }
 
 function assertThirdPartyRoleAvailableInConfig(config, environment) {
@@ -204,6 +383,25 @@ function isLegacyManagedRole(config, legacyRoleConfigPath) {
 
 function record(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function optionalString(value) {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+function requiredAgentString(value, field, message) {
+  const normalized = optionalString(value);
+  if (normalized === undefined) throw agentInvalid("required", field, message);
+  return normalized;
+}
+
+function agentInvalid(code, field, message, cause) {
+  return new AgentsManagementError(
+    code,
+    field,
+    message,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 function readOptionalFile(path) {
@@ -281,8 +479,9 @@ const usage = `用法：codexc agents <configure|disable|status> [参数]
   disable                    移除共享第三方子代理
   status [--json]            查看当前状态
 
-Provider：${loadManagedModelProviderDefinitions(process.env)
-  .map((definition) => definition.id).join("、")}`;
+内置 Provider：${loadManagedModelProviderDefinitions(process.env)
+  .map((definition) => definition.id).join("、")}
+自定义 Provider：使用 codexc setup 已配置的固定或切换模式 Provider ID`;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await runAgentsCli().catch((error) => {
@@ -297,7 +496,11 @@ async function runAgentsCli() {
     console.log(usage);
     process.exitCode = command === undefined ? 1 : 0;
   } else if (command === "configure" && provider && rest.length === 0) {
-    const selection = await configureThirdPartyRole(provider, model, process.env);
+    const result = await applyThirdPartyAgentChange(
+      { action: "configure", provider, model },
+      { environment: process.env },
+    );
+    const selection = result.selection;
     writeCliMessage(
       "success",
       `已配置共享第三方子代理：${selection.provider} / ${selection.model}（agents.external）。`,
@@ -305,8 +508,11 @@ async function runAgentsCli() {
     writeCliRemediationRestartAll();
     printStatus(process.env);
   } else if (command === "disable" && provider === undefined) {
-    const removed = await disableThirdPartyRole(process.env);
-    if (removed) {
+    const result = await applyThirdPartyAgentChange(
+      { action: "disable" },
+      { environment: process.env },
+    );
+    if (result.action === "disabled") {
       writeCliMessage("success", "已移除共享第三方子代理。");
       writeCliRemediationRestartAll();
     } else {

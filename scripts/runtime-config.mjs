@@ -1,4 +1,11 @@
-import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -33,10 +40,7 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
   const dataDir = dirname(configPath);
   const resolvedCwd = realpathSync(resolve(cwd));
   if (existsSync(configPath)) {
-    if (!explicitConfigFile) {
-      chmodSync(dataDir, 0o700);
-    }
-    chmodSync(configPath, 0o600);
+    prepareExistingUserConfig(configPath, dataDir, !explicitConfigFile);
     return { created: false, configPath, dataDir, workspace: resolvedCwd };
   }
 
@@ -100,11 +104,38 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
 export function requireUserConfig(environment = process.env) {
   const result = locateUserConfig(environment);
   const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
-  if (!explicitConfigFile) {
-    chmodSync(result.dataDir, 0o700);
-  }
-  chmodSync(result.configPath, 0o600);
+  prepareExistingUserConfig(
+    result.configPath,
+    result.dataDir,
+    !explicitConfigFile,
+  );
   return result;
+}
+
+function prepareExistingUserConfig(configPath, dataDir, manageDataDirectory) {
+  let configStatus;
+  let parentStatus;
+  try {
+    configStatus = lstatSync(configPath);
+    parentStatus = lstatSync(dataDir);
+  } catch {
+    throw new Error("config.toml 不可用，请检查文件路径和权限");
+  }
+  if (!configStatus.isFile()) {
+    throw new Error("config.toml 必须是普通文件且不能是符号链接");
+  }
+  const currentUserId = process.getuid?.();
+  if (
+    currentUserId !== undefined
+    && (configStatus.uid !== currentUserId || parentStatus.uid !== currentUserId)
+  ) {
+    throw new Error("config.toml 及其父目录必须由当前用户拥有");
+  }
+  if (!parentStatus.isDirectory() || (parentStatus.mode & 0o022) !== 0) {
+    throw new Error("config.toml 父目录权限不安全：不能允许组或其他用户写入");
+  }
+  if (manageDataDirectory) chmodSync(dataDir, 0o700);
+  chmodSync(configPath, 0o600);
 }
 
 export function locateUserConfig(environment = process.env) {

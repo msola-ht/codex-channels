@@ -17,6 +17,7 @@ describe("Feishu application validation", () => {
       },
     }));
     const createClient = vi.fn(() => ({ request }));
+    const controller = new AbortController();
 
     await expect(validateFeishuApplication({
       appId: "cli_0123456789abcdef",
@@ -24,6 +25,7 @@ describe("Feishu application validation", () => {
     }, {
       createClient,
       requestTimeoutMs: 10_000,
+      signal: controller.signal,
     })).resolves.toEqual({
       openId: "ou_bot",
       name: "Codex Bot",
@@ -45,6 +47,7 @@ describe("Feishu application validation", () => {
       method: "GET",
       url: "/open-apis/bot/v3/info",
       timeout: 10_000,
+      signal: controller.signal,
     });
   });
 

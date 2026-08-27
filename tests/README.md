@@ -110,7 +110,19 @@
   当前属主、`0600`、大小和非符号链接校验，官方模式直接编辑/确认删除备份候选，恢复/删除候选在配置提交后消费同名
   备份，配置失败时保持原备份，配置成功但清理失败时报告部分成功；从第三方恢复官方清除第三方模型覆盖，已在
   官方模式时保留官方模型；主 Provider JSON 列表覆盖固定、切换、备份与未知状态，并保证凭据不进入输出；
-  共享第三方子代理状态 JSON 固定空值与配置标记且不要求 Gateway 初始化；
+  共享第三方子代理状态 JSON 固定空值与配置标记且不要求 Gateway 初始化，无 prompts 的配置/停用
+  预览、稳定字段错误、无变化短路和全部服务重启动作，以及 Setup 中受管/自定义 Provider 的模型选择、
+  停用确认、删除保护、无凭据角色文件、隔离 Key 注入、统计代理与脱敏总览；
+  直接 API Provider 的无 prompts 结构化管理用例、脱敏凭据状态、增改删除事务、失败回滚与提交后
+  响应异常确认；统一 Provider 管理事务的跨进程序列化及同调用链嵌套复用；
+  Gateway Config 的无 prompts 脱敏读取、受控修改、生效动作、代理值隔离和稳定字段错误；
+  统一 Provider 管理状态对 OpenAI 默认值、受管与自定义 Provider、备份候选、模型目录和共享子代理的汇总与凭据隔离；
+  自定义主 Provider 新增、编辑、切换与删除的无 prompts 脱敏预览、稳定字段错误、生效动作、
+  同 Origin Key 内部保留、使用中保护和结构化部分成功；
+  受管 Provider 默认模型、思考等级与自动压缩的无 prompts 预览、稳定字段错误、切换模式写入、
+  固定模式配置失败回滚和 App Server 重启动作；DeepSeek/OpenCode Go 恢复的无 prompts 脱敏预览、
+  明确确认、稳定备份错误和全部服务重启动作；DeepSeek 安装的无 prompts 脱敏预览、字段校验、
+  固定模式确认、Key 结果隔离、分阶段并发保护回滚和全部服务重启动作；
   共享私有文件读取以同一描述符完成 `O_NOFOLLOW` 与权限校验；DeepSeek 官方脚本目录提取、两种 Setup 模式、
   API Key 输出隔离、下载失败不修改、Flash、Flash Vision Exp 与 Pro 可选、受控目录输入能力校验，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
@@ -123,8 +135,9 @@
   重置时间时短时退避，避免逐请求查询 usage 接口。
 - OpenCode Go 的账户注册表与旧版单账户迁移、账户 CLI（add/list/remove/default/stop）及不含凭据的 JSON 列表、切换/固定
   Setup、同名模型按 Provider 独立选择、按需 App Server 启动、共享统计代理的 `/go/<账户>` 前缀
-  路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、账户适配器按 `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与
-  SDK 协议基线校验。
+  路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、账户新增/默认切换/运行实例停止/账户删除的无 prompts
+  脱敏预览、稳定字段错误、固定模式与历史丢失确认、Key 输出隔离、共享子代理同步、未运行短路和 Remote TUI 占用结果、账户适配器按
+  `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与 SDK 协议基线校验。
 - OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、Gateway 最近无 Turn 活动且超过空闲阈值时
   经 supervisor `releaseProvider` 释放；`agents.external` 复用主 App Server 和共享统计代理，不锁定
   同账户隔离实例；受管 Remote TUI
@@ -195,7 +208,8 @@
 - 后台服务结构化状态覆盖 systemd 属性归一、launchd 运行/缺失/查询失败、目标异常时的 JSON 输出与
   CLI 参数顺序校验；Windows 服务管理链路尚未支持时保持明确失败，不宣称部分兼容。
 - 微信 Setup 的替换风险取消门槛、扫码结果到禁用态非敏感配置和独立安全凭据的原子提交、配置失败
-  凭据恢复，以及微信/飞书分离的 Keychain Service、Linux 密文私有权限、严格版本和损坏失败关闭。
+  凭据恢复、提交后响应异常确认与并发确认串行，以及微信/飞书分离的 Keychain Service、Linux 密文
+  私有权限、严格版本和损坏失败关闭。
 - Workspace 不可变授权快照、热加载失败回滚、选择歧义、稳定 JSON 注册列表，以及 Telegram Surface、账号和规范
   Actor ID 的联合授权；飞书 Surface、App 账号和 `open_id` 精确允许名单及原子替换。
 - 微信二维码合同探针的固定请求 Header/路径/Body、严格响应裁剪、未知和残缺状态失败

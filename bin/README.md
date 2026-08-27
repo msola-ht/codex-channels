@@ -23,13 +23,13 @@
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile deepseek`、
   `--profile opencode-go`、`--profile opencode-go-<账户>` 或 `--profile custom-<Provider ID>`
-  选择隔离实例；
+  选择隔离实例；按当前目录或 `--workspace` 解析 Workspace 权限并允许显式 Codex 参数覆盖；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry；
   `check --json` 静默底层 Codex 展示并返回可解析的成功或失败结果。
-- `agents`：选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
+- `agents`：从已配置的受管或自定义 Provider 中选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
   `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化，`--json` 返回稳定状态对象。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；Key 只写入
@@ -46,7 +46,8 @@
   发送回对应会话；见 `docs/channel-image.md`。
 - `webui`、`center`：分别启动本机只读指标界面和多设备指标中心；监听参数在读取用户配置前完成校验，
   `center info --json` 只输出令牌是否已配置，不输出令牌内容。
-- `service`：完整校验配置后生成全部后台服务定义，并启动 App Server 与 Gateway；启停、重启、状态和日志命令使用
+- `service`：安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
+  与 Gateway；启停、重启、状态和日志命令使用
   `gateway`、`app-server`、`webui`、`center` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
   `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等

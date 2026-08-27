@@ -6,7 +6,10 @@
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
 - `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，并提供复用同一
   子 Schema 的严格 `[codex]` 局部校验；在保留已有注释的前提下合并缺失的 Schema 安全默认值，
-  并复用统一私有文件原子替换，以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
+  所有基于已读取文档的写入在同一同步配置文件锁内复核原文后再执行私有文件原子替换；需要同时
+  更新 Gateway 配置与直接 API 凭据的同步管理事务复用该可重入锁，异步操作必须使用独立事务锁，
+  拒绝并发覆盖，
+  并以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
@@ -38,12 +41,13 @@
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
   凭据；自定义主 Provider 的私有候选备份按普通私有文件同样校验类型、属主、权限、大小和符号链接；
   自定义切换模式使用显式私有注册表和逐 Provider 的 `sf-custom-<id>` 私有 Profile，仅接受 Codex
-  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段，Provider 块与 Key 不进入主配置；Remote TUI
+  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段；注册表与 Profile 的增删改
+  共用私有文件锁并支持执行前快照保护，Provider 块与 Key 不进入主配置；Remote TUI
   通过公开 `custom-<id>` 名称映射到该内部 Profile；后台 App Server 则使用加载器生成的非敏感 `-c`
   覆盖，并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；
   读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
-  共享第三方子代理只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个 Provider 使用独立
+  共享第三方子代理支持受管与自定义 Provider，只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个受管 Provider 使用独立
   模型目录，并按模型读取上下文、默认思考等级与自动压缩阈值；受管 Profile 镜像所选模型的默认
   思考等级，校验必须与模型目录一致；Profile 与共享角色使用 `~/.codex` 下的 `sf-` 前缀文件，
   模型目录、清单与管理标记存放在 `~/.codex-connect/providers/<id>/`。
@@ -99,6 +103,8 @@
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
   避免路径校验后被符号链接替换；
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
+- `private-file-lock.mjs` / `private-file-lock.d.mts`：为跨越异步配置事务的私有文件更新提供
+  PID 所有权、陈旧锁回收和替换锁保护，供 Provider 管理与微信配置/凭据事务串行写入。
 - `api-provider-credential.mjs` / `api-provider-credential.d.mts`：按第三方 API 提供商 ID 隔离
   API Key，严格校验私有目录、文件所有者、权限与符号链接，并复用统一私有文件原子替换。
 - `workspace-permission.mjs` / `workspace-permission.d.mts`：统一 Workspace 的 Sandbox、审批策略

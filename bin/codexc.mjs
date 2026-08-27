@@ -26,12 +26,12 @@ import {
 import {
   loadConfiguredCustomPrimaryModelProvider,
   loadOpenAiBaseUrl,
-  loadConfiguredProviderCredential,
-  loadManagedModelProviderRole,
+  loadThirdPartyModelProviderRole,
+  loadThirdPartyProviderCredential,
   providerMetricsSocketPath,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
-  writeManagedModelProviderRoleConfig,
+  writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   loadManagedModelProviderDefinitions,
@@ -143,11 +143,11 @@ const helpText = {
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
   setup: `用法：codexc setup
 
-打开脱敏配置总览，以及模型与提供商、通讯渠道和项目技能设置菜单。
+打开脱敏配置总览，以及模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方 / 默认模型与思考等级
-  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 直接 API Provider（预留）
+  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 项目技能（安装或卸载项目技能）`,
   start: `用法：codexc start
@@ -714,23 +714,23 @@ async function runServiceAppServer(args) {
     loadManagedModelProviderDefinitions(runtime.environment)
       .map((definition) => [definition.id, definition]),
   );
-  const managedRole = loadManagedModelProviderRole(runtime.environment);
+  const thirdPartyRole = loadThirdPartyModelProviderRole(runtime.environment);
   const externalRoleBaseUrl = (baseUrl) =>
     `${baseUrl.replace(/\/+$/u, "")}/role/external`;
   const withExternalRoleMetrics = (provider, options) =>
-    managedRole
-      && sharedProviderProxyKey(managedRole.provider) === sharedProviderProxyKey(provider)
+    thirdPartyRole
+      && sharedProviderProxyKey(thirdPartyRole.provider) === sharedProviderProxyKey(provider)
       ? {
           ...options,
-          externalRoleReasoningEffort: managedRole.reasoningEffort,
+          externalRoleReasoningEffort: thirdPartyRole.reasoningEffort,
         }
       : options;
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
   const goAccountIds = goAccounts.map((account) => account.id);
-  const goDefaultAccount = managedRole
-    && opencodeGoAccountIdFromProvider(managedRole.provider)
+  const goDefaultAccount = thirdPartyRole
+    && opencodeGoAccountIdFromProvider(thirdPartyRole.provider)
     ? goAccounts.find((account) =>
-        account.id === opencodeGoAccountIdFromProvider(managedRole.provider))
+        account.id === opencodeGoAccountIdFromProvider(thirdPartyRole.provider))
     : loadOpencodeGoDefaultAccount(runtime.environment);
   const goDefaultAccountId = goDefaultAccount?.id;
   const opencodeGoQuotaWindows = new Map(goAccounts.map((account) => [
@@ -748,12 +748,12 @@ async function runServiceAppServer(args) {
   ]));
   const isGoProvider = (provider) =>
     opencodeGoAccountIdFromProvider(provider) !== undefined;
-  const refreshManagedRoleConfig = (provider, baseUrl) => {
-    if (managedRole?.provider !== provider) return;
+  const refreshThirdPartyRoleConfig = (provider, baseUrl) => {
+    if (thirdPartyRole?.provider !== provider) return;
     try {
-      writeManagedModelProviderRoleConfig(runtime.environment, {
+      writeThirdPartyModelProviderRoleConfig(runtime.environment, {
         provider,
-        model: managedRole.model,
+        model: thirdPartyRole.model,
         baseUrl,
       });
     } catch (error) {
@@ -784,8 +784,8 @@ async function runServiceAppServer(args) {
   const childrenByProvider = new Map();
   let watchChild;
   let detachChild;
-  const primaryChildCredential = managedRole
-    ? loadConfiguredProviderCredential(managedRole.provider, runtime.environment)
+  const primaryChildCredential = thirdPartyRole
+    ? loadThirdPartyProviderCredential(thirdPartyRole.provider, runtime.environment)
     : undefined;
   const launchProvider = (provider) => {
     const existing = providerLaunches.get(provider);
@@ -814,7 +814,7 @@ async function runServiceAppServer(args) {
         : localBaseUrl;
       let child;
       try {
-        refreshManagedRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
+        refreshThirdPartyRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
         const argumentsList = withProviderBaseUrl(
           managed.runtime.arguments,
           provider,
@@ -896,7 +896,7 @@ async function runServiceAppServer(args) {
     childrenByProvider.delete(provider);
     if (isGoProvider(provider)) {
       const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
-      const roleUsesGoProxy = managedRole && isGoProvider(managedRole.provider);
+      const roleUsesGoProxy = thirdPartyRole && isGoProvider(thirdPartyRole.provider);
       if (!remainingGoChild && !roleUsesGoProxy) {
         const goProxy = providerProxyRuntimes.get("opencode-go")?.proxy;
         if (goProxy) await closeProviderProxy(goProxy);
@@ -920,7 +920,7 @@ async function runServiceAppServer(args) {
         customPrimaryProvider.id,
         localBaseUrl,
       );
-      refreshManagedRoleConfig(
+      refreshThirdPartyRoleConfig(
         customPrimaryProvider.id,
         externalRoleBaseUrl(localBaseUrl),
       );
@@ -973,23 +973,24 @@ async function runServiceAppServer(args) {
         definition.id,
         primaryBaseUrl,
       );
-      refreshManagedRoleConfig(
+      refreshThirdPartyRoleConfig(
         definition.id,
         externalRoleBaseUrl(localBaseUrl),
       );
     }
-    if (managedRole && managedByProvider.has(managedRole.provider)) {
-      const provider = managedRole.provider;
+    if (thirdPartyRole && managedByProvider.has(thirdPartyRole.provider)) {
+      const provider = thirdPartyRole.provider;
       const definition = providerDefinitions.get(provider);
-      if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+      const customDefinition = customSwitchingProvidersById.get(provider);
+      if (!definition && !customDefinition) throw new Error(`未知第三方 Provider：${provider}`);
       const providerKey = isGoProvider(provider) ? "opencode-go" : provider;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(provider, isGoProvider(provider)
           ? goProxyOptions
-          : proxyOptionsForUrl(new URL(definition.baseUrl))),
+          : proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl))),
       );
-      refreshManagedRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
+      refreshThirdPartyRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
     }
     supervisorOwner = new AppServerSupervisorOwner(
       socketPath,
@@ -1111,7 +1112,31 @@ async function service(args) {
     return;
   }
   if (action === "install") {
-    runScript("scripts/validate-config.mjs", [], { failureReportedByChild: true });
+    const runtime = configuredEnvironment();
+    const { prepareServiceInstall } = await import(
+      "../scripts/service-install-management.mjs"
+    );
+    const task = prepareServiceInstall(runtime.environment, {
+      onProgress: ({ stage, status }) => {
+        if (status === "completed" && stage === "validate-config") {
+          console.log("Gateway 配置校验通过。");
+        }
+        if (status === "completed" && stage === "write-definitions") {
+          for (const managedService of task.preview.services) {
+            console.log(`生成：${managedService.destination}`);
+          }
+          printCliMessage(
+            "success",
+            task.preview.serviceManager === "systemd"
+              ? "systemd 用户服务配置已生成。"
+              : "launchd 配置已生成。",
+          );
+        }
+      },
+    });
+    await task.execute();
+    printCliMessage("success", coreServiceReadyMessage("all"));
+    return;
   }
   const controlEnvironment = serviceActionAllowsInvalidConfig(action)
     ? serviceControlEnvironment()

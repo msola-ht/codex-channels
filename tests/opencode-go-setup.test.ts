@@ -28,6 +28,9 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
 });
 
 import {
+  addOpencodeGoAccount,
+  applyOpencodeGoRestore,
+  previewOpencodeGoRestore,
   refreshOpencodeGoCatalogForUpdate,
   runOpenCodeGoSetup,
 } from "../scripts/opencode-go-setup.mjs";
@@ -64,6 +67,29 @@ describe("OpenCode Go setup", () => {
       "OpenAI + OpenCode Go 切换模式（创建默认账户 opencode-go）",
       "仅 OpenCode Go 固定模式（创建默认账户 opencode-go）",
     ]);
+  });
+
+  it("requires fixed-mode confirmation when called without a custom prompter", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-confirm-"));
+    const password = vi.fn();
+    const output = { write: vi.fn() };
+
+    await expect(addOpencodeGoAccount("opencode-go", {
+      mode: "exclusive",
+      environment: {
+        CODEX_HOME: codexHome,
+        CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+      },
+      output,
+      prompts: {
+        confirm: async () => false,
+        password,
+        isCancel: () => false,
+      } as never,
+    })).resolves.toEqual({ action: "cancelled", accountId: "opencode-go" });
+
+    expect(password).not.toHaveBeenCalled();
+    expect(output.write).toHaveBeenCalledWith("已取消，未修改任何文件。\n");
   });
 
   it("opens model settings from the OpenCode Go menu when configured", async () => {
@@ -223,6 +249,52 @@ describe("OpenCode Go setup", () => {
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
   });
 
+  it("exposes a credential-free restore preview and requires explicit confirmation", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-restore-preview-"));
+    const environment = {
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+    };
+    await runOpenCodeGoSetup({
+      environment,
+      output: { write: () => undefined },
+      prompter: prompt("switching"),
+      configureRole: vi.fn(async () => undefined),
+      downloadCatalog: successfulCatalog,
+    });
+
+    expect(previewOpencodeGoRestore({ environment })).toEqual({
+      operation: "restore",
+      provider: { id: "opencode-go", name: "OpenCode Go" },
+      effects: {
+        restoresInitialConfig: true,
+        removesManagedCatalog: true,
+        restoresExternalAgentConfig: true,
+        removesManagedAccounts: true,
+      },
+      confirmation: { required: true, field: "confirmRestore" },
+      activation: "restart-all",
+    });
+    await expect(applyOpencodeGoRestore({}, { environment })).rejects.toMatchObject({
+      code: "confirmation-required",
+      field: "confirmRestore",
+    });
+  });
+
+  it("returns a stable error when no restore backup exists", () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-no-restore-"));
+
+    expect(() => previewOpencodeGoRestore({
+      environment: {
+        CODEX_HOME: codexHome,
+        CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+      },
+    })).toThrow(expect.objectContaining({
+      code: "backup-not-found",
+      field: "restore",
+    }));
+  });
+
   it("restores a legacy backup state created before catalog files were provider-owned", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-legacy-restore-"));
     await runOpenCodeGoSetup({
@@ -269,7 +341,7 @@ describe("OpenCode Go setup", () => {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("restore"),
-    })).rejects.toThrow("备份状态无效");
+    })).rejects.toMatchObject({ code: "backup-invalid", field: "restore" });
 
     expect(readFileSync(configPath, "utf8")).toBe(configBefore);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(true);

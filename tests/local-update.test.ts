@@ -24,9 +24,11 @@ import {
 } from "../runtime/model-provider-definitions.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import {
+  getLocalUpdateFailure,
   inspectDatabaseUpdates,
   inspectCoreServiceInstallation,
   inspectGatewayConfiguration,
+  inspectLocalUpdatePlan,
   refreshManagedProviderCatalogsForUpdate,
   updateDatabases,
   updateGatewayConfiguration,
@@ -270,6 +272,7 @@ describe("local update", () => {
 
   it("keeps config and both databases inside one stopped service window", async () => {
     const calls: string[] = [];
+    const progress: Array<[string, string]> = [];
     const result = await updateLocalInstallation(terminalEnvironment(), {
       inspectConfig: () => {
         calls.push("inspect-config");
@@ -303,6 +306,12 @@ describe("local update", () => {
       waitForServices: async () => {
         calls.push("wait-ready");
       },
+      onProgress: ({ stage, status }) => {
+        progress.push([stage, status]);
+        if (stage === "inspect" && status === "started") {
+          throw new Error("observer unavailable");
+        }
+      },
     });
 
     expect(calls).toEqual([
@@ -323,6 +332,75 @@ describe("local update", () => {
       providerCatalogs: "provider-catalogs",
       servicesRestored: true,
     });
+    expect(progress).toEqual([
+      ["inspect", "started"],
+      ["inspect", "completed"],
+      ["stop-services", "started"],
+      ["stop-services", "completed"],
+      ["provider-files", "started"],
+      ["provider-files", "completed"],
+      ["provider-catalogs", "started"],
+      ["provider-catalogs", "completed"],
+      ["config", "started"],
+      ["config", "completed"],
+      ["databases", "started"],
+      ["databases", "completed"],
+      ["validate-offline", "started"],
+      ["validate-offline", "completed"],
+      ["restore-services", "started"],
+      ["restore-services", "completed"],
+    ]);
+  });
+
+  it("returns a redacted local update preflight plan", async () => {
+    const plan = await inspectLocalUpdatePlan(terminalEnvironment(), {
+      inspectConfig: () => ({
+        configPath: "/config",
+        missingSafeDefaults: ["display.reasoning"],
+        removedPaths: [],
+      }),
+      inspectDatabases: () => ({
+        state: { schemaVersion: 4, targetSchemaVersion: 4 },
+        metrics: { schemaVersion: 10, targetSchemaVersion: 11 },
+      }),
+      inspectServices: () => ({ installed: true }),
+    });
+
+    expect(plan).toMatchObject({
+      operation: "local-update",
+      requiresServiceInterruption: true,
+      steps: [
+        "inspect",
+        "stop-services",
+        "provider-files",
+        "provider-catalogs",
+        "config",
+        "databases",
+        "validate-offline",
+        "restore-services",
+      ],
+    });
+    expect(plan.revision).toMatch(/^[0-9a-f]{64}$/u);
+    expect(JSON.stringify(plan)).not.toContain("token");
+  });
+
+  it("rejects a stale local update plan before stopping or writing", async () => {
+    const calls: string[] = [];
+    const plan = await inspectLocalUpdatePlan(terminalEnvironment(), {
+      inspectConfig: () => ({ configPath: "/config-a" }),
+      inspectDatabases: () => ({ state: {}, metrics: {} }),
+      inspectServices: () => ({ installed: true }),
+    });
+
+    await expect(updateLocalInstallation(terminalEnvironment(), {
+      expectedRevision: plan.revision,
+      inspectConfig: () => ({ configPath: "/config-b" }),
+      inspectDatabases: () => ({ state: {}, metrics: {} }),
+      inspectServices: () => ({ installed: true }),
+      stopServices: () => calls.push("stop"),
+      updateConfig: () => calls.push("config"),
+    })).rejects.toThrow("本地更新预检状态已变化");
+    expect(calls).toEqual([]);
   });
 
   it("updates offline without starting services when core services are not installed", async () => {
@@ -523,24 +601,50 @@ describe("local update", () => {
 
   it("restores and verifies core services when an offline update fails", async () => {
     const calls: string[] = [];
-    await expect(updateLocalInstallation(terminalEnvironment(), {
-      inspectConfig: () => ({ configPath: "/config", missingSafeDefaults: [] }),
-      inspectDatabases: () => ({ state: {}, metrics: {} }),
-      inspectServices: () => ({ installed: true }),
-      stopServices: () => calls.push("stop"),
-      updateConfig: () => calls.push("update-config"),
-      updateDatabases: () => {
-        calls.push("update-databases");
-        throw new Error("database failed");
-      },
-      validateOffline: () => calls.push("validate-offline"),
-      startServices: () => calls.push("start"),
-      waitForServices: async () => {
-        calls.push("wait-ready");
-      },
-    })).rejects.toThrow(/database failed/u);
+    let failure: unknown;
+    try {
+      await updateLocalInstallation(terminalEnvironment(), {
+        inspectConfig: () => ({ configPath: "/config", missingSafeDefaults: [] }),
+        inspectDatabases: () => ({ state: {}, metrics: {} }),
+        inspectServices: () => ({ installed: true }),
+        stopServices: () => calls.push("stop"),
+        updateProviderFiles: () => calls.push("update-provider-files"),
+        updateProviderCatalogs: () => calls.push("update-provider-catalogs"),
+        updateConfig: () => calls.push("update-config"),
+        updateDatabases: () => {
+          calls.push("update-databases");
+          throw new Error("database failed");
+        },
+        validateOffline: () => calls.push("validate-offline"),
+        startServices: () => calls.push("start"),
+        waitForServices: async () => {
+          calls.push("wait-ready");
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/database failed/u);
+    expect(getLocalUpdateFailure(failure)).toEqual({
+      operation: "local-update",
+      code: "local-update-failed",
+      stage: "databases",
+      completedStages: [
+        "inspect",
+        "stop-services",
+        "provider-files",
+        "provider-catalogs",
+        "config",
+        "restore-services",
+      ],
+      recovery: { changes: "partial", services: "restored" },
+      recommendation: "修复失败原因后重新运行 codexc update",
+    });
     expect(calls).toEqual([
       "stop",
+      "update-provider-files",
+      "update-provider-catalogs",
       "update-config",
       "update-databases",
       "start",

@@ -2,6 +2,10 @@ import {
   createManagedProviderProfile,
   createModelProviderConfig,
 } from "../runtime/model-provider-profile.mjs";
+import {
+  withManagedModelCatalogSettings,
+  withPreservedManagedModelCatalogSettings,
+} from "../runtime/model-provider-runtime.mjs";
 
 const managedRootKeys = Object.freeze([
   "model",
@@ -16,6 +20,32 @@ const managedRootKeys = Object.freeze([
   "forced_login_method",
 ]);
 
+export class ManagedModelProviderSetupError extends Error {
+  constructor(code, field, message, options) {
+    super(message, options);
+    this.name = "ManagedModelProviderSetupError";
+    this.code = code;
+    this.field = field;
+  }
+}
+
+export function createManagedProviderRestorePreview(definition, {
+  removesManagedAccounts = false,
+} = {}) {
+  return {
+    operation: "restore",
+    provider: { id: definition.id, name: definition.displayName },
+    effects: {
+      restoresInitialConfig: true,
+      removesManagedCatalog: true,
+      restoresExternalAgentConfig: true,
+      removesManagedAccounts,
+    },
+    confirmation: { required: true, field: "confirmRestore" },
+    activation: "restart-all",
+  };
+}
+
 export function createSwitchingProviderProfile(definition, {
   apiKey,
   catalogPath,
@@ -28,6 +58,35 @@ export function createSwitchingProviderProfile(definition, {
     ...(model === undefined ? {} : { model }),
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
   });
+}
+
+export function createManagedProviderCatalog(catalog, definition, {
+  previousModels = [],
+  autoCompactPercent = 60,
+} = {}) {
+  const models = Array.isArray(catalog?.models) ? catalog.models : [];
+  for (const { slug, available } of definition.models) {
+    if (available && !models.some((model) => model?.slug === slug)) {
+      throw new Error(`${definition.displayName} 模型目录缺少 ${slug}`);
+    }
+  }
+  const defaultEntry = models.find((model) => model?.slug === definition.defaultModel);
+  const contextWindow = defaultEntry?.context_window;
+  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
+    throw new Error(`${definition.displayName} 模型目录缺少上下文窗口`);
+  }
+  const defaultsApplied = withManagedModelCatalogSettings(catalog, definition, {
+    model: definition.defaultModel,
+    reasoningEffort: definition.defaultReasoningEffort,
+    ...(autoCompactPercent === null
+      ? {}
+      : { autoCompactLimit: Math.round(contextWindow * autoCompactPercent / 100) }),
+  });
+  return withPreservedManagedModelCatalogSettings(
+    defaultsApplied,
+    definition,
+    previousModels,
+  );
 }
 
 export function applyExclusiveProviderConfig(current, definition, {

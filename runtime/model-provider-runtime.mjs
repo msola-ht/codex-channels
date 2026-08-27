@@ -14,6 +14,7 @@ import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import { connectHomePath, providerStorageRoot } from "./connect-home.mjs";
+import { withGatewayConfigLock } from "./gateway-config.mjs";
 import {
   deepseekProviderDefinition,
   loadManagedModelProviderDefinitions,
@@ -37,6 +38,7 @@ export const customPrimaryProviderProfileName = "sf-custom";
 const customSwitchingProviderProfileName = "custom";
 const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon-bedrock"]);
 const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
+const thirdPartyRoleReasoningEffortPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u;
 const customSwitchingRegistryMaximumBytes = 262_144;
 const customSwitchingDefaultReasoningEffort = "medium";
 
@@ -488,6 +490,56 @@ export function loadConfiguredCustomSwitchingModelProviders(environment = proces
   return providers.map((provider) => loadCustomSwitchingProfile(environment, provider));
 }
 
+export function loadCustomModelProviderRoleCandidates(environment = process.env) {
+  const switching = loadConfiguredCustomSwitchingModelProviders(environment).map((provider) => ({
+    provider: provider.id,
+    displayName: provider.name,
+    model: provider.model,
+    reasoningEffort: provider.reasoningEffort,
+    mode: "switching",
+    baseUrl: provider.baseUrl,
+    apiKey: provider.apiKey,
+    apiKeyEnvironmentKey: customSwitchingProviderEnvironmentKey(provider.id),
+    supportsWebsockets: provider.supportsWebsockets,
+  }));
+  const primary = loadConfiguredCustomPrimaryModelProvider(environment);
+  if (primary === undefined) return switching;
+  const configPath = join(codexHomePath(environment), "config.toml");
+  let document;
+  try {
+    document = record(parse(readCodexConfigFile(configPath)));
+  } catch {
+    throw new Error("Codex 自定义固定 Provider 配置无法安全读取");
+  }
+  const provider = record(record(document.model_providers)[primary.id]);
+  const model = document.model;
+  const reasoningEffort = document.model_reasoning_effort ?? customSwitchingDefaultReasoningEffort;
+  const apiKey = provider.experimental_bearer_token;
+  if (
+    typeof model !== "string"
+    || model.trim() === ""
+    || !validThirdPartyRoleReasoningEffort(reasoningEffort)
+    || typeof apiKey !== "string"
+    || apiKey.trim() === ""
+    || /[\r\n]/u.test(apiKey)
+  ) {
+    throw new Error(`Codex 自定义固定 Provider ${primary.id} 不具备可用的子代理配置`);
+  }
+  return [...switching, {
+    provider: primary.id,
+    displayName: typeof provider.name === "string" && provider.name.trim() !== ""
+      ? provider.name.trim()
+      : primary.id,
+    model: model.trim(),
+    reasoningEffort: reasoningEffort.trim(),
+    mode: "exclusive",
+    baseUrl: primary.baseUrl,
+    apiKey,
+    apiKeyEnvironmentKey: customSwitchingProviderEnvironmentKey(primary.id),
+    supportsWebsockets: provider.supports_websockets === true,
+  }];
+}
+
 function loadCustomSwitchingProfile(environment, registeredProvider) {
   const path = customPrimaryProviderProfilePath(environment, registeredProvider);
   let profileContent;
@@ -627,6 +679,15 @@ function configuredCustomSwitchingProfileFromContent(
 }
 
 export function writeCustomPrimaryProviderSwitchingProfile(
+  options,
+  environment = process.env,
+  guards = {},
+) {
+  return withGatewayConfigLock(customSwitchingProviderRegistryPath(environment), () =>
+    writeCustomPrimaryProviderSwitchingProfileUnlocked(options, environment, guards));
+}
+
+function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   {
     provider,
     model,
@@ -637,6 +698,11 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     catalogSource = { kind: "official" },
   },
   environment = process.env,
+  {
+    expectedProfilePresent,
+    expectedProfileContent,
+    expectedProviderIds,
+  } = {},
 ) {
   const validationError = validateCustomPrimaryModelProviderId(provider, environment);
   if (validationError !== null) throw new Error(validationError);
@@ -663,6 +729,13 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     previousProfile = readPrivateFileSync(profilePath);
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
+  }
+  if (
+    (expectedProviderIds !== undefined && !sameStringArray(ids, expectedProviderIds))
+    || (expectedProfilePresent === true && previousProfile !== expectedProfileContent)
+    || (expectedProfilePresent === false && previousProfile !== undefined)
+  ) {
+    throw customSwitchingProfileChangedError(provider);
   }
   writePrivateFileAtomicSync(
     profilePath,
@@ -708,6 +781,19 @@ export function writeCustomPrimaryProviderSwitchingProfile(
 
 export function removeCustomPrimaryProviderSwitchingProfile(
   environment = process.env,
+  provider,
+  expectedProfileContent,
+) {
+  return withGatewayConfigLock(customSwitchingProviderRegistryPath(environment), () =>
+    removeCustomPrimaryProviderSwitchingProfileUnlocked(
+      environment,
+      provider,
+      expectedProfileContent,
+    ));
+}
+
+function removeCustomPrimaryProviderSwitchingProfileUnlocked(
+  environment,
   provider,
   expectedProfileContent,
 ) {
@@ -763,6 +849,15 @@ export function restoreCustomPrimaryProviderSwitchingProfile(
   provider,
   profileContent,
 ) {
+  return withGatewayConfigLock(customSwitchingProviderRegistryPath(environment), () =>
+    restoreCustomPrimaryProviderSwitchingProfileUnlocked(environment, provider, profileContent));
+}
+
+function restoreCustomPrimaryProviderSwitchingProfileUnlocked(
+  environment,
+  provider,
+  profileContent,
+) {
   configuredCustomSwitchingProfileFromContent(environment, provider, profileContent);
   const ids = loadCustomSwitchingProviderIds(environment);
   const path = customPrimaryProviderProfilePath(environment, provider);
@@ -785,6 +880,12 @@ export function restoreCustomPrimaryProviderSwitchingProfile(
     }
     throw error;
   }
+}
+
+function sameStringArray(left, right) {
+  return Array.isArray(right)
+    && left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function customSwitchingProfileChangedError(provider) {
@@ -1003,7 +1104,56 @@ export function writeManagedModelProviderRoleConfig(
   return { role: managedThirdPartyRoleName, provider: definition.id, model: selectedModel };
 }
 
+export function writeThirdPartyModelProviderRoleConfig(
+  environment = process.env,
+  { provider, model, baseUrl } = {},
+) {
+  const definition = findManagedProviderDefinition(environment, provider);
+  if (definition !== undefined) {
+    return writeManagedModelProviderRoleConfig(environment, { provider, model, baseUrl });
+  }
+  const candidate = loadCustomModelProviderRoleCandidates(environment)
+    .find((entry) => entry.provider === provider);
+  if (candidate === undefined) throw new Error("请先选择已配置的第三方 Provider");
+  const selectedModel = model ?? candidate.model;
+  if (selectedModel !== candidate.model) {
+    throw new Error(`${candidate.displayName} 子代理当前只支持已配置模型：${candidate.model}`);
+  }
+  const url = validProviderBaseUrl(baseUrl ?? candidate.baseUrl, "第三方子代理 base_url");
+  const lines = [
+    `model = ${tomlString(selectedModel)}`,
+    `model_provider = ${tomlString(candidate.provider)}`,
+    `model_reasoning_effort = ${tomlString(candidate.reasoningEffort)}`,
+    `developer_instructions = ${tomlString(
+      "你是第三方模型单次子代理。此角色只用于 fork_turns=1 的一次性任务：把继承上下文中最后一条用户消息视为完整任务并直接执行；不要尝试解析 encrypted_content，不等待或请求后续消息，也不要调用子代理通信工具。若最后一条用户消息仍不足以确定任务，只返回一句明确错误。",
+    )}`,
+    "",
+    `[model_providers.${candidate.provider}]`,
+    `name = ${tomlString(candidate.displayName)}`,
+    `base_url = ${tomlString(url)}`,
+    'wire_api = "responses"',
+    `env_key = ${tomlString(candidate.apiKeyEnvironmentKey)}`,
+    `supports_websockets = ${candidate.supportsWebsockets}`,
+    "requires_openai_auth = false",
+    "",
+  ].join("\n");
+  writePrivateFileAtomicSync(managedModelProviderRoleConfigPath(environment), lines);
+  return { role: managedThirdPartyRoleName, provider: candidate.provider, model: selectedModel };
+}
+
 export function loadManagedModelProviderRole(environment = process.env) {
+  const role = loadThirdPartyModelProviderRole(environment);
+  return role?.providerType === "managed"
+    ? {
+        role: role.role,
+        provider: role.provider,
+        model: role.model,
+        reasoningEffort: role.reasoningEffort,
+      }
+    : undefined;
+}
+
+export function loadThirdPartyModelProviderRole(environment = process.env) {
   const path = managedModelProviderRoleConfigPath(environment);
   if (!existsSync(path)) return undefined;
   const configPath = join(codexHomePath(environment), "config.toml");
@@ -1024,22 +1174,32 @@ export function loadManagedModelProviderRole(environment = process.env) {
   const model = document.model;
   const reasoningEffort = document.model_reasoning_effort;
   const definition = findManagedProviderDefinition(environment, provider);
+  const custom = definition === undefined
+    ? loadCustomModelProviderRoleCandidates(environment).find((entry) => entry.provider === provider)
+    : undefined;
   if (
-    !definition
+    (!definition && !custom)
     || typeof model !== "string"
-    || typeof reasoningEffort !== "string"
-    || reasoningEffort.length === 0
-    || reasoningEffort.length > 128
-    || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(reasoningEffort)
+    || !validThirdPartyRoleReasoningEffort(reasoningEffort)
+    || (custom !== undefined
+      && (model !== custom.model || reasoningEffort !== custom.reasoningEffort))
   ) {
     throw new Error("第三方子代理角色配置无效");
   }
   return {
     role: managedThirdPartyRoleName,
-    provider: definition.id,
+    provider: definition?.id ?? custom.provider,
     model,
     reasoningEffort,
+    providerType: definition === undefined ? "custom" : "managed",
   };
+}
+
+function validThirdPartyRoleReasoningEffort(value) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 128
+    && thirdPartyRoleReasoningEffortPattern.test(value);
 }
 
 export function loadConfiguredProviderCredential(provider, environment = process.env) {
@@ -1050,6 +1210,18 @@ export function loadConfiguredProviderCredential(provider, environment = process
   return {
     environmentKey: profile.apiKeyEnvironmentKey,
     apiKey: profile.apiKey,
+  };
+}
+
+export function loadThirdPartyProviderCredential(provider, environment = process.env) {
+  const definition = findManagedProviderDefinition(environment, provider);
+  if (definition !== undefined) return loadConfiguredProviderCredential(provider, environment);
+  const candidate = loadCustomModelProviderRoleCandidates(environment)
+    .find((entry) => entry.provider === provider);
+  if (candidate === undefined) throw new Error(`未知第三方 Provider：${provider}`);
+  return {
+    environmentKey: candidate.apiKeyEnvironmentKey,
+    apiKey: candidate.apiKey,
   };
 }
 

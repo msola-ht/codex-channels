@@ -321,6 +321,33 @@ describe("Weixin QR contract probe", () => {
       pollDelayMs: 0,
     })).rejects.toMatchObject({ code: "login-timeout" });
   });
+
+  it("cancels while waiting for a verification code", async () => {
+    const controller = new AbortController();
+    const client = {
+      start: vi.fn(async () => ({
+        qrcode: "qr-secret",
+        qrcodeImageContent: "https://weixin.qq.com/x/visible-qr",
+      })),
+      poll: vi.fn(async () => ({ status: "need_verifycode" })),
+    };
+    const waitingForCode = new Promise<string>(() => {});
+    const login = runWeixinQrLoginContract({
+      client,
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      signal: controller.signal,
+      displayQr: async () => {},
+      readVerifyCode: async () => waitingForCode,
+      pollDelayMs: 0,
+    });
+
+    await vi.waitFor(() => {
+      expect(client.poll).toHaveBeenCalledOnce();
+    });
+    controller.abort();
+
+    await expect(login).rejects.toMatchObject({ code: "aborted" });
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {

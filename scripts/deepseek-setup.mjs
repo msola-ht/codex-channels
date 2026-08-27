@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -15,8 +16,6 @@ import {
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
   managedModelProviderRoleConfigPath,
-  withManagedModelCatalogSettings,
-  withPreservedManagedModelCatalogSettings,
   writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -32,11 +31,15 @@ import {
 } from "./agents.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import {
+  ManagedModelProviderSetupError,
   applyExclusiveProviderConfig,
+  createManagedProviderCatalog,
+  createManagedProviderRestorePreview,
   createSwitchingProviderProfile,
   hasProviderBaseConfig,
   restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 export const deepseekSetupScriptUrl =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
@@ -51,6 +54,198 @@ const maximumAutoCompactPercent = 90;
 const previousDefaultModel = "deepseek-v4-flash";
 
 class DeepseekSetupCancelled extends Error {}
+
+export function previewDeepseekConfiguration(
+  { mode = "switching" },
+  { environment = process.env } = {},
+) {
+  if (mode !== "switching" && mode !== "exclusive") {
+    throw managedSetupInvalid(
+      "invalid-mode",
+      "mode",
+      "DeepSeek 模式必须是 switching 或 exclusive",
+    );
+  }
+  try {
+    assertThirdPartyRoleAvailable(environment);
+  } catch (error) {
+    throw managedSetupInvalid(
+      "provider-conflict",
+      "provider",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+  if (mode === "exclusive") {
+    let primary;
+    try {
+      primary = loadPrimaryModelProvider(environment);
+    } catch (error) {
+      throw managedSetupInvalid(
+        "provider-state-unavailable",
+        "provider",
+        error instanceof Error ? error.message : String(error),
+        error,
+      );
+    }
+    if (primary !== "openai" && primary !== providerId) {
+      throw managedSetupInvalid(
+        "provider-conflict",
+        "provider",
+        `请先恢复当前固定 Provider：${primary}`,
+      );
+    }
+  }
+  const configured = existsSync(deepseekSetupPaths(environment).backupStatePath);
+  return {
+    operation: configured ? "reconfigure" : "add",
+    provider: { id: providerId, name: deepseekProviderDefinition.displayName },
+    mode,
+    effects: {
+      writesMainConfig: mode === "exclusive",
+      writesIsolatedProfile: mode === "switching",
+      downloadsCatalog: true,
+      updatesExternalAgent: true,
+      preservesInitialConfig: true,
+    },
+    confirmation: {
+      required: mode === "exclusive",
+      field: "confirmExclusiveConfigChange",
+    },
+    activation: "restart-all",
+  };
+}
+
+export async function applyDeepseekConfiguration(
+  input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyDeepseekConfigurationUnlocked(input, options),
+  );
+}
+
+async function applyDeepseekConfigurationUnlocked(
+  {
+    mode = "switching",
+    apiKey,
+    autoCompactPercent,
+    confirmExclusiveConfigChange = false,
+  },
+  {
+    environment = process.env,
+    fetchImpl = globalThis.fetch,
+    downloadCatalog = downloadDeepseekCatalog,
+    configureRole = configureThirdPartyRole,
+  } = {},
+) {
+  const preview = previewDeepseekConfiguration({ mode }, { environment });
+  if (mode === "exclusive" && confirmExclusiveConfigChange !== true) {
+    throw managedSetupInvalid(
+      "confirmation-required",
+      "confirmExclusiveConfigChange",
+      "固定模式会修改并备份 Codex 主配置，必须先明确确认",
+    );
+  }
+  if (
+    typeof apiKey !== "string"
+    || !/^sk-[^\s"]+$/u.test(apiKey)
+    || apiKey.length > 4_096
+  ) {
+    throw managedSetupInvalid("invalid-api-key", "apiKey", "DeepSeek API Key 无效");
+  }
+  if (
+    autoCompactPercent !== undefined
+    && (!Number.isInteger(autoCompactPercent)
+      || autoCompactPercent < minimumAutoCompactPercent
+      || autoCompactPercent > maximumAutoCompactPercent)
+  ) {
+    throw managedSetupInvalid(
+      "invalid-auto-compact-percent",
+      "autoCompactPercent",
+      "DeepSeek 自动压缩百分比无效",
+    );
+  }
+
+  let downloaded;
+  try {
+    downloaded = await downloadCatalog(fetchImpl);
+  } catch (error) {
+    throw managedSetupInvalid(
+      "catalog-unavailable",
+      "catalog",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+  try {
+    return await configureDeepseekInstallation({
+      mode,
+      apiKey,
+      autoCompactPercent,
+      downloaded,
+      environment,
+      configureRole,
+      preview,
+    });
+  } catch (error) {
+    if (error instanceof ManagedModelProviderSetupError) throw error;
+    throw managedSetupInvalid(
+      "operation-failed",
+      "action",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+}
+
+export async function previewDeepseekRestore({
+  environment = process.env,
+} = {}) {
+  const paths = deepseekSetupPaths(environment);
+  await readDeepseekRestoreState(paths.backupStatePath);
+  return createManagedProviderRestorePreview(deepseekProviderDefinition);
+}
+
+export async function applyDeepseekRestore(
+  input,
+  options = {},
+) {
+  const environment = options.environment ?? process.env;
+  return withModelProviderManagementTransaction(
+    environment,
+    () => applyDeepseekRestoreUnlocked(input, options),
+  );
+}
+
+async function applyDeepseekRestoreUnlocked(
+  { confirmRestore = false },
+  { environment = process.env } = {},
+) {
+  const preview = await previewDeepseekRestore({ environment });
+  if (confirmRestore !== true) {
+    throw managedSetupInvalid(
+      "confirmation-required",
+      "confirmRestore",
+      "恢复 DeepSeek 初始配置前必须明确确认",
+    );
+  }
+  const paths = deepseekSetupPaths(environment);
+  try {
+    await restoreInitialConfig(paths);
+  } catch (error) {
+    if (error instanceof ManagedModelProviderSetupError) throw error;
+    throw managedSetupInvalid(
+      "operation-failed",
+      "restore",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+  return { action: "restored", ...preview };
+}
 
 export async function runDeepseekSetup({
   allowBack = false,
@@ -84,77 +279,32 @@ export async function runDeepseekSetup({
         prompts,
       });
     }
-    const codexHome = codexHomePath(environment);
-    const configPath = join(codexHome, "config.toml");
-    const roleConfigPath = managedModelProviderRoleConfigPath(environment);
-    const profilePath = join(codexHome, deepseekProviderDefinition.profileFileName);
-    const providerDirectory = managedProviderDirectory(
-      environment,
-      deepseekProviderDefinition,
-    );
-    const gatewayProfilePath = join(
-      providerDirectory,
-      deepseekProviderDefinition.managedMarkerFileName,
-    );
-    const catalogPath = join(
-      providerDirectory,
-      deepseekProviderDefinition.catalogFileName,
-    );
-    const manifestPath = join(
-      providerDirectory,
-      deepseekProviderDefinition.catalogManifestFileName,
-    );
-    const backupDirectory = join(
-      providerDirectory,
-      deepseekProviderDefinition.backupDirectoryName,
-    );
-    const backupPath = join(backupDirectory, "config.toml");
-    const profileBackupPath = join(
-      backupDirectory,
-      deepseekProviderDefinition.profileFileName,
-    );
-    const gatewayProfileBackupPath = join(
-      backupDirectory,
-      deepseekProviderDefinition.managedMarkerFileName,
-    );
-    const roleConfigBackupPath = join(
-      backupDirectory,
-      "sf-agent.config.toml",
-    );
-    const backupStatePath = join(backupDirectory, "state.json");
+    const paths = deepseekSetupPaths(environment);
+    const {
+      configPath,
+      profilePath,
+      catalogPath,
+    } = paths;
     if (choice === "3") {
+      await previewDeepseekRestore({ environment });
       output.write("恢复会覆盖 DeepSeek 安装后对 ~/.codex/config.toml 做的其他修改。\n");
       if (!await prompt.confirm("确认恢复首次安装前的配置？", false)) {
         output.write("已取消，未修改任何文件。\n");
         return undefined;
       }
-      return restoreInitialConfig({
-        configPath,
-        profilePath,
-        gatewayProfilePath,
-        catalogPath,
-        manifestPath,
-        roleConfigPath,
-        backupPath,
-        profileBackupPath,
-        gatewayProfileBackupPath,
-        roleConfigBackupPath,
-        backupStatePath,
-        output,
-      });
+      await applyDeepseekRestore({ confirmRestore: true }, { environment });
+      output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
+      output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+      return deepseekRestoreResult(paths);
     }
     const mode = choice === "1" ? "switching" : "exclusive";
-    assertThirdPartyRoleAvailable(environment);
+    previewDeepseekConfiguration({ mode }, { environment });
     if (mode === "switching") {
       output.write(
         "\n切换模式保留 OpenAI 默认；DeepSeek 模型、Provider 与 API Key 全部保存在独立 Profile。\n",
       );
     }
     if (mode === "exclusive") {
-      const primary = loadPrimaryModelProvider(environment);
-      if (primary !== "openai" && primary !== providerId) {
-        throw new Error(`请先恢复当前固定 Provider：${primary}`);
-      }
       output.write("\n固定模式会修改 ~/.codex/config.toml，并将 DeepSeek API Key 写入该 0600 文件。\n");
       if (!await prompt.confirm("确认继续并先备份原配置？", false)) {
         output.write("已取消，未修改任何文件。\n");
@@ -163,124 +313,30 @@ export async function runDeepseekSetup({
     }
     const apiKey = await askApiKey(prompt);
     const autoCompactPercent = await askAutoCompact(prompt);
-
-    const downloaded = await downloadDeepseekCatalog(fetchImpl);
-    const previousManifest = await readOptionalJson(
-      manifestPath,
-      "DeepSeek 模型目录清单",
-    );
-    const defaultModelMigration = readDefaultModelMigration(previousManifest);
-    const installationPaths = [
-      configPath,
-      profilePath,
-      gatewayProfilePath,
-      catalogPath,
-      manifestPath,
-      roleConfigPath,
-      backupPath,
-      profileBackupPath,
-      gatewayProfileBackupPath,
-      roleConfigBackupPath,
-      backupStatePath,
-    ];
-    const installationSnapshots = await snapshotFiles(installationPaths);
-    let rollbackGuards;
-    try {
-      await mkdir(codexHome, { recursive: true, mode: 0o700 });
-      await preserveInitialConfig({
-        configPath,
-        profilePath,
-        gatewayProfilePath,
-        backupPath,
-        profileBackupPath,
-        gatewayProfileBackupPath,
-        roleConfigPath,
-        roleConfigBackupPath,
-        backupStatePath,
-      });
-      const previous = await loadPreviousManagedSettings({
-        environment,
-        gatewayProfilePath,
-        gatewayProfileBackupPath,
-        backupStatePath,
-      });
-      const selectedModel = previous?.model ?? supportedModel;
-      const managedCatalog = createManagedDeepseekCatalog(
-        downloaded.catalog,
-        previous?.models,
-        autoCompactPercent ?? null,
-      );
-      const selectedModelEntry = managedCatalog.models?.find(
-        (entry) => entry?.slug === selectedModel,
-      );
-      const selectedModelReasoningEffort = selectedModelEntry?.default_reasoning_level;
-      if (typeof selectedModelReasoningEffort !== "string") {
-        throw new Error("DeepSeek 模型目录缺少默认思考等级，未修改配置");
-      }
-      const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
-        configPath,
-        gatewayProfilePath,
-        gatewayProfileBackupPath,
-        backupPath,
-        backupStatePath,
-        catalogPath,
-        apiKey,
-        mode,
-        model: selectedModel,
-        reasoningEffort: selectedModelReasoningEffort,
-      });
-      await writePrivateFileAtomic(
-        catalogPath,
-        `${JSON.stringify(managedCatalog, null, 2)}\n`,
-      );
-      await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
-        source: deepseekSetupScriptUrl,
-        sha256: downloaded.sha256,
-        downloadedAt: new Date().toISOString(),
-        ...(defaultModelMigration === undefined
-          ? {}
-          : { defaultModelMigration }),
-      }, null, 2)}\n`);
-      await replaceOptionalFile(configPath, configContent);
-      await replaceOptionalFile(profilePath, profileContent);
-      await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
-      await setBackupRestoredState(backupStatePath, false);
-      rollbackGuards = await snapshotFiles(installationPaths);
-      await configureRole(providerId, selectedModel, environment);
-      if (mode === "switching") {
-        output.write(`\nOpenAI 默认模型与认证保持不变：${configPath}\n`);
-        output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
-        output.write("已将共享第三方子代理（agents.external）切换到 DeepSeek。\n");
-      } else {
-        output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
-        output.write("已将共享第三方子代理（agents.external）切换到 DeepSeek。\n");
-      }
-    } catch (error) {
-      if (rollbackGuards === undefined) throw error;
-      try {
-        await restoreFileSnapshots(installationSnapshots, rollbackGuards);
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          "DeepSeek 配置失败，且未能完整恢复操作前文件",
-          { cause: rollbackError },
-        );
-      }
-      throw error;
+    await applyDeepseekConfiguration({
+      mode,
+      apiKey,
+      autoCompactPercent,
+      confirmExclusiveConfigChange: mode === "exclusive",
+    }, {
+      environment,
+      fetchImpl,
+      configureRole,
+    });
+    if (mode === "switching") {
+      output.write(`\nOpenAI 默认模型与认证保持不变：${configPath}\n`);
+      output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
+      output.write("已将共享第三方子代理（agents.external）切换到 DeepSeek。\n");
+    } else {
+      output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
+      output.write("已将共享第三方子代理（agents.external）切换到 DeepSeek。\n");
     }
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
     output.write(mode === "switching"
       ? `原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile ${deepseekProviderDefinition.codexProfileName}\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile ${deepseekProviderDefinition.profileName}\n`
       : `原生 Codex 和 Gateway 将默认使用 ${supportedModel}。\n`);
     output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
-    return {
-      mode,
-      configPath,
-      profilePath,
-      gatewayProfilePath,
-      catalogPath,
-      backupPath,
-    };
+    return deepseekSetupResult(paths, mode);
   } catch (error) {
     if (allowBack && error instanceof DeepseekSetupCancelled) {
       return { action: "back" };
@@ -288,6 +344,138 @@ export async function runDeepseekSetup({
     throw error;
   } finally {
     prompt.close();
+  }
+}
+
+async function configureDeepseekInstallation({
+  mode,
+  apiKey,
+  autoCompactPercent,
+  downloaded,
+  environment,
+  configureRole,
+  preview,
+}) {
+  const paths = deepseekSetupPaths(environment);
+  const {
+    codexHome,
+    configPath,
+    roleConfigPath,
+    profilePath,
+    gatewayProfilePath,
+    catalogPath,
+    manifestPath,
+    backupPath,
+    profileBackupPath,
+    gatewayProfileBackupPath,
+    roleConfigBackupPath,
+    backupStatePath,
+  } = paths;
+  const previousManifest = await readOptionalJson(
+    manifestPath,
+    "DeepSeek 模型目录清单",
+  );
+  const defaultModelMigration = readDefaultModelMigration(previousManifest);
+  const installationPaths = [
+    configPath,
+    profilePath,
+    gatewayProfilePath,
+    catalogPath,
+    manifestPath,
+    roleConfigPath,
+    backupPath,
+    profileBackupPath,
+    gatewayProfileBackupPath,
+    roleConfigBackupPath,
+    backupStatePath,
+  ];
+  const installationSnapshots = await snapshotFiles(installationPaths);
+  let rollbackGuards = installationSnapshots;
+  try {
+    await mkdir(codexHome, { recursive: true, mode: 0o700 });
+    await preserveInitialConfig({
+      configPath,
+      profilePath,
+      gatewayProfilePath,
+      backupPath,
+      profileBackupPath,
+      gatewayProfileBackupPath,
+      roleConfigPath,
+      roleConfigBackupPath,
+      backupStatePath,
+    });
+    rollbackGuards = await snapshotFiles(installationPaths);
+    const previous = await loadPreviousManagedSettings({
+      environment,
+      gatewayProfilePath,
+      gatewayProfileBackupPath,
+      backupStatePath,
+    });
+    const selectedModel = previous?.model ?? supportedModel;
+    const managedCatalog = createManagedDeepseekCatalog(
+      downloaded.catalog,
+      previous?.models,
+      autoCompactPercent ?? null,
+    );
+    const selectedModelEntry = managedCatalog.models?.find(
+      (entry) => entry?.slug === selectedModel,
+    );
+    const selectedModelReasoningEffort = selectedModelEntry?.default_reasoning_level;
+    if (typeof selectedModelReasoningEffort !== "string") {
+      throw new Error("DeepSeek 模型目录缺少默认思考等级，未修改配置");
+    }
+    const { configContent, profileContent, gatewayProfileContent } = await buildCodexConfig({
+      configPath,
+      gatewayProfilePath,
+      gatewayProfileBackupPath,
+      backupPath,
+      backupStatePath,
+      catalogPath,
+      apiKey,
+      mode,
+      model: selectedModel,
+      reasoningEffort: selectedModelReasoningEffort,
+    });
+    await writePrivateFileAtomic(
+      catalogPath,
+      `${JSON.stringify(managedCatalog, null, 2)}\n`,
+    );
+    rollbackGuards = await snapshotFiles(installationPaths);
+    await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
+      source: deepseekSetupScriptUrl,
+      sha256: downloaded.sha256,
+      downloadedAt: new Date().toISOString(),
+      ...(defaultModelMigration === undefined
+        ? {}
+        : { defaultModelMigration }),
+    }, null, 2)}\n`);
+    rollbackGuards = await snapshotFiles(installationPaths);
+    await replaceOptionalFile(configPath, configContent);
+    rollbackGuards = await snapshotFiles(installationPaths);
+    await replaceOptionalFile(profilePath, profileContent);
+    rollbackGuards = await snapshotFiles(installationPaths);
+    await replaceOptionalFile(gatewayProfilePath, gatewayProfileContent);
+    rollbackGuards = await snapshotFiles(installationPaths);
+    await setBackupRestoredState(backupStatePath, false);
+    rollbackGuards = await snapshotFiles(installationPaths);
+    await configureRole(providerId, selectedModel, environment);
+    return {
+      action: "configured",
+      model: selectedModel,
+      paths: deepseekPublicPaths(paths),
+      ...preview,
+    };
+  } catch (error) {
+    try {
+      await restoreFileSnapshots(installationSnapshots, rollbackGuards);
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "DeepSeek 配置失败，且未能完整恢复操作前文件",
+        { cause: rollbackError },
+      );
+    }
+    throw error;
   }
 }
 
@@ -426,32 +614,13 @@ export function createManagedDeepseekCatalog(
   )) {
     throw new Error("DeepSeek 自动压缩百分比无效");
   }
-  const models = Array.isArray(catalog?.models) ? catalog.models : [];
-  for (const { slug, available } of deepseekProviderDefinition.models) {
-    if (available && !models.some((model) => model?.slug === slug)) {
-      throw new Error(`DeepSeek 官方模型目录缺少 ${slug}`);
-    }
-  }
-  const defaultEntry = models.find((model) => model?.slug === supportedModel);
-  const contextWindow = defaultEntry?.context_window;
-  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
-    throw new Error("DeepSeek 模型目录缺少上下文窗口，未修改配置");
-  }
-  const defaultsApplied = withManagedModelCatalogSettings(
+  return createManagedProviderCatalog(
     catalog,
     deepseekProviderDefinition,
     {
-      model: supportedModel,
-      reasoningEffort: deepseekProviderDefinition.defaultReasoningEffort,
-      ...(autoCompactPercent === null
-        ? {}
-        : { autoCompactLimit: Math.round(contextWindow * autoCompactPercent / 100) }),
+      previousModels,
+      autoCompactPercent,
     },
-  );
-  return withPreservedManagedModelCatalogSettings(
-    defaultsApplied,
-    deepseekProviderDefinition,
-    previousModels,
   );
 }
 
@@ -850,20 +1019,8 @@ async function restoreInitialConfig({
   gatewayProfileBackupPath,
   roleConfigBackupPath,
   backupStatePath,
-  output,
 }) {
-  let state;
-  try {
-    state = JSON.parse(await readFile(backupStatePath, "utf8"));
-  } catch {
-    throw new Error("未找到可恢复的 Codex 初始配置");
-  }
-  if (
-    state.originalRoleConfigExisted !== undefined
-    && typeof state.originalRoleConfigExisted !== "boolean"
-  ) {
-    throw new Error("Codex 初始配置备份状态无效");
-  }
+  const state = await readDeepseekRestoreState(backupStatePath);
   if (state.originalConfigExisted === true) {
     await writePrivateFileAtomic(configPath, await readFile(backupPath));
   } else if (state.originalConfigExisted === false) {
@@ -894,16 +1051,108 @@ async function restoreInitialConfig({
     throw new Error("Codex 初始配置备份状态无效");
   }
   await setBackupRestoredState(backupStatePath, true);
-  output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
-  output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+}
+
+async function readDeepseekRestoreState(backupStatePath) {
+  let state;
+  try {
+    state = JSON.parse(await readFile(backupStatePath, "utf8"));
+  } catch (error) {
+    throw managedSetupInvalid(
+      error?.code === "ENOENT" ? "backup-not-found" : "backup-invalid",
+      "restore",
+      error?.code === "ENOENT"
+        ? "未找到可恢复的 Codex 初始配置"
+        : "Codex 初始配置备份状态无效",
+    );
+  }
+  if (
+    typeof state?.originalConfigExisted !== "boolean"
+    || (state.originalProfileExisted !== undefined
+      && typeof state.originalProfileExisted !== "boolean")
+    || (state.originalGatewayProfileExisted !== undefined
+      && typeof state.originalGatewayProfileExisted !== "boolean")
+    || (state.originalRoleConfigExisted !== undefined
+      && typeof state.originalRoleConfigExisted !== "boolean")
+  ) {
+    throw managedSetupInvalid(
+      "backup-invalid",
+      "restore",
+      "Codex 初始配置备份状态无效",
+    );
+  }
+  return state;
+}
+
+function deepseekSetupPaths(environment) {
+  const codexHome = codexHomePath(environment);
+  const providerDirectory = managedProviderDirectory(
+    environment,
+    deepseekProviderDefinition,
+  );
+  const backupDirectory = join(
+    providerDirectory,
+    deepseekProviderDefinition.backupDirectoryName,
+  );
   return {
-    mode: "restored",
-    configPath,
-    profilePath,
-    gatewayProfilePath,
-    catalogPath,
-    backupPath,
+    codexHome,
+    configPath: join(codexHome, "config.toml"),
+    roleConfigPath: managedModelProviderRoleConfigPath(environment),
+    profilePath: join(codexHome, deepseekProviderDefinition.profileFileName),
+    gatewayProfilePath: join(
+      providerDirectory,
+      deepseekProviderDefinition.managedMarkerFileName,
+    ),
+    catalogPath: join(providerDirectory, deepseekProviderDefinition.catalogFileName),
+    manifestPath: join(
+      providerDirectory,
+      deepseekProviderDefinition.catalogManifestFileName,
+    ),
+    backupPath: join(backupDirectory, "config.toml"),
+    profileBackupPath: join(
+      backupDirectory,
+      deepseekProviderDefinition.profileFileName,
+    ),
+    gatewayProfileBackupPath: join(
+      backupDirectory,
+      deepseekProviderDefinition.managedMarkerFileName,
+    ),
+    roleConfigBackupPath: join(backupDirectory, "sf-agent.config.toml"),
+    backupStatePath: join(backupDirectory, "state.json"),
   };
+}
+
+function deepseekRestoreResult(paths) {
+  return deepseekSetupResult(paths, "restored");
+}
+
+function deepseekSetupResult(paths, mode) {
+  return {
+    mode,
+    configPath: paths.configPath,
+    profilePath: paths.profilePath,
+    gatewayProfilePath: paths.gatewayProfilePath,
+    catalogPath: paths.catalogPath,
+    backupPath: paths.backupPath,
+  };
+}
+
+function deepseekPublicPaths(paths) {
+  return {
+    configPath: paths.configPath,
+    profilePath: paths.profilePath,
+    markerPath: paths.gatewayProfilePath,
+    catalogPath: paths.catalogPath,
+  };
+}
+
+function managedSetupInvalid(code, field, message, cause) {
+  return new ManagedModelProviderSetupError(
+    code,
+    field,
+    message,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 async function replaceOptionalFile(path, content) {
@@ -980,7 +1229,7 @@ async function askChoice(prompt, label, maximum) {
 async function askApiKey(prompt) {
   while (true) {
     const apiKey = await prompt.secret("DeepSeek API Key（以 sk- 开头）");
-    if (/^sk-[^\s"]+$/u.test(apiKey)) return apiKey;
+    if (/^sk-[^\s"]+$/u.test(apiKey) && apiKey.length <= 4_096) return apiKey;
   }
 }
 

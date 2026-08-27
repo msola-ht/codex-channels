@@ -9,11 +9,13 @@
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
 - `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
   源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
-  版本不匹配；
+  版本不匹配；更新前返回不包含 origin 的修订计划，候选准备完成后再返回目标版本、服务中断要求和
+  精确执行阶段，预检状态变化时在克隆或停服前拒绝执行；
   候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，之后才停止服务并
   原子切换源码，最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
   明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
-  `.bin/codexc` 与 Shell PATH。Registry 安装直接委派现有本地更新，不修改程序包。
+  `.bin/codexc` 与 Shell PATH。阶段进度和失败对象包含已完成阶段、服务/源码恢复状态与修复建议，
+  观察者或 CLI 展示异常不改变更新事务。Registry 安装直接委派现有本地更新，不修改程序包。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
@@ -23,14 +25,16 @@
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
-  校验 `config.toml`、状态库、指标库、计划任务库及核心服务定义的完整状态；服务已安装时在同一个
+  校验 `config.toml`、状态库、指标库、计划任务库及核心服务定义的完整状态，并返回不含凭据的修订
+  计划、是否需要中断服务及八阶段进度；预检与进度观察者异常不影响更新事务。服务已安装时在同一个
   App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2），离线复核
   后启动并通过 Socket 与监管拓扑确认核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线
   更新，不擅自安装或启动，检测到
   `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按
   目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
   源码已经切换后刷新全局命令或本地更新失败时仍保留新源码与旧源码备份，并先尝试恢复核心服务；
-  服务恢复也失败时同时报告两个错误。
+  服务恢复也失败时同时报告两个错误；失败对象另附失败阶段、已完成阶段、已应用改动范围、服务恢复状态
+  和修复建议，不要求调用方解析异常文案。
   未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
   `backup-provider-migration.mjs` 先完整备份旧布局、现有新目录与被改写引用文件，再把受管
   第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
@@ -106,9 +110,10 @@
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“模型与提供商”
   “通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方与第三方 Provider
   两级，子模块返回时停留在所属层级。
-- `setup-summary.mjs`：通过既有 App Server `config/read` 读取 Codex 全局默认模型与思考等级，并汇总
-  主 Provider、可切换 Provider、第三方模型默认值、已启用渠道和用户技能数量；不显示 API Key、
-  Token、应用凭据、允许名单、代理值或 Provider URL。
+- `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
+  不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
+  共享第三方子代理、直接 API Provider 数量、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
+  允许名单、代理值或 Provider URL。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
   新增时从 URL 主机名派生 Provider ID 或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
@@ -126,10 +131,30 @@
   保留原 Key，Origin 变化时强制重新输入且写入前不复用旧 Key；新增拒绝覆盖 config 或私有备份中的已有 Provider ID。
   无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
   主 Provider 冲突的顶层 `openai_base_url`。
+- `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
+  Provider 新增与编辑的无终端校验、脱敏预览和执行接口；用 `preserve` / `replace` 明确表达 Key
+  操作，现有 Key 只在内部计划闭包中用于同 Origin 保留，不进入预览或执行结果。固定模式复用 Codex
+  配置事务与 Profile 回滚，切换模式在写入前复核 Codex 配置版本、私有注册表和 Profile 快照，再在
+  同一文件锁内原子写入私有 Profile，并统一返回生效动作和备份清理警告；CLI
+  继续负责字段询问、危险修改确认和中文渲染。
+- `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
+  Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受控模型目录和共享
+  第三方子代理的脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
+  Provider CLI 列表共同复用。
+- `model-provider-management-transaction.mjs` / `model-provider-management-transaction.d.mts`：统一
+  串行 DeepSeek、OpenCode Go、自定义主 Provider、默认模型设置与共享第三方子代理的跨文件管理
+  事务；同一异步调用链中的嵌套操作复用事务，避免角色切换与 Provider/账户删除交叉提交。
+- `primary-provider-management.mjs` / `primary-provider-management.d.mts`：提供自定义主 Provider
+  切换与删除的无终端预览和执行接口；预览仅返回脱敏目标、影响与生效动作，执行继续保护共享子代理
+  正在使用的 Provider、校验显式模型属于 App Server 官方目录、保持配置/Profile/私有备份事务顺序，
+  并以稳定错误码和结构化警告报告失败或备份清理部分成功。
+- `primary-provider-config-transaction.mjs` / `primary-provider-config-transaction.d.mts`：统一自定义
+  Provider 固定模式写入事务；切换与新增/编辑共同复用 Profile 移除、Codex 配置版本写入、响应丢失
+  只读确认和安全回滚，避免两条管理链路复制高风险事务逻辑。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
-  list / add / switch / remove 子命令；`list --json` 返回不含凭据的稳定主实例与候选摘要；list 与
-  switch / remove 复用 Codex 用户配置事务读取和
-  原子写入，add 复用自定义 Responses Provider Setup 的交互流程，Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
+  list / add / switch / remove 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；
+  switch / remove 复用 Provider 管理接口并只负责中文确认与结果渲染，add 复用自定义 Responses Provider Setup 的交互流程，
+  Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
   Provider 时，交互菜单须经二次确认后移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
   编辑备份候选并恢复、修改和激活，也可经二次确认删除备份候选。恢复、编辑或删除时先提交配置，
@@ -140,19 +165,28 @@
   模式时保留官方模型。
 - `primary-provider-usage.mjs`：`codexc primary-provider` 的规范帮助文案，供脚本与入口帮助共用，
   避免两份文案漂移。
-- `agents.mjs`：配置、停用或查看共享第三方子代理；`status --json` 返回稳定配置状态，Provider
-  与模型未配置时显式使用 `null`，不要求 Gateway 已初始化。
+- `agents.mjs`：提供不依赖终端提示的共享第三方子代理 Provider 列表、配置/停用预览与执行接口，
+  `codexc agents` 复用该接口；`status --json` 返回稳定配置状态，Provider 与模型未配置时显式使用
+  `null`，不要求 Gateway 已初始化。角色文件和 Codex 主配置复用统一 Provider 管理事务，避免与
+  Provider/账户配置、切换或删除交叉提交；管理结果只包含脱敏选择和全部服务重启动作。
+- `agents-setup.mjs` / `agents-setup.d.mts`：向 Setup 提供共享第三方子代理的受管或自定义 Provider、
+  模型选择和停用确认，只编排 `agents.mjs` 的管理接口；自定义 Provider 当前使用其已配置模型。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
   `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
   之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`，从第三方
-  模式恢复时清除第三方顶层模型。
+  模式恢复时清除第三方顶层模型。设备登录完成后在统一 Provider 管理事务内重新读取配置与角色
+  占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
   App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
   Gateway 的 Thread 默认模型。
-- `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：按已配置的第三方 Provider
-  和模型设置新会话默认模型、目录声明的上下文、默认思考等级及自动压缩阈值；切换模式同步更新
-  私有 Profile，固定模式复用官方用户配置事务并清除根级覆盖，历史 Thread 仍保留创建时的模型。
+- `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
+  默认模型、思考等级和自动压缩阈值的无终端校验、预览与执行接口；切换模式更新私有 Profile，固定
+  模式与切换模式共用统一 Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读
+  确认写入结果，仅在确认未生效时恢复模型目录，
+  结果明确返回 App Server 重启动作。
+- `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
+  Provider、模型、思考等级和自动压缩交互与中文渲染，写入复用管理接口；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
   受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
@@ -170,23 +204,38 @@
   配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
+- `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
+  设置脱敏读取与明确修改接口；只接受受控的显示、系统、自动化、网络、高级、Telegram 格式、WebUI、
+  指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，凭据和网络读取只显示是否已配置；
+  读取同时返回原始文件修订，修改必须携带并在应用前复核；最终提交复用 Gateway Config 的共享写锁
+  和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置。
+- `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
+  `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
+  的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、Thread 分区管理员、显式 HTTP(S) 代理、日志等级与
-  开发中的 Plugin API；管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
+  开发中的 Plugin API；复用 Config 管理接口，管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
-  只修改对应展示配置段。
+  CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理调试入口、审批超时、全局 Sandbox、默认 Workspace 和
-  Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`。
+  Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`，两者复用同一 Config 管理接口。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
   保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
+- `management-access.mjs`、`management-confirmations.mjs`、`management-audit.mjs`、
+  `management-security.mjs` / `management-security.d.mts`：未来本机管理适配器复用的无 HTTP 安全基础，
+  覆盖独立管理凭据、短期会话、Origin/CSRF、限速、请求上限、安全响应头、一次性高风险确认和脱敏审计；
+  当前不监听端口、不接入只读 WebUI，也不开放管理写路由。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
   Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
-- `api-provider-setup.mjs` / `api-provider-setup.d.mts`：增改或删除多个 Responses 兼容第三方 API
-  提供商，非敏感元数据写入主配置，API Key 按提供商隔离；当前没有运行时调用方，保留给后续
-  明确设计的直接 API 功能。
+- `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API
+  Provider 脱敏列表、输入校验、增改和删除事务；返回值只包含 `hasApiKey`，不返回凭据，供 Setup
+  与后续受保护的管理界面复用。
+- `api-provider-setup.mjs` / `api-provider-setup.d.mts`：编排多个 Responses 兼容直接 API Provider
+  的新增、编辑、删除 prompts，并调用共享管理用例；当前没有运行时调用方，保留给后续明确设计的
+  直接 API 功能。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
-  仅 DeepSeek 两种安装模式；只下载、不执行
+  仅 DeepSeek 两种安装模式；安装与恢复均提供脱敏预览、明确确认和无终端事务接口，CLI 只负责询问与展示；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与全部受控模型后写入
   `~/.codex-connect/providers/deepseek/`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
   模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，模型目录与管理标记写入
@@ -197,7 +246,7 @@
   生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改，并保留仍受支持的默认模型、
   逐模型思考等级和自动压缩百分比；目录上下文更新时按原百分比重算阈值。退出固定模式时只还原 Setup
   管理的字段（含自动压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
-  角色配置事务失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
+  安装事务按写入阶段更新并发保护快照，失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
   安装时为初始模型设置自动压缩阈值；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
   模型设置”按模型维护 10–90% 阈值，写入模型目录的 `auto_compact_token_limit`，不再使用会覆盖
   全部模型的 Profile 顶层阈值。`codexc update` 首次看到仍使用旧默认 Flash 的 Profile 与同
@@ -208,10 +257,19 @@
   列出的模型。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
-  切换 Profile、固定配置与受管字段恢复逻辑。
+  受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；DeepSeek 与
+  OpenCode Go 共同复用，账户注册和历史备份格式仍由各自适配层负责。
+- `opencode-go-account-files.mjs` / `opencode-go-account-files.d.mts`：集中 OpenCode Go 账户私有文件
+  路径、受限读取、快照和并发保护回滚原语，供账户新增、删除、目录刷新与恢复事务复用。
+- `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
+  默认账户切换、运行实例停止与账户删除的无终端预览和执行接口；默认切换同步更新正在使用 OpenCode Go
+  的共享子代理并保留失败回滚，停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚。
+- `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
+  账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、首次备份、Key 写入、切换/固定模式配置和多文件事务回滚。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
   （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
-  返回不含 Key 与 Profile 路径的稳定账户摘要；配置切换/固定模式或恢复首次配置前状态，从同一受审查来源
+  返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
+  或通过脱敏预览、明确确认与无终端执行接口恢复首次配置前状态，从同一受审查来源
   生成共享模型目录并复用共享子代理机制，
   但不复用凭据、Provider 身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
   默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
@@ -224,21 +282,32 @@
   备份目录，再执行文件布局与模型设置迁移；遇到新旧并存时先把现有 Provider 目录移到备份内
   的 `original-providers/`，迁移失败时恢复原目录。默认只预演，需显式 `--apply` 才写入；
   `codexc update` 的停机窗口会自动以 `--apply` 方式调用。
-- `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口。
-- `telegram-setup.mjs`：独立完成 Telegram Bot Token 验证、一次性私聊配对、用户 ID 获取和用户配置写入；
-  复用统一 TOML、环境变量和系统代理解析；交互输入的 Token 在当前终端明文显示，但验证错误
-  继续脱敏；新建 Bot 仅引导使用官方 BotFather。
-- `feishu-setup.mjs`：提供手动输入凭据和 Device Authorization 扫码两种方式；扫码时由飞书授权页
-  选择新建或已有企业自建应用，只申请私聊接收与发送、流式卡片、应用自管理检测、受控配置写入和
-  命令中心所需权限、事件与回调。
-  两种方式都验证凭据与 Bot 身份，并原子保存 App ID、App Secret 和允许的用户 Open ID；扫码模式
-  只保存本次扫码用户，不合并旧名单或追加其他用户；二维码和短期授权状态不持久化。扫码保存后立即
-  保留已有菜单并自动发布 `codexc_home` 悬浮菜单、长连接
-  事件与卡片回调；失败时保留连接配置，并提示先使用终端 `codexc doctor` 检查、再重新扫码选择
-  当前应用恢复，不能依赖尚未收到消息的 `/fs doctor`。手动凭据流程也先由终端 Doctor 检查。
+- `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口，并允许
+  长流程通过 `AbortSignal` 中止尚未完成的问题。
+- `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
+  `telegram-setup-session.mjs` 的结构化会话；复用统一 TOML、环境变量和系统代理解析；交互输入的
+  Token 在当前终端明文显示，但验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
+- `telegram-setup-session.mjs` / `telegram-setup-session.d.mts`：提供所有者绑定的 Telegram Setup
+  开始、状态、自动配对、允许名单预览、确认与取消接口；Bot Token 和一次性配对码只保存在有期限的
+  进程内会话中，状态、预览和结果不返回 Token，取消和超时通过 grammY `AbortSignal` 中止验证或
+  长轮询，确认时检查 Telegram 配置未被并发改动后再原子写入。
+- `feishu-setup.mjs`：把手动凭据输入、Device Authorization 二维码、允许名单确认和中文输出适配到
+  `feishu-setup-session.mjs` 的结构化会话；扫码时由飞书授权页选择新建或已有企业自建应用，只申请
+  私聊接收与发送、流式卡片、应用自管理检测、受控配置写入和命令中心所需权限、事件与回调。
+- `feishu-setup-session.mjs` / `feishu-setup-session.d.mts`：提供所有者绑定的飞书 Setup 开始、状态、
+  脱敏预览、确认与取消接口；手动与扫码两种方式都验证凭据和 Bot 身份，扫码授权、Bot 验证与终端
+  等待共用整体期限及真实 `AbortSignal`。App Secret 与短期授权只由进程内会话持有，确认时检查飞书
+  配置未被并发改动后再原子保存；扫码模式只保存本次扫码用户，并在保存后保留已有菜单、自动发布
+  `codexc_home` 悬浮菜单、长连接事件与卡片回调。远程配置失败时保留已保存的连接配置，并返回脱敏
+  警告供终端提示通过 `codexc doctor` 和重新扫码恢复。
 - `weixin-setup.mjs`：从统一 Setup 菜单执行连接替换风险确认、微信扫码和严格结果裁剪，把
-  Bot Token 原子写入微信独立安全凭据后端，并只向 TOML 写入禁用态账号与允许用户元数据；
+  终端输入输出适配到 `weixin-setup-session.mjs` 的结构化会话，把 Bot Token 原子写入微信独立安全凭据后端，
+  并只向 TOML 写入禁用态账号与允许用户元数据；
   Setup 不直接启动消息 Surface，操作者显式启用配置并重载 Gateway 后生效。
+- `weixin-setup-session.mjs` / `weixin-setup-session.d.mts`：提供所有者绑定的微信 Setup 开始、状态、
+  配对码提交、确认与取消接口；二维码和凭据只保存在有期限的进程内会话中，状态与保存预览不返回
+  Bot Token，取消和超时会中止底层请求并丢弃临时状态，确认时检查微信配置未被并发改动后复用原子
+  凭据/配置回滚事务。
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份、应用权限、
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误。
@@ -246,11 +315,11 @@
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
 - `agents.mjs` / `agents.d.mts`：`codexc agents` 的执行脚本与公开声明，在 `~/.codex/config.toml` 中开启或关闭
-  `features.multi_agent_v2` 并注册单次共享 `agents.external` 角色；命令按已配置 Provider 与模型
+  `features.multi_agent_v2` 并注册单次共享 `agents.external` 角色；命令按已配置的受管或自定义 Provider 与模型
   更新同一角色，角色说明要求主模型以 `fork_turns=1` 传入当前用户消息；非托管同名角色会失败关闭，不会被覆盖。启用时先原子生成
   无凭据角色文件，再通过带用户层版本校验的官方键级配置事务更新主配置，事务失败时恢复角色文件；
   显式禁用同样拒绝删除非托管同名角色。App Server 服务启动时原子刷新角色文件为
-  当前 Provider 的本机统计代理地址，同时写入禁止
+  当前 Provider 的本机统计代理地址，只把该 Provider 的 Key 注入主 App Server 子进程，同时写入禁止
   解析加密正文和等待后续消息的受控指令。普通服务退出保留文件以维持 Codex 配置可解析，显式
   禁用或恢复首次配置时删除；只读 `status` 不依赖 Gateway 配置。
 
@@ -268,7 +337,9 @@
   `sf-*` 名称或保留的 `sf-custom-*` 名称误作公开参数，并尊重 `--` 后原样传给 Codex 的参数边界。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
   Provider `--profile`（当前公开为自定义第三方的 `custom-<Provider ID>`、`deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
-  磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；
+  磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；同时按当前目录或显式
+  `--workspace` 解析有效 Sandbox、审批策略与 Permission Profile，第三方 Profile 不复制权限，
+  用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
@@ -369,10 +440,15 @@
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
-- `install-launchd.mjs`：渲染并安装 launchd plist；Codex 路径复用共享可执行文件解析，代理由 CLI
-  服务入口在每次启动时解析。
-- `service-install-context.mjs`：systemd 与 launchd 安装器共用的配置、默认 Workspace、主 Socket、
-  Codex/Node 可执行文件及服务 PATH 解析；运行目录统一创建为 `0700`，平台模板和转义仍各自维护。
+- `install-launchd.mjs` / `install-systemd.mjs`：保留可直接生成平台服务定义的兼容脚本，实际模板计划、
+  转义与原子写入统一复用服务安装管理接口；代理仍由 CLI 服务入口在每次启动时解析。
+- `service-install-context.mjs` / `service-install-context.d.mts`：systemd 与 launchd 安装器共用的配置、
+  默认 Workspace、主 Socket、Codex/Node 可执行文件及服务 PATH 解析；读取计划不修改磁盘，执行时才把
+  运行目录创建为 `0700`。
+- `service-install-management.mjs` / `service-install-management.d.mts`：把服务安装拆成配置校验、平台
+  预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
+  完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
+  控制脚本实现 linger、旧 Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 明确失败关闭。
 - `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
   Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
   WebUI 与指标中心的专属重启要求继续单独提示。
@@ -382,8 +458,6 @@
   日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
-- `install-systemd.mjs`：渲染并安装 Linux systemd 用户服务 unit；Codex 路径复用共享可执行文件
-  解析，代理由 CLI 服务入口在每次启动时解析。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
   控制脚本，避免 Shell 维护第二份服务标识。
 - `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性或 launchd Job 字段生成统一、无配置

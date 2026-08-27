@@ -98,6 +98,8 @@ describe("Feishu setup", () => {
     expect(validateApplication).toHaveBeenCalledWith({
       appId: "cli_0123456789abcdef",
       appSecret: "manual-secret",
+    }, {
+      signal: expect.any(globalThis.AbortSignal),
     });
     const configured = parseToml(readFileSync(fixture.configPath, "utf8"));
     expect(configured.feishu).toEqual({
@@ -186,6 +188,7 @@ describe("Feishu setup", () => {
         },
       },
       onQRCodeReady: expect.any(Function),
+      onStatusChange: expect.any(Function),
     });
     expect(renderQRCode).toHaveBeenCalledWith(
       "https://applink.feishu.cn/client/mini_program/open?device=short-lived",
@@ -194,6 +197,8 @@ describe("Feishu setup", () => {
     expect(configureApplication).toHaveBeenCalledWith({
       appId: "cli_0123456789abcdef",
       appSecret: "app-secret",
+    }, {
+      signal: expect.any(globalThis.AbortSignal),
     });
     const configured = parseToml(readFileSync(fixture.configPath, "utf8"));
     expect(configured.feishu).toEqual({

@@ -707,15 +707,12 @@ describe("custom primary Provider setup", () => {
     });
   });
 
-  it("does not create a main-config writer for a new switching Profile", async () => {
+  it("does not write the main config for a new switching Profile", async () => {
     const environment = testEnvironment();
-    const { client } = clientFixture({
+    const { client, createClient } = clientFixture({
       model_provider: "openai",
       model_providers: {},
     });
-    const createClient = vi.fn()
-      .mockResolvedValueOnce(client)
-      .mockRejectedValueOnce(new Error("config writer creation failed"));
     const prompts = promptFixture({
       texts: ["https://api.example.test/v1", "gpt-5.6-sol"],
       selects: ["OpenAI", "switching", "no"],
@@ -728,7 +725,8 @@ describe("custom primary Provider setup", () => {
       createClient,
     })).resolves.toEqual({ provider: "OpenAI", model: "gpt-5.6-sol" });
 
-    expect(createClient).toHaveBeenCalledOnce();
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
     expect(existsSync(customPrimaryProviderProfilePath(environment, "OpenAI"))).toBe(true);
   });
 

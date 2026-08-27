@@ -1,4 +1,3 @@
-import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
 import type {
   CodexUserConfigEdit,
   CodexUserConfigValue,
@@ -17,27 +16,112 @@ export interface AgentsStatus {
   multiAgentV2Enabled: boolean;
   externalRoleConfigured: boolean;
   legacyDsRoleConfigured: boolean;
-  provider?: ManagedModelProviderId;
+  provider?: string;
   model?: string;
 }
 
+export interface ThirdPartyAgentProvider {
+  provider: string;
+  displayName: string;
+  model: string;
+  reasoningEffort: string;
+  mode: "switching" | "exclusive";
+  models: Array<{
+    model: string;
+    displayName: string;
+    contextWindow: number;
+    reasoningEffort: string;
+    reasoningEfforts: Array<{ effort: string; description: string }>;
+    autoCompactLimit?: number;
+    autoCompactPercent?: number;
+  }>;
+}
+
+export type ThirdPartyAgentChangeInput =
+  | { action: "configure"; provider: string; model?: string }
+  | { action: "disable" };
+
+export type ThirdPartyAgentChangePreview =
+  | {
+      operation: "configure";
+      current: { configured: boolean; provider: string | null; model: string | null };
+      selection: {
+        provider: string;
+        providerDisplayName: string;
+        model: string;
+        modelDisplayName: string;
+      };
+      willChange: boolean;
+      activation: "restart-all";
+    }
+  | {
+      operation: "disable";
+      current: { configured: boolean; provider: string | null; model: string | null };
+      willChange: boolean;
+      activation: "restart-all" | "none";
+    };
+
+export class AgentsManagementError extends Error {
+  code: string;
+  field: string;
+}
+
 export function agentsStatus(environment?: NodeJS.ProcessEnv): AgentsStatus;
+export function loadThirdPartyAgentProviders(
+  environment?: NodeJS.ProcessEnv,
+): ThirdPartyAgentProvider[];
+export function previewThirdPartyAgentChange(
+  input: ThirdPartyAgentChangeInput,
+  options?: {
+    environment?: NodeJS.ProcessEnv;
+    loadProviders?: typeof loadThirdPartyAgentProviders;
+    loadStatus?: typeof agentsStatus;
+    validateRoleAvailability?: boolean;
+  },
+): ThirdPartyAgentChangePreview;
+export function applyThirdPartyAgentChange(
+  input: ThirdPartyAgentChangeInput,
+  options?: {
+    environment?: NodeJS.ProcessEnv;
+    loadProviders?: typeof loadThirdPartyAgentProviders;
+    loadStatus?: typeof agentsStatus;
+    configureRole?: typeof configureThirdPartyRole;
+    disableRole?: typeof disableThirdPartyRole;
+    validateRoleAvailability?: boolean;
+  },
+): Promise<
+  | {
+      action: "configured";
+      activation: "restart-all";
+      previous: ThirdPartyAgentChangePreview["current"];
+      selection: { provider: string; model: string };
+    }
+  | {
+      action: "disabled" | "unchanged";
+      activation: "restart-all" | "none";
+      previous: ThirdPartyAgentChangePreview["current"];
+    }
+>;
 export function assertThirdPartyRoleAvailable(environment?: NodeJS.ProcessEnv): void;
 export function configureThirdPartyRole(
-  provider: ManagedModelProviderId,
+  provider: string,
   model?: string,
   environment?: NodeJS.ProcessEnv,
   dependencies?: { updateConfig?: CodexUserConfigWriter },
-): Promise<{ role: "external"; provider: ManagedModelProviderId; model: string }>;
+): Promise<{ role: "external"; provider: string; model: string }>;
 export function disableThirdPartyRole(
   environment?: NodeJS.ProcessEnv,
   dependencies?: { updateConfig?: CodexUserConfigWriter },
 ): Promise<boolean>;
+export function assertThirdPartyRoleDoesNotUseProvider(
+  provider: string,
+  environment?: NodeJS.ProcessEnv,
+): void;
 export function removeManagedThirdPartyRole(
   environment?: NodeJS.ProcessEnv,
   dependencies?: {
     updateConfig?: CodexUserConfigWriter;
-    provider?: ManagedModelProviderId;
+    provider?: string;
     disableFeature?: boolean;
   },
 ): Promise<boolean>;

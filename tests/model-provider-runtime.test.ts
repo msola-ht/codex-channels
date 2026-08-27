@@ -58,10 +58,13 @@ import {
   loadManagedProviderAppServers,
   loadConfiguredCustomPrimaryModelProvider,
   loadConfiguredCustomSwitchingModelProviders,
+  loadCustomModelProviderRoleCandidates,
   loadCustomSwitchingProviderIds,
   customSwitchingProviderRegistryPath,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
+  loadThirdPartyModelProviderRole,
+  loadThirdPartyProviderCredential,
   managedModelProviderRoleConfigPath,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
@@ -75,6 +78,7 @@ import {
   writeCustomPrimaryProviderSwitchingProfile,
   writeManagedModelProviderProfileDefault,
   writeManagedModelProviderRoleConfig,
+  writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   loadOpencodeGoAccounts,
@@ -902,6 +906,138 @@ describe("model provider runtime topology", () => {
 
     removeManagedModelProviderRoleConfig(environment);
     expect(existsSync(rolePath)).toBe(false);
+  });
+
+  it("writes a custom switching Provider subagent role without duplicating its API key", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-agent-role-"));
+    const environment = testEnvironment(codexHome);
+    writeFileSync(join(codexHome, "config.toml"), 'model_provider = "openai"\n', { mode: 0o600 });
+    writeCustomPrimaryProviderSwitchingProfile({
+      provider: "codeproxy-dev",
+      model: "gpt-5.6-sol",
+      name: "CodeProxy Dev",
+      baseUrl: "https://proxy.example.test/v1",
+      apiKey: "custom-agent-secret",
+      supportsWebsockets: true,
+    }, environment);
+    const rolePath = managedModelProviderRoleConfigPath(environment);
+
+    expect(loadCustomModelProviderRoleCandidates(environment)).toContainEqual(
+      expect.objectContaining({
+        provider: "codeproxy-dev",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "medium",
+        mode: "switching",
+      }),
+    );
+    writeThirdPartyModelProviderRoleConfig(environment, {
+      provider: "codeproxy-dev",
+      model: "gpt-5.6-sol",
+      baseUrl: "http://127.0.0.1:39493/role/external",
+    });
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      `model_provider = "openai"\n[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n`,
+      { mode: 0o600 },
+    );
+
+    const content = readFileSync(rolePath, "utf8");
+    expect(content).toContain('model_provider = "codeproxy-dev"');
+    expect(content).toContain('model_reasoning_effort = "medium"');
+    expect(content).toContain('base_url = "http://127.0.0.1:39493/role/external"');
+    expect(content).toContain('env_key = "CODEX_CONNECT_CUSTOM_');
+    expect(content).not.toContain("custom-agent-secret");
+    expect(content).not.toContain("experimental_bearer_token");
+    expect(loadManagedModelProviderRole(environment)).toBeUndefined();
+    expect(loadThirdPartyModelProviderRole(environment)).toEqual({
+      role: "external",
+      provider: "codeproxy-dev",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      providerType: "custom",
+    });
+    expect(loadThirdPartyProviderCredential("codeproxy-dev", environment)).toEqual({
+      environmentKey: "CODEX_CONNECT_CUSTOM_636F646570726F78792D646576_API_KEY",
+      apiKey: "custom-agent-secret",
+    });
+  });
+
+  it("writes a custom fixed Provider subagent role with an isolated environment key", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-fixed-agent-role-"));
+    const environment = testEnvironment(codexHome);
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "gpt-5.6-sol"',
+      'model_provider = "codeproxy-fixed"',
+      'model_reasoning_effort = "medium"',
+      "",
+      "[model_providers.codeproxy-fixed]",
+      'name = "CodeProxy Fixed"',
+      'base_url = "https://fixed.example.test/v1"',
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      "supports_websockets = false",
+      'experimental_bearer_token = "custom-fixed-secret"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    expect(loadCustomModelProviderRoleCandidates(environment)).toContainEqual(
+      expect.objectContaining({
+        provider: "codeproxy-fixed",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "medium",
+        mode: "exclusive",
+      }),
+    );
+    writeThirdPartyModelProviderRoleConfig(environment, {
+      provider: "codeproxy-fixed",
+      baseUrl: "http://127.0.0.1:39494/role/external",
+    });
+
+    const rolePath = managedModelProviderRoleConfigPath(environment);
+    writeFileSync(join(codexHome, "config.toml"), [
+      readFileSync(join(codexHome, "config.toml"), "utf8").trimEnd(),
+      "",
+      "[agents.external]",
+      `config_file = ${JSON.stringify(rolePath)}`,
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const content = readFileSync(rolePath, "utf8");
+    expect(content).toContain('model_provider = "codeproxy-fixed"');
+    expect(content).toContain('env_key = "CODEX_CONNECT_CUSTOM_');
+    expect(content).not.toContain("custom-fixed-secret");
+    expect(content).not.toContain("experimental_bearer_token");
+    expect(loadThirdPartyModelProviderRole(environment)).toEqual({
+      role: "external",
+      provider: "codeproxy-fixed",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      providerType: "custom",
+    });
+    expect(loadThirdPartyProviderCredential("codeproxy-fixed", environment)).toEqual({
+      environmentKey: "CODEX_CONNECT_CUSTOM_636F646570726F78792D6669786564_API_KEY",
+      apiKey: "custom-fixed-secret",
+    });
+  });
+
+  it("rejects an invalid custom fixed Provider subagent reasoning effort before writing", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-fixed-agent-effort-"));
+    const environment = testEnvironment(codexHome);
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "gpt-5.6-sol"',
+      'model_provider = "codeproxy-fixed"',
+      'model_reasoning_effort = "invalid effort"',
+      "",
+      "[model_providers.codeproxy-fixed]",
+      'base_url = "https://fixed.example.test/v1"',
+      'wire_api = "responses"',
+      'experimental_bearer_token = "custom-fixed-secret"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    expect(() => writeThirdPartyModelProviderRoleConfig(environment, {
+      provider: "codeproxy-fixed",
+    })).toThrow("不具备可用的子代理配置");
+    expect(existsSync(managedModelProviderRoleConfigPath(environment))).toBe(false);
   });
 
   it("validates both switching and exclusive managed configurations", async () => {

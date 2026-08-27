@@ -7,6 +7,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +19,7 @@ import {
   parseGatewayConfig,
   readGatewayConfig,
   validateCodexConfigDocument,
+  withGatewayConfigLock,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import {
@@ -87,6 +89,64 @@ describe("Gateway config.toml", () => {
 
     expect(() => writeGatewayConfig(fixture.configPath, document)).not.toThrow();
     expect(readGatewayConfig(fixture.configPath).logging).toEqual({ level: "debug" });
+  });
+
+  it("rejects a stale parsed document after another writer commits", () => {
+    const fixture = createFixture();
+    const first = readGatewayConfig(fixture.configPath);
+    const stale = readGatewayConfig(fixture.configPath);
+    first.logging = { level: "debug" };
+    stale.display = { reasoning: false };
+
+    writeGatewayConfig(fixture.configPath, first);
+
+    expect(() => writeGatewayConfig(fixture.configPath, stale))
+      .toThrow("config.toml 在写入期间已发生变化");
+    expect(readGatewayConfig(fixture.configPath).logging).toEqual({ level: "debug" });
+    expect(readGatewayConfig(fixture.configPath).display).toBeUndefined();
+  });
+
+  it("fails closed while another process owns the config write lock", () => {
+    const fixture = createFixture();
+    const original = readFixture(fixture.configPath);
+    const document = readGatewayConfig(fixture.configPath);
+    document.logging = { level: "debug" };
+    writeFileSync(`${fixture.configPath}.lock`, "", { mode: 0o600, flag: "wx" });
+
+    expect(() => writeGatewayConfig(fixture.configPath, document))
+      .toThrow("config.toml 正在由其他进程修改，请稍后重试");
+    expect(readFixture(fixture.configPath)).toBe(original);
+  });
+
+  it("rejects asynchronous work in the synchronous config lock", () => {
+    const fixture = createFixture();
+
+    expect(() => withGatewayConfigLock(
+      fixture.configPath,
+      (() => Promise.resolve("not-supported")) as unknown as () => string,
+    )).toThrow("withGatewayConfigLock 只接受同步操作");
+  });
+
+  it("does not remove a replacement lock when releasing an older lock", () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    const lockPath = `${fixture.configPath}.lock`;
+    let replaced = false;
+    Object.defineProperty(document, "logging", {
+      enumerable: true,
+      get() {
+        if (!replaced) {
+          replaced = true;
+          unlinkSync(lockPath);
+          writeFileSync(lockPath, "replacement\n", { mode: 0o600, flag: "wx" });
+        }
+        return { level: "debug" };
+      },
+    });
+
+    writeGatewayConfig(fixture.configPath, document);
+
+    expect(readFileSync(lockPath, "utf8")).toBe("replacement\n");
   });
 
   it("keeps Workspace comments with their Workspace when earlier entries are removed", () => {

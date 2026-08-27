@@ -581,7 +581,7 @@ describe("Codex Connect config menu", () => {
     });
 
     expect(result).toEqual({
-      webui: { host: "0.0.0.0", token: "webui-token" },
+      webui: { host: "0.0.0.0", port: 8787, tokenConfigured: true },
       configPath: fixture.configPath,
     });
     expect(readGatewayConfig(fixture.configPath).webui).toEqual({
@@ -989,8 +989,10 @@ describe("Codex Connect config menu", () => {
     expect(printed).toContain("上报端点：http://127.0.0.1:8790/api/ingest");
     expect(printed).toContain("设备 ID：device-a");
     expect(printed).toContain("WebUI 全局视图：已启用");
-    expect(printed).toContain("devi****oken");
-    expect(printed).toContain("view****oken");
+    expect(printed).toContain("设备上报令牌：已配置");
+    expect(printed).toContain("全局查看令牌：已配置");
+    expect(printed).not.toContain("device-token");
+    expect(printed).not.toContain("view-token");
   });
 
   it("updates the metrics upload interval through the menu", async () => {
@@ -1118,7 +1120,14 @@ describe("Codex Connect config menu", () => {
     });
 
     expect(result).toEqual({
-      center: { enabled: true },
+      center: {
+        enabled: true,
+        host: "127.0.0.1",
+        port: 8790,
+        tokenConfigured: false,
+        deviceTokenConfigured: false,
+        databasePath: "data/central-metrics.sqlite3",
+      },
       configPath: fixture.configPath,
     });
     const center = readGatewayConfig(fixture.configPath).metrics as unknown as {
