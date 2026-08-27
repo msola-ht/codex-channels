@@ -217,6 +217,30 @@ describe("Git 源码更新", () => {
     ]);
   });
 
+  it("updates a stable source checkout to a Gateway fix release", async () => {
+    const fixture = createInstalledFixture("codexc-source-update-fix-release-");
+    writePackageVersion(fixture.repository, "0.147.0-fix1");
+    runGit(fixture.repository, ["add", "."]);
+    runGit(fixture.repository, ["commit", "--quiet", "-m", "fix release"]);
+
+    const result = await updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => undefined,
+      inspectStaged: async () => ({ services: { installed: false } }),
+      installGlobalPackage: () => undefined,
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      runLocalUpdate: () => undefined,
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      previousVersion: "0.147.0",
+      version: "0.147.0-fix1",
+    });
+    expect(JSON.parse(readFileSync(join(fixture.checkout, "package.json"), "utf8")).version)
+      .toBe("0.147.0-fix1");
+  });
+
   it("migrates the legacy launcher even when main is already current", async () => {
     const fixture = createInstalledFixture("codexc-source-launcher-migration-");
     runGit(fixture.checkout, ["reset", "--quiet", "--hard", fixture.latestCommit]);
@@ -550,8 +574,14 @@ function createInstalledFixture(prefix: string) {
 }
 
 function writePackageVersion(repository: string, version: string): void {
+  const codexVersion = version.split("-", 1)[0];
+  mkdirSync(join(repository, "src", "codex-protocol"), { recursive: true });
   writeFileSync(join(repository, "package.json"), JSON.stringify({ version }));
   writeFileSync(join(repository, "webui", "package.json"), JSON.stringify({ version }));
+  writeFileSync(
+    join(repository, "src", "codex-protocol", "version.json"),
+    JSON.stringify({ codexCli: `codex-cli ${codexVersion}` }),
+  );
 }
 
 function runGit(cwd: string, args: string[]): void {

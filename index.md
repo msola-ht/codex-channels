@@ -17,6 +17,8 @@
 
 - [`docs/releases/v0.148.0-fix1.md`](docs/releases/v0.148.0-fix1.md)：`v0.148.0-fix1` npm 修复预览版
   的改动、安装、验证和回滚说明。
+- [`docs/releases/v0.148.0-fix2.md`](docs/releases/v0.148.0-fix2.md)：修复 `-fixN` 源码更新失败的
+  `v0.148.0-fix2` npm 热修预览版说明。
 
 ## 协议与设计
 
