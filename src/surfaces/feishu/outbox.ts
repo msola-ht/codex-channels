@@ -804,6 +804,17 @@ export class FeishuOutbox implements SurfaceOutputPort {
           status: "active",
           ...(event.identity ? { identity: event.identity } : {}),
         });
+        const replyTo = this.replyTargets.get(
+          turnKey(event.threadId, event.turnId),
+        );
+        if (replyTo !== undefined) {
+          await this.sendMarkdown(
+            event.target.conversationId,
+            markdown,
+            maximumFeishuMessageChunks,
+            replyTo,
+          );
+        }
         return;
       }
       const replyTo = this.replyTargets.get(
@@ -844,40 +855,30 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     const key = turnKey(event.threadId, event.turnId);
-    const consumesReplyTarget = event.type === "turn.completed"
-      || (
-        event.type === "text.completed"
-        && event.phase !== "commentary"
-      );
-    const replyTo = consumesReplyTarget
-      ? this.replyTargets.get(key)
-      : undefined;
+    const replyTo = this.replyTargets.get(key);
     if (
       event.type === "text.completed"
       && event.phase !== "commentary"
       && this.canSendCompletedAnswerFile(event.text)
     ) {
-      try {
-        await this.sendLongFinalAnswer(
-          event.target.conversationId,
-          event.text,
-          replyTo,
-        );
-      } finally {
-        if (consumesReplyTarget) {
-          this.replyTargets.delete(key);
-        }
-      }
+      await this.sendLongFinalAnswer(
+        event.target.conversationId,
+        event.text,
+        replyTo,
+      );
       return;
     }
-    await this.sendMarkdown(
-      event.target.conversationId,
-      markdown,
-      maximumFeishuMessageChunks,
-      replyTo,
-    );
-    if (consumesReplyTarget) {
-      this.replyTargets.delete(key);
+    try {
+      await this.sendMarkdown(
+        event.target.conversationId,
+        markdown,
+        maximumFeishuMessageChunks,
+        replyTo,
+      );
+    } finally {
+      if (event.type === "turn.completed") {
+        this.replyTargets.delete(key);
+      }
     }
   }
 
@@ -1250,18 +1251,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
           ? `${state.cardText}${feishuTruncationNotice}`
           : state.cardText;
         const replyKey = turnKey(state.threadId, state.turnId);
-        const replyTo = state.phase === "commentary"
-          ? undefined
-          : this.replyTargets.get(replyKey);
+        const replyTo = this.replyTargets.get(replyKey);
         await this.sendMarkdown(
           state.chatId,
           markdown,
           remainingMessageBudget,
           replyTo,
         );
-        if (replyTo !== undefined) {
-          this.replyTargets.delete(replyKey);
-        }
       }
       if (state.completionFooter !== undefined) {
         await this.sendMarkdown(state.chatId, state.completionFooter);
@@ -1438,9 +1434,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       throw new Error("飞书流式卡片数量超过单个结果上限");
     }
     const replyKey = turnKey(state.threadId, state.turnId);
-    const replyTo = state.phase === "commentary"
-      ? undefined
-      : this.replyTargets.get(replyKey);
+    const replyTo = this.replyTargets.get(replyKey);
     const created =
       replyTo !== undefined && this.messagePort.createStreamingReplyCard
         ? await this.messagePort.createStreamingReplyCard(replyTo, initialText)
@@ -1448,9 +1442,6 @@ export class FeishuOutbox implements SurfaceOutputPort {
             state.chatId,
             initialText,
           );
-    if (replyTo !== undefined) {
-      this.replyTargets.delete(replyKey);
-    }
     state.cardId = created.cardId;
     state.lastSentText = initialText;
     state.cardCount += 1;
@@ -1482,9 +1473,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         ? `${state.text}${feishuTruncationNotice}`
         : state.text;
       const replyKey = turnKey(state.threadId, state.turnId);
-      const replyTo = state.phase === "commentary"
-        ? undefined
-        : this.replyTargets.get(replyKey);
+      const replyTo = this.replyTargets.get(replyKey);
       if (replyTo !== undefined && this.messagePort.replyPost) {
         await this.messagePort.replyPost(replyTo, markdown);
       } else {
@@ -1493,9 +1482,6 @@ export class FeishuOutbox implements SurfaceOutputPort {
           markdown,
           remainingMessageBudget,
         );
-      }
-      if (replyTo !== undefined) {
-        this.replyTargets.delete(replyKey);
       }
     }
     if (state.completionFooter !== undefined) {

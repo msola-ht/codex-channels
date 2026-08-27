@@ -250,7 +250,7 @@ describe("Feishu output renderer", () => {
     expect(results.map((result) => renderFeishuCommandResult(result))).toEqual([
       "## 当前没有运行中的任务。",
       "当前 Workspace 没有匹配的可恢复会话。",
-      expect.stringContaining("Thread：尚未绑定"),
+      expect.stringContaining("Session：尚未绑定"),
       expect.stringContaining("Main · main ← 当前"),
       expect.stringContaining("Fast 模式：开启"),
       "当前没有已启用的 Skills。",

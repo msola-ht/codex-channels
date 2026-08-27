@@ -119,7 +119,7 @@ describe("Feishu outbox", () => {
     }]);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ schema: "2.0" });
-    expect(sent[0]?.header.title.content).toBe("Thread 状态");
+    expect(sent[0]?.header.title.content).toBe("Session 状态");
     expect(statusCardText(sent[0]!)).toBe("GitHub Plugin · 运行中");
   });
 
@@ -158,9 +158,9 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.header.title.content).toBe("Thread 状态");
+    expect(sent[0]?.header.title.content).toBe("Session 状态");
     expect(updated).toHaveLength(1);
-    expect(updated[0]?.header.title.content).toBe("Thread 状态");
+    expect(updated[0]?.header.title.content).toBe("Session 状态");
     expect(statusCardText(updated[0]!)).toBe("运行中");
   });
 
@@ -199,7 +199,7 @@ describe("Feishu outbox", () => {
     await outbox.close();
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.header.title.content).toBe("Thread 状态");
+    expect(sent[0]?.header.title.content).toBe("Session 状态");
     expect(statusCardText(sent[0]!)).toBe("运行中");
     expect(updated).toHaveLength(0);
   });
@@ -696,11 +696,11 @@ describe("Feishu outbox", () => {
     });
     await outbox.close();
 
-    expect(markdownCards).toEqual(["处理中"]);
-    expect(replies).toEqual([{
-      messageId: "om_origin",
-      markdown: "最终回复",
-    }]);
+    expect(markdownCards).toEqual([]);
+    expect(replies).toEqual([
+      { messageId: "om_origin", markdown: "处理中" },
+      { messageId: "om_origin", markdown: "最终回复" },
+    ]);
   });
 
   it("keeps the reply target through commentary for the final streaming card", async () => {
@@ -773,11 +773,11 @@ describe("Feishu outbox", () => {
     });
     await outbox.close();
 
-    expect(ordinaryCards).toEqual(["处理中"]);
-    expect(replyCards).toEqual([{
-      messageId: "om_origin",
-      text: "最终回复",
-    }]);
+    expect(ordinaryCards).toEqual([]);
+    expect(replyCards).toEqual([
+      { messageId: "om_origin", text: "处理中" },
+      { messageId: "om_origin", text: "最终回复" },
+    ]);
   });
 
   it("keeps Turn completion separate from a commentary-only stream", async () => {
@@ -1909,7 +1909,7 @@ describe("Feishu outbox", () => {
           template: "blue",
           title: {
             tag: "plain_text",
-            content: "Thread 状态",
+            content: "Session 状态",
           },
         },
         body: {
@@ -1935,7 +1935,7 @@ describe("Feishu outbox", () => {
           template: "green",
           title: {
             tag: "plain_text",
-            content: "Thread 状态",
+            content: "Session 状态",
           },
         },
         body: {
@@ -2448,9 +2448,9 @@ describe("Feishu outbox", () => {
     outbox.handle(turnCompleted());
     await outbox.close();
 
-    expect(replies).toHaveLength(1);
+    expect(replies).toHaveLength(2);
     expect(replies[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
-    expect(ordinaryCards.at(-1)).toBe(turnCompletedMarkdown);
+    expect(replies[1]).toContain("本次运行 · 已完成");
   });
 
   it("does not upload a final answer beyond the bounded file limit", async () => {

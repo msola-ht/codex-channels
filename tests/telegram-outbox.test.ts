@@ -501,7 +501,13 @@ describe("TelegramOutbox", () => {
         allow_sending_without_reply: true,
       },
     });
-    expect(api.sendOptions[1]).toEqual({ disable_notification: true });
+    expect(api.sendOptions[1]).toEqual({
+      disable_notification: true,
+      reply_parameters: {
+        message_id: 42,
+        allow_sending_without_reply: true,
+      },
+    });
     expect(api.sendOptions[2]).toMatchObject({
       reply_parameters: { message_id: 42 },
     });
@@ -834,10 +840,9 @@ describe("TelegramOutbox", () => {
       "<b>操作过程</b>\n\n💻 ⏳ <b>运行命令 · 运行中</b>\n" +
       "<pre><code class=\"language-shell\">TOKEN=[已隐藏] git status --short</code></pre>",
     ]);
-    expect(api.sendOptions[0]).toMatchObject({
+    expect(api.sendOptions[0]).toEqual({
       parse_mode: "HTML",
       disable_notification: true,
-      reply_parameters: { message_id: 42 },
     });
 
     outbox.handle({
@@ -1170,6 +1175,10 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions[1]).toEqual({
       parse_mode: "HTML",
       disable_notification: true,
+      reply_parameters: {
+        message_id: 42,
+        allow_sending_without_reply: true,
+      },
     });
   });
 

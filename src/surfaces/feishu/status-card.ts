@@ -24,7 +24,7 @@ export function renderFeishuThreadStatusCard(
           : "grey",
       title: {
         tag: "plain_text",
-        content: "Thread 状态",
+        content: "Session 状态",
       },
     },
     body: {
