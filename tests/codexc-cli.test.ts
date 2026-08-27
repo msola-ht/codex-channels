@@ -1558,6 +1558,16 @@ describe("codexc CLI", () => {
     expect(internal.stderr).toContain(
       "Codex Profile sf-custom-codeproxy-dev 是内部名称；请使用 --profile custom-codeproxy-dev",
     );
+
+    const providerId = spawnSync(
+      process.execPath,
+      [cli, "remote", "--profile", "codeproxy-dev"],
+      { cwd: workspace, env: environment, encoding: "utf8" },
+    );
+    expect(providerId.status).toBe(1);
+    expect(providerId.stderr).toContain(
+      "codeproxy-dev 是 Provider ID；请使用 --profile custom-codeproxy-dev",
+    );
   }, 30_000);
 
   it("starts the App Server with effective proxy settings and the official path allowlist", () => {

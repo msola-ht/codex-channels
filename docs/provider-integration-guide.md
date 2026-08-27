@@ -162,7 +162,7 @@ codexc doctor
 
 - `/model` 能看到带新 Provider 前缀的模型，并可按序号选择；
 - 新会话、同 Provider 历史 Thread、跨 Provider 新建 Thread 的模型与思考等级符合预期；
-- `codexc remote --profile <id>` 能拉起隔离 App Server 并共享会话；
+- `codexc remote --profile custom-<Provider ID>` 能拉起隔离 App Server 并共享会话；
 - `/usage` 按账户形态展示余额或配额窗口与模型本地用量；
 - 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启；
 - 峰谷价格按请求开始时间验证：生效时间前后、快照存在与缺失、窗口重置边界；

@@ -4,6 +4,7 @@ export function parseCodexRemoteOptions(
   args: readonly string[],
   options?: {
     customSwitchingProfiles?: ReadonlyArray<{
+      providerId: string;
       profileName: string;
       codexProfileName: string;
     }>;
