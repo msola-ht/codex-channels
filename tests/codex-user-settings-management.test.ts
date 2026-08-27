@@ -37,6 +37,12 @@ describe("Codex user settings management", () => {
         reasoningEffort: "high",
         fastEnabled: true,
         webSearch: null,
+        reasoningSummary: null,
+        planModeReasoningEffort: null,
+        verbosity: null,
+        personality: null,
+        checkForUpdateOnStartup: null,
+        historyPersistence: null,
       },
       permissions: {
         editable: true,
@@ -151,6 +157,37 @@ describe("Codex user settings management", () => {
 
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "web_search", value: "live" },
+    ], { expectedVersion: "version-1" });
+  });
+
+  it("writes additional user preferences in one versioned transaction", async () => {
+    const client = settingsClient({});
+
+    await expect(updateCodexUserSetting({
+      kind: "preferences",
+      reasoningSummary: "concise",
+      planModeReasoningEffort: "high",
+      verbosity: "high",
+      personality: "friendly",
+      checkForUpdateOnStartup: false,
+      historyPersistence: "none",
+    }, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+      primaryProvider: () => "openai",
+    })).resolves.toMatchObject({
+      kind: "preferences",
+      activation: "restart-all",
+    });
+
+    expect(client.listModels).toHaveBeenCalledOnce();
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "model_reasoning_summary", value: "concise" },
+      { keyPath: "plan_mode_reasoning_effort", value: "high" },
+      { keyPath: "model_verbosity", value: "high" },
+      { keyPath: "personality", value: "friendly" },
+      { keyPath: "check_for_update_on_startup", value: false },
+      { keyPath: "history.persistence", value: "none" },
     ], { expectedVersion: "version-1" });
   });
 

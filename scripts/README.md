@@ -186,7 +186,8 @@
   已有 `default_permissions` 时不混写传统 Sandbox 字段；一键写入全部还会关闭官方分析与反馈并开启
   `features.goals`，这些设置不影响 Gateway 本地指标统计。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 用户设置”
-  适配器，只负责选择、预览和中文结果；第三方 Provider 的模型与凭据继续留在 Provider Setup。
+  适配器，只负责选择、预览和中文结果；可单独设置 Plan 思考等级、推理摘要、输出详细程度、人格、
+  更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider

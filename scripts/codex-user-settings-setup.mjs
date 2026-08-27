@@ -45,6 +45,11 @@ export async function runCodexUserSettingsSetup({
         label: "联网搜索模式",
         hint: settings.defaults.webSearch ?? "当前：未设置（默认缓存）",
       },
+      ...(settings.defaultsEditable ? [{
+        value: "preferences",
+        label: "其他用户偏好",
+        hint: "Plan、推理摘要、输出详细程度、人格、更新检查与历史",
+      }] : []),
       {
         value: "permissions",
         label: "沙盒、审批与网络",
@@ -98,6 +103,9 @@ export async function runCodexUserSettingsSetup({
       createClient,
       primaryProvider,
     });
+  }
+  if (section === "preferences") {
+    return runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
   if (section === "permissions") {
     return runPermissionSettings({
@@ -228,6 +236,33 @@ async function runWebSearchSetting({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 联网搜索模式已更新：${mode}\n`);
+  output.write("请运行 codexc service restart all，使新会话使用新设置。\n");
+  return result;
+}
+
+async function runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  const pick = async (message, initialValue, options) => {
+    const value = await prompts.select({ message, showInstructions: false, initialValue, options: [...options, { value: "back", label: "返回" }] });
+    return prompts.isCancel(value) || value === "back" ? null : value;
+  };
+  const model = settings.models.find((item) => item.model === settings.defaults.model) ?? settings.models[0];
+  if (!model || model.reasoningEfforts.length === 0) throw new Error("当前没有可用模型思考等级");
+  const plan = await pick("Plan 默认思考等级", settings.defaults.planModeReasoningEffort ?? model.defaultReasoningEffort, model.reasoningEfforts.map((item) => ({ value: item.effort, label: item.effort, hint: item.description })));
+  if (plan === null) return { action: "back" };
+  const summary = await pick("推理摘要", settings.defaults.reasoningSummary ?? "auto", ["auto", "concise", "detailed", "none"].map((value) => ({ value, label: value })));
+  if (summary === null) return { action: "back" };
+  const verbosity = await pick("输出详细程度", settings.defaults.verbosity ?? "medium", ["low", "medium", "high"].map((value) => ({ value, label: value })));
+  if (verbosity === null) return { action: "back" };
+  const personality = await pick("模型人格", settings.defaults.personality ?? "none", ["none", "friendly", "pragmatic"].map((value) => ({ value, label: value })));
+  if (personality === null) return { action: "back" };
+  const check = await pick("启动时检查更新", settings.defaults.checkForUpdateOnStartup ?? true, [{ value: true, label: "开启" }, { value: false, label: "关闭" }]);
+  if (check === null) return { action: "back" };
+  const history = await pick("历史记录保存", settings.defaults.historyPersistence ?? "save-all", [{ value: "save-all", label: "保存" }, { value: "none", label: "不保存" }]);
+  if (history === null) return { action: "back" };
+  const confirmed = await prompts.confirm({ message: `保存其他用户偏好：Plan ${plan} · 摘要 ${summary} · 详细程度 ${verbosity} · 人格 ${personality} · 更新检查 ${check ? "开启" : "关闭"} · 历史 ${history}？`, initialValue: true });
+  if (prompts.isCancel(confirmed) || confirmed !== true) { output.write("已取消，未修改其他用户偏好。\n"); return undefined; }
+  const result = await updateSetting({ kind: "preferences", reasoningSummary: summary, planModeReasoningEffort: plan, verbosity, personality, checkForUpdateOnStartup: check, historyPersistence: history }, { environment, expectedVersion: settings.version, ...(createClient === undefined ? {} : { createClient }), ...(primaryProvider === undefined ? {} : { primaryProvider }) });
+  output.write("Codex 其他用户偏好已更新。\n");
   output.write("请运行 codexc service restart all，使新会话使用新设置。\n");
   return result;
 }
