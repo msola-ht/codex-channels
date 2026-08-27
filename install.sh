@@ -112,14 +112,14 @@ note "正在克隆 Codex Connect main 到 $checkout"
 git clone --quiet --branch main --single-branch "$repository" "$staging/repository" \
   || fail "无法克隆官方 main 分支"
 
-package_version="$(node -e '
+version="$(node -e '
 import { readFileSync } from "node:fs";
 const metadata = JSON.parse(readFileSync(process.argv[1], "utf8"));
-const version = typeof metadata.version === "string" ? metadata.version : "";
+const value = typeof metadata.codexCli === "string" ? metadata.codexCli : "";
+const version = value.startsWith("codex-cli ") ? value.slice("codex-cli ".length) : "";
 if (!/^\d+\.\d+\.\d+$/u.test(version)) process.exit(1);
 process.stdout.write(version);
-' "$staging/repository/package.json")"
-version="$package_version"
+' "$staging/repository/src/codex-protocol/version.json")"
 codex_command="$(command -v codex 2>/dev/null || true)"
 if [ -z "$codex_command" ]; then
   note "未检测到 Codex CLI，正在安装 @openai/codex@$version"

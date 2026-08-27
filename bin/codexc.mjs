@@ -109,7 +109,7 @@ const helpText = {
 
 初始化与配置：
   init                         初始化用户目录和配置
-  setup                        配置模型、提供商、通讯渠道与项目技能（交互菜单）
+  setup                        配置 Codex 用户设置、提供商、通讯渠道与项目技能（交互菜单）
   config                       打开日常设置菜单（交互菜单）
   doctor                       诊断安装、配置和服务
 
@@ -143,10 +143,11 @@ const helpText = {
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
   setup: `用法：codexc setup
 
-打开脱敏配置总览，以及模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
+打开脱敏配置总览，以及 Codex 用户设置、模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
 
 常用入口：
-  codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方 / 默认模型与思考等级
+  codexc setup → Codex 用户设置 → 一键配置全部 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络
+  codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
   codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 项目技能（安装或卸载项目技能）`,

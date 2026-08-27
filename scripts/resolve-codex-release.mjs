@@ -60,20 +60,27 @@ async function main() {
   }
 
   const resolved = await resolveOfficialRelease(requestedVersion);
-  const packageMetadata = JSON.parse(
-    readFileSync(resolve(import.meta.dirname, "..", "package.json"), "utf8"),
+  const protocolMetadata = JSON.parse(
+    readFileSync(
+      resolve(import.meta.dirname, "..", "src", "codex-protocol", "version.json"),
+      "utf8",
+    ),
   );
-  const comparison = compareStableVersions(resolved.version, packageMetadata.version);
+  const currentVersion = protocolMetadata.codexCli.replace(/^codex-cli /u, "");
+  if (!stableVersionPattern.test(currentVersion)) {
+    throw new Error(`无法解析当前 Codex CLI 协议版本：${protocolMetadata.codexCli}`);
+  }
+  const comparison = compareStableVersions(resolved.version, currentVersion);
   if (comparison < 0) {
     throw new Error(
-      `拒绝降级 Codex CLI：项目是 ${packageMetadata.version}，目标是 ${resolved.version}`,
+      `拒绝降级 Codex CLI：项目是 ${currentVersion}，目标是 ${resolved.version}`,
     );
   }
   const upgradeAvailable = comparison > 0;
   console.log(`官方 Codex 正式发行版：${resolved.tag}`);
   console.log(upgradeAvailable
-    ? `发现可用升级：${packageMetadata.version} → ${resolved.version}`
-    : `项目已经使用该正式版本：${packageMetadata.version}`);
+    ? `发现可用升级：${currentVersion} → ${resolved.version}`
+    : `项目已经使用该正式版本：${currentVersion}`);
   console.log(resolved.url);
 
   if (process.env.GITHUB_OUTPUT) {

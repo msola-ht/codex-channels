@@ -19,7 +19,11 @@ export async function runSystemSettings({
     options: [
       { value: "debug", label: "调试模式", hint: "控制全局脱敏调试日志与渠道技术字段" },
       { value: "approval_timeout", label: "审批超时", hint: "approval.timeout_seconds（30–3600 秒）" },
-      { value: "sandbox", label: "Codex Sandbox", hint: "read-only 或 workspace-write" },
+      {
+        value: "sandbox",
+        label: "Gateway 渠道 Sandbox",
+        hint: "外部渠道默认值；Codex 用户设置在 Setup 中管理",
+      },
       { value: "default_workspace", label: "默认工作区", hint: "default_workspace" },
       {
         value: "default_model",
@@ -75,7 +79,7 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
 async function runSandbox({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
-    message: "Codex Sandbox",
+    message: "Gateway 渠道 Sandbox",
     showInstructions: false,
     initialValue: settings.system.sandbox,
     options: [
@@ -92,7 +96,7 @@ async function runSandbox({ environment, output, prompts, writeConfig }) {
     kind: "system.sandbox",
     value: selected,
   }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`Codex Sandbox 已设为${selected}：${result.configPath}\n`);
+  output.write(`Gateway 渠道 Sandbox 已设为${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "restart");
   return { sandbox: selected, configPath: result.configPath };
 }

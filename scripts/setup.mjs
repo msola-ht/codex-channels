@@ -10,6 +10,7 @@ import { runWeixinSetup } from "./weixin-setup.mjs";
 import { runApiProviderSetup } from "./api-provider-setup.mjs";
 import { runSkillSetup } from "./skill-setup.mjs";
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
+import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
 import { runOpenCodeGoSetup } from "./opencode-go-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { runCustomPrimaryProviderMenu } from "./primary-provider-cli.mjs";
@@ -18,6 +19,7 @@ import { writeSetupConfigurationSummary } from "./setup-summary.mjs";
 import { runThirdPartyAgentSetup } from "./agents-setup.mjs";
 
 export async function runSetup({
+  environment = process.env,
   input = process.stdin,
   output = process.stdout,
   prompts = clackPrompts,
@@ -28,6 +30,7 @@ export async function runSetup({
   apiProviderSetup = runApiProviderSetup,
   skillSetup = runSkillSetup,
   codexDefaultsSetup = runCodexDefaultsSetup,
+  codexUserSettingsSetup = runCodexUserSettingsSetup,
   openCodeGoSetup = runOpenCodeGoSetup,
   modelProviderDefaultSetup = runModelProviderDefaultSetup,
   customPrimarySetup = runCustomPrimaryProviderMenu,
@@ -45,6 +48,11 @@ export async function runSetup({
           value: "summary",
           label: "配置总览",
           hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
+        },
+        {
+          value: "codex_user",
+          label: "Codex 用户设置",
+          hint: "默认模型、思考等级、Fast、沙盒、审批与网络",
         },
         {
           value: "models",
@@ -88,6 +96,16 @@ export async function runSetup({
         if (isBackResult(result)) continue;
         return result;
       }
+      case "codex_user": {
+        const result = await codexUserSettingsSetup({
+          environment,
+          output,
+          prompts,
+          defaultsSetup: codexDefaultsSetup,
+        });
+        if (isBackResult(result)) continue;
+        return result;
+      }
       case "models": {
         const result = await runModelSetup({
           input,
@@ -95,7 +113,6 @@ export async function runSetup({
           prompts,
           deepseekSetup,
           apiProviderSetup,
-          codexDefaultsSetup,
           openCodeGoSetup,
           modelProviderDefaultSetup,
           customPrimarySetup,
@@ -126,7 +143,6 @@ async function runModelSetup({
   prompts,
   deepseekSetup,
   apiProviderSetup,
-  codexDefaultsSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   customPrimarySetup,
@@ -141,7 +157,7 @@ async function runModelSetup({
         {
           value: "official",
           label: "OpenAI 官方",
-          hint: "OpenAI 官方登录与默认模型",
+          hint: "OpenAI 官方登录与固定主 Provider 恢复",
         },
         {
           value: "third_party",
@@ -157,7 +173,6 @@ async function runModelSetup({
         input,
         output,
         prompts,
-        codexDefaultsSetup,
         officialLoginSetup,
       });
       if (isBackResult(result)) continue;
@@ -186,7 +201,6 @@ async function runOfficialModelSetup({
   input,
   output,
   prompts,
-  codexDefaultsSetup,
   officialLoginSetup,
 }) {
   while (true) {
@@ -199,11 +213,6 @@ async function runOfficialModelSetup({
           label: "登录并恢复官方",
           hint: "运行 codex login --device-auth，并停用自定义固定主 Provider",
         },
-        {
-          value: "codex",
-          label: "默认模型与思考等级",
-          hint: "设置 Codex 官方全局默认值",
-        },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
     });
@@ -211,8 +220,6 @@ async function runOfficialModelSetup({
     let result;
     if (module === "official_login") {
       result = await officialLoginSetup({ input, output, prompts });
-    } else if (module === "codex") {
-      result = await codexDefaultsSetup({ input, output, prompts, allowBack: true });
     } else {
       throw new Error(`未知官方设置：${String(module)}`);
     }

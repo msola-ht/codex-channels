@@ -13,6 +13,11 @@
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS Git 源码安装、目录、更新和失败边界。
 
+## 发行记录
+
+- [`docs/releases/v0.148.0-fix1.md`](docs/releases/v0.148.0-fix1.md)：`v0.148.0-fix1` npm 修复预览版
+  的改动、安装、验证和回滚说明。
+
 ## 协议与设计
 
 - [`docs/architecture-optimization.md`](docs/architecture-optimization.md)：全项目链路审查、结构性优化原则、实施顺序与进度。

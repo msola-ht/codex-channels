@@ -107,9 +107,9 @@
   Worker 共用的上报载荷校验及类型声明。
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema，子代理标注包含可空
   `parent_turn_id`；历史 Cloudflare D1 migration 保留部署参考，不作为生产中心运行时依赖。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“模型与提供商”
-  “通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方与第三方 Provider
-  两级，子模块返回时停留在所属层级。
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“Codex 用户设置”
+  “模型与提供商”“通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
+  登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   共享第三方子代理、直接 API Provider 数量、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
@@ -177,9 +177,15 @@
   之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`，从第三方
   模式恢复时清除第三方顶层模型。设备登录完成后在统一 Provider 管理事务内重新读取配置与角色
   占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
-- `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和思考等级，通过独立 stdio
-  App Server 的 `config/read` / `config/batchWrite` 更新用户 `config.toml`；不修改登录凭据或
-  Gateway 的 Thread 默认模型。
+- `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
+  Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast，
+  一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入全部字段；Fast 始终作为
+  OpenAI 主配置偏好写入，不读取第三方模型目录。第三方固定模式不开放官方默认模型与思考等级，
+  已有 `default_permissions` 时不混写传统 Sandbox 字段。
+- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 用户设置”
+  适配器，只负责选择、预览和中文结果；第三方 Provider 的模型与凭据继续留在 Provider Setup。
+- `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
+  思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
   默认模型、思考等级和自动压缩阈值的无终端校验、预览与执行接口；切换模式更新私有 Profile，固定
   模式与切换模式共用统一 Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读
@@ -216,7 +222,7 @@
   开发中的 Plugin API；复用 Config 管理接口，管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
-- `config-system-menu.mjs`：独立管理调试入口、审批超时、全局 Sandbox、默认 Workspace 和
+- `config-system-menu.mjs`：独立管理调试入口、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace 和
   Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`，两者复用同一 Config 管理接口。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
@@ -395,7 +401,8 @@
   均按固定 `v2.4.6` 合同申请官方 CDN 上传地址、AES-128-ECB 加密并以二进制 `POST` 上传，
   再发送单张图片或单个一般文件消息；上传缺少下载参数时有限重试，4xx 立即失败；不输出或保存
   媒体正文、上传地址、参数、key、Token、游标或完整身份，不注册常驻 Surface。
-- `check-gateway-version.mjs`：校验 npm 包和 Gateway 版本都与 Codex CLI 协议版本一致。
+- `check-gateway-version.mjs`：校验 npm 包与 Gateway 运行时版本一致，并要求正式版本或 `-fixN`
+  修复版本使用与 Codex CLI 协议相同的基础版本。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根 `index.md` 文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `codex-rules.mjs`：向 CLI 重新导出 `runtime/project-rules.mjs` 的项目定位、规则生成与检查能力。
@@ -425,9 +432,11 @@
   `codexc` 入口与配置预检。
 - `check-release-tag.mjs`：要求 Git Tag、`package.json` 与 README 正式版本及安装命令严格一致，
   README 尚未完成正式发布提交时失败关闭。
-- `sync-published-readme.mjs`：把受控的 README 正式版本与安装命令渲染为已发布版本；拒绝
+- `sync-published-readme.mjs`：把受控的 README 正式版本与安装命令渲染为已发布版本；允许与
+  当前正式版基础版本一致的 `-fixN` Gateway 修复预览版本，并独立保留正式版安装说明；拒绝其他
   预发布、降级、高于开发基线和缺少受控标记的文档。
-- `sync-gateway-version.mjs`：以锁定的 Codex CLI 协议版本同步 `package.json`、锁文件和 Gateway 运行时版本；不维护独立版本号。
+- `sync-gateway-version.mjs`：升级 Codex CLI 协议时把 `package.json`、锁文件和 Gateway 运行时
+  版本重置为新的正式基础版本；Gateway 修复发行可在该基础版本后使用受控的 `-fixN` 后缀。
 - `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
   OpenAI 主提供商使用的配置、环境变量或系统代理路由（不显示代理地址或凭据）、
   Workspace、飞书凭据/Bot 身份、

@@ -25,7 +25,9 @@
 
 - `initializeUserData` 已返回初始化结果，可作为 `init` 的结构化基础。
 - Config 和 Setup 总览已提供不依赖终端的脱敏结构化读取，CLI 只负责展示。
-- OpenAI 默认值、受管 Provider、自定义主 Provider、OpenCode Go 账户和共享第三方子代理已统一为脱敏管理状态。
+- Codex 用户级默认模型、思考等级、Fast、Sandbox、审批和 Workspace Sandbox 网络权限已统一为
+  带修订保护的脱敏管理接口；受管 Provider、自定义主 Provider、OpenCode Go 账户和共享第三方子代理
+  继续使用各自的脱敏管理状态。
 - DeepSeek 与 OpenCode Go 共用受管模型目录和切换/固定模式配置核心；OpenCode Go 的多账户生命周期、
   DeepSeek 的历史备份兼容和自定义主 Provider 的任意 URL/ID 语义保留在各自边界。
 - 直接 API Provider 已抽取脱敏列表、凭据事务和明确生效动作。
@@ -43,6 +45,7 @@
 - [x] 直接 API Provider 管理返回脱敏状态和明确生效动作，CLI 只负责询问与渲染。
 - [x] Config 提供脱敏结构化读取。
 - [x] Config 的显示、系统、自动化、网络和高级设置使用明确修改输入与统一结果。
+- [x] Codex 用户设置提供统一脱敏快照、三种独立事务和一次写入全部的组合事务，并由 Setup 复用；Provider 凭据和模型目录不进入该接口。
 - [x] 现有 Config CLI 菜单复用管理接口，并保持用户可见行为不变。
 - [x] 定向类型检查、Lint、测试和文档检查通过。
 
