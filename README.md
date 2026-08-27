@@ -11,17 +11,17 @@
 通过 `codexc remote` 启动的原生 Codex TUI 与聊天客户端按模型提供商共享同一个 Codex App
 Server，因此可以继续使用对应的会话、Thread 和运行状态。
 
-`main` 开发基线：`0.148.0`（尚未发布）
-当前正式版：`0.147.0`
-要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.147.0`
+`main` 开发基线：`0.148.0`
+当前正式版：`0.148.0`
+要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.148.0`
 
 ## 快速开始
 
 安装配套版本：
 
 ```bash
-npm install -g @openai/codex@0.147.0
-npm install -g @hegenai/codexc@0.147.0
+npm install -g @openai/codex@0.148.0
+npm install -g @hegenai/codexc@0.148.0
 ```
 
 也可以在 Linux 或 macOS 上把官方 `main` 分支 Git 仓库安装到
@@ -369,7 +369,7 @@ codexc service logs -n 100
 - 独立 `codex` 正在使用聊天绑定的同一 Thread：Gateway 仍会启动并提示该会话被占用；退出独立
   `codex` 后，Gateway 会自动恢复订阅并再次提示。终端需要共享会话时使用 `codexc remote`。
 - 只需重启 Gateway：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
-- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.147.0`。
+- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.148.0`。
 - 飞书完全收不到消息：先在终端运行 `codexc doctor`；如提示权限、消息事件或版本未生效，重新运行
   `codexc setup`，扫码时选择当前应用并完成授权、审核和发布。机器人能接收私聊但菜单不完整时，
   再发送 `/fs doctor`。
@@ -382,8 +382,8 @@ codexc service logs -n 100
 ## 升级与卸载
 
 ```bash
-npm install -g @hegenai/codexc@0.147.0
-npm install -g @openai/codex@0.147.0
+npm install -g @hegenai/codexc@0.148.0
+npm install -g @openai/codex@0.148.0
 codexc service install
 codexc update
 codexc doctor
