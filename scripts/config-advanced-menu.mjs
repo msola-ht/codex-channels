@@ -43,6 +43,7 @@ export async function runNetworkSettings({
     message: "选择网络代理设置",
     showInstructions: false,
     options: [
+      { value: "batch", label: "一次设置 HTTP / HTTPS / 通用代理", hint: "一次校验并写入三个代理 URL" },
       ...proxyFields.map(([value, label]) => ({
         value,
         label,
@@ -52,6 +53,7 @@ export async function runNetworkSettings({
     ],
   });
   if (prompts.isCancel(field) || field === "back") return { action: "back" };
+  if (field === "batch") return runProxyBatch({ environment, output, prompts, writeConfig, settings });
   if (!proxyFields.some(([value]) => value === field)) {
     throw new Error(`未知网络代理设置：${String(field)}`);
   }
@@ -73,7 +75,7 @@ export async function runNetworkSettings({
           message: "NO_PROXY（逗号分隔主机；留空取消）",
           validate: (candidate) => validateNetworkProxyValue(field, candidate),
         })
-      : await prompts.password({
+      : await prompts.text({
           message: "代理 URL（http:// 或 https://；留空取消）",
           validate: (candidate) => validateNetworkProxyValue(field, candidate),
         });
@@ -90,6 +92,30 @@ export async function runNetworkSettings({
   output.write(`${proxyFields.find(([value]) => value === field)?.[1]}已${action === "clear" ? "清除" : "更新"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, "reinstall");
   return { field, configured: action !== "clear", configPath: result.configPath };
+}
+
+async function runProxyBatch({ environment, output, prompts, writeConfig, settings }) {
+  const values = {};
+  for (const [field, label] of proxyFields.slice(0, 3)) {
+    const value = await prompts.text({
+      message: `${label} URL（留空保持当前值）`,
+      initialValue: "",
+      validate: (candidate) => {
+        const normalized = stringValue(candidate);
+        return normalized === "" ? undefined : validateNetworkProxyValue(field, normalized);
+      },
+    });
+    if (prompts.isCancel(value)) return { action: "back" };
+    if (stringValue(value) !== "") values[field] = stringValue(value);
+  }
+  if (Object.keys(values).length === 0) return { action: "back" };
+  const result = updateGatewaySetting({
+    kind: "network.proxy-batch",
+    values,
+  }, { environment, expectedRevision: settings.revision, writeConfig });
+  output.write(`HTTP、HTTPS、通用代理已一次性更新：${result.configPath}\n`);
+  writeGatewayConfigActivationNotice(output, environment, "reinstall");
+  return { fields: Object.keys(values), configPath: result.configPath };
 }
 
 export async function runAdvancedSettings(options) {

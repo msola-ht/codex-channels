@@ -79,7 +79,7 @@ export function createWebuiServer({
   assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
     throw new Error(
-      "WebUI 绑定非回环地址时必须提供访问令牌（--token 或配置 [webui] token）",
+      "WebUI 绑定非回环地址时必须提供访问令牌（请通过 codexc config 或配置 [webui] token 设置）",
     );
   }
   const server = createServer((request, response) => {

@@ -88,7 +88,7 @@
   Threads 返回指标库首个请求开始时间，请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
-  `--token` 或配置 `token`，API 以 `Authorization: Bearer` 校验并采用常数时间比较。
+  配置 `token`，API 以 `Authorization: Bearer` 校验并采用常数时间比较；令牌不通过命令行传入。
 - `metrics-center-server.mjs`：`codexc center` 的多设备指标中心 HTTP 服务。
   接收各设备 Gateway 的增量上报（独立 Bearer 上报令牌校验、载荷校验、按 `device_id + local_id`
   upsert 覆盖写入），写入中心 SQLite（复用 `metrics-center-schema.sql` 表结构，
@@ -220,7 +220,7 @@
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、Thread 分区管理员、显式 HTTP(S) 代理、日志等级与
-  开发中的 Plugin API；复用 Config 管理接口，管理员只能从已启用渠道的允许名单中选择，代理值使用隐藏输入且不回显。
+  开发中的 Plugin API；复用 Config 管理接口，管理员只能从已启用渠道的允许名单中选择，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理调试入口、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace 和
