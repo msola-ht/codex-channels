@@ -10,7 +10,11 @@ export function parseCodexRemoteOptions(
   args,
   {
     customSwitchingProfiles = loadConfiguredCustomSwitchingModelProviders(process.env)
-      .map(({ profileName, codexProfileName }) => ({ profileName, codexProfileName })),
+      .map(({ provider, profileName, codexProfileName }) => ({
+        providerId: provider,
+        profileName,
+        codexProfileName,
+      })),
   } = {},
 ) {
   const configuredManagedProfileDefinitions = loadManagedModelProviderDefinitions(process.env);
@@ -65,6 +69,13 @@ export function parseCodexRemoteOptions(
         + `请使用 --profile ${internalProfile.profileName}`,
       );
     }
+    const customProviderId = customProviderIdArgument(args, index, customSwitchingProfiles);
+    if (customProviderId) {
+      throw new Error(
+        `${customProviderId.providerId} 是 Provider ID；`
+        + `请使用 --profile ${customProviderId.profileName}`,
+      );
+    }
     const reservedCustomProfile = reservedCustomInternalProfileArgument(args, index);
     if (reservedCustomProfile) {
       const provider = reservedCustomProfile.slice("sf-custom-".length);
@@ -82,6 +93,22 @@ export function parseCodexRemoteOptions(
     passthrough.push(argument);
   }
   return { passthrough, workspaceId, selectedProfile };
+}
+
+function customProviderIdArgument(args, index, definitions) {
+  const argument = args[index];
+  for (const { providerId, profileName } of definitions) {
+    if (
+      (argument === "--profile" || argument === "-p")
+      && args[index + 1] === providerId
+    ) {
+      return { providerId, profileName };
+    }
+    if ([`--profile=${providerId}`, `-p=${providerId}`, `-p${providerId}`].includes(argument)) {
+      return { providerId, profileName };
+    }
+  }
+  return undefined;
 }
 
 function assertManagedProfileDefinitions(definitions) {

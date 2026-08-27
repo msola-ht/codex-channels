@@ -40,6 +40,7 @@ describe("Codex Remote options", () => {
       ["--profile", "custom-proxy-a"],
       {
         customSwitchingProfiles: [{
+          providerId: "proxy-a",
           profileName: "custom-proxy-a",
           codexProfileName: "sf-custom-proxy-a",
         }],
@@ -52,12 +53,28 @@ describe("Codex Remote options", () => {
   });
 
   it.each([
+    [["--profile", "proxy-a"]],
+    [["--profile=proxy-a"]],
+    [["-p=proxy-a"]],
+    [["-pproxy-a"]],
+  ])("rejects a custom Provider ID from %j", (args) => {
+    expect(() => parseCodexRemoteOptions(args, {
+      customSwitchingProfiles: [{
+        providerId: "proxy-a",
+        profileName: "custom-proxy-a",
+        codexProfileName: "sf-custom-proxy-a",
+      }],
+    })).toThrow("proxy-a 是 Provider ID；请使用 --profile custom-proxy-a");
+  });
+
+  it.each([
     [["--profile", "sf-custom-proxy-a"]],
     [["--profile=sf-custom-proxy-a"]],
     [["-psf-custom-proxy-a"]],
   ])("rejects the internal custom Codex Profile from %j", (args) => {
     expect(() => parseCodexRemoteOptions(args, {
       customSwitchingProfiles: [{
+        providerId: "proxy-a",
         profileName: "custom-proxy-a",
         codexProfileName: "sf-custom-proxy-a",
       }],
@@ -89,11 +106,11 @@ describe("Codex Remote options", () => {
   });
 
   it.each([
-    [{ profileName: "", codexProfileName: "sf-custom-proxy-a" }],
-    [{ profileName: "custom-proxy-a", codexProfileName: "" }],
-    [{ profileName: "custom-proxy-a", codexProfileName: "custom-proxy-a" }],
-    [{ profileName: "deepseek", codexProfileName: "sf-custom-proxy-a" }],
-    [{ profileName: "custom-proxy-a", codexProfileName: "sf-deepseek" }],
+    [{ providerId: "proxy-a", profileName: "", codexProfileName: "sf-custom-proxy-a" }],
+    [{ providerId: "proxy-a", profileName: "custom-proxy-a", codexProfileName: "" }],
+    [{ providerId: "proxy-a", profileName: "custom-proxy-a", codexProfileName: "custom-proxy-a" }],
+    [{ providerId: "proxy-a", profileName: "deepseek", codexProfileName: "sf-custom-proxy-a" }],
+    [{ providerId: "proxy-a", profileName: "custom-proxy-a", codexProfileName: "sf-deepseek" }],
   ])("rejects an invalid or conflicting managed Profile definition %j", (definition) => {
     expect(() => parseCodexRemoteOptions([], {
       customSwitchingProfiles: [definition],
