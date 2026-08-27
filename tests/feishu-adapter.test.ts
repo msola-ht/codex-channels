@@ -570,6 +570,51 @@ describe("Feishu conversation adapter", () => {
     expect(fixture.sent).toEqual([]);
   });
 
+  it("adds related action shortcuts to the Feishu status card", async () => {
+    const fixture = createOutbox();
+    const adapter = new FeishuConversationAdapter(
+      {
+        status: vi.fn(() => ({
+          workspaceId: "main",
+          workspaceName: "Main",
+          cwd: "/workspace",
+          threadId: "thread-1",
+          turnId: null,
+          model: "gpt-test",
+          modelProvider: "openai",
+          effort: "medium",
+          serviceTier: null,
+          modelPending: false,
+          effortPending: false,
+          fastModePending: false,
+          collaborationMode: "default",
+          collaborationModePending: false,
+          gitBranch: null,
+        })),
+      } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+
+    const response = await adapter.handleCommandCenterAction(
+      message.target,
+      "status",
+      message.actorId,
+      "",
+    );
+
+    expect(response).toMatchObject({
+      title: "Codex 状态",
+      descriptionFormat: "markdown",
+      choices: expect.arrayContaining([
+        { label: "模型设置", action: "model", input: "" },
+        { label: "工作区", action: "workspace", input: "" },
+        { label: "权限查询", action: "permissions", input: "" },
+      ]),
+    });
+    await fixture.outbox.close();
+  });
+
   it("uses the shared Skill list and explicit invocation commands", async () => {
     const fixture = createOutbox();
     const listSkills = vi.fn(async () => [{
@@ -689,6 +734,40 @@ describe("Feishu conversation adapter", () => {
       value: "never",
     });
     expect(fixture.sent[0]?.text).toContain("已更新工作区权限");
+  });
+
+  it("adds a read-only permissions result entry point to Workspace settings", async () => {
+    const fixture = createOutbox();
+    const adapter = new FeishuConversationAdapter(
+      {
+        status: () => ({ workspaceId: "codex-connect" }),
+        listPermissionProfiles: async () => [{
+          id: ":workspace",
+          description: "允许工作区写入",
+          allowed: true,
+        }],
+      } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+
+    const result = await adapter.handleCommandCenterAction(
+      message.target,
+      "permissions",
+      message.actorId,
+      "",
+    );
+    expect(result).toMatchObject({
+      title: "权限只读查询",
+      description: expect.stringContaining("本次为只读查询"),
+      descriptionFormat: "markdown",
+      choices: [{
+        label: "修改 Workspace 权限",
+        action: "workspaceperm",
+        input: "",
+      }],
+    });
+    await fixture.outbox.close();
   });
 
   it("turns active and archived session results into exact card choices", async () => {

@@ -122,6 +122,7 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(
         context,
         formatConversationWorkspaces(result),
+        workspaceSelectionKeyboard(result),
       );
       return;
     case "workspace-permissions":
@@ -135,7 +136,9 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(
         context,
         formatConversationModels(result),
-        modelEffortKeyboard(result),
+        result.view === "model"
+          ? modelSelectionKeyboard(result)
+          : modelEffortKeyboard(result),
       );
       return;
     case "collaboration-mode":
@@ -194,7 +197,11 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(context, formatConversationLimits(result));
       return;
     case "permissions":
-      await replyTelegramPanel(context, formatConversationPermissions(result));
+      await replyTelegramPanel(
+        context,
+        formatConversationPermissions(result),
+        workspacePermissionKeyboard(),
+      );
       return;
     case "project-rules":
       await replyTelegramPanel(
@@ -231,6 +238,22 @@ export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
   };
 }
 
+export function workspaceSelectionKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
+): InlineKeyboardMarkup | undefined {
+  if (result.workspaces.length === 0) return undefined;
+  return {
+    inline_keyboard: result.workspaces.map((workspace) => [{
+      text: `${workspace.id === result.currentWorkspaceId ? "✓ " : ""}切换到 ${workspace.name}`,
+      callback_data: `ws:${telegramWorkspaceSwitchToken(workspace.id)}`,
+    }]),
+  };
+}
+
+export function telegramWorkspaceSwitchToken(workspaceId: string): string {
+  return createHash("sha256").update(workspaceId).digest("base64url");
+}
+
 export function modelEffortKeyboard(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
 ): InlineKeyboardMarkup | undefined {
@@ -251,6 +274,26 @@ export function modelEffortKeyboard(
     inline_keyboard: model.supportedReasoningEfforts.map((option, index) => [{
       text: `${option.effort === result.state.effort ? "✓ " : ""}${option.effort}`,
       callback_data: `me:${index + 1}:${token}`,
+    }]),
+  };
+}
+
+export function modelSelectionKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "models" }>,
+): InlineKeyboardMarkup | undefined {
+  if (result.view !== "model" || result.state.models.length === 0) {
+    return undefined;
+  }
+  const token = telegramModelSelectionToken(
+    result.state.model,
+    result.state.modelProvider ?? "openai",
+  );
+  return {
+    inline_keyboard: result.state.models.map((model, index) => [{
+      text: boundedButtonLabel(
+        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
+      ),
+      callback_data: `ms:${index + 1}:${token}`,
     }]),
   };
 }

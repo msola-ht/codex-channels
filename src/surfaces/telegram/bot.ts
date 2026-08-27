@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
@@ -60,6 +58,7 @@ import {
   telegramThreadSectionToken,
   workspacePermissionFieldKeyboard,
   workspacePermissionPrompt,
+  telegramWorkspaceSwitchToken,
 } from "./command-renderer.js";
 import { TelegramInteractionPort } from "./interactions.js";
 import { TelegramApiExecutor } from "./api-executor.js";
@@ -413,7 +412,7 @@ export class TelegramSurface {
     });
     this.bot.callbackQuery(/^ws:([A-Za-z0-9_-]{43})$/, async (context) => {
       const workspace = this.service.listWorkspaces().find(
-        (candidate) => workspaceSwitchToken(candidate.id) === context.match[1],
+        (candidate) => telegramWorkspaceSwitchToken(candidate.id) === context.match[1],
       );
       if (!workspace) {
         throw new UserFacingError(
@@ -434,6 +433,46 @@ export class TelegramSurface {
         this.exchangeRate?.() ?? null,
       );
     });
+    this.bot.callbackQuery(
+      /^ms:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
+      async (context) => {
+        const modelTarget = target(context);
+        const state = await this.service.modelState(modelTarget);
+        if (
+          telegramModelSelectionToken(
+            state.model,
+            state.modelProvider ?? "openai",
+          ) !== context.match[2]
+        ) {
+          throw new UserFacingError(
+            "model.selection.expired",
+            "模型列表已变化，请重新发送 /model 选择",
+          );
+        }
+        const selected = state.models[Number(context.match[1]) - 1];
+        if (!selected || selected.available === false) {
+          throw new UserFacingError(
+            "model.selection.expired",
+            "模型列表已变化，请重新发送 /model 选择",
+          );
+        }
+        await context.answerCallbackQuery({ text: "正在选择模型" });
+        await context.editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: [] },
+        });
+        const result = await this.commands.execute(
+          modelTarget,
+          "model",
+          String(Number(context.match[1])),
+        );
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
+      },
+    );
     this.bot.callbackQuery(
       /^me:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
@@ -1275,11 +1314,7 @@ function workspaceSwitchKeyboard(workspaces: readonly Workspace[]): {
   return {
     inline_keyboard: workspaces.map((workspace) => [{
       text: `切换到 ${workspace.name}`,
-      callback_data: `ws:${workspaceSwitchToken(workspace.id)}`,
+      callback_data: `ws:${telegramWorkspaceSwitchToken(workspace.id)}`,
     }]),
   };
-}
-
-function workspaceSwitchToken(workspaceId: string): string {
-  return createHash("sha256").update(workspaceId).digest("base64url");
 }

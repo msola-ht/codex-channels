@@ -258,7 +258,7 @@ describe("Feishu output renderer", () => {
       "当前没有已安装的 Plugin。",
       expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
-      expect.stringContaining("可用 Permission Profiles"),
+      expect.stringContaining("本次为只读查询"),
       expect.stringContaining("项目规则检查通过"),
       "当前 Thread 暂无 Turn Diff。",
       "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
@@ -630,7 +630,7 @@ describe("Feishu output renderer", () => {
         allowed: true,
         description: "允许工作区写入",
       }],
-    })).toContain("- workspace-write · 允许 · 允许工作区写入");
+    })).toContain("- workspace-write · 可选择 · 允许工作区写入");
     expect(renderFeishuCommandResult({
       kind: "project-rules",
       action: "initialized",

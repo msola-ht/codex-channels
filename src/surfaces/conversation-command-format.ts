@@ -1501,11 +1501,23 @@ export function formatConversationPermissions(
   result: Extract<ConversationCommandResult, { kind: "permissions" }>,
 ): string {
   return toStructuredMarkdownList([
-    "当前 Gateway 固定使用配置中的 read-only 或 workspace-write。",
-    "可用 Permission Profiles：",
+    "权限查询说明",
+    "- 本次为只读查询，不会修改当前 Workspace 权限；需要调整请使用 /workspaceperm。",
+    ...(result.workspace
+      ? [
+          `当前 Workspace：${result.workspace.name}（${result.workspace.id}）`,
+          `- 沙箱：${result.workspace.sandbox ?? "跟随 Gateway 默认"}`,
+          `- 审批：${result.workspace.approvalPolicy ?? "跟随默认"}`,
+          `- Profile：${result.workspace.permissions ?? "未配置"}`,
+        ]
+      : [
+          "当前 Workspace 权限：未能从当前会话读取；Gateway 默认模式为配置中的 read-only 或 workspace-write。",
+        ]),
+    "- 沙盒网络：跟随 Codex 用户默认设置（当前 Workspace 无独立覆盖）。",
+    "可选择的 Permission Profiles（可选择不代表当前正在使用）：",
     ...result.profiles.map(
       (profile) =>
-        `- ${profile.id} · ${profile.allowed ? "允许" : "受策略禁止"}${profile.description ? ` · ${profile.description}` : ""}`,
+        `- ${profile.id} · ${profile.allowed ? "可选择" : "不可选择（受策略禁止）"}${profile.description ? ` · ${profile.description}` : ""}`,
     ),
   ].join("\n"));
 }
