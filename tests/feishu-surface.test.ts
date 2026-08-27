@@ -198,7 +198,7 @@ describe("Feishu Surface", () => {
 
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
-      text: "已将补充要求追加到当前 Turn。",
+      text: "已将补充要求追加到当前 Turn：\n\n> 继续开发",
     }]);
     expect(fixture.sdkClose).toHaveBeenCalledWith(false);
   });

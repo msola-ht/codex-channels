@@ -45,6 +45,8 @@ import type {
   StoredTurnRequestMetricsSummary,
   StoredWeeklyQuotaEstimate,
   StoredWeeklyQuotaWindow,
+  QuotaHistoryQuery,
+  StoredQuotaPeriod,
   WeeklyQuotaEstimateQuery,
 } from "./request-metrics.js";
 
@@ -52,6 +54,9 @@ const dayMs = 24 * 60 * 60 * 1_000;
 const defaultRetentionDays = 365;
 const defaultMaximumRows = 1_000_000;
 const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
+// 上游额度接口的 resetsAt 可能在相邻快照间有数秒抖动；仅在很小范围内归并，
+// 避免把真实的不定期重置误合并。
+const quotaResetJitterMs = 5 * 60 * 1_000;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
 const pageSortSql = {
@@ -461,6 +466,102 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           planType: row.weekly_quota_plan_type,
         }
       : null;
+  }
+
+  quotaHistory(query: QuotaHistoryQuery): StoredQuotaPeriod[] {
+    this.requireOpen();
+    if (!Number.isSafeInteger(query.startAtMs) || !Number.isSafeInteger(query.endAtMs)
+      || query.startAtMs < 0 || query.startAtMs >= query.endAtMs) {
+      throw new Error("额度历史查询时间范围无效");
+    }
+    const rows = this.database.prepare(`
+      SELECT * FROM model_request_metrics_enriched
+      WHERE recorded_at_ms >= ? AND recorded_at_ms < ?
+      ORDER BY recorded_at_ms ASC, id ASC
+    `).all(query.startAtMs, query.endAtMs) as unknown as MetricRow[];
+    const groups = new Map<string, StoredQuotaPeriod>();
+    for (const row of rows) {
+      const metric = toStoredMetric(row);
+      const snapshots: Array<{
+        windowId: string;
+        resetsAt: number | null;
+        usedPercentMillionths: number | null;
+        planType: string | null;
+      }> = [];
+      if (metric.weeklyQuota) snapshots.push({
+        windowId: metric.weeklyQuota.limitId,
+        resetsAt: metric.weeklyQuota.resetsAt,
+        usedPercentMillionths: metric.weeklyQuota.usedPercentMillionths,
+        planType: metric.weeklyQuota.planType,
+      });
+      for (const window of metric.quotaWindows ?? []) snapshots.push({
+        windowId: window.windowId,
+        resetsAt: window.resetsAt,
+        usedPercentMillionths: null,
+        planType: null,
+      });
+      for (const snapshot of snapshots) {
+        if (snapshot.resetsAt === null) continue;
+        const exactKey = `${metric.provider}\u0000${snapshot.windowId}\u0000${snapshot.resetsAt}`;
+        let key = exactKey;
+        let existing = groups.get(key);
+        if (!existing) {
+          for (const [candidateKey, candidate] of groups) {
+            if (candidate.provider === metric.provider
+              && candidate.windowId === snapshot.windowId
+              && Math.abs(candidate.resetsAt - snapshot.resetsAt) <= quotaResetJitterMs) {
+              key = candidateKey;
+              existing = candidate;
+              break;
+            }
+          }
+        }
+        const successful = metric.status === "completed" ? 1 : 0;
+        const inputTokens = metric.inputTokens ?? 0;
+        const outputTokens = metric.outputTokens ?? 0;
+        const totalTokens = metric.totalTokens ?? inputTokens + outputTokens;
+        const cost = metric.totalCostNanos;
+        if (!existing) {
+          groups.set(key, {
+            provider: metric.provider,
+            windowId: snapshot.windowId,
+            resetsAt: snapshot.resetsAt,
+            periodStartAtMs: quotaPeriodStartAtMs(snapshot.windowId, snapshot.resetsAt),
+            periodEndAtMs: snapshot.resetsAt * 1_000,
+            firstObservedAtMs: metric.recordedAtMs,
+            lastObservedAtMs: metric.recordedAtMs,
+            snapshotCount: 1,
+            requestCount: 1,
+            unsuccessfulRequestCount: 1 - successful,
+            inputTokens,
+            outputTokens,
+            totalTokens,
+            pricedRequestCount: cost === null ? 0 : 1,
+            totalCostNanos: cost,
+            latestUsedPercentMillionths: snapshot.usedPercentMillionths,
+            planType: snapshot.planType,
+          });
+        } else {
+          existing.lastObservedAtMs = metric.recordedAtMs;
+          existing.snapshotCount += 1;
+          existing.requestCount += 1;
+          existing.unsuccessfulRequestCount += 1 - successful;
+          existing.inputTokens += inputTokens;
+          existing.outputTokens += outputTokens;
+          existing.totalTokens += totalTokens;
+          if (cost !== null) {
+            existing.pricedRequestCount += 1;
+            existing.totalCostNanos = existing.totalCostNanos === null
+              ? cost : existing.totalCostNanos + cost;
+          }
+          if (snapshot.usedPercentMillionths !== null) {
+            existing.latestUsedPercentMillionths = snapshot.usedPercentMillionths;
+          }
+          if (snapshot.planType !== null) existing.planType = snapshot.planType;
+        }
+      }
+    }
+    return [...groups.values()].sort((a, b) => b.lastObservedAtMs - a.lastObservedAtMs);
   }
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
@@ -1302,6 +1403,18 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   }
 }
 
+function quotaPeriodStartAtMs(windowId: string, resetsAt: number): number | null {
+  const endAtMs = resetsAt * 1_000;
+  if (windowId === "codex" || windowId === "weekly") return endAtMs - weeklyWindowMs;
+  if (windowId === "rolling") return endAtMs - 5 * 60 * 60 * 1_000;
+  if (windowId !== "monthly") return null;
+  const date = new Date(endAtMs);
+  const previousMonth = date.getUTCMonth() - 1;
+  const year = date.getUTCFullYear();
+  const lastDay = new Date(Date.UTC(year, previousMonth + 1, 0)).getUTCDate();
+  return Date.UTC(year, previousMonth, Math.min(date.getUTCDate(), lastDay), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds(), date.getUTCMilliseconds());
+}
+
 function positiveInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new Error(`${label}必须是正整数`);
@@ -1352,9 +1465,11 @@ function estimateWeeklyQuotaRows(
   let observedDeltaPercentMillionths = 0;
   let intervalCount = 0;
   const total = emptyWeeklyInterval();
+  const periodTotal = emptyWeeklyInterval();
   const currencies = new Set<string>();
 
   for (const row of rows) {
+    addWeeklyIntervalRow(periodTotal, row);
     const matching = row.weekly_quota_limit_id === query.limitId
       && row.weekly_resets_at === query.resetsAt
       && row.weekly_used_percent_millionths !== null;
@@ -1393,6 +1508,11 @@ function estimateWeeklyQuotaRows(
     pending = emptyWeeklyInterval();
   }
 
+  // 周期内最后一个额度快照之后通常仍有请求；它们没有下一个快照
+  // 可以闭合区间，但仍属于本周期样本，必须计入总量。
+  mergeWeeklyInterval(total, pending);
+  for (const currency of pending.currencies) currencies.add(currency);
+
   if (
     observedDeltaPercentMillionths <= 0
     || firstObservedAtMs === null
@@ -1415,6 +1535,11 @@ function estimateWeeklyQuotaRows(
     totalTokens: total.inputTokens + total.outputTokens,
     pricingCurrency: currencies.size === 1 ? [...currencies][0]! : null,
     totalCostNanos: currencies.size === 1 ? total.totalCostNanos : null,
+    periodRequestCount: periodTotal.requestCount,
+    periodInputTokens: periodTotal.inputTokens,
+    periodOutputTokens: periodTotal.outputTokens,
+    periodTotalTokens: periodTotal.inputTokens + periodTotal.outputTokens,
+    periodTotalCostNanos: periodTotal.currencies.size === 1 ? periodTotal.totalCostNanos : null,
   };
 }
 

@@ -38,6 +38,8 @@ export type {
   StoredTurnRequestMetricsSummary,
   StoredWeeklyQuotaEstimate,
   StoredWeeklyQuotaWindow,
+  QuotaHistoryQuery,
+  StoredQuotaPeriod,
   WeeklyQuotaEstimateQuery,
   StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";

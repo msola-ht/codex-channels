@@ -593,6 +593,23 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
+  replyMarkdown(chatId: string, messageId: string, markdown: string): boolean {
+    if (this.closed) {
+      return false;
+    }
+    return this.delivery.enqueue(
+      chatId,
+      () => this.sendMarkdown(chatId, markdown, maximumFeishuMessageChunks, messageId),
+      true,
+    );
+  }
+
+  replyToTurn(chatId: string, threadId: string, turnId: string, markdown: string): boolean {
+    const replyTo = this.replyTargets.get(turnKey(threadId, turnId));
+    if (replyTo === undefined) return false;
+    return this.replyMarkdown(chatId, replyTo, markdown);
+  }
+
   deliverText(chatId: string, text: string): Promise<void> {
     return this.delivery.runOrdered(
       chatId,

@@ -634,6 +634,14 @@ setInterval(() => undefined, 1_000);`,
       provider: "deepseek",
       quotaWindows,
     });
+    expect(store.quotaHistory?.({
+      startAtMs: 0,
+      endAtMs: Number.MAX_SAFE_INTEGER,
+    })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: "deepseek", windowId: "rolling", resetsAt: 1_800_000_000 }),
+      expect.objectContaining({ provider: "deepseek", windowId: "weekly", resetsAt: 1_900_000_000 }),
+      expect.objectContaining({ provider: "deepseek", windowId: "monthly", resetsAt: 2_000_000_000 }),
+    ]));
     store.close();
   });
 

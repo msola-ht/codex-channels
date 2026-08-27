@@ -48,7 +48,7 @@
   升级到 v4，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口提供
   只读版本检查；不自动迁移未知版本。运行时由 SqliteScheduledTaskStore 保持失败关闭。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
-  `run`、`turns`、`threads`、`report`、`export` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
+  `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
   组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
@@ -181,10 +181,13 @@
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast，
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入全部字段；Fast 始终作为
-  OpenAI 主配置偏好写入，不读取第三方模型目录。第三方固定模式不开放官方默认模型与思考等级，
-  已有 `default_permissions` 时不混写传统 Sandbox 字段。
+  OpenAI 主配置偏好写入；一键写入全部时同时将顶层 `web_search` 设为 `cached`，单独设置页可选择
+  `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。第三方固定模式不开放官方默认模型与思考等级，
+  已有 `default_permissions` 时不混写传统 Sandbox 字段；一键写入全部还会关闭官方分析与反馈并开启
+  `features.goals`，这些设置不影响 Gateway 本地指标统计。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 用户设置”
-  适配器，只负责选择、预览和中文结果；第三方 Provider 的模型与凭据继续留在 Provider Setup。
+  适配器，只负责选择、预览和中文结果；可单独设置 Plan 思考等级、推理摘要、输出详细程度、人格、
+  更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider

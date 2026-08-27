@@ -256,6 +256,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   ${metricsCommandUsage.threads.slice("用法：".length)}   列出有指标的会话
   ${metricsCommandUsage.report.slice("用法：".length)}   聚合汇报
   ${metricsCommandUsage.export.slice("用法：".length)}   请求明细导出
+  ${metricsCommandUsage.quota.slice("用法：".length)}   历史额度周期
   codexc metrics status [--json]   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
@@ -341,6 +342,9 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
   "metrics.export": `${metricsCommandUsage.export}
 
 只读导出脱敏请求记录；默认最近 30 天、JSON 格式并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。--thread 只导出指定 Thread。`,
+  "metrics.quota": `${metricsCommandUsage.quota}
+
+只读查询已记录的 OpenAI 与 OpenCode Go 历史额度窗口；按实际重置时间归并，并显示窗口起止、请求、Token 和本机样本估算。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -1557,7 +1561,8 @@ async function metrics(args) {
     showSubcommandHelp(args, "cleanup", "metrics.cleanup") ||
     showSubcommandHelp(args, "prune", "metrics.prune") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
-    showSubcommandHelp(args, "export", "metrics.export")) {
+    showSubcommandHelp(args, "export", "metrics.export") ||
+    showSubcommandHelp(args, "quota", "metrics.quota")) {
     return;
   }
   if (args.some(isHelpArgument)) {
@@ -1601,10 +1606,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export", "quota"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export|quota>");
   }
   validateMetricsCommandArgs(subcommand, rest);
   if (

@@ -192,6 +192,23 @@ export function readMetricsExport(environment = process.env, options = {}) {
   }
 }
 
+export function readQuotaHistory(environment = process.env, options = {}) {
+  const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
+  const databasePath = requireCompatibleMetricsDatabase(environment);
+  const store = new SqliteModelRequestMetricsStore(databasePath, range.endAtMs, { readOnly: true });
+  try {
+    return {
+      format: "codex-connect-quota-history",
+      version: 1,
+      generatedAt: new Date(range.endAtMs).toISOString(),
+      range,
+      periods: store.quotaHistory({ startAtMs: range.startAtMs, endAtMs: range.endAtMs }),
+    };
+  } finally {
+    store.close();
+  }
+}
+
 export function readWeeklyQuota(store, nowMs) {
   const window = store.latestWeeklyQuota("openai", nowMs);
   if (window === null) return null;

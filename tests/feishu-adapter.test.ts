@@ -2204,7 +2204,7 @@ describe("Feishu conversation adapter", () => {
   });
 
   it("confirms when the message was added to the active Turn", async () => {
-    const fixture = createOutbox();
+    const replyToTurn = vi.fn(() => true);
     const adapter = new FeishuConversationAdapter(
       {
         submit: async () => ({
@@ -2213,17 +2213,22 @@ describe("Feishu conversation adapter", () => {
           steered: true,
         }),
       } as unknown as ConversationUseCases,
-      fixture.outbox,
+      {
+        notifyMarkdown: vi.fn(() => true),
+        notifyText: vi.fn(() => true),
+        replyToTurn,
+      } as unknown as FeishuOutbox,
       imagePort,
     );
 
     await adapter.handle(message);
-    await fixture.outbox.close();
 
-    expect(fixture.sent).toEqual([{
-      chatId: "oc_chat",
-      text: "已将补充要求追加到当前 Turn。",
-    }]);
+    expect(replyToTurn).toHaveBeenCalledWith(
+      "oc_chat",
+      "thread-1",
+      "turn-1",
+      "已将补充要求追加到当前 Turn：\n\n> 继续开发",
+    );
   });
 
   it("renders a structured user error without exposing its fallback message", async () => {

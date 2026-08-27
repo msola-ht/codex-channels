@@ -1898,13 +1898,20 @@ export function formatConversationLimits(
                   estimate.requestCount - estimate.unsuccessfulRequestCount,
                 );
                 return [
-                `${estimate.limitId}：已使用 ${formatPercent(estimate.usedPercent)} · 观测变化 ${formatPercent(estimate.observedDeltaPercent)}（${estimate.intervalCount} 个区间）`,
-                `样本：${estimate.requestCount} 次请求${estimate.unsuccessfulRequestCount > 0 ? ` · ${estimate.unsuccessfulRequestCount} 次未成功` : ""}`,
+                "本周期本机实际：",
+                `  - 请求：${estimate.periodRequestCount ?? estimate.requestCount} 次`,
+                `  - Token：${formatTokenCount(estimate.periodTotalTokens ?? estimate.totalTokensPerPercent)}`,
+                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.periodTotalCostNanos ?? null)}`,
+                `观测变化 ${formatPercent(estimate.observedDeltaPercent)}（${estimate.intervalCount} 个区间）`,
                 `每 1%：约 ${formatTokenCount(estimate.totalTokensPerPercent)} Token`,
                 `  - 输入：约 ${formatTokenCount(estimate.inputTokensPerPercent)}`,
                 `  - 输出：约 ${formatTokenCount(estimate.outputTokensPerPercent)}`,
                 `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos)}${estimate.pricedRequestCount === pricedSuccesses ? "" : `（计价 ${estimate.pricedRequestCount}/${pricedSuccesses}）`}`,
-                `剩余 ${formatPercent(estimate.remainingPercent)}：约 ${formatTokenCount(estimate.remainingTokens)} Token · API 参考费用 ${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.remainingCostNanos)}`,
+                "推算 100% 总额度：",
+                `  - Token：约 ${formatTokenCount(estimate.totalTokensPerPercent * 100)}`,
+                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos === null ? null : estimate.costPerPercentNanos * 100)}`,
+                `剩余 ${formatPercent(estimate.remainingPercent)}：约 ${formatTokenCount(estimate.remainingTokens)} Token`,
+                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.remainingCostNanos)}`,
                 ...(estimate.observedDeltaPercent < 1
                   ? ["提示：观测到的额度变化不足 1%，估算波动可能较大。"]
                   : []),

@@ -37,6 +37,33 @@ export function printStatus(result, { json = false, output = process.stdout } = 
   }
 }
 
+export function printQuotaHistory(result, format = "markdown", display = null) {
+  void display;
+  if (format === "json") {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (format === "csv") {
+    const columns = ["provider", "windowId", "periodStartAtMs", "periodEndAtMs", "resetsAt", "firstObservedAtMs", "lastObservedAtMs", "snapshotCount", "requestCount", "unsuccessfulRequestCount", "inputTokens", "outputTokens", "totalTokens", "pricedRequestCount", "totalCostNanos", "latestUsedPercentMillionths", "planType"];
+    console.log(columns.join(","));
+    for (const period of result.periods) console.log(columns.map((column) => csvCell(period[column])).join(","));
+    return;
+  }
+  console.log(`额度历史（${result.range.name}）`);
+  if (result.periods.length === 0) {
+    console.log("暂无已记录的额度周期快照。");
+    return;
+  }
+  for (const period of result.periods) {
+    const start = period.periodStartAtMs === null ? "未知" : formatLocalTime(period.periodStartAtMs);
+    const reset = formatLocalTime(period.periodEndAtMs);
+    const used = period.latestUsedPercentMillionths === null
+      ? "未记录历史百分比"
+      : `${(period.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%`;
+    console.log(`- ${period.provider} · ${period.windowId} · 周期 ${start} ～ ${reset} · 最新使用 ${used} · 请求 ${period.requestCount} · Token ${formatTokenCount(period.totalTokens)}`);
+  }
+}
+
 export function printMetricsReport(result, format, display = null) {
   const aggregateProvider = singleReportProvider(result.report);
   if (format === "json") {

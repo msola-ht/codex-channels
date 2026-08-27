@@ -167,6 +167,7 @@ describe("codexc CLI", () => {
       [["metrics", "prune", "--help"], "用法：codexc metrics prune"],
       [["metrics", "report", "-h"], "用法：codexc metrics report"],
       [["metrics", "export", "--help"], "用法：codexc metrics export"],
+      [["metrics", "quota", "--help"], "用法：codexc metrics quota"],
       [["channel", "-h"], "用法：codexc channel"],
       [["channel", "send-image", "--help"], "用法：codexc channel send-image"],
       [["webui", "-h"], "用法：codexc webui"],

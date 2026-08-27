@@ -318,6 +318,7 @@ codexc metrics status --json                     # 稳定 JSON 数据库状态
 codexc metrics threads                            # 会话归纳总览（模型、Token、费用）
 codexc metrics report --range 30d --group models  # 聚合汇报
 codexc metrics export --range 30d --format json   # 脱敏明细导出；--thread 可按 Thread 过滤
+codexc metrics quota --range 365d                 # 查看已记录的 OpenAI / OpenCode Go 历史额度周期
 codexc metrics reset                              # 先保留 0600 旧库备份，再重建
 codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策略清理
 ```

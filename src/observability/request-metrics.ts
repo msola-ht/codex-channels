@@ -165,6 +165,11 @@ export interface StoredWeeklyQuotaEstimate {
   totalTokens: number;
   pricingCurrency: string | null;
   totalCostNanos: number | null;
+  periodRequestCount?: number;
+  periodInputTokens?: number;
+  periodOutputTokens?: number;
+  periodTotalTokens?: number;
+  periodTotalCostNanos?: number | null;
 }
 
 export interface StoredWeeklyQuotaWindow {
@@ -172,6 +177,31 @@ export interface StoredWeeklyQuotaWindow {
   usedPercentMillionths: number;
   resetsAt: number;
   observedAtMs: number;
+  planType: string | null;
+}
+
+export interface QuotaHistoryQuery {
+  startAtMs: number;
+  endAtMs: number;
+}
+
+export interface StoredQuotaPeriod {
+  provider: string;
+  windowId: string;
+  resetsAt: number;
+  periodStartAtMs: number | null;
+  periodEndAtMs: number;
+  firstObservedAtMs: number;
+  lastObservedAtMs: number;
+  snapshotCount: number;
+  requestCount: number;
+  unsuccessfulRequestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  pricedRequestCount: number;
+  totalCostNanos: number | null;
+  latestUsedPercentMillionths: number | null;
   planType: string | null;
 }
 
@@ -450,6 +480,7 @@ export interface ModelRequestMetricsStore {
   errors(
     query: ModelRequestMetricsErrorQuery,
   ): StoredModelRequestMetricsErrorReport;
+  quotaHistory?(query: QuotaHistoryQuery): StoredQuotaPeriod[];
   threadTurnTaskSummary(
     threadId: string,
     turnId: string,

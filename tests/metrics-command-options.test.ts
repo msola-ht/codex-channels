@@ -74,6 +74,13 @@ describe("metrics command options", () => {
       .toThrow("codexc metrics status [--json]");
   });
 
+  it("accepts historical quota ranges and formats", () => {
+    expect(() => validateMetricsCommandArgs("quota", ["--range", "365d", "--format", "json"]))
+      .not.toThrow();
+    expect(() => validateMetricsCommandArgs("quota", ["--format", "yaml"]))
+      .toThrow("--format 只支持 markdown、json、csv");
+  });
+
   it("accepts a configured custom primary Provider for prune", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-metrics-prune-custom-"));
     temporaryDirectories.push(codexHome);

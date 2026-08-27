@@ -236,6 +236,11 @@ export interface WeeklyQuotaMetricsObservation {
   totalTokens: number;
   pricingCurrency: string | null;
   totalCostNanos: number | null;
+  periodRequestCount?: number;
+  periodInputTokens?: number;
+  periodOutputTokens?: number;
+  periodTotalTokens?: number;
+  periodTotalCostNanos?: number | null;
 }
 
 export function estimateWeeklyLimit(
@@ -262,10 +267,12 @@ export function estimateWeeklyLimit(
   const remaining = (value: number): number => Math.round(
     value / deltaPercent * remainingPercent,
   );
+  const periodTotalTokens = observation.periodTotalTokens ?? observation.totalTokens;
+  const periodTotalCostNanos = observation.periodTotalCostNanos ?? observation.totalCostNanos;
   return {
     limitId: limit.limitId,
-    startAtMs: observation.firstObservedAtMs,
-    endAtMs: observation.lastObservedAtMs,
+    startAtMs: window.resetsAt * 1_000 - weeklyWindowDurationMins * 60 * 1_000,
+    endAtMs: window.resetsAt * 1_000,
     usedPercent: window.usedPercent,
     remainingPercent,
     observedDeltaPercent: deltaPercent,
@@ -284,5 +291,10 @@ export function estimateWeeklyLimit(
     remainingCostNanos: observation.totalCostNanos === null
       ? null
       : remaining(observation.totalCostNanos),
+    periodRequestCount: observation.periodRequestCount ?? observation.requestCount,
+    periodInputTokens: observation.periodInputTokens ?? observation.inputTokens,
+    periodOutputTokens: observation.periodOutputTokens ?? observation.outputTokens,
+    periodTotalTokens,
+    periodTotalCostNanos,
   };
 }
