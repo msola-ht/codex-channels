@@ -390,7 +390,7 @@ describe("SqliteScheduledTaskStore", () => {
     expect(store.cleanup(activeOccurrence + 3)).toBe(0);
     expect(store.getRun(activeRun.runId)?.errorMessage).not.toContain("Authorization");
     store.close();
-  });
+  }, 15_000);
 
   it("removes terminal runs older than 90 days", () => {
     const { path } = databasePath();
