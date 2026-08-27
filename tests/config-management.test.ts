@@ -15,7 +15,10 @@ import {
   loadGatewaySettings,
   updateGatewaySetting,
 } from "../scripts/config-management.mjs";
-import { GatewayConfigConflictError } from "../runtime/gateway-config.mjs";
+import {
+  GatewayConfigConflictError,
+  readGatewayConfig,
+} from "../runtime/gateway-config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const roots: string[] = [];
@@ -82,6 +85,33 @@ describe("Gateway Config management", () => {
     expect(settings.display.operationUpdates).toBe("full");
     expect(settings.network.https_proxy).toEqual({ configured: true });
     expect(JSON.stringify(settings)).not.toContain("127.0.0.1:7890");
+  });
+
+  it("writes three proxy endpoints atomically", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+    const result = updateGatewaySetting({
+      kind: "network.proxy-batch",
+      values: {
+        http_proxy: "http://127.0.0.1:7890",
+        https_proxy: "http://127.0.0.1:7891",
+        all_proxy: "http://127.0.0.1:7892",
+      },
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+
+    expect(result).toMatchObject({
+      value: { fields: ["http_proxy", "https_proxy", "all_proxy"] },
+      activation: "reinstall-services",
+    });
+    expect(readGatewayConfig(fixture.configPath).network).toEqual({
+      http_proxy: "http://127.0.0.1:7890",
+      https_proxy: "http://127.0.0.1:7891",
+      all_proxy: "http://127.0.0.1:7892",
+      no_proxy: "localhost,127.0.0.1",
+    });
   });
 
   it("returns stable field and code information for invalid input", () => {

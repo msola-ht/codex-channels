@@ -268,7 +268,8 @@ Codex 权限参数。
 
 ```bash
 codexc webui                          # 启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）
-codexc webui --host 0.0.0.0 --token 令牌  # 非回环地址必须提供令牌
+codexc config  # 在 WebUI 设置中配置令牌
+codexc webui --host 0.0.0.0  # 非回环地址必须已有令牌
 ```
 
 WebUI 只读指标数据库；监听、令牌、远程访问与后台服务说明见 [`docs/webui.md`](docs/webui.md)。

@@ -1,4 +1,4 @@
-export const WEBUI_USAGE = "用法：codexc webui [--host 地址] [--port 端口] [--token 令牌]";
+export const WEBUI_USAGE = "用法：codexc webui [--host 地址] [--port 端口]";
 
 export function assertWebuiHost(value) {
   if (!["127.0.0.1", "::1", "0.0.0.0"].includes(value)) {
@@ -34,13 +34,7 @@ export function parseWebuiCliArgs(args) {
       continue;
     }
     if (argument === "--token") {
-      const raw = args[index + 1];
-      if (raw === undefined || raw === "" || raw.startsWith("--")) {
-        throw new Error(WEBUI_USAGE);
-      }
-      settings.token = raw;
-      index += 1;
-      continue;
+      throw new Error("WebUI 令牌不得通过命令行传入，请运行 codexc config 设置访问令牌");
     }
     throw new Error(`未知参数：${argument}\n${WEBUI_USAGE}`);
   }

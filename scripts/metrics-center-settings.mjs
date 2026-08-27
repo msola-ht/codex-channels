@@ -12,7 +12,7 @@ import {
 
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 8790;
-const CENTER_USAGE = "用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]";
+const CENTER_USAGE = "用法：codexc center [--host 地址] [--port 端口] [--database 路径]";
 
 export function assertMetricsCenterHost(value) {
   if (!["127.0.0.1", "::1", "0.0.0.0"].includes(value)) {
@@ -37,10 +37,8 @@ export function resolveMetricsCenterSettings({
   return {
     host: cli.host ?? configured.host ?? DEFAULT_HOST,
     port: cli.port ?? configured.port ?? DEFAULT_PORT,
-    token: cli.token !== undefined ? cli.token : configured.token ?? null,
-    deviceToken: cli.deviceToken !== undefined
-      ? cli.deviceToken
-      : configured.device_token ?? null,
+    token: configured.token ?? null,
+    deviceToken: configured.device_token ?? null,
     databasePath: cli.database
       ?? resolveConfiguredPath(
         configured.database_path ?? "data/central-metrics.sqlite3",
@@ -78,22 +76,10 @@ export function parseMetricsCenterCliArgs(args) {
       continue;
     }
     if (argument === "--token") {
-      const raw = args[index + 1];
-      if (raw === undefined || raw === "" || raw.startsWith("--")) {
-        throw new Error(CENTER_USAGE);
-      }
-      settings.token = raw;
-      index += 1;
-      continue;
+      throw new Error("指标中心查看令牌不得通过命令行传入，请运行 codexc config 设置");
     }
     if (argument === "--device-token") {
-      const raw = args[index + 1];
-      if (raw === undefined || raw === "" || raw.startsWith("--")) {
-        throw new Error(CENTER_USAGE);
-      }
-      settings.deviceToken = raw;
-      index += 1;
-      continue;
+      throw new Error("指标中心设备令牌不得通过命令行传入，请运行 codexc config 设置");
     }
     if (argument === "--database") {
       const raw = args[index + 1];

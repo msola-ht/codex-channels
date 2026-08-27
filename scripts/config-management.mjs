@@ -238,6 +238,8 @@ function applySetting(document, input) {
     }
     case "network.proxy":
       return applyNetworkProxy(document, input);
+    case "network.proxy-batch":
+      return applyNetworkProxyBatch(document, input);
     default:
       throw invalid("kind", "unknown-setting", `未知 Gateway 设置：${String(input.kind)}`);
   }
@@ -259,6 +261,38 @@ function applyNetworkProxy(document, input) {
   else document.network = network;
   return {
     value: { field, configured: action === "set" },
+    activation: "reinstall-services",
+  };
+}
+
+function applyNetworkProxyBatch(document, input) {
+  if (!input.values || typeof input.values !== "object" || Array.isArray(input.values)) {
+    throw invalid("values", "invalid-input", "批量代理设置必须是对象");
+  }
+  const network = { ...table(document.network) };
+  const fields = ["http_proxy", "https_proxy", "all_proxy"];
+  const unknown = Object.keys(input.values).find((field) => !fields.includes(field));
+  if (unknown !== undefined) {
+    throw invalid(`values.${unknown}`, "unknown-field", `批量代理字段无效：${unknown}`);
+  }
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(input.values, field)) continue;
+    const value = input.values[field];
+    if (value === null || stringValue(value) === "") {
+      delete network[field];
+      continue;
+    }
+    const normalized = requiredString(value, `values.${field}`, "代理 URL");
+    const validation = validateNetworkProxyValue(field, normalized);
+    if (validation !== undefined) throw invalid(`values.${field}`, "invalid-proxy", validation);
+    network[field] = normalized;
+  }
+  if (Object.keys(network).length === 0) delete document.network;
+  else document.network = network;
+  return {
+    value: {
+      fields: fields.filter((field) => Object.prototype.hasOwnProperty.call(input.values, field)),
+    },
     activation: "reinstall-services",
   };
 }

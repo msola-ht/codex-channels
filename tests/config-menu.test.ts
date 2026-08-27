@@ -313,7 +313,7 @@ describe("Codex Connect config menu", () => {
           .mockResolvedValueOnce("network")
           .mockResolvedValueOnce("https_proxy")
           .mockResolvedValueOnce("set"),
-        password: vi.fn(async () => proxy),
+        text: vi.fn(async () => proxy),
         isCancel: () => false,
         cancel: vi.fn(),
       },
@@ -323,6 +323,39 @@ describe("Codex Connect config menu", () => {
     expect(readGatewayConfig(fixture.configPath).network).toMatchObject({ https_proxy: proxy });
     expect(output.join("")).toContain("codexc service install");
     expect(output.join("")).not.toContain("proxy-secret");
+  });
+
+  it("writes HTTP, HTTPS and all proxy URLs in one operation", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const text = vi.fn()
+      .mockResolvedValueOnce("http://127.0.0.1:7890")
+      .mockResolvedValueOnce("http://127.0.0.1:7891")
+      .mockResolvedValueOnce("http://127.0.0.1:7892");
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn().mockResolvedValueOnce("network").mockResolvedValueOnce("batch"),
+        text,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+    });
+
+    expect(result).toEqual({
+      fields: ["http_proxy", "https_proxy", "all_proxy"],
+      configPath: fixture.configPath,
+    });
+    expect(readGatewayConfig(fixture.configPath).network).toEqual({
+      http_proxy: "http://127.0.0.1:7890",
+      https_proxy: "http://127.0.0.1:7891",
+      all_proxy: "http://127.0.0.1:7892",
+      no_proxy: "localhost,127.0.0.1",
+    });
+    expect(output.join("")).toContain("一次性更新");
+    expect(text).toHaveBeenCalledTimes(3);
   });
 
   it("labels the network action back button with its actual Config destination", async () => {

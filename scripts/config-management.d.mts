@@ -105,6 +105,14 @@ export type GatewaySettingInput =
       action: "set" | "clear";
       value?: string;
     }
+  | {
+      kind: "network.proxy-batch";
+      values: {
+        http_proxy?: string | null;
+        https_proxy?: string | null;
+        all_proxy?: string | null;
+      };
+    }
   | { kind: "webui.host"; value: "127.0.0.1" | "::1" | "0.0.0.0" | null; token?: string }
   | { kind: "webui.port"; value: number | null }
   | { kind: "webui.token"; action: "set" | "clear"; value?: string }

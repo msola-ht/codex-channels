@@ -599,7 +599,7 @@ function main() {
       return;
     }
     if (args[0] === "--help" || args[0] === "-h") {
-      console.log("用法：codexc center [--host 地址] [--port 端口] [--token 查看令牌] [--device-token 上报令牌] [--database 路径]");
+      console.log("用法：codexc center [--host 地址] [--port 端口] [--database 路径]");
       console.log("      codexc center info [--json]     查看中心地址、双令牌状态与运行状态");
       console.log("      codexc center config   交互配置 [metrics.center]");
       return;

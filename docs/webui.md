@@ -6,7 +6,7 @@
 ## 命令
 
 ```text
-codexc webui [--host 127.0.0.1|::1|0.0.0.0] [--port 端口] [--token 令牌]
+codexc webui [--host 127.0.0.1|::1|0.0.0.0] [--port 端口]
 ```
 
 参数优先级：命令行 > `config.toml` 的 `[webui]` 段 > 默认值（`127.0.0.1:8787`）。
@@ -37,7 +37,7 @@ token = "你的_访问令牌"
 | SSH 隧道 | `127.0.0.1` | 不需要 | 本机执行 `ssh -L 8787:127.0.0.1:8787 user@服务器`，再访问 `http://127.0.0.1:8787/` |
 | 反向代理 | `127.0.0.1` | 不需要（反代层鉴权） | Nginx/Caddy `proxy_pass http://127.0.0.1:8787` |
 | Cloudflare Tunnel | `127.0.0.1` | 不需要（Cloudflare Access） | `cloudflared tunnel --url http://127.0.0.1:8787` |
-| 局域网直连 | `0.0.0.0` | 需要 | `codexc webui --host 0.0.0.0 --token 令牌`，访问 `http://<局域网IP>:8787/?token=令牌` |
+| 局域网直连 | `0.0.0.0` | 需要 | 先运行 `codexc config` 设置 WebUI 令牌，再运行 `codexc webui --host 0.0.0.0`，访问 `http://<局域网IP>:8787/?token=令牌` |
 | 公网直连 / Tailscale 直连 | `0.0.0.0` | 需要 | 同上，地址换成公网 IP 或 Tailscale IP |
 
 - SSH 隧道、反向代理与 Cloudflare Tunnel 都连接服务器的回环地址，可以保持无令牌，
