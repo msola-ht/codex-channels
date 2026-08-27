@@ -109,6 +109,7 @@ function settingsState(): CodexUserSettingsState {
       model: "gpt-test",
       reasoningEffort: "medium",
       fastEnabled: false,
+      webSearch: null,
     },
     permissions: {
       editable: true,

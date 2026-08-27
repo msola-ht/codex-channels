@@ -36,6 +36,7 @@ describe("Codex user settings management", () => {
         model: "gpt-test",
         reasoningEffort: "high",
         fastEnabled: true,
+        webSearch: null,
       },
       permissions: {
         editable: true,
@@ -96,6 +97,7 @@ describe("Codex user settings management", () => {
         sandboxMode: "workspace-write",
         approvalPolicy: "on-request",
         networkAccess: true,
+        webSearch: "cached",
       },
     });
 
@@ -106,6 +108,10 @@ describe("Codex user settings management", () => {
       { keyPath: "sandbox_mode", value: "workspace-write" },
       { keyPath: "approval_policy", value: "on-request" },
       { keyPath: "sandbox_workspace_write.network_access", value: true },
+      { keyPath: "web_search", value: "cached" },
+      { keyPath: "analytics.enabled", value: false },
+      { keyPath: "feedback.enabled", value: false },
+      { keyPath: "features.goals", value: true },
     ], { expectedVersion: "version-1" });
   });
 
@@ -124,6 +130,27 @@ describe("Codex user settings management", () => {
     expect(client.listModels).not.toHaveBeenCalled();
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "service_tier", value: "fast" },
+    ], { expectedVersion: "version-1" });
+  });
+
+  it("writes the selected web search mode in a separate setting", async () => {
+    const client = settingsClient({ web_search: "cached" });
+
+    await expect(updateCodexUserSetting({
+      kind: "web-search",
+      mode: "live",
+    }, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+      primaryProvider: () => "deepseek",
+    })).resolves.toMatchObject({
+      kind: "web-search",
+      value: { mode: "live" },
+      activation: "restart-all",
+    });
+
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "web_search", value: "live" },
     ], { expectedVersion: "version-1" });
   });
 

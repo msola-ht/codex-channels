@@ -3,6 +3,7 @@ import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 
 const sandboxModes = new Set(["read-only", "workspace-write"]);
 const approvalPolicies = new Set(["untrusted", "on-request", "never"]);
+const webSearchModes = new Set(["live", "indexed", "cached", "disabled"]);
 
 export class CodexUserSettingsError extends Error {
   constructor(code, field, message, options) {
@@ -103,6 +104,7 @@ function projectSettings(snapshot, provider, rawModels) {
     ? configuredEffort
     : selectedModel?.defaultReasoningEffort ?? configuredEffort;
   const serviceTier = optionalString(config.service_tier);
+  const webSearch = webSearchModes.has(config.web_search) ? config.web_search : null;
   const sandboxMode = sandboxModes.has(config.sandbox_mode) ? config.sandbox_mode : null;
   const approvalPolicy = approvalPolicies.has(config.approval_policy)
     ? config.approval_policy
@@ -117,6 +119,7 @@ function projectSettings(snapshot, provider, rawModels) {
       model: selectedModel?.model ?? optionalString(config.model),
       reasoningEffort: effort ?? null,
       fastEnabled: isFastServiceTier(serviceTier),
+      webSearch,
     },
     permissions: {
       editable: optionalString(config.default_permissions) === null,
@@ -143,6 +146,8 @@ function createEdits(input, { config, provider, models }) {
       return fastEdits(input, provider, config, models);
     case "permissions":
       return permissionEdits(input, config);
+    case "web-search":
+      return webSearchEdits(input);
     default:
       throw invalid("kind", "unknown-setting", `未知 Codex 用户设置：${String(input.kind)}`);
   }
@@ -153,12 +158,22 @@ function allEdits(input, provider, config, models) {
   const defaults = defaultEdits(input, provider, models);
   const fast = fastEdit(input.fastEnabled, "fastEnabled");
   const permissions = permissionEdits(input, config);
+  const webSearch = { keyPath: "web_search", value: "cached" };
+  const privacy = [
+    { keyPath: "analytics.enabled", value: false },
+    { keyPath: "feedback.enabled", value: false },
+  ];
+  const goals = { keyPath: "features.goals", value: true };
   return {
-    edits: [...defaults.edits, ...fast.edits, ...permissions.edits],
+    edits: [...defaults.edits, ...fast.edits, ...permissions.edits, webSearch, ...privacy, goals],
     value: {
       ...defaults.value,
       fastEnabled: fast.value.enabled,
       ...permissions.value,
+      webSearch: webSearch.value,
+      analyticsEnabled: false,
+      feedbackEnabled: false,
+      goalsEnabled: true,
     },
   };
 }
@@ -194,6 +209,16 @@ function defaultEdits(input, provider, models) {
 
 function fastEdits(input) {
   return fastEdit(input.enabled);
+}
+
+function webSearchEdits(input) {
+  if (!webSearchModes.has(input?.mode)) {
+    throw invalid("mode", "invalid-web-search", `联网搜索模式无效：${String(input?.mode)}`);
+  }
+  return {
+    edits: [{ keyPath: "web_search", value: input.mode }],
+    value: { mode: input.mode },
+  };
 }
 
 function fastEdit(enabled, field = "enabled") {

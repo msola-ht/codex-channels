@@ -181,8 +181,10 @@
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast，
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入全部字段；Fast 始终作为
-  OpenAI 主配置偏好写入，不读取第三方模型目录。第三方固定模式不开放官方默认模型与思考等级，
-  已有 `default_permissions` 时不混写传统 Sandbox 字段。
+  OpenAI 主配置偏好写入；一键写入全部时同时将顶层 `web_search` 设为 `cached`，单独设置页可选择
+  `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。第三方固定模式不开放官方默认模型与思考等级，
+  已有 `default_permissions` 时不混写传统 Sandbox 字段；一键写入全部还会关闭官方分析与反馈并开启
+  `features.goals`，这些设置不影响 Gateway 本地指标统计。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 用户设置”
   适配器，只负责选择、预览和中文结果；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和

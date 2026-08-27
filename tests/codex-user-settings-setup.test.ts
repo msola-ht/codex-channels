@@ -113,6 +113,7 @@ describe("Codex user settings setup", () => {
     const options = firstCall?.options ?? [];
     expect(options.map((option: { value: string }) => option.value)).toEqual([
       "fast",
+      "web-search",
       "permissions",
       "back",
     ]);
@@ -163,6 +164,7 @@ function settingsState(): CodexUserSettingsState {
       model: "gpt-test",
       reasoningEffort: "medium",
       fastEnabled: false,
+      webSearch: null,
     },
     permissions: {
       editable: true,

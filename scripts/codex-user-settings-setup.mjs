@@ -41,6 +41,11 @@ export async function runCodexUserSettingsSetup({
         hint: settings.defaults.fastEnabled ? "当前：开启" : "当前：关闭",
       },
       {
+        value: "web-search",
+        label: "联网搜索模式",
+        hint: settings.defaults.webSearch ?? "当前：未设置（默认缓存）",
+      },
+      {
         value: "permissions",
         label: "沙盒、审批与网络",
         hint: permissionHint(settings.permissions),
@@ -74,6 +79,17 @@ export async function runCodexUserSettingsSetup({
   }
   if (section === "fast") {
     return runFastSetting({
+      environment,
+      output,
+      prompts,
+      settings,
+      updateSetting,
+      createClient,
+      primaryProvider,
+    });
+  }
+  if (section === "web-search") {
+    return runWebSearchSetting({
       environment,
       output,
       prompts,
@@ -122,7 +138,11 @@ async function runAllSettings({
       `${modelDefaults.model.model} · ${modelDefaults.reasoningEffort}`,
       `Fast ${fastEnabled ? "开启" : "关闭"}`,
       `${permissions.sandboxMode} · ${permissions.approvalPolicy}`,
-      `网络${permissions.networkAccess ? "开启" : "关闭"}？`,
+      `网络${permissions.networkAccess ? "开启" : "关闭"}`,
+      "联网搜索：缓存？",
+      "分析关闭",
+      "反馈关闭",
+      "Goals 开启？",
     ].join(" · "),
     initialValue: true,
   });
@@ -143,7 +163,7 @@ async function runAllSettings({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(
-    `Codex 用户设置已全部更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}\n`,
+    `Codex 用户设置已全部更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"} · 联网搜索缓存 · 分析关闭 · 反馈关闭 · Goals 开启\n`,
   );
   output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
   return result;
@@ -168,6 +188,47 @@ async function runFastSetting({
   });
   output.write(`Codex 新会话默认 Fast 已${enabled ? "开启" : "关闭"}。\n`);
   output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
+  return result;
+}
+
+async function runWebSearchSetting({
+  environment,
+  output,
+  prompts,
+  settings,
+  updateSetting,
+  createClient,
+  primaryProvider,
+}) {
+  const mode = await prompts.select({
+    message: "选择联网搜索模式",
+    showInstructions: false,
+    initialValue: settings.defaults.webSearch ?? "cached",
+    options: [
+      { value: "cached", label: "缓存", hint: "使用 Codex 缓存搜索结果" },
+      { value: "live", label: "实时", hint: "执行实时联网搜索" },
+      { value: "indexed", label: "索引", hint: "使用索引搜索" },
+      { value: "disabled", label: "关闭", hint: "禁用联网搜索" },
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(mode) || mode === "back") return { action: "back" };
+  const confirmed = await prompts.confirm({
+    message: `保存联网搜索模式：${mode}？`,
+    initialValue: true,
+  });
+  if (prompts.isCancel(confirmed) || confirmed !== true) {
+    output.write("已取消，未修改联网搜索设置。\n");
+    return undefined;
+  }
+  const result = await updateSetting({ kind: "web-search", mode }, {
+    environment,
+    expectedVersion: settings.version,
+    ...(createClient === undefined ? {} : { createClient }),
+    ...(primaryProvider === undefined ? {} : { primaryProvider }),
+  });
+  output.write(`Codex 联网搜索模式已更新：${mode}\n`);
+  output.write("请运行 codexc service restart all，使新会话使用新设置。\n");
   return result;
 }
 

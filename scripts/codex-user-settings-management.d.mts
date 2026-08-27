@@ -12,6 +12,7 @@ export type CodexUserSettingInput =
     }
   | { kind: "defaults"; model: string; reasoningEffort: string }
   | { kind: "fast"; enabled: boolean }
+  | { kind: "web-search"; mode: "live" | "indexed" | "cached" | "disabled" }
   | {
       kind: "permissions";
       sandboxMode: "read-only" | "workspace-write";
@@ -34,6 +35,7 @@ export interface CodexUserSettingsState {
     model: string | null;
     reasoningEffort: string | null;
     fastEnabled: boolean;
+    webSearch: "live" | "indexed" | "cached" | "disabled" | null;
   };
   permissions: {
     editable: boolean;
