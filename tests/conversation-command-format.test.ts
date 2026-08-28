@@ -448,7 +448,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(conversationCommandHelpLines.join("\n")).toContain(
       "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
     );
-    expect(formatConversationMcp({
+    const mcpOverview = formatConversationMcp({
       kind: "mcp",
       servers: [{
         name: "project-tools",
@@ -457,7 +457,10 @@ describe("provider-aware conversation command formatting", () => {
         authStatus: "notLoggedIn",
         toolCount: 1,
       }],
-    })).toContain("1. project-tools · 运行：需要认证");
+    });
+    expect(mcpOverview).toContain("1. project-tools · 运行：需要认证");
+    expect(mcpOverview).toContain("  - 详情：/mcp 1");
+    expect(mcpOverview).not.toContain("/mcp <名称或序号>");
 
     expect(formatConversationMcpHealth({
       kind: "mcp-health",

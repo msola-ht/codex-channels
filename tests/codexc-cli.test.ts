@@ -3733,6 +3733,7 @@ describe("codexc CLI", () => {
       const telegram = table(document.telegram);
       telegram.bot_token = secret;
       telegram.allowed_user_ids = [123456];
+      document.experimental = { plugin_api: true };
     });
 
     const diagnosed = spawnSync(process.execPath, [cli, "doctor", "--json"], {
@@ -3761,6 +3762,12 @@ describe("codexc CLI", () => {
       kind: "success",
       name: "Telegram Token",
       remediation: null,
+    }));
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      section: "扩展能力",
+      kind: "note",
+      name: "Plugin API",
+      detail: expect.stringContaining("Codex 0.150.1"),
     }));
     expect(diagnosed.stdout).not.toContain(secret);
     expect(diagnosed.stdout).not.toContain("Codex Connect Doctor\n");

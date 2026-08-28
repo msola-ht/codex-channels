@@ -978,12 +978,12 @@ export function formatConversationMcp(
   }
   return toStructuredMarkdownList([
     `MCP Servers（${result.servers.length}）：`,
-    ...result.servers.map(
-      (server, index) =>
+    ...result.servers.flatMap(
+      (server, index) => [
         `${index + 1}. ${server.name} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
+        `  - 详情：/mcp ${index + 1}`,
+      ],
     ),
-    "",
-    "详情：/mcp <名称或序号>",
   ].join("\n"));
 }
 
