@@ -655,7 +655,7 @@ describe("ConversationCore", () => {
       contextCompactionItemIdsForThread: () => undefined,
     }, output);
 
-    for (const kind of ["interacted", "interrupted"] as const) {
+    for (const kind of ["interacted", "interrupted", "completed"] as const) {
       core.handle({
         type: "item.subagentActivity",
         threadId: "thread-1",

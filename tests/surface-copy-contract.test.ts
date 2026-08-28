@@ -527,7 +527,13 @@ describe("shared surface copy contract", () => {
       },
       {
         kind: "mcp",
-        servers: [{ name: "docs", pluginId: null, authStatus: "oAuth", toolCount: 2 }],
+        servers: [{
+          name: "docs",
+          runtimeStatus: "connected",
+          pluginId: null,
+          authStatus: "oAuth",
+          toolCount: 2,
+        }],
       },
       {
         kind: "mcp-health",
@@ -546,6 +552,7 @@ describe("shared surface copy contract", () => {
         selector: "docs",
         server: {
           name: "docs",
+          runtimeStatus: "connected",
           pluginId: null,
           authStatus: "oAuth",
           toolCount: 1,

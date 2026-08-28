@@ -62,12 +62,15 @@
   同时保留只能实时观测的响应延迟；再把 Thread 历史计价与当前 Turn 计价合并，并把历史与当前
   出现的峰谷档位集合一并合并。若当前 Turn 已部分延迟写入，先扣除该部分再加入完整值，避免累计
   总价重复或遗漏。
-- `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 自动订阅后发送的
-  子线程 `turn/completed` 作为正常终态，并接受官方中断活动与旧版
-  `collabAgentToolCall.agentsStates` 终态；极快子线程先完成后登记时只在有界短期缓存中保留终态。
+- `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 发给发起父 Turn 的
+  `subAgentActivity.completed` 作为成功终态，并以父 Thread、父 Turn、子 Thread 和代理路径精确
+  匹配；子线程 `turn/completed` 不再重复宣布成功，失败/中断仍接受子线程终态、官方中断活动与
+  `collabAgentToolCall.agentsStates` 异常状态。极快子线程在登记前完成时只在有界短期缓存中保留
+  带父运行归属的完成活动。Tracker 在 App Server 输入阶段同步记录未结算父运行，避免异步 Surface
+  输出尚未登记时提前释放后台父 Thread；最后一个子代理终态后由组合根重试挂起的订阅清理。
   `interacted` 到达时若该子线程仍有活动轮次则不重复登记；上一轮已经终止时开启新一轮完成跟踪，
   上一轮仍在指标结算窗口内则分离结算；子线程 `turn/started` 会把本轮精确 Turn 与父 Turn 记入
-  Observability，官方完成通知按同一子 Turn 读取本轮统计，避免通知乱序或快速继续时覆盖终态，
+  Observability，官方成功活动按同一子 Turn 读取本轮统计，避免通知乱序或快速继续时覆盖终态，
   也不会把多轮 Thread 累计误报为单轮用量。
   已观察到模型指标且终态后出现父线程官方 `wait` Item 时，立即等待 Observability Writer 当前
   水位落库并发布，保持该等待操作先于完成卡片；终态到达时尚无指标或之后未出现父线程等待时

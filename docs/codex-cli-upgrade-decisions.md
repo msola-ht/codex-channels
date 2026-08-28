@@ -29,7 +29,7 @@
 | 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
 | --- | --- | --- | --- |
 | 0.145.0 精确协议基线 | 让 Gateway、App Server 和生成类型保持在同一正式版本 | 项目发布时锁定正式版本，不保留旧 CLI 兼容分支 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
-| 稳定 Multi-Agent v2 | 让主 Thread 按配置启动、观察和协调不同角色的子代理 | Gateway 只消费官方子代理活动、工具状态和子 Thread 终态，不复制代理调度；三个 Surface 统一显示有界操作与完成结果 | [`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)、[`subagent-completion-tracker.ts`](../src/bootstrap/subagent-completion-tracker.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
+| 稳定 Multi-Agent v2 | 让主 Thread 按配置启动、观察和协调不同角色的子代理 | Gateway 只消费官方子代理活动、工具状态和子 Thread 生命周期，不复制代理调度；三个 Surface 统一显示有界操作与完成结果 | [`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)、[`subagent-completion-tracker.ts`](../src/bootstrap/subagent-completion-tracker.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
 | 一次性音频输入 | 把受支持的本地音频作为单次 Turn 输入提交给模型 | 三个 Surface 统一完成格式、时长、大小和私有临时文件校验；Application 在提交前继续按模型目录的 `inputModalities` 失败关闭，当前可见模型未声明 `audio` 时不会假装可用 | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts)、[`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 会话标题搜索 | 按持久化会话名称或提取标题筛选当前 Workspace 的可恢复 Thread | `/sessions [搜索词]` 与 `/archived [搜索词]` 使用稳定 `thread/list.searchTerm`，不读取或搜索对话正文 | [`thread-port.ts`](../src/session-routing/thread-port.ts)、[`conversation-command-service.ts`](../src/application/conversation-command-service.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts) |
 | Default/Plan 协作模式 | 让渠道用户在下一 Turn 使用官方 Default 或 Plan 预设 | 作为唯一允许的实验协议例外，只受控使用 `collaborationMode/list` 与 `turn/start.collaborationMode`，不借初始化协商接入其他实验能力 | [`collaboration-mode-port.ts`](../src/application/collaboration-mode-port.ts)、[`client.ts`](../src/codex-client/client.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
@@ -265,13 +265,14 @@
 | Skill 的 Plugin 归属 | 由 App Server 明确指出一个 Skill 是否来自 Plugin | Skill 列表改用稳定 `SkillMetadata.pluginId` 排除 Plugin Skill，不再从安装路径猜测来源；开发中 Plugin 仍通过独立入口调用 | [`skill-adapter.ts`](../src/codex-client/skill-adapter.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | 多代理新增动作与中断状态 | 识别发送消息、追加任务、中断和列表等新动作，并正确显示被中断的工具调用 | 操作适配继续保留官方动作名，Surface 提供统一中文标题；`CollabAgentToolCallStatus.interrupted` 归为失败，不再冒充成功 | [`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)、[`operation-presentation.ts`](../src/surfaces/operation-presentation.ts)、[`operation-adapter.test.ts`](../tests/operation-adapter.test.ts) |
 | 命令审批种类失败关闭 | 区分启动命令与向现有终端写入输入的审批 | 旧服务未发送 `kind` 时仍按命令处理；0.150.1 的 `kind=command` 正常进入现有审批，`writeStdin` 和未知值在没有独立预览与交互合同前直接拒绝 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`approval.test.ts`](../tests/approval.test.ts) |
+| MCP 当前 Thread 运行状态 | 查看每个 MCP Server 的真实连接阶段，并区分需认证、失败、取消和禁用 | `/mcp` 与 `/mcp health` 读取稳定 `runtimeStatus`，官方 `null` 显示为未知；查询不启动或重连 Server，显式刷新后仍以再次查询为准 | [`mcp-port.ts`](../src/application/mcp-port.ts)、[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| `subAgentActivity.completed` 成功终态 | 把晚于父 Turn 完成的子代理成功结果重新关联到发起 Turn | 成功结算只采用该父 Turn 归属信号，并按父 Thread、父 Turn、子 Thread 和代理路径匹配；子线程 `turn/completed` 与等待工具状态不再作为并行成功来源，异常终态仍使用官方失败/中断信号 | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`subagent-completion-tracker.ts`](../src/bootstrap/subagent-completion-tracker.ts)、真实顺序合同 [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 ### 待评估
 
 | 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
 | --- | --- | --- | --- |
-| `subAgentActivity.completed` 终态 | 把晚于父 Turn 完成的子代理成功结果重新关联到发起 Turn | 可减少 Bootstrap 仅依赖子 Thread 通知和收敛窗口的复杂度，并改善同级代理继续任务的归属 | 当前适配器有意忽略该新增枚举，仍用子 Thread 精确 Turn 终态结算；只有真实合同确认父活动、子 Turn、等待 Item 和指标写入的顺序及去重规则后，才替换现有终态来源，不并行维护两套成功判断 |
-| MCP 运行时状态与资源来源 | 读取每个 MCP Server 的真实连接状态，并把 App 专属资源关联回原始 Tool Call | 可让 `/mcp health` 区分未启动、连接中、需认证、失败和禁用，也能安全处理 Hosted App 资源 | 当前资源命令只读取用户明确选择的通用 Server URI，未携带 `originCallId` 或 `connectorId`；运行时状态虽为稳定只读字段，但接入前要先定义三渠道统一状态和处理建议，并补真实失败/重连合同，不把状态字段当作主动网络探测 |
+| MCP Hosted App 资源来源 | 把 App 专属资源关联回原始 Tool Call 与 Connector | 可在未来安全读取 Hosted App Widget 或其他受 Connector 归属约束的资源 | 当前资源命令只读取用户明确选择的通用 Server URI，未携带 `originCallId` 或 `connectorId`；只有项目正式支持 Hosted App 资源并定义调用归属、账户授权与三渠道展示后才接入，不从 URI 或 Item 顺序猜测来源 |
 
 ### 明确不采用
 
@@ -288,8 +289,6 @@
 
 ### 纯上游变化
 
-- 子代理完成活动的父 Turn 与同级代理路由修复随 App Server 获得；Gateway 当前仍以子 Thread 的
-  精确 Turn 终态作为成功结算事实来源，新增 `completed` 活动按上面的待评估边界处理。
 - TUI `/copy`、自动命名、快捷键、Windows Sandbox 与内部 Guardian 优化不改变 Gateway 公开接口。
 
 ## 0.150.1

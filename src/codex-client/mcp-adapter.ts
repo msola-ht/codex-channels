@@ -32,6 +32,16 @@ const mcpAuthStatuses = new Set<McpServerSummary["authStatus"]>([
   "oAuth",
 ]);
 
+const mcpRuntimeStatuses = new Set<McpServerSummary["runtimeStatus"]>([
+  "notStarted",
+  "starting",
+  "connected",
+  "authenticationRequired",
+  "failed",
+  "cancelled",
+  "disabled",
+]);
+
 export function toMcpServerSummaryPage(
   response: ListMcpServerStatusResponse,
 ): McpServerSummaryPage {
@@ -218,10 +228,21 @@ function toServerSummary(
   }
   return {
     name,
+    runtimeStatus: requiredMcpRuntimeStatus(server.runtimeStatus),
     pluginId: requiredNullablePluginId(server.pluginId),
     authStatus: server.authStatus,
     toolCount: Object.keys(server.tools).length,
   };
+}
+
+function requiredMcpRuntimeStatus(value: unknown): McpServerSummary["runtimeStatus"] {
+  if (value === null) return "unknown";
+  if (typeof value !== "string" || !mcpRuntimeStatuses.has(
+    value as McpServerSummary["runtimeStatus"],
+  )) {
+    throw new Error("Codex 响应缺少有效 MCP server runtimeStatus");
+  }
+  return value as McpServerSummary["runtimeStatus"];
 }
 
 function requiredNullablePluginId(value: unknown): string | null {

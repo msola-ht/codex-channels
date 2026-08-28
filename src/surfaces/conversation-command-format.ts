@@ -980,7 +980,7 @@ export function formatConversationMcp(
     `MCP Servers（${result.servers.length}）：`,
     ...result.servers.map(
       (server, index) =>
-        `${index + 1}. ${server.name} · auth=${server.authStatus} · tools=${server.toolCount}`,
+        `${index + 1}. ${server.name} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
     ),
     "",
     "详情：/mcp <名称或序号>",
@@ -1011,18 +1011,34 @@ export function formatConversationMcpHealth(
     ...(visibleActions.length > 0
       ? [
           "需要处理：",
-          ...visibleActions.flatMap((action) => [
-            `- ${action.server}：尚未登录`,
-            `  - 处理：/mcp login ${action.selector}`,
-          ]),
+          ...visibleActions.flatMap((action) => action.type === "loginRequired"
+            ? [
+                `- ${action.server}：尚未登录`,
+                `  - 处理：/mcp login ${action.selector}`,
+              ]
+            : [
+                `- ${action.server}：连接失败或已取消`,
+                "  - 处理：/mcp reload",
+              ]),
         ]
       : []),
     ...(visibleNotices.length > 0 || omittedFindings > 0
       ? [
           "提示：",
-          ...visibleNotices.map((notice) => notice.type === "authUnknown"
-            ? `- ${notice.server}：认证状态未知，可检查配置或尝试 /mcp login ${notice.selector}`
-            : `- ${notice.server}：未公开工具、资源或资源模板`),
+          ...visibleNotices.map((notice) => {
+            switch (notice.type) {
+              case "authUnknown":
+                return `- ${notice.server}：认证状态未知，可检查配置或尝试 /mcp login ${notice.selector}`;
+              case "noCapabilities":
+                return `- ${notice.server}：未公开工具、资源或资源模板`;
+              case "notStarted":
+                return `- ${notice.server}：尚未启动`;
+              case "starting":
+                return `- ${notice.server}：正在连接`;
+              case "disabled":
+                return `- ${notice.server}：已禁用`;
+            }
+          }),
           ...(omittedFindings > 0
             ? [`- 其余 ${omittedFindings} 项已省略；使用 /mcp 查看完整 Server 列表`]
             : []),
@@ -1038,8 +1054,8 @@ export function formatConversationMcpReload(
   return toStructuredMarkdownList([
     "MCP 配置重新加载",
     "状态：已请求",
-    "生效：已加载 Session 会在下一次活动 Turn 时刷新",
-    "提示：无需重启 Codex App Server",
+    "生效：已加载 Session 已刷新 MCP 配置",
+    "提示：无需重启 Codex App Server；连接结果请再次使用 /mcp health 查询",
   ].join("\n"));
 }
 
@@ -1065,9 +1081,10 @@ export function formatConversationMcpDetail(
   return toStructuredMarkdownList([
     `MCP Server：${server.serverTitle ?? server.name}`,
     `名称：${server.name}`,
+    `运行：${formatMcpRuntimeStatus(server.runtimeStatus)}`,
     ...(server.pluginId ? [`来源 Plugin：${server.pluginId}`] : []),
     `版本：${server.serverVersion ?? "未提供"}`,
-    `认证：${server.authStatus}`,
+    `认证：${formatMcpAuthStatus(server.authStatus)}`,
     ...(server.serverDescription
       ? [`说明：${formatMcpDescription(server.serverDescription)}`]
       : []),
@@ -1081,6 +1098,33 @@ export function formatConversationMcpDetail(
     `浏览资源模板：/mcp ${selector} templates`,
     `读取资源：/mcp resource ${selector} <URI>`,
   ].join("\n"));
+}
+
+function formatMcpRuntimeStatus(
+  status: Extract<ConversationCommandResult, { kind: "mcp" }>["servers"][number]["runtimeStatus"],
+): string {
+  return ({
+    unknown: "未知",
+    notStarted: "未启动",
+    starting: "正在连接",
+    connected: "已连接",
+    authenticationRequired: "需要认证",
+    failed: "失败",
+    cancelled: "已取消",
+    disabled: "已禁用",
+  } as const)[status];
+}
+
+function formatMcpAuthStatus(
+  status: Extract<ConversationCommandResult, { kind: "mcp" }>["servers"][number]["authStatus"],
+): string {
+  return ({
+    unknown: "未知",
+    unsupported: "不支持 OAuth",
+    notLoggedIn: "未登录",
+    bearerToken: "Bearer Token",
+    oAuth: "OAuth",
+  } as const)[status];
 }
 
 function formatSelectedMcpDetailSection(

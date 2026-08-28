@@ -454,8 +454,9 @@ function toItemEvent(
 
 function parseSubagentActivityKind(
   value: unknown,
-): "started" | "interacted" | "interrupted" | undefined {
+): "started" | "interacted" | "interrupted" | "completed" | undefined {
   return value === "started" || value === "interacted" || value === "interrupted"
+      || value === "completed"
     ? value
     : undefined;
 }

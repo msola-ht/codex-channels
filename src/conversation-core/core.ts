@@ -369,7 +369,7 @@ export class ConversationCore {
         });
         return;
       case "item.subagentActivity":
-        if (event.kind === "interrupted") {
+        if (event.kind === "interrupted" || event.kind === "completed") {
           return;
         }
         this.publishForThread(event.threadId, {

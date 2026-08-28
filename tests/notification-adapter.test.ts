@@ -196,6 +196,28 @@ describe("Notification adapter", () => {
       kind: "started",
     });
     expect(toConversationInputEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "subAgentActivity",
+          id: "item-completed",
+          kind: "completed",
+          agentThreadId: "subagent-thread-1",
+          agentPath: "/root/ds_probe",
+        },
+      },
+    })).toEqual({
+      type: "item.subagentActivity",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-completed",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+      kind: "completed",
+    });
+    expect(toConversationInputEvent({
       method: "thread/status/changed",
       params: {
         threadId: "thread-1",

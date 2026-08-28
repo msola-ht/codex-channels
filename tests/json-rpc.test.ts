@@ -113,6 +113,7 @@ function appServerMcpStatus(
 ): Record<string, unknown> {
   return {
     name: "local-tools",
+    runtimeStatus: null,
     pluginId: null,
     serverInfo: null,
     tools: { search: {} },
@@ -1642,6 +1643,7 @@ describe("JsonRpcClient", () => {
       {
         data: [appServerMcpStatus({
           name: "project-tools",
+          runtimeStatus: "connected",
           authStatus: "oAuth",
           tools: { search: {}, fetch: {} },
         })],
@@ -1662,8 +1664,20 @@ describe("JsonRpcClient", () => {
     await client.connect();
 
     await expect(client.listMcpServers("thread-1")).resolves.toEqual([
-      { name: "project-tools", pluginId: null, authStatus: "oAuth", toolCount: 2 },
-      { name: "user-tools", pluginId: null, authStatus: "bearerToken", toolCount: 0 },
+      {
+        name: "project-tools",
+        runtimeStatus: "connected",
+        pluginId: null,
+        authStatus: "oAuth",
+        toolCount: 2,
+      },
+      {
+        name: "user-tools",
+        runtimeStatus: "unknown",
+        pluginId: null,
+        authStatus: "bearerToken",
+        toolCount: 0,
+      },
     ]);
     expect(
       transport.sent
@@ -1687,7 +1701,7 @@ describe("JsonRpcClient", () => {
   it("preserves the official unknown MCP authentication status", async () => {
     const transport = new FakeTransport();
     transport.mcpPages = [{
-      data: [appServerMcpStatus({ authStatus: "unknown" })],
+      data: [appServerMcpStatus({ authStatus: "unknown", runtimeStatus: "starting" })],
       nextCursor: null,
     }];
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
@@ -1696,8 +1710,60 @@ describe("JsonRpcClient", () => {
     await client.connect();
 
     await expect(client.listMcpServers()).resolves.toEqual([
-      { name: "local-tools", pluginId: null, authStatus: "unknown", toolCount: 1 },
+      {
+        name: "local-tools",
+        runtimeStatus: "starting",
+        pluginId: null,
+        authStatus: "unknown",
+        toolCount: 1,
+      },
     ]);
+  });
+
+  it.each([
+    "notStarted",
+    "starting",
+    "connected",
+    "authenticationRequired",
+    "failed",
+    "cancelled",
+    "disabled",
+  ] as const)("preserves the official %s MCP runtime status", async (runtimeStatus) => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({ runtimeStatus })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers()).resolves.toEqual([
+      expect.objectContaining({ runtimeStatus }),
+    ]);
+  });
+
+  it.each([
+    { name: "missing", value: undefined },
+    { name: "invalid", value: "ready" },
+    { name: "wrong type", value: 1 },
+  ])("fails closed for a $name MCP runtimeStatus", async ({ value }) => {
+    const transport = new FakeTransport();
+    const status = appServerMcpStatus();
+    if (value === undefined) {
+      delete status.runtimeStatus;
+    } else {
+      status.runtimeStatus = value;
+    }
+    transport.mcpPages = [{ data: [status], nextCursor: null }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers())
+      .rejects.toThrow("Codex 响应缺少有效 MCP server runtimeStatus");
   });
 
   it.each([
@@ -1728,6 +1794,7 @@ describe("JsonRpcClient", () => {
     transport.mcpPages = [{
       data: [appServerMcpStatus({
         name: "project-tools",
+        runtimeStatus: "authenticationRequired",
         pluginId: "github@local",
         authStatus: "notLoggedIn",
         serverInfo: {
@@ -1782,6 +1849,7 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listMcpServerDetails("thread-1")).resolves.toEqual([{
       name: "project-tools",
+      runtimeStatus: "authenticationRequired",
       pluginId: "github@local",
       authStatus: "notLoggedIn",
       toolCount: 1,

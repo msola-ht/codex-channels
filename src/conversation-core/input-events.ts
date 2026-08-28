@@ -66,7 +66,7 @@ export type ConversationInputEvent =
       itemId: string;
       agentThreadId: string;
       agentPath: string;
-      kind: "started" | "interacted" | "interrupted";
+      kind: "started" | "interacted" | "interrupted" | "completed";
     }
   | {
       type: "turn.modelTiming.updated";

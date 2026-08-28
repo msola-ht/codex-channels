@@ -596,8 +596,14 @@ describe("Feishu output renderer", () => {
     })).toContain("1. tdd：测试驱动开发");
     expect(renderFeishuCommandResult({
       kind: "mcp",
-      servers: [{ name: "docs", pluginId: null, authStatus: "oAuth", toolCount: 2 }],
-    })).toContain("1. docs · auth=oAuth · tools=2");
+      servers: [{
+        name: "docs",
+        runtimeStatus: "connected",
+        pluginId: null,
+        authStatus: "oAuth",
+        toolCount: 2,
+      }],
+    })).toContain("1. docs · 运行：已连接 · 认证：OAuth · 工具：2");
     expect(renderFeishuCommandResult({
       kind: "plugins",
       plugins: [{

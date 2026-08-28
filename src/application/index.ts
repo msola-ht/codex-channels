@@ -126,6 +126,7 @@ export {
   type McpOAuthLogin,
   type McpLoginResult,
   type McpQueryPort,
+  type McpRuntimeStatus,
   type McpResourceContent,
   type McpResourceReadResult,
   type McpResourceSummary,

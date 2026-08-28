@@ -381,6 +381,7 @@ export class ConversationService implements ConversationUseCases {
       provider: string,
       resetsAt: number,
     ) => Promise<RemoteQuotaSummary | undefined>,
+    private readonly hasPendingSubagentRuns?: (parentThreadId: string) => boolean,
   ) {
     this.queueUseCases = new ThreadQueueService(
       this.locks,
@@ -1344,24 +1345,34 @@ export class ConversationService implements ConversationUseCases {
         (total, server) => total + server.resourceTemplates.length,
         0,
       ),
-      actions: servers.flatMap((server, index) =>
-        server.authStatus === "notLoggedIn"
-          ? [{
-              type: "loginRequired" as const,
-              server: server.name,
-              selector: String(index + 1),
-            }]
-          : []
-      ),
+      actions: servers.flatMap<McpHealthReport["actions"][number]>((server, index) => {
+        const selector = String(index + 1);
+        if (
+          server.runtimeStatus === "authenticationRequired"
+          || server.authStatus === "notLoggedIn"
+        ) {
+          return [{ type: "loginRequired" as const, server: server.name, selector }];
+        }
+        if (server.runtimeStatus === "failed" || server.runtimeStatus === "cancelled") {
+          return [{
+            type: "reconnectRecommended" as const,
+            server: server.name,
+            selector,
+          }];
+        }
+        return [];
+      }),
       notices: servers.flatMap((server, index) => [
         ...(server.authStatus === "unknown"
+          && server.runtimeStatus !== "authenticationRequired"
           ? [{
               type: "authUnknown" as const,
               server: server.name,
               selector: String(index + 1),
             }]
           : []),
-        ...(server.authStatus !== "notLoggedIn"
+        ...(server.runtimeStatus === "connected"
+          && server.authStatus !== "notLoggedIn"
           && server.authStatus !== "unknown"
           && server.tools.length === 0
           && server.resources.length === 0
@@ -1371,6 +1382,15 @@ export class ConversationService implements ConversationUseCases {
               server: server.name,
               selector: String(index + 1),
             }]
+          : []),
+        ...(server.runtimeStatus === "notStarted"
+          ? [{ type: "notStarted" as const, server: server.name, selector: String(index + 1) }]
+          : []),
+        ...(server.runtimeStatus === "starting"
+          ? [{ type: "starting" as const, server: server.name, selector: String(index + 1) }]
+          : []),
+        ...(server.runtimeStatus === "disabled"
+          ? [{ type: "disabled" as const, server: server.name, selector: String(index + 1) }]
           : []),
       ]),
     };
@@ -1830,6 +1850,9 @@ export class ConversationService implements ConversationUseCases {
       return false;
     }
     this.pendingBackgroundReleases.add(threadId);
+    if (this.hasPendingSubagentRuns?.(threadId)) {
+      return false;
+    }
     if (options.dispatchQueued !== false) {
       const queueState = await this.dispatchNativeQueueBeforeRelease(threadId);
       if (queueState !== "empty" && queueState !== "unavailable") {

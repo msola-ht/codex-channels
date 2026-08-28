@@ -450,38 +450,51 @@ describe("provider-aware conversation command formatting", () => {
     );
     expect(formatConversationMcp({
       kind: "mcp",
-      servers: [{ name: "project-tools", pluginId: null, authStatus: "notLoggedIn", toolCount: 1 }],
-    })).toContain("1. project-tools");
+      servers: [{
+        name: "project-tools",
+        runtimeStatus: "authenticationRequired",
+        pluginId: null,
+        authStatus: "notLoggedIn",
+        toolCount: 1,
+      }],
+    })).toContain("1. project-tools · 运行：需要认证");
 
     expect(formatConversationMcpHealth({
       kind: "mcp-health",
       report: {
-        serverCount: 3,
+        serverCount: 5,
         toolCount: 1,
         resourceCount: 0,
         resourceTemplateCount: 0,
-        actions: [{ type: "loginRequired", server: "oauth tools", selector: "1" }],
+        actions: [
+          { type: "loginRequired", server: "oauth tools", selector: "1" },
+          { type: "reconnectRecommended", server: "failed", selector: "4" },
+        ],
         notices: [
           { type: "authUnknown", server: "unknown auth", selector: "2" },
-          { type: "noCapabilities", server: "empty", selector: "3" },
+          { type: "disabled", server: "empty", selector: "3" },
+          { type: "starting", server: "starting", selector: "5" },
         ],
       },
     })).toBe([
       "## MCP 健康检查",
-      "- 状态：发现 1 项需要处理",
-      "- Server：3 个 · 工具：1 个 · 资源：0 个 · 资源模板：0 个",
+      "- 状态：发现 2 项需要处理",
+      "- Server：5 个 · 工具：1 个 · 资源：0 个 · 资源模板：0 个",
       "### 需要处理",
       "- oauth tools：尚未登录",
       "  - 处理：/mcp login 1",
+      "- failed：连接失败或已取消",
+      "  - 处理：/mcp reload",
       "### 提示",
       "- unknown auth：认证状态未知，可检查配置或尝试 /mcp login 2",
-      "- empty：未公开工具、资源或资源模板",
+      "- empty：已禁用",
+      "- starting：正在连接",
     ].join("\n"));
     expect(formatConversationMcpReload({ kind: "mcp-reload" })).toBe([
       "## MCP 配置重新加载",
       "- 状态：已请求",
-      "- 生效：已加载 Session 会在下一次活动 Turn 时刷新",
-      "- 提示：无需重启 Codex App Server",
+      "- 生效：已加载 Session 已刷新 MCP 配置",
+      "- 提示：无需重启 Codex App Server；连接结果请再次使用 /mcp health 查询",
     ].join("\n"));
 
     const detail = formatConversationMcpDetail({
@@ -489,6 +502,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "Project Tools",
+        runtimeStatus: "authenticationRequired",
         pluginId: "github@local",
         authStatus: "notLoggedIn",
         toolCount: 1,
@@ -522,6 +536,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "codex_apps",
       server: {
         name: "codex_apps",
+        runtimeStatus: "connected",
         pluginId: null,
         authStatus: "bearerToken",
         toolCount: 0,
@@ -541,6 +556,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "large",
       server: {
         name: "large",
+        runtimeStatus: "connected",
         pluginId: null,
         authStatus: "oAuth",
         toolCount: 20,
@@ -666,6 +682,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "codex_apps",
+        runtimeStatus: "connected",
         pluginId: null,
         authStatus: "bearerToken",
         toolCount: 18,
@@ -707,6 +724,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "codex_apps",
+        runtimeStatus: "connected",
         pluginId: null,
         authStatus: "bearerToken",
         toolCount: 1,
