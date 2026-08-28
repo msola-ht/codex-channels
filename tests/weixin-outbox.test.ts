@@ -175,7 +175,7 @@ describe("WeixinOutbox", () => {
     }));
     const { outbox, sendText } = outboxFixture(
       { value: true },
-      { remainingUsage, debugEnabled: true },
+      { remainingUsage },
     );
 
     await outbox.handle({

@@ -5,6 +5,13 @@ export interface ReasoningEffortOption {
 
 export type ModelInputModality = "text" | "image" | "audio";
 
+export type ModelMultiAgentVersion = "disabled" | "v1" | "v2";
+
+export interface ModelUpgradeNotice {
+  model: string;
+  retirementAtSeconds: number | null;
+}
+
 export interface ModelOption {
   provider?: string;
   available?: boolean;
@@ -21,6 +28,8 @@ export interface ModelOption {
   defaultServiceTier: string | null;
   isDefault: boolean;
   inputModalities: ModelInputModality[];
+  multiAgentVersion?: ModelMultiAgentVersion;
+  upgrade?: ModelUpgradeNotice;
 }
 
 export interface ModelSelectionPort {

@@ -31,6 +31,10 @@ describe("shared operation presentation", () => {
     }
     expect(operationTitle(operation("reviewMode", "exited"))).toBe("退出审查模式");
     expect(operationTitle(operation("subagent", "spawnAgent"))).toBe("启动子代理");
+    expect(operationTitle(operation("subagent", "sendMessage"))).toBe("向子代理发送消息");
+    expect(operationTitle(operation("subagent", "followupTask"))).toBe("向子代理追加任务");
+    expect(operationTitle(operation("subagent", "interruptAgent"))).toBe("中断子代理");
+    expect(operationTitle(operation("subagent", "listAgents"))).toBe("查看子代理");
     expect(operationTitle(operation("subagent", "unknown"))).toBe("子代理活动");
   });
 

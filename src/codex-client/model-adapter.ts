@@ -1,6 +1,7 @@
 import type { ModelListResponse } from "../codex-protocol/index.js";
 import type {
   ModelInputModality,
+  ModelMultiAgentVersion,
   ModelOption,
 } from "../application/index.js";
 
@@ -53,7 +54,38 @@ export function toModelOption(model: ModelListResponse["data"][number]): ModelOp
     defaultServiceTier: model.defaultServiceTier,
     isDefault: model.isDefault,
     inputModalities: model.inputModalities.map(toInputModality),
+    ...(model.multiAgentVersion === null
+      ? {}
+      : { multiAgentVersion: toMultiAgentVersion(model.multiAgentVersion) }),
+    ...(model.upgradeInfo === null
+      ? {}
+      : {
+          upgrade: {
+            model: requireNonEmptyString(model.upgradeInfo.model, "model upgrade target"),
+            retirementAtSeconds: toRetirementAtSeconds(model.upgradeInfo.retirementAt),
+          },
+        }),
   };
+}
+
+function toMultiAgentVersion(value: unknown): ModelMultiAgentVersion {
+  if (value === "disabled" || value === "v1" || value === "v2") {
+    return value;
+  }
+  throw new Error("Codex 响应包含未知 model multiAgentVersion");
+}
+
+function toRetirementAtSeconds(value: unknown): number | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < 0
+    || !Number.isFinite(new Date(value * 1_000).valueOf())
+  ) {
+    throw new Error("Codex 响应缺少有效 model retirementAt");
+  }
+  return value;
 }
 
 function toInputModality(value: unknown): ModelInputModality {
@@ -63,8 +95,9 @@ function toInputModality(value: unknown): ModelInputModality {
   throw new Error("Codex 响应包含未知 model inputModalities");
 }
 
-function requireNonEmptyString(value: unknown, field: string): asserts value is string {
+function requireNonEmptyString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`Codex 响应缺少有效 ${field}`);
   }
+  return value;
 }

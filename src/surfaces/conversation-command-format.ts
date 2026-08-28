@@ -10,6 +10,7 @@ import {
   type AccountThreadUsage,
   type AccountThreadUsageGroup,
   type McpResourceContent,
+  type ModelOption,
   type ThreadQueueInputType,
   type ThreadQueueItem,
 } from "../application/index.js";
@@ -1607,6 +1608,8 @@ export function formatConversationModels(
       ...(result.nextSelection === "effort"
         ? ["模型已选择，请继续选择思考等级。", ""]
         : []),
+      ...formatCurrentModelNotices(current),
+      "",
       "可用思考等级：",
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
@@ -1622,16 +1625,51 @@ export function formatConversationModels(
     ...(current && fastServiceTierId(current)
       ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
       : []),
+    ...formatCurrentModelNotices(current),
     "",
     ...providerSwitchNotice,
     `模型列表（${state.models.length}）：`,
     ...state.models.map(
       (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
+        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
     ),
     "",
     "切换：/model <序号、模型 ID 或名称>",
   ].join("\n"));
+}
+
+function formatCurrentModelNotices(model: ModelOption | undefined): string[] {
+  if (!model) return [];
+  const notices: string[] = [];
+  if (model.multiAgentVersion) {
+    const runtime = model.multiAgentVersion === "disabled"
+      ? "不支持"
+      : model.multiAgentVersion === "v1"
+        ? "v1（旧版）"
+        : "v2";
+    notices.push(`Codex 多代理运行时：${runtime}`);
+  }
+  if (model.upgrade) {
+    notices.push([
+      `官方模型提示：建议切换到 ${model.upgrade.model}`,
+      ...(model.upgrade.retirementAtSeconds === null
+        ? []
+        : [`退役时间：${formatUtcDate(model.upgrade.retirementAtSeconds)}（UTC）`]),
+    ].join(" · "));
+  }
+  return notices;
+}
+
+function formatModelUpgradeBadge(model: ModelOption): string {
+  if (!model.upgrade) return "";
+  const retirement = model.upgrade.retirementAtSeconds === null
+    ? ""
+    : ` · 退役 ${formatUtcDate(model.upgrade.retirementAtSeconds)} UTC`;
+  return ` · 官方建议替代 ${model.upgrade.model}${retirement}`;
+}
+
+function formatUtcDate(timestampSeconds: number): string {
+  return new Date(timestampSeconds * 1_000).toISOString().slice(0, 10);
 }
 
 function formatNextMessageModel(value: { model: string; modelProvider?: string }): string {

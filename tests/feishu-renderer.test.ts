@@ -438,6 +438,9 @@ describe("Feishu output renderer", () => {
       "- 上下文：100 / 200（50%）",
       "- 上下文压缩：2 次",
       "- Git 分支：feature/weixin-surface",
+      "",
+      "### 账户状态",
+      "- 周限：剩余 63%",
     ].join("\n"));
   });
 

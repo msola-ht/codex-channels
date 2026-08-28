@@ -59,12 +59,16 @@ export function formatPlanType(value: string): string {
     pro: "Pro",
     prolite: "Pro Lite",
     team: "Team",
+    self_serve_business_prolite: "Business Premium",
     self_serve_business_usage_based: "Business（按量）",
     business: "Business",
     ent26: "Enterprise",
+    enterprise_cbp_automation: "Enterprise（Automation）",
     enterprise_cbp_usage_based: "Enterprise（按量）",
     enterprise: "Enterprise",
     edu: "Edu",
+    edu_plus: "Edu Plus",
+    edu_pro: "Edu Pro",
     unknown: "未知",
   };
   return names[value] ?? value;

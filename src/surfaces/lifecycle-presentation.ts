@@ -530,13 +530,22 @@ export function createTurnCompletedPresentation(
       value: `${event.contextCompactionCount} 次`,
     });
   }
-  if (debug && usesOpenAiAccount(event.modelProvider) && event.weeklyLimit && !event.remoteQuota) {
+  const remoteUsedPercent = event.remoteQuota?.latestUsedPercentMillionths === null
+    || event.remoteQuota?.latestUsedPercentMillionths === undefined
+    ? null
+    : event.remoteQuota.latestUsedPercentMillionths / 1_000_000;
+  if (usesOpenAiAccount(event.modelProvider) && remoteUsedPercent !== null) {
+    accountFields.push({
+      label: "周限",
+      value: `剩余 ${formatPercent(Math.max(0, 100 - remoteUsedPercent))}（额度中心）`,
+    });
+  } else if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
     accountFields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
-  if (debug && remainingUsage) {
+  if (remainingUsage) {
     accountFields.push({
       label: `剩余用量${remainingUsage.bucket === undefined
         ? ""

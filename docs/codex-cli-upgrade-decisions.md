@@ -82,6 +82,7 @@
 | External Agent 配置和会话导入 | 把其他编程 Agent 的配置、会话和导入历史迁入 Codex | App Server 是 Thread 和历史的唯一事实来源；Gateway 不读取、迁移或维护其他 Agent 的会话副本 |
 | Plugin Marketplace、分享和 Workspace 发布 | 从远端目录查找或下载 Plugin，并把本地 Plugin 分享给个人或工作区 | 固定版本 Plugin API 仍禁止生产客户端调用；下载、发布和分享还会扩大网络、供应链信任与 Workspace 权限边界 |
 | Remote Code Mode Host | 让本机 App Server 把代码执行任务交给另一台机器或远程执行环境 | 当前只连接本机共享 App Server；远程执行主机需要独立认证、网络和执行信任模型 |
+| 自定义 Provider 独立联网搜索 | 让声明兼容能力的第三方 Responses Provider 执行独立 `web.run` 搜索 | 上游要求 Provider 显式声明 `supports_standalone_web_search` 并实现搜索端点；当前受管第三方只透传各自 `/responses` 内建搜索，自定义 Provider Setup 也没有该能力和端点合同，因此不开放配置或路由 |
 | 临时 Fork | 创建一个短期会话分支，但不把它显示在正常会话列表中 | 外部 Conversation 需要稳定、可恢复且唯一的 Thread 绑定；不进入列表的临时 Thread 不适合作为渠道会话 |
 | Realtime | 持续传输实时文字或音频，形成低延迟实时会话 | 当前项目只允许 Plan 所需实验协议，未建立实时音频的授权、传输、状态和 Surface 合同 |
 | 企业配置要求和配置写入 | 让企业管理员限制更新、登录 Shell、日志目录、数据目录、Browser Use 等主机行为 | 外部聊天用户不得修改 Codex 管理策略或主机级配置；这些能力不应通过聊天渠道暴露 |
@@ -179,6 +180,7 @@
 | `account/usage/read.threadId` 与 `threadUsage` | 查询一个 OpenAI Thread 的官方估算 Credit、可选美元和用量分组 | 复用现有 `/usage`：账户摘要保持主结果，当前 OpenAI Thread 的估算并行读取且失败隔离；没有 Thread 或使用第三方 Provider 时保持原行为。官方估算不写入指标库、不与 `/metrics` 参考费用合并，也不宣称递归包含子代理 | [`Thread 官方用量开发设计`](thread-usage-development.md)、[`account-adapter.ts`](../src/codex-client/account-adapter.ts)、[`provider-account-service.test.ts`](../tests/provider-account-service.test.ts) |
 | `misalignmentPolicyViolation` 结构化错误 | 用固定协议枚举表示 Turn 因安全策略不一致而终止 | Client 只识别该精确枚举并向 Core 传递窄分类；三渠道完成卡片统一显示固定、脱敏且可操作的中文提示，指标保留独立错误分类与代码，`willRetry=false` 与 `failed` 终态保持不变；其他 `CodexErrorInfo` 继续沿用现有脱敏自由文本 | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`core.ts`](../src/conversation-core/core.ts)、[`turn-error-metrics.ts`](../src/bootstrap/turn-error-metrics.ts)、[`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts)、结构化错误真实合同 [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | MCP Server `pluginId` 来源展示 | 标识 MCP Server 是否由某个 Plugin 提供 | Client 在协议边界校验可空、长度受限且符合固定上游 `<plugin>@<marketplace>` 字符规则的 Plugin ID；只在 `/mcp` 详情显示来源，不用于授权、审批、命令/脚本来源推断或 OAuth 参数。OAuth 仍使用自动发现 | [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`conversation-command-format.ts`](../src/surfaces/conversation-command-format.ts) |
+| 模型多代理运行时与生命周期提示 | 从稳定 `model/list` 读取 `multiAgentVersion`、结构化替代模型和退役时间 | `/model` 只读显示当前 Codex 多代理运行时；带替代信息的 OpenAI 模型显示建议模型与 UTC 退役日期，不转发 Markdown/链接，不自动禁用或切换，不改变审批；第三方 Provider 不继承 OpenAI 生命周期 | [`model-adapter.ts`](../src/codex-client/model-adapter.ts)、[`model-port.ts`](../src/application/model-port.ts)、[`model-selection-service.ts`](../src/application/model-selection-service.ts)、[`conversation-command-format.ts`](../src/surfaces/conversation-command-format.ts) |
 | 实验 `thread/queue/*` 与 `thread/queue/changed` | 用 App Server 持久 Queue 替换 Gateway 内存队列，对齐六个原生请求、每 Thread 100 条容量和 25/100 分页 | 不保留第二套队列；Gateway 只负责 Actor、Workspace、Conversation 归属、Provider 路由和安全展示；本地契约与条件式真实 App Server 合同见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) | [`queue-adapter.ts`](../src/codex-client/queue-adapter.ts)、[`thread-queue-port.ts`](../src/application/thread-queue-port.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 实验 `thread/revert` 与 `thread/reverted` | 在 Queue 替换后独立采用 Thread 历史回退 | 新建 Thread 使用 `paginated` history，并通过分页 Turn 列表选择回退边界；既有 legacy Thread 不迁移；回退一次性确认、执行前复核且明确不会恢复文件，Queue 联合语义以条件式真实 App Server 合同门禁验证，详细设计见 [`Thread Queue 与 Revert 开发设计`](thread-queue-revert-development.md) | [`history-adapter.ts`](../src/codex-client/history-adapter.ts)、[`thread-history-port.ts`](../src/application/thread-history-port.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
@@ -186,7 +188,7 @@
 
 | 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
 | --- | --- | --- | --- |
-| 模型 `multiAgentVersion`、退休时间与自动审核要求 | 描述模型的多代理运行时、退役时间和受管自动审核约束 | 可改进模型目录说明和受管环境提示 | 当前模型路由不依赖这些字段，审批仍由 Surface Actor 显式决定；只有字段影响模型可选性、请求合法性或必须展示的安全约束时再映射到 Application |
+| 受管模型自动审核要求 | 描述企业或受管环境要求自动审核的模型范围 | 可改进受管环境提示 | 当前审批仍由 Surface Actor 显式决定；不新增 `configRequirements/read` 依赖，不让受管要求自动批准、拒绝或改变模型可选性 |
 | MCP 单次 OAuth 注册策略 | 允许登录时选择自动发现、动态注册或预注册客户端 | 可为少数 OAuth 注册兼容性问题提供显式覆盖 | 当前 OAuth 自动发现路径工作正常，且没有用户选择和凭据配置边界；不扩展 OAuth 参数或凭据策略 |
 | Thread 分区外观 | 为自定义 Thread 分区保存跨客户端同步的图标和颜色 | 可让渠道中的分区目录与原生客户端使用相同的视觉标识 | 当前 `/section` 只投影分区名称，创建和重命名时省略 `appearance`，因此不会覆盖其他客户端已有设置；只有三个 Surface 形成统一、安全且有明确用户需求的图标或颜色展示规则时再扩展 Application 类型与写入命令 |
 
@@ -229,10 +231,13 @@
 | --- | --- | --- |
 | `codex agents` 任务面板 | 在终端搜索、启动、重命名和停止任务 | 属于原生 TUI，不复制第二套终端界面到渠道 |
 | `/cd`、`/pwd`、`/cwd` | 在终端会话中切换或查看工作目录 | Gateway 只允许预配置 Workspace，不能通过聊天输入任意目录 |
-| SDK 原始配置覆盖与 `max`/`ultra` 选择 | 让 SDK 调用者覆盖配置并使用更高思考等级 | 当前渠道设置按既有模型目录和思考等级边界运行，不因生成类型出现就开放新档位 |
+| SDK 原始配置覆盖 | 让 SDK 调用者直接传入任意 CLI 配置覆盖 | Gateway 只接受受控命令、Workspace 与配置事务，不向渠道暴露任意 `-c` 覆盖；`max`、`ultra` 或其他思考等级如果由稳定 `model/list` 对具体模型明确声明，仍会按现有模型目录自然显示和校验，不属于原始覆盖能力 |
+| 第三方 Provider 官方 Turn 费用遥测 | 从兼容上游读取单个 Turn 的官方费用估算 | 该能力要求第三方上游实现对应费用端点和认证合同；当前 `/metrics` 使用 Provider Proxy 的实际 Token 与价格快照，`/usage` 也不把本机参考费用冒充上游账单，因此不接入 |
 
 ### 纯上游变化
 
+- 原生 `codex queue` 通过同一 `thread/queue/add` 向本机或显式 Remote App Server 提交文字；Gateway
+  已有 `/queue` 和 Queue 通知归约，不再复制一个 `codexc queue` 入口。
 - Doctor 网络/桌面诊断、Vim、Windows Terminal 和 TUI 渲染改进由原生 CLI 提供，不改变 Gateway 公开接口。
 
 ## 0.149.1
@@ -256,24 +261,42 @@
 | --- | --- | --- | --- |
 | 不可信项目与凭据安全修复 | 防止不可信项目指令越权，并减少 App Server 日志中的敏感信息 | 随锁定 App Server 自动获得；Gateway 继续执行自身 Workspace 授权、日志脱敏和显式审批 | [`policy/`](../src/policy/)、[`observability/`](../src/observability/)、真实 App Server 合同 |
 | MCP 启动与 Unix 关闭修复 | 让 MCP 启动更可靠，并减少关闭时被子进程拖住 | 现有 MCP 状态与服务生命周期直接受益，不建立旁路连接池 | [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、服务生命周期测试 |
+| 新账户套餐与认证枚举 | 识别 Business Premium、Enterprise Automation、Edu Plus、Edu Pro 和 AWS Access Keys 登录 | 按 0.150.1 生成类型补齐窄业务联合与显示名，避免合法账户或额度通知被当作无效响应；这只保证协议兼容，不表示项目接入 Bedrock Provider | [`account-port.ts`](../src/application/account-port.ts)、[`account-adapter.ts`](../src/codex-client/account-adapter.ts)、[`account-format.ts`](../src/surfaces/account-format.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| Skill 的 Plugin 归属 | 由 App Server 明确指出一个 Skill 是否来自 Plugin | Skill 列表改用稳定 `SkillMetadata.pluginId` 排除 Plugin Skill，不再从安装路径猜测来源；开发中 Plugin 仍通过独立入口调用 | [`skill-adapter.ts`](../src/codex-client/skill-adapter.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| 多代理新增动作与中断状态 | 识别发送消息、追加任务、中断和列表等新动作，并正确显示被中断的工具调用 | 操作适配继续保留官方动作名，Surface 提供统一中文标题；`CollabAgentToolCallStatus.interrupted` 归为失败，不再冒充成功 | [`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)、[`operation-presentation.ts`](../src/surfaces/operation-presentation.ts)、[`operation-adapter.test.ts`](../tests/operation-adapter.test.ts) |
+| 命令审批种类失败关闭 | 区分启动命令与向现有终端写入输入的审批 | 旧服务未发送 `kind` 时仍按命令处理；0.150.1 的 `kind=command` 正常进入现有审批，`writeStdin` 和未知值在没有独立预览与交互合同前直接拒绝 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`approval.test.ts`](../tests/approval.test.ts) |
+
+### 待评估
+
+| 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
+| --- | --- | --- | --- |
+| `subAgentActivity.completed` 终态 | 把晚于父 Turn 完成的子代理成功结果重新关联到发起 Turn | 可减少 Bootstrap 仅依赖子 Thread 通知和收敛窗口的复杂度，并改善同级代理继续任务的归属 | 当前适配器有意忽略该新增枚举，仍用子 Thread 精确 Turn 终态结算；只有真实合同确认父活动、子 Turn、等待 Item 和指标写入的顺序及去重规则后，才替换现有终态来源，不并行维护两套成功判断 |
+| MCP 运行时状态与资源来源 | 读取每个 MCP Server 的真实连接状态，并把 App 专属资源关联回原始 Tool Call | 可让 `/mcp health` 区分未启动、连接中、需认证、失败和禁用，也能安全处理 Hosted App 资源 | 当前资源命令只读取用户明确选择的通用 Server URI，未携带 `originCallId` 或 `connectorId`；运行时状态虽为稳定只读字段，但接入前要先定义三渠道统一状态和处理建议，并补真实失败/重连合同，不把状态字段当作主动网络探测 |
 
 ### 明确不采用
 
 | 上游能力 | 它是做什么的 | 当前不采用原因 |
 | --- | --- | --- |
-| Project API 与项目事件 | 创建、移动、删除并同步 App Server 项目 | 当前 Workspace Registry 已承担工作区边界，不引入第二套项目管理 |
-| Realtime、Bedrock、Browser/Computer Use | 提供实时会话、AWS 模型或浏览器/桌面控制 | 尚无对应认证、审批、网络、计价和多渠道安全合同 |
-| `@` 任务引用、Interrupt Hook 与额外 Plugin 能力 | 在任务间传递消息或从 Hook/Plugin 触发旁路操作 | 会建立跨 Session 或旁路执行语义，超出当前 Gateway 边界 |
+| Project API 与项目事件 | 创建、移动、删除并同步 App Server 项目 | Project 是单个 App Server 内的实验 Thread 整理对象，不能替代 Workspace 的 cwd 授权、Sandbox、审批或 Permission Profile；当前也不建立跨 Provider 的第二套 Project 状态 |
+| Realtime | 提供持续实时文字或音频会话 | 尚无音频输出、连接恢复、状态归约和三渠道实时传输合同 |
+| Amazon Bedrock | 通过 AWS 凭据、区域和托管策略使用模型 | 当前受管 Provider 没有 Bedrock 的凭据、模型目录、计价和隔离服务边界；接受新增认证枚举不等于接入 Provider |
+| Browser/Computer Use | 让模型操作浏览器或桌面，并读取企业管控要求 | 当前没有对应工具入口、屏幕与输入隐私边界、网络和持久审批合同；不读取仅为这些能力服务的配置要求 |
+| TUI 任务引用与管理工具 | 用 `@` 引用其他任务，并让 TUI 动态工具管理会话 | 这是原生 TUI 在其客户端连接上注册的动态工具和 mention 编码；Gateway 不复制 TUI 工具命名空间，也不把外部 Conversation 暴露为可跨 Session 读取的任务目录 |
+| Interrupt Hook 与额外 Plugin 能力 | 在 Turn 中断时执行命令或 MCP Handler | Hook 可脱离正常 Turn 工具审批路径运行；Gateway 不提供 Hook 配置或旁路执行入口 |
+| MCP 事件流 | 订阅 Hosted App MCP 的持续事件 | 0.150.0 方法和通知仍为实验能力，且现有 `/mcp` 只需要状态、详情、资源与 OAuth；没有消费事件正文的业务入口，不创建订阅 |
+| `writeStdin` 审批 | 审批向一个已运行终端写入输入 | 输入可能包含交互式确认或敏感内容，且现有审批卡片只展示命令；在建立独立预览、一次性请求 ID 和三渠道合同前保持失败关闭 |
 
 ### 纯上游变化
 
+- 子代理完成活动的父 Turn 与同级代理路由修复随 App Server 获得；Gateway 当前仍以子 Thread 的
+  精确 Turn 终态作为成功结算事实来源，新增 `completed` 活动按上面的待评估边界处理。
 - TUI `/copy`、自动命名、快捷键、Windows Sandbox 与内部 Guardian 优化不改变 Gateway 公开接口。
 
 ## 0.150.1
 
 - 官方 Release：[`rust-v0.150.1`](https://github.com/openai/codex/releases/tag/rust-v0.150.1)
 - 项目开发基线：Gateway、生成协议、真实 App Server 合同与 CI 锁定 `0.150.1`；README 当前正式版在发布准备前保持不变
-- 评估范围：远程压缩图片 Token 预算修复，以及 0.149.x–0.150.0 新增的项目、MCP 事件流、Realtime、Bedrock、Browser/Computer Use 和 TUI 能力
+- 评估范围：远程压缩图片 Token 预算修复和精确补丁版本基线
 
 ### 已采用
 
@@ -282,18 +305,9 @@
 | 0.150.1 精确协议基线 | 让 Gateway、App Server 和生成类型保持同一正式版本 | 重新生成协议并同步 Gateway、CI 和固定源码索引；不保留旧 CLI 兼容分支 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 远程压缩图片预算修复 | 长会话压缩时正确计算保留图片占用的 Token | 随锁定 App Server 自动获得，不新增 Gateway 业务逻辑或图片历史副本 | [`conversation-core/`](../src/conversation-core/README.md)、真实 App Server 合同 |
 
-### 明确不采用
-
-| 上游能力 | 它是做什么的 | 当前不采用原因 |
-| --- | --- | --- |
-| Project API 与项目事件 | 创建、移动、删除和同步 App Server 项目 | 当前 Workspace Registry 和会话绑定边界不需要第二套项目管理；不导出、不新增渠道命令 |
-| MCP 事件流 | 持续接收 MCP 服务事件 | Gateway 通过 App Server 获取 MCP 状态，不建立旁路事件流或持久化连接 |
-| Realtime、Bedrock、Browser/Computer Use | 提供实时语音、AWS 模型或浏览器/桌面控制 | 当前没有对应认证、审批、网络和三渠道安全合同；生成类型不代表项目支持 |
-
 ### 纯上游变化
 
-- 0.149.x–0.150.0 的 TUI、Windows、Guardian、插件和内部安全修复由原生 App Server/CLI 获得，
-  不改变 Gateway 的公开接口、持久化 Schema 或 Surface 行为。
+- 本补丁没有新增 Gateway 业务协议；0.149.x–0.150.0 的取舍保留在各自章节，不在补丁章节重复记录。
 
 ## 后续使用
 

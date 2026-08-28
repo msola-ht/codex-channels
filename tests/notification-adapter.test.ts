@@ -379,6 +379,17 @@ describe("Notification adapter", () => {
       planType: "ent26",
     });
     expect(toConversationInputEvent({
+      method: "account/updated",
+      params: {
+        authMode: "bedrockAccessKeys",
+        planType: "self_serve_business_prolite",
+      },
+    })).toEqual({
+      type: "account.updated",
+      authMode: "bedrockAccessKeys",
+      planType: "self_serve_business_prolite",
+    });
+    expect(toConversationInputEvent({
       method: "mcpServer/startupStatus/updated",
       params: {
         threadId: null,

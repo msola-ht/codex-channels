@@ -369,15 +369,17 @@ export class ModelSelectionService {
   }
 
   private async listModels(): Promise<ModelOption[]> {
-    const primary = (await this.codex.listModels()).map((model) =>
-      this.primaryProvider === "openai"
-        ? model
-        : { ...model, provider: this.primaryProvider });
+    const primary = (await this.codex.listModels()).map((model) => {
+      if (this.primaryProvider === "openai") return model;
+      const providerModel = withoutProviderUpgrade(model);
+      return { ...providerModel, provider: this.primaryProvider };
+    });
     const combined = new Map(primary.map((model) => [modelKey(model), model]));
     for (const provider of this.officialCatalogProviders) {
       for (const model of primary) {
+        const catalogModel = withoutProviderUpgrade(model);
         const aliased = {
-          ...model,
+          ...catalogModel,
           provider: provider.provider,
           displayName: `${provider.displayName} · ${model.displayName}`,
           isDefault: model.model === provider.defaultModel,
@@ -390,6 +392,12 @@ export class ModelSelectionService {
     }
     return [...combined.values()];
   }
+}
+
+function withoutProviderUpgrade(model: ModelOption): ModelOption {
+  const providerModel = { ...model };
+  delete providerModel.upgrade;
+  return providerModel;
 }
 
 function findModel(

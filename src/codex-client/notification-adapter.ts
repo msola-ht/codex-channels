@@ -713,6 +713,7 @@ function parseAuthMode(
     || value === "agentIdentity"
     || value === "personalAccessToken"
     || value === "bedrockApiKey"
+    || value === "bedrockAccessKeys"
     ? { valid: true, value }
     : { valid: false };
 }
@@ -729,12 +730,16 @@ function parsePlanType(
     || value === "pro"
     || value === "prolite"
     || value === "team"
+    || value === "self_serve_business_prolite"
     || value === "self_serve_business_usage_based"
     || value === "business"
     || value === "ent26"
+    || value === "enterprise_cbp_automation"
     || value === "enterprise_cbp_usage_based"
     || value === "enterprise"
     || value === "edu"
+    || value === "edu_plus"
+    || value === "edu_pro"
     || value === "unknown"
     ? { valid: true, value }
     : { valid: false };

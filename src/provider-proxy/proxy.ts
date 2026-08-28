@@ -97,7 +97,7 @@ export interface ProviderProxyOptions {
   upstreamPort?: number;
   upstreamProtocol?: "http" | "https";
   upstreamBasePath?: string;
-  /** 仅官方 OpenAI 主代理启用的 Codex 0.148.0 API 路径。 */
+  /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.150.1 API 路径。 */
   allowOpenAiApiPaths?: boolean;
   /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
   accountIds?: readonly string[];

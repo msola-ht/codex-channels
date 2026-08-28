@@ -150,6 +150,38 @@ describe("ModelSelectionService", () => {
     });
   });
 
+  it("does not copy OpenAI retirement hints to custom Provider aliases", async () => {
+    const official = {
+      ...models[0]!,
+      multiAgentVersion: "v2" as const,
+      upgrade: { model: "gpt-next", retirementAtSeconds: 1_893_456_000 },
+    };
+    const service = new ModelSelectionService(
+      {
+        listModels: async () => [official],
+        writeDefaultFastMode: async () => undefined,
+        readDefaultServiceTier: async () => "default",
+      },
+      { modelSettings: () => undefined } as unknown as SessionRouter,
+      undefined,
+      [],
+      "openai",
+      [{ provider: "codeproxy-dev", displayName: "codeproxy-dev", defaultModel: official.model }],
+    );
+
+    const state = await service.state(target);
+    expect(state.models[0]).toMatchObject({
+      multiAgentVersion: "v2",
+      upgrade: { model: "gpt-next" },
+    });
+    expect(state.models[0]?.provider).toBeUndefined();
+    expect(state.models[1]).toMatchObject({
+      provider: "codeproxy-dev",
+      multiAgentVersion: "v2",
+    });
+    expect(state.models[1]).not.toHaveProperty("upgrade");
+  });
+
   it("keeps identical model IDs from different Providers independently selectable", async () => {
     const sharedModel = "deepseek-v4-flash";
     const deepseek = { ...model(sharedModel, ["high"], "high"), provider: "deepseek" };

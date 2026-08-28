@@ -21,15 +21,15 @@ title   = Codex Connect Gateway
 version = 当前 Gateway 版本
 ```
 
-锁定的 Codex 0.148.0 会把 `clientInfo.name` 设为进程级 originator，把
+当前锁定的 Codex 0.150.1 会把 `clientInfo.name` 设为进程级 originator，把
 `clientInfo.name` 和 `clientInfo.version` 组成 UA 后缀。模型请求的原始 UA 由 App Server
 生成，结构近似为：
 
 ```text
-codex_connect/0.148.0 (<系统与架构>) <终端标识> (codex_connect; <Gateway 版本>)
+codex_connect/0.150.1 (<系统与架构>) <终端标识> (codex_connect; <Gateway 版本>)
 ```
 
-第一个 `0.148.0` 来自 App Server 的真实构建版本，不等于 `clientInfo.version`。Provider Proxy
+第一个 `0.150.1` 来自 App Server 的真实构建版本，不等于 `clientInfo.version`。Provider Proxy
 收到该原始 Header 后，目前只移除 Hop-by-hop Header 和私有 Turn 元数据，再把 UA 原样转发到上游。
 HTTP/SSE 与 WebSocket 都遵循这一行为。
 
@@ -76,7 +76,7 @@ Gateway -> App Server initialize
   clientInfo = my_client / My Codex Client / 1.0.0
 
 App Server -> 本地 Provider Proxy
-  User-Agent = my_client/0.148.0 (<系统与架构>) <终端标识> (my_client; 1.0.0)
+  User-Agent = my_client/0.150.1 (<系统与架构>) <终端标识> (my_client; 1.0.0)
 
 本地 Provider Proxy -> 模型上游
   User-Agent = Mozilla/5.0 MyClient/1.0

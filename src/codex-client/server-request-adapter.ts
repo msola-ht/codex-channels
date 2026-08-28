@@ -100,6 +100,9 @@ function decodeCommandRequest(
   request: RpcServerRequest,
 ): Extract<ApprovalRequest, { type: "command" }> | undefined {
   const params = asRecord(request.params);
+  if (params?.kind !== undefined && params.kind !== "command") {
+    return undefined;
+  }
   const base = approvalIdentity(request, params);
   const command = nullableOptionalString(params?.command);
   const reason = nullableOptionalString(params?.reason);

@@ -27,16 +27,17 @@
 - `user-input-summary.ts`：为 Queue 与分页历史共用的 Client 内部 UserInput 安全摘要工具；摘要有界，
   不传播完整输入、命令参数或本地路径。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
-  `text/image/audio` 输入能力，过滤不可见项，
+  `text/image/audio` 输入能力、Codex 多代理运行时及结构化替代模型/退役时间，过滤不可见项；
+  官方迁移 Markdown、链接和自由文案不越过 Client 边界，
   并在缺少模型选择必需字段时失败关闭。
 - `model-provider-catalog.ts`：按 Bootstrap 注入的编译期 Provider 定义，只读取 Setup 下载到用户
   `CODEX_HOME` 的受控模型目录；相同模型 ID 仍按 Provider 独立映射，未列入对应定义的模型不会开放；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
-  稳定摘要；按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
+  稳定摘要；接受当前 0.150.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
-  排除系统与插件缓存；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
+  使用稳定 `SkillMetadata.pluginId` 排除系统与 Plugin 所有项，不从安装路径猜测来源；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
   绝对路径均通过校验的引用。
 - `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，并把工具
   `annotations.readOnlyHint` 归约为只读、可能写入或未知；校验 OAuth
@@ -56,11 +57,12 @@
   只识别 `misalignmentPolicyViolation` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
-  `readOnlyHint` 能力提示，并在离开 Client 边界前
+  `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；只把 `imageGeneration.savedPath` 映射为稳定生成图片
   产物路径，不把 `imageView` 当作可外发产物。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
-  Server Request 解码为 Approval 稳定请求；其中按固定版本的空对象 Schema 与
+  Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，
+  `writeStdin` 与未知种类在没有独立预览合同前安全拒绝；其中按固定版本的空对象 Schema 与
   `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
   精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。实验
   `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。
@@ -108,7 +110,8 @@ Queue 复核摘要由 Client 对完整有序原始输入计算不可逆指纹，
 Notification 适配只返回当前支持的稳定事件；未知或畸形通知由组合根记录 method 后忽略，不记录
 原始 params，也不阻塞 App Server Reader。
 `subAgentActivity` Item 只在官方完成阶段进入稳定事件，并保留 `started`、`interacted`、
-`interrupted` 类型，避免同一 Item 的开始与完成阶段重复发布；`collabAgentToolCall` Item 由操作适配器
+`interrupted` 类型，避免同一 Item 的开始与完成阶段重复发布；0.150.1 新增的 `completed` 在真实顺序
+与去重合同完成前不作为第二套成功终态；`collabAgentToolCall` Item 由操作适配器
 保留官方接收线程 ID 和有界状态，不保留代理消息正文。Bootstrap 结合已订阅子线程自己的
 `turn/completed`、中断活动和旧版工具状态判断子代理终态；Surface 把 `started` 与 `interacted`
 分别显示为开始和继续，并消费稳定操作与完成事件，`interacted` 不改变存活状态。

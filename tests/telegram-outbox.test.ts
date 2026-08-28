@@ -1237,6 +1237,9 @@ describe("TelegramOutbox", () => {
         "• <b>上下文压缩：</b>2 次",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
         "• <b>Git 分支：</b>feature/weixin-surface",
+        "",
+        "<b>账户状态</b>",
+        "• <b>周限：</b>剩余 58%",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({

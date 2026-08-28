@@ -196,6 +196,12 @@ describe("shared surface copy contract", () => {
     expect(formatPercent(12.34)).toBe("12.3%");
     expect(formatPlanType("self_serve_business_usage_based"))
       .toBe("Business（按量）");
+    expect(formatPlanType("self_serve_business_prolite"))
+      .toBe("Business Premium");
+    expect(formatPlanType("enterprise_cbp_automation"))
+      .toBe("Enterprise（Automation）");
+    expect(formatPlanType("edu_plus")).toBe("Edu Plus");
+    expect(formatPlanType("edu_pro")).toBe("Edu Pro");
     expect(formatPlanType("ent26")).toBe("Enterprise");
     expect(formatRateLimitState(null)).toBe("正常");
     expect(formatRateLimitWindow({

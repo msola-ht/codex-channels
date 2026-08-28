@@ -104,8 +104,10 @@ export {
 } from "./model-selection-service.js";
 export {
   type ModelInputModality,
+  type ModelMultiAgentVersion,
   type ModelOption,
   type ModelSelectionPort,
+  type ModelUpgradeNotice,
   type ReasoningEffortOption,
 } from "./model-port.js";
 export {

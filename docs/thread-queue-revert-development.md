@@ -1,6 +1,6 @@
 # Thread Queue 与 Revert 开发设计
 
-本文定义 Codex CLI `0.148.0` 实验 `thread/queue/*`、`thread/queue/changed`、
+本文定义 Codex CLI `0.148.0` 引入、并在当前锁定 `0.150.1` 复核的实验 `thread/queue/*`、`thread/queue/changed`、
 `thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的采用方案。
 它是实施合同；当前项目已完成第一阶段原生 Queue 替换，并已接入第二阶段分页历史与 Revert。
 Queue/Revert 联合真实合同仍是条件门禁：
@@ -52,16 +52,16 @@ Thread 的历史模式并增加破坏性写操作，必须单独审查和回滚�
 
 ## 固定事实来源
 
-实现只以正式 Tag `rust-v0.148.0` 为准：
+当前实现只以正式 Tag `rust-v0.150.1` 为准：
 
-- [`thread_queue_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/thread_queue_processor.rs)：Queue 请求处理、分页和错误边界。
-- [`thread_queue.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/thread_queue.rs)：实验握手、容量、持久化、自动派发、中断和手动启动合同。
-- [`thread_revert.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/thread_revert.rs)：分页历史回退、活动 Turn 中断、通知和重启合同。
-- [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/thread_processor.rs)：Revert 只接受分页历史 Thread，并在回退后重新加载同一 Thread。
+- [`thread_queue_processor.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server/src/request_processors/thread_queue_processor.rs)：Queue 请求处理、分页和错误边界。
+- [`thread_queue.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server/tests/suite/v2/thread_queue.rs)：实验握手、容量、持久化、自动派发、中断和手动启动合同。
+- [`thread_revert.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server/tests/suite/v2/thread_revert.rs)：分页历史回退、活动 Turn 中断、通知和重启合同。
+- [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server/src/request_processors/thread_processor.rs)：Revert 只接受分页历史 Thread，并在回退后重新加载同一 Thread。
 - 本地生成类型：[`codex-protocol/generated/v2/`](../src/codex-protocol/generated/v2/)。生成类型是字段名称和可空性的最终事实来源。
 
 项目内 `upstream/openai-codex` 应保持在提交
-`3ba0f711642a888aec92a611a3f3b2211157ff89`，即 `rust-v0.148.0`。不得用官方 `main`
+`90854393966b21e9ebfd21b122334eb09a20c93d`，即 `rust-v0.150.1`。不得用官方 `main`
 补充或替代本设计。
 
 ## Queue 原生合同
@@ -256,7 +256,7 @@ Revert 成功后：
 - 修改根 `AGENTS.md` 中受控实验例外，精确加入 `thread/turns/list`、`thread/revert` 与
   `thread/reverted`，不借机开放 `thread/items/list` 或其他实验 API。
 - 更新 `docs/index.md` 的受控导出数、直接调用方法数、支持矩阵、固定源码说明和复核命令结果。
-- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.148.0` 时仍由现有版本门禁拒绝。
+- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.150.1` 时仍由现有版本门禁拒绝。
 - 不新增 Gateway SQLite Schema，也不新增消息正文持久化配置。
 
 Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设功能开关。Revert 是新的破坏性实验
