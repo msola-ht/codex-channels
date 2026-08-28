@@ -31,6 +31,7 @@ import {
   inspectMetricsDatabase,
   metricsDatabaseCanUpgrade,
   readMetricsExport,
+  readQuotaHistory,
   readMetricsReport,
   readMetricsRun,
   readMetricsThreads,
@@ -61,6 +62,7 @@ import {
   printMetricsRun,
   printMetricsThreads,
   printMetricsTurns,
+  printQuotaHistory,
   printStatus,
 } from "./metrics-output-renderer.mjs";
 
@@ -68,6 +70,7 @@ export { metricsRange } from "./metrics-command-options.mjs";
 export {
   inspectMetricsDatabase,
   readMetricsExport,
+  readQuotaHistory,
   readMetricsReport,
   readMetricsRun,
   readMetricsThreads,
@@ -1008,6 +1011,11 @@ if (
         format,
         display,
       );
+    } else if (command === "quota") {
+      const options = parseMetricsOptions(process.argv.slice(3), new Set(["--range", "--from", "--to", "--format"]));
+      const format = options.format ?? "markdown";
+      assertExportFormat(format, ["markdown", "json", "csv"]);
+      printQuotaHistory(readQuotaHistory(process.env, options), format, loadDisplayContext(process.env));
     } else if (command === "run") {
       const options = parseMetricsRunArgs(process.argv.slice(3));
       printMetricsRun(
@@ -1031,7 +1039,7 @@ if (
       );
     } else {
       throw new Error(
-        "用法：codexc metrics <status|run|threads|turns|report|export|upgrade|reset|sync-reset|cleanup|prune>",
+        "用法：codexc metrics <status|run|threads|turns|report|export|quota|upgrade|reset|sync-reset|cleanup|prune>",
       );
     }
   } catch (error) {

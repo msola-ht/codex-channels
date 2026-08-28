@@ -29,6 +29,7 @@ export const metricsCommandUsage = Object.freeze({
   threads: "用法：codexc metrics threads [--format markdown|json|csv] [--stdout]",
   report: "用法：codexc metrics report [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--group <global|providers|models>] [--format markdown|json|csv] [--stdout]",
   export: "用法：codexc metrics export [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format <json|csv|markdown>] [--thread <Thread ID>] [--stdout]",
+  quota: "用法：codexc metrics quota [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format markdown|json|csv] [--stdout]",
 });
 
 export function metricsRange(name, nowMs) {
@@ -131,6 +132,15 @@ export function validateMetricsCommandArgs(subcommand, args, environment = proce
       new Set(["--range", "--from", "--to", "--format", "--thread"]),
     );
     assertExportFormat(options.format ?? "json", ["json", "csv", "markdown"]);
+    metricsRangeOptions(options, Date.now());
+    return;
+  }
+  if (subcommand === "quota") {
+    const options = parseMetricsOptions(
+      withoutStdout,
+      new Set(["--range", "--from", "--to", "--format"]),
+    );
+    assertExportFormat(options.format ?? "markdown", ["markdown", "json", "csv"]);
     metricsRangeOptions(options, Date.now());
     return;
   }

@@ -107,6 +107,11 @@ export interface AccountWeeklyLimitEstimate {
   pricingCurrency: string | null;
   costPerPercentNanos: number | null;
   remainingCostNanos: number | null;
+  periodRequestCount?: number;
+  periodInputTokens?: number;
+  periodOutputTokens?: number;
+  periodTotalTokens?: number;
+  periodTotalCostNanos?: number | null;
 }
 
 export interface AccountQueryPort {

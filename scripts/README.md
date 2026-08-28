@@ -48,7 +48,7 @@
   升级到 v4，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口提供
   只读版本检查；不自动迁移未知版本。运行时由 SqliteScheduledTaskStore 保持失败关闭。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
-  `run`、`turns`、`threads`、`report`、`export` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
+  `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
   组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
