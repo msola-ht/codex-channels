@@ -353,7 +353,7 @@ export function formatConversationThreadRevertPreview(
     `活动 Turn：${preview.activeTurnId ? `会被中断（${preview.activeTurnId}）` : "无"}`,
     `当前 Queue：${preview.queueItemCount} 条（Revert 后按原顺序保留，不会自动启动）`,
     "不会恢复工作区文件、命令副作用或外部 API/MCP 副作用。",
-    "确认完成前请勿从 TUI 或其他客户端向该 Thread 追加 Turn。",
+    "确认完成前请勿从 TUI 或其他客户端向该 Session 追加 Turn。",
     "确认：/revert confirm " + preview.token,
     "令牌五分钟内有效且只能使用一次。",
   ].join("\n"));
@@ -418,7 +418,7 @@ export function formatConversationThreadSectionDeletePreview(
     `名称：${section.name}`,
     `ID：${section.id}`,
     `当前 Workspace：活动 ${section.currentWorkspaceActiveCount} / 归档 ${section.currentWorkspaceArchivedCount}`,
-    "删除只会解除 Thread 的分区归属，不会删除 Thread；其他 Workspace 中的归属也会受影响。",
+    "删除只会解除 Session 的分区归属，不会删除 Session；其他 Workspace 中的归属也会受影响。",
     "",
     `确认：/section delete ${section.id} confirm`,
   ].join("\n"));
@@ -465,7 +465,7 @@ export function formatConversationCommandOutcome(
             `Session ID：${outcome.threadId}`,
             formatConversationModel("会话模型", outcome.model),
             ...(outcome.queuePending
-              ? ["Queue 中有待派发条目，已沿用该 Thread 自身设置，未应用当前会话的待生效偏好。"]
+              ? ["Queue 中有待派发条目，已沿用该 Session 自身设置，未应用当前会话的待生效偏好。"]
               : []),
           ].join("\n"))
         : toStructuredMarkdownList([
@@ -473,7 +473,7 @@ export function formatConversationCommandOutcome(
             `Session ID：${outcome.threadId}`,
             formatConversationModel("会话模型", outcome.model),
             ...(outcome.queuePending
-              ? ["Queue 中有待派发条目，已沿用该 Thread 自身设置，未应用当前会话的待生效偏好。"]
+              ? ["Queue 中有待派发条目，已沿用该 Session 自身设置，未应用当前会话的待生效偏好。"]
               : []),
             ...(outcome.backgroundedThreadId
               ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
@@ -560,7 +560,7 @@ export function formatConversationCommandOutcome(
         `Workspace：${outcome.workspace.name}`,
         ...workspacePermissionLines(outcome.workspace),
         "",
-        "权限已热加载；对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+        "权限已热加载；对新建或恢复的 Session 生效，不改变已绑定 Session。",
       ].join("\n"));
     case "turn.stop-requested":
       return outcome.stopped
@@ -594,7 +594,7 @@ export function formatConversationCommandOutcome(
       ].join("\n"));
     case "thread.reverted":
       return toStructuredMarkdownList([
-        "已回退 Thread 历史",
+        "已回退 Session 历史",
         `Session ID：${outcome.threadId}`,
         `边界 Turn：${outcome.beforeTurnId}`,
         "工作区文件和外部副作用不会随历史回退。",
@@ -805,13 +805,13 @@ export function formatConversationOccupancy(
           ? release.stuck
             ? "当前会话恢复失败，可确认释放：/release force（会向该进程发送结束信号；若是 App Server 子进程，服务会自动重启并重连所有会话）。"
             : "当前会话运行正常，通常无需释放；如确认需要，/release force 会结束该进程（App Server 子进程会重启并重连所有会话）。"
-          : "该进程无法自动释放，请关闭占用 Thread 的 Codex 客户端，或重启 App Server 服务。",
+          : "该进程无法自动释放，请关闭占用 Session 的 Codex 客户端，或重启 App Server 服务。",
         `Session ID：${release.threadId}`,
       ].join("\n"));
     case "unidentifiable":
       return toStructuredMarkdownList([
         "无法识别占用 Codex Session 的进程（当前平台不支持进程诊断）。",
-        "请关闭占用该 Thread 的 Codex 客户端，或重启 App Server 服务后等待自动恢复。",
+        "请关闭占用该 Session 的 Codex 客户端，或重启 App Server 服务后等待自动恢复。",
         `Session ID：${release.threadId}`,
       ].join("\n"));
   }
@@ -898,7 +898,7 @@ export function formatConversationWorkspacePermissions(
     "- /workspaceperm sandbox <read-only|workspace-write|danger-full-access|clear>",
     "- /workspaceperm approval <untrusted|on-request|never|clear>",
     "- /workspaceperm profile <Profile ID|clear>",
-    "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+    "权限热加载后对新建或恢复的 Session 生效，不改变已绑定 Session。",
   ].join("\n"));
 }
 
@@ -1037,7 +1037,7 @@ export function formatConversationMcpReload(
   return toStructuredMarkdownList([
     "MCP 配置重新加载",
     "状态：已请求",
-    "生效：已加载 Thread 会在下一次活动 Turn 时刷新",
+    "生效：已加载 Session 会在下一次活动 Turn 时刷新",
     "提示：无需重启 Codex App Server",
   ].join("\n"));
 }
@@ -1940,7 +1940,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
   const lines = [
     "Codex 状态",
     `Workspace：${status.workspaceName} (${status.workspaceId})`,
-    `Session：${status.threadName ?? "未命名"}`,
+    `Session：${status.threadId ? status.threadName ?? "未命名" : "尚未绑定"}`,
     `Session ID：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,

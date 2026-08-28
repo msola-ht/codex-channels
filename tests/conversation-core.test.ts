@@ -32,6 +32,7 @@ describe("ConversationCore", () => {
       foregroundThreadId: () => foregroundThreadId,
       isBackgroundThread: (threadId) => background.has(threadId),
       targetForThread: () => target,
+      threadNameForThread: (threadId) => threadId === "thread-1" ? "后台检查" : null,
       modelSettingsForThread: () => undefined,
       contextCompactionItemIdsForThread: () => undefined,
     }, output);
@@ -53,7 +54,7 @@ describe("ConversationCore", () => {
     expect(core.activeTurnForThread("thread-1")).toBeUndefined();
     expect(events.find(
       (event) => event.type === "turn.completed" && event.threadId === "thread-1",
-    )).toMatchObject({ background: true, target });
+    )).toMatchObject({ background: true, target, sessionName: "后台检查" });
   });
 
   it("shows one thinking status per reasoning segment and resumes after operations", async () => {

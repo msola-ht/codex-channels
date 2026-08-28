@@ -484,10 +484,10 @@ describe("Feishu command center", () => {
       ? undefined
       : {
           kind: "form" as const,
-          title: "设置 Thread Goal",
+          title: "设置 Session Goal",
           action,
           fieldLabel: "目标",
-          placeholder: "请输入当前 Thread 的目标",
+          placeholder: "请输入当前 Session 的目标",
           inputPrefix: "set ",
           multiline: true,
         });

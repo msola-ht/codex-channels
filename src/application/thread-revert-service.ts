@@ -119,7 +119,7 @@ export class ThreadRevertService {
         this.invalidate(target);
         throw new UserFacingError(
           "revert.concurrent",
-          "Thread 历史已发生变化，请重新执行 /revert list",
+          "Session 历史已发生变化，请重新执行 /revert list",
         );
       }
       const turn = currentPage.turns.find(
@@ -187,7 +187,7 @@ export class ThreadRevertService {
         this.invalidate(target);
         throw new UserFacingError(
           "revert.confirmation-invalid",
-          "当前 Thread 或 Workspace 已发生变化，请重新生成 Revert 预览",
+          "当前 Session 或 Workspace 已发生变化，请重新生成 Revert 预览",
         );
       }
       await this.requirePaginatedThread(confirmation.threadId);
@@ -218,7 +218,7 @@ export class ThreadRevertService {
         this.invalidate(target);
         throw new UserFacingError(
           "revert.concurrent",
-          "Thread 历史、活动任务或 Queue 已发生变化，请重新执行 /revert list",
+          "Session 历史、活动任务或 Queue 已发生变化，请重新执行 /revert list",
         );
       }
       try {
@@ -262,7 +262,7 @@ export class ThreadRevertService {
   ): { threadId: string; workspaceId: string } {
     const binding = this.router.current(target);
     if (!binding) {
-      throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+      throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
     }
     return { threadId: binding.threadId, workspaceId: binding.workspaceId };
   }
@@ -282,7 +282,7 @@ export class ThreadRevertService {
     if (thread.historyMode !== "paginated") {
       throw new UserFacingError(
         "revert.legacy-thread",
-        "当前 Thread 不支持回退；请新建分页历史会话",
+        "当前 Session 不支持回退；请新建分页历史会话",
       );
     }
   }
@@ -527,7 +527,7 @@ function revertUserFacingError(error: unknown): UserFacingError {
   if (message.includes("legacy") || message.includes("paginated")) {
     return new UserFacingError(
       "revert.legacy-thread",
-      "当前 Thread 不支持回退；请新建分页历史会话",
+      "当前 Session 不支持回退；请新建分页历史会话",
     );
   }
   return new UserFacingError(
@@ -539,12 +539,12 @@ function revertUserFacingError(error: unknown): UserFacingError {
 function revertListUserFacingError(error: unknown): UserFacingError {
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("before first user message") || message.includes("not materialized")) {
-    return new UserFacingError("revert.empty-history", "当前 Thread 还没有可回退的 Turn");
+    return new UserFacingError("revert.empty-history", "当前 Session 还没有可回退的 Turn");
   }
   if (message.includes("paginated")) {
     return new UserFacingError(
       "revert.legacy-thread",
-      "当前 Thread 不支持回退；请新建分页历史会话",
+      "当前 Session 不支持回退；请新建分页历史会话",
     );
   }
   return new UserFacingError("revert.unavailable", "当前 App Server 无法读取分页历史");

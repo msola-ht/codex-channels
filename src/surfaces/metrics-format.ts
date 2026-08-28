@@ -38,7 +38,7 @@ export function formatConversationMetrics(
 ): string {
   const summary = result.summary;
   if (summary === null) {
-    return "当前会话尚未绑定 Thread，暂无请求指标。";
+    return "当前会话尚未绑定 Session，暂无请求指标。";
   }
   if ("view" in summary) {
     if (summary.view === "errors") {
@@ -49,7 +49,7 @@ export function formatConversationMetrics(
   const currency = priceCurrency?.(summary.modelProvider) ?? "usd";
   const lines = [
     "## 请求指标",
-    `Thread：${formatThreadId(summary.threadId)}`,
+    `Session ID：${formatThreadId(summary.threadId)}`,
     ...(exchangeRate ? formatExchangeRateLine(exchangeRate) : []),
   ];
   if (summary.latestTurn) {

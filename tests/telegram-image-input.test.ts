@@ -988,7 +988,7 @@ describe("Telegram image input", () => {
           message_id: 24,
           date: 1,
           chat: telegramChat(),
-          text: "Thread 分区",
+          text: "会话分区",
         },
       },
     });
@@ -1024,7 +1024,7 @@ describe("Telegram image input", () => {
           message_id: 25,
           date: 1,
           chat: telegramChat(),
-          text: "Thread 分区",
+          text: "会话分区",
         },
       },
     });

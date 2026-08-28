@@ -382,7 +382,7 @@ export class TelegramSurface {
         [
           "Codex Connect Gateway",
           "",
-          "普通文本会发送到当前 Codex Thread。",
+          "普通文本会发送到当前 Codex Session。",
           "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
           "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
@@ -639,7 +639,7 @@ export class TelegramSurface {
       },
     );
     this.bot.callbackQuery(/^section:page:([1-9]\d*)$/, async (context) => {
-      await context.answerCallbackQuery({ text: "正在加载 Thread 分区" });
+      await context.answerCallbackQuery({ text: "正在加载会话分区" });
       const result = await this.commands.execute(
         target(context),
         "section",
@@ -793,7 +793,7 @@ export class TelegramSurface {
         if (matches.length !== 1) {
           throw new UserFacingError(
             "thread-section.selector.not-found",
-            "Thread 分区按钮已失效",
+            "会话分区按钮已失效",
           );
         }
         await context.answerCallbackQuery({ text: `正在移动到 ${matches[0]!.name}` });

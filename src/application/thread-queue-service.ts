@@ -225,7 +225,7 @@ export class ThreadQueueService {
   private requireCurrentThread(target: ConversationTarget): string {
     const binding = this.router.current(target);
     if (!binding) {
-      throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+      throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
     }
     return binding.threadId;
   }
@@ -366,7 +366,7 @@ export function queueUserFacingError(
   if (message.includes("active or pending turn")) {
     return new UserFacingError(
       "queue.busy",
-      "当前 Thread 有活动或待触发 Turn，请稍后重试",
+      "当前 Session 有活动或待触发 Turn，请稍后重试",
     );
   }
   if (message.includes("queued submission not found")) {

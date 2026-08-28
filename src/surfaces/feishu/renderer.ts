@@ -87,6 +87,7 @@ export function renderFeishuStartupNotification(
   status: Pick<
     ConversationStatus,
     | "threadId"
+    | "threadName"
     | "workspaceId"
     | "model"
     | "modelProvider"
@@ -111,7 +112,7 @@ export function renderFeishuHelp(): string {
   return toStructuredMarkdownList([
     "飞书 Codex 命令",
     "",
-    "普通文本会发送到当前 Codex Thread。",
+    "普通文本会发送到当前 Codex Session。",
     "",
     ...conversationCommandHelpLines,
     "飞书：",

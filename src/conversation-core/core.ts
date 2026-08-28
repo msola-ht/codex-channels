@@ -430,6 +430,7 @@ export class ConversationCore {
           type: "turn.completed",
           target,
           threadId: event.threadId,
+          sessionName: this.router.threadNameForThread?.(event.threadId) ?? null,
           turnId: event.turnId,
           status: event.status,
           ...(resolvedError ? { error: resolvedError.message } : {}),

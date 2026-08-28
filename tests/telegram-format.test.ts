@@ -178,6 +178,7 @@ describe("formatStartupNotification", () => {
       ],
       {
         threadId: "019f8951-eb3",
+        threadName: "发布检查",
         workspaceId: "main",
         model: "gpt-main",
         effort: "high",
@@ -217,7 +218,8 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("### 当前会话");
     expect(text).toContain("- Workspace：Main (main)");
     expect(text).toContain("工作目录：/workspace/main");
-    expect(text).toContain("Thread：019f8951-eb3");
+    expect(text).toContain("Session：发布检查");
+    expect(text).toContain("Session ID：019f8951-eb3");
     expect(text).toContain("Git 分支：feature/weixin-surface");
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考等级：high");
@@ -254,7 +256,8 @@ describe("formatStartupNotification", () => {
 
     expect(text).toContain("系统：freebsd · x64");
     expect(text).toContain("App Server UA：App Server 未返回");
-    expect(text).toContain("Thread：尚未绑定");
+    expect(text).toContain("Session：尚未绑定");
+    expect(text).toContain("Session ID：尚未绑定");
     expect(text).toContain("Git 分支：未检测到");
     expect(text).toContain("Fast 模式：未知");
   });

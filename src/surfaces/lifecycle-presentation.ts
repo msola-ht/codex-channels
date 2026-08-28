@@ -86,6 +86,7 @@ export interface StartupRuntimeInfo {
 type StartupStatus = Pick<
   ConversationStatus,
   | "threadId"
+  | "threadName"
   | "workspaceId"
   | "model"
   | "modelProvider"
@@ -149,7 +150,11 @@ export function createStartupPresentation(
             value: `${workspace.name} (${workspace.id})`,
           },
           { label: "工作目录", value: workspace.cwd },
-          { label: "Thread", value: status.threadId ?? "尚未绑定" },
+          {
+            label: "Session",
+            value: status.threadId ? status.threadName ?? "未命名" : "尚未绑定",
+          },
+          { label: "Session ID", value: status.threadId ?? "尚未绑定" },
           {
             label: "Git 分支",
             value: status.gitBranch ?? "未检测到",
@@ -204,7 +209,7 @@ export function createTurnStartedPresentation(
         ? "后台任务继续处理中。"
         : "已开始处理。",
     fields: backgroundThreadId
-      ? [{ label: "Thread", value: backgroundThreadId }]
+      ? [{ label: "Session ID", value: backgroundThreadId }]
       : [],
   };
 }
@@ -216,7 +221,7 @@ export function createTurnReasoningPresentation(
   return {
     title: "思考中…",
     fields: backgroundThreadId
-      ? [{ label: "Thread", value: backgroundThreadId }]
+      ? [{ label: "Session ID", value: backgroundThreadId }]
       : [],
     ...(elapsedMs === undefined || elapsedMs < 1_000
       ? {}
@@ -450,6 +455,7 @@ export function createTurnCompletedPresentation(
             : event.workspaceId,
         }]
       : []),
+    { label: "Session", value: event.sessionName ?? "未命名" },
     { label: "Session ID", value: event.threadId },
   ];
   const runFields: LifecyclePresentationField[] = [];

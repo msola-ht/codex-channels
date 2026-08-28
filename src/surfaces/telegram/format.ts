@@ -120,7 +120,7 @@ export function formatConfigurationChange(
 
 export function formatStartupNotification(
   workspaces: Workspace[],
-  status: Pick<ConversationStatus, "threadId" | "workspaceId" | "model" | "modelProvider" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
+  status: Pick<ConversationStatus, "threadId" | "threadName" | "workspaceId" | "model" | "modelProvider" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
 ): string {
   return renderTelegramLifecyclePresentation(

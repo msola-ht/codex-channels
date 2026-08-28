@@ -1410,7 +1410,7 @@ describe("Feishu conversation adapter", () => {
       "goal",
       message.actorId,
     )).resolves.toMatchObject({
-      title: "Thread Goal",
+      title: "Session Goal",
       choices: [
         { action: "goal", input: " " },
         { action: "goal-set", input: "" },
@@ -2253,7 +2253,7 @@ describe("Feishu conversation adapter", () => {
 
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
-      text: "操作失败：该 Codex Thread 已绑定到其他会话。",
+      text: "操作失败：该 Codex Session 已绑定到其他会话。",
     }]);
     expect(JSON.stringify(fixture.sent)).not.toContain("opaque");
   });

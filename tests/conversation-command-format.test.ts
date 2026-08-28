@@ -480,7 +480,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationMcpReload({ kind: "mcp-reload" })).toBe([
       "## MCP 配置重新加载",
       "- 状态：已请求",
-      "- 生效：已加载 Thread 会在下一次活动 Turn 时刷新",
+      "- 生效：已加载 Session 会在下一次活动 Turn 时刷新",
       "- 提示：无需重启 Codex App Server",
     ].join("\n"));
 
@@ -986,7 +986,7 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("已更新工作区权限");
     expect(rendered).toContain("- 审批：免审批");
-    expect(rendered).toContain("对新建或恢复的 Thread 生效");
+    expect(rendered).toContain("对新建或恢复的 Session 生效");
   });
 
   it("shows the model used by the next message after changing session context", () => {
@@ -1023,7 +1023,7 @@ describe("provider-aware conversation command formatting", () => {
       threadId: "thread-cold",
       queuePending: true,
       model: { model: "gpt-test", modelProvider: "openai" },
-    })).toContain("已沿用该 Thread 自身设置");
+    })).toContain("已沿用该 Session 自身设置");
   });
 
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {

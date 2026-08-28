@@ -22,8 +22,8 @@ const target = {
   accountId,
   conversationId: actorId,
 } as const;
-const turnCompletedText = "**本次运行 · 已完成**\n\n- Session ID：thread";
-const turnStoppedText = "**本次运行 · 已停止**\n\n- Session ID：thread";
+const turnCompletedText = "**本次运行 · 已完成**\n\n- Session：测试会话\n- Session ID：thread";
+const turnStoppedText = "**本次运行 · 已停止**\n\n- Session：测试会话\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
   it("shows one initial plan and one message for each completed step", async () => {
@@ -447,6 +447,7 @@ describe("WeixinOutbox", () => {
         + "**本次运行**\n"
         + "- 错误：受控错误\n\n"
         + "**当前 Session 累计**\n"
+        + "- Session：测试会话\n"
         + "- Session ID：thread",
     ]);
   });
@@ -1186,6 +1187,7 @@ function turnCompleted(
     type: "turn.completed",
     target,
     threadId: "thread",
+    sessionName: "测试会话",
     turnId: "turn",
     status,
   };

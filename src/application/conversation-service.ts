@@ -502,7 +502,7 @@ export class ConversationService implements ConversationUseCases {
       if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
         throw new UserFacingError(
           "plugin.provider.unsupported",
-          "开发中的 Plugin 调用当前只支持 OpenAI Thread",
+          "开发中的 Plugin 调用当前只支持 OpenAI Session",
         );
       }
       const workspace = this.router.workspace(target);
@@ -811,7 +811,7 @@ export class ConversationService implements ConversationUseCases {
     return this.lockedThreadSections(target, async () => {
       const binding = this.router.current(target);
       if (!binding) {
-        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
       const section = resolveThreadSection(
         await this.codex.listThreadSections(),
@@ -824,7 +824,7 @@ export class ConversationService implements ConversationUseCases {
         if (before.section?.id !== section.id) {
           throw new UserFacingError(
             "thread-section.before.invalid",
-            "排序目标 Thread 不在所选分区中",
+            "排序目标 Session 不在所选分区中",
           );
         }
         beforeThreadId = before.id;
@@ -838,7 +838,7 @@ export class ConversationService implements ConversationUseCases {
     return this.lockedThreadSections(target, async () => {
       const binding = this.router.current(target);
       if (!binding) {
-        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
       await this.codex.moveThreadToSection(binding.threadId, null);
     });
@@ -864,7 +864,7 @@ export class ConversationService implements ConversationUseCases {
       if (selector.trim() !== section.id) {
         throw new UserFacingError(
           "thread-section.delete-confirmation.invalid",
-          "删除确认必须使用预览返回的完整 Thread 分区 ID",
+          "删除确认必须使用预览返回的完整会话分区 ID",
         );
       }
       await this.codex.deleteThreadSection(section.id);
@@ -887,19 +887,19 @@ export class ConversationService implements ConversationUseCases {
       if (this.router.isBackgroundThread?.(selected.id)) {
         throw new UserFacingError(
           "thread.takeover.busy",
-          "运行中的后台 Thread 不能跨渠道接管",
+          "运行中的后台 Session 不能跨渠道接管",
         );
       }
       if (owner.surface === target.surface) {
         throw new UserFacingError(
           "thread.bound",
-          "该 Codex Thread 已绑定到同一渠道中的其他会话",
+          "该 Codex Session 已绑定到同一渠道中的其他会话",
         );
       }
       if (!this.transfers) {
         throw new UserFacingError(
           "thread.bound",
-          "当前服务没有启用跨渠道 Thread 接管",
+          "当前服务没有启用跨渠道 Session 接管",
         );
       }
       const transfers = this.transfers;
@@ -911,7 +911,7 @@ export class ConversationService implements ConversationUseCases {
         ) {
           throw new UserFacingError(
             "thread.takeover.changed",
-            "Codex Thread 绑定已变化，请重新选择",
+            "Codex Session 绑定已变化，请重新选择",
           );
         }
         this.requireIdle(owner);
@@ -965,7 +965,7 @@ export class ConversationService implements ConversationUseCases {
       ) {
         throw new UserFacingError(
           "thread.takeover.changed",
-          "Codex Thread 绑定已变化，请重新选择",
+          "Codex Session 绑定已变化，请重新选择",
         );
       }
       const current = this.router.current?.(target);
@@ -1050,7 +1050,7 @@ export class ConversationService implements ConversationUseCases {
       if (current && await this.probeNativeQueueItems(current.threadId)) {
         throw new UserFacingError(
           "conversation.background-queued",
-          "当前会话仍有排队消息，暂不能切换 Thread",
+          "当前会话仍有排队消息，暂不能切换 Session",
         );
       }
       this.requireIdle(target);
@@ -1148,7 +1148,7 @@ export class ConversationService implements ConversationUseCases {
       this.requireIdle(target);
       const binding = this.router.current(target);
       if (!binding) {
-        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
       await this.codex.setThreadName(binding.threadId, normalized);
     });
@@ -1158,7 +1158,7 @@ export class ConversationService implements ConversationUseCases {
     return this.locked(target, async () => {
       const binding = this.router.current(target);
       if (!binding) {
-        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
       }
       return this.codex.setThreadPinned(binding.threadId, pinned);
     });
@@ -1179,7 +1179,7 @@ export class ConversationService implements ConversationUseCases {
       if (await this.probeNativeQueueItems(current.threadId)) {
         throw new UserFacingError(
           "conversation.background-queued",
-          "当前会话仍有排队消息，暂不能分叉 Thread",
+          "当前会话仍有排队消息，暂不能分叉 Session",
         );
       }
       this.requireIdle(target);
@@ -1416,7 +1416,7 @@ export class ConversationService implements ConversationUseCases {
     if (!threadId) {
       throw new UserFacingError(
         "mcp.thread.required",
-        "请先发送消息创建 Thread，或使用 /resume 恢复 Thread 后再登录 MCP Server",
+        "请先发送消息创建 Session，或使用 /resume 恢复 Session 后再登录 MCP Server",
       );
     }
     return {
@@ -2004,7 +2004,7 @@ export function resolveThread<T extends Pick<ConversationSession, "id" | "name">
   if (!selector) {
     throw new UserFacingError(
       "session.selector.required",
-      "需要提供会话序号、名称或 Thread ID",
+      "需要提供会话序号、名称或 Session ID",
       { command },
     );
   }
@@ -2049,7 +2049,7 @@ function normalizeThreadSectionName(value: string): string {
   ) {
     throw new UserFacingError(
       "thread-section.name.invalid",
-      "Thread 分区名称必须为 1–64 个不含控制字符的字符",
+      "会话分区名称必须为 1–64 个不含控制字符的字符",
     );
   }
   return normalized;
@@ -2076,8 +2076,8 @@ function resolveThreadSection<T extends ThreadSectionSnapshot>(
       ? "thread-section.selector.ambiguous"
       : "thread-section.selector.not-found",
     exact.length > 1 || prefixes.length > 1
-      ? "Thread 分区选择不唯一，请使用序号或完整 ID"
-      : "找不到指定 Thread 分区",
+      ? "会话分区选择不唯一，请使用序号或完整 ID"
+      : "找不到指定会话分区",
   );
 }
 
