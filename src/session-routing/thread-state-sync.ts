@@ -6,6 +6,7 @@ export type ThreadStateEvent =
       threadId: string;
       settings: ThreadModelSettings;
     }
+  | { type: "thread.name.updated"; threadId: string; name: string | null }
   | { type: "thread.archived"; threadId: string }
   | { type: "thread.deleted"; threadId: string }
   | { type: "thread.closed"; threadId: string };
@@ -17,6 +18,9 @@ export class ThreadStateSynchronizer {
     switch (event.type) {
       case "thread.settings.updated":
         this.router.updateModelSettings(event.threadId, event.settings);
+        return;
+      case "thread.name.updated":
+        this.router.updateThreadName(event.threadId, event.name);
         return;
       case "thread.archived":
         this.router.forgetThread(event.threadId);

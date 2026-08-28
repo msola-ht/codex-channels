@@ -50,6 +50,7 @@ export class SessionRouter {
   // 模型设置保留到进程结束：thread/list 不返回 model，
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
+  private readonly namesByThread = new Map<string, string | null>();
   private readonly contextCompactionItemIdsByThread = new Map<string, readonly string[]>();
 
   constructor(
@@ -136,6 +137,14 @@ export class SessionRouter {
     return this.modelSettingsByThread.get(threadId);
   }
 
+  threadNameForThread(threadId: string): string | null | undefined {
+    return this.namesByThread.get(threadId);
+  }
+
+  updateThreadName(threadId: string, name: string | null): void {
+    if (this.bindings.getByThread(threadId)) this.namesByThread.set(threadId, name);
+  }
+
   contextCompactionItemIdsForThread(threadId: string): readonly string[] | undefined {
     return this.contextCompactionItemIdsByThread.get(threadId);
   }
@@ -195,6 +204,7 @@ export class SessionRouter {
           },
         );
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
+        this.namesByThread.set(resumed.thread.id, resumed.thread.name);
         this.contextCompactionItemIdsByThread.set(
           resumed.thread.id,
           resumed.contextCompactionItemIds,
@@ -295,6 +305,7 @@ export class SessionRouter {
           this.workspacePermissions(workspace),
         );
         this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
+        this.namesByThread.set(resumed.thread.id, resumed.thread.name);
         this.contextCompactionItemIdsByThread.set(
           resumed.thread.id,
           resumed.contextCompactionItemIds,
@@ -313,6 +324,7 @@ export class SessionRouter {
         : {}),
     });
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier);
+    this.namesByThread.set(started.thread.id, started.thread.name);
     this.contextCompactionItemIdsByThread.set(
       started.thread.id,
       started.contextCompactionItemIds,
@@ -416,6 +428,7 @@ export class SessionRouter {
       session.reasoningEffort,
       session.serviceTier,
     );
+    this.namesByThread.set(session.thread.id, session.thread.name);
     this.contextCompactionItemIdsByThread.set(
       session.thread.id,
       session.contextCompactionItemIds,
@@ -443,6 +456,7 @@ export class SessionRouter {
       await this.detach(target);
     }
     this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
+    this.namesByThread.set(resumed.thread.id, resumed.thread.name);
     this.contextCompactionItemIdsByThread.set(
       resumed.thread.id,
       resumed.contextCompactionItemIds,
@@ -570,6 +584,7 @@ export class SessionRouter {
       startOptions,
     );
     this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
+    this.namesByThread.set(forked.thread.id, forked.thread.name);
     this.contextCompactionItemIdsByThread.set(
       forked.thread.id,
       forked.contextCompactionItemIds,
@@ -604,6 +619,7 @@ export class SessionRouter {
   forgetThread(threadId: string): ConversationTarget | undefined {
     const binding = this.bindings.getByThread(threadId);
     this.contextCompactionItemIdsByThread.delete(threadId);
+    this.namesByThread.delete(threadId);
     if (binding) {
       this.bindings.removeThread(threadId);
       return binding.target;

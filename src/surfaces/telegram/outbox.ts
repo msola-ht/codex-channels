@@ -573,6 +573,14 @@ export class TelegramOutbox {
         return;
       case "thread.status":
         return;
+      case "thread.name":
+        await this.sendPanel(
+          chatId,
+          `Session 名称已更新：${event.name ?? "未命名"}`,
+          undefined,
+          true,
+        );
+        return;
     }
   }
 

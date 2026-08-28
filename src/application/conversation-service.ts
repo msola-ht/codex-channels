@@ -199,6 +199,7 @@ const maximumBackgroundThreadsPerConversation = 3;
 
 export interface ConversationStatus {
   threadId?: string;
+  threadName?: string | null;
   turnId?: string;
   workspaceId: string;
   workspaceName: string;
@@ -1689,6 +1690,7 @@ export class ConversationService implements ConversationUseCases {
       : undefined;
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
+      ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),
       ...(active ? { turnId: active.turnId } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
       ...(goal ? { goal } : {}),

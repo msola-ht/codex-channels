@@ -496,7 +496,7 @@ describe("shared surface copy contract", () => {
     };
 
     const rendered = formatConversationStatus(status);
-    expect(rendered).toContain("Session：thread-1");
+    expect(rendered).toContain("Session ID：thread-1");
     expect(rendered).toContain(
       "周限：剩余 88% · 周期 7 天",
     );

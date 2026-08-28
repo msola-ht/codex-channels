@@ -464,6 +464,13 @@ export class ConversationCore {
           status: event.status,
         });
         return;
+      case "thread.name.updated":
+        this.publishForThread(event.threadId, {
+          type: "thread.name",
+          threadId: event.threadId,
+          name: event.name,
+        });
+        return;
       case "thread.closed":
       case "thread.archived":
       case "thread.deleted": {

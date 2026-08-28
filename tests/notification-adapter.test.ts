@@ -7,6 +7,27 @@ import {
 } from "../src/codex-client/index.js";
 
 describe("Notification adapter", () => {
+  it("maps App Server Session name updates for both core output and routing state", () => {
+    const notification = {
+      method: "thread/name/updated",
+      params: { threadId: "thread-1", threadName: "新名称" },
+    } as const;
+    expect(toConversationInputEvent(notification)).toEqual({
+      type: "thread.name.updated",
+      threadId: "thread-1",
+      name: "新名称",
+    });
+    expect(toThreadStateEvent(notification)).toEqual({
+      type: "thread.name.updated",
+      threadId: "thread-1",
+      name: "新名称",
+    });
+    expect(toConversationInputEvent({
+      method: "thread/name/updated",
+      params: { threadId: "thread-1" },
+    })).toEqual({ type: "thread.name.updated", threadId: "thread-1", name: null });
+  });
+
   it("maps Queue changes to a thread-only snapshot invalidation event", () => {
     expect(toThreadQueueChangedEvent({
       method: "thread/queue/changed",

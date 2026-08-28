@@ -280,6 +280,8 @@ export function renderFeishuOutput(
       );
     case "thread.status":
       return `Session 状态：${threadStatusLabel(event.status)}`;
+    case "thread.name":
+      return `Session 名称已更新：${event.name ?? "未命名"}`;
     case "thread.availability":
       return formatThreadAvailability(
         event.availability,

@@ -1602,7 +1602,8 @@ describe("Feishu conversation adapter", () => {
       text: [
         "## Codex 状态",
         "- Workspace：Main (main)",
-        "- Session：thread-1",
+        "- Session：未命名",
+        "- Session ID：thread-1",
         "- Turn：turn-1",
         "- 工作目录：/workspace",
         "- Git 分支：未检测到",
@@ -1612,7 +1613,7 @@ describe("Feishu conversation adapter", () => {
         "- Fast 模式：开启",
         "- 协作模式：Default",
         "",
-        "- 当前 Thread 用量：等待 App Server 推送统计",
+        "- 当前 Session 用量：等待 App Server 推送统计",
       ].join("\n"),
     }]);
   });

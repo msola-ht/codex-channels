@@ -32,6 +32,7 @@ type RoutingNotification = Extract<
   {
     method:
       | "thread/settings/updated"
+      | "thread/name/updated"
       | "thread/archived"
       | "thread/deleted"
       | "thread/closed";
@@ -58,6 +59,7 @@ type CoreNotification = Extract<
       | "error"
       | "turn/completed"
       | "thread/status/changed"
+      | "thread/name/updated"
       | "thread/closed"
       | "thread/archived"
       | "thread/deleted"
@@ -71,6 +73,7 @@ type CoreNotification = Extract<
 
 const routingMethods = {
   settingsUpdated: "thread/settings/updated",
+  nameUpdated: "thread/name/updated",
   archived: "thread/archived",
   deleted: "thread/deleted",
   closed: "thread/closed",
@@ -92,6 +95,7 @@ const coreMethods = {
   error: "error",
   turnCompleted: "turn/completed",
   threadStatusChanged: "thread/status/changed",
+  threadNameUpdated: "thread/name/updated",
   threadClosed: "thread/closed",
   threadArchived: "thread/archived",
   threadDeleted: "thread/deleted",
@@ -109,6 +113,8 @@ export function toThreadStateEvent(
   switch (notification.method) {
     case routingMethods.settingsUpdated:
       return toThreadSettingsUpdatedEvent(notification.params);
+    case routingMethods.nameUpdated:
+      return toThreadNameUpdatedStateEvent(notification.params);
     case routingMethods.archived:
       return toThreadLifecycleEvent("thread.archived", notification.params);
     case routingMethods.deleted:
@@ -118,6 +124,18 @@ export function toThreadStateEvent(
     default:
       return undefined;
   }
+}
+
+function toThreadNameUpdatedStateEvent(value: unknown): ThreadStateEvent | undefined {
+  const params = asRecord(value);
+  const threadId = nonEmptyString(params?.threadId);
+  if (!threadId) return undefined;
+  const name = params?.threadName;
+  return {
+    type: "thread.name.updated",
+    threadId,
+    name: typeof name === "string" && name.trim() ? name : null,
+  };
 }
 
 /** Queue changes only invalidate the local selector snapshot; they never trigger a read. */
@@ -164,6 +182,8 @@ export function toConversationInputEvent(
       return toTurnCompletedEvent(notification.params);
     case coreMethods.threadStatusChanged:
       return toThreadStatusEvent(notification.params);
+    case coreMethods.threadNameUpdated:
+      return toThreadNameUpdatedEvent(notification.params);
     case coreMethods.threadClosed:
       return toCoreThreadLifecycleEvent("thread.closed", notification.params);
     case coreMethods.threadArchived:
@@ -183,6 +203,14 @@ export function toConversationInputEvent(
     default:
       return undefined;
   }
+}
+
+function toThreadNameUpdatedEvent(value: unknown): ConversationInputEvent | undefined {
+  const params = asRecord(value);
+  const threadId = nonEmptyString(params?.threadId);
+  if (!threadId) return undefined;
+  const name = params?.threadName;
+  return { type: "thread.name.updated", threadId, name: typeof name === "string" && name.trim() ? name : null };
 }
 
 function toThreadRevertedEvent(value: unknown): ConversationInputEvent | undefined {

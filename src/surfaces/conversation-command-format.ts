@@ -79,7 +79,7 @@ export const conversationCommandDescriptions = {
   skill: "查看或调用 Skill",
   mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
   plugin: "列出、查看或调用 Plugin（开发中）",
-  usage: "查看账号与当前 Thread 用量",
+  usage: "查看账号与当前 Session 用量",
   metrics: "查看会话、聚合或异常请求指标",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",
@@ -1940,7 +1940,8 @@ export function formatConversationStatus(status: ConversationStatus): string {
   const lines = [
     "Codex 状态",
     `Workspace：${status.workspaceName} (${status.workspaceId})`,
-    `Session：${status.threadId ?? "尚未绑定"}`,
+    `Session：${status.threadName ?? "未命名"}`,
+    `Session ID：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
@@ -1966,7 +1967,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     const { total, last, modelContextWindow } = status.tokenUsage;
     lines.push(
       "",
-      "当前 Thread 用量：",
+      "当前 Session 用量：",
       `- **Token**：${formatTokenCount(total.totalTokens)}`,
       `  - 最近模型请求：${formatTokenCount(last.totalTokens)}`,
       `  - 输入命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
@@ -1982,7 +1983,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
       `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {
-    lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
+    lines.push("", "当前 Session 用量：等待 App Server 推送统计");
   }
   if (usesOpenAiAccount(status.modelProvider) && status.weeklyLimit) {
     lines.push(`周限：${formatRemainingRateLimitWindow(status.weeklyLimit)}`);
