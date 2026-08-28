@@ -22,8 +22,8 @@ const target = {
   accountId,
   conversationId: actorId,
 } as const;
-const turnCompletedText = "**本次运行 · 已完成**\n\n- Thread ID：thread";
-const turnStoppedText = "**本次运行 · 已停止**\n\n- Thread ID：thread";
+const turnCompletedText = "**本次运行 · 已完成**\n\n- Session ID：thread";
+const turnStoppedText = "**本次运行 · 已停止**\n\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
   it("shows one initial plan and one message for each completed step", async () => {
@@ -175,7 +175,7 @@ describe("WeixinOutbox", () => {
     }));
     const { outbox, sendText } = outboxFixture(
       { value: true },
-      { remainingUsage },
+      { remainingUsage, debugEnabled: true },
     );
 
     await outbox.handle({
@@ -446,8 +446,8 @@ describe("WeixinOutbox", () => {
       "**本次运行 · 失败**\n\n"
         + "**本次运行**\n"
         + "- 错误：受控错误\n\n"
-        + "**当前会话累计**\n"
-        + "- Thread ID：thread",
+        + "**当前 Session 累计**\n"
+        + "- Session ID：thread",
     ]);
   });
 

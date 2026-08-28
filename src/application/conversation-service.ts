@@ -17,6 +17,7 @@ import type {
   ProviderAccountQueryPort,
   ProviderAccountUsage,
 } from "./account-port.js";
+import type { RemoteQuotaSummary } from "../conversation-core/index.js";
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
 import type {
   McpLoginResult,
@@ -375,6 +376,10 @@ export class ConversationService implements ConversationUseCases {
     private readonly threadOccupancy?: ThreadOccupancyPort,
     private readonly threadQueue?: ThreadQueuePort,
     threadHistory?: ThreadHistoryPort,
+    private readonly remoteQuotaReader?: (
+      provider: string,
+      resetsAt: number,
+    ) => Promise<RemoteQuotaSummary | undefined>,
   ) {
     this.queueUseCases = new ThreadQueueService(
       this.locks,
@@ -1577,9 +1582,25 @@ export class ConversationService implements ConversationUseCases {
       const estimate = estimateWeeklyLimit(limit, observation);
       return estimate === null ? [] : [estimate];
     });
-    return weeklyEstimates.length === 0
+    const estimates = this.remoteQuotaReader === undefined
+      ? weeklyEstimates
+      : await Promise.all(weeklyEstimates.map(async (estimate) => {
+          const remote = await this.remoteQuotaReader!("openai", estimate.endAtMs / 1_000);
+          if (!remote) return estimate;
+          return {
+            ...estimate,
+            source: "center" as const,
+            deviceCount: remote.deviceCount,
+            periodRequestCount: remote.requestCount,
+            periodTotalTokens: remote.totalTokens,
+            periodTotalCostNanos: remote.totalCostNanos,
+            totalTokensPerPercent: remote.tokensPerPercent ?? estimate.totalTokensPerPercent,
+            costPerPercentNanos: remote.costPerPercentNanos ?? estimate.costPerPercentNanos,
+          };
+        }));
+    return estimates.length === 0
       ? resolved
-      : { ...resolved, weeklyEstimates };
+      : { ...resolved, weeklyEstimates: estimates };
   }
 
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]> {

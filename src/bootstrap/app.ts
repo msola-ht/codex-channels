@@ -564,6 +564,12 @@ export class GatewayApplication {
       },
       this.codex,
       this.codex,
+      (provider, resetsAt) => readRemoteQuotaSummary(
+        this.config.metricsView,
+        provider,
+        resetsAt,
+        this.logger,
+      ),
     );
     this.output.subscribe("conversation-background-release", async (event) => {
       if (event.type !== "turn.completed" || !this.router.isBackgroundThread(event.threadId)) {
@@ -732,11 +738,12 @@ export class GatewayApplication {
             turnId,
             current,
           ),
-        remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(
-          this.config.metricsView,
-          provider,
-          resetsAt,
-        ),
+          remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(
+            this.config.metricsView,
+            provider,
+            resetsAt,
+            this.logger,
+          ),
         completionTiming: async (threadId, turnId, current) => {
           await metricsWriter.waitForCurrentWrites(threadId);
           const summary = metricsStore.threadSummary(threadId);
@@ -1649,19 +1656,26 @@ async function readRemoteQuotaSummary(
   settings: GatewayConfig["metricsView"] | undefined,
   provider: string | undefined,
   resetsAt: number | null | undefined,
+  logger?: Pick<Logger, "warn">,
 ): Promise<import("../conversation-core/index.js").RemoteQuotaSummary | undefined> {
   if (!settings?.enabled || !settings.endpoint || !settings.token || !provider) {
     return undefined;
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 700);
+  // The center may aggregate a year's worth of periods from SQLite. Keep the
+  // request bounded, but do not treat a normal local response (~1s) as a
+  // failure and silently fall back to the single-device estimate.
+  const timeout = setTimeout(() => controller.abort(), 2_500);
   try {
     const endpoint = new URL("/api/quota?days=365", settings.endpoint);
     const response = await fetch(endpoint, {
       headers: { authorization: `Bearer ${settings.token}` },
       signal: controller.signal,
     });
-    if (!response.ok) return undefined;
+    if (!response.ok) {
+      logger?.warn({ provider, resetsAt, status: response.status }, "指标中心额度查询失败");
+      return undefined;
+    }
     const body = await response.json() as {
       periods?: Array<{
         provider?: string;
@@ -1674,20 +1688,42 @@ async function readRemoteQuotaSummary(
         latestUsedPercentMillionths?: number | null;
         estimatedTotalTokens?: number | null;
         estimatedTotalCostNanos?: number | null;
+        tokensPerPercent?: number | null;
+        costPerPercentNanos?: number | null;
         lastObservedAtMs?: number;
       }>;
     };
     const candidates = body.periods?.filter((candidate) => candidate.provider === provider) ?? [];
-    const period = (resetsAt === null || resetsAt === undefined
-      ? candidates.sort((a, b) => (b.lastObservedAtMs ?? 0) - (a.lastObservedAtMs ?? 0))[0]
+    const exactPeriod = resetsAt === null || resetsAt === undefined
+      ? undefined
       : candidates.find((candidate) =>
           candidate.windowId === "codex"
           && typeof candidate.resetsAt === "number"
           && Math.abs(candidate.resetsAt - resetsAt) <= 5 * 60,
-        ));
+        );
+    // A provider may refresh its reset timestamp between two snapshots. If an
+    // exact match is absent, only use the most recently observed future codex
+    // period; never fall back to an older completed period.
+    const period = exactPeriod ?? candidates
+      .filter((candidate) => candidate.windowId === "codex"
+        && typeof candidate.resetsAt === "number"
+        && candidate.resetsAt >= Math.floor(Date.now() / 1_000)
+        && typeof candidate.lastObservedAtMs === "number")
+      .sort((a, b) => (b.lastObservedAtMs ?? 0) - (a.lastObservedAtMs ?? 0))[0];
     if (!period || typeof period.deviceCount !== "number" || typeof period.requestCount !== "number"
       || typeof period.totalTokens !== "number" || typeof period.resetsAt !== "number"
-      || typeof period.lastObservedAtMs !== "number") return undefined;
+      || typeof period.lastObservedAtMs !== "number") {
+      logger?.warn({
+        provider,
+        resetsAt,
+        candidateResetsAt: candidates
+          .filter((candidate) => candidate.windowId === "codex")
+          .map((candidate) => candidate.resetsAt)
+          .filter((value): value is number => typeof value === "number")
+          .slice(0, 8),
+      }, "指标中心额度周期未命中");
+      return undefined;
+    }
     return {
       provider,
       windowId: period.windowId ?? "codex",
@@ -1698,9 +1734,16 @@ async function readRemoteQuotaSummary(
       latestUsedPercentMillionths: period.latestUsedPercentMillionths ?? null,
       estimatedTotalTokens: period.estimatedTotalTokens ?? null,
       estimatedTotalCostNanos: period.estimatedTotalCostNanos ?? null,
+      tokensPerPercent: period.tokensPerPercent ?? null,
+      costPerPercentNanos: period.costPerPercentNanos ?? null,
       observedAtMs: period.lastObservedAtMs,
     };
-  } catch {
+  } catch (error) {
+    logger?.warn({
+      err: error,
+      provider,
+      resetsAt,
+    }, "指标中心额度读取异常，回退本机估算");
     return undefined;
   } finally {
     clearTimeout(timeout);
