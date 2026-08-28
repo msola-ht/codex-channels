@@ -9,6 +9,8 @@ export type {
   GlobalCostRow,
   GlobalDailyResponse,
   GlobalDailyRow,
+  GlobalQuotaPeriod,
+  GlobalQuotaResponse,
   GlobalDeviceRow,
   GlobalDevicesResponse,
   GlobalOverviewResponse,

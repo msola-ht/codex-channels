@@ -4,6 +4,7 @@ import type {
   GlobalDailyResponse,
   GlobalDevicesResponse,
   GlobalOverviewResponse,
+  GlobalQuotaResponse,
   GlobalRequestsResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
@@ -230,6 +231,19 @@ export function fetchGlobalDaily(
   ].filter(Boolean).join("&")
   return getJson<GlobalDailyResponse>(
     `${API_PREFIX}/global/daily?${query}`,
+    signal,
+  )
+}
+
+export function fetchGlobalQuota(
+  days: number,
+  device: string | null = null,
+  signal?: AbortSignal,
+): Promise<GlobalQuotaResponse> {
+  const query = new URLSearchParams({ days: String(days) })
+  if (device !== null) query.set("device", device)
+  return getJson<GlobalQuotaResponse>(
+    `${API_PREFIX}/global/quota?${query.toString()}`,
     signal,
   )
 }

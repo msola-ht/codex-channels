@@ -455,6 +455,27 @@ export function createTurnCompletedPresentation(
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
   let fallbackCacheField: LifecyclePresentationField | undefined;
+  if (event.remoteQuota) {
+    accountFields.push({
+      label: "额度中心",
+      value: `${event.remoteQuota.deviceCount} 台设备 · ${event.remoteQuota.requestCount} 次请求`,
+      subfields: [
+        { label: "本周期 Token", value: formatTokenCount(event.remoteQuota.totalTokens) },
+        ...(event.remoteQuota.latestUsedPercentMillionths === null
+          ? []
+          : [{
+              label: "最新使用",
+              value: `${(event.remoteQuota.latestUsedPercentMillionths / 100_000).toFixed(2)}%`,
+            }]),
+        ...(event.remoteQuota.estimatedTotalTokens === null
+          ? []
+          : [{
+              label: "推算 100% Token",
+              value: formatTokenCount(event.remoteQuota.estimatedTotalTokens),
+            }]),
+      ],
+    });
+  }
   if (event.error) {
     runFields.push({
       label: "错误",
@@ -503,7 +524,7 @@ export function createTurnCompletedPresentation(
       value: `${event.contextCompactionCount} 次`,
     });
   }
-  if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
+  if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit && !event.remoteQuota) {
     accountFields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),

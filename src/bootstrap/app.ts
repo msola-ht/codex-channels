@@ -732,6 +732,11 @@ export class GatewayApplication {
             turnId,
             current,
           ),
+        remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(
+          this.config.metricsView,
+          provider,
+          resetsAt,
+        ),
         completionTiming: async (threadId, turnId, current) => {
           await metricsWriter.waitForCurrentWrites(threadId);
           const summary = metricsStore.threadSummary(threadId);
@@ -1637,6 +1642,68 @@ export class GatewayApplication {
       this.bindingRestoreTask = task;
     }, delayMs);
     this.bindingRestoreTimer.unref();
+  }
+}
+
+async function readRemoteQuotaSummary(
+  settings: GatewayConfig["metricsView"] | undefined,
+  provider: string | undefined,
+  resetsAt: number | null | undefined,
+): Promise<import("../conversation-core/index.js").RemoteQuotaSummary | undefined> {
+  if (!settings?.enabled || !settings.endpoint || !settings.token || !provider) {
+    return undefined;
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 700);
+  try {
+    const endpoint = new URL("/api/quota?days=365", settings.endpoint);
+    const response = await fetch(endpoint, {
+      headers: { authorization: `Bearer ${settings.token}` },
+      signal: controller.signal,
+    });
+    if (!response.ok) return undefined;
+    const body = await response.json() as {
+      periods?: Array<{
+        provider?: string;
+        windowId?: string;
+        resetsAt?: number;
+        deviceCount?: number;
+        requestCount?: number;
+        totalTokens?: number;
+        totalCostNanos?: number;
+        latestUsedPercentMillionths?: number | null;
+        estimatedTotalTokens?: number | null;
+        estimatedTotalCostNanos?: number | null;
+        lastObservedAtMs?: number;
+      }>;
+    };
+    const candidates = body.periods?.filter((candidate) => candidate.provider === provider) ?? [];
+    const period = (resetsAt === null || resetsAt === undefined
+      ? candidates.sort((a, b) => (b.lastObservedAtMs ?? 0) - (a.lastObservedAtMs ?? 0))[0]
+      : candidates.find((candidate) =>
+          candidate.windowId === "codex"
+          && typeof candidate.resetsAt === "number"
+          && Math.abs(candidate.resetsAt - resetsAt) <= 5 * 60,
+        ));
+    if (!period || typeof period.deviceCount !== "number" || typeof period.requestCount !== "number"
+      || typeof period.totalTokens !== "number" || typeof period.resetsAt !== "number"
+      || typeof period.lastObservedAtMs !== "number") return undefined;
+    return {
+      provider,
+      windowId: period.windowId ?? "codex",
+      deviceCount: period.deviceCount,
+      requestCount: period.requestCount,
+      totalTokens: period.totalTokens,
+      totalCostNanos: typeof period.totalCostNanos === "number" ? period.totalCostNanos : null,
+      latestUsedPercentMillionths: period.latestUsedPercentMillionths ?? null,
+      estimatedTotalTokens: period.estimatedTotalTokens ?? null,
+      estimatedTotalCostNanos: period.estimatedTotalCostNanos ?? null,
+      observedAtMs: period.lastObservedAtMs,
+    };
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

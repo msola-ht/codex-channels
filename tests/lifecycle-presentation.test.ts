@@ -622,6 +622,36 @@ describe("shared Surface lifecycle presentation", () => {
     ].join("\n"));
   });
 
+  it("uses the remote quota section instead of the local OpenAI weekly line", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: { surface: "telegram", accountId: "default", conversationId: "100" },
+        threadId: "thread-remote",
+        turnId: "turn-remote",
+        status: "completed",
+        model: "gpt-test",
+        modelProvider: "openai",
+        weeklyLimit: { usedPercent: 37, windowDurationMins: 10_080, resetsAt: 1_800_000_000 },
+        remoteQuota: {
+          provider: "openai",
+          windowId: "codex",
+          deviceCount: 3,
+          requestCount: 12,
+          totalTokens: 1_200_000,
+          totalCostNanos: 500_000_000,
+          latestUsedPercentMillionths: 370_000_000,
+          estimatedTotalTokens: 3_200_000,
+          estimatedTotalCostNanos: 1_300_000_000,
+          observedAtMs: 1_800_000_000_000,
+        },
+      }),
+    );
+    expect(rendered).toContain("额度中心：3 台设备 · 12 次请求");
+    expect(rendered).toContain("本周期 Token：1.2 M");
+    expect(rendered).not.toContain("周限：");
+  });
+
   it("keeps Thread metrics but hides OpenAI-only fields for DeepSeek", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
