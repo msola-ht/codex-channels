@@ -11,7 +11,7 @@
 通过 `codexc remote` 启动的原生 Codex TUI 与聊天客户端按模型提供商共享同一个 Codex App
 Server，因此可以继续使用对应的会话、Thread 和运行状态。
 
-`main` 开发基线：`0.148.0-fix2`
+`main` 开发基线：`0.150.1`
 当前正式版：`0.148.0`
 当前修复预览版：`0.148.0-fix2`
 要求：macOS 或 Linux、Node.js 22.13+、已登录的 `codex-cli 0.148.0`

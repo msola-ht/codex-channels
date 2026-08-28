@@ -210,6 +210,91 @@
 - Hook、Skill Creator、TUI 渲染、Windows 运行时与发布打包修复不改变 Gateway 的公开接口、
   持久化 Schema 或 npm 分发流程。
 
+## 0.149.0
+
+- 官方 Release：[`rust-v0.149.0`](https://github.com/openai/codex/releases/tag/rust-v0.149.0)
+- 项目开发基线：本次累计升级的一部分，最终与 `0.150.1` 一起锁定
+- 评估范围：队列唤醒、权限 Profile 恢复、子代理通知、TUI 任务管理、工作目录命令和诊断增强
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 队列唤醒与会话恢复修复 | 让排队消息能唤醒空闲会话，并在恢复/Fork 时保留原权限 | 现有 Thread Queue、Session 恢复和 Workspace 权限链路随 App Server 自动受益，不增加 Gateway 兼容层 | [`thread-queue-port.ts`](../src/application/thread-queue-port.ts)、[`session-routing/`](../src/session-routing/)、真实 App Server 合同 |
+| 子代理通知去重与路由修复 | 避免同一子代理活动重复显示，并把通知送回正确的父会话 | 现有子代理完成通知直接受益，继续由 Core 归约，不复制调度状态 | [`subagent-completion-tracker.ts`](../src/bootstrap/subagent-completion-tracker.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts) |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| `codex agents` 任务面板 | 在终端搜索、启动、重命名和停止任务 | 属于原生 TUI，不复制第二套终端界面到渠道 |
+| `/cd`、`/pwd`、`/cwd` | 在终端会话中切换或查看工作目录 | Gateway 只允许预配置 Workspace，不能通过聊天输入任意目录 |
+| SDK 原始配置覆盖与 `max`/`ultra` 选择 | 让 SDK 调用者覆盖配置并使用更高思考等级 | 当前渠道设置按既有模型目录和思考等级边界运行，不因生成类型出现就开放新档位 |
+
+### 纯上游变化
+
+- Doctor 网络/桌面诊断、Vim、Windows Terminal 和 TUI 渲染改进由原生 CLI 提供，不改变 Gateway 公开接口。
+
+## 0.149.1
+
+- 官方 Release：[`rust-v0.149.1`](https://github.com/openai/codex/releases/tag/rust-v0.149.1)
+- 项目开发基线：作为 `0.149.x` 补丁版本随累计协议升级进入 `0.150.1`
+
+### 纯上游变化
+
+- 官方 Release 未列出新的用户可见功能或本项目需要适配的业务协议；保留精确版本链路，不新增本地入口。
+
+## 0.150.0
+
+- 官方 Release：[`rust-v0.150.0`](https://github.com/openai/codex/releases/tag/rust-v0.150.0)
+- 项目开发基线：本次累计升级的一部分，最终与 `0.150.1` 一起锁定
+- 评估范围：Project、MCP 事件流、Realtime、Bedrock、Browser/Computer Use、任务引用和安全修复
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 不可信项目与凭据安全修复 | 防止不可信项目指令越权，并减少 App Server 日志中的敏感信息 | 随锁定 App Server 自动获得；Gateway 继续执行自身 Workspace 授权、日志脱敏和显式审批 | [`policy/`](../src/policy/)、[`observability/`](../src/observability/)、真实 App Server 合同 |
+| MCP 启动与 Unix 关闭修复 | 让 MCP 启动更可靠，并减少关闭时被子进程拖住 | 现有 MCP 状态与服务生命周期直接受益，不建立旁路连接池 | [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、服务生命周期测试 |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| Project API 与项目事件 | 创建、移动、删除并同步 App Server 项目 | 当前 Workspace Registry 已承担工作区边界，不引入第二套项目管理 |
+| Realtime、Bedrock、Browser/Computer Use | 提供实时会话、AWS 模型或浏览器/桌面控制 | 尚无对应认证、审批、网络、计价和多渠道安全合同 |
+| `@` 任务引用、Interrupt Hook 与额外 Plugin 能力 | 在任务间传递消息或从 Hook/Plugin 触发旁路操作 | 会建立跨 Session 或旁路执行语义，超出当前 Gateway 边界 |
+
+### 纯上游变化
+
+- TUI `/copy`、自动命名、快捷键、Windows Sandbox 与内部 Guardian 优化不改变 Gateway 公开接口。
+
+## 0.150.1
+
+- 官方 Release：[`rust-v0.150.1`](https://github.com/openai/codex/releases/tag/rust-v0.150.1)
+- 项目开发基线：Gateway、生成协议、真实 App Server 合同与 CI 锁定 `0.150.1`；README 当前正式版在发布准备前保持不变
+- 评估范围：远程压缩图片 Token 预算修复，以及 0.149.x–0.150.0 新增的项目、MCP 事件流、Realtime、Bedrock、Browser/Computer Use 和 TUI 能力
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 0.150.1 精确协议基线 | 让 Gateway、App Server 和生成类型保持同一正式版本 | 重新生成协议并同步 Gateway、CI 和固定源码索引；不保留旧 CLI 兼容分支 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 远程压缩图片预算修复 | 长会话压缩时正确计算保留图片占用的 Token | 随锁定 App Server 自动获得，不新增 Gateway 业务逻辑或图片历史副本 | [`conversation-core/`](../src/conversation-core/README.md)、真实 App Server 合同 |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| Project API 与项目事件 | 创建、移动、删除和同步 App Server 项目 | 当前 Workspace Registry 和会话绑定边界不需要第二套项目管理；不导出、不新增渠道命令 |
+| MCP 事件流 | 持续接收 MCP 服务事件 | Gateway 通过 App Server 获取 MCP 状态，不建立旁路事件流或持久化连接 |
+| Realtime、Bedrock、Browser/Computer Use | 提供实时语音、AWS 模型或浏览器/桌面控制 | 当前没有对应认证、审批、网络和三渠道安全合同；生成类型不代表项目支持 |
+
+### 纯上游变化
+
+- 0.149.x–0.150.0 的 TUI、Windows、Guardian、插件和内部安全修复由原生 App Server/CLI 获得，
+  不改变 Gateway 的公开接口、持久化 Schema 或 Surface 行为。
+
 ## 后续使用
 
 处理下一个正式版本时：

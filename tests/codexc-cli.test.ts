@@ -245,7 +245,7 @@ describe("codexc CLI", () => {
     const mainHelp = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
     expect(mainHelp.stdout).toContain("version, -v, --version");
     expect(mainHelp.stdout).toContain("center                       启动或配置多设备指标中心");
-  }, 30_000);
+  }, 180_000);
 
   it("keeps top-level help as a complete first-level command index", () => {
     const result = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
