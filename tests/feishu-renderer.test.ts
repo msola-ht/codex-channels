@@ -260,8 +260,8 @@ describe("Feishu output renderer", () => {
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("本次为只读查询"),
       expect.stringContaining("项目规则检查通过"),
-      "当前 Thread 暂无 Turn Diff。",
-      "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
+      "当前 Session 暂无 Turn Diff。",
+      "当前 Session 没有 Goal。使用 /goal set <目标> 设置。",
     ]);
   });
 
@@ -448,7 +448,7 @@ describe("Feishu output renderer", () => {
           threadId: "thread-resumed",
           model: { model: "gpt-test", modelProvider: "openai" },
         },
-        expected: "Thread：thread-resumed",
+        expected: "Session ID：thread-resumed",
       },
       {
         outcome: {
@@ -457,25 +457,25 @@ describe("Feishu output renderer", () => {
           transferredFrom: "telegram",
           model: { model: "gpt-test", modelProvider: "openai" },
         },
-        expected: "已从 Telegram 接管 Codex Thread",
+        expected: "已从 Telegram 接管 Codex Session",
       },
       {
         outcome: {
           type: "session.new",
           nextModel: { model: "gpt-test", modelProvider: "openai" },
         },
-        expected: "发送下一条普通消息时才会创建新的 Codex Thread",
+        expected: "发送下一条普通消息时才会创建新的 Codex Session",
       },
       {
         outcome: { type: "thread.archived", threadId: "thread-archived" },
-        expected: "Thread：thread-archived",
+        expected: "Session ID：thread-archived",
       },
       {
         outcome: {
           type: "thread.unarchived",
           threadId: "thread-unarchived",
         },
-        expected: "Thread：thread-unarchived",
+        expected: "Session ID：thread-unarchived",
       },
       {
         outcome: {
@@ -524,11 +524,11 @@ describe("Feishu output renderer", () => {
       },
       {
         outcome: { type: "thread.compaction-requested" },
-        expected: "已请求压缩当前 Codex Thread",
+        expected: "已请求压缩当前 Codex Session",
       },
       {
         outcome: { type: "thread.forked", threadId: "thread-forked" },
-        expected: "Thread：thread-forked",
+        expected: "Session ID：thread-forked",
       },
       {
         outcome: { type: "review.started", turnId: "turn-review" },
@@ -536,7 +536,7 @@ describe("Feishu output renderer", () => {
       },
       {
         outcome: { type: "goal.cleared" },
-        expected: "已清除当前 Thread Goal",
+        expected: "已清除当前 Session Goal",
       },
       {
         outcome: {

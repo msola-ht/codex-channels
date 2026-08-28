@@ -1000,7 +1000,7 @@ describe("Telegram image input", () => {
       undefined,
     );
     expect(apiCalls).toContain("answerCallbackQuery");
-    expect(sentTexts.join("\n")).toContain("已移动当前会话到 Thread 分区");
+    expect(sentTexts.join("\n")).toContain("已移动当前会话到会话分区");
     await surface.stop();
     await output.close();
   });

@@ -114,7 +114,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationOccupancy({
       kind: "occupancy",
       result: { status: "unbound" },
-    })).toContain("当前会话没有绑定 Codex Thread");
+    })).toContain("当前会话没有绑定 Codex Session");
     expect(formatConversationOccupancy({
       kind: "occupancy",
       result: { status: "free", threadId: "thread-free" },
@@ -167,7 +167,7 @@ describe("provider-aware conversation command formatting", () => {
         threadId: "thread-held",
         holder: { pid: 4242, command: "codex app-server" },
       },
-    })).toContain("已释放 Codex Thread 占用");
+    })).toContain("已释放 Codex Session 占用");
     expect(formatConversationOccupancy({
       kind: "occupancy",
       result: { status: "unidentifiable", threadId: "thread-x" },
@@ -856,7 +856,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(runs).toContain("  - 触发时间：1970-01-01T00:00:00.001Z");
     expect(runs).toContain("  - 开始时间：1970-01-01T00:00:00.001Z");
     expect(runs).toContain("  - 完成时间：1970-01-01T00:00:00.002Z");
-    expect(runs).toContain("  - Thread：thread-1");
+    expect(runs).toContain("  - Session ID：thread-1");
     expect(runs).not.toContain("\n- 计划时间：");
   });
 
@@ -995,7 +995,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationCommandOutcome({
       type: "session.new",
       nextModel,
-    })).toContain("发送下一条普通消息时才会创建新的 Codex Thread");
+    })).toContain("发送下一条普通消息时才会创建新的 Codex Session");
     expect(formatConversationCommandOutcome({
       type: "session.new",
       backgroundedThreadId: "thread-running",
@@ -1055,8 +1055,8 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("下一条消息中创建新 Thread");
-    expect(rendered).toContain("当前 Thread 会保留");
+    expect(rendered).toContain("下一条消息中创建新 Session");
+    expect(rendered).toContain("当前 Session 会保留");
     expect(rendered).toContain("下一条消息模型：deepseek-v4-flash · Provider：deepseek");
   });
 
@@ -1154,7 +1154,7 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain("OpenAI Codex 账户用量摘要");
-    expect(rendered).toContain("当前 Thread 官方估算");
+    expect(rendered).toContain("当前 Session 官方估算");
     expect(rendered).toContain("Credits：46");
     expect(rendered).toContain("估算费用：$1.82");
     expect(rendered).toContain("计费 Token：输入 100 · 缓存 20 · 输出 40");
@@ -1185,7 +1185,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
     expect(unavailable).toContain("累计 Tokens");
-    expect(unavailable).toContain("当前 Thread 的官方计费估算不可用");
+    expect(unavailable).toContain("当前 Session 的官方计费估算不可用");
     expect(unavailable).toContain("仅向部分 Business/Enterprise 工作区开放");
 
     const failed = formatConversationUsage({
@@ -1198,7 +1198,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
     expect(failed).toContain("累计 Tokens");
-    expect(failed).toContain("当前 Thread 官方估算暂时无法查询，请稍后重试 /usage");
+    expect(failed).toContain("当前 Session 官方估算暂时无法查询，请稍后重试 /usage");
   });
 
   it("omits unavailable official dollars and only sums complete Token fields", () => {

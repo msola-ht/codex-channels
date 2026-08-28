@@ -255,8 +255,8 @@ describe("Weixin command renderer", () => {
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("本次为只读查询"),
       expect.stringContaining("项目规则检查通过"),
-      "当前 Thread 暂无 Turn Diff。",
-      "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
+      "当前 Session 暂无 Turn Diff。",
+      "当前 Session 没有 Goal。使用 /goal set <目标> 设置。",
     ]);
   });
 
