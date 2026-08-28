@@ -1889,7 +1889,7 @@ export function formatConversationLimits(
     ...(hasWeeklyWindow
       ? [
           "",
-          "周限估算（本机代理样本）：",
+          `周限估算（${weeklyEstimates.some((estimate) => estimate.source === "center") ? "指标中心，多设备" : "本机代理样本"}）：`,
           ...(weeklyEstimates.length === 0
             ? ["正在采样；需要同一周窗口内至少出现一次可观测的额度增长。"]
             : weeklyEstimates.flatMap((estimate) => {
@@ -1898,7 +1898,9 @@ export function formatConversationLimits(
                   estimate.requestCount - estimate.unsuccessfulRequestCount,
                 );
                 return [
-                "本周期本机实际：",
+                estimate.source === "center"
+                  ? `本周期指标中心汇总（${estimate.deviceCount ?? 0} 个设备）：`
+                  : "本周期本机实际：",
                 `  - 请求：${estimate.periodRequestCount ?? estimate.requestCount} 次`,
                 `  - Token：${formatTokenCount(estimate.periodTotalTokens ?? estimate.totalTokensPerPercent)}`,
                 `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.periodTotalCostNanos ?? null)}`,
@@ -1917,7 +1919,9 @@ export function formatConversationLimits(
                   : []),
                 ];
               })),
-          "口径：按统计代理相邻额度快照的增量折算；其他客户端在快照间的用量可能造成偏差，费用不是订阅实际扣款。",
+          weeklyEstimates.some((estimate) => estimate.source === "center")
+            ? "口径：请求、Token 和费用为指标中心汇总的已同步样本；额度总量按中心周期的额度变化估算，可能存在同步延迟，费用不是订阅实际扣款。"
+            : "口径：按统计代理相邻额度快照的增量折算；其他客户端在快照间的用量可能造成偏差，费用不是订阅实际扣款。",
         ]
       : []),
   ].join("\n"));

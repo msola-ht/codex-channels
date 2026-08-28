@@ -93,7 +93,7 @@
   接收各设备 Gateway 的增量上报（独立 Bearer 上报令牌校验、载荷校验、按 `device_id + local_id`
   upsert 覆盖写入），写入中心 SQLite（复用 `metrics-center-schema.sql` 表结构，
   WAL、`0600`），并提供 `/api/overview`、`/api/requests`、`/api/subagents`、
-  `/api/devices`、`/api/health`；查询使用独立只读令牌，WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端；
+  `/api/quota?days=365`（也支持 `days=all`，按提供商、额度窗口、重置时间聚合多设备实际请求与估算）、`/api/devices`、`/api/health`；查询使用独立只读令牌，WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端；
   `center info --json` 返回运行状态、端点和双令牌配置布尔值，不返回令牌或掩码片段。
   子命令 `codexc center config` 交互设置 `[metrics.center]`、`codexc center info` 输出
   中心地址（含设备上报端点）、双令牌状态与运行状态；监听参数优先命令行，其次

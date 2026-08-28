@@ -214,6 +214,10 @@ async function routeApi(environment, url, response) {
     await proxyGlobalCenter(environment, url, response, "/api/daily");
     return;
   }
+  if (apiPath === "/global/quota") {
+    await proxyGlobalCenter(environment, url, response, "/api/quota");
+    return;
+  }
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
 }
 

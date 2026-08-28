@@ -294,6 +294,10 @@ async function handleRequest({ token, deviceToken }, database, request, response
     handleDaily(url, database, response);
     return;
   }
+  if (url.pathname === "/api/quota") {
+    handleQuota(url, database, response);
+    return;
+  }
   if (url.pathname === "/api/requests") {
     handleRequests(url, database, response);
     return;
@@ -497,6 +501,134 @@ function handleDaily(url, database, response) {
     ORDER BY day ASC
   `).all(...params);
   sendJson(response, 200, { daily: rows });
+}
+
+function handleQuota(url, database, response) {
+  const requestedDays = url.searchParams.get("days") ?? "";
+  const days = requestedDays === "all" ? "all" : clampDays(requestedDays, 365);
+  const deviceId = url.searchParams.get("device") ?? "";
+  const deviceClause = deviceId ? " WHERE device_id = ?" : "";
+  const rows = database.prepare(days === "all" ? `
+    SELECT device_id, recorded_at_ms, input_tokens, output_tokens, total_tokens,
+           total_cost_nanos, status, payload
+    FROM request_metrics${deviceClause} ORDER BY recorded_at_ms ASC
+  ` : `
+    SELECT device_id, recorded_at_ms, input_tokens, output_tokens, total_tokens,
+           total_cost_nanos, status, payload
+    FROM request_metrics WHERE recorded_at_ms >= ?${deviceId ? " AND device_id = ?" : ""}
+    ORDER BY recorded_at_ms ASC
+  `).all(...(days === "all"
+    ? (deviceId ? [deviceId] : [])
+    : [Date.now() - days * 86_400_000, ...(deviceId ? [deviceId] : [])]));
+  const periods = new Map();
+  for (const row of rows) {
+    let payload;
+    try { payload = JSON.parse(row.payload); } catch { continue; }
+    const snapshots = [];
+    if (payload.weeklyQuota?.resetsAt !== undefined) snapshots.push({
+      windowId: payload.weeklyQuota.limitId ?? "codex",
+      resetsAt: payload.weeklyQuota.resetsAt,
+      usedPercentMillionths: payload.weeklyQuota.usedPercentMillionths ?? null,
+    });
+    for (const window of payload.quotaWindows ?? []) {
+      if (window?.resetsAt !== null && window?.resetsAt !== undefined) snapshots.push({
+        windowId: window.windowId,
+        resetsAt: window.resetsAt,
+        usedPercentMillionths: null,
+      });
+    }
+    for (const snapshot of snapshots) {
+      if (!Number.isSafeInteger(snapshot.resetsAt)) continue;
+      if (typeof snapshot.windowId !== "string" || snapshot.windowId.length === 0) continue;
+      const provider = payload.provider ?? "unknown";
+      const existing = [...periods.values()].find((candidate) =>
+        candidate.provider === provider
+        && candidate.windowId === snapshot.windowId
+        && Math.abs(candidate.resetsAt - snapshot.resetsAt) <= 5 * 60,
+      );
+      const key = existing?.key ?? `${provider}\u0000${snapshot.windowId}\u0000${snapshot.resetsAt}`;
+      const period = periods.get(key) ?? {
+        key,
+        provider,
+        windowId: snapshot.windowId,
+        resetsAt: snapshot.resetsAt,
+        firstObservedAtMs: row.recorded_at_ms,
+        lastObservedAtMs: row.recorded_at_ms,
+        deviceIds: new Set(),
+        requestCount: 0,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        totalCostNanos: 0,
+        pricedRequestCount: 0,
+        latestUsedPercentMillionths: null,
+        quotaSamples: [],
+      };
+      period.lastObservedAtMs = row.recorded_at_ms;
+      period.deviceIds.add(row.device_id);
+      period.requestCount += 1;
+      if (row.status !== "completed") period.unsuccessfulRequestCount += 1;
+      period.inputTokens += row.input_tokens ?? 0;
+      period.outputTokens += row.output_tokens ?? 0;
+      period.totalTokens += row.total_tokens ?? (row.input_tokens ?? 0) + (row.output_tokens ?? 0);
+      if (row.total_cost_nanos !== null) {
+        period.totalCostNanos += row.total_cost_nanos;
+        period.pricedRequestCount += 1;
+      }
+      if (snapshot.usedPercentMillionths !== null
+        && Number.isSafeInteger(snapshot.usedPercentMillionths)) {
+        period.latestUsedPercentMillionths = snapshot.usedPercentMillionths;
+        period.quotaSamples.push({
+          observedAtMs: row.recorded_at_ms,
+          usedPercentMillionths: snapshot.usedPercentMillionths,
+        });
+      }
+      periods.set(key, period);
+    }
+  }
+  sendJson(response, 200, {
+    days,
+    generatedAt: new Date().toISOString(),
+    periods: [...periods.values()].map((period) => {
+      const samples = period.quotaSamples.sort((a, b) => a.observedAtMs - b.observedAtMs);
+      let observedDeltaPercentMillionths = 0;
+      for (let index = 1; index < samples.length; index += 1) {
+        const delta = samples[index].usedPercentMillionths - samples[index - 1].usedPercentMillionths;
+        if (delta > 0) observedDeltaPercentMillionths += delta;
+      }
+      const tokensPerPercent = observedDeltaPercentMillionths > 0
+        ? period.totalTokens * 1_000_000 / observedDeltaPercentMillionths
+        : null;
+      const costPerPercentNanos = observedDeltaPercentMillionths > 0
+        ? period.totalCostNanos * 1_000_000 / observedDeltaPercentMillionths
+        : null;
+      const publicPeriod = {
+        provider: period.provider,
+        windowId: period.windowId,
+        resetsAt: period.resetsAt,
+        firstObservedAtMs: period.firstObservedAtMs,
+        lastObservedAtMs: period.lastObservedAtMs,
+        requestCount: period.requestCount,
+        unsuccessfulRequestCount: period.unsuccessfulRequestCount,
+        inputTokens: period.inputTokens,
+        outputTokens: period.outputTokens,
+        totalTokens: period.totalTokens,
+        totalCostNanos: period.totalCostNanos,
+        pricedRequestCount: period.pricedRequestCount,
+        latestUsedPercentMillionths: period.latestUsedPercentMillionths,
+      };
+      return {
+        ...publicPeriod,
+        deviceCount: period.deviceIds.size,
+        observedDeltaPercentMillionths,
+        tokensPerPercent,
+        costPerPercentNanos: period.pricedRequestCount === 0 ? null : costPerPercentNanos,
+        estimatedTotalTokens: tokensPerPercent === null ? null : tokensPerPercent * 100,
+        estimatedTotalCostNanos: costPerPercentNanos === null ? null : costPerPercentNanos * 100,
+      };
+    }),
+  });
 }
 
 const requestSortColumns = {

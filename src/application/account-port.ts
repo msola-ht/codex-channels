@@ -112,6 +112,8 @@ export interface AccountWeeklyLimitEstimate {
   periodOutputTokens?: number;
   periodTotalTokens?: number;
   periodTotalCostNanos?: number | null;
+  source?: "local" | "center";
+  deviceCount?: number;
 }
 
 export interface AccountQueryPort {

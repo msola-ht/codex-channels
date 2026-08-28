@@ -56,6 +56,7 @@ import {
   fetchGlobalDaily,
   fetchGlobalDevices,
   fetchGlobalOverview,
+  fetchGlobalQuota,
   fetchOpencodeGoUsage,
   fetchSettings,
 } from "@/lib/api"
@@ -66,6 +67,7 @@ import type {
   GlobalDailyRow,
   GlobalDeviceRow,
   GlobalOverviewResponse,
+  GlobalQuotaResponse,
   GlobalProviderRow,
   OpencodeGoUsageResponse,
   SettingsResponse,
@@ -253,6 +255,10 @@ function GlobalDashboard({
     (signal) => fetchGlobalDaily(deviceId, 90, signal),
     [deviceId],
   )
+  const quota = useApi(
+    (signal) => fetchGlobalQuota(365, deviceId, signal),
+    [deviceId],
+  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -263,6 +269,7 @@ function GlobalDashboard({
         : (
           <>
             <GlobalTotalsCards totals={overview.data.totals} />
+            <GlobalQuotaCard quota={quota.data} loading={quota.loading} />
             <GlobalTrendCard rows={daily.data?.daily ?? []} loading={daily.loading} />
             <GlobalHeatmapCard rows={daily.data?.daily ?? []} loading={daily.loading} />
             <GlobalCostTable rows={overview.data.costsByCurrency} />
@@ -274,6 +281,44 @@ function GlobalDashboard({
         ? <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} />
         : null}
     </div>
+  )
+}
+
+function GlobalQuotaCard({
+  quota,
+  loading,
+}: {
+  quota: GlobalQuotaResponse | null
+  loading: boolean
+}) {
+  if (loading && quota === null) return <PageSkeleton rows={2} />
+  if (quota === null || quota.periods.length === 0) {
+    return <Alert><AlertTitle>暂无额度周期</AlertTitle><AlertDescription>中心库尚未收集到带重置时间的额度快照</AlertDescription></Alert>
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>多设备额度估算</CardTitle>
+        <CardDescription>最近 {quota.days} 天，按提供商与重置时间合并</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead>提供商 / 窗口</TableHead><TableHead>设备</TableHead><TableHead>本周期 Token</TableHead>
+            <TableHead>最新使用</TableHead><TableHead>推算 100% Token</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>{quota.periods.map((period) => (
+            <TableRow key={`${period.provider}-${period.windowId}-${period.resetsAt}`}>
+              <TableCell>{period.provider} · {period.windowId}</TableCell>
+              <TableCell>{period.deviceCount}</TableCell>
+              <TableCell>{formatTokens(period.totalTokens)}</TableCell>
+              <TableCell>{period.latestUsedPercentMillionths === null ? "—" : `${(period.latestUsedPercentMillionths / 100_000).toFixed(2)}%`}</TableCell>
+              <TableCell>{period.estimatedTotalTokens === null ? "—" : formatTokens(period.estimatedTotalTokens)}</TableCell>
+            </TableRow>
+          ))}</TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   )
 }
 

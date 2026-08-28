@@ -450,11 +450,32 @@ export function createTurnCompletedPresentation(
             : event.workspaceId,
         }]
       : []),
-    { label: "Thread ID", value: event.threadId },
+    { label: "Session ID", value: event.threadId },
   ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
   let fallbackCacheField: LifecyclePresentationField | undefined;
+  if (debug && event.remoteQuota) {
+    accountFields.push({
+      label: "额度中心",
+      value: `${event.remoteQuota.deviceCount} 台设备 · ${event.remoteQuota.requestCount} 次请求`,
+      subfields: [
+        { label: "本周期 Token", value: formatTokenCount(event.remoteQuota.totalTokens) },
+        ...(event.remoteQuota.latestUsedPercentMillionths === null
+          ? []
+          : [{
+              label: "最新使用",
+              value: `${(event.remoteQuota.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%`,
+            }]),
+        ...(event.remoteQuota.estimatedTotalTokens === null
+          ? []
+          : [{
+              label: "推算 100% Token",
+              value: formatTokenCount(event.remoteQuota.estimatedTotalTokens),
+            }]),
+      ],
+    });
+  }
   if (event.error) {
     runFields.push({
       label: "错误",
@@ -503,13 +524,13 @@ export function createTurnCompletedPresentation(
       value: `${event.contextCompactionCount} 次`,
     });
   }
-  if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
+  if (debug && usesOpenAiAccount(event.modelProvider) && event.weeklyLimit && !event.remoteQuota) {
     accountFields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
-  if (remainingUsage) {
+  if (debug && remainingUsage) {
     accountFields.push({
       label: `剩余用量${remainingUsage.bucket === undefined
         ? ""
@@ -903,7 +924,7 @@ export function createTurnCompletedPresentation(
       ? [{ title: "本次运行", fields: runFields }]
       : []),
     ...(sessionFields.length > 0
-      ? [{ title: "当前会话累计", fields: sessionFields }]
+      ? [{ title: "当前 Session 累计", fields: sessionFields }]
       : []),
     ...(accountFields.length > 0
       ? [{ title: "账户状态", fields: accountFields }]

@@ -342,6 +342,45 @@ describe("metrics center server", () => {
     expect(bounded.daily.length).toBeLessThanOrEqual(1);
   });
 
+  it("aggregates quota snapshots across devices and estimates the observed window", async () => {
+    const { origin } = await startServer();
+    const resetAt = 1_800_000_000;
+    await ingest(origin, payloadBody([{
+      ...requestRow(1),
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 10_000_000,
+        resetsAt: resetAt,
+      },
+    }], []));
+    await ingest(origin, payloadBody([{
+      ...requestRow(2),
+      recordedAtMs: 1_785_640_900_000,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 12_000_000,
+        resetsAt: resetAt + 120,
+      },
+    }], [], "device-b"));
+
+    const body = await fetchJson<{
+      periods: Array<Record<string, number | null>>;
+    }>(`${origin}/api/quota?days=365`);
+    expect(body.periods).toHaveLength(1);
+    expect(body.periods[0]).toMatchObject({
+      provider: "deepseek",
+      windowId: "codex",
+      deviceCount: 2,
+      requestCount: 2,
+      totalTokens: 2_200,
+      observedDeltaPercentMillionths: 2_000_000,
+      tokensPerPercent: 1_100,
+      estimatedTotalTokens: 110_000,
+    });
+    const all = await fetchJson<{ days: number | "all" }>(`${origin}/api/quota?days=all`);
+    expect(all.days).toBe("all");
+  });
+
   it("rejects invalid payloads and exposes public health", async () => {
     const { origin } = await startServer();
 

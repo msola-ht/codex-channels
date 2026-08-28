@@ -82,6 +82,11 @@ describe("webui server", () => {
           inputTokens: 1_000,
           outputTokens: 100,
           totalTokens: 1_100,
+          weeklyQuota: {
+            limitId: "codex",
+            usedPercentMillionths: 10_000_000,
+            resetsAt: 1_800_000_000,
+          },
           recordedAtMs: 1_785_640_800_000,
         }],
         subagentThreads: [],
@@ -102,6 +107,12 @@ describe("webui server", () => {
       daily: Array<{ request_count: number }>;
     };
     expect(dailyBody.daily.reduce((sum, row) => sum + row.request_count, 0)).toBe(1);
+
+    const quota = await fetch(`${origin}/api/v1/global/quota?days=365`);
+    expect(quota.status).toBe(200);
+    expect(await quota.json()).toMatchObject({
+      periods: [expect.objectContaining({ provider: "deepseek", windowId: "codex" })],
+    });
   });
 
   it("serves the static page and rejects unknown paths", async () => {

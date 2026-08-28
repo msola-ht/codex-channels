@@ -385,6 +385,35 @@ export interface GlobalDailyResponse {
   daily: GlobalDailyRow[]
 }
 
+export interface GlobalQuotaPeriod {
+  provider: string
+  windowId: string
+  resetsAt: number
+  firstObservedAtMs: number
+  lastObservedAtMs: number
+  deviceCount: number
+  requestCount: number
+  unsuccessfulRequestCount: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  totalCostNanos: number
+  pricedRequestCount: number
+  latestUsedPercentMillionths: number | null
+  observedDeltaPercentMillionths: number
+  tokensPerPercent: number | null
+  costPerPercentNanos: number | null
+  /** 按观测到的额度增量外推到 100% 的估算值。 */
+  estimatedTotalTokens: number | null
+  estimatedTotalCostNanos: number | null
+}
+
+export interface GlobalQuotaResponse {
+  days: number | "all"
+  generatedAt: string
+  periods: GlobalQuotaPeriod[]
+}
+
 export interface GlobalRequestRow {
   device_id: string
   local_id: number
