@@ -42,6 +42,8 @@ export class ConversationCore {
   private readonly goalsByThread = new Map<string, ThreadGoal>();
   private readonly contextCompactionItemIdsByThread = new Map<string, Set<string>>();
   private readonly seenUserMessages = new Set<string>();
+  private readonly turnsWithUserMessage = new Set<string>();
+  private readonly turnsWithFinalResponse = new Set<string>();
   private readonly phaseByItem = new Map<string, MessagePhase | null>();
   private readonly artifactsByThread = new Map<string, TurnArtifacts>();
   private readonly timingByThread = new Map<string, TurnTimingAccumulator>();
@@ -165,6 +167,7 @@ export class ConversationCore {
         this.contextCompactionItemIdsByThread.delete(threadId);
         this.artifactsByThread.delete(threadId);
         this.timingByThread.delete(threadId);
+        this.clearTurnResponseState(threadId);
         this.disposeReasoning(threadId);
       }
       this.publishConnectionNotice("connection.lost", message, affectedThreadIds);
@@ -177,6 +180,8 @@ export class ConversationCore {
     this.goalsByThread.clear();
     this.contextCompactionItemIdsByThread.clear();
     this.seenUserMessages.clear();
+    this.turnsWithUserMessage.clear();
+    this.turnsWithFinalResponse.clear();
     this.phaseByItem.clear();
     this.timingByThread.clear();
     for (const state of this.reasoningByThread.values()) {
@@ -339,6 +344,9 @@ export class ConversationCore {
       case "item.agentMessage.completed": {
         const key = this.itemKey(event.threadId, event.turnId, event.itemId);
         const phase = event.phase ?? this.phaseByItem.get(key) ?? null;
+        if (phase !== "commentary" && event.text.trim().length > 0) {
+          this.turnsWithFinalResponse.add(this.turnKey(event.threadId, event.turnId));
+        }
         this.publishForThread(event.threadId, {
           type: "text.completed",
           threadId: event.threadId,
@@ -391,6 +399,11 @@ export class ConversationCore {
         return;
       case "turn.completed": {
         this.clearReasoning(event.threadId, event.turnId);
+        const responseKey = this.turnKey(event.threadId, event.turnId);
+        const hasUserMessage = this.turnsWithUserMessage.has(responseKey);
+        const hasFinalResponse = this.turnsWithFinalResponse.has(responseKey);
+        this.turnsWithUserMessage.delete(responseKey);
+        this.turnsWithFinalResponse.delete(responseKey);
         this.clearSeenUserMessages(event.threadId, event.turnId);
         this.clearItemPhases(event.threadId, event.turnId);
         const target = this.router.targetForThread(event.threadId);
@@ -435,6 +448,13 @@ export class ConversationCore {
           status: event.status,
           ...(resolvedError ? { error: resolvedError.message } : {}),
           ...(resolvedError?.errorCode ? { errorCode: resolvedError.errorCode } : {}),
+          ...(event.status === "completed"
+              && resolvedError === undefined
+              && hasUserMessage
+              && !hasFinalResponse
+              && !this.isBackgroundThread(event.threadId)
+            ? { missingFinalResponse: true as const }
+            : {}),
           ...(event.durationMs === undefined
             ? {}
             : { durationMs: event.durationMs }),
@@ -481,6 +501,7 @@ export class ConversationCore {
         this.goalsByThread.delete(event.threadId);
         this.contextCompactionItemIdsByThread.delete(event.threadId);
         this.timingByThread.delete(event.threadId);
+        this.clearTurnResponseState(event.threadId);
         this.disposeReasoning(event.threadId);
         this.clearSeenUserMessages(event.threadId);
         this.clearItemPhases(event.threadId);
@@ -659,6 +680,7 @@ export class ConversationCore {
   private publishUserMessage(
     event: Extract<ConversationInputEvent, { type: "item.userMessage" }>,
   ): void {
+    this.turnsWithUserMessage.add(this.turnKey(event.threadId, event.turnId));
     const messageKey = `${event.threadId}:${event.turnId}:${event.itemId}`;
     if (this.seenUserMessages.has(messageKey)) {
       return;
@@ -699,6 +721,24 @@ export class ConversationCore {
         this.phaseByItem.delete(key);
       }
     }
+  }
+
+  private clearTurnResponseState(threadId: string): void {
+    const prefix = `${threadId}:`;
+    for (const key of this.turnsWithUserMessage) {
+      if (key.startsWith(prefix)) {
+        this.turnsWithUserMessage.delete(key);
+      }
+    }
+    for (const key of this.turnsWithFinalResponse) {
+      if (key.startsWith(prefix)) {
+        this.turnsWithFinalResponse.delete(key);
+      }
+    }
+  }
+
+  private turnKey(threadId: string, turnId: string): string {
+    return `${threadId}:${turnId}`;
   }
 
   private itemKey(threadId: string, turnId: string, itemId: string): string {

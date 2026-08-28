@@ -37,6 +37,7 @@ import {
   formatAveragePriceValue,
   formatCompactMetricsValue,
 } from "./metrics-format.js";
+import { missingFinalResponseText } from "./output-copy.js";
 import {
   formatCacheHitRate,
   formatTokenCount,
@@ -486,6 +487,12 @@ export function createTurnCompletedPresentation(
     runFields.push({
       label: "错误",
       value: formatTurnErrorMessage(event.error, event.errorCode),
+    });
+  }
+  if (event.missingFinalResponse) {
+    runFields.push({
+      label: "结果",
+      value: missingFinalResponseText,
     });
   }
   if (event.tokenUsage) {
@@ -946,7 +953,7 @@ export function createTurnCompletedPresentation(
       : []),
   ];
   return {
-    title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
+    title: `${event.background ? "后台任务" : "本次运行"} · ${event.missingFinalResponse ? "无最终回复" : turnStatusLabel(event.status)}`,
     fields: sections.length === 1 ? sections[0]!.fields : [],
     ...(sections.length > 1 ? { sections } : {}),
   };

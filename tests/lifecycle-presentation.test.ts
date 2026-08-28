@@ -1347,6 +1347,29 @@ describe("shared Surface lifecycle presentation", () => {
     expect(debug).toContain("均价：约 $500,000.00/100M（≈ ¥3,600,000.00/100M）");
   });
 
+  it("renders a completed Turn without a final response as an actionable anomaly", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-openai",
+        turnId: "turn-openai",
+        status: "completed",
+        missingFinalResponse: true,
+      }),
+    );
+
+    expect(rendered).toContain("本次运行 · 无最终回复");
+    expect(rendered).toContain(
+      "结果：Codex 已结束本轮，但未返回最终消息。请重试；若当前上下文较高，可先使用 /compact。",
+    );
+    expect(rendered).not.toContain("本次运行 · 已完成");
+  });
+
   it("keeps the Turn Token total when cache metrics are incomplete", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({

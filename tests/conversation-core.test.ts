@@ -923,6 +923,144 @@ describe("ConversationCore", () => {
     expect(events.some((event) => event.type === "user.message")).toBe(false);
   });
 
+  it("marks a completed user Turn that has no final response", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "userMessage",
+          id: "user-1",
+          clientId: `${gatewayUserMessageClientIdPrefix}request-1`,
+          content: [{ type: "text", text: "继续处理" }],
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          id: "commentary-1",
+          text: "我先检查一下。",
+          phase: "commentary",
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed", error: null },
+      },
+    });
+    await output.close();
+
+    expect(events.find((event) => event.type === "turn.completed"))
+      .toHaveProperty("missingFinalResponse", true);
+  });
+
+  it("does not mark manual compaction, background Turns, or final responses as missing", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => {
+      events.push(event);
+    });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [],
+      targetForThread: () => target,
+      isBackgroundThread: (threadId) => threadId === "background-thread",
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "compact-turn", status: "completed", error: null },
+      },
+    });
+    handleNotification(core, {
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-2",
+        item: {
+          type: "userMessage",
+          id: "user-2",
+          clientId: `${gatewayUserMessageClientIdPrefix}request-2`,
+          content: [{ type: "text", text: "继续处理" }],
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-2",
+        item: {
+          type: "agentMessage",
+          id: "final-2",
+          text: "已经处理完成。",
+          phase: "final_answer",
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-2", status: "completed", error: null },
+      },
+    });
+    handleNotification(core, {
+      method: "item/started",
+      params: {
+        threadId: "background-thread",
+        turnId: "background-turn",
+        item: {
+          type: "userMessage",
+          id: "background-user",
+          clientId: `${gatewayUserMessageClientIdPrefix}background-request`,
+          content: [{ type: "text", text: "执行后台任务" }],
+        },
+      },
+    });
+    handleNotification(core, {
+      method: "turn/completed",
+      params: {
+        threadId: "background-thread",
+        turn: { id: "background-turn", status: "completed", error: null },
+      },
+    });
+    await output.close();
+
+    const completions = events.filter((event) => event.type === "turn.completed");
+    expect(completions).toHaveLength(3);
+    expect(completions[0]).not.toHaveProperty("missingFinalResponse");
+    expect(completions[1]).not.toHaveProperty("missingFinalResponse");
+    expect(completions[2]).toMatchObject({ background: true });
+    expect(completions[2]).not.toHaveProperty("missingFinalResponse");
+  });
+
   it("propagates agent message phases and emits a disconnect event for cleanup", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];

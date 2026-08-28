@@ -55,6 +55,7 @@ import {
   emptyCodexResponseText,
   formatCliInput,
   formatThreadAvailability,
+  missingFinalResponseText,
 } from "../src/surfaces/output-copy.js";
 import {
   renderWeixinCommandResult,
@@ -233,6 +234,9 @@ describe("shared surface copy contract", () => {
     expect(formatTurnInputAppended("image", true))
       .toBe("已将图片和补充要求追加到当前 Turn。");
     expect(emptyCodexResponseText).toBe("Codex 返回了空消息。");
+    expect(missingFinalResponseText).toBe(
+      "Codex 已结束本轮，但未返回最终消息。请重试；若当前上下文较高，可先使用 /compact。",
+    );
     expect(formatCliInput("继续处理"))
       .toBe("CLI 输入\n\n继续处理");
   });
