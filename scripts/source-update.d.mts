@@ -122,3 +122,8 @@ export function inspectManagedSourceUpdatePlan(
 ): SourceUpdatePlan;
 
 export function getSourceUpdateFailure(error: unknown): SourceUpdateFailure | undefined;
+export function getCodexVersionMismatchRemediation(error: unknown): string[];
+export function writeSourceUpdateFailure(
+  error: unknown,
+  writeMessage?: SourceUpdateOptions["writeMessage"],
+): void;
