@@ -28,6 +28,8 @@ npm install -g @openai/codex@0.145.0
 npm install -g @hegenai/codexc@0.145.0
 \`\`\`
 
+Codex 0.145.0 的 Plugin API 仍在开发中。
+
 - 重新安装精确版本 \`@openai/codex@0.145.0\`。
 `;
 
@@ -170,6 +172,7 @@ describe("published README synchronization", () => {
     expect(updated).toContain("`codex-cli 0.146.0`");
     expect(updated).toContain("@openai/codex@0.146.0");
     expect(updated).toContain("@hegenai/codexc@0.146.0");
+    expect(updated).toContain("Codex 0.146.0 的 Plugin API");
     expect(updated).not.toContain("0.145.0");
     expect(renderPublishedReadme(updated, "0.146.0")).toBe(updated);
   });
@@ -239,6 +242,22 @@ describe("published README synchronization", () => {
     expect(stableReadme).not.toContain("当前预发行版");
     expect(stableReadme).not.toContain("测试下一正式版预发行包");
     expect(stableReadme).not.toContain("0.146.0-rc.1");
+  });
+
+  it("keeps an older fix preview intact when an rc becomes stable", () => {
+    const fixReadme = renderPublishedReadme(readme, "0.145.0-fix2");
+    const rcReadme = renderPublishedReadme(fixReadme, "0.146.0-rc.1");
+    const stableReadme = renderPublishedReadme(
+      rcReadme.replace(
+        "`main` 开发基线：`0.146.0-rc.1`",
+        "`main` 开发基线：`0.146.0`（尚未发布）",
+      ),
+      "0.146.0",
+    );
+
+    expect(stableReadme).toContain("当前修复预览版：`0.145.0-fix2`");
+    expect(stableReadme).toContain("@hegenai/codexc@0.145.0-fix2");
+    expect(stableReadme).not.toContain("@hegenai/codexc@0.146.0-fix2");
   });
 
   it("keeps a newer main baseline marked as unpublished", () => {

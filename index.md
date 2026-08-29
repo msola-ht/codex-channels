@@ -16,7 +16,7 @@
 ## 发行记录
 
 - [`docs/releases/v0.150.1.md`](docs/releases/v0.150.1.md)：对应 `codex-cli 0.150.1` 的
-  `v0.150.1-rc.1` 预发行说明、用户可见改动、兼容边界与发布状态。
+  `v0.150.1` 正式发行说明、用户可见改动、兼容边界与验证状态。
 - [`docs/releases/v0.148.0-fix1.md`](docs/releases/v0.148.0-fix1.md)：`v0.148.0-fix1` npm 修复预览版
   的改动、安装、验证和回滚说明。
 - [`docs/releases/v0.148.0-fix2.md`](docs/releases/v0.148.0-fix2.md)：修复 `-fixN` 源码更新失败的
