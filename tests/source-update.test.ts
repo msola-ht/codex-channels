@@ -241,6 +241,31 @@ describe("Git 源码更新", () => {
       .toBe("0.147.0-fix1");
   });
 
+  it("updates an older stable source checkout to a newer Gateway rc release", async () => {
+    const fixture = createInstalledFixture("codexc-source-update-rc-release-");
+    writePackageVersion(fixture.repository, "0.148.0-rc.1");
+    runGit(fixture.repository, ["add", "."]);
+    runGit(fixture.repository, ["commit", "--quiet", "-m", "rc release"]);
+    writeFileSync(fixture.codex, "#!/bin/sh\nprintf '%s\\n' 'codex-cli 0.148.0'\n");
+
+    const result = await updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => undefined,
+      inspectStaged: async () => ({ services: { installed: false } }),
+      installGlobalPackage: () => undefined,
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      runLocalUpdate: () => undefined,
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      previousVersion: "0.147.0",
+      version: "0.148.0-rc.1",
+    });
+    expect(JSON.parse(readFileSync(join(fixture.checkout, "package.json"), "utf8")).version)
+      .toBe("0.148.0-rc.1");
+  });
+
   it("migrates the legacy launcher even when main is already current", async () => {
     const fixture = createInstalledFixture("codexc-source-launcher-migration-");
     runGit(fixture.checkout, ["reset", "--quiet", "--hard", fixture.latestCommit]);
@@ -555,6 +580,7 @@ function createInstalledFixture(prefix: string) {
   writeFileSync(codex, "#!/bin/sh\nprintf '%s\\n' 'codex-cli 0.147.0'\n");
   chmodSync(codex, 0o755);
   return {
+    codex,
     checkout,
     environment: {
       ...process.env,

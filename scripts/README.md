@@ -9,8 +9,8 @@
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
 - `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
   源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
-  版本不匹配；接受与候选协议基础版本一致的 `-fixN` Gateway 修复版本，Codex CLI 校验仍使用候选
-  协议元数据中的正式版本；更新前返回不包含 origin 的修订计划，候选准备完成后再返回目标版本、服务中断要求和
+  版本不匹配；接受与候选协议基础版本一致的 `-rc.N` Gateway 候选版或 `-fixN` 修复版，Codex CLI
+  校验仍使用候选协议元数据中的正式版本；更新前返回不包含 origin 的修订计划，候选准备完成后再返回目标版本、服务中断要求和
   精确执行阶段，预检状态变化时在克隆或停服前拒绝执行；
   候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，之后才停止服务并
   原子切换源码，最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
@@ -405,8 +405,8 @@
   均按固定 `v2.4.6` 合同申请官方 CDN 上传地址、AES-128-ECB 加密并以二进制 `POST` 上传，
   再发送单张图片或单个一般文件消息；上传缺少下载参数时有限重试，4xx 立即失败；不输出或保存
   媒体正文、上传地址、参数、key、Token、游标或完整身份，不注册常驻 Surface。
-- `check-gateway-version.mjs`：校验 npm 包与 Gateway 运行时版本一致，并要求正式版本或 `-fixN`
-  修复版本使用与 Codex CLI 协议相同的基础版本。
+- `check-gateway-version.mjs`：校验 npm 包与 Gateway 运行时版本一致，并要求正式版本、`-rc.N`
+  候选版或 `-fixN` 修复版使用与 Codex CLI 协议相同的基础版本。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根 `index.md` 文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `codex-rules.mjs`：向 CLI 重新导出 `runtime/project-rules.mjs` 的项目定位、规则生成与检查能力。
@@ -434,13 +434,14 @@
   全局安装命令会完成构建并生成 `codexc` 入口。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装，验证 WebUI 前端产物，并执行公开的
   `codexc` 入口与配置预检。
-- `check-release-tag.mjs`：要求 Git Tag、`package.json` 与 README 正式版本及安装命令严格一致，
-  README 尚未完成正式发布提交时失败关闭。
-- `sync-published-readme.mjs`：把受控的 README 正式版本与安装命令渲染为已发布版本；允许与
-  当前正式版基础版本一致的 `-fixN` Gateway 修复预览版本，并独立保留正式版安装说明；拒绝其他
-  预发布、降级、高于开发基线和缺少受控标记的文档。
+- `check-release-tag.mjs`：要求 Git Tag、`package.json` 与 README 发布版本及安装命令严格一致，
+  README 尚未完成对应发布提交时失败关闭。
+- `sync-published-readme.mjs`：把受控的 README 正式版、`-rc.N` 候选版或 `-fixN` 修复版及安装命令
+  渲染为对应发布状态；RC 独立保留当前正式安装说明并使用目标正式 Codex CLI，fix 独立保留正式
+  安装说明；拒绝其他预发布、降级、高于开发基线和缺少受控标记的文档。
 - `sync-gateway-version.mjs`：升级 Codex CLI 协议时把 `package.json`、锁文件和 Gateway 运行时
-  版本重置为新的正式基础版本；Gateway 修复发行可在该基础版本后使用受控的 `-fixN` 后缀。
+  版本重置为新的正式基础版本；Gateway 候选发行和修复发行可分别在该基础版本后使用受控的
+  `-rc.N` 或 `-fixN` 后缀。
 - `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
   OpenAI 主提供商使用的配置、环境变量或系统代理路由（不显示代理地址或凭据）、
   Workspace、飞书凭据/Bot 身份、

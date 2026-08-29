@@ -17,7 +17,7 @@ const readme = readFileSync(join(packageDir, "README.md"), "utf8");
 const version = metadata.version;
 if (renderPublishedReadme(readme, version) !== readme) {
   throw new Error(
-    `README 尚未同步为正式版本 ${version}；请先提交 README 正式版本并等待 main CI 通过`,
+    `README 尚未同步为发布版本 ${version}；请先提交对应 README 版本并等待 main CI 通过`,
   );
 }
 console.log(`发布版本匹配：${tag}`);

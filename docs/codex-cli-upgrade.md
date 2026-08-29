@@ -184,7 +184,8 @@ npm run verify:commit
 1. `main` 已同步远端、工作区干净，目标提交的 GitHub CI 全部通过。
 2. `package.json` 与 `src/version.json` 一致；正式 Gateway 版本与
    `src/codex-protocol/version.json`、`ci.yml` 的 Codex CLI 精确版本一致，`-fixN` Gateway
-   修复版本则必须保持相同基础版本。
+   修复版本和 `-rc.N` 候选预发行版则必须保持相同基础版本。RC 只允许基于已经锁定的正式
+   Codex CLI，不采用上游 Codex Pre-release。
 3. npm Trusted Publisher 已绑定本仓库的 `publish.yml`。
 4. 使用仓库脚本把 README 的开发基线、当前正式版、运行要求和安装命令渲染为目标版本，审查
    差异后直接提交并等待 `main` CI 全部通过：
@@ -212,13 +213,15 @@ git tag -a "v$RELEASE_VERSION" -m "发布 v$RELEASE_VERSION"
 git push origin "v$RELEASE_VERSION"
 ```
 
-`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag、包版本和 Tag 所在提交中的 README 正式版本，
+`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag、包版本和 Tag 所在提交中的 README 发布版本，
 运行完整 `verify:commit`，然后通过 npm Trusted Publishing 执行公开发布；README 仍带有“尚未发布”
-标记或安装命令未同步时失败关闭。正式版更新 npm `latest`，`-fixN` 修复版先发布到 `fix` 标签；
-普通 push、合并 PR 和手动运行 CI 都不会发布 npm。修复版验证完成后可用 npm dist-tag 把同一
-版本提升为 `latest`，无需重新发布包。
+标记或安装命令未同步时失败关闭。正式版更新 npm `latest`，`-rc.N` 候选版发布到 `next`，
+`-fixN` 修复版发布到 `fix`；普通 push、合并 PR 和手动运行 CI 都不会发布 npm。修复版验证完成后
+可用 npm dist-tag 把同一版本提升为 `latest`，无需重新发布包；RC 验证完成后仍发布无后缀正式版，
+不把 RC 包提升为正式版。
 
-等待 `Publish npm package` 工作流成功后再创建对应的 GitHub Release。Release 说明应基于升级
+等待 `Publish npm package` 工作流成功后再创建对应的 GitHub Release；`-rc.N` 必须标记为
+Pre-release。Release 说明应基于升级
 PR 的实际改动、验证结果和发布边界整理，不能继续使用自动提案的通用占位描述。正式 Release
 不会再自动修改或提交 README；README 已在发布提交中接受完整门禁。当前工作流不会自动创建
 GitHub Release，也不会自动安装本机包、重启 Gateway 或部署服务。

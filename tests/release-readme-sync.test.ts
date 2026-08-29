@@ -81,6 +81,51 @@ describe("published README synchronization", () => {
     }
   });
 
+  it("validates an rc tag and publishes rc packages to the next channel", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "codexc-release-rc-tag-"));
+    const scriptsDirectory = join(fixture, "scripts");
+    mkdirSync(scriptsDirectory);
+    try {
+      for (const name of [
+        "check-release-tag.mjs",
+        "package-path.mjs",
+        "sync-published-readme.mjs",
+      ]) {
+        copyFileSync(resolve("scripts", name), join(scriptsDirectory, name));
+      }
+      const rcVersion = "0.146.0-rc.1";
+      const rcSource = readme.replace(
+        "`main` 开发基线：`0.146.0`（尚未发布）",
+        `\`main\` 开发基线：\`${rcVersion}\`（尚未发布）`,
+      );
+      writeFileSync(
+        join(fixture, "package.json"),
+        JSON.stringify({ version: rcVersion }),
+      );
+      writeFileSync(
+        join(fixture, "README.md"),
+        renderPublishedReadme(rcSource, rcVersion),
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        [join(scriptsDirectory, "check-release-tag.mjs"), `v${rcVersion}`],
+        {
+          cwd: fixture,
+          encoding: "utf8",
+          env: { ...process.env, GITHUB_REF_NAME: "" },
+        },
+      );
+      const workflow = readFileSync(resolve(".github/workflows/publish.yml"), "utf8");
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(`发布版本匹配：v${rcVersion}`);
+      expect(workflow).toContain("contains(github.ref_name, '-rc.') && 'next'");
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a release tag before the repository README is finalized", () => {
     const fixture = mkdtempSync(join(tmpdir(), "codexc-release-readme-stale-"));
     const scriptsDirectory = join(fixture, "scripts");
@@ -110,7 +155,7 @@ describe("published README synchronization", () => {
       );
 
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain("README 尚未同步为正式版本 0.146.0");
+      expect(result.stderr).toContain("README 尚未同步为发布版本 0.146.0");
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
@@ -148,6 +193,54 @@ describe("published README synchronization", () => {
     expect(renderPublishedReadme(fixReadme, "0.146.0-fix1")).toBe(fixReadme);
   });
 
+  it("publishes an rc version without replacing the current stable installation", () => {
+    const rcReadme = renderPublishedReadme(
+      readme.replace(
+        "`main` 开发基线：`0.146.0`（尚未发布）",
+        "`main` 开发基线：`0.146.0-rc.1`（尚未发布）",
+      ),
+      "0.146.0-rc.1",
+    );
+
+    expect(rcReadme).toContain("`main` 开发基线：`0.146.0-rc.1`");
+    expect(rcReadme).toContain("当前正式版：`0.145.0`");
+    expect(rcReadme).toContain("当前预发行版：`0.146.0-rc.1`");
+    expect(rcReadme).toContain("`codex-cli 0.145.0`");
+    expect(rcReadme).toContain("预发行版要求：macOS 或 Linux、Node.js 22.13+");
+    expect(rcReadme).toContain("`codex-cli 0.146.0`");
+    expect(rcReadme).toContain("@openai/codex@0.146.0");
+    expect(rcReadme).toContain("@hegenai/codexc@0.146.0-rc.1");
+    expect(renderPublishedReadme(rcReadme, "0.146.0-rc.1")).toBe(rcReadme);
+
+    const rc2Readme = renderPublishedReadme(rcReadme, "0.146.0-rc.2");
+    expect(rc2Readme).toContain("当前预发行版：`0.146.0-rc.2`");
+    expect(rc2Readme).toContain("@hegenai/codexc@0.146.0-rc.2");
+    expect(rc2Readme).not.toContain("0.146.0-rc.1");
+    expect(() => renderPublishedReadme(rc2Readme, "0.146.0-rc.1")).toThrow("降级");
+  });
+
+  it("removes the rc installation when the same base version becomes stable", () => {
+    const rcReadme = renderPublishedReadme(
+      readme.replace(
+        "`main` 开发基线：`0.146.0`（尚未发布）",
+        "`main` 开发基线：`0.146.0-rc.1`（尚未发布）",
+      ),
+      "0.146.0-rc.1",
+    );
+    const stableReadme = renderPublishedReadme(
+      rcReadme.replace(
+        "`main` 开发基线：`0.146.0-rc.1`",
+        "`main` 开发基线：`0.146.0`（尚未发布）",
+      ),
+      "0.146.0",
+    );
+
+    expect(stableReadme).toContain("当前正式版：`0.146.0`");
+    expect(stableReadme).not.toContain("当前预发行版");
+    expect(stableReadme).not.toContain("测试下一正式版预发行包");
+    expect(stableReadme).not.toContain("0.146.0-rc.1");
+  });
+
   it("keeps a newer main baseline marked as unpublished", () => {
     const nextBaseline = readme.replace(
       "`main` 开发基线：`0.146.0`",
@@ -163,7 +256,7 @@ describe("published README synchronization", () => {
     expect(() => renderPublishedReadme(readme, "0.144.0")).toThrow("降级");
     expect(() => renderPublishedReadme(readme, "0.147.0")).toThrow("开发基线");
     expect(() => renderPublishedReadme(readme, "0.146.0-alpha.1")).toThrow(
-      "正式版本或 fix 修复版",
+      "正式版本、rc 预发行版或 fix 修复版",
     );
     expect(() =>
       renderPublishedReadme("# Codex Connect Gateway\n", "0.146.0")

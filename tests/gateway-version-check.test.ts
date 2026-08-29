@@ -16,7 +16,10 @@ describe("Gateway version check", () => {
     ["0.148.0", true],
     ["0.148.0-fix1", true],
     ["0.148.0-fix2", true],
+    ["0.148.0-rc.1", true],
+    ["0.148.0-rc.2", true],
     ["0.148.0-fix0", false],
+    ["0.148.0-rc.0", false],
     ["0.148.0-alpha.1", false],
     ["0.149.0-fix1", false],
   ])("validates %s against the locked Codex CLI", (version, accepted) => {

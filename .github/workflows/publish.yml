@@ -49,4 +49,4 @@ jobs:
         run: npm run verify:commit
 
       - name: Publish
-        run: npm publish --access public --tag "${{ contains(github.ref_name, '-fix') && 'fix' || 'latest' }}"
+        run: npm publish --access public --tag "${{ contains(github.ref_name, '-rc.') && 'next' || contains(github.ref_name, '-fix') && 'fix' || 'latest' }}"
