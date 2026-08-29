@@ -24,6 +24,7 @@ import {
   recordManagedSourceMetadata,
 } from "./source-install-metadata.mjs";
 import { removeLegacySourceShellPaths } from "./source-shell-path.mjs";
+import { createPrompter } from "./terminal-prompter.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -87,6 +88,7 @@ export function inspectManagedSourceUpdatePlan(
             "validate-candidate",
             "build-candidate",
             "inspect-candidate",
+            "prepare-codex-cli",
             "stop-services",
             "switch-source",
             "refresh-command",
@@ -212,7 +214,6 @@ export async function updateManagedSourceInstallation(
       if (compareVersions(targetVersion, currentVersion) < 0) {
         throw new Error(`拒绝降级源码安装：当前 ${currentVersion}，main 为 ${targetVersion}`);
       }
-      assertCodexVersion(targetCodexVersion, environment, options.captureCommand);
       const targetCommit = capture(
         "git",
         ["rev-parse", "HEAD"],
@@ -224,7 +225,10 @@ export async function updateManagedSourceInstallation(
         throw new Error("官方 main 在预检后发生变化，请重新运行 codexc update");
       }
       assertFastForward(stagedCheckout, currentCommit, targetCommit, environment);
-      return { targetCommit, targetVersion };
+      if (!options.confirmCodexCliInstall) {
+        assertCodexVersion(targetCodexVersion, environment, options.captureCommand);
+      }
+      return { targetCodexVersion, targetCommit, targetVersion };
     });
     writeMessageSafely(
       writeMessage,
@@ -248,6 +252,16 @@ export async function updateManagedSourceInstallation(
       requiresServiceInterruption: inspection.services.installed,
       targetVersion: candidate.targetVersion,
     }));
+    await runStage(
+      "prepare-codex-cli",
+      () => ensureCodexVersion(
+        candidate.targetCodexVersion,
+        stagedCheckout,
+        environment,
+        writeMessage,
+        options,
+      ),
+    );
     writeMessageSafely(writeMessage, "note", "候选源码已通过校验，准备切换。");
     if (inspection.services.installed) {
       servicesMayNeedRestore = true;
@@ -596,7 +610,48 @@ function assertManagedRepository(checkout, repository, environment, captureComma
   }
 }
 
+async function ensureCodexVersion(expected, checkout, environment, writeMessage, options) {
+  const actual = installedCodexVersion(environment, options.captureCommand);
+  if (actual === expected) return;
+  const failure = codexVersionMismatchError(expected, actual);
+  if (!options.confirmCodexCliInstall) throw failure;
+  const confirmed = await options.confirmCodexCliInstall({
+    currentVersion: actual || undefined,
+    requiredVersion: expected,
+  });
+  if (!confirmed) throw failure;
+  writeMessageSafely(
+    writeMessage,
+    "note",
+    `正在全局安装 @openai/codex@${expected}。`,
+  );
+  try {
+    await (options.installCodexCli ?? installCodexCli)(
+      expected,
+      checkout,
+      environment,
+      options,
+    );
+  } catch (error) {
+    throw codexInstallFailureError(expected, error);
+  }
+  const installed = installedCodexVersion(environment, options.captureCommand);
+  if (installed !== expected) {
+    throw codexVersionMismatchError(expected, installed);
+  }
+  writeMessageSafely(
+    writeMessage,
+    "success",
+    `Codex CLI ${expected} 已安装，继续源码更新。`,
+  );
+}
+
 function assertCodexVersion(expected, environment, captureCommand) {
+  const actual = installedCodexVersion(environment, captureCommand);
+  if (actual !== expected) throw codexVersionMismatchError(expected, actual);
+}
+
+function installedCodexVersion(environment, captureCommand) {
   const executable = environment.CODEX_BINARY?.trim() || "codex";
   const output = capture(
     executable,
@@ -605,17 +660,40 @@ function assertCodexVersion(expected, environment, captureCommand) {
     environment,
     captureCommand,
   ).trim();
-  const actual = output.split(/\s+/u).at(-1)?.replace(/^v/u, "") ?? "";
-  if (actual !== expected) {
-    const error = new Error(
-      `Codex CLI 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}`,
-    );
-    codexVersionMismatchRemediations.set(error, [
-      `npm install -g @openai/codex@${expected}`,
-      "安装完成后重新运行 codexc update",
-    ]);
-    throw error;
-  }
+  return output.split(/\s+/u).at(-1)?.replace(/^v/u, "") ?? "";
+}
+
+function codexVersionMismatchError(expected, actual) {
+  const error = new Error(
+    `Codex CLI 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}`,
+  );
+  codexVersionMismatchRemediations.set(error, [
+    `npm install -g @openai/codex@${expected}`,
+    "安装完成后重新运行 codexc update",
+  ]);
+  return error;
+}
+
+function codexInstallFailureError(expected, cause) {
+  const error = new Error(
+    `Codex CLI ${expected} 安装失败：${errorMessage(cause)}`,
+    { cause },
+  );
+  codexVersionMismatchRemediations.set(error, [
+    `npm install -g @openai/codex@${expected}`,
+    "安装完成后重新运行 codexc update",
+  ]);
+  return error;
+}
+
+function installCodexCli(version, checkout, environment, options) {
+  run(
+    process.platform === "win32" ? "npm.cmd" : "npm",
+    ["install", "-g", `@openai/codex@${version}`],
+    checkout,
+    environment,
+    options.runCommand,
+  );
 }
 
 async function buildCheckout(checkout, environment, options) {
@@ -785,7 +863,26 @@ async function main() {
     await runLocalUpdate(packageDir, process.env, {});
     return;
   }
-  const result = await updateManagedSourceInstallation(process.env, { projectDir: checkout });
+  const prompter = process.stdin.isTTY && process.stdout.isTTY
+    ? createPrompter(process.stdin, process.stdout)
+    : undefined;
+  let result;
+  try {
+    result = await updateManagedSourceInstallation(process.env, {
+      projectDir: checkout,
+      ...(prompter
+        ? {
+            confirmCodexCliInstall: ({ currentVersion, requiredVersion }) =>
+              prompter.confirm(
+                `Codex CLI 版本不匹配（需要 ${requiredVersion}，当前 ${currentVersion ?? "未知"}），是否现在安装？`,
+                true,
+              ),
+          }
+        : {}),
+    });
+  } finally {
+    prompter?.close();
+  }
   if (!result.changed) {
     writeCliMessage(
       "note",

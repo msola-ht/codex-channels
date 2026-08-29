@@ -12,6 +12,7 @@ export type SourceUpdateStage =
   | "validate-candidate"
   | "build-candidate"
   | "inspect-candidate"
+  | "prepare-codex-cli"
   | "stop-services"
   | "switch-source"
   | "refresh-command"
@@ -71,6 +72,16 @@ export interface SourceUpdateOptions {
     args: string[],
     options: Record<string, unknown>,
   ) => void;
+  confirmCodexCliInstall?: (request: {
+    currentVersion?: string;
+    requiredVersion: string;
+  }) => Promise<boolean> | boolean;
+  installCodexCli?: (
+    version: string,
+    checkout: string,
+    environment: NodeJS.ProcessEnv,
+    options: SourceUpdateOptions,
+  ) => Promise<void> | void;
   writeMessage?: (kind: "note" | "success" | "failure" | "remediation", message: string) => void;
   buildCheckout?: (
     checkout: string,
