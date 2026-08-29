@@ -718,6 +718,27 @@ describe("ApprovalCoordinator", () => {
     expect(interaction.requests).toEqual([]);
   });
 
+  it("declines write-stdin approvals until their distinct review is supported", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await handleRaw(coordinator, {
+      id: "request-write-stdin",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        kind: "writeStdin",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "command-1",
+        approvalId: "stdin-approval-1",
+        command: "secret input",
+      },
+    });
+
+    expect(response).toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
+  });
+
   it("maps an explicit session command approval to the protocol session decision", async () => {
     const interaction = new FakeInteraction({
       type: "approval",

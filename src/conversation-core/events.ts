@@ -17,7 +17,8 @@ export type AuthMode =
   | "headers"
   | "agentIdentity"
   | "personalAccessToken"
-  | "bedrockApiKey";
+  | "bedrockApiKey"
+  | "bedrockAccessKeys";
 export type PlanType =
   | "free"
   | "go"
@@ -25,12 +26,16 @@ export type PlanType =
   | "pro"
   | "prolite"
   | "team"
+  | "self_serve_business_prolite"
   | "self_serve_business_usage_based"
   | "business"
   | "ent26"
+  | "enterprise_cbp_automation"
   | "enterprise_cbp_usage_based"
   | "enterprise"
   | "edu"
+  | "edu_plus"
+  | "edu_pro"
   | "unknown";
 export type RateLimitReachedType =
   | "rate_limit_reached"
@@ -301,8 +306,9 @@ export type OutputEvent =
   | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
   | { type: "subagent.contacted"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
   | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; pricedRequestCount: number; inputTokens: number; pricedInputTokens: number; cachedInputTokens: number | null; outputTokens: number; pricedOutputTokens: number; reasoningOutputTokens: number; outputTokensPerSecond: number | null; outputSpeedSampleCount: number; outputSpeedTimedCount: number; totalCostNanos: number | null; inputCostNanos: number | null; cachedInputCostNanos: number | null; outputCostNanos: number | null; pricingCurrency: string | null; elapsedMs: number; durationMs: number }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; remoteQuota?: RemoteQuotaSummary; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; taskAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; remoteQuota?: RemoteQuotaSummary; goal?: ThreadGoal; contextCompactionCount?: number; sessionReferenceCost?: ReferenceCostSummary; taskAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
+  | { type: "thread.name"; target: ConversationTarget; threadId: string; name: string | null; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }
   | { type: "turn.reasoning"; target: ConversationTarget; threadId: string; turnId: string; summary: string; elapsedMs: number; final?: boolean; background?: boolean }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string; background?: boolean }

@@ -65,6 +65,7 @@ export function renderWeixinStartupNotification(
   status: Pick<
     ConversationStatus,
     | "threadId"
+    | "threadName"
     | "workspaceId"
     | "model"
     | "modelProvider"
@@ -88,7 +89,7 @@ export function renderWeixinStartupNotification(
 export function renderWeixinHelp(): string {
   return toStructuredMarkdownList([
     "微信 Codex 命令",
-    "普通文本会发送到当前 Codex Thread。",
+    "普通文本会发送到当前 Codex Session。",
     ...conversationCommandHelpLines,
     "微信：",
     "- /whoami · /wx doctor",

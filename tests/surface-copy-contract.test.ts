@@ -55,6 +55,7 @@ import {
   emptyCodexResponseText,
   formatCliInput,
   formatThreadAvailability,
+  missingFinalResponseText,
 } from "../src/surfaces/output-copy.js";
 import {
   renderWeixinCommandResult,
@@ -161,7 +162,7 @@ describe("shared surface copy contract", () => {
     );
     for (const surface of ["Telegram", "飞书", "微信"] as const) {
       expect(formatSurfaceUserFacingError(error, surface)).toBe(
-        "当前用户没有 Thread 分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway",
+        "当前用户没有会话分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway",
       );
     }
   });
@@ -196,6 +197,12 @@ describe("shared surface copy contract", () => {
     expect(formatPercent(12.34)).toBe("12.3%");
     expect(formatPlanType("self_serve_business_usage_based"))
       .toBe("Business（按量）");
+    expect(formatPlanType("self_serve_business_prolite"))
+      .toBe("Business Premium");
+    expect(formatPlanType("enterprise_cbp_automation"))
+      .toBe("Enterprise（Automation）");
+    expect(formatPlanType("edu_plus")).toBe("Edu Plus");
+    expect(formatPlanType("edu_pro")).toBe("Edu Pro");
     expect(formatPlanType("ent26")).toBe("Enterprise");
     expect(formatRateLimitState(null)).toBe("正常");
     expect(formatRateLimitWindow({
@@ -227,6 +234,9 @@ describe("shared surface copy contract", () => {
     expect(formatTurnInputAppended("image", true))
       .toBe("已将图片和补充要求追加到当前 Turn。");
     expect(emptyCodexResponseText).toBe("Codex 返回了空消息。");
+    expect(missingFinalResponseText).toBe(
+      "Codex 已结束本轮，但未返回最终消息。请重试；若当前上下文较高，可先使用 /compact。",
+    );
     expect(formatCliInput("继续处理"))
       .toBe("CLI 输入\n\n继续处理");
   });
@@ -496,7 +506,7 @@ describe("shared surface copy contract", () => {
     };
 
     const rendered = formatConversationStatus(status);
-    expect(rendered).toContain("Session：thread-1");
+    expect(rendered).toContain("Session ID：thread-1");
     expect(rendered).toContain(
       "周限：剩余 88% · 周期 7 天",
     );
@@ -521,7 +531,13 @@ describe("shared surface copy contract", () => {
       },
       {
         kind: "mcp",
-        servers: [{ name: "docs", pluginId: null, authStatus: "oAuth", toolCount: 2 }],
+        servers: [{
+          name: "docs",
+          runtimeStatus: "connected",
+          pluginId: null,
+          authStatus: "oAuth",
+          toolCount: 2,
+        }],
       },
       {
         kind: "mcp-health",
@@ -540,6 +556,7 @@ describe("shared surface copy contract", () => {
         selector: "docs",
         server: {
           name: "docs",
+          runtimeStatus: "connected",
           pluginId: null,
           authStatus: "oAuth",
           toolCount: 1,

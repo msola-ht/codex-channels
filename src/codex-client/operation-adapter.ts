@@ -214,7 +214,7 @@ function operationStatus(item: Record<string, unknown>, phase: ItemPhase): Opera
     return "running";
   }
   const status = stringValue(item.status)?.toLowerCase();
-  if (status === "failed" || item.success === false) {
+  if (status === "failed" || status === "interrupted" || item.success === false) {
     return "failed";
   }
   if (status === "declined") {

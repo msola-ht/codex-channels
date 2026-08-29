@@ -154,7 +154,7 @@ describe("WeixinSurface", () => {
     );
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "final reply",
-      "**本次运行 · 已完成**\n\n- Session ID：thread",
+      "**本次运行 · 已完成**\n\n- Session：测试会话\n- Session ID：thread",
     ]);
     expect(onFatal).not.toHaveBeenCalled();
   });
@@ -985,6 +985,7 @@ function turnCompleted(): Extract<OutputEvent, { type: "turn.completed" }> {
     type: "turn.completed",
     target,
     threadId: "thread",
+    sessionName: "测试会话",
     turnId: "turn",
     status: "completed",
   };

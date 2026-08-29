@@ -7,6 +7,27 @@ import {
 } from "../src/codex-client/index.js";
 
 describe("Notification adapter", () => {
+  it("maps App Server Session name updates for both core output and routing state", () => {
+    const notification = {
+      method: "thread/name/updated",
+      params: { threadId: "thread-1", threadName: "新名称" },
+    } as const;
+    expect(toConversationInputEvent(notification)).toEqual({
+      type: "thread.name.updated",
+      threadId: "thread-1",
+      name: "新名称",
+    });
+    expect(toThreadStateEvent(notification)).toEqual({
+      type: "thread.name.updated",
+      threadId: "thread-1",
+      name: "新名称",
+    });
+    expect(toConversationInputEvent({
+      method: "thread/name/updated",
+      params: { threadId: "thread-1" },
+    })).toEqual({ type: "thread.name.updated", threadId: "thread-1", name: null });
+  });
+
   it("maps Queue changes to a thread-only snapshot invalidation event", () => {
     expect(toThreadQueueChangedEvent({
       method: "thread/queue/changed",
@@ -173,6 +194,28 @@ describe("Notification adapter", () => {
       agentThreadId: "subagent-thread-1",
       agentPath: "/root/ds_probe",
       kind: "started",
+    });
+    expect(toConversationInputEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "subAgentActivity",
+          id: "item-completed",
+          kind: "completed",
+          agentThreadId: "subagent-thread-1",
+          agentPath: "/root/ds_probe",
+        },
+      },
+    })).toEqual({
+      type: "item.subagentActivity",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-completed",
+      agentThreadId: "subagent-thread-1",
+      agentPath: "/root/ds_probe",
+      kind: "completed",
     });
     expect(toConversationInputEvent({
       method: "thread/status/changed",
@@ -356,6 +399,17 @@ describe("Notification adapter", () => {
       type: "account.updated",
       authMode: "chatgpt",
       planType: "ent26",
+    });
+    expect(toConversationInputEvent({
+      method: "account/updated",
+      params: {
+        authMode: "bedrockAccessKeys",
+        planType: "self_serve_business_prolite",
+      },
+    })).toEqual({
+      type: "account.updated",
+      authMode: "bedrockAccessKeys",
+      planType: "self_serve_business_prolite",
     });
     expect(toConversationInputEvent({
       method: "mcpServer/startupStatus/updated",

@@ -29,7 +29,8 @@
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
   可把主 App Server 的 Codex 官方模型目录以精确自定义 Provider ID 克隆为切换菜单项，不复制或
-  持久化模型目录；
+  持久化模型目录；模型声明的 Codex 多代理运行时作为只读能力提示保留，OpenAI 替代模型与退役时间
+  不复制到第三方 Provider，且不参与模型可用性、自动切换或审批判断；
   在 Workspace、新会话或同 Provider 历史 Thread 切换前后捕获并恢复当前模型、思考等级与服务层级，
   显式恢复不同 Provider 的历史 Thread 时则尊重该 Thread 的 Provider；偏好只保留在运行内存中；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
@@ -42,7 +43,8 @@
   暴露完整实验协议。
 - `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；
   模式按 Thread 同步，只在内存保存尚未生效的选择。
-- `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级与
+- `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级、
+  Codex 多代理运行时与可选模型替代提示，以及
   Fast 默认值窄端口；CLI Setup 的全局模型默认值不进入会话 Application 边界。
   Application 和 Surface 不接收完整官方模型对象。
 - `account-port.ts`：分别定义 OpenAI 账户 Token/额度、当前 Thread 官方估算、第三方余额和未支持状态的可辨识结果，
@@ -58,7 +60,7 @@
   或请求正文。
 - `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
-- `mcp-port.ts`：定义 MCP Server 概览、可空 Plugin 来源、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth
+- `mcp-port.ts`：定义 MCP Server 概览、当前 Thread 的未启动/连接中/已连接/需认证/失败/取消/禁用或未知运行状态、可空 Plugin 来源、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth
   能力判断、登录结果和有界只读资源内容；Plugin 来源只供 `/mcp` 详情展示，不用于授权或 OAuth；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
 - `plugin-port.ts`：定义开发中 Plugin 的已安装摘要、版本、来源、安装时间、开发者、分类、能力、
   认证时机、可用原因、适用套餐标识、Marketplace 加载失败计数与只供 Turn 调用的官方 mention 引用；
@@ -73,7 +75,7 @@
 - `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例；Application 只接收纯文本写入，
   通过 Client 返回条目种类、可编辑标记和有界安全预览，不传播官方 `UserInput` 或本地路径。
   切换到已有 Queue 的 Thread 时沿用该 Thread 自身设置并清除当前会话待生效偏好；后台完成释放前
-  重新查询 Queue 和按 Thread 活动 Turn，避免自动派发期间解除绑定。
+  重新查询 Queue、按 Thread 活动 Turn 和待结算子代理运行，避免自动派发或子代理仍在运行时解除绑定。
 - `thread-history-port.ts`：定义分页 Turn 摘要、历史模式和 Revert 的稳定端口；只为当前会话提供
   有界列表、预览和一次性确认结果，不保存完整历史或工作区文件状态。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
@@ -93,7 +95,8 @@ Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默�
 历史、活动 Turn 和完整 Queue，并在并发变化时失败关闭；Queue 按真实 0.148 合同保留原顺序且不会因 Revert 自动启动。成功的
 `thread.reverted` 会清除 Core 的产物、计划、目标、上下文压缩、用量与计时等派生展示缓存；不持久化
 Turn/Item 历史，也不承诺恢复工作区文件。
-后台 Thread 完成后只释放后台绑定，不由 Gateway 手动派发下一 Turn。
+后台 Thread 完成后只释放后台绑定，不由 Gateway 手动派发下一 Turn；仍有待结算子代理时保留订阅，
+最后一个子代理终态完成后重试此前挂起的释放。
 Gateway 计划任务通过 `ScheduledTaskApplicationService` 暴露创建预览、一次性确认、列表、运行记录、
 重命名、暂停、恢复、立即运行、uncertain 重试和删除预览；每次操作精确绑定 Surface Actor 与
 Conversation，数字选择器只使用最近五分钟的内存快照，完整 ID 仍重新复核 Store 归属。
@@ -144,7 +147,7 @@ Application 不读取数据库。OpenAI `/limits` 还通过该端口按周窗口
 Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选、调用名称与绝对路径
 校验由 Client 适配器在协议边界完成。
 MCP 查询与配置刷新只依赖 `McpQueryPort`；Application 从官方详情归约只含需处理项与提示的健康
-摘要，并把刷新交给 Client，不把状态读取冒充远端网络探测。官方状态分页、Thread 配置上下文、OAuth
+摘要，连接失败或取消只建议显式刷新，并把刷新交给 Client，不把运行状态读取冒充远端网络探测。官方状态分页、Thread 配置上下文、OAuth
 URL 校验、资源限长与响应裁剪由 Client 适配器处理，渠道查询分页与搜索由共享命令结果表达。Plugin 调试只依赖
 `PluginQueryPort`，开关和 Provider 限制由 Application 执行。
 Permission Profile 查询只依赖 `PermissionQueryPort`；CWD、分页和官方响应裁剪由 Client 处理。

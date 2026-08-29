@@ -78,6 +78,7 @@ function appServerModel(
     defaultReasoningEffort: "medium",
     inputModalities: ["text"],
     supportsPersonality: false,
+    multiAgentVersion: null,
     additionalSpeedTiers: ["fast"],
     serviceTiers: [{
       id: "priority",
@@ -112,6 +113,7 @@ function appServerMcpStatus(
 ): Record<string, unknown> {
   return {
     name: "local-tools",
+    runtimeStatus: null,
     pluginId: null,
     serverInfo: null,
     tools: { search: {} },
@@ -1026,6 +1028,28 @@ describe("JsonRpcClient", () => {
     expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
   });
 
+  it.each([
+    "self_serve_business_prolite",
+    "enterprise_cbp_automation",
+    "edu_plus",
+    "edu_pro",
+  ] as const)("accepts the Codex 0.150.1 plan type %s", async (planType) => {
+    const transport = new FakeTransport();
+    transport.accountRateLimitsResult = {
+      rateLimits: appServerRateLimit({ planType }),
+      rateLimitsByLimitId: null,
+      rateLimitResetCredits: null,
+    };
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.accountRateLimits()).resolves.toMatchObject({
+      limits: [{ planType }],
+    });
+  });
+
   it("maps account usage and multi-bucket limits to stable Application summaries", async () => {
     const transport = new FakeTransport();
     transport.accountUsageResult = {
@@ -1327,6 +1351,7 @@ describe("JsonRpcClient", () => {
             path: "/Users/test/.codex/skills/personal/SKILL.md",
             scope: "user",
             enabled: true,
+            pluginId: null,
           },
           {
             name: "repo",
@@ -1334,6 +1359,7 @@ describe("JsonRpcClient", () => {
             path: "/tmp/project/.codex/skills/repo/SKILL.md",
             scope: "repo",
             enabled: true,
+            pluginId: null,
           },
           {
             name: "plugin:cached",
@@ -1341,6 +1367,7 @@ describe("JsonRpcClient", () => {
             path: "/Users/test/.codex/plugins/cache/plugin/skills/cached/SKILL.md",
             scope: "user",
             enabled: true,
+            pluginId: "plugin@local",
           },
           {
             name: "system",
@@ -1348,6 +1375,7 @@ describe("JsonRpcClient", () => {
             path: "/Users/test/.codex/skills/.system/system/SKILL.md",
             scope: "system",
             enabled: true,
+            pluginId: null,
           },
           {
             name: "disabled",
@@ -1355,6 +1383,7 @@ describe("JsonRpcClient", () => {
             path: "/Users/test/.codex/skills/disabled/SKILL.md",
             scope: "user",
             enabled: false,
+            pluginId: null,
           },
         ],
       }, {
@@ -1366,6 +1395,7 @@ describe("JsonRpcClient", () => {
           path: "/tmp/other/.codex/skills/repo/SKILL.md",
           scope: "repo",
           enabled: true,
+          pluginId: null,
         }],
       }],
     };
@@ -1400,6 +1430,7 @@ describe("JsonRpcClient", () => {
           path: "/Users/test/.codex/skills/broken/SKILL.md",
           scope: "user",
           enabled: true,
+          pluginId: null,
         }],
       }],
     };
@@ -1593,6 +1624,7 @@ describe("JsonRpcClient", () => {
           path: "relative/SKILL.md",
           scope: "repo",
           enabled: true,
+          pluginId: null,
         }],
       }],
     };
@@ -1611,6 +1643,7 @@ describe("JsonRpcClient", () => {
       {
         data: [appServerMcpStatus({
           name: "project-tools",
+          runtimeStatus: "connected",
           authStatus: "oAuth",
           tools: { search: {}, fetch: {} },
         })],
@@ -1631,8 +1664,20 @@ describe("JsonRpcClient", () => {
     await client.connect();
 
     await expect(client.listMcpServers("thread-1")).resolves.toEqual([
-      { name: "project-tools", pluginId: null, authStatus: "oAuth", toolCount: 2 },
-      { name: "user-tools", pluginId: null, authStatus: "bearerToken", toolCount: 0 },
+      {
+        name: "project-tools",
+        runtimeStatus: "connected",
+        pluginId: null,
+        authStatus: "oAuth",
+        toolCount: 2,
+      },
+      {
+        name: "user-tools",
+        runtimeStatus: "unknown",
+        pluginId: null,
+        authStatus: "bearerToken",
+        toolCount: 0,
+      },
     ]);
     expect(
       transport.sent
@@ -1656,7 +1701,7 @@ describe("JsonRpcClient", () => {
   it("preserves the official unknown MCP authentication status", async () => {
     const transport = new FakeTransport();
     transport.mcpPages = [{
-      data: [appServerMcpStatus({ authStatus: "unknown" })],
+      data: [appServerMcpStatus({ authStatus: "unknown", runtimeStatus: "starting" })],
       nextCursor: null,
     }];
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
@@ -1665,8 +1710,60 @@ describe("JsonRpcClient", () => {
     await client.connect();
 
     await expect(client.listMcpServers()).resolves.toEqual([
-      { name: "local-tools", pluginId: null, authStatus: "unknown", toolCount: 1 },
+      {
+        name: "local-tools",
+        runtimeStatus: "starting",
+        pluginId: null,
+        authStatus: "unknown",
+        toolCount: 1,
+      },
     ]);
+  });
+
+  it.each([
+    "notStarted",
+    "starting",
+    "connected",
+    "authenticationRequired",
+    "failed",
+    "cancelled",
+    "disabled",
+  ] as const)("preserves the official %s MCP runtime status", async (runtimeStatus) => {
+    const transport = new FakeTransport();
+    transport.mcpPages = [{
+      data: [appServerMcpStatus({ runtimeStatus })],
+      nextCursor: null,
+    }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers()).resolves.toEqual([
+      expect.objectContaining({ runtimeStatus }),
+    ]);
+  });
+
+  it.each([
+    { name: "missing", value: undefined },
+    { name: "invalid", value: "ready" },
+    { name: "wrong type", value: 1 },
+  ])("fails closed for a $name MCP runtimeStatus", async ({ value }) => {
+    const transport = new FakeTransport();
+    const status = appServerMcpStatus();
+    if (value === undefined) {
+      delete status.runtimeStatus;
+    } else {
+      status.runtimeStatus = value;
+    }
+    transport.mcpPages = [{ data: [status], nextCursor: null }];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listMcpServers())
+      .rejects.toThrow("Codex 响应缺少有效 MCP server runtimeStatus");
   });
 
   it.each([
@@ -1697,6 +1794,7 @@ describe("JsonRpcClient", () => {
     transport.mcpPages = [{
       data: [appServerMcpStatus({
         name: "project-tools",
+        runtimeStatus: "authenticationRequired",
         pluginId: "github@local",
         authStatus: "notLoggedIn",
         serverInfo: {
@@ -1751,6 +1849,7 @@ describe("JsonRpcClient", () => {
 
     await expect(client.listMcpServerDetails("thread-1")).resolves.toEqual([{
       name: "project-tools",
+      runtimeStatus: "authenticationRequired",
       pluginId: "github@local",
       authStatus: "notLoggedIn",
       toolCount: 1,
@@ -2600,6 +2699,18 @@ describe("JsonRpcClient", () => {
     const transport = new FakeTransport();
     transport.modelListData = [
       appServerModel(),
+      appServerModel({
+        id: "gpt-retiring",
+        model: "gpt-retiring",
+        multiAgentVersion: "v2",
+        upgradeInfo: {
+          model: "gpt-next",
+          upgradeCopy: "Upgrade",
+          modelLink: "https://example.test/model",
+          migrationMarkdown: "Do not propagate",
+          retirementAt: 1_893_456_000,
+        },
+      }),
       appServerModel({ id: "hidden", model: "hidden", hidden: true }),
     ];
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {
@@ -2623,7 +2734,40 @@ describe("JsonRpcClient", () => {
       defaultServiceTier: "default",
       isDefault: true,
       inputModalities: ["text"],
+    }, {
+      id: "gpt-retiring",
+      model: "gpt-retiring",
+      displayName: "GPT Test",
+      supportedReasoningEfforts: [{
+        effort: "medium",
+        description: "Medium",
+      }],
+      defaultReasoningEffort: "medium",
+      serviceTiers: [{
+        id: "priority",
+        name: "Fast",
+      }],
+      defaultServiceTier: "default",
+      isDefault: true,
+      inputModalities: ["text"],
+      multiAgentVersion: "v2",
+      upgrade: {
+        model: "gpt-next",
+        retirementAtSeconds: 1_893_456_000,
+      },
     }]);
+  });
+
+  it("fails closed for invalid model lifecycle metadata", async () => {
+    const transport = new FakeTransport();
+    transport.modelListData = [appServerModel({ multiAgentVersion: "v3" })];
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.listModels())
+      .rejects.toThrow("Codex 响应包含未知 model multiAgentVersion");
   });
 
   it("fails closed when a model response lacks a required stable field", async () => {

@@ -26,7 +26,7 @@ import {
 import { removeLegacySourceShellPaths } from "./source-shell-path.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
-const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*)?$/u;
+const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
 const stableVersionPattern = /^\d+\.\d+\.\d+$/u;
 const commitPattern = /^[0-9a-f]{40}$/u;
 
@@ -680,7 +680,7 @@ async function runLocalUpdate(checkout, environment, options) {
 function packageVersion(checkout) {
   const metadata = JSON.parse(readFileSync(join(checkout, "package.json"), "utf8"));
   if (!releaseVersionPattern.test(metadata.version ?? "")) {
-    throw new Error("源码 package.json 缺少正式版本或 fix 修复版本号");
+    throw new Error("源码 package.json 缺少正式版本、rc 预发行版或 fix 修复版本号");
   }
   return metadata.version;
 }
@@ -701,7 +701,7 @@ function codexVersion(checkout) {
 function compareVersions(left, right) {
   const leftParts = versionParts(left);
   const rightParts = versionParts(right);
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 5; index += 1) {
     if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
   }
   return 0;
@@ -709,12 +709,19 @@ function compareVersions(left, right) {
 
 function versionParts(value) {
   const [stable, suffix] = value.split("-", 2);
-  return [...stable.split(".").map(Number), suffix ? Number(suffix.slice(3)) : 0];
+  const stage = suffix?.startsWith("rc.") ? 0 : suffix?.startsWith("fix") ? 2 : 1;
+  const sequence = suffix?.startsWith("rc.")
+    ? Number(suffix.slice(3))
+    : suffix?.startsWith("fix") ? Number(suffix.slice(3)) : 0;
+  return [...stable.split(".").map(Number), stage, sequence];
 }
 
 function isGatewayVersionCompatible(gatewayVersion, expectedCodexVersion) {
   return gatewayVersion === expectedCodexVersion
-    || new RegExp(`^${escapeRegExp(expectedCodexVersion)}-fix[1-9]\\d*$`, "u")
+    || new RegExp(
+      `^${escapeRegExp(expectedCodexVersion)}-(?:fix[1-9]\\d*|rc\\.[1-9]\\d*)$`,
+      "u",
+    )
       .test(gatewayVersion);
 }
 

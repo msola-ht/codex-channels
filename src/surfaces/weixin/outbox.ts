@@ -391,6 +391,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
           event.threadId,
           event.background,
         );
+      case "thread.name":
+        return formatWeixinCommandText(
+          `Session 名称已更新：${event.name ?? "未命名"}`,
+          { structuredFields: true },
+        );
       case "warning":
         return formatCodexWarning(visibleUpstreamMessage(event.message));
       case "account.updated":

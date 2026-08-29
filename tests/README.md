@@ -8,8 +8,8 @@
   重试和断线清理。
 - Thread 新建、列表、恢复、切换、删除、订阅、恢复失败绑定保留、active-writer 稳定分类、关闭/归档/删除通知语义、
   官方响应到稳定路由快照的映射与必需字段失败关闭、活动 Turn 重启恢复和 Workspace 路由。
-- 运行中 `/resume`/`new` 的前台转后台、订阅保留、前后台 Turn 独立归约、后台完成清理、会话列表
-  标识，以及后台审批和结果继续投递原 Conversation。
+- 运行中 `/resume`/`new` 的前台转后台、订阅保留、前后台 Turn 独立归约、后台完成清理、待结算
+  子代理释放屏障与终态后重试、会话列表标识，以及后台审批和结果继续投递原 Conversation。
 - 多 Provider Client 的 Thread 归属发现、状态合并、Turn 路由、Server Request ID 隔离、独立重连
   与定向绑定/交互恢复；切换模式双 App Server、固定模式单主实例和 Provider Remote TUI Socket 选择。
 - Thread 设置、归档、删除和关闭 Notification 到稳定 Routing 事件的映射，残缺或无关通知隔离，
@@ -177,6 +177,7 @@
   跨价格档位聚合；失败和未完整请求保留原始价格快照但不进入费用汇总，CSV 导出统一中和
   电子表格公式前缀；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、可配置保留策略与备份清理、
   Schema v10→v11 的运行级子代理关系备份迁移与结构异常事务回滚、同一子 Thread 多轮运行的精确父 Turn 归属、
+  0.150.1 原生 `subAgentActivity.completed` 的父 Turn 归属、成功信号去重与真实 App Server 顺序合同、
   有界内部读取，以及
   Schema v2 enriched View 的耗时、速度、缓存、费用计算和 `/M Token` 单价一致性。回归测试还覆盖 WebSocket 完成后立即
   关闭不重复、指标确认不等待延迟分片 SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪
@@ -186,7 +187,9 @@
   系统和插件缓存并在缺少显示字段时失败关闭；显式调用重新解析精确名称、校验绝对路径，并同时
   发送 `$Skill` 文本标记与结构化 Skill 输入；三个渠道统一覆盖无参数 `/skill` 编号列表与
   `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
-- MCP 查询按当前 Thread 读取项目级配置：概览使用精简清单分页，详情映射工具、资源和模板；
+- MCP 查询按当前 Thread 读取项目级配置：概览使用精简清单分页，详情映射工具、资源和模板；七种
+  官方运行状态原样进入稳定端口，`null` 显示为未知，畸形或缺失状态失败关闭；健康摘要区分需认证、
+  失败、取消、未启动、连接中与禁用，不把只读状态查询当作主动探测；
   详情说明允许官方返回的多行文本，归一化空白并限为 2,000 字符；共享命令按工具、资源或模板
   提供每页 8 项的分页与搜索，页面输出包含稳定的前后页命令；
   OAuth 和资源读取使用精简清单解析目标，不受无关 Server 的完整资源发现阻塞；OAuth 只接受
@@ -366,6 +369,7 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 
 该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 测试配置和本地测试 MCP 进程，验证
 App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 完整详情、只读资源、OAuth PKCE 回调及完成通知、
+Thread 运行状态的已连接、进程退出失败与显式配置刷新后重连、
 工具审批元数据及 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的模型、思考等级、Fast、`multi_agent_v2` 与 agents 用户设置能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
 第二个 Client 修改共享 Thread 的模型、思考等级和 Fast 设置时，订阅方收到完整的

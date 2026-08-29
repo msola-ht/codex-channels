@@ -51,6 +51,10 @@ describe("operation normalization", () => {
       { type: "fileChange", id: "2", changes: [], status: "declined" },
       "completed",
     )?.status).toBe("declined");
+    expect(toOperationUpdate(
+      { type: "collabAgentToolCall", id: "3", tool: "wait", status: "interrupted" },
+      "completed",
+    )?.status).toBe("failed");
   });
 
   it("maps only the official generated-image saved path as an artifact", () => {

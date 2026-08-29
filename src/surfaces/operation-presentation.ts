@@ -72,7 +72,11 @@ export function operationTitle(record: OperationUpdate): string {
       return ({
         spawnAgent: "启动子代理",
         sendInput: "向子代理发送任务",
+        sendMessage: "向子代理发送消息",
+        followupTask: "向子代理追加任务",
         resumeAgent: "恢复子代理",
+        interruptAgent: "中断子代理",
+        listAgents: "查看子代理",
         wait: "等待子代理",
         closeAgent: "关闭子代理",
         started: "子代理已启动",

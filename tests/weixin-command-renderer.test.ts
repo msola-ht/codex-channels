@@ -245,7 +245,7 @@ describe("Weixin command renderer", () => {
     expect(results.map((result) => renderWeixinCommandResult(result))).toEqual([
       "## 当前没有运行中的任务。",
       "当前 Workspace 没有匹配的可恢复会话。",
-      expect.stringContaining("Session：尚未绑定"),
+      expect.stringContaining("Session ID：尚未绑定"),
       expect.stringContaining("Main · main ← 当前"),
       expect.stringContaining("Fast 模式：开启"),
       "当前没有已启用的 Skills。",
@@ -255,8 +255,8 @@ describe("Weixin command renderer", () => {
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("本次为只读查询"),
       expect.stringContaining("项目规则检查通过"),
-      "当前 Thread 暂无 Turn Diff。",
-      "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
+      "当前 Session 暂无 Turn Diff。",
+      "当前 Session 没有 Goal。使用 /goal set <目标> 设置。",
     ]);
   });
 

@@ -1,6 +1,15 @@
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 let pendingToolCallId;
+
+const exitFile = process.env.MCP_TEST_EXIT_FILE;
+if (exitFile) {
+  const exitTimer = setInterval(() => {
+    if (existsSync(exitFile)) process.exit(0);
+  }, 20);
+  exitTimer.unref();
+}
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);

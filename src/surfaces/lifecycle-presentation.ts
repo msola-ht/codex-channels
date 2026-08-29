@@ -37,6 +37,7 @@ import {
   formatAveragePriceValue,
   formatCompactMetricsValue,
 } from "./metrics-format.js";
+import { missingFinalResponseText } from "./output-copy.js";
 import {
   formatCacheHitRate,
   formatTokenCount,
@@ -86,6 +87,7 @@ export interface StartupRuntimeInfo {
 type StartupStatus = Pick<
   ConversationStatus,
   | "threadId"
+  | "threadName"
   | "workspaceId"
   | "model"
   | "modelProvider"
@@ -149,7 +151,11 @@ export function createStartupPresentation(
             value: `${workspace.name} (${workspace.id})`,
           },
           { label: "工作目录", value: workspace.cwd },
-          { label: "Thread", value: status.threadId ?? "尚未绑定" },
+          {
+            label: "Session",
+            value: status.threadId ? status.threadName ?? "未命名" : "尚未绑定",
+          },
+          { label: "Session ID", value: status.threadId ?? "尚未绑定" },
           {
             label: "Git 分支",
             value: status.gitBranch ?? "未检测到",
@@ -204,7 +210,7 @@ export function createTurnStartedPresentation(
         ? "后台任务继续处理中。"
         : "已开始处理。",
     fields: backgroundThreadId
-      ? [{ label: "Thread", value: backgroundThreadId }]
+      ? [{ label: "Session ID", value: backgroundThreadId }]
       : [],
   };
 }
@@ -216,7 +222,7 @@ export function createTurnReasoningPresentation(
   return {
     title: "思考中…",
     fields: backgroundThreadId
-      ? [{ label: "Thread", value: backgroundThreadId }]
+      ? [{ label: "Session ID", value: backgroundThreadId }]
       : [],
     ...(elapsedMs === undefined || elapsedMs < 1_000
       ? {}
@@ -450,6 +456,7 @@ export function createTurnCompletedPresentation(
             : event.workspaceId,
         }]
       : []),
+    { label: "Session", value: event.sessionName ?? "未命名" },
     { label: "Session ID", value: event.threadId },
   ];
   const runFields: LifecyclePresentationField[] = [];
@@ -480,6 +487,12 @@ export function createTurnCompletedPresentation(
     runFields.push({
       label: "错误",
       value: formatTurnErrorMessage(event.error, event.errorCode),
+    });
+  }
+  if (event.missingFinalResponse) {
+    runFields.push({
+      label: "结果",
+      value: missingFinalResponseText,
     });
   }
   if (event.tokenUsage) {
@@ -524,13 +537,22 @@ export function createTurnCompletedPresentation(
       value: `${event.contextCompactionCount} 次`,
     });
   }
-  if (debug && usesOpenAiAccount(event.modelProvider) && event.weeklyLimit && !event.remoteQuota) {
+  const remoteUsedPercent = event.remoteQuota?.latestUsedPercentMillionths === null
+    || event.remoteQuota?.latestUsedPercentMillionths === undefined
+    ? null
+    : event.remoteQuota.latestUsedPercentMillionths / 1_000_000;
+  if (usesOpenAiAccount(event.modelProvider) && remoteUsedPercent !== null) {
+    accountFields.push({
+      label: "周限",
+      value: `剩余 ${formatPercent(Math.max(0, 100 - remoteUsedPercent))}（额度中心）`,
+    });
+  } else if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
     accountFields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
-  if (debug && remainingUsage) {
+  if (remainingUsage) {
     accountFields.push({
       label: `剩余用量${remainingUsage.bucket === undefined
         ? ""
@@ -931,7 +953,7 @@ export function createTurnCompletedPresentation(
       : []),
   ];
   return {
-    title: `${event.background ? "后台任务" : "本次运行"} · ${turnStatusLabel(event.status)}`,
+    title: `${event.background ? "后台任务" : "本次运行"} · ${event.missingFinalResponse ? "无最终回复" : turnStatusLabel(event.status)}`,
     fields: sections.length === 1 ? sections[0]!.fields : [],
     ...(sections.length > 1 ? { sections } : {}),
   };

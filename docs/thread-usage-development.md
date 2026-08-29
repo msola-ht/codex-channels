@@ -1,6 +1,6 @@
 # OpenAI Thread 官方用量开发设计
 
-本文定义 Codex CLI `0.148.0` 的 `account/usage/read.threadId` 与 `threadUsage` 在 Gateway
+本文定义 Codex CLI `0.148.0` 引入、并在当前锁定 `0.150.1` 复核的 `account/usage/read.threadId` 与 `threadUsage` 在 Gateway
 中的采用方案。目标是在不新增聊天命令、不改变第三方 Provider 用量口径、不建立第二套账本的
 前提下，让现有 `/usage` 同时展示 OpenAI 账户活动摘要和当前 Thread 的官方估算。
 
@@ -19,15 +19,15 @@
 
 ## 固定事实来源
 
-实现只以正式 Tag `rust-v0.148.0` 为准：
+当前实现只以正式 Tag `rust-v0.150.1` 为准：
 
-- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/README.md)：
+- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server/README.md)：
   `account/usage/read` 传入有效 `threadId` 后，使用 App Server 当前活动账户查询一个 Thread 的
  估算 Credit、可选美元费用和用量分组；计费路由不可用时 `threadUsage` 为 `null`。
-- [`account_processor.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/src/request_processors/account_processor.rs)：
+- [`account_processor.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server/src/request_processors/account_processor.rs)：
   只接受规范 Thread UUID，只允许 ChatGPT 后端认证，将后端 `403` / `404` 收敛为
   `threadUsage: null`，超时和其他错误返回 JSON-RPC 错误。
-- [`account_thread_usage.rs`](https://github.com/openai/codex/blob/rust-v0.148.0/codex-rs/app-server/tests/suite/v2/account_thread_usage.rs)：
+- [`account_thread_usage.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server/tests/suite/v2/account_thread_usage.rs)：
   活动 Workspace、规范 Thread ID、外部管理认证、不可用计费路由和非法 ID 合同。
 - 本地生成类型：[`codex-protocol/generated/v2/`](../src/codex-protocol/generated/v2/)。字段名称、
   可空性和整数单位以生成类型为最终事实来源。
@@ -95,7 +95,7 @@ OpenAI Codex 账户用量摘要：
 当前 Thread 的官方计费估算不可用；该能力目前仅向部分 Business/Enterprise 工作区开放。
 ```
 
-不得声称套餐一定不支持，也不得建议切换 Provider、重新登录或充值，因为 `0.148.0` 合同没有提供
+不得声称套餐一定不支持，也不得建议切换 Provider、重新登录或充值，因为当前锁定的 `0.150.1` 合同没有提供
 不可用原因。
 
 ### Thread 查询失败
@@ -138,7 +138,7 @@ OpenAI 且存在当前 Thread 时，账户摘要和 Thread 估算是两个独立
 
 - 从受控入口只新增实际直接使用的 `GetAccountTokenUsageParams`；既有
   `GetAccountTokenUsageResponse` 内部引用生成的 Thread 用量类型，不额外扩大受控出口。
-- `account/usage/read` 已是现有稳定方法；本次只采用它在 0.148.0 增加的可选参数和响应字段，
+- `account/usage/read` 已是现有稳定方法；本次只采用它从 0.148.0 起提供、并在当前 0.150.1 复核的可选参数和响应字段，
   不增加实验握手或运行时兼容层。
 
 ### `codex-client`
@@ -149,7 +149,7 @@ OpenAI 且存在当前 Thread 时，账户摘要和 Thread 估算是两个独立
   - 校验 Credit、美元和 Token 为非负有限整数；`null` 保持未知。
   - 校验模型、思考等级和速度是 `null` 或有界非空字符串。
   - `threadUsage` 缺失或为 `null` 都映射为 `unavailable`，不兼容旧服务器；运行版本门禁仍要求
-    精确 `0.148.0`。
+    精确 `0.150.1`。
 - Adapter 不生成渠道文案、不访问指标库、不缓存估算。
 
 ### `application`
@@ -177,7 +177,7 @@ OpenAI 且存在当前 Thread 时，账户摘要和 Thread 估算是两个独立
 
 ## 子代理边界
 
-`account/usage/read` 的 App Server 参数一次只接受一个 Thread ID，0.148.0 文档和测试没有声明父
+`account/usage/read` 的 App Server 参数一次只接受一个 Thread ID，当前固定文档和测试没有声明父
 Thread 的结果递归包含子代理。首期必须按“当前精确 Thread 官方估算”展示，不能标为“会话总账”。
 
 不使用本地 `subagent_threads` 关系逐个调用官方接口并自行求和，原因是：
@@ -201,7 +201,7 @@ Thread 的结果递归包含子代理。首期必须按“当前精确 Thread �
    OpenAI Thread 查询。
 4. Application：账户主查询失败保持失败；Thread 可选查询失败收敛为 `failed`，不丢账户摘要。
 5. Formatter：可用、不可用、失败、缺失美元、Token 部分缺失、8 组截断和三渠道一致文案。
-6. 真实 App Server 合同：在条件式 `RUN_CODEX_INTEGRATION=1` 环境验证精确 0.148.0 接受规范
+6. 真实 App Server 合同：在条件式 `RUN_CODEX_INTEGRATION=1` 环境验证精确 0.150.1 接受规范
    `threadId`、非法 ID 失败关闭，以及认证环境允许时返回 `unavailable` 或匹配请求 ID 的结构化结果；
    未配置 ChatGPT 认证或计费路由时必须明确记为跳过/不可用，不能伪报成功结果。
 7. 定向测试通过后运行 `npm run check`、`npm run lint`、`npm run docs:check` 和协议检查；提交时由

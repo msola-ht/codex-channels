@@ -197,6 +197,7 @@ describe("shared Surface lifecycle presentation", () => {
         [{ id: "main", name: "Main", cwd: "/workspace/main" }],
         {
           threadId: "thread-1",
+          threadName: "发布检查",
           workspaceId: "main",
           model: "gpt-test",
           effort: "medium",
@@ -240,7 +241,8 @@ describe("shared Surface lifecycle presentation", () => {
       "当前会话：",
       "Workspace：Main (main)",
       "工作目录：/workspace/main",
-      "Thread：thread-1",
+      "Session：发布检查",
+      "Session ID：thread-1",
       "Git 分支：feature/lifecycle",
       "模型：gpt-test",
       "提供商：OpenAI 官方",
@@ -564,6 +566,7 @@ describe("shared Surface lifecycle presentation", () => {
           conversationId: "100",
         },
         threadId: "thread-1",
+        sessionName: "统一生命周期",
         turnId: "turn-1",
         status: "failed",
         error: "失败：[REDACTED]",
@@ -611,11 +614,15 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "当前 Session 累计：",
       "当前工作区：Main (main)",
+      "Session：统一生命周期",
       "Session ID：thread-1",
       "上下文：10 K / 100 K（10%）",
       "上下文压缩：2 次",
       "Goal：进行中 · 12.5 K / 100 K",
       "Git 分支：feature/lifecycle",
+      "",
+      "账户状态：",
+      "周限：剩余 63%",
     ].join("\n"));
   });
 
@@ -637,7 +644,7 @@ describe("shared Surface lifecycle presentation", () => {
           requestCount: 12,
           totalTokens: 1_200_000,
           totalCostNanos: 500_000_000,
-          latestUsedPercentMillionths: 370_000_000,
+          latestUsedPercentMillionths: 37_000_000,
           estimatedTotalTokens: 3_200_000,
           estimatedTotalCostNanos: 1_300_000_000,
           observedAtMs: 1_800_000_000_000,
@@ -646,7 +653,36 @@ describe("shared Surface lifecycle presentation", () => {
     );
     expect(rendered).toContain("额度中心：3 台设备 · 12 次请求");
     expect(rendered).toContain("本周期 Token：1.2 M");
-    expect(rendered).not.toContain("周限：");
+    expect(rendered).toContain("周限：剩余 63%（额度中心）");
+  });
+
+  it("keeps only the remote remaining quota summary in formal mode", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: { surface: "telegram", accountId: "default", conversationId: "100" },
+        threadId: "thread-remote",
+        turnId: "turn-remote",
+        status: "completed",
+        modelProvider: "openai",
+        remoteQuota: {
+          provider: "openai",
+          windowId: "codex",
+          deviceCount: 3,
+          requestCount: 12,
+          totalTokens: 1_200_000,
+          totalCostNanos: 500_000_000,
+          latestUsedPercentMillionths: 37_000_000,
+          estimatedTotalTokens: 3_200_000,
+          estimatedTotalCostNanos: 1_300_000_000,
+          observedAtMs: 1_800_000_000_000,
+        },
+      }),
+    );
+    expect(rendered).toContain("账户状态：");
+    expect(rendered).toContain("周限：剩余 63%（额度中心）");
+    expect(rendered).not.toContain("额度中心：3 台设备");
+    expect(rendered).not.toContain("本周期 Token");
   });
 
   it("keeps Thread metrics but hides OpenAI-only fields for DeepSeek", () => {
@@ -727,7 +763,7 @@ describe("shared Surface lifecycle presentation", () => {
         },
         () => "usd",
         null,
-        true,
+        false,
         {
           model: "deepseek-v4-flash",
           bucket: "off-peak",
@@ -1309,6 +1345,29 @@ describe("shared Surface lifecycle presentation", () => {
     expect(debug).toContain("输入价格：$0.600000（≈ ¥4.320000）");
     expect(debug).toContain("模型请求聚合耗时：1秒");
     expect(debug).toContain("均价：约 $500,000.00/100M（≈ ¥3,600,000.00/100M）");
+  });
+
+  it("renders a completed Turn without a final response as an actionable anomaly", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-openai",
+        turnId: "turn-openai",
+        status: "completed",
+        missingFinalResponse: true,
+      }),
+    );
+
+    expect(rendered).toContain("本次运行 · 无最终回复");
+    expect(rendered).toContain(
+      "结果：Codex 已结束本轮，但未返回最终消息。请重试；若当前上下文较高，可先使用 /compact。",
+    );
+    expect(rendered).not.toContain("本次运行 · 已完成");
   });
 
   it("keeps the Turn Token total when cache metrics are incomplete", () => {

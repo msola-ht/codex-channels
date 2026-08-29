@@ -24,5 +24,6 @@ export interface ConversationRoutingPort {
   targetForThread(threadId: string): ConversationTarget | undefined;
   workspaceForThread?(threadId: string): RoutedWorkspace | undefined;
   modelSettingsForThread(threadId: string): RoutedThreadModelSettings | undefined;
+  threadNameForThread?(threadId: string): string | null | undefined;
   contextCompactionItemIdsForThread(threadId: string): readonly string[] | undefined;
 }

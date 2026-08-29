@@ -49,7 +49,7 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 仍不得进入日志。可通过 `codexc config` 的“高级设置 → 日志等级”选择完整等级，变化需要重启
 Gateway，不需要重启 App Server。
 
-`experimental.plugin_api` 控制 Codex 0.148.0 开发中 Plugin 调试入口，默认关闭；未显式开启时
+`experimental.plugin_api` 控制当前锁定 Codex 0.150.1 的开发中 Plugin 调试入口，默认关闭；未显式开启时
 `/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
 请求。变化需要重启 Gateway，不需要重启 App Server；Doctor 始终显示开关状态与风险提示。
 

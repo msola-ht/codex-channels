@@ -12,6 +12,7 @@ const turnCompletedTitle = "<b>本次运行 · 已完成</b>";
 const turnCompletedPanel = [
   turnCompletedTitle,
   "",
+  "• <b>Session：</b>测试会话",
   "• <b>Session ID：</b>thread-1",
 ].join("\n");
 
@@ -460,6 +461,7 @@ describe("TelegramOutbox", () => {
         "• <b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
         "",
         "<b>当前 Session 累计</b>",
+        "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
       ].join("\n"),
     ]);
@@ -1229,11 +1231,15 @@ describe("TelegramOutbox", () => {
         "• <b>提供商：</b>OpenAI 官方",
         "",
         "<b>当前 Session 累计</b>",
+        "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
         "• <b>上下文压缩：</b>2 次",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
         "• <b>Git 分支：</b>feature/weixin-surface",
+        "",
+        "<b>账户状态</b>",
+        "• <b>周限：</b>剩余 58%",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({
@@ -1258,6 +1264,7 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedTitle,
         "",
+        "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
         "• <b>Git 分支：</b>feature/weixin-surface",
       ].join("\n"),
@@ -1557,6 +1564,7 @@ function turnCompleted(): Extract<OutputEvent, { type: "turn.completed" }> {
     type: "turn.completed",
     target,
     threadId: "thread-1",
+    sessionName: "测试会话",
     turnId: "turn-1",
     status: "completed",
   };

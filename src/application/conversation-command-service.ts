@@ -456,7 +456,7 @@ export class ConversationCommandService {
         if (!canManageCustomSections) {
           throw new UserFacingError(
             "thread-section.admin-required",
-            "只有配置的 Thread 分区管理员可以修改全局分区",
+            "只有配置的会话分区管理员可以修改全局分区",
           );
         }
         if (operation.type === "create") {

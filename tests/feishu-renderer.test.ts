@@ -59,6 +59,7 @@ describe("Feishu output renderer", () => {
       [{ id: "main", name: "Main", cwd: "/workspace" }],
       {
         threadId: "thread-1",
+        threadName: "飞书联调",
         workspaceId: "main",
         model: "gpt-test",
         effort: "medium",
@@ -101,7 +102,8 @@ describe("Feishu output renderer", () => {
       "### 当前会话",
       "- Workspace：Main (main)",
       "- 工作目录：/workspace",
-      "- Thread：thread-1",
+      "- Session：飞书联调",
+      "- Session ID：thread-1",
       "- Git 分支：feature/weixin-surface",
       "- 模型：gpt-test",
       "- 提供商：OpenAI 官方",
@@ -250,7 +252,7 @@ describe("Feishu output renderer", () => {
     expect(results.map((result) => renderFeishuCommandResult(result))).toEqual([
       "## 当前没有运行中的任务。",
       "当前 Workspace 没有匹配的可恢复会话。",
-      expect.stringContaining("Session：尚未绑定"),
+      expect.stringContaining("Session ID：尚未绑定"),
       expect.stringContaining("Main · main ← 当前"),
       expect.stringContaining("Fast 模式：开启"),
       "当前没有已启用的 Skills。",
@@ -260,8 +262,8 @@ describe("Feishu output renderer", () => {
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("本次为只读查询"),
       expect.stringContaining("项目规则检查通过"),
-      "当前 Thread 暂无 Turn Diff。",
-      "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。",
+      "当前 Session 暂无 Turn Diff。",
+      "当前 Session 没有 Goal。使用 /goal set <目标> 设置。",
     ]);
   });
 
@@ -382,6 +384,7 @@ describe("Feishu output renderer", () => {
       type: "turn.completed",
       target,
       threadId: "thread-1",
+      sessionName: "渲染测试",
       turnId: "turn-1",
       status: "completed",
       durationMs: 65_432,
@@ -430,10 +433,14 @@ describe("Feishu output renderer", () => {
       "",
       "### 当前 Session 累计",
       "- 当前工作区：Main (main)",
+      "- Session：渲染测试",
       "- Session ID：thread-1",
       "- 上下文：100 / 200（50%）",
       "- 上下文压缩：2 次",
       "- Git 分支：feature/weixin-surface",
+      "",
+      "### 账户状态",
+      "- 周限：剩余 63%",
     ].join("\n"));
   });
 
@@ -448,7 +455,7 @@ describe("Feishu output renderer", () => {
           threadId: "thread-resumed",
           model: { model: "gpt-test", modelProvider: "openai" },
         },
-        expected: "Thread：thread-resumed",
+        expected: "Session ID：thread-resumed",
       },
       {
         outcome: {
@@ -457,25 +464,25 @@ describe("Feishu output renderer", () => {
           transferredFrom: "telegram",
           model: { model: "gpt-test", modelProvider: "openai" },
         },
-        expected: "已从 Telegram 接管 Codex Thread",
+        expected: "已从 Telegram 接管 Codex Session",
       },
       {
         outcome: {
           type: "session.new",
           nextModel: { model: "gpt-test", modelProvider: "openai" },
         },
-        expected: "发送下一条普通消息时才会创建新的 Codex Thread",
+        expected: "发送下一条普通消息时才会创建新的 Codex Session",
       },
       {
         outcome: { type: "thread.archived", threadId: "thread-archived" },
-        expected: "Thread：thread-archived",
+        expected: "Session ID：thread-archived",
       },
       {
         outcome: {
           type: "thread.unarchived",
           threadId: "thread-unarchived",
         },
-        expected: "Thread：thread-unarchived",
+        expected: "Session ID：thread-unarchived",
       },
       {
         outcome: {
@@ -524,11 +531,11 @@ describe("Feishu output renderer", () => {
       },
       {
         outcome: { type: "thread.compaction-requested" },
-        expected: "已请求压缩当前 Codex Thread",
+        expected: "已请求压缩当前 Codex Session",
       },
       {
         outcome: { type: "thread.forked", threadId: "thread-forked" },
-        expected: "Thread：thread-forked",
+        expected: "Session ID：thread-forked",
       },
       {
         outcome: { type: "review.started", turnId: "turn-review" },
@@ -536,7 +543,7 @@ describe("Feishu output renderer", () => {
       },
       {
         outcome: { type: "goal.cleared" },
-        expected: "已清除当前 Thread Goal",
+        expected: "已清除当前 Session Goal",
       },
       {
         outcome: {
@@ -589,8 +596,14 @@ describe("Feishu output renderer", () => {
     })).toContain("1. tdd：测试驱动开发");
     expect(renderFeishuCommandResult({
       kind: "mcp",
-      servers: [{ name: "docs", pluginId: null, authStatus: "oAuth", toolCount: 2 }],
-    })).toContain("1. docs · auth=oAuth · tools=2");
+      servers: [{
+        name: "docs",
+        runtimeStatus: "connected",
+        pluginId: null,
+        authStatus: "oAuth",
+        toolCount: 2,
+      }],
+    })).toContain("1. docs · 运行：已连接 · 认证：OAuth · 工具：2");
     expect(renderFeishuCommandResult({
       kind: "plugins",
       plugins: [{

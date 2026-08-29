@@ -30,6 +30,8 @@
 普通 MCP form 仍按 JSON 输入处理，工具审批不得降级为要求用户手写 JSON。
 本模块不导入 `codex-client` 或 `codex-protocol`，也不接收原始 RPC method/params；畸形与未知
 Server Request 在 Client 适配边界安全拒绝，原始 params 不进入业务模块或错误消息。
+命令审批只接收缺省或明确的 `kind=command`；`kind=writeStdin` 需要独立输入预览与交互合同，当前在
+Client 边界失败关闭，不得降级成普通命令审批。
 命令审批携带实验性的额外网络或文件系统权限时，Client 适配器必须先按当前协议基线验证，
 `coordinator.ts` 再将权限明细加入审批内容；实验决策清单未提供一次批准时必须拒绝，未知或畸形
 权限形状不得弹出可批准的降级审批。会话批准只在协议提供 `acceptForSession` 时显示并按原值返回；文件审批按

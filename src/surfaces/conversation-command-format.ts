@@ -10,6 +10,7 @@ import {
   type AccountThreadUsage,
   type AccountThreadUsageGroup,
   type McpResourceContent,
+  type ModelOption,
   type ThreadQueueInputType,
   type ThreadQueueItem,
 } from "../application/index.js";
@@ -62,13 +63,13 @@ export const conversationCommandDescriptions = {
   unarchive: "恢复已归档会话",
   pin: "固定当前会话",
   unpin: "取消固定当前会话",
-  section: "查看或管理 Codex Thread 分区",
+  section: "查看或管理会话分区",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
   workspaceperm: "查看或修改当前工作区权限",
   stop: "停止当前任务",
   queue: "管理 App Server 持久队列",
-  revert: "回退当前 Thread 的分页历史",
+  revert: "回退当前 Session 的分页历史",
   rename: "命名当前会话",
   compact: "压缩当前上下文",
   fork: "分叉当前会话",
@@ -79,7 +80,7 @@ export const conversationCommandDescriptions = {
   skill: "查看或调用 Skill",
   mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
   plugin: "列出、查看或调用 Plugin（开发中）",
-  usage: "查看账号与当前 Thread 用量",
+  usage: "查看账号与当前 Session 用量",
   metrics: "查看会话、聚合或异常请求指标",
   limits: "查看套餐与额度",
   permissions: "查看权限配置",
@@ -96,10 +97,10 @@ export const conversationCommandHelpSections = [
   {
     title: "会话：",
     lines: [
-      "/resume [序号|名称|Thread ID]",
+      "/resume [序号|名称|Session ID]",
       "/sessions [页码] [filter all|running|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]",
       "/archived [页码] [filter all|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]",
-      "/new · /archive · /unarchive <序号|名称|Thread ID>",
+      "/new · /archive · /unarchive <序号|名称|Session ID>",
       "/pin · /unpin",
       "/section（查看）· 管理员：/section create <名称> · /section rename <分区序号或 ID> <新名称>",
       "管理员：/section move <分区序号或 ID> [before <会话>] · /section remove · /section delete <分区序号或 ID>",
@@ -198,8 +199,8 @@ export function formatConversationSessions(
       : []),
     "",
     result.archived
-      ? "恢复归档：/unarchive <序号、名称或 Thread ID>"
-      : "恢复：/resume <序号、名称或 Thread ID>",
+      ? "恢复归档：/unarchive <序号、名称或 Session ID>"
+      : "恢复：/resume <序号、名称或 Session ID>",
   ].join("\n"));
 }
 
@@ -280,7 +281,7 @@ export function formatConversationScheduledRuns(
           ...(run.completedAt === null
             ? []
             : [`  - 完成时间：${formatScheduledAt(run.completedAt)}`]),
-          ...(run.threadId ? [`  - Thread：${run.threadId}`] : []),
+          ...(run.threadId ? [`  - Session ID：${run.threadId}`] : []),
           ...(run.errorCategory ? [`  - 分类：${run.errorCategory}`] : []),
         ].join("\n"))),
     "",
@@ -353,7 +354,7 @@ export function formatConversationThreadRevertPreview(
     `活动 Turn：${preview.activeTurnId ? `会被中断（${preview.activeTurnId}）` : "无"}`,
     `当前 Queue：${preview.queueItemCount} 条（Revert 后按原顺序保留，不会自动启动）`,
     "不会恢复工作区文件、命令副作用或外部 API/MCP 副作用。",
-    "确认完成前请勿从 TUI 或其他客户端向该 Thread 追加 Turn。",
+    "确认完成前请勿从 TUI 或其他客户端向该 Session 追加 Turn。",
     "确认：/revert confirm " + preview.token,
     "令牌五分钟内有效且只能使用一次。",
   ].join("\n"));
@@ -379,7 +380,7 @@ export function formatConversationThreadSections(
 ): string {
   if (result.page > result.pageCount) {
     return toStructuredMarkdownList([
-      `Thread 分区（全局 ${result.totalSectionCount}）：`,
+      `会话分区（全局 ${result.totalSectionCount}）：`,
       `第 ${result.page} 页不存在，共 ${result.pageCount} 页`,
       "返回第一页：/section list 1",
     ].join("\n"));
@@ -390,7 +391,7 @@ export function formatConversationThreadSections(
     return `${selector}. ${section.name}${builtIn} · 当前 Workspace：活动 ${section.currentWorkspaceActiveCount} / 归档 ${section.currentWorkspaceArchivedCount} · ${section.id}`;
   });
   return toStructuredMarkdownList([
-    `Thread 分区（全局 ${result.totalSectionCount} · 第 ${result.page}/${result.pageCount} 页）：`,
+    `会话分区（全局 ${result.totalSectionCount} · 第 ${result.page}/${result.pageCount} 页）：`,
     ...(entries.length > 0 ? entries : ["当前没有可显示的分区。"]),
     ...(result.page > 1 ? ["", `上一页：/section list ${result.page - 1}`] : []),
     ...(result.page < result.pageCount ? ["", `下一页：/section list ${result.page + 1}`] : []),
@@ -399,12 +400,12 @@ export function formatConversationThreadSections(
     "固定：/pin · 取消固定：/unpin",
     ...(result.canManageCustomSections
       ? [
-          "移动到自定义分区：/section move <序号或 ID> [before <会话序号、名称或 Thread ID>]",
+          "移动到自定义分区：/section move <序号或 ID> [before <会话序号、名称或 Session ID>]",
           "新建：/section create <名称> · 重命名：/section rename <分区序号或 ID> <新名称>",
           "移出自定义分区：/section remove · 删除：/section delete <分区序号或 ID>",
         ]
       : [
-          "自定义分区：当前用户仅可查看和筛选；写操作需要配置 Thread 分区管理员。",
+          "自定义分区：当前用户仅可查看和筛选；写操作需要配置会话分区管理员。",
         ]),
   ].join("\n"));
 }
@@ -414,11 +415,11 @@ export function formatConversationThreadSectionDeletePreview(
 ): string {
   const { section } = result.preview;
   return toStructuredMarkdownList([
-    "即将删除全局 Thread 分区",
+    "即将删除全局会话分区",
     `名称：${section.name}`,
     `ID：${section.id}`,
     `当前 Workspace：活动 ${section.currentWorkspaceActiveCount} / 归档 ${section.currentWorkspaceArchivedCount}`,
-    "删除只会解除 Thread 的分区归属，不会删除 Thread；其他 Workspace 中的归属也会受影响。",
+    "删除只会解除 Session 的分区归属，不会删除 Session；其他 Workspace 中的归属也会受影响。",
     "",
     `确认：/section delete ${section.id} confirm`,
   ].join("\n"));
@@ -462,18 +463,18 @@ export function formatConversationCommandOutcome(
       return outcome.transferredFrom
         ? toStructuredMarkdownList([
             formatTakeoverSource(outcome.transferredFrom),
-            `Thread：${outcome.threadId}`,
+            `Session ID：${outcome.threadId}`,
             formatConversationModel("会话模型", outcome.model),
             ...(outcome.queuePending
-              ? ["Queue 中有待派发条目，已沿用该 Thread 自身设置，未应用当前会话的待生效偏好。"]
+              ? ["Queue 中有待派发条目，已沿用该 Session 自身设置，未应用当前会话的待生效偏好。"]
               : []),
           ].join("\n"))
         : toStructuredMarkdownList([
-            "已恢复 Codex Thread",
-            `Thread：${outcome.threadId}`,
+            "已恢复 Codex Session",
+            `Session ID：${outcome.threadId}`,
             formatConversationModel("会话模型", outcome.model),
             ...(outcome.queuePending
-              ? ["Queue 中有待派发条目，已沿用该 Thread 自身设置，未应用当前会话的待生效偏好。"]
+              ? ["Queue 中有待派发条目，已沿用该 Session 自身设置，未应用当前会话的待生效偏好。"]
               : []),
             ...(outcome.backgroundedThreadId
               ? [`原任务已转入后台：${outcome.backgroundedThreadId}`]
@@ -483,25 +484,25 @@ export function formatConversationCommandOutcome(
       return outcome.backgroundedThreadId
         ? toStructuredMarkdownList([
             "新会话已准备，原任务继续在后台运行。",
-            `后台 Thread：${outcome.backgroundedThreadId}`,
-            "发送下一条普通消息时才会创建新的 Codex Thread。",
+            `后台 Session ID：${outcome.backgroundedThreadId}`,
+            "发送下一条普通消息时才会创建新的 Codex Session。",
             formatNextMessageModel(outcome.nextModel),
           ].join("\n"))
         : toStructuredMarkdownList([
             "已退出当前会话。",
-            "发送下一条普通消息时才会创建新的 Codex Thread。",
+            "发送下一条普通消息时才会创建新的 Codex Session。",
             formatNextMessageModel(outcome.nextModel),
           ].join("\n"));
     case "thread.archived":
       return toStructuredMarkdownList([
-        "已归档 Codex Thread",
-        `Thread：${outcome.threadId}`,
+        "已归档 Codex Session",
+        `Session ID：${outcome.threadId}`,
         "下一条普通消息将创建新会话。",
       ].join("\n"));
     case "thread.unarchived":
       return toStructuredMarkdownList([
         "已取消归档并切换会话",
-        `Thread：${outcome.threadId}`,
+        `Session ID：${outcome.threadId}`,
       ].join("\n"));
     case "thread.pin-updated":
       return toStructuredMarkdownList([
@@ -515,13 +516,13 @@ export function formatConversationCommandOutcome(
       ].join("\n"));
     case "thread-section.created":
       return toStructuredMarkdownList([
-        "已创建全局 Thread 分区",
+        "已创建全局会话分区",
         `名称：${outcome.name}`,
         `ID：${outcome.sectionId}`,
       ].join("\n"));
     case "thread-section.renamed":
       return toStructuredMarkdownList([
-        "已重命名全局 Thread 分区",
+        "已重命名全局会话分区",
         `名称：${outcome.name}`,
         `ID：${outcome.sectionId}`,
       ].join("\n"));
@@ -529,7 +530,7 @@ export function formatConversationCommandOutcome(
       return toStructuredMarkdownList([
         outcome.pinned
           ? "已将当前会话移入内置固定区"
-          : "已移动当前会话到 Thread 分区",
+          : "已移动当前会话到会话分区",
         `分区：${outcome.name}`,
         ...(outcome.ordered ? ["位置：已按 before 参数调整"] : []),
         outcome.pinned
@@ -538,14 +539,14 @@ export function formatConversationCommandOutcome(
       ].join("\n"));
     case "thread-section.removed":
       return toStructuredMarkdownList([
-        "已将当前会话移出 Thread 分区。",
+        "已将当前会话移出会话分区。",
       ].join("\n"));
     case "thread-section.deleted":
       return toStructuredMarkdownList([
-        "已删除全局 Thread 分区",
+        "已删除全局会话分区",
         `名称：${outcome.name}`,
         `ID：${outcome.sectionId}`,
-        "分区内 Thread 保留，只解除分区归属。",
+        "分区内 Session 保留，只解除分区归属。",
       ].join("\n"));
     case "workspace.selected":
       return toStructuredMarkdownList([
@@ -560,7 +561,7 @@ export function formatConversationCommandOutcome(
         `Workspace：${outcome.workspace.name}`,
         ...workspacePermissionLines(outcome.workspace),
         "",
-        "权限已热加载；对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+        "权限已热加载；对新建或恢复的 Session 生效，不改变已绑定 Session。",
       ].join("\n"));
     case "turn.stop-requested":
       return outcome.stopped
@@ -594,8 +595,8 @@ export function formatConversationCommandOutcome(
       ].join("\n"));
     case "thread.reverted":
       return toStructuredMarkdownList([
-        "已回退 Thread 历史",
-        `Thread：${outcome.threadId}`,
+        "已回退 Session 历史",
+        `Session ID：${outcome.threadId}`,
         `边界 Turn：${outcome.beforeTurnId}`,
         "工作区文件和外部副作用不会随历史回退。",
       ].join("\n"));
@@ -606,12 +607,12 @@ export function formatConversationCommandOutcome(
       ].join("\n"));
     case "thread.compaction-requested":
       return toStructuredMarkdownList([
-        "已请求压缩当前 Codex Thread。进度将通过标准事件返回。",
+        "已请求压缩当前 Codex Session。进度将通过标准事件返回。",
       ].join("\n"));
     case "thread.forked":
       return toStructuredMarkdownList([
         "已分叉并切换到新会话",
-        `Thread：${outcome.threadId}`,
+        `Session ID：${outcome.threadId}`,
       ].join("\n"));
     case "review.started":
       return toStructuredMarkdownList([
@@ -657,7 +658,7 @@ export function formatConversationCommandOutcome(
             `Turn：${outcome.turnId}`,
           ].join("\n"));
     case "goal.cleared":
-      return toStructuredMarkdownList(["已清除当前 Thread Goal。"].join("\n"));
+      return toStructuredMarkdownList(["已清除当前 Session Goal。"].join("\n"));
     case "goal.updated":
       return toStructuredMarkdownList([
         "Goal 已设置",
@@ -696,7 +697,7 @@ export function formatConversationCommandOutcome(
         ...(outcome.run.completedAt === null
           ? []
           : [`完成时间：${formatScheduledAt(outcome.run.completedAt)}`]),
-        ...(outcome.run.threadId ? [`Thread：${outcome.run.threadId}`] : []),
+        ...(outcome.run.threadId ? [`Session ID：${outcome.run.threadId}`] : []),
       ].join("\n"));
   }
 }
@@ -783,36 +784,36 @@ export function formatConversationOccupancy(
   switch (release.status) {
     case "unbound":
       return toStructuredMarkdownList([
-        "当前会话没有绑定 Codex Thread，无需释放占用。",
+        "当前会话没有绑定 Codex Session，无需释放占用。",
       ].join("\n"));
     case "free":
       return toStructuredMarkdownList([
-        "当前会话的 Codex Thread 未被占用。",
-        `Thread：${release.threadId}`,
+        "当前会话的 Codex Session 未被占用。",
+        `Session ID：${release.threadId}`,
       ].join("\n"));
     case "released":
       return toStructuredMarkdownList([
-        "已释放 Codex Thread 占用，正在自动恢复订阅。",
-        `Thread：${release.threadId}`,
+        "已释放 Codex Session 占用，正在自动恢复订阅。",
+        `Session ID：${release.threadId}`,
         `占用进程：PID ${release.holder.pid}`,
         formatProcessCommand(release.holder.command),
       ].join("\n"));
     case "held":
       return toStructuredMarkdownList([
-        `Codex Thread 被 PID ${release.holder.pid} 占用。`,
+        `Codex Session 被 PID ${release.holder.pid} 占用。`,
         `进程：${formatProcessCommand(release.holder.command)}`,
         release.releasable
           ? release.stuck
             ? "当前会话恢复失败，可确认释放：/release force（会向该进程发送结束信号；若是 App Server 子进程，服务会自动重启并重连所有会话）。"
             : "当前会话运行正常，通常无需释放；如确认需要，/release force 会结束该进程（App Server 子进程会重启并重连所有会话）。"
-          : "该进程无法自动释放，请关闭占用 Thread 的 Codex 客户端，或重启 App Server 服务。",
-        `Thread：${release.threadId}`,
+          : "该进程无法自动释放，请关闭占用 Session 的 Codex 客户端，或重启 App Server 服务。",
+        `Session ID：${release.threadId}`,
       ].join("\n"));
     case "unidentifiable":
       return toStructuredMarkdownList([
-        "无法识别占用 Codex Thread 的进程（当前平台不支持进程诊断）。",
-        "请关闭占用该 Thread 的 Codex 客户端，或重启 App Server 服务后等待自动恢复。",
-        `Thread：${release.threadId}`,
+        "无法识别占用 Codex Session 的进程（当前平台不支持进程诊断）。",
+        "请关闭占用该 Session 的 Codex 客户端，或重启 App Server 服务后等待自动恢复。",
+        `Session ID：${release.threadId}`,
       ].join("\n"));
   }
 }
@@ -856,13 +857,13 @@ export function formatThreadQueueInputTypeLabel(type: ThreadQueueInputType): str
 function formatTakeoverSource(surface: string): string {
   switch (surface) {
     case "telegram":
-      return "已从 Telegram 接管 Codex Thread";
+      return "已从 Telegram 接管 Codex Session";
     case "feishu":
-      return "已从飞书接管 Codex Thread";
+      return "已从飞书接管 Codex Session";
     case "weixin":
-      return "已从微信接管 Codex Thread";
+      return "已从微信接管 Codex Session";
     default:
-      return "已从其他渠道接管 Codex Thread";
+      return "已从其他渠道接管 Codex Session";
   }
 }
 
@@ -898,7 +899,7 @@ export function formatConversationWorkspacePermissions(
     "- /workspaceperm sandbox <read-only|workspace-write|danger-full-access|clear>",
     "- /workspaceperm approval <untrusted|on-request|never|clear>",
     "- /workspaceperm profile <Profile ID|clear>",
-    "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。",
+    "权限热加载后对新建或恢复的 Session 生效，不改变已绑定 Session。",
   ].join("\n"));
 }
 
@@ -977,12 +978,12 @@ export function formatConversationMcp(
   }
   return toStructuredMarkdownList([
     `MCP Servers（${result.servers.length}）：`,
-    ...result.servers.map(
-      (server, index) =>
-        `${index + 1}. ${server.name} · auth=${server.authStatus} · tools=${server.toolCount}`,
+    ...result.servers.flatMap(
+      (server, index) => [
+        `${index + 1}. ${server.name} · 运行：${formatMcpRuntimeStatus(server.runtimeStatus)} · 认证：${formatMcpAuthStatus(server.authStatus)} · 工具：${server.toolCount}`,
+        `  - 详情：/mcp ${index + 1}`,
+      ],
     ),
-    "",
-    "详情：/mcp <名称或序号>",
   ].join("\n"));
 }
 
@@ -1010,18 +1011,34 @@ export function formatConversationMcpHealth(
     ...(visibleActions.length > 0
       ? [
           "需要处理：",
-          ...visibleActions.flatMap((action) => [
-            `- ${action.server}：尚未登录`,
-            `  - 处理：/mcp login ${action.selector}`,
-          ]),
+          ...visibleActions.flatMap((action) => action.type === "loginRequired"
+            ? [
+                `- ${action.server}：尚未登录`,
+                `  - 处理：/mcp login ${action.selector}`,
+              ]
+            : [
+                `- ${action.server}：连接失败或已取消`,
+                "  - 处理：/mcp reload",
+              ]),
         ]
       : []),
     ...(visibleNotices.length > 0 || omittedFindings > 0
       ? [
           "提示：",
-          ...visibleNotices.map((notice) => notice.type === "authUnknown"
-            ? `- ${notice.server}：认证状态未知，可检查配置或尝试 /mcp login ${notice.selector}`
-            : `- ${notice.server}：未公开工具、资源或资源模板`),
+          ...visibleNotices.map((notice) => {
+            switch (notice.type) {
+              case "authUnknown":
+                return `- ${notice.server}：认证状态未知，可检查配置或尝试 /mcp login ${notice.selector}`;
+              case "noCapabilities":
+                return `- ${notice.server}：未公开工具、资源或资源模板`;
+              case "notStarted":
+                return `- ${notice.server}：尚未启动`;
+              case "starting":
+                return `- ${notice.server}：正在连接`;
+              case "disabled":
+                return `- ${notice.server}：已禁用`;
+            }
+          }),
           ...(omittedFindings > 0
             ? [`- 其余 ${omittedFindings} 项已省略；使用 /mcp 查看完整 Server 列表`]
             : []),
@@ -1037,8 +1054,8 @@ export function formatConversationMcpReload(
   return toStructuredMarkdownList([
     "MCP 配置重新加载",
     "状态：已请求",
-    "生效：已加载 Thread 会在下一次活动 Turn 时刷新",
-    "提示：无需重启 Codex App Server",
+    "生效：已加载 Session 已刷新 MCP 配置",
+    "提示：无需重启 Codex App Server；连接结果请再次使用 /mcp health 查询",
   ].join("\n"));
 }
 
@@ -1064,9 +1081,10 @@ export function formatConversationMcpDetail(
   return toStructuredMarkdownList([
     `MCP Server：${server.serverTitle ?? server.name}`,
     `名称：${server.name}`,
+    `运行：${formatMcpRuntimeStatus(server.runtimeStatus)}`,
     ...(server.pluginId ? [`来源 Plugin：${server.pluginId}`] : []),
     `版本：${server.serverVersion ?? "未提供"}`,
-    `认证：${server.authStatus}`,
+    `认证：${formatMcpAuthStatus(server.authStatus)}`,
     ...(server.serverDescription
       ? [`说明：${formatMcpDescription(server.serverDescription)}`]
       : []),
@@ -1080,6 +1098,33 @@ export function formatConversationMcpDetail(
     `浏览资源模板：/mcp ${selector} templates`,
     `读取资源：/mcp resource ${selector} <URI>`,
   ].join("\n"));
+}
+
+function formatMcpRuntimeStatus(
+  status: Extract<ConversationCommandResult, { kind: "mcp" }>["servers"][number]["runtimeStatus"],
+): string {
+  return ({
+    unknown: "未知",
+    notStarted: "未启动",
+    starting: "正在连接",
+    connected: "已连接",
+    authenticationRequired: "需要认证",
+    failed: "失败",
+    cancelled: "已取消",
+    disabled: "已禁用",
+  } as const)[status];
+}
+
+function formatMcpAuthStatus(
+  status: Extract<ConversationCommandResult, { kind: "mcp" }>["servers"][number]["authStatus"],
+): string {
+  return ({
+    unknown: "未知",
+    unsupported: "不支持 OAuth",
+    notLoggedIn: "未登录",
+    bearerToken: "Bearer Token",
+    oAuth: "OAuth",
+  } as const)[status];
 }
 
 function formatSelectedMcpDetailSection(
@@ -1546,7 +1591,7 @@ export function formatConversationArtifacts(
         "",
         result.artifacts.diff,
       ].join("\n")
-    : "当前 Thread 暂无 Turn Diff。";
+    : "当前 Session 暂无 Turn Diff。";
 }
 
 export function formatConversationCollaborationMode(
@@ -1572,7 +1617,7 @@ export function formatConversationGoal(
         `状态：${formatGoalStatus(result.goal.status)}`,
         `Tokens：${formatGoalTokens(result.goal)}`,
       ].join("\n"))
-    : "当前 Thread 没有 Goal。使用 /goal set <目标> 设置。";
+    : "当前 Session 没有 Goal。使用 /goal set <目标> 设置。";
 }
 
 export function formatConversationModels(
@@ -1584,7 +1629,7 @@ export function formatConversationModels(
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
   const fast = isFastServiceTier(state.serviceTier, current) ? "开启" : "关闭";
   const providerSwitchNotice = state.providerPending
-    ? ["提供商切换将在下一条消息中创建新 Thread；当前 Thread 会保留，可通过 /resume 恢复。", ""]
+    ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。", ""]
     : [];
   if (result.view === "fast") {
     return toStructuredMarkdownList([
@@ -1607,6 +1652,8 @@ export function formatConversationModels(
       ...(result.nextSelection === "effort"
         ? ["模型已选择，请继续选择思考等级。", ""]
         : []),
+      ...formatCurrentModelNotices(current),
+      "",
       "可用思考等级：",
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
@@ -1622,16 +1669,51 @@ export function formatConversationModels(
     ...(current && fastServiceTierId(current)
       ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
       : []),
+    ...formatCurrentModelNotices(current),
     "",
     ...providerSwitchNotice,
     `模型列表（${state.models.length}）：`,
     ...state.models.map(
       (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
+        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
     ),
     "",
     "切换：/model <序号、模型 ID 或名称>",
   ].join("\n"));
+}
+
+function formatCurrentModelNotices(model: ModelOption | undefined): string[] {
+  if (!model) return [];
+  const notices: string[] = [];
+  if (model.multiAgentVersion) {
+    const runtime = model.multiAgentVersion === "disabled"
+      ? "不支持"
+      : model.multiAgentVersion === "v1"
+        ? "v1（旧版）"
+        : "v2";
+    notices.push(`Codex 多代理运行时：${runtime}`);
+  }
+  if (model.upgrade) {
+    notices.push([
+      `官方模型提示：建议切换到 ${model.upgrade.model}`,
+      ...(model.upgrade.retirementAtSeconds === null
+        ? []
+        : [`退役时间：${formatUtcDate(model.upgrade.retirementAtSeconds)}（UTC）`]),
+    ].join(" · "));
+  }
+  return notices;
+}
+
+function formatModelUpgradeBadge(model: ModelOption): string {
+  if (!model.upgrade) return "";
+  const retirement = model.upgrade.retirementAtSeconds === null
+    ? ""
+    : ` · 退役 ${formatUtcDate(model.upgrade.retirementAtSeconds)} UTC`;
+  return ` · 官方建议替代 ${model.upgrade.model}${retirement}`;
+}
+
+function formatUtcDate(timestampSeconds: number): string {
+  return new Date(timestampSeconds * 1_000).toISOString().slice(0, 10);
 }
 
 function formatNextMessageModel(value: { model: string; modelProvider?: string }): string {
@@ -1756,15 +1838,15 @@ function appendThreadUsage(
   if (!threadUsage) {
     return;
   }
-  lines.push("", "当前 Thread 官方估算：");
+  lines.push("", "当前 Session 官方估算：");
   if (threadUsage.kind === "unavailable") {
     lines.push(
-      "当前 Thread 的官方计费估算不可用；该能力目前仅向部分 Business/Enterprise 工作区开放。",
+      "当前 Session 的官方计费估算不可用；该能力目前仅向部分 Business/Enterprise 工作区开放。",
     );
     return;
   }
   if (threadUsage.kind === "failed") {
-    lines.push("当前 Thread 官方估算暂时无法查询，请稍后重试 /usage。");
+    lines.push("当前 Session 官方估算暂时无法查询，请稍后重试 /usage。");
     return;
   }
   lines.push(`Credits：${formatMicros(threadUsage.estimatedUsageCreditsMicros)}`);
@@ -1940,7 +2022,8 @@ export function formatConversationStatus(status: ConversationStatus): string {
   const lines = [
     "Codex 状态",
     `Workspace：${status.workspaceName} (${status.workspaceId})`,
-    `Session：${status.threadId ?? "尚未绑定"}`,
+    `Session：${status.threadId ? status.threadName ?? "未命名" : "尚未绑定"}`,
+    `Session ID：${status.threadId ?? "尚未绑定"}`,
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
@@ -1966,7 +2049,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     const { total, last, modelContextWindow } = status.tokenUsage;
     lines.push(
       "",
-      "当前 Thread 用量：",
+      "当前 Session 用量：",
       `- **Token**：${formatTokenCount(total.totalTokens)}`,
       `  - 最近模型请求：${formatTokenCount(last.totalTokens)}`,
       `  - 输入命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
@@ -1982,7 +2065,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
       `  - Codex 有效上下文窗口：${modelContextWindow === null ? "未知" : formatTokenCount(modelContextWindow)}`,
     );
   } else if (status.threadId) {
-    lines.push("", "当前 Thread 用量：等待 App Server 推送统计");
+    lines.push("", "当前 Session 用量：等待 App Server 推送统计");
   }
   if (usesOpenAiAccount(status.modelProvider) && status.weeklyLimit) {
     lines.push(`周限：${formatRemainingRateLimitWindow(status.weeklyLimit)}`);

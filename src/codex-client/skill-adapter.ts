@@ -72,10 +72,12 @@ function toDirectlyInstalledSkills(
       if (typeof skill.path !== "string") {
         throw new Error("Codex 响应缺少有效 skill path");
       }
-      const normalizedPath = skill.path.replaceAll("\\", "/");
+      if (skill.pluginId !== null && typeof skill.pluginId !== "string") {
+        throw new Error("Codex 响应缺少有效 skill pluginId");
+      }
       const directlyInstalled = skill.enabled
         && (skill.scope === "user" || skill.scope === "repo")
-        && !normalizedPath.includes("/.codex/plugins/");
+        && skill.pluginId === null;
       if (!directlyInstalled) {
         return [];
       }

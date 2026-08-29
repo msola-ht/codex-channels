@@ -7,7 +7,7 @@
 
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发和指标观测实现。监听自动分配的回环地址，把精确
   `/responses`、HTTP `/responses/compact` 与只读 `/models` 路径转发到上游；官方 OpenAI
-  主代理还按 Codex 0.148.0 固定端点清单接受 POST `/alpha/search`、
+  主代理还按当前锁定 Codex 0.150.1 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
   Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
@@ -30,7 +30,7 @@
   或计价覆盖率。旧版 HTTP `/responses/compact` 以及 Codex 0.146 默认通过普通 HTTP/WebSocket
   `/responses` 发送、由私有元数据 `request_kind=compaction` 标记的 remote compaction v2 都归为
   压缩操作；压缩操作以自身成功状态为准，不要求模型 Usage，但观测到的 Token、费用和额度快照
-  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。Codex 0.148.0 WebSocket 首轮
+  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.150.1 的 WebSocket 首轮
   `request_kind=prewarm` 使用 `generate=false` 建立并复用连接，不是模型推理请求；代理照常透明
   转发并移除私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
   OpenAI HTTP/SSE 只从明确的 `x-codex-primary/secondary-*` 白名单响应头提取 10,080 分钟周窗口，

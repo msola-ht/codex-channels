@@ -76,6 +76,32 @@ describe("model formatting", () => {
     expect(text).toContain("/model <序号、模型 ID 或名称>");
   });
 
+  it("shows structured lifecycle hints without changing availability", () => {
+    const retiring = {
+      ...models[1]!,
+      multiAgentVersion: "v2" as const,
+      upgrade: {
+        model: "gpt-next",
+        retirementAtSeconds: 1_893_456_000,
+      },
+    };
+    const text = formatModels({
+      models: [models[0]!, retiring],
+      model: retiring.model,
+      effort: "high",
+      serviceTier: "default",
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    });
+
+    expect(text).toContain("Codex 多代理运行时：v2");
+    expect(text).toContain("官方模型提示：建议切换到 gpt-next · 退役时间：2030-01-01（UTC）");
+    expect(text).toContain("官方建议替代 gpt-next · 退役 2030-01-01 UTC ← 当前");
+    expect(text).not.toContain("暂不可用");
+  });
+
   it("only lists reasoning efforts supported by the current model", () => {
     const text = formatReasoningEfforts({
       models,
@@ -178,6 +204,7 @@ describe("formatStartupNotification", () => {
       ],
       {
         threadId: "019f8951-eb3",
+        threadName: "发布检查",
         workspaceId: "main",
         model: "gpt-main",
         effort: "high",
@@ -217,7 +244,8 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("### 当前会话");
     expect(text).toContain("- Workspace：Main (main)");
     expect(text).toContain("工作目录：/workspace/main");
-    expect(text).toContain("Thread：019f8951-eb3");
+    expect(text).toContain("Session：发布检查");
+    expect(text).toContain("Session ID：019f8951-eb3");
     expect(text).toContain("Git 分支：feature/weixin-surface");
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考等级：high");
@@ -254,7 +282,8 @@ describe("formatStartupNotification", () => {
 
     expect(text).toContain("系统：freebsd · x64");
     expect(text).toContain("App Server UA：App Server 未返回");
-    expect(text).toContain("Thread：尚未绑定");
+    expect(text).toContain("Session：尚未绑定");
+    expect(text).toContain("Session ID：尚未绑定");
     expect(text).toContain("Git 分支：未检测到");
     expect(text).toContain("Fast 模式：未知");
   });

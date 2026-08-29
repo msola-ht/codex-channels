@@ -19,7 +19,7 @@ const target = {
   conversationId: "oc_chat",
 } as const;
 
-const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- Session ID：thread-1";
+const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- Session：测试会话\n- Session ID：thread-1";
 
 const cardMethods = {
   sendCard: async () => "om_card",
@@ -2580,6 +2580,7 @@ function turnCompleted(): OutputEvent {
     type: "turn.completed",
     target,
     threadId: "thread-1",
+    sessionName: "测试会话",
     turnId: "turn-1",
     status: "completed",
   };

@@ -1166,7 +1166,7 @@ function renderCommandCenterInitialChoices(
   }
   if (action === "goal") {
     return {
-      title: "Thread Goal",
+      title: "Session Goal",
       choices: [
         { label: "查看当前", action, input: " " },
         { label: "设置 Goal", action: "goal-set", input: "" },
@@ -1243,7 +1243,7 @@ function renderCommandCenterForm(
     return {
       kind: "form",
       title: "搜索会话",
-      description: "按会话名称、预览或 Thread ID 搜索。",
+      description: "按会话名称、预览或 Session ID 搜索。",
       action: "sessions",
       fieldLabel: "搜索词",
       placeholder: "请输入搜索词",
@@ -1253,7 +1253,7 @@ function renderCommandCenterForm(
     return {
       kind: "form",
       title: "搜索已归档会话",
-      description: "按会话名称、预览或 Thread ID 搜索。",
+      description: "按会话名称、预览或 Session ID 搜索。",
       action: "archived",
       fieldLabel: "搜索词",
       placeholder: "请输入搜索词",
@@ -1315,10 +1315,10 @@ function renderCommandCenterForm(
   if (action === "goal-set") {
     return {
       kind: "form",
-      title: "设置 Thread Goal",
+      title: "设置 Session Goal",
       action: "goal",
       fieldLabel: "目标",
-      placeholder: "请输入当前 Thread 的目标",
+      placeholder: "请输入当前 Session 的目标",
       inputPrefix: "set ",
       multiline: true,
     };
@@ -1486,7 +1486,7 @@ function renderCommandCenterChoices(
     const backgroundThreadIds = new Set(result.backgroundThreadIds ?? []);
     return {
       title: "选择会话",
-      description: "点击后切换到对应 Codex Thread。",
+      description: "点击后切换到对应 Codex Session。",
       choices: [
         {
           label: "搜索会话…",
@@ -1508,7 +1508,7 @@ function renderCommandCenterChoices(
     }
     return {
       title: "恢复已归档会话",
-      description: "点击后取消归档并切换到对应 Codex Thread。",
+      description: "点击后取消归档并切换到对应 Codex Session。",
       choices: [
         {
           label: "搜索归档…",

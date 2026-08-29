@@ -679,7 +679,7 @@ function renderFeishuCategorizedCommandsCard(
       actionRow(token, [
         ["固定会话", "pin", "default"],
         ["取消固定", "unpin", "default"],
-        ["Thread 分区", "section", "default"],
+        ["会话分区", "section", "default"],
         ["历史回退", "revert", "default"],
       ]),
       actionRow(token, [
@@ -738,7 +738,7 @@ export function renderFeishuCommandCenterCard(
         tag: "div",
         text: {
           tag: "plain_text",
-          content: "选择操作；普通文本仍会发送到当前 Codex Thread。",
+          content: "选择操作；普通文本仍会发送到当前 Codex Session。",
         },
       },
       sectionTitle("常用"),

@@ -20,7 +20,7 @@ export function formatSurfaceUserFacingError(
     case "conversation.name.invalid":
       return "会话名称必须为 1–64 个字符";
     case "conversation.missing":
-      return "当前还没有 Codex Thread";
+      return "当前还没有 Codex Session";
     case "conversation.busy":
       return "当前任务运行中，请先使用 /stop 停止当前任务";
     case "conversation.background-limit":
@@ -52,7 +52,7 @@ export function formatSurfaceUserFacingError(
     case "model.input.unsupported":
       return `当前模型 ${detail(error, "model", "未知")} 不支持该输入类型`;
     case "session.selector.required":
-      return `用法：/${detail(error, "command", "resume")} <序号、名称或 Thread ID>`;
+      return `用法：/${detail(error, "command", "resume")} <序号、名称或 Session ID>`;
     case "session.selector.ambiguous":
       return "会话选择不唯一";
     case "session.selector.not-found":
@@ -64,25 +64,25 @@ export function formatSurfaceUserFacingError(
     case "thread-section.usage":
       return "用法：/section [list [页码]|create <名称>|rename <分区 ID 或序号> <新名称>|move <分区 ID 或序号> [before <会话>]|remove|delete <分区 ID 或序号> [confirm]]";
     case "thread-section.name.invalid":
-      return "Thread 分区名称必须为 1–64 个字符，且不能包含控制字符";
+      return "会话分区名称必须为 1–64 个字符，且不能包含控制字符";
     case "thread-section.selector.ambiguous":
-      return "Thread 分区选择不唯一，请使用完整 ID";
+      return "会话分区选择不唯一，请使用完整 ID";
     case "thread-section.selector.not-found":
-      return "找不到指定 Thread 分区";
+      return "找不到指定会话分区";
     case "thread-section.pinned.immutable":
       return "内置固定区不能重命名或删除；请使用 /pin 或 /unpin 管理固定状态";
     case "thread-section.before.invalid":
       return "before 指定的会话必须已经位于目标分区";
     case "thread-section.delete-confirmation.invalid":
-      return "删除确认必须使用预览返回的完整 Thread 分区 ID";
+      return "删除确认必须使用预览返回的完整会话分区 ID";
     case "thread-section.admin-required":
-      return "当前用户没有 Thread 分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway";
+      return "当前用户没有会话分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway";
     case "thread.bound":
-      return "该 Codex Thread 已绑定到其他会话";
+      return "该 Codex Session 已绑定到其他会话";
     case "thread.takeover.busy":
       return "原渠道或当前渠道仍有任务或待处理交互，暂不能接管";
     case "thread.takeover.workspace":
-      return "只能接管当前 Workspace 中的 Codex Thread";
+      return "只能接管当前 Workspace 中的 Codex Session";
     case "thread.takeover.changed":
       return "会话绑定刚刚发生变化，请重新打开会话列表后再试";
     case "goal.empty":
@@ -108,7 +108,7 @@ export function formatSurfaceUserFacingError(
     case "queue.empty":
       return "App Server Queue 为空，请先使用 /queue add 新增条目";
     case "queue.busy":
-      return "当前 Thread 有活动或待触发 Turn，请稍后重试";
+      return "当前 Session 有活动或待触发 Turn，请稍后重试";
     case "queue.pending-overrides":
       return "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成";
     case "queue.snapshot.required":
@@ -128,9 +128,9 @@ export function formatSurfaceUserFacingError(
     case "revert.unavailable":
       return "当前 App Server 不支持分页历史回退";
     case "revert.empty-history":
-      return "当前 Thread 还没有可回退的 Turn";
+      return "当前 Session 还没有可回退的 Turn";
     case "revert.legacy-thread":
-      return "当前 Thread 不支持回退；请新建分页历史会话";
+      return "当前 Session 不支持回退；请新建分页历史会话";
     case "revert.snapshot-required":
       return "Turn 选择器只对最近五分钟的 /revert list 页面有效，请先重新列出历史";
     case "revert.turn-not-found":
@@ -138,7 +138,7 @@ export function formatSurfaceUserFacingError(
     case "revert.confirmation-invalid":
       return "Revert 确认已失效，请重新生成预览";
     case "revert.concurrent":
-      return "Thread 历史、活动任务或 Queue 已发生变化，请重新生成 Revert 预览";
+      return "Session 历史、活动任务或 Queue 已发生变化，请重新生成 Revert 预览";
     case "revert.queue-unknown":
       return "无法确认当前 Queue，Revert 已失败关闭";
     case "revert.result-unknown":
@@ -200,7 +200,7 @@ export function formatSurfaceUserFacingError(
     case "mcp.oauth.unsupported":
       return "该 MCP Server 不支持 OAuth 登录";
     case "mcp.thread.required":
-      return "请先发送消息创建 Thread，或使用 /resume 恢复 Thread 后再登录 MCP Server";
+      return "请先发送消息创建 Session，或使用 /resume 恢复 Session 后再登录 MCP Server";
     case "mcp.resource.usage":
       return "需要提供有效的 MCP Resource URI";
     case "plugin.usage":
@@ -214,7 +214,7 @@ export function formatSurfaceUserFacingError(
     case "plugin.disabled":
       return "开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway";
     case "plugin.provider.unsupported":
-      return "开发中的 Plugin 调用当前只支持 OpenAI Thread";
+      return "开发中的 Plugin 调用当前只支持 OpenAI Session";
     case "command.unsupported":
       return surfaceLabel === "Telegram"
         ? `不支持的会话命令：${detail(error, "command", "未知")}`

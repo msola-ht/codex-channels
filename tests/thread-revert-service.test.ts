@@ -214,7 +214,7 @@ describe("ConversationService Thread Revert", () => {
 
     await expect(service.revertList(target)).rejects.toMatchObject({
       code: "revert.empty-history",
-      message: "当前 Thread 还没有可回退的 Turn",
+      message: "当前 Session 还没有可回退的 Turn",
     });
   });
 

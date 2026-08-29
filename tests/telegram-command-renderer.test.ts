@@ -143,7 +143,7 @@ describe("Telegram command renderer", () => {
     );
 
     expect(reply).toHaveBeenCalledWith(
-      expect.stringContaining("已从飞书接管 Codex Thread"),
+      expect.stringContaining("已从飞书接管 Codex Session"),
       expect.objectContaining({ parse_mode: "HTML" }),
     );
   });

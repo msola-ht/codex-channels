@@ -114,7 +114,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationOccupancy({
       kind: "occupancy",
       result: { status: "unbound" },
-    })).toContain("当前会话没有绑定 Codex Thread");
+    })).toContain("当前会话没有绑定 Codex Session");
     expect(formatConversationOccupancy({
       kind: "occupancy",
       result: { status: "free", threadId: "thread-free" },
@@ -167,7 +167,7 @@ describe("provider-aware conversation command formatting", () => {
         threadId: "thread-held",
         holder: { pid: 4242, command: "codex app-server" },
       },
-    })).toContain("已释放 Codex Thread 占用");
+    })).toContain("已释放 Codex Session 占用");
     expect(formatConversationOccupancy({
       kind: "occupancy",
       result: { status: "unidentifiable", threadId: "thread-x" },
@@ -448,40 +448,56 @@ describe("provider-aware conversation command formatting", () => {
     expect(conversationCommandHelpLines.join("\n")).toContain(
       "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
     );
-    expect(formatConversationMcp({
+    const mcpOverview = formatConversationMcp({
       kind: "mcp",
-      servers: [{ name: "project-tools", pluginId: null, authStatus: "notLoggedIn", toolCount: 1 }],
-    })).toContain("1. project-tools");
+      servers: [{
+        name: "project-tools",
+        runtimeStatus: "authenticationRequired",
+        pluginId: null,
+        authStatus: "notLoggedIn",
+        toolCount: 1,
+      }],
+    });
+    expect(mcpOverview).toContain("1. project-tools · 运行：需要认证");
+    expect(mcpOverview).toContain("  - 详情：/mcp 1");
+    expect(mcpOverview).not.toContain("/mcp <名称或序号>");
 
     expect(formatConversationMcpHealth({
       kind: "mcp-health",
       report: {
-        serverCount: 3,
+        serverCount: 5,
         toolCount: 1,
         resourceCount: 0,
         resourceTemplateCount: 0,
-        actions: [{ type: "loginRequired", server: "oauth tools", selector: "1" }],
+        actions: [
+          { type: "loginRequired", server: "oauth tools", selector: "1" },
+          { type: "reconnectRecommended", server: "failed", selector: "4" },
+        ],
         notices: [
           { type: "authUnknown", server: "unknown auth", selector: "2" },
-          { type: "noCapabilities", server: "empty", selector: "3" },
+          { type: "disabled", server: "empty", selector: "3" },
+          { type: "starting", server: "starting", selector: "5" },
         ],
       },
     })).toBe([
       "## MCP 健康检查",
-      "- 状态：发现 1 项需要处理",
-      "- Server：3 个 · 工具：1 个 · 资源：0 个 · 资源模板：0 个",
+      "- 状态：发现 2 项需要处理",
+      "- Server：5 个 · 工具：1 个 · 资源：0 个 · 资源模板：0 个",
       "### 需要处理",
       "- oauth tools：尚未登录",
       "  - 处理：/mcp login 1",
+      "- failed：连接失败或已取消",
+      "  - 处理：/mcp reload",
       "### 提示",
       "- unknown auth：认证状态未知，可检查配置或尝试 /mcp login 2",
-      "- empty：未公开工具、资源或资源模板",
+      "- empty：已禁用",
+      "- starting：正在连接",
     ].join("\n"));
     expect(formatConversationMcpReload({ kind: "mcp-reload" })).toBe([
       "## MCP 配置重新加载",
       "- 状态：已请求",
-      "- 生效：已加载 Thread 会在下一次活动 Turn 时刷新",
-      "- 提示：无需重启 Codex App Server",
+      "- 生效：已加载 Session 已刷新 MCP 配置",
+      "- 提示：无需重启 Codex App Server；连接结果请再次使用 /mcp health 查询",
     ].join("\n"));
 
     const detail = formatConversationMcpDetail({
@@ -489,6 +505,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "Project Tools",
+        runtimeStatus: "authenticationRequired",
         pluginId: "github@local",
         authStatus: "notLoggedIn",
         toolCount: 1,
@@ -522,6 +539,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "codex_apps",
       server: {
         name: "codex_apps",
+        runtimeStatus: "connected",
         pluginId: null,
         authStatus: "bearerToken",
         toolCount: 0,
@@ -541,6 +559,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "large",
       server: {
         name: "large",
+        runtimeStatus: "connected",
         pluginId: null,
         authStatus: "oAuth",
         toolCount: 20,
@@ -666,6 +685,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "codex_apps",
+        runtimeStatus: "connected",
         pluginId: null,
         authStatus: "bearerToken",
         toolCount: 18,
@@ -707,6 +727,7 @@ describe("provider-aware conversation command formatting", () => {
       selector: "1",
       server: {
         name: "codex_apps",
+        runtimeStatus: "connected",
         pluginId: null,
         authStatus: "bearerToken",
         toolCount: 1,
@@ -856,7 +877,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(runs).toContain("  - 触发时间：1970-01-01T00:00:00.001Z");
     expect(runs).toContain("  - 开始时间：1970-01-01T00:00:00.001Z");
     expect(runs).toContain("  - 完成时间：1970-01-01T00:00:00.002Z");
-    expect(runs).toContain("  - Thread：thread-1");
+    expect(runs).toContain("  - Session ID：thread-1");
     expect(runs).not.toContain("\n- 计划时间：");
   });
 
@@ -986,7 +1007,7 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("已更新工作区权限");
     expect(rendered).toContain("- 审批：免审批");
-    expect(rendered).toContain("对新建或恢复的 Thread 生效");
+    expect(rendered).toContain("对新建或恢复的 Session 生效");
   });
 
   it("shows the model used by the next message after changing session context", () => {
@@ -995,7 +1016,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(formatConversationCommandOutcome({
       type: "session.new",
       nextModel,
-    })).toContain("发送下一条普通消息时才会创建新的 Codex Thread");
+    })).toContain("发送下一条普通消息时才会创建新的 Codex Session");
     expect(formatConversationCommandOutcome({
       type: "session.new",
       backgroundedThreadId: "thread-running",
@@ -1023,7 +1044,7 @@ describe("provider-aware conversation command formatting", () => {
       threadId: "thread-cold",
       queuePending: true,
       model: { model: "gpt-test", modelProvider: "openai" },
-    })).toContain("已沿用该 Thread 自身设置");
+    })).toContain("已沿用该 Session 自身设置");
   });
 
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {
@@ -1055,8 +1076,8 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("下一条消息中创建新 Thread");
-    expect(rendered).toContain("当前 Thread 会保留");
+    expect(rendered).toContain("下一条消息中创建新 Session");
+    expect(rendered).toContain("当前 Session 会保留");
     expect(rendered).toContain("下一条消息模型：deepseek-v4-flash · Provider：deepseek");
   });
 
@@ -1154,7 +1175,7 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain("OpenAI Codex 账户用量摘要");
-    expect(rendered).toContain("当前 Thread 官方估算");
+    expect(rendered).toContain("当前 Session 官方估算");
     expect(rendered).toContain("Credits：46");
     expect(rendered).toContain("估算费用：$1.82");
     expect(rendered).toContain("计费 Token：输入 100 · 缓存 20 · 输出 40");
@@ -1185,7 +1206,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
     expect(unavailable).toContain("累计 Tokens");
-    expect(unavailable).toContain("当前 Thread 的官方计费估算不可用");
+    expect(unavailable).toContain("当前 Session 的官方计费估算不可用");
     expect(unavailable).toContain("仅向部分 Business/Enterprise 工作区开放");
 
     const failed = formatConversationUsage({
@@ -1198,7 +1219,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
     expect(failed).toContain("累计 Tokens");
-    expect(failed).toContain("当前 Thread 官方估算暂时无法查询，请稍后重试 /usage");
+    expect(failed).toContain("当前 Session 官方估算暂时无法查询，请稍后重试 /usage");
   });
 
   it("omits unavailable official dollars and only sums complete Token fields", () => {

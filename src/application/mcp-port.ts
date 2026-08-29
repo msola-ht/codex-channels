@@ -5,12 +5,23 @@ export type McpAuthStatus =
   | "bearerToken"
   | "oAuth";
 
+export type McpRuntimeStatus =
+  | "unknown"
+  | "notStarted"
+  | "starting"
+  | "connected"
+  | "authenticationRequired"
+  | "failed"
+  | "cancelled"
+  | "disabled";
+
 export function supportsMcpOAuthLogin(status: McpAuthStatus): boolean {
   return status !== "unsupported" && status !== "bearerToken";
 }
 
 export interface McpServerSummary {
   name: string;
+  runtimeStatus: McpRuntimeStatus;
   pluginId: string | null;
   authStatus: McpAuthStatus;
   toolCount: number;
@@ -54,12 +65,17 @@ export interface McpHealthReport {
   resourceCount: number;
   resourceTemplateCount: number;
   actions: Array<{
-    type: "loginRequired";
+    type: "loginRequired" | "reconnectRecommended";
     server: string;
     selector: string;
   }>;
   notices: Array<{
-    type: "authUnknown" | "noCapabilities";
+    type:
+      | "authUnknown"
+      | "noCapabilities"
+      | "notStarted"
+      | "starting"
+      | "disabled";
     server: string;
     selector: string;
   }>;

@@ -570,28 +570,35 @@ export class GatewayApplication {
         resetsAt,
         this.logger,
       ),
+      (parentThreadId) =>
+        this.subagentCompletion.hasPendingForParentThread(parentThreadId),
     );
     this.output.subscribe("conversation-background-release", async (event) => {
-      if (event.type !== "turn.completed" || !this.router.isBackgroundThread(event.threadId)) {
+      const threadId = event.type === "turn.completed"
+        ? event.threadId
+        : event.type === "subagent.completed"
+          ? event.parentThreadId
+          : undefined;
+      if (!threadId || !this.router.isBackgroundThread(threadId)) {
         return;
       }
       try {
-        await this.trackQueueLifecycleTask(() =>
-          service.releaseBackgroundIfComplete(event.threadId, {
-            // 0.148 deliberately keeps Queue entries after an interrupted turn;
-            // only normal/failed completion participates in native idle dispatch.
-            dispatchQueued: event.status !== "interrupted",
-          })
-        );
+        await this.trackQueueLifecycleTask(() => event.type === "turn.completed"
+          ? service.releaseBackgroundIfComplete(threadId, {
+              // 0.148 deliberately keeps Queue entries after an interrupted turn;
+              // only normal/failed completion participates in native idle dispatch.
+              dispatchQueued: event.status !== "interrupted",
+            })
+          : service.retryPendingBackgroundRelease(threadId));
       } catch (error) {
         this.logger.warn(
-          { err: error, threadId: event.threadId },
-          "后台 Thread 完成后的订阅清理失败，已保留绑定供重启重试",
+          { err: error, threadId },
+          "后台 Thread 终态后的订阅清理失败，已保留绑定供后续重试",
         );
         this.output.publish({
           type: "warning",
           target: event.target,
-          threadId: event.threadId,
+          threadId,
           background: true,
           message: "后台任务已完成，但订阅清理暂时失败；Gateway 重启后会重试。",
         }, true);
@@ -839,6 +846,20 @@ export class GatewayApplication {
           });
         }
         this.subagentCompletion.handleInput(coreEvent);
+        if (
+          coreEvent.type === "item.subagentActivity"
+          && (coreEvent.kind === "completed" || coreEvent.kind === "interrupted")
+          && this.router.isBackgroundThread(coreEvent.threadId)
+        ) {
+          void this.trackQueueLifecycleTask(() =>
+            service.retryPendingBackgroundRelease(coreEvent.threadId)
+          ).catch((error) => {
+            this.logger.warn(
+              { err: error, threadId: coreEvent.threadId },
+              "子代理终态后的后台 Thread 订阅清理失败，已保留绑定供后续重试",
+            );
+          });
+        }
         this.core.handle(coreEvent);
         if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
           const modelSettings = this.router.modelSettingsForThread(coreEvent.threadId);

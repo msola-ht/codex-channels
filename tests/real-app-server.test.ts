@@ -35,6 +35,7 @@ import {
   updateCodexUserSetting,
 } from "../scripts/codex-user-settings-management.mjs";
 import type { ApprovalRequest } from "../src/approval/index.js";
+import type { McpRuntimeStatus } from "../src/application/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
   handleApprovalServerRequest,
@@ -746,6 +747,212 @@ contractSuite("real supervised App Server service", () => {
     } finally {
       removeNotification?.();
       if (client && threadId) {
+        await client.unsubscribeThread(threadId).catch(() => undefined);
+        await client.deleteThread(threadId).catch(() => undefined);
+      }
+      await client?.close().catch(() => undefined);
+      await stopDetachedTestProcess(processHandle, 5_000).catch(() => undefined);
+      await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  }, 30_000);
+
+  it("attributes native subagent completion activity to the initiating parent Turn", async () => {
+    const testRuntime = mkdtempSync(join(tmpdir(), "codex-subagent-completion-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const workspace = join(testRuntime, "workspace");
+    const socketPath = join(testRuntime, "codex-app-server.sock");
+    const parentPrompt = "Spawn the completion contract worker.";
+    const childPrompt = "Complete the child contract task.";
+    const spawnCallId = "spawn-completion-contract-worker";
+    let responseSequence = 0;
+    const apiServer = createServer((request, response) => {
+      if (request.method === "GET" && request.url?.startsWith("/v1/models")) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          object: "list",
+          data: [{ id: "subagent-contract-model", object: "model", owned_by: "contract" }],
+        }));
+        return;
+      }
+      if (request.method !== "POST" || request.url !== "/v1/responses") {
+        request.resume();
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "subagent contract fixture endpoint" } }));
+        return;
+      }
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        responseSequence += 1;
+        const responseId = `subagent-contract-response-${responseSequence}`;
+        const events = body.includes(spawnCallId)
+          ? [
+              { type: "response.created", response: { id: responseId } },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "message",
+                  role: "assistant",
+                  id: "parent-contract-message",
+                  content: [{ type: "output_text", text: "parent complete" }],
+                },
+              },
+              completedResponseEvent(responseId),
+            ]
+          : body.includes(childPrompt)
+          ? [
+              { type: "response.created", response: { id: responseId } },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "message",
+                  role: "assistant",
+                  id: "child-contract-message",
+                  content: [{ type: "output_text", text: "child complete" }],
+                },
+              },
+              completedResponseEvent(responseId),
+            ]
+          : [
+              { type: "response.created", response: { id: responseId } },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "function_call",
+                  call_id: spawnCallId,
+                  namespace: "collaboration",
+                  name: "spawn_agent",
+                  arguments: JSON.stringify({
+                    message: childPrompt,
+                    task_name: "contract_worker",
+                    fork_turns: "none",
+                  }),
+                },
+              },
+              completedResponseEvent(responseId),
+            ];
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        for (const event of events) {
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+        response.end();
+      });
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      apiServer.once("error", rejectListen);
+      apiServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const apiAddress = apiServer.address();
+    if (!apiAddress || typeof apiAddress === "string") {
+      throw new Error("子代理完成合同无法创建本机 Responses 夹具");
+    }
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "config.toml"), [
+      'model = "subagent-contract-model"',
+      'model_provider = "subagent-contract"',
+      "",
+      "[features]",
+      "multi_agent_v2 = true",
+      "",
+      "[model_providers.subagent-contract]",
+      'name = "Subagent Contract Provider"',
+      `base_url = "http://127.0.0.1:${apiAddress.port}/v1"`,
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      "supports_websockets = false",
+      "",
+    ].join("\n"), { mode: 0o600 });
+
+    let stderr = "";
+    const processHandle = spawn(
+      process.env.CODEX_BINARY ?? "codex",
+      ["app-server", "--listen", `unix://${socketPath}`],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, CODEX_HOME: codexHome },
+        stdio: ["ignore", "ignore", "pipe"],
+        detached: process.platform !== "win32",
+      },
+    );
+    processHandle.stderr?.setEncoding("utf8");
+    processHandle.stderr?.on("data", (chunk: string) => {
+      stderr = appendDiagnostic(stderr, chunk);
+    });
+    let client: CodexAppServerClient | undefined;
+    let threadId: string | undefined;
+    let parentTurnId: string | undefined;
+    let removeNotification: (() => void) | undefined;
+    const activities: Array<Extract<
+      NonNullable<ReturnType<typeof toConversationInputEvent>>,
+      { type: "item.subagentActivity" }
+    >> = [];
+    const parentSequence: string[] = [];
+    try {
+      await waitFor(
+        () => existsSync(socketPath),
+        10_000,
+        () => processHandle.exitCode === null
+          ? undefined
+          : new Error(appServerFailure("子代理完成合同 App Server 启动失败", stderr)),
+      );
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+      const started = await client.startThread(workspace, { ephemeral: true });
+      threadId = started.thread.id;
+      removeNotification = client.onNotification((notification) => {
+        const event = toConversationInputEvent(notification);
+        if (event?.type === "item.subagentActivity") {
+          activities.push(event);
+          if (event.kind === "completed") parentSequence.push("subagent.completed");
+        } else if (event?.type === "turn.completed" && event.threadId === threadId) {
+          parentSequence.push("parent.turn.completed");
+        }
+      });
+      const parentTurn = await client.startTurn(
+        threadId,
+        [{ type: "text", text: parentPrompt }],
+        "codex_connect:subagent-completion-contract",
+        workspace,
+      );
+      parentTurnId = parentTurn.turnId;
+      await waitFor(
+        () => activities.some(({ kind }) => kind === "completed"),
+        15_000,
+      );
+
+      const spawned = activities.find(({ kind }) => kind === "started");
+      const completed = activities.find(({ kind }) => kind === "completed");
+      expect(spawned).toBeDefined();
+      expect(completed).toMatchObject({
+        threadId,
+        turnId: parentTurnId,
+        agentThreadId: spawned?.agentThreadId,
+        agentPath: spawned?.agentPath,
+        kind: "completed",
+      });
+      expect(parentSequence.indexOf("parent.turn.completed")).toBeGreaterThanOrEqual(0);
+      expect(parentSequence.indexOf("subagent.completed")).toBeGreaterThan(
+        parentSequence.indexOf("parent.turn.completed"),
+      );
+    } finally {
+      removeNotification?.();
+      if (client && threadId) {
+        if (parentTurnId) {
+          await client.interruptTurn(threadId, parentTurnId).catch(() => undefined);
+        }
         await client.unsubscribeThread(threadId).catch(() => undefined);
         await client.deleteThread(threadId).catch(() => undefined);
       }
@@ -2003,6 +2210,7 @@ contractSuite("isolated Codex App Server state contract", () => {
   let peerClient: CodexAppServerClient;
   let oauthServer: ReturnType<typeof createServer>;
   let oauthBaseUrl: string;
+  let runtimeProbeExitFile: string;
   let appServerStderr = "";
 
   beforeAll(async () => {
@@ -2126,6 +2334,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     const approvalProbe = resolve(
       "tests/fixtures/mcp-tool-approval-server.mjs",
     );
+    runtimeProbeExitFile = join(testRuntime, "runtime-probe-exit");
     writeFileSync(
       join(codexHome, "config.toml"),
       [
@@ -2134,6 +2343,13 @@ contractSuite("isolated Codex App Server state contract", () => {
         "[mcp_servers.approval_probe]",
         `command = ${JSON.stringify(process.execPath)}`,
         `args = [${JSON.stringify(approvalProbe)}]`,
+        "",
+        "[mcp_servers.runtime_probe]",
+        `command = ${JSON.stringify(process.execPath)}`,
+        `args = [${JSON.stringify(approvalProbe)}]`,
+        "",
+        "[mcp_servers.runtime_probe.env]",
+        `MCP_TEST_EXIT_FILE = ${JSON.stringify(runtimeProbeExitFile)}`,
         "",
         "[mcp_servers.oauth_probe]",
         `url = ${JSON.stringify(`${oauthBaseUrl}/oauth-mcp`)}`,
@@ -2258,6 +2474,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(Array.isArray(servers)).toBe(true);
     expect(servers.every((server) =>
       typeof server.name === "string"
+      && server.runtimeStatus === "unknown"
       && (server.pluginId === null || typeof server.pluginId === "string")
       && typeof server.authStatus === "string"
       && Number.isInteger(server.toolCount))).toBe(true);
@@ -2295,6 +2512,39 @@ contractSuite("isolated Codex App Server state contract", () => {
       omittedContentCount: 0,
     });
   }, 15_000);
+
+  it("reports thread MCP runtime failure and reconnect after an explicit reload", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    try {
+      await waitForMcpRuntimeStatus(
+        ownerClient,
+        threadId,
+        "runtime_probe",
+        "connected",
+      );
+      writeFileSync(runtimeProbeExitFile, "exit", { mode: 0o600 });
+      await waitForMcpRuntimeStatus(
+        ownerClient,
+        threadId,
+        "runtime_probe",
+        "failed",
+      );
+
+      rmSync(runtimeProbeExitFile, { force: true });
+      await ownerClient.reloadMcpServers();
+      await waitForMcpRuntimeStatus(
+        ownerClient,
+        threadId,
+        "runtime_probe",
+        "connected",
+      );
+    } finally {
+      rmSync(runtimeProbeExitFile, { force: true });
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId).catch(() => undefined);
+    }
+  }, 20_000);
 
   it("maps the isolated App Server MCP OAuth completion notification", async () => {
     const started = await ownerClient.startThread(workdir);
@@ -3229,6 +3479,24 @@ async function waitFor(
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+}
+
+async function waitForMcpRuntimeStatus(
+  client: CodexAppServerClient,
+  threadId: string,
+  serverName: string,
+  expectedStatus: McpRuntimeStatus,
+): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started <= 10_000) {
+    const server = (await client.listMcpServerDetails(threadId))
+      .find((entry) => entry.name === serverName);
+    if (server?.runtimeStatus === expectedStatus) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+  throw new Error(
+    `等待 MCP Server ${serverName} 进入 ${expectedStatus} 状态超时`,
+  );
 }
 
 async function stopDetachedTestProcess(child: ChildProcess, timeoutMs: number): Promise<void> {

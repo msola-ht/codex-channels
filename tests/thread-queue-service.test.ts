@@ -174,6 +174,7 @@ function serviceWithQueue(
     router?: Partial<SessionRouter>;
     models?: Partial<ModelSelectionService>;
     collaborationModes?: object;
+    hasPendingSubagentRuns?: (parentThreadId: string) => boolean;
   } = {},
 ): ConversationService {
   const router = {
@@ -217,6 +218,9 @@ function serviceWithQueue(
     undefined,
     undefined,
     queue,
+    undefined,
+    undefined,
+    options.hasPendingSubagentRuns,
   );
 }
 
@@ -599,6 +603,40 @@ describe("ConversationService native Thread Queue", () => {
     await expect(released.releaseBackgroundIfComplete(binding.threadId))
       .resolves.toBe(true);
     expect(releaseBackground).toHaveBeenCalledWith(binding.threadId);
+  });
+
+  it("keeps a background binding while its parent Thread has a pending subagent run", async () => {
+    const releaseBackground = vi.fn(async () => undefined);
+    const service = serviceWithQueue(queuePort([]), {
+      router: {
+        isBackgroundThread: () => true,
+        releaseBackground,
+      },
+      hasPendingSubagentRuns: (parentThreadId) => parentThreadId === binding.threadId,
+    });
+
+    await expect(service.releaseBackgroundIfComplete(binding.threadId))
+      .resolves.toBe(false);
+    expect(releaseBackground).not.toHaveBeenCalled();
+  });
+
+  it("retries a deferred background release after the last subagent run settles", async () => {
+    let pending = true;
+    const releaseBackground = vi.fn(async () => undefined);
+    const service = serviceWithQueue(queuePort([]), {
+      router: {
+        isBackgroundThread: () => true,
+        releaseBackground,
+      },
+      hasPendingSubagentRuns: () => pending,
+    });
+
+    await expect(service.releaseBackgroundIfComplete(binding.threadId))
+      .resolves.toBe(false);
+    pending = false;
+    await expect(service.retryPendingBackgroundRelease(binding.threadId))
+      .resolves.toBe(true);
+    expect(releaseBackground).toHaveBeenCalledTimes(1);
   });
 
   it("uses native Queue start as the completion-release barrier", async () => {

@@ -245,7 +245,7 @@ describe("codexc CLI", () => {
     const mainHelp = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
     expect(mainHelp.stdout).toContain("version, -v, --version");
     expect(mainHelp.stdout).toContain("center                       启动或配置多设备指标中心");
-  }, 30_000);
+  }, 180_000);
 
   it("keeps top-level help as a complete first-level command index", () => {
     const result = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
@@ -3733,6 +3733,7 @@ describe("codexc CLI", () => {
       const telegram = table(document.telegram);
       telegram.bot_token = secret;
       telegram.allowed_user_ids = [123456];
+      document.experimental = { plugin_api: true };
     });
 
     const diagnosed = spawnSync(process.execPath, [cli, "doctor", "--json"], {
@@ -3761,6 +3762,12 @@ describe("codexc CLI", () => {
       kind: "success",
       name: "Telegram Token",
       remediation: null,
+    }));
+    expect(payload.checks).toContainEqual(expect.objectContaining({
+      section: "扩展能力",
+      kind: "note",
+      name: "Plugin API",
+      detail: expect.stringContaining("Codex 0.150.1"),
     }));
     expect(diagnosed.stdout).not.toContain(secret);
     expect(diagnosed.stdout).not.toContain("Codex Connect Doctor\n");

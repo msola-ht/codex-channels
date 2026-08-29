@@ -1192,7 +1192,13 @@ describe("ConversationService model selection", () => {
 
   it("lists MCP summaries for the current Thread", async () => {
     const listMcpServers = vi.fn(async () => [
-      { name: "project-tools", pluginId: null, authStatus: "oAuth" as const, toolCount: 2 },
+      {
+        name: "project-tools",
+        runtimeStatus: "connected" as const,
+        pluginId: null,
+        authStatus: "oAuth" as const,
+        toolCount: 2,
+      },
     ]);
     const service = new ConversationService(
       turnPort(),
@@ -1205,7 +1211,13 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.listMcpServers(target)).resolves.toEqual([
-      { name: "project-tools", pluginId: null, authStatus: "oAuth", toolCount: 2 },
+      {
+        name: "project-tools",
+        runtimeStatus: "connected",
+        pluginId: null,
+        authStatus: "oAuth",
+        toolCount: 2,
+      },
     ]);
     expect(listMcpServers).toHaveBeenCalledWith("thread-1");
   });
@@ -1213,6 +1225,7 @@ describe("ConversationService model selection", () => {
   it("resolves MCP details and routes OAuth and resource reads to one Thread snapshot", async () => {
     const server = {
       name: "project-tools",
+      runtimeStatus: "authenticationRequired" as const,
       pluginId: null,
       authStatus: "notLoggedIn" as const,
       toolCount: 1,
@@ -1231,6 +1244,7 @@ describe("ConversationService model selection", () => {
     };
     const summary = {
       name: server.name,
+      runtimeStatus: server.runtimeStatus,
       pluginId: server.pluginId,
       authStatus: server.authStatus,
       toolCount: server.toolCount,
@@ -1290,6 +1304,7 @@ describe("ConversationService model selection", () => {
   it("summarizes actionable MCP health findings and reloads managed App Servers", async () => {
     const listMcpServerDetails = vi.fn(async () => [{
       name: "oauth tools",
+      runtimeStatus: "authenticationRequired" as const,
       pluginId: null,
       authStatus: "notLoggedIn" as const,
       toolCount: 0,
@@ -1301,6 +1316,7 @@ describe("ConversationService model selection", () => {
       resourceTemplates: [],
     }, {
       name: "unknown auth",
+      runtimeStatus: "unknown" as const,
       pluginId: null,
       authStatus: "unknown" as const,
       toolCount: 1,
@@ -1312,6 +1328,31 @@ describe("ConversationService model selection", () => {
       resourceTemplates: [],
     }, {
       name: "empty",
+      runtimeStatus: "disabled" as const,
+      pluginId: null,
+      authStatus: "unsupported" as const,
+      toolCount: 0,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+    }, {
+      name: "failed",
+      runtimeStatus: "failed" as const,
+      pluginId: null,
+      authStatus: "unsupported" as const,
+      toolCount: 0,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+    }, {
+      name: "starting",
+      runtimeStatus: "starting" as const,
       pluginId: null,
       authStatus: "unsupported" as const,
       toolCount: 0,
@@ -1332,14 +1373,18 @@ describe("ConversationService model selection", () => {
     );
 
     await expect(service.mcpHealth(target)).resolves.toEqual({
-      serverCount: 3,
+      serverCount: 5,
       toolCount: 1,
       resourceCount: 0,
       resourceTemplateCount: 0,
-      actions: [{ type: "loginRequired", server: "oauth tools", selector: "1" }],
+      actions: [
+        { type: "loginRequired", server: "oauth tools", selector: "1" },
+        { type: "reconnectRecommended", server: "failed", selector: "4" },
+      ],
       notices: [
         { type: "authUnknown", server: "unknown auth", selector: "2" },
-        { type: "noCapabilities", server: "empty", selector: "3" },
+        { type: "disabled", server: "empty", selector: "3" },
+        { type: "starting", server: "starting", selector: "5" },
       ],
     });
     await expect(service.reloadMcpServers(target)).resolves.toBeUndefined();
@@ -1351,12 +1396,14 @@ describe("ConversationService model selection", () => {
     const listMcpServers = vi.fn()
       .mockResolvedValueOnce([{
         name: "local-tools",
+        runtimeStatus: "connected" as const,
         pluginId: null,
         authStatus: "unsupported" as const,
         toolCount: 0,
       }])
       .mockResolvedValueOnce([{
         name: "token-tools",
+        runtimeStatus: "connected" as const,
         pluginId: null,
         authStatus: "bearerToken" as const,
         toolCount: 0,
@@ -1387,6 +1434,7 @@ describe("ConversationService model selection", () => {
   it("requires a bound Thread before starting MCP OAuth", async () => {
     const listMcpServers = vi.fn(async () => [{
       name: "oauth-tools",
+      runtimeStatus: "authenticationRequired" as const,
       pluginId: null,
       authStatus: "notLoggedIn" as const,
       toolCount: 0,

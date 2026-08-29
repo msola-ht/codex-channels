@@ -7,7 +7,9 @@
 - `index.ts`：本模块的公开导出入口。
 - `core.ts`：维护活动 Turn、Token、当前 Goal、上下文压缩 Item ID、最近 Diff/Plan、推理段状态和事件去重状态，
   把稳定输入事件归约为文本、操作、状态和完成事件；Turn 完成事件原样携带 Client 已校验的官方
-  `durationMs` 与 Router 已确认的 Workspace、`modelProvider`；结构化 `misalignmentPolicyViolation` 只以窄分类
+  `durationMs` 与 Router 已确认的 Workspace、`modelProvider`；普通前台用户 Turn 在官方成功终态前
+  未产生非空最终回复时附加稳定诊断标记，手动压缩和后台 Turn 不参与该判断；结构化
+  `misalignmentPolicyViolation` 只以窄分类
   传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定计时输入交给
   `turn-timing-accumulator.ts`，不读取 SQLite；
   三类综合速度只聚合同时具有对应

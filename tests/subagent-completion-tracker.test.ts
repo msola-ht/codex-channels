@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { OutputEvent } from "../src/conversation-core/index.js";
+import type {
+  ConversationInputEvent,
+  OutputEvent,
+} from "../src/conversation-core/index.js";
 import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
 
 const target = {
@@ -135,7 +138,133 @@ function waitCompleted(
   };
 }
 
+function completedActivity(
+  parentTurnId = "turn-1",
+  agentThreadId = "agent-1",
+): Extract<ConversationInputEvent, { type: "item.subagentActivity" }> {
+  return {
+    type: "item.subagentActivity",
+    threadId: "parent-1",
+    turnId: parentTurnId,
+    itemId: `completed-${agentThreadId}-${parentTurnId}`,
+    agentThreadId,
+    agentPath: "/root/review",
+    kind: "completed",
+  };
+}
+
 describe("SubagentCompletionTracker", () => {
+  it("reports unresolved runs for the parent Thread until every child reaches a terminal state", () => {
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish: vi.fn(),
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned("agent-1", "/root/first"));
+    tracker.handle(spawned("agent-2", "/root/second"));
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(true);
+
+    tracker.handleInput({
+      ...completedActivity("turn-1", "agent-1"),
+      agentPath: "/root/first",
+    });
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(true);
+
+    tracker.handleInput({
+      ...completedActivity("turn-1", "agent-2"),
+      agentPath: "/root/second",
+    });
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
+    tracker.close();
+  });
+
+  it("raises the parent release barrier before the asynchronous spawn output is consumed", () => {
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish: vi.fn(),
+      settleDelayMs: 20,
+    });
+
+    tracker.handleInput({
+      ...completedActivity(),
+      itemId: "started-agent-1-turn-1",
+      kind: "started",
+    });
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(true);
+
+    tracker.handle(spawned());
+    tracker.handleInput(completedActivity());
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
+    tracker.close();
+  });
+
+  it("does not treat an interaction as a new run before a child Turn starts", () => {
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish: vi.fn(),
+      settleDelayMs: 20,
+    });
+
+    tracker.handleInput({
+      ...completedActivity("turn-2"),
+      itemId: "interacted-agent-1-turn-2",
+      kind: "interacted",
+    });
+    tracker.handle(contacted());
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
+
+    tracker.handleInput({
+      type: "turn.started",
+      threadId: "agent-1",
+      turnId: "agent-turn-2",
+    });
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(true);
+    tracker.close();
+  });
+
+  it("distinguishes a follow-up Turn from a queue-only agent message", () => {
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish: vi.fn(),
+      settleDelayMs: 20,
+    });
+    const operation = (
+      action: "send_message" | "followup_task",
+      itemId = `${action}-1`,
+    ): ConversationInputEvent => ({
+      type: "item.operation.updated",
+      threadId: "parent-1",
+      turnId: "turn-2",
+      operation: {
+        itemId,
+        kind: "subagent",
+        action,
+        status: "completed",
+        receiverThreadIds: ["agent-1"],
+      },
+    });
+
+    tracker.handleInput(operation("send_message"));
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
+
+    tracker.handleInput(operation("followup_task"));
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(true);
+    tracker.handleInput(completedActivity("turn-2"));
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
+    tracker.handleInput(operation("followup_task"));
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
+
+    tracker.handleInput(operation("followup_task", "followup_task-2"));
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(true);
+    tracker.handleInput({
+      ...completedActivity("turn-2"),
+      itemId: "completed-agent-1-turn-2-second-run",
+    });
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
+    tracker.close();
+  });
+
   it("does not infer completion from silence and waits for an official terminal state", async () => {
     vi.useFakeTimers();
     const publish = vi.fn();
@@ -152,6 +281,10 @@ describe("SubagentCompletionTracker", () => {
     expect(publish).not.toHaveBeenCalled();
 
     tracker.handle(state("completed"));
+    await vi.advanceTimersByTimeAsync(20);
+    expect(publish).not.toHaveBeenCalled();
+
+    tracker.handleInput(completedActivity());
     await vi.advanceTimersByTimeAsync(20);
 
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -174,7 +307,7 @@ describe("SubagentCompletionTracker", () => {
     vi.useRealTimers();
   });
 
-  it("settles from the subscribed child turn completion notification", async () => {
+  it("settles successful runs from the parent-attributed completion activity", async () => {
     vi.useFakeTimers();
     const publish = vi.fn();
     const tracker = new SubagentCompletionTracker({
@@ -193,18 +326,22 @@ describe("SubagentCompletionTracker", () => {
       error: null,
     });
     await vi.advanceTimersByTimeAsync(20);
+    expect(publish).not.toHaveBeenCalled();
+
+    tracker.handleInput(completedActivity());
+    await vi.advanceTimersByTimeAsync(20);
 
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
       type: "subagent.completed",
       agentThreadId: "agent-1",
       status: "completed",
-      elapsedMs: 12_345,
+      elapsedMs: 12_365,
     }));
     tracker.close();
     vi.useRealTimers();
   });
 
-  it("retains an early child completion until the spawn activity is registered", async () => {
+  it("retains an early parent-attributed completion until the spawn activity is registered", async () => {
     vi.useFakeTimers();
     const publish = vi.fn();
     const tracker = new SubagentCompletionTracker({
@@ -213,16 +350,34 @@ describe("SubagentCompletionTracker", () => {
       settleDelayMs: 20,
     });
 
-    tracker.handleInput({
-      type: "turn.completed",
-      threadId: "agent-1",
-      turnId: "agent-turn-1",
-      status: "completed",
-      error: null,
-    });
+    tracker.handleInput(completedActivity());
     tracker.handle(spawned());
     await vi.advanceTimersByTimeAsync(20);
 
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+      agentThreadId: "agent-1",
+      status: "completed",
+    }));
+    tracker.close();
+    vi.useRealTimers();
+  });
+
+  it("rejects a successful completion attributed to a different parent run", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const tracker = new SubagentCompletionTracker({
+      readSummary: () => summary(),
+      publish,
+      settleDelayMs: 20,
+    });
+
+    tracker.handle(spawned());
+    tracker.handleInput(completedActivity("turn-2"));
+    await vi.advanceTimersByTimeAsync(20);
+    expect(publish).not.toHaveBeenCalled();
+
+    tracker.handleInput(completedActivity());
+    await vi.advanceTimersByTimeAsync(20);
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
       agentThreadId: "agent-1",
       status: "completed",
@@ -251,6 +406,7 @@ describe("SubagentCompletionTracker", () => {
       status: turnStatus,
       error: turnStatus === "failed" ? "failed" : null,
     });
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
     await vi.advanceTimersByTimeAsync(20);
 
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -279,6 +435,7 @@ describe("SubagentCompletionTracker", () => {
       agentPath: "/root/review",
       kind: "interrupted",
     });
+    expect(tracker.hasPendingForParentThread("parent-1")).toBe(false);
     await vi.advanceTimersByTimeAsync(20);
 
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -315,6 +472,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity("turn-2"));
     await vi.advanceTimersByTimeAsync(20);
 
     expect(publish.mock.calls.map(([event]) => event.status)).toEqual([
@@ -350,6 +508,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity("turn-2"));
     await vi.advanceTimersByTimeAsync(20);
 
     expect(publish.mock.calls.map(([event]) => event.status)).toEqual([
@@ -395,6 +554,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity());
     tracker.handle(contacted());
     tracker.handleInput({
       type: "turn.started",
@@ -408,6 +568,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity("turn-2"));
     await vi.advanceTimersByTimeAsync(20);
 
     expect(readSummary.mock.calls).toEqual([
@@ -435,7 +596,7 @@ describe("SubagentCompletionTracker", () => {
     vi.useRealTimers();
   });
 
-  it("uses the active child Turn for a legacy terminal without a Turn ID", async () => {
+  it("uses the active child Turn for the parent-attributed completion", async () => {
     vi.useFakeTimers();
     const readSummary = vi.fn(() => summary());
     const tracker = new SubagentCompletionTracker({
@@ -450,7 +611,7 @@ describe("SubagentCompletionTracker", () => {
       threadId: "agent-1",
       turnId: "agent-turn-1",
     });
-    tracker.handle(state("completed"));
+    tracker.handleInput(completedActivity());
     await vi.advanceTimersByTimeAsync(20);
 
     expect(readSummary).toHaveBeenCalledWith("agent-1", "agent-turn-1");
@@ -481,6 +642,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity());
     tracker.handle(contacted());
     await vi.advanceTimersByTimeAsync(0);
 
@@ -497,6 +659,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity("turn-2"));
     tracker.handle(waitCompleted("parent-1", "turn-2"));
     await vi.advanceTimersByTimeAsync(0);
 
@@ -545,6 +708,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity());
     tracker.handle(contacted());
     tracker.handleInput({
       type: "turn.completed",
@@ -553,6 +717,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity("turn-2"));
     await vi.advanceTimersByTimeAsync(20);
 
     expect(onRunStarted.mock.calls.map(([details]) => details.agentTurnId)).toEqual([
@@ -586,6 +751,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity());
     tracker.handle(contacted());
     await vi.advanceTimersByTimeAsync(0);
     tracker.handleInput({
@@ -610,6 +776,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity("turn-2"));
     await vi.advanceTimersByTimeAsync(20);
     expect(publish).toHaveBeenCalledTimes(2);
     tracker.close();
@@ -646,6 +813,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity());
     tracker.handleInput({
       type: "turn.completed",
       threadId: "agent-1",
@@ -653,6 +821,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity("turn-2"));
     await vi.advanceTimersByTimeAsync(20);
 
     expect(onRunStarted.mock.calls.map(([details]) => details.agentTurnId)).toEqual([
@@ -695,7 +864,8 @@ describe("SubagentCompletionTracker", () => {
     });
 
     tracker.handle(spawned());
-    tracker.handle(state("completed"));
+    tracker.handleInput(completedActivity());
+    tracker.handle(waitCompleted());
     await vi.advanceTimersByTimeAsync(15);
     expect(publish).not.toHaveBeenCalled();
 
@@ -726,6 +896,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity());
     await vi.advanceTimersByTimeAsync(0);
     expect(publish).not.toHaveBeenCalled();
 
@@ -756,6 +927,7 @@ describe("SubagentCompletionTracker", () => {
       status: "completed",
       error: null,
     });
+    tracker.handleInput(completedActivity());
     tracker.handle(waitCompleted("unrelated-parent"));
     await vi.advanceTimersByTimeAsync(0);
     expect(publish).not.toHaveBeenCalled();
@@ -786,6 +958,10 @@ describe("SubagentCompletionTracker", () => {
       turnId: "agent-turn-2",
       status: "completed",
       error: null,
+    });
+    tracker.handleInput({
+      ...completedActivity("turn-1", "agent-2"),
+      agentPath: "/root/parallel",
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -839,7 +1015,7 @@ describe("SubagentCompletionTracker", () => {
 
     tracker.handle(spawned());
     tracker.metricsAvailable("agent-1");
-    tracker.handle(state("completed"));
+    tracker.handleInput(completedActivity());
     await vi.advanceTimersByTimeAsync(20);
 
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({
@@ -868,7 +1044,7 @@ describe("SubagentCompletionTracker", () => {
 
     tracker.handle(spawned());
     tracker.metricsAvailable("agent-1");
-    tracker.handle(state("completed"));
+    tracker.handleInput(completedActivity());
     await vi.advanceTimersByTimeAsync(20);
     expect(readSummary).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
@@ -901,7 +1077,7 @@ describe("SubagentCompletionTracker", () => {
 
     tracker.handle(spawned());
     tracker.metricsAvailable("agent-1");
-    tracker.handle(state("completed"));
+    tracker.handleInput(completedActivity());
     await vi.advanceTimersByTimeAsync(20);
     tracker.metricsAvailable("agent-1");
     releaseFirstCheckpoint(true);
@@ -929,7 +1105,7 @@ describe("SubagentCompletionTracker", () => {
 
     tracker.handle(spawned());
     tracker.metricsAvailable("agent-1");
-    tracker.handle(state("completed"));
+    tracker.handleInput(completedActivity());
     await vi.advanceTimersByTimeAsync(20);
 
     expect(readSummary).not.toHaveBeenCalled();

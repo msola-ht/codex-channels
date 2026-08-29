@@ -27,18 +27,20 @@
 - `user-input-summary.ts`：为 Queue 与分页历史共用的 Client 内部 UserInput 安全摘要工具；摘要有界，
   不传播完整输入、命令参数或本地路径。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
-  `text/image/audio` 输入能力，过滤不可见项，
+  `text/image/audio` 输入能力、Codex 多代理运行时及结构化替代模型/退役时间，过滤不可见项；
+  官方迁移 Markdown、链接和自由文案不越过 Client 边界，
   并在缺少模型选择必需字段时失败关闭。
 - `model-provider-catalog.ts`：按 Bootstrap 注入的编译期 Provider 定义，只读取 Setup 下载到用户
   `CODEX_HOME` 的受控模型目录；相同模型 ID 仍按 Provider 独立映射，未列入对应定义的模型不会开放；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
-  稳定摘要；按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
+  稳定摘要；接受当前 0.150.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
-  排除系统与插件缓存；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
+  使用稳定 `SkillMetadata.pluginId` 排除系统与 Plugin 所有项，不从安装路径猜测来源；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
   绝对路径均通过校验的引用。
-- `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，并把工具
+- `mcp-adapter.ts`：把官方 MCP Server 状态页裁剪为概览或工具、资源、模板详情，严格映射当前 Thread
+  已发布连接的七种 `runtimeStatus`，把官方 `null` 映射为稳定“未知”且不据此启动或重连 Server；并把工具
   `annotations.readOnlyHint` 归约为只读、可能写入或未知；校验 OAuth
   授权 URL，将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
   合计 8,000 字符且隐藏常见凭据，二进制裁剪为元数据；保留可空、长度受限且符合固定上游
@@ -56,11 +58,12 @@
   只识别 `misalignmentPolicyViolation` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
-  `readOnlyHint` 能力提示，并在离开 Client 边界前
+  `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；只把 `imageGeneration.savedPath` 映射为稳定生成图片
   产物路径，不把 `imageView` 当作可外发产物。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
-  Server Request 解码为 Approval 稳定请求；其中按固定版本的空对象 Schema 与
+  Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，
+  `writeStdin` 与未知种类在没有独立预览合同前安全拒绝；其中按固定版本的空对象 Schema 与
   `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
   精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。实验
   `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。
@@ -70,7 +73,8 @@
   读取等 App Server 方法的类型化封装；模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；MCP 概览按 Thread 使用
-  `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，OAuth 不自动重试并消费
+  `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，成功只表示已加载 Thread
+  刷新了 MCP 配置，远端连接结果仍由后续运行状态查询确认；OAuth 不自动重试并消费
   官方登录完成通知，资源读取保持只读；Permission
   Profile 按 CWD 分页。开发中 Plugin 只调用 `plugin/installed` 并经 Application 开关约束，
   不接入搜索、安装或分享。Thread 列表支持官方 `searchTerm`、`sectionId` 和
@@ -108,10 +112,11 @@ Queue 复核摘要由 Client 对完整有序原始输入计算不可逆指纹，
 Notification 适配只返回当前支持的稳定事件；未知或畸形通知由组合根记录 method 后忽略，不记录
 原始 params，也不阻塞 App Server Reader。
 `subAgentActivity` Item 只在官方完成阶段进入稳定事件，并保留 `started`、`interacted`、
-`interrupted` 类型，避免同一 Item 的开始与完成阶段重复发布；`collabAgentToolCall` Item 由操作适配器
-保留官方接收线程 ID 和有界状态，不保留代理消息正文。Bootstrap 结合已订阅子线程自己的
-`turn/completed`、中断活动和旧版工具状态判断子代理终态；Surface 把 `started` 与 `interacted`
-分别显示为开始和继续，并消费稳定操作与完成事件，`interacted` 不改变存活状态。
+`interrupted` 与 `completed` 类型，避免同一 Item 的开始与完成阶段重复发布；`completed` 是
+0.150.1 对成功运行的父 Turn 归属信号，Bootstrap 不再从子线程 `turn/completed` 或等待工具状态
+重复推断成功。`collabAgentToolCall` Item 由操作适配器保留官方接收线程 ID 和有界状态，不保留
+代理消息正文；其异常状态与子线程失败/中断通知继续用于非成功终态。Surface 把 `started` 与
+`interacted` 分别显示为开始和继续，并消费稳定操作与完成事件，`interacted` 不改变存活状态。
 Server Request 适配只把已校验的稳定请求交给 Approval；Approval 不接触生成协议或 RPC 信封，
 响应类型与请求不一致时失败关闭。
 当前精确协议基线要求 initialize 协商实验 API，App Server 才会发送已生成并受控导出的

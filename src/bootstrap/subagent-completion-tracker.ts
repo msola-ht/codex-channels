@@ -12,6 +12,7 @@ interface ActiveSubagent {
   target: ConversationTarget;
   parentThreadId: string;
   parentTurnId: string;
+  agentThreadId: string;
   agentPath: string;
   startedAtMs: number;
   activeTurnId: string | undefined;
@@ -69,6 +70,18 @@ interface PendingActivity {
   expiresAtMs: number;
 }
 
+interface PendingCompletion {
+  event: Extract<ConversationInputEvent, { type: "item.subagentActivity" }>;
+  completedAtMs: number;
+  expiresAtMs: number;
+}
+
+interface PendingParentRun {
+  parentThreadId: string;
+  parentTurnId: string;
+  agentThreadId: string;
+}
+
 export interface SubagentCompletionTrackerOptions {
   readSummary: (
     agentThreadId: string,
@@ -92,19 +105,30 @@ export interface SubagentCompletionTrackerOptions {
 const defaultSettleDelayMs = 5_000;
 const pendingTerminalTtlMs = 60_000;
 const maxPendingTerminals = 128;
+const maxObservedFollowupOperations = 128;
 
 export class SubagentCompletionTracker {
   private readonly active = new Map<string, ActiveSubagent>();
   private readonly pendingTerminals = new Map<string, PendingTerminal>();
   private readonly pendingStarts = new Map<string, PendingStart>();
   private readonly pendingActivities = new Map<string, PendingActivity>();
+  private readonly pendingCompletions = new Map<string, PendingCompletion>();
+  private readonly pendingParentRuns = new Map<string, PendingParentRun>();
+  private readonly observedFollowupOperations = new Set<string>();
   private closed = false;
 
   constructor(private readonly options: SubagentCompletionTrackerOptions) {}
 
+  hasPendingForParentThread(parentThreadId: string): boolean {
+    return [...this.pendingParentRuns.values()].some((run) =>
+      run.parentThreadId === parentThreadId
+    );
+  }
+
   handle(event: OutputEvent): void {
     if (this.closed) return;
     if (event.type === "subagent.spawned") {
+      this.rememberParentRun(event);
       if (!this.active.has(event.agentThreadId)) this.register(event);
       return;
     }
@@ -165,8 +189,33 @@ export class SubagentCompletionTracker {
       }
       return;
     }
-    if (event.type === "item.subagentActivity" && event.kind === "interrupted") {
-      this.markTerminal(event.agentThreadId, "interrupted", false);
+    if (
+      event.type === "item.operation.updated"
+      && event.operation.kind === "subagent"
+      && event.operation.action === "followup_task"
+      && event.operation.status === "completed"
+    ) {
+      for (const agentThreadId of event.operation.receiverThreadIds ?? []) {
+        const run = {
+          parentThreadId: event.threadId,
+          parentTurnId: event.turnId,
+          agentThreadId,
+        };
+        if (!this.rememberFollowupOperation(run, event.operation.itemId)) continue;
+        this.rememberParentRun(run, true);
+      }
+      return;
+    }
+    if (event.type === "item.subagentActivity") {
+      if (event.kind === "started") {
+        this.rememberParentRun(event);
+      } else if (event.kind === "interrupted") {
+        this.forgetParentRun(event);
+        this.markTerminal(event.agentThreadId, "interrupted", false);
+      } else if (event.kind === "completed") {
+        this.forgetParentRun(event);
+        this.markNativeCompletion(event);
+      }
     }
   }
 
@@ -200,6 +249,21 @@ export class SubagentCompletionTracker {
     this.pendingTerminals.clear();
     this.pendingStarts.clear();
     this.pendingActivities.clear();
+    this.pendingCompletions.clear();
+    this.pendingParentRuns.clear();
+    this.observedFollowupOperations.clear();
+  }
+
+  private markNativeCompletion(
+    event: Extract<ConversationInputEvent, { type: "item.subagentActivity" }>,
+  ): void {
+    const entry = this.active.get(event.agentThreadId);
+    if (!entry || !matchesParentRun(entry, event)) {
+      this.rememberPendingCompletion(event);
+      return;
+    }
+    this.pendingCompletions.delete(event.agentThreadId);
+    this.markTerminal(event.agentThreadId, "completed", false);
   }
 
   private markTerminal(
@@ -235,6 +299,7 @@ export class SubagentCompletionTracker {
       entry.terminalStatus = status;
       entry.terminalTurnId = resolvedTerminalTurnId;
       entry.terminalAtMs = Date.now();
+      this.forgetParentRun(entry);
       this.schedule(agentThreadId, entry);
       this.promotePendingFollowup(agentThreadId);
       return;
@@ -295,6 +360,7 @@ export class SubagentCompletionTracker {
       target: event.target,
       parentThreadId: event.threadId,
       parentTurnId: event.turnId,
+      agentThreadId: event.agentThreadId,
       agentPath: event.agentPath,
       startedAtMs: Date.now(),
       activeTurnId: undefined,
@@ -319,8 +385,71 @@ export class SubagentCompletionTracker {
       entry.terminalStatus = pending.status;
       entry.terminalTurnId = pending.terminalTurnId ?? entry.activeTurnId;
       entry.terminalAtMs = pending.terminalAtMs;
+      this.forgetParentRun(entry);
       this.schedule(event.agentThreadId, entry);
     }
+    const completion = this.takePendingCompletion(event.agentThreadId);
+    if (completion && matchesParentRun(entry, completion.event)) {
+      entry.terminalStatus = "completed";
+      entry.terminalTurnId = entry.activeTurnId;
+      entry.terminalAtMs = completion.completedAtMs;
+      this.forgetParentRun(entry);
+      this.schedule(event.agentThreadId, entry);
+    }
+  }
+
+  private rememberParentRun(
+    run: PendingParentRun | Extract<OutputEvent, {
+      type: "subagent.spawned" | "subagent.contacted";
+    }> | Extract<ConversationInputEvent, { type: "item.subagentActivity" }>,
+    allowSettled = false,
+  ): void {
+    const value: PendingParentRun = "parentThreadId" in run
+      ? run
+      : {
+          parentThreadId: run.threadId,
+          parentTurnId: run.turnId,
+          agentThreadId: run.agentThreadId,
+        };
+    if (!allowSettled && this.parentRunSettled(value)) return;
+    this.pendingParentRuns.set(parentRunKey(value), value);
+  }
+
+  private rememberFollowupOperation(run: PendingParentRun, itemId: string): boolean {
+    const key = followupOperationKey(run, itemId);
+    if (this.observedFollowupOperations.has(key)) return false;
+    this.observedFollowupOperations.add(key);
+    while (this.observedFollowupOperations.size > maxObservedFollowupOperations) {
+      const oldest = this.observedFollowupOperations.values().next().value;
+      if (!oldest) break;
+      this.observedFollowupOperations.delete(oldest);
+    }
+    return true;
+  }
+
+  private forgetParentRun(
+    run: ActiveSubagent | Extract<ConversationInputEvent, { type: "item.subagentActivity" }>,
+  ): void {
+    const value: PendingParentRun = "parentThreadId" in run
+      ? run
+      : {
+          parentThreadId: run.threadId,
+          parentTurnId: run.turnId,
+          agentThreadId: run.agentThreadId,
+        };
+    this.pendingParentRuns.delete(parentRunKey(value));
+  }
+
+  private parentRunSettled(run: PendingParentRun): boolean {
+    const active = this.active.get(run.agentThreadId);
+    if (
+      active?.terminalStatus
+      && active.parentThreadId === run.parentThreadId
+      && active.parentTurnId === run.parentTurnId
+    ) return true;
+    const completion = this.pendingCompletions.get(run.agentThreadId)?.event;
+    return completion?.threadId === run.parentThreadId
+      && completion.turnId === run.parentTurnId;
   }
 
   private assignTurn(
@@ -329,6 +458,7 @@ export class SubagentCompletionTracker {
     agentTurnId: string,
   ): void {
     entry.activeTurnId = agentTurnId;
+    this.rememberParentRun(entry);
     if (entry.terminalStatus && entry.terminalTurnId === undefined) {
       entry.terminalTurnId = agentTurnId;
       this.schedule(agentThreadId, entry);
@@ -394,6 +524,37 @@ export class SubagentCompletionTracker {
     const now = Date.now();
     for (const [threadId, pending] of this.pendingActivities) {
       if (pending.expiresAtMs <= now) this.pendingActivities.delete(threadId);
+    }
+  }
+
+  private rememberPendingCompletion(
+    event: Extract<ConversationInputEvent, { type: "item.subagentActivity" }>,
+  ): void {
+    this.prunePendingCompletions();
+    this.pendingCompletions.delete(event.agentThreadId);
+    this.pendingCompletions.set(event.agentThreadId, {
+      event,
+      completedAtMs: Date.now(),
+      expiresAtMs: Date.now() + pendingTerminalTtlMs,
+    });
+    while (this.pendingCompletions.size > maxPendingTerminals) {
+      const oldest = this.pendingCompletions.keys().next().value;
+      if (!oldest) break;
+      this.pendingCompletions.delete(oldest);
+    }
+  }
+
+  private takePendingCompletion(agentThreadId: string): PendingCompletion | undefined {
+    this.prunePendingCompletions();
+    const pending = this.pendingCompletions.get(agentThreadId);
+    this.pendingCompletions.delete(agentThreadId);
+    return pending;
+  }
+
+  private prunePendingCompletions(): void {
+    const now = Date.now();
+    for (const [threadId, pending] of this.pendingCompletions) {
+      if (pending.expiresAtMs <= now) this.pendingCompletions.delete(threadId);
     }
   }
 
@@ -514,16 +675,37 @@ export class SubagentCompletionTracker {
 function turnCompletionStatus(
   status: "completed" | "interrupted" | "failed" | "inProgress",
 ): SubagentTerminalStatus | undefined {
-  if (status === "completed" || status === "interrupted") return status;
+  if (status === "interrupted") return status;
   return status === "failed" ? "errored" : undefined;
 }
 
 function completionStatus(
   status: SubagentStatus,
 ): SubagentTerminalStatus | undefined {
-  return status === "pendingInit" || status === "running"
+  return status === "pendingInit" || status === "running" || status === "completed"
     ? undefined
     : status;
+}
+
+function matchesParentRun(
+  entry: ActiveSubagent,
+  event: Extract<ConversationInputEvent, { type: "item.subagentActivity" }>,
+): boolean {
+  return entry.parentThreadId === event.threadId
+    && entry.parentTurnId === event.turnId
+    && entry.agentPath === event.agentPath;
+}
+
+function parentRunKey(run: PendingParentRun): string {
+  return [
+    run.parentThreadId,
+    run.parentTurnId,
+    run.agentThreadId,
+  ].join("\u0000");
+}
+
+function followupOperationKey(run: PendingParentRun, itemId: string): string {
+  return `${parentRunKey(run)}\u0000${itemId}`;
 }
 
 function pendingTerminalKey(agentThreadId: string, agentTurnId?: string): string {

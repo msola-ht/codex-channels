@@ -1,5 +1,7 @@
 export const contentTruncatedText = "内容过长，已截断";
 export const emptyCodexResponseText = "Codex 返回了空消息。";
+export const missingFinalResponseText =
+  "Codex 已结束本轮，但未返回最终消息。请重试；若当前上下文较高，可先使用 /compact。";
 export const interactionStoppedText = "已停止当前交互请求。";
 export const cliInputTitle = "CLI 输入";
 export const gatewayRequestFailedText = "Gateway 未能完成请求，请稍后重试";
