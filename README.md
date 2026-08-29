@@ -390,7 +390,8 @@ codexc service logs -n 100
 - 独立 `codex` 正在使用聊天绑定的同一 Thread：Gateway 仍会启动并提示该会话被占用；退出独立
   `codex` 后，Gateway 会自动恢复订阅并再次提示。终端需要共享会话时使用 `codexc remote`。
 - 只需重启 Gateway：运行 `codexc service restart`，共享 App Server 和活动 Thread 会保留。
-- Codex CLI 版本不一致：重新安装精确版本 `@openai/codex@0.150.1`。
+- Codex CLI 版本不一致：Git 源码更新会询问是否安装精确版本，直接回车默认确认；非交互运行或拒绝
+  安装时，按错误消息给出的 `npm install -g @openai/codex@<版本>` 处理后重试。
 - 飞书完全收不到消息：先在终端运行 `codexc doctor`；如提示权限、消息事件或版本未生效，重新运行
   `codexc setup`，扫码时选择当前应用并完成授权、审核和发布。机器人能接收私聊但菜单不完整时，
   再发送 `/fs doctor`。

@@ -56,6 +56,7 @@ describe("Git 源码更新", () => {
         "validate-candidate",
         "build-candidate",
         "inspect-candidate",
+        "prepare-codex-cli",
         "stop-services",
         "switch-source",
         "refresh-command",
@@ -150,6 +151,8 @@ describe("Git 源码更新", () => {
       "build-candidate:completed",
       "inspect-candidate:started",
       "inspect-candidate:completed",
+      "prepare-codex-cli:started",
+      "prepare-codex-cli:completed",
       "switch-source:started",
       "switch-source:completed",
       "refresh-command:started",
@@ -463,6 +466,7 @@ describe("Git 源码更新", () => {
         "validate-candidate",
         "build-candidate",
         "inspect-candidate",
+        "prepare-codex-cli",
         "stop-services",
         "switch-source",
       ]),
@@ -521,7 +525,7 @@ describe("Git 源码更新", () => {
     expect(servicesStopped).toBe(false);
   });
 
-  it("rejects main when its version no longer matches the installed Codex CLI", async () => {
+  it("rejects a version mismatch without an interactive confirmation", async () => {
     const fixture = createInstalledFixture("codexc-source-version-mismatch-");
     writePackageVersion(fixture.repository, "0.148.0");
     runGit(fixture.repository, ["add", "."]);
@@ -568,6 +572,131 @@ describe("Git 源码更新", () => {
     ]);
 
     expect(candidateBuilt).toBe(false);
+    expect(servicesStopped).toBe(false);
+    expect(JSON.parse(readFileSync(join(fixture.checkout, "package.json"), "utf8")).version)
+      .toBe("0.147.0");
+  });
+
+  it("does not install or change source when the Codex CLI installation is declined", async () => {
+    const fixture = createInstalledFixture("codexc-source-version-decline-");
+    writePackageVersion(fixture.repository, "0.148.0");
+    runGit(fixture.repository, ["add", "."]);
+    runGit(fixture.repository, ["commit", "--quiet", "-m", "upgrade"]);
+    let installed = false;
+    let servicesStopped = false;
+
+    await expect(updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => undefined,
+      confirmCodexCliInstall: () => false,
+      inspectStaged: async () => ({ services: { installed: true } }),
+      installCodexCli: () => { installed = true; },
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      stopServices: () => { servicesStopped = true; },
+    })).rejects.toThrow("Codex CLI 版本不匹配：需要 0.148.0，当前 0.147.0");
+
+    expect(installed).toBe(false);
+    expect(servicesStopped).toBe(false);
+    expect(JSON.parse(readFileSync(join(fixture.checkout, "package.json"), "utf8")).version)
+      .toBe("0.147.0");
+  });
+
+  it("installs the confirmed Codex CLI version before continuing the source update", async () => {
+    const fixture = createInstalledFixture("codexc-source-version-install-");
+    writePackageVersion(fixture.repository, "0.148.0");
+    runGit(fixture.repository, ["add", "."]);
+    runGit(fixture.repository, ["commit", "--quiet", "-m", "upgrade"]);
+    const confirmations: unknown[] = [];
+    const installedVersions: string[] = [];
+    const messages: Array<[string, string]> = [];
+
+    const result = await updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => undefined,
+      confirmCodexCliInstall: (request) => {
+        confirmations.push(request);
+        return true;
+      },
+      inspectStaged: async () => ({ services: { installed: false } }),
+      installGlobalPackage: () => undefined,
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+      runCommand: (command, args, options) => {
+        if (
+          (command === "npm" || command === "npm.cmd")
+          && args[0] === "install"
+          && args[1] === "-g"
+          && args[2]?.startsWith("@openai/codex@")
+        ) {
+          const version = args[2].slice("@openai/codex@".length);
+          installedVersions.push(version);
+          writeFileSync(
+            fixture.codex,
+            `#!/bin/sh\nprintf '%s\\n' 'codex-cli ${version}'\n`,
+          );
+          chmodSync(fixture.codex, 0o755);
+          return;
+        }
+        execFileSync(command, args, {
+          cwd: options.cwd as string,
+          env: options.environment as NodeJS.ProcessEnv,
+          stdio: "ignore",
+        });
+      },
+      runLocalUpdate: () => undefined,
+      writeMessage: (kind, message) => { messages.push([kind, message]); },
+    });
+
+    expect(confirmations).toEqual([{
+      currentVersion: "0.147.0",
+      requiredVersion: "0.148.0",
+    }]);
+    expect(installedVersions).toEqual(["0.148.0"]);
+    expect(messages).toContainEqual([
+      "note",
+      "正在全局安装 @openai/codex@0.148.0。",
+    ]);
+    expect(messages).toContainEqual([
+      "success",
+      "Codex CLI 0.148.0 已安装，继续源码更新。",
+    ]);
+    expect(result).toMatchObject({
+      changed: true,
+      previousVersion: "0.147.0",
+      version: "0.148.0",
+    });
+  });
+
+  it("keeps the current source and services when Codex CLI installation fails", async () => {
+    const fixture = createInstalledFixture("codexc-source-version-install-failure-");
+    writePackageVersion(fixture.repository, "0.148.0");
+    runGit(fixture.repository, ["add", "."]);
+    runGit(fixture.repository, ["commit", "--quiet", "-m", "upgrade"]);
+    let candidateBuilt = false;
+    let servicesStopped = false;
+
+    let failure: unknown;
+    try {
+      await updateManagedSourceInstallation(fixture.environment, {
+        buildCheckout: () => { candidateBuilt = true; },
+        confirmCodexCliInstall: () => true,
+        inspectStaged: async () => ({ services: { installed: true } }),
+        installCodexCli: () => { throw new Error("npm install failed"); },
+        projectDir: fixture.checkout,
+        repository: fixture.repository,
+        stopServices: () => { servicesStopped = true; },
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message)
+      .toBe("Codex CLI 0.148.0 安装失败：npm install failed");
+    expect(getCodexVersionMismatchRemediation(failure)).toEqual([
+      "npm install -g @openai/codex@0.148.0",
+      "安装完成后重新运行 codexc update",
+    ]);
+    expect(candidateBuilt).toBe(true);
     expect(servicesStopped).toBe(false);
     expect(JSON.parse(readFileSync(join(fixture.checkout, "package.json"), "utf8")).version)
       .toBe("0.147.0");
