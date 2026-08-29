@@ -441,7 +441,8 @@
   安装说明；拒绝其他预发布、降级、高于开发基线和缺少受控标记的文档。
 - `sync-gateway-version.mjs`：升级 Codex CLI 协议时把 `package.json`、锁文件和 Gateway 运行时
   版本重置为新的正式基础版本；Gateway 候选发行和修复发行可分别在该基础版本后使用受控的
-  `-rc.N` 或 `-fixN` 后缀。
+  `-rc.N` 或 `-fixN` 后缀。RC Tag 发布后，`main` 必须恢复无后缀基础版本以兼容旧版源码更新器，
+  已发布的 RC 安装入口继续由 README 和 Release 保留。
 - `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
   OpenAI 主提供商使用的配置、环境变量或系统代理路由（不显示代理地址或凭据）、
   Workspace、飞书凭据/Bot 身份、

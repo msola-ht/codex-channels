@@ -226,6 +226,12 @@ PR 的实际改动、验证结果和发布边界整理，不能继续使用自�
 不会再自动修改或提交 README；README 已在发布提交中接受完整门禁。当前工作流不会自动创建
 GitHub Release，也不会自动安装本机包、重启 Gateway 或部署服务。
 
+RC Tag 和 npm `next` 发布完成后，必须通过后续 PR 把 `package.json`、锁文件、`src/version.json`
+以及 README 的 `main` 开发基线恢复为无后缀正式基础版本，同时保留当前 RC 安装入口并继续标记
+正式版尚未发布。旧版源码更新器只认识正式版本和 `-fixN`；若让 `main` 长期停留在 `-rc.N`，旧设备
+会在安装候选源码前失败，无法通过 `codexc update` 自举。已经发布的 RC Tag、npm 包和 GitHub
+Pre-release 不得移动或改写。
+
 ## 6. 发布后验证与本机升级
 
 先核对 npm 和 GitHub Release，再安装精确版本：
@@ -236,15 +242,13 @@ npm view @hegenai/codexc version
 npm install -g "@openai/codex@$RELEASE_VERSION"
 npm install -g "@hegenai/codexc@$RELEASE_VERSION"
 codexc service install
+codexc service restart all
 codexc doctor
 codexc service status
 ```
 
-如果需要让 App Server 一并切换到新 CLI，再明确执行：
-
-```bash
-codexc service restart all
-```
+升级 npm 包不会替换已经运行的 Gateway 或 Provider App Server 进程；已有服务必须在 Doctor 前
+完整重启。首次安装时 `codexc service install` 已启动对应服务，后续显式重启保持同一验证流程。
 
 发布完成的判断标准是：npm 返回目标版本、GitHub Release 指向同一 Tag、本机诊断通过且所需服务
 状态正常。发布后发现仅文档有误时按普通修复提交处理，不移动已经发布的 Tag；包内容有误时不得
