@@ -16,10 +16,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  getCodexVersionMismatchRemediation,
   getSourceUpdateFailure,
   inspectManagedSourceUpdatePlan,
   managedSourceCheckout,
   updateManagedSourceInstallation,
+  writeSourceUpdateFailure,
 } from "../scripts/source-update.mjs";
 
 const temporaryDirectories: string[] = [];
@@ -527,12 +529,43 @@ describe("Git 源码更新", () => {
     let candidateBuilt = false;
     let servicesStopped = false;
 
-    await expect(updateManagedSourceInstallation(fixture.environment, {
-      buildCheckout: () => { candidateBuilt = true; },
-      projectDir: fixture.checkout,
-      repository: fixture.repository,
-      stopServices: () => { servicesStopped = true; },
-    })).rejects.toThrow("Codex CLI 版本不匹配：需要 0.148.0，当前 0.147.0");
+    let failure: unknown;
+    try {
+      await updateManagedSourceInstallation(fixture.environment, {
+        buildCheckout: () => { candidateBuilt = true; },
+        projectDir: fixture.checkout,
+        repository: fixture.repository,
+        stopServices: () => { servicesStopped = true; },
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message)
+      .toBe("Codex CLI 版本不匹配：需要 0.148.0，当前 0.147.0");
+    expect(getCodexVersionMismatchRemediation(failure)).toEqual([
+      "npm install -g @openai/codex@0.148.0",
+      "安装完成后重新运行 codexc update",
+    ]);
+    const messages: Array<{ kind: string; message: string }> = [];
+    writeSourceUpdateFailure(failure, (kind, message) => {
+      messages.push({ kind, message });
+    });
+    expect(messages).toEqual([
+      {
+        kind: "failure",
+        message: "Codex CLI 版本不匹配：需要 0.148.0，当前 0.147.0",
+      },
+      {
+        kind: "remediation",
+        message: "npm install -g @openai/codex@0.148.0",
+      },
+      {
+        kind: "remediation",
+        message: "安装完成后重新运行 codexc update",
+      },
+    ]);
 
     expect(candidateBuilt).toBe(false);
     expect(servicesStopped).toBe(false);

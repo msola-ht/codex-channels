@@ -29,6 +29,7 @@ const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
 const stableVersionPattern = /^\d+\.\d+\.\d+$/u;
 const commitPattern = /^[0-9a-f]{40}$/u;
+const codexVersionMismatchRemediations = new WeakMap();
 
 export function managedSourceCheckout(environment = process.env, projectDir = packageDir) {
   const expected = join(userDataDir(environment), "codex-channels");
@@ -364,6 +365,19 @@ export function getSourceUpdateFailure(error) {
     : undefined;
 }
 
+export function getCodexVersionMismatchRemediation(error) {
+  return error instanceof Error
+    ? [...(codexVersionMismatchRemediations.get(error) ?? [])]
+    : [];
+}
+
+export function writeSourceUpdateFailure(error, writeMessage = writeCliMessage) {
+  writeMessage("failure", errorMessage(error));
+  for (const remediation of getCodexVersionMismatchRemediation(error)) {
+    writeMessage("remediation", remediation);
+  }
+}
+
 function assertSourceUpdateCaller(environment) {
   if (
     environment.CODEX_CONNECT_SERVICE_ROLE === "app-server"
@@ -593,7 +607,14 @@ function assertCodexVersion(expected, environment, captureCommand) {
   ).trim();
   const actual = output.split(/\s+/u).at(-1)?.replace(/^v/u, "") ?? "";
   if (actual !== expected) {
-    throw new Error(`Codex CLI 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}`);
+    const error = new Error(
+      `Codex CLI 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}`,
+    );
+    codexVersionMismatchRemediations.set(error, [
+      `npm install -g @openai/codex@${expected}`,
+      "安装完成后重新运行 codexc update",
+    ]);
+    throw error;
   }
 }
 
@@ -786,7 +807,7 @@ if (
   try {
     await main();
   } catch (error) {
-    writeCliMessage("failure", errorMessage(error));
+    writeSourceUpdateFailure(error);
     process.exitCode = 1;
   }
 }
