@@ -226,11 +226,21 @@ PR 的实际改动、验证结果和发布边界整理，不能继续使用自�
 不会再自动修改或提交 README；README 已在发布提交中接受完整门禁。当前工作流不会自动创建
 GitHub Release，也不会自动安装本机包、重启 Gateway 或部署服务。
 
-RC Tag 和 npm `next` 发布完成后，必须通过后续 PR 把 `package.json`、锁文件、`src/version.json`
-以及 README 的 `main` 开发基线恢复为无后缀正式基础版本，同时保留当前 RC 安装入口并继续标记
-正式版尚未发布。旧版源码更新器只认识正式版本和 `-fixN`；若让 `main` 长期停留在 `-rc.N`，旧设备
-会在安装候选源码前失败，无法通过 `codexc update` 自举。已经发布的 RC Tag、npm 包和 GitHub
-Pre-release 不得移动或改写。
+### 带后缀版本的强制收尾
+
+`-rc.N` 候选版或 `-fixN` 修复版必须完成以下闭环，缺少任一步都不算发布完成：
+
+1. 在版本完全一致的不可变 Tag 提交上发布 npm 包，并核验 `next` 或 `fix` 指向目标版本。
+2. 创建并核验同版本 GitHub Pre-release 或 Release，不移动 Tag、不覆盖 npm 包。
+3. 立即通过独立 PR 把 `package.json`、锁文件、`src/version.json` 和 README 的 `main` 开发基线
+   恢复为无后缀基础版本；用户可见的 RC 或 fix 安装入口继续保留，当前正式版不得提前变化。
+4. 合并恢复 PR 后确认 `main` 工作区干净、四处版本一致，且旧版源码更新器的正式版规则接受
+   `package.json`；没有新 Tag 和 `Publish npm package` 工作流运行。
+
+旧版源码更新器可能不认识后来新增的后缀；让 `main` 长期停留在 `-rc.N` 或 `-fixN` 会使旧设备在
+安装候选源码前失败，无法通过 `codexc update` 自举。恢复无后缀基础版本只代表源码开发基线，
+不等于正式发布；不得因此创建正式 Tag、移动 npm `latest` 或把 Pre-release 改为正式 Release。
+恢复 PR 合并和兼容检查完成前，不得宣告发行闭环或开始下一轮版本发布准备。
 
 ## 6. 发布后验证与本机升级
 

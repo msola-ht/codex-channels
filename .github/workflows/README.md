@@ -9,7 +9,7 @@
   merge ref 通过全部门禁并禁止直接写入 `main`，因此 push 不再重复运行同一检查。检查覆盖提交
   差异、类型和版本、生产与测试 Lint、文档链接和索引、全量测试、Shell、真实 tarball 与干净
   源码安装冒烟及平台模板检查。
-  独立的 App Server 合同任务安装锁定的 Codex CLI 0.148.0，检查协议版本与生成类型，并使用隔离
+  独立的 App Server 合同任务安装锁定的 Codex CLI 0.150.1，检查协议版本与生成类型，并使用隔离
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。
 - `codex-upgrade-preview.yml`：每日及手动检查 `openai/codex` 正式发行版本；版本留空时使用
   最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
@@ -31,6 +31,9 @@
 - README 的正式版本与安装命令在发布提交中直接更新并接受 PR/CI 审查；GitHub Release 不再触发
   自动写回 `main`。GitHub Release 创建、本机安装、服务重启和部署仍不由工作流执行。完整收尾步骤见
   [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)。
+- `-rc.N` 或 `-fixN` 发布核验后必须立即创建独立恢复 PR，把 `main` 的包、锁文件、运行时版本和
+  开发基线恢复为无后缀基础版本，同时保留已发布后缀版本的安装入口。恢复 PR 不创建 Tag、不触发
+  `publish.yml`；合并并确认旧源码更新器接受 `main` 版本之前，发布流程不算闭环。
 
 启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
 
