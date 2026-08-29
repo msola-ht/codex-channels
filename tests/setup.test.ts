@@ -439,7 +439,7 @@ describe("Codex Connect setup", () => {
             model: "gpt-5.6-sol",
             reasoningEffort: "medium",
             baseUrl: "https://secret.example/v1",
-            profileName: "custom-codeproxy",
+            profileName: "sf-custom-codeproxy",
           }],
           backupCandidates: [],
         },
@@ -461,7 +461,7 @@ describe("Codex Connect setup", () => {
             model: "gpt-5.6-sol",
             reasoningEffort: "medium",
             baseUrl: "https://secret.example/v1",
-            profileName: "custom-codeproxy",
+            profileName: "sf-custom-codeproxy",
           },
         ],
         externalAgent: {

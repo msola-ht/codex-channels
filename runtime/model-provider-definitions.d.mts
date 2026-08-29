@@ -30,7 +30,6 @@ export interface ModelProviderDefinition {
   readonly storageId?: string;
   readonly displayName: string;
   readonly profileName: string;
-  readonly codexProfileName: string;
   readonly profileFileName: string;
   readonly catalogFileName: string;
   readonly catalogManifestFileName: string;

@@ -226,8 +226,8 @@ describe("codexc CLI", () => {
     const remoteHelp = spawnSync(process.execPath, [cli, "remote", "--help"], {
       encoding: "utf8",
     });
-    expect(remoteHelp.stdout).toContain("opencode-go-<账户>");
-    expect(remoteHelp.stdout).toContain("custom-<Provider ID>");
+    expect(remoteHelp.stdout).toContain("sf-opencode-go-<账户>");
+    expect(remoteHelp.stdout).toContain("sf-custom-<Provider ID>");
     const channelHelp = spawnSync(process.execPath, [cli, "channel", "--help"], {
       encoding: "utf8",
     });
@@ -1414,11 +1414,11 @@ describe("codexc CLI", () => {
     await supervisor.start();
     try {
       for (const [index, args] of [
-        ["--profile", "deepseek"],
-        ["--profile=deepseek"],
-        ["-p", "deepseek"],
-        ["-p=deepseek"],
-        ["-pdeepseek"],
+        ["--profile", "sf-deepseek"],
+        ["--profile=sf-deepseek"],
+        ["-p", "sf-deepseek"],
+        ["-p=sf-deepseek"],
+        ["-psf-deepseek"],
       ].entries()) {
         const capturePath = join(root, `capture-${index}.json`);
         await execFileAsync(process.execPath, [cli, "remote", ...args, "resume"], {
@@ -1466,7 +1466,7 @@ describe("codexc CLI", () => {
     ]);
   }, 30_000);
 
-  it("maps a public custom Profile without dropping the current Workspace permissions", async () => {
+  it("uses the native custom Profile without dropping the current Workspace permissions", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-remote-custom-profile-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -1520,7 +1520,7 @@ describe("codexc CLI", () => {
       const capturePath = join(root, "capture.json");
       await execFileAsync(
         process.execPath,
-        [cli, "remote", "--profile", "custom-codeproxy-dev", "resume"],
+        [cli, "remote", "--profile", "sf-custom-codeproxy-dev", "resume"],
         {
           cwd: workspace,
           env: { ...environment, CODEX_TEST_CAPTURE: capturePath },
@@ -1545,14 +1545,14 @@ describe("codexc CLI", () => {
       await supervisor.close();
     }
 
-    const internal = spawnSync(
+    const oldProfile = spawnSync(
       process.execPath,
-      [cli, "remote", "--profile", "sf-custom-codeproxy-dev"],
+      [cli, "remote", "--profile", "custom-codeproxy-dev"],
       { cwd: workspace, env: environment, encoding: "utf8" },
     );
-    expect(internal.status).toBe(1);
-    expect(internal.stderr).toContain(
-      "Codex Profile sf-custom-codeproxy-dev 是内部名称；请使用 --profile custom-codeproxy-dev",
+    expect(oldProfile.status).toBe(1);
+    expect(oldProfile.stderr).toContain(
+      "Profile custom-codeproxy-dev 不是该 Provider 的规范名称；请使用 --profile sf-custom-codeproxy-dev",
     );
 
     const providerId = spawnSync(
@@ -1562,7 +1562,7 @@ describe("codexc CLI", () => {
     );
     expect(providerId.status).toBe(1);
     expect(providerId.stderr).toContain(
-      "codeproxy-dev 是 Provider ID；请使用 --profile custom-codeproxy-dev",
+      "codeproxy-dev 是 Provider ID；请使用 --profile sf-custom-codeproxy-dev",
     );
   }, 30_000);
 

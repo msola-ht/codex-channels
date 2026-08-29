@@ -3,21 +3,24 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import { loadConfiguredCustomSwitchingModelProviders } from "../runtime/model-provider-runtime.mjs";
+import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
 
 export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
 
 export function parseCodexRemoteOptions(
   args,
   {
-    customSwitchingProfiles = loadConfiguredCustomSwitchingModelProviders(process.env)
-      .map(({ provider, profileName, codexProfileName }) => ({
+    environment = process.env,
+    managedProfileDefinitions: suppliedManagedProfileDefinitions,
+    customSwitchingProfiles = loadConfiguredCustomSwitchingModelProviders(environment)
+      .map(({ provider, profileName }) => ({
         providerId: provider,
         profileName,
-        codexProfileName,
       })),
   } = {},
 ) {
-  const configuredManagedProfileDefinitions = loadManagedModelProviderDefinitions(process.env);
+  const configuredManagedProfileDefinitions = suppliedManagedProfileDefinitions
+    ?? loadManagedModelProviderDefinitions(environment);
   const managedProfileDefinitions = [
     ...customSwitchingProfiles,
     ...configuredManagedProfileDefinitions,
@@ -58,15 +61,15 @@ export function parseCodexRemoteOptions(
       index += profileArgument.consumed - 1;
       continue;
     }
-    const internalProfile = internalProfileArgument(
+    const oldProfile = oldManagedProfileArgument(
       args,
       index,
       managedProfileDefinitions,
     );
-    if (internalProfile) {
+    if (oldProfile) {
       throw new Error(
-        `Codex Profile ${internalProfile.codexProfileName} 是内部名称；`
-        + `请使用 --profile ${internalProfile.profileName}`,
+        `Profile ${oldProfile.profileName} 不是该 Provider 的规范名称；`
+        + `请使用 --profile ${oldProfile.canonicalProfileName}`,
       );
     }
     const customProviderId = customProviderIdArgument(args, index, customSwitchingProfiles);
@@ -76,13 +79,9 @@ export function parseCodexRemoteOptions(
         + `请使用 --profile ${customProviderId.profileName}`,
       );
     }
-    const reservedCustomProfile = reservedCustomInternalProfileArgument(args, index);
-    if (reservedCustomProfile) {
-      const provider = reservedCustomProfile.slice("sf-custom-".length);
-      throw new Error(reservedCustomProfile === "sf-custom"
-        ? "Codex Profile sf-custom 是内部保留名称；固定模式请直接使用 codexc remote"
-        : `Codex Profile ${reservedCustomProfile} 是内部保留名称；`
-          + `请先运行 codexc setup 配置对应 Provider，再使用 --profile custom-${provider}`);
+    const reservedProfile = reservedManagedProfileArgument(args, index);
+    if (reservedProfile) {
+      throw new Error(reservedManagedProfileMessage(reservedProfile));
     }
     if (codexProfileArgument(args, index)) {
       if (selectedProfile !== undefined) {
@@ -113,20 +112,16 @@ function customProviderIdArgument(args, index, definitions) {
 
 function assertManagedProfileDefinitions(definitions) {
   const names = new Set();
-  for (const { profileName, codexProfileName } of definitions) {
+  for (const { profileName } of definitions) {
     if (
       typeof profileName !== "string"
       || profileName.trim() === ""
-      || typeof codexProfileName !== "string"
-      || codexProfileName.trim() === ""
-      || profileName === codexProfileName
+      || !profileName.startsWith("sf-")
       || names.has(profileName)
-      || names.has(codexProfileName)
     ) {
       throw new Error("受管模型 Provider Profile 定义无效或冲突");
     }
     names.add(profileName);
-    names.add(codexProfileName);
   }
 }
 
@@ -158,26 +153,43 @@ function managedProfileArgument(args, index, definitions) {
   return undefined;
 }
 
-function internalProfileArgument(args, index, definitions) {
+function oldManagedProfileArgument(args, index, definitions) {
   const argument = args[index];
-  for (const { profileName, codexProfileName } of definitions) {
+  for (const definition of definitions) {
+    const canonicalProfileName = definition.profileName;
+    const profileName = nonCanonicalManagedProfileName(definition);
     if (
-      (argument === "--profile" || argument === "-p")
-      && args[index + 1] === codexProfileName
+      typeof profileName !== "string"
+      || profileName === canonicalProfileName
     ) {
-      return { profileName, codexProfileName };
+      continue;
     }
     if (
-      [`--profile=${codexProfileName}`, `-p=${codexProfileName}`, `-p${codexProfileName}`]
+      (argument === "--profile" || argument === "-p")
+      && args[index + 1] === profileName
+    ) {
+      return { profileName, canonicalProfileName };
+    }
+    if (
+      [`--profile=${profileName}`, `-p=${profileName}`, `-p${profileName}`]
         .includes(argument)
     ) {
-      return { profileName, codexProfileName };
+      return { profileName, canonicalProfileName };
     }
   }
   return undefined;
 }
 
-function reservedCustomInternalProfileArgument(args, index) {
+function nonCanonicalManagedProfileName(definition) {
+  if (typeof definition.providerId === "string") {
+    return `custom-${definition.providerId}`;
+  }
+  return definition.id === "deepseek" || isOpencodeGoProviderNamespace(definition.id)
+    ? definition.id
+    : undefined;
+}
+
+function reservedManagedProfileArgument(args, index) {
   const argument = args[index];
   let profile;
   if (argument === "--profile" || argument === "-p") {
@@ -189,7 +201,22 @@ function reservedCustomInternalProfileArgument(args, index) {
   } else if (/^-p[^-]/u.test(argument)) {
     profile = argument.slice(2);
   }
-  return profile === "sf-custom" || profile?.startsWith("sf-custom-")
+  return profile === "sf-custom"
+    || profile?.startsWith("sf-custom-")
+    || profile?.startsWith("sf-opencode-go-")
     ? profile
     : undefined;
+}
+
+function reservedManagedProfileMessage(profile) {
+  if (profile === "sf-custom") {
+    return "Codex Profile sf-custom 是内部保留名称；固定模式请直接使用 codexc remote";
+  }
+  if (profile.startsWith("sf-custom-")) {
+    return `Codex Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应 Provider`;
+  }
+  if (profile.startsWith("sf-opencode-go-")) {
+    return `OpenCode Go Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应账户`;
+  }
+  return `Codex Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应 Provider`;
 }

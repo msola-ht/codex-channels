@@ -183,7 +183,6 @@ export interface ConfiguredCustomSwitchingModelProvider {
   apiKey: string;
   supportsWebsockets: boolean;
   profileName: string;
-  codexProfileName: string;
   profileContent: string;
   reasoningEffort: "medium";
   catalogSource: { kind: "official" };

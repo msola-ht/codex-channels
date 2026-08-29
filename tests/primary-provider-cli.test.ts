@@ -195,7 +195,7 @@ describe("primary provider CLI", () => {
       id: "thirdparty",
       name: "Third-party",
       baseUrl: "https://switch.example.test/v1",
-      profileName: "custom-thirdparty",
+      profileName: "sf-custom-thirdparty",
     }]);
     expect(JSON.stringify(value)).not.toContain("sk-switch-secret");
   });
