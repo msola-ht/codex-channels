@@ -347,6 +347,7 @@ export class FeishuSurface implements SurfaceAdapter {
         ? { actorRegistry: options.actorRegistry }
         : {}),
       handle: (message) => this.adapter.handle(message),
+      handleUrgent: (message) => this.adapter.handle(message),
       handleImageBatch: (messages) =>
         this.adapter.handleImageBatch(messages),
       inputQuietWindowMs: 0,

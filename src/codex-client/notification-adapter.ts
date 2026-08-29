@@ -684,15 +684,21 @@ function parseTurnError(
   }
   const additionalDetails = nonEmptyString(error?.additionalDetails);
   const errorCode = parseTurnErrorCode(error?.codexErrorInfo);
+  const combined = additionalDetails && additionalDetails !== message
+    ? `${message}\n${additionalDetails}`
+    : message;
   return {
     valid: true,
-    value: sanitizeOperationText(
-      additionalDetails && additionalDetails !== message
-        ? `${message}\n${additionalDetails}`
-        : message,
-    ),
+    value: sanitizeTurnErrorText(combined),
     ...(errorCode ? { errorCode } : {}),
   };
+}
+
+function sanitizeTurnErrorText(value: string): string {
+  if (value.includes("provider_proxy_upstream_error")) {
+    return "模型 Provider 上游暂时不可用或响应超时，有限重试后仍未恢复";
+  }
+  return sanitizeOperationText(value);
 }
 
 function parseTurnErrorCode(value: unknown): TurnErrorCode | undefined {

@@ -7,6 +7,7 @@ import {
   surfaceErrorMetadata,
   type SurfaceErrorMetadata,
 } from "../error-metadata.js";
+import { isEmergencyStopCommand } from "../slash-command.js";
 
 import type { FeishuMessageEvent } from "./message-event.js";
 import {
@@ -68,6 +69,7 @@ export interface FeishuInboxOptions {
   access: SurfaceAccessPolicy;
   actorRegistry?: ConversationActorRegistry;
   handle(message: FeishuInboxMessage): Promise<void>;
+  handleUrgent?(message: Extract<FeishuInboxMessage, { kind: "text" }>): Promise<void>;
   handleImageBatch?(messages: readonly Extract<
     FeishuInboxMessage,
     { kind: "image" }
@@ -99,6 +101,7 @@ export class FeishuInbox {
   private readonly now: () => number;
   private readonly seen = new Map<string, number>();
   private readonly workers = new Map<string, ConversationWorker>();
+  private readonly urgentTasks = new Set<Promise<void>>();
   private pendingCount = 0;
   private closed = false;
   private closePromise: Promise<void> | undefined;
@@ -197,10 +200,6 @@ export class FeishuInbox {
     if (this.seen.has(deduplicationKey)) {
       return { status: "ignored", reason: "duplicate" };
     }
-    if (this.pendingCount >= this.capacity) {
-      return { status: "retry", reason: "overloaded" };
-    }
-
     const message: FeishuInboxMessage = {
       target,
       actorId: event.actorOpenId,
@@ -211,6 +210,17 @@ export class FeishuInbox {
       ...(event.parentId === undefined ? {} : { parentId: event.parentId }),
       ...content,
     };
+    if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
+      if (this.urgentTasks.size >= this.capacity) {
+        return { status: "retry", reason: "overloaded" };
+      }
+      this.rememberSeen(deduplicationKey, now);
+      this.runUrgent(message);
+      return { status: "accepted" };
+    }
+    if (this.pendingCount >= this.capacity) {
+      return { status: "retry", reason: "overloaded" };
+    }
     this.rememberSeen(deduplicationKey, now);
     this.pendingCount += 1;
     this.enqueue(message);
@@ -244,6 +254,25 @@ export class FeishuInbox {
     worker.done = Promise.resolve().then(
       () => this.runWorker(conversationId, worker),
     );
+  }
+
+  private runUrgent(
+    message: Extract<FeishuInboxMessage, { kind: "text" }>,
+  ): void {
+    this.pendingCount += 1;
+    const task = Promise.resolve().then(async () => {
+      this.options.actorRegistry?.rememberActor(
+        message.target,
+        message.actorId,
+      );
+      await (this.options.handleUrgent ?? this.options.handle)(message);
+    }).catch((error) => {
+      this.reportProcessingError(message, error);
+    }).finally(() => {
+      this.pendingCount -= 1;
+      this.urgentTasks.delete(task);
+    });
+    this.urgentTasks.add(task);
   }
 
   private async runWorker(
@@ -332,7 +361,10 @@ export class FeishuInbox {
 
   private async finishClose(): Promise<void> {
     const completed = await waitAtMost(
-      Promise.allSettled([...this.workers.values()].map((worker) => worker.done)),
+      Promise.allSettled([
+        ...[...this.workers.values()].map((worker) => worker.done),
+        ...this.urgentTasks,
+      ]),
       this.closeTimeoutMs,
     );
     if (completed) {

@@ -1,3 +1,6 @@
+export const thirdPartyProviderRequestMaxRetries = 1;
+export const thirdPartyProviderStreamMaxRetries = 0;
+
 export function createManagedProviderProfile(definition, {
   apiKey,
   catalogPath,
@@ -39,6 +42,8 @@ export function createModelProviderConfig(definition, apiKey) {
     ...(definition.supportsWebsockets === undefined
       ? {}
       : { supports_websockets: definition.supportsWebsockets }),
+    request_max_retries: thirdPartyProviderRequestMaxRetries,
+    stream_max_retries: thirdPartyProviderStreamMaxRetries,
     experimental_bearer_token: apiKey,
   };
 }
@@ -57,6 +62,8 @@ export function createCustomPrimaryProviderConfig({
     wire_api: "responses",
     requires_openai_auth: auth !== "none" && auth !== "bearer_token",
     supports_websockets: supportsWebsockets,
+    request_max_retries: thirdPartyProviderRequestMaxRetries,
+    stream_max_retries: thirdPartyProviderStreamMaxRetries,
     ...(auth === "env_key" ? { env_key: envKey } : {}),
     ...(auth === "bearer_token" ? { experimental_bearer_token: bearerToken } : {}),
   };
@@ -69,6 +76,14 @@ export function modelProviderBlockEdits(id, provider) {
     { keyPath: `model_providers.${id}.wire_api`, value: provider.wire_api ?? "responses" },
     { keyPath: `model_providers.${id}.requires_openai_auth`, value: provider.requires_openai_auth === true },
     { keyPath: `model_providers.${id}.supports_websockets`, value: provider.supports_websockets === true },
+    {
+      keyPath: `model_providers.${id}.request_max_retries`,
+      value: thirdPartyProviderRequestMaxRetries,
+    },
+    {
+      keyPath: `model_providers.${id}.stream_max_retries`,
+      value: thirdPartyProviderStreamMaxRetries,
+    },
     ...(typeof provider.env_key === "string"
       ? [{ keyPath: `model_providers.${id}.env_key`, value: provider.env_key }]
       : [{ keyPath: `model_providers.${id}.env_key`, value: null }]),

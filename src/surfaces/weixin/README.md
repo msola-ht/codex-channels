@@ -78,8 +78,9 @@
   目录（包括显式启用后的 Gateway `/schedule <自然语言>` 确认预览与计划任务管理），并保留微信本地 `/start`、`/help`、
   `/whoami`、`/wx doctor`；共享解析器把
   `/h`、`/work`、`/r` 显式规范化为
-  `/help`、`/workspace`、`/resume`；同一 Conversation 的完整消息处理链保持顺序，不同
-  Conversation 可并行；将说明文字和全部成功下载的图片一次
+  `/help`、`/workspace`、`/resume`；同一 Conversation 的普通消息处理链保持顺序，不同
+  Conversation 可并行；授权且精确匹配的 `/stop` 绕过普通消息顺序器，直接进入现有共享命令
+  和交互停止边界；将说明文字和全部成功下载的图片一次
   提交；UTF-8 文本文件以内联文本和明确文件名边界提交，不使用本地文件路径。引用正文与当前
   消息明确分离，任一图片失败或总大小超限时不提交部分输入。命令解析只看
   当前消息并复用 Surface 公共模板，未知斜杠

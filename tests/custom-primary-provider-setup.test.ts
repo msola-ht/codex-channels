@@ -156,6 +156,14 @@ describe("custom primary Provider setup", () => {
           keyPath: "model_providers.127-0-0-1.experimental_bearer_token",
           value: "sk-test-secret",
         },
+        {
+          keyPath: "model_providers.127-0-0-1.request_max_retries",
+          value: 1,
+        },
+        {
+          keyPath: "model_providers.127-0-0-1.stream_max_retries",
+          value: 0,
+        },
       ]),
       { expectedVersion: "v1" },
     );
@@ -211,6 +219,8 @@ describe("custom primary Provider setup", () => {
           wire_api: "responses",
           requires_openai_auth: false,
           supports_websockets: false,
+          request_max_retries: 1,
+          stream_max_retries: 0,
           experimental_bearer_token: "sk-test-secret",
         },
       },
@@ -600,6 +610,8 @@ describe("custom primary Provider setup", () => {
           wire_api: "responses",
           requires_openai_auth: false,
           supports_websockets: false,
+          request_max_retries: 1,
+          stream_max_retries: 0,
           experimental_bearer_token: "sk-existing-secret",
         },
       };

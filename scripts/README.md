@@ -128,7 +128,10 @@
   `config/batchWrite` 原子写入并激活 `~/.codex/config.toml` 的自定义主 Provider；切换模式保持主
   Provider 为 `openai` 且不修改主配置，为每个 Provider 写入包含完整 Provider 块、Key、模型、
   `model_reasoning_effort = "medium"` 和服务层级的 0600 `~/.codex/sf-custom-<Provider ID>.config.toml`，
-  并通过私有显式注册表支持多个隔离实例。自定义固定模式不能保留其他自定义切换 Profile；转为固定
+  并通过私有显式注册表支持多个隔离实例。Gateway 管理的 DeepSeek、OpenCode Go 与自定义
+  Provider 固定使用 `request_max_retries = 1`、`stream_max_retries = 0`，即首次 HTTP 请求失败后
+  最多再试一次，流中断不自动重连，避免 Codex 默认 HTTP 重试与流重连相乘；已有配置也由 App Server
+  服务启动参数施加同一边界。自定义固定模式不能保留其他自定义切换 Profile；转为固定
   模式前用户须先删除其他自定义切换 Provider。受管切换 Provider 可共存；受管固定模式必须先恢复
   官方模式，写入响应丢失时只读确认固定配置事务。只支持
   `experimental_bearer_token` 直接写入 API Key（明文入 0600 config）。远程上游强制 HTTPS，HTTP 仅允许本机回环地址。同一 URL Origin 编辑时留空

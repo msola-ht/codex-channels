@@ -143,12 +143,22 @@ describe("model provider runtime topology", () => {
     expect(loadManagedProviderAppServers(environment).map((provider) => ({
       provider: provider.provider,
       environmentKeys: Object.keys(provider.childEnvironment),
+      retryPolicy: provider.arguments.filter((argument) =>
+        argument.includes("_max_retries=")),
     }))).toEqual([{
       provider: "deepseek",
       environmentKeys: ["CODEX_CONNECT_DEEPSEEK_API_KEY"],
+      retryPolicy: [
+        "model_providers.deepseek.request_max_retries=1",
+        "model_providers.deepseek.stream_max_retries=0",
+      ],
     }, {
       provider: "opencode-go",
       environmentKeys: ["CODEX_CONNECT_OPENCODE_GO_API_KEY"],
+      retryPolicy: [
+        "model_providers.opencode-go.request_max_retries=1",
+        "model_providers.opencode-go.stream_max_retries=0",
+      ],
     }]);
     expect(validateConfiguredModelProviders(environment)).toEqual([
       { provider: "deepseek", mode: "switching" },
@@ -158,6 +168,8 @@ describe("model provider runtime topology", () => {
     writeManagedModelProviderRoleConfig(environment, { provider: "deepseek" });
     expect(readFileSync(managedModelProviderRoleConfigPath(environment), "utf8"))
       .toContain('model_provider = "deepseek"');
+    expect(readFileSync(managedModelProviderRoleConfigPath(environment), "utf8"))
+      .toContain("request_max_retries = 1");
   });
 
   it("uses OpenAI as primary and exposes DeepSeek as an auxiliary switching server", async () => {
@@ -227,6 +239,8 @@ describe("model provider runtime topology", () => {
         "-c", expect.stringMatching(/^model_providers\.OpenAI\.env_key=/u),
         "-c", "model_providers.OpenAI.requires_openai_auth=false",
         "-c", "model_providers.OpenAI.supports_websockets=true",
+        "-c", "model_providers.OpenAI.request_max_retries=1",
+        "-c", "model_providers.OpenAI.stream_max_retries=0",
       ],
     });
     const childEnvironment = loadConfiguredCustomSwitchingModelProviders(environment)[0]
@@ -765,6 +779,8 @@ describe("model provider runtime topology", () => {
     expect(overridden).toContain(
       "model_providers.deepseek.base_url=\"http://127.0.0.1:38473/\"",
     );
+    expect(overridden).toContain("model_providers.deepseek.request_max_retries=1");
+    expect(overridden).toContain("model_providers.deepseek.stream_max_retries=0");
     expect(overridden.at(-2)).toBe("-c");
     expect(overridden.some((value, index) =>
       value === "-c" && overridden[index + 1] === "-c"
@@ -875,6 +891,8 @@ describe("model provider runtime topology", () => {
     expect(content).toContain("不等待或请求后续消息");
     expect(content).toContain('base_url = "http://127.0.0.1:39491/"');
     expect(content).toContain('env_key = "CODEX_CONNECT_DEEPSEEK_API_KEY"');
+    expect(content).toContain("request_max_retries = 1");
+    expect(content).toContain("stream_max_retries = 0");
     expect(content).not.toContain("model_context_window");
     expect(content).not.toContain("model_auto_compact_token_limit");
     expect(content).not.toContain("experimental_bearer_token");
@@ -946,6 +964,8 @@ describe("model provider runtime topology", () => {
     expect(content).toContain('model_reasoning_effort = "medium"');
     expect(content).toContain('base_url = "http://127.0.0.1:39493/role/external"');
     expect(content).toContain('env_key = "CODEX_CONNECT_CUSTOM_');
+    expect(content).toContain("request_max_retries = 1");
+    expect(content).toContain("stream_max_retries = 0");
     expect(content).not.toContain("custom-agent-secret");
     expect(content).not.toContain("experimental_bearer_token");
     expect(loadManagedModelProviderRole(environment)).toBeUndefined();

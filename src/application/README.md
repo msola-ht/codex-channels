@@ -121,7 +121,8 @@ OpenAI Thread 后发送官方 mention；
 Gateway 重启时通过恢复 Thread 和设置通知重新取得这些设置。`/plan` 无参数切换
 Default/Plan，带参数时在空闲边界内直接启动 Plan Turn；活动 Turn 不允许中途切换。
 Turn、steer、停止、重命名、固定、压缩、Review 和 Goal 只依赖 `TurnExecutionPort`；当前版本官方字段由
-`codex-client` 负责映射。Goal set/clear 请求成功后，Application 使用已确认结果立即更新 Core；
+`codex-client` 负责映射。停止直接读取 Core 中精确的活动 Thread/Turn 并发送中断，不进入同一
+Conversation 的普通操作互斥区，因此不会被尚未返回的 steer 阻塞。Goal set/clear 请求成功后，Application 使用已确认结果立即更新 Core；
 App Server 通知继续处理其他客户端修改与恢复后的状态校正。
 自定义 Thread 分区也只依赖 `TurnExecutionPort`：Application 解析全局选择器、统计当前 Workspace
 活动与归档成员、校验 `before` 目标仍在同一分区，并在删除前返回结构化影响预览；关键词搜索使用

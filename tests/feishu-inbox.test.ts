@@ -122,6 +122,41 @@ describe("FeishuInbox", () => {
     });
   });
 
+  it("delivers /stop without waiting for an earlier message in the same Chat", async () => {
+    let releaseFirst: () => void = () => undefined;
+    const firstPending = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const urgent: FeishuInboxMessage[] = [];
+    const fixture = createFixture({
+      handle: async (message) => {
+        fixture.handled.push(message);
+        await firstPending;
+      },
+      handleUrgent: async (message) => {
+        urgent.push(message);
+      },
+    });
+
+    expect(fixture.inbox.receive(createEvent())).toEqual({ status: "accepted" });
+    await settle();
+    expect(fixture.handled).toHaveLength(1);
+
+    expect(fixture.inbox.receive(createEvent({
+      eventId: "event-stop",
+      messageId: "om_stop",
+      content: JSON.stringify({ text: "/stop" }),
+    }))).toEqual({ status: "accepted" });
+    await settle();
+
+    expect(urgent).toEqual([
+      expect.objectContaining({ kind: "text", text: "/stop" }),
+    ]);
+
+    releaseFirst();
+    await fixture.inbox.close();
+  });
+
   it("preserves the validated Feishu reply parent identifier", async () => {
     const fixture = createFixture();
 

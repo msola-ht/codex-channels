@@ -24,6 +24,12 @@
 kebab-case 诊断码进入 `errorCode`，其余字符串会被剥离。这样既保留平台限流、发送失败等可检索
 分类，又避免上游响应、凭据或本机路径泄密。
 
+本地模型代理返回的 `provider_proxy_upstream_error` 会在 Codex Client 边界统一映射为“模型
+Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”；渠道不会显示回环代理地址、原始 5xx
+正文或内部错误 JSON。DeepSeek、OpenCode Go 与自定义 Provider 的 HTTP 首次失败后最多再试
+一次，流断开不再叠加重连；OpenAI 官方保持 Codex 原生策略。活动任务仍可随时使用 `/stop`，
+三个渠道都会让精确停止命令绕过普通输入排队。
+
 ## 用户可见错误码字典
 
 ### 消息与会话

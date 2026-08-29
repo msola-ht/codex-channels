@@ -1127,15 +1127,13 @@ export class ConversationService implements ConversationUseCases {
     });
   }
 
-  stop(target: ConversationTarget): Promise<boolean> {
-    return this.locked(target, async () => {
-      const active = this.core.activeTurn(target);
-      if (!active) {
-        return false;
-      }
-      await this.codex.interruptTurn(active.threadId, active.turnId);
-      return true;
-    });
+  async stop(target: ConversationTarget): Promise<boolean> {
+    const active = this.core.activeTurn(target);
+    if (!active) {
+      return false;
+    }
+    await this.codex.interruptTurn(active.threadId, active.turnId);
+    return true;
   }
 
   rename(target: ConversationTarget, name: string): Promise<void> {

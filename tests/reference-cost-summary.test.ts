@@ -266,6 +266,52 @@ describe("mergeCompletionTiming", () => {
     expect(timing).not.toHaveProperty("outputTokensPerSecond");
     expect(timing).not.toHaveProperty("compact");
   });
+
+  it("reconciles persisted request totals with the live request status breakdown", () => {
+    const latestTurn = turnSummary({
+      requestCount: 22,
+      unsuccessfulRequestCount: 14,
+    });
+
+    expect(mergeCompletionTiming(latestTurn, "turn-1", {
+      modelRequestCount: 21,
+      completedModelRequestCount: 8,
+      interruptedModelRequestCount: 2,
+      incompleteModelRequestCount: 0,
+      failedModelRequestCount: 11,
+      retryableFailureModelRequestCount: 0,
+    })).toMatchObject({
+      modelRequestCount: 22,
+      completedModelRequestCount: 8,
+      interruptedModelRequestCount: 2,
+      incompleteModelRequestCount: 1,
+      failedModelRequestCount: 11,
+      retryableFailureModelRequestCount: 0,
+    });
+  });
+
+  it("bounds a stale live status breakdown to the persisted request totals", () => {
+    const latestTurn = turnSummary({
+      requestCount: 5,
+      unsuccessfulRequestCount: 2,
+    });
+
+    expect(mergeCompletionTiming(latestTurn, "turn-1", {
+      modelRequestCount: 17,
+      completedModelRequestCount: 8,
+      interruptedModelRequestCount: 1,
+      incompleteModelRequestCount: 0,
+      failedModelRequestCount: 8,
+      retryableFailureModelRequestCount: 7,
+    })).toMatchObject({
+      modelRequestCount: 5,
+      completedModelRequestCount: 3,
+      interruptedModelRequestCount: 1,
+      incompleteModelRequestCount: 0,
+      failedModelRequestCount: 1,
+      retryableFailureModelRequestCount: 1,
+    });
+  });
 });
 
 const rates = {

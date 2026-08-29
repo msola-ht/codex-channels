@@ -1,5 +1,8 @@
 import type { ModelProviderDefinition } from "./model-provider-definitions.mjs";
 
+export const thirdPartyProviderRequestMaxRetries: 1;
+export const thirdPartyProviderStreamMaxRetries: 0;
+
 export function createManagedProviderProfile(
   definition: ModelProviderDefinition,
   options: {
