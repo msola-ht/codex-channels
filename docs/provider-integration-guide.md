@@ -44,7 +44,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 在 `runtime/model-provider-definitions.mjs` 新增冻结定义并加入
 `managedModelProviderDefinitions`：
 
-- `id`、`displayName`、公开 `profileName`、内部 `codexProfileName`、`profileFileName`、`catalogFileName`、
+- `id`、`displayName`、唯一规范 `profileName`、`profileFileName`、`catalogFileName`、
   `catalogManifestFileName`、`managedMarkerFileName`、`backupDirectoryName`；
 - `baseUrl`、`wireApi`、`apiKeyEnvironmentKey`、`supportsWebsockets`；
 - `defaultModel`、`defaultReasoningEffort`、受控 `models` 列表。
@@ -53,6 +53,8 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
   静态或人工审查目录可把来源也设为 `none`；通用远程价格目录使用 `remote`，不得把任意 URL、
   脚本或动态插件放入定义。启用目录更新适配器时必须声明非空受控来源。
 
+`profileName` 必须使用项目受管的 `sf-` 前缀，`profileFileName` 必须由
+`${profileName}.config.toml` 派生；`codexc remote`、原生 `codex --profile` 和磁盘文件不得再定义别名。
 注册后自动获得：watcher 目录路径、`codexc remote --profile <profileName>` 规范名称、
 `agents.external` 角色、文件迁移、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
@@ -162,7 +164,7 @@ codexc doctor
 
 - `/model` 能看到带新 Provider 前缀的模型，并可按序号选择；
 - 新会话、同 Provider 历史 Thread、跨 Provider 新建 Thread 的模型与思考等级符合预期；
-- `codexc remote --profile custom-<Provider ID>` 能拉起隔离 App Server 并共享会话；
+- `codexc remote --profile sf-<Provider ID>` 能拉起隔离 App Server 并共享会话；
 - `/usage` 按账户形态展示余额或配额窗口与模型本地用量；
 - 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启；
 - 峰谷价格按请求开始时间验证：生效时间前后、快照存在与缺失、窗口重置边界；
@@ -239,8 +241,8 @@ Gateway 管理的 DeepSeek、OpenCode Go 与自定义 Provider 统一使用一�
 Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"`、服务层级、
 `request_max_retries = 1` 和 `stream_max_retries = 0`；受管 Provider 的新 Profile 也写入同一重试
 边界，主 `~/.codex/config.toml` 保持官方配置。
-`codexc remote --profile custom-<Provider ID>`
-连接该隔离实例，并在内部映射到 `sf-custom-<Provider ID>` Codex Profile；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
+`codexc remote --profile sf-custom-<Provider ID>`
+使用与原生 Codex 及磁盘文件相同的 Profile 名称连接该隔离实例；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
 跨 Provider 选择沿用现有新 Thread 路由边界。锁定版 App Server 不接受 `--profile`，后台服务会先
 严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，
 不进入命令行。多个切换模式 Provider 通过私有显式注册表同时保留，并使用独立 Socket 与统计代理。

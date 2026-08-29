@@ -23,8 +23,8 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
 - 跨账户切换会保留并解绑当前 Thread，下一条消息使用目标账户新建 Thread，不复制历史；
 - `/resume` 按原 `modelProvider` 恢复历史 Thread，并在需要时拉起对应账户 App Server；
 - `/model` 中默认账户显示为 `OpenCode Go`，其他账户显示为 `OpenCode Go（<accountId>）`；
-- `codexc remote --profile opencode-go` 连接默认账户，
-  `codexc remote --profile opencode-go-<accountId>` 连接其他账户。
+- `codexc remote --profile sf-opencode-go` 连接默认账户，
+  `codexc remote --profile sf-opencode-go-<accountId>` 连接其他账户。
 
 ## 账户文件
 

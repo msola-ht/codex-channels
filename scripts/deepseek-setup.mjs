@@ -333,7 +333,7 @@ export async function runDeepseekSetup({
     }
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
     output.write(mode === "switching"
-      ? `原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile ${deepseekProviderDefinition.codexProfileName}\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile ${deepseekProviderDefinition.profileName}\n`
+      ? `原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile ${deepseekProviderDefinition.profileName}\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile ${deepseekProviderDefinition.profileName}\n`
       : `原生 Codex 和 Gateway 将默认使用 ${supportedModel}。\n`);
     output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
     return deepseekSetupResult(paths, mode);

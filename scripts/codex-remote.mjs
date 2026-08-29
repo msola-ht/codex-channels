@@ -46,10 +46,9 @@ async function runRemoteCli() {
     process.argv.slice(2),
     {
       customSwitchingProfiles: customSwitchingProviders.map(
-        ({ provider, profileName, codexProfileName }) => ({
+        ({ provider, profileName }) => ({
           providerId: provider,
           profileName,
-          codexProfileName,
         }),
       ),
     },
@@ -74,7 +73,6 @@ async function runRemoteCli() {
     ? {
         id: customSwitchingProvider.provider,
         profileName: customSwitchingProvider.profileName,
-        codexProfileName: customSwitchingProvider.codexProfileName,
         displayName: customSwitchingProvider.provider,
       }
     : [
@@ -112,7 +110,7 @@ async function runRemoteCli() {
         "-C",
         workdir,
         ...(selectedDefinition
-          ? ["--profile", selectedDefinition.codexProfileName]
+          ? ["--profile", selectedDefinition.profileName]
           : []),
         ...permissionArguments,
         ...passthrough,

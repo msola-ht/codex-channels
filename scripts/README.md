@@ -349,11 +349,11 @@
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
-  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数，统一拒绝把受管 Provider 的内部
-  `sf-*` 名称或保留的 `sf-custom-*` 名称误作公开参数，并尊重 `--` 后原样传给 Codex 的参数边界。
-- `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下规范化
-  Provider `--profile`（当前公开为自定义第三方的 `custom-<Provider ID>`、`deepseek` 与任意 `opencode-go-<账户>`），选择隔离实例后映射为
-  磁盘上的 `sf-*` Profile，供 Remote TUI 完成第三方 Provider 认证；同时按当前目录或显式
+  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
+  原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
+- `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下识别
+  与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
+  完成第三方 Provider 认证；同时按当前目录或显式
   `--workspace` 解析有效 Sandbox、审批策略与 Permission Profile，第三方 Profile 不复制权限，
   用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
