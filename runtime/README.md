@@ -44,7 +44,7 @@
   自定义切换模式使用显式私有注册表和逐 Provider 的 `sf-custom-<id>` 私有 Profile，仅接受 Codex
   官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段；注册表与 Profile 的增删改
   共用私有文件锁并支持执行前快照保护，Provider 块与 Key 不进入主配置；Remote TUI
-  通过公开 `custom-<id>` 名称映射到该内部 Profile；后台 App Server 则使用加载器生成的非敏感 `-c`
+  与原生 Codex 统一使用同一个 `sf-custom-<id>` Profile 名称；后台 App Server 则使用加载器生成的非敏感 `-c`
   覆盖（包括全部第三方 Provider 的统一有限重试边界），并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；
   读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；

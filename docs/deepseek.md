@@ -17,7 +17,7 @@ Gateway 运行配置。
 - DeepSeek 的模型、Provider 和 API Key 保存在权限为 `0600` 的
   `~/.codex/sf-deepseek.config.toml`。
 - 聊天渠道使用 `/model` 为当前会话选择模型。
-- `codexc remote` 连接 OpenAI App Server；`codexc remote --profile deepseek` 连接共享的
+- `codexc remote` 连接 OpenAI App Server；`codexc remote --profile sf-deepseek` 连接共享的
   DeepSeek App Server。
 - 直接运行 `codex` 或 `codex --profile sf-deepseek` 会启动独立 TUI，不共享 Gateway Thread；
   Profile 镜像所选模型的默认思考等级，与 Remote/App Server 一致。

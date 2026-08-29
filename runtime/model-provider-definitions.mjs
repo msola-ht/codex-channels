@@ -31,12 +31,14 @@ const opencodeGoProviderCapabilities = Object.freeze({
   needsExchangeRate: false,
 });
 
+const deepseekProfileName = "sf-deepseek";
+const opencodeGoProfileName = "sf-opencode-go";
+
 export const deepseekProviderDefinition = Object.freeze({
   id: "deepseek",
   displayName: "DeepSeek",
-  profileName: "deepseek",
-  codexProfileName: "sf-deepseek",
-  profileFileName: "sf-deepseek.config.toml",
+  profileName: deepseekProfileName,
+  profileFileName: `${deepseekProfileName}.config.toml`,
   catalogFileName: "models.json",
   catalogManifestFileName: "models.manifest.json",
   managedMarkerFileName: "managed.toml",
@@ -57,9 +59,8 @@ export const deepseekProviderDefinition = Object.freeze({
 export const opencodeGoProviderDefinition = Object.freeze({
   id: "opencode-go",
   displayName: "OpenCode Go",
-  profileName: "opencode-go",
-  codexProfileName: "sf-opencode-go",
-  profileFileName: "sf-opencode-go.config.toml",
+  profileName: opencodeGoProfileName,
+  profileFileName: `${opencodeGoProfileName}.config.toml`,
   catalogFileName: "models.json",
   catalogManifestFileName: "models.manifest.json",
   managedMarkerFileName: "managed.toml",
@@ -110,6 +111,7 @@ export function expandManagedModelProviderDefinitions(
   environment = process.env,
 ) {
   return Object.freeze(definitions.flatMap((definition) => {
+    assertManagedModelProviderProfile(definition);
     const capabilities = assertManagedModelProviderCapabilities(definition);
     switch (capabilities.instanceAdapter) {
       case "single":
@@ -124,19 +126,30 @@ export function expandManagedModelProviderDefinitions(
   }));
 }
 
+function assertManagedModelProviderProfile(definition) {
+  if (
+    typeof definition?.profileName !== "string"
+    || !definition.profileName.startsWith("sf-")
+    || definition.profileFileName !== `${definition.profileName}.config.toml`
+  ) {
+    const provider = typeof definition?.id === "string" ? definition.id : "unknown";
+    throw new Error(`受管 Provider Profile 定义无效：${provider}`);
+  }
+}
+
 export function opencodeGoAccountDefinition(accountId) {
   const provider = opencodeGoProviderId(accountId);
   const isDefaultAccount = accountId === opencodeGoDefaultAccountId;
+  const profileName = isDefaultAccount
+    ? opencodeGoProfileName
+    : `${opencodeGoProfileName}-${accountId}`;
   return Object.freeze({
     id: provider,
     accountId,
     storageId: "opencode-go",
     displayName: isDefaultAccount ? "OpenCode Go" : `OpenCode Go（${accountId}）`,
-    profileName: provider,
-    codexProfileName: isDefaultAccount ? "sf-opencode-go" : `sf-opencode-go-${accountId}`,
-    profileFileName: isDefaultAccount
-      ? "sf-opencode-go.config.toml"
-      : `sf-opencode-go-${accountId}.config.toml`,
+    profileName,
+    profileFileName: `${profileName}.config.toml`,
     catalogFileName: opencodeGoProviderDefinition.catalogFileName,
     catalogManifestFileName: opencodeGoProviderDefinition.catalogManifestFileName,
     managedMarkerFileName: opencodeGoProviderDefinition.managedMarkerFileName,

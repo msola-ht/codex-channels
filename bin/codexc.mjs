@@ -157,8 +157,8 @@ const helpText = {
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
-切换模式可用 --profile deepseek、opencode-go、opencode-go-<账户> 或
-custom-<Provider ID> 连接对应的隔离 App Server。`,
+切换模式可用 --profile sf-deepseek、sf-opencode-go、sf-opencode-go-<账户> 或
+sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
   service: `用法：codexc service <命令>
 
   install                      生成全部后台服务定义，并启动 App Server 与 Gateway

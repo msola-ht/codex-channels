@@ -225,8 +225,7 @@ describe("model provider runtime topology", () => {
       provider: "OpenAI",
       model: "gpt-5.6-sol",
       baseUrl: "https://proxy.example.test/v1",
-      profileName: "custom-OpenAI",
-      codexProfileName: "sf-custom-OpenAI",
+      profileName: "sf-custom-OpenAI",
       catalogSource: { kind: "official" },
       arguments: [
         "-c", 'model="gpt-5.6-sol"',
@@ -292,19 +291,16 @@ describe("model provider runtime topology", () => {
     expect(loadConfiguredCustomSwitchingModelProviders(environment).map((provider) => ({
       provider: provider.provider,
       profileName: provider.profileName,
-      codexProfileName: provider.codexProfileName,
       effort: provider.reasoningEffort,
     }))).toEqual([
       {
         provider: "proxy-a",
-        profileName: "custom-proxy-a",
-        codexProfileName: "sf-custom-proxy-a",
+        profileName: "sf-custom-proxy-a",
         effort: "medium",
       },
       {
         provider: "proxy-b",
-        profileName: "custom-proxy-b",
-        codexProfileName: "sf-custom-proxy-b",
+        profileName: "sf-custom-proxy-b",
         effort: "medium",
       },
     ]);

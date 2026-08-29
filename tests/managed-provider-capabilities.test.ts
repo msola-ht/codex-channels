@@ -9,6 +9,7 @@ import {
   deepseekProviderDefinition,
   expandManagedModelProviderDefinitions,
   loadManagedModelProviderWatcherDefinitions,
+  managedModelProviderDefinitions,
   opencodeGoAccountDefinition,
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
@@ -20,6 +21,27 @@ import {
 } from "../src/bootstrap/managed-provider-capabilities.js";
 
 describe("managed Provider capability registry", () => {
+  it("uses one canonical Profile name for CLI selection and the profile file", () => {
+    for (const definition of [
+      ...managedModelProviderDefinitions,
+      opencodeGoAccountDefinition("lunare"),
+    ]) {
+      expect(definition.profileName).toMatch(/^sf-/u);
+      expect(definition.profileFileName).toBe(`${definition.profileName}.config.toml`);
+    }
+  });
+
+  it("fails closed when a future Provider Profile file diverges from its canonical name", () => {
+    const futureProvider = {
+      ...deepseekProviderDefinition,
+      id: "future-provider",
+      profileName: "sf-future-provider",
+      profileFileName: "sf-other.config.toml",
+    } as unknown as typeof deepseekProviderDefinition;
+    expect(() => expandManagedModelProviderDefinitions([futureProvider], process.env))
+      .toThrow("受管 Provider Profile 定义无效：future-provider");
+  });
+
   it("declares the reviewed capability kinds and preserves them for Go accounts", () => {
     expect(deepseekProviderDefinition.capabilities).toEqual({
       catalogSource: "deepseek-official",

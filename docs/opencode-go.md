@@ -55,8 +55,8 @@ Pro 的账户保持不变；清单记录迁移完成后，用户再主动选回 
 旧 Thread 仍可通过 `/resume` 恢复。终端共享会话使用：
 
 ```bash
-codexc remote --profile opencode-go            # 默认账户
-codexc remote --profile opencode-go-<账户>      # 新增账户
+codexc remote --profile sf-opencode-go            # 默认账户
+codexc remote --profile sf-opencode-go-<账户>      # 新增账户
 ```
 
 所有 OpenCode Go 账户共享同一个统计代理（不随账户数量增长）；每个账户的隔离 App Server 按需

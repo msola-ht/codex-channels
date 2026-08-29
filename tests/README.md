@@ -308,7 +308,7 @@
   label、核心服务范围、默认目标和启停顺序，平台脚本按规范目标查询标识而不依赖注册顺序；公共进程生命周期只向仍活动的子进程转发信号、
   解释同步子进程结果并成对清理监听；CLI 成功、失败、提示和处理状态使用独立颜色，Doctor 检查项另用通过，并统一遵守
   `NO_COLOR`；状态呈现不改变路径、标识符和其他机器可解析数据；受管子命令失败只展示一次且不输出
-  Node.js 堆栈，Remote TUI 把公开 Provider 别名映射到 `sf-` Profile 且终止信号原样传播，项目规则检查被信号终止时不结束 CLI/Gateway 宿主，
+  Node.js 堆栈，Remote TUI 与原生 Codex 使用同一个 `sf-*` Provider Profile 名称且终止信号原样传播，项目规则检查被信号终止时不结束 CLI/Gateway 宿主，
   只读 Agent 状态不依赖 Gateway 配置。
 - Linux/macOS Git 源码安装覆盖 npm 全局目录与已有版本检测、Codex CLI 缺失时安装精确版本、
   登录状态提示、官方 `main` 克隆、隔离依赖与 Gateway/WebUI 构建、npm 全局命令注册、旧 PATH

@@ -179,8 +179,8 @@ codexc primary-provider switch <Provider ID> [模型]  # 切换主 Provider
 codexc primary-provider remove <Provider ID>         # 删除 Provider
 ```
 
-切换模式下，终端使用 `codexc remote --profile custom-<Provider ID>` 连接对应隔离实例；
-`sf-custom-<Provider ID>` 是内部 Codex Profile 名称，不作为 `codexc remote` 的公开参数。
+切换模式下，终端使用 `codexc remote --profile sf-custom-<Provider ID>` 连接对应隔离实例；
+该名称与原生 `codex --profile sf-custom-<Provider ID>` 及磁盘 Profile 文件一致。
 固定或切换模式的自定义 Provider 也可在 Setup 的“共享第三方子代理”中设为
 `agents.external`；当前使用该 Provider 时必须先切换或停用子代理，才能恢复官方模式或删除 Provider。
 
@@ -208,7 +208,7 @@ codexc service restart all
 
 聊天中使用 `/model` 切换；当前渠道模型会在切换 Workspace、新会话或同 Provider 历史会话时继续
 用于下一 Turn，显式恢复不同 Provider 的历史会话时仍尊重该 Thread 的 Provider。终端使用
-`codexc remote --profile deepseek`。模型限制、原生视觉、自动压缩、
+`codexc remote --profile sf-deepseek`。模型限制、原生视觉、自动压缩、
 子代理和跨 Provider 行为见 [`DeepSeek 使用说明`](docs/deepseek.md)。
 
 从旧版外部识图升级时，`codexc update` 会先创建私有备份，再自动移除
@@ -234,8 +234,8 @@ codexc opencode-go account stop <id>
 它与 DeepSeek 官方配置、凭据和价格独立；所有账户共享一个统计代理，每个账户的隔离 App Server
 按需启动、空闲 5 分钟自动释放（释放后会通知渠道一次，再次使用自动拉起）。也可作为共享
 `agents.external` 子代理（只指向默认账户）。聊天使用 `/model` 选择
-“OpenCode Go（账户）”模型，终端使用 `codexc remote --profile opencode-go`（默认账户）或
-`--profile opencode-go-<账户>`；`/usage`
+“OpenCode Go（账户）”模型，终端使用 `codexc remote --profile sf-opencode-go`（默认账户）或
+`--profile sf-opencode-go-<账户>`；`/usage`
 只展示当前 Thread 账户的额度，WebUI 按账户分别展示。配置、协议范围和官方全模型价格维护见
 [`OpenCode Go 使用说明`](docs/opencode-go.md) 与
 [`多账户实现`](docs/opencode-go-multi-account.md)。
@@ -262,7 +262,7 @@ codexc work remove <序号|ID|名称>    # 删除注册，不删除项目文件
 cd /absolute/path/to/project
 codexc remote
 codexc remote resume
-codexc remote --profile deepseek resume
+codexc remote --profile sf-deepseek resume
 ```
 
 `codexc remote` 连接 Gateway 使用的 App Server。直接运行 `codex` 或 `codex --profile sf-deepseek`
