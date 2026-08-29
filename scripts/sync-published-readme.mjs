@@ -50,8 +50,12 @@ export function renderPublishedReadme(readme, targetVersion) {
   }
   const rendered = readmeWithoutRc
     .replaceAll(`codex-cli ${currentCodexVersion}`, `codex-cli ${targetCodexVersion}`)
+    .replaceAll(`Codex ${currentCodexVersion} 的 Plugin API`, `Codex ${targetCodexVersion} 的 Plugin API`)
     .replaceAll(`@openai/codex@${currentCodexVersion}`, `@openai/codex@${targetCodexVersion}`)
-    .replaceAll(`@hegenai/codexc@${currentVersion}`, `@hegenai/codexc@${targetVersion}`)
+    .replace(
+      new RegExp(`@hegenai/codexc@${escapeRegExp(currentVersion)}(?!-)`, "gu"),
+      `@hegenai/codexc@${targetVersion}`,
+    )
     .replace(
       `当前正式版：\`${currentVersion}\``,
       `当前正式版：\`${targetVersion}\``,
