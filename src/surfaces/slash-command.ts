@@ -35,3 +35,12 @@ export function normalizeSurfaceCommandName(name: string): string {
     name as keyof typeof surfaceCommandAliases
   ] ?? name;
 }
+
+export function isEmergencyStopCommand(text: string): boolean {
+  try {
+    const command = parseSlashCommand(text);
+    return command?.name === "stop" && command.argumentsText.length === 0;
+  } catch {
+    return false;
+  }
+}

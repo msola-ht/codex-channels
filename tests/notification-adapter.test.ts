@@ -523,6 +523,27 @@ describe("Notification adapter", () => {
       durationMs: 65_432,
       error: "模型请求失败，Authorization: Bearer [REDACTED] 请检查代理配置",
     });
+    expect(toConversationInputEvent({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-2",
+          status: "failed",
+          error: {
+            message: "unexpected status 502 Bad Gateway: {\"error\":{\"type\":\"provider_proxy_upstream_error\"}}, url: http://127.0.0.1:65188/responses",
+            codexErrorInfo: null,
+            additionalDetails: null,
+          },
+        },
+      },
+    })).toEqual({
+      type: "turn.completed",
+      threadId: "thread-1",
+      turnId: "turn-2",
+      status: "failed",
+      error: "模型 Provider 上游暂时不可用或响应超时，有限重试后仍未恢复",
+    });
   });
 
   it("only exposes the exact structured misalignment policy error code", () => {

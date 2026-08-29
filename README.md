@@ -352,6 +352,9 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 - 图片：直接发送 PNG/JPEG/WebP/非动画 GIF；当前模型不支持图片时，先用 `/model` 切换到支持图片的模型
 - 帮助：`/help`、`/whoami`
 
+`/stop` 是紧急停止入口：飞书、Telegram 和微信会让精确停止命令绕过同一会话中尚未返回的普通
+消息处理，并中断当前活动 Turn；其他命令和普通消息仍保持原有顺序。
+
 飞书中需要引用其他消息时，请直接回复目标消息后发送要求。Gateway 不解析飞书“复制消息链接”，
 收到这类链接会在创建 Turn 前明确拒绝。
 

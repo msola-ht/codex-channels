@@ -721,6 +721,8 @@ describe("DeepSeek setup", () => {
       base_url: "https://api.deepseek.com/",
       wire_api: "responses",
       requires_openai_auth: false,
+      request_max_retries: 1,
+      stream_max_retries: 0,
       experimental_bearer_token: "sk-secret",
     });
     expect(parse(readFileSync(

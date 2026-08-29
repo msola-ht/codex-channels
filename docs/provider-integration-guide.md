@@ -189,6 +189,8 @@ base_url = "https://proxy.example.com/v1"
 wire_api = "responses"
 requires_openai_auth = true
 supports_websockets = false
+request_max_retries = 1
+stream_max_retries = 0
 ```
 
 可配置多个自定义主 Provider 候选块，但同一时刻只激活一个：`model_provider` 显式选中时激活
@@ -219,6 +221,9 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 
 修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
+Gateway 管理的 DeepSeek、OpenCode Go 与自定义 Provider 统一使用一次 HTTP 失败重试、零次流
+断开重连，即首次 HTTP 请求失败后最多再试一次，避免 Codex 默认请求重试和流重连相乘；已有配置
+也会在 App Server 服务启动时应用同一边界。OpenAI 官方 Provider 保持 Codex 原生重试策略。
 
 已存在的 Thread 在 Codex 中保留创建时的 Provider：恢复旧会话时，官方实现会用线程保存的
 `model_provider` 覆盖当前配置。因此切换 `model_provider` 后，旧会话仍走原 Provider（例如内置
@@ -231,8 +236,10 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 `/model clear` 可清除该偏好，让下一个新 Thread 重新使用 `model_provider` 默认值。Gateway
 在固定模式把自定义 Thread 路由到主 App Server；切换模式保持官方 `openai` 主实例，并通过
 `~/.codex/sf-custom-<Provider ID>.config.toml` 启动独立自定义 App Server。每个 Profile 完整保存该
-Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"` 和服务层级，主
-`~/.codex/config.toml` 保持官方配置。`codexc remote --profile custom-<Provider ID>`
+Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"`、服务层级、
+`request_max_retries = 1` 和 `stream_max_retries = 0`；受管 Provider 的新 Profile 也写入同一重试
+边界，主 `~/.codex/config.toml` 保持官方配置。
+`codexc remote --profile custom-<Provider ID>`
 连接该隔离实例，并在内部映射到 `sf-custom-<Provider ID>` Codex Profile；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
 跨 Provider 选择沿用现有新 Thread 路由边界。锁定版 App Server 不接受 `--profile`，后台服务会先
 严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，

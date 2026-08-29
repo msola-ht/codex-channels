@@ -2101,6 +2101,51 @@ describe("ConversationService model selection", () => {
     expect(clearGoal).toHaveBeenCalledWith("thread-1");
   });
 
+  it("stops an active Turn without waiting for an in-flight conversation operation", async () => {
+    let releaseSteer: () => void = () => undefined;
+    const steerPending = new Promise<{ turnId: string }>((resolve) => {
+      releaseSteer = () => resolve({ turnId: "turn-1" });
+    });
+    const steerTurn = vi.fn(() => steerPending);
+    const interruptTurn = vi.fn(async () => undefined);
+    const service = new ConversationService(
+      turnPort({ steerTurn, interruptTurn }),
+      {
+        current: () => ({
+          target,
+          workspaceId: "main",
+          threadId: "thread-1",
+          sessionId: "session-1",
+        }),
+        workspace: () => ({
+          id: "main",
+          name: "Main",
+          cwd: "/workspace",
+        }),
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => ({ threadId: "thread-1", turnId: "turn-1" }),
+      } as unknown as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+
+    const submission = service.submit(target, "补充消息");
+    await vi.waitFor(() => expect(steerTurn).toHaveBeenCalledOnce());
+    const stopping = service.stop(target);
+    const stoppedBeforeSteerSettled = await Promise.race([
+      stopping.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
+    ]);
+
+    releaseSteer();
+    await submission;
+    await stopping;
+
+    expect(stoppedBeforeSteerSettled).toBe(true);
+    expect(interruptTurn).toHaveBeenCalledWith("thread-1", "turn-1");
+  });
+
   it("takes over an idle Thread and notifies the previous channel", async () => {
     const previousTarget = {
       surface: "feishu" as const,

@@ -27,7 +27,8 @@
   `opencode-go`（新增账户才使用 `opencode-go-<账户>`）；Key 不进入注册表。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
-  config 编辑映射，避免 DeepSeek、OpenCode Go 与自定义 Setup 重复解释同一格式。
+  config 编辑映射；DeepSeek、OpenCode Go 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
+  故障边界，避免 Codex 默认两层重试相乘；OpenAI 官方 Provider 保持 Codex 原生策略。
 - `deepseek-pricing-baseline.json`：保存从 DeepSeek 官方价格页审查后的人民币每百万 Token 单价、
   北京时间峰谷区间、周末规则和生效日期；Bootstrap 只读使用，自动检查只能通过 Draft PR 提议更新。
 - `opencode-go-pricing-baseline.json`：保存 OpenCode Go 官方页面全部模型的美元每百万 Token 单价、
@@ -44,7 +45,7 @@
   官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段；注册表与 Profile 的增删改
   共用私有文件锁并支持执行前快照保护，Provider 块与 Key 不进入主配置；Remote TUI
   通过公开 `custom-<id>` 名称映射到该内部 Profile；后台 App Server 则使用加载器生成的非敏感 `-c`
-  覆盖，并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；
+  覆盖（包括全部第三方 Provider 的统一有限重试边界），并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；
   读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
   切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
   共享第三方子代理支持受管与自定义 Provider，只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个受管 Provider 使用独立

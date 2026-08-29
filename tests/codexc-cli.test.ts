@@ -1766,6 +1766,10 @@ describe("codexc CLI", () => {
         'model_provider="thirdparty"',
         "-c",
         expect.stringMatching(/^model_providers\.thirdparty\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
+        "-c",
+        "model_providers.thirdparty.request_max_retries=1",
+        "-c",
+        "model_providers.thirdparty.stream_max_retries=0",
         "app-server",
         "--listen",
         `unix://${join(home, "runtime", "codex-app-server.sock")}`,
@@ -2186,7 +2190,12 @@ describe("codexc CLI", () => {
       "const baseUrlArg = args.find((value) => value.startsWith('model_providers.deepseek.base_url='));",
       "const listenUrl = args.at(-1);",
       "const socketPath = listenUrl?.startsWith('unix://') ? listenUrl.slice('unix://'.length) : undefined;",
-      "const capture = { baseUrlArg, initialized: false };",
+      "const capture = {",
+      "  baseUrlArg,",
+      "  requestRetries: args.find((value) => value === 'model_providers.deepseek.request_max_retries=1'),",
+      "  streamRetries: args.find((value) => value === 'model_providers.deepseek.stream_max_retries=0'),",
+      "  initialized: false,",
+      "};",
       "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(capture));",
       "if (!socketPath) process.exit(2);",
       "const server = createServer();",
@@ -2301,12 +2310,16 @@ describe("codexc CLI", () => {
     expect(existsSync(join(home, "runtime", "gateway-owner.sock"))).toBe(false);
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
       baseUrlArg?: string;
+      requestRetries?: string;
+      streamRetries?: string;
       initialized?: boolean;
     };
     expect(captured.initialized).toBe(true);
     expect(captured.baseUrlArg).toMatch(
       /^model_providers\.deepseek\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u,
     );
+    expect(captured.requestRetries).toBe("model_providers.deepseek.request_max_retries=1");
+    expect(captured.streamRetries).toBe("model_providers.deepseek.stream_max_retries=0");
   }, 15_000);
 
   it("rejects a partial App Server topology instead of bypassing a provider proxy", async () => {

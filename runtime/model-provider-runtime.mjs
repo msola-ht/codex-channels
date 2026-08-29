@@ -20,7 +20,11 @@ import {
   loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
 } from "./model-provider-definitions.mjs";
-import { modelProviderBlockEdits } from "./model-provider-profile.mjs";
+import {
+  modelProviderBlockEdits,
+  thirdPartyProviderRequestMaxRetries,
+  thirdPartyProviderStreamMaxRetries,
+} from "./model-provider-profile.mjs";
 import {
   isOpencodeGoProviderNamespace,
   opencodeGoAccountMarkerPath,
@@ -168,6 +172,8 @@ function providerAppServerRuntime(profile) {
       ...(profile.supportsWebsockets === undefined
         ? []
         : ["-c", `model_providers.${profile.provider}.supports_websockets=${profile.supportsWebsockets}`]),
+      "-c", `model_providers.${profile.provider}.request_max_retries=${thirdPartyProviderRequestMaxRetries}`,
+      "-c", `model_providers.${profile.provider}.stream_max_retries=${thirdPartyProviderStreamMaxRetries}`,
     ],
     childEnvironment: {
       [profile.apiKeyEnvironmentKey]: profile.apiKey,
@@ -615,6 +621,8 @@ function configuredCustomSwitchingProfileFromContent(
     "wire_api",
     "requires_openai_auth",
     "supports_websockets",
+    "request_max_retries",
+    "stream_max_retries",
     "experimental_bearer_token",
   ]);
   if (Object.keys(provider).some((key) => !supportedProviderKeys.has(key))) {
@@ -637,6 +645,18 @@ function configuredCustomSwitchingProfileFromContent(
     && provider.requires_openai_auth !== false
   ) {
     throw new Error(`Codex 自定义切换 Provider ${id} 的 requires_openai_auth 无效`);
+  }
+  if (
+    provider.request_max_retries !== undefined
+    && provider.request_max_retries !== thirdPartyProviderRequestMaxRetries
+  ) {
+    throw new Error(`Codex 自定义切换 Provider ${id} 的 request_max_retries 无效`);
+  }
+  if (
+    provider.stream_max_retries !== undefined
+    && provider.stream_max_retries !== thirdPartyProviderStreamMaxRetries
+  ) {
+    throw new Error(`Codex 自定义切换 Provider ${id} 的 stream_max_retries 无效`);
   }
   const apiKey = provider.experimental_bearer_token;
   if (typeof apiKey !== "string" || apiKey.trim() === "" || /[\r\n]/u.test(apiKey)) {
@@ -673,6 +693,8 @@ function configuredCustomSwitchingProfileFromContent(
       "-c", `model_providers.${id}.env_key=${JSON.stringify(environmentKey)}`,
       "-c", `model_providers.${id}.requires_openai_auth=false`,
       "-c", `model_providers.${id}.supports_websockets=${supportsWebsockets}`,
+      "-c", `model_providers.${id}.request_max_retries=${thirdPartyProviderRequestMaxRetries}`,
+      "-c", `model_providers.${id}.stream_max_retries=${thirdPartyProviderStreamMaxRetries}`,
     ],
     childEnvironment: { [environmentKey]: apiKey },
   };
@@ -751,6 +773,8 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
           wire_api: "responses",
           requires_openai_auth: false,
           supports_websockets: supportsWebsockets === true,
+          request_max_retries: thirdPartyProviderRequestMaxRetries,
+          stream_max_retries: thirdPartyProviderStreamMaxRetries,
           experimental_bearer_token: apiKey,
         },
       },
@@ -969,13 +993,20 @@ export function providerMetricsSocketPath(primarySocketPath, provider) {
 }
 
 export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
-  const prefix = `model_providers.${provider}.base_url=`;
+  const prefixes = [
+    `model_providers.${provider}.base_url=`,
+    `model_providers.${provider}.request_max_retries=`,
+    `model_providers.${provider}.stream_max_retries=`,
+  ];
   const kept = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
     const value = argumentsList[index];
     if (value === "-c") {
       const next = argumentsList[index + 1];
-      if (typeof next === "string" && next.startsWith(prefix)) {
+      if (
+        typeof next === "string"
+        && prefixes.some((prefix) => next.startsWith(prefix))
+      ) {
         index += 1;
         continue;
       }
@@ -986,6 +1017,10 @@ export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
     ...kept,
     "-c",
     `model_providers.${provider}.base_url=${JSON.stringify(baseUrl)}`,
+    "-c",
+    `model_providers.${provider}.request_max_retries=${thirdPartyProviderRequestMaxRetries}`,
+    "-c",
+    `model_providers.${provider}.stream_max_retries=${thirdPartyProviderStreamMaxRetries}`,
   ];
 }
 
@@ -1098,6 +1133,8 @@ export function writeManagedModelProviderRoleConfig(
       ? []
       : [`supports_websockets = ${profile.supportsWebsockets}`]),
     "requires_openai_auth = false",
+    `request_max_retries = ${thirdPartyProviderRequestMaxRetries}`,
+    `stream_max_retries = ${thirdPartyProviderStreamMaxRetries}`,
     "",
   ].join("\n");
   writePrivateFileAtomicSync(managedModelProviderRoleConfigPath(environment), lines);
@@ -1135,6 +1172,8 @@ export function writeThirdPartyModelProviderRoleConfig(
     `env_key = ${tomlString(candidate.apiKeyEnvironmentKey)}`,
     `supports_websockets = ${candidate.supportsWebsockets}`,
     "requires_openai_auth = false",
+    `request_max_retries = ${thirdPartyProviderRequestMaxRetries}`,
+    `stream_max_retries = ${thirdPartyProviderStreamMaxRetries}`,
     "",
   ].join("\n");
   writePrivateFileAtomicSync(managedModelProviderRoleConfigPath(environment), lines);

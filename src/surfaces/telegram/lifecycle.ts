@@ -5,6 +5,7 @@ import {
   conversationCommandNames,
 } from "../../application/index.js";
 import { conversationCommandDescriptions } from "../conversation-command-format.js";
+import { isEmergencyStopCommand } from "../slash-command.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 
@@ -18,6 +19,9 @@ const commands = [
 ];
 
 const updateGroupSizes = new WeakMap<object, number>();
+const maximumPendingUpdates = 1_000;
+const maximumUrgentUpdates = 100;
+const defaultCloseTimeoutMs = 5_000;
 
 export function telegramUpdateGroupSize(update: object): number | undefined {
   return updateGroupSizes.get(update);
@@ -34,18 +38,30 @@ export interface TelegramStartupNotification {
   messages: () => ReadonlyArray<{ chatId: number; text: string }>;
 }
 
+export interface TelegramLifecycleOptions {
+  closeTimeoutMs?: number;
+}
+
 export class TelegramLifecycle {
   private polling: Promise<void> | undefined;
   private startupNotificationTask: Promise<void> | undefined;
   private lifecycleAbort: AbortController | undefined;
+  private updateProcessing = Promise.resolve();
+  private readonly urgentUpdateTasks = new Set<Promise<void>>();
+  private readonly capacityWaiters = new Set<() => void>();
+  private pendingUpdateCount = 0;
   private stopping = false;
+  private readonly closeTimeoutMs: number;
 
   constructor(
     private readonly bot: Bot,
     private readonly logger: Logger,
     private readonly startupNotification?: TelegramStartupNotification,
     private readonly onFatal?: (error: Error) => void,
-  ) {}
+    options: TelegramLifecycleOptions = {},
+  ) {
+    this.closeTimeoutMs = options.closeTimeoutMs ?? defaultCloseTimeoutMs;
+  }
 
   start(): void {
     this.stopping = false;
@@ -73,6 +89,19 @@ export class TelegramLifecycle {
     this.lifecycleAbort = undefined;
     await this.polling?.catch(() => undefined);
     this.polling = undefined;
+    const updatesCompleted = await waitAtMost(Promise.allSettled([
+      this.updateProcessing,
+      ...this.urgentUpdateTasks,
+    ]), this.closeTimeoutMs);
+    if (!updatesCompleted) {
+      this.logger.warn(
+        {
+          pendingUpdateCount: this.pendingUpdateCount,
+          urgentUpdateCount: this.urgentUpdateTasks.size,
+        },
+        "Telegram 更新处理未在关闭等待上限内完成",
+      );
+    }
     await this.startupNotificationTask?.catch(() => undefined);
     this.startupNotificationTask = undefined;
   }
@@ -184,33 +213,48 @@ export class TelegramLifecycle {
     const maximumFailures = 12;
     while (!this.stopping && !signal.aborted) {
       try {
+        await this.waitForUpdateCapacity(signal);
+        if (this.stopping || signal.aborted) {
+          return;
+        }
         const updates = await this.bot.api.getUpdates(
-          { offset, timeout: 20, allowed_updates: [] },
+          {
+            offset,
+            timeout: 20,
+            limit: Math.max(
+              1,
+              Math.min(
+                100,
+                maximumPendingUpdates - this.pendingUpdateCount,
+                maximumUrgentUpdates - this.urgentUpdateTasks.size,
+              ),
+            ),
+            allowed_updates: [],
+          },
           signal as never,
         );
         consecutiveFailures = 0;
-        for (const update of updates) {
-          offset = update.update_id + 1;
+        const emergencyStops = new Set(
+          updates.filter((update) => isTelegramEmergencyStopUpdate(
+            update,
+            this.bot.botInfo.username,
+          )),
+        );
+        for (const update of emergencyStops) {
+          this.runUrgentUpdate(update);
         }
-        for (const group of groupTelegramUpdates(updates)) {
+        for (const group of groupTelegramUpdates(
+          updates.filter((update) => !emergencyStops.has(update)),
+        )) {
           if (group.length > 1) {
             for (const update of group) {
               updateGroupSizes.set(update, group.length);
             }
           }
-          await Promise.all(group.map(async (update) => {
-            try {
-              await this.bot.handleUpdate(update);
-            } catch (error) {
-              this.logger.error(
-                {
-                  ...telegramErrorMetadata(error),
-                  updateId: update.update_id,
-                },
-                "Telegram 更新处理失败",
-              );
-            }
-          }));
+          this.enqueueUpdateGroup(group);
+        }
+        for (const update of updates) {
+          offset = update.update_id + 1;
         }
       } catch (error) {
         if (this.stopping || signal.aborted) {
@@ -236,6 +280,98 @@ export class TelegramLifecycle {
         );
       }
     }
+  }
+
+  private enqueueUpdateGroup(
+    group: ReadonlyArray<Parameters<Bot["handleUpdate"]>[0]>,
+  ): void {
+    this.pendingUpdateCount += group.length;
+    const processing = this.updateProcessing.then(async () => {
+      await Promise.all(group.map((update) => this.handleUpdate(update)));
+    });
+    this.updateProcessing = processing.finally(() => {
+      this.pendingUpdateCount -= group.length;
+      this.notifyUpdateCapacity();
+    });
+  }
+
+  private runUrgentUpdate(
+    update: Parameters<Bot["handleUpdate"]>[0],
+  ): void {
+    const task = Promise.resolve()
+      .then(() => this.handleUpdate(update))
+      .finally(() => {
+        this.urgentUpdateTasks.delete(task);
+        this.notifyUpdateCapacity();
+      });
+    this.urgentUpdateTasks.add(task);
+  }
+
+  private async waitForUpdateCapacity(signal: AbortSignal): Promise<void> {
+    while (
+      !signal.aborted
+      && (
+        this.pendingUpdateCount >= maximumPendingUpdates
+        || this.urgentUpdateTasks.size >= maximumUrgentUpdates
+      )
+    ) {
+      await new Promise<void>((resolve) => {
+        const finish = (): void => {
+          signal.removeEventListener("abort", finish);
+          this.capacityWaiters.delete(finish);
+          resolve();
+        };
+        this.capacityWaiters.add(finish);
+        signal.addEventListener("abort", finish, { once: true });
+      });
+    }
+  }
+
+  private notifyUpdateCapacity(): void {
+    for (const notify of [...this.capacityWaiters]) notify();
+  }
+
+  private async handleUpdate(
+    update: Parameters<Bot["handleUpdate"]>[0],
+  ): Promise<void> {
+    try {
+      await this.bot.handleUpdate(update);
+    } catch (error) {
+      this.logger.error(
+        {
+          ...telegramErrorMetadata(error),
+          updateId: update.update_id,
+        },
+        "Telegram 更新处理失败",
+      );
+    }
+  }
+}
+
+function isTelegramEmergencyStopUpdate(
+  update: Parameters<Bot["handleUpdate"]>[0],
+  botUsername: string,
+): boolean {
+  const text = update.message?.text;
+  if (text === undefined) {
+    return false;
+  }
+  const normalized = text.trim();
+  return isEmergencyStopCommand(normalized)
+    || normalized === `/stop@${botUsername}`;
+}
+
+async function waitAtMost(operation: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

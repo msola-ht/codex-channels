@@ -12,7 +12,10 @@ import {
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import type { InputImageMimeType } from "../generated-image.js";
-import { parseSlashCommand } from "../slash-command.js";
+import {
+  isEmergencyStopCommand,
+  parseSlashCommand,
+} from "../slash-command.js";
 import {
   formatOperationFailure,
   gatewayRequestFailedText,
@@ -128,6 +131,9 @@ export class WeixinConversationAdapter {
   }
 
   handle(message: WeixinConversationMessage): Promise<void> {
+    if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
+      return this.handleOnce(message);
+    }
     return this.handleOrdered(
       conversationTargetKey(message.target),
       () => this.handleOnce(message),

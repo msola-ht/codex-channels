@@ -61,6 +61,42 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).not.toHaveBeenCalled();
   });
 
+  it("handles /stop without waiting for an earlier message in the same Conversation", async () => {
+    let releaseSubmission: () => void = () => undefined;
+    const submissionPending = new Promise<void>((resolve) => {
+      releaseSubmission = resolve;
+    });
+    const submit = vi.fn(async () => {
+      await submissionPending;
+      return { threadId: "thread", turnId: "turn", steered: true };
+    });
+    const stop = vi.fn(async () => true);
+    const notifyText = vi.fn(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ submit, stop }),
+      { notifyText },
+    );
+
+    const ordinary = adapter.handle(message);
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    const stopping = adapter.handle({ ...message, text: "/stop" });
+    const stoppedBeforeSubmissionSettled = await Promise.race([
+      stopping.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
+    ]);
+
+    releaseSubmission();
+    await ordinary;
+    await stopping;
+
+    expect(stoppedBeforeSubmissionSettled).toBe(true);
+    expect(stop).toHaveBeenCalledWith(target);
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      "**已请求停止当前任务。**",
+    );
+  });
+
   it("does not delay ordinary text while waiting for adjacent images", async () => {
     vi.useFakeTimers();
     const submit = vi.fn(async () => ({

@@ -144,6 +144,150 @@ describe("TelegramLifecycle", () => {
     expect(handled).toEqual([1, 2, 3]);
   });
 
+  it("keeps polling and handles /stop after an earlier update starts blocking", async () => {
+    const handled: number[] = [];
+    let poll = 0;
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const bot = {
+      botInfo: { username: "test_bot" },
+      init: async () => undefined,
+      handleUpdate: async (update: ReturnType<typeof telegramUpdate>) => {
+        if (update.update_id === 1) {
+          await firstGate;
+        }
+        handled.push(update.update_id);
+      },
+      api: {
+        setMyCommands: async () => true,
+        getUpdates: async (_options: unknown, signal: AbortSignal) => {
+          poll += 1;
+          if (poll === 1) {
+            return [telegramUpdate(1)];
+          }
+          if (poll === 2) {
+            return [telegramUpdate(2, undefined, "/stop")];
+          }
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(
+      bot as unknown as Bot,
+      pino({ level: "silent" }),
+    );
+
+    lifecycle.start();
+    try {
+      await vi.waitFor(() => expect(handled).toContain(2), { timeout: 100 });
+      expect(handled).not.toContain(1);
+    } finally {
+      releaseFirst();
+      await lifecycle.stop();
+    }
+  });
+
+  it("preserves ordinary update order across polling batches", async () => {
+    const handled: number[] = [];
+    let poll = 0;
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const bot = {
+      botInfo: { username: "test_bot" },
+      init: async () => undefined,
+      handleUpdate: async (update: ReturnType<typeof telegramUpdate>) => {
+        if (update.update_id === 1) {
+          await firstGate;
+        }
+        handled.push(update.update_id);
+      },
+      api: {
+        setMyCommands: async () => true,
+        getUpdates: async (_options: unknown, signal: AbortSignal) => {
+          poll += 1;
+          if (poll === 1) {
+            return [telegramUpdate(1)];
+          }
+          if (poll === 2) {
+            return [telegramUpdate(2)];
+          }
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(
+      bot as unknown as Bot,
+      pino({ level: "silent" }),
+    );
+
+    lifecycle.start();
+    await vi.waitFor(() => expect(poll).toBeGreaterThanOrEqual(3));
+    expect(handled).toEqual([]);
+    releaseFirst();
+    await vi.waitFor(() => expect(handled).toEqual([1, 2]));
+    await lifecycle.stop();
+  });
+
+  it("bounds shutdown waiting when an accepted update remains blocked", async () => {
+    let delivered = false;
+    let started = false;
+    let releaseUpdate!: () => void;
+    const updateGate = new Promise<void>((resolve) => {
+      releaseUpdate = resolve;
+    });
+    const bot = {
+      botInfo: { username: "test_bot" },
+      init: async () => undefined,
+      handleUpdate: async () => {
+        started = true;
+        await updateGate;
+      },
+      api: {
+        setMyCommands: async () => true,
+        getUpdates: async (_options: unknown, signal: AbortSignal) => {
+          if (!delivered) {
+            delivered = true;
+            return [telegramUpdate(1)];
+          }
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(
+      bot as unknown as Bot,
+      pino({ level: "silent" }),
+      undefined,
+      undefined,
+      { closeTimeoutMs: 10 },
+    );
+
+    lifecycle.start();
+    await vi.waitFor(() => expect(started).toBe(true));
+    const stopping = lifecycle.stop();
+    try {
+      expect(await Promise.race([
+        stopping.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
+      ])).toBe(true);
+    } finally {
+      releaseUpdate();
+      await stopping;
+    }
+  });
+
   it("exposes the size of one contiguous media group while handling it", async () => {
     const handled: Array<[number, number | undefined]> = [];
     let delivered = false;
@@ -262,7 +406,11 @@ describe("TelegramLifecycle", () => {
   });
 });
 
-function telegramUpdate(updateId: number, mediaGroupId?: string) {
+function telegramUpdate(
+  updateId: number,
+  mediaGroupId?: string,
+  text = "middle",
+) {
   return {
     update_id: updateId,
     message: {
@@ -270,7 +418,7 @@ function telegramUpdate(updateId: number, mediaGroupId?: string) {
       date: 1,
       chat: { id: 1, type: "private" as const },
       ...(mediaGroupId === undefined
-        ? { text: "middle" }
+        ? { text }
         : {
             media_group_id: mediaGroupId,
             photo: [{
