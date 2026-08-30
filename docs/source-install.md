@@ -27,6 +27,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 该脚本要求 Git、Node.js 22.13+、npm 和固定版本 Codex CLI；缺少 Codex CLI 时会通过 `npm.cmd`
 安装精确版本。它只使用当前用户目录，不要求管理员权限；安装失败会清理临时目录和不完整源码。
+默认克隆官方 `main`；本地开发验证可显式传入 `-Repository <本地仓库路径> -Branch <分支>`，该参数不改变
+正式安装默认值。安装器会在 Git checkout 时启用长路径支持，以覆盖 Windows 深层源码目录。
 
 安装器先在 `~/.codex-connect` 的私有临时目录完成克隆、依赖安装、Gateway 与 WebUI 构建和版本
 校验；`main` 中 `package.json` 的版本必须与本机 Codex CLI 一致。成功后才移动为

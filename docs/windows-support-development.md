@@ -823,7 +823,16 @@ Provider 业务闭环仍待验收。
 ### 阶段五：后台服务、安装、更新与卸载
 
 状态：当前用户计划任务主路径、日志跟随、异常退出重启及本地更新停启/失败恢复已通过实机验证；
-PowerShell 源码安装器已实现但未完成实机安装验收，系统重启、源码候选更新和发布安装组合仍待验收。
+本轮 Windows 实机已补充完成本地源码构建、服务安装/状态/日志/卸载、Setup 写入与飞书消息往返验收。
+PowerShell 源码安装器的“按分支克隆未提交改动”场景仍需提交后再做完整端到端验收，系统重启、源码候选更新
+和发布安装组合仍待验收。
+
+本轮实机记录（2026-08-30）：`node scripts/prepare-package.mjs` 在 Windows 下完成依赖检查与
+TypeScript 构建；`codexc service install` 生成并启动 App Server、Gateway、WebUI 和指标中心计划任务，
+`codexc service status` 显示 App Server/Gateway 运行中，`codexc service logs gateway` 显示 Windows
+UDS、飞书长连接和 Surface 已就绪且错误日志为空；`codexc setup` 成功写入 Codex 用户设置及其他用户偏好；
+`codexc service uninstall` 成功移除受管计划任务并保留用户数据；飞书普通消息真实往返、完成卡片、Token、
+费用、延迟和账户周限统计均正常。
 
 - [x] 在 Task Scheduler 用户任务与 Windows Service 中选择一种首期正式方案；选择前明确管理员要求、
   登录前/后启动、失败重启、日志、环境变量、凭据访问和卸载语义。

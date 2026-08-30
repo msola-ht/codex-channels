@@ -1,9 +1,15 @@
 param(
-  [switch]$Help
+  [switch]$Help,
+  [string]$Repository,
+  [string]$Branch = 'main'
 )
 
 $ErrorActionPreference = 'Stop'
-$repository = 'https://github.com/msola-ht/codex-channels.git'
+$repository = if ([string]::IsNullOrWhiteSpace($Repository)) {
+  'https://github.com/msola-ht/codex-channels.git'
+} else {
+  $Repository
+}
 
 function Show-Usage {
   @'
@@ -75,9 +81,9 @@ if (Test-Path -LiteralPath $manifest) {
   Write-Output '[提示] 未检测到 npm 全局版 @hegenai/codexc。'
 }
 
-$home = $env:USERPROFILE
-if ([string]::IsNullOrWhiteSpace($home)) { throw 'USERPROFILE 未设置' }
-$installRoot = if ([string]::IsNullOrWhiteSpace($env:CODEX_CONNECT_HOME)) { Join-Path $home '.codex-connect' } else { $env:CODEX_CONNECT_HOME }
+$userProfile = $env:USERPROFILE
+if ([string]::IsNullOrWhiteSpace($userProfile)) { throw 'USERPROFILE 未设置' }
+$installRoot = if ([string]::IsNullOrWhiteSpace($env:CODEX_CONNECT_HOME)) { Join-Path $userProfile '.codex-connect' } else { $env:CODEX_CONNECT_HOME }
 if (-not [System.IO.Path]::IsPathRooted($installRoot)) { throw 'CODEX_CONNECT_HOME 必须是绝对路径' }
 $installRoot = [System.IO.Path]::GetFullPath($installRoot)
 $checkout = Join-Path $installRoot 'codex-channels'
@@ -89,8 +95,8 @@ $repositoryRoot = Join-Path $staging 'repository'
 $completed = $false
 try {
   New-Item -ItemType Directory -Path $staging -Force | Out-Null
-  Write-Output "[提示] 正在克隆 Codex Connect main 到 $checkout"
-  Invoke-Checked $git @('clone', '--quiet', '--branch', 'main', '--single-branch', $repository, $repositoryRoot) $installRoot
+  Write-Output "[提示] 正在克隆 Codex Connect $Branch 到 $checkout"
+  Invoke-Checked $git @('-c', 'core.longpaths=true', 'clone', '--quiet', '--branch', $Branch, '--single-branch', $repository, $repositoryRoot) $installRoot
   Protect-Directory $staging $repositoryRoot
 
   $versionDocument = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src\codex-protocol\version.json') -Raw -Encoding utf8 | ConvertFrom-Json
