@@ -349,6 +349,7 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
   return `${JSON.stringify({
     version: 1,
     target: service.target,
+    autoStart: service.core,
     displayName: service.displayName,
     description: `${service.displayName} background service for Codex Connect`,
     taskName: identifier,

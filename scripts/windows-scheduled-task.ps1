@@ -28,7 +28,16 @@ switch ($Action) {
     $arguments = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $quotedLauncher -DefinitionPath $quotedDefinition"
     $taskAction = New-ScheduledTaskAction -Execute $definition.pwshBinary -Argument $arguments
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+    $autoStart = if ($null -eq $definition.autoStart) {
+      $definition.target -in @('app-server', 'gateway')
+    } else {
+      [bool]$definition.autoStart
+    }
+    $trigger = $null
+    if ($autoStart) {
+      $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+      $trigger.CimInstanceProperties['Delay'].Value = 'PT1M'
+    }
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet `
       -AllowStartIfOnBatteries `
@@ -36,14 +45,18 @@ switch ($Action) {
       -StartWhenAvailable `
       -MultipleInstances IgnoreNew `
       -ExecutionTimeLimit ([TimeSpan]::Zero)
-    Register-ScheduledTask `
-      -TaskName $TaskName `
-      -Action $taskAction `
-      -Trigger $trigger `
-      -Principal $principal `
-      -Settings $settings `
-      -Description $definition.description `
-      -Force | Out-Null
+    $registration = @{
+      TaskName = $TaskName
+      Action = $taskAction
+      Principal = $principal
+      Settings = $settings
+      Description = $definition.description
+      Force = $true
+    }
+    if ($trigger) {
+      $registration.Trigger = $trigger
+    }
+    Register-ScheduledTask @registration | Out-Null
   }
   'start' {
     $task = Get-ExactTask
