@@ -2,6 +2,14 @@
   "schemaVersion": 1,
   "codexCli": "0.150.1",
   "options": {
+    "--config": {
+      "present": true,
+      "aliases": [
+        "-c"
+      ],
+      "argument": "<key=value>",
+      "values": []
+    },
     "--remote": {
       "present": true,
       "aliases": [],

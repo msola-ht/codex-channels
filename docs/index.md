@@ -115,10 +115,12 @@
 仍可作为 Workspace Thread 设置传给 App Server，但 `codexc remote` 不把它转换为固定版已退役的
 CLI 参数，未显式覆盖时失败关闭。
 [`public-cli-contract.json`](../src/codex-protocol/public-cli-contract.json) 固定记录 Remote 实际转发
-参数的存在性、别名、参数形状和枚举值；正式 CLI 升级会从目标版公开帮助刷新快照，并在
+的 `--remote`、`--profile`、`--config`、`--sandbox`、`--cd` 和 `--ask-for-approval` 的存在性、
+别名、参数形状和枚举值；正式 CLI 升级会从目标版公开帮助刷新快照，并在
 `public-cli-impact.md` 中把新增、删除、签名变化和枚举变化与 App Server 协议影响分开报告。
 `codexc update` 在每次本地更新及候选源码切换前，用实际 CLI 校验同一快照、本地审批允许值和
-`~/.codex/config.toml`；不兼容设置只给出精确修复提示，不静默迁移审批语义。
+实际 `CODEX_HOME/config.toml` 的根级和所有 Profile 审批设置；目标版本不同时使用临时候选 CLI
+先完成真实校验，通过后才修改全局安装。不兼容设置只给出精确修复提示，不静默迁移审批语义。
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |

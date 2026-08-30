@@ -8,6 +8,7 @@ import { parse } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 
 const trackedOptions = [
+  "--config",
   "--remote",
   "--profile",
   "--sandbox",
@@ -91,17 +92,28 @@ export function comparePublicCliContracts(before, after) {
   return changes;
 }
 
-export function validateCodexUserSettingsAgainstContract(config, contract) {
+export function validateCodexUserSettingsAgainstContract(
+  config,
+  contract,
+  configPath = "~/.codex/config.toml",
+) {
   assertContract(contract);
-  const approvalPolicy = config && typeof config === "object" && !Array.isArray(config)
-    ? config.approval_policy
-    : undefined;
-  if (approvalPolicy === undefined) return;
   const accepted = normalizeOption(contract.options["--ask-for-approval"]).values;
-  if (typeof approvalPolicy !== "string" || !accepted.includes(approvalPolicy)) {
-    throw new Error(
-      `Codex 用户配置 approval_policy = ${JSON.stringify(approvalPolicy)} 不受 CLI `
-      + `${contract.codexCli} 支持；请从 ~/.codex/config.toml 删除该行后重新运行 codexc update`,
+  const document = record(config);
+  validateApprovalPolicy(
+    document.approval_policy,
+    "approval_policy",
+    accepted,
+    contract.codexCli,
+    configPath,
+  );
+  for (const [name, profile] of Object.entries(record(document.profiles))) {
+    validateApprovalPolicy(
+      record(profile).approval_policy,
+      profileApprovalPolicyPath(name),
+      accepted,
+      contract.codexCli,
+      configPath,
     );
   }
 }
@@ -206,6 +218,25 @@ function normalizeOption(value) {
     : { present: false, aliases: [], argument: null, values: [] };
 }
 
+function record(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function validateApprovalPolicy(value, keyPath, accepted, codexCli, configPath) {
+  if (value === undefined) return;
+  if (typeof value === "string" && accepted.includes(value)) return;
+  throw new Error(
+    `Codex 用户配置 ${keyPath} = ${JSON.stringify(value)} 不受 CLI ${codexCli} 支持；`
+    + `请从 ${configPath} 删除该行后重新运行 codexc update`,
+  );
+}
+
+function profileApprovalPolicyPath(name) {
+  return /^[A-Za-z0-9_-]+$/u.test(name)
+    ? `profiles.${name}.approval_policy`
+    : `profiles[${JSON.stringify(name)}].approval_policy`;
+}
+
 function assertContract(contract) {
   if (
     !contract
@@ -287,10 +318,10 @@ function validateCodexUserSettingsFile(environment, contract) {
     config = parse(readFileSync(path, "utf8"));
   } catch {
     throw new Error(
-      "Codex 用户配置 ~/.codex/config.toml 无法解析；请修正后重新运行 codexc update",
+      `Codex 用户配置 ${path} 无法解析；请修正后重新运行 codexc update`,
     );
   }
-  validateCodexUserSettingsAgainstContract(config, contract);
+  validateCodexUserSettingsAgainstContract(config, contract, path);
 }
 
 function arraysEqual(left, right) {

@@ -331,6 +331,8 @@ describe("Codex release upgrade preview", () => {
       "Codex CLI",
       "",
       "Options:",
+      "  -c, --config <key=value>",
+      "          Override a configuration value.",
       "      --remote <ADDR>",
       "          Connect to a remote app server endpoint.",
       "  -s, --sandbox <SANDBOX_MODE>",
@@ -347,6 +349,11 @@ describe("Codex release upgrade preview", () => {
       schemaVersion: 1,
       codexCli: "0.150.1",
       options: {
+        "--config": {
+          present: true,
+          aliases: ["-c"],
+          argument: "<key=value>",
+        },
         "--ask-for-approval": {
           present: true,
           aliases: ["-a"],
@@ -448,6 +455,18 @@ describe("Codex release upgrade preview", () => {
       { approval_policy: "untrusted" },
       contract,
     )).toThrow("approval_policy = \"untrusted\"");
+    expect(() => validateCodexUserSettingsAgainstContract(
+      {
+        profiles: {
+          legacy: { approval_policy: "untrusted" },
+        },
+      },
+      contract,
+      "/tmp/custom-codex/config.toml",
+    )).toThrow(
+      "profiles.legacy.approval_policy = \"untrusted\" 不受 CLI 0.150.1 支持；"
+      + "请从 /tmp/custom-codex/config.toml 删除该行后重新运行 codexc update",
+    );
   });
 
   it("captures tracked and new files without changing the repository index", () => {
