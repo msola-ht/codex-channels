@@ -22,6 +22,11 @@ export function resolvePrimaryAppServerSocketPath(
   dataDir: string,
 ): string;
 
+export function assertAppServerSocketPathSupported(
+  socketPath: string,
+  platform?: NodeJS.Platform,
+): void;
+
 export function resolveAppServerRuntime(
   document: Record<string, unknown>,
   dataDir: string,

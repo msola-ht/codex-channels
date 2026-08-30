@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import {
@@ -9,6 +9,7 @@ import {
 } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
 import {
   childProcessIsRunning,
   installProcessSignalHandlers,
@@ -37,7 +38,7 @@ async function runDevAll() {
     : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "src/main.ts"];
 
   mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
-  chmodSync(runtimeDir, 0o700);
+  securePrivateDirectorySync(runtimeDir);
 
   const appServerSupervisors = [];
   try {

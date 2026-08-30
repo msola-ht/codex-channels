@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+
 const checks = [
   {
     name: "Git 差异格式",
@@ -48,10 +50,12 @@ if (process.platform === "darwin") {
 
 for (const check of checks) {
   console.log(`\n[提交检查] ${check.name}`);
-  const result = spawnSync(check.command, check.args, {
+  const invocation = resolveExecutableInvocation(check.command, check.args);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd: check.cwd === undefined ? process.cwd() : join(process.cwd(), check.cwd),
     env: process.env,
     stdio: "inherit",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) {
     throw result.error;

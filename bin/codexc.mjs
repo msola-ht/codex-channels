@@ -48,7 +48,11 @@ import {
 import { createOpencodeGoQuotaWindowsProvider } from "../runtime/opencode-go-quota-windows.mjs";
 import { createProxyFetch } from "../dist/bootstrap/proxy-fetch.js";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
-import { effectiveCodexBinary } from "../runtime/executable.mjs";
+import {
+  effectiveCodexBinary,
+  executableInvocation,
+  resolveExecutable,
+} from "../runtime/executable.mjs";
 import {
   defaultServiceTarget,
   parseServiceTarget,
@@ -830,7 +834,7 @@ async function runServiceAppServer(args) {
           provider,
           providerBaseUrl,
         );
-        child = spawn(runtime.environment.CODEX_BINARY, [
+        child = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
           ...argumentsList,
           "app-server",
           "--listen",
@@ -842,7 +846,7 @@ async function runServiceAppServer(args) {
             ...managed.runtime.childEnvironment,
           },
           cwd: defaultWorkspace.cwd,
-        });
+        }, runtime.environment);
         children.push(child);
         childrenByProvider.set(provider, child);
         await waitForProviderAppServer(managed.socketPath, child, provider);
@@ -1019,7 +1023,7 @@ async function runServiceAppServer(args) {
     primaryChildEnvironment[primaryChildCredential.environmentKey] =
       primaryChildCredential.apiKey;
   }
-  const primaryChild = spawn(runtime.environment.CODEX_BINARY, [
+  const primaryChild = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
     ...primaryArguments,
     "app-server",
     "--listen",
@@ -1028,7 +1032,7 @@ async function runServiceAppServer(args) {
     stdio: "inherit",
     env: primaryChildEnvironment,
     cwd: defaultWorkspace.cwd,
-  });
+  }, runtime.environment);
   children.push(primaryChild);
   const lifecycle = forwardChildrenLifecycle(children, async () => {
     await supervisorOwner?.close();
@@ -1051,6 +1055,18 @@ function withoutManagedProviderApiKeys(environment) {
     delete childEnvironment[key];
   }
   return childEnvironment;
+}
+
+function spawnCodexProcess(codexBinary, args, options, environment) {
+  const invocation = executableInvocation(
+    resolveExecutable(codexBinary, environment),
+    args,
+    environment,
+  );
+  return spawn(invocation.file, invocation.args, {
+    ...options,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
 }
 
 function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_000) {
@@ -1181,7 +1197,7 @@ async function service(args) {
       { failureReportedByChild: serviceControllerReportsFailure(action) },
     );
   } else {
-    throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
+    throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows 后台服务尚未支持");
   }
   const readinessTarget = coreServiceReadinessTarget(action, serviceArgs);
   if (readinessTarget) {
@@ -1462,7 +1478,7 @@ async function runForegroundScript(
       }
     }
     if (!childProcessIsRunning(child)) return;
-    child.kill("SIGKILL");
+    signalChildProcesses([child], "SIGKILL");
   };
   const forwardSignal = (signal) => {
     if (forwardedSignal) {

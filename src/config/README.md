@@ -12,7 +12,9 @@
 配置结构只在共享运行时边界验证一次，本目录只补充依赖文件系统和运行语义的校验。Gateway
 读取前要求配置是当前用户拥有的非符号链接普通文件，且组和其他用户无权访问；配置父目录必须
 由当前用户拥有并禁止组或其他用户写入。配置错误必须抛出 `ConfigurationError` 并阻止启动，
-不能静默采用更宽松的权限、目录或网络默认值。
+不能静默采用更宽松的权限、目录或网络默认值。Windows 使用 PowerShell 7 `pwsh` 与 .NET SID/ACL
+校验表达等价结果，不读取没有安全意义的 POSIX mode；新建配置先收紧父目录，已有配置只校验、不
+静默接管其他 Owner。
 运行配置中的安全凭据目录固定由配置文件父目录派生，与可自定义的 SQLite 数据库路径相互独立。
 默认字段补齐只添加当前严格 Schema 已声明的缺失默认值，不覆盖已有配置，不补渠道凭据、身份或
 允许名单，也不处理未知字段或不受支持的版本。运行语义校验失败、文件发生并发修改或原子写回失败时
@@ -23,7 +25,8 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `allowed_user_ids` 必须至少包含一个正整数。飞书和微信继续以各自的 `enabled` 字段决定是否启用。
 
 `network` 表由 Telegram、飞书和微信共用，按显式 TOML、标准代理环境变量、受支持系统代理的
-顺序合并；Bootstrap 再按每个请求的目标协议和 `NO_PROXY` 选择直连或 HTTP(S) 代理。Telegram
+顺序合并；系统自动发现当前只支持 macOS 和 GNOME，Windows 不读取 WinINET/WinHTTP，需使用 TOML
+或标准代理环境变量。Bootstrap 再按每个请求的目标协议和 `NO_PROXY` 选择直连或 HTTP(S) 代理。Telegram
 私有 `proxy_url` 只覆盖 Telegram，并优先于共享代理和 `NO_PROXY`。项目不修改系统代理，也不
 安装、配置或重启 sing-box；仅 SOCKS `ALL_PROXY` 仍不受 HTTP(S) 客户端支持。
 

@@ -1,8 +1,22 @@
-import { chmodSync, lstatSync, renameSync, unlinkSync } from "node:fs";
-import { createConnection, createServer } from "node:net";
+import { spawn } from "node:child_process";
+import { lstatSync, mkdirSync, renameSync } from "node:fs";
+import { createConnection } from "node:net";
 import { basename, dirname, extname, resolve } from "node:path";
+import { Duplex } from "node:stream";
 
 import WebSocket from "ws";
+
+import {
+  assertPrivateIpcEndpointSync,
+  createPrivateIpcConnection,
+  PrivateIpcServer,
+} from "./private-ipc.mjs";
+import { resolveExecutableInvocation } from "./executable.mjs";
+import {
+  assertPrivateDirectoryAccessSync,
+  securePrivateDirectorySync,
+} from "./private-file.mjs";
+import { terminateChildProcess } from "./process-lifecycle.mjs";
 
 const protocolVersion = 4;
 const maximumResponseBytes = 16_384;
@@ -12,7 +26,6 @@ const minimumUnixSocketPathLimitBytes = 104;
 const providerIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 
 export class AppServerSupervisorOwner {
-  #identity;
   #server;
   #socketPath;
   #sockets = new Set();
@@ -31,7 +44,7 @@ export class AppServerSupervisorOwner {
     this.#topology = topology;
     this.#ensureProvider = ensureProvider;
     this.#releaseProvider = releaseProvider;
-    this.#server = createServer({ allowHalfOpen: true }, (socket) => {
+    this.#server = new PrivateIpcServer(this.#socketPath, (socket) => {
       this.#sockets.add(socket);
       const chunks = [];
       let bytes = 0;
@@ -228,23 +241,7 @@ export class AppServerSupervisorOwner {
   }
 
   async start() {
-    await removeStaleSupervisorSocket(this.#socketPath);
-    await new Promise((resolveListen, rejectListen) => {
-      const onError = (error) => {
-        this.#server.removeListener("listening", onListening);
-        rejectListen(error);
-      };
-      const onListening = () => {
-        this.#server.removeListener("error", onError);
-        resolveListen();
-      };
-      this.#server.once("error", onError);
-      this.#server.once("listening", onListening);
-      this.#server.listen(this.#socketPath);
-    }).catch((error) => {
-      if (error?.code === "EADDRINUSE") {
-        throw new Error("Codex App Server 统一监管入口已在运行");
-      }
+    await this.#server.start("Codex App Server 统一监管入口已在运行").catch((error) => {
       if (
         error?.code === "ENAMETOOLONG"
         || (
@@ -259,20 +256,6 @@ export class AppServerSupervisorOwner {
       }
       throw error;
     });
-    try {
-      const status = lstatSync(this.#socketPath);
-      this.#identity = { dev: status.dev, ino: status.ino };
-      chmodSync(this.#socketPath, 0o600);
-    } catch (error) {
-      await this.close();
-      if (error?.code === "ENOENT") {
-        throw new Error(
-          `App Server 监管 Socket 无法创建（路径可能超过平台长度限制）：${this.#socketPath}`,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
   }
 
   close() {
@@ -285,11 +268,8 @@ export class AppServerSupervisorOwner {
 
   async #closeInternal() {
     for (const socket of this.#sockets) socket.destroy();
-    if (this.#server.listening) {
-      await new Promise((resolveClose) => this.#server.close(() => resolveClose()));
-    }
+    await this.#server.close();
     await Promise.allSettled([...this.#providerOperations.values()]);
-    unlinkOwnedSocket(this.#socketPath, this.#identity);
   }
 }
 
@@ -342,7 +322,7 @@ export async function acquireAppServerProviderLease(primarySocketPath, provider)
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
   assertSafeSupervisorSocket(socketPath);
   return new Promise((resolveLease, rejectLease) => {
-    const socket = createConnection(socketPath);
+    const socket = createPrivateIpcConnection(socketPath);
     let response = Buffer.alloc(0);
     let settled = false;
     const fail = (message) => {
@@ -436,16 +416,7 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
 }
 
 function assertSafeSupervisorSocket(socketPath) {
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return undefined;
-  if (
-    !status.isSocket()
-    || status.uid !== process.getuid?.()
-    || (status.mode & 0o077) !== 0
-  ) {
-    throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
-  }
-  return status;
+  return assertPrivateIpcEndpointSync(socketPath);
 }
 
 export function sameAppServerTopology(actual, expected) {
@@ -459,6 +430,12 @@ export function sameAppServerTopology(actual, expected) {
 }
 
 export async function prepareAppServerSocketPaths(socketPaths) {
+  if (process.platform === "win32") {
+    for (const directory of new Set(socketPaths.map((socketPath) => dirname(socketPath)))) {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      securePrivateDirectorySync(directory);
+    }
+  }
   const occupied = await Promise.all(
     socketPaths.map((socketPath) => appServerSocketAcceptsWebSocket(socketPath)),
   );
@@ -467,12 +444,19 @@ export async function prepareAppServerSocketPaths(socketPaths) {
       "App Server Socket 已被未受监管的进程占用；请先停止现有 App Server 后重试",
     );
   }
+  if (process.platform === "win32") return;
   for (const socketPath of socketPaths) {
     preserveStaleSocket(socketPath);
   }
 }
 
 export async function appServerSocketAcceptsWebSocket(socketPath) {
+  if (process.platform === "win32") {
+    const parent = lstatSync(dirname(socketPath), { throwIfNoEntry: false });
+    if (!parent) return false;
+    assertPrivateDirectoryAccessSync(dirname(socketPath));
+    return windowsAppServerProxyAcceptsWebSocket(socketPath);
+  }
   const status = lstatSync(socketPath, { throwIfNoEntry: false });
   if (!status) return false;
   if (!status.isSocket() || status.uid !== process.getuid?.()) {
@@ -503,35 +487,9 @@ export async function appServerSocketAcceptsWebSocket(socketPath) {
   });
 }
 
-async function removeStaleSupervisorSocket(socketPath) {
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return;
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
-    throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
-  }
-  if (await socketAcceptsConnections(socketPath)) {
-    throw new Error("Codex App Server 统一监管入口已在运行");
-  }
-  const current = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (current?.dev === status.dev && current.ino === status.ino) {
-    unlinkSync(socketPath);
-  }
-}
-
-function socketAcceptsConnections(socketPath) {
-  return new Promise((resolveCheck) => {
-    const socket = createConnection(socketPath);
-    socket.once("connect", () => {
-      socket.destroy();
-      resolveCheck(true);
-    });
-    socket.once("error", () => resolveCheck(false));
-  });
-}
-
 function readSupervisorResponse(socketPath, request, timeoutMs = 1_000) {
   return new Promise((resolveResponse) => {
-    const socket = createConnection(socketPath);
+    const socket = createPrivateIpcConnection(socketPath);
     const chunks = [];
     let bytes = 0;
     let settled = false;
@@ -610,10 +568,106 @@ function preserveStaleSocket(socketPath) {
   console.warn(`检测到无效 Socket，已保留为：${preserved}`);
 }
 
-function unlinkOwnedSocket(socketPath, identity) {
-  if (!identity) return;
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (status?.isSocket() && status.dev === identity.dev && status.ino === identity.ino) {
-    unlinkSync(socketPath);
+async function windowsAppServerProxyAcceptsWebSocket(socketPath) {
+  const invocation = resolveExecutableInvocation(
+    process.env.CODEX_BINARY || "codex",
+    ["app-server", "proxy", "--sock", socketPath],
+  );
+  const child = spawn(invocation.file, invocation.args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
+  child.stderr.resume();
+  const connection = new AppServerProxyDuplex(child.stdout, child.stdin);
+  const socket = new WebSocket("ws://localhost/", {
+    perMessageDeflate: false,
+    handshakeTimeout: 1_500,
+    createConnection: () => connection,
+  });
+  return new Promise((resolveCheck) => {
+    let settled = false;
+    const finish = (healthy) => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.once("error", () => undefined);
+      socket.terminate();
+      connection.destroy();
+      void stopProxyChild(child).then(() => resolveCheck(healthy));
+    };
+    socket.once("open", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.once("close", () => finish(false));
+    child.once("error", () => finish(false));
+    child.once("exit", () => finish(false));
+  });
+}
+
+class AppServerProxyDuplex extends Duplex {
+  constructor(source, sink) {
+    super();
+    this.source = source;
+    this.sink = sink;
+    source.on("data", (chunk) => {
+      if (!this.push(chunk)) source.pause();
+    });
+    source.once("end", () => this.push(null));
+    source.once("error", (error) => this.destroy(error));
+    sink.once("error", (error) => this.destroy(error));
   }
+
+  _read() {
+    this.source.resume();
+  }
+
+  _write(chunk, encoding, callback) {
+    this.sink.write(chunk, encoding, callback);
+  }
+
+  _final(callback) {
+    this.sink.end(callback);
+  }
+
+  _destroy(error, callback) {
+    this.source.destroy();
+    this.sink.destroy();
+    callback(error);
+  }
+
+  setTimeout(_timeout, callback) {
+    if (callback) this.once("timeout", callback);
+    return this;
+  }
+
+  setNoDelay() {
+    return this;
+  }
+
+  setKeepAlive() {
+    return this;
+  }
+}
+
+async function stopProxyChild(child) {
+  if (child.exitCode !== null) return;
+  child.stdin.end();
+  if (await waitForChildExit(child, 1_000)) return;
+  await terminateChildProcess(child, { gracePeriodMs: 0, forcePeriodMs: 1_000 });
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null) return Promise.resolve(true);
+  return new Promise((resolveWait) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolveWait(false);
+    }, timeoutMs);
+    timer.unref();
+    const onExit = () => {
+      clearTimeout(timer);
+      resolveWait(true);
+    };
+    child.once("exit", onExit);
+  });
 }

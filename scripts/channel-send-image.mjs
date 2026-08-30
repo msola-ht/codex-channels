@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -13,6 +12,10 @@ import { fileURLToPath } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../runtime/private-file.mjs";
 import {
   locateUserConfig,
   resolveConfiguredPath,
@@ -62,12 +65,12 @@ export async function submitChannelImage({
 
   const pendingDirectory = join(runtime.spoolDirectory, "pending");
   mkdirSync(pendingDirectory, { recursive: true });
-  chmodSync(pendingDirectory, 0o700);
+  securePrivateDirectorySync(pendingDirectory);
   const base = randomUUID();
   const extension = imageExtension(imagePath);
   const pendingImage = join(pendingDirectory, `${base}${extension}`);
   copyFileSync(imagePath, pendingImage);
-  chmodSync(pendingImage, 0o600);
+  securePrivateFileSync(pendingImage);
   const manifestPath = join(pendingDirectory, `${base}.json`);
   writeFileSync(
     manifestPath,
@@ -79,7 +82,7 @@ export async function submitChannelImage({
     }, null, 2)}\n`,
     { mode: 0o600 },
   );
-  chmodSync(manifestPath, 0o600);
+  securePrivateFileSync(manifestPath);
   return {
     manifestPath,
     imagePath: pendingImage,

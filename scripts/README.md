@@ -2,6 +2,10 @@
 
 本目录保存 npm CLI 和开发流程调用的 Node.js、Shell 脚本。脚本处理本机配置、构建、协议生成和服务管理，不承载 Gateway 的会话业务逻辑。
 
+需要启动 Codex 或 npm 的脚本统一复用 `runtime/executable.mjs` 的结构化调用描述。Windows 按
+`PATHEXT` 解析原生程序和 `.cmd` / `.bat` shim，并通过解析后的 `ComSpec` 启动批处理文件，不依赖
+Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环境变量键名大小写不敏感处理。
+
 ## 配置与 Workspace
 
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
@@ -356,7 +360,19 @@
   完成第三方 Provider 认证；同时按当前目录或显式
   `--workspace` 解析有效 Sandbox、审批策略与 Permission Profile，第三方 Profile 不复制权限，
   用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
+  Windows 在获取 Provider 租约前校验追加 Provider 后缀后的最终 UDS 路径小于 108 UTF-8 字节；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
+- `windows-app-server-proxy-probe.mjs`：阶段零 Windows Transport 探针；不依赖项目安装或第三方包，
+  接受绝对 `codex.exe`、UDS 路径和工作目录，经官方 `app-server proxy` 完成标准 WebSocket Upgrade、
+  `initialize` / `initialized` 与只读 `thread/list`；`--scenario` 可选择只读、跨 Proxy 读取、
+  分片消息边界、真实 Turn、精确 `node --version` 一次审批或立即中断，非只读 Turn 场景只使用
+  Ephemeral Thread 并在结束时取消订阅。`message-limit` 默认验证 64 MiB 请求可达和 96 MiB 请求
+  被固定版 App Server 拒绝；可用 `--accepted-bytes` / `--rejected-bytes` 复核其他两侧值；
+  `--hold-ms` 可保持只读连接并再次读取，验证服务端退出后的超时边界。脚本只输出脱敏结构化结果，
+  不写 Gateway 配置或会话正文。
+- `windows-proxy-inbound-limit-probe.mjs`：使用可控的本地 WebSocket 字节流子进程驱动构建产物中的真实
+  `WindowsProxyTransport`，默认验证 128 MiB 文本帧可完整接收、`128 MiB + 1` 被客户端有界拒绝；
+  夹具不连接模型、不创建 Thread，也不输出载荷正文。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
 - `codex-release-api.mjs`：为稳定版解析器调用 GitHub Release API；请求或响应正文
@@ -374,7 +390,8 @@
 - `check-pr-description.mjs`：所有 Ready PR 必须写清新增、修复和改动，没有对应内容时明确写
   “无”；正式升级 PR 还要把自动占位内容替换为本项目的收益、采用项、不采用项及风险与验证。
   Draft PR 暂时跳过，转为 Ready 时由同一门禁重新检查。
-- `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录。
+- `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录；
+  正文比较只归一化 CRLF 与 LF，不掩盖其他生成差异。
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
   成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于受控 Plan 边界。
 - `check-protocol.mjs`：校验本机 Codex CLI 版本，并按记录的实验状态重新生成到临时目录确认类型逐文件一致。
@@ -416,7 +433,8 @@
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根 `index.md` 文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `codex-rules.mjs`：向 CLI 重新导出 `runtime/project-rules.mjs` 的项目定位、规则生成与检查能力。
-- `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
+- `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置；Unix
+  校验 `pre-commit` 的可执行位，Windows 不读取 NTFS 上不存在的 POSIX 执行位。
 - `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 
@@ -451,8 +469,11 @@
   版本以兼容旧版源码更新器；已发布版本的安装入口继续由 README 和 Release 保留。
 - `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
   OpenAI 主提供商使用的配置、环境变量或系统代理路由（不显示代理地址或凭据）、
+  Unix owner-only mode 或 Windows 当前 SID 私有 ACL、DPAPI CurrentUser 后端、状态/指标数据库、
+  凭据/媒体/渠道输出目录和配置内访问令牌是否存在（不显示内容）、
   Workspace、飞书凭据/Bot 身份、
-  微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
+  微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间；App Server
+  健康检查在 Unix 直连 WebSocket，在 Windows 复用官方 Proxy Transport，并校验 initialize 与精确版本，
   以及微信运行时启用状态；缺少 `bubblewrap` 时说明内置 helper 回退并输出发行版安装命令，
   完成全部检测后按诊断领域只输出失败、提示和处理建议，交互终端区分颜色并汇总各状态数量；
   Doctor 不自动安装或修改 AppArmor，不调用

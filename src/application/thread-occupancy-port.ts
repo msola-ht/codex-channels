@@ -3,6 +3,8 @@ import type { ConversationTarget } from "../conversation-core/index.js";
 export interface ThreadLockHolder {
   pid: number;
   command: string;
+  executable?: string;
+  startedAt?: string;
 }
 
 export type ThreadOccupancyReleaseResult =

@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { chmod, mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../../runtime/private-file.mjs";
 
 import { UserFacingError } from "../conversation-core/index.js";
 
@@ -49,7 +54,8 @@ export class ManagedMediaStore<MimeType extends string> {
       throw new Error(this.options.closedMessage);
     }
     await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
-    await chmod(this.options.directory, 0o700);
+    securePrivateDirectorySync(this.options.directory);
+    await this.secureExistingFiles();
     await this.cleanupExpired().catch((error: unknown) => {
       this.options.onCleanupFailure(error);
     });
@@ -104,6 +110,7 @@ export class ManagedMediaStore<MimeType extends string> {
         limiter,
         createWriteStream(temporaryPath, { flags: "wx", mode: 0o600 }),
       );
+      securePrivateFileSync(temporaryPath);
       const mediaType = await this.options.detectType(temporaryPath);
       if (!mediaType) {
         throw this.options.unsupportedError();
@@ -135,5 +142,14 @@ export class ManagedMediaStore<MimeType extends string> {
         await unlink(path);
       }
     }));
+  }
+
+  private async secureExistingFiles(): Promise<void> {
+    const entries = await readdir(this.options.directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && this.options.managedFileName.test(entry.name)) {
+        securePrivateFileSync(join(this.options.directory, entry.name));
+      }
+    }
   }
 }

@@ -9,18 +9,44 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-import { writePrivateFileAtomicSync } from "./private-file.mjs";
+import {
+  assertPrivateDirectoryAccessSync,
+  securePrivateDirectorySync,
+  writePrivateFileAtomicSync,
+} from "./private-file.mjs";
+import {
+  readWindowsSecureRecordSync,
+  removeWindowsSecureRecordSync,
+  windowsSecureRecordPath,
+  writeWindowsSecureRecordSync,
+} from "./windows-secure-record.mjs";
 
 const maximumApiKeyBytes = 16_384;
 const providerIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 
 export function apiProviderCredentialPath(credentialsDirectory, providerId) {
-  return join(credentialsDirectory, "api-providers", validProviderId(providerId), "api-key");
+  const directory = join(
+    credentialsDirectory,
+    "api-providers",
+    validProviderId(providerId),
+  );
+  return process.platform === "win32"
+    ? windowsSecureRecordPath(directory, "api-key")
+    : join(directory, "api-key");
 }
 
 export function readApiProviderKey(credentialsDirectory, providerId) {
   const root = join(credentialsDirectory, "api-providers");
   const directory = join(root, validProviderId(providerId));
+  if (process.platform === "win32") {
+    const value = readWindowsSecureRecordSync(directory, "api-key", process.env);
+    if (value === null) {
+      const error = new Error("第三方 API Key 凭据不存在");
+      error.code = "ENOENT";
+      throw error;
+    }
+    return validateApiKey(value);
+  }
   assertPrivateDirectory(credentialsDirectory);
   assertPrivateDirectory(root);
   assertPrivateDirectory(directory);
@@ -48,6 +74,10 @@ export function writeApiProviderKey(credentialsDirectory, providerId, apiKey) {
   ensurePrivateDirectory(credentialsDirectory);
   ensurePrivateDirectory(root);
   ensurePrivateDirectory(directory);
+  if (process.platform === "win32") {
+    writeWindowsSecureRecordSync(directory, "api-key", value, process.env);
+    return;
+  }
   writePrivateFileAtomicSync(path, `${value}\n`);
 }
 
@@ -61,6 +91,10 @@ export function removeApiProviderKey(credentialsDirectory, providerId) {
   const directory = join(root, id);
   if (!existsSync(directory)) return;
   assertPrivateDirectory(directory);
+  if (process.platform === "win32") {
+    removeWindowsSecureRecordSync(directory, "api-key");
+    return;
+  }
   rmSync(join(directory, "api-key"), { force: true });
   rmdirSync(directory);
   try {
@@ -79,8 +113,13 @@ function validProviderId(value) {
 
 function ensurePrivateDirectory(path) {
   if (!existsSync(path)) mkdirSync(path, { mode: 0o700 });
+  if (process.platform === "win32") {
+    securePrivateDirectorySync(path);
+  } else {
+    assertPrivateDirectory(path);
+    chmodSync(path, 0o700);
+  }
   assertPrivateDirectory(path);
-  chmodSync(path, 0o700);
 }
 
 function assertPrivateDirectory(path) {
@@ -90,10 +129,11 @@ function assertPrivateDirectory(path) {
     !status.isDirectory()
     || status.isSymbolicLink()
     || (currentUserId !== undefined && status.uid !== currentUserId)
-    || (status.mode & 0o077) !== 0
+    || (process.platform !== "win32" && (status.mode & 0o077) !== 0)
   ) {
     throw new Error("第三方 API Key 凭据目录权限无效");
   }
+  if (process.platform === "win32") assertPrivateDirectoryAccessSync(path);
 }
 
 function validateApiKey(value) {

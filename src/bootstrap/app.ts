@@ -1,10 +1,15 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
+import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import { ensureAppServerProvider } from "../../runtime/app-server-supervisor.mjs";
-import { effectiveCodexBinary } from "../../runtime/executable.mjs";
+import {
+  effectiveCodexBinary,
+  executableInvocation,
+  resolveExecutable,
+} from "../../runtime/executable.mjs";
 import {
   checkProjectRulesAtRoot,
   initializeProjectRulesAtRoot,
@@ -26,6 +31,7 @@ import {
   inspectThreadWriterLock,
   terminateThreadWriterHolder,
 } from "../../runtime/thread-writer-lock.mjs";
+import { terminateChildProcess } from "../../runtime/process-lifecycle.mjs";
 import {
   inspectAppServerSupervisor,
   releaseAppServerProvider,
@@ -35,6 +41,7 @@ import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
   CodexAppServerClient,
+  createAppServerTransport,
   ProviderRoutingClient,
   gatewayVersion,
   handleApprovalServerRequest,
@@ -45,7 +52,7 @@ import {
   toConversationInputEvent,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
-  UnixWebSocketTransport,
+  type CodexTransport,
   type RpcNotification,
 } from "../codex-client/index.js";
 import {
@@ -147,7 +154,7 @@ interface PendingBindingRestore {
 }
 
 export class GatewayApplication {
-  private readonly transport: UnixWebSocketTransport;
+  private readonly transport: CodexTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
@@ -218,7 +225,22 @@ export class GatewayApplication {
         configuredProviders.has(definition.id),
         definition,
       ));
-    this.transport = new UnixWebSocketTransport(config.codexSocketPath);
+    const codexBinary = resolveExecutable(effectiveCodexBinary(config.codexBinary));
+    const createCodexProcessInvocation = (args: readonly string[]) =>
+      executableInvocation(codexBinary, args);
+    const createTransport = (socketPath: string): CodexTransport =>
+      {
+        assertAppServerSocketPathSupported(socketPath);
+        return createAppServerTransport(
+          { kind: "local-app-server", socketPath },
+          {
+            codexBinary,
+            createCodexProcessInvocation,
+            terminateCodexProcess: terminateChildProcess,
+          },
+        );
+      };
+    this.transport = createTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
     const customProviderIds = customPrimaryProvider === undefined
       ? customSwitchingProviders.map(({ id }) => id)
@@ -234,7 +256,7 @@ export class GatewayApplication {
       },
     ));
     for (const managedProvider of managedProviders) {
-      const providerTransport = new UnixWebSocketTransport(
+      const providerTransport = createTransport(
         providerAppServerSocketPath(config.codexSocketPath, managedProvider.provider),
       );
       clients.set(managedProvider.provider, new CodexAppServerClient(
@@ -245,7 +267,7 @@ export class GatewayApplication {
       ));
     }
     for (const customSwitchingProvider of customSwitchingProviders) {
-      const providerTransport = new UnixWebSocketTransport(
+      const providerTransport = createTransport(
         providerAppServerSocketPath(config.codexSocketPath, customSwitchingProvider.provider),
       );
       clients.set(customSwitchingProvider.provider, new CodexAppServerClient(
@@ -1603,6 +1625,7 @@ export class GatewayApplication {
     if (
       recheck.holder === null
       || recheck.holder.pid !== holder.pid
+      || recheck.holder.startedAt !== holder.startedAt
       || !recheckedReleasable
     ) {
       return {
@@ -1613,7 +1636,9 @@ export class GatewayApplication {
         stuck,
       };
     }
-    const exited = await terminateThreadWriterHolder(holder.pid);
+    const exited = await terminateThreadWriterHolder(holder.pid, {
+      ...(holder.startedAt === undefined ? {} : { startedAt: holder.startedAt }),
+    });
     if (!exited) {
       return {
         status: "held",
@@ -1776,6 +1801,9 @@ function isHighFrequencyNotification(method: string): boolean {
 }
 
 function isReleaseableThreadWriterHolder(holder: ThreadLockHolder): boolean {
+  if (holder.executable !== undefined) {
+    return /^(?:.*[/\\])?codex(?:\.exe)?$/iu.test(holder.executable);
+  }
   return /^(?:codex|[^\s]*[/\\]codex)(?:\s|$)/u.test(holder.command);
 }
 
@@ -1849,10 +1877,20 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal): Promis
 }
 
 function verifyCodexVersion(config: GatewayConfig): void {
-  const actual = execFileSync(effectiveCodexBinary(config.codexBinary), ["--version"], {
+  const invocation = executableInvocation(
+    resolveExecutable(effectiveCodexBinary(config.codexBinary)),
+    ["--version"],
+  );
+  const result = spawnSync(invocation.file, invocation.args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error("无法读取 Codex 版本");
+  }
+  const actual = result.stdout.trim();
   if (actual !== supportedCodexCliVersion) {
     throw new Error(
       `Codex 版本不受支持：当前 ${actual}，协议基线 ${supportedCodexCliVersion}`,

@@ -11,12 +11,31 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
+import { createAppServerTransport } from "../src/codex-client/app-server-transport.js";
 import {
   decodeTextMessage,
   UnixWebSocketTransport,
 } from "../src/codex-client/unix-websocket-transport.js";
 
 const temporaryDirectories: string[] = [];
+
+describe("App Server Transport selection", () => {
+  const endpoint = { kind: "local-app-server", socketPath: "app-server.sock" } as const;
+
+  it("keeps the Unix WebSocket Transport on Unix platforms", () => {
+    expect(createAppServerTransport(endpoint, {
+      codexBinary: "codex",
+      platform: "linux",
+    }).kind).toBe("unix-websocket");
+  });
+
+  it("selects the owned official Proxy Transport on Windows", () => {
+    expect(createAppServerTransport(endpoint, {
+      codexBinary: "codex.exe",
+      platform: "win32",
+    }).kind).toBe("windows-uds-proxy");
+  });
+});
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {

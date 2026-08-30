@@ -110,7 +110,8 @@ codexc service reload
 ```
 
 无法直连 OpenAI 的网络需要配置 HTTP(S) 代理。Gateway 优先使用 `config.toml`，其次读取
-`HTTPS_PROXY` / `HTTP_PROXY` 等标准环境变量和当前系统代理：
+`HTTPS_PROXY` / `HTTP_PROXY` 等标准环境变量，再读取当前受支持的 macOS 或 GNOME 系统代理；
+Windows 不自动读取 WinINET/WinHTTP，请显式使用 TOML 或标准代理环境变量：
 
 ```toml
 [network]

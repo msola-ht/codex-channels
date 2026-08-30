@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -134,7 +135,7 @@ function uninstallGlobalPackage(prefixes, environment) {
       "codexc",
     );
     if (inferNpmGlobalPrefix(packageDirectory) !== prefix) continue;
-    const result = spawnSync(
+    const invocation = resolveExecutableInvocation(
       "npm",
       [
         "uninstall",
@@ -145,7 +146,16 @@ function uninstallGlobalPackage(prefixes, environment) {
         "--no-fund",
         "@hegenai/codexc",
       ],
-      { env: environment, stdio: "inherit" },
+      environment,
+    );
+    const result = spawnSync(
+      invocation.file,
+      invocation.args,
+      {
+        env: environment,
+        stdio: "inherit",
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+      },
     );
     if (result.error) throw result.error;
     if (result.status !== 0) {

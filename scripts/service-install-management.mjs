@@ -144,7 +144,7 @@ function buildServiceInstallPlan(environment, options) {
     throw new ServiceInstallManagementError(
       "unsupported-platform",
       "preflight",
-      "后台服务当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持",
+      "后台服务当前支持 macOS launchd 与 Linux systemd；Windows 后台服务尚未支持",
       { completedStages: [], recovery: "unsupported" },
     );
   }

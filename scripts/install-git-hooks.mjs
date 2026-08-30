@@ -16,7 +16,7 @@ export function installGitHooks(root = packageDir) {
   if (!existsSync(preCommitPath)) {
     throw new Error("仓库缺少 .githooks/pre-commit");
   }
-  if ((statSync(preCommitPath).mode & 0o111) === 0) {
+  if (process.platform !== "win32" && (statSync(preCommitPath).mode & 0o111) === 0) {
     throw new Error(".githooks/pre-commit 缺少可执行权限");
   }
 

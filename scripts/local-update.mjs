@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   readFileSync,
@@ -28,6 +27,7 @@ import {
   gatewayOwnerIsReady,
 } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { securePrivateFileSync } from "../runtime/private-file.mjs";
 import {
   assertManagedModelProviderCapabilities,
   managedModelProviderDefinitions,
@@ -76,7 +76,7 @@ export function updateGatewayConfiguration(environment = process.env, options = 
     throw new Error(`配置备份已存在：${backupPath}`);
   }
   copyFileSync(configPath, backupPath);
-  chmodSync(backupPath, 0o600);
+  securePrivateFileSync(backupPath);
   try {
     const document = readGatewayConfig(configPath);
     const removedPaths = removeObsoleteGatewayConfig(document);
@@ -100,7 +100,7 @@ export function updateGatewayConfiguration(environment = process.env, options = 
   } catch (error) {
     if (readFileSync(configPath, "utf8") !== before) {
       copyFileSync(backupPath, configPath);
-      chmodSync(configPath, 0o600);
+      securePrivateFileSync(configPath);
     }
     unlinkSync(backupPath);
     throw error;

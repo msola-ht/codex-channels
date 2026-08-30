@@ -6,17 +6,23 @@ import {
   generateProtocolTree,
   replaceProtocolTree,
 } from "./protocol-schema.mjs";
+import {
+  executableInvocation,
+  resolveExecutable,
+} from "../runtime/executable.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const output = resolve(root, "src/codex-protocol/generated");
-const codex = process.env.CODEX_BINARY || "codex";
+const codex = resolveExecutable(process.env.CODEX_BINARY || "codex");
 const generated = generateProtocolTree(codex, root, dirname(output), {
   experimental: true,
 });
 try {
-  const version = execFileSync(codex, ["--version"], {
+  const versionInvocation = executableInvocation(codex, ["--version"]);
+  const version = execFileSync(versionInvocation.file, versionInvocation.args, {
     cwd: root,
     encoding: "utf8",
+    windowsVerbatimArguments: versionInvocation.windowsVerbatimArguments,
   }).trim();
   replaceProtocolTree(generated, output);
   writeFileSync(

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { packageDir } from "./runtime-config.mjs";
 
@@ -223,11 +224,13 @@ try {
 }
 
 function run(command, args, cwd, env, capture = false) {
-  const result = spawnSync(command, args, {
+  const invocation = resolveExecutableInvocation(command, args, env);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd,
     env,
     encoding: "utf8",
     stdio: capture ? "pipe" : "inherit",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) {
     throw result.error;

@@ -19,7 +19,8 @@ Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间�
 `HH:mm` 计算。不存在的 DST 本地时间跳过，重复的本地时间只选择较早的 UTC occurrence。相对延时以
 固定 UTC 分钟数计算，不随 DST 改变。时间计算不会读取或改变进程的 `TZ`。
 
-SQLite 只保存任务定义和最小 Run 元数据，目录和文件使用私有权限；运行时从不隐式迁移 Schema，
+SQLite 只保存任务定义和最小 Run 元数据，目录、文件与备份在 Unix 使用 owner-only 权限、在 Windows
+使用当前 SID 私有 ACL；运行时从不隐式迁移 Schema，
 v1 或未知版本在打开时失败关闭。`codexc update` 与 `codexc state upgrade` 在 Gateway 停止后预检、
 备份并显式执行唯一的 v1→v2 迁移（`hourly`→`interval`），迁移在同一事务中保留 `runs` 外键。
 调度器只通过执行端口请求运行，不建立第二套 App Server Thread/Turn 状态，也不自动重试结果未知的

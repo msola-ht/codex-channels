@@ -4,13 +4,14 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import pino from "pino";
 import { parse } from "smol-toml";
@@ -38,10 +39,12 @@ import type { ApprovalRequest } from "../src/approval/index.js";
 import type { McpRuntimeStatus } from "../src/application/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
+  createAppServerTransport,
   handleApprovalServerRequest,
   toConversationInputEvent,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
+  type CodexTransport,
 } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
@@ -50,6 +53,9 @@ import { ProviderProxy } from "../src/provider-proxy/index.js";
 
 const run = process.env.RUN_CODEX_INTEGRATION === "1";
 const suite = run ? describe : describe.skip;
+const windowsTransportSuite = run && process.platform === "win32"
+  ? describe
+  : describe.skip;
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 const deepseekCatalogPath = process.env.CODEX_DEEPSEEK_MODEL_CATALOG;
@@ -99,6 +105,152 @@ describe("real App Server test process cleanup", () => {
         maxRetries: 5,
         retryDelay: 100,
       });
+    }
+  });
+});
+
+windowsTransportSuite("real Codex App Server over Windows Proxy Transport", () => {
+  const workdir = process.cwd();
+  const runtimeRoot = resolve(".runtime");
+  const codexBinary = process.env.CODEX_BINARY ?? "codex";
+  let testRuntime: string | undefined;
+  let primarySocketPath: string | undefined;
+  let processHandle: ChildProcess | undefined;
+  let providerProcessHandle: ChildProcess | undefined;
+  let client: CodexAppServerClient | undefined;
+  let providerClient: CodexAppServerClient | undefined;
+  let transport: CodexTransport | undefined;
+  let appServerStderr = "";
+  let providerAppServerStderr = "";
+  let upstreamUserAgent = "";
+
+  beforeAll(async () => {
+    mkdirSync(runtimeRoot, { recursive: true });
+    const runtime = mkdtempSync(join(runtimeRoot, "windows-proxy-integration-"));
+    testRuntime = runtime;
+    const socketName = "app-server.sock";
+    const socketPath = join(runtime, socketName);
+    primarySocketPath = socketPath;
+    processHandle = spawn(
+      codexBinary,
+      ["app-server", "--listen", `unix://${socketPath}`],
+      {
+        cwd: workdir,
+        stdio: ["ignore", "ignore", "pipe"],
+        windowsHide: true,
+      },
+    );
+    processHandle.stderr?.setEncoding("utf8");
+    processHandle.stderr?.on("data", (chunk: string) => {
+      appServerStderr = appendDiagnostic(appServerStderr, chunk);
+    });
+    await waitFor(
+      () => readdirSync(runtime).includes(socketName),
+      10_000,
+      () => processHandle?.exitCode === null
+        ? undefined
+        : new Error(appServerFailure(
+          "Codex App Server 在创建 Windows Unix Socket 前退出",
+          appServerStderr,
+        )),
+    );
+    const providerSocketPath = providerAppServerSocketPath(
+      socketPath,
+      "windows-contract",
+    );
+    providerProcessHandle = spawn(
+      codexBinary,
+      ["app-server", "--listen", `unix://${providerSocketPath}`],
+      {
+        cwd: workdir,
+        stdio: ["ignore", "ignore", "pipe"],
+        windowsHide: true,
+      },
+    );
+    providerProcessHandle.stderr?.setEncoding("utf8");
+    providerProcessHandle.stderr?.on("data", (chunk: string) => {
+      providerAppServerStderr = appendDiagnostic(providerAppServerStderr, chunk);
+    });
+    await waitFor(
+      () => readdirSync(runtime).includes(basename(providerSocketPath)),
+      10_000,
+      () => providerProcessHandle?.exitCode === null
+        ? undefined
+        : new Error(appServerFailure(
+          "Provider App Server 在创建 Windows Unix Socket 前退出",
+          providerAppServerStderr,
+        )),
+    );
+    transport = createAppServerTransport(
+      { kind: "local-app-server", socketPath },
+      { codexBinary },
+    );
+    client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "read-only",
+    });
+    providerClient = new CodexAppServerClient(
+      new JsonRpcClient(createAppServerTransport(
+        { kind: "local-app-server", socketPath: providerSocketPath },
+        { codexBinary },
+      )),
+      { sandbox: "read-only" },
+    );
+    const initialized = await client.connect();
+    await providerClient.connect();
+    upstreamUserAgent = initialized.userAgent;
+  }, 15_000);
+
+  afterAll(async () => {
+    await providerClient?.close();
+    await client?.close();
+    if (providerProcessHandle) {
+      await stopDetachedTestProcess(providerProcessHandle, 2_000).catch(() => undefined);
+    }
+    if (processHandle) {
+      await stopDetachedTestProcess(processHandle, 2_000).catch(() => undefined);
+    }
+    if (testRuntime) {
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  });
+
+  it("initializes, lists threads, and closes the owned Proxy", async () => {
+    expect(transport?.kind).toBe("windows-uds-proxy");
+    expect(upstreamUserAgent).toContain("codex_connect/0.150.1");
+    await expect(client?.listThreads(workdir)).resolves.toEqual(expect.any(Array));
+  });
+
+  it("keeps an Ephemeral Thread isolated from a Provider App Server", async () => {
+    const started = await client?.startThread(workdir, { ephemeral: true });
+    expect(started?.thread.id).toBeTruthy();
+    try {
+      await expect(providerClient?.readThread(started?.thread.id ?? ""))
+        .rejects.toThrow();
+    } finally {
+      if (started) {
+        await client?.unsubscribeThread(started.thread.id).catch(() => undefined);
+      }
+    }
+  });
+
+  it("rejects an initialization response above the configured message limit", async () => {
+    expect(primarySocketPath).toBeTruthy();
+    const constrainedClient = new CodexAppServerClient(
+      new JsonRpcClient(createAppServerTransport(
+        { kind: "local-app-server", socketPath: primarySocketPath ?? "" },
+        { codexBinary, maxPayloadBytes: 64 },
+      )),
+      { sandbox: "read-only" },
+    );
+    try {
+      await expect(constrainedClient.connect()).rejects.toThrow();
+    } finally {
+      await constrainedClient.close();
     }
   });
 });

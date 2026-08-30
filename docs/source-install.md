@@ -7,7 +7,8 @@ Linux 与 macOS 可以把 Codex Connect 官方 `main` 分支作为完整 Git 仓
 ```
 
 配置、数据库、凭据、Socket、日志和输出仍使用 `~/.codex-connect` 下原有目录，不写入 Git
-仓库。Windows Transport 与后台服务尚未支持，因此安装脚本会明确拒绝其他平台。
+仓库。Windows 前台 Transport 正在开发验证，但后台服务和源码安装尚未支持，因此安装脚本仍会明确
+拒绝 Windows 和其他未支持平台。
 
 ## 安装
 

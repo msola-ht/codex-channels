@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+
 const packageName = "@hegenai/codexc";
 
 export function inferNpmGlobalPrefix(packageDirectory) {
@@ -61,9 +63,15 @@ export function recordManagedSourceMetadata(
 }
 
 export function currentNpmGlobalPrefix(environment = process.env) {
-  const result = spawnSync("npm", ["prefix", "--global"], {
+  const invocation = resolveExecutableInvocation(
+    "npm",
+    ["prefix", "--global"],
+    environment,
+  );
+  const result = spawnSync(invocation.file, invocation.args, {
     env: environment,
     encoding: "utf8",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) throw result.error;
   const prefix = result.stdout.trim();

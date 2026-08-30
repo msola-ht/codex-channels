@@ -1,7 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { resolveOptionalExecutable } from "../runtime/executable.mjs";
+import {
+  executableInvocation,
+  resolveOptionalExecutable,
+} from "../runtime/executable.mjs";
+import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 
 export async function updateCodexUserConfig(
   environment,
@@ -68,7 +72,14 @@ export async function createCodexUserConfigClient({
     StdioTransport,
   } = await import("../dist/codex-client/index.js");
   return new CodexAppServerClient(
-    new JsonRpcClient(new StdioTransport({ codexBinary, cwd, environment })),
+    new JsonRpcClient(new StdioTransport({
+      codexBinary,
+      cwd,
+      environment,
+      createCodexProcessInvocation: (args) =>
+        executableInvocation(codexBinary, args, environment),
+      terminateCodexProcess: terminateChildProcess,
+    })),
     { sandbox: "read-only" },
   );
 }

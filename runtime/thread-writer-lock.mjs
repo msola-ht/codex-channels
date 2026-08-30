@@ -1,7 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { codexHomePath } from "./codex-home.mjs";
+import { resolveExecutableInvocation } from "./executable.mjs";
 
 const redactedArgument = "[已脱敏]";
 const sensitiveArgumentNamePattern = /(?:authorization|cookie|api[-_]?key|apikey|bearer[-_]?token|token|secret|password|header)/iu;
@@ -15,8 +18,10 @@ export function inspectThreadWriterLock(threadId, environment = process.env, pro
   if (!existsSync(lockPath)) {
     return { held: false };
   }
+  if (process.platform === "win32") {
+    return inspectWindowsThreadWriterLock(lockPath, environment);
+  }
   if (process.platform !== "linux") {
-    // 非 Linux 平台没有 /proc，无法可靠识别持锁进程。
     return { held: true, holder: null };
   }
   try {
@@ -83,7 +88,21 @@ export function processCommandLine(pid, procRoot = "/proc") {
   }
 }
 
-export async function terminateThreadWriterHolder(pid, { timeoutMs = 8_000 } = {}) {
+export async function terminateThreadWriterHolder(pid, {
+  timeoutMs = 8_000,
+  startedAt,
+  environment = process.env,
+} = {}) {
+  if (process.platform === "win32") {
+    if (typeof startedAt !== "string" || !/^\d+$/u.test(startedAt)) return false;
+    const response = invokeWindowsThreadWriterLock({
+      operation: "terminate",
+      pid,
+      startedAt,
+      timeoutMs,
+    }, environment);
+    return response?.ok === true && response.exited === true;
+  }
   if (!isRunningProcess(pid)) {
     return true;
   }
@@ -108,6 +127,75 @@ export async function terminateThreadWriterHolder(pid, { timeoutMs = 8_000 } = {
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
   return !isRunningProcess(pid);
+}
+
+function inspectWindowsThreadWriterLock(lockPath, environment) {
+  const response = invokeWindowsThreadWriterLock({
+    operation: "inspect",
+    path: lockPath,
+  }, environment);
+  if (response?.ok !== true || !Array.isArray(response.holders)) {
+    return { held: true, holder: null };
+  }
+  if (response.holders.length === 0) return { held: false };
+  if (response.holders.length !== 1) return { held: true, holder: null };
+  const [holder] = response.holders;
+  if (
+    !Number.isSafeInteger(holder?.pid)
+    || holder.pid <= 0
+    || typeof holder.startedAt !== "string"
+    || !/^\d+$/u.test(holder.startedAt)
+    || typeof holder.executable !== "string"
+  ) {
+    return { held: true, holder: null };
+  }
+  return {
+    held: true,
+    holder: {
+      pid: holder.pid,
+      command: holder.executable,
+      executable: holder.executable,
+      startedAt: holder.startedAt,
+    },
+  };
+}
+
+function invokeWindowsThreadWriterLock(request, environment) {
+  const script = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "windows-thread-writer-lock.ps1",
+  );
+  let invocation;
+  try {
+    invocation = resolveExecutableInvocation(
+      "pwsh",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        script,
+      ],
+      environment,
+    );
+  } catch {
+    return undefined;
+  }
+  const result = spawnSync(invocation.file, invocation.args, {
+    input: JSON.stringify(request),
+    encoding: "utf8",
+    maxBuffer: 1_048_576,
+    windowsHide: true,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
+  if (result.error || result.status !== 0) return undefined;
+  try {
+    return JSON.parse(result.stdout.trim());
+  } catch {
+    return undefined;
+  }
 }
 
 function isRunningProcess(pid) {

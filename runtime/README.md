@@ -13,7 +13,8 @@
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
-  `NO_PROXY`。渠道显式代理优先于共享代理和 `NO_PROXY`。
+  `NO_PROXY`。系统自动发现只覆盖 macOS 和 GNOME；Windows 明确不读取 WinINET/WinHTTP，使用 TOML
+  或标准代理环境变量。渠道显式代理优先于共享代理和 `NO_PROXY`。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
@@ -56,33 +57,46 @@
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用，避免各入口独立解释运行拓扑。
-- `app-server-supervisor.mjs`：以当前用户私有 Unix Socket 持有 App Server 监管入口互斥锁，
+- `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、App Server Supervisor 和 Provider
+  Metrics 提供共享的当前用户私有 IPC。Unix 保留 `0600` Socket、属主和 inode 清理合同；Windows
+  使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机
+  认证令牌，连接首帧必须认证，关闭时只删除当前所有者发布的描述文件。
+- `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动、释放与
   Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`）；拓扑同时区分
   已配置、运行中、主动释放和持有租约的 Provider。租约由私有 Socket 连接持有，断开时自动撤销，
   存在租约时拒绝释放；同一 Provider 的启动、释放与租约获取串行执行，释放结果明确区分已释放、
   租约占用和实例未运行，旧版或无效监管响应对账户删除失败关闭。Gateway 还据此避免把主动释放
   误判为意外断线。入口集中检查真实 WebSocket 健康状态，拒绝
-  未受监管的活动 App Server，并安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
+  未受监管的活动 App Server；Windows 通过官方 `app-server proxy` 检查 UDS 健康并把失效 rendezvous
+  留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出，同时等待已经开始的 Provider 生命周期操作收尾且拒绝启动排队操作。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
+- `app-server-runtime.mjs` / `app-server-runtime.d.mts`：解析主实例与受管 Provider 的 App Server Socket
+  拓扑；Windows 在启动 App Server、Gateway 或 Remote TUI 前校验最终 UDS 路径小于 108 UTF-8 字节，
+  并提示通过 `codex.socket_path` 缩短基础路径，不隐式搬移端点。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
-  私有 Gateway 所有权 Socket，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
+  私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
   建立与应用就绪使用不同状态，应用开始停止时立即撤销就绪；公开同源健康探针供本地更新确认
   Gateway 已完成应用启动且尚未进入关闭流程。
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
   label、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor 复用。
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
-  按温和终止、强制终止和有限终态等待关闭单个子进程，解释同步子进程的启动错误/退出码/终止信号
-  和成对安装/移除进程信号监听；App Server 服务入口收到退出信号后停止监管请求、等待已开始的
+  按温和终止、强制终止和有限终态等待关闭单个子进程；Windows 对调用方精确持有的 PID 使用系统
+  `taskkill.exe /T` 终止该子进程树，避免批处理 Shim 退出后遗留 Codex 后代，且不扫描或结束其他 Codex
+  进程；多个 Windows Console 信号处理器并发终止同一进程树时，以精确 PID 已不存在作为完成结果；
+  同时解释同步子进程的启动错误、退出码和终止信号，并成对安装或移除进程信号监听。App Server 服务
+  入口收到退出信号后停止监管请求、等待已开始的
   Provider 操作，并对全部子进程执行有限终止。可标记失败已由子命令展示，避免嵌套 CLI 重复报错。
   具体关闭超时和资源清理仍由各生命周期所有者决定。
 - `cli-presentation.mjs` / `cli-presentation.d.mts`：集中定义公开 CLI 的成功、失败、提示和处理
   状态标签、颜色、输出流路由和换行，Doctor 检查项另用通过；统一遵守 TTY 与 `NO_COLOR`，
   重定向输出保持纯文本。
 - `executable.mjs` / `executable.d.mts`：统一选择配置或安装环境中的 Codex 路径，并从绝对/相对
-  路径或受控 `PATH` 解析本机可执行文件；供 CLI、Bootstrap、服务安装器和 Doctor 复用，不依赖
-  平台固定位置的 `which`。
+  路径或受控 `PATH` 解析本机可执行文件；Windows 按大小写不敏感的环境变量键读取 `PATH`、`PATHEXT`
+  和 `ComSpec`，选择原生可执行文件或 `.cmd` / `.bat` shim，并以结构化调用描述交给 Codex/npm 子进程
+  入口，避免依赖 Shell 自动补后缀。供 CLI、Bootstrap、服务安装器和 Doctor 复用，不依赖平台固定
+  位置的 `which`。
 - `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
   并拒绝通过符号链接把写入转移到 Workspace 外；CLI 的 JSON 模式可静默底层 Codex 展示，普通模式
   继续原样转发检查输出。
@@ -94,20 +108,36 @@
   `~/.codex`），供 CLI、脚本、Runtime 与 Bootstrap 复用。
 - `thread-writer-lock.mjs` / `thread-writer-lock.d.mts`：定位并安全结束持有 Codex 线程写锁
   （`~/.codex/thread-writer-locks/<thread>.lock`）的本地进程；Linux 通过 `/proc` 按打开描述符
-  与命令行识别持锁方，向渠道展示前剥离凭据参数；`/release force` 只放行入口可执行文件为
-  `codex`、且发送信号前二次核验身份未变化的持锁方，供恢复诊断复用且不删除锁文件。
+  与命令行识别持锁方，Windows 通过 PowerShell 7 调用 Restart Manager 按文件句柄取得 PID 与进程
+  启动时间，并只展示可执行路径；`/release force` 只放行入口可执行文件为 `codex`、且发送终止前
+  二次核验 PID 与启动时间均未变化的持锁方，供恢复诊断复用且不删除锁文件。
+- `windows-thread-writer-lock.ps1`：Windows Thread Writer Lock 的 Restart Manager 适配器；返回文件
+  持有进程的 PID、启动时间和可执行路径，并在终止前通过同一进程对象复核启动时间。
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup、迁移脚本与 Runtime 复用。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记、子代理配置和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
-  避免路径校验后被符号链接替换；
+  避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
+  适配器，原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和
+  Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
+- `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器；只从 stdin 读取固定 JSON 请求，通过 .NET
+  ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析
+  本地化命令输出。
 - `private-file-lock.mjs` / `private-file-lock.d.mts`：为跨越异步配置事务的私有文件更新提供
-  PID 所有权、陈旧锁回收和替换锁保护，供 Provider 管理与微信配置/凭据事务串行写入。
+  PID 所有权、陈旧锁回收和替换锁保护，锁目录与锁文件同样使用当前平台私有权限，供 Provider 管理与
+  微信配置/凭据事务串行写入。
 - `api-provider-credential.mjs` / `api-provider-credential.d.mts`：按第三方 API 提供商 ID 隔离
-  API Key，严格校验私有目录、文件所有者、权限与符号链接，并复用统一私有文件原子替换。
+  API Key，严格校验私有目录、文件所有者、权限与符号链接；macOS/Linux 保留现有私有文件格式，
+  Windows 使用当前用户 DPAPI 主密钥和 AES-256-GCM 记录，不在磁盘保存明文 Key。
+- `windows-dpapi.mjs` / `windows-dpapi.d.mts` / `windows-dpapi.ps1`：通过 PowerShell 7 调用
+  `ProtectedData` 的 `CurrentUser` 作用域保护和解保护小型二进制主密钥；只接受 Base64 JSON stdin/stdout，
+  不把输入或底层异常写入日志。
+- `windows-secure-record.mjs` / `windows-secure-record.d.mts`：Windows 版本化安全凭据记录；每个凭据
+  目录持有一个 DPAPI 保护的随机 256-bit 主密钥，记录继续使用随机 IV 的 AES-256-GCM，文件名只含
+  记录键摘要，目录和文件同时复用当前 SID 私有 ACL 与原子替换。
 - `workspace-permission.mjs` / `workspace-permission.d.mts`：统一 Workspace 的 Sandbox、审批策略
   与 Permission Profile 更新及互斥规则，供 CLI、Config 菜单和渠道写入适配器复用。
 

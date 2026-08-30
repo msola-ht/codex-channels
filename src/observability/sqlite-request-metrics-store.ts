@@ -1,6 +1,11 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
+
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../../runtime/private-file.mjs";
 
 import {
   acquireRequestMetricsDatabaseLock,
@@ -217,13 +222,13 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     }
     const parent = dirname(path);
     mkdirSync(parent, { recursive: true, mode: 0o700 });
-    chmodSync(parent, 0o700);
+    securePrivateDirectorySync(parent);
     this.lock = acquireRequestMetricsDatabaseLock(path);
     let database: DatabaseSync | undefined;
     try {
       database = new DatabaseSync(path);
       this.database = database;
-      chmodSync(path, 0o600);
+      securePrivateFileSync(path);
       this.database.exec(`
         PRAGMA busy_timeout = 10;
         PRAGMA journal_mode = WAL;

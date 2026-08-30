@@ -1,5 +1,6 @@
 import {
   closeSync,
+  existsSync,
   fstatSync,
   mkdirSync,
   openSync,
@@ -13,7 +14,10 @@ import { dirname, resolve } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { z } from "zod";
 
-import { writePrivateFileAtomicSync } from "./private-file.mjs";
+import {
+  securePrivateDirectorySync,
+  writePrivateFileAtomicSync,
+} from "./private-file.mjs";
 
 const sourceByDocument = new WeakMap();
 const activeGatewayConfigLocks = new Set();
@@ -459,6 +463,11 @@ export function materializeGatewayConfigDefaults(configPath, document) {
 }
 
 export function writeGatewayConfig(configPath, document) {
+  if (process.platform === "win32" && !existsSync(configPath)) {
+    const parent = dirname(resolve(configPath));
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    securePrivateDirectorySync(parent);
+  }
   return withGatewayConfigLock(configPath, () => {
     const generated = stringify(document);
     const source = sourceByDocument.get(document);

@@ -3,7 +3,10 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import {
+  assertAppServerSocketPathSupported,
+  resolvePrimaryAppServerSocketPath,
+} from "../runtime/app-server-runtime.mjs";
 import { acquireAppServerProviderLease } from "../runtime/app-server-supervisor.mjs";
 import {
   loadConfiguredCustomSwitchingModelProviders,
@@ -15,6 +18,10 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import {
+  executableInvocation,
+  resolveExecutable,
+} from "../runtime/executable.mjs";
 import {
   assertSynchronousChildSuccess,
   ForwardedChildSignalError,
@@ -92,31 +99,30 @@ async function runRemoteCli() {
       throw new Error(`${selectedDefinition.displayName} 尚未配置，请先运行 codexc setup`);
     }
     socketPath = providerAppServerSocketPath(primarySocketPath, managedProvider.provider);
+    assertAppServerSocketPathSupported(socketPath);
     providerLease = await acquireAppServerProviderLease(
       primarySocketPath,
       managedProvider.provider,
     );
   }
   const configuredBinary = stringValue(codex.binary) || "codex";
-  const codexBinary = isAbsolute(configuredBinary)
-    ? realpathSync(configuredBinary)
-    : configuredBinary;
+  const codexBinary = resolveExecutable(configuredBinary);
+  const invocation = executableInvocation(codexBinary, [
+    "--remote",
+    `unix://${socketPath}`,
+    "-C",
+    workdir,
+    ...(selectedDefinition
+      ? ["--profile", selectedDefinition.profileName]
+      : []),
+    ...permissionArguments,
+    ...passthrough,
+  ]);
   try {
-    const result = spawnSync(
-      codexBinary,
-      [
-        "--remote",
-        `unix://${socketPath}`,
-        "-C",
-        workdir,
-        ...(selectedDefinition
-          ? ["--profile", selectedDefinition.profileName]
-          : []),
-        ...permissionArguments,
-        ...passthrough,
-      ],
-      { stdio: "inherit" },
-    );
+    const result = spawnSync(invocation.file, invocation.args, {
+      stdio: "inherit",
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
     assertSynchronousChildSuccess(result, {
       failureReportedByChild: true,
       failureMessage: (exitCode) => `Codex TUI 已退出：exit=${exitCode}`,

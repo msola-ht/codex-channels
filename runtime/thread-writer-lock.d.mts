@@ -1,6 +1,8 @@
 export interface ThreadWriterLockHolder {
   pid: number;
   command: string;
+  executable?: string;
+  startedAt?: string;
 }
 
 export type ThreadWriterLockInspection =
@@ -30,5 +32,9 @@ export function processCommandLine(
 
 export function terminateThreadWriterHolder(
   pid: number,
-  options?: { timeoutMs?: number },
+  options?: {
+    timeoutMs?: number;
+    startedAt?: string;
+    environment?: NodeJS.ProcessEnv;
+  },
 ): Promise<boolean>;

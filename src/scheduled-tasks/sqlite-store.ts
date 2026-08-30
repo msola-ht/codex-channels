@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   copyFileSync,
   constants as fsConstants,
   lstatSync,
@@ -8,6 +7,13 @@ import {
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
+import {
+  assertPrivateDirectoryAccessSync,
+  assertPrivateFileAccessSync,
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../../runtime/private-file.mjs";
 
 import {
   calculateNextRunAt,
@@ -92,13 +98,15 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       const source = tryLstat(path);
       if (source?.isSymbolicLink()) throw new Error("计划任务数据库路径不能是符号链接");
       if (source !== undefined && !source.isFile()) throw new Error("计划任务数据库路径必须是普通文件");
-      if (source !== undefined && (source.mode & 0o777) !== 0o600) {
+      if (source !== undefined && process.platform === "win32") {
+        assertPrivateFileAccessSync(path);
+      } else if (source !== undefined && (source.mode & 0o777) !== 0o600) {
         throw new Error("计划任务数据库文件权限必须是 0600");
       }
     }
     this.database = new DatabaseSync(path);
     try {
-      if (path !== ":memory:") chmodSync(path, 0o600);
+      if (path !== ":memory:") securePrivateFileSync(path);
       this.database.exec(
         "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE; PRAGMA foreign_keys = ON;",
       );
@@ -808,7 +816,11 @@ export function inspectScheduledTaskDatabaseFile(
     };
   }
   if (source.isSymbolicLink() || !source.isFile()) throw new Error("计划任务数据库源路径无效");
-  if ((source.mode & 0o777) !== 0o600) throw new Error("计划任务数据库文件权限必须是 0600");
+  if (process.platform === "win32") {
+    assertPrivateFileAccessSync(databasePath);
+  } else if ((source.mode & 0o777) !== 0o600) {
+    throw new Error("计划任务数据库文件权限必须是 0600");
+  }
   requirePrivateDirectory(dirname(databasePath));
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
@@ -901,13 +913,17 @@ function copyScheduledTaskDatabaseFile(sourcePath: string, destinationPath: stri
   if (resolve(destinationPath) === resolve(sourcePath)) throw new Error("备份目标不能覆盖计划任务数据库");
   const source = tryLstat(sourcePath);
   if (source === undefined || source.isSymbolicLink() || !source.isFile()) throw new Error("计划任务数据库源路径无效");
-  if ((source.mode & 0o777) !== 0o600) throw new Error("计划任务数据库文件权限必须是 0600");
+  if (process.platform === "win32") {
+    assertPrivateFileAccessSync(sourcePath);
+  } else if ((source.mode & 0o777) !== 0o600) {
+    throw new Error("计划任务数据库文件权限必须是 0600");
+  }
   const target = tryLstat(destinationPath);
   if (target?.isSymbolicLink()) throw new Error("备份目标不能是符号链接");
   if (target !== undefined) throw new Error("备份目标已存在，拒绝覆盖");
   ensurePrivateDirectory(dirname(destinationPath));
   copyFileSync(sourcePath, destinationPath, fsConstants.COPYFILE_EXCL);
-  chmodSync(destinationPath, 0o600);
+  securePrivateFileSync(destinationPath);
   return destinationPath;
 }
 
@@ -1130,13 +1146,15 @@ function ensurePrivateDirectory(directory: string): void {
   }
   for (const path of missing.reverse()) {
     mkdirSync(path, { mode: 0o700 });
-    chmodSync(path, 0o700);
+    securePrivateDirectorySync(path);
   }
   const final = tryLstat(resolve(directory));
   if (final === undefined || final.isSymbolicLink() || !final.isDirectory()) {
     throw new Error("计划任务数据库目录无效");
   }
-  if ((final.mode & 0o777) !== 0o700) {
+  if (process.platform === "win32") {
+    assertPrivateDirectoryAccessSync(resolve(directory));
+  } else if ((final.mode & 0o777) !== 0o700) {
     throw new Error("计划任务数据库目录权限必须是 0700");
   }
 }

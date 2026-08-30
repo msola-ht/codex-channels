@@ -1,24 +1,17 @@
+import type { Socket } from "node:net";
+
 import {
-  chmodSync,
-  lstatSync,
-  unlinkSync,
-  type Stats,
-} from "node:fs";
-import {
-  createConnection,
-  createServer,
-  type Server,
-  type Socket,
-} from "node:net";
+  createPrivateIpcConnection,
+  PrivateIpcServer,
+} from "../../runtime/private-ipc.mjs";
 
 import type { ProviderProxyMetrics } from "./proxy.js";
 
 const maximumMetricsBytes = 8_192;
 
 export class ProviderProxyMetricsServer {
-  private readonly server: Server;
+  private readonly server: PrivateIpcServer;
   private readonly sockets = new Set<Socket>();
-  private socketIdentity: Pick<Stats, "dev" | "ino"> | undefined;
   private started = false;
   private stopped = false;
 
@@ -27,7 +20,7 @@ export class ProviderProxyMetricsServer {
     private readonly onMetrics: (metrics: ProviderProxyMetrics) => void,
     private readonly onError?: (error: Error) => void,
   ) {
-    this.server = createServer({ allowHalfOpen: true }, (socket) => {
+    this.server = new PrivateIpcServer(this.socketPath, (socket) => {
       this.handleConnection(socket);
     });
   }
@@ -36,24 +29,8 @@ export class ProviderProxyMetricsServer {
     if (this.started) {
       return;
     }
-    await removeStaleSocket(this.socketPath);
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error): void => {
-        this.server.removeListener("listening", onListening);
-        reject(error);
-      };
-      const onListening = (): void => {
-        this.server.removeListener("error", onError);
-        resolve();
-      };
-      this.server.once("error", onError);
-      this.server.once("listening", onListening);
-      this.server.listen(this.socketPath);
-    });
     try {
-      const status = lstatSync(this.socketPath);
-      this.socketIdentity = { dev: status.dev, ino: status.ino };
-      chmodSync(this.socketPath, 0o600);
+      await this.server.start(`模型代理指标 Socket 已被占用：${this.socketPath}`);
       this.started = true;
     } catch (error) {
       await this.close();
@@ -69,29 +46,33 @@ export class ProviderProxyMetricsServer {
     for (const socket of this.sockets) {
       socket.destroy();
     }
-    if (this.server.listening) {
-      await new Promise<void>((resolveClose) => {
-        this.server.close(() => resolveClose());
-      });
-    }
-    unlinkOwnedSocket(this.socketPath, this.socketIdentity);
+    await this.server.close();
   }
 
   private handleConnection(socket: Socket): void {
     this.sockets.add(socket);
     let bytes = 0;
     const chunks: Buffer[] = [];
+    let handled = false;
     socket.on("data", (chunk: Buffer) => {
+      if (handled) {
+        return;
+      }
       bytes += chunk.length;
       if (bytes > maximumMetricsBytes) {
         socket.destroy(new Error("模型代理指标超过大小限制"));
         return;
       }
       chunks.push(chunk);
-    });
-    socket.on("end", () => {
+      const payload = Buffer.concat(chunks);
+      const newline = payload.indexOf(10);
+      if (newline < 0) {
+        return;
+      }
+      handled = true;
+      socket.pause();
       try {
-        const metrics = parseMetrics(Buffer.concat(chunks).toString("utf8"));
+        const metrics = parseMetrics(payload.subarray(0, newline).toString("utf8"));
         if (metrics) {
           this.onMetrics(metrics);
         }
@@ -99,6 +80,11 @@ export class ProviderProxyMetricsServer {
         this.onError?.(asError(error));
       } finally {
         socket.end("ok\n");
+      }
+    });
+    socket.on("end", () => {
+      if (!handled) {
+        socket.end();
       }
     });
     socket.on("error", (error) => this.onError?.(asError(error)));
@@ -111,7 +97,13 @@ export function sendProviderProxyMetrics(
   metrics: ProviderProxyMetrics,
 ): Promise<void> {
   return new Promise((resolve) => {
-    const socket = createConnection(socketPath);
+    let socket: Socket;
+    try {
+      socket = createPrivateIpcConnection(socketPath);
+    } catch {
+      resolve();
+      return;
+    }
     let settled = false;
     const finish = (): void => {
       if (settled) {
@@ -123,7 +115,7 @@ export function sendProviderProxyMetrics(
     };
     socket.setTimeout(1_000, finish);
     socket.once("connect", () => {
-      socket.end(`${JSON.stringify(metrics)}\n`);
+      socket.write(`${JSON.stringify(metrics)}\n`);
     });
     socket.on("data", (chunk: Buffer) => {
       if (chunk.includes(10)) {
@@ -133,48 +125,6 @@ export function sendProviderProxyMetrics(
     socket.once("end", finish);
     socket.once("error", finish);
   });
-}
-
-async function removeStaleSocket(socketPath: string): Promise<void> {
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) {
-    return;
-  }
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
-    throw new Error(`模型代理指标 Socket 路径已存在且不安全：${socketPath}`);
-  }
-  if (await socketAcceptsConnections(socketPath)) {
-    throw new Error(`模型代理指标 Socket 已被占用：${socketPath}`);
-  }
-  unlinkSync(socketPath);
-}
-
-function socketAcceptsConnections(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection(socketPath);
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => resolve(false));
-  });
-}
-
-function unlinkOwnedSocket(
-  socketPath: string,
-  identity: Pick<Stats, "dev" | "ino"> | undefined,
-): void {
-  if (!identity) {
-    return;
-  }
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (
-    status?.isSocket()
-    && status.dev === identity.dev
-    && status.ino === identity.ino
-  ) {
-    unlinkSync(socketPath);
-  }
 }
 
 function parseMetrics(value: string): ProviderProxyMetrics | undefined {
