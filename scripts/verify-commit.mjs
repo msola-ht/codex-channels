@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 
 const checks = [
   {
@@ -29,7 +30,7 @@ const checks = [
     "scripts/launchd-control.sh",
     "scripts/systemd-control.sh",
   ] },
-  { name: "npm 安装冒烟", command: "npm", args: ["run", "test:package"] },
+  { name: "npm tarball 安装冒烟", command: "npm", args: ["run", "test:package:tarball-prepared"] },
 ];
 
 if (process.platform === "darwin") {
@@ -46,22 +47,38 @@ if (process.platform === "darwin") {
   });
 }
 
+const verificationStartedAt = performance.now();
+
 for (const check of checks) {
   console.log(`\n[提交检查] ${check.name}`);
+  const checkStartedAt = performance.now();
   const result = spawnSync(check.command, check.args, {
     cwd: check.cwd === undefined ? process.cwd() : join(process.cwd(), check.cwd),
     env: process.env,
     stdio: "inherit",
   });
+  const checkDuration = formatDuration(performance.now() - checkStartedAt);
+  const cumulativeDuration = formatDuration(performance.now() - verificationStartedAt);
   if (result.error) {
+    console.error(
+      `[提交检查] ${check.name} 失败（本阶段 ${checkDuration}，累计耗时 ${cumulativeDuration}）`,
+    );
     throw result.error;
   }
   if (result.status !== 0) {
+    console.error(
+      `[提交检查] ${check.name} 失败（本阶段 ${checkDuration}，累计耗时 ${cumulativeDuration}）`,
+    );
     process.exit(result.status ?? 1);
   }
+  console.log(
+    `[提交检查] ${check.name} 通过（本阶段 ${checkDuration}，累计耗时 ${cumulativeDuration}）`,
+  );
 }
 
-console.log("\n提交前检查全部通过。");
+console.log(
+  `\n提交前检查全部通过。总耗时 ${formatDuration(performance.now() - verificationStartedAt)}`,
+);
 
 function gitDiffArgs() {
   if (process.env.CI === "true") {
@@ -76,4 +93,13 @@ function gitDiffArgs() {
   return staged.status === 0
     ? ["diff", "--check"]
     : ["diff", "--cached", "--check"];
+}
+
+function formatDuration(milliseconds) {
+  const seconds = milliseconds / 1_000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(seconds < 10 ? 2 : 1)} 秒`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} 分 ${(seconds % 60).toFixed(1)} 秒`;
 }

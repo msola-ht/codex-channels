@@ -417,7 +417,9 @@
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `codex-rules.mjs`：向 CLI 重新导出 `runtime/project-rules.mjs` 的项目定位、规则生成与检查能力。
 - `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
-- `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查。
+- `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查，并输出每个
+  阶段及全部检查的累计耗时；完整测试已经成功构建 Gateway 后，日常门禁只复用该产物执行 tarball
+  安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 
 ## 构建、打包与服务

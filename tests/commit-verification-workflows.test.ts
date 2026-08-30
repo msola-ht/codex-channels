@@ -41,4 +41,37 @@ describe("commit verification workflows", () => {
     expect(workflow).toContain("node scripts/check-release-tag.mjs");
     expect(workflow).not.toContain("sync-published-readme.mjs");
   });
+
+  it("reports each verification stage duration and the total duration", () => {
+    const script = readFileSync(
+      join(process.cwd(), "scripts", "verify-commit.mjs"),
+      "utf8",
+    );
+
+    expect(script).toContain("formatDuration");
+    expect(script).toContain("累计耗时");
+    expect(script).toContain("总耗时");
+  });
+
+  it("keeps clean source installation outside the routine commit gate", () => {
+    const packageDocument = JSON.parse(
+      readFileSync(join(process.cwd(), "package.json"), "utf8"),
+    ) as { scripts: Record<string, string> };
+    const verification = readFileSync(
+      join(process.cwd(), "scripts", "verify-commit.mjs"),
+      "utf8",
+    );
+
+    expect(packageDocument.scripts["test:package:tarball-prepared"]).toBe(
+      "node scripts/smoke-package.mjs",
+    );
+    expect(packageDocument.scripts["test:package"]).toContain("smoke-source-prepare.mjs");
+    expect(verification).toContain("test:package:tarball-prepared");
+    expect(verification).not.toContain('args: ["run", "test:package:prepared"]');
+    const publishWorkflow = readFileSync(
+      join(process.cwd(), ".github", "workflows", "publish.yml"),
+      "utf8",
+    );
+    expect(publishWorkflow).toContain("node scripts/smoke-source-prepare.mjs");
+  });
 });

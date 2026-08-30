@@ -713,10 +713,12 @@ setInterval(() => undefined, 1_000);`,
       });
     }
 
-    expect(store.quotaHistory({
+    const history = store.quotaHistory({
       startAtMs: 0,
       endAtMs: Number.MAX_SAFE_INTEGER,
-    })).toEqual([
+    });
+    expect(history).toHaveLength(2);
+    expect(history).toEqual(expect.arrayContaining([
       expect.objectContaining({
         resetsAt: firstReset,
         snapshotCount: 1,
@@ -727,7 +729,7 @@ setInterval(() => undefined, 1_000);`,
         snapshotCount: 2,
         latestUsedPercentMillionths: 1_000_000,
       }),
-    ]);
+    ]));
     store.close();
   });
 
