@@ -107,7 +107,8 @@
   脱敏读取、独立或一次写入全部的版本化受控事务、Permission Profile 冲突保护与 Remote 自然继承，
   以及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；渠道当前模型在 Workspace、新会话及同 Provider
-  历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；按第三方 Provider
+  历史 Thread 切换后的恢复、自动接续 Provider 筛选、跨 Provider 显式恢复隔离，以及切换模型时
+  读取目标 Provider App Server 的有效思考等级并在不兼容时回落目录默认；按第三方 Provider
   和模型独立设置新会话默认值、目录上下文、思考等级与自动压缩阈值，固定模式清除根级覆盖并使用
   官方配置事务，以及旧受管文件到 `sf-` 前缀、独立模型目录和按模型设置的冲突检测、权限校验与
   引用迁移；自定义主 Provider 覆盖 URL 主机名 ID 与推荐 `OpenAI` 选择、远程压缩所需名称固定、

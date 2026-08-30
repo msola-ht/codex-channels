@@ -111,6 +111,12 @@ export class ModelSelectionService {
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
     const selectedFastTier = fastServiceTierId(selected);
+    const providerDefaultEffort = providerChanged
+      ? await this.codex.readDefaultReasoningEffort(
+          this.router.workspace(target).cwd,
+          selectedProvider,
+        )
+      : undefined;
     const providerDefaultTier = providerChanged && selectedFastTier
       ? await this.codex.readDefaultServiceTier(
           this.router.workspace(target).cwd,
@@ -123,7 +129,9 @@ export class ModelSelectionService {
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = !providerChanged && current.effort && supported.includes(current.effort)
       ? current.effort
-      : selected.defaultReasoningEffort;
+      : providerDefaultEffort && supported.includes(providerDefaultEffort)
+        ? providerDefaultEffort
+        : selected.defaultReasoningEffort;
     const pending = { ...this.pendingByConversation.get(this.key(target)) };
     if (providerChanged) {
       delete pending.serviceTier;
