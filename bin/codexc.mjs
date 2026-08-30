@@ -84,7 +84,6 @@ import {
 } from "../scripts/runtime-config.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
-  securePrivateDirectorySync,
   securePrivateFileSync,
 } from "../runtime/private-file.mjs";
 import {
@@ -204,7 +203,7 @@ Thread 分区管理员）、网络代理、高级设置（日志等级与开发�
 Linux 缺少 bubblewrap 时输出安装建议。`,
   security: `用法：codexc security repair
 
-修复 Windows Codex 私有配置目录及其中 TOML 文件的 ACL；其他平台明确提示无需处理。`,
+修复 Windows Codex 私有 TOML 配置文件的 ACL；不修改 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
   rules: `用法：codexc rules <init|check>
 
 具体用法：
@@ -1580,14 +1579,13 @@ function security(args) {
     return;
   }
   const home = codexHomePath(process.env);
-  securePrivateDirectorySync(home);
   const files = readdirSync(home, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
     .map((entry) => join(home, entry.name));
   for (const file of files) {
     if (statSync(file).isFile()) securePrivateFileSync(file);
   }
-  printCliMessage("success", `Windows 私有路径 ACL 已修复：${home}（${files.length} 个 TOML 文件）`);
+  printCliMessage("success", `Windows 私有 TOML 文件 ACL 已修复：${home}（${files.length} 个文件）`);
 }
 
 function sendForegroundStopMessage(child, signal) {

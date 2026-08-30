@@ -657,10 +657,9 @@ function checkCodexHomePrivatePaths() {
   if (process.platform !== "win32") return;
   const home = codexHomePath(process.env);
   if (!existsSync(home)) {
-    note("Codex 私有目录权限", "尚未创建；首次使用 Codex 用户配置时创建");
+    note("Codex 私有配置权限", "尚未创建；首次使用 Codex 用户配置时创建");
     return;
   }
-  checkPrivateDirectory("Codex 私有目录权限", home, "运行 codexc security repair");
   let entries;
   try {
     entries = readdirSync(home, { withFileTypes: true });
