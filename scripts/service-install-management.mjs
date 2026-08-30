@@ -170,8 +170,14 @@ function buildServiceInstallPlan(environment, options) {
     );
   }
   const projectDir = options.projectDir ?? packageDir;
+  const additionalPathEntries = operatingSystem === "win32"
+    ? [
+        ...definition.additionalPathEntries,
+        dirname(resolveExecutable("git", environment)),
+      ]
+    : definition.additionalPathEntries;
   const baseContext = resolveServiceInstallContext(
-    definition.additionalPathEntries,
+    additionalPathEntries,
     {
       environment,
       projectDir,
