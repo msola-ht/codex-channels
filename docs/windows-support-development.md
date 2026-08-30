@@ -742,7 +742,7 @@ App Server 与 Gateway 的标准输出/错误日志；日志跟随改用独立 P
 Codex CLI 版本校验、Gateway/WebUI 构建、受管 Git 标记、临时 npm tarball 全局安装及失败清理；不要求
 管理员权限，不修改 Shell PATH。源码安装元数据和卸载流程同时识别 Windows `prefix\node_modules` 与
 历史 Unix `prefix\lib\node_modules` 布局。安装器已通过 PowerShell 解析、`-Help` 和 Node/Lint/类型/
-文档检查；真实联网克隆、依赖构建、全局安装及安装后服务验收留到下一轮，不以脚本解析通过宣称安装完成。
+文档检查；当前分支的真实依赖构建、全局安装及安装后服务验收已完成；远程候选和发布包验收仍单独保留。
 
 ### 阶段一：平台运行时与内部 IPC
 
@@ -856,20 +856,39 @@ WebUI 与指标中心状态为 `Ready`、触发方式为 `On demand only`。重�
 Windows 私有目录复核（2026-08-30）：对既有 `data/uploads` 媒体暂存目录重新应用当前用户、SYSTEM
 和 Administrators 私有 ACL 后，`codexc doctor` 通过媒体目录检查；当前诊断为 20 项通过、10 项提示，
 无失败项。
+
+本地更新再次复核（2026-08-30）：`codexc update` 在当前 Windows 源码部署上通过本地更新预检，确认
+`config.toml` 参数兼容、状态数据库 Schema 4 和指标数据库 Schema 11 均兼容；核心服务成功停止，
+更新流程完成后 App Server 与 Gateway 成功启动并通过就绪检查。该结果只证明当前本地版本的更新与恢复，
+不替代远程 `main` 候选源码更新和发布安装验收。
+
+普通用户服务路径复核（2026-08-30）：在非管理员 PowerShell 下依次执行 `codexc service uninstall`、
+`codexc service install`、`codexc service status --json` 和 `codexc doctor` 均通过；卸载后用户配置与
+运行数据保留，重新安装后 App Server 与 Gateway 均为 `loaded: true`、`running: true`、
+`processAlive: true`、`rpcReachable: true`，总体 `healthy: true`。PowerShell `Get-ScheduledTask`
+确认两个核心计划任务状态为 `Running`；Doctor 无失败项，剩余内容为未配置渠道或可选能力提示。
+
+Provider/Transport 无凭据复核（2026-08-30）：按主 Socket、DeepSeek、OpenCode Go 账户和自定义 Provider
+样例生成 App Server Socket 与 Metrics Socket，确认路径互不重复且全部通过 Windows Socket 字节长度校验；
+当前 Windows App Server Supervisor 返回 `status: ready`，主 Provider 为 `openai`，运行、释放和租约 Provider
+列表为空，实际拓扑只包含主 Socket。当前配置未启用第三方 Provider，真实 Provider 请求、空闲释放和多账户
+切换仍需在具备对应凭据的候选环境中单独验收。
 - [x] 首期用户安装明确使用 npm 全局包和普通 PowerShell，不要求执行 POSIX `install.sh`。
 - [ ] `codexc update` 完成候选构建、配置/数据库预检、服务停启、CLI 精确版本安装提示和失败恢复；
   当前本地更新的配置/数据库预检、Windows 服务停启和失败恢复已完成，候选构建与 CLI 安装提示待验收。
 - [x] 卸载只删除受管程序与服务，保留配置、数据库、凭据、日志和输出，除非用户明确选择数据清理。
 
-验收门槛：普通用户权限和需要提升权限的路径分别测试；安装、更新、崩溃恢复、系统重启和卸载没有
-遗留服务、明文凭据、错误 PATH 或失去管理的进程。
+验收门槛：普通用户权限路径已完成实机验收；仍需确认提升权限终端不会改变当前用户服务归属。安装、
+更新、崩溃恢复、系统重启和卸载没有遗留服务、明文凭据、错误 PATH 或失去管理的进程。
 
 ### 阶段六：CI、发布与公开支持
 
-状态：等待阶段五。
+状态：Windows CI 基础运行 Job 已加入当前分支；完整跨平台门禁、发布候选和公开支持仍待验收。
 
-- [ ] CI 增加 `windows-latest`，先拆分跨平台检查与 Unix 专属检查，不通过跳过全部测试制造绿色结果。
-- [ ] Windows 运行类型检查、Lint、文档、全量跨平台单测、npm tarball 安装和 CLI 分级帮助冒烟。
+- [x] CI 增加独立 `windows-latest` Job，执行 Windows 构建、类型检查、文档检查、PowerShell 语法和 CLI
+  帮助冒烟；Unix 专属检查仍留在 Unix Job，不通过跳过全部测试制造绿色结果。
+- [ ] Windows 生产/测试 Lint、全量跨平台单测、npm tarball 安装和完整 CLI 分级帮助冒烟；类型检查、文档检查
+  和基础 CLI 帮助冒烟已由独立 Windows Job 覆盖。
 - [ ] Windows 安装精确 Codex CLI，运行选定 Transport 的真实 App Server 合同。
 - [ ] 增加 Windows 服务模板/任务、私有凭据、路径、进程树、Provider 隔离和渠道主路径测试。
 - [ ] 发布候选在真实 Windows 主机完成安装、重启、Doctor、Remote TUI、三个渠道和至少两个 Provider
