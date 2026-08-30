@@ -1,0 +1,668 @@
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import {
+  acquireAppServerProviderLease,
+  appServerSupervisorSocketPath,
+  ensureAppServerProvider,
+  inspectAppServerSupervisor,
+  releaseAppServerProvider,
+  sameAppServerTopology,
+} from "../runtime/app-server-supervisor.mjs";
+import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { providerAppServerSocketPath, writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
+import { CodexAppServerClient } from "../src/codex-client/client.js";
+import { toConversationInputEvent } from "../src/codex-client/index.js";
+import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
+import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
+
+const runContract = process.env.RUN_CODEX_CONTRACT === "1";
+const contractSuite = runContract ? describe : describe.skip;
+
+contractSuite("real supervised App Server provider", () => {
+    it("starts a custom Responses primary Provider and maps reasoning notifications", async () => {
+      const testRuntime = mkdtempSync(join(tmpdir(), "codex-custom-provider-contract-"));
+      const codexHome = join(testRuntime, "codex-home");
+      const workspace = join(testRuntime, "workspace");
+      const configPath = join(testRuntime, "config.toml");
+      const socketPath = join(testRuntime, "codex-app-server.sock");
+      const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
+      const apiServer = createServer((request, response) => {
+        if (request.method === "GET" && request.url === "/v1/models") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify({
+            object: "list",
+            data: [{ id: "gpt-5.6-terra", object: "model", owned_by: "fixture" }],
+          }));
+          return;
+        }
+        if (request.method === "POST" && request.url === "/v1/responses") {
+          const requestChunks: Buffer[] = [];
+          request.on("data", (chunk: Buffer | string) => {
+            requestChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          });
+          request.on("end", () => {
+            const requestBody = Buffer.concat(requestChunks).toString("utf8");
+            if (requestBody.includes("trigger policy violation")) {
+              response.writeHead(400, { "content-type": "application/json" });
+              response.end(JSON.stringify({
+                error: {
+                  type: "invalid_request_error",
+                  code: "misalignment_policy_violation",
+                  message: "This request violated the misalignment policy.",
+                },
+              }));
+              return;
+            }
+            response.writeHead(200, { "content-type": "text/event-stream" });
+            const encryptedReasoning = Buffer
+              .from(`${"b".repeat(550)}step one`)
+              .toString("base64");
+            const events = [
+              { type: "response.created", response: { id: "resp-1" } },
+              {
+                type: "response.output_item.added",
+                item: {
+                  type: "reasoning",
+                  id: "reasoning-1",
+                  summary: [{ type: "summary_text", text: "" }],
+                },
+              },
+              {
+                type: "response.reasoning_summary_text.delta",
+                delta: "step one",
+                summary_index: 0,
+              },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "reasoning",
+                  id: "reasoning-1",
+                  summary: [{ type: "summary_text", text: "step one" }],
+                  encrypted_content: encryptedReasoning,
+                },
+              },
+              {
+                type: "response.output_item.added",
+                item: {
+                  type: "message",
+                  role: "assistant",
+                  id: "message-1",
+                  content: [],
+                },
+              },
+              { type: "response.output_text.delta", delta: "Done" },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "message",
+                  role: "assistant",
+                  id: "message-1",
+                  content: [{ type: "output_text", text: "Done" }],
+                },
+              },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp-1",
+                  usage: {
+                    input_tokens: 1,
+                    input_tokens_details: null,
+                    output_tokens: 1,
+                    output_tokens_details: null,
+                    total_tokens: 2,
+                  },
+                },
+              },
+            ];
+            for (const event of events) {
+              response.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+            response.end();
+          });
+          return;
+        }
+        request.resume();
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "fixture endpoint" } }));
+      });
+      await new Promise<void>((resolveListen, rejectListen) => {
+        apiServer.once("error", rejectListen);
+        apiServer.listen(0, "127.0.0.1", () => resolveListen());
+      });
+      const apiAddress = apiServer.address();
+      if (!apiAddress || typeof apiAddress === "string") {
+        throw new Error("自定义 Provider 合同无法创建本机 Responses 夹具");
+      }
+      mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+      mkdirSync(workspace, { recursive: true, mode: 0o700 });
+      writeFileSync(join(codexHome, "config.toml"), [
+        'model = "gpt-5.6-terra"',
+        "",
+        "[model_providers.thirdparty]",
+        'name = "Contract Responses Provider"',
+        `base_url = "http://127.0.0.1:${apiAddress.port}/v1"`,
+        'wire_api = "responses"',
+        "requires_openai_auth = false",
+        "supports_websockets = false",
+        "",
+      ].join("\n"), { mode: 0o600 });
+      writeGatewayConfig(configPath, {
+        version: 1,
+        default_workspace: "integration",
+        telegram: {
+          bot_token: "integration-token",
+          allowed_user_ids: [123],
+          message_format: "html",
+        },
+        network: {},
+        codex: {
+          binary: process.env.CODEX_BINARY ?? "codex",
+          socket_path: socketPath,
+          sandbox: "workspace-write",
+        },
+        approval: { timeout_seconds: 300 },
+        storage: { database_path: join(testRuntime, "gateway.sqlite3") },
+        logging: { level: "info" },
+        workspaces: [{ id: "integration", name: "Integration", cwd: workspace }],
+      });
+
+      let stdout = "";
+      let stderr = "";
+      let client: CodexAppServerClient | undefined;
+      const service = spawn(
+        process.execPath,
+        [resolve("bin/codexc.mjs"), "service-app-server"],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            CODEX_CONNECT_HOME: testRuntime,
+            CODEX_CONNECT_CONFIG_FILE: configPath,
+            CODEX_HOME: codexHome,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: process.platform !== "win32",
+        },
+      );
+      service.stdout?.setEncoding("utf8");
+      service.stderr?.setEncoding("utf8");
+      service.stdout?.on("data", (chunk: string) => {
+        stdout = appendDiagnostic(stdout, chunk);
+      });
+      service.stderr?.on("data", (chunk: string) => {
+        stderr = appendDiagnostic(stderr, chunk);
+      });
+
+      try {
+        await waitFor(
+          () => existsSync(socketPath) && stdout.includes("openai 模型统计代理已启动"),
+          15_000,
+          () => service.exitCode === null && service.signalCode === null
+            ? undefined
+            : new Error(appServerFailure(
+                "自定义 Provider App Server 在就绪前退出",
+                `${stdout}\n${stderr}`,
+              )),
+        );
+        expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
+          primaryProvider: "openai",
+          managedProviders: [],
+          socketPaths: [socketPath],
+        });
+        client = new CodexAppServerClient(
+          new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+          { sandbox: "read-only" },
+        );
+        await client.connect();
+        expect((await client.listModels()).some(({ model }) => model === "gpt-5.6-terra"))
+          .toBe(true);
+
+        const started = await client.startThread(workspace);
+        const threadId = started.thread.id;
+        let reasoningDeltaCount = 0;
+        let turnId: string | undefined;
+        let completed = false;
+        let policyError: Extract<ReturnType<typeof toConversationInputEvent>, { type: "turn.error" }> | undefined;
+        let policyCompleted: Extract<ReturnType<typeof toConversationInputEvent>, { type: "turn.completed" }> | undefined;
+        const removeNotification = client.onNotification((notification) => {
+          const event = toConversationInputEvent(notification);
+          if (event?.type === "item.reasoning.delta" && event.threadId === threadId) {
+            reasoningDeltaCount += 1;
+          }
+          if (
+            event?.type === "turn.completed"
+            && event.threadId === threadId
+          ) {
+            completed = true;
+          }
+          if (event?.type === "turn.error" && event.threadId === threadId) {
+            policyError = event;
+          }
+          if (event?.type === "turn.completed" && event.threadId === threadId && event.status === "failed") {
+            policyCompleted = event;
+          }
+        });
+        try {
+          const turn = await client.startTurn(
+            threadId,
+            [{ type: "text", text: "reason through it" }],
+            "codex_connect:contract",
+            workspace,
+          );
+          turnId = turn.turnId;
+          await waitFor(
+            () => reasoningDeltaCount >= 1,
+            10_000,
+          );
+          await waitFor(() => completed, 10_000);
+
+          const policyTurn = await client.startTurn(
+            threadId,
+            [{ type: "text", text: "trigger policy violation" }],
+            "codex_connect:contract-policy",
+            workspace,
+          );
+          turnId = policyTurn.turnId;
+          await waitFor(() => policyCompleted !== undefined, 10_000);
+          expect(policyError).toMatchObject({
+            threadId,
+            turnId: policyTurn.turnId,
+            willRetry: false,
+            errorCode: "misalignmentPolicyViolation",
+          });
+          expect(policyCompleted).toMatchObject({
+            threadId,
+            turnId: policyTurn.turnId,
+            status: "failed",
+            errorCode: "misalignmentPolicyViolation",
+          });
+        } finally {
+          removeNotification();
+          if (turnId) {
+            await client.interruptTurn(threadId, turnId).catch(() => undefined);
+          }
+          await client.unsubscribeThread(threadId).catch(() => undefined);
+          await client.deleteThread(threadId).catch(() => undefined);
+        }
+      } finally {
+        try {
+          await client?.close().catch(() => undefined);
+          await stopDetachedTestProcess(service, 10_000);
+          await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
+        } finally {
+          await new Promise<void>((resolveClose, rejectClose) => {
+            apiServer.close((error) => error ? rejectClose(error) : resolveClose());
+          });
+          rmSync(testRuntime, { recursive: true, force: true });
+        }
+      }
+    }, 30_000);
+
+    it("starts an on-demand custom switching App Server with the official catalog", async () => {
+      const testRuntime = mkdtempSync(join(tmpdir(), "codex-custom-switching-contract-"));
+      const codexHome = join(testRuntime, "codex-home");
+      const workspace = join(testRuntime, "workspace");
+      const configPath = join(testRuntime, "config.toml");
+      const socketPath = join(testRuntime, "codex-app-server.sock");
+      const customSocketPath = providerAppServerSocketPath(socketPath, "OpenAI");
+      const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
+      const apiServer = createServer((request, response) => {
+        request.resume();
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "fixture endpoint" } }));
+      });
+      await new Promise<void>((resolveListen, rejectListen) => {
+        apiServer.once("error", rejectListen);
+        apiServer.listen(0, "127.0.0.1", () => resolveListen());
+      });
+      const apiAddress = apiServer.address();
+      if (!apiAddress || typeof apiAddress === "string") {
+        throw new Error("自定义切换 Provider 合同无法创建本机 Responses 夹具");
+      }
+      mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+      mkdirSync(workspace, { recursive: true, mode: 0o700 });
+      writeFileSync(join(codexHome, "config.toml"), 'model_provider = "openai"\n', {
+        mode: 0o600,
+      });
+      writeCustomPrimaryProviderSwitchingProfile({
+        provider: "OpenAI",
+        model: "gpt-5.6-terra",
+        name: "OpenAI",
+        baseUrl: `http://127.0.0.1:${apiAddress.port}/v1`,
+        apiKey: "sk-integration-placeholder",
+        supportsWebsockets: false,
+      }, {
+        ...process.env,
+        CODEX_CONNECT_HOME: testRuntime,
+        CODEX_HOME: codexHome,
+      });
+      writeGatewayConfig(configPath, {
+        version: 1,
+        default_workspace: "integration",
+        telegram: {
+          bot_token: "integration-token",
+          allowed_user_ids: [123],
+          message_format: "html",
+        },
+        network: {},
+        codex: {
+          binary: process.env.CODEX_BINARY ?? "codex",
+          socket_path: socketPath,
+          sandbox: "workspace-write",
+        },
+        approval: { timeout_seconds: 300 },
+        storage: { database_path: join(testRuntime, "gateway.sqlite3") },
+        logging: { level: "info" },
+        workspaces: [{ id: "integration", name: "Integration", cwd: workspace }],
+      });
+
+      let stdout = "";
+      let stderr = "";
+      let customClient: CodexAppServerClient | undefined;
+      let threadId: string | undefined;
+      const service = spawn(
+        process.execPath,
+        [resolve("bin/codexc.mjs"), "service-app-server"],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            CODEX_CONNECT_HOME: testRuntime,
+            CODEX_CONNECT_CONFIG_FILE: configPath,
+            CODEX_HOME: codexHome,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: process.platform !== "win32",
+        },
+      );
+      service.stdout?.setEncoding("utf8");
+      service.stderr?.setEncoding("utf8");
+      service.stdout?.on("data", (chunk: string) => {
+        stdout = appendDiagnostic(stdout, chunk);
+      });
+      service.stderr?.on("data", (chunk: string) => {
+        stderr = appendDiagnostic(stderr, chunk);
+      });
+
+      try {
+        await waitFor(
+          () => existsSync(socketPath) && stdout.includes("openai 模型统计代理已启动"),
+          15_000,
+          () => service.exitCode === null && service.signalCode === null
+            ? undefined
+            : new Error(appServerFailure(
+                "自定义切换主 App Server 在就绪前退出",
+                `${stdout}\n${stderr}`,
+              )),
+        );
+        expect(sameAppServerTopology(await inspectAppServerSupervisor(socketPath), {
+          primaryProvider: "openai",
+          managedProviders: ["OpenAI"],
+          socketPaths: [socketPath, customSocketPath],
+        })).toBe(true);
+
+        await ensureAppServerProvider(socketPath, "OpenAI").catch((error) => {
+          throw new Error(appServerFailure(
+            error instanceof Error ? error.message : String(error),
+            `${stdout}\n${stderr}`,
+          ), { cause: error });
+        });
+        customClient = new CodexAppServerClient(
+          new JsonRpcClient(new UnixWebSocketTransport(customSocketPath)),
+          { sandbox: "read-only" },
+        );
+        await customClient.connect();
+        expect((await customClient.listModels()).some(({ model }) => model === "gpt-5.6-terra"))
+          .toBe(true);
+        const started = await customClient.startThread(workspace);
+        threadId = started.thread.id;
+        expect(started.thread.modelProvider).toBe("OpenAI");
+      } finally {
+        if (threadId) {
+          await customClient?.unsubscribeThread(threadId).catch(() => undefined);
+          await customClient?.deleteThread(threadId).catch(() => undefined);
+        }
+        await customClient?.close().catch(() => undefined);
+        await stopDetachedTestProcess(service, 10_000);
+        await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
+        await new Promise<void>((resolveClose, rejectClose) => {
+          apiServer.close((error) => error ? rejectClose(error) : resolveClose());
+        });
+        rmSync(testRuntime, { recursive: true, force: true });
+      }
+    }, 30_000);
+
+    it("starts OpenAI and an on-demand OpenCode Go App Server with matching topology", async () => {
+      const testRuntime = mkdtempSync(join(tmpdir(), "codex-contract-"));
+      const codexHome = join(testRuntime, "codex-home");
+      const workspace = join(testRuntime, "workspace");
+      const configPath = join(testRuntime, "config.toml");
+      const socketPath = join(testRuntime, "codex-app-server.sock");
+      const openCodeSocketPath = providerAppServerSocketPath(socketPath, "opencode-go");
+      const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
+      const providerDirectory = join(testRuntime, "providers", "opencode-go");
+      mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+      mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+      mkdirSync(workspace, { recursive: true, mode: 0o700 });
+      const roleConfigPath = join(codexHome, "sf-agent.config.toml");
+      writeFileSync(
+        roleConfigPath,
+        [
+          'model = "deepseek-v4-flash"',
+          'model_provider = "opencode-go"',
+          'model_reasoning_effort = "high"',
+          'developer_instructions = "Integration fixture role"',
+          "",
+        ].join("\n"),
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(codexHome, "config.toml"),
+        [
+          "[features]",
+          "multi_agent_v2 = true",
+          "",
+          "[agents.external]",
+          'description = "Integration fixture role"',
+          `config_file = ${JSON.stringify(roleConfigPath)}`,
+          "",
+        ].join("\n"),
+        { mode: 0o600 },
+      );
+      const catalogPath = join(providerDirectory, "models.json");
+      const validCatalog = `${JSON.stringify({
+        models: [{
+          slug: "deepseek-v4-flash",
+          display_name: "DeepSeek-V4-Flash",
+          description: "OpenCode Go contract fixture",
+          context_window: 200_000,
+          default_reasoning_level: "high",
+          supported_reasoning_levels: [{
+            effort: "high",
+            description: "OpenCode Go contract fixture",
+          }],
+          shell_type: "shell_command",
+          visibility: "list",
+          supported_in_api: true,
+          priority: 1,
+          availability_nux: null,
+          upgrade: null,
+          base_instructions: "You are a coding agent.",
+          support_verbosity: true,
+          default_verbosity: "low",
+          apply_patch_tool_type: "freeform",
+          truncation_policy: { mode: "tokens", limit: 10_000 },
+          supports_parallel_tool_calls: true,
+          experimental_supported_tools: [],
+        }],
+      })}\n`;
+      // 能通过 Gateway 启动校验、但缺少 codex 要求的 display_name，
+      // 用于验证首次按需启动失败时服务仍然存活。
+      const invalidForCodexCatalog = `${JSON.stringify({
+        models: [{
+          slug: "deepseek-v4-flash",
+          context_window: 200_000,
+          default_reasoning_level: "high",
+          supported_reasoning_levels: [{
+            effort: "high",
+            description: "OpenCode Go contract fixture",
+          }],
+        }],
+      })}\n`;
+      writeFileSync(
+        catalogPath,
+        invalidForCodexCatalog,
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(providerDirectory, "managed.toml"),
+        'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(codexHome, "sf-opencode-go.config.toml"),
+        [
+          'model = "deepseek-v4-flash"',
+          'model_provider = "opencode-go"',
+          'model_reasoning_effort = "high"',
+          `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+          "[model_providers.opencode-go]",
+          'name = "opencode-go"',
+          'base_url = "https://opencode.ai/zen/go/v1"',
+          'wire_api = "responses"',
+          "requires_openai_auth = false",
+          "supports_websockets = false",
+          'experimental_bearer_token = "sk-integration-placeholder"',
+          "",
+        ].join("\n"),
+        { mode: 0o600 },
+      );
+      writeGatewayConfig(configPath, {
+        version: 1,
+        default_workspace: "integration",
+        telegram: {
+          bot_token: "integration-token",
+          allowed_user_ids: [123],
+          message_format: "html",
+        },
+        network: {},
+        codex: {
+          binary: process.env.CODEX_BINARY ?? "codex",
+          socket_path: socketPath,
+          sandbox: "workspace-write",
+        },
+        approval: { timeout_seconds: 300 },
+        storage: { database_path: join(testRuntime, "gateway.sqlite3") },
+        logging: { level: "info" },
+        workspaces: [{ id: "integration", name: "Integration", cwd: workspace }],
+      });
+
+      let stdout = "";
+      let stderr = "";
+      let client: CodexAppServerClient | undefined;
+      let openCodeClient: CodexAppServerClient | undefined;
+      const service = spawn(
+        process.execPath,
+        [resolve("bin/codexc.mjs"), "service-app-server"],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            CODEX_CONNECT_HOME: testRuntime,
+            CODEX_CONNECT_CONFIG_FILE: configPath,
+            CODEX_HOME: codexHome,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: process.platform !== "win32",
+        },
+      );
+      service.stdout?.setEncoding("utf8");
+      service.stderr?.setEncoding("utf8");
+      service.stdout?.on("data", (chunk: string) => {
+        stdout = appendDiagnostic(stdout, chunk);
+      });
+      service.stderr?.on("data", (chunk: string) => {
+        stderr = appendDiagnostic(stderr, chunk);
+      });
+
+      try {
+        await waitFor(
+          () => existsSync(socketPath) && stdout.includes("openai 模型统计代理已启动"),
+          15_000,
+          () => service.exitCode === null && service.signalCode === null
+            ? undefined
+            : new Error(appServerFailure(
+                "service-app-server 在真实 App Server 就绪前退出",
+                `${stdout}\n${stderr}`,
+              )),
+        );
+
+        const topology = await inspectAppServerSupervisor(socketPath);
+        expect(sameAppServerTopology(topology, {
+          primaryProvider: "openai",
+          managedProviders: ["opencode-go"],
+          socketPaths: [socketPath, openCodeSocketPath],
+        })).toBe(true);
+
+        client = new CodexAppServerClient(
+          new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+          { sandbox: "read-only" },
+        );
+        const initialized = await client.connect();
+        expect(initialized.userAgent).toContain("codex_connect/");
+
+        await expect(ensureAppServerProvider(socketPath, "opencode-go"))
+          .rejects.toThrow("模型 Provider App Server 启动失败：opencode-go（exit=1）");
+        expect(service.exitCode).toBeNull();
+        expect(await client.listModels()).not.toHaveLength(0);
+        expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
+          primaryProvider: "openai",
+        });
+
+        writeFileSync(catalogPath, validCatalog, { mode: 0o600 });
+        await ensureAppServerProvider(socketPath, "opencode-go").catch((error) => {
+          throw new Error(appServerFailure(
+            error instanceof Error ? error.message : String(error),
+            `${stdout}\n${stderr}`,
+          ), { cause: error });
+        });
+        expect(existsSync(openCodeSocketPath)).toBe(true);
+        openCodeClient = new CodexAppServerClient(
+          new JsonRpcClient(new UnixWebSocketTransport(openCodeSocketPath)),
+          { sandbox: "read-only" },
+        );
+        const openCodeInitialized = await openCodeClient.connect();
+        expect(openCodeInitialized.userAgent).toContain("codex_connect/");
+        const providerLease = await acquireAppServerProviderLease(socketPath, "opencode-go");
+        try {
+          expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
+            leasedProviders: ["opencode-go"],
+          });
+          await expect(releaseAppServerProvider(socketPath, "opencode-go"))
+            .resolves.toEqual({ released: false, reason: "leased" });
+        } finally {
+          await providerLease.close();
+        }
+        const models = await openCodeClient.listModels();
+        expect(models.some(({ model }) => model === "deepseek-v4-flash")).toBe(true);
+      } finally {
+        try {
+          await openCodeClient?.close().catch(() => undefined);
+          await client?.close().catch(() => undefined);
+          await stopDetachedTestProcess(service, 10_000);
+          await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
+          expect(existsSync(roleConfigPath)).toBe(true);
+          expect(readFileSync(roleConfigPath, "utf8")).not.toContain("api_key");
+        } finally {
+          rmSync(testRuntime, { recursive: true, force: true });
+        }
+      }
+    }, 45_000);
+  });

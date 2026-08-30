@@ -258,6 +258,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   });
 
+  describe("capability discovery", () => {
   it("maps the isolated App Server Skill list to stable installed entries", async () => {
     const skills = await ownerClient.listSkills(workdir);
 
@@ -491,6 +492,9 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
+  });
+
+  describe("state sharing", () => {
   it("shares persisted Thread pin state across clients without local storage", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
@@ -594,6 +598,9 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 20_000);
 
+  });
+
+  describe("configuration and input", () => {
   it("round-trips MCP tool approval metadata through the real App Server", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
@@ -1108,6 +1115,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       }]).catch(() => undefined);
     }
   }, 15_000);
+  });
 });
 
 async function expectConfiguredTier(client: CodexAppServerClient, cwd: string, expected: string): Promise<void> {
