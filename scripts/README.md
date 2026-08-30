@@ -351,7 +351,9 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   使用情况启动；共享 `agents.external` 当前选择的 Provider 会预先启动统计代理以保证子代理可用；
   随后再启动 Gateway。只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
-  App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
+  App Server 失败关闭；Windows 前台停止时通过父子 Node IPC 依次请求 Gateway 和 App Server Supervisor
+  正常释放私有端点，父入口保留有限超时后的精确进程树终止。脚本统一收敛自身启动错误，已经由内部
+  服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
@@ -359,7 +361,10 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
   完成第三方 Provider 认证；同时按当前目录或显式
   `--workspace` 解析有效 Sandbox、审批策略与 Permission Profile，第三方 Profile 不复制权限，
-  用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
+  用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；固定版
+  CLI 已不接受 `--ask-for-approval untrusted`，因此该 Workspace 策略使用仅限当前进程和精确
+  Workspace 路径的官方 `projects.<path>.trust_level="untrusted"` 配置覆盖，保持
+  `UnlessTrusted` 语义且不改写 Codex 用户配置；
   Windows 在获取 Provider 租约前校验追加 Provider 后缀后的最终 UDS 路径小于 108 UTF-8 字节；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `windows-app-server-proxy-probe.mjs`：阶段零 Windows Transport 探针；不依赖项目安装或第三方包，

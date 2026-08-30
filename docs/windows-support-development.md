@@ -631,8 +631,9 @@ Server Socket 和统计代理端口全部消失，探针目录也已按精确路
 文件系统字符串编码；依赖在字节数大于等于 108 时返回 `path must be shorter than SUN_LEN`。实机构造
 ASCII 精确边界后，107 字节 Socket 成功监听，108 字节稳定拒绝，与锁定源码一致。
 
-共享 App Server Runtime 现在在 Windows 解析主 Socket 后立即按 UTF-8 字节校验，并对所有追加
-Provider ID 后缀的最终 Socket 路径逐一复核。Gateway 组合根在创建每个 Transport 前执行同一校验；
+共享 App Server Runtime 现在在 Windows 形成实际运行拓扑时按 UTF-8 字节校验主 Socket，并对所有追加
+Provider ID 后缀的最终 Socket 路径逐一复核；纯配置和路径解析不提前施加运行时限制。Gateway 组合根
+在创建每个 Transport 前执行同一校验；
 Remote TUI 在获取 Provider 租约前校验所选最终路径。路径过长时不启动 App Server、Proxy、Gateway 或
 Provider 租约，也不隐式搬移端点，而是报告当前字节数、必须小于 108，并提示在 `config.toml` 中缩短
 `codex.socket_path` 且为 Provider 后缀预留空间。
@@ -640,6 +641,61 @@ Provider 租约，也不隐式搬移端点，而是报告当前字节数、必�
 内存探针确认 ASCII 和中文路径均按 UTF-8 字节计数，107 接受、108 拒绝。公开 `codexc start` 使用
 108 字节绝对 Socket 的隔离配置时，在输出可操作错误后以退出码 1 返回，未创建 rendezvous 或启动模型
 统计代理。该前置校验保持 Unix 路径解析和既有配置结果不变。
+
+#### 第二十六轮实机记录：2026-08-30
+
+本轮在独立的 Windows 临时配置目录内通过公开 CLI 完成 `codexc init`、`config --json`、交互式
+`config` 写入、`work add/list --json`、`metrics status --json`、`center info --json` 和只读
+`doctor --json`。Doctor 只因占位配置未提供有效渠道而以结构化失败退出；配置文件与 Workspace 写入、
+当前 SID 私有 ACL、指标和中心路径均正常。此前已经完成的 WebUI、指标中心和 Setup 安全取消不重复运行。
+
+随后使用不可外发的占位 Telegram Token 与本机拒绝代理启动公开 `codexc start`，Gateway 通过
+`windows-uds-proxy` 连接固定版 App Server；另一原生 PowerShell PTY 以
+`codexc remote --workspace windows-stage4` 进入同一 App Server，工作目录精确落在注册 Workspace，
+并成功打开原生 `/permissions` 选择界面。该结果验证显式 Workspace、Remote TUI 和 App Server 权限
+入口连通，但未提交 Turn、审批选择或外部请求，不替代真实 Provider 与渠道验收。
+
+首次停止时所有进程和统计端口均已退出，但 Windows `taskkill` 无法让 Node 子进程等待异步资源关闭，
+留下失效的 `gateway-owner.sock` 与 `codex-app-server-supervisor.sock` 描述文件。前台入口现通过仅限父子
+进程的 Node IPC 逐层请求 `dev-all`、Gateway 和 App Server Supervisor 正常停止；现有有限超时和精确
+PID 树终止继续作为 IPC 不可用或关闭超时的失败路径。重新构建并完整复验后，相关进程为 0、统计端口
+关闭、两个私有 IPC 描述文件均已删除，只保留上游按既定语义维护的 App Server UDS rendezvous。
+
+#### 第二十七轮实机记录：2026-08-30
+
+本轮继续使用独立的 Windows 临时配置目录：Telegram 只使用指向本机拒绝端口的私有
+`proxy_url` 和占位凭据，OpenAI 则继续使用当前 PowerShell 会话的标准代理。公开 `codexc start`
+完成 Gateway、统计代理和固定版 App Server 启动后，`codexc remote --workspace windows-stage4`
+从另一原生 PowerShell PTY 连接同一 App Server。真实 OpenAI Turn 通过 PowerShell 执行
+`Get-Location`，返回注册 Workspace 的精确路径 `F:\GitHub\codex-channels`，没有修改仓库文件。
+
+退出 Remote 后，使用前一会话给出的 Thread 标识再次执行 `codexc remote ... resume <Thread ID>`；
+TUI 恢复了同一条用户输入、命令输出和完成回复，证明固定 App Server 上的 Thread 可由 Windows
+Remote TUI 跨进程恢复。随后在 `/permissions` 中显式选择“Ask for approval”，受限环境内的只读
+PowerShell HEAD 请求先失败，TUI 再显示原生命令、用途和一次性/前缀授权选项；选择一次性批准后，
+同一命令在受限环境外返回 HTTP 200。该验证没有写入持久授权规则。
+
+另一个 Turn 运行 `Start-Sleep -Seconds 30` 时按 `Esc`，TUI 明确显示 Conversation interrupted；
+`/stop` 随后关闭遗留的后台终端。Remote 和前台 Gateway 依次退出后，与隔离配置关联的进程为 0，
+`gateway-owner.sock` 与 `codex-app-server-supervisor.sock` 均不存在，只保留上游 App Server UDS
+rendezvous；隔离目录随后删除。
+
+本轮同时确认一个未收敛边界：固定版 Codex CLI 0.150.1 的公开 `--ask-for-approval` 参数只接受
+`on-request` 和 `never`，直接传入项目 Workspace Schema 已允许的 `untrusted` 会在进入 TUI 前拒绝。
+因此本轮只证明原生 `on-request` 一次性审批，不把 Workspace 三种审批策略整体标记为完成；后续须先
+核对固定版 CLI 的受支持传参方式，再修复 Remote 的 `untrusted` 映射或收窄公开配置。
+
+#### 第二十八轮实机记录：2026-08-30
+
+固定版 Codex CLI 0.150.1 源码确认公开 `--ask-for-approval` 只保留 `on-request` 与 `never`，而精确
+`[projects."<路径>"] trust_level = "untrusted"` 会映射到官方 `UnlessTrusted`。Remote 因此不再把
+Workspace 的 `untrusted` 传给已废弃的 CLI 枚举，而是仅对当前 Codex 进程注入精确 Workspace 项目
+信任覆盖；显式权限参数仍优先，且不会写入 `~/.codex/config.toml`。
+
+本轮在原生 PowerShell PTY 中使用固定版 CLI 和 Windows 反斜杠 Workspace 路径执行同形配置覆盖，
+CLI 成功通过参数与配置解析并进入 TUI；随后只因探针刻意指向不存在的本地 App Server Socket 而退出，
+未再出现 `untrusted` 非法值或已废弃配置错误。该结果收敛了 Remote 参数映射，但完整 Workspace
+`untrusted` 命令审批仍与 Sandbox/网络权限组合一并保留到真实 App Server 合同验收。
 
 ### 阶段一：平台运行时与内部 IPC
 
@@ -697,9 +753,12 @@ Windows 环境变量键、真实 `PATH` npm/Codex shim 和生产调用入口均�
 
 ### 阶段四：前台 Windows 功能闭环
 
-状态：命令入口、只读 CLI、Doctor/App Server、WebUI、指标中心和 Remote TUI 基础前台主路径已通过；
-`codexc start` 的 App Server/统计代理/Gateway 前台启动和中断清理、Setup 主菜单与无修改取消已通过；
-交互式配置写入、Remote Profile/共享会话/审批与渠道/Provider 业务闭环仍待验收。
+状态：命令入口、配置初始化与交互写入、Workspace 注册、只读 CLI、Doctor/App Server、WebUI、指标中心
+和显式 Workspace Remote TUI 基础前台主路径已通过；`codexc start` 的 App Server/统计代理/Gateway
+前台启动、父子 IPC 正常关闭和中断清理、Setup 主菜单与无修改取消已通过；真实 OpenAI Turn、同一
+Thread 跨 Remote 进程恢复、原生 `on-request` 一次性审批、Turn 中断和 `untrusted` Remote 参数映射
+已通过。Remote Provider Profile、`untrusted` 的真实命令审批、完整 Sandbox/网络权限组合与渠道/
+Provider 业务闭环仍待验收。
 
 - [ ] `codexc init`、`setup`、`config`、`work`、`start`、`remote`、`doctor`、`metrics`、`webui` 和
   `center` 在前台运行方式下闭环。

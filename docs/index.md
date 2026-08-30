@@ -111,6 +111,8 @@
 `codexc setup` 的脱敏总览复用既有 `config/read` 显示全局默认模型与思考等级，入口位于
 [`setup-summary.mjs`](../scripts/setup-summary.mjs)，由 [`setup.test.ts`](../tests/setup.test.ts) 验证；
 用户设置入口在显式确认后复用下表已有的版本化配置事务，不新增协议方法，也不修改登录状态。
+固定版 CLI 的 Remote 参数只直接接受 `on-request` 与 `never`；Workspace 的 `untrusted` 通过当前
+进程内精确项目 `trust_level="untrusted"` 覆盖恢复官方 `UnlessTrusted` 语义，不写入 Codex 用户配置。
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |

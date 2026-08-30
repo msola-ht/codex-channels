@@ -1214,8 +1214,8 @@ describe("codexc CLI", () => {
       realpathSync(first),
       "-c",
       'default_permissions=":workspace"',
-      "--ask-for-approval",
-      "untrusted",
+      "-c",
+      `projects.${JSON.stringify(realpathSync(first))}.trust_level="untrusted"`,
       "resume",
     ]);
     expect(JSON.parse(readFileSync(explicitCapture, "utf8"))).toEqual([
@@ -1247,8 +1247,8 @@ describe("codexc CLI", () => {
       realpathSync(first),
       "-c",
       'default_permissions=":workspace"',
-      "--ask-for-approval",
-      "untrusted",
+      "-c",
+      `projects.${JSON.stringify(realpathSync(first))}.trust_level="untrusted"`,
       "--profile",
       "personal",
       "resume",
@@ -1260,8 +1260,8 @@ describe("codexc CLI", () => {
       realpathSync(nestedWorkdir),
       "--sandbox",
       "danger-full-access",
-      "--ask-for-approval",
-      "untrusted",
+      "-c",
+      `projects.${JSON.stringify(realpathSync(nestedWorkspace))}.trust_level="untrusted"`,
       "resume",
     ]);
     expect(JSON.parse(readFileSync(workspaceWriteModifierCapture, "utf8"))).toEqual([

@@ -58,12 +58,13 @@ async function runDevAll() {
   const stop = () => {
     if (stopping) return;
     stopping = true;
-    signalChildProcesses(
-      [...(gateway ? [gateway] : []), ...appServerSupervisors],
-      "SIGTERM",
-    );
+    stopForegroundChildren([...(gateway ? [gateway] : []), ...appServerSupervisors]);
   };
-  installProcessSignalHandlers({ SIGINT: stop, SIGTERM: stop });
+  const cleanupSignals = installProcessSignalHandlers({ SIGINT: stop, SIGTERM: stop });
+  const onControlMessage = (message) => {
+    if (message?.type === "codexc-stop") stop();
+  };
+  process.on("message", onControlMessage);
 
   for (const supervisor of appServerSupervisors) {
     supervisor.once("exit", (code, signal) => {
@@ -78,33 +79,55 @@ async function runDevAll() {
     });
   }
 
-  while (!stopping) {
-    gateway = spawn(process.execPath, gatewayEntry, {
-      cwd: runtime.dataDir,
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        CODEX_CONNECT_CONFIG_FILE: runtime.configPath,
-        CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
-        CODEX_CONNECT_SERVICE_ROLE: "gateway",
-      },
-    });
-    const result = await waitForGateway(gateway);
-    gateway = undefined;
-    if (stopping) break;
-    if (result.code === 75) {
-      console.log("Gateway 配置需要重建连接，正在保持 App Server 并重启 Gateway...");
-      continue;
+  try {
+    while (!stopping) {
+      gateway = spawn(process.execPath, gatewayEntry, {
+        cwd: runtime.dataDir,
+        stdio: process.platform === "win32"
+          ? ["inherit", "inherit", "inherit", "ipc"]
+          : "inherit",
+        env: {
+          ...process.env,
+          CODEX_CONNECT_CONFIG_FILE: runtime.configPath,
+          CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
+          CODEX_CONNECT_SERVICE_ROLE: "gateway",
+        },
+      });
+      const result = await waitForGateway(gateway);
+      gateway = undefined;
+      if (stopping) break;
+      if (result.code === 75) {
+        console.log("Gateway 配置需要重建连接，正在保持 App Server 并重启 Gateway...");
+        continue;
+      }
+      stop();
+      if (result.error) {
+        throw new Error(`Gateway 启动失败：${result.error.message}`);
+      }
+      if (result.code !== 0 || result.signal) {
+        throw new Error(
+          `Gateway 意外退出：code=${result.code} signal=${result.signal}`,
+        );
+      }
     }
-    stop();
-    if (result.error) {
-      throw new Error(`Gateway 启动失败：${result.error.message}`);
+  } finally {
+    cleanupSignals();
+    process.off("message", onControlMessage);
+  }
+}
+
+function stopForegroundChildren(children) {
+  for (const child of children) {
+    if (!childProcessIsRunning(child)) continue;
+    if (process.platform === "win32" && child.connected) {
+      try {
+        child.send({ type: "codexc-stop" });
+        continue;
+      } catch {
+        // Fall through to the exact PID-tree termination path.
+      }
     }
-    if (result.code !== 0 || result.signal) {
-      throw new Error(
-        `Gateway 意外退出：code=${result.code} signal=${result.signal}`,
-      );
-    }
+    signalChildProcesses([child], "SIGTERM");
   }
 }
 
@@ -156,7 +179,9 @@ async function ensureAppServerTopology({
     [join(packageDir, "bin", "codexc.mjs"), "service-app-server"],
     {
       cwd: runtime.dataDir,
-      stdio: "inherit",
+      stdio: process.platform === "win32"
+        ? ["inherit", "inherit", "inherit", "ipc"]
+        : "inherit",
       env: {
         ...process.env,
         CODEX_CONNECT_CONFIG_FILE: runtime.configPath,

@@ -148,6 +148,7 @@ function workspaceForWorkdir(workspaces, workdir) {
 function workspacePermissionArguments(workspace, passthrough) {
   const overrides = explicitPermissionOverrides(passthrough);
   const permissions = stringValue(workspace?.permissions);
+  const approvalPolicy = stringValue(workspace?.approval_policy);
   return [
     ...(overrides.sandbox
       ? []
@@ -158,9 +159,11 @@ function workspacePermissionArguments(workspace, passthrough) {
           : []),
     ...(overrides.approval
       ? []
-      : stringValue(workspace?.approval_policy)
-        ? ["--ask-for-approval", stringValue(workspace.approval_policy)]
-        : []),
+      : approvalPolicy === "untrusted"
+        ? ["-c", `projects.${JSON.stringify(workspace.cwd)}.trust_level="untrusted"`]
+        : approvalPolicy
+          ? ["--ask-for-approval", approvalPolicy]
+          : []),
   ];
 }
 

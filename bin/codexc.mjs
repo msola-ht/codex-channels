@@ -1458,7 +1458,9 @@ async function runForegroundScript(
     process.execPath,
     nodeArguments([join(packageDir, relativePath), ...args]),
     {
-      stdio: "inherit",
+      stdio: process.platform === "win32"
+        ? ["inherit", "inherit", "inherit", "ipc"]
+        : "inherit",
       env: { ...runtime.environment, ...additionalEnvironment },
       cwd: workingDirectory ?? runtime.dataDir,
       detached: process.platform !== "win32",
@@ -1487,7 +1489,9 @@ async function runForegroundScript(
     }
     forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
-      signalChildProcesses([child], signal);
+      if (!sendForegroundStopMessage(child, signal)) {
+        signalChildProcesses([child], signal);
+      }
       shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
       shutdownTimer.unref();
     }
@@ -1530,6 +1534,20 @@ async function runForegroundScript(
       })().catch(rejectChild);
     });
   });
+}
+
+function sendForegroundStopMessage(child, signal) {
+  if (process.platform !== "win32" || !child.connected) return false;
+  try {
+    child.send({ type: "codexc-stop", signal }, (error) => {
+      if (error && childProcessIsRunning(child)) {
+        signalChildProcesses([child], signal);
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function waitForProcessGroupExit(processGroupId, timeoutMs) {
@@ -1844,7 +1862,7 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     if (settled) return;
     settled = true;
     cleanup();
-    forward(initialSignal);
+    if (initialSignal) forward(initialSignal);
     void (async () => {
       const cleanupResults = await Promise.allSettled([
         Promise.resolve().then(closeResources),
@@ -1880,10 +1898,18 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
       process.exitCode = 1;
     });
   };
-  cleanup = installProcessSignalHandlers({
+  const cleanupSignals = installProcessSignalHandlers({
     SIGTERM: () => finish(null, "SIGTERM", undefined, "SIGTERM"),
     SIGINT: () => finish(null, "SIGINT", undefined, "SIGINT"),
   });
+  const onControlMessage = (message) => {
+    if (message?.type === "codexc-stop") finish(0, null, undefined, null);
+  };
+  process.on("message", onControlMessage);
+  cleanup = () => {
+    cleanupSignals();
+    process.off("message", onControlMessage);
+  };
   const watchChild = (child) => {
     if (watchers.has(child)) return;
     const onError = (error) => finish(1, null, error);
