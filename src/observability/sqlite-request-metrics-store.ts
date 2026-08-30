@@ -56,7 +56,7 @@ const defaultMaximumRows = 1_000_000;
 const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 // 上游额度接口的 resetsAt 可能在相邻快照间有数秒抖动；仅在很小范围内归并，
 // 避免把真实的不定期重置误合并。
-const quotaResetJitterMs = 5 * 60 * 1_000;
+const quotaResetJitterSeconds = 5 * 60;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
 const pageSortSql = {
@@ -509,7 +509,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           for (const [candidateKey, candidate] of groups) {
             if (candidate.provider === metric.provider
               && candidate.windowId === snapshot.windowId
-              && Math.abs(candidate.resetsAt - snapshot.resetsAt) <= quotaResetJitterMs) {
+              && Math.abs(candidate.resetsAt - snapshot.resetsAt) <= quotaResetJitterSeconds) {
               key = candidateKey;
               existing = candidate;
               break;
@@ -1471,7 +1471,8 @@ function estimateWeeklyQuotaRows(
   for (const row of rows) {
     addWeeklyIntervalRow(periodTotal, row);
     const matching = row.weekly_quota_limit_id === query.limitId
-      && row.weekly_resets_at === query.resetsAt
+      && row.weekly_resets_at !== null
+      && Math.abs(row.weekly_resets_at - query.resetsAt) <= quotaResetJitterSeconds
       && row.weekly_used_percent_millionths !== null;
     const hasOtherSnapshot = row.weekly_quota_limit_id !== null && !matching;
     if (hasOtherSnapshot) {
