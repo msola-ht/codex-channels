@@ -449,6 +449,9 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   到 `~/.codex-connect/codex-channels`，检测 npm 与 Codex CLI，缺少 Codex CLI 时安装项目精确版本，
   并检查登录状态；随后完成依赖、Gateway/WebUI 构建和 npm 全局命令注册。不覆盖现有源码目录、
   配置或数据，也不写入 Shell PATH。
+- 根目录 `install.ps1`：在 Windows PowerShell 7 中执行与 `install.sh` 等价的源码安装事务，使用
+  npm.cmd、用户级 `.codex-connect` 和当前 SID 私有目录，不要求管理员权限；失败时删除临时目录和
+  不完整源码。Windows 公开支持门槛完成前，该入口仍属于开发验证入口。
 - `clean-dist.mjs`：构建前清理 `dist/`。
 - `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果

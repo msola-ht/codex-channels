@@ -11,7 +11,8 @@
 工厂也已接入主 Client 和 Provider Client 的组合根。Gateway Owner、App Server Supervisor 和
 Provider Metrics 已收敛到共享私有 IPC 并通过 Windows 定向探针；当前用户计划任务后台服务主路径也已
 通过实机验证，日志跟随、异常退出重启及本地更新停启/失败恢复也已通过；系统重启、源码候选更新、
-完整渠道/Provider 生命周期和发布验证仍未完成。Windows 可执行文件与 npm shim 调用、精确持有 PID 的子进程树终止已经完成定向回归，配置与
+完整渠道/Provider 生命周期和发布验证仍未完成。Windows PowerShell 7 源码安装器已实现并通过语法与
+帮助验证，但真实安装尚未验收。Windows 可执行文件与 npm shim 调用、精确持有 PID 的子进程树终止已经完成定向回归，配置与
 共享私有文件的 SID/ACL 基础合同也已通过 tarball 冒烟；飞书用户 OAuth、微信 Bot、微信回复上下文和
 第三方 Provider Key 已接入 DPAPI 主密钥保护；状态库、计划任务库、指标库、管理与 WebUI Token、媒体、
 渠道输出和受管备份也已接入当前 SID 私有 ACL，Doctor 已能只读诊断该合同；真实 Remote TUI 已在普通
@@ -735,6 +736,14 @@ App Server 与 Gateway 的标准输出/错误日志；日志跟随改用独立 P
 并恢复健康。该结果覆盖本地更新的服务停启和失败恢复，不替代源码候选构建、全局 CLI 精确版本安装
 提示、系统重启或发布包升级验收。
 
+#### 第三十一轮实现记录：2026-08-30
+
+新增根目录 `install.ps1`，使用 PowerShell 7、`npm.cmd` 和当前用户目录完成源码安装的克隆、精确
+Codex CLI 版本校验、Gateway/WebUI 构建、受管 Git 标记、临时 npm tarball 全局安装及失败清理；不要求
+管理员权限，不修改 Shell PATH。源码安装元数据和卸载流程同时识别 Windows `prefix\node_modules` 与
+历史 Unix `prefix\lib\node_modules` 布局。安装器已通过 PowerShell 解析、`-Help` 和 Node/Lint/类型/
+文档检查；真实联网克隆、依赖构建、全局安装及安装后服务验收留到下一轮，不以脚本解析通过宣称安装完成。
+
 ### 阶段一：平台运行时与内部 IPC
 
 状态：Transport 与内部 IPC 实现子项已完成；阶段整体仍等待内部 IPC 完整安全验收。
@@ -814,7 +823,7 @@ Provider 业务闭环仍待验收。
 ### 阶段五：后台服务、安装、更新与卸载
 
 状态：当前用户计划任务主路径、日志跟随、异常退出重启及本地更新停启/失败恢复已通过实机验证；
-系统重启、源码候选更新和发布安装组合仍待验收。
+PowerShell 源码安装器已实现但未完成实机安装验收，系统重启、源码候选更新和发布安装组合仍待验收。
 
 - [x] 在 Task Scheduler 用户任务与 Windows Service 中选择一种首期正式方案；选择前明确管理员要求、
   登录前/后启动、失败重启、日志、环境变量、凭据访问和卸载语义。

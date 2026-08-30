@@ -1,14 +1,14 @@
 # Git 源码安装
 
-Linux 与 macOS 可以把 Codex Connect 官方 `main` 分支作为完整 Git 仓库安装到：
+Linux、macOS 与 Windows 可以把 Codex Connect 官方 `main` 分支作为完整 Git 仓库安装到：
 
 ```text
 ~/.codex-connect/codex-channels
 ```
 
 配置、数据库、凭据、Socket、日志和输出仍使用 `~/.codex-connect` 下原有目录，不写入 Git
-仓库。Windows 前台 Transport 正在开发验证，但后台服务和源码安装尚未支持，因此安装脚本仍会明确
-拒绝 Windows 和其他未支持平台。
+仓库。Windows 使用 PowerShell 7 和当前用户计划任务；在全部 Windows 发布门槛通过前，该入口仍属于
+开发验证，不代表项目已经公开支持 Windows。
 
 ## 安装
 
@@ -17,6 +17,16 @@ Linux 与 macOS 可以把 Codex Connect 官方 `main` 分支作为完整 Git 仓
 ```bash
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
+
+Windows PowerShell 7 使用仓库根目录的安装器：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+& .\install.ps1
+```
+
+该脚本要求 Git、Node.js 22.13+、npm 和固定版本 Codex CLI；缺少 Codex CLI 时会通过 `npm.cmd`
+安装精确版本。它只使用当前用户目录，不要求管理员权限；安装失败会清理临时目录和不完整源码。
 
 安装器先在 `~/.codex-connect` 的私有临时目录完成克隆、依赖安装、Gateway 与 WebUI 构建和版本
 校验；`main` 中 `package.json` 的版本必须与本机 Codex CLI 一致。成功后才移动为

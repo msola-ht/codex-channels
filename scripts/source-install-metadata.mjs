@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
@@ -10,13 +10,12 @@ export function inferNpmGlobalPrefix(packageDirectory) {
   const scopeDirectory = dirname(packageDirectory);
   const nodeModulesDirectory = dirname(scopeDirectory);
   const libraryDirectory = dirname(nodeModulesDirectory);
-  const prefix = dirname(libraryDirectory);
-  if (
-    packageDirectory !== join(scopeDirectory, "codexc")
+  const prefix = process.platform === "win32" && basename(libraryDirectory).toLowerCase() !== "lib"
+    ? libraryDirectory
+    : dirname(libraryDirectory);
+  if (packageDirectory !== join(scopeDirectory, "codexc")
     || scopeDirectory !== join(nodeModulesDirectory, "@hegenai")
-    || nodeModulesDirectory !== join(libraryDirectory, "node_modules")
-    || libraryDirectory !== join(prefix, "lib")
-  ) {
+    || nodeModulesDirectory !== join(libraryDirectory, "node_modules")) {
     return undefined;
   }
   const manifest = join(packageDirectory, "package.json");

@@ -49,6 +49,9 @@ curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/instal
 安装器会从源码构建并注册 npm 全局 `codexc` 命令，不修改 Shell PATH。目录、环境检测、更新和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 
+Windows PowerShell 7 使用仓库根目录的 `install.ps1`；该入口目前属于 Windows 开发验证，不代表
+公开支持门槛已经完成。详见 [`Git 源码安装`](docs/source-install.md)。
+
 初始化并配置通讯渠道：
 
 ```bash

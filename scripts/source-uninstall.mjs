@@ -127,14 +127,11 @@ function hasManagedSourceMarker(checkout, environment) {
 
 function uninstallGlobalPackage(prefixes, environment) {
   for (const prefix of prefixes) {
-    const packageDirectory = join(
-      prefix,
-      "lib",
-      "node_modules",
-      "@hegenai",
-      "codexc",
-    );
-    if (inferNpmGlobalPrefix(packageDirectory) !== prefix) continue;
+    const packageDirectory = [
+      join(prefix, "node_modules", "@hegenai", "codexc"),
+      join(prefix, "lib", "node_modules", "@hegenai", "codexc"),
+    ].find((candidate) => inferNpmGlobalPrefix(candidate) === prefix);
+    if (packageDirectory === undefined) continue;
     const invocation = resolveExecutableInvocation(
       "npm",
       [
