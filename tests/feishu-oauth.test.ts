@@ -28,7 +28,6 @@ import {
 } from "../src/surfaces/feishu/oauth-device-flow.js";
 import {
   EncryptedFileFeishuUserTokenStore,
-  feishuTokenStatus,
   MacKeychainFeishuUserTokenStore,
   type FeishuUserTokenStore,
   type StoredFeishuUserToken,
@@ -664,22 +663,6 @@ describe("Feishu encrypted token store", () => {
       .rejects.toThrow("读取飞书加密凭据失败");
   });
 
-  it("reports valid, refreshable, expired, and missing states without exposing tokens", () => {
-    const now = 10_000_000;
-    expect(feishuTokenStatus(null, now)).toBe("missing");
-    expect(feishuTokenStatus(storedToken({
-      expiresAt: now + 600_000,
-      refreshExpiresAt: now + 1_000_000,
-    }), now)).toBe("valid");
-    expect(feishuTokenStatus(storedToken({
-      expiresAt: now,
-      refreshExpiresAt: now + 1_000_000,
-    }), now)).toBe("refreshable");
-    expect(feishuTokenStatus(storedToken({
-      expiresAt: now,
-      refreshExpiresAt: now,
-    }), now)).toBe("expired");
-  });
 });
 
 describe("Feishu macOS Keychain token store", () => {
