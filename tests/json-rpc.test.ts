@@ -2297,6 +2297,18 @@ describe("JsonRpcClient", () => {
       .toEqual({ includeLayers: false });
   });
 
+  it("reads the effective reasoning effort for a Workspace through the App Server config API", async () => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+      sandbox: "workspace-write",
+    });
+    await client.connect();
+
+    await expect(client.readDefaultReasoningEffort("/tmp/project")).resolves.toBe("high");
+    expect(transport.sent.find((message) => message.method === "config/read")?.params)
+      .toEqual({ cwd: "/tmp/project", includeLayers: false });
+  });
+
   it("maps the effective Fast config to a stable service-tier value", async () => {
     const transport = new FakeTransport();
     const client = new CodexAppServerClient(new JsonRpcClient(transport), {

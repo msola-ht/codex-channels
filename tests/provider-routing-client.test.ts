@@ -620,6 +620,19 @@ describe("ProviderRoutingClient", () => {
     expect(openai.readDefaultServiceTier).not.toHaveBeenCalled();
   });
 
+  it("reads the default reasoning effort from the selected Provider App Server", async () => {
+    const openai = client();
+    const deepseek = client();
+    deepseek.readDefaultReasoningEffort.mockResolvedValue("high");
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.readDefaultReasoningEffort(cwd, "deepseek"))
+      .resolves.toBe("high");
+
+    expect(deepseek.readDefaultReasoningEffort).toHaveBeenCalledWith(cwd);
+    expect(openai.readDefaultReasoningEffort).not.toHaveBeenCalled();
+  });
+
   it("keeps experimental Plugin discovery on the primary OpenAI App Server", async () => {
     const openai = client();
     const deepseek = client();
@@ -1039,6 +1052,7 @@ function client() {
     compactThread: vi.fn(),
     listModels: vi.fn(),
     writeDefaultFastMode: vi.fn(),
+    readDefaultReasoningEffort: vi.fn(),
     readDefaultServiceTier: vi.fn(),
     forkThread: vi.fn(),
     startReview: vi.fn(),

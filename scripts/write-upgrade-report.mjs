@@ -13,6 +13,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { analyzeProtocolDiff } from "./analyze-upgrade-protocol.mjs";
+import { analyzePublicCliContractDiff } from "./codex-public-cli-contract.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const gitOutputBufferBytes = 16 * 1024 * 1024;
@@ -175,6 +176,7 @@ function main() {
     completeValidation,
   );
   const protocolImpact = analyzeProtocolDiff(root, diff.nameStatus);
+  const publicCliImpact = analyzePublicCliContractDiff(root);
   const baseVersion = readProtocolVersionAtHead(root);
 
   writeFileSync(resolve(output, "base-commit.txt"), `${diff.baseCommit}\n`);
@@ -185,6 +187,7 @@ function main() {
   writeFileSync(resolve(output, "diff-stat.txt"), diff.diffStat);
   writeFileSync(resolve(output, "upgrade.patch"), diff.patch);
   writeFileSync(resolve(output, "protocol-impact.md"), protocolImpact);
+  writeFileSync(resolve(output, "public-cli-impact.md"), publicCliImpact);
   writeFileSync(resolve(output, "summary.md"), summary);
   if (completeValidation) {
     writeFileSync(

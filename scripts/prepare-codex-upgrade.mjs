@@ -7,6 +7,10 @@ import {
   compareStableVersions,
   resolveOfficialRelease,
 } from "./resolve-codex-release.mjs";
+import {
+  capturePublicCliContract,
+  writePublicCliContract,
+} from "./codex-public-cli-contract.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const versionPattern = /^\d+\.\d+\.\d+$/u;
@@ -101,6 +105,7 @@ async function main() {
       `本机 Codex CLI 是 ${installedVersion}，目标是 ${options.targetVersion}；请先安装精确目标版本。`,
     );
   }
+  const publicCliContract = capturePublicCliContract(codex);
 
   console.log(`当前协议版本：${currentVersion}`);
   console.log(`目标 CLI 版本：${options.targetVersion}`);
@@ -116,6 +121,10 @@ async function main() {
     CODEX_BINARY: codex,
   });
   run(process.execPath, [resolve(root, "scripts/check-gateway-version.mjs")]);
+  writePublicCliContract(
+    resolve(root, "src/codex-protocol/public-cli-contract.json"),
+    publicCliContract,
+  );
 
   const changed = run("git", ["status", "--short"]).trim();
   if (!changed) {

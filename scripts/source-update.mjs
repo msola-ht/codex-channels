@@ -89,13 +89,18 @@ export function inspectManagedSourceUpdatePlan(
             "build-candidate",
             "inspect-candidate",
             "prepare-codex-cli",
+            "validate-codex-contract",
+            "install-codex-cli",
             "stop-services",
             "switch-source",
             "refresh-command",
             "local-update",
             "cleanup",
           ]
-        : refreshCommand ? ["refresh-command"] : []),
+        : [
+            "validate-codex-contract",
+            ...(refreshCommand ? ["refresh-command"] : []),
+          ]),
     ],
   });
 }
@@ -152,6 +157,15 @@ export async function updateManagedSourceInstallation(
   const installRoot = resolve(checkout, "..");
   if (currentCommit === remoteCommit) {
     try {
+      writeMessageSafely(writeMessage, "note", "正在核对 Codex 公开合同和用户设置。");
+      await runStage(
+        "validate-codex-contract",
+        () => (options.validateCodexContract ?? validateCodexContract)(
+          checkout,
+          environment,
+          options,
+        ),
+      );
       if (plan.refreshCommand) {
         await runStage(
           "refresh-command",
@@ -169,7 +183,7 @@ export async function updateManagedSourceInstallation(
         stage: activeStage,
         completedStages,
         recovery: { services: "not-needed", source: "unchanged" },
-        recommendation: "修复全局命令安装后重新运行 codexc update",
+        recommendation: "按错误提示修复 Codex CLI 合同、用户设置或全局命令后重新运行 codexc update",
       });
     }
     return { changed: false, commit: currentCommit, managed: true, version: currentVersion };
@@ -252,9 +266,29 @@ export async function updateManagedSourceInstallation(
       requiresServiceInterruption: inspection.services.installed,
       targetVersion: candidate.targetVersion,
     }));
-    await runStage(
+    const preparedCodex = await runStage(
       "prepare-codex-cli",
-      () => ensureCodexVersion(
+      () => prepareCodexVersion(
+        candidate.targetCodexVersion,
+        stagedCheckout,
+        environment,
+        writeMessage,
+        options,
+      ),
+    );
+    writeMessageSafely(writeMessage, "note", "正在核对候选版本的 Codex 公开合同。");
+    await runStage(
+      "validate-codex-contract",
+      () => (options.validateCodexContract ?? validateCodexContract)(
+        stagedCheckout,
+        preparedCodex.validationEnvironment,
+        options,
+      ),
+    );
+    await runStage(
+      "install-codex-cli",
+      () => installPreparedCodexVersion(
+        preparedCodex,
         candidate.targetCodexVersion,
         stagedCheckout,
         environment,
@@ -610,9 +644,11 @@ function assertManagedRepository(checkout, repository, environment, captureComma
   }
 }
 
-async function ensureCodexVersion(expected, checkout, environment, writeMessage, options) {
+async function prepareCodexVersion(expected, checkout, environment, writeMessage, options) {
   const actual = installedCodexVersion(environment, options.captureCommand);
-  if (actual === expected) return;
+  if (actual === expected) {
+    return { installRequired: false, validationEnvironment: environment };
+  }
   const failure = codexVersionMismatchError(expected, actual);
   if (!options.confirmCodexCliInstall) throw failure;
   const confirmed = await options.confirmCodexCliInstall({
@@ -623,7 +659,45 @@ async function ensureCodexVersion(expected, checkout, environment, writeMessage,
   writeMessageSafely(
     writeMessage,
     "note",
-    `正在全局安装 @openai/codex@${expected}。`,
+    `正在准备 @openai/codex@${expected} 临时候选环境。`,
+  );
+  let binary;
+  try {
+    binary = await (
+      options.installCodexCliForValidation ?? installCodexCliForValidation
+    )(
+      expected,
+      checkout,
+      environment,
+      options,
+    );
+  } catch (error) {
+    throw codexValidationInstallFailureError(expected, error);
+  }
+  const validationEnvironment = { ...environment, CODEX_BINARY: binary };
+  const installed = installedCodexVersion(
+    validationEnvironment,
+    options.captureCommand,
+  );
+  if (installed !== expected) {
+    throw codexVersionMismatchError(expected, installed);
+  }
+  return { installRequired: true, validationEnvironment };
+}
+
+async function installPreparedCodexVersion(
+  prepared,
+  expected,
+  checkout,
+  environment,
+  writeMessage,
+  options,
+) {
+  if (!prepared.installRequired) return;
+  writeMessageSafely(
+    writeMessage,
+    "note",
+    `候选合同已通过，正在全局安装 @openai/codex@${expected}。`,
   );
   try {
     await (options.installCodexCli ?? installCodexCli)(
@@ -649,6 +723,19 @@ async function ensureCodexVersion(expected, checkout, environment, writeMessage,
 function assertCodexVersion(expected, environment, captureCommand) {
   const actual = installedCodexVersion(environment, captureCommand);
   if (actual !== expected) throw codexVersionMismatchError(expected, actual);
+}
+
+function validateCodexContract(checkout, environment, options) {
+  capture(
+    process.execPath,
+    [
+      join(checkout, "scripts", "codex-public-cli-contract.mjs"),
+      "--check-user-settings",
+    ],
+    checkout,
+    environment,
+    options.captureCommand,
+  );
 }
 
 function installedCodexVersion(environment, captureCommand) {
@@ -684,6 +771,43 @@ function codexInstallFailureError(expected, cause) {
     "安装完成后重新运行 codexc update",
   ]);
   return error;
+}
+
+function codexValidationInstallFailureError(expected, cause) {
+  return new Error(
+    `Codex CLI ${expected} 临时候选环境准备失败：${errorMessage(cause)}`,
+    { cause },
+  );
+}
+
+function installCodexCliForValidation(version, checkout, environment, options) {
+  const prefix = join(resolve(checkout, ".."), "codex-cli-contract");
+  run(
+    process.platform === "win32" ? "npm.cmd" : "npm",
+    [
+      "install",
+      "--prefix",
+      prefix,
+      "--no-save",
+      "--no-package-lock",
+      "--no-audit",
+      "--no-fund",
+      `@openai/codex@${version}`,
+    ],
+    checkout,
+    environment,
+    options.runCommand,
+  );
+  const binary = join(
+    prefix,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "codex.cmd" : "codex",
+  );
+  if (!existsSync(binary)) {
+    throw new Error(`临时候选 Codex CLI 缺少可执行文件：${binary}`);
+  }
+  return binary;
 }
 
 function installCodexCli(version, checkout, environment, options) {
@@ -860,6 +984,7 @@ function errorMessage(error) {
 async function main() {
   const checkout = managedSourceCheckout();
   if (!checkout) {
+    validateCodexContract(packageDir, process.env, {});
     await runLocalUpdate(packageDir, process.env, {});
     return;
   }

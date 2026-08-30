@@ -405,7 +405,6 @@ async function promptPermissions(prompts, settings) {
     initialValue: settings.permissions.approvalPolicy ?? "on-request",
     options: [
       { value: "on-request", label: "按需审批", hint: "需要额外权限时询问" },
-      { value: "untrusted", label: "严格审批", hint: "不受信命令先询问" },
       { value: "never", label: "不请求审批", hint: "无法在运行中申请额外权限" },
       { value: "back", label: "返回" },
     ],
