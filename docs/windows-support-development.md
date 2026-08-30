@@ -873,6 +873,11 @@ Provider/Transport 无凭据复核（2026-08-30）：按主 Socket、DeepSeek、
 当前 Windows App Server Supervisor 返回 `status: ready`，主 Provider 为 `openai`，运行、释放和租约 Provider
 列表为空，实际拓扑只包含主 Socket。当前配置未启用第三方 Provider，真实 Provider 请求、空闲释放和多账户
 切换仍需在具备对应凭据的候选环境中单独验收。
+
+DeepSeek 子代理实机复核（2026-08-30）：通过 Windows + 飞书真实链路调用 `deepseek-v4-flash-vision-exp`
+完成一次单次第三方子代理任务，返回内容为“收到”，子代理侧模型请求 1 次，未派生下级代理；主会话额外
+请求不计入子代理请求数，任务合计按主会话与子代理分别汇总。此前一次未明确限制派生层级的提示曾出现
+两个无有效任务的下级代理，结果不受影响；后续使用“只用 DS 子代理一次、不要派生下级”的明确约束复核通过。
 - [x] 首期用户安装明确使用 npm 全局包和普通 PowerShell，不要求执行 POSIX `install.sh`。
 - [ ] `codexc update` 完成候选构建、配置/数据库预检、服务停启、CLI 精确版本安装提示和失败恢复；
   当前本地更新的配置/数据库预检、Windows 服务停启和失败恢复已完成，候选构建与 CLI 安装提示待验收。

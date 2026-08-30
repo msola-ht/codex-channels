@@ -6,8 +6,10 @@ import {
   closeSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -80,6 +82,11 @@ import {
   requireUserConfig,
   userDataDir,
 } from "../scripts/runtime-config.mjs";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../runtime/private-file.mjs";
 import {
   checkProjectRules,
   initializeProjectRules,
@@ -116,6 +123,7 @@ const helpText = {
   setup                        配置 Codex 用户设置、提供商、通讯渠道与项目技能（交互菜单）
   config                       打开日常设置菜单（交互菜单）
   doctor                       诊断安装、配置和服务
+  security                     修复本机私有路径权限
 
 项目与 Codex：
   remote [参数]                启动共享 App Server 的 Codex TUI
@@ -194,6 +202,9 @@ Thread 分区管理员）、网络代理、高级设置（日志等级与开发�
 
 只诊断当前安装、配置和服务状态，不修改配置；--json 输出结构化检查结果；
 Linux 缺少 bubblewrap 时输出安装建议。`,
+  security: `用法：codexc security repair
+
+修复 Windows Codex 私有配置目录及其中 TOML 文件的 ACL；其他平台明确提示无需处理。`,
   rules: `用法：codexc rules <init|check>
 
 具体用法：
@@ -452,6 +463,9 @@ try {
         break;
       }
       runDoctor(args);
+      break;
+    case "security":
+      security(args);
       break;
     case "rules":
       projectRules(args);
@@ -1554,6 +1568,26 @@ async function runForegroundScript(
       })().catch(rejectChild);
     });
   });
+}
+
+function security(args) {
+  if (showRequestedHelp(args, "security")) return;
+  if (args.length !== 1 || args[0] !== "repair") {
+    throw new Error("用法：codexc security repair");
+  }
+  if (process.platform !== "win32") {
+    printCliMessage("note", "当前平台使用 Unix 文件权限，无需 Windows ACL 修复。");
+    return;
+  }
+  const home = codexHomePath(process.env);
+  securePrivateDirectorySync(home);
+  const files = readdirSync(home, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
+    .map((entry) => join(home, entry.name));
+  for (const file of files) {
+    if (statSync(file).isFile()) securePrivateFileSync(file);
+  }
+  printCliMessage("success", `Windows 私有路径 ACL 已修复：${home}（${files.length} 个 TOML 文件）`);
 }
 
 function sendForegroundStopMessage(child, signal) {

@@ -17,6 +17,7 @@
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
   交互终端使用不同颜色并汇总结果；`--json` 输出全部脱敏检查、分类计数与健康状态；Linux 缺少
   `bubblewrap` 时输出安装建议，不改写配置。
+- `security repair`：修复 Windows Codex 私有配置目录和 TOML 文件 ACL；Unix 平台提示无需处理。
 - `start`：在前台复用内部 `service-app-server` 监管入口启动 App Server、Provider 统计代理与
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管

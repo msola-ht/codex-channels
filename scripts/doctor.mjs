@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  readdirSync,
   readFileSync,
   statSync,
 } from "node:fs";
@@ -47,6 +48,7 @@ import {
   assertPrivateDirectoryAccessSync,
   assertPrivateFileAccessSync,
 } from "../runtime/private-file.mjs";
+import { codexHomePath } from "../runtime/codex-home.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
@@ -105,6 +107,7 @@ if (!existsSync(configPath)) {
   record("用户配置", false, `不存在：${configPath}；请先运行 codexc init`);
 } else {
   record("用户配置", true, configPath);
+  checkCodexHomePrivatePaths();
   if (explicitConfigFile) {
     note("配置目录权限", "显式配置文件保留父目录现有权限");
   } else {
@@ -637,26 +640,48 @@ function note(name, detail, remediation) {
   checks.push({ section: checkSection, kind: "note", name, detail, remediation });
 }
 
-function checkPrivateDirectory(name, path) {
+function checkPrivateDirectory(name, path, remediation) {
   if (process.platform === "win32") {
     try {
       assertPrivateDirectoryAccessSync(path);
       record(name, true, "当前 SID 私有 ACL 有效");
     } catch (error) {
-      record(name, false, errorMessage(error));
+      record(name, false, errorMessage(error), remediation);
     }
     return;
   }
   checkMode(name, path, 0o700);
 }
 
-function checkPrivateFile(name, path) {
+function checkCodexHomePrivatePaths() {
+  if (process.platform !== "win32") return;
+  const home = codexHomePath(process.env);
+  if (!existsSync(home)) {
+    note("Codex 私有目录权限", "尚未创建；首次使用 Codex 用户配置时创建");
+    return;
+  }
+  checkPrivateDirectory("Codex 私有目录权限", home, "运行 codexc security repair");
+  let entries;
+  try {
+    entries = readdirSync(home, { withFileTypes: true });
+  } catch (error) {
+    record("Codex 私有配置权限", false, errorMessage(error), "运行 codexc security repair");
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith(".toml")) {
+      checkPrivateFile(`Codex 配置权限：${entry.name}`, join(home, entry.name), "运行 codexc security repair");
+    }
+  }
+}
+
+function checkPrivateFile(name, path, remediation) {
   if (process.platform === "win32") {
     try {
       assertPrivateFileAccessSync(path);
       record(name, true, "当前 SID 私有 ACL 有效");
     } catch (error) {
-      record(name, false, errorMessage(error));
+      record(name, false, errorMessage(error), remediation);
     }
     return;
   }

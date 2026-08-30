@@ -39,6 +39,12 @@ codexc service restart all
 codexc doctor
 ```
 
+Windows 如果提示私有路径 ACL 无效，可运行以下命令修复当前用户的 Codex 配置目录和 TOML 配置文件权限：
+
+```powershell
+codexc security repair
+```
+
 也可以在 Linux 或 macOS 上把官方 `main` 分支 Git 仓库安装到
 `~/.codex-connect/codex-channels`：
 
