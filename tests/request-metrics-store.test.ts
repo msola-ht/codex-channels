@@ -333,6 +333,50 @@ setInterval(() => undefined, 1_000);`,
     store.close();
   });
 
+  it("estimates a weekly quota across small reset timestamp jitter", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const resetsAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60;
+    store.record({
+      ...sample(),
+      provider: "openai",
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 8_000_000,
+        resetsAt: resetsAt + 2,
+        planType: "plus",
+      },
+    });
+    store.record({
+      ...sample(),
+      provider: "openai",
+      inputTokens: 900,
+      outputTokens: 100,
+      totalTokens: 1_000,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 9_000_000,
+        resetsAt: resetsAt + 1,
+        planType: "plus",
+      },
+    });
+
+    expect(store.weeklyQuotaEstimate({
+      provider: "openai",
+      limitId: "codex",
+      resetsAt,
+      nowMs: Date.now() + 1,
+    })).toMatchObject({
+      observedDeltaPercentMillionths: 1_000_000,
+      intervalCount: 1,
+      requestCount: 1,
+      totalTokens: 1_000,
+    });
+    store.close();
+  });
+
   it("breaks a weekly estimate interval when the percentage moves backwards", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
@@ -642,6 +686,48 @@ setInterval(() => undefined, 1_000);`,
       expect.objectContaining({ provider: "deepseek", windowId: "weekly", resetsAt: 1_900_000_000 }),
       expect.objectContaining({ provider: "deepseek", windowId: "monthly", resetsAt: 2_000_000_000 }),
     ]));
+    store.close();
+  });
+
+  it("keeps irregular OpenAI resets separate while merging reset timestamp jitter", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(
+      join(directory, "request-metrics.sqlite3"),
+    );
+    const firstReset = 2_000_000;
+    const irregularReset = firstReset + 57 * 60 * 60;
+    for (const [resetsAt, usedPercentMillionths] of [
+      [firstReset, 55_000_000],
+      [irregularReset, 0],
+      [irregularReset + 2, 1_000_000],
+    ] as const) {
+      store.record({
+        ...sample(),
+        provider: "openai",
+        weeklyQuota: {
+          limitId: "codex",
+          usedPercentMillionths,
+          resetsAt,
+          planType: "plus",
+        },
+      });
+    }
+
+    expect(store.quotaHistory({
+      startAtMs: 0,
+      endAtMs: Number.MAX_SAFE_INTEGER,
+    })).toEqual([
+      expect.objectContaining({
+        resetsAt: firstReset,
+        snapshotCount: 1,
+        latestUsedPercentMillionths: 55_000_000,
+      }),
+      expect.objectContaining({
+        resetsAt: irregularReset,
+        snapshotCount: 2,
+        latestUsedPercentMillionths: 1_000_000,
+      }),
+    ]);
     store.close();
   });
 
