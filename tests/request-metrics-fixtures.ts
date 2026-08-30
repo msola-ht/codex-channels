@@ -1,0 +1,38 @@
+import type { ModelRequestMetricSample } from "../src/observability/index.js";
+
+export function sample(): ModelRequestMetricSample {
+  return {
+    provider: "deepseek",
+    pricing: null,
+    transport: "http",
+    responseFormat: "sse",
+    operation: "response",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    model: "deepseek-v4-flash",
+    serviceTier: "default",
+    reasoningEffort: "max",
+    status: "completed",
+    httpStatus: 200,
+    errorType: null,
+    errorCode: null,
+    errorMessage: null,
+    incompleteReason: null,
+    inputTokens: 1_000,
+    cachedInputTokens: 900,
+    outputTokens: 100,
+    reasoningOutputTokens: 40,
+    totalTokens: 1_100,
+    upstreamCreatedAt: 1_785_640_800,
+    upstreamCompletedAt: 1_785_640_801,
+    requestStartedAtMs: 1_000,
+    firstTokenAtMs: 1_100,
+    firstReasoningDeltaAtMs: 1_100,
+    lastReasoningDeltaAtMs: 1_300,
+    firstOutputDeltaAtMs: 1_400,
+    lastOutputDeltaAtMs: 1_600,
+    responseCompletedAtMs: 1_650,
+    weeklyQuota: null,
+    quotaWindows: null,
+  };
+}
