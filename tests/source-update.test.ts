@@ -57,6 +57,7 @@ describe("Git 源码更新", () => {
         "build-candidate",
         "inspect-candidate",
         "prepare-codex-cli",
+        "validate-codex-contract",
         "stop-services",
         "switch-source",
         "refresh-command",
@@ -153,6 +154,8 @@ describe("Git 源码更新", () => {
       "inspect-candidate:completed",
       "prepare-codex-cli:started",
       "prepare-codex-cli:completed",
+      "validate-codex-contract:started",
+      "validate-codex-contract:completed",
       "switch-source:started",
       "switch-source:completed",
       "refresh-command:started",
@@ -217,6 +220,7 @@ describe("Git 源码更新", () => {
       ],
       ["note", "正在克隆 Git main 候选源码。"],
       ["note", "正在构建并预检候选源码；详细日志仅在失败时显示。"],
+      ["note", "正在核对候选版本的 Codex 公开合同。"],
       ["note", "候选源码已通过校验，准备切换。"],
       ["note", "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。"],
     ]);
@@ -314,7 +318,7 @@ describe("Git 源码更新", () => {
       managed: true,
       updateAvailable: false,
       refreshCommand: true,
-      steps: ["inspect", "refresh-command"],
+      steps: ["inspect", "validate-codex-contract", "refresh-command"],
     });
 
     const result = await updateManagedSourceInstallation(fixture.environment, {
@@ -666,6 +670,41 @@ describe("Git 源码更新", () => {
     });
   });
 
+  it("keeps the current source and services when the candidate Codex contract needs adaptation", async () => {
+    const fixture = createInstalledFixture("codexc-source-contract-mismatch-");
+    let servicesStopped = false;
+    let globalInstalled = false;
+
+    let failure: unknown;
+    try {
+      await updateManagedSourceInstallation(fixture.environment, {
+        buildCheckout: () => undefined,
+        inspectStaged: async () => ({ services: { installed: true } }),
+        installGlobalPackage: () => { globalInstalled = true; },
+        projectDir: fixture.checkout,
+        repository: fixture.repository,
+        runLocalUpdate: () => undefined,
+        stopServices: () => { servicesStopped = true; },
+        validateCodexContract: () => {
+          throw new Error("公开参数 --ask-for-approval 删除值：on-request");
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("--ask-for-approval 删除值");
+    expect(getSourceUpdateFailure(failure)).toMatchObject({
+      stage: "validate-codex-contract",
+      recovery: { services: "not-needed", source: "unchanged" },
+    });
+    expect(servicesStopped).toBe(false);
+    expect(globalInstalled).toBe(false);
+    expect(gitOutput(fixture.checkout, ["rev-parse", "HEAD"]))
+      .toBe(fixture.initialCommit);
+  });
+
   it("keeps the current source and services when Codex CLI installation fails", async () => {
     const fixture = createInstalledFixture("codexc-source-version-install-failure-");
     writePackageVersion(fixture.repository, "0.148.0");
@@ -734,11 +773,16 @@ function temporaryDirectory(prefix: string): string {
 function createMainRepository(root: string) {
   const repository = join(root, "repository");
   mkdirSync(join(repository, "webui"), { recursive: true });
+  mkdirSync(join(repository, "scripts"), { recursive: true });
   runGit(root, ["init", "--quiet", repository]);
   runGit(repository, ["branch", "-M", "main"]);
   runGit(repository, ["config", "user.email", "source-update@example.invalid"]);
   runGit(repository, ["config", "user.name", "Source Update Test"]);
   writePackageVersion(repository, "0.147.0");
+  writeFileSync(
+    join(repository, "scripts", "codex-public-cli-contract.mjs"),
+    "if (process.argv[2] !== '--check-user-settings') process.exit(1);\n",
+  );
   runGit(repository, ["add", "."]);
   runGit(repository, ["commit", "--quiet", "-m", "initial"]);
   const initialCommit = gitOutput(repository, ["rev-parse", "HEAD"]);

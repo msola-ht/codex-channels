@@ -7,7 +7,7 @@ export type CodexUserSettingInput =
       reasoningEffort: string;
       fastEnabled: boolean;
       sandboxMode: "read-only" | "workspace-write";
-      approvalPolicy: "untrusted" | "on-request" | "never";
+      approvalPolicy: "on-request" | "never";
       networkAccess: boolean;
     }
   | { kind: "defaults"; model: string; reasoningEffort: string }
@@ -25,7 +25,7 @@ export type CodexUserSettingInput =
   | {
       kind: "permissions";
       sandboxMode: "read-only" | "workspace-write";
-      approvalPolicy: "untrusted" | "on-request" | "never";
+      approvalPolicy: "on-request" | "never";
       networkAccess: boolean;
     };
 
@@ -56,7 +56,7 @@ export interface CodexUserSettingsState {
     editable: boolean;
     defaultPermissions: string | null;
     sandboxMode: "read-only" | "workspace-write" | null;
-    approvalPolicy: "untrusted" | "on-request" | "never" | null;
+    approvalPolicy: "on-request" | "never" | null;
     networkAccess: boolean | null;
   };
 }

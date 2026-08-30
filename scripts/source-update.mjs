@@ -89,13 +89,17 @@ export function inspectManagedSourceUpdatePlan(
             "build-candidate",
             "inspect-candidate",
             "prepare-codex-cli",
+            "validate-codex-contract",
             "stop-services",
             "switch-source",
             "refresh-command",
             "local-update",
             "cleanup",
           ]
-        : refreshCommand ? ["refresh-command"] : []),
+        : [
+            "validate-codex-contract",
+            ...(refreshCommand ? ["refresh-command"] : []),
+          ]),
     ],
   });
 }
@@ -152,6 +156,15 @@ export async function updateManagedSourceInstallation(
   const installRoot = resolve(checkout, "..");
   if (currentCommit === remoteCommit) {
     try {
+      writeMessageSafely(writeMessage, "note", "正在核对 Codex 公开合同和用户设置。");
+      await runStage(
+        "validate-codex-contract",
+        () => (options.validateCodexContract ?? validateCodexContract)(
+          checkout,
+          environment,
+          options,
+        ),
+      );
       if (plan.refreshCommand) {
         await runStage(
           "refresh-command",
@@ -169,7 +182,7 @@ export async function updateManagedSourceInstallation(
         stage: activeStage,
         completedStages,
         recovery: { services: "not-needed", source: "unchanged" },
-        recommendation: "修复全局命令安装后重新运行 codexc update",
+        recommendation: "按错误提示修复 Codex CLI 合同、用户设置或全局命令后重新运行 codexc update",
       });
     }
     return { changed: false, commit: currentCommit, managed: true, version: currentVersion };
@@ -259,6 +272,15 @@ export async function updateManagedSourceInstallation(
         stagedCheckout,
         environment,
         writeMessage,
+        options,
+      ),
+    );
+    writeMessageSafely(writeMessage, "note", "正在核对候选版本的 Codex 公开合同。");
+    await runStage(
+      "validate-codex-contract",
+      () => (options.validateCodexContract ?? validateCodexContract)(
+        stagedCheckout,
+        environment,
         options,
       ),
     );
@@ -651,6 +673,19 @@ function assertCodexVersion(expected, environment, captureCommand) {
   if (actual !== expected) throw codexVersionMismatchError(expected, actual);
 }
 
+function validateCodexContract(checkout, environment, options) {
+  capture(
+    process.execPath,
+    [
+      join(checkout, "scripts", "codex-public-cli-contract.mjs"),
+      "--check-user-settings",
+    ],
+    checkout,
+    environment,
+    options.captureCommand,
+  );
+}
+
 function installedCodexVersion(environment, captureCommand) {
   const executable = environment.CODEX_BINARY?.trim() || "codex";
   const output = capture(
@@ -860,6 +895,7 @@ function errorMessage(error) {
 async function main() {
   const checkout = managedSourceCheckout();
   if (!checkout) {
+    validateCodexContract(packageDir, process.env, {});
     await runLocalUpdate(packageDir, process.env, {});
     return;
   }

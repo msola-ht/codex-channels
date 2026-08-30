@@ -84,6 +84,14 @@ describe("Codex user settings setup", () => {
       environment: { CODEX_HOME: "/tmp/codex-home" },
       expectedVersion: "version-1",
     });
+    const approvalPrompt = prompts.select.mock.calls[2]?.[0] as {
+      options?: Array<{ value: string }>;
+    };
+    expect(approvalPrompt.options?.map((option) => option.value)).toEqual([
+      "on-request",
+      "never",
+      "back",
+    ]);
     expect(output.join("")).toContain("Codex 用户权限已更新");
   });
 

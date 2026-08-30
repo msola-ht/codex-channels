@@ -19,6 +19,8 @@ import * as releaseApiHelpers from "../scripts/codex-release-api.mjs";
 import * as reportHelpers from "../scripts/write-upgrade-report.mjs";
 // @ts-expect-error JavaScript protocol analyzer intentionally has no declaration file.
 import * as protocolAnalysisHelpers from "../scripts/analyze-upgrade-protocol.mjs";
+// @ts-expect-error JavaScript public CLI contract helper intentionally has no declaration file.
+import * as publicCliContractHelpers from "../scripts/codex-public-cli-contract.mjs";
 // @ts-expect-error JavaScript validation helper intentionally has no declaration file.
 import * as validationHelpers from "../scripts/run-upgrade-validation.mjs";
 
@@ -29,6 +31,12 @@ const {
   renderUpgradeSummary,
 } = reportHelpers;
 const { analyzeProtocolDiff } = protocolAnalysisHelpers;
+const {
+  comparePublicCliContracts,
+  parsePublicCliContract,
+  renderPublicCliContractImpact,
+  validateCodexUserSettingsAgainstContract,
+} = publicCliContractHelpers;
 const { defaultUpgradeValidationStages, runUpgradeValidationStages } = validationHelpers;
 const temporaryDirectories: string[] = [];
 
@@ -226,6 +234,8 @@ describe("Codex release upgrade preview", () => {
       .toBe("unresolved\n");
     expect(readFileSync(join(output, "summary.md"), "utf8"))
       .toContain("目标版本尚未解析");
+    expect(readFileSync(join(output, "public-cli-impact.md"), "utf8"))
+      .toContain("Codex 公开 CLI 合同影响");
     expect(JSON.parse(
       readFileSync(join(output, "results.json"), "utf8"),
     )).toMatchObject({
@@ -314,6 +324,130 @@ describe("Codex release upgrade preview", () => {
     expect(impact).toContain("新增：`thread/pin`");
     expect(impact).toContain("新增必填");
     expect(impact).toContain("`Thread.isPinned`");
+  });
+
+  it("extracts the project-used public CLI option contract from help", () => {
+    const contract = parsePublicCliContract("codex-cli 0.150.1\n", [
+      "Codex CLI",
+      "",
+      "Options:",
+      "      --remote <ADDR>",
+      "          Connect to a remote app server endpoint.",
+      "  -s, --sandbox <SANDBOX_MODE>",
+      "          [possible values: read-only, workspace-write, danger-full-access]",
+      "  -a, --ask-for-approval <APPROVAL_POLICY>",
+      "          Possible values:",
+      "          - on-request: Ask when needed",
+      "          - never: Never ask",
+      "  -C, --cd <DIR>",
+      "  -p, --profile <CONFIG_PROFILE_V2>",
+    ].join("\n"));
+
+    expect(contract).toMatchObject({
+      schemaVersion: 1,
+      codexCli: "0.150.1",
+      options: {
+        "--ask-for-approval": {
+          present: true,
+          aliases: ["-a"],
+          argument: "<APPROVAL_POLICY>",
+          values: ["on-request", "never"],
+        },
+        "--sandbox": {
+          present: true,
+          values: ["read-only", "workspace-write", "danger-full-access"],
+        },
+      },
+    });
+  });
+
+  it("separates added, removed and changed public CLI contract entries", () => {
+    const before = {
+      schemaVersion: 1,
+      codexCli: "0.150.1",
+      options: {
+        "--ask-for-approval": {
+          present: true,
+          aliases: ["-a"],
+          argument: "<APPROVAL_POLICY>",
+          values: ["on-request", "never"],
+        },
+        "--sandbox": {
+          present: true,
+          aliases: ["-s"],
+          argument: "<SANDBOX_MODE>",
+          values: ["read-only", "workspace-write", "danger-full-access"],
+        },
+      },
+    };
+    const after = {
+      schemaVersion: 1,
+      codexCli: "0.151.0",
+      options: {
+        "--ask-for-approval": {
+          present: true,
+          aliases: ["-a"],
+          argument: "<APPROVAL_POLICY>",
+          values: ["on-request", "never", "always"],
+        },
+        "--sandbox": {
+          present: true,
+          aliases: [],
+          argument: "<MODE>",
+          values: ["read-only", "workspace-write"],
+        },
+      },
+    };
+
+    const changes = comparePublicCliContracts(before, after);
+    expect(changes).toEqual([
+      {
+        option: "--ask-for-approval",
+        kind: "values",
+        added: ["always"],
+        removed: [],
+      },
+      {
+        option: "--sandbox",
+        kind: "signature",
+        before: "-s, --sandbox <SANDBOX_MODE>",
+        after: "--sandbox <MODE>",
+      },
+      {
+        option: "--sandbox",
+        kind: "values",
+        added: [],
+        removed: ["danger-full-access"],
+      },
+    ]);
+    const report = renderPublicCliContractImpact(before, after);
+    expect(report).toContain("新增值：`always`");
+    expect(report).toContain("删除值：`danger-full-access`");
+    expect(report).toContain("参数签名变化");
+  });
+
+  it("rejects user settings that the locked public CLI contract no longer accepts", () => {
+    const contract = {
+      schemaVersion: 1,
+      codexCli: "0.150.1",
+      options: {
+        "--ask-for-approval": {
+          present: true,
+          aliases: ["-a"],
+          argument: "<APPROVAL_POLICY>",
+          values: ["on-request", "never"],
+        },
+      },
+    };
+
+    expect(() => validateCodexUserSettingsAgainstContract(
+      { approval_policy: "on-request" },
+      contract,
+    )).not.toThrow();
+    expect(() => validateCodexUserSettingsAgainstContract(
+      { approval_policy: "untrusted" },
+      contract,
+    )).toThrow("approval_policy = \"untrusted\"");
   });
 
   it("captures tracked and new files without changing the repository index", () => {

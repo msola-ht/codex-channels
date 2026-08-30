@@ -1,8 +1,9 @@
 import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { supportedPublicApprovalPolicies } from "./codex-public-cli-contract.mjs";
 
 const sandboxModes = new Set(["read-only", "workspace-write"]);
-const approvalPolicies = new Set(["untrusted", "on-request", "never"]);
+const approvalPolicies = new Set(supportedPublicApprovalPolicies);
 const webSearchModes = new Set(["live", "indexed", "cached", "disabled"]);
 const reasoningSummaries = new Set(["auto", "concise", "detailed", "none"]);
 const verbosities = new Set(["low", "medium", "high"]);

@@ -53,7 +53,9 @@ hook 配置；随后直接调用 `npm run verify:commit`。本地 `npm ci`、`np
 项目不维护独立基础版本号；`@hegenai/codexc`、Gateway 和发布 Tag 使用锁定的 Codex CLI
 正式发行版本，候选版和修复版只允许增加受控的 `-rc.N` 或 `-fixN` 后缀。升级提案只认
 `openai/codex` GitHub Release 中非 Draft、非 Pre-release 的
-`rust-v<版本>`；生成后仍由 Codex 按 `docs/codex-cli-upgrade.md` 审查和适配。完成升级时必须
+`rust-v<版本>`；生成后仍由 Codex 按 `docs/codex-cli-upgrade.md` 审查和适配。升级时必须
+同时审查 Artifact 的 `public-cli-impact.md` 与 `protocol-impact.md`，前者报告本项目实际转发参数
+及枚举值的新增、删除和变化，后者报告 App Server 生成协议结构；两者不能互相替代。完成升级时必须
 同步更新 `ci.yml` 中 App Server 合同任务安装的 Codex CLI 精确版本。自动提案阶段不修改稳定版
 文档，因此将文档索引检查记录为跳过；正式适配后必须由 `npm run verify:commit` 完成文档和全部
 提交门禁。

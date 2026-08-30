@@ -142,6 +142,13 @@ function workspaceForWorkdir(workspaces, workdir) {
 function workspacePermissionArguments(workspace, passthrough) {
   const overrides = explicitPermissionOverrides(passthrough);
   const permissions = stringValue(workspace?.permissions);
+  const approvalPolicy = stringValue(workspace?.approval_policy);
+  if (!overrides.approval && approvalPolicy === "untrusted") {
+    throw new Error(
+      "Workspace 审批策略 untrusted 不能传给 Codex CLI 0.150.1；"
+      + "请用 --ask-for-approval on-request|never 显式覆盖，或修改 Workspace 审批策略",
+    );
+  }
   return [
     ...(overrides.sandbox
       ? []
@@ -152,8 +159,8 @@ function workspacePermissionArguments(workspace, passthrough) {
           : []),
     ...(overrides.approval
       ? []
-      : stringValue(workspace?.approval_policy)
-        ? ["--ask-for-approval", stringValue(workspace.approval_policy)]
+      : approvalPolicy
+        ? ["--ask-for-approval", approvalPolicy]
         : []),
   ];
 }

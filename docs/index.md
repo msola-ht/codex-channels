@@ -111,6 +111,14 @@
 `codexc setup` 的脱敏总览复用既有 `config/read` 显示全局默认模型与思考等级，入口位于
 [`setup-summary.mjs`](../scripts/setup-summary.mjs)，由 [`setup.test.ts`](../tests/setup.test.ts) 验证；
 用户设置入口在显式确认后复用下表已有的版本化配置事务，不新增协议方法，也不修改登录状态。
+固定版的公开用户配置只接受 `approval_policy = "on-request" | "never"`；协议内部的 `untrusted`
+仍可作为 Workspace Thread 设置传给 App Server，但 `codexc remote` 不把它转换为固定版已退役的
+CLI 参数，未显式覆盖时失败关闭。
+[`public-cli-contract.json`](../src/codex-protocol/public-cli-contract.json) 固定记录 Remote 实际转发
+参数的存在性、别名、参数形状和枚举值；正式 CLI 升级会从目标版公开帮助刷新快照，并在
+`public-cli-impact.md` 中把新增、删除、签名变化和枚举变化与 App Server 协议影响分开报告。
+`codexc update` 在每次本地更新及候选源码切换前，用实际 CLI 校验同一快照、本地审批允许值和
+`~/.codex/config.toml`；不兼容设置只给出精确修复提示，不静默迁移审批语义。
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |

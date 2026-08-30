@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "codexCli": "0.150.1",
+  "options": {
+    "--remote": {
+      "present": true,
+      "aliases": [],
+      "argument": "<ADDR>",
+      "values": []
+    },
+    "--profile": {
+      "present": true,
+      "aliases": [
+        "-p"
+      ],
+      "argument": "<CONFIG_PROFILE_V2>",
+      "values": []
+    },
+    "--sandbox": {
+      "present": true,
+      "aliases": [
+        "-s"
+      ],
+      "argument": "<SANDBOX_MODE>",
+      "values": [
+        "read-only",
+        "workspace-write",
+        "danger-full-access"
+      ]
+    },
+    "--cd": {
+      "present": true,
+      "aliases": [
+        "-C"
+      ],
+      "argument": "<DIR>",
+      "values": []
+    },
+    "--ask-for-approval": {
+      "present": true,
+      "aliases": [
+        "-a"
+      ],
+      "argument": "<APPROVAL_POLICY>",
+      "values": [
+        "on-request",
+        "never"
+      ]
+    }
+  }
+}

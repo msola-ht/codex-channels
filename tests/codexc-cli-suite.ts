@@ -1172,11 +1172,11 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
         throw new Error("测试 Workspace 未注册");
       }
       firstWorkspace.permissions = ":workspace";
-      firstWorkspace.approval_policy = "untrusted";
+      firstWorkspace.approval_policy = "on-request";
       secondWorkspace.sandbox = "read-only";
       secondWorkspace.approval_policy = "never";
       configuredNestedWorkspace.sandbox = "danger-full-access";
-      configuredNestedWorkspace.approval_policy = "untrusted";
+      configuredNestedWorkspace.approval_policy = "on-request";
     });
 
     const currentCapture = join(root, "current.json");
@@ -1234,7 +1234,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "-c",
       'default_permissions=":workspace"',
       "--ask-for-approval",
-      "untrusted",
+      "on-request",
       "resume",
     ]);
     expect(JSON.parse(readFileSync(explicitCapture, "utf8"))).toEqual([
@@ -1267,7 +1267,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "-c",
       'default_permissions=":workspace"',
       "--ask-for-approval",
-      "untrusted",
+      "on-request",
       "--profile",
       "personal",
       "resume",
@@ -1280,7 +1280,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "--sandbox",
       "danger-full-access",
       "--ask-for-approval",
-      "untrusted",
+      "on-request",
       "resume",
     ]);
     expect(JSON.parse(readFileSync(workspaceWriteModifierCapture, "utf8"))).toEqual([
@@ -1296,6 +1296,58 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "sandbox_workspace_write.network_access=true",
       "resume",
     ]);
+  });
+
+  it("fails closed when a remote Workspace uses the retired untrusted CLI policy", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-remote-approval-"));
+    temporaryDirectories.push(root);
+    const home = join(root, ".codex-connect");
+    const workspace = join(root, "Workspace");
+    const capture = join(root, "capture.json");
+    const fakeCodex = join(root, "fake-codex.mjs");
+    mkdirSync(workspace);
+    writeFileSync(
+      fakeCodex,
+      "#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(process.argv.slice(2)));\n",
+    );
+    chmodSync(fakeCodex, 0o700);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+      CODEX_TEST_CAPTURE: capture,
+    };
+    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    execFileSync(process.execPath, [cli, "work", "add", "--cwd", workspace], {
+      cwd: workspace,
+      env: environment,
+    });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.codex).binary = fakeCodex;
+      const configuredWorkspace = (document.workspaces as Array<Record<string, unknown>>).find(
+        (candidate) => candidate.cwd === realpathSync(workspace),
+      );
+      if (!configuredWorkspace) throw new Error("测试 Workspace 未注册");
+      configuredWorkspace.approval_policy = "untrusted";
+    });
+
+    const rejected = spawnSync(process.execPath, [cli, "remote"], {
+      cwd: workspace,
+      env: environment,
+      encoding: "utf8",
+    });
+
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("Workspace 审批策略 untrusted 不能传给 Codex CLI 0.150.1");
+    expect(existsSync(capture)).toBe(false);
+
+    execFileSync(process.execPath, [
+      cli,
+      "remote",
+      "--ask-for-approval",
+      "on-request",
+    ], { cwd: workspace, env: environment });
+    expect(JSON.parse(readFileSync(capture, "utf8"))).toContain("on-request");
   });
 
   it("reports an invalid remote Workspace exactly once without a Node stack", () => {

@@ -32,7 +32,8 @@ npm run codex:upgrade -- <正式版本> --dry-run
 2. 调用现有原子协议生成器，替换 `src/codex-protocol/generated/`。
 3. 同步 `src/codex-protocol/version.json`、`package.json`、`package-lock.json` 和
    `src/version.json`。
-4. 重新生成协议并逐文件比较，再校验 Gateway 与协议版本一致。
+4. 从目标 CLI 公开帮助刷新本项目实际转发参数的合同快照，重新生成协议并逐文件比较，再校验
+   Gateway、协议版本、公开 CLI 合同与本地权限映射一致。
 5. 列出产生的差异，等待 Codex 审查。
 
 脚本不会安装全局 CLI、自动改业务代码、批量替换文档版本、提交、推送或重建服务。生成失败时
@@ -51,6 +52,8 @@ GitHub Actions `Codex upgrade proposal` 每日检查一次，也可以手动触�
 - `diff-stat.txt`：文件与行数统计。
 - `upgrade.patch`：供 Codex 在本地读取或应用的完整差异。
 - `protocol-impact.md`：相对基线的 RPC 名称、顶层类型字段和生成文件变化。
+- `public-cli-impact.md`：本项目实际转发的公开 CLI 参数、短参数别名、参数形状和枚举值的新增、
+  删除与变化；与 App Server 内部协议影响分开报告。
 - `summary.md`：版本、文件数量和协议目录数量摘要。
 - `logs/resolve.log`、`logs/install.log`、`logs/generation.log`：官方 Release 解析、目标 CLI
   安装和协议生成过程。
@@ -102,7 +105,8 @@ Codex 应按以下顺序处理，操作者不需要人工阅读协议文件：
    `npm run codex:upgrade -- <正式版本> --dry-run`，通过后再运行正式升级命令。
 3. 先阅读目标版本官方 Release 的 New Features、Bug Fixes 和 Chores，按 CLI/TUI、App Server
    协议、App Server 内部修复初步筛选与本项目有关的变化；不要从完整源码差异开始漫游分析。
-4. 再比较生成的 `ClientRequest`、`ClientNotification`、`ServerNotification` 和
+4. 先阅读 `public-cli-impact.md`，确认 Remote 和用户设置实际依赖的参数是否新增、删除、改名或
+   改变枚举值；再比较生成的 `ClientRequest`、`ClientNotification`、`ServerNotification` 和
    `ServerRequest`，只核实更新日志涉及的协议变化，以及本项目现有调用路径可能受影响的新增、
    删除和参数变化。
 5. 仅对本项目现有路径或准备采用的候选能力，查阅官方 App Server 文档、`rust-v<正式版本>`
