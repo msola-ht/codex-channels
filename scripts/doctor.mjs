@@ -58,7 +58,7 @@ import {
   validateFeishuApplication,
 } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
-import { inspectManagedServiceStatus } from "./service-status.mjs";
+import { inspectManagedServiceHealth } from "./service-status.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
@@ -557,7 +557,7 @@ if (process.platform === "darwin") {
   }
 } else if (process.platform === "win32") {
   try {
-    const status = inspectManagedServiceStatus({
+    const status = await inspectManagedServiceHealth({
       environment: {
         ...process.env,
         CODEX_CONNECT_HOME: dataDir,

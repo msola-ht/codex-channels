@@ -2,10 +2,15 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import {
   parseServiceTarget,
   serviceDefinitionsForTarget,
 } from "../runtime/service-targets.mjs";
+import { appServerSocketAcceptsWebSocket } from "../runtime/app-server-supervisor.mjs";
+import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
+import { runtimeConfig } from "./runtime-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
 
@@ -40,6 +45,55 @@ export function inspectManagedServiceStatus({
     platform: servicePlatform,
     target: resolvedTarget,
     healthy: services.every((service) => service.running),
+    services,
+  };
+}
+
+/**
+ * Add process and protocol reachability checks to the platform service status.
+ * The existing synchronous inspector remains available for callers that only
+ * need supervisor state; this async view is used by user-facing diagnostics.
+ */
+export async function inspectManagedServiceHealth(options = {}) {
+  const status = inspectManagedServiceStatus(options);
+  let configDocument;
+  const environment = options.environment ?? process.env;
+  const paths = runtimeConfig(environment);
+  try {
+    configDocument = readGatewayConfig(paths.configPath);
+  } catch {
+    configDocument = undefined;
+  }
+  const services = await Promise.all(status.services.map(async (service) => {
+    const processAlive = service.pid !== null;
+    let rpcReachable = service.target === "gateway" || service.target === "app-server"
+      ? false
+      : null;
+    if (service.running && processAlive && configDocument) {
+      try {
+        if (service.target === "gateway") {
+          rpcReachable = await gatewayOwnerIsReady(paths.configPath);
+        } else if (service.target === "app-server") {
+          rpcReachable = await appServerSocketAcceptsWebSocket(
+            resolvePrimaryAppServerSocketPath(configDocument, paths.dataDir),
+          );
+        }
+      } catch {
+        rpcReachable = false;
+      }
+    }
+    return {
+      ...service,
+      processAlive,
+      rpcReachable,
+    };
+  }));
+  return {
+    ...status,
+    healthy: services.every((service) => {
+      if (!service.running) return false;
+      return service.rpcReachable === null || service.rpcReachable === true;
+    }),
     services,
   };
 }
@@ -183,7 +237,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.argv.length !== 3) {
       throw new Error("用法：codexc service status [gateway|app-server|webui|center|all] [--json]");
     }
-    const result = inspectManagedServiceStatus({ target: process.argv[2] });
+    const result = await inspectManagedServiceHealth({ target: process.argv[2] });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (!result.healthy) process.exitCode = 1;
   } catch (error) {
