@@ -824,15 +824,17 @@ Provider 业务闭环仍待验收。
 
 状态：当前用户计划任务主路径、日志跟随、异常退出重启及本地更新停启/失败恢复已通过实机验证；
 本轮 Windows 实机已补充完成本地源码构建、服务安装/状态/日志/卸载、Setup 写入与飞书消息往返验收。
-PowerShell 源码安装器的“按分支克隆未提交改动”场景仍需提交后再做完整端到端验收，系统重启、源码候选更新
-和发布安装组合仍待验收。
+PowerShell 源码安装器的“按分支克隆未提交改动”场景仍需提交后再做完整端到端验收；源码候选更新和发布安装
+组合仍待验收。系统重启、计划任务延迟、核心任务自动启动、私有媒体目录 ACL 已完成实机验收。
 
 本轮实机记录（2026-08-30）：`node scripts/prepare-package.mjs` 在 Windows 下完成依赖检查与
 TypeScript 构建；`codexc service install` 生成并启动 App Server、Gateway、WebUI 和指标中心计划任务，
 `codexc service status` 显示 App Server/Gateway 运行中，`codexc service logs gateway` 显示 Windows
 UDS、飞书长连接和 Surface 已就绪且错误日志为空；`codexc setup` 成功写入 Codex 用户设置及其他用户偏好；
 `codexc service uninstall` 成功移除受管计划任务并保留用户数据；飞书普通消息真实往返、完成卡片、Token、
-费用、延迟和账户周限统计均正常。
+费用、延迟和账户周限统计均正常；本地 `codexc update` 完成配置兼容性预检、状态库 Schema 4 和指标库
+Schema 11 预检，成功停止并恢复 App Server/Gateway，更新后就绪检查通过。由于本地分支与远程 `main`
+存在差异，远程候选源码构建和发布安装更新仍未验收。
 
 - [x] 在 Task Scheduler 用户任务与 Windows Service 中选择一种首期正式方案；选择前明确管理员要求、
   登录前/后启动、失败重启、日志、环境变量、凭据访问和卸载语义。
@@ -840,6 +842,20 @@ UDS、飞书长连接和 Surface 已就绪且错误日志为空；`codexc setup`
 - [x] `codexc service install|start|stop|restart|status|logs|uninstall` 与既有目标和默认值保持一致。
 - [x] App Server 独立于 Gateway；重启 Gateway 不得终止共享 App Server，`all` 才按现有合同处理全部
   核心服务。
+
+开机自启动实测（2026-08-30）：重启并登录后，`codexc service status --json` 显示 App Server 与
+Gateway 均为 `running` 且 `healthy: true`；WebUI 与指标中心未自动启动。进程树中的
+`windows-service-host.mjs`、`bin/codexc.mjs gateway` 和 `dist/main.js` 是 Gateway 的正常宿主、
+入口与子进程链，不表示重复 Gateway；当前重启后仅出现两个核心服务窗口。
+
+计划任务 XML 复核（2026-08-30）：App Server 与 Gateway 的 `LogonTrigger` 均实际写入
+`<Delay>PT1M</Delay>`，动作使用 PowerShell `-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden`；
+WebUI 与指标中心状态为 `Ready`、触发方式为 `On demand only`。重启后的实机观察与 XML 配置一致，
+当前仅出现两个核心服务窗口。
+
+Windows 私有目录复核（2026-08-30）：对既有 `data/uploads` 媒体暂存目录重新应用当前用户、SYSTEM
+和 Administrators 私有 ACL 后，`codexc doctor` 通过媒体目录检查；当前诊断为 20 项通过、10 项提示，
+无失败项。
 - [x] 首期用户安装明确使用 npm 全局包和普通 PowerShell，不要求执行 POSIX `install.sh`。
 - [ ] `codexc update` 完成候选构建、配置/数据库预检、服务停启、CLI 精确版本安装提示和失败恢复；
   当前本地更新的配置/数据库预检、Windows 服务停启和失败恢复已完成，候选构建与 CLI 安装提示待验收。

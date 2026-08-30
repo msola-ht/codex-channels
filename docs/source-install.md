@@ -49,6 +49,20 @@ codexc setup
 codexc service install
 ```
 
+Windows 若 Git 仍报告 `Filename too long`，先在普通 PowerShell 中启用当前用户的 Git 长路径配置，
+再重新运行安装器；这不会修改仓库工作树，也不需要管理员权限：
+
+```powershell
+& git.exe config --global core.longpaths true
+& .\install.ps1
+```
+
+本地开发验证可指定当前仓库和分支（不会把未提交改动上传到远程）：
+
+```powershell
+& .\install.ps1 -Repository 'F:\GitHub\codex-channels' -Branch 'docs/windows-support-plan'
+```
+
 Git 仓库用于跟踪和构建 `main`，日常命令由构建后的 npm 全局包提供。安装器会给仓库写入仅位于
 `.git/config` 的受管标记和本次 npm 全局目录，不修改工作树。
 
