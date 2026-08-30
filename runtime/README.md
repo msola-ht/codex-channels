@@ -80,7 +80,8 @@
   建立与应用就绪使用不同状态，应用开始停止时立即撤销就绪；公开同源健康探针供本地更新确认
   Gateway 已完成应用启动且尚未进入关闭流程。
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
-  label、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor 复用。
+  label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
+  复用。
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
   按温和终止、强制终止和有限终态等待关闭单个子进程；Windows 对调用方精确持有的 PID 使用系统
   `taskkill.exe /T` 终止该子进程树，避免批处理 Shim 退出后遗留 Codex 后代，且不扫描或结束其他 Codex

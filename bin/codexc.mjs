@@ -1134,7 +1134,11 @@ async function service(args) {
   const serviceArgs = parseServiceArguments(action, rest);
   rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
   if (action === "status" && serviceArgs[1] === "--json") {
-    runStandaloneScript("scripts/service-status.mjs", [serviceArgs[0]]);
+    runStandaloneScript(
+      "scripts/service-status.mjs",
+      [serviceArgs[0]],
+      serviceControlEnvironment(),
+    );
     return;
   }
   if (action === "install") {
@@ -1155,7 +1159,9 @@ async function service(args) {
             "success",
             task.preview.serviceManager === "systemd"
               ? "systemd 用户服务配置已生成。"
-              : "launchd 配置已生成。",
+              : task.preview.serviceManager === "launchd"
+                ? "launchd 配置已生成。"
+                : "Windows 当前用户计划任务配置已生成。",
           );
         }
       },
@@ -1196,8 +1202,22 @@ async function service(args) {
       undefined,
       { failureReportedByChild: serviceControllerReportsFailure(action) },
     );
+  } else if (process.platform === "win32") {
+    run(
+      process.execPath,
+      [
+        join(packageDir, "scripts/windows-service-control.mjs"),
+        action,
+        ...serviceArgs,
+        "--definitions",
+        join(controlEnvironment.CODEX_CONNECT_HOME, "services"),
+      ],
+      controlEnvironment,
+      undefined,
+      { failureReportedByChild: serviceControllerReportsFailure(action) },
+    );
   } else {
-    throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows 后台服务尚未支持");
+    throw new Error("codexc service 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
   const readinessTarget = coreServiceReadinessTarget(action, serviceArgs);
   if (readinessTarget) {
@@ -1437,11 +1457,11 @@ function runScript(relativePath, args, {
   );
 }
 
-function runStandaloneScript(relativePath, args) {
+function runStandaloneScript(relativePath, args, environment = process.env) {
   run(
     process.execPath,
     [join(packageDir, relativePath), ...args],
-    process.env,
+    environment,
     process.cwd(),
     { failureReportedByChild: true },
   );

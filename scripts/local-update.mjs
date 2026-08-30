@@ -382,9 +382,9 @@ export function inspectCoreServiceInstallation(
   environment = process.env,
   platform = process.platform,
 ) {
-  const home = environment.HOME;
+  const home = platform === "win32" ? environment.USERPROFILE : environment.HOME;
   if (!home) {
-    throw new Error("无法检查后台服务安装状态：HOME 未设置");
+    throw new Error(`无法检查后台服务安装状态：${platform === "win32" ? "USERPROFILE" : "HOME"} 未设置`);
   }
   let definitionsDirectory;
   let identifierKey;
@@ -395,15 +395,20 @@ export function inspectCoreServiceInstallation(
   } else if (platform === "darwin") {
     definitionsDirectory = join(home, "Library", "LaunchAgents");
     identifierKey = "launchd";
+  } else if (platform === "win32") {
+    definitionsDirectory = join(requireUserConfig(environment).dataDir, "services");
+    identifierKey = "windows";
   } else {
-    throw new Error("codexc update 当前支持 macOS launchd 与 Linux systemd");
+    throw new Error("codexc update 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
   const paths = serviceDefinitionsForTarget("all").map((definition) =>
     join(
       definitionsDirectory,
       platform === "darwin"
         ? `${definition[identifierKey]}.plist`
-        : definition[identifierKey],
+        : platform === "win32"
+          ? `${definition.target}.json`
+          : definition[identifierKey],
     )
   );
   const existingPaths = paths.filter((path) => existsSync(path));

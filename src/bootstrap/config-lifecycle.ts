@@ -80,7 +80,7 @@ export async function runGatewayProcess(): Promise<void> {
       unwatchFile(path);
     }
     process.removeListener("SIGHUP", scheduleReload);
-    process.removeListener("message", stopFromParent);
+    process.removeListener("message", controlFromParent);
   };
   const stop = (exitCode = 0): void => {
     if (stopping) {
@@ -186,19 +186,19 @@ export async function runGatewayProcess(): Promise<void> {
     reloadTimer.unref();
   }
 
-  const stopFromParent = (message: unknown): void => {
+  const controlFromParent = (message: unknown): void => {
     if (
       typeof message === "object"
       && message !== null
       && "type" in message
-      && message.type === "codexc-stop"
     ) {
-      stop();
+      if (message.type === "codexc-stop") stop();
+      if (message.type === "codexc-reload") scheduleReload();
     }
   };
   process.once("SIGINT", () => stop());
   process.once("SIGTERM", () => stop());
-  process.on("message", stopFromParent);
+  process.on("message", controlFromParent);
   process.on("SIGHUP", scheduleReload);
 
   try {

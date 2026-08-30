@@ -164,7 +164,7 @@ describe("service install management", () => {
       && error.recovery === "retry-install");
   });
 
-  it("uses the same contract for launchd and rejects unsupported Windows", () => {
+  it("uses the same contract for launchd and Windows Scheduled Tasks", () => {
     const fixture = createFixture();
     const written: Array<{ path: string; content: string }> = [];
     const launchd = previewServiceInstall(fixture.environment, {
@@ -188,12 +188,35 @@ describe("service install management", () => {
       expect(file.path).toMatch(/\.plist$/u);
       expect(file.content).not.toMatch(/__[A-Z_]+__/u);
     }
-    expect(() => previewServiceInstall(fixture.environment, {
+    const windowsWritten: Array<{ path: string; content: string }> = [];
+    const pwshExecutable = join(fixture.root, "PowerShell", "pwsh.exe");
+    const windows = previewServiceInstall(fixture.environment, {
       operatingSystem: "win32",
-    })).toThrowError(expect.objectContaining({
-      code: "unsupported-platform",
-      recovery: "unsupported",
-    }));
+      pwshExecutable,
+    });
+    writeServiceDefinitions(fixture.environment, {
+      operatingSystem: "win32",
+      pwshExecutable,
+      writeDefinition: (path, content) => windowsWritten.push({ path, content }),
+    });
+    expect(windows).toMatchObject({
+      operatingSystem: "win32",
+      serviceManager: "windows",
+    });
+    expect(windows.services[0]?.destination).toBe(join(
+      fixture.root,
+      ".codex-connect/services/app-server.json",
+    ));
+    expect(windowsWritten).toHaveLength(4);
+    for (const file of windowsWritten) {
+      expect(file.path).toMatch(/\.json$/u);
+      expect(file.content).not.toContain("must-not-leak");
+      expect(JSON.parse(file.content)).toMatchObject({
+        version: 1,
+        pwshBinary: pwshExecutable,
+      });
+      expect(JSON.parse(file.content).environment.PATH).toContain(dirname(pwshExecutable));
+    }
   });
 });
 

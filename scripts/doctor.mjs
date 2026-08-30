@@ -58,6 +58,7 @@ import {
   validateFeishuApplication,
 } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
+import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
@@ -553,6 +554,26 @@ if (process.platform === "darwin") {
         ? "已启用，退出登录后服务可继续运行"
         : "未启用或无法确认；重新运行 codexc service install，或按安装提示由管理员启用",
     );
+  }
+} else if (process.platform === "win32") {
+  try {
+    const status = inspectManagedServiceStatus({
+      environment: {
+        ...process.env,
+        CODEX_CONNECT_HOME: dataDir,
+        CODEX_CONNECT_CONFIG_FILE: configPath,
+      },
+      platform: "win32",
+      target: "all",
+    });
+    note(
+      "Windows 计划任务",
+      status.healthy
+        ? "App Server 与 Gateway 已运行"
+        : `已运行 ${status.services.filter((service) => service.running).length}/${status.services.length}；可运行 codexc service install 安装当前用户计划任务`,
+    );
+  } catch (error) {
+    note("Windows 计划任务", `无法查询：${errorMessage(error)}`);
   }
 } else {
   note("系统服务", "当前平台尚未提供系统服务适配");

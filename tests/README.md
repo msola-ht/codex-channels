@@ -210,8 +210,8 @@
   CLI 项目规则生成/检查、launchd、systemd 安装时的 linger 启用与登录前启动保证、Unix WebSocket
   私有目录/真实 Socket 校验和请求头、
   模块依赖方向、`runtime` 导入白名单及公开入口边界。
-- 后台服务结构化状态覆盖 systemd 属性归一、launchd 运行/缺失/查询失败、目标异常时的 JSON 输出与
-  CLI 参数顺序校验；Windows 服务管理链路尚未支持时保持明确失败，不宣称部分兼容。
+- 后台服务结构化状态覆盖 systemd 属性归一、launchd 运行/缺失/查询失败、Windows 计划任务定义与
+  私有 Host 健康归一、目标异常时的 JSON 输出及 CLI 参数顺序校验。
 - 微信 Setup 的替换风险取消门槛、扫码结果到禁用态非敏感配置和独立安全凭据的原子提交、配置失败
   凭据恢复、提交后响应异常确认与并发确认串行，以及微信/飞书分离的 Keychain Service、Linux 密文
   私有权限、严格版本和损坏失败关闭。

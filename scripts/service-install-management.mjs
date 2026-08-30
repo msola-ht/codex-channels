@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 import { loadRuntimeConfig } from "../dist/config/index.js";
-import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import {
+  securePrivateDirectorySync,
+  writePrivateFileAtomicSync,
+} from "../runtime/private-file.mjs";
 import { assertSynchronousChildSuccess } from "../runtime/process-lifecycle.mjs";
+import { resolveExecutable } from "../runtime/executable.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
 import { packageDir } from "./package-path.mjs";
 import {
@@ -39,6 +43,12 @@ const platformDefinitions = {
       "/usr/sbin",
       "/sbin",
     ],
+  },
+  win32: {
+    serviceManager: "windows",
+    shell: process.execPath,
+    controlScript: "windows-service-control.mjs",
+    additionalPathEntries: [],
   },
 };
 
@@ -144,21 +154,23 @@ function buildServiceInstallPlan(environment, options) {
     throw new ServiceInstallManagementError(
       "unsupported-platform",
       "preflight",
-      "后台服务当前支持 macOS launchd 与 Linux systemd；Windows 后台服务尚未支持",
+      "后台服务当前支持 macOS launchd、Linux systemd 与 Windows 计划任务",
       { completedStages: [], recovery: "unsupported" },
     );
   }
-  const home = stringValue(environment.HOME);
+  const home = operatingSystem === "win32"
+    ? stringValue(environment.USERPROFILE)
+    : stringValue(environment.HOME);
   if (!home) {
     throw new ServiceInstallManagementError(
       "missing-home",
       "preflight",
-      "无法生成后台服务安装计划：HOME 未设置",
+      `无法生成后台服务安装计划：${operatingSystem === "win32" ? "USERPROFILE" : "HOME"} 未设置`,
       { completedStages: [], recovery: "set-home" },
     );
   }
   const projectDir = options.projectDir ?? packageDir;
-  const context = resolveServiceInstallContext(
+  const baseContext = resolveServiceInstallContext(
     definition.additionalPathEntries,
     {
       environment,
@@ -168,6 +180,13 @@ function buildServiceInstallPlan(environment, options) {
         : { nodeExecutable: options.nodeExecutable }),
     },
   );
+  const context = definition.serviceManager === "windows"
+    ? {
+        ...baseContext,
+        pwshBinary: options.pwshExecutable
+          ?? resolveExecutable("pwsh.exe", environment),
+      }
+    : baseContext;
   const destinationDirectory = definition.serviceManager === "systemd"
     ? join(
         stringValue(environment.XDG_CONFIG_HOME)
@@ -176,24 +195,32 @@ function buildServiceInstallPlan(environment, options) {
         "systemd",
         "user",
       )
-    : join(resolve(home), "Library", "LaunchAgents");
+    : definition.serviceManager === "launchd"
+      ? join(resolve(home), "Library", "LaunchAgents")
+      : join(context.runtime.dataDir, "services");
   const files = serviceDefinitions.map((service) => {
     const identifier = service[definition.serviceManager];
     const templatePath = definition.serviceManager === "systemd"
       ? join(projectDir, "systemd", identifier)
         .replace(/\.service$/u, ".service.template")
-      : join(projectDir, "launchd", `${identifier}.plist.template`);
+      : definition.serviceManager === "launchd"
+        ? join(projectDir, "launchd", `${identifier}.plist.template`)
+        : undefined;
     const destination = definition.serviceManager === "systemd"
       ? join(destinationDirectory, identifier)
-      : join(destinationDirectory, `${identifier}.plist`);
-    const template = readFileSync(templatePath, "utf8");
+      : definition.serviceManager === "launchd"
+        ? join(destinationDirectory, `${identifier}.plist`)
+        : join(destinationDirectory, `${service.target}.json`);
+    const template = templatePath ? readFileSync(templatePath, "utf8") : undefined;
     return {
       service,
       identifier,
       destination,
       content: definition.serviceManager === "systemd"
         ? renderSystemdTemplate(template, context)
-        : renderLaunchdTemplate(template, context),
+        : definition.serviceManager === "launchd"
+          ? renderLaunchdTemplate(template, context)
+          : renderWindowsDefinition(service, identifier, context, projectDir),
     };
   });
   const plan = {
@@ -260,13 +287,20 @@ function assertFreshPlan(plan, environment, options) {
 function writeDefinitions(plan, options) {
   ensureServiceInstallRuntimeDirectory(plan.context);
   mkdirSync(plan.destinationDirectory, { recursive: true, mode: 0o700 });
+  if (plan.serviceManager === "windows") {
+    securePrivateDirectorySync(plan.destinationDirectory);
+  }
   const writer = options.writeDefinition ?? writePrivateFileAtomicSync;
   for (const file of plan.files) writer(file.destination, file.content);
 }
 
 function defaultPreflight(plan, environment, options) {
-  if (plan.serviceManager !== "launchd") return;
-  runController(plan, "check-install", environment, options);
+  if (plan.serviceManager === "launchd") {
+    runController(plan, "check-install", environment, options);
+  }
+  if (plan.serviceManager === "windows") {
+    runController(plan, "preflight", environment, options);
+  }
 }
 
 function defaultActivateCore(plan, environment, options) {
@@ -279,9 +313,12 @@ async function defaultWaitForCore(target, environment, options) {
 }
 
 function runController(plan, action, environment, options) {
+  const args = plan.serviceManager === "windows"
+    ? [plan.controlScript, action, "--definitions", plan.destinationDirectory]
+    : [plan.controlScript, action];
   const result = (options.spawnCommand ?? spawnSync)(
     plan.shell,
-    [plan.controlScript, action],
+    args,
     {
       cwd: plan.context.runtime.dataDir,
       env: environment,
@@ -289,6 +326,49 @@ function runController(plan, action, environment, options) {
     },
   );
   assertSynchronousChildSuccess(result, { failureReportedByChild: true });
+}
+
+function renderWindowsDefinition(service, identifier, context, projectDir) {
+  const command = service.target === "app-server" ? "service-app-server" : service.target;
+  const environment = {
+    CODEX_CONNECT_HOME: context.runtime.dataDir,
+    CODEX_CONNECT_CONFIG_FILE: context.runtime.configPath,
+    PATH: [context.executablePath, dirname(context.pwshBinary)].join(delimiter),
+    ...(service.target === "app-server"
+      ? { CODEX_CONNECT_SERVICE_ROLE: "app-server" }
+      : {}),
+    ...(service.target === "gateway"
+      ? {
+          CODEX_CONNECT_SERVICE_ROLE: "gateway",
+          CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
+          CODEX_BINARY: context.codexBinary,
+        }
+      : {}),
+  };
+  const logBase = service.target === "app-server" ? "codex-app-server" : service.target;
+  return `${JSON.stringify({
+    version: 1,
+    target: service.target,
+    displayName: service.displayName,
+    description: `${service.displayName} background service for Codex Connect`,
+    taskName: identifier,
+    pwshBinary: context.pwshBinary,
+    launcherPath: join(projectDir, "scripts", "windows-service-launcher.ps1"),
+    nodeBinary: context.nodeBinary,
+    serviceHost: join(projectDir, "scripts", "windows-service-host.mjs"),
+    arguments: [
+      "--disable-warning=ExperimentalWarning",
+      context.cliEntry,
+      command,
+    ],
+    workingDirectory: service.target === "app-server"
+      ? context.workdir
+      : context.runtime.dataDir,
+    environment,
+    controlPath: join(context.runtimeDir, `windows-service-${service.target}.sock`),
+    stdoutLog: join(context.runtimeDir, `${logBase}.log`),
+    stderrLog: join(context.runtimeDir, `${logBase}.error.log`),
+  }, null, 2)}\n`;
 }
 
 function renderSystemdTemplate(template, context) {

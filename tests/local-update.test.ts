@@ -119,6 +119,19 @@ describe("local update", () => {
       .toEqual({ installed: true });
   });
 
+  it("recognizes installed Windows Scheduled Task definitions", () => {
+    const { dataDir, environment } = fixture();
+    const definitionsDirectory = join(dataDir, "services");
+    mkdirSync(definitionsDirectory, { recursive: true });
+    writeFileSync(join(definitionsDirectory, "app-server.json"), "{}");
+    writeFileSync(join(definitionsDirectory, "gateway.json"), "{}");
+
+    expect(inspectCoreServiceInstallation({
+      ...environment,
+      USERPROFILE: dataDir,
+    }, "win32")).toEqual({ installed: true });
+  });
+
   it("materializes only missing safe config defaults and keeps a private backup", () => {
     const { environment, configPath } = fixture();
     const document = readGatewayConfig(configPath);

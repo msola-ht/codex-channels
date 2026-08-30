@@ -78,6 +78,9 @@ Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务�
 运行。当前用户没有启用权限时，安装会停止并显示需要管理员执行的精确命令；执行后重新运行
 `codexc service install`。
 
+Windows 使用当前用户的计划任务，在该用户登录后通过隐藏的 PowerShell 7 进程启动服务，不需要
+管理员权限；不会隐式退回启动文件夹。任务定义、日志与其他用户数据保留在 `.codex-connect`。
+
 完成后，在已配置的聊天客户端中私聊机器人即可使用。发送 `/help` 查看聊天命令。
 
 ## Setup 配置
@@ -298,7 +301,7 @@ codexc channel send-image /tmp/截图.png --thread <Thread ID>  # 指定会话
 ```bash
 codexc start                          # 前台启动 App Server 与 Gateway（调试用）
 codexc service status                 # 查看全部核心服务
-codexc service status --json          # 输出统一的 macOS/Linux 服务状态对象
+codexc service status --json          # 输出统一的 macOS/Linux/Windows 服务状态对象
 codexc service reload                 # 重新读取配置
 codexc service restart                # 只重启 Gateway
 codexc service restart all            # 重启 Gateway 和 App Server
@@ -337,7 +340,7 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 
 脚本还可使用 `codexc agents status --json` 查看共享第三方子代理状态，使用
 `codexc center info --json` 查看不含令牌内容的指标中心运行与端点信息，使用
-`codexc service status [目标] --json` 获取 macOS launchd 或 Linux systemd 的统一服务状态，使用
+`codexc service status [目标] --json` 获取 macOS launchd、Linux systemd 或 Windows 计划任务的统一服务状态，使用
 `codexc doctor --json` 获取完整的脱敏诊断检查结果，使用 `codexc rules check --json` 获取项目规则
 校验结果，使用 `codexc config --json` 获取配置路径与文件存在状态。
 

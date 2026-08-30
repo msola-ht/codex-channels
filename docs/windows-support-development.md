@@ -9,8 +9,8 @@
 `codex-cli 0.150.1` 上进入阶段四前台功能闭环；阶段一内部 IPC 安全验收和阶段三跨用户拒绝仍并行保留。
 底层 UDS、官方 Proxy、原生 Remote TUI 与 Gateway 的 `WindowsProxyTransport` 已证明可以建立连接；平台端点
 工厂也已接入主 Client 和 Provider Client 的组合根。Gateway Owner、App Server Supervisor 和
-Provider Metrics 已收敛到共享私有 IPC 并通过 Windows 定向探针；后台服务、完整渠道/Provider 生命周期
-和发布验证仍未完成。Windows 可执行文件与 npm shim 调用、精确持有 PID 的子进程树终止已经完成定向回归，配置与
+Provider Metrics 已收敛到共享私有 IPC 并通过 Windows 定向探针；当前用户计划任务后台服务主路径也已
+通过实机验证，更新恢复、系统重启、完整渠道/Provider 生命周期和发布验证仍未完成。Windows 可执行文件与 npm shim 调用、精确持有 PID 的子进程树终止已经完成定向回归，配置与
 共享私有文件的 SID/ACL 基础合同也已通过 tarball 冒烟；飞书用户 OAuth、微信 Bot、微信回复上下文和
 第三方 Provider Key 已接入 DPAPI 主密钥保护；状态库、计划任务库、指标库、管理与 WebUI Token、媒体、
 渠道输出和受管备份也已接入当前 SID 私有 ACL，Doctor 已能只读诊断该合同；真实 Remote TUI 已在普通
@@ -121,7 +121,8 @@ Windows 版本使用：
 
 ### 服务与进程
 
-- 服务安装、状态、日志和更新只实现 systemd 与 launchd，其他平台稳定失败关闭。
+- 服务安装、启停、状态、热加载和卸载已经接入 Windows 当前用户计划任务；日志、更新恢复与系统重启
+  仍需完成阶段五组合验收。
 - 进程停止在 Unix 使用信号和进程组；Windows 已建立只面向调用方持有 PID 的精确子进程树终止合同，
   但完整前台与后台服务验收仍未完成。
 - Thread Writer Lock 在 Linux 通过 `/proc/<pid>/fd` 定位持有者；Windows 已通过 Restart Manager 以
@@ -697,6 +698,23 @@ CLI 成功通过参数与配置解析并进入 TUI；随后只因探针刻意指
 未再出现 `untrusted` 非法值或已废弃配置错误。该结果收敛了 Remote 参数映射，但完整 Workspace
 `untrusted` 命令审批仍与 Sandbox/网络权限组合一并保留到真实 App Server 合同验收。
 
+#### 第二十九轮实机记录：2026-08-30
+
+本轮选定 Windows 当前用户计划任务作为首期后台方案：四个固定任务在用户登录后以 Limited 权限启动，
+不要求管理员权限，也不隐式退回启动文件夹。隐藏 PowerShell 7 启动器运行独立 Node 服务宿主；服务宿主
+通过当前 SID 私有 IPC 提供状态、Gateway 热加载和正常停止，超时才终止其精确子进程树。App Server、
+Gateway、WebUI 与指标中心继续使用既有目标、核心范围和启停顺序，任务定义与日志位于用户数据目录。
+
+短路径隔离配置的真实公开 CLI 冒烟完成 `service install`、核心状态、正常停止、重新启动、Gateway
+`reload`、WebUI/指标中心按需启停及 `service uninstall`。安装后 App Server 与 Gateway 均返回统一
+Windows 健康状态；停止后旧进程退出，再启动获得新 PID 并再次就绪。卸载后四个任务均不存在、探针
+进程为 0、服务定义文件为 0，用户数据按合同保留，随后隔离目录按验证过的 `%TEMP%` 精确路径删除。
+
+实机过程中修复了两个 Windows 专属边界：服务 PATH 必须包含已经解析的 PowerShell 7 目录，Host IPC
+必须复用共享私有 IPC 的认证首帧和换行请求协议。旧的半关闭协议会让状态与正常停止收到空响应，并在
+Task Scheduler 外层停止后留下失去管理的子进程；修复后同形停止/重启不再遗留进程。过长探针目录仍由
+既有 108 字节 Windows UDS 前置校验拒绝，不增加隐式端点搬移。
+
 ### 阶段一：平台运行时与内部 IPC
 
 状态：Transport 与内部 IPC 实现子项已完成；阶段整体仍等待内部 IPC 完整安全验收。
@@ -775,17 +793,18 @@ Provider 业务闭环仍待验收。
 
 ### 阶段五：后台服务、安装、更新与卸载
 
-状态：等待阶段四。
+状态：当前用户计划任务主路径已实现并通过实机冒烟；更新恢复、崩溃/系统重启和发布安装组合仍待验收。
 
-- [ ] 在 Task Scheduler 用户任务与 Windows Service 中选择一种首期正式方案；选择前明确管理员要求、
+- [x] 在 Task Scheduler 用户任务与 Windows Service 中选择一种首期正式方案；选择前明确管理员要求、
   登录前/后启动、失败重启、日志、环境变量、凭据访问和卸载语义。
-- [ ] 复用现有服务计划、修订、阶段进度、结构化结果和恢复状态，只新增 Windows 执行适配器。
-- [ ] `codexc service install|start|stop|restart|status|logs|uninstall` 与既有目标和默认值保持一致。
-- [ ] App Server 独立于 Gateway；重启 Gateway 不得终止共享 App Server，`all` 才按现有合同处理全部
+- [x] 复用现有服务计划、修订、阶段进度、结构化结果和恢复状态，只新增 Windows 执行适配器。
+- [ ] `codexc service install|start|stop|restart|status|logs|uninstall` 与既有目标和默认值保持一致；除
+  日志跟随外的主路径已完成定向验证。
+- [x] App Server 独立于 Gateway；重启 Gateway 不得终止共享 App Server，`all` 才按现有合同处理全部
   核心服务。
-- [ ] 提供 PowerShell 源码安装入口，或明确首期只支持 npm 安装；不能要求用户执行 POSIX `install.sh`。
+- [x] 首期用户安装明确使用 npm 全局包和普通 PowerShell，不要求执行 POSIX `install.sh`。
 - [ ] `codexc update` 完成候选构建、配置/数据库预检、服务停启、CLI 精确版本安装提示和失败恢复。
-- [ ] 卸载只删除受管程序与服务，保留配置、数据库、凭据、日志和输出，除非用户明确选择数据清理。
+- [x] 卸载只删除受管程序与服务，保留配置、数据库、凭据、日志和输出，除非用户明确选择数据清理。
 
 验收门槛：普通用户权限和需要提升权限的路径分别测试；安装、更新、崩溃恢复、系统重启和卸载没有
 遗留服务、明文凭据、错误 PATH 或失去管理的进程。

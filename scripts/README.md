@@ -494,8 +494,8 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   运行目录创建为 `0700`。
 - `service-install-management.mjs` / `service-install-management.d.mts`：把服务安装拆成配置校验、平台
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
-  完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
-  控制脚本实现 linger、旧 Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 明确失败关闭。
+  完成阶段、稳定恢复动作和最终结果。Linux systemd、macOS launchd 与 Windows 用户级计划任务共用
+  任务契约，但继续由各自控制脚本实现平台预检及服务管理，不解析 Shell 文案推断结果。
 - `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
   Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
   WebUI 与指标中心的专属重启要求继续单独提示。
@@ -507,13 +507,19 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
   控制脚本，避免 Shell 维护第二份服务标识。
-- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性或 launchd Job 字段生成统一、无配置
-  依赖的 JSON 服务状态；目标异常时保留可解析输出并返回非零状态，查询器故障则失败关闭。
-- `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
+- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性、launchd Job 字段或 Windows 私有
+  服务 Host IPC 生成统一、无配置依赖的 JSON 服务状态；目标异常时保留可解析输出并返回非零状态，
+  查询器故障则失败关闭。
+- `cli-status.mjs`：让 systemd/launchd/Windows 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
   安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
   与指标中心独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
+- `windows-service-control.mjs` / `windows-service-control.d.mts`、`windows-scheduled-task.ps1`、
+  `windows-service-host.mjs`、`windows-service-launcher.ps1`：通过当前用户的登录触发计划任务管理四个
+  Windows 后台目标；隐藏的 PowerShell 7 启动器运行私有服务 Host，Host 通过当前 SID 私有 IPC 提供
+  状态、热加载和正常停止，超时才终止其精确子进程树。安装无需管理员权限，不隐式退回启动文件夹；
+  卸载只删除受管任务和任务定义，保留配置、数据库、凭据与日志。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。
