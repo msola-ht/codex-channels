@@ -7,7 +7,7 @@
 
 状态：进行中。已在 Windows 11 `10.0.22631`、Node.js `24.15.0` 与全局
 `codex-cli 0.150.1` 上进入阶段四前台功能闭环；阶段一内部 IPC 安全验收和阶段三跨用户拒绝仍并行保留。
-底层 UDS、官方 Proxy、原生 Remote TUI 与 Gateway 的 `WindowsProxyTransport` 已证明可以建立连接；平台端点
+底层 UDS、Codex 提供的 Proxy 命令、原生 Remote TUI 与 Gateway 的 `WindowsProxyTransport` 已证明可以建立连接；平台端点
 工厂也已接入主 Client 和 Provider Client 的组合根。Gateway Owner、App Server Supervisor 和
 Provider Metrics 已收敛到共享私有 IPC 并通过 Windows 定向探针；当前用户计划任务后台服务主路径也已
 通过实机验证，日志跟随、异常退出重启及本地更新停启/失败恢复也已通过；系统重启、源码候选更新、
@@ -31,7 +31,7 @@ Windows 支持不需要重写 Application、Conversation Core、Session Routing�
 复用。上游另有回环 WebSocket 与 Capability Token，但官方仍将 WebSocket Transport 标为实验且不受
 支持，不能在未经独立决策和真实合同验证时成为项目的正式 Windows 基线。
 
-首选验证方向是保留上游 Windows UDS，并由官方 `codex app-server proxy --sock <PATH>` 为 Gateway
+首选验证方向是保留上游 Windows UDS，并使用 Codex 提供的 `codex app-server proxy --sock <PATH>` 为 Gateway
 提供单连接字节桥接；原生 TUI 继续直接使用 `codex --remote unix://<PATH>`。如果固定版本的 Windows
 Proxy 真实合同不成立，再评估受认证的回环 WebSocket。不能为了快速跑通而启动无认证 TCP App Server，
 也不能退回每个渠道单独启动 stdio App Server，因为这会破坏共享 Thread、Provider 隔离实例和 Remote
@@ -42,12 +42,12 @@ TUI 的既有架构。
 截至 2026-08-30，结论是“底层方案可行，项目尚不支持 Windows”，不能把当前分支作为可部署的
 Windows 版本使用：
 
-- 固定版 Codex App Server、官方 Proxy 与原生 Remote TUI 已在 Windows 建立真实连接，证明首选
+- 固定版 Codex App Server、Codex Proxy 命令与原生 Remote TUI 已在 Windows 建立真实连接，证明首选
   Transport 方向具备继续实现的基础。
 - 当前 Gateway 在 Unix 保留 `UnixWebSocketTransport` 的 POSIX 安全检查，在 Windows 则通过
-  `WindowsProxyTransport` 和官方 `app-server proxy --sock` 接入同一 UDS，不再对 Windows rendezvous
+  `WindowsProxyTransport` 和 `app-server proxy --sock` 接入同一 UDS，不再对 Windows rendezvous
   执行不成立的 POSIX Socket 类型、UID 或 mode 判断。
-- 独立的 `WindowsProxyTransport` 已通过构建产物和真实 App Server 合同，能够拥有官方 Proxy 子进程、
+- 独立的 `WindowsProxyTransport` 已通过构建产物和真实 App Server 合同，能够拥有 Codex Proxy 子进程、
   完成初始化与只读 `thread/list`，并在客户端关闭后清理 Proxy；组合根已为主实例和 Provider 实例
   选择该实现；Supervisor、Gateway Owner 和 Provider Metrics 也已接入 Windows 私有 IPC，但完整安全
   验收尚未结束。
@@ -126,6 +126,10 @@ Windows 版本使用：
 - 服务安装、启停、状态、日志、热加载和卸载已经接入 Windows 当前用户计划任务；异常退出由启动器
   有界重启，本地更新的停启与失败恢复已通过隔离实机验证，系统重启和源码候选更新仍需完成阶段五
   组合验收。
+- 启动操作具有幂等预检：宿主已运行时直接复用，计划任务已进入 `Running` 但宿主尚未就绪时仅等待；
+  计划任务设置 `MultipleInstances=IgnoreNew`，不会因重复触发创建第二个服务实例。后台启动默认隐藏窗口，
+  可通过 `codexc service status --json` 查看状态与 PID，并通过 `codexc service logs app-server` 或
+  `codexc service logs gateway` 查看启动输出。
 - 进程停止在 Unix 使用信号和进程组；Windows 已建立只面向调用方持有 PID 的精确子进程树终止合同，
   但完整前台与后台服务验收仍未完成。
 - Thread Writer Lock 在 Linux 通过 `/proc/<pid>/fd` 定位持有者；Windows 已通过 Restart Manager 以
@@ -186,11 +190,20 @@ Transport 可行性尚未在真实 Windows 主机验证，因此阶段零完成�
 
 | 方案 | 优点 | 风险 | 当前决策 |
 | --- | --- | --- | --- |
-| Windows UDS + `codex app-server proxy` | 使用固定版正式 UDS；原生 TUI 可直接共享；Gateway 不依赖 Node 直接连接 Windows UDS | 必须继续验证重连和完整生命周期；Gateway 需把子进程 stdio 包装为单条 Duplex | 采用方向；生产 Transport、主/Provider 选择、真实只读合同和 128 MiB 入站边界已通过 |
+| Windows UDS + `codex app-server proxy` | 使用固定版 UDS；原生 TUI 可直接共享；Gateway 不依赖 Node 直接连接 Windows UDS | `proxy` 是 Codex 提供的 UDS 到 stdin/stdout 字节桥，不是官方声明的 Windows 唯一推荐；Gateway 仍需包装其生命周期 | 本项目采用；生产 Transport、主/Provider 选择、真实只读合同和 128 MiB 入站边界已通过 |
 | 回环 WebSocket + Capability Token | Node 与原生 TUI 都能连接；健康检查和认证参数已存在 | 固定版官方明确标为实验且不受支持；端口、Token 生命周期和服务发现增加复杂度 | 仅作为首选失败后的候选，不直接生产采用 |
 | 每个 Gateway 使用 stdio App Server | 跨平台最简单 | 单客户端语义破坏共享 App Server、Remote TUI、Provider 租约和独立生命周期 | 拒绝 |
 | 无认证回环 WebSocket | 实现快 | 同机其他进程可控制 App Server，违反当前安全边界 | 拒绝 |
 | Gateway 自行实现 App Server 或会话代理 | 可完全控制 Transport | 复制官方状态机与协议，维护和安全风险不可接受 | 拒绝 |
+
+### App Server 连接方式对比
+
+| 方式 | 官方定位 | 本项目适用性 |
+| --- | --- | --- |
+| stdio（`codex app-server` 默认） | 官方本地客户端和 IDE 的通用集成基线；客户端启动长期子进程并保持双向 JSONL | 适合单客户端前台场景；共享 App Server 需要额外生命周期协调 |
+| Unix Socket | 官方本地控制面 Transport；通过 WebSocket Upgrade 承载 App Server 协议 | macOS/Linux 直接采用；Windows 不由 Node 直接读取 Unix Socket |
+| `codex app-server proxy --sock` | 官方命令，将 UDS 原始字节桥接到 stdin/stdout；后方仍是标准 WebSocket Upgrade | Windows 当前采用的适配方式；属于本项目平台选择，不是官方 Windows 专属推荐 |
+| WebSocket `--listen ws://` | 官方当前标记为 experimental / unsupported | 不作为生产方案，避免端口、认证和生命周期复杂度 |
 
 阶段零必须在结果文档中记录最终选择、原始错误、固定 CLI 版本和复验命令。若首选与候选都不能满足
 安全、共享会话和稳定性要求，Windows 工作进入阻塞状态，不通过降级语义宣告支持。

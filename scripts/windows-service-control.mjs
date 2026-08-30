@@ -169,6 +169,15 @@ export async function inspectWindowsServiceStatus({
 async function startDefinitions(target, definitionsDirectory, environment) {
   for (const service of serviceDefinitionsForTarget(target, "start")) {
     const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
+    const host = await inspectHost(definition.controlPath);
+    if (host?.version === 1 && host.running === true) {
+      continue;
+    }
+    const task = queryTask(service.windows, environment);
+    if (task.exists && String(task.state).toLowerCase() === "running") {
+      await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
+      continue;
+    }
     runTaskPrimitive("start", service.windows, environment, undefined, definition.pwshBinary);
     await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
   }

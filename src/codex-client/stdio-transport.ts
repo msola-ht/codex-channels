@@ -39,6 +39,7 @@ export class StdioTransport extends BaseTransport {
       cwd: this.options.cwd,
       env: this.options.environment,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: process.platform === "win32",
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
     this.process = child;
