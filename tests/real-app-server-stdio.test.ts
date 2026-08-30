@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import { appendDiagnostic, appServerFailure } from "./support/real-app-server-helpers.js";
 
 const run = process.env.RUN_CODEX_INTEGRATION === "1";
 const suite = run ? describe : describe.skip;
@@ -55,9 +56,3 @@ suite("real Codex App Server over stdio", () => {
     expect(Array.isArray(threads)).toBe(true);
   }, 15_000);
 });
-
-function appendDiagnostic(current: string, chunk: string): string { return `${current}${chunk}`.slice(-4_000); }
-function appServerFailure(message: string, stderr: string): string {
-  const sanitized = stderr.replace(/(authorization|token|password|cookie)(\s*[:=]\s*)\S+/gi, "$1$2[REDACTED]").trim();
-  return sanitized ? `${message}\nApp Server stderr:\n${sanitized}` : message;
-}

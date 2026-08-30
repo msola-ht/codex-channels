@@ -1,19 +1,11 @@
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  ConversationTarget,
-  OutputEvent,
-} from "../src/conversation-core/index.js";
 import {
   FeishuOutbox,
 } from "../src/surfaces/feishu/index.js";
+import { completed, operationUpdated, turnCompleted } from "./support/feishu-outbox-fixtures.js";
 
-const target = {
-  surface: "feishu",
-  accountId: "cli_app",
-  conversationId: "oc_chat",
-} as const;
 
 const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- Session：测试会话\n- Session ID：thread-1";
 
@@ -304,51 +296,6 @@ describe("Feishu outbox operation summaries", () => {
   });
 
 });
-
-function completed(
-  targetOverrides: Partial<ConversationTarget> = {},
-  text = "飞书回复",
-  itemId = text,
-): OutputEvent {
-  return {
-    type: "text.completed",
-    target: { ...target, ...targetOverrides },
-    threadId: "thread-1",
-    turnId: "turn-1",
-    itemId,
-    text,
-  };
-}
-
-function operationUpdated(
-  status: "running" | "completed",
-  kind: Extract<
-    OutputEvent,
-    { type: "operation.updated" }
-  >["operation"]["kind"] = "command",
-  itemId = "command-1",
-  detail = "git status --short",
-): Extract<OutputEvent, { type: "operation.updated" }> {
-  return {
-    type: "operation.updated",
-    target,
-    threadId: "thread-1",
-    turnId: "turn-1",
-    operation: {
-      itemId,
-      kind,
-      detail,
-      status,
-      ...(status === "completed"
-        ? { durationMs: 125, exitCode: 0 }
-        : {}),
-    },
-  };
-}
-
-function turnCompleted(): OutputEvent {
-  return { type: "turn.completed", target, threadId: "thread-1", sessionName: "测试会话", turnId: "turn-1", status: "completed" };
-}
 
 async function settle(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));

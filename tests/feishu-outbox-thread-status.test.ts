@@ -10,12 +10,8 @@ import {
   FeishuOutbox,
   type FeishuCardDocument,
 } from "../src/surfaces/feishu/index.js";
+import { target, threadStatus } from "./support/feishu-outbox-fixtures.js";
 
-const target = {
-  surface: "feishu",
-  accountId: "cli_app",
-  conversationId: "oc_chat",
-} as const;
 
 export const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- Session：测试会话\n- Session ID：thread-1";
 
@@ -352,14 +348,6 @@ export function delta(text: string, itemId = "item-1"): OutputEvent {
   };
 }
 
-function threadStatus(status: string): OutputEvent {
-  return {
-    type: "thread.status",
-    target,
-    threadId: "thread-1",
-    status,
-  };
-}
 
 export function turnCompleted(): OutputEvent {
   return {

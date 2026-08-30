@@ -28,6 +28,7 @@ import {
 } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
@@ -1109,27 +1110,6 @@ contractSuite("isolated Codex App Server state contract", () => {
   }, 15_000);
 });
 
-async function waitFor(predicate: () => boolean, timeoutMs: number, failure?: () => Error | undefined): Promise<void> {
-  const started = Date.now();
-  while (!predicate()) {
-    const currentFailure = failure?.();
-    if (currentFailure) throw currentFailure;
-    if (Date.now() - started > timeoutMs) throw new Error("等待 Codex App Server Unix Socket 超时；请检查 App Server stderr");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
-async function stopDetachedTestProcess(child: ChildProcess, timeoutMs: number): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  if (child.pid !== undefined) {
-    try { process.kill(-child.pid, "SIGTERM"); } catch { /* process already exited */ }
-  }
-  await waitFor(() => child.exitCode !== null || child.signalCode !== null, timeoutMs);
-}
-function appendDiagnostic(current: string, chunk: string): string { return `${current}${chunk}`.slice(-4_000); }
-function appServerFailure(message: string, stderr: string): string {
-  const sanitized = stderr.replace(/(authorization|token|password|cookie)(\s*[:=]\s*)\S+/gi, "$1$2[REDACTED]").trim();
-  return sanitized ? `${message}\nApp Server stderr:\n${sanitized}` : message;
-}
 async function expectConfiguredTier(client: CodexAppServerClient, cwd: string, expected: string): Promise<void> {
   await expect(client.readDefaultServiceTier(cwd)).resolves.toBe(expected);
 }
@@ -1142,4 +1122,23 @@ async function waitForMcpRuntimeStatus(client: CodexAppServerClient, threadId: s
   }
   throw new Error(`等待 MCP Server ${serverName} 进入 ${expectedStatus} 状态超时`);
 }
-function wavSilence(): Buffer { const data = Buffer.alloc(1600); const header = Buffer.alloc(44); header.write("RIFF", 0); return Buffer.concat([header, data]); }
+function wavSilence(): Buffer {
+  const sampleRate = 16_000;
+  const sampleCount = 1_600;
+  const dataBytes = sampleCount * 2;
+  const result = Buffer.alloc(44 + dataBytes);
+  result.write("RIFF", 0);
+  result.writeUInt32LE(36 + dataBytes, 4);
+  result.write("WAVE", 8);
+  result.write("fmt ", 12);
+  result.writeUInt32LE(16, 16);
+  result.writeUInt16LE(1, 20);
+  result.writeUInt16LE(1, 22);
+  result.writeUInt32LE(sampleRate, 24);
+  result.writeUInt32LE(sampleRate * 2, 28);
+  result.writeUInt16LE(2, 32);
+  result.writeUInt16LE(16, 34);
+  result.write("data", 36);
+  result.writeUInt32LE(dataBytes, 40);
+  return result;
+}

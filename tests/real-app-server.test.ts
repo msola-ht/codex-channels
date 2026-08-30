@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import { appendDiagnostic, appServerFailure, signalTestProcessTree, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const deepseekCatalogPath = process.env.CODEX_DEEPSEEK_MODEL_CATALOG;
@@ -226,64 +227,3 @@ deepseekCatalogContractTest(
   },
   30_000,
 );
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs: number,
-  failure?: () => Error | undefined,
-): Promise<void> {
-  const started = Date.now();
-  while (!predicate()) {
-    const currentFailure = failure?.();
-    if (currentFailure) {
-      throw currentFailure;
-    }
-    if (Date.now() - started > timeoutMs) {
-      throw new Error("等待 Codex App Server Unix Socket 超时；请检查 App Server stderr");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
-
-async function stopDetachedTestProcess(child: ChildProcess, timeoutMs: number): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  signalTestProcessTree(child, "SIGTERM");
-  try {
-    await waitFor(
-      () => child.exitCode !== null || child.signalCode !== null,
-      timeoutMs,
-    );
-  } catch (error) {
-    signalTestProcessTree(child, "SIGKILL");
-    await waitFor(
-      () => child.exitCode !== null || child.signalCode !== null,
-      2_000,
-    );
-    throw error;
-  }
-}
-
-function signalTestProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (process.platform !== "win32" && child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, signal);
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
-        throw error;
-      }
-    }
-    return;
-  }
-  child.kill(signal);
-}
-
-function appendDiagnostic(current: string, chunk: string): string {
-  return `${current}${chunk}`.slice(-4_000);
-}
-
-function appServerFailure(message: string, stderr: string): string {
-  const sanitized = stderr
-    .replace(/(authorization|token|password|cookie)(\s*[:=]\s*)\S+/gi, "$1$2[REDACTED]")
-    .trim();
-  return sanitized ? `${message}\nApp Server stderr:\n${sanitized}` : message;
-}

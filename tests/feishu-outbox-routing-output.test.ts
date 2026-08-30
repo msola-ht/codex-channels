@@ -1,23 +1,13 @@
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  ConversationTarget,
-  OutputEvent,
-} from "../src/conversation-core/index.js";
-import {
-  feishuCardElements,
-  FeishuMessageError,
-  FeishuOutbox,
-  type FeishuCardDocument,
-  type FeishuMessagePort,
-} from "../src/surfaces/feishu/index.js";
+import { FeishuMessageError, FeishuOutbox, type FeishuMessagePort } from "../src/surfaces/feishu/index.js";
+import type { OutputEvent } from "../src/conversation-core/index.js";
+import { completed, target, turnCompleted } from "./support/feishu-outbox-fixtures.js";
 
-const target = {
-  surface: "feishu",
-  accountId: "cli_app",
-  conversationId: "oc_chat",
-} as const;
+function deferred(): { promise: Promise<void>; resolve(): void } { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
+async function settle(): Promise<void> { await new Promise<void>((resolve) => setImmediate(resolve)); }
+
 
 export const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- Session：测试会话\n- Session ID：thread-1";
 
@@ -391,139 +381,3 @@ describe("Feishu outbox routing and bounded output", () => {
   });
 
 });
-
-function completed(
-  targetOverrides: Partial<ConversationTarget> = {},
-  text = "飞书回复",
-  itemId = text,
-): OutputEvent {
-  return {
-    type: "text.completed",
-    target: { ...target, ...targetOverrides },
-    threadId: "thread-1",
-    turnId: "turn-1",
-    itemId,
-    text,
-  };
-}
-
-export function operationUpdated(
-  status: "running" | "completed",
-  kind: Extract<
-    OutputEvent,
-    { type: "operation.updated" }
-  >["operation"]["kind"] = "command",
-  itemId = "command-1",
-  detail = "git status --short",
-): Extract<OutputEvent, { type: "operation.updated" }> {
-  return {
-    type: "operation.updated",
-    target,
-    threadId: "thread-1",
-    turnId: "turn-1",
-    operation: {
-      itemId,
-      kind,
-      detail,
-      status,
-      ...(status === "completed"
-        ? { durationMs: 125, exitCode: 0 }
-        : {}),
-    },
-  };
-}
-
-export function delta(text: string, itemId = "item-1"): OutputEvent {
-  return {
-    type: "text.delta",
-    target,
-    threadId: "thread-1",
-    turnId: "turn-1",
-    itemId,
-    text,
-  };
-}
-
-export function threadStatus(status: string): OutputEvent {
-  return {
-    type: "thread.status",
-    target,
-    threadId: "thread-1",
-    status,
-  };
-}
-
-function turnCompleted(): OutputEvent {
-  return {
-    type: "turn.completed",
-    target,
-    threadId: "thread-1",
-    sessionName: "测试会话",
-    turnId: "turn-1",
-    status: "completed",
-  };
-}
-
-export function planUpdated(
-  steps: Extract<OutputEvent, { type: "plan.updated" }>["steps"],
-): Extract<OutputEvent, { type: "plan.updated" }> {
-  return {
-    type: "plan.updated",
-    target,
-    threadId: "thread-1",
-    turnId: "turn-1",
-    explanation: null,
-    steps,
-  };
-}
-
-export function statusCardText(card: FeishuCardDocument): string {
-  const element = feishuCardElements(card)[0] as {
-    text?: {
-      content?: unknown;
-    };
-  } | undefined;
-  return typeof element?.text?.content === "string"
-    ? element.text.content
-    : "";
-}
-
-function deferred(): {
-  promise: Promise<void>;
-  resolve(): void;
-} {
-  let resolve: (() => void) | undefined;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return {
-    promise,
-    resolve: () => resolve?.(),
-  };
-}
-
-export function deferredValue<T>(): {
-  promise: Promise<T>;
-  resolve(value: T): void;
-} {
-  let resolve: ((value: T) => void) | undefined;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return {
-    promise,
-    resolve: (value) => resolve?.(value),
-  };
-}
-
-export function statusBindingCount(outbox: FeishuOutbox): number {
-  return (
-    outbox as unknown as {
-      threadStatusMessages: ReadonlyMap<string, unknown>;
-    }
-  ).threadStatusMessages.size;
-}
-
-async function settle(): Promise<void> {
-  await new Promise<void>((resolve) => setImmediate(resolve));
-}
