@@ -120,6 +120,7 @@ try {
     "scripts/service-status.d.mts",
     "scripts/service-status.mjs",
     "scripts/windows-scheduled-task.ps1",
+    "scripts/windows-log-follow.ps1",
     "scripts/windows-service-control.d.mts",
     "scripts/windows-service-control.mjs",
     "scripts/windows-service-host.mjs",

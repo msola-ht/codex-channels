@@ -517,9 +517,11 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
   与指标中心独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
 - `windows-service-control.mjs` / `windows-service-control.d.mts`、`windows-scheduled-task.ps1`、
+  `windows-log-follow.ps1`、
   `windows-service-host.mjs`、`windows-service-launcher.ps1`：通过当前用户的登录触发计划任务管理四个
   Windows 后台目标；隐藏的 PowerShell 7 启动器运行私有服务 Host，Host 通过当前 SID 私有 IPC 提供
-  状态、热加载和正常停止，超时才终止其精确子进程树。安装无需管理员权限，不隐式退回启动文件夹；
+  状态、热加载和正常停止，超时才终止其精确子进程树；Host 异常退出时由启动器间隔 5 秒最多重启
+  3 次，正常停止不重启。安装无需管理员权限，不隐式退回启动文件夹；
   卸载只删除受管任务和任务定义，保留配置、数据库、凭据与日志。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

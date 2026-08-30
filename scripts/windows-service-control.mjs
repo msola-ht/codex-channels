@@ -322,10 +322,15 @@ function showLogs(target, definitionsDirectory, environment, { follow, lines }) 
   const result = spawnSync(pwsh, [
     "-NoLogo",
     "-NoProfile",
-    "-Command",
-    "Get-Content -LiteralPath $args[1..($args.Count - 1)] -Tail ([int]$args[0]) -Wait",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    join(packageDir, "scripts", "windows-log-follow.ps1"),
+    "-Lines",
     String(lines),
-    ...paths,
+    "-PathsJson",
+    JSON.stringify(paths),
   ], { env: environment, stdio: "inherit", windowsHide: false });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`Windows 日志跟随失败：exit=${result.status ?? 1}`);
