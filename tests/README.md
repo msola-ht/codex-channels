@@ -2,6 +2,11 @@
 
 本目录包含 Vitest 单元测试、少量 fast-check 属性测试、模块边界测试和条件式真实 App Server 集成测试。测试文件按被测模块命名并使用 `.test.ts` 后缀。属性测试只用于输入空间大且存在稳定不变量的纯函数，不替代示例测试和真实合同测试。
 
+进程型 `codexc` CLI 合同按基础命令、Workspace、Remote、Remote Profile、Provider、监管、语法错误、
+其他错误、诊断、服务和 Doctor 十一个入口
+分片运行，共享 `codexc-cli-suite.ts` 中的测试定义与 Fixture；分片只用于释放 Vitest 文件级并行，
+不改变断言、真实子进程边界或临时资源隔离。
+
 ## 覆盖范围
 
 - JSON-RPC initialize、生成类型约束的精确出站消息、初始化断线竞态、消息分流、超时、过载

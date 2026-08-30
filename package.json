@@ -59,6 +59,7 @@
     "start": "node dist/main.js",
     "test": "npm run build && vitest run --config vitest.config.ts",
     "test:package": "npm run build && node scripts/smoke-package.mjs && node scripts/smoke-source-prepare.mjs",
+    "test:package:tarball-prepared": "node scripts/smoke-package.mjs",
     "test:watch": "vitest --config vitest.config.ts",
     "codex:upgrade": "node scripts/prepare-codex-upgrade.mjs",
     "codex:upgrade:validate": "node scripts/run-upgrade-validation.mjs",
