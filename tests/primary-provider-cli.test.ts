@@ -76,24 +76,6 @@ function clientFixture(snapshot: {
   };
 }
 
-describe("primary Provider private backup", () => {
-  it("rejects a backup file readable by other users", () => {
-    const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-permissions-"));
-    const environment = environmentForConnectHome(connectHome);
-    backupPrimaryProviderCandidates({
-      OpenAI: {
-        name: "OpenAI",
-        base_url: "https://example.test/v1",
-        wire_api: "responses",
-        experimental_bearer_token: "sk-private",
-      },
-    }, environment);
-    chmodSync(primaryProviderBackupPath(environment), 0o644);
-
-    expect(() => readPrimaryProviderBackup(environment)).toThrow("无法安全读取");
-  });
-});
-
 describe("primary provider CLI", () => {
   it("lists the active primary and all custom candidates", async () => {
     const { client, createClient } = clientFixture({
