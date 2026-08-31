@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { securePrivateFileSync } from "../runtime/private-file.mjs";
 
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
@@ -141,9 +142,11 @@ describe("state database upgrade", () => {
       PRAGMA user_version = 3;
     `);
     state.close();
+    if (process.platform === "win32") securePrivateFileSync(statePath);
 
     const scheduledPath = join(dataDir, "scheduled-tasks.sqlite3");
     createScheduledTaskV1Database(scheduledPath);
+    if (process.platform === "win32") securePrivateFileSync(scheduledPath);
 
     const before = inspectStateDatabase(environment);
     expect(before.scheduledTasks).toMatchObject({
@@ -244,6 +247,7 @@ describe("state database upgrade", () => {
     scheduled.exec("PRAGMA user_version = 3;");
     scheduled.close();
     chmodSync(scheduledPath, 0o600);
+    if (process.platform === "win32") securePrivateFileSync(scheduledPath);
 
     expect(() => validateStateDatabaseStructure(environment)).toThrow(/计划任务数据库 Schema 3/u);
     expect(() => upgradeStateDatabase(environment)).toThrow(/计划任务数据库 Schema 3/u);

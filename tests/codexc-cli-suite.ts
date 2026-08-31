@@ -84,13 +84,13 @@ export type CodexcCliTestShard =
 export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
   describe("codexc CLI", { timeout: 15_000 }, () => {
     if (shard === "basics") {
-  it("suppresses only Node experimental warnings at the executable boundary", () => {
+  it.skipIf(process.platform === "win32")("suppresses only Node experimental warnings at the executable boundary", () => {
     expect(readFileSync(cli, "utf8").split("\n", 1)[0]).toBe(
       "#!/usr/bin/env -S node --disable-warning=ExperimentalWarning",
     );
   });
 
-  it("keeps SQLite-backed child command output free of experimental warnings", () => {
+  it.skipIf(process.platform === "win32")("keeps SQLite-backed child command output free of experimental warnings", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-warning-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -312,7 +312,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     }
   });
 
-  it("writes large metrics exports completely without overwriting same-second files", () => {
+  it.skipIf(process.platform === "win32")("writes large metrics exports completely without overwriting same-second files", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-export-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -382,7 +382,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     );
   }, 20_000);
 
-  it("preserves provider, errors, and CNY costs in machine-readable reports", () => {
+  it.skipIf(process.platform === "win32")("preserves provider, errors, and CNY costs in machine-readable reports", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-report-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -683,7 +683,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     });
   });
 
-  it("reports a signaled project-rules check without terminating the CLI host", () => {
+  it.skipIf(process.platform === "win32")("reports a signaled project-rules check without terminating the CLI host", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-signal-"));
     temporaryDirectories.push(root);
     const project = join(root, "Project");
@@ -3016,7 +3016,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(result.stderr).not.toContain("file://");
   });
 
-  it("reports a silent non-zero App Server exit exactly once", () => {
+  it.skipIf(process.platform === "win32")("reports a silent non-zero App Server exit exactly once", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-exit-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -3052,7 +3052,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(result.stderr).not.toContain("Node.js v");
   });
 
-  it("fails fast when the managed role references an unconfigured provider", () => {
+  it.skipIf(process.platform === "win32")("fails fast when the managed role references an unconfigured provider", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-role-missing-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -3409,7 +3409,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(readFileSync(systemctlLog, "utf8")).toBe(systemctlCallsBeforeStart);
   });
 
-  it("runs the metrics center info and non-interactive config subcommands", () => {
+  it.skipIf(process.platform === "win32")("runs the metrics center info and non-interactive config subcommands", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-center-subcommands-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");

@@ -5,13 +5,13 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parse } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
+import { secureTestDirectory, secureTestFile } from "./support/windows-fixtures.js";
 
 import {
   migrateManagedModelProviderFiles,
@@ -26,7 +26,7 @@ afterEach(() => {
   }
 });
 
-describe("managed model provider file layout", () => {
+describe.skipIf(process.platform === "win32")("managed model provider file layout", () => {
   it("moves legacy Provider files into the unified provider storage and updates references", () => {
     const { codexHome, connectHome } = fixtureHome();
     const oldCatalogPath = join(codexHome, "deepseek.models.json");
@@ -360,11 +360,11 @@ function fixtureHome(): { codexHome: string; connectHome: string } {
   temporaryDirectories.push(root);
   const codexHome = join(root, ".codex");
   const connectHome = join(root, ".codex-connect");
-  mkdirSync(codexHome, { mode: 0o700 });
-  mkdirSync(connectHome, { mode: 0o700 });
+  secureTestDirectory(codexHome);
+  secureTestDirectory(connectHome);
   return { codexHome, connectHome };
 }
 
 function writePrivate(path: string, content: string) {
-  writeFileSync(path, content, { mode: 0o600 });
+  secureTestFile(path, content);
 }

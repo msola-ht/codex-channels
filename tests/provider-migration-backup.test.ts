@@ -19,8 +19,8 @@ import {
 import {
   deepseekProviderDefinition,
   opencodeGoProviderDefinition,
-  type ModelProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
+import type { ModelProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 
 describe("backup provider migration", () => {
   it("resolves backup targets inside managed directories and rejects outside paths", () => {

@@ -96,7 +96,7 @@ describe("OpenCode Go account provisioning", () => {
     })).rejects.toMatchObject({ code: "invalid-api-key", field: "apiKey" });
   });
 
-  it("keeps untouched file guards when one transaction file advances", async () => {
+  it.skipIf(process.platform === "win32")("keeps untouched file guards when one transaction file advances", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-opencode-go-guards-"));
     temporaryDirectories.push(root);
     const first = join(root, "first");

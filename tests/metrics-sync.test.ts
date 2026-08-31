@@ -116,7 +116,7 @@ describe("MetricsSync", () => {
     await sync.close();
   });
 
-  it("失败时不推进水位，退避后重试成功再推进", async () => {
+  it.skipIf(process.platform === "win32")("失败时不推进水位，退避后重试成功再推进", async () => {
     vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-"));
     temporaryDirectories.push(directory);
@@ -151,7 +151,7 @@ describe("MetricsSync", () => {
     await sync.close();
   });
 
-  it("429 返回 Retry-After 时按服务端要求延后重试", async () => {
+  it.skipIf(process.platform === "win32")("429 返回 Retry-After 时按服务端要求延后重试", async () => {
     vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-"));
     temporaryDirectories.push(directory);

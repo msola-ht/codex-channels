@@ -48,8 +48,10 @@ describe("config event queue", () => {
     expect(matchingWorkspaceConfigEvents(events, [project])).toMatchObject([
       { id: projectEvent.id, workspace: project },
     ]);
-    expect(statSync(queuePath).mode & 0o777).toBe(0o600);
-    expect(statSync(join(root, "data")).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      expect(statSync(queuePath).mode & 0o777).toBe(0o600);
+      expect(statSync(join(root, "data")).mode & 0o777).toBe(0o700);
+    }
 
     acknowledgeConfigEvents(queuePath, [projectEvent.id]);
     expect(readConfigEvents(queuePath)).toMatchObject([

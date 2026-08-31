@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createOpencodeGoQuotaWindowsProvider } from "../runtime/opencode-go-quota-windows.mjs";
+import { securePrivateDirectorySync, securePrivateFileSync } from "../runtime/private-file.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -198,17 +199,21 @@ async function createCodexHome(): Promise<string> {
     "opencode-go",
   );
   await mkdir(providerDirectory, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") securePrivateDirectorySync(providerDirectory);
   await writeFile(join(directory, "config.toml"), 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
+  if (process.platform === "win32") securePrivateFileSync(join(directory, "config.toml"));
   await writeFile(
     join(directory, "sf-opencode-go.config.toml"),
     `model = "deepseek-v4-flash"\nmodel_provider = "opencode-go"\n${providerConfig("sk-test-secret")}`,
     { mode: 0o600 },
   );
+  if (process.platform === "win32") securePrivateFileSync(join(directory, "sf-opencode-go.config.toml"));
   await writeFile(
     join(providerDirectory, "managed.toml"),
     'version = 1\nprovider = "opencode-go"\n',
     { mode: 0o600 },
   );
+  if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "managed.toml"));
   return directory;
 }
 

@@ -56,7 +56,9 @@ describe("Workspace configuration", () => {
     expect(readConfigEvents(eventQueuePath)).toMatchObject([
       { type: "workspace-added", workspace: { id: "new-project", cwd: realpathSync(added) } },
     ]);
-    expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("preserves per-workspace permissions while adding and removing registrations", () => {
