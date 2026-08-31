@@ -47,6 +47,7 @@ export class EventBus<T> {
     this.subscriptions.add(subscription);
     return () => {
       queue.close();
+      controller.abort();
       this.subscriptions.delete(subscription);
     };
   }

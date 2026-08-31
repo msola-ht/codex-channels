@@ -143,6 +143,42 @@ describe("WeixinOutbox", () => {
     expect(sendText).not.toHaveBeenCalled();
   });
 
+  it("drops queued final reasoning after command execution starts", async () => {
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    let sendCount = 0;
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        sendCount += 1;
+        if (sendCount === 1) {
+          await startGate;
+        }
+      },
+    );
+
+    outbox.handle(turnStarted());
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 15_000,
+      final: true,
+    });
+    outbox.handle(operationUpdated("running"));
+    releaseStart();
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "已开始处理。",
+    ]);
+  });
+
   it("sends a connection restore notice", async () => {
     const { outbox, sendText } = outboxFixture();
 

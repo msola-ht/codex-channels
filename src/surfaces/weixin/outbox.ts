@@ -182,15 +182,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
       }
       this.delivery.enqueue(
         event.target.conversationId,
-        (signal) => this.send(
-          event.target,
-          renderPlainLifecyclePresentation(
-            createTurnReasoningPresentation(
-              event.background ? event.threadId : undefined,
-              event.elapsedMs,
-            ),
-          ), maximumChunks, signal,
-        ),
+        (signal) => this.executionTurns.has(turnKey(event.threadId, event.turnId))
+          ? Promise.resolve()
+          : this.send(
+            event.target,
+            renderPlainLifecyclePresentation(
+              createTurnReasoningPresentation(
+                event.background ? event.threadId : undefined,
+                event.elapsedMs,
+              ),
+            ), maximumChunks, signal,
+          ),
         true,
       );
       return;

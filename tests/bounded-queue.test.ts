@@ -137,6 +137,33 @@ describe("EventBus", () => {
     expect(signal.aborted).toBe(true);
   });
 
+  it("aborts an active consumer when unsubscribing", async () => {
+    const bus = new EventBus<number>(pino({ level: "silent" }));
+    let signal!: AbortSignal;
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const unsubscribe = bus.subscribe("signal", async (_event, workerSignal) => {
+      signal = workerSignal;
+      started();
+      await new Promise<void>((resolve) => {
+        if (workerSignal.aborted) {
+          resolve();
+          return;
+        }
+        workerSignal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    bus.publish(1, true);
+    await startedPromise;
+
+    unsubscribe();
+    await bus.close();
+
+    expect(signal.aborted).toBe(true);
+  });
+
   it("stops waiting after the consumer close timeout", async () => {
     vi.useFakeTimers();
     const bus = new EventBus<number>(pino({ level: "silent" }));
