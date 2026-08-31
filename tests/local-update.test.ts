@@ -144,7 +144,7 @@ describe("local update", () => {
     expect(readGatewayConfig(configPath).display).toMatchObject({
       operation_updates: "compact",
       plan_updates: true,
-      price_currency: "cny",
+      price_currency: "usd",
     });
   });
 

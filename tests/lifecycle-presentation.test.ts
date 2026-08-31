@@ -50,6 +50,7 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(presentation.fields).toEqual([
       { label: "App Server", value: "已连接" },
+      { label: "系统", value: "Linux · x64" },
       { label: "OpenAI 网络", value: "连接失败；请检查代理设置" },
     ]);
   });
@@ -93,6 +94,7 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(presentation.fields).toEqual([
       { label: "App Server", value: "已连接" },
+      { label: "系统", value: "Linux · x64" },
     ]);
   });
 
@@ -231,9 +233,9 @@ describe("shared Surface lifecycle presentation", () => {
       "Codex Connect 已上线",
       "",
       "App Server：已连接",
+      "系统：Linux · x64",
       "",
       "运行环境：",
-      "系统：Linux · x64",
       "版本：Codex Connect 0.146.0 · Node.js v22.23.1",
       "连接：Unix WebSocket",
       "App Server UA：codex/0.146.0 (Linux; x64) (gateway; 0.146.0)",
@@ -647,12 +649,15 @@ describe("shared Surface lifecycle presentation", () => {
           latestUsedPercentMillionths: 37_000_000,
           estimatedTotalTokens: 3_200_000,
           estimatedTotalCostNanos: 1_300_000_000,
+          resetsAt: 1_800_000_000,
           observedAtMs: 1_800_000_000_000,
         },
       }, undefined, undefined, true),
     );
     expect(rendered).toContain("额度中心：3 台设备 · 12 次请求");
     expect(rendered).toContain("本周期 Token：1.2 M");
+    expect(rendered).toContain("重置时间：");
+    expect(rendered).toContain("周限：剩余 63%（额度中心） · 重置");
     expect(rendered).toContain("周限：剩余 63%（额度中心）");
   });
 
@@ -675,12 +680,14 @@ describe("shared Surface lifecycle presentation", () => {
           latestUsedPercentMillionths: 37_000_000,
           estimatedTotalTokens: 3_200_000,
           estimatedTotalCostNanos: 1_300_000_000,
+          resetsAt: 1_800_000_000,
           observedAtMs: 1_800_000_000_000,
         },
       }),
     );
     expect(rendered).toContain("账户状态：");
     expect(rendered).toContain("周限：剩余 63%（额度中心）");
+    expect(rendered).toContain("周限：剩余 63%（额度中心） · 重置 ");
     expect(rendered).not.toContain("额度中心：3 台设备");
     expect(rendered).not.toContain("本周期 Token");
   });

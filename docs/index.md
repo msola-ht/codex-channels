@@ -3,6 +3,8 @@
 本页用于定位 Codex App Server 的官方说明、`0.150.1` 固定版本源码，以及本项目对应实现。
 它是查询入口，不替代生成协议类型，也不声明本项目支持官方协议的全部能力。
 
+展示默认使用 USD；可通过 `display.price_currency = "cny"` 显式切换为人民币。
+
 ## 版本与数字
 
 当前索引对应 [`src/codex-protocol/version.json`](../src/codex-protocol/version.json) 锁定的
