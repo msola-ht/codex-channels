@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import { executableInvocation } from "../runtime/executable.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -29,7 +30,6 @@ describe("StdioTransport", () => {
       ? [
           "@echo off",
           'set /p "=%CODEX_TEST_MARKER%" <nul 1>&2',
-          "more >nul",
         ].join("\r\n")
       : [
           "#!/bin/sh",
@@ -40,6 +40,7 @@ describe("StdioTransport", () => {
     let stderr = "";
     const transport = new StdioTransport({
       codexBinary: executable,
+      createCodexProcessInvocation: (args) => executableInvocation(executable, args),
       cwd: root,
       environment: {
         ...process.env,
