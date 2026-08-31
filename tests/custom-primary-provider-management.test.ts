@@ -123,7 +123,7 @@ describe("custom primary Provider management", () => {
     );
   });
 
-  it("preserves an existing Key inside a prepared update without returning it", async () => {
+  it.skipIf(process.platform === "win32")("preserves an existing Key inside a prepared update without returning it", async () => {
     const environment = isolatedEnvironment("custom-provider-management-preserve-");
     backupPrimaryProviderCandidates({
       codeproxy: {

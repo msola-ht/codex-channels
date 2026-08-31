@@ -98,7 +98,7 @@ describe("management security core", () => {
     const created = provisionManagementCredential(path, { randomBytesImpl });
     expect(created).toMatchObject({ created: true, rotated: false });
     expect(created.credential).toHaveLength(43);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(readManagementCredential(path)).toBe(created.credential);
     expect(provisionManagementCredential(path, { randomBytesImpl })).toEqual({
       path,
@@ -213,6 +213,6 @@ describe("management security core", () => {
     const content = readFileSync(path, "utf8");
     expect(content).toContain('"operation":"config.update"');
     expect(content).not.toContain("must-not-be-recorded");
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 });

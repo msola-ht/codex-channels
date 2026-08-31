@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   chmodSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -28,6 +27,7 @@ import {
   writeCustomPrimaryProviderSwitchingProfile,
   writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 const officialModels = ["gpt-5.6-sol", "model-a", "model-new", "model-old"].map((model) => ({
   model,
@@ -41,14 +41,14 @@ function isolatedEnvironment(prefix: string): NodeJS.ProcessEnv {
   const root = mkdtempSync(join(tmpdir(), prefix));
   const codexHome = join(root, "codex");
   const connectHome = join(root, "connect");
-  mkdirSync(codexHome, { recursive: true, mode: 0o700 });
-  mkdirSync(connectHome, { recursive: true, mode: 0o700 });
+  secureTestDirectory(codexHome);
+  secureTestDirectory(connectHome);
   return { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: connectHome };
 }
 
 function environmentForConnectHome(connectHome: string): NodeJS.ProcessEnv {
   const codexHome = join(connectHome, "codex");
-  mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+  secureTestDirectory(codexHome);
   return { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: connectHome };
 }
 

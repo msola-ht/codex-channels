@@ -525,7 +525,7 @@ describe("Gateway config.toml", () => {
     expect(readFixture(fixture.configPath)).toContain(
       "# 自动补齐前的注释",
     );
-    expect(statSync(fixture.configPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(fixture.configPath).mode & 0o777).toBe(0o600);
   });
 
   it("does not materialize defaults when semantic validation fails", () => {

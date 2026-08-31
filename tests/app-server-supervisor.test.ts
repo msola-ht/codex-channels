@@ -24,6 +24,7 @@ afterEach(() => {
 });
 
 describe("App Server supervisor", () => {
+  const unixIt = process.platform === "win32" ? it.skip : it;
   it("refuses an unsafe supervisor path before requesting a Provider", async () => {
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-unsafe-"));
     temporaryDirectories.push(runtimeDir);
@@ -33,7 +34,7 @@ describe("App Server supervisor", () => {
     });
 
     await expect(ensureAppServerProvider(primarySocketPath, "opencode-go"))
-      .rejects.toThrow("监管 Socket 路径不安全");
+      .rejects.toThrow(/监管 Socket 路径不安全|Windows 私有 IPC 端点不安全/u);
   });
 
   it("starts a configured Provider through the private supervisor request", async () => {
@@ -90,7 +91,7 @@ describe("App Server supervisor", () => {
     await owner.close();
   });
 
-  it("rejects a supervisor socket path that exceeds the platform length limit", async () => {
+  unixIt("rejects a supervisor socket path that exceeds the platform length limit", async () => {
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-long-"));
     temporaryDirectories.push(runtimeDir);
     const primarySocketPath = join(runtimeDir, `${"a".repeat(110)}.sock`);
@@ -288,7 +289,7 @@ describe("App Server supervisor", () => {
     await owner.close();
   });
 
-  it("closes promptly while a local client keeps its connection open", async () => {
+  unixIt("closes promptly while a local client keeps its connection open", async () => {
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-close-"));
     temporaryDirectories.push(runtimeDir);
     const primarySocketPath = join(runtimeDir, "codex-app-server.sock");

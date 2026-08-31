@@ -1,5 +1,5 @@
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync as rawMkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -48,12 +48,19 @@ import {
   EncryptedFileWeixinReplyContextPersistence,
   FileWeixinUpdatesCursorStore,
 } from "../src/surfaces/weixin/index.js";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 const temporaryDirectories: string[] = [];
 const cli = resolve("bin/codexc.mjs");
 const execFileAsync = promisify(execFile);
 const linuxIt = process.platform === "linux" ? it : it.skip;
 const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
+
+function mkdtempSync(prefix: string): string {
+  const root = rawMkdtempSync(prefix);
+  if (process.platform === "win32") secureTestDirectory(root);
+  return root;
+}
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -1123,6 +1130,10 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     }
 
     if (shard === "remote") {
+  if (process.platform === "win32") {
+    it.skip("Windows 远程 TUI 使用 .cmd 包装器合同测试；Unix 可执行夹具不适用", () => undefined);
+    return;
+  }
 
   it("runs remote with the current or explicitly selected Workspace permissions", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
@@ -1444,6 +1455,10 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     }
 
     if (shard === "remote-profile") {
+  if (process.platform === "win32") {
+    it.skip("Windows 远程 Profile 使用服务合同测试；Unix 可执行夹具不适用", () => undefined);
+    return;
+  }
 
   it("routes the DeepSeek profile to its isolated remote App Server and authenticates the TUI", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-remote-profile-"));
@@ -1644,6 +1659,10 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     }
 
     if (shard === "provider") {
+  if (process.platform === "win32") {
+    it.skip("Windows 使用独立服务合同测试覆盖 Provider；Unix 套接字集成夹具不适用", () => undefined);
+    return;
+  }
   it("starts the App Server with effective proxy settings and the official path allowlist", () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-entry-"));
     temporaryDirectories.push(root);
@@ -2195,6 +2214,10 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     }
 
     if (shard === "supervision") {
+  if (process.platform === "win32") {
+    it.skip("Windows 进程监督由计划任务与服务合同测试覆盖；Unix 进程夹具不适用", () => undefined);
+    return;
+  }
   it("does not start an on-demand Provider proxy before that Provider is used", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-proxy-"));
     temporaryDirectories.push(root);
