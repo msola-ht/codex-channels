@@ -235,6 +235,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
       ) {
         return;
       }
+      // 操作只发送终态卡片；运行中状态由审批/执行链路内部维护，避免
+      // 同一命令产生“运行中”和“已完成”两条刷屏消息。
+      if (event.operation.status === "running") {
+        return;
+      }
       if (
         this.operationUpdates.accept(event, event.target)
       ) {
