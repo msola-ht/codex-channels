@@ -373,6 +373,9 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
       : context.runtime.dataDir,
     environment,
     controlPath: join(context.runtimeDir, `windows-service-${service.target}.sock`),
+    ...(service.target === "app-server"
+      ? { socketPath: context.runtime.primarySocketPath }
+      : {}),
     stdoutLog: join(context.runtimeDir, `${logBase}.log`),
     stderrLog: join(context.runtimeDir, `${logBase}.error.log`),
   }, null, 2)}\n`;

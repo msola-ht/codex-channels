@@ -1,4 +1,4 @@
-import { accessSync, constants, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
 import { delimiter, extname, isAbsolute, join, resolve } from "node:path";
 
 export function effectiveCodexBinary(
@@ -60,6 +60,8 @@ export function executableInvocation(
   ) {
     return { file: executable, args: [...args], windowsVerbatimArguments: false };
   }
+  const directCodex = directCodexShimInvocation(executable, args);
+  if (directCodex) return directCodex;
   const commandInterpreter = environmentVariable(
     environment,
     "ComSpec",
@@ -77,6 +79,24 @@ export function executableInvocation(
     args: ["/d", "/s", "/v:off", "/c", `"${commandLine}"`],
     windowsVerbatimArguments: true,
   };
+}
+
+function directCodexShimInvocation(executable, args) {
+  if (process.platform !== "win32" || extname(executable).toLowerCase() !== ".cmd") {
+    return undefined;
+  }
+  const normalized = executable.replace(/\\/gu, "/").toLowerCase();
+  if (!normalized.endsWith("/codex.cmd")) return undefined;
+  const entry = join(
+    executable.slice(0, -"codex.cmd".length),
+    "node_modules",
+    "@openai",
+    "codex",
+    "bin",
+    "codex.js",
+  );
+  if (!existsSync(entry)) return undefined;
+  return { file: process.execPath, args: [entry, ...args], windowsVerbatimArguments: false };
 }
 
 export function resolveExecutableInvocation(

@@ -36,7 +36,11 @@ switch ($Action) {
     $trigger = $null
     if ($autoStart) {
       $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
-      $trigger.CimInstanceProperties['Delay'].Value = 'PT1M'
+      $trigger.CimInstanceProperties['Delay'].Value = if ($definition.target -eq 'gateway') {
+        'PT2M'
+      } else {
+        'PT1M'
+      }
     }
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet `

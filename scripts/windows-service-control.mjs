@@ -10,6 +10,11 @@ import { pathToFileURL } from "node:url";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutable } from "../runtime/executable.mjs";
 import {
+  appServerSocketAcceptsWebSocket,
+  appServerSupervisorSocketPath,
+  inspectAppServerSupervisorState,
+} from "../runtime/app-server-supervisor.mjs";
+import {
   createPrivateIpcConnection,
   privateIpcEndpointExists,
 } from "../runtime/private-ipc.mjs";
@@ -171,16 +176,46 @@ async function startDefinitions(target, definitionsDirectory, environment) {
     const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
     const host = await inspectHost(definition.controlPath);
     if (host?.version === 1 && host.running === true) {
+      if (service.target === "app-server") await waitForAppServer(definition.socketPath);
       continue;
     }
     const task = queryTask(service.windows, environment);
     if (task.exists && String(task.state).toLowerCase() === "running") {
       await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
+      if (service.target === "app-server") await waitForAppServer(definition.socketPath);
       continue;
     }
     runTaskPrimitive("start", service.windows, environment, undefined, definition.pwshBinary);
     await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
+    if (service.target === "app-server") {
+      await waitForAppServer(definition.socketPath);
+    }
   }
+}
+
+async function waitForAppServer(socketPath) {
+  if (typeof socketPath !== "string" || socketPath.length === 0) return;
+  const deadline = Date.now() + hostStartTimeoutMs;
+  while (Date.now() < deadline) {
+    if (await appServerSocketAcceptsWebSocket(socketPath)) {
+      await waitForAppServerSupervisor(appServerSupervisorSocketPath(socketPath), deadline);
+      return;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
+  }
+  throw new Error(`等待 Codex App Server 就绪超时：${socketPath}`);
+}
+
+async function waitForAppServerSupervisor(socketPath, deadline) {
+  while (Date.now() < deadline) {
+    try {
+      if ((await inspectAppServerSupervisorState(socketPath)).status === "ready") return;
+    } catch {
+      // The descriptor may be absent or mid-write while App Server finishes startup.
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
+  }
+  throw new Error(`等待 App Server 监管入口就绪超时：${socketPath}`);
 }
 
 async function stopDefinition(service, definitionsDirectory, environment) {

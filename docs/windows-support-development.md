@@ -128,6 +128,7 @@ Windows 版本使用：
   组合验收。
 - 启动操作具有幂等预检：宿主已运行时直接复用，计划任务已进入 `Running` 但宿主尚未就绪时仅等待；
   计划任务设置 `MultipleInstances=IgnoreNew`，不会因重复触发创建第二个服务实例。后台启动默认隐藏窗口，
+  登录触发时 App Server 延迟 1 分钟、Gateway 延迟 2 分钟，避免 Gateway 在 App Server 就绪前抢先启动；
   可通过 `codexc service status --json` 查看状态与 PID，并通过 `codexc service logs app-server` 或
   `codexc service logs gateway` 查看启动输出。
 - 进程停止在 Unix 使用信号和进程组；Windows 已建立只面向调用方持有 PID 的精确子进程树终止合同，
