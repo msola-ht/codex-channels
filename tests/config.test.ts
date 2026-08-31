@@ -495,12 +495,12 @@ describe("Gateway config.toml", () => {
       socket_path: "runtime/codex-app-server.sock",
       sandbox: "workspace-write",
     });
-    expect(persisted.approval).toEqual({ timeout_seconds: 300 });
+    expect(persisted.approval).toEqual({ timeout_seconds: 600 });
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,
       reasoning: true,
-      price_currency: "cny",
+      price_currency: "usd",
     });
     expect(persisted.experimental).toEqual({ plugin_api: false });
     expect(persisted.scheduled_tasks).toEqual({ enabled: false });

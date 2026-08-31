@@ -171,11 +171,14 @@ plugin_api = true
 ### Codex 用户设置
 
 在 `codexc setup` 中选择“Codex 用户设置”，可统一设置 OpenAI 默认模型与思考等级、Fast 默认状态，
-以及默认沙盒、审批策略和 Workspace Sandbox 网络权限；“一键配置全部”会在一次确认后原子写入
+以及默认沙盒、审批策略和 Workspace Sandbox 网络权限；用户级审批策略只提供 Codex CLI 0.150.1
+公开支持的 `on-request` 与 `never`。“一键配置全部”会在一次确认后原子写入
 全部字段。设置通过 App Server 的版本化事务写入
 `~/.codex/config.toml`，不会修改 Codex 登录状态或第三方 Provider 配置；第三方固定模式的模型、
 思考等级和服务层级仍在对应 Provider 设置中管理。完成后运行 `codexc service restart all`，让新
-App Server 会话使用新的默认值。
+App Server 会话使用新的默认值。旧版本若已在根级或任意 `[profiles.<name>]` 写入
+`approval_policy = "untrusted"`，须先删除该行；固定版 App Server 会明确拒绝这项已退役的用户
+配置，Setup 不会静默迁移它。
 
 ### 自定义第三方 Provider
 
@@ -282,6 +285,8 @@ codexc remote --profile sf-deepseek resume
 会启动独立 TUI，不共享 Gateway Thread。当前目录位于已注册 Workspace 内，或显式使用
 `--workspace <ID>` 时，Remote TUI 会沿用该 Workspace 的沙盒、审批策略或权限 Profile；未匹配
 Workspace 时使用 `~/.codex/config.toml` 的 Codex 用户权限默认值。显式传给 Codex 的权限参数仍优先。
+Workspace 的 `untrusted` 仍可用于渠道 Thread，但 Codex CLI 0.150.1 不接受该公开参数；Remote 匹配到
+该值时会失败并要求显式选择 `on-request` / `never` 或修改 Workspace，不会静默放宽审批。
 未受管的个人 Codex Profile 仍可提供模型等设置；如需覆盖 Workspace 权限，须显式传入对应的
 Codex 权限参数。
 
@@ -429,9 +434,13 @@ codexc doctor
 ```
 
 日常升级统一使用 `codexc update`。Git 源码安装会更新官方 `main` 并刷新 npm 全局命令，后台服务
-已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。旧版第三方 Provider 文件会在停机
-窗口内先自动备份，再迁移到 `~/.codex-connect/providers/<id>/`；已配置的 DeepSeek 与 OpenCode Go
-会同步刷新受控官方模型目录并保留逐模型设置；首次升级时，OpenCode Go 仍使用旧默认 Flash 的账户
+已安装时会自动停止并恢复；未安装时只离线更新配置和数据库。每次更新都会核对当前或候选 Codex
+CLI 的公开参数合同与 `~/.codex/config.toml` 用户设置；不兼容时在停服务和切换源码前停止，并要求
+先完成代码适配或删除退役设置，不会静默改变审批语义。目标 CLI 版本不同时先安装到临时候选目录
+完成真实合同校验，通过后才修改全局 CLI；合同失败不会留下新 CLI 与旧源码的混用状态。旧版第三方
+Provider 文件会在停机窗口内先自动备份，再迁移到 `~/.codex-connect/providers/<id>/`；
+已配置的 DeepSeek 与 OpenCode Go 会同步刷新受控官方模型目录并保留逐模型设置；首次升级时，
+OpenCode Go 仍使用旧默认 Flash 的账户
 会自动切换到 Flash Vision Exp，已主动选择 Pro 的账户不变，迁移完成后再手动选回 Flash 也会保留；
 已废弃的 `[vision]` 配置段会在备份后自动移除。
 该命令必须从本机终端执行。详细

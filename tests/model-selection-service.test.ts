@@ -50,6 +50,7 @@ function createService(settings?: {
   const codex = {
     listModels: async () => availableModels,
     writeDefaultFastMode: async () => undefined,
+    readDefaultReasoningEffort: async () => null,
     readDefaultServiceTier: async () => "default",
   } satisfies ModelSelectionPort;
   let currentSettings = settings;
@@ -59,6 +60,7 @@ function createService(settings?: {
       ? { target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }
       : undefined,
     modelSettings: () => currentSettings,
+    workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
     updateModelSettings: (_threadId: string, next: typeof settings) => {
       currentSettings = next;
     },
@@ -71,6 +73,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
@@ -91,6 +94,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
@@ -107,6 +111,7 @@ describe("ModelSelectionService", () => {
         serviceTier: "default",
       }),
       newSession,
+      workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
     } as unknown as SessionRouter;
     const service = new ModelSelectionService(
       codex,
@@ -160,6 +165,7 @@ describe("ModelSelectionService", () => {
       {
         listModels: async () => [official],
         writeDefaultFastMode: async () => undefined,
+        readDefaultReasoningEffort: async () => null,
         readDefaultServiceTier: async () => "default",
       },
       { modelSettings: () => undefined } as unknown as SessionRouter,
@@ -217,6 +223,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => [openAi],
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = { modelSettings: () => undefined } as unknown as SessionRouter;
@@ -245,6 +252,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = { modelSettings: () => undefined } as unknown as SessionRouter;
@@ -337,6 +345,7 @@ describe("ModelSelectionService", () => {
     const service = new ModelSelectionService({
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     }, router);
 
@@ -371,6 +380,7 @@ describe("ModelSelectionService", () => {
     const service = new ModelSelectionService({
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     }, router);
 
@@ -405,6 +415,7 @@ describe("ModelSelectionService", () => {
     const service = new ModelSelectionService({
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     }, router);
 
@@ -438,6 +449,7 @@ describe("ModelSelectionService", () => {
     const service = new ModelSelectionService({
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     }, router, undefined, [], "OpenAI");
 
@@ -469,6 +481,7 @@ describe("ModelSelectionService", () => {
     const service = new ModelSelectionService({
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     }, router, undefined, [], "OpenAI");
 
@@ -514,6 +527,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
@@ -580,6 +594,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
@@ -617,6 +632,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => tierModels,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
@@ -637,12 +653,14 @@ describe("ModelSelectionService", () => {
     });
   });
 
-  it("starts a new Thread when selecting a model from another provider", async () => {
+  it("uses the target Provider configured effort when selecting a model from another provider", async () => {
     const newSession = vi.fn().mockResolvedValue(undefined);
     const fork = vi.fn().mockResolvedValue(undefined);
+    const readDefaultReasoningEffort = vi.fn().mockResolvedValue("high");
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
@@ -652,12 +670,13 @@ describe("ModelSelectionService", () => {
       modelSettings: () => ({
         model: "gpt-main",
         modelProvider: "openai",
-        effort: "low",
+        effort: "medium",
         serviceTier: "default",
       }),
+      workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
     } as unknown as SessionRouter;
     const deepseek = {
-      ...model("deepseek-v4-flash", ["low", "high"], "high"),
+      ...model("deepseek-v4-flash", ["low", "high"], "low"),
       provider: "deepseek",
     };
     const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
@@ -666,6 +685,7 @@ describe("ModelSelectionService", () => {
 
     expect(newSession).toHaveBeenCalledOnce();
     expect(fork).not.toHaveBeenCalled();
+    expect(readDefaultReasoningEffort).toHaveBeenCalledWith("/workspace", "deepseek");
     expect(state).toMatchObject({
       model: "deepseek-v4-flash",
       modelProvider: "deepseek",
@@ -680,12 +700,13 @@ describe("ModelSelectionService", () => {
     });
   });
 
-  it("starts a new Thread for another provider when no Thread is bound", async () => {
+  it("falls back to the model default when the target Provider configured effort is unsupported", async () => {
     const newSession = vi.fn().mockResolvedValue(undefined);
     const fork = vi.fn().mockResolvedValue(undefined);
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => "medium",
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {
@@ -693,6 +714,7 @@ describe("ModelSelectionService", () => {
       fork,
       newSession,
       modelSettings: () => undefined,
+      workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
     } as unknown as SessionRouter;
     const deepseek = {
       ...model("deepseek-v4-flash", ["low", "high"], "high"),
@@ -700,10 +722,11 @@ describe("ModelSelectionService", () => {
     };
     const service = new ModelSelectionService(codex, router, undefined, [deepseek]);
 
-    await service.selectModel(target, "deepseek-v4-flash");
+    const state = await service.selectModel(target, "deepseek-v4-flash");
 
     expect(newSession).toHaveBeenCalledOnce();
     expect(fork).not.toHaveBeenCalled();
+    expect(state.effort).toBe("high");
   });
 
   it("starts a clean OpenAI Thread when switching back from a third-party provider", async () => {
@@ -713,6 +736,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => "medium",
       readDefaultServiceTier,
     } as unknown as ModelSelectionPort;
     const router = {
@@ -746,6 +770,7 @@ describe("ModelSelectionService", () => {
     const codex = {
       listModels: async () => models,
       writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
     const router = {

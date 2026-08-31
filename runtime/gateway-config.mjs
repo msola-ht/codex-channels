@@ -96,7 +96,7 @@ const apiProviderSchema = z.strictObject({
   endpoint: z.url(),
 });
 
-const priceCurrencySchema = z.enum(["cny", "usd"]).default("cny");
+const priceCurrencySchema = z.enum(["cny", "usd"]).default("usd");
 
 const threadSectionPrincipalSchema = z.string().regex(
   /^(?:telegram|feishu|weixin):\S+$/u,
@@ -266,8 +266,8 @@ const gatewayDocumentSchema = z.strictObject({
   }).optional(),
   codex: codexSchema,
   approval: z.strictObject({
-    timeout_seconds: z.number().int().min(30).max(3600).default(300),
-  }).default({ timeout_seconds: 300 }),
+    timeout_seconds: z.number().int().min(30).max(3600).default(600),
+  }).default({ timeout_seconds: 600 }),
   display: z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
@@ -277,7 +277,7 @@ const gatewayDocumentSchema = z.strictObject({
     operation_updates: "compact",
     plan_updates: true,
     reasoning: true,
-    price_currency: "cny",
+    price_currency: "usd",
   }),
   experimental: z.strictObject({
     plugin_api: z.boolean().default(false),

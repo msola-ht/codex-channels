@@ -125,6 +125,8 @@ describe("local update", () => {
     mkdirSync(definitionsDirectory, { recursive: true });
     writeFileSync(join(definitionsDirectory, "app-server.json"), "{}");
     writeFileSync(join(definitionsDirectory, "gateway.json"), "{}");
+    writeFileSync(join(definitionsDirectory, "app-server.vbs"), "");
+    writeFileSync(join(definitionsDirectory, "gateway.vbs"), "");
 
     expect(inspectCoreServiceInstallation({
       ...environment,
@@ -157,7 +159,7 @@ describe("local update", () => {
     expect(readGatewayConfig(configPath).display).toMatchObject({
       operation_updates: "compact",
       plan_updates: true,
-      price_currency: "cny",
+      price_currency: "usd",
     });
   });
 

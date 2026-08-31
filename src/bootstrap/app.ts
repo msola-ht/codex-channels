@@ -1780,6 +1780,7 @@ async function readRemoteQuotaSummary(
       latestUsedPercentMillionths: period.latestUsedPercentMillionths ?? null,
       estimatedTotalTokens: period.estimatedTotalTokens ?? null,
       estimatedTotalCostNanos: period.estimatedTotalCostNanos ?? null,
+      resetsAt: period.resetsAt,
       tokensPerPercent: period.tokensPerPercent ?? null,
       costPerPercentNanos: period.costPerPercentNanos ?? null,
       observedAtMs: period.lastObservedAtMs,

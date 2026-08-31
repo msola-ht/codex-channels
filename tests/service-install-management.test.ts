@@ -207,15 +207,24 @@ describe("service install management", () => {
       fixture.root,
       ".codex-connect/services/app-server.json",
     ));
-    expect(windowsWritten).toHaveLength(4);
-    for (const file of windowsWritten) {
-      expect(file.path).toMatch(/\.json$/u);
+    expect(windowsWritten).toHaveLength(8);
+    const definitions = windowsWritten.filter((file) => file.path.endsWith(".json"));
+    const launchers = windowsWritten.filter((file) => file.path.endsWith(".vbs"));
+    expect(definitions).toHaveLength(4);
+    expect(launchers).toHaveLength(4);
+    for (const file of definitions) {
       expect(file.content).not.toContain("must-not-leak");
       expect(JSON.parse(file.content)).toMatchObject({
         version: 1,
         pwshBinary: pwshExecutable,
+        vbsLauncherPath: expect.stringMatching(/\.vbs$/u),
       });
       expect(JSON.parse(file.content).environment.PATH).toContain(dirname(pwshExecutable));
+    }
+    for (const file of launchers) {
+      expect(file.content).toContain("CreateObject(\"WScript.Shell\")");
+      expect(file.content).toContain("shell.Run");
+      expect(file.content).toContain(", 0, True)");
     }
   });
 });

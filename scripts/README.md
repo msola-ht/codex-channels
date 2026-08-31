@@ -2,10 +2,6 @@
 
 本目录保存 npm CLI 和开发流程调用的 Node.js、Shell 脚本。脚本处理本机配置、构建、协议生成和服务管理，不承载 Gateway 的会话业务逻辑。
 
-需要启动 Codex 或 npm 的脚本统一复用 `runtime/executable.mjs` 的结构化调用描述。Windows 按
-`PATHEXT` 解析原生程序和 `.cmd` / `.bat` shim，并通过解析后的 `ComSpec` 启动批处理文件，不依赖
-Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环境变量键名大小写不敏感处理。
-
 ## 配置与 Workspace
 
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
@@ -13,14 +9,18 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
 - `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
   源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
-  版本不匹配；交互终端遇到不匹配时以默认确认的 `Y/n` 询问是否全局安装精确 Codex CLI 版本，安装
-  成功后继续原更新事务；拒绝、安装失败或非交互调用均在停服和切换源码前失败，并显示精确安装与
-  重试命令。接受与候选协议
+  版本不匹配；交互终端遇到不匹配时以默认确认的 `Y/n` 询问是否全局安装精确 Codex CLI 版本，确认
+  后先安装到随候选清理的临时目录完成真实合同检查，通过后才执行独立全局安装阶段并继续原更新
+  事务；拒绝、临时或全局安装失败、合同失败及非交互调用均在停服和切换源码前失败，并显示精确
+  错误或安装与重试命令。接受与候选协议
   基础版本一致的 `-rc.N` Gateway 候选版或 `-fixN` 修复版，Codex CLI 校验仍使用候选协议元数据中的
   正式版本；更新前返回不包含 origin 的修订计划，候选准备完成后再返回目标版本、服务中断要求和
   精确执行阶段，预检状态变化时在克隆或停服前拒绝执行；
   候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，之后才停止服务并
-  原子切换源码，最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
+  使用实际 CLI 校验包含 `--config` 的候选公开合同、本地审批允许值及 Codex 根级和所有 Profile
+  用户配置；无新提交与 Registry 安装也执行同一只读检查。不一致时在全局安装、停服和切换前失败，
+  不自动迁移审批策略；通过后才安装全局 CLI 并原子切换源码，
+  最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
   明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
   `.bin/codexc` 与 Shell PATH。阶段进度和失败对象包含已完成阶段、服务/源码恢复状态与修复建议，
   观察者或 CLI 展示异常不改变更新事务。Registry 安装直接委派现有本地更新，不修改程序包。
@@ -351,9 +351,7 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   使用情况启动；共享 `agents.external` 当前选择的 Provider 会预先启动统计代理以保证子代理可用；
   随后再启动 Gateway。只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
-  App Server 失败关闭；Windows 前台停止时通过父子 Node IPC 依次请求 Gateway 和 App Server Supervisor
-  正常释放私有端点，父入口保留有限超时后的精确进程树终止。脚本统一收敛自身启动错误，已经由内部
-  服务入口展示的失败不重复包装。
+  App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
@@ -361,23 +359,10 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
   完成第三方 Provider 认证；同时按当前目录或显式
   `--workspace` 解析有效 Sandbox、审批策略与 Permission Profile，第三方 Profile 不复制权限，
-  用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；固定版
-  CLI 已不接受 `--ask-for-approval untrusted`，因此该 Workspace 策略使用仅限当前进程和精确
-  Workspace 路径的官方 `projects.<path>.trust_level="untrusted"` 配置覆盖，保持
-  `UnlessTrusted` 语义且不改写 Codex 用户配置；
-  Windows 在获取 Provider 租约前校验追加 Provider 后缀后的最终 UDS 路径小于 108 UTF-8 字节；
+  用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
+  Workspace 的 `untrusted` 保留给 App Server Thread，但在没有显式审批覆盖时拒绝映射为固定版 CLI
+  已退役的公开参数，不静默改成更宽松策略；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
-- `windows-app-server-proxy-probe.mjs`：阶段零 Windows Transport 探针；不依赖项目安装或第三方包，
-  接受绝对 `codex.exe`、UDS 路径和工作目录，经官方 `app-server proxy` 完成标准 WebSocket Upgrade、
-  `initialize` / `initialized` 与只读 `thread/list`；`--scenario` 可选择只读、跨 Proxy 读取、
-  分片消息边界、真实 Turn、精确 `node --version` 一次审批或立即中断，非只读 Turn 场景只使用
-  Ephemeral Thread 并在结束时取消订阅。`message-limit` 默认验证 64 MiB 请求可达和 96 MiB 请求
-  被固定版 App Server 拒绝；可用 `--accepted-bytes` / `--rejected-bytes` 复核其他两侧值；
-  `--hold-ms` 可保持只读连接并再次读取，验证服务端退出后的超时边界。脚本只输出脱敏结构化结果，
-  不写 Gateway 配置或会话正文。
-- `windows-proxy-inbound-limit-probe.mjs`：使用可控的本地 WebSocket 字节流子进程驱动构建产物中的真实
-  `WindowsProxyTransport`，默认验证 128 MiB 文本帧可完整接收、`128 MiB + 1` 被客户端有界拒绝；
-  夹具不连接模型、不创建 Thread，也不输出载荷正文。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
 - `codex-release-api.mjs`：为稳定版解析器调用 GitHub Release API；请求或响应正文
@@ -386,17 +371,20 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   拒绝 Draft、Pre-release 和版本不匹配。
 - `analyze-upgrade-protocol.mjs`：比较 `HEAD` 与升级工作树中的生成协议，报告 RPC 名称、顶层
   类型字段和生成文件变化；只陈述结构差异，不推断行为语义。
+- `codex-public-cli-contract.mjs`：从锁定 CLI 的公开帮助提取 Remote 实际转发参数（包括 Permission
+  Profile 使用的 `-c/--config`）的存在性、别名、参数形状和枚举值，校验根级和所有 Profile 用户
+  设置审批值与快照一致；升级时刷新受控快照并按新增、删除、签名变化
+  和枚举变化生成独立影响报告，不把 App Server 内部枚举误当成公开 CLI 合同。
 - `run-upgrade-validation.mjs`：为正式升级提案独立运行协议、类型、Lint、测试、
   真实合同、构建和打包检查；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
   改稳定版文档，因此明确跳过文档索引检查和仅用于发布前的 README 同步测试。
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
-  二进制安全 Patch，并比较 `HEAD` 生成协议的 RPC 名称和顶层字段结构，合并逐阶段结果；生成
-  或验证失败且没有差异时仍会输出报告。
+  二进制安全 Patch，并分别比较 `HEAD` 生成协议的 RPC/顶层字段结构和受控公开 CLI 合同，合并
+  逐阶段结果；生成或验证失败且没有差异时仍会输出报告。
 - `check-pr-description.mjs`：所有 Ready PR 必须写清新增、修复和改动，没有对应内容时明确写
   “无”；正式升级 PR 还要把自动占位内容替换为本项目的收益、采用项、不采用项及风险与验证。
   Draft PR 暂时跳过，转为 Ready 时由同一门禁重新检查。
-- `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录；
-  正文比较只归一化 CRLF 与 LF，不掩盖其他生成差异。
+- `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录。
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
   成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于受控 Plan 边界。
 - `check-protocol.mjs`：校验本机 Codex CLI 版本，并按记录的实验状态重新生成到临时目录确认类型逐文件一致。
@@ -438,9 +426,10 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根 `index.md` 文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `codex-rules.mjs`：向 CLI 重新导出 `runtime/project-rules.mjs` 的项目定位、规则生成与检查能力。
-- `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置；Unix
-  校验 `pre-commit` 的可执行位，Windows 不读取 NTFS 上不存在的 POSIX 执行位。
-- `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查。
+- `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
+- `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查，并输出每个
+  阶段及全部检查的累计耗时；完整测试已经成功构建 Gateway 后，日常门禁只复用该产物执行 tarball
+  安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 
 ## 构建、打包与服务
@@ -449,9 +438,6 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   到 `~/.codex-connect/codex-channels`，检测 npm 与 Codex CLI，缺少 Codex CLI 时安装项目精确版本，
   并检查登录状态；随后完成依赖、Gateway/WebUI 构建和 npm 全局命令注册。不覆盖现有源码目录、
   配置或数据，也不写入 Shell PATH。
-- 根目录 `install.ps1`：在 Windows PowerShell 7 中执行与 `install.sh` 等价的源码安装事务，使用
-  npm.cmd、用户级 `.codex-connect` 和当前 SID 私有目录，不要求管理员权限；失败时删除临时目录和
-  不完整源码。Windows 公开支持门槛完成前，该入口仍属于开发验证入口。
 - `clean-dist.mjs`：构建前清理 `dist/`。
 - `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
@@ -477,11 +463,8 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   版本以兼容旧版源码更新器；已发布版本的安装入口继续由 README 和 Release 保留。
 - `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
   OpenAI 主提供商使用的配置、环境变量或系统代理路由（不显示代理地址或凭据）、
-  Unix owner-only mode 或 Windows 当前 SID 私有 ACL、DPAPI CurrentUser 后端、状态/指标数据库、
-  凭据/媒体/渠道输出目录和配置内访问令牌是否存在（不显示内容）、
   Workspace、飞书凭据/Bot 身份、
-  微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间；App Server
-  健康检查在 Unix 直连 WebSocket，在 Windows 复用官方 Proxy Transport，并校验 initialize 与精确版本，
+  微信配置与 Bot 凭据、消息游标检查点、允许用户的加密回复上下文覆盖数和最近保存时间，
   以及微信运行时启用状态；缺少 `bubblewrap` 时说明内置 helper 回退并输出发行版安装命令，
   完成全部检测后按诊断领域只输出失败、提示和处理建议，交互终端区分颜色并汇总各状态数量；
   Doctor 不自动安装或修改 AppArmor，不调用
@@ -497,8 +480,8 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   运行目录创建为 `0700`。
 - `service-install-management.mjs` / `service-install-management.d.mts`：把服务安装拆成配置校验、平台
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
-  完成阶段、稳定恢复动作和最终结果。Linux systemd、macOS launchd 与 Windows 用户级计划任务共用
-  任务契约，但继续由各自控制脚本实现平台预检及服务管理，不解析 Shell 文案推断结果。
+  完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
+  控制脚本实现 linger、旧 Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 明确失败关闭。
 - `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
   Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
   WebUI 与指标中心的专属重启要求继续单独提示。
@@ -510,21 +493,27 @@ Shell 自动补后缀；从 `process.env` 复制的环境对象按 Windows 环�
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
   控制脚本，避免 Shell 维护第二份服务标识。
-- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性、launchd Job 字段或 Windows 私有
-  服务 Host IPC 生成统一、无配置依赖的 JSON 服务状态；目标异常时保留可解析输出并返回非零状态，
-  查询器故障则失败关闭。
-- `cli-status.mjs`：让 systemd/launchd/Windows 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
+- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性或 launchd Job 字段生成统一、无配置
+  依赖的 JSON 服务状态；目标异常时保留可解析输出并返回非零状态，查询器故障则失败关闭。
+- `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
   安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
   与指标中心独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
-- `windows-service-control.mjs` / `windows-service-control.d.mts`、`windows-scheduled-task.ps1`、
-  `windows-log-follow.ps1`、
-  `windows-service-host.mjs`、`windows-service-launcher.ps1`：通过当前用户的登录触发计划任务管理四个
-  Windows 后台目标；隐藏的 PowerShell 7 启动器运行私有服务 Host，Host 通过当前 SID 私有 IPC 提供
-  状态、热加载和正常停止，超时才终止其精确子进程树；Host 异常退出时由启动器间隔 5 秒最多重启
-  3 次，正常停止不重启。安装无需管理员权限，不隐式退回启动文件夹；
-  卸载只删除受管任务和任务定义，保留配置、数据库、凭据与日志。
+- `windows-service-control.mjs` / `windows-service-control.d.mts`：读取用户级 Windows 服务定义，
+  通过计划任务控制脚本执行 App Server、Gateway、WebUI 和指标中心的安装、启停、重启、状态、日志
+  与卸载；核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
+- `windows-service-host.mjs`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
+  Node 服务进程，转发控制请求并把标准输出、错误输出写入用户级运行日志。
+- `windows-service-launcher.ps1`：Windows 计划任务调用的 PowerShell 启动器，设置受控环境后
+  转交服务宿主，不依赖当前终端目录或用户 Shell 配置。
+- `windows-scheduled-task.ps1`：创建、启动、查询和删除当前用户计划任务；任务通过
+  `wscript.exe` 以隐藏窗口运行对应 VBS 启动器，避免服务进程占用可见终端窗口。
+- `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc service logs` 使用。
+- `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的只读探针，用于确认
+  代理端点、初始化握手和 RPC 可达性。
+- `windows-proxy-inbound-limit-probe.mjs`：验证 Windows 代理入口对回环地址和入站连接限制的
+  只读探针，不修改系统或服务配置。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

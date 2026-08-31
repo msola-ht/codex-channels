@@ -20,6 +20,7 @@ import type {
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -116,6 +117,7 @@ describe("MetricsSync", () => {
   });
 
   it("失败时不推进水位，退避后重试成功再推进", async () => {
+    vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-"));
     temporaryDirectories.push(directory);
     const statePath = join(directory, "metrics-sync-state.json");
@@ -128,14 +130,20 @@ describe("MetricsSync", () => {
       fetchImpl,
     }));
 
+    const startedAtMs = Date.now();
     sync.start();
+    await vi.advanceTimersByTimeAsync(0);
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(existsSync(statePath)).toBe(false);
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
 
     fetchImpl.mockResolvedValueOnce(new Response(null, { status: 204 }));
-    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2), { timeout: 5_000 });
-    await vi.waitFor(() => expect(existsSync(statePath)).toBe(true), { timeout: 5_000 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await vi.runOnlyPendingTimersAsync();
+    expect(Date.now() - startedAtMs).toBeGreaterThanOrEqual(1_000);
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(existsSync(statePath)).toBe(true));
     const persisted = JSON.parse(readFileSync(statePath, "utf8")) as {
       lastRequestLocalId: number;
     };
@@ -144,6 +152,7 @@ describe("MetricsSync", () => {
   });
 
   it("429 返回 Retry-After 时按服务端要求延后重试", async () => {
+    vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-"));
     temporaryDirectories.push(directory);
     const statePath = join(directory, "metrics-sync-state.json");
@@ -160,15 +169,17 @@ describe("MetricsSync", () => {
       fetchImpl,
     }));
 
+    const startedAtMs = Date.now();
     sync.start();
+    await vi.advanceTimersByTimeAsync(0);
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
-    await new Promise((resolve) => setTimeout(resolve, 1_800));
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     fetchImpl.mockResolvedValueOnce(new Response(null, { status: 204 }));
-    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2), {
-      timeout: 6_000,
-    });
+    await vi.runOnlyPendingTimersAsync();
+    expect(Date.now() - startedAtMs).toBeGreaterThanOrEqual(3_000);
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
     await sync.close();
   }, 10_000);
 

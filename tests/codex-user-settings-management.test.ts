@@ -199,7 +199,7 @@ describe("Codex user settings management", () => {
     await updateCodexUserSetting({
       kind: "permissions",
       sandboxMode: "workspace-write",
-      approvalPolicy: "untrusted",
+      approvalPolicy: "on-request",
       networkAccess: true,
     }, {
       expectedVersion: "version-1",
@@ -210,9 +210,27 @@ describe("Codex user settings management", () => {
     expect(client.listModels).not.toHaveBeenCalled();
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "sandbox_mode", value: "workspace-write" },
-      { keyPath: "approval_policy", value: "untrusted" },
+      { keyPath: "approval_policy", value: "on-request" },
       { keyPath: "sandbox_workspace_write.network_access", value: true },
     ], { expectedVersion: "version-1" });
+  });
+
+  it("rejects the retired untrusted policy before writing user config", async () => {
+    const client = settingsClient({});
+
+    await expect(updateCodexUserSetting({
+      kind: "permissions",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "untrusted" as never,
+      networkAccess: false,
+    }, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+    })).rejects.toMatchObject({
+      code: "invalid-approval-policy",
+      field: "approvalPolicy",
+    });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
   });
 
   it("fails closed when a Permission Profile already owns the permission model", async () => {

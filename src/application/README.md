@@ -34,8 +34,8 @@
   在 Workspace、新会话或同 Provider 历史 Thread 切换前后捕获并恢复当前模型、思考等级与服务层级，
   显式恢复不同 Provider 的历史 Thread 时则尊重该 Thread 的 Provider；偏好只保留在运行内存中；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
-  `modelProvider` 的 Thread，并采用目标模型目录的默认思考等级，避免把原 Provider 的设置或专属
-  历史发送到不兼容的 API；旧 Thread 保持可恢复；
+  `modelProvider` 的 Thread；思考等级优先采用目标 Provider App Server 的有效配置，目标模型不支持
+  或未配置时才回落其目录默认值，避免把原 Provider 的设置或专属历史发送到不兼容的 API；旧 Thread 保持可恢复；
   含内联图片或本地音频的输入在创建或追加 Turn 前必须分别通过当前模型的 `image` 或 `audio` 能力检查；
   Fast 只允许当前模型目录明确声明支持时切换，并通过模型窄端口保存用户级默认层级；第三方模型
   不得借关闭 Fast 改写 OpenAI 默认设置。
@@ -129,9 +129,9 @@ App Server 通知继续处理其他客户端修改与恢复后的状态校正。
 完整历史目录，分区视图按官方 `section_position` 排序，同时保留完整目录选择器；不持久化分区目录。
 内置 Pinned 分区继续由 `/pin` 与 `/unpin` 提供会话级快捷入口；共享命令边界只允许配置的当前
 Surface Actor 执行自定义分区写操作，读取与筛选不需要管理员权限。
-模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪以及同一用户
-`config.toml` 的 `config/read` / `config/batchWrite` 事务由 `codex-client` 统一处理。CLI Setup
-直接依赖具体 Client 的全局默认值读写，不扩大 Surface 可用的会话端口。
+模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪，以及目标
+Provider App Server 的有效思考等级与服务层级读取均由 `codex-client` 统一处理。CLI Setup 直接依赖
+具体 Client 的全局默认值读写，不扩大 Surface 可用的会话端口。
 OpenAI 原生账户查询只依赖 `AccountQueryPort`；当前 Thread 的 `/usage` 与 `/limits` 通过
 `ProviderAccountQueryPort` 按 `modelProvider` 选择显式注册的适配器。OpenAI `/usage` 在有当前绑定
 Thread 时并行读取账户摘要和精确 Thread 官方估算，估算失败隔离为可辨识状态；待生效 Provider

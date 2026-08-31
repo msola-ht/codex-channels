@@ -401,16 +401,19 @@ export function inspectCoreServiceInstallation(
   } else {
     throw new Error("codexc update 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
-  const paths = serviceDefinitionsForTarget("all").map((definition) =>
-    join(
+  const paths = serviceDefinitionsForTarget("all").flatMap((definition) => {
+    const definitionPath = join(
       definitionsDirectory,
       platform === "darwin"
         ? `${definition[identifierKey]}.plist`
         : platform === "win32"
           ? `${definition.target}.json`
           : definition[identifierKey],
-    )
-  );
+    );
+    return platform === "win32"
+      ? [definitionPath, join(definitionsDirectory, `${definition.target}.vbs`)]
+      : [definitionPath];
+  });
   const existingPaths = paths.filter((path) => existsSync(path));
   if (existingPaths.length === 0) {
     return { installed: false };

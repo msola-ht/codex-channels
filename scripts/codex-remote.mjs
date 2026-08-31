@@ -3,10 +3,7 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import {
-  assertAppServerSocketPathSupported,
-  resolvePrimaryAppServerSocketPath,
-} from "../runtime/app-server-runtime.mjs";
+import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { acquireAppServerProviderLease } from "../runtime/app-server-supervisor.mjs";
 import {
   loadConfiguredCustomSwitchingModelProviders,
@@ -18,10 +15,6 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import {
-  executableInvocation,
-  resolveExecutable,
-} from "../runtime/executable.mjs";
 import {
   assertSynchronousChildSuccess,
   ForwardedChildSignalError,
@@ -99,30 +92,31 @@ async function runRemoteCli() {
       throw new Error(`${selectedDefinition.displayName} 尚未配置，请先运行 codexc setup`);
     }
     socketPath = providerAppServerSocketPath(primarySocketPath, managedProvider.provider);
-    assertAppServerSocketPathSupported(socketPath);
     providerLease = await acquireAppServerProviderLease(
       primarySocketPath,
       managedProvider.provider,
     );
   }
   const configuredBinary = stringValue(codex.binary) || "codex";
-  const codexBinary = resolveExecutable(configuredBinary);
-  const invocation = executableInvocation(codexBinary, [
-    "--remote",
-    `unix://${socketPath}`,
-    "-C",
-    workdir,
-    ...(selectedDefinition
-      ? ["--profile", selectedDefinition.profileName]
-      : []),
-    ...permissionArguments,
-    ...passthrough,
-  ]);
+  const codexBinary = isAbsolute(configuredBinary)
+    ? realpathSync(configuredBinary)
+    : configuredBinary;
   try {
-    const result = spawnSync(invocation.file, invocation.args, {
-      stdio: "inherit",
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-    });
+    const result = spawnSync(
+      codexBinary,
+      [
+        "--remote",
+        `unix://${socketPath}`,
+        "-C",
+        workdir,
+        ...(selectedDefinition
+          ? ["--profile", selectedDefinition.profileName]
+          : []),
+        ...permissionArguments,
+        ...passthrough,
+      ],
+      { stdio: "inherit" },
+    );
     assertSynchronousChildSuccess(result, {
       failureReportedByChild: true,
       failureMessage: (exitCode) => `Codex TUI 已退出：exit=${exitCode}`,
@@ -149,6 +143,12 @@ function workspacePermissionArguments(workspace, passthrough) {
   const overrides = explicitPermissionOverrides(passthrough);
   const permissions = stringValue(workspace?.permissions);
   const approvalPolicy = stringValue(workspace?.approval_policy);
+  if (!overrides.approval && approvalPolicy === "untrusted") {
+    throw new Error(
+      "Workspace 审批策略 untrusted 不能传给 Codex CLI 0.150.1；"
+      + "请用 --ask-for-approval on-request|never 显式覆盖，或修改 Workspace 审批策略",
+    );
+  }
   return [
     ...(overrides.sandbox
       ? []
@@ -159,11 +159,9 @@ function workspacePermissionArguments(workspace, passthrough) {
           : []),
     ...(overrides.approval
       ? []
-      : approvalPolicy === "untrusted"
-        ? ["-c", `projects.${JSON.stringify(workspace.cwd)}.trust_level="untrusted"`]
-        : approvalPolicy
-          ? ["--ask-for-approval", approvalPolicy]
-          : []),
+      : approvalPolicy
+        ? ["--ask-for-approval", approvalPolicy]
+        : []),
   ];
 }
 

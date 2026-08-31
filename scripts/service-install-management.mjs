@@ -299,7 +299,7 @@ function writeDefinitions(plan, options) {
   const writer = options.writeDefinition ?? writePrivateFileAtomicSync;
   for (const file of plan.files) {
     writer(file.destination, file.content);
-    if (plan.serviceManager === "windows" && !options.writeDefinition) {
+    if (plan.serviceManager === "windows") {
       const definition = JSON.parse(file.content);
       writer(
         definition.vbsLauncherPath,

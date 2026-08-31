@@ -42,6 +42,7 @@ type ProviderClientMethod =
   | "compactThread"
   | "listModels"
   | "writeDefaultFastMode"
+  | "readDefaultReasoningEffort"
   | "readDefaultServiceTier"
   | "forkThread"
   | "startReview"
@@ -589,6 +590,15 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["writeDefaultFastMode"]>
   ): ReturnType<ProviderClientInstance["writeDefaultFastMode"]> {
     return this.primaryClient().writeDefaultFastMode(...args);
+  }
+
+  async readDefaultReasoningEffort(
+    cwd: string,
+    modelProvider = this.primaryProvider,
+  ): ReturnType<ProviderClientInstance["readDefaultReasoningEffort"]> {
+    return this.withProviderActivity(modelProvider, async () =>
+      (await this.ensureClient(modelProvider)).readDefaultReasoningEffort(cwd)
+    );
   }
 
   async readDefaultServiceTier(

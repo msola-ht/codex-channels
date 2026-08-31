@@ -35,5 +35,6 @@ export interface ModelOption {
 export interface ModelSelectionPort {
   listModels(): Promise<ModelOption[]>;
   writeDefaultFastMode(enabled: boolean): Promise<void>;
+  readDefaultReasoningEffort(cwd: string, modelProvider?: string): Promise<string | null>;
   readDefaultServiceTier(cwd: string, modelProvider?: string): Promise<string | null>;
 }

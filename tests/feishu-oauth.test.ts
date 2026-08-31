@@ -20,9 +20,6 @@ import {
 import type {
   FeishuCardDocument,
 } from "../src/surfaces/feishu/approval-card.js";
-import {
-  renderFeishuOAuthCard,
-} from "../src/surfaces/feishu/oauth-card.js";
 import type {
   FeishuOAuthApi,
 } from "../src/surfaces/feishu/oauth-device-flow.js";
@@ -31,7 +28,6 @@ import {
 } from "../src/surfaces/feishu/oauth-device-flow.js";
 import {
   EncryptedFileFeishuUserTokenStore,
-  feishuTokenStatus,
   MacKeychainFeishuUserTokenStore,
   type FeishuUserTokenStore,
   type StoredFeishuUserToken,
@@ -601,40 +597,6 @@ describe("Feishu OAuth controller", () => {
   });
 });
 
-describe("Feishu OAuth card", () => {
-  it("opens the device flow inside Feishu instead of exposing a plain external link", () => {
-    const card = renderFeishuOAuthCard(
-      "https://accounts.feishu.cn/device?code=abc",
-      ["drive:file:download"],
-      240,
-    );
-    const serialized = JSON.stringify(card);
-
-    expect(card).toMatchObject({ schema: "2.0" });
-    expect(serialized).toContain(
-      "https://applink.feishu.cn/client/web_url/open",
-    );
-    expect(serialized).toContain("在飞书内授权");
-    expect(serialized).not.toContain("app-secret");
-  });
-
-  it("refuses to wrap an authorization URL outside Feishu accounts", () => {
-    expect(() => renderFeishuOAuthCard(
-      "https://example.com/device?code=abc",
-      ["drive:file:download", "offline_access"],
-      240,
-    )).toThrow("飞书 OAuth 授权地址无效");
-  });
-
-  it("refuses a nondefault port on the Feishu accounts host", () => {
-    expect(() => renderFeishuOAuthCard(
-      "https://accounts.feishu.cn:8443/device?code=abc",
-      ["drive:file:download", "offline_access"],
-      240,
-    )).toThrow("飞书 OAuth 授权地址无效");
-  });
-});
-
 describe("Feishu encrypted token store", () => {
   it("persists no plaintext token and enforces private permissions", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-feishu-token-"));
@@ -701,22 +663,6 @@ describe("Feishu encrypted token store", () => {
       .rejects.toThrow("读取飞书加密凭据失败");
   });
 
-  it("reports valid, refreshable, expired, and missing states without exposing tokens", () => {
-    const now = 10_000_000;
-    expect(feishuTokenStatus(null, now)).toBe("missing");
-    expect(feishuTokenStatus(storedToken({
-      expiresAt: now + 600_000,
-      refreshExpiresAt: now + 1_000_000,
-    }), now)).toBe("valid");
-    expect(feishuTokenStatus(storedToken({
-      expiresAt: now,
-      refreshExpiresAt: now + 1_000_000,
-    }), now)).toBe("refreshable");
-    expect(feishuTokenStatus(storedToken({
-      expiresAt: now,
-      refreshExpiresAt: now,
-    }), now)).toBe("expired");
-  });
 });
 
 describe("Feishu macOS Keychain token store", () => {

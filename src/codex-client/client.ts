@@ -707,6 +707,19 @@ export class CodexAppServerClient implements
     return { model, effort };
   }
 
+  async readDefaultReasoningEffort(cwd: string): Promise<string | null> {
+    const params: ConfigReadParams = { cwd, includeLayers: false };
+    const response = await this.rpc.request<ConfigReadResponse>({
+      method: "config/read",
+      params,
+    }, { retryOverload: true });
+    const effort = response.config.model_reasoning_effort;
+    if (effort !== null && (typeof effort !== "string" || effort.trim() === "")) {
+      throw new Error("Codex 响应缺少有效 config model_reasoning_effort");
+    }
+    return effort;
+  }
+
   async readDefaultServiceTier(cwd: string): Promise<string | null> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
     const response = await this.rpc.request<ConfigReadResponse>({

@@ -291,6 +291,7 @@ export interface RemoteQuotaSummary {
   latestUsedPercentMillionths: number | null;
   estimatedTotalTokens: number | null;
   estimatedTotalCostNanos: number | null;
+  resetsAt: number | null;
   tokensPerPercent?: number | null;
   costPerPercentNanos?: number | null;
   observedAtMs: number;

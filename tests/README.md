@@ -2,6 +2,11 @@
 
 本目录包含 Vitest 单元测试、少量 fast-check 属性测试、模块边界测试和条件式真实 App Server 集成测试。测试文件按被测模块命名并使用 `.test.ts` 后缀。属性测试只用于输入空间大且存在稳定不变量的纯函数，不替代示例测试和真实合同测试。
 
+进程型 `codexc` CLI 合同按基础命令、Workspace、Remote、Remote Profile、Provider、监管、语法错误、
+其他错误、诊断、服务和 Doctor 十一个入口
+分片运行，共享 `codexc-cli-suite.ts` 中的测试定义与 Fixture；分片只用于释放 Vitest 文件级并行，
+不改变断言、真实子进程边界或临时资源隔离。
+
 ## 覆盖范围
 
 - JSON-RPC initialize、生成类型约束的精确出站消息、初始化断线竞态、消息分流、超时、过载
@@ -102,7 +107,8 @@
   脱敏读取、独立或一次写入全部的版本化受控事务、Permission Profile 冲突保护与 Remote 自然继承，
   以及受控 agents 设置持久化、共享客户端完整或残缺设置
   通知、Thread 失效通知及 Gateway/CLI 连接恢复；渠道当前模型在 Workspace、新会话及同 Provider
-  历史 Thread 切换后的恢复、自动接续 Provider 筛选和跨 Provider 显式恢复隔离；按第三方 Provider
+  历史 Thread 切换后的恢复、自动接续 Provider 筛选、跨 Provider 显式恢复隔离，以及切换模型时
+  读取目标 Provider App Server 的有效思考等级并在不兼容时回落目录默认；按第三方 Provider
   和模型独立设置新会话默认值、目录上下文、思考等级与自动压缩阈值，固定模式清除根级覆盖并使用
   官方配置事务，以及旧受管文件到 `sf-` 前缀、独立模型目录和按模型设置的冲突检测、权限校验与
   引用迁移；自定义主 Provider 覆盖 URL 主机名 ID 与推荐 `OpenAI` 选择、远程压缩所需名称固定、
@@ -314,8 +320,10 @@
   登录状态提示、官方 `main` 克隆、隔离依赖与 Gateway/WebUI 构建、npm 全局命令注册、旧 PATH
   精确清理、旧版官方仓库安全认领、跨 npm prefix 完整卸载、用户数据保留、macOS launchd plist 服务检测及
   构建失败不留半成品；源码更新覆盖同版本新 commit、脏仓库和自定义提交提前拒绝、
-  候选仓库先构建后切换、Codex CLI 版本不匹配时支持交互确认安装后继续，并覆盖拒绝、非交互与安装
-  失败均不停止服务或切换源码、显示精确安装与重试命令；切换失败恢复旧仓库与服务、旧仓库
+  候选仓库先构建后切换、Codex CLI 版本不匹配时支持交互确认、临时候选真实合同检查通过后再全局
+  安装，并覆盖拒绝、非交互、临时候选或合同失败不改变全局 CLI，全局安装失败不停止服务或切换源码，
+  以及显示精确安装与重试命令；公开合同覆盖 `-c/--config`，用户设置检查覆盖根级与所有 Profile；
+  切换失败恢复旧仓库与服务、旧仓库
   成功清理、Git 阶段摘要、构建成功日志收敛、旧源码入口迁移到全局包，以及 Registry 安装继续复用原本地更新路径。
 - `codexc start` 在第三方固定模式下复用 `service-app-server`，把主 App Server 的 Provider
   地址指向本机统计代理；监管 Socket 覆盖裸 App Server、后台入口重复启动和 Provider 拓扑不一致

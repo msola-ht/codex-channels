@@ -48,5 +48,8 @@ jobs:
       - name: Run commit verification
         run: npm run verify:commit
 
+      - name: Clean source installation smoke test
+        run: node scripts/smoke-source-prepare.mjs
+
       - name: Publish
         run: npm publish --access public --tag "${{ contains(github.ref_name, '-rc.') && 'next' || contains(github.ref_name, '-fix') && 'fix' || 'latest' }}"

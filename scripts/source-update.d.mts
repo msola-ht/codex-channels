@@ -13,6 +13,8 @@ export type SourceUpdateStage =
   | "build-candidate"
   | "inspect-candidate"
   | "prepare-codex-cli"
+  | "validate-codex-contract"
+  | "install-codex-cli"
   | "stop-services"
   | "switch-source"
   | "refresh-command"
@@ -78,6 +80,17 @@ export interface SourceUpdateOptions {
   }) => Promise<boolean> | boolean;
   installCodexCli?: (
     version: string,
+    checkout: string,
+    environment: NodeJS.ProcessEnv,
+    options: SourceUpdateOptions,
+  ) => Promise<void> | void;
+  installCodexCliForValidation?: (
+    version: string,
+    checkout: string,
+    environment: NodeJS.ProcessEnv,
+    options: SourceUpdateOptions,
+  ) => Promise<string> | string;
+  validateCodexContract?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,

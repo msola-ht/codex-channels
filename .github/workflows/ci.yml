@@ -42,6 +42,13 @@ jobs:
       - name: Install WebUI dependencies
         run: npm ci --ignore-scripts --prefix webui
 
+      - name: Install locked Codex CLI
+        run: npm install --global @openai/codex@0.150.1
+
+      - name: Add npm global bin to PATH
+        shell: bash
+        run: echo "$(npm prefix --global)/bin" >> "$GITHUB_PATH"
+
       - name: Run commit verification
         run: npm run verify:commit
 

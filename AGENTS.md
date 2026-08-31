@@ -245,7 +245,8 @@ Surface -> Application/Core <- Codex Client
   hook 不可用、CI/门禁本身正在修改、用户明确要求，或需要独立诊断门禁失败时才手动运行。
 - `npm run verify:commit` 是本地提交与 GitHub CI 共用的完整提交检查入口，必须依次覆盖
   暂存差异格式、类型与版本、生产和测试 Lint、文档链接与索引、全量测试、Shell 语法、
-  npm tarball 与干净源码安装冒烟，以及当前平台可执行的服务模板检查。
+  npm tarball 安装冒烟，以及当前平台可执行的服务模板检查。干净源码全局安装不进入日常提交与
+  PR 门禁；完整 `npm run test:package`、正式发布工作流和 Codex CLI 升级验证仍必须覆盖该合同。
 - `npm ci`、`npm install` 或 `npm run hooks:install` 必须把仓库内 `.githooks/pre-commit`
   设为当前仓库 hook；不得使用 `git commit --no-verify` 绕过检查。
 - 修改检查脚本、Git hook 或 CI 时，必须保持 `verify:commit`、`.githooks/pre-commit`、
