@@ -76,7 +76,12 @@ jobs:
       - name: Use user-owned Windows temp directory
         shell: pwsh
         run: |
-          $userTemp = Join-Path $env:USERPROFILE 'AppData\Local\Temp'
+          $userTemp = Join-Path $env:USERPROFILE 'codex-ci-temp'
+          New-Item -ItemType Directory -Force -Path $userTemp | Out-Null
+          $acl = Get-Acl -LiteralPath $userTemp
+          $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+          $acl.SetOwner($currentSid)
+          Set-Acl -LiteralPath $userTemp -AclObject $acl
           "TEMP=$userTemp" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TMP=$userTemp" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -120,7 +125,7 @@ jobs:
           $ErrorActionPreference = 'Continue'
           whoami
           Get-Item Env:TEMP, Env:TMP, Env:USERPROFILE | Select-Object Name, Value
-          $probe = Join-Path $env:USERPROFILE 'AppData\Local\Temp\codexc-acl-probe'
+          $probe = Join-Path $env:TEMP 'codexc-acl-probe'
           New-Item -ItemType Directory -Force -Path $probe | Out-Null
           $acl = Get-Acl -LiteralPath $probe
           $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
