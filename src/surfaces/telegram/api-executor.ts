@@ -12,11 +12,15 @@ interface TelegramApiCall {
 export class TelegramApiExecutor {
   constructor(private readonly logger: Logger) {}
 
-  async call<T>(context: TelegramApiCall, operation: () => Promise<T>): Promise<T> {
+  async call<T>(
+    context: TelegramApiCall,
+    operation: (signal: AbortSignal) => Promise<T>,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<T> {
     const maximumAttempts = context.critical ? 3 : 1;
     for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
       try {
-        return await operation();
+        return await operation(signal);
       } catch (error) {
         const delayMs = retryDelay(error, attempt);
         if (attempt === maximumAttempts || delayMs === undefined || delayMs > 30_000) {
@@ -33,7 +37,7 @@ export class TelegramApiExecutor {
           },
           "Telegram API 请求失败，稍后重试",
         );
-        await wait(delayMs);
+        await wait(delayMs, signal);
       }
     }
     throw new Error("Telegram API 重试状态异常");
@@ -60,9 +64,17 @@ function exponentialDelay(attempt: number): number {
   return 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 150);
 }
 
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => {
+function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("Telegram API 请求已取消"));
+      return;
+    }
     const timer = setTimeout(resolve, milliseconds);
     timer.unref();
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(new Error("Telegram API 请求已取消"));
+    }, { once: true });
   });
 }

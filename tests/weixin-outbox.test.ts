@@ -887,7 +887,7 @@ describe("WeixinOutbox", () => {
     );
   });
 
-  it("reports overload without interrupting in-flight or queued critical output", async () => {
+  it("retains critical output without interrupting in-flight delivery", async () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");
     let releaseFirst!: () => void;
@@ -917,11 +917,11 @@ describe("WeixinOutbox", () => {
       expect(sent).toEqual(["first"]);
     });
     expect(outbox.notifyText(target, "second")).toBe(true);
-    expect(outbox.notifyText(target, "overloaded")).toBe(false);
+    expect(outbox.notifyText(target, "overloaded")).toBe(true);
 
     releaseFirst();
     await outbox.close();
-    expect(sent).toEqual(["first", "second"]);
+    expect(sent).toEqual(["first", "second", "overloaded"]);
   });
 
   it("rechecks authorization and rejects missing or revoked reply contexts", async () => {

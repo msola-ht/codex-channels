@@ -348,18 +348,15 @@ export class SurfaceManager {
     if (!this.active.has(surface)) {
       const runtime = this.requireRuntime(surface);
       if (isCriticalOutputEvent(routedEvent)) {
-        if (
-          runtime.pendingCriticalOutput.length
-          >= this.maximumPendingCriticalOutput
-        ) {
-          const dropped = runtime.pendingCriticalOutput.shift();
+        if (runtime.pendingCriticalOutput.length >= this.maximumPendingCriticalOutput) {
           this.logger.error(
             {
               surface: surface.surface,
               accountId: surface.accountId,
-              droppedEventType: dropped?.type,
+              eventType: routedEvent.type,
+              pending: runtime.pendingCriticalOutput.length,
             },
-            "Surface 恢复队列已满，最早的关键输出被丢弃",
+            "Surface 恢复队列达到告警阈值，关键输出继续保留",
           );
         }
         runtime.pendingCriticalOutput.push(routedEvent);

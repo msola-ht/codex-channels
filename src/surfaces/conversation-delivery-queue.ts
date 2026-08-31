@@ -5,11 +5,12 @@ import { surfaceErrorMetadata } from "./error-metadata.js";
 
 interface DeliveryOperation {
   critical: boolean;
-  run(): Promise<void>;
+  run(signal: AbortSignal): Promise<void>;
 }
 
 interface ConversationWorker {
   queue: BoundedAsyncQueue<DeliveryOperation>;
+  controller: AbortController;
   done: Promise<void>;
 }
 
@@ -43,7 +44,7 @@ export class ConversationDeliveryQueue {
 
   enqueue(
     conversationId: string,
-    run: () => Promise<void>,
+    run: (signal: AbortSignal) => Promise<void>,
     critical: boolean,
   ): boolean {
     if (this.closed) {
@@ -66,7 +67,7 @@ export class ConversationDeliveryQueue {
 
   runOrdered<T>(
     conversationId: string,
-    run: () => Promise<T>,
+    run: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
     if (this.closed) {
       return Promise.reject(
@@ -77,9 +78,9 @@ export class ConversationDeliveryQueue {
       const worker = this.worker(conversationId);
       const accepted = worker.queue.pushPriority({
         critical: true,
-        run: async () => {
+        run: async (signal) => {
           try {
-            resolve(await run());
+            resolve(await run(signal));
           } catch (error) {
             reject(
               error instanceof Error
@@ -109,9 +110,11 @@ export class ConversationDeliveryQueue {
     let worker = this.workers.get(conversationId);
     if (!worker) {
       const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity);
+      const controller = new AbortController();
       worker = {
         queue,
-        done: this.runWorker(conversationId, queue),
+        controller,
+        done: this.runWorker(conversationId, queue, controller.signal),
       };
       this.workers.set(conversationId, worker);
     }
@@ -125,6 +128,7 @@ export class ConversationDeliveryQueue {
     this.closed = true;
     for (const worker of this.workers.values()) {
       worker.queue.close();
+      worker.controller.abort();
     }
     const conversationCount = this.workers.size;
     this.closePromise = this.finishClose(conversationCount);
@@ -152,6 +156,7 @@ export class ConversationDeliveryQueue {
   private async runWorker(
     conversationId: string,
     queue: BoundedAsyncQueue<DeliveryOperation>,
+    signal: AbortSignal,
   ): Promise<void> {
     while (true) {
       const operation = await queue.shift();
@@ -159,7 +164,7 @@ export class ConversationDeliveryQueue {
         return;
       }
       try {
-        await operation.run();
+        await operation.run(signal);
       } catch (error) {
         this.logger.warn(
           {

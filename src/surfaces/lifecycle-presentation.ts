@@ -548,7 +548,7 @@ export function createTurnCompletedPresentation(
   if (usesOpenAiAccount(event.modelProvider) && remoteUsedPercent !== null) {
     accountFields.push({
       label: "周限",
-      value: `剩余 ${formatPercent(Math.max(0, 100 - remoteUsedPercent))}（额度中心）${event.remoteQuota?.resetsAt === null || event.remoteQuota?.resetsAt === undefined ? "" : ` · 重置 ${formatResetTime(event.remoteQuota.resetsAt)}`}`,
+      value: `剩余 ${formatPercent(Math.max(0, 100 - remoteUsedPercent))}${event.remoteQuota?.resetsAt === null || event.remoteQuota?.resetsAt === undefined ? "" : ` · 重置 ${formatResetTime(event.remoteQuota.resetsAt)}`}`,
     });
   } else if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
     accountFields.push({
@@ -953,7 +953,7 @@ export function createTurnCompletedPresentation(
       ? [{ title: "当前 Session 累计", fields: sessionFields }]
       : []),
     ...(accountFields.length > 0
-      ? [{ title: "账户状态", fields: accountFields }]
+      ? [{ title: event.remoteQuota === undefined ? "账户状态" : "账户状态（额度中心）", fields: accountFields }]
       : []),
   ];
   return {

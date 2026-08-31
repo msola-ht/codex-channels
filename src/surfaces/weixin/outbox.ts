@@ -17,7 +17,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { shouldDisplayOperation } from "../operation-presentation.js";
+import { isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
 import type {
   OperationUpdateDisplay,
   SurfaceOutputPort,
@@ -118,6 +118,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly operationUpdates =
     new OperationUpdateBuffer<ConversationTarget>();
+  private readonly executionTurns = new Set<string>();
   private readonly planProgress = new TurnPlanProgressState();
   private readonly accountId: string;
   private closed = false;
@@ -152,6 +153,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "turn.started") {
+      this.clearExecutionTurns(event.threadId);
       this.options.typing?.start(event.target);
       this.delivery.enqueue(
         event.target.conversationId,
@@ -170,6 +172,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     if (event.type === "turn.reasoning") {
       if (this.options.reasoningEnabled === false) {
+        return;
+      }
+      if (this.executionTurns.has(turnKey(event.threadId, event.turnId))) {
         return;
       }
       if (event.final !== true) {
@@ -191,6 +196,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "operation.updated") {
+      if (isExecutionOperation(event.operation)) {
+        this.executionTurns.add(turnKey(event.threadId, event.turnId));
+      }
       const imagePath = event.operation.imagePath;
       if (
         event.operation.kind === "imageGeneration"
@@ -319,6 +327,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     await this.options.typing?.close();
     await this.delivery.close();
     this.operationUpdates.clear();
+    this.executionTurns.clear();
     this.planProgress.clear();
     this.contexts.clear();
   }
@@ -608,6 +617,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
       && target.accountId === this.accountId;
   }
 
+  private clearExecutionTurns(threadId: string): void {
+    const prefix = `${threadId}\u0000`;
+    for (const key of this.executionTurns) {
+      if (key.startsWith(prefix)) this.executionTurns.delete(key);
+    }
+  }
+
+}
+
+function turnKey(threadId: string, turnId: string): string {
+  return `${threadId}\u0000${turnId}`;
 }
 
 function splitWeixinText(

@@ -14,7 +14,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { shouldDisplayOperation } from "../operation-presentation.js";
+import { isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentContactedPresentation,
@@ -128,6 +128,7 @@ export class TelegramOutbox {
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly planProgress = new TurnPlanProgressState();
   private readonly reasoningMessages = new Map<string, TelegramReasoningMessage>();
+  private readonly executionTurns = new Set<string>();
   private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
   private readonly delivery: ConversationDeliveryQueue;
@@ -190,6 +191,7 @@ export class TelegramOutbox {
     const chatId = event.target.conversationId;
     switch (event.type) {
       case "turn.started":
+        this.clearExecutionTurns(event.threadId);
         this.reasoningMessages.delete(event.threadId);
         this.replyTargets.bindPending(
           chatId,
@@ -216,6 +218,9 @@ export class TelegramOutbox {
         return;
       case "turn.reasoning":
         if (this.options.reasoningEnabled === false) {
+          return;
+        }
+        if (this.executionTurns.has(this.turnKey(event.threadId, event.turnId))) {
           return;
         }
         this.deliverReasoning(event);
@@ -307,6 +312,10 @@ export class TelegramOutbox {
       }
       case "operation.updated": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
+        if (isExecutionOperation(event.operation)) {
+          this.executionTurns.add(turnKey);
+          this.reasoningMessages.delete(event.threadId);
+        }
         let streamFlushed = false;
         const flushStreamBeforeOutput = (): void => {
           if (streamFlushed) {
@@ -324,7 +333,7 @@ export class TelegramOutbox {
           flushStreamBeforeOutput();
           this.enqueue(
             chatId,
-            () => this.sendImage(chatId, imagePath),
+            (signal) => this.sendImage(chatId, imagePath, signal),
             true,
           );
         }
@@ -587,6 +596,7 @@ export class TelegramOutbox {
   private async sendImage(
     chatId: string,
     imagePath: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     const image = await (
       this.options.readGeneratedImage ?? readGeneratedImage
@@ -597,21 +607,23 @@ export class TelegramOutbox {
         operation: "sendPhoto",
         critical: false,
       },
-      () => this.api.sendPhoto(
+      (requestSignal) => this.api.sendPhoto(
         chatId,
         new InputFile(
           image.bytes,
           `codex-generated-image.${image.format === "jpeg" ? "jpg" : "png"}`,
         ),
         { disable_notification: true },
+        requestSignal as never,
       ),
+      signal,
     );
   }
 
   sendChannelImage(chatId: string, imagePath: string): Promise<void> {
     return this.delivery.runOrdered(
       chatId,
-      () => this.sendImage(chatId, imagePath),
+      (signal) => this.sendImage(chatId, imagePath, signal),
     );
   }
 
@@ -646,6 +658,7 @@ export class TelegramOutbox {
     this.operationUpdates.clear();
     this.planProgress.clear();
     this.reasoningMessages.clear();
+    this.executionTurns.clear();
     this.replyTargets.clear();
     this.approvalOperations.clear();
     this.notifiedTurns.clear();
@@ -719,7 +732,7 @@ export class TelegramOutbox {
     }
   }
 
-  runOrdered<T>(chatId: string, run: () => Promise<T>): Promise<T> {
+  runOrdered<T>(chatId: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this.closed) {
       return Promise.reject(new Error("Telegram Outbox 已关闭"));
     }
@@ -731,7 +744,7 @@ export class TelegramOutbox {
     text: string,
     replyMarkup?: InlineKeyboardMarkup,
   ): boolean {
-    return this.enqueue(chatId, () => this.sendNotificationPanel(chatId, text, replyMarkup), true);
+    return this.enqueue(chatId, (signal) => this.sendNotificationPanel(chatId, text, replyMarkup, signal), true);
   }
 
   deliverPanel(
@@ -739,10 +752,14 @@ export class TelegramOutbox {
     text: string,
     replyMarkup?: InlineKeyboardMarkup,
   ): Promise<void> {
-    return this.runOrdered(chatId, () => this.sendNotificationPanel(chatId, text, replyMarkup));
+    return this.runOrdered(chatId, (signal) => this.sendNotificationPanel(chatId, text, replyMarkup, signal));
   }
 
-  private enqueue(chatId: string, run: () => Promise<void>, critical: boolean): boolean {
+  private enqueue(
+    chatId: string,
+    run: (signal: AbortSignal) => Promise<void>,
+    critical: boolean,
+  ): boolean {
     return this.delivery.enqueue(chatId, run, critical);
   }
 
@@ -750,16 +767,18 @@ export class TelegramOutbox {
     chatId: string,
     text: string,
     replyMarkup?: InlineKeyboardMarkup,
+    signal?: AbortSignal,
   ): Promise<void> {
     const chunks = formatTelegramPanelChunks(text);
     for (const [index, chunk] of chunks.entries()) {
       const finalChunk = index === chunks.length - 1;
       await this.executor.call(
         { chatId, operation: "sendMessage", critical: true },
-        () => this.api.sendMessage(chatId, chunk, {
+        (requestSignal) => this.api.sendMessage(chatId, chunk, {
           ...htmlSendOptions(undefined, index > 0),
           ...(finalChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
-        }),
+        }, requestSignal as never),
+        signal,
       );
     }
   }
@@ -1112,7 +1131,9 @@ export class TelegramOutbox {
       if (event.final === true) {
         this.enqueue(
           chatId,
-          () => this.sendPanel(chatId, text).then(() => undefined),
+          () => this.executionTurns.has(this.turnKey(event.threadId, event.turnId))
+            ? Promise.resolve()
+            : this.sendPanel(chatId, text).then(() => undefined),
           true,
         );
         return;
@@ -1126,6 +1147,12 @@ export class TelegramOutbox {
       this.enqueue(
         chatId,
         async () => {
+          if (this.executionTurns.has(this.turnKey(event.threadId, event.turnId))) {
+            if (this.reasoningMessages.get(event.threadId) === state) {
+              this.reasoningMessages.delete(event.threadId);
+            }
+            return;
+          }
           state.messageId = await this.sendPanel(chatId, text);
         },
         true,
@@ -1138,6 +1165,9 @@ export class TelegramOutbox {
     this.enqueue(
       chatId,
       async () => {
+        if (this.executionTurns.has(this.turnKey(event.threadId, event.turnId))) {
+          return;
+        }
         if (existing.messageId === undefined) {
           existing.messageId = await this.sendPanel(chatId, text);
           return;
@@ -1168,6 +1198,13 @@ export class TelegramOutbox {
 
   private turnKey(threadId: string, turnId: string): string {
     return `${threadId}:${turnId}`;
+  }
+
+  private clearExecutionTurns(threadId: string): void {
+    const prefix = `${threadId}:`;
+    for (const key of this.executionTurns) {
+      if (key.startsWith(prefix)) this.executionTurns.delete(key);
+    }
   }
 
   private streamKey(turnKey: string, itemId: string): string {

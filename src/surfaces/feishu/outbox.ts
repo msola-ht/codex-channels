@@ -17,7 +17,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { shouldDisplayOperation } from "../operation-presentation.js";
+import { isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
@@ -164,6 +164,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly streams = new Map<string, FeishuStreamState>();
   private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
   private readonly reasoningCards = new Map<string, FeishuReasoningCard>();
+  private readonly executionTurns = new Set<string>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly replyTargets = new TurnReplyTargets<string>();
   private streamCapacityWarningIssued = false;
@@ -194,6 +195,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "turn.started") {
+      this.clearExecutionTurns(event.threadId);
       this.reasoningCards.delete(event.threadId);
       this.replyTargets.bindPending(
         event.target.conversationId,
@@ -202,6 +204,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "turn.reasoning") {
       if (this.options.reasoningEnabled === false) {
+        return;
+      }
+      if (this.executionTurns.has(turnKey(event.threadId, event.turnId))) {
         return;
       }
       this.logger.debug(
@@ -225,6 +230,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
     }
     if (event.type === "operation.updated") {
+      if (isExecutionOperation(event.operation)) {
+        this.executionTurns.add(turnKey(event.threadId, event.turnId));
+        this.reasoningCards.delete(event.threadId);
+      }
       let streamFlushed = false;
       const flushStreamBeforeOutput = (): void => {
         if (streamFlushed) {
@@ -415,7 +424,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
       if (event.final === true) {
         this.delivery.enqueue(
           chatId,
-          () => this.sendMarkdown(chatId, rendered),
+          () => this.executionTurns.has(turnKey(event.threadId, event.turnId))
+            ? Promise.resolve()
+            : this.sendMarkdown(chatId, rendered),
           true,
         );
         return;
@@ -430,6 +441,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
       this.delivery.enqueue(
         chatId,
         async () => {
+          if (this.executionTurns.has(turnKey(event.threadId, event.turnId))) {
+            if (this.reasoningCards.get(event.threadId) === state) {
+              this.reasoningCards.delete(event.threadId);
+            }
+            return;
+          }
           try {
             const created = await this.messagePort.createStreamingCard(chatId, rendered);
             state.cardId = created.cardId;
@@ -469,6 +486,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.delivery.enqueue(
       chatId,
       async () => {
+        if (this.executionTurns.has(turnKey(event.threadId, event.turnId))) {
+          return;
+        }
         if (existing.cardId === undefined) {
           if (this.reasoningCards.get(event.threadId) === existing) {
             this.reasoningCards.delete(event.threadId);
@@ -674,6 +694,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.streams.clear();
     this.finishedStreams.clear();
     this.reasoningCards.clear();
+    this.executionTurns.clear();
     this.operationUpdates.clear();
     this.replyTargets.clear();
   }
@@ -702,6 +723,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
       () => this.sendMarkdown(chatId, markdown),
       true,
     );
+  }
+
+  private clearExecutionTurns(threadId: string): void {
+    const prefix = `${threadId}\u0000`;
+    for (const key of this.executionTurns) {
+      if (key.startsWith(prefix)) this.executionTurns.delete(key);
+    }
   }
 
   private async sendText(chatId: string, text: string): Promise<void> {
