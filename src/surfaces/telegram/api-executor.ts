@@ -70,11 +70,24 @@ function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
       reject(new Error("Telegram API 请求已取消"));
       return;
     }
-    const timer = setTimeout(resolve, milliseconds);
-    timer.unref();
-    signal.addEventListener("abort", () => {
+    let settled = false;
+    const cleanup = (): void => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      cleanup();
       reject(new Error("Telegram API 请求已取消"));
-    }, { once: true });
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    }, milliseconds);
+    timer.unref();
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
