@@ -107,6 +107,16 @@ jobs:
           node bin/codexc.mjs --help
           node bin/codexc.mjs service --help
 
+      - name: Windows compatibility tests
+        run: >-
+          npx vitest run
+          tests/service-install-management.test.ts
+          tests/private-file.test.ts
+          tests/stdio-transport.test.ts
+          tests/unix-websocket-transport.test.ts
+          tests/systemd-install.test.ts
+          tests/executable.test.ts
+
   app-server-contract:
     name: Codex 0.150.1 App Server contract
     runs-on: ubuntu-latest
