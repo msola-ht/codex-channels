@@ -17,6 +17,7 @@ import {
   formatOpenAiErrorMessage,
   formatPercent,
   formatRemainingRateLimitWindow,
+  formatResetTime,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./conversation-command-format.js";
 import {
@@ -115,6 +116,10 @@ export function createStartupPresentation(
     title: "Codex Connect 已上线",
     fields: [
       { label: "App Server", value: "已连接" },
+      {
+        label: "系统",
+        value: `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
+      },
       ...(runtime.openAiConnectivity === "unreachable"
         ? [{
             label: "OpenAI 网络",
@@ -127,10 +132,6 @@ export function createStartupPresentation(
         ? [{
             title: "运行环境",
             fields: [
-              {
-                label: "系统",
-                value: `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
-              },
               {
                 label: "版本",
                 value: `Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
@@ -468,6 +469,9 @@ export function createTurnCompletedPresentation(
       value: `${event.remoteQuota.deviceCount} 台设备 · ${event.remoteQuota.requestCount} 次请求`,
       subfields: [
         { label: "本周期 Token", value: formatTokenCount(event.remoteQuota.totalTokens) },
+        ...(event.remoteQuota.resetsAt === null
+          ? []
+          : [{ label: "重置时间", value: formatResetTime(event.remoteQuota.resetsAt) }]),
         ...(event.remoteQuota.latestUsedPercentMillionths === null
           ? []
           : [{
@@ -544,7 +548,7 @@ export function createTurnCompletedPresentation(
   if (usesOpenAiAccount(event.modelProvider) && remoteUsedPercent !== null) {
     accountFields.push({
       label: "周限",
-      value: `剩余 ${formatPercent(Math.max(0, 100 - remoteUsedPercent))}（额度中心）`,
+      value: `剩余 ${formatPercent(Math.max(0, 100 - remoteUsedPercent))}（额度中心）${event.remoteQuota?.resetsAt === null || event.remoteQuota?.resetsAt === undefined ? "" : ` · 重置 ${formatResetTime(event.remoteQuota.resetsAt)}`}`,
     });
   } else if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
     accountFields.push({
