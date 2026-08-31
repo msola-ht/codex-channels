@@ -114,6 +114,24 @@ jobs:
           node bin/codexc.mjs --help
           node bin/codexc.mjs service --help
 
+      - name: Diagnose Windows private ACL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          whoami
+          Get-Item Env:TEMP, Env:TMP, Env:USERPROFILE | Select-Object Name, Value
+          $probe = Join-Path $env:USERPROFILE 'AppData\Local\Temp\codexc-acl-probe'
+          New-Item -ItemType Directory -Force -Path $probe | Out-Null
+          $acl = Get-Acl -LiteralPath $probe
+          $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+          "PROBE=$probe"
+          "OWNER_SID=$($owner.Value)"
+          "CURRENT_SID=$([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)"
+          $acl.Access | Select-Object IdentityReference, FileSystemRights, AccessControlType, IsInherited, InheritanceFlags, PropagationFlags | Format-Table -AutoSize
+          $request = @{ operation = 'secure'; kind = 'directory'; path = $probe } | ConvertTo-Json -Compress
+          $request | & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'runtime/windows-private-acl.ps1'
+          "ACL_EXIT=$LASTEXITCODE"
+
       - name: Windows compatibility tests
         run: >-
           npx vitest run
