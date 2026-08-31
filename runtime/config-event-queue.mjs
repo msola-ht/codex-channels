@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -12,6 +11,11 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "./private-file.mjs";
 
 const queueVersion = 1;
 const maximumEvents = 100;
@@ -92,7 +96,7 @@ function readQueueUnlocked(queuePath) {
   if (statSync(queuePath).size > maximumQueueBytes) {
     throw new Error("配置事件队列超过 256 KiB");
   }
-  chmodSync(queuePath, 0o600);
+  securePrivateFileSync(queuePath);
   const content = readFileSync(queuePath, "utf8");
   if (!content.trim()) {
     return [];
@@ -151,6 +155,7 @@ function writeQueueUnlocked(queuePath, events) {
   ensureQueueDirectory(queuePath);
   const temporaryPath = `${queuePath}.${process.pid}.tmp`;
   writeFileSync(temporaryPath, serializeQueue(events), { mode: 0o600 });
+  securePrivateFileSync(temporaryPath);
   renameSync(temporaryPath, queuePath);
 }
 
@@ -161,7 +166,7 @@ function serializeQueue(events) {
 function ensureQueueDirectory(queuePath) {
   const directory = dirname(queuePath);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  chmodSync(directory, 0o700);
+  securePrivateDirectorySync(directory);
 }
 
 function withQueueLock(queuePath, operation) {
@@ -193,6 +198,13 @@ function withQueueLock(queuePath, operation) {
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
+  }
+  try {
+    securePrivateFileSync(lockPath);
+  } catch (error) {
+    closeSync(descriptor);
+    unlinkSync(lockPath);
+    throw error;
   }
   let result;
   let operationFailed = false;

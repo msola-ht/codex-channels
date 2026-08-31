@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync } from "node:fs";
+import { copyFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
@@ -10,6 +10,7 @@ import {
 } from "../dist/scheduled-tasks/index.js";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { securePrivateFileSync } from "../runtime/private-file.mjs";
 import {
   requireUserConfig,
   resolveConfiguredPath,
@@ -135,7 +136,7 @@ function upgradeGatewayStateDatabase(environment = process.env, options = {}) {
     database.exec("BEGIN EXCLUSIVE");
     try {
       copyFileSync(databasePath, backupPath);
-      chmodSync(backupPath, 0o600);
+      securePrivateFileSync(backupPath);
       database.exec(`
         CREATE TABLE conversation_background_bindings (
           surface TEXT NOT NULL CHECK (length(surface) > 0),

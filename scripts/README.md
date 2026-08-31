@@ -493,13 +493,28 @@
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
   控制脚本，避免 Shell 维护第二份服务标识。
-- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性或 launchd Job 字段生成统一、无配置
-  依赖的 JSON 服务状态；目标异常时保留可解析输出并返回非零状态，查询器故障则失败关闭。
+- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性、launchd Job 字段或 Windows 计划任务
+  生成统一基础 JSON 服务状态；Windows 额外核对受管进程和核心 RPC 端点。目标异常时保留可解析输出
+  并返回非零状态，查询器故障则失败关闭。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
   安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
   与指标中心独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
+- `windows-service-control.mjs` / `windows-service-control.d.mts`：读取用户级 Windows 服务定义，
+  通过计划任务控制脚本执行 App Server、Gateway、WebUI 和指标中心的安装、启停、重启、状态、日志
+  与卸载；核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
+- `windows-service-host.mjs`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
+  Node 服务进程，转发控制请求并把标准输出、错误输出写入用户级运行日志。
+- `windows-service-launcher.ps1`：Windows 计划任务调用的 PowerShell 启动器，设置受控环境后
+  转交服务宿主，不依赖当前终端目录或用户 Shell 配置。
+- `windows-scheduled-task.ps1`：创建、启动、查询和删除当前用户计划任务；任务通过
+  `wscript.exe` 以隐藏窗口运行对应 VBS 启动器，避免服务进程占用可见终端窗口。
+- `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc service logs` 使用。
+- `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的只读探针，用于确认
+  代理端点、初始化握手和 RPC 可达性。
+- `windows-proxy-inbound-limit-probe.mjs`：验证 Windows 代理入口对回环地址和入站连接限制的
+  只读探针，不修改系统或服务配置。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。

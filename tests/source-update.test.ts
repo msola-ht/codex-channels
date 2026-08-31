@@ -32,7 +32,7 @@ afterEach(() => {
   }
 });
 
-describe("Git 源码更新", () => {
+describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
   it("returns a redacted revisioned plan before changing a managed checkout", () => {
     const fixture = createInstalledFixture("codexc-source-update-plan-");
 

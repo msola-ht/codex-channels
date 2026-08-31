@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-prepare-"));
@@ -51,17 +52,24 @@ try {
       throw new Error(`干净源码副本不应包含 ${path}`);
     }
   }
-  const result = spawnSync(
+  const installEnvironment = {
+    ...process.env,
+    npm_config_cache: join(temporaryDirectory, "npm-cache"),
+    npm_config_prefix: join(temporaryDirectory, "global"),
+  };
+  const installInvocation = resolveExecutableInvocation(
     "npm",
     ["run", "install:global"],
+    installEnvironment,
+  );
+  const result = spawnSync(
+    installInvocation.file,
+    installInvocation.args,
     {
       cwd: sourceDirectory,
-      env: {
-        ...process.env,
-        npm_config_cache: join(temporaryDirectory, "npm-cache"),
-        npm_config_prefix: join(temporaryDirectory, "global"),
-      },
+      env: installEnvironment,
       encoding: "utf8",
+      windowsVerbatimArguments: installInvocation.windowsVerbatimArguments,
     },
   );
   if (result.error) {
@@ -93,9 +101,11 @@ try {
   if (!existsSync(installedPackage) || lstatSync(installedPackage).isSymbolicLink()) {
     throw new Error("干净源码全局安装仍链接到源码目录");
   }
-  const invoked = spawnSync(command, ["--version"], {
+  const commandInvocation = resolveExecutableInvocation(command, ["--version"]);
+  const invoked = spawnSync(commandInvocation.file, commandInvocation.args, {
     cwd: sourceDirectory,
     encoding: "utf8",
+    windowsVerbatimArguments: commandInvocation.windowsVerbatimArguments,
   });
   if (invoked.error) {
     throw invoked.error;

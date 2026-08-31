@@ -788,7 +788,7 @@ describe("GatewayApplication startup cleanup", () => {
         command: "codex app-server --listen unix:///tmp/codex.sock",
       },
     });
-    expect(vi.mocked(terminateThreadWriterHolder)).toHaveBeenCalledWith(4242);
+    expect(vi.mocked(terminateThreadWriterHolder)).toHaveBeenCalledWith(4242, expect.any(Object));
     expect(restoreCalls).toBe(1);
   });
 

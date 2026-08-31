@@ -17,7 +17,7 @@ function environmentForConnectHome(connectHome: string): NodeJS.ProcessEnv {
 }
 
 describe("primary Provider private backup", () => {
-  it("rejects a backup file readable by other users", () => {
+  it.skipIf(process.platform === "win32")("rejects a backup file readable by other users", () => {
     const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-permissions-"));
     const environment = environmentForConnectHome(connectHome);
     backupPrimaryProviderCandidates({

@@ -41,6 +41,7 @@ import {
   type ModelRequestMetricSample,
 } from "../src/observability/index.js";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
+import { secureTestDirectory, secureTestFile } from "./support/windows-fixtures.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -416,13 +417,13 @@ describe("model request metrics database operations", () => {
   it("prunes rows for a backed-up custom primary Provider", () => {
     const { environment, databasePath, home } = fixture();
     const privateDirectory = join(home, "private");
-    mkdirSync(privateDirectory, { recursive: true, mode: 0o700 });
-    writeFileSync(join(privateDirectory, "primary-providers.json"), JSON.stringify({
+    secureTestDirectory(privateDirectory);
+    secureTestFile(join(privateDirectory, "primary-providers.json"), JSON.stringify({
       OpenAI: {
         base_url: "https://zzone.example.test/v1",
         wire_api: "responses",
       },
-    }), { mode: 0o600 });
+    }));
     const store = new SqliteModelRequestMetricsStore(databasePath);
     store.record({ ...metricSample(), provider: "OpenAI" });
     store.record({ ...metricSample(), provider: "openai" });
@@ -914,7 +915,7 @@ describe("model request metrics database operations", () => {
     });
     expect(result.backupPath).toContain(".v1.2026-08-02T12-34-56-789Z.bak");
     expect(existsSync(result.backupPath!)).toBe(true);
-    expect(statSync(result.backupPath!).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(result.backupPath!).mode & 0o777).toBe(0o600);
     expect(existsSync(databasePath)).toBe(false);
     const backup = new DatabaseSync(result.backupPath!, { readOnly: true });
     expect(backup.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get())
@@ -1222,7 +1223,7 @@ describe("model request metrics database operations", () => {
       schemaVersion: 11,
     });
     expect(result.backupPath).toContain(".v10.2026-08-05T12-34-56-789Z.bak");
-    expect(statSync(result.backupPath!).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(result.backupPath!).mode & 0o777).toBe(0o600);
     const upgraded = new DatabaseSync(databasePath, { readOnly: true });
     expect(upgraded.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
@@ -1306,7 +1307,7 @@ describe("model request metrics database operations", () => {
     rolledBack.close();
     const backupPath = `${databasePath}.v10.2026-08-05T12-34-56-789Z.bak`;
     expect(existsSync(backupPath)).toBe(true);
-    expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(backupPath).mode & 0o777).toBe(0o600);
   });
 
   it("refuses metrics upgrades while Gateway is running", () => {
@@ -1435,7 +1436,7 @@ describe("model request metrics database operations", () => {
       lastSubagentRecordedAtMs: 0,
       lastSubagentThreadId: null,
     });
-    expect(statSync(statePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(statePath).mode & 0o777).toBe(0o600);
   });
 
   it("does nothing when the metrics sync state does not exist", () => {

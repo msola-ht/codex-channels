@@ -6,8 +6,10 @@ import {
   closeSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -48,7 +50,11 @@ import {
 import { createOpencodeGoQuotaWindowsProvider } from "../runtime/opencode-go-quota-windows.mjs";
 import { createProxyFetch } from "../dist/bootstrap/proxy-fetch.js";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
-import { effectiveCodexBinary } from "../runtime/executable.mjs";
+import {
+  effectiveCodexBinary,
+  executableInvocation,
+  resolveExecutable,
+} from "../runtime/executable.mjs";
 import {
   defaultServiceTarget,
   parseServiceTarget,
@@ -76,6 +82,10 @@ import {
   requireUserConfig,
   userDataDir,
 } from "../scripts/runtime-config.mjs";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import {
+  securePrivateFileSync,
+} from "../runtime/private-file.mjs";
 import {
   checkProjectRules,
   initializeProjectRules,
@@ -112,6 +122,7 @@ const helpText = {
   setup                        配置 Codex 用户设置、提供商、通讯渠道与项目技能（交互菜单）
   config                       打开日常设置菜单（交互菜单）
   doctor                       诊断安装、配置和服务
+  security                     修复本机私有路径权限
 
 项目与 Codex：
   remote [参数]                启动共享 App Server 的 Codex TUI
@@ -190,6 +201,9 @@ Thread 分区管理员）、网络代理、高级设置（日志等级与开发�
 
 只诊断当前安装、配置和服务状态，不修改配置；--json 输出结构化检查结果；
 Linux 缺少 bubblewrap 时输出安装建议。`,
+  security: `用法：codexc security repair
+
+修复 Windows Codex 私有 TOML 配置文件的 ACL；不修改 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
   rules: `用法：codexc rules <init|check>
 
 具体用法：
@@ -450,6 +464,9 @@ try {
         break;
       }
       runDoctor(args);
+      break;
+    case "security":
+      security(args);
       break;
     case "rules":
       projectRules(args);
@@ -832,7 +849,7 @@ async function runServiceAppServer(args) {
           provider,
           providerBaseUrl,
         );
-        child = spawn(runtime.environment.CODEX_BINARY, [
+        child = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
           ...argumentsList,
           "app-server",
           "--listen",
@@ -844,7 +861,7 @@ async function runServiceAppServer(args) {
             ...managed.runtime.childEnvironment,
           },
           cwd: defaultWorkspace.cwd,
-        });
+        }, runtime.environment);
         children.push(child);
         childrenByProvider.set(provider, child);
         await waitForProviderAppServer(managed.socketPath, child, provider);
@@ -1021,7 +1038,7 @@ async function runServiceAppServer(args) {
     primaryChildEnvironment[primaryChildCredential.environmentKey] =
       primaryChildCredential.apiKey;
   }
-  const primaryChild = spawn(runtime.environment.CODEX_BINARY, [
+  const primaryChild = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
     ...primaryArguments,
     "app-server",
     "--listen",
@@ -1030,7 +1047,7 @@ async function runServiceAppServer(args) {
     stdio: "inherit",
     env: primaryChildEnvironment,
     cwd: defaultWorkspace.cwd,
-  });
+  }, runtime.environment);
   children.push(primaryChild);
   const lifecycle = forwardChildrenLifecycle(children, async () => {
     await supervisorOwner?.close();
@@ -1053,6 +1070,18 @@ function withoutManagedProviderApiKeys(environment) {
     delete childEnvironment[key];
   }
   return childEnvironment;
+}
+
+function spawnCodexProcess(codexBinary, args, options, environment) {
+  const invocation = executableInvocation(
+    resolveExecutable(codexBinary, environment),
+    args,
+    environment,
+  );
+  return spawn(invocation.file, invocation.args, {
+    ...options,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
 }
 
 function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_000) {
@@ -1120,7 +1149,11 @@ async function service(args) {
   const serviceArgs = parseServiceArguments(action, rest);
   rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
   if (action === "status" && serviceArgs[1] === "--json") {
-    runStandaloneScript("scripts/service-status.mjs", [serviceArgs[0]]);
+    runStandaloneScript(
+      "scripts/service-status.mjs",
+      [serviceArgs[0]],
+      serviceControlEnvironment(),
+    );
     return;
   }
   if (action === "install") {
@@ -1141,7 +1174,9 @@ async function service(args) {
             "success",
             task.preview.serviceManager === "systemd"
               ? "systemd 用户服务配置已生成。"
-              : "launchd 配置已生成。",
+              : task.preview.serviceManager === "launchd"
+                ? "launchd 配置已生成。"
+                : "Windows 当前用户计划任务配置已生成。",
           );
         }
       },
@@ -1182,8 +1217,22 @@ async function service(args) {
       undefined,
       { failureReportedByChild: serviceControllerReportsFailure(action) },
     );
+  } else if (process.platform === "win32") {
+    run(
+      process.execPath,
+      [
+        join(packageDir, "scripts/windows-service-control.mjs"),
+        action,
+        ...serviceArgs,
+        "--definitions",
+        join(controlEnvironment.CODEX_CONNECT_HOME, "services"),
+      ],
+      controlEnvironment,
+      undefined,
+      { failureReportedByChild: serviceControllerReportsFailure(action) },
+    );
   } else {
-    throw new Error("codexc service 当前支持 macOS launchd 与 Linux systemd；Windows Transport 尚未支持");
+    throw new Error("codexc service 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
   const readinessTarget = coreServiceReadinessTarget(action, serviceArgs);
   if (readinessTarget) {
@@ -1423,11 +1472,11 @@ function runScript(relativePath, args, {
   );
 }
 
-function runStandaloneScript(relativePath, args) {
+function runStandaloneScript(relativePath, args, environment = process.env) {
   run(
     process.execPath,
     [join(packageDir, relativePath), ...args],
-    process.env,
+    environment,
     process.cwd(),
     { failureReportedByChild: true },
   );
@@ -1444,7 +1493,9 @@ async function runForegroundScript(
     process.execPath,
     nodeArguments([join(packageDir, relativePath), ...args]),
     {
-      stdio: "inherit",
+      stdio: process.platform === "win32"
+        ? ["inherit", "inherit", "inherit", "ipc"]
+        : "inherit",
       env: { ...runtime.environment, ...additionalEnvironment },
       cwd: workingDirectory ?? runtime.dataDir,
       detached: process.platform !== "win32",
@@ -1464,7 +1515,7 @@ async function runForegroundScript(
       }
     }
     if (!childProcessIsRunning(child)) return;
-    child.kill("SIGKILL");
+    signalChildProcesses([child], "SIGKILL");
   };
   const forwardSignal = (signal) => {
     if (forwardedSignal) {
@@ -1473,7 +1524,9 @@ async function runForegroundScript(
     }
     forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
-      signalChildProcesses([child], signal);
+      if (!sendForegroundStopMessage(child, signal)) {
+        signalChildProcesses([child], signal);
+      }
       shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
       shutdownTimer.unref();
     }
@@ -1516,6 +1569,39 @@ async function runForegroundScript(
       })().catch(rejectChild);
     });
   });
+}
+
+function security(args) {
+  if (showRequestedHelp(args, "security")) return;
+  if (args.length !== 1 || args[0] !== "repair") {
+    throw new Error("用法：codexc security repair");
+  }
+  if (process.platform !== "win32") {
+    printCliMessage("note", "当前平台使用 Unix 文件权限，无需 Windows ACL 修复。");
+    return;
+  }
+  const home = codexHomePath(process.env);
+  const files = readdirSync(home, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
+    .map((entry) => join(home, entry.name));
+  for (const file of files) {
+    if (statSync(file).isFile()) securePrivateFileSync(file);
+  }
+  printCliMessage("success", `Windows 私有 TOML 文件 ACL 已修复：${home}（${files.length} 个文件）`);
+}
+
+function sendForegroundStopMessage(child, signal) {
+  if (process.platform !== "win32" || !child.connected) return false;
+  try {
+    child.send({ type: "codexc-stop", signal }, (error) => {
+      if (error && childProcessIsRunning(child)) {
+        signalChildProcesses([child], signal);
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function waitForProcessGroupExit(processGroupId, timeoutMs) {
@@ -1830,7 +1916,7 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     if (settled) return;
     settled = true;
     cleanup();
-    forward(initialSignal);
+    if (initialSignal) forward(initialSignal);
     void (async () => {
       const cleanupResults = await Promise.allSettled([
         Promise.resolve().then(closeResources),
@@ -1866,10 +1952,18 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
       process.exitCode = 1;
     });
   };
-  cleanup = installProcessSignalHandlers({
+  const cleanupSignals = installProcessSignalHandlers({
     SIGTERM: () => finish(null, "SIGTERM", undefined, "SIGTERM"),
     SIGINT: () => finish(null, "SIGINT", undefined, "SIGINT"),
   });
+  const onControlMessage = (message) => {
+    if (message?.type === "codexc-stop") finish(0, null, undefined, null);
+  };
+  process.on("message", onControlMessage);
+  cleanup = () => {
+    cleanupSignals();
+    process.off("message", onControlMessage);
+  };
   const watchChild = (child) => {
     if (watchers.has(child)) return;
     const onError = (error) => finish(1, null, error);

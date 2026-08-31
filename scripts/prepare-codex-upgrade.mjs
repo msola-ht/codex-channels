@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import {
   compareStableVersions,
   resolveOfficialRelease,
@@ -137,11 +138,14 @@ async function main() {
 }
 
 function run(command, args, extraEnv = {}) {
-  return execFileSync(command, args, {
+  const environment = { ...process.env, ...extraEnv };
+  const invocation = resolveExecutableInvocation(command, args, environment);
+  return execFileSync(invocation.file, invocation.args, {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, ...extraEnv },
+    env: environment,
     stdio: ["ignore", "pipe", "inherit"],
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
 }
 

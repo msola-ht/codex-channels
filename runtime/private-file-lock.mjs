@@ -2,6 +2,11 @@ import { mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "./private-file.mjs";
+
 const defaultTimeoutMs = 2_000;
 const staleLockMs = 30_000;
 
@@ -11,6 +16,7 @@ export async function withPrivateFileLock(
   { label = "私有文件", timeoutMs = defaultTimeoutMs } = {},
 ) {
   mkdirSync(dirname(targetPath), { recursive: true, mode: 0o700 });
+  securePrivateDirectorySync(dirname(targetPath));
   const lockPath = `${targetPath}.lock`;
   const lock = await acquirePrivateFileLock(lockPath, label, timeoutMs);
   let result;
@@ -45,6 +51,7 @@ async function acquirePrivateFileLock(lockPath, label, timeoutMs) {
     try {
       const handle = await open(lockPath, "wx", 0o600);
       try {
+        securePrivateFileSync(lockPath);
         await handle.writeFile(`${process.pid}\n`);
         const metadata = await handle.stat();
         return { handle, dev: metadata.dev, ino: metadata.ino };

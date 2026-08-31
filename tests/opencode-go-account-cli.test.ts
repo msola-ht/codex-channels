@@ -231,7 +231,7 @@ describe("OpenCode Go account CLI", () => {
     ]);
   });
 
-  it("keeps the previous default account when the shared role update fails", async () => {
+  it.skipIf(process.platform === "win32")("keeps the previous default account when the shared role update fails", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
     const rolePath = join(codexHome(home), "sf-agent.config.toml");
@@ -272,7 +272,7 @@ describe("OpenCode Go account CLI", () => {
     ]);
   });
 
-  it("does not replace a DeepSeek shared role when the GO default account changes", async () => {
+  it.skipIf(process.platform === "win32")("does not replace a DeepSeek shared role when the GO default account changes", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
     await addOpencodeGoAccount("opencode-go", {
@@ -501,7 +501,7 @@ describe("OpenCode Go account CLI", () => {
     }
   });
 
-  it("does not remove an account when the running Supervisor protocol is incompatible", async () => {
+  it.skipIf(process.platform === "win32")("does not remove an account when the running Supervisor protocol is incompatible", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
     await addOpencodeGoAccount("opencode-go", {

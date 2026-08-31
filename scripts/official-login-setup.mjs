@@ -2,7 +2,10 @@ import { spawnSync } from "node:child_process";
 
 import * as clackPrompts from "@clack/prompts";
 
-import { resolveOptionalExecutable } from "../runtime/executable.mjs";
+import {
+  executableInvocation,
+  resolveOptionalExecutable,
+} from "../runtime/executable.mjs";
 import {
   backupPrimaryProviderCandidates,
   listCustomPrimaryProviderCandidates,
@@ -28,9 +31,15 @@ function resolveCodexBinary(environment) {
 }
 
 function defaultRunLogin({ codexBinary, environment }) {
-  const result = spawnSync(codexBinary, ["login", "--device-auth"], {
+  const invocation = executableInvocation(
+    codexBinary,
+    ["login", "--device-auth"],
+    environment,
+  );
+  const result = spawnSync(invocation.file, invocation.args, {
     stdio: "inherit",
     env: environment,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) {
     throw result.error;

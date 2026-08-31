@@ -28,11 +28,11 @@ export function childProcessIsRunning(
   child: Pick<ChildProcess, "exitCode" | "signalCode"> | undefined,
 ): boolean;
 export function signalChildProcesses(
-  children: Array<Pick<ChildProcess, "exitCode" | "signalCode" | "kill">>,
+  children: Array<Pick<ChildProcess, "pid" | "exitCode" | "signalCode" | "kill">>,
   signal: NodeJS.Signals,
 ): void;
 export function terminateChildProcess(
-  child: Pick<ChildProcess, "exitCode" | "signalCode" | "kill" | "once" | "off">,
+  child: Pick<ChildProcess, "pid" | "exitCode" | "signalCode" | "kill" | "once" | "off">,
   options?: {
     gracePeriodMs?: number;
     forcePeriodMs?: number;

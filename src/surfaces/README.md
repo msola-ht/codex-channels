@@ -26,8 +26,9 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
   目录内部完整 `SurfaceAdapter` 已实现；严格运行配置显式启用时由 Bootstrap 注册单账号私聊
   Surface。
 
-`secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain 和 Linux AES-256-GCM
-字符串记录机制；平台模块仍各自拥有 Service、目录、记录键、载荷校验和错误语义。
+`secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain、Linux AES-256-GCM 和 Windows
+DPAPI 主密钥 + AES-256-GCM 字符串记录机制；平台模块仍各自拥有 Service、目录、记录键、载荷校验
+和错误语义。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
@@ -195,7 +196,8 @@ Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类
 不重复发送启动提示；该事件保留具体扩展类型和名称，追加到活动 Turn 时仍渲染明确确认。普通文本、图片下载、平台帮助、身份查询和
 交互取消保留在平台边界。PNG/JPEG/WebP/非动画 GIF
 的大小限制与内容签名校验由 `managed-image-store.ts` 在 Surface 内复用；
-一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、`0700/0600` 私有暂存和一小时清理由
+一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、Unix `0700/0600` 或 Windows 当前 SID
+ACL 私有暂存和一小时清理由
 `managed-audio-store.ts` 复用。两者通过内部 `managed-media-store.ts` 统一私有目录生命周期、
 有界流落盘、临时文件清理和过期清理；各自的格式白名单、限制、保留时间和公开接口保持独立。
 Application 只接收绝对本地路径；

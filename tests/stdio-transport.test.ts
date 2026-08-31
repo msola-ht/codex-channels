@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import { executableInvocation } from "../runtime/executable.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -23,16 +24,23 @@ describe("StdioTransport", () => {
   it("passes the configured environment to the App Server process", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-stdio-"));
     temporaryDirectories.push(root);
-    const executable = join(root, "fake-codex");
-    writeFileSync(executable, [
-      "#!/bin/sh",
-      'printf "%s" "$CODEX_TEST_MARKER" >&2',
-      "while IFS= read -r _line; do :; done",
-    ].join("\n"), { mode: 0o700 });
+    const windows = process.platform === "win32";
+    const executable = join(root, windows ? "fake-codex.cmd" : "fake-codex");
+    writeFileSync(executable, windows
+      ? [
+          "@echo off",
+          'set /p "=%CODEX_TEST_MARKER%" <nul 1>&2',
+        ].join("\r\n")
+      : [
+          "#!/bin/sh",
+          'printf "%s" "$CODEX_TEST_MARKER" >&2',
+          "while IFS= read -r _line; do :; done",
+        ].join("\n"), { mode: 0o700 });
     chmodSync(executable, 0o700);
     let stderr = "";
     const transport = new StdioTransport({
       codexBinary: executable,
+      createCodexProcessInvocation: (args) => executableInvocation(executable, args),
       cwd: root,
       environment: {
         ...process.env,

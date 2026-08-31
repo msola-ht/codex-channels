@@ -1,5 +1,5 @@
 export interface CodexTransport {
-  readonly kind: "unix-websocket" | "stdio";
+  readonly kind: "unix-websocket" | "windows-uds-proxy" | "stdio";
   connect(): Promise<void>;
   close(): Promise<void>;
   send(message: string): Promise<void>;
@@ -8,7 +8,7 @@ export interface CodexTransport {
 }
 
 export abstract class BaseTransport implements CodexTransport {
-  abstract readonly kind: "unix-websocket" | "stdio";
+  abstract readonly kind: "unix-websocket" | "windows-uds-proxy" | "stdio";
   private readonly messageHandlers = new Set<(message: string) => void>();
   private readonly closeHandlers = new Set<(error?: Error) => void>();
 

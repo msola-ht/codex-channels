@@ -46,7 +46,11 @@ import {
   createManagedProviderProfile,
 } from "../runtime/model-provider-profile.mjs";
 import { writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
-import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+  writePrivateFileAtomicSync,
+} from "../runtime/private-file.mjs";
 
 describe("codexc agents script", () => {
   it("previews a shared role change without prompts or configuration writes", () => {
@@ -663,6 +667,7 @@ function writeProviderFixture(
 ) {
   const providerDirectory = fixture.providerDirectory(definition);
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") securePrivateDirectorySync(providerDirectory);
   const catalogPath = join(providerDirectory, definition.catalogFileName);
   writeFileSync(
     catalogPath,
@@ -680,6 +685,7 @@ function writeProviderFixture(
     }),
     { mode: 0o600 },
   );
+  if (process.platform === "win32") securePrivateFileSync(catalogPath);
   const profile = createManagedProviderProfile(definition, {
     apiKey: "sk-test-secret",
     catalogPath,
@@ -689,28 +695,40 @@ function writeProviderFixture(
     ? join(fixture.home, "config.toml")
     : join(fixture.home, definition.profileFileName);
   writeFileSync(target, stringify(profile), { mode: 0o600 });
+  if (process.platform === "win32") securePrivateFileSync(target);
   if (definition.accountId !== undefined) {
     const accountsDirectory = join(providerDirectory, "accounts");
     const accountDirectory = join(accountsDirectory, definition.accountId);
     mkdirSync(accountDirectory, { recursive: true, mode: 0o700 });
+    if (process.platform === "win32") securePrivateDirectorySync(accountsDirectory);
+    if (process.platform === "win32") securePrivateDirectorySync(accountDirectory);
     if (!existsSync(join(providerDirectory, "accounts.json"))) {
       writeFileSync(
         join(providerDirectory, "accounts.json"),
         `${JSON.stringify([{ id: definition.accountId, default: true }], null, 2)}\n`,
         { mode: 0o600 },
       );
+      if (process.platform === "win32") {
+        securePrivateFileSync(join(providerDirectory, "accounts.json"));
+      }
     }
     writeFileSync(
       join(accountDirectory, definition.managedMarkerFileName),
       stringify(createManagedProviderMarker(definition, mode)),
       { mode: 0o600 },
     );
+    if (process.platform === "win32") {
+      securePrivateFileSync(join(accountDirectory, definition.managedMarkerFileName));
+    }
   } else {
     writeFileSync(
       join(providerDirectory, definition.managedMarkerFileName),
       stringify(createManagedProviderMarker(definition, mode)),
       { mode: 0o600 },
     );
+    if (process.platform === "win32") {
+      securePrivateFileSync(join(providerDirectory, definition.managedMarkerFileName));
+    }
   }
 }
 

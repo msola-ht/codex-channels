@@ -6,15 +6,18 @@ import {
   installProcessSignalHandlers,
   signalChildProcesses,
 } from "../runtime/process-lifecycle.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
 const packageDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const children = new Set();
 let shuttingDown = false;
 
 function start(command, args, options = {}) {
-  const child = spawn(command, args, {
+  const invocation = resolveExecutableInvocation(command, args);
+  const child = spawn(invocation.file, invocation.args, {
     stdio: "inherit",
     ...options,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   children.add(child);
   child.on("exit", (code, signal) => {

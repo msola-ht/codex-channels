@@ -4,6 +4,7 @@ export const serviceDefinitions = Object.freeze([
     displayName: "Codex App Server",
     systemd: "codex-connect-app-server.service",
     launchd: "com.hegenai.codex-app-server",
+    windows: "Codex Connect App Server",
     core: true,
     helpOrder: 1,
     startOrder: 0,
@@ -14,6 +15,7 @@ export const serviceDefinitions = Object.freeze([
     displayName: "Gateway",
     systemd: "codex-connect-gateway.service",
     launchd: "com.hegenai.codex-gateway",
+    windows: "Codex Connect Gateway",
     core: true,
     helpOrder: 0,
     startOrder: 1,
@@ -24,6 +26,7 @@ export const serviceDefinitions = Object.freeze([
     displayName: "WebUI",
     systemd: "codex-connect-webui.service",
     launchd: "com.hegenai.codex-webui",
+    windows: "Codex Connect WebUI",
     core: false,
     helpOrder: 2,
     startOrder: 0,
@@ -34,6 +37,7 @@ export const serviceDefinitions = Object.freeze([
     displayName: "指标中心",
     systemd: "codex-connect-center.service",
     launchd: "com.hegenai.codex-center",
+    windows: "Codex Connect Metrics Center",
     core: false,
     helpOrder: 3,
     startOrder: 0,
@@ -81,7 +85,7 @@ export function serviceDefinitionsForTarget(target, order = "start") {
 }
 
 export function serviceIdentifiers(platform, target = "all", order = "start") {
-  if (platform !== "systemd" && platform !== "launchd") {
+  if (platform !== "systemd" && platform !== "launchd" && platform !== "windows") {
     throw new Error(`不支持的服务平台：${platform}`);
   }
   return serviceDefinitionsForTarget(target, order).map((definition) => definition[platform]);

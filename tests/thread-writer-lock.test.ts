@@ -17,6 +17,7 @@ import {
 } from "../runtime/thread-writer-lock.mjs";
 
 describe("thread writer lock diagnostics", () => {
+  const unixIt = process.platform === "win32" ? it.skip : it;
   it("finds the local process holding a thread lock through /proc", () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-thread-lock-"));
     const codexHome = join(root, "codex-home");
@@ -76,7 +77,7 @@ describe("thread writer lock diagnostics", () => {
     expect(command).not.toContain("header-secret");
   });
 
-  it("treats an unreadable process table as unidentifiable instead of free", () => {
+  unixIt("treats an unreadable process table as unidentifiable instead of free", () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-thread-lock-proc-"));
     const codexHome = join(root, "codex-home");
     const lockDirectory = join(codexHome, "thread-writer-locks");
@@ -116,7 +117,7 @@ describe("thread writer lock diagnostics", () => {
     },
   );
 
-  it("treats an already exited holder as terminated", async () => {
+  unixIt("treats an already exited holder as terminated", async () => {
     await expect(terminateThreadWriterHolder(Number.MAX_SAFE_INTEGER))
       .resolves.toBe(true);
   });

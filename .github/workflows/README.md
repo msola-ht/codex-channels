@@ -4,8 +4,9 @@
 
 ## 文件
 
-- `ci.yml`：在 Pull Request 和手动触发时，分别使用 Ubuntu 与 macOS、Node.js 22.13.0
-  执行与本地 pre-commit hook 相同的 `npm run verify:commit`。Branch Protection 要求 PR 的当前
+- `ci.yml`：在 Pull Request 和手动触发时，使用 Ubuntu 与 macOS、Node.js 22.13.0 执行与本地
+  pre-commit hook 相同的 `npm run verify:commit`，并使用 Windows latest 执行独立的构建、类型、文档、
+  PowerShell 语法和 CLI 帮助冒烟。Windows Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
   merge ref 通过全部门禁并禁止直接写入 `main`，因此 push 不再重复运行同一检查。检查覆盖提交
   差异、类型和版本、生产与测试 Lint、文档链接和索引、全量测试、Shell、真实 tarball 安装冒烟
   及平台模板检查；tarball 冒烟复用同次完整测试已经生成的 Gateway 构建产物，干净源码安装不进入

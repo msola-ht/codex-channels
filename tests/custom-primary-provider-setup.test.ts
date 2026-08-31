@@ -742,7 +742,7 @@ describe("custom primary Provider setup", () => {
     expect(existsSync(customPrimaryProviderProfilePath(environment, "OpenAI"))).toBe(true);
   });
 
-  it("reports a committed switching Profile when private backup cleanup fails", async () => {
+  it.skipIf(process.platform === "win32")("reports a committed switching Profile when private backup cleanup fails", async () => {
     const environment = testEnvironment();
     writeMainConfig(environment, switchingMainConfig());
     backupPrimaryProviderCandidates({

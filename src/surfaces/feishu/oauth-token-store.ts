@@ -1,6 +1,7 @@
 import {
   EncryptedFileCredentialRecordStore,
   MacKeychainCredentialRecordStore,
+  WindowsDpapiCredentialRecordStore,
   type KeychainCommandRunner,
   type SecureCredentialRecordStore,
 } from "../secure-credential-store.js";
@@ -38,6 +39,12 @@ export function createFeishuUserTokenStore(
   }
   if (platform === "linux") {
     return new EncryptedFileFeishuUserTokenStore(credentialsDirectory);
+  }
+  if (platform === "win32") {
+    return new EncryptedFileFeishuUserTokenStore(
+      credentialsDirectory,
+      new WindowsDpapiCredentialRecordStore(credentialsDirectory),
+    );
   }
   throw new Error(`飞书用户授权不支持当前平台：${platform}`);
 }
@@ -79,8 +86,12 @@ export class EncryptedFileFeishuUserTokenStore
 implements FeishuUserTokenStore {
   private readonly records: SecureCredentialRecordStore;
 
-  constructor(directory: string) {
-    this.records = new EncryptedFileCredentialRecordStore(directory);
+  constructor(
+    directory: string,
+    records: SecureCredentialRecordStore =
+      new EncryptedFileCredentialRecordStore(directory),
+  ) {
+    this.records = records;
   }
 
   async get(

@@ -11,12 +11,32 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
+import { createAppServerTransport } from "../src/codex-client/app-server-transport.js";
 import {
   decodeTextMessage,
   UnixWebSocketTransport,
 } from "../src/codex-client/unix-websocket-transport.js";
 
 const temporaryDirectories: string[] = [];
+const unixIt = process.platform === "win32" ? it.skip : it;
+
+describe("App Server Transport selection", () => {
+  const endpoint = { kind: "local-app-server", socketPath: "app-server.sock" } as const;
+
+  it("keeps the Unix WebSocket Transport on Unix platforms", () => {
+    expect(createAppServerTransport(endpoint, {
+      codexBinary: "codex",
+      platform: "linux",
+    }).kind).toBe("unix-websocket");
+  });
+
+  it("selects the owned official Proxy Transport on Windows", () => {
+    expect(createAppServerTransport(endpoint, {
+      codexBinary: "codex.exe",
+      platform: "win32",
+    }).kind).toBe("windows-uds-proxy");
+  });
+});
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -39,7 +59,7 @@ describe("UnixWebSocketTransport", () => {
     )).toBe(text);
   });
 
-  it("matches the native remote handshake without custom identity or auth headers", async () => {
+  unixIt("matches the native remote handshake without custom identity or auth headers", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-ws-"));
     temporaryDirectories.push(root);
     const socketPath = join(root, "app.sock");
@@ -85,7 +105,7 @@ describe("UnixWebSocketTransport", () => {
     }
   });
 
-  it("accepts App Server messages larger than the legacy 8 MiB limit", async () => {
+  unixIt("accepts App Server messages larger than the legacy 8 MiB limit", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-ws-large-"));
     temporaryDirectories.push(root);
     const socketPath = join(root, "app.sock");
@@ -118,7 +138,7 @@ describe("UnixWebSocketTransport", () => {
     }
   });
 
-  it("rejects a socket inside a directory accessible by other users", async () => {
+  unixIt("rejects a socket inside a directory accessible by other users", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-ws-"));
     temporaryDirectories.push(root);
     chmodSync(root, 0o755);
@@ -128,7 +148,7 @@ describe("UnixWebSocketTransport", () => {
     ).connect()).rejects.toThrow("Codex Unix Socket 父目录权限不安全");
   });
 
-  it("rejects a non-socket target before opening a connection", async () => {
+  unixIt("rejects a non-socket target before opening a connection", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-ws-"));
     temporaryDirectories.push(root);
     const socketPath = join(root, "app.sock");

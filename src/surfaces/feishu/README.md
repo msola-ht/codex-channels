@@ -56,7 +56,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `permissions.ts`：渲染当前进程权限观测和 Doctor 无配置快照时的精简回退摘要。
 - `oauth-device-flow.ts`：严格裁剪应用用户 Scope、Device Authorization、有限轮询和授权身份查询。
 - `oauth-card.ts`：把 Device Flow 映射为 CardKit 2.0 飞书内嵌授权卡片及稳定结果卡片。
-- `oauth-token-store.ts`：macOS Keychain 与 Linux AES-256-GCM 私有凭据后端。
+- `oauth-token-store.ts`：macOS Keychain、Linux AES-256-GCM 与 Windows 当前用户 DPAPI 主密钥保护的
+  AES-256-GCM 私有凭据后端。
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
   映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知、`/status` 与
@@ -309,7 +310,8 @@ Actor 仍获授权时才生成授权按钮，并把精确差集传给 SDK；菜�
 
 用户 OAuth Token 不进入 Application、Core、配置或会话 SQLite。macOS 使用系统 Keychain；
 Linux 在 Bootstrap 从状态数据库父目录注入的 `credentials/feishu` 下保存独立主密钥和
-AES-256-GCM 密文，目录为 `0700`、文件为 `0600`。`revoke` 先取消当前 Actor 的进行中轮询再删除
+AES-256-GCM 密文，目录为 `0700`、文件为 `0600`；Windows 在同一逻辑目录保存当前用户 DPAPI
+保护的随机主密钥和 AES-256-GCM 密文，并使用当前 SID 私有 ACL。`revoke` 先取消当前 Actor 的进行中轮询再删除
 本地凭据，Surface 停止会取消授权任务并最多等待 5 秒；停止或存储错误与 Token 写入竞态时尝试
 恢复原凭据，失败只记录脱敏警告。Linux 后端在原子替换前完成权限设置；Keychain 命令同样有
 5 秒上限并使用原地更新，读取两种后端时均严格校验凭据载荷。Linux 只有凭据文件不存在时才返回

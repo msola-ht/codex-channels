@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
@@ -51,19 +52,21 @@ function assertPreparedBuild() {
 }
 
 function packSource(destination) {
+  const invocation = resolveExecutableInvocation("npm", [
+    "pack",
+    "--ignore-scripts",
+    "--loglevel=error",
+    "--json",
+    "--pack-destination",
+    destination,
+  ]);
   const result = spawnSync(
-    "npm",
-    [
-      "pack",
-      "--ignore-scripts",
-      "--loglevel=error",
-      "--json",
-      "--pack-destination",
-      destination,
-    ],
+    invocation.file,
+    invocation.args,
     {
       cwd: packageDir,
       encoding: "utf8",
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     },
   );
   if (result.error) {
@@ -93,9 +96,11 @@ function buildWebui() {
 }
 
 function run(command, args, cwd = packageDir) {
-  const result = spawnSync(command, args, {
+  const invocation = resolveExecutableInvocation(command, args);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd,
     stdio: "inherit",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) {
     throw result.error;
@@ -104,9 +109,11 @@ function run(command, args, cwd = packageDir) {
 }
 
 function runQuiet(command, args, cwd = packageDir) {
-  const result = spawnSync(command, args, {
+  const invocation = resolveExecutableInvocation(command, args);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd,
     encoding: "utf8",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {

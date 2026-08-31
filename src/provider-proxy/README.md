@@ -54,13 +54,14 @@
   `agents.external` 选择的默认账户并在转发前剥离该前缀。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
-- `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的 `0600` Unix Socket，
-  接收端归约后返回确认，保证短回复的 Turn 完成事件不会抢先清理计时状态；Gateway 不在线时指标
-  直接丢弃并继续模型响应。接收端拒绝非 Socket、非当前用户或已被活动进程占用的路径，并只删除
-  自己创建的 Socket；监听建立后的权限检查失败也会关闭监听并清理自身路径。
+- `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的当前用户私有 IPC；Unix 使用
+  `0600` Socket，Windows 使用共享运行时提供的认证命名管道。接收端归约后返回确认，保证短回复的
+  Turn 完成事件不会抢先清理计时状态；Gateway 不在线时指标直接丢弃并继续模型响应。接收端拒绝
+  不安全、无认证或已被活动进程占用的端点，并只清理自己创建的端点；指标按换行完成单帧并在归约后
+  确认，不依赖 Windows named pipe 不具备的半关闭时序。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
 
-模块只依赖 Node 内置 HTTP/HTTPS/Unix Socket 能力，不接触平台 SDK、数据库或协议生成类型；
+模块只依赖 Node 内置 HTTP/HTTPS 与共享私有 IPC 能力，不接触平台 SDK、数据库或协议生成类型；
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
 `observability` 独立指标库和 `conversation-core` 的稳定计时输入事件。
 App Server 服务立即为主 Provider 创建独立代理，并在可选切换 Provider 首次使用时按需创建对应

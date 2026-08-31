@@ -70,10 +70,12 @@ describe("Third-party API provider setup", () => {
     expect(readApiProviderKey(fixture.credentialsDirectory, "relay-a")).toBe("key-a");
     expect(readApiProviderKey(fixture.credentialsDirectory, "relay-b")).toBe("key-b");
     expect(readFileSync(fixture.configPath, "utf8")).not.toContain("key-a");
-    expect(statSync(apiProviderCredentialPath(
-      fixture.credentialsDirectory,
-      "relay-a",
-    )).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(apiProviderCredentialPath(
+        fixture.credentialsDirectory,
+        "relay-a",
+      )).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("updates one provider without changing the others", async () => {
@@ -137,7 +139,7 @@ describe("Third-party API provider setup", () => {
       fixture.credentialsDirectory,
       "relay-a",
       "private-key",
-    )).toThrow("凭据目录权限无效");
+    )).toThrow(/凭据目录权限无效|私有路径不能是符号链接/u);
   });
 });
 

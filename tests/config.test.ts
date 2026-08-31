@@ -30,6 +30,7 @@ import {
 } from "../src/config/index.js";
 
 const temporaryDirectories: string[] = [];
+const unixIt = process.platform === "win32" ? it.skip : it;
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -420,7 +421,7 @@ describe("Gateway config.toml", () => {
     })).toThrow(/ds_proxy/u);
   });
 
-  it("rejects a config file readable by group or other users", () => {
+  unixIt("rejects a config file readable by group or other users", () => {
     const fixture = createFixture();
     chmodSync(fixture.configPath, 0o640);
 
@@ -439,7 +440,7 @@ describe("Gateway config.toml", () => {
     })).toThrow("config.toml 必须是普通文件且不能是符号链接");
   });
 
-  it("rejects a config file in a group-writable directory", () => {
+  unixIt("rejects a config file in a group-writable directory", () => {
     const fixture = createFixture();
     chmodSync(fixture.root, 0o770);
 
@@ -524,7 +525,7 @@ describe("Gateway config.toml", () => {
     expect(readFixture(fixture.configPath)).toContain(
       "# 自动补齐前的注释",
     );
-    expect(statSync(fixture.configPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(fixture.configPath).mode & 0o777).toBe(0o600);
   });
 
   it("does not materialize defaults when semantic validation fails", () => {

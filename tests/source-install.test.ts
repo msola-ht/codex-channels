@@ -25,7 +25,7 @@ afterEach(() => {
   }
 });
 
-describe("Linux/macOS Git 源码安装", () => {
+describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", () => {
   it("braces shell variables before non-ASCII text", () => {
     const installer = readFileSync(resolve("install.sh"), "utf8");
 

@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 
 const temporaryDirectories: string[] = [];
+const linuxIt = process.platform === "linux" ? it : it.skip;
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -88,7 +89,7 @@ describe("systemd installer", () => {
     }
   });
 
-  it("queries only the requested service identifier", () => {
+  linuxIt("queries only the requested service identifier", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-query-"));
     temporaryDirectories.push(root);
     const binDir = join(root, "bin");
@@ -123,7 +124,7 @@ describe("systemd installer", () => {
     expect(queries[0]).toContain("systemd gateway start");
   });
 
-  it("returns the systemctl status failure to callers", () => {
+  linuxIt("returns the systemctl status failure to callers", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-status-"));
     temporaryDirectories.push(root);
     const binDir = join(root, "bin");
@@ -154,7 +155,7 @@ describe("systemd installer", () => {
     expect(result.stderr).toContain("service is unavailable");
   });
 
-  it("treats missing units as already stopped after uninstall", () => {
+  linuxIt("treats missing units as already stopped after uninstall", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-stop-missing-"));
     temporaryDirectories.push(root);
     const binDir = join(root, "bin");
@@ -188,7 +189,7 @@ describe("systemd installer", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("fails closed when the service catalog query fails", () => {
+  linuxIt("fails closed when the service catalog query fails", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-query-failure-"));
     temporaryDirectories.push(root);
     const binDir = join(root, "bin");
@@ -224,7 +225,7 @@ describe("systemd installer", () => {
     expect(result.stdout).not.toContain("[成功]");
   });
 
-  it("enables linger during install so services start before login", () => {
+  linuxIt("enables linger during install so services start before login", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-linger-"));
     temporaryDirectories.push(root);
     const binDir = join(root, "bin");
@@ -282,7 +283,7 @@ describe("systemd installer", () => {
     expect(output).toContain("未登录时也会随系统启动");
   });
 
-  it("fails install with an actionable command when linger cannot be enabled", () => {
+  linuxIt("fails install with an actionable command when linger cannot be enabled", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-linger-failure-"));
     temporaryDirectories.push(root);
     const binDir = join(root, "bin");
@@ -322,7 +323,7 @@ describe("systemd installer", () => {
     expect(existsSync(systemctlLog)).toBe(false);
   });
 
-  it("supports lifecycle actions and preserves user data on uninstall", () => {
+  linuxIt("supports lifecycle actions and preserves user data on uninstall", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-systemd-control-"));
     temporaryDirectories.push(root);
     const configHome = join(root, ".config");

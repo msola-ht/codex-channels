@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 import { ScheduledTaskRunCoordinator } from "../src/bootstrap/scheduled-task-run-coordinator.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
@@ -108,6 +109,7 @@ function turn(id: string, status: ThreadTurnSummary["status"]): ThreadTurnSummar
 function setup(history: ThreadHistoryPort, options: { readonly markRunning?: boolean } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "codexc-scheduled-coordinator-"));
   directories.push(directory);
+  secureTestDirectory(directory);
   const store = new SqliteScheduledTaskStore(join(directory, "scheduled.sqlite3"));
   const task = store.createTask(taskInput());
   const bindings = new MemoryBindingStore();

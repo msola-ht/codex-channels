@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { terminateChildProcess } from "../../runtime/process-lifecycle.mjs";
+
 const packageDir = fileURLToPath(new URL("../../", import.meta.url));
 
 export interface ServiceRestartRunnerOptions {
@@ -34,16 +36,25 @@ export function restartAppServerService(
     child.stderr?.on("data", (chunk: string) => {
       stderr = `${stderr}${chunk}`.slice(-4_000);
     });
+    let timedOut = false;
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject(new Error("codexc service restart app-server 超时"));
+      timedOut = true;
+      void terminateChildProcess(child).then(
+        () => reject(new Error("codexc service restart app-server 超时")),
+        (error) => reject(new Error(
+          "codexc service restart app-server 超时且子进程树清理失败",
+          { cause: error },
+        )),
+      );
     }, timeoutMs);
     child.once("error", (error) => {
       clearTimeout(timer);
+      if (timedOut) return;
       reject(error);
     });
     child.once("close", (code) => {
       clearTimeout(timer);
+      if (timedOut) return;
       if (code === 0) {
         resolve();
         return;

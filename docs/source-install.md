@@ -1,13 +1,14 @@
 # Git 源码安装
 
-Linux 与 macOS 可以把 Codex Connect 官方 `main` 分支作为完整 Git 仓库安装到：
+Linux、macOS 与 Windows 可以把 Codex Connect 官方 `main` 分支作为完整 Git 仓库安装到：
 
 ```text
 ~/.codex-connect/codex-channels
 ```
 
 配置、数据库、凭据、Socket、日志和输出仍使用 `~/.codex-connect` 下原有目录，不写入 Git
-仓库。Windows Transport 与后台服务尚未支持，因此安装脚本会明确拒绝其他平台。
+仓库。Windows 使用 PowerShell 7 和当前用户计划任务；在全部 Windows 发布门槛通过前，该入口仍属于
+开发验证，不代表项目已经公开支持 Windows。
 
 ## 安装
 
@@ -16,6 +17,18 @@ Linux 与 macOS 可以把 Codex Connect 官方 `main` 分支作为完整 Git 仓
 ```bash
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
+
+Windows PowerShell 7 使用仓库根目录的安装器：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+& .\install.ps1
+```
+
+该脚本要求 Git、Node.js 22.13+、npm 和固定版本 Codex CLI；缺少 Codex CLI 时会通过 `npm.cmd`
+安装精确版本。它只使用当前用户目录，不要求管理员权限；安装失败会清理临时目录和不完整源码。
+默认克隆官方 `main`；本地开发验证可显式传入 `-Repository <本地仓库路径> -Branch <分支>`，该参数不改变
+正式安装默认值。安装器会在 Git checkout 时启用长路径支持，以覆盖 Windows 深层源码目录。
 
 安装器先在 `~/.codex-connect` 的私有临时目录完成克隆、依赖安装、Gateway 与 WebUI 构建和版本
 校验；`main` 中 `package.json` 的版本必须与本机 Codex CLI 一致。成功后才移动为
@@ -34,6 +47,20 @@ fnm、nvm 等版本管理器时，切换 Node.js 版本也会切换对应的全�
 codexc init
 codexc setup
 codexc service install
+```
+
+Windows 若 Git 仍报告 `Filename too long`，先在普通 PowerShell 中启用当前用户的 Git 长路径配置，
+再重新运行安装器；这不会修改仓库工作树，也不需要管理员权限：
+
+```powershell
+& git.exe config --global core.longpaths true
+& .\install.ps1
+```
+
+本地开发验证可指定当前仓库和分支（不会把未提交改动上传到远程）：
+
+```powershell
+& .\install.ps1 -Repository 'F:\GitHub\codex-channels' -Branch 'docs/windows-support-plan'
 ```
 
 Git 仓库用于跟踪和构建 `main`，日常命令由构建后的 npm 全局包提供。安装器会给仓库写入仅位于

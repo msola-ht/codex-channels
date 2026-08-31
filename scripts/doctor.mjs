@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  readdirSync,
   readFileSync,
   statSync,
 } from "node:fs";
@@ -14,14 +15,17 @@ import {
   formatCliStatus,
 } from "../runtime/cli-presentation.mjs";
 import {
+  executableInvocation,
   resolveExecutable,
   resolveOptionalExecutable,
 } from "../runtime/executable.mjs";
 import {
+  appServerSocketAcceptsWebSocket,
   inspectAppServerSupervisor,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import {
+  assertAppServerSocketPathSupported,
   resolveAppServerRuntime,
   resolvePrimaryAppServerSocketPath,
 } from "../runtime/app-server-runtime.mjs";
@@ -40,12 +44,23 @@ import {
   selectHttpProxyUrl,
 } from "../runtime/network-proxy.mjs";
 import { readApiProviderKey } from "../runtime/api-provider-credential.mjs";
+import {
+  assertPrivateDirectoryAccessSync,
+  assertPrivateFileAccessSync,
+} from "../runtime/private-file.mjs";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
+import {
+  protectForCurrentWindowsUserSync,
+  unprotectForCurrentWindowsUserSync,
+} from "../runtime/windows-dpapi.mjs";
 import {
   inspectFeishuApplicationConfiguration,
   validateFeishuApplication,
 } from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
+import { inspectManagedServiceHealth } from "./service-status.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
@@ -92,12 +107,13 @@ if (!existsSync(configPath)) {
   record("用户配置", false, `不存在：${configPath}；请先运行 codexc init`);
 } else {
   record("用户配置", true, configPath);
+  checkCodexHomePrivatePaths();
   if (explicitConfigFile) {
     note("配置目录权限", "显式配置文件保留父目录现有权限");
   } else {
-    checkMode("配置目录权限", dataDir, 0o700);
+    checkPrivateDirectory("配置目录权限", dataDir);
   }
-  checkMode("配置文件权限", configPath, 0o600);
+  checkPrivateFile("配置文件权限", configPath);
   try {
     const candidate = readGatewayConfig(configPath);
     validateGatewayConfigDocument(candidate);
@@ -109,15 +125,53 @@ if (!existsSync(configPath)) {
 }
 
 if (document) {
-  setSection("网络与代理");
-  checkOpenAiProxy(document);
-
-  setSection("通讯渠道");
   const telegram = table(document.telegram);
   const feishu = table(document.feishu);
   const weixin = table(document.weixin);
   const codex = table(document.codex);
   const storage = table(document.storage);
+  const stateDatabasePath = resolveConfiguredPath(
+    stringValue(storage.database_path),
+    dataDir,
+    join(dataDir, "data", "gateway.sqlite3"),
+  );
+
+  setSection("私有存储");
+  checkWindowsCredentialBackend();
+  checkOptionalPrivateDirectory("状态目录权限", dirname(stateDatabasePath));
+  checkOptionalPrivateFile("状态数据库权限", stateDatabasePath);
+  checkOptionalPrivateFile(
+    "指标数据库权限",
+    join(dirname(stateDatabasePath), "request-metrics.sqlite3"),
+  );
+  checkOptionalPrivateDirectory(
+    "凭据目录权限",
+    join(dataDir, "credentials"),
+  );
+  checkOptionalPrivateDirectory(
+    "媒体暂存目录权限",
+    join(dirname(stateDatabasePath), "uploads"),
+  );
+  checkOptionalPrivateDirectory(
+    "渠道输出目录权限",
+    join(dirname(stateDatabasePath), "channel-outbox"),
+  );
+  const webui = table(document.webui);
+  const metricsCenter = table(table(document.metrics).center);
+  note(
+    "配置内访问令牌",
+    [
+      `WebUI ${stringValue(webui.token) ? "已配置" : "未配置"}`,
+      `指标中心查看令牌 ${stringValue(metricsCenter.token) ? "已配置" : "未配置"}`,
+      `设备令牌 ${stringValue(metricsCenter.device_token) ? "已配置" : "未配置"}`,
+      "内容已隐藏并由配置文件私有权限保护",
+    ].join("；"),
+  );
+
+  setSection("网络与代理");
+  checkOpenAiProxy(document);
+
+  setSection("通讯渠道");
   const tokenConfigured = Boolean(stringValue(telegram.bot_token));
   const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
   if (tokenConfigured) {
@@ -211,11 +265,6 @@ if (document) {
         credential
           ? "安全凭据存在且载荷有效（内容已隐藏）"
           : "安全凭据不存在，请重新运行 codexc setup",
-      );
-      const stateDatabasePath = resolveConfiguredPath(
-        stringValue(storage.database_path),
-        dataDir,
-        join(dataDir, "data", "gateway.sqlite3"),
       );
       const cursorStore = new FileWeixinUpdatesCursorStore(
         join(dirname(stateDatabasePath), "weixin-updates"),
@@ -311,17 +360,12 @@ if (document) {
   );
   const scheduledTasks = table(document.scheduled_tasks);
   if (scheduledTasks.enabled === true) {
-    const stateDatabasePath = resolveConfiguredPath(
-      stringValue(storage.database_path),
-      dataDir,
-      join(dataDir, "data", "gateway.sqlite3"),
-    );
     const scheduledTaskPath = join(dirname(stateDatabasePath), "scheduled-tasks.sqlite3");
     if (!existsSync(scheduledTaskPath)) {
       note("Gateway 计划任务", "已启用；数据库将在 Gateway 下次启动时创建");
     } else {
       note("Gateway 计划任务", "已启用，私有数据库已存在");
-      checkMode("计划任务数据库权限", scheduledTaskPath, 0o600);
+      checkPrivateFile("计划任务数据库权限", scheduledTaskPath);
     }
   } else {
     note("Gateway 计划任务", "已关闭");
@@ -348,11 +392,14 @@ if (document) {
 
   setSection("Codex 与 App Server");
   const codexCommand = stringValue(codex.binary) || "codex";
+  let codexBinary;
   try {
-    const codexBinary = resolveExecutable(codexCommand);
-    const versionResult = spawnSync(codexBinary, ["--version"], {
+    codexBinary = resolveExecutable(codexCommand);
+    const invocation = executableInvocation(codexBinary, ["--version"]);
+    const versionResult = spawnSync(invocation.file, invocation.args, {
       encoding: "utf8",
       timeout: 5_000,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
     if (versionResult.error) {
       throw versionResult.error;
@@ -396,22 +443,26 @@ if (document) {
   if (appServerTopology) {
     await checkAppServerSupervisor(socketPath, appServerTopology);
   }
-  await checkAppServer("Codex App Server", socketPath);
+  await checkAppServer("Codex App Server", socketPath, codexBinary ?? codexCommand);
   for (let index = 0; index < managedProviders.length; index += 1) {
     const managedProvider = managedProviders[index];
     await checkOptionalAppServer(
       `${managedProvider.provider} App Server`,
       appServerTopology.socketPaths[index + 1],
+      codexBinary ?? codexCommand,
     );
   }
 }
 
-async function checkOptionalAppServer(label, socketPath) {
-  if (!existsSync(socketPath)) {
+async function checkOptionalAppServer(label, socketPath, codexBinary) {
+  const available = process.platform === "win32"
+    ? await appServerSocketAcceptsWebSocket(socketPath)
+    : existsSync(socketPath);
+  if (!available) {
     record(label, true, "已配置；首次选择该 Provider 或恢复其会话时按需启动");
     return;
   }
-  await checkAppServer(label, socketPath);
+  await checkAppServer(label, socketPath, codexBinary);
 }
 
 async function checkAppServerSupervisor(socketPath, expectedTopology) {
@@ -438,13 +489,14 @@ async function checkAppServerSupervisor(socketPath, expectedTopology) {
   }
 }
 
-async function checkAppServer(label, socketPath) {
-  if (!existsSync(socketPath)) {
+async function checkAppServer(label, socketPath, codexBinary) {
+  if (process.platform !== "win32" && !existsSync(socketPath)) {
     record(label, false, `Socket 不存在：${socketPath}`);
     return;
   }
   try {
-    const appServerUserAgent = await initializeUnixWebSocket(socketPath);
+    assertAppServerSocketPathSupported(socketPath);
+    const appServerUserAgent = await initializeAppServer(socketPath, codexBinary);
     record(label, true, `initialize 握手通过：${socketPath}`);
     const actualVersion = appServerVersion(appServerUserAgent);
     record(
@@ -505,6 +557,26 @@ if (process.platform === "darwin") {
         ? "已启用，退出登录后服务可继续运行"
         : "未启用或无法确认；重新运行 codexc service install，或按安装提示由管理员启用",
     );
+  }
+} else if (process.platform === "win32") {
+  try {
+    const status = await inspectManagedServiceHealth({
+      environment: {
+        ...process.env,
+        CODEX_CONNECT_HOME: dataDir,
+        CODEX_CONNECT_CONFIG_FILE: configPath,
+      },
+      platform: "win32",
+      target: "all",
+    });
+    note(
+      "Windows 计划任务",
+      status.healthy
+        ? "App Server 与 Gateway 已运行"
+        : `已运行 ${status.services.filter((service) => service.running).length}/${status.services.length}；可运行 codexc service install 安装当前用户计划任务`,
+    );
+  } catch (error) {
+    note("Windows 计划任务", `无法查询：${errorMessage(error)}`);
   }
 } else {
   note("系统服务", "当前平台尚未提供系统服务适配");
@@ -568,6 +640,87 @@ function note(name, detail, remediation) {
   checks.push({ section: checkSection, kind: "note", name, detail, remediation });
 }
 
+function checkPrivateDirectory(name, path, remediation) {
+  if (process.platform === "win32") {
+    try {
+      assertPrivateDirectoryAccessSync(path);
+      record(name, true, "当前 SID 私有 ACL 有效");
+    } catch (error) {
+      record(name, false, errorMessage(error), remediation);
+    }
+    return;
+  }
+  checkMode(name, path, 0o700);
+}
+
+function checkCodexHomePrivatePaths() {
+  if (process.platform !== "win32") return;
+  const home = codexHomePath(process.env);
+  if (!existsSync(home)) {
+    note("Codex 私有配置权限", "尚未创建；首次使用 Codex 用户配置时创建");
+    return;
+  }
+  let entries;
+  try {
+    entries = readdirSync(home, { withFileTypes: true });
+  } catch (error) {
+    record("Codex 私有配置权限", false, errorMessage(error), "运行 codexc security repair");
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith(".toml")) {
+      checkPrivateFile(`Codex 配置权限：${entry.name}`, join(home, entry.name), "运行 codexc security repair");
+    }
+  }
+}
+
+function checkPrivateFile(name, path, remediation) {
+  if (process.platform === "win32") {
+    try {
+      assertPrivateFileAccessSync(path);
+      record(name, true, "当前 SID 私有 ACL 有效");
+    } catch (error) {
+      record(name, false, errorMessage(error), remediation);
+    }
+    return;
+  }
+  checkMode(name, path, 0o600);
+}
+
+function checkOptionalPrivateDirectory(name, path) {
+  if (existsSync(path)) checkPrivateDirectory(name, path);
+  else note(name, "尚未创建；首次使用对应功能时创建");
+}
+
+function checkOptionalPrivateFile(name, path) {
+  if (existsSync(path)) checkPrivateFile(name, path);
+  else note(name, "尚未创建；首次使用对应功能时创建");
+}
+
+function checkWindowsCredentialBackend() {
+  if (process.platform !== "win32") return;
+  try {
+    const sample = Buffer.from("codexc-doctor-dpapi-v1", "utf8");
+    const protectedValue = protectForCurrentWindowsUserSync(sample);
+    const restored = unprotectForCurrentWindowsUserSync(protectedValue);
+    record(
+      "Windows 凭据后端",
+      restored.equals(sample),
+      restored.equals(sample)
+        ? "DPAPI CurrentUser 保护与恢复通过；凭据内容未读取"
+        : "DPAPI CurrentUser 恢复结果无效",
+      "确认 PowerShell 7 可用，并在当前 Windows 用户下重新运行 codexc doctor",
+    );
+  } catch (error) {
+    record(
+      "Windows 凭据后端",
+      false,
+      errorMessage(error),
+      "确认 PowerShell 7 可用，并在当前 Windows 用户下重新运行 codexc doctor",
+    );
+  }
+}
+
 function checkMode(name, path, expected) {
   try {
     const actual = statSync(path).mode & 0o777;
@@ -628,24 +781,30 @@ function checkOpenAiProxy(document) {
     );
     const remediation = "在 config.toml 的 [network] 中设置 https_proxy，"
       + "或为服务设置 HTTPS_PROXY；然后运行 codexc service restart all";
+    const windowsDiscoveryNote = process.platform === "win32"
+      ? "；Windows 系统代理未自动读取，仅使用 TOML 或标准代理环境变量"
+      : "";
 
     if (proxiedTargets.length === targets.length) {
-      note("OpenAI 代理", "已检测到代理，官方模型请求将通过代理连接");
+      note(
+        "OpenAI 代理",
+        `已检测到代理，官方模型请求将通过代理连接${windowsDiscoveryNote}`,
+      );
       return;
     }
     if (hasConfiguredProxy) {
       note(
         "OpenAI 代理",
         proxiedTargets.length === 0
-          ? "代理已配置，但 OpenAI 目标被 NO_PROXY 设为直连"
-          : "部分 OpenAI 目标被 NO_PROXY 设为直连",
+          ? `代理已配置，但 OpenAI 目标被 NO_PROXY 设为直连${windowsDiscoveryNote}`
+          : `部分 OpenAI 目标被 NO_PROXY 设为直连${windowsDiscoveryNote}`,
         remediation,
       );
       return;
     }
     note(
       "OpenAI 代理",
-      "未检测到代理，官方模型请求将尝试直连；受限网络中可能无法连接",
+      `未检测到代理，官方模型请求将尝试直连；受限网络中可能无法连接${windowsDiscoveryNote}`,
       remediation,
     );
   } catch (error) {
@@ -749,6 +908,90 @@ async function initializeUnixWebSocket(socketPath) {
     socket.once("error", finish);
     socket.once("close", () => finish(new Error("WebSocket 在握手完成前关闭")));
   });
+}
+
+async function initializeAppServer(socketPath, codexBinary) {
+  if (process.platform !== "win32") {
+    return initializeUnixWebSocket(socketPath);
+  }
+  const { createAppServerTransport } = await import(
+    "../dist/codex-client/index.js"
+  );
+  const transport = createAppServerTransport(
+    { kind: "local-app-server", socketPath },
+    {
+      codexBinary,
+      connectTimeoutMs: 3_000,
+      createCodexProcessInvocation: (args) => executableInvocation(codexBinary, args),
+      terminateCodexProcess: terminateChildProcess,
+    },
+  );
+  await transport.connect();
+  try {
+    return await new Promise((resolvePromise, rejectPromise) => {
+      let settled = false;
+      const timeout = setTimeout(
+        () => finish(new Error("initialize 握手超时")),
+        3_000,
+      );
+      timeout.unref();
+      const removeMessage = transport.onMessage((raw) => {
+        let message;
+        try {
+          message = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        if (message.id !== 1) return;
+        if (message.error) {
+          finish(new Error(`initialize 被拒绝：${message.error.message || "未知错误"}`));
+          return;
+        }
+        void transport.send(
+          JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }),
+        ).then(
+          () => finish(
+            undefined,
+            typeof message.result?.userAgent === "string"
+              ? message.result.userAgent
+              : undefined,
+          ),
+          finish,
+        );
+      });
+      const removeClose = transport.onClose((error) => {
+        finish(error ?? new Error("App Server Transport 在握手完成前关闭"));
+      });
+      const finish = (error, response) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        removeMessage();
+        removeClose();
+        if (error) rejectPromise(error);
+        else resolvePromise(response);
+      };
+      void transport.send(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          clientInfo: {
+            name: "codex_connect",
+            title: "Codex Connect Doctor",
+            version: packageMetadata.version,
+          },
+          capabilities: {
+            experimentalApi: false,
+            requestAttestation: false,
+            optOutNotificationMethods: null,
+          },
+        },
+      })).catch(finish);
+    });
+  } finally {
+    await transport.close();
+  }
 }
 
 function codexPackageVersion(value) {

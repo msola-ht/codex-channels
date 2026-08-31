@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -13,6 +12,10 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../runtime/private-file.mjs";
 import {
   providerMetricsSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
@@ -121,7 +124,7 @@ export function resetMetricsDatabase(
       throw new Error(`指标数据库备份已存在：${backupPath}`);
     }
     renameSync(status.databasePath, backupPath);
-    chmodSync(backupPath, 0o600);
+    securePrivateFileSync(backupPath);
     return {
       backupPath,
       changed: true,
@@ -178,7 +181,7 @@ export function upgradeMetricsDatabase(
     const backupPath = `${status.databasePath}.v${previousSchemaVersion}.${backupTimestamp(now())}.bak`;
     if (existsSync(backupPath)) throw new Error(`指标数据库备份已存在：${backupPath}`);
     copyFileSync(status.databasePath, backupPath);
-    chmodSync(backupPath, 0o600);
+    securePrivateFileSync(backupPath);
     const database = new DatabaseSync(status.databasePath);
     try {
       const statements = ["BEGIN IMMEDIATE;"];
@@ -345,7 +348,7 @@ export function resetMetricsSyncState(environment = process.env, options = {}) {
   }
   const backupPath = `${statePath}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   copyFileSync(statePath, backupPath);
-  chmodSync(backupPath, 0o600);
+  securePrivateFileSync(backupPath);
   const next = {
     version: 1,
     deviceId,
@@ -356,11 +359,12 @@ export function resetMetricsSyncState(environment = process.env, options = {}) {
   const temporaryPath = `${statePath}.tmp`;
   try {
     mkdirSync(dirname(statePath), { recursive: true });
+    securePrivateDirectorySync(dirname(statePath));
     writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, {
       mode: 0o600,
       flag: "wx",
     });
-    chmodSync(temporaryPath, 0o600);
+    securePrivateFileSync(temporaryPath);
     renameSync(temporaryPath, statePath);
   } catch (error) {
     try {
@@ -526,7 +530,7 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
   checkpoint(databasePath);
   const backupPath = `${databasePath}.cleanup-${backupTimestamp(new Date())}.bak`;
   copyFileSync(databasePath, backupPath);
-  chmodSync(backupPath, 0o600);
+  securePrivateFileSync(backupPath);
   const database = new DatabaseSync(databasePath);
   let deletedByAge;
   let deletedByLimit;
@@ -658,7 +662,7 @@ function backupMetricsDatabase(databasePath, provider) {
   }
   const backupPath = `${databasePath}.${provider}-prune-${backupTimestamp(new Date())}.bak`;
   copyFileSync(databasePath, backupPath);
-  chmodSync(backupPath, 0o600);
+  securePrivateFileSync(backupPath);
   return backupPath;
 }
 
@@ -792,13 +796,17 @@ function isGatewayRunning(environment) {
 
 function metricsSocketIsActive(socketPath) {
   if (!existsSync(socketPath)) return false;
+  const connectionSource = process.platform === "win32"
+    ? `const { createPrivateIpcConnection } = await import(process.argv[2]);
+const socket = createPrivateIpcConnection(process.argv[1]);`
+    : `const { createConnection } = await import("node:net");
+const socket = createConnection(process.argv[1]);`;
   const result = spawnSync(
     process.execPath,
     [
       "--input-type=module",
       "--eval",
-      `import { createConnection } from "node:net";
-const socket = createConnection(process.argv[1]);
+      `${connectionSource}
 let settled = false;
 const finish = (code) => {
   if (settled) return;
@@ -810,6 +818,7 @@ socket.once("connect", () => finish(0));
 socket.once("error", () => finish(1));
 socket.setTimeout(500, () => finish(2));`,
       socketPath,
+      new URL("../runtime/private-ipc.mjs", import.meta.url).href,
     ],
     { stdio: "ignore", timeout: 1_000 },
   );

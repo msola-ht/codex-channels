@@ -14,6 +14,7 @@ import {
 
 const temporaryDirectories: string[] = [];
 const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
+const unixIt = process.platform === "win32" ? it.skip : it;
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -65,7 +66,7 @@ describe("Gateway owner", () => {
 
     await first.start();
     const socketPath = gatewayOwnerSocketPath(configPath);
-    expect(statSync(socketPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(socketPath).mode & 0o777).toBe(0o600);
     await expect(second.start()).rejects.toThrow("Gateway 已在运行");
 
     await first.close();
@@ -74,7 +75,7 @@ describe("Gateway owner", () => {
     await second.close();
   });
 
-  it("makes concurrent close callers wait for the same Socket cleanup", async () => {
+  unixIt("makes concurrent close callers wait for the same Socket cleanup", async () => {
     const dataDir = mkdtempSync(join(unixSocketTmpdir, "codexc-gateway-owner-close-"));
     temporaryDirectories.push(dataDir);
     const configPath = join(dataDir, "config.toml");

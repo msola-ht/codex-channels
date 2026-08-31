@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   chmodSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -28,6 +27,7 @@ import {
   writeCustomPrimaryProviderSwitchingProfile,
   writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 const officialModels = ["gpt-5.6-sol", "model-a", "model-new", "model-old"].map((model) => ({
   model,
@@ -41,14 +41,14 @@ function isolatedEnvironment(prefix: string): NodeJS.ProcessEnv {
   const root = mkdtempSync(join(tmpdir(), prefix));
   const codexHome = join(root, "codex");
   const connectHome = join(root, "connect");
-  mkdirSync(codexHome, { recursive: true, mode: 0o700 });
-  mkdirSync(connectHome, { recursive: true, mode: 0o700 });
+  secureTestDirectory(codexHome);
+  secureTestDirectory(connectHome);
   return { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: connectHome };
 }
 
 function environmentForConnectHome(connectHome: string): NodeJS.ProcessEnv {
   const codexHome = join(connectHome, "codex");
-  mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+  secureTestDirectory(codexHome);
   return { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: connectHome };
 }
 
@@ -586,7 +586,7 @@ describe("primary provider CLI", () => {
     expect(backup.thirdparty.base_url).toBe("https://third.example.test/v1");
   });
 
-  it("refuses to replace a fixed custom Provider still used by agents.external", async () => {
+  it.skipIf(process.platform === "win32")("refuses to replace a fixed custom Provider still used by agents.external", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-role-switch-");
     const config = {
       model: "gpt-5.6-sol",
@@ -703,7 +703,7 @@ describe("primary provider CLI", () => {
     expect(readPrimaryProviderBackup(environment)).toEqual({});
   });
 
-  it("reports a committed switch when private backup cleanup fails", async () => {
+  it.skipIf(process.platform === "win32")("reports a committed switch when private backup cleanup fails", async () => {
     const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-switch-cleanup-"));
     const environment = environmentForConnectHome(connectHome);
     backupPrimaryProviderCandidates({
@@ -820,7 +820,7 @@ describe("primary provider CLI", () => {
     ], { expectedVersion: "v1" });
   });
 
-  it("removes a stale custom switching registration whose Profile is missing", async () => {
+  it.skipIf(process.platform === "win32")("removes a stale custom switching registration whose Profile is missing", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-remove-stale-switching-");
     writeFileSync(join(environment.CODEX_HOME!, "config.toml"), 'model_provider = "openai"\n', {
       mode: 0o600,
@@ -899,7 +899,7 @@ describe("primary provider CLI", () => {
     expect(readPrimaryProviderBackup(environment)).toEqual({});
   });
 
-  it("refuses to delete a custom switching Provider still used by agents.external", async () => {
+  it.skipIf(process.platform === "win32")("refuses to delete a custom switching Provider still used by agents.external", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-role-remove-");
     writeFileSync(join(environment.CODEX_HOME!, "config.toml"), 'model_provider = "openai"\n', {
       mode: 0o600,
@@ -970,7 +970,7 @@ describe("primary provider CLI", () => {
     expect(createClient).not.toHaveBeenCalled();
   });
 
-  it("reports partial success when a switching Profile is removed but backup cleanup fails", async () => {
+  it.skipIf(process.platform === "win32")("reports partial success when a switching Profile is removed but backup cleanup fails", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-remove-switching-partial-");
     writeFileSync(join(environment.CODEX_HOME!, "config.toml"), 'model_provider = "openai"\n', {
       mode: 0o600,
@@ -1683,7 +1683,7 @@ describe("primary provider CLI", () => {
     });
   });
 
-  it("edits a configured candidate from the menu when the private backup is invalid", async () => {
+  it.skipIf(process.platform === "win32")("edits a configured candidate from the menu when the private backup is invalid", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-menu-configured-");
     backupPrimaryProviderCandidates({
       backupOnly: {
@@ -1740,7 +1740,7 @@ describe("primary provider CLI", () => {
     );
   });
 
-  it("fails before switching when the private backup is invalid", async () => {
+  it.skipIf(process.platform === "win32")("fails before switching when the private backup is invalid", async () => {
     const connectHome = mkdtempSync(join(tmpdir(), "codexc-primary-provider-menu-switch-invalid-"));
     const environment = environmentForConnectHome(connectHome);
     backupPrimaryProviderCandidates({

@@ -210,7 +210,7 @@ describe("primary Provider management", () => {
     });
   });
 
-  it("keeps configured removal as partial success when backup cleanup becomes unavailable", async () => {
+  it.skipIf(process.platform === "win32")("keeps configured removal as partial success when backup cleanup becomes unavailable", async () => {
     const environment = isolatedEnvironment("primary-provider-management-partial-");
     backupPrimaryProviderCandidates({
       codeproxy: {

@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+
 const checks = [
   {
     name: "Git 差异格式",
@@ -52,10 +54,12 @@ const verificationStartedAt = performance.now();
 for (const check of checks) {
   console.log(`\n[提交检查] ${check.name}`);
   const checkStartedAt = performance.now();
-  const result = spawnSync(check.command, check.args, {
+  const invocation = resolveExecutableInvocation(check.command, check.args);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd: check.cwd === undefined ? process.cwd() : join(process.cwd(), check.cwd),
     env: process.env,
     stdio: "inherit",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   const checkDuration = formatDuration(performance.now() - checkStartedAt);
   const cumulativeDuration = formatDuration(performance.now() - verificationStartedAt);
@@ -84,8 +88,10 @@ function gitDiffArgs() {
   if (process.env.CI === "true") {
     return ["diff", "--check", "HEAD^", "HEAD"];
   }
-  const staged = spawnSync("git", ["diff", "--cached", "--quiet"], {
+  const invocation = resolveExecutableInvocation("git", ["diff", "--cached", "--quiet"]);
+  const staged = spawnSync(invocation.file, invocation.args, {
     cwd: process.cwd(),
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (staged.error) {
     throw staged.error;

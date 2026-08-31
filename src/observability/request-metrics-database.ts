@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   existsSync,
   readFileSync,
   statSync,
@@ -7,6 +6,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
+import { securePrivateFileSync } from "../../runtime/private-file.mjs";
 
 export const modelRequestMetricsSchemaVersion = 11;
 const incompleteLockGraceMs = 30_000;
@@ -26,7 +27,7 @@ export function acquireRequestMetricsDatabaseLock(
   let database: DatabaseSync | undefined;
   try {
     database = new DatabaseSync(lockDatabasePath);
-    chmodSync(lockDatabasePath, 0o600);
+    securePrivateFileSync(lockDatabasePath);
     database.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;");
   } catch (error) {
     database?.close();

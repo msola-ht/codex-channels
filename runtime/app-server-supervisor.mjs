@@ -1,8 +1,22 @@
-import { chmodSync, lstatSync, renameSync, unlinkSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { chmodSync, lstatSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { basename, dirname, extname, resolve } from "node:path";
+import { Duplex } from "node:stream";
 
 import WebSocket from "ws";
+
+import {
+  assertPrivateIpcEndpointSync,
+  createPrivateIpcConnection,
+  PrivateIpcServer,
+} from "./private-ipc.mjs";
+import { resolveExecutableInvocation } from "./executable.mjs";
+import {
+  assertPrivateDirectoryAccessSync,
+  securePrivateDirectorySync,
+} from "./private-file.mjs";
+import { terminateChildProcess } from "./process-lifecycle.mjs";
 
 const protocolVersion = 4;
 const maximumResponseBytes = 16_384;
@@ -31,7 +45,7 @@ export class AppServerSupervisorOwner {
     this.#topology = topology;
     this.#ensureProvider = ensureProvider;
     this.#releaseProvider = releaseProvider;
-    this.#server = createServer({ allowHalfOpen: true }, (socket) => {
+    const listener = (socket) => {
       this.#sockets.add(socket);
       const chunks = [];
       let bytes = 0;
@@ -50,7 +64,10 @@ export class AppServerSupervisorOwner {
         socket.pause();
         void this.#handleRequest(socket, Buffer.concat(chunks).toString("utf8"));
       });
-    });
+    };
+    this.#server = process.platform === "win32"
+      ? new PrivateIpcServer(this.#socketPath, listener)
+      : createServer({ allowHalfOpen: true }, listener);
   }
 
   async #handleRequest(socket, requestText) {
@@ -228,20 +245,12 @@ export class AppServerSupervisorOwner {
   }
 
   async start() {
+    if (process.platform === "win32") {
+      await this.#server.start("Codex App Server 统一监管入口已在运行");
+      return;
+    }
     await removeStaleSupervisorSocket(this.#socketPath);
-    await new Promise((resolveListen, rejectListen) => {
-      const onError = (error) => {
-        this.#server.removeListener("listening", onListening);
-        rejectListen(error);
-      };
-      const onListening = () => {
-        this.#server.removeListener("error", onError);
-        resolveListen();
-      };
-      this.#server.once("error", onError);
-      this.#server.once("listening", onListening);
-      this.#server.listen(this.#socketPath);
-    }).catch((error) => {
+    await listenUnixSupervisor(this.#server, this.#socketPath).catch((error) => {
       if (error?.code === "EADDRINUSE") {
         throw new Error("Codex App Server 统一监管入口已在运行");
       }
@@ -285,11 +294,15 @@ export class AppServerSupervisorOwner {
 
   async #closeInternal() {
     for (const socket of this.#sockets) socket.destroy();
-    if (this.#server.listening) {
+    if (process.platform === "win32") {
+      await this.#server.close();
+    } else if (this.#server.listening) {
       await new Promise((resolveClose) => this.#server.close(() => resolveClose()));
     }
     await Promise.allSettled([...this.#providerOperations.values()]);
-    unlinkOwnedSocket(this.#socketPath, this.#identity);
+    if (process.platform !== "win32") {
+      unlinkOwnedUnixSocket(this.#socketPath, this.#identity);
+    }
   }
 }
 
@@ -342,7 +355,9 @@ export async function acquireAppServerProviderLease(primarySocketPath, provider)
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
   assertSafeSupervisorSocket(socketPath);
   return new Promise((resolveLease, rejectLease) => {
-    const socket = createConnection(socketPath);
+    const socket = process.platform === "win32"
+      ? createPrivateIpcConnection(socketPath)
+      : createConnection(socketPath);
     let response = Buffer.alloc(0);
     let settled = false;
     const fail = (message) => {
@@ -436,6 +451,7 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
 }
 
 function assertSafeSupervisorSocket(socketPath) {
+  if (process.platform === "win32") return assertPrivateIpcEndpointSync(socketPath);
   const status = lstatSync(socketPath, { throwIfNoEntry: false });
   if (!status) return undefined;
   if (
@@ -459,6 +475,12 @@ export function sameAppServerTopology(actual, expected) {
 }
 
 export async function prepareAppServerSocketPaths(socketPaths) {
+  if (process.platform === "win32") {
+    for (const directory of new Set(socketPaths.map((socketPath) => dirname(socketPath)))) {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      securePrivateDirectorySync(directory);
+    }
+  }
   const occupied = await Promise.all(
     socketPaths.map((socketPath) => appServerSocketAcceptsWebSocket(socketPath)),
   );
@@ -467,12 +489,19 @@ export async function prepareAppServerSocketPaths(socketPaths) {
       "App Server Socket 已被未受监管的进程占用；请先停止现有 App Server 后重试",
     );
   }
+  if (process.platform === "win32") return;
   for (const socketPath of socketPaths) {
     preserveStaleSocket(socketPath);
   }
 }
 
 export async function appServerSocketAcceptsWebSocket(socketPath) {
+  if (process.platform === "win32") {
+    const parent = lstatSync(dirname(socketPath), { throwIfNoEntry: false });
+    if (!parent) return false;
+    assertPrivateDirectoryAccessSync(dirname(socketPath));
+    return windowsAppServerProxyAcceptsWebSocket(socketPath);
+  }
   const status = lstatSync(socketPath, { throwIfNoEntry: false });
   if (!status) return false;
   if (!status.isSocket() || status.uid !== process.getuid?.()) {
@@ -506,11 +535,17 @@ export async function appServerSocketAcceptsWebSocket(socketPath) {
 async function removeStaleSupervisorSocket(socketPath) {
   const status = lstatSync(socketPath, { throwIfNoEntry: false });
   if (!status) return;
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
+  if (
+    !status.isSocket()
+    || status.uid !== process.getuid?.()
+  ) {
     throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
   }
-  if (await socketAcceptsConnections(socketPath)) {
+  if (await unixSocketAcceptsConnections(socketPath)) {
     throw new Error("Codex App Server 统一监管入口已在运行");
+  }
+  if ((status.mode & 0o077) !== 0) {
+    throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
   }
   const current = lstatSync(socketPath, { throwIfNoEntry: false });
   if (current?.dev === status.dev && current.ino === status.ino) {
@@ -518,7 +553,7 @@ async function removeStaleSupervisorSocket(socketPath) {
   }
 }
 
-function socketAcceptsConnections(socketPath) {
+function unixSocketAcceptsConnections(socketPath) {
   return new Promise((resolveCheck) => {
     const socket = createConnection(socketPath);
     socket.once("connect", () => {
@@ -529,9 +564,35 @@ function socketAcceptsConnections(socketPath) {
   });
 }
 
+function listenUnixSupervisor(server, socketPath) {
+  return new Promise((resolveListen, rejectListen) => {
+    const onError = (error) => {
+      server.removeListener("listening", onListening);
+      rejectListen(error);
+    };
+    const onListening = () => {
+      server.removeListener("error", onError);
+      resolveListen();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(socketPath);
+  });
+}
+
+function unlinkOwnedUnixSocket(socketPath, identity) {
+  if (!identity) return;
+  const status = lstatSync(socketPath, { throwIfNoEntry: false });
+  if (status?.isSocket() && status.dev === identity.dev && status.ino === identity.ino) {
+    unlinkSync(socketPath);
+  }
+}
+
 function readSupervisorResponse(socketPath, request, timeoutMs = 1_000) {
   return new Promise((resolveResponse) => {
-    const socket = createConnection(socketPath);
+    const socket = process.platform === "win32"
+      ? createPrivateIpcConnection(socketPath)
+      : createConnection(socketPath);
     const chunks = [];
     let bytes = 0;
     let settled = false;
@@ -610,10 +671,106 @@ function preserveStaleSocket(socketPath) {
   console.warn(`检测到无效 Socket，已保留为：${preserved}`);
 }
 
-function unlinkOwnedSocket(socketPath, identity) {
-  if (!identity) return;
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (status?.isSocket() && status.dev === identity.dev && status.ino === identity.ino) {
-    unlinkSync(socketPath);
+async function windowsAppServerProxyAcceptsWebSocket(socketPath) {
+  const invocation = resolveExecutableInvocation(
+    process.env.CODEX_BINARY || "codex",
+    ["app-server", "proxy", "--sock", socketPath],
+  );
+  const child = spawn(invocation.file, invocation.args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
+  child.stderr.resume();
+  const connection = new AppServerProxyDuplex(child.stdout, child.stdin);
+  const socket = new WebSocket("ws://localhost/", {
+    perMessageDeflate: false,
+    handshakeTimeout: 1_500,
+    createConnection: () => connection,
+  });
+  return new Promise((resolveCheck) => {
+    let settled = false;
+    const finish = (healthy) => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.once("error", () => undefined);
+      socket.terminate();
+      connection.destroy();
+      void stopProxyChild(child).then(() => resolveCheck(healthy));
+    };
+    socket.once("open", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.once("close", () => finish(false));
+    child.once("error", () => finish(false));
+    child.once("exit", () => finish(false));
+  });
+}
+
+class AppServerProxyDuplex extends Duplex {
+  constructor(source, sink) {
+    super();
+    this.source = source;
+    this.sink = sink;
+    source.on("data", (chunk) => {
+      if (!this.push(chunk)) source.pause();
+    });
+    source.once("end", () => this.push(null));
+    source.once("error", (error) => this.destroy(error));
+    sink.once("error", (error) => this.destroy(error));
   }
+
+  _read() {
+    this.source.resume();
+  }
+
+  _write(chunk, encoding, callback) {
+    this.sink.write(chunk, encoding, callback);
+  }
+
+  _final(callback) {
+    this.sink.end(callback);
+  }
+
+  _destroy(error, callback) {
+    this.source.destroy();
+    this.sink.destroy();
+    callback(error);
+  }
+
+  setTimeout(_timeout, callback) {
+    if (callback) this.once("timeout", callback);
+    return this;
+  }
+
+  setNoDelay() {
+    return this;
+  }
+
+  setKeepAlive() {
+    return this;
+  }
+}
+
+async function stopProxyChild(child) {
+  if (child.exitCode !== null) return;
+  child.stdin.end();
+  if (await waitForChildExit(child, 1_000)) return;
+  await terminateChildProcess(child, { gracePeriodMs: 0, forcePeriodMs: 1_000 });
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null) return Promise.resolve(true);
+  return new Promise((resolveWait) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolveWait(false);
+    }, timeoutMs);
+    timer.unref();
+    const onExit = () => {
+      clearTimeout(timer);
+      resolveWait(true);
+    };
+    child.once("exit", onExit);
+  });
 }

@@ -69,7 +69,7 @@ function runDeepseekSetup(options: DeepseekSetupOptions = {}) {
   });
 }
 
-describe("DeepSeek setup", () => {
+describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
   afterEach(() => {
     privateFileFailure.path = undefined;
   });
@@ -732,10 +732,12 @@ describe("DeepSeek setup", () => {
     expect(readFileSync(join(fixture.home, "auth.json"), "utf8"))
       .toBe('{"tokens":"openai"}\n');
     expect(fixture.text()).not.toContain("sk-secret");
-    expect(statSync(join(fixture.home, "config.toml")).mode & 0o777).toBe(0o600);
-    expect(statSync(join(fixture.home, "sf-deepseek.config.toml")).mode & 0o777).toBe(0o600);
-    expect(statSync(join(fixture.connectHome, "providers", "deepseek", "managed.toml")).mode & 0o777)
-      .toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(join(fixture.home, "config.toml")).mode & 0o777).toBe(0o600);
+      expect(statSync(join(fixture.home, "sf-deepseek.config.toml")).mode & 0o777).toBe(0o600);
+      expect(statSync(join(fixture.connectHome, "providers", "deepseek", "managed.toml")).mode & 0o777)
+        .toBe(0o600);
+    }
     expect(readFileSync(join(fixture.connectHome, "providers", "deepseek", "models.manifest.json"), "utf8"))
       .toContain(deepseekSetupScriptUrl);
   });

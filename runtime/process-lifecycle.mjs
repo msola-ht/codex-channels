@@ -1,3 +1,6 @@
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+
 export class ReportedChildExitError extends Error {
   constructor(exitCode, message = `子命令执行失败：exit=${exitCode}`) {
     super(message);
@@ -39,7 +42,16 @@ export function childProcessIsRunning(child) {
 
 export function signalChildProcesses(children, signal) {
   for (const child of children) {
-    if (childProcessIsRunning(child)) child.kill(signal);
+    if (!childProcessIsRunning(child)) continue;
+    if (process.platform === "win32" && windowsTreeTerminationSignal(signal)) {
+      const force = signal === "SIGKILL";
+      const signaled = signalWindowsProcessTree(child, force);
+      if (!signaled && !force && childProcessIsRunning(child)) {
+        signalWindowsProcessTree(child, true);
+      }
+      continue;
+    }
+    child.kill(signal);
   }
 }
 
@@ -48,9 +60,24 @@ export async function terminateChildProcess(child, {
   forcePeriodMs = 1_000,
 } = {}) {
   if (!childProcessIsRunning(child)) return;
-  child.kill("SIGTERM");
+  if (process.platform === "win32") {
+    const signaled = signalWindowsProcessTree(child, false);
+    if (!signaled && childProcessIsRunning(child)) {
+      signalWindowsProcessTree(child, true);
+      if (await childExitedWithin(child, forcePeriodMs)) return;
+      throw new Error("子进程在强制终止后仍未退出");
+    }
+  } else {
+    child.kill("SIGTERM");
+  }
   if (await childExitedWithin(child, gracePeriodMs)) return;
-  if (childProcessIsRunning(child)) child.kill("SIGKILL");
+  if (childProcessIsRunning(child)) {
+    if (process.platform === "win32") {
+      signalWindowsProcessTree(child, true);
+    } else {
+      child.kill("SIGKILL");
+    }
+  }
   if (await childExitedWithin(child, forcePeriodMs)) return;
   throw new Error("子进程在强制终止后仍未退出");
 }
@@ -87,4 +114,41 @@ function childExitedWithin(child, timeoutMs) {
     }
     timer = setTimeout(() => finish(!childProcessIsRunning(child)), timeoutMs);
   });
+}
+
+function windowsTreeTerminationSignal(signal) {
+  return signal === "SIGINT" || signal === "SIGTERM" || signal === "SIGKILL";
+}
+
+function signalWindowsProcessTree(child, force) {
+  if (child.pid === undefined) {
+    return child.kill(force ? "SIGKILL" : "SIGTERM");
+  }
+  const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT;
+  if (!systemRoot) {
+    throw new Error("Windows 进程树终止需要 SystemRoot");
+  }
+  const result = spawnSync(
+    join(systemRoot, "System32", "taskkill.exe"),
+    ["/PID", String(child.pid), "/T", ...(force ? ["/F"] : [])],
+    { stdio: "ignore", windowsHide: true },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0 && !windowsProcessExists(child.pid)) {
+    return true;
+  }
+  if (force && result.status !== 0 && childProcessIsRunning(child)) {
+    throw new Error(`Windows 子进程树终止失败：pid=${child.pid} exit=${result.status ?? 1}`);
+  }
+  return result.status === 0;
+}
+
+function windowsProcessExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    throw error;
+  }
 }

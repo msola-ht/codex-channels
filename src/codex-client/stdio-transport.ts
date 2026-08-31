@@ -1,10 +1,16 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 
+import type {
+  CreateCodexProcessInvocation,
+  TerminateCodexProcess,
+} from "./codex-process.js";
 import { BaseTransport } from "./transport.js";
 
 export interface StdioTransportOptions {
   codexBinary: string;
+  createCodexProcessInvocation?: CreateCodexProcessInvocation;
+  terminateCodexProcess?: TerminateCodexProcess;
   cwd: string;
   environment?: NodeJS.ProcessEnv;
   onStderr?: (text: string) => void;
@@ -23,10 +29,18 @@ export class StdioTransport extends BaseTransport {
     if (this.process) {
       return;
     }
-    const child = spawn(this.options.codexBinary, ["app-server", "--stdio"], {
+    const args = ["app-server", "--stdio"];
+    const invocation = this.options.createCodexProcessInvocation?.(args) ?? {
+      file: this.options.codexBinary,
+      args,
+      windowsVerbatimArguments: false,
+    };
+    const child = spawn(invocation.file, invocation.args, {
       cwd: this.options.cwd,
       env: this.options.environment,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: process.platform === "win32",
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
     this.process = child;
     this.lines = createInterface({ input: child.stdout });
@@ -62,17 +76,34 @@ export class StdioTransport extends BaseTransport {
     if (!child || child.exitCode !== null) {
       return;
     }
+    if (this.options.terminateCodexProcess) {
+      await this.options.terminateCodexProcess(child);
+      return;
+    }
     child.kill("SIGTERM");
-    await Promise.race([
-      new Promise<void>((resolve) => child.once("exit", () => resolve())),
-      new Promise<void>((resolve) => {
-        setTimeout(() => {
-          if (child.exitCode === null) {
-            child.kill("SIGKILL");
-          }
-          resolve();
-        }, 5_000).unref();
-      }),
-    ]);
+    await waitForExit(child, 5_000);
+    if (child.exitCode === null) {
+      child.kill("SIGKILL");
+      await waitForExit(child, 1_000);
+    }
   }
+}
+
+function waitForExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+): Promise<void> {
+  if (child.exitCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve();
+    }, timeoutMs);
+    timeout.unref();
+    const onExit = (): void => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    child.once("exit", onExit);
+  });
 }

@@ -2,7 +2,6 @@ import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { connect } from "node:net";
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -17,6 +16,10 @@ import * as clackPrompts from "@clack/prompts";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../runtime/private-file.mjs";
 import { runCenterSettings } from "./metrics-config-menu.mjs";
 import { parseIngestPayload } from "./metrics-center-payload.mjs";
 import {
@@ -83,12 +86,13 @@ const upsertDeviceSql = `
 export function openCentralDatabase(databasePath) {
   const existed = existsSync(databasePath);
   mkdirSync(dirname(databasePath), { recursive: true });
+  securePrivateDirectorySync(dirname(databasePath));
   const database = new DatabaseSync(databasePath);
   database.exec("PRAGMA journal_mode = WAL;");
   database.exec("PRAGMA busy_timeout = 10000;");
   database.exec(readFileSync(SCHEMA_PATH, "utf8"));
   if (!existed) database.exec("PRAGMA user_version = 1");
-  chmodSync(databasePath, 0o600);
+  securePrivateFileSync(databasePath);
   const schemaVersion = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
   if (schemaVersion !== 1) {
     database.close();
@@ -117,7 +121,7 @@ export function upgradeMetricsCenterDatabase(databasePath) {
     if (existsSync(backupPath)) throw new Error(`升级备份已存在：${backupPath}`);
     database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     copyFileSync(databasePath, backupPath);
-    chmodSync(backupPath, 0o600);
+    securePrivateFileSync(backupPath);
     database.exec("BEGIN IMMEDIATE");
     try {
       const deviceColumns = database.prepare("PRAGMA table_info(devices)").all();

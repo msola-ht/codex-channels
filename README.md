@@ -39,6 +39,12 @@ codexc service restart all
 codexc doctor
 ```
 
+Windows 如果提示私有路径 ACL 无效，可运行以下命令逐个修复 Codex TOML 配置文件权限（不修改沙箱目录权限）：
+
+```powershell
+codexc security repair
+```
+
 也可以在 Linux 或 macOS 上把官方 `main` 分支 Git 仓库安装到
 `~/.codex-connect/codex-channels`：
 
@@ -48,6 +54,9 @@ curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/instal
 
 安装器会从源码构建并注册 npm 全局 `codexc` 命令，不修改 Shell PATH。目录、环境检测、更新和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
+
+Windows PowerShell 7 使用仓库根目录的 `install.ps1`；该入口目前属于 Windows 开发验证，不代表
+公开支持门槛已经完成。详见 [`Git 源码安装`](docs/source-install.md)。
 
 初始化并配置通讯渠道：
 
@@ -77,6 +86,9 @@ codexc service status
 Linux 安装后台服务时会检查并尝试启用 systemd linger，使服务在系统启动且用户尚未登录时也能
 运行。当前用户没有启用权限时，安装会停止并显示需要管理员执行的精确命令；执行后重新运行
 `codexc service install`。
+
+Windows 使用当前用户的计划任务，在该用户登录后通过隐藏的 PowerShell 7 进程启动服务，不需要
+管理员权限；不会隐式退回启动文件夹。任务定义、日志与其他用户数据保留在 `.codex-connect`。
 
 完成后，在已配置的聊天客户端中私聊机器人即可使用。发送 `/help` 查看聊天命令。
 
@@ -110,7 +122,8 @@ codexc service reload
 ```
 
 无法直连 OpenAI 的网络需要配置 HTTP(S) 代理。Gateway 优先使用 `config.toml`，其次读取
-`HTTPS_PROXY` / `HTTP_PROXY` 等标准环境变量和当前系统代理：
+`HTTPS_PROXY` / `HTTP_PROXY` 等标准环境变量，再读取当前受支持的 macOS 或 GNOME 系统代理；
+Windows 不自动读取 WinINET/WinHTTP，请显式使用 TOML 或标准代理环境变量：
 
 ```toml
 [network]
@@ -302,7 +315,7 @@ codexc channel send-image /tmp/截图.png --thread <Thread ID>  # 指定会话
 ```bash
 codexc start                          # 前台启动 App Server 与 Gateway（调试用）
 codexc service status                 # 查看全部核心服务
-codexc service status --json          # 输出统一的 macOS/Linux 服务状态对象
+codexc service status --json          # 输出统一的 macOS/Linux/Windows 服务状态对象
 codexc service reload                 # 重新读取配置
 codexc service restart                # 只重启 Gateway
 codexc service restart all            # 重启 Gateway 和 App Server
@@ -341,7 +354,9 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 
 脚本还可使用 `codexc agents status --json` 查看共享第三方子代理状态，使用
 `codexc center info --json` 查看不含令牌内容的指标中心运行与端点信息，使用
-`codexc service status [目标] --json` 获取 macOS launchd 或 Linux systemd 的统一服务状态，使用
+`codexc service status [目标] --json` 获取 macOS launchd、Linux systemd 或 Windows 计划任务的统一基础服务状态。
+Windows 计划任务状态额外使用 `processAlive` 表示受管进程仍有有效 PID，使用 `rpcReachable`
+表示 Gateway/App Server 协议端点可达；其 `healthy` 只有在服务运行且核心协议可达时才为 `true`。
 `codexc doctor --json` 获取完整的脱敏诊断检查结果，使用 `codexc rules check --json` 获取项目规则
 校验结果，使用 `codexc config --json` 获取配置路径与文件存在状态。
 

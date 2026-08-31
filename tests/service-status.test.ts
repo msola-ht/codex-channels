@@ -103,9 +103,36 @@ describe("managed service JSON status", () => {
       userId: 501,
     })).toThrow("permission denied");
     expect(() => inspectManagedServiceStatus({
-      platform: "win32",
+      platform: "aix",
       target: "gateway",
-    })).toThrow("当前支持 macOS launchd 与 Linux systemd");
+    })).toThrow("当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+  });
+
+  it("returns the normalized Windows Scheduled Task status", () => {
+    const status = {
+      platform: "windows",
+      target: "gateway",
+      healthy: true,
+      services: [{
+        target: "gateway",
+        name: "Gateway",
+        identifier: "Codex Connect Gateway",
+        loaded: true,
+        running: true,
+        state: "running",
+        pid: 456,
+      }],
+    };
+    expect(inspectManagedServiceStatus({
+      environment: { CODEX_CONNECT_HOME: "C:\\Users\\test\\.codex-connect" },
+      platform: "win32",
+      run: () => ({
+        status: 0,
+        stdout: `${JSON.stringify(status)}\n`,
+        stderr: "",
+      }),
+      target: "gateway",
+    })).toEqual(status);
   });
 
   it("accepts only explicit systemd not-found output after a failed query", () => {

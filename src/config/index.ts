@@ -18,6 +18,7 @@ import {
   resolveHttpProxyUrl,
   resolveProxyEnvironment,
 } from "../../runtime/network-proxy.mjs";
+import { assertPrivateConfigAccessSync } from "../../runtime/private-file.mjs";
 
 export {
   configChange,
@@ -169,6 +170,14 @@ function validateRuntimeConfigPermissions(configPath: string): void {
   }
   if (!configStatus.isFile()) {
     throw new ConfigurationError("config.toml 必须是普通文件且不能是符号链接");
+  }
+  if (process.platform === "win32") {
+    try {
+      assertPrivateConfigAccessSync(configPath);
+    } catch {
+      throw new ConfigurationError("config.toml Windows SID/ACL 权限不安全");
+    }
+    return;
   }
   const currentUserId = process.getuid?.();
   if (

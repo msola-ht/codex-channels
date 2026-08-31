@@ -7,7 +7,8 @@
 - `index.ts`：本模块的公开导出入口。
 - `binding-store.ts`：定义 Conversation、Workspace、Thread 和必要偏好的存储接口。
 - `memory-binding-store.ts`：用于测试和临时运行的内存实现。
-- `sqlite-binding-store.ts`：单机 Gateway 使用的 SQLite 实现，负责当前 Schema、文件权限和持久恢复。
+- `sqlite-binding-store.ts`：单机 Gateway 使用的 SQLite 实现，负责当前 Schema、Unix owner-only 权限、
+  Windows 当前 SID 私有 ACL 和持久恢复。
 
 Conversation 使用 `surface + accountId + conversationId` 作为复合身份；每个 Conversation 最多
 有一个前台绑定，并可保存有界的运行中后台绑定；一个 Codex Thread 仍只能归属一个外部

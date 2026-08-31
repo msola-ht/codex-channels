@@ -8,8 +8,8 @@ export type ServiceInstallStage =
 export interface ServiceInstallPreview {
   operation: "install";
   revision: string;
-  operatingSystem: "linux" | "darwin";
-  serviceManager: "systemd" | "launchd";
+  operatingSystem: "linux" | "darwin" | "win32";
+  serviceManager: "systemd" | "launchd" | "windows";
   configPath: string;
   services: Array<{
     target: "gateway" | "app-server" | "webui" | "center";
@@ -46,6 +46,7 @@ export interface ServiceInstallOptions {
   operatingSystem?: NodeJS.Platform;
   projectDir?: string;
   nodeExecutable?: string;
+  pwshExecutable?: string;
   validateConfig?: (environment: NodeJS.ProcessEnv) => unknown;
   preflight?: (
     plan: unknown,
@@ -93,7 +94,7 @@ export function writeServiceDefinitions(
 ): {
   action: "definitions-written";
   revision: string;
-  operatingSystem: "linux" | "darwin";
-  serviceManager: "systemd" | "launchd";
+  operatingSystem: "linux" | "darwin" | "win32";
+  serviceManager: "systemd" | "launchd" | "windows";
   services: ServiceInstallPreview["services"];
 };

@@ -39,6 +39,10 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Set cross-platform home aliases
+        shell: bash
+        run: echo "USERPROFILE=$HOME" >> "$GITHUB_ENV"
+
       - name: Install WebUI dependencies
         run: npm ci --ignore-scripts --prefix webui
 
@@ -51,6 +55,72 @@ jobs:
 
       - name: Run commit verification
         run: npm run verify:commit
+
+  windows-runtime:
+    name: Windows runtime / Node 22
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install WebUI dependencies
+        run: npm ci --ignore-scripts --prefix webui
+
+      - name: Build and type-check
+        run: |
+          npm run build
+          npm run check
+
+      - name: Check documentation
+        run: npm run docs:check
+
+      - name: Check PowerShell scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = Get-ChildItem -LiteralPath 'scripts' -Filter '*.ps1' -File
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw "PowerShell 语法错误：$($file.FullName)"
+            }
+          }
+
+      - name: CLI help smoke check
+        run: |
+          node bin/codexc.mjs --help
+          node bin/codexc.mjs service --help
+
+      - name: Windows compatibility tests
+        # GitHub-hosted Windows runners own TEMP as BUILTIN\Administrators;
+        # strict private-ACL fixtures require the current SID as owner and
+        # are covered by the local Windows verification hook instead.
+        run: >-
+          npx vitest run
+          tests/stdio-transport.test.ts
+          tests/unix-websocket-transport.test.ts
+          tests/systemd-install.test.ts
+          tests/executable.test.ts
 
   app-server-contract:
     name: Codex 0.150.1 App Server contract

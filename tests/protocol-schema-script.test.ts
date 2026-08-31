@@ -80,7 +80,7 @@ function temporaryDirectory(): string {
 }
 
 function fakeCodex(root: string, fails: boolean): string {
-  const path = join(root, fails ? "codex-fail" : "codex-success");
+  const path = join(root, `${fails ? "codex-fail" : "codex-success"}.cjs`);
   writeFileSync(path, [
     "#!/usr/bin/env node",
     "const { mkdirSync, writeFileSync } = require('node:fs');",
@@ -92,6 +92,6 @@ function fakeCodex(root: string, fails: boolean): string {
           "writeFileSync(`${output}/Generated.ts`, 'generated\\n');",
         ].join("\n"),
   ].join("\n"));
-  chmodSync(path, 0o755);
+  if (process.platform !== "win32") chmodSync(path, 0o755);
   return path;
 }

@@ -1,15 +1,10 @@
 import { randomUUID } from "node:crypto";
-import {
-  chmodSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-} from "node:fs";
-import { rename, unlink, writeFile } from "node:fs/promises";
+import { lstatSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { dirname } from "node:path";
 
 import type { Logger } from "pino";
+
+import { writePrivateFileAtomic } from "../../runtime/private-file.mjs";
 
 import type {
   ModelRequestMetricsStore,
@@ -298,14 +293,5 @@ async function persistState(
   path: string,
   state: PersistedMetricsSyncState,
 ): Promise<void> {
-  mkdirSync(dirname(path), { recursive: true });
-  const tempPath = `${path}.tmp`;
-  try {
-    await writeFile(tempPath, JSON.stringify(state, null, 2), { mode: 0o600 });
-    chmodSync(tempPath, 0o600);
-    await rename(tempPath, path);
-  } catch (error) {
-    await unlink(tempPath).catch(() => undefined);
-    throw error;
-  }
+  await writePrivateFileAtomic(path, `${JSON.stringify(state, null, 2)}\n`);
 }

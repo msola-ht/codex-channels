@@ -16,7 +16,7 @@
   公开持久化水位只等待调用时已经入队的记录，不被后续新记录无限延长，并按 Thread 返回该水位内
   的实际写入结果。
 - `metrics-sync.ts`：把本地指标库的请求记录与子代理标注增量上报到中心服务。读取
-  `MetricsSyncConfig`，自动生成或复用设备标识，持久化 `0600` 水位文件，按间隔与指数退避
+  `MetricsSyncConfig`，自动生成或复用设备标识，持久化 Unix `0600` / Windows 当前 SID 私有水位文件，按间隔与指数退避
   定时上报，429/5xx 且服务端返回 `Retry-After` 时优先按服务端要求延后；只有收到
   HTTP 2xx 才推进水位。载荷只含脱敏指标，不上传 `errorMessage`，不包含消息正文、提示词
   或审批内容；本模块不依赖代理、Surface 或业务 Storage，网络与状态路径由 Bootstrap 注入。
@@ -33,7 +33,7 @@
   时间戳与本机流式阶段时间戳
   写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v11、`0600` 文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
+  严格 Schema v11、Unix `0600` / Windows 当前 SID 私有文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录默认保留

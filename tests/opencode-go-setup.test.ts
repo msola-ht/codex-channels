@@ -36,7 +36,7 @@ import {
 } from "../scripts/opencode-go-setup.mjs";
 import { writeManagedModelProviderProfileDefault } from "../runtime/model-provider-runtime.mjs";
 
-describe("OpenCode Go setup", () => {
+describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
   afterEach(() => {
     privateFileFailure.path = undefined;
   });

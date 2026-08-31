@@ -9,7 +9,7 @@ export interface ManagedServiceStatusEntry {
 }
 
 export interface ManagedServiceStatus {
-  platform: "systemd" | "launchd";
+  platform: "systemd" | "launchd" | "windows";
   target: "gateway" | "app-server" | "webui" | "center" | "all";
   healthy: boolean;
   services: ManagedServiceStatusEntry[];
@@ -25,7 +25,7 @@ export interface ServiceStatusRunResult {
 export type ServiceStatusRunner = (
   command: string,
   args: readonly string[],
-  options: { encoding: "utf8"; env: NodeJS.ProcessEnv },
+  options: { encoding: "utf8"; env: NodeJS.ProcessEnv; windowsHide?: boolean },
 ) => ServiceStatusRunResult;
 
 export function inspectManagedServiceStatus(options?: {
