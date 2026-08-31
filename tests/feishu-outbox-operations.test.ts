@@ -61,12 +61,15 @@ describe("Feishu outbox operation summaries", () => {
     expect(operations[3]).toBe(`static:${turnCompletedMarkdown}`);
   });
 
-  it("ignores running operation frames and sends one static terminal card", async () => {
+  it("sends running and terminal operation cards in order", async () => {
     const markdownCards: string[] = [];
+    const updates: string[] = [];
     const outbox = new FeishuOutbox(
       "cli_app",
       {
         ...cardMethods,
+        createStreamingCard: async (_chatId, markdown) => ({ cardId: `card:${markdown}`, messageId: "om_stream" }),
+        updateStreamingCard: async (_cardId, markdown) => { updates.push(markdown); },
         sendText: async () => {},
         sendPost: async () => {},
         sendMarkdownCard: async (_chatId, markdown) => {
@@ -82,10 +85,32 @@ describe("Feishu outbox operation summaries", () => {
     await outbox.close();
 
     expect(markdownCards).toHaveLength(2);
-    expect(markdownCards[0]).not.toContain("**执行进度**");
+    expect(markdownCards[0]).toContain("**运行命令 · 已完成**");
     expect(markdownCards[0]).toContain("git status --short");
-    expect(markdownCards[0]).toContain("已完成");
     expect(markdownCards[1]).toBe(turnCompletedMarkdown);
+    expect(updates).toEqual([]);
+  });
+
+  it("deduplicates repeated identical operation states", async () => {
+    const markdownCards: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          markdownCards.push(markdown);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle(operationUpdated("running"));
+    outbox.handle(operationUpdated("running"));
+    await outbox.close();
+
+    expect(markdownCards).toHaveLength(0);
   });
 
   it("does not send operation updates in hidden mode", async () => {

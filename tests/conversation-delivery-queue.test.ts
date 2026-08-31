@@ -69,6 +69,48 @@ describe("ConversationDeliveryQueue", () => {
     expect(calls).toEqual(["first", "critical"]);
   });
 
+  it("retains critical operations when the bounded queue is full of critical work", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, {
+      component: "Test",
+      capacity: 1,
+    });
+    const calls: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    delivery.enqueue("a", async () => {
+      calls.push("first");
+      await firstGate;
+    }, true);
+    await settle();
+    expect(delivery.enqueue("a", async () => {
+      calls.push("second");
+    }, true)).toBe(true);
+    expect(delivery.enqueue("a", async () => {
+      calls.push("third");
+    }, true)).toBe(true);
+
+    releaseFirst();
+    await delivery.close();
+    expect(calls).toEqual(["first", "second", "third"]);
+  });
+
+  it("aborts the Conversation worker when closing", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
+    let signal!: AbortSignal;
+    const started = new Promise<void>((resolve) => {
+      delivery.enqueue("a", async (workerSignal) => {
+        signal = workerSignal;
+        resolve();
+      }, true);
+    });
+    await started;
+    await delivery.close();
+    expect(signal.aborted).toBe(true);
+  });
+
   it("prioritizes an ordered interaction ahead of queued non-critical output", async () => {
     const delivery = new ConversationDeliveryQueue(logger, {
       component: "Test",

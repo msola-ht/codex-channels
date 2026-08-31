@@ -64,6 +64,9 @@ describe("shared Surface lifecycle presentation", () => {
     expect(renderPlainLifecyclePresentation(
       createTurnReasoningPresentation(undefined, 500),
     )).toBe("思考中…");
+    expect(renderPlainLifecyclePresentation(
+      createTurnReasoningPresentation(undefined, 500, true),
+    )).toBe("思考完成\n\n耗时：500毫秒");
   });
 
   it("does not warn when at least one official OpenAI route is reachable", () => {
@@ -657,8 +660,8 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("额度中心：3 台设备 · 12 次请求");
     expect(rendered).toContain("本周期 Token：1.2 M");
     expect(rendered).toContain("重置时间：");
-    expect(rendered).toContain("周限：剩余 63%（额度中心） · 重置");
-    expect(rendered).toContain("周限：剩余 63%（额度中心）");
+    expect(rendered).toContain("账户状态（额度中心）：");
+    expect(rendered).toContain("周限：剩余 63% · 重置");
   });
 
   it("keeps only the remote remaining quota summary in formal mode", () => {
@@ -685,9 +688,8 @@ describe("shared Surface lifecycle presentation", () => {
         },
       }),
     );
-    expect(rendered).toContain("账户状态：");
-    expect(rendered).toContain("周限：剩余 63%（额度中心）");
-    expect(rendered).toContain("周限：剩余 63%（额度中心） · 重置 ");
+    expect(rendered).toContain("账户状态（额度中心）：");
+    expect(rendered).toContain("周限：剩余 63% · 重置 ");
     expect(rendered).not.toContain("额度中心：3 台设备");
     expect(rendered).not.toContain("本周期 Token");
   });

@@ -7,11 +7,13 @@ const closeTimeoutMs = 5_000;
 interface Subscription<T> {
   name: string;
   queue: BoundedAsyncQueue<T>;
+  controller: AbortController;
   worker: Promise<void>;
 }
 
 export class EventBus<T> {
   private readonly subscriptions = new Set<Subscription<T>>();
+  private readonly workers = new Set<Promise<void>>();
   private closed = false;
   private closePromise: Promise<void> | undefined;
 
@@ -22,21 +24,30 @@ export class EventBus<T> {
 
   subscribe(
     name: string,
-    handler: (event: T) => Promise<void> | void,
+    handler: (event: T, signal: AbortSignal) => Promise<void> | void,
     capacity = this.defaultCapacity,
   ): () => void {
     if (this.closed) {
       throw new Error("事件总线已关闭");
     }
     const queue = new BoundedAsyncQueue<T>(capacity);
+    const controller = new AbortController();
+    const worker = this.runWorker(name, queue, handler, controller.signal);
+    this.workers.add(worker);
+    void worker.then(
+      () => this.workers.delete(worker),
+      () => this.workers.delete(worker),
+    );
     const subscription: Subscription<T> = {
       name,
       queue,
-      worker: this.runWorker(name, queue, handler),
+      controller,
+      worker,
     };
     this.subscriptions.add(subscription);
     return () => {
       queue.close();
+      controller.abort();
       this.subscriptions.delete(subscription);
     };
   }
@@ -54,12 +65,12 @@ export class EventBus<T> {
       return this.closePromise;
     }
     this.closed = true;
-    const workers: Promise<void>[] = [];
     for (const subscription of this.subscriptions) {
       subscription.queue.close();
-      workers.push(subscription.worker);
+      subscription.controller.abort();
     }
-    const consumerCount = this.subscriptions.size;
+    const workers = [...this.workers];
+    const consumerCount = workers.length;
     this.subscriptions.clear();
     this.closePromise = waitAtMost(
       Promise.allSettled(workers),
@@ -81,7 +92,8 @@ export class EventBus<T> {
   private async runWorker(
     name: string,
     queue: BoundedAsyncQueue<T>,
-    handler: (event: T) => Promise<void> | void,
+    handler: (event: T, signal: AbortSignal) => Promise<void> | void,
+    signal: AbortSignal,
   ): Promise<void> {
     while (true) {
       const event = await queue.shift();
@@ -89,7 +101,7 @@ export class EventBus<T> {
         return;
       }
       try {
-        await handler(event);
+        await handler(event, signal);
       } catch (error) {
         this.logger.error({ err: error, consumer: name }, "事件消费者执行失败");
       }

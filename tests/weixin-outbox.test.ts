@@ -119,7 +119,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "思考中…\n\n耗时：15秒",
+      "思考完成\n\n耗时：15秒",
     ]);
   });
 
@@ -141,6 +141,77 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it("drops queued final reasoning after command execution starts", async () => {
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    let sendCount = 0;
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        sendCount += 1;
+        if (sendCount === 1) {
+          await startGate;
+        }
+      },
+    );
+
+    outbox.handle(turnStarted());
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 15_000,
+      final: true,
+    });
+    outbox.handle(operationUpdated("running"));
+    releaseStart();
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "已开始处理。",
+    ]);
+  });
+
+  it("shows a new reasoning status after an operation completes", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle(turnStarted());
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 1_000,
+      final: true,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    outbox.handle(operationUpdated("running"));
+    outbox.handle(operationUpdated("completed"));
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 2_000,
+      final: true,
+    });
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "已开始处理。",
+      "思考完成\n\n耗时：1秒",
+      expect.stringContaining("运行命令 · 已完成"),
+      "思考完成\n\n耗时：2秒",
+    ]);
   });
 
   it("sends a connection restore notice", async () => {
@@ -594,7 +665,7 @@ describe("WeixinOutbox", () => {
       actorId,
       contextToken: "context-secret",
       image: Buffer.from("validated-image"),
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("rechecks authorization after reading a generated image", async () => {
@@ -887,7 +958,7 @@ describe("WeixinOutbox", () => {
     );
   });
 
-  it("reports overload without interrupting in-flight or queued critical output", async () => {
+  it("retains critical output without interrupting in-flight delivery", async () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");
     let releaseFirst!: () => void;
@@ -917,11 +988,11 @@ describe("WeixinOutbox", () => {
       expect(sent).toEqual(["first"]);
     });
     expect(outbox.notifyText(target, "second")).toBe(true);
-    expect(outbox.notifyText(target, "overloaded")).toBe(false);
+    expect(outbox.notifyText(target, "overloaded")).toBe(true);
 
     releaseFirst();
     await outbox.close();
-    expect(sent).toEqual(["first", "second"]);
+    expect(sent).toEqual(["first", "second", "overloaded"]);
   });
 
   it("rechecks authorization and rejects missing or revoked reply contexts", async () => {

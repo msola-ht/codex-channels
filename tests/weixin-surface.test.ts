@@ -195,7 +195,7 @@ describe("WeixinSurface", () => {
     await vi.waitFor(() => {
       expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
         text: expect.stringContaining("已创建 Gateway 计划任务"),
-      }));
+      }), expect.any(AbortSignal));
     });
     await surface.stop();
   });
@@ -237,7 +237,7 @@ describe("WeixinSurface", () => {
 
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
       text: expect.stringMatching(/Workspace：main[\s\S]*模型：opencode-go\/deepseek-v4-flash-vision-exp[\s\S]*思考等级：high[\s\S]*\/schedule confirm 12345678-1234-1234-1234-123456789abc/u),
-    }));
+    }), expect.any(AbortSignal));
     await surface.stop();
   });
 
@@ -308,7 +308,7 @@ describe("WeixinSurface", () => {
     await vi.waitFor(() => {
       expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
         text: expect.stringContaining("```text\n/批准一次 "),
-      }));
+      }), expect.any(AbortSignal));
     });
     const choices = sendText.mock.calls
       .map(([input]) => input.text)
@@ -370,7 +370,7 @@ describe("WeixinSurface", () => {
       actorId,
       contextToken: "restored-context",
       text: "**Codex Connect 已上线**\n- App Server：已连接",
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("uses official lifecycle notifications without depending on reply context", async () => {
@@ -628,7 +628,7 @@ describe("WeixinSurface", () => {
       actorId,
       contextToken: "context-secret",
       text: "**已请求停止当前任务。**",
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("stops input before draining output and keeps repeated lifecycle calls safe", async () => {
@@ -825,7 +825,7 @@ describe("WeixinSurface", () => {
         "",
         "- 已生效：Workspace",
       ].join("\n"),
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("queues a runtime configuration change through a restored reply context", async () => {
@@ -872,7 +872,7 @@ describe("WeixinSurface", () => {
         "- 变更：默认模型",
         "- 当前 Gateway 将退出；若由系统服务托管，将自动重新启动。",
       ].join("\n"),
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("fails proactive configuration delivery closed without a reply context provider", async () => {

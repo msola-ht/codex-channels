@@ -30,11 +30,12 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe(2);
   });
 
-  it("never evicts a queued critical event for another event", async () => {
+  it("retains critical events when the queue contains only critical entries", async () => {
     const queue = new BoundedAsyncQueue<number>(1);
     expect(queue.push(1, true)).toBe(true);
-    expect(queue.push(2, true)).toBe(false);
+    expect(queue.push(2, true)).toBe(true);
     expect(await queue.shift()).toBe(1);
+    expect(await queue.shift()).toBe(2);
   });
 
   it("places priority after existing critical entries and before non-critical entries", async () => {
@@ -100,6 +101,67 @@ describe("EventBus", () => {
 
     release();
     await Promise.all([firstClose, secondClose]);
+  });
+
+  it("waits for an unsubscribed consumer during close", async () => {
+    const bus = new EventBus<number>(pino({ level: "silent" }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const unsubscribe = bus.subscribe("slow", async () => gate);
+    bus.publish(1, true);
+    unsubscribe();
+
+    let closed = false;
+    const closing = bus.close().then(() => {
+      closed = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(closed).toBe(false);
+
+    release();
+    await closing;
+    expect(closed).toBe(true);
+  });
+
+  it("aborts an active consumer when closing", async () => {
+    const bus = new EventBus<number>(pino({ level: "silent" }));
+    let signal!: AbortSignal;
+    bus.subscribe("signal", (_event, workerSignal) => {
+      signal = workerSignal;
+    });
+    bus.publish(1, true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await bus.close();
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("aborts an active consumer when unsubscribing", async () => {
+    const bus = new EventBus<number>(pino({ level: "silent" }));
+    let signal!: AbortSignal;
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const unsubscribe = bus.subscribe("signal", async (_event, workerSignal) => {
+      signal = workerSignal;
+      started();
+      await new Promise<void>((resolve) => {
+        if (workerSignal.aborted) {
+          resolve();
+          return;
+        }
+        workerSignal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    bus.publish(1, true);
+    await startedPromise;
+
+    unsubscribe();
+    await bus.close();
+
+    expect(signal.aborted).toBe(true);
   });
 
   it("stops waiting after the consumer close timeout", async () => {

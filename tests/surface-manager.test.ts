@@ -501,6 +501,41 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("retains all critical output while a Surface is unavailable", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: string[] = [];
+    feishu.output.handle = (event) => {
+      if (event.type === "turn.completed") {
+        received.push(event.turnId);
+      }
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      maximumPendingCriticalOutput: 1,
+    });
+    const event = (turnId: string): OutputEvent => ({
+      type: "turn.completed",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId,
+      status: "completed",
+    });
+
+    output.publish(event("turn-1"));
+    output.publish(event("turn-2"));
+    await settle();
+    await manager.start();
+    await settle();
+
+    expect(received).toEqual(["turn-1", "turn-2"]);
+    await manager.stop();
+    await output.close();
+  });
+
   it("adds the current Git branch to completed Turns before routing", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];

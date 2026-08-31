@@ -38,11 +38,11 @@ export class BoundedAsyncQueue<T> {
     if (!critical) {
       return false;
     }
+    // 关键事件不能因普通容量耗尽而丢失；容量只限制可丢弃的中间事件。
     const disposableIndex = this.entries.findIndex((entry) => !entry.critical);
-    if (disposableIndex === -1) {
-      return false;
+    if (disposableIndex !== -1) {
+      this.entries.splice(disposableIndex, 1);
     }
-    this.entries.splice(disposableIndex, 1);
     this.entries.push({ value, critical });
     return true;
   }
@@ -58,10 +58,9 @@ export class BoundedAsyncQueue<T> {
     }
     if (this.entries.length >= this.capacity) {
       const firstNonCritical = this.entries.findIndex((entry) => !entry.critical);
-      if (firstNonCritical === -1) {
-        return false;
+      if (firstNonCritical !== -1) {
+        this.entries.splice(firstNonCritical, 1);
       }
-      this.entries.splice(firstNonCritical, 1);
     }
     const criticalEntries = this.entries.filter((entry) => entry.critical);
     const nonCriticalEntries = this.entries.filter((entry) => !entry.critical);

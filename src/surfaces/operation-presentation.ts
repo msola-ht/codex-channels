@@ -18,6 +18,16 @@ export function shouldDisplayOperation(
     || (record.action === "spawnAgent" && record.status === "completed");
 }
 
+export function isExecutionOperation(record: OperationUpdate): boolean {
+  return record.kind === "command"
+    || record.kind === "fileChange"
+    || record.kind === "mcpTool"
+    || record.kind === "dynamicTool"
+    || record.kind === "webSearch"
+    || record.kind === "imageView"
+    || record.kind === "imageGeneration";
+}
+
 export function operationMetadata(record: OperationUpdate): string[] {
   return [
     record.durationMs === undefined || record.durationMs <= 0
