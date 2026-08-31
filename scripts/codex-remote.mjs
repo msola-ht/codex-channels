@@ -20,6 +20,7 @@ import {
   ForwardedChildSignalError,
   ReportedChildExitError,
 } from "../runtime/process-lifecycle.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -98,25 +99,22 @@ async function runRemoteCli() {
     );
   }
   const configuredBinary = stringValue(codex.binary) || "codex";
-  const codexBinary = isAbsolute(configuredBinary)
-    ? realpathSync(configuredBinary)
-    : configuredBinary;
   try {
-    const result = spawnSync(
-      codexBinary,
-      [
-        "--remote",
-        `unix://${socketPath}`,
-        "-C",
-        workdir,
-        ...(selectedDefinition
-          ? ["--profile", selectedDefinition.profileName]
-          : []),
-        ...permissionArguments,
-        ...passthrough,
-      ],
-      { stdio: "inherit" },
-    );
+    const invocation = resolveExecutableInvocation(configuredBinary, [
+      "--remote",
+      `unix://${socketPath}`,
+      "-C",
+      workdir,
+      ...(selectedDefinition
+        ? ["--profile", selectedDefinition.profileName]
+        : []),
+      ...permissionArguments,
+      ...passthrough,
+    ]);
+    const result = spawnSync(invocation.file, invocation.args, {
+      stdio: "inherit",
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
     assertSynchronousChildSuccess(result, {
       failureReportedByChild: true,
       failureMessage: (exitCode) => `Codex TUI 已退出：exit=${exitCode}`,
