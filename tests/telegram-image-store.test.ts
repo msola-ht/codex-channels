@@ -47,8 +47,10 @@ describe("TelegramImageStore", () => {
     expect(image.mimeType).toBe("image/jpeg");
     expect(image.path.startsWith(directory)).toBe(true);
     expect(readFileSync(image.path)).toEqual(jpegBytes());
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
-    expect(statSync(image.path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(directory).mode & 0o777).toBe(0o700);
+      expect(statSync(image.path).mode & 0o777).toBe(0o600);
+    }
     store.close();
   });
 

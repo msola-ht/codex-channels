@@ -49,8 +49,10 @@ describe("WeixinAudioStore", () => {
       bytes: plaintext.length,
     });
     expect(readFileSync(audio.path)).toEqual(plaintext);
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
-    expect(statSync(audio.path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(directory).mode & 0o777).toBe(0o700);
+      expect(statSync(audio.path).mode & 0o777).toBe(0o600);
+    }
     store.close();
   });
 

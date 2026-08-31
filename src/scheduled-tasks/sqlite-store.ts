@@ -983,7 +983,9 @@ function requirePrivateDirectory(directory: string): void {
   if (entry === undefined || entry.isSymbolicLink() || !entry.isDirectory()) {
     throw new Error("计划任务数据库目录无效");
   }
-  if ((entry.mode & 0o777) !== 0o700) {
+  if (process.platform === "win32") {
+    assertPrivateDirectoryAccessSync(directory);
+  } else if ((entry.mode & 0o777) !== 0o700) {
     throw new Error("计划任务数据库目录权限必须是 0700");
   }
 }

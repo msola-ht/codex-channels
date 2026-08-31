@@ -34,7 +34,9 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.record(sample());
 
     expect(path).toBe(join(directory, "request-metrics.sqlite3"));
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    }
     expect(store.count()).toBe(1);
     expect(store.recent(1)[0]).toMatchObject({
       ...sample(),

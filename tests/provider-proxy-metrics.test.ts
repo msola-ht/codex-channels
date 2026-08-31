@@ -26,7 +26,8 @@ afterEach(() => {
 });
 
 describe("Provider proxy metrics channel", () => {
-  it("delivers one bounded metrics record over a private Unix socket", async () => {
+  const unixIt = process.platform === "win32" ? it.skip : it;
+  unixIt("delivers one bounded metrics record over a private Unix socket", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "metrics.sock");
@@ -153,7 +154,7 @@ describe("Provider proxy metrics channel", () => {
     await server.close();
   });
 
-  it("closes an active listener even when startup did not reach the started state", async () => {
+  unixIt("closes an active listener even when startup did not reach the started state", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-cleanup-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "metrics.sock");
@@ -182,7 +183,7 @@ describe("Provider proxy metrics channel", () => {
     expect(statSync(socketPath).isFile()).toBe(true);
   });
 
-  it("reports an occupied metrics channel without treating it as the Gateway lock", async () => {
+  unixIt("reports an occupied metrics channel without treating it as the Gateway lock", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-occupied-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "metrics.sock");

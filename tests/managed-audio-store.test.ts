@@ -51,8 +51,10 @@ describe("ManagedAudioStore", () => {
 
     expect(result.mimeType).toBe(mimeType);
     expect(readFileSync(result.path)).toEqual(bytes);
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
-    expect(statSync(result.path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(directory).mode & 0o777).toBe(0o700);
+      expect(statSync(result.path).mode & 0o777).toBe(0o600);
+    }
     store.close();
   });
 
