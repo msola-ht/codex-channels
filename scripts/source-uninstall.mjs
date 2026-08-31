@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -126,15 +127,12 @@ function hasManagedSourceMarker(checkout, environment) {
 
 function uninstallGlobalPackage(prefixes, environment) {
   for (const prefix of prefixes) {
-    const packageDirectory = join(
-      prefix,
-      "lib",
-      "node_modules",
-      "@hegenai",
-      "codexc",
-    );
-    if (inferNpmGlobalPrefix(packageDirectory) !== prefix) continue;
-    const result = spawnSync(
+    const packageDirectory = [
+      join(prefix, "node_modules", "@hegenai", "codexc"),
+      join(prefix, "lib", "node_modules", "@hegenai", "codexc"),
+    ].find((candidate) => inferNpmGlobalPrefix(candidate) === prefix);
+    if (packageDirectory === undefined) continue;
+    const invocation = resolveExecutableInvocation(
       "npm",
       [
         "uninstall",
@@ -145,7 +143,16 @@ function uninstallGlobalPackage(prefixes, environment) {
         "--no-fund",
         "@hegenai/codexc",
       ],
-      { env: environment, stdio: "inherit" },
+      environment,
+    );
+    const result = spawnSync(
+      invocation.file,
+      invocation.args,
+      {
+        env: environment,
+        stdio: "inherit",
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+      },
     );
     if (result.error) throw result.error;
     if (result.status !== 0) {

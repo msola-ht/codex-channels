@@ -8,11 +8,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { mkdtemp } from "node:fs/promises";
 
 import { parse } from "smol-toml";
 import { describe, expect, it, vi } from "vitest";
+import { secureTestDirectory, secureTestFile } from "./support/windows-fixtures.js";
 
 const runtimeFileFailures = vi.hoisted(() => ({
   unlinkPath: undefined as string | undefined,
@@ -42,6 +43,9 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
       }
       return actual.writePrivateFileAtomicSync(path, content);
     },
+    assertPrivateFileAccessSync: () => undefined,
+    assertPrivateDirectoryAccessSync: () => undefined,
+    readPrivateFileSync: (path: string) => readFileSync(path, "utf8"),
   };
 });
 
@@ -107,7 +111,7 @@ describe("model provider runtime topology", () => {
     expect(resolvePrimaryAppServerSocketPath(
       { codex: { socket_path: "runtime/custom.sock" } },
       "/private/codexc",
-    )).toBe("/private/codexc/runtime/custom.sock");
+    )).toBe(resolve("/private/codexc/runtime/custom.sock"));
   });
 
   it("describes the complete switching topology from one shared source", async () => {
@@ -121,8 +125,8 @@ describe("model provider runtime topology", () => {
     expect(descriptor.primaryProvider).toBe("openai");
     expect(descriptor.managedProviders[0]?.provider).toBe("deepseek");
     expect(descriptor.socketPaths).toEqual([
-      "/private/codexc/runtime/codex.sock",
-      "/private/codexc/runtime/codex-deepseek.sock",
+      resolve("/private/codexc/runtime/codex.sock"),
+      resolve("/private/codexc/runtime/codex-deepseek.sock"),
     ]);
     expect(descriptor.topology).toEqual({
       primaryProvider: "openai",
@@ -717,14 +721,14 @@ describe("model provider runtime topology", () => {
     expect(providerAppServerSocketPath(
       "/private/runtime/codex-app-server.sock",
       "deepseek",
-    )).toBe("/private/runtime/codex-app-server-deepseek.sock");
+    )).toBe(resolve("/private/runtime/codex-app-server-deepseek.sock"));
   });
 
   it("derives a private metrics socket beside the provider App Server socket", () => {
     expect(providerMetricsSocketPath(
       "/private/runtime/codex-app-server.sock",
       "deepseek",
-    )).toBe("/private/runtime/codex-app-server-deepseek-metrics.sock");
+    )).toBe(resolve("/private/runtime/codex-app-server-deepseek-metrics.sock"));
   });
 
   it("preserves a configured OpenAI base URL behind the local metrics proxy", async () => {
@@ -900,7 +904,7 @@ describe("model provider runtime topology", () => {
       reasoningEffort: "high",
     });
 
-    expect(statSync(rolePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(rolePath).mode & 0o777).toBe(0o600);
     const firstRoleInode = statSync(rolePath).ino;
     writeManagedModelProviderRoleConfig(environment, {
       provider: "deepseek",
@@ -1106,25 +1110,22 @@ function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
 
 async function configuredHome(mode: "switching" | "exclusive"): Promise<string> {
   const codexHome = await mkdtemp(join(tmpdir(), "codexc-provider-runtime-"));
-  mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+  secureTestDirectory(codexHome);
   const providerDirectory = join(connectHomeFor(codexHome), "providers", "deepseek");
-  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
-  writeFileSync(
+  secureTestDirectory(providerDirectory);
+  secureTestFile(
     join(providerDirectory, "managed.toml"),
     `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`,
-    { mode: 0o600 },
   );
   const profilePath = mode === "exclusive" ? "config.toml" : "sf-deepseek.config.toml";
   const catalogPath = join(providerDirectory, "models.json");
-  writeFileSync(
+  secureTestFile(
     join(codexHome, profilePath),
     providerProfile(mode, catalogPath),
-    { mode: 0o600 },
   );
-  writeFileSync(
+  secureTestFile(
     catalogPath,
     providerCatalog(),
-    { mode: 0o600 },
   );
   return codexHome;
 }
@@ -1157,28 +1158,25 @@ function configureOpenCodeGo(
     "providers",
     "opencode-go",
   );
-  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  secureTestDirectory(providerDirectory);
   const accountId = "opencode-go";
   const accountDirectory = join(providerDirectory, "accounts", accountId);
-  mkdirSync(accountDirectory, { recursive: true, mode: 0o700 });
-  writeFileSync(
+  secureTestDirectory(accountDirectory);
+  secureTestFile(
     join(providerDirectory, "accounts.json"),
     `${JSON.stringify([{ id: accountId, default: true }], null, 2)}\n`,
-    { mode: 0o600 },
   );
-  writeFileSync(
+  secureTestFile(
     join(accountDirectory, "managed.toml"),
     `version = 1\nprovider = "opencode-go"\nmode = "${mode}"\n`,
-    { mode: 0o600 },
   );
   const catalogPath = join(providerDirectory, "models.json");
-  writeFileSync(
+  secureTestFile(
     catalogPath,
     providerCatalog(),
-    { mode: 0o600 },
   );
   const provider = "opencode-go";
-  writeFileSync(join(codexHome, mode === "exclusive" ? "config.toml" : "sf-opencode-go.config.toml"), [
+  secureTestFile(join(codexHome, mode === "exclusive" ? "config.toml" : "sf-opencode-go.config.toml"), [
     'model = "deepseek-v4-flash"',
     `model_provider = "${provider}"`,
     ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
@@ -1191,7 +1189,7 @@ function configureOpenCodeGo(
     "supports_websockets = false",
     'experimental_bearer_token = "sk-opencode-test-secret"',
     "",
-  ].join("\n"), { mode: 0o600 });
+  ].join("\n"));
 }
 
 function configureLegacyOpenCodeGo(
@@ -1203,19 +1201,17 @@ function configureLegacyOpenCodeGo(
     "providers",
     "opencode-go",
   );
-  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
-  writeFileSync(
+  secureTestDirectory(providerDirectory);
+  secureTestFile(
     join(providerDirectory, "managed.toml"),
     `version = 1\nprovider = "opencode-go"\nmode = "${mode}"\n`,
-    { mode: 0o600 },
   );
   const catalogPath = join(providerDirectory, "models.json");
-  writeFileSync(
+  secureTestFile(
     catalogPath,
     providerCatalog(),
-    { mode: 0o600 },
   );
-  writeFileSync(join(codexHome, mode === "exclusive" ? "config.toml" : "sf-opencode-go.config.toml"), [
+  secureTestFile(join(codexHome, mode === "exclusive" ? "config.toml" : "sf-opencode-go.config.toml"), [
     'model = "deepseek-v4-flash"',
     'model_provider = "opencode-go"',
     ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
@@ -1228,7 +1224,7 @@ function configureLegacyOpenCodeGo(
     "supports_websockets = false",
     'experimental_bearer_token = "sk-opencode-test-secret"',
     "",
-  ].join("\n"), { mode: 0o600 });
+  ].join("\n"));
 }
 
 function configurePrMainOpenCodeGo(codexHome: string): void {

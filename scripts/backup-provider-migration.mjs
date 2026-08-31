@@ -2,6 +2,7 @@
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   renameSync,
@@ -15,6 +16,10 @@ import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { connectHomePath, providerStorageRoot } from "../runtime/connect-home.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../runtime/private-file.mjs";
 import {
   migrateManagedModelProviderFiles,
   migrateManagedModelProviderModelSettings,
@@ -77,16 +82,21 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
     throw new Error(`备份目录已存在，拒绝覆盖：${backupRoot}`);
   }
   mkdirSync(backupRoot, { recursive: true, mode: 0o700 });
+  securePrivateDirectorySync(backupRoot);
 
   const copied = [];
   const copyFile = (source, target) => {
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    securePrivateDirectorySync(dirname(target));
     cpSync(source, target, { recursive: false });
+    securePrivateFileSync(target);
     copied.push({ source, target });
   };
   const copyDirectory = (source, target) => {
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    securePrivateDirectorySync(dirname(target));
     cpSync(source, target, { recursive: true });
+    secureCopiedTree(target);
     copied.push({ source, target });
   };
 
@@ -119,7 +129,9 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
     if (!existsSync(directory)) continue;
     const target = join(backupRoot, "original-providers", definition.id);
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    securePrivateDirectorySync(dirname(target));
     renameSync(directory, target);
+    secureCopiedTree(target);
     movedDirectories.push({ provider: definition.id, from: directory, to: target });
   }
 
@@ -182,11 +194,26 @@ function assertInside(root, path) {
 }
 
 function writeManifest(backupDirectory, value) {
+  const path = join(backupDirectory, "backup-manifest.json");
   writeFileSync(
-    join(backupDirectory, "backup-manifest.json"),
+    path,
     `${JSON.stringify(value, null, 2)}\n`,
     { mode: 0o600 },
   );
+  securePrivateFileSync(path);
+}
+
+function secureCopiedTree(path) {
+  const entry = lstatSync(path);
+  if (entry.isSymbolicLink()) throw new Error(`备份不能包含符号链接：${path}`);
+  if (!entry.isDirectory()) {
+    securePrivateFileSync(path);
+    return;
+  }
+  securePrivateDirectorySync(path);
+  for (const name of readdirSync(path)) {
+    secureCopiedTree(join(path, name));
+  }
 }
 
 function timestamp(now) {

@@ -16,6 +16,8 @@ import {
   type ScheduledTaskExecutionPort,
   type ScheduledTaskExecutionResult,
 } from "../src/scheduled-tasks/index.js";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
+import { securePrivateFileSync } from "../runtime/private-file.mjs";
 
 const directories: string[] = [];
 const base = Date.parse("2026-01-01T00:00:00.000Z");
@@ -30,8 +32,10 @@ describe("SqliteScheduledTaskStore", () => {
     const store = new SqliteScheduledTaskStore(path);
     const task = store.createTask(taskInput({ createdAt: base + 8 * 60 * 60_000 }));
 
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(directory).mode & 0o777).toBe(0o700);
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    }
     expect(task.nextRunAt).toBe(Date.parse("2026-01-01T09:00:00.000Z"));
     store.close();
 
@@ -68,7 +72,7 @@ describe("SqliteScheduledTaskStore", () => {
       version: 2,
       backupPath,
     });
-    expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(backupPath).mode & 0o777).toBe(0o600);
     const backupDb = new DatabaseSync(backupPath, { readOnly: true });
     expect(backupDb.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
     expect(backupDb.prepare("SELECT schedule_type FROM tasks WHERE task_id = 'v1-task'").get())
@@ -178,7 +182,8 @@ describe("SqliteScheduledTaskStore", () => {
     const unknownDb = new DatabaseSync(unknown.path);
     unknownDb.exec("CREATE TABLE unrelated (value TEXT)");
     unknownDb.close();
-    chmodSync(unknown.path, 0o600);
+    if (process.platform === "win32") securePrivateFileSync(unknown.path);
+    else chmodSync(unknown.path, 0o600);
     expect(() => new SqliteScheduledTaskStore(unknown.path)).toThrow(ScheduledTaskSchemaError);
 
     const incomplete = databasePath();
@@ -191,7 +196,8 @@ describe("SqliteScheduledTaskStore", () => {
       PRAGMA user_version = 2;
     `);
     incompleteDb.close();
-    chmodSync(incomplete.path, 0o600);
+    if (process.platform === "win32") securePrivateFileSync(incomplete.path);
+    else chmodSync(incomplete.path, 0o600);
     expect(() => new SqliteScheduledTaskStore(incomplete.path))
       .toThrow(/Schema 2.*结构不完整/);
 
@@ -199,11 +205,14 @@ describe("SqliteScheduledTaskStore", () => {
     const wrongVersionDb = new DatabaseSync(wrongVersion.path);
     wrongVersionDb.exec("PRAGMA user_version = 2");
     wrongVersionDb.close();
-    chmodSync(wrongVersion.path, 0o600);
+    if (process.platform === "win32") securePrivateFileSync(wrongVersion.path);
+    else chmodSync(wrongVersion.path, 0o600);
     expect(() => new SqliteScheduledTaskStore(wrongVersion.path)).toThrow(ScheduledTaskSchemaError);
   });
 
-  it("rejects extra columns and unsafe existing directories without changing permissions", () => {
+  const unixIt = process.platform === "win32" ? it.skip : it;
+
+  unixIt("rejects extra columns and unsafe existing directories without changing permissions", () => {
     const valid = databasePath();
     const store = new SqliteScheduledTaskStore(valid.path);
     store.close();
@@ -227,7 +236,7 @@ describe("SqliteScheduledTaskStore", () => {
     privateStore.close();
   });
 
-  it("allows a real private directory below a symlinked system ancestor but rejects a symlinked final directory", () => {
+  unixIt("allows a real private directory below a symlinked system ancestor but rejects a symlinked final directory", () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-scheduled-symlink-parent-"));
     directories.push(root);
     const realParent = join(root, "real-parent");
@@ -845,9 +854,10 @@ describe("ScheduledTaskScheduler", () => {
 
 function databasePath(): { readonly directory: string; readonly path: string } {
   const directory = mkdtempSync(join(tmpdir(), "codexc-scheduled-tasks-"));
-  chmodSync(directory, 0o700);
+  const privateDirectory = join(directory, "private");
+  secureTestDirectory(privateDirectory);
   directories.push(directory);
-  return { directory, path: join(directory, "scheduled-tasks.sqlite3") };
+  return { directory: privateDirectory, path: join(privateDirectory, "scheduled-tasks.sqlite3") };
 }
 
 function taskInput(overrides: Partial<CreateScheduledTaskInput> = {}): CreateScheduledTaskInput {
@@ -958,7 +968,8 @@ function createV1Database(
     `).run("v1-run", "v1-task", anchorAt, "completed");
   }
   db.close();
-  chmodSync(path, 0o600);
+  if (process.platform === "win32") securePrivateFileSync(path);
+  else chmodSync(path, 0o600);
 }
 
 async function delay(milliseconds: number): Promise<void> {

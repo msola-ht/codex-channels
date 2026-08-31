@@ -9,6 +9,11 @@ import {
 } from "node:fs";
 import { dirname, join, parse, resolve } from "node:path";
 
+import {
+  executableInvocation,
+  resolveExecutable,
+} from "./executable.mjs";
+
 const SAFE_NPM_SCRIPTS = [
   "build",
   "check",
@@ -78,7 +83,7 @@ export function checkProjectRulesAtRoot({
     );
   }
   const rulesPath = realpathSync(unresolvedRulesPath);
-  const result = spawnSync(codexBinary, [
+  const invocation = executableInvocation(resolveExecutable(codexBinary), [
     "execpolicy",
     "check",
     "--pretty",
@@ -88,10 +93,12 @@ export function checkProjectRulesAtRoot({
     "git",
     "status",
     "-sb",
-  ], {
+  ]);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd: resolvedRoot,
     env: process.env,
     stdio: quiet ? "ignore" : "inherit",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) {
     throw result.error;

@@ -1,6 +1,11 @@
-import { chmodSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
-import { createConnection, createServer } from "node:net";
 import { dirname, join } from "node:path";
+
+import {
+  createPrivateIpcConnection,
+  privateIpcAcceptsConnections,
+  privateIpcEndpointExists,
+  PrivateIpcServer,
+} from "./private-ipc.mjs";
 
 const connectionTimeoutMs = 1_000;
 const maximumStatusBytes = 4_096;
@@ -8,7 +13,6 @@ const maximumStatusBytes = 4_096;
 export class GatewayOwnershipError extends Error {}
 
 export class GatewayOwner {
-  #identity;
   #ready = false;
   #readinessRevoked = false;
   #server;
@@ -18,7 +22,7 @@ export class GatewayOwner {
 
   constructor(configPath) {
     this.#socketPath = gatewayOwnerSocketPath(configPath);
-    this.#server = createServer({ allowHalfOpen: true }, (socket) => {
+    this.#server = new PrivateIpcServer(this.#socketPath, (socket) => {
       this.#sockets.add(socket);
       socket.on("error", () => undefined);
       socket.on("close", () => this.#sockets.delete(socket));
@@ -32,33 +36,12 @@ export class GatewayOwner {
   }
 
   async start() {
-    mkdirSync(dirname(this.#socketPath), { recursive: true, mode: 0o700 });
-    chmodSync(dirname(this.#socketPath), 0o700);
-    await removeStaleGatewaySocket(this.#socketPath);
-    await new Promise((resolveListen, rejectListen) => {
-      const onError = (error) => {
-        this.#server.removeListener("listening", onListening);
-        rejectListen(error);
-      };
-      const onListening = () => {
-        this.#server.removeListener("error", onError);
-        resolveListen();
-      };
-      this.#server.once("error", onError);
-      this.#server.once("listening", onListening);
-      this.#server.listen(this.#socketPath);
-    }).catch((error) => {
-      if (error?.code === "EADDRINUSE") {
-        throw new GatewayOwnershipError("Gateway 已在运行，不能重复启动");
-      }
-      throw error;
-    });
     try {
-      const status = lstatSync(this.#socketPath);
-      this.#identity = { dev: status.dev, ino: status.ino };
-      chmodSync(this.#socketPath, 0o600);
+      await this.#server.start("Gateway 已在运行，不能重复启动");
     } catch (error) {
-      await this.close();
+      if (error instanceof Error && error.message === "Gateway 已在运行，不能重复启动") {
+        throw new GatewayOwnershipError(error.message);
+      }
       throw error;
     }
   }
@@ -69,7 +52,7 @@ export class GatewayOwner {
   }
 
   markReady() {
-    if (!this.#identity || !this.#server.listening) {
+    if (!this.#server.listening) {
       throw new Error("Gateway 所有权尚未建立，不能标记就绪");
     }
     if (this.#readinessRevoked) return;
@@ -77,7 +60,7 @@ export class GatewayOwner {
   }
 
   markNotReady() {
-    if (!this.#identity || !this.#server.listening) {
+    if (!this.#server.listening) {
       throw new Error("Gateway 所有权尚未建立，不能撤销就绪");
     }
     this.#readinessRevoked = true;
@@ -86,10 +69,7 @@ export class GatewayOwner {
 
   async #closeInternal() {
     for (const socket of this.#sockets) socket.destroy();
-    if (this.#server.listening) {
-      await new Promise((resolveClose) => this.#server.close(() => resolveClose()));
-    }
-    unlinkOwnedSocket(this.#socketPath, this.#identity);
+    await this.#server.close();
   }
 }
 
@@ -99,21 +79,13 @@ export function gatewayOwnerSocketPath(configPath) {
 
 export function gatewayOwnerIsActive(configPath) {
   const socketPath = gatewayOwnerSocketPath(configPath);
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return Promise.resolve(false);
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
-    throw new Error(`Gateway 所有权 Socket 路径不安全：${socketPath}`);
-  }
-  return socketAcceptsConnections(socketPath);
+  if (!privateIpcEndpointExists(socketPath)) return Promise.resolve(false);
+  return privateIpcAcceptsConnections(socketPath);
 }
 
 export async function gatewayOwnerIsReady(configPath) {
   const socketPath = gatewayOwnerSocketPath(configPath);
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return false;
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
-    throw new Error(`Gateway 所有权 Socket 路径不安全：${socketPath}`);
-  }
+  if (!privateIpcEndpointExists(socketPath)) return false;
   const owner = await readGatewayOwnerStatus(socketPath);
   return owner?.version === 1
     && Number.isSafeInteger(owner.pid)
@@ -121,40 +93,9 @@ export async function gatewayOwnerIsReady(configPath) {
     && owner.ready === true;
 }
 
-async function removeStaleGatewaySocket(socketPath) {
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return;
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
-    throw new Error(`Gateway 所有权 Socket 路径不安全：${socketPath}`);
-  }
-  if (await socketAcceptsConnections(socketPath)) {
-    throw new GatewayOwnershipError("Gateway 已在运行，不能重复启动");
-  }
-  const current = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (current?.dev === status.dev && current.ino === status.ino) {
-    unlinkSync(socketPath);
-  }
-}
-
-function socketAcceptsConnections(socketPath) {
-  return new Promise((resolveCheck) => {
-    const socket = createConnection(socketPath);
-    let settled = false;
-    const finish = (active) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolveCheck(active);
-    };
-    socket.setTimeout(connectionTimeoutMs, () => finish(false));
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
-}
-
 function readGatewayOwnerStatus(socketPath) {
   return new Promise((resolveStatus) => {
-    const socket = createConnection(socketPath);
+    const socket = createPrivateIpcConnection(socketPath);
     const chunks = [];
     let bytes = 0;
     let settled = false;
@@ -183,12 +124,4 @@ function readGatewayOwnerStatus(socketPath) {
     });
     socket.once("error", () => finish(undefined));
   });
-}
-
-function unlinkOwnedSocket(socketPath, identity) {
-  if (!identity) return;
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (status?.isSocket() && status.dev === identity.dev && status.ino === identity.ino) {
-    unlinkSync(socketPath);
-  }
 }

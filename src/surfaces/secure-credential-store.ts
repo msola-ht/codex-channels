@@ -16,6 +16,12 @@ import {
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import {
+  readWindowsSecureRecordSync,
+  removeWindowsSecureRecordSync,
+  writeWindowsSecureRecordSync,
+} from "../../runtime/windows-secure-record.mjs";
+
 export interface SecureCredentialRecordStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
@@ -186,6 +192,25 @@ implements SecureCredentialRecordStore {
   private recordPath(key: string): string {
     const digest = createHash("sha256").update(key).digest("hex");
     return join(this.directory, `${digest}.enc`);
+  }
+}
+
+export class WindowsDpapiCredentialRecordStore
+implements SecureCredentialRecordStore {
+  constructor(private readonly directory: string) {}
+
+  get(key: string): Promise<string | null> {
+    return Promise.resolve(readWindowsSecureRecordSync(this.directory, key));
+  }
+
+  set(key: string, value: string): Promise<void> {
+    writeWindowsSecureRecordSync(this.directory, key, value);
+    return Promise.resolve();
+  }
+
+  remove(key: string): Promise<void> {
+    removeWindowsSecureRecordSync(this.directory, key);
+    return Promise.resolve();
   }
 }
 

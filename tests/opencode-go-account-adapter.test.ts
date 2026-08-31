@@ -1,8 +1,19 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../runtime/private-file.mjs")>();
+  return {
+    ...actual,
+    readPrivateFileSync: (path: string) => readFileSync(path, "utf8"),
+    assertPrivateFileAccessSync: () => undefined,
+    assertPrivateDirectoryAccessSync: () => undefined,
+  };
+});
 
 import {
   createOpencodeGoAccountAdapter,

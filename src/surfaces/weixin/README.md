@@ -6,7 +6,8 @@
 未新增 SQLite Schema。
 
 - `credential-store.ts`：严格校验版本 1 微信 Bot 凭据；macOS 使用独立 Keychain Service，
-  Linux 使用独立 `credentials/weixin` AES-256-GCM 私有目录。
+  Linux 使用独立 `credentials/weixin` AES-256-GCM 私有目录，Windows 使用当前用户 DPAPI 主密钥
+  保护的 AES-256-GCM 私有目录。
 - `credential-client.ts`：首次协议调用时从安全存储读取并缓存当前进程的凭据 Client；缺失或
   损坏凭据失败关闭，不把 Token 提升到 Bootstrap 配置或日志。
 - `factory.ts`：接收 Bootstrap 已决策的精确凭据、游标、回复上下文和上传目录，组合微信固定的
@@ -104,7 +105,8 @@
   `actorId + context_token` 副本，支持精确撤销和整体清空。
 - `reply-context-persistence.ts`：按精确账号和私聊 Actor 保存严格版本 1 的最近回复上下文；
   macOS 使用独立 Keychain Service，Linux 使用独立
-  `credentials/weixin-reply-context` AES-256-GCM 私有目录。载荷、密文或身份不匹配失败关闭。
+  `credentials/weixin-reply-context` AES-256-GCM 私有目录，Windows 使用同目录语义的当前用户 DPAPI
+  主密钥与 AES-256-GCM 记录。载荷、密文或身份不匹配失败关闭。
 - `typing-controller.ts`：只在内存按 Actor 缓存最多 24 小时的 `typing_ticket`；Turn 开始时
   启用原生输入状态并每 5 秒续期，最终回复、完成、停止、失败或 Surface 关闭时取消；协议失败
   只记录受限元数据，不阻断正常回复。

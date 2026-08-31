@@ -3,6 +3,16 @@ export {
   type ThreadDefaults,
 } from "./client.js";
 export {
+  createAppServerTransport,
+  type AppServerTransportOptions,
+  type LocalAppServerEndpoint,
+} from "./app-server-transport.js";
+export type {
+  CodexProcessInvocation,
+  CreateCodexProcessInvocation,
+  TerminateCodexProcess,
+} from "./codex-process.js";
+export {
   toProtocolQueueText,
   toThreadQueueAddResult,
   toThreadQueueItem,
@@ -52,3 +62,7 @@ export {
   UnixWebSocketTransport,
   type UnixWebSocketTransportOptions,
 } from "./unix-websocket-transport.js";
+export {
+  WindowsProxyTransport,
+  type WindowsProxyTransportOptions,
+} from "./windows-proxy-transport.js";

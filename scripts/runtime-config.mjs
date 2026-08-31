@@ -10,6 +10,11 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  assertPrivateConfigAccessSync,
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../runtime/private-file.mjs";
 import { packageDir } from "./package-path.mjs";
 
 export { packageDir };
@@ -50,12 +55,10 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
   mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   mkdirSync(workspaceDir, { recursive: true, mode: 0o700 });
-  if (!explicitConfigFile) {
-    chmodSync(dataDir, 0o700);
-  }
-  chmodSync(runtimeDir, 0o700);
-  chmodSync(stateDir, 0o700);
-  chmodSync(workspaceDir, 0o700);
+  if (!explicitConfigFile) securePrivateDirectorySync(dataDir);
+  securePrivateDirectorySync(runtimeDir);
+  securePrivateDirectorySync(stateDir);
+  securePrivateDirectorySync(workspaceDir);
 
   const defaultCwd = realpathSync(workspaceDir);
   const defaultWorkspace = { id: "codex-connect", name: ".codex-connect/workspace", cwd: defaultCwd };
@@ -123,6 +126,12 @@ function prepareExistingUserConfig(configPath, dataDir, manageDataDirectory) {
   }
   if (!configStatus.isFile()) {
     throw new Error("config.toml 必须是普通文件且不能是符号链接");
+  }
+  if (process.platform === "win32") {
+    if (manageDataDirectory) securePrivateDirectorySync(dataDir);
+    securePrivateFileSync(configPath);
+    assertPrivateConfigAccessSync(configPath);
+    return;
   }
   const currentUserId = process.getuid?.();
   if (

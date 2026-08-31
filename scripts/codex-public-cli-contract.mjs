@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
 const trackedOptions = [
   "--config",
@@ -263,10 +264,12 @@ function readHeadContract(repositoryRoot) {
 }
 
 function runCodex(codexBinary, args) {
-  return execFileSync(codexBinary, args, {
+  const invocation = resolveExecutableInvocation(codexBinary, args);
+  return execFileSync(invocation.file, invocation.args, {
     encoding: "utf8",
     env: process.env,
     stdio: ["ignore", "pipe", "inherit"],
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
 }
 

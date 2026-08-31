@@ -10,19 +10,26 @@ import {
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
+import {
+  executableInvocation,
+  resolveExecutable,
+} from "../runtime/executable.mjs";
+
 export function generateProtocolTree(codex, root, outputParent, options = {}) {
   mkdirSync(outputParent, { recursive: true });
   const generated = mkdtempSync(join(outputParent, ".generated-"));
   try {
-    execFileSync(codex, [
+    const invocation = executableInvocation(resolveExecutable(codex), [
       "app-server",
       "generate-ts",
       "--out",
       generated,
       ...(options.experimental ? ["--experimental"] : []),
-    ], {
+    ]);
+    execFileSync(invocation.file, invocation.args, {
       cwd: root,
       stdio: options.stdio ?? "inherit",
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
     return generated;
   } catch (error) {
@@ -40,12 +47,16 @@ export function assertProtocolTreesEqual(expected, actual) {
     );
   }
   for (const file of expectedFiles) {
-    const expectedContent = readFileSync(join(expected, file));
-    const actualContent = readFileSync(join(actual, file));
-    if (!expectedContent.equals(actualContent)) {
+    const expectedContent = normalizedGeneratedContent(join(expected, file));
+    const actualContent = normalizedGeneratedContent(join(actual, file));
+    if (expectedContent !== actualContent) {
       throw new Error(`生成协议内容不一致：${file}`);
     }
   }
+}
+
+function normalizedGeneratedContent(path) {
+  return readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 }
 
 export function replaceProtocolTree(generated, output) {

@@ -11,7 +11,7 @@
 - [`docs/webui.md`](docs/webui.md)：本地只读指标 WebUI 的命令、架构、页面、API、边界与安全。
 - [`docs/metrics-sync.md`](docs/metrics-sync.md)：多设备指标增量同步的本地配置、载荷与边界。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
-- [`docs/source-install.md`](docs/source-install.md)：Linux/macOS Git 源码安装、目录、更新和失败边界。
+- [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
 
 ## 发行记录
 
@@ -27,6 +27,8 @@
 - [`docs/architecture-optimization.md`](docs/architecture-optimization.md)：全项目链路审查、结构性优化原则、实施顺序与进度。
 - [`docs/management-interfaces-development.md`](docs/management-interfaces-development.md)：Setup、Config、安装和更新命令面向未来本机可视化的结构化接口演进计划与进度。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：未来本机管理写接口的认证、Origin/CSRF、修订、防重放、任务与审计边界。
+- [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 原生支持的
+  Transport、IPC、凭据、进程、服务、CI 分阶段计划与发布门槛。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。

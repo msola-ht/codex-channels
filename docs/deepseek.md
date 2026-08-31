@@ -193,6 +193,10 @@ codexc agents disable
 当前用户消息中完整给出。它不等待后续消息，也不调用子代理通信工具；需要多轮协作时使用 OpenAI
 官方子代理。
 
+Windows + 飞书真实验收（2026-08-30）确认：明确要求“只用 DS 子代理一次、不要派生下级”时，
+`deepseek-v4-flash-vision-exp` 子代理单次返回“收到”，子代理侧模型请求为 1 次，未产生下级代理。
+若任务没有明确限制派生层级，模型可能自行尝试派生下级；调用方应在一次性任务中明确禁止继续派生。
+
 子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
 线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
 页面显示“子代理 · <代理路径>”。子代理线程标注自指标库 Schema v7 起可用；Schema v10

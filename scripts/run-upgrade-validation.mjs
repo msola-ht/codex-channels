@@ -7,6 +7,8 @@ import {
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+
 const root = resolve(import.meta.dirname, "..");
 
 export const defaultUpgradeValidationStages = [
@@ -111,14 +113,30 @@ async function runStage(stage, logsDirectory, options) {
 
   stdout.write(`\n[升级验证] ${stage.name}\n`);
   const status = await new Promise((complete) => {
-    const child = spawn(stage.command, stage.args, {
+    const environment = {
+      ...process.env,
+      ...options.environment,
+      ...stage.environment,
+    };
+    let invocation;
+    try {
+      invocation = resolveExecutableInvocation(
+        stage.command,
+        stage.args,
+        environment,
+      );
+    } catch (error) {
+      const message = `无法启动验证命令：${error.message}\n`;
+      stderr.write(message);
+      stream.write(message);
+      complete({ status: "error", exitCode: null, error: error.message });
+      return;
+    }
+    const child = spawn(invocation.file, invocation.args, {
       cwd: options.cwd || root,
-      env: {
-        ...process.env,
-        ...options.environment,
-        ...stage.environment,
-      },
+      env: environment,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
     child.stdout.on("data", (chunk) => {
       stdout.write(chunk);

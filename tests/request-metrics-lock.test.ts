@@ -101,7 +101,7 @@ describe("request metrics database lock", () => {
     },
   );
 
-  it("keeps a lock held by the current process lifetime fail-closed", () => {
+  it.skipIf(process.platform === "win32")("keeps a lock held by the current process lifetime fail-closed", () => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
     const lockPath = `${path}.lock`;

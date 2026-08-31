@@ -1,6 +1,11 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../../runtime/private-file.mjs";
 
 import type { ConversationTarget, SurfaceId } from "../conversation-core/index.js";
 import type {
@@ -44,10 +49,10 @@ export class SqliteBindingStore implements BindingStore {
   constructor(readonly path: string) {
     const parent = dirname(path);
     mkdirSync(parent, { recursive: true, mode: 0o700 });
-    chmodSync(parent, 0o700);
+    securePrivateDirectorySync(parent);
     this.database = new DatabaseSync(path);
     try {
-      chmodSync(path, 0o600);
+      securePrivateFileSync(path);
       this.database.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE;");
       this.initializeSchema();
       this.load();

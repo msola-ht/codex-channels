@@ -18,7 +18,7 @@ import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 
-describe("real App Server Queue contract", () => {
+describe.skipIf(process.platform === "win32")("real App Server Queue contract", () => {
   it("runs the native Queue capacity, paging, dispatch and restart contract", async () => {
     const testRuntime = mkdtempSync(join(tmpdir(), "codex-queue-contract-"));
     const codexHome = join(testRuntime, "codex-home");

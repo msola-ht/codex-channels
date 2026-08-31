@@ -16,6 +16,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { securePrivateFileSync } from "../runtime/private-file.mjs";
 
 export function readWorkspaceConfig(document) {
   const parsed = parseWorkspaceConfig(document);
@@ -62,7 +63,7 @@ export function addWorkspaceToConfig({
   eventQueuePath,
 }) {
   const document = readGatewayConfig(configPath);
-  chmodSync(configPath, 0o600);
+  securePrivateFileSync(configPath);
   const parsed = parseWorkspaceConfig(document);
   if (
     !parsed.workspaces.some((workspace) => workspace.id === parsed.defaultWorkspaceId)
@@ -158,7 +159,7 @@ export function removeWorkspaceFromConfig({
   eventQueuePath,
 }) {
   const document = readGatewayConfig(configPath);
-  chmodSync(configPath, 0o600);
+  securePrivateFileSync(configPath);
   const parsed = parseWorkspaceConfig(document);
   const selected = resolveWorkspaceSelector(parsed.workspaces, selector);
   if (

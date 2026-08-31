@@ -35,13 +35,13 @@ describe("FileWeixinUpdatesCursorStore", () => {
     await store.set(accountId, "cursor-two");
 
     expect(await store.get(accountId)).toBe("cursor-two");
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") expect(statSync(directory).mode & 0o777).toBe(0o700);
     const files = readdirSync(directory);
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^[a-f0-9]{64}\.json$/u);
     expect(files[0]).not.toContain("account-fixture");
     const path = join(directory, files[0]!);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       version: 1,
       accountId,
@@ -88,7 +88,7 @@ describe("FileWeixinUpdatesCursorStore", () => {
     }
 
     expect(await store.get(accountId)).toBe("cursor-one");
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") expect(statSync(directory).mode & 0o777).toBe(0o700);
     await store.remove(accountId);
 
     await expect(store.get(accountId)).resolves.toBeNull();

@@ -1,6 +1,7 @@
 import {
   EncryptedFileCredentialRecordStore,
   MacKeychainCredentialRecordStore,
+  WindowsDpapiCredentialRecordStore,
   type KeychainCommandRunner,
   type SecureCredentialRecordStore,
 } from "../secure-credential-store.js";
@@ -64,6 +65,11 @@ export function createWeixinCredentialStore(
   if (platform === "linux") {
     return new StrictWeixinCredentialStore(
       new EncryptedFileCredentialRecordStore(credentialsDirectory),
+    );
+  }
+  if (platform === "win32") {
+    return new StrictWeixinCredentialStore(
+      new WindowsDpapiCredentialRecordStore(credentialsDirectory),
     );
   }
   throw new Error(`微信凭据不支持当前平台：${platform}`);

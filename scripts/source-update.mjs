@@ -16,6 +16,7 @@ import { pathToFileURL } from "node:url";
 
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -843,11 +844,13 @@ function runQuiet(command, args, cwd, environment, implementation) {
     implementation(command, args, { cwd, environment, quiet: true });
     return;
   }
-  const result = spawnSync(command, args, {
+  const invocation = resolveExecutableInvocation(command, args, environment);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd,
     env: environment,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) throw result.error;
   if (result.status === 0) return;
@@ -956,7 +959,13 @@ function capture(command, args, cwd, environment, implementation, options = {}) 
   if (implementation) {
     return implementation(command, args, { cwd, environment, ...options });
   }
-  const result = spawnSync(command, args, { cwd, env: environment, encoding: "utf8" });
+  const invocation = resolveExecutableInvocation(command, args, environment);
+  const result = spawnSync(invocation.file, invocation.args, {
+    cwd,
+    env: environment,
+    encoding: "utf8",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     if (options.allowFailure) return "";
@@ -970,7 +979,13 @@ function run(command, args, cwd, environment, implementation) {
     implementation(command, args, { cwd, environment });
     return;
   }
-  const result = spawnSync(command, args, { cwd, env: environment, stdio: "inherit" });
+  const invocation = resolveExecutableInvocation(command, args, environment);
+  const result = spawnSync(invocation.file, invocation.args, {
+    cwd,
+    env: environment,
+    stdio: "inherit",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`${command} 执行失败：exit=${result.status ?? 1}`);

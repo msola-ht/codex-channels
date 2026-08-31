@@ -15,6 +15,7 @@ import {
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { primaryProviderBackupPath } from "../runtime/model-provider-runtime.mjs";
+import { securePrivateDirectorySync, securePrivateFileSync } from "../runtime/private-file.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -106,12 +107,14 @@ describe("metrics command options", () => {
     temporaryDirectories.push(connectHome);
     const backupPath = primaryProviderBackupPath({ CODEX_CONNECT_HOME: connectHome });
     mkdirSync(dirname(backupPath), { recursive: true, mode: 0o700 });
+    if (process.platform === "win32") securePrivateDirectorySync(dirname(backupPath));
     writeFileSync(backupPath, JSON.stringify({
       OpenAI: {
         base_url: "https://zzone.example.test/v1",
         wire_api: "responses",
       },
     }), { mode: 0o600 });
+    if (process.platform === "win32") securePrivateFileSync(backupPath);
     const environment = { ...process.env, CODEX_CONNECT_HOME: connectHome };
 
     expect(() => validateMetricsCommandArgs("prune", ["OpenAI"], environment))

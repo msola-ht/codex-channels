@@ -6,6 +6,7 @@ import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import { ScheduledTaskComposition } from "../src/bootstrap/scheduled-task-composition.js";
+import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
 import type { ProviderRoutingClient } from "../src/codex-client/index.js";
 import type { ConversationCore, OutputEvent } from "../src/conversation-core/index.js";
 import type { EventBus } from "../src/event-bus/index.js";
@@ -16,6 +17,7 @@ import type { SqliteBindingStore } from "../src/storage/index.js";
 describe("ScheduledTaskComposition", () => {
   it("owns the empty scheduler recovery, start, stop, and store lifecycle", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-scheduled-composition-"));
+    if (process.platform === "win32") securePrivateDirectorySync(directory);
     const subscribe = vi.fn();
     const composition = new ScheduledTaskComposition({
       stateDatabasePath: join(directory, "state.sqlite3"),

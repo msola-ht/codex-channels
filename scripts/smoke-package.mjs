@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { packageDir } from "./runtime-config.mjs";
 
@@ -116,6 +117,14 @@ try {
     "scripts/service-install-context.mjs",
     "scripts/service-install-management.d.mts",
     "scripts/service-install-management.mjs",
+    "scripts/service-status.d.mts",
+    "scripts/service-status.mjs",
+    "scripts/windows-scheduled-task.ps1",
+    "scripts/windows-log-follow.ps1",
+    "scripts/windows-service-control.d.mts",
+    "scripts/windows-service-control.mjs",
+    "scripts/windows-service-host.mjs",
+    "scripts/windows-service-launcher.ps1",
     "scripts/model-provider-default-setup.d.mts",
     "scripts/model-provider-default-setup.mjs",
     "scripts/model-provider-file-layout.d.mts",
@@ -223,11 +232,13 @@ try {
 }
 
 function run(command, args, cwd, env, capture = false) {
-  const result = spawnSync(command, args, {
+  const invocation = resolveExecutableInvocation(command, args, env);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd,
     env,
     encoding: "utf8",
     stdio: capture ? "pipe" : "inherit",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) {
     throw result.error;

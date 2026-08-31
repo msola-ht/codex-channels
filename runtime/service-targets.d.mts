@@ -1,11 +1,12 @@
 export type ServiceTarget = "gateway" | "app-server" | "webui" | "center" | "all";
-export type ServicePlatform = "systemd" | "launchd";
+export type ServicePlatform = "systemd" | "launchd" | "windows";
 
 export interface ServiceDefinition {
   readonly target: Exclude<ServiceTarget, "all">;
   readonly displayName: string;
   readonly systemd: string;
   readonly launchd: string;
+  readonly windows: string;
   readonly core: boolean;
   readonly helpOrder: number;
   readonly startOrder: number;

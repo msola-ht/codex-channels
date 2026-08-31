@@ -38,9 +38,9 @@ describe("Weixin credential store", () => {
 
     const files = readdirSync(directory);
     expect(files).toHaveLength(2);
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") expect(statSync(directory).mode & 0o777).toBe(0o700);
     for (const file of files) {
-      expect(statSync(join(directory, file)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") expect(statSync(join(directory, file)).mode & 0o777).toBe(0o600);
       expect(readFileSync(join(directory, file)).includes(
         Buffer.from(credential.botToken),
       )).toBe(false);

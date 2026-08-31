@@ -28,7 +28,7 @@ describe("Workspace CLI JSON", () => {
       "[[workspaces]]",
       'id = "main"',
       'name = "Main"',
-      `cwd = "${workspace}"`,
+      `cwd = "${workspace.replaceAll("\\", "/")}"`,
       "",
     ].join("\n"));
     const output = { write: vi.fn() };

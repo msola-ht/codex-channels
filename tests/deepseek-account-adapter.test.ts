@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDeepseekAccountAdapter } from "../src/bootstrap/deepseek-account-adapter.js";
+import { securePrivateDirectorySync, securePrivateFileSync } from "../runtime/private-file.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -72,6 +73,7 @@ describe("DeepSeek account adapter", () => {
       providerConfig("sk-fixed-secret"),
       { mode: 0o600 },
     );
+    if (process.platform === "win32") securePrivateFileSync(join(codexHome, "config.toml"));
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       is_available: false,
       balance_infos: [],
@@ -100,17 +102,21 @@ async function createCodexHome(): Promise<string> {
     "deepseek",
   );
   await mkdir(providerDirectory, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") securePrivateDirectorySync(providerDirectory);
   await writeFile(join(directory, "config.toml"), 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
+  if (process.platform === "win32") securePrivateFileSync(join(directory, "config.toml"));
   await writeFile(
     join(directory, "sf-deepseek.config.toml"),
     `model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n${providerConfig("sk-test-secret")}`,
     { mode: 0o600 },
   );
+  if (process.platform === "win32") securePrivateFileSync(join(directory, "sf-deepseek.config.toml"));
   await writeFile(
     join(providerDirectory, "managed.toml"),
     'version = 1\nprovider = "deepseek"\n',
     { mode: 0o600 },
   );
+  if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "managed.toml"));
   return directory;
 }
 

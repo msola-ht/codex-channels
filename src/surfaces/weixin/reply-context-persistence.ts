@@ -1,6 +1,7 @@
 import {
   EncryptedFileCredentialRecordStore,
   MacKeychainCredentialRecordStore,
+  WindowsDpapiCredentialRecordStore,
   type KeychainCommandRunner,
   type SecureCredentialRecordStore,
 } from "../secure-credential-store.js";
@@ -83,6 +84,11 @@ export function createWeixinReplyContextPersistence(
   if (platform === "linux") {
     return new StrictWeixinReplyContextPersistence(
       new EncryptedFileCredentialRecordStore(directory),
+    );
+  }
+  if (platform === "win32") {
+    return new StrictWeixinReplyContextPersistence(
+      new WindowsDpapiCredentialRecordStore(directory),
     );
   }
   throw new Error(`微信回复上下文不支持当前平台：${platform}`);

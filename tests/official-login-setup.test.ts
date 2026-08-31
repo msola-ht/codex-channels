@@ -143,11 +143,15 @@ describe("official login setup", () => {
   it("defaults to codex login --device-auth for remote login", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codexc-official-login-device-"));
     const argsPath = join(dir, "args.txt");
-    const loginScript = join(dir, "fake-codex.sh");
-    writeFileSync(loginScript, [
-      "#!/bin/sh",
-      `printf '%s\\n' "$*" > '${argsPath}'`,
-    ].join("\n"), { mode: 0o700 });
+    const loginScript = join(dir, process.platform === "win32" ? "fake-codex.cmd" : "fake-codex.sh");
+    if (process.platform === "win32") {
+      writeFileSync(loginScript, `@echo off\r\necho %* > "${argsPath}"\r\n`, { mode: 0o700 });
+    } else {
+      writeFileSync(loginScript, [
+        "#!/bin/sh",
+        `printf '%s\\n' "$*" > '${argsPath}'`,
+      ].join("\n"), { mode: 0o700 });
+    }
 
     const client = {
       connect: vi.fn(async () => undefined),
@@ -166,13 +170,20 @@ describe("official login setup", () => {
     };
 
     await runOfficialLoginSetup({
-      environment: { CODEX_BINARY: loginScript },
+      environment: {
+        CODEX_BINARY: loginScript,
+        ...(process.platform === "win32"
+          ? { ComSpec: process.env.ComSpec ?? `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\cmd.exe` }
+          : {}),
+      },
       output,
       prompts,
       createClient,
     });
 
-    expect(readFileSync(argsPath, "utf8").trim()).toBe("login --device-auth");
+    expect(readFileSync(argsPath, "utf8").trim()).toBe(
+      process.platform === "win32" ? '"login" "--device-auth"' : "login --device-auth",
+    );
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "model_provider", value: "openai" },
       { keyPath: "model", value: null },

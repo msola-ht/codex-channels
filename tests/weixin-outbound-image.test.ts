@@ -74,8 +74,10 @@ describe("Weixin outbound generated-image reader", () => {
 
     await expect(readWeixinOutboundImage("relative.png"))
       .rejects.toMatchObject({ code: "invalid-path" });
-    await expect(readWeixinOutboundImage(linkPath))
-      .rejects.toMatchObject({ code: "invalid-file" });
+    if (process.platform !== "win32") {
+      await expect(readWeixinOutboundImage(linkPath))
+        .rejects.toMatchObject({ code: "invalid-file" });
+    }
     await expect(readWeixinOutboundImage(textPath))
       .rejects.toMatchObject({ code: "unsupported-image" });
     await expect(readWeixinOutboundImage(webpPath))

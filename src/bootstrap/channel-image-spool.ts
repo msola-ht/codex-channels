@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -11,6 +10,11 @@ import {
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 
 import type { Logger } from "pino";
+
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../../runtime/private-file.mjs";
 
 import type { ConversationTarget } from "../conversation-core/index.js";
 
@@ -87,7 +91,17 @@ export class ChannelImageSpool {
       this.failedDirectory,
     ]) {
       mkdirSync(directory, { recursive: true });
-      chmodSync(directory, 0o700);
+      securePrivateDirectorySync(directory);
+    }
+    for (const directory of [
+      this.pendingDirectory,
+      this.doneDirectory,
+      this.failedDirectory,
+    ]) {
+      for (const name of readdirSync(directory)) {
+        const path = join(directory, name);
+        if (statSync(path).isFile()) securePrivateFileSync(path);
+      }
     }
   }
 
@@ -233,6 +247,7 @@ export class ChannelImageSpool {
         `${message}\n`,
         { mode: 0o600 },
       );
+      securePrivateFileSync(join(this.failedDirectory, `${base}.error.txt`));
       renameSync(manifestPath, join(this.failedDirectory, name));
     } catch (error) {
       this.options.logger.error(

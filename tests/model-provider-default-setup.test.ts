@@ -6,6 +6,10 @@ import { parse } from "smol-toml";
 import { describe, expect, it, vi } from "vitest";
 
 import { runModelProviderDefaultSetup } from "../scripts/model-provider-default-setup.mjs";
+import {
+  securePrivateDirectorySync,
+  securePrivateFileSync,
+} from "../runtime/private-file.mjs";
 
 describe("managed model provider default setup", () => {
   it("updates only the selected switching Provider profile", async () => {
@@ -155,6 +159,7 @@ function providerFixture(mode: "switching" | "exclusive") {
     "deepseek",
   );
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") securePrivateDirectorySync(providerDirectory);
   const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
@@ -174,6 +179,7 @@ function providerFixture(mode: "switching" | "exclusive") {
     `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
+  if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "managed.toml"));
   writeFileSync(catalogPath, JSON.stringify({
     models: [
       "deepseek-v4-flash",
@@ -192,15 +198,19 @@ function providerFixture(mode: "switching" | "exclusive") {
       auto_compact_token_limit: 629_146,
     })),
   }), { mode: 0o600 });
+  if (process.platform === "win32") securePrivateFileSync(catalogPath);
   if (mode === "switching") {
     writeFileSync(join(codexHome, "sf-deepseek.config.toml"), providerLines, { mode: 0o600 });
+    if (process.platform === "win32") securePrivateFileSync(join(codexHome, "sf-deepseek.config.toml"));
     writeFileSync(
       join(codexHome, "config.toml"),
       'model = "gpt-5.6-sol"\nmodel_provider = "openai"\n',
       { mode: 0o600 },
     );
+    if (process.platform === "win32") securePrivateFileSync(join(codexHome, "config.toml"));
   } else {
     writeFileSync(join(codexHome, "config.toml"), providerLines, { mode: 0o600 });
+    if (process.platform === "win32") securePrivateFileSync(join(codexHome, "config.toml"));
   }
   return codexHome;
 }

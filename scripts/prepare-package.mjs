@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { installGitHooks } from "./install-git-hooks.mjs";
 import { packageDir } from "./package-path.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
 const builtEntry = join(packageDir, "dist", "main.js");
@@ -18,12 +19,20 @@ if (existsSync(sourceConfig)) {
 }
 
 function ensureSourceDependencies() {
+  const invocation = resolveExecutableInvocation("npm", [
+    "ls",
+    "--include=dev",
+    "--depth=0",
+    "--silent",
+    "--global=false",
+  ]);
   const inspected = spawnSync(
-    "npm",
-    ["ls", "--include=dev", "--depth=0", "--silent", "--global=false"],
+    invocation.file,
+    invocation.args,
     {
       cwd: packageDir,
       stdio: "ignore",
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     },
   );
   if (inspected.error) {
@@ -48,9 +57,11 @@ function ensureSourceDependencies() {
 }
 
 function runNpm(args) {
-  const result = spawnSync("npm", args, {
+  const invocation = resolveExecutableInvocation("npm", args);
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd: packageDir,
     stdio: "inherit",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) {
     throw result.error;

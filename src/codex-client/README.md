@@ -4,11 +4,18 @@
 
 ## 文件
 
+- `app-server-transport.ts`：用平台无关的本机 App Server 端点描述选择 Transport；Unix 保留原生
+  WebSocket UDS，Windows 使用官方 Proxy 字节桥接。
+- `codex-process.ts`：定义由组合根注入 Transport 的 Codex 子进程调用与终止形状，使 Windows batch
+  shim 解析及精确 PID 树终止留在共享 Runtime，Codex Client 不反向依赖部署基础设施。
 - `index.ts`：本模块的公开导出入口。
 - `transport.ts`：Transport 接口和公共生命周期基类。
 - `unix-websocket-transport.ts`：连接前校验当前用户私有的父目录和本人所有的真实 Unix Socket，
   再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
   128 MiB 边界一致，避免大型 Thread 恢复响应被客户端提前断开，同时保留有界内存约束。
+- `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
+  子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，关闭 Gateway
+  Client 时只终止对应 Proxy，不终止独立 App Server。
 - `stdio-transport.ts`：用于受控开发和测试场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间

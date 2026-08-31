@@ -1,8 +1,9 @@
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 import {
   ScheduledTaskApplicationService,
@@ -302,7 +303,7 @@ function createService(
 } {
   const directory = mkdtempSync(join(tmpdir(), "codexc-scheduled-application-"));
   directories.push(directory);
-  chmodSync(directory, 0o700);
+  secureTestDirectory(directory);
   const store = new SqliteScheduledTaskStore(join(directory, "scheduled.sqlite3"));
   const runTaskNow = vi.fn<ScheduledTaskApplicationPort["runTaskNow"]>(async (taskId) =>
     store.claimManual(taskId, now + 2).run

@@ -18,6 +18,10 @@ describe("service target catalog", () => {
       "com.hegenai.codex-gateway",
       "com.hegenai.codex-app-server",
     ]);
+    expect(serviceIdentifiers("windows", "all", "start")).toEqual([
+      "Codex Connect App Server",
+      "Codex Connect Gateway",
+    ]);
   });
 
   it("owns public defaults and App Server inclusion semantics", () => {

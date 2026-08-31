@@ -17,6 +17,7 @@
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
   交互终端使用不同颜色并汇总结果；`--json` 输出全部脱敏检查、分类计数与健康状态；Linux 缺少
   `bubblewrap` 时输出安装建议，不改写配置。
+- `security repair`：逐个修复 Windows Codex TOML 配置文件 ACL，不修改沙箱目录权限；Unix 平台提示无需处理。
 - `start`：在前台复用内部 `service-app-server` 监管入口启动 App Server、Provider 统计代理与
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
@@ -52,7 +53,9 @@
   `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务；`status --json`
-  把 macOS launchd 与 Linux systemd 归一为同一状态结构，服务异常时仍输出可解析 JSON 并返回非零状态。
+  把 macOS launchd、Linux systemd 与 Windows 用户级计划任务归一为同一状态结构，服务异常时仍输出
+  可解析 JSON 并返回非零状态。Windows 由隐藏的 PowerShell 7 启动器和当前 SID 私有 IPC 管理，无需
+  管理员权限，登录当前用户后启动。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一非主动释放的受监管组件异常

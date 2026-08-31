@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
+
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
 const packageName = "@hegenai/codexc";
 
@@ -8,13 +10,12 @@ export function inferNpmGlobalPrefix(packageDirectory) {
   const scopeDirectory = dirname(packageDirectory);
   const nodeModulesDirectory = dirname(scopeDirectory);
   const libraryDirectory = dirname(nodeModulesDirectory);
-  const prefix = dirname(libraryDirectory);
-  if (
-    packageDirectory !== join(scopeDirectory, "codexc")
+  const prefix = process.platform === "win32" && basename(libraryDirectory).toLowerCase() !== "lib"
+    ? libraryDirectory
+    : dirname(libraryDirectory);
+  if (packageDirectory !== join(scopeDirectory, "codexc")
     || scopeDirectory !== join(nodeModulesDirectory, "@hegenai")
-    || nodeModulesDirectory !== join(libraryDirectory, "node_modules")
-    || libraryDirectory !== join(prefix, "lib")
-  ) {
+    || nodeModulesDirectory !== join(libraryDirectory, "node_modules")) {
     return undefined;
   }
   const manifest = join(packageDirectory, "package.json");
@@ -61,9 +62,15 @@ export function recordManagedSourceMetadata(
 }
 
 export function currentNpmGlobalPrefix(environment = process.env) {
-  const result = spawnSync("npm", ["prefix", "--global"], {
+  const invocation = resolveExecutableInvocation(
+    "npm",
+    ["prefix", "--global"],
+    environment,
+  );
+  const result = spawnSync(invocation.file, invocation.args, {
     env: environment,
     encoding: "utf8",
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error) throw result.error;
   const prefix = result.stdout.trim();

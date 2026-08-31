@@ -130,7 +130,8 @@
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
 - `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
-  发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；目录权限 `0700`，只接受
+  发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows
+  使用当前 SID 私有 ACL，并在启动时收紧既有受管文件；只接受
   pending 目录内的绝对图片路径。
 
 业务状态和平台逻辑应留在对应模块，只有具体实现选择、交互端口注册与生命周期协调放在这里。
