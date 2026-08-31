@@ -538,12 +538,14 @@ async function removeStaleSupervisorSocket(socketPath) {
   if (
     !status.isSocket()
     || status.uid !== process.getuid?.()
-    || (status.mode & 0o077) !== 0
   ) {
     throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
   }
   if (await unixSocketAcceptsConnections(socketPath)) {
     throw new Error("Codex App Server 统一监管入口已在运行");
+  }
+  if ((status.mode & 0o077) !== 0) {
+    throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
   }
   const current = lstatSync(socketPath, { throwIfNoEntry: false });
   if (current?.dev === status.dev && current.ino === status.ino) {

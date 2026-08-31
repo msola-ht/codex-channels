@@ -56,6 +56,7 @@ export function inspectManagedServiceStatus({
  */
 export async function inspectManagedServiceHealth(options = {}) {
   const status = inspectManagedServiceStatus(options);
+  if (status.platform !== "windows") return status;
   let configDocument;
   const environment = options.environment ?? process.env;
   const paths = runtimeConfig(environment);

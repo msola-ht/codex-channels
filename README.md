@@ -354,8 +354,9 @@ codexc metrics cleanup --keep-days 90 --restart-gateway # 备份并按自定策�
 
 脚本还可使用 `codexc agents status --json` 查看共享第三方子代理状态，使用
 `codexc center info --json` 查看不含令牌内容的指标中心运行与端点信息，使用
-`codexc service status [目标] --json` 获取 macOS launchd、Linux systemd 或 Windows 计划任务的统一服务状态，使用
-其中 `processAlive` 表示受管进程仍有有效 PID，`rpcReachable` 表示 Gateway/App Server 协议端点可达，`healthy` 只有在服务运行且核心协议可达时才为 `true`；
+`codexc service status [目标] --json` 获取 macOS launchd、Linux systemd 或 Windows 计划任务的统一基础服务状态。
+Windows 计划任务状态额外使用 `processAlive` 表示受管进程仍有有效 PID，使用 `rpcReachable`
+表示 Gateway/App Server 协议端点可达；其 `healthy` 只有在服务运行且核心协议可达时才为 `true`。
 `codexc doctor --json` 获取完整的脱敏诊断检查结果，使用 `codexc rules check --json` 获取项目规则
 校验结果，使用 `codexc config --json` 获取配置路径与文件存在状态。
 

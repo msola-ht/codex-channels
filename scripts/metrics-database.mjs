@@ -796,13 +796,17 @@ function isGatewayRunning(environment) {
 
 function metricsSocketIsActive(socketPath) {
   if (!existsSync(socketPath)) return false;
+  const connectionSource = process.platform === "win32"
+    ? `const { createPrivateIpcConnection } = await import(process.argv[2]);
+const socket = createPrivateIpcConnection(process.argv[1]);`
+    : `const { createConnection } = await import("node:net");
+const socket = createConnection(process.argv[1]);`;
   const result = spawnSync(
     process.execPath,
     [
       "--input-type=module",
       "--eval",
-      `const { createPrivateIpcConnection } = await import(process.argv[2]);
-const socket = createPrivateIpcConnection(process.argv[1]);
+      `${connectionSource}
 let settled = false;
 const finish = (code) => {
   if (settled) return;

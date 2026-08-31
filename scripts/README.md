@@ -493,8 +493,9 @@
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
   控制脚本，避免 Shell 维护第二份服务标识。
-- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性或 launchd Job 字段生成统一、无配置
-  依赖的 JSON 服务状态；目标异常时保留可解析输出并返回非零状态，查询器故障则失败关闭。
+- `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性、launchd Job 字段或 Windows 计划任务
+  生成统一基础 JSON 服务状态；Windows 额外核对受管进程和核心 RPC 端点。目标异常时保留可解析输出
+  并返回非零状态，查询器故障则失败关闭。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；

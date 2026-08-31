@@ -56,7 +56,9 @@ export function readPrivateFileSync(
 export function writePrivateFileAtomicSync(path, content) {
   const parent = dirname(path);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
-  securePrivateDirectorySync(parent);
+  if (process.platform === "win32") {
+    securePrivateDirectorySync(parent);
+  }
   const temporaryPath = privateTemporaryPath(path);
   try {
     writeFileSync(temporaryPath, content, { mode: 0o600, flag: "wx" });
@@ -71,7 +73,9 @@ export function writePrivateFileAtomicSync(path, content) {
 export async function writePrivateFileAtomic(path, content) {
   const parent = dirname(path);
   await mkdir(parent, { recursive: true, mode: 0o700 });
-  securePrivateDirectorySync(parent);
+  if (process.platform === "win32") {
+    securePrivateDirectorySync(parent);
+  }
   const temporaryPath = privateTemporaryPath(path);
   try {
     await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx" });
