@@ -55,6 +55,12 @@ export function executableInvocation(
   environment = process.env,
 ) {
   if (
+    process.platform === "win32"
+    && [".cjs", ".js", ".mjs"].includes(extname(executable).toLowerCase())
+  ) {
+    return { file: process.execPath, args: [executable, ...args], windowsVerbatimArguments: false };
+  }
+  if (
     process.platform !== "win32"
     || ![".bat", ".cmd"].includes(extname(executable).toLowerCase())
   ) {
