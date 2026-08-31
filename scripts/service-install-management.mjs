@@ -297,7 +297,16 @@ function writeDefinitions(plan, options) {
     securePrivateDirectorySync(plan.destinationDirectory);
   }
   const writer = options.writeDefinition ?? writePrivateFileAtomicSync;
-  for (const file of plan.files) writer(file.destination, file.content);
+  for (const file of plan.files) {
+    writer(file.destination, file.content);
+    if (plan.serviceManager === "windows" && !options.writeDefinition) {
+      const definition = JSON.parse(file.content);
+      writer(
+        definition.vbsLauncherPath,
+        renderWindowsVbsLauncher(file.destination, definition),
+      );
+    }
+  }
 }
 
 function defaultPreflight(plan, environment, options) {
@@ -359,6 +368,7 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
     displayName: service.displayName,
     description: `${service.displayName} background service for Codex Connect`,
     taskName: identifier,
+    vbsLauncherPath: join(context.runtime.dataDir, "services", `${service.target}.vbs`),
     pwshBinary: context.pwshBinary,
     launcherPath: join(projectDir, "scripts", "windows-service-launcher.ps1"),
     nodeBinary: context.nodeBinary,
@@ -379,6 +389,33 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
     stdoutLog: join(context.runtimeDir, `${logBase}.log`),
     stderrLog: join(context.runtimeDir, `${logBase}.error.log`),
   }, null, 2)}\n`;
+}
+
+function renderWindowsVbsLauncher(definitionPath, definition) {
+  const quoteWindowsArgument = (value) => `"${String(value).replaceAll('"', '\\"')}"`;
+  const command = [
+    quoteWindowsArgument(definition.pwshBinary),
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-WindowStyle",
+    "Hidden",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    quoteWindowsArgument(definition.launcherPath),
+    "-DefinitionPath",
+    quoteWindowsArgument(definitionPath),
+  ].join(" ");
+  const vbsLiteral = (value) => `"${String(value).replaceAll('"', '""')}"`;
+  return [
+    "Option Explicit",
+    "Dim shell, exitCode",
+    "Set shell = CreateObject(\"WScript.Shell\")",
+    `exitCode = shell.Run(${vbsLiteral(command)}, 0, True)`,
+    "WScript.Quit exitCode",
+    "",
+  ].join("\r\n");
 }
 
 function renderSystemdTemplate(template, context) {

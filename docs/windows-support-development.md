@@ -718,7 +718,8 @@ CLI 成功通过参数与配置解析并进入 TUI；随后只因探针刻意指
 #### 第二十九轮实机记录：2026-08-30
 
 本轮选定 Windows 当前用户计划任务作为首期后台方案：四个固定任务在用户登录后以 Limited 权限启动，
-不要求管理员权限，也不隐式退回启动文件夹。隐藏 PowerShell 7 启动器运行独立 Node 服务宿主；服务宿主
+不要求管理员权限，也不隐式退回启动文件夹。计划任务通过 `wscript.exe //B //NoLogo` 调用受管 VBS，
+由 VBS 隐藏启动 PowerShell 7 启动器运行独立 Node 服务宿主；服务宿主
 通过当前 SID 私有 IPC 提供状态、Gateway 热加载和正常停止，超时才终止其精确子进程树。App Server、
 Gateway、WebUI 与指标中心继续使用既有目标、核心范围和启停顺序，任务定义与日志位于用户数据目录。
 
@@ -862,10 +863,11 @@ Gateway 均为 `running` 且 `healthy: true`；WebUI 与指标中心未自动启
 `windows-service-host.mjs`、`bin/codexc.mjs gateway` 和 `dist/main.js` 是 Gateway 的正常宿主、
 入口与子进程链，不表示重复 Gateway；当前重启后仅出现两个核心服务窗口。
 
-计划任务 XML 复核（2026-08-30）：App Server 与 Gateway 的 `LogonTrigger` 均实际写入
-`<Delay>PT1M</Delay>`，动作使用 PowerShell `-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden`；
-WebUI 与指标中心状态为 `Ready`、触发方式为 `On demand only`。重启后的实机观察与 XML 配置一致，
-当前仅出现两个核心服务窗口。
+计划任务 XML 复核（2026-08-30）：App Server 与 Gateway 的 `LogonTrigger` 分别写入
+`<Delay>PT1M</Delay>` 与 `<Delay>PT2M</Delay>`，动作统一使用 `wscript.exe //B //NoLogo` 调用
+受管 VBS 隐藏启动器；VBS 再以隐藏窗口启动 PowerShell 服务启动器。WebUI 与指标中心状态为
+`Ready`、触发方式为 `On demand only`。重启后的实机观察与 XML 配置一致；任务动作已改为后台
+`wscript.exe //B //NoLogo`，不再为服务启动显示 PowerShell 或 CMD 窗口。
 
 Windows 私有目录复核（2026-08-30）：对既有 `data/uploads` 媒体暂存目录重新应用当前用户、SYSTEM
 和 Administrators 私有 ACL 后，`codexc doctor` 通过媒体目录检查；当前诊断为 20 项通过、10 项提示，

@@ -23,10 +23,12 @@ switch ($Action) {
       throw '注册计划任务时必须提供服务定义路径'
     }
     $definition = Get-Content -LiteralPath $DefinitionPath -Raw -Encoding utf8 | ConvertFrom-Json
-    $quotedLauncher = '"' + $definition.launcherPath.Replace('"', '\"') + '"'
-    $quotedDefinition = '"' + $DefinitionPath.Replace('"', '\"') + '"'
-    $arguments = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $quotedLauncher -DefinitionPath $quotedDefinition"
-    $taskAction = New-ScheduledTaskAction -Execute $definition.pwshBinary -Argument $arguments
+    if (-not $definition.vbsLauncherPath) {
+      throw '服务定义缺少隐藏启动器路径；请运行 codexc service install'
+    }
+    $quotedVbsLauncher = '"' + $definition.vbsLauncherPath.Replace('"', '\"') + '"'
+    $wscriptBinary = Join-Path $env:SystemRoot 'System32\wscript.exe'
+    $taskAction = New-ScheduledTaskAction -Execute $wscriptBinary -Argument "//B //NoLogo $quotedVbsLauncher"
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $autoStart = if ($null -eq $definition.autoStart) {
       $definition.target -in @('app-server', 'gateway')

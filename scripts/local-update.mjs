@@ -531,12 +531,25 @@ export async function waitForCoreServiceTarget(
   while (now() < deadline) {
     let appServerReady = true;
     if (requiresAppServer) {
-      const supervisor = await inspectSupervisor(descriptor.primarySocketPath);
-      const primarySocketHealthy = await socketHealthy(descriptor.primarySocketPath);
+      let supervisor;
+      let primarySocketHealthy = false;
+      try {
+        supervisor = await inspectSupervisor(descriptor.primarySocketPath);
+        primarySocketHealthy = await socketHealthy(descriptor.primarySocketPath);
+      } catch {
+        // Windows IPC descriptors can be briefly absent or mid-write while the service starts.
+      }
       appServerReady = sameAppServerTopology(supervisor, descriptor.topology)
         && primarySocketHealthy;
     }
-    const gatewayReady = !requiresGateway || await gatewayHealthy(configPath);
+    let gatewayReady = !requiresGateway;
+    if (requiresGateway) {
+      try {
+        gatewayReady = await gatewayHealthy(configPath);
+      } catch {
+        // Treat a transient Windows owner descriptor rewrite as not ready yet.
+      }
+    }
     const healthy = appServerReady && gatewayReady;
     if (healthy) {
       healthySince ??= now();

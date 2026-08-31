@@ -75,7 +75,13 @@ export async function controlWindowsServices({
       await stopDefinition(definition, definitionsDirectory, environment);
       runTaskPrimitive("unregister", definition.windows, environment);
       const file = definitionPath(definitionsDirectory, definition.target);
-      if (existsSync(file)) unlinkSync(file);
+      if (existsSync(file)) {
+        const value = readDefinition(file);
+        if (value.vbsLauncherPath && existsSync(value.vbsLauncherPath)) {
+          unlinkSync(value.vbsLauncherPath);
+        }
+        unlinkSync(file);
+      }
     }
     writeCliMessage("success", "Codex App Server、Gateway、WebUI 与指标中心 Windows 计划任务已卸载。");
     writeCliMessage("note", "用户配置与运行数据保留在 CODEX_CONNECT_HOME。");
