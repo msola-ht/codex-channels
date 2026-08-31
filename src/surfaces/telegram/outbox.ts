@@ -128,7 +128,8 @@ export class TelegramOutbox {
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly planProgress = new TurnPlanProgressState();
   private readonly reasoningMessages = new Map<string, TelegramReasoningMessage>();
-  private readonly executionTurns = new Set<string>();
+  private readonly activeOperations = new Set<string>();
+  private readonly reasoningGenerations = new Map<string, number>();
   private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
   private readonly delivery: ConversationDeliveryQueue;
@@ -220,10 +221,13 @@ export class TelegramOutbox {
         if (this.options.reasoningEnabled === false) {
           return;
         }
-        if (this.executionTurns.has(this.turnKey(event.threadId, event.turnId))) {
+        if (this.hasActiveOperation(event.threadId, event.turnId)) {
           return;
         }
-        this.deliverReasoning(event);
+        this.deliverReasoning(
+          event,
+          this.reasoningGenerations.get(this.turnKey(event.threadId, event.turnId)) ?? 0,
+        );
         return;
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
@@ -313,7 +317,13 @@ export class TelegramOutbox {
       case "operation.updated": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
         if (isExecutionOperation(event.operation)) {
-          this.executionTurns.add(turnKey);
+          const operationKey = this.operationKey(turnKey, event.operation.itemId);
+          if (event.operation.status === "running") {
+            this.activeOperations.add(operationKey);
+            this.reasoningGenerations.set(turnKey, (this.reasoningGenerations.get(turnKey) ?? 0) + 1);
+          } else {
+            this.activeOperations.delete(operationKey);
+          }
           this.reasoningMessages.delete(event.threadId);
         }
         let streamFlushed = false;
@@ -662,7 +672,8 @@ export class TelegramOutbox {
     this.operationUpdates.clear();
     this.planProgress.clear();
     this.reasoningMessages.clear();
-    this.executionTurns.clear();
+    this.activeOperations.clear();
+    this.reasoningGenerations.clear();
     this.replyTargets.clear();
     this.approvalOperations.clear();
     this.notifiedTurns.clear();
@@ -1132,26 +1143,29 @@ export class TelegramOutbox {
 
   private deliverReasoning(
     event: Extract<OutputEvent, { type: "turn.reasoning" }>,
+    generation: number,
   ): void {
     const chatId = event.target.conversationId;
     const text = renderTelegramLifecyclePresentation(
       createTurnReasoningPresentation(
         event.background ? event.threadId : undefined,
         event.elapsedMs,
+        event.final === true,
       ),
     );
     const editText = formatTelegramPanelChunks(text)[0] ?? text;
     const existing = this.reasoningMessages.get(event.threadId);
     if (existing !== undefined && existing.turnId !== event.turnId) {
       this.reasoningMessages.delete(event.threadId);
-      this.deliverReasoning(event);
+      this.deliverReasoning(event, generation);
       return;
     }
     if (existing === undefined) {
       if (event.final === true) {
         this.enqueue(
           chatId,
-          (signal) => this.executionTurns.has(this.turnKey(event.threadId, event.turnId))
+          (signal) => (this.reasoningGenerations.get(this.turnKey(event.threadId, event.turnId)) ?? 0) !== generation
+            || this.hasActiveOperation(event.threadId, event.turnId)
             ? Promise.resolve()
             : this.sendPanel(chatId, text, undefined, false, signal).then(() => undefined),
           true,
@@ -1167,7 +1181,8 @@ export class TelegramOutbox {
       this.enqueue(
         chatId,
         async (signal) => {
-          if (this.executionTurns.has(this.turnKey(event.threadId, event.turnId))) {
+          if ((this.reasoningGenerations.get(this.turnKey(event.threadId, event.turnId)) ?? 0) !== generation
+            || this.hasActiveOperation(event.threadId, event.turnId)) {
             if (this.reasoningMessages.get(event.threadId) === state) {
               this.reasoningMessages.delete(event.threadId);
             }
@@ -1185,7 +1200,8 @@ export class TelegramOutbox {
     this.enqueue(
       chatId,
       async (signal) => {
-        if (this.executionTurns.has(this.turnKey(event.threadId, event.turnId))) {
+        if ((this.reasoningGenerations.get(this.turnKey(event.threadId, event.turnId)) ?? 0) !== generation
+          || this.hasActiveOperation(event.threadId, event.turnId)) {
           return;
         }
         if (existing.messageId === undefined) {
@@ -1222,10 +1238,18 @@ export class TelegramOutbox {
     return `${threadId}:${turnId}`;
   }
 
+  private hasActiveOperation(threadId: string, turnId: string): boolean {
+    const prefix = `${this.turnKey(threadId, turnId)}:`;
+    return [...this.activeOperations].some((key) => key.startsWith(prefix));
+  }
+
   private clearExecutionTurns(threadId: string): void {
     const prefix = `${threadId}:`;
-    for (const key of this.executionTurns) {
-      if (key.startsWith(prefix)) this.executionTurns.delete(key);
+    for (const key of this.activeOperations) {
+      if (key.startsWith(prefix)) this.activeOperations.delete(key);
+    }
+    for (const key of this.reasoningGenerations.keys()) {
+      if (key.startsWith(prefix)) this.reasoningGenerations.delete(key);
     }
   }
 

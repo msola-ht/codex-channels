@@ -159,7 +159,7 @@ describe("Telegram command renderer", () => {
       },
     );
 
-    expect(reply).toHaveBeenCalledWith("## 已请求停止当前任务。");
+    expect(reply).toHaveBeenCalledWith("已请求停止当前任务。");
   });
 
   it("confirms a native Queue write and its persistence", async () => {

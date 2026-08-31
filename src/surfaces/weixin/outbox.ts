@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
 
 import type {
   DisplayPriceCurrency,
@@ -118,7 +119,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly operationUpdates =
     new OperationUpdateBuffer<ConversationTarget>();
-  private readonly executionTurns = new Set<string>();
+  private readonly activeOperations = new Set<string>();
+  private readonly pendingApprovalOperations = new Set<string>();
+  private readonly reasoningGenerations = new Map<string, number>();
   private readonly planProgress = new TurnPlanProgressState();
   private readonly accountId: string;
   private closed = false;
@@ -174,15 +177,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
       if (this.options.reasoningEnabled === false) {
         return;
       }
-      if (this.executionTurns.has(turnKey(event.threadId, event.turnId))) {
+      if (this.hasActiveOperation(event.threadId, event.turnId)) {
         return;
       }
       if (event.final !== true) {
         return;
       }
+      const generation = this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0;
       this.delivery.enqueue(
         event.target.conversationId,
-        (signal) => this.executionTurns.has(turnKey(event.threadId, event.turnId))
+        (signal) => (this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0) !== generation
+          || this.hasActiveOperation(event.threadId, event.turnId)
           ? Promise.resolve()
           : this.send(
             event.target,
@@ -190,6 +195,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
               createTurnReasoningPresentation(
                 event.background ? event.threadId : undefined,
                 event.elapsedMs,
+                true,
               ),
             ), maximumChunks, signal,
           ),
@@ -199,7 +205,15 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     if (event.type === "operation.updated") {
       if (isExecutionOperation(event.operation)) {
-        this.executionTurns.add(turnKey(event.threadId, event.turnId));
+        const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
+        const turn = turnKey(event.threadId, event.turnId);
+        if (event.operation.status === "running") {
+          if (this.pendingApprovalOperations.has(key)) return;
+          this.activeOperations.add(key);
+          this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
+        } else {
+          this.activeOperations.delete(key);
+        }
       }
       const imagePath = event.operation.imagePath;
       if (
@@ -214,8 +228,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       }
       if (
-        event.operation.status === "running"
-        || !shouldDisplayOperation(
+        !shouldDisplayOperation(
           event.operation,
           this.options.operationUpdateDisplay ?? "full",
         )
@@ -331,7 +344,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
     await this.options.typing?.close();
     await this.delivery.close();
     this.operationUpdates.clear();
-    this.executionTurns.clear();
+    this.activeOperations.clear();
+    this.reasoningGenerations.clear();
     this.planProgress.clear();
     this.contexts.clear();
   }
@@ -646,9 +660,34 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private clearExecutionTurns(threadId: string): void {
     const prefix = `${threadId}\u0000`;
-    for (const key of this.executionTurns) {
-      if (key.startsWith(prefix)) this.executionTurns.delete(key);
+    for (const key of this.activeOperations) {
+      if (key.startsWith(prefix)) this.activeOperations.delete(key);
     }
+    for (const key of this.reasoningGenerations.keys()) {
+      if (key.startsWith(prefix)) this.reasoningGenerations.delete(key);
+    }
+  }
+
+  private operationKey(threadId: string, turnId: string, itemId: string): string {
+    return `${turnKey(threadId, turnId)}\u0000${itemId}`;
+  }
+
+  prepareInteraction(request: InteractionRequest): void {
+    if (request.type === "approval") {
+      this.pendingApprovalOperations.add(this.operationKey(request.threadId, request.turnId, request.itemId));
+    }
+  }
+
+  finishInteraction(request: InteractionRequest, decision: InteractionDecision): void {
+    void decision;
+    if (request.type === "approval") {
+      this.pendingApprovalOperations.delete(this.operationKey(request.threadId, request.turnId, request.itemId));
+    }
+  }
+
+  private hasActiveOperation(threadId: string, turnId: string): boolean {
+    const prefix = `${turnKey(threadId, turnId)}\u0000`;
+    return [...this.activeOperations].some((key) => key.startsWith(prefix));
   }
 
 }

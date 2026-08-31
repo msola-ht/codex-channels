@@ -144,6 +144,43 @@ describe("Feishu outbox streaming lifecycle", () => {
     expect(created).toEqual([]);
   });
 
+  it("seals an already-created reasoning card without emitting an intermediate operation card", async () => {
+    const finished: string[] = [];
+    const operations: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          operations.push(markdown);
+        },
+        createStreamingCard: async () => ({ cardId: "reasoning", messageId: "reasoning-message" }),
+        finishStreamingCard: async (_cardId, _sequence, summary) => {
+          finished.push(summary);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 1_000,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await outbox.handle(operationUpdated("running"));
+    await outbox.close();
+
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toContain("思考中");
+    expect(operations).toHaveLength(0);
+  });
+
   it("does not append a working footer to active Turn output", async () => {
     vi.useFakeTimers();
     const created: string[] = [];

@@ -119,7 +119,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "思考中…\n\n耗时：15秒",
+      "思考完成\n\n耗时：15秒",
     ]);
   });
 
@@ -176,6 +176,43 @@ describe("WeixinOutbox", () => {
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "已开始处理。",
+      expect.stringContaining("运行命令 · 运行中"),
+    ]);
+  });
+
+  it("shows a new reasoning status after an operation completes", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle(turnStarted());
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 1_000,
+      final: true,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    outbox.handle(operationUpdated("running"));
+    outbox.handle(operationUpdated("completed"));
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      summary: "",
+      elapsedMs: 2_000,
+      final: true,
+    });
+    await outbox.close();
+
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      "已开始处理。",
+      "思考完成\n\n耗时：1秒",
+      expect.stringContaining("运行命令 · 运行中"),
+      expect.stringContaining("运行命令 · 已完成"),
+      "思考完成\n\n耗时：2秒",
     ]);
   });
 
@@ -552,6 +589,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+      expect.stringContaining("运行命令 · 运行中"),
       "运行命令 · 已完成 · exit 0\n\n"
       + "具体内容：\n\n"
       + "git status --short\n\n"

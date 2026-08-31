@@ -28,6 +28,7 @@ import type {
   SurfaceOutputPort,
 } from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
 import { FeishuMessageError } from "./client.js";
 import {
   formatFeishuOperation,
@@ -96,6 +97,7 @@ interface FeishuReasoningCard {
   turnId: string;
   cardId?: string;
   sequence: number;
+  lastText?: string;
 }
 
 export interface FeishuMessagePort {
@@ -168,7 +170,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly streams = new Map<string, FeishuStreamState>();
   private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
   private readonly reasoningCards = new Map<string, FeishuReasoningCard>();
-  private readonly executionTurns = new Set<string>();
+  private readonly activeOperations = new Set<string>();
+  private readonly reasoningGenerations = new Map<string, number>();
+  private readonly operationDisplays = new Map<string, string>();
+  private readonly pendingApprovalOperations = new Set<string>();
+  private readonly heldApprovalOperations = new Map<string, Extract<OutputEvent, { type: "operation.updated" }>['operation']>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly replyTargets = new TurnReplyTargets<string>();
   private streamCapacityWarningIssued = false;
@@ -210,7 +216,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       if (this.options.reasoningEnabled === false) {
         return;
       }
-      if (this.executionTurns.has(turnKey(event.threadId, event.turnId))) {
+      if (this.hasActiveOperation(event.threadId, event.turnId)) {
         return;
       }
       this.logger.debug(
@@ -223,7 +229,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
         },
         "飞书收到思考状态事件",
       );
-      this.deliverReasoning(event);
+      this.deliverReasoning(
+        event,
+        this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0,
+      );
       return;
     }
     if (event.type === "text.completed") {
@@ -235,8 +244,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "operation.updated") {
       if (isExecutionOperation(event.operation)) {
-        this.executionTurns.add(turnKey(event.threadId, event.turnId));
-        this.reasoningCards.delete(event.threadId);
+        const turn = turnKey(event.threadId, event.turnId);
+        const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
+        if (event.operation.status === "running") {
+          this.activeOperations.add(key);
+          this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
+          this.sealReasoningCard(event.threadId, event.turnId);
+        } else {
+          this.activeOperations.delete(key);
+        }
       }
       let streamFlushed = false;
       const flushStreamBeforeOutput = (): void => {
@@ -280,41 +296,32 @@ export class FeishuOutbox implements SurfaceOutputPort {
         );
         this.delivery.enqueue(
           event.target.conversationId,
-          (signal) => this.sendMarkdown(
-            event.target.conversationId,
-            markdown,
-            maximumFeishuMessageChunks,
-            undefined,
-            undefined,
-            signal,
-          ),
+          (signal) => this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal),
           true,
         );
         return;
       }
       if (
-        this.operationUpdates.accept(event, event.target.conversationId)
+        event.operation.status !== "running"
+        && this.operationUpdates.accept(event, event.target.conversationId)
       ) {
         return;
       }
-      if (event.operation.status !== "running") {
+      if (event.operation.status === "running") {
+        const operationKey = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
+        if (this.pendingApprovalOperations.has(operationKey)) {
+          this.heldApprovalOperations.set(operationKey, event.operation);
+          return;
+        }
+        return;
+      } else {
+        if (event.operation.kind === "command") {
+          flushStreamBeforeOutput();
+        }
         flushStreamBeforeOutput();
-        const markdown = formatFeishuOperation(
-          event.operation,
-          this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
-        );
-        this.delivery.enqueue(
-          event.target.conversationId,
-          (signal) => this.sendMarkdown(
-            event.target.conversationId,
-            markdown,
-            maximumFeishuMessageChunks,
-            undefined,
-            undefined,
-            signal,
-          ),
-          true,
-        );
+        const markdown = formatFeishuOperation(event.operation, this.options.operationUpdateDisplay === "compact" ? "compact" : "full");
+        if (!this.acceptOperationDisplay(event, markdown)) return;
+        this.delivery.enqueue(event.target.conversationId, (signal) => this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal), true);
       }
       return;
     }
@@ -418,6 +425,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
 
   private deliverReasoning(
     event: Extract<OutputEvent, { type: "turn.reasoning" }>,
+    generation: number,
   ): void {
     const rendered = renderFeishuOutput(
       event,
@@ -432,14 +440,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const existing = this.reasoningCards.get(event.threadId);
     if (existing !== undefined && existing.turnId !== event.turnId) {
       this.reasoningCards.delete(event.threadId);
-      this.deliverReasoning(event);
+      this.deliverReasoning(event, generation);
       return;
     }
     if (existing === undefined) {
       if (event.final === true) {
         this.delivery.enqueue(
           chatId,
-          (signal) => this.executionTurns.has(turnKey(event.threadId, event.turnId))
+          (signal) => (this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0) !== generation
+            || this.hasActiveOperation(event.threadId, event.turnId)
             ? Promise.resolve()
             : this.sendMarkdown(chatId, rendered, maximumFeishuMessageChunks, undefined, undefined, signal),
           true,
@@ -456,7 +465,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
       this.delivery.enqueue(
         chatId,
         async (signal) => {
-          if (this.executionTurns.has(turnKey(event.threadId, event.turnId))) {
+          if ((this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0) !== generation
+            || this.hasActiveOperation(event.threadId, event.turnId)) {
             if (this.reasoningCards.get(event.threadId) === state) {
               this.reasoningCards.delete(event.threadId);
             }
@@ -465,6 +475,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           try {
             const created = await this.messagePort.createStreamingCard(chatId, rendered, signal);
             state.cardId = created.cardId;
+            state.lastText = rendered;
             this.logger.info(
               {
                 component: "Feishu",
@@ -501,7 +512,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.delivery.enqueue(
       chatId,
       async (signal) => {
-        if (this.executionTurns.has(turnKey(event.threadId, event.turnId))) {
+        if ((this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0) !== generation
+          || this.hasActiveOperation(event.threadId, event.turnId)) {
           return;
         }
         if (existing.cardId === undefined) {
@@ -512,6 +524,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           return;
         }
         existing.sequence += 1;
+        existing.lastText = rendered;
         try {
           if (event.final === true) {
             await this.messagePort.updateStreamingCard(
@@ -714,7 +727,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.streams.clear();
     this.finishedStreams.clear();
     this.reasoningCards.clear();
-    this.executionTurns.clear();
+    this.activeOperations.clear();
+    this.reasoningGenerations.clear();
+    this.operationDisplays.clear();
+    this.pendingApprovalOperations.clear();
+    this.heldApprovalOperations.clear();
     this.operationUpdates.clear();
     this.replyTargets.clear();
   }
@@ -747,9 +764,81 @@ export class FeishuOutbox implements SurfaceOutputPort {
 
   private clearExecutionTurns(threadId: string): void {
     const prefix = `${threadId}\u0000`;
-    for (const key of this.executionTurns) {
-      if (key.startsWith(prefix)) this.executionTurns.delete(key);
+    for (const key of this.activeOperations) {
+      if (key.startsWith(prefix)) this.activeOperations.delete(key);
     }
+    for (const key of this.reasoningGenerations.keys()) {
+      if (key.startsWith(prefix)) this.reasoningGenerations.delete(key);
+    }
+    for (const key of this.operationDisplays.keys()) {
+      if (key.startsWith(prefix)) this.operationDisplays.delete(key);
+    }
+  }
+
+  private operationKey(threadId: string, turnId: string, itemId: string): string {
+    return `${turnKey(threadId, turnId)}\u0000${itemId}`;
+  }
+
+
+  private acceptOperationDisplay(
+    event: Extract<OutputEvent, { type: "operation.updated" }>,
+    markdown: string,
+  ): boolean {
+    const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
+    if (this.operationDisplays.get(key) === markdown) {
+      return false;
+    }
+    this.operationDisplays.set(key, markdown);
+    return true;
+  }
+
+
+  prepareInteraction(request: InteractionRequest): void {
+    if (request.type !== "approval") return;
+    this.pendingApprovalOperations.add(
+      this.operationKey(request.threadId, request.turnId, request.itemId),
+    );
+  }
+
+  finishInteraction(request: InteractionRequest, decision: InteractionDecision): void {
+    if (request.type !== "approval") return;
+    const key = this.operationKey(request.threadId, request.turnId, request.itemId);
+    this.pendingApprovalOperations.delete(key);
+    const held = this.heldApprovalOperations.get(key);
+    this.heldApprovalOperations.delete(key);
+    if (!held || decision.type !== "approval" || !decision.approved) return;
+    void held;
+  }
+
+
+  private sealReasoningCard(threadId: string, turnId: string): void {
+    const state = this.reasoningCards.get(threadId);
+    if (state === undefined || state.turnId !== turnId) {
+      return;
+    }
+    this.reasoningCards.delete(threadId);
+    if (state.cardId === undefined || state.lastText === undefined) {
+      return;
+    }
+    state.sequence += 1;
+    this.delivery.enqueue(
+      state.chatId,
+      async (signal) => {
+        await this.messagePort.finishStreamingCard(
+          state.cardId!,
+          state.sequence,
+          state.lastText!.replace(/^思考中…/u, "思考完成"),
+          undefined,
+          signal,
+        );
+      },
+      true,
+    );
+  }
+
+  private hasActiveOperation(threadId: string, turnId: string): boolean {
+    const prefix = `${turnKey(threadId, turnId)}\u0000`;
+    return [...this.activeOperations].some((key) => key.startsWith(prefix));
   }
 
   private async sendText(chatId: string, text: string, signal?: AbortSignal): Promise<void> {

@@ -254,7 +254,7 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual(["<b>思考中…</b>"]);
     expect(api.edits).toEqual([
       "<b>思考中…</b>\n\n<b>耗时：</b>3秒",
-      "<b>思考中…</b>\n\n<b>耗时：</b>15秒",
+      "<b>思考完成</b>\n\n<b>耗时：</b>15秒",
     ]);
   });
 

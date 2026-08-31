@@ -64,6 +64,9 @@ describe("shared Surface lifecycle presentation", () => {
     expect(renderPlainLifecyclePresentation(
       createTurnReasoningPresentation(undefined, 500),
     )).toBe("思考中…");
+    expect(renderPlainLifecyclePresentation(
+      createTurnReasoningPresentation(undefined, 500, true),
+    )).toBe("思考完成\n\n耗时：500毫秒");
   });
 
   it("does not warn when at least one official OpenAI route is reachable", () => {

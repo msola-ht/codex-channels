@@ -43,7 +43,7 @@ describe("Feishu output renderer", () => {
       turnId: "turn-1",
       summary: "",
       elapsedMs: 15_000,
-    })).toBe("## 思考中…\n\n---\n**耗时：** 15秒");
+    })).toBe("**思考中…**\n\n---\n**耗时：** 15秒");
   });
 
   it("distinguishes a batch image limit from a single-image limit", () => {

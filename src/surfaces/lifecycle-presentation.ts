@@ -219,13 +219,14 @@ export function createTurnStartedPresentation(
 export function createTurnReasoningPresentation(
   backgroundThreadId?: string,
   elapsedMs?: number,
+  completed = false,
 ): LifecyclePresentation {
   return {
-    title: "思考中…",
+    title: completed ? "思考完成" : "思考中…",
     fields: backgroundThreadId
       ? [{ label: "Session ID", value: backgroundThreadId }]
       : [],
-    ...(elapsedMs === undefined || elapsedMs < 1_000
+    ...(elapsedMs === undefined || (elapsedMs < 1_000 && !completed)
       ? {}
       : { footer: { label: "耗时", value: formatElapsedDuration(elapsedMs) } }),
   };
