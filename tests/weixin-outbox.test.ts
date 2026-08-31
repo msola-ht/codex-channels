@@ -594,7 +594,7 @@ describe("WeixinOutbox", () => {
       actorId,
       contextToken: "context-secret",
       image: Buffer.from("validated-image"),
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("rechecks authorization after reading a generated image", async () => {
