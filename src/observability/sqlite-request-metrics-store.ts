@@ -566,7 +566,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         }
       }
     }
-    return [...groups.values()].sort((a, b) => b.lastObservedAtMs - a.lastObservedAtMs);
+    const periods = [...groups.values()];
+    applyObservedQuotaResetBoundaries(periods);
+    return periods.sort((a, b) => b.lastObservedAtMs - a.lastObservedAtMs);
   }
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
@@ -1406,6 +1408,30 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
 
   private requireOpen(): void {
     if (this.closed) throw new Error("模型请求指标数据库已关闭");
+  }
+}
+
+function applyObservedQuotaResetBoundaries(periods: StoredQuotaPeriod[]): void {
+  const groups = new Map<string, StoredQuotaPeriod[]>();
+  for (const period of periods) {
+    if (period.periodStartAtMs === null) continue;
+    const key = `${period.provider}\u0000${period.windowId}`;
+    const group = groups.get(key) ?? [];
+    group.push(period);
+    groups.set(key, group);
+  }
+  for (const group of groups.values()) {
+    group.sort((left, right) => left.periodStartAtMs! - right.periodStartAtMs!);
+    for (let index = 0; index < group.length - 1; index += 1) {
+      const period = group[index]!;
+      const nextPeriod = group[index + 1]!;
+      const nominalDurationMs = period.periodEndAtMs - period.periodStartAtMs!;
+      const resetOffsetMs = Math.abs(nextPeriod.periodStartAtMs! - period.periodEndAtMs);
+      if (nextPeriod.periodStartAtMs! > period.periodStartAtMs!
+        && resetOffsetMs < nominalDurationMs) {
+        period.periodEndAtMs = nextPeriod.periodStartAtMs!;
+      }
+    }
   }
 }
 

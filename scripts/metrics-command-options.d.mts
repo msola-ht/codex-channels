@@ -24,6 +24,7 @@ export function isMetricsProviderId(
   value: string,
   environment?: NodeJS.ProcessEnv,
 ): boolean;
+export function isPrunableMetricsProviderId(value: string): boolean;
 
 export const metricsCommandUsage: Readonly<Record<
   "run" | "turns" | "threads" | "report" | "export",
