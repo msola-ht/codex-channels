@@ -41,13 +41,13 @@ export interface TelegramInteractionQueue {
     request: InteractionRequest,
     decision: InteractionDecision,
   ): void;
-  runOrdered<T>(chatId: string, run: () => Promise<T>): Promise<T>;
+  runOrdered<T>(chatId: string, run: (signal: AbortSignal) => Promise<T>): Promise<T>;
 }
 
 const directInteractionQueue: TelegramInteractionQueue = {
   prepareInteraction: () => undefined,
   finishInteraction: () => undefined,
-  runOrdered: (_chatId, run) => run(),
+  runOrdered: (_chatId, run) => run(new AbortController().signal),
 };
 
 export class TelegramInteractionPort implements InteractionPort {
@@ -176,7 +176,7 @@ export class TelegramInteractionPort implements InteractionPort {
   ): Promise<Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined> {
     let message: Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined;
     try {
-      message = await this.queue.runOrdered(target.conversationId, async () => {
+      message = await this.queue.runOrdered(target.conversationId, async (signal) => {
         let sent: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
         for (const [index, chunk] of chunks.entries()) {
           const isLast = index === chunks.length - 1;
@@ -185,7 +185,8 @@ export class TelegramInteractionPort implements InteractionPort {
             : { parse_mode: "HTML" as const, disable_notification: true };
           sent = await this.executor.call(
             { chatId: target.conversationId, operation: "sendMessage", critical: true },
-            () => this.bot.api.sendMessage(target.conversationId, chunk, options),
+            (requestSignal) => this.bot.api.sendMessage(target.conversationId, chunk, options, requestSignal as never),
+            signal,
           );
         }
         return sent;
@@ -294,12 +295,15 @@ export class TelegramInteractionPort implements InteractionPort {
       ) {
         await this.queue.runOrdered(
           pending.target.conversationId,
-          () => this.executor.call(
+          (signal) => this.executor.call(
             { chatId: pending.target.conversationId, operation: "sendMessage", critical: true },
-            () => context.reply(
+            (requestSignal) => this.bot.api.sendMessage(
+              pending.target.conversationId,
               "回答不完整或不符合可选值，请按原请求重新回复；发送 /stop 可停止当前请求。",
               { reply_parameters: { message_id: pending.messageId } },
+              requestSignal as never,
             ),
+            signal,
           ),
         );
         return true;
@@ -337,11 +341,15 @@ export class TelegramInteractionPort implements InteractionPort {
       } catch {
         await this.queue.runOrdered(
           pending.target.conversationId,
-          () => this.executor.call(
+          (signal) => this.executor.call(
             { chatId: pending.target.conversationId, operation: "sendMessage", critical: true },
-            () => context.reply("表单必须回复为有效 JSON 对象；发送 /stop 停止当前请求。", {
-              reply_parameters: { message_id: pending.messageId },
-            }),
+            (requestSignal) => this.bot.api.sendMessage(
+              pending.target.conversationId,
+              "表单必须回复为有效 JSON 对象；发送 /stop 停止当前请求。",
+              { reply_parameters: { message_id: pending.messageId } },
+              requestSignal as never,
+            ),
+            signal,
           ),
         );
       }
@@ -659,7 +667,7 @@ export class TelegramInteractionPort implements InteractionPort {
     );
     const message = await this.queue.runOrdered(
       target.conversationId,
-      async () => {
+      async (signal) => {
         let sent: Awaited<ReturnType<typeof this.bot.api.sendMessage>>
           | undefined;
         for (const [index, chunk] of chunks.entries()) {
@@ -670,13 +678,15 @@ export class TelegramInteractionPort implements InteractionPort {
               operation: "sendMessage",
               critical: true,
             },
-            () => this.bot.api.sendMessage(
+            (requestSignal) => this.bot.api.sendMessage(
               target.conversationId,
               chunk,
               isLast
                 ? interactionOptions(request, keyboard)
                 : { parse_mode: "HTML", disable_notification: true },
+              requestSignal as never,
             ),
+            signal,
           );
         }
         return sent;
@@ -741,10 +751,10 @@ export class TelegramInteractionPort implements InteractionPort {
     messageText: string,
     outcome: string,
   ): Promise<void> {
-    return this.queue.runOrdered(target.conversationId, () =>
+    return this.queue.runOrdered(target.conversationId, (signal) =>
       this.executor.call(
         { chatId: target.conversationId, operation: "editMessageText", critical: true },
-        () => this.bot.api.editMessageText(
+        (requestSignal) => this.bot.api.editMessageText(
           target.conversationId,
           messageId,
           `${messageText}\n\n处理结果：${outcome}`,
@@ -752,7 +762,9 @@ export class TelegramInteractionPort implements InteractionPort {
             parse_mode: "HTML",
             reply_markup: { inline_keyboard: [] },
           },
+          requestSignal as never,
         ),
+        signal,
       )
     ).then(() => undefined).catch((error) => {
       this.logger.warn(
