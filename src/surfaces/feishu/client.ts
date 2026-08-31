@@ -270,7 +270,10 @@ export class FeishuMessageClient implements
         options,
         dependencies.sendTimeoutMs,
       );
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       throw new FeishuMessageError(
         "client-create-failed",
         "飞书消息客户端创建失败",
@@ -278,15 +281,15 @@ export class FeishuMessageClient implements
     }
   }
 
-  async sendText(chatId: string, text: string): Promise<void> {
-    await this.sendMessage(chatId, "text", JSON.stringify({ text }));
+  async sendText(chatId: string, text: string, signal?: AbortSignal): Promise<void> {
+    await this.sendMessage(chatId, "text", JSON.stringify({ text }), signal);
   }
 
-  async sendPost(chatId: string, markdown: string): Promise<void> {
+  async sendPost(chatId: string, markdown: string, signal?: AbortSignal): Promise<void> {
     await this.sendMessage(
       chatId,
       "post",
-      encodeFeishuPostContent(markdown),
+      encodeFeishuPostContent(markdown), signal,
     );
   }
 
@@ -294,6 +297,7 @@ export class FeishuMessageClient implements
     chatId: string,
     fileName: string,
     file: Buffer,
+    signal?: AbortSignal,
   ): Promise<void> {
     if (
       !this.sdkClient.createFile
@@ -322,7 +326,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书文件上传超时",
-        ),
+        ), signal,
       );
       const fileKey = response?.file_key ?? response?.data?.file_key;
       if (
@@ -337,9 +341,12 @@ export class FeishuMessageClient implements
       await this.sendMessage(
         chatId,
         "file",
-        JSON.stringify({ file_key: fileKey }),
+        JSON.stringify({ file_key: fileKey }), signal,
       );
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       if (error instanceof FeishuMessageError) {
         throw error;
       }
@@ -356,7 +363,7 @@ export class FeishuMessageClient implements
     }
   }
 
-  async sendImage(chatId: string, image: Buffer): Promise<void> {
+  async sendImage(chatId: string, image: Buffer, signal?: AbortSignal): Promise<void> {
     if (
       !this.sdkClient.createImage
       || image.length === 0
@@ -379,7 +386,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书图片上传超时",
-        ),
+        ), signal,
       );
       const imageKey = response?.image_key ?? response?.data?.image_key;
       if (
@@ -394,9 +401,12 @@ export class FeishuMessageClient implements
       await this.sendMessage(
         chatId,
         "image",
-        JSON.stringify({ image_key: imageKey }),
+        JSON.stringify({ image_key: imageKey }), signal,
       );
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       if (error instanceof FeishuMessageError) {
         throw error;
       }
@@ -413,16 +423,16 @@ export class FeishuMessageClient implements
     }
   }
 
-  async replyPost(messageId: string, markdown: string): Promise<void> {
+  async replyPost(messageId: string, markdown: string, signal?: AbortSignal): Promise<void> {
     await this.replyMessage(
       messageId,
       "post",
-      encodeFeishuPostContent(markdown),
+      encodeFeishuPostContent(markdown), signal,
     );
   }
 
-  async sendMarkdownCard(chatId: string, markdown: string): Promise<string> {
-    const cardId = await this.createMarkdownCard(markdown);
+  async sendMarkdownCard(chatId: string, markdown: string, signal?: AbortSignal): Promise<string> {
+    const cardId = await this.createMarkdownCard(markdown, signal);
     return this.sendMessage(
       chatId,
       "interactive",
@@ -431,15 +441,16 @@ export class FeishuMessageClient implements
         data: {
           card_id: cardId,
         },
-      }),
+      }), signal,
     );
   }
 
   async replyMarkdownCard(
     messageId: string,
     markdown: string,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const cardId = await this.createMarkdownCard(markdown);
+    const cardId = await this.createMarkdownCard(markdown, signal);
     return this.replyMessage(
       messageId,
       "interactive",
@@ -448,15 +459,16 @@ export class FeishuMessageClient implements
         data: {
           card_id: cardId,
         },
-      }),
+      }), signal,
     );
   }
 
   async createStreamingCard(
     chatId: string,
     initialText: string,
+    signal?: AbortSignal,
   ): Promise<{ cardId: string; messageId: string }> {
-    const cardId = await this.createStreamingCardResource(initialText);
+    const cardId = await this.createStreamingCardResource(initialText, signal);
     const messageId = await this.sendMessage(
       chatId,
       "interactive",
@@ -465,7 +477,7 @@ export class FeishuMessageClient implements
         data: {
           card_id: cardId,
         },
-      }),
+      }), signal,
     );
     return { cardId, messageId };
   }
@@ -473,8 +485,9 @@ export class FeishuMessageClient implements
   async createStreamingReplyCard(
     messageId: string,
     initialText: string,
+    signal?: AbortSignal,
   ): Promise<{ cardId: string; messageId: string }> {
-    const cardId = await this.createStreamingCardResource(initialText);
+    const cardId = await this.createStreamingCardResource(initialText, signal);
     const replyMessageId = await this.replyMessage(
       messageId,
       "interactive",
@@ -483,7 +496,7 @@ export class FeishuMessageClient implements
         data: {
           card_id: cardId,
         },
-      }),
+      }), signal,
     );
     return { cardId, messageId: replyMessageId };
   }
@@ -492,6 +505,7 @@ export class FeishuMessageClient implements
     cardId: string,
     content: string,
     sequence: number,
+    signal?: AbortSignal,
   ): Promise<void> {
     if (!this.sdkClient.updateStreamingCard) {
       throw new FeishuMessageError(
@@ -511,7 +525,7 @@ export class FeishuMessageClient implements
           uuid: `c_${cardId}_${sequence}`,
         },
       }),
-      "飞书流式卡片更新",
+      "飞书流式卡片更新", signal,
     );
   }
 
@@ -520,6 +534,7 @@ export class FeishuMessageClient implements
     sequence: number,
     summary: string,
     footer?: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     if (!this.sdkClient.finishStreamingCard) {
       throw new FeishuMessageError(
@@ -571,31 +586,34 @@ export class FeishuMessageClient implements
           uuid: `f_${cardId}_${sequence}`,
         },
       }),
-      "飞书流式卡片结束",
+      "飞书流式卡片结束", signal,
     );
   }
 
   async sendCard(
     chatId: string,
     card: FeishuCardDocument,
+    signal?: AbortSignal,
   ): Promise<string> {
     return this.sendMessage(
       chatId,
       "interactive",
-      JSON.stringify(card),
+      JSON.stringify(card), signal,
     );
   }
 
   async updateCard(
     messageId: string,
     card: FeishuCardDocument,
+    signal?: AbortSignal,
   ): Promise<void> {
-    await this.updateMessage(messageId, JSON.stringify(card));
+    await this.updateMessage(messageId, JSON.stringify(card), signal);
   }
 
   private async updateMessage(
     messageId: string,
     content: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
       const response = await withTimeout(
@@ -611,7 +629,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书消息更新超时",
-        ),
+        ), signal,
       );
       if (response.code !== undefined && response.code !== 0) {
         throw new FeishuMessageError(
@@ -620,6 +638,9 @@ export class FeishuMessageClient implements
         );
       }
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       if (error instanceof FeishuMessageError) {
         throw error;
       }
@@ -639,6 +660,7 @@ export class FeishuMessageClient implements
   private async runStreamingOperation(
     operation: () => Promise<{ code?: number | undefined }>,
     label: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
       const response = await withTimeout(
@@ -647,7 +669,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           `${label}超时`,
-        ),
+        ), signal,
       );
       if (response.code !== undefined && response.code !== 0) {
         if (isFeishuRateLimitCode(response.code)) {
@@ -662,6 +684,9 @@ export class FeishuMessageClient implements
         );
       }
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       if (error instanceof FeishuMessageError) {
         throw error;
       }
@@ -858,6 +883,7 @@ export class FeishuMessageClient implements
 
   private async createStreamingCardResource(
     initialText: string,
+    signal?: AbortSignal,
   ): Promise<string> {
     if (!this.sdkClient.createStreamingCard) {
       throw new FeishuMessageError(
@@ -901,7 +927,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书流式卡片创建超时",
-        ),
+        ), signal,
       );
       const candidate = response.data?.card_id;
       if (
@@ -933,7 +959,7 @@ export class FeishuMessageClient implements
     }
   }
 
-  private async createMarkdownCard(markdown: string): Promise<string> {
+  private async createMarkdownCard(markdown: string, signal?: AbortSignal): Promise<string> {
     if (!this.sdkClient.createStreamingCard) {
       throw new FeishuMessageError(
         "card-create-failed",
@@ -966,7 +992,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书静态卡片创建超时",
-        ),
+        ), signal,
       );
       const candidate = response.data?.card_id;
       if (
@@ -981,7 +1007,10 @@ export class FeishuMessageClient implements
         );
       }
       return candidate;
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       throw new FeishuMessageError(
         "card-create-failed",
         "飞书静态卡片创建失败",
@@ -993,6 +1022,7 @@ export class FeishuMessageClient implements
     messageId: string,
     messageType: "post" | "interactive",
     content: string,
+    signal?: AbortSignal,
   ): Promise<string> {
     if (!isSafeFeishuResourceIdentifier(messageId)) {
       throw new FeishuMessageError(
@@ -1022,7 +1052,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书回复消息发送超时",
-        ),
+        ), signal,
       );
       if (
         typeof response?.data?.message_id !== "string"
@@ -1035,6 +1065,9 @@ export class FeishuMessageClient implements
       }
       return response.data.message_id;
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       if (error instanceof FeishuMessageError) {
         throw error;
       }
@@ -1055,6 +1088,7 @@ export class FeishuMessageClient implements
     chatId: string,
     messageType: "text" | "post" | "interactive" | "file" | "image",
     content: string,
+    signal?: AbortSignal,
   ): Promise<string> {
     try {
       const response = await withTimeout(
@@ -1072,7 +1106,7 @@ export class FeishuMessageClient implements
         new FeishuMessageError(
           "send-timeout",
           "飞书消息发送超时",
-        ),
+        ), signal,
       );
       if (
         typeof response?.data?.message_id !== "string"
@@ -1085,6 +1119,9 @@ export class FeishuMessageClient implements
       }
       return response.data.message_id;
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       if (error instanceof FeishuMessageError) {
         throw error;
       }
@@ -1328,19 +1365,38 @@ async function withTimeout<T>(
   operation: Promise<T>,
   timeoutMs: number,
   timeoutError: Error,
+  signal?: AbortSignal,
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
       reject(timeoutError);
     }, timeoutMs);
     timer.unref();
   });
+  const aborted = new Promise<never>((_resolve, reject) => {
+    if (!signal) return;
+    onAbort = () => reject(createAbortError());
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
   try {
-    return await Promise.race([operation, timeout]);
+    return await Promise.race([operation, timeout, aborted]);
   } finally {
     if (timer) {
       clearTimeout(timer);
     }
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
   }
+}
+
+function createAbortError(): Error {
+  const error = new Error("飞书输出操作已取消");
+  error.name = "AbortError";
+  return error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
