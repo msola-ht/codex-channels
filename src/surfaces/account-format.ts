@@ -76,6 +76,9 @@ export function formatPlanType(value: string): string {
 
 export function formatOpenAiErrorMessage(value: string): string {
   const message = visibleUpstreamMessage(value);
+  if (message.includes("Selected model is at capacity")) {
+    return "所选模型当前容量已满，请稍后重试或改用其他模型。";
+  }
   if (message.includes("You've hit your usage limit")) {
     const parts = ["OpenAI 用量上限已到达"];
     if (message.includes("purchase more credits")) {

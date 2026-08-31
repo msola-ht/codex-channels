@@ -446,9 +446,9 @@ describe("model request metrics database operations", () => {
     local.close();
   });
 
-  it("rejects an unsupported provider", () => {
+  it("rejects an invalid provider identifier", () => {
     const { environment, databasePath } = fixture();
-    expect(() => pruneProviderMetrics("unknown", environment, {
+    expect(() => pruneProviderMetrics("provider with spaces", environment, {
       localDatabasePath: databasePath,
       centerDatabasePath: null,
       stopGateway: () => undefined,

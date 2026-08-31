@@ -525,8 +525,29 @@ function handleRequests(environment, url, response) {
 
 function handleErrors(environment, url, response) {
   const range = parseRange(url);
+  const display = displayForCurrency(
+    loadDisplayContext(environment),
+    parseCurrency(url),
+  );
+  const offset = parseBoundedInt(url.searchParams.get("offset"), "offset", 0, null, 0);
+  const limit = parseBoundedInt(
+    url.searchParams.get("limit"),
+    "limit",
+    1,
+    500,
+    100,
+  );
   const store = openMetricsStore(environment, range.endAtMs);
   try {
+    const page = store.page({
+      startAtMs: range.startAtMs,
+      endAtMs: range.endAtMs,
+      offset,
+      limit,
+      sortKey: "recordedAtMs",
+      sortDirection: "desc",
+      onlyFailures: true,
+    });
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
@@ -534,6 +555,9 @@ function handleErrors(environment, url, response) {
         startAtMs: range.startAtMs,
         endAtMs: range.endAtMs,
       }),
+      records: page.records.map((record) => enrichCosts(record, display, record.provider)),
+      nextOffset: page.nextOffset,
+      total: page.matchedTotal,
     });
   } finally {
     store.close();

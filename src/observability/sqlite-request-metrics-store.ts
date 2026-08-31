@@ -602,11 +602,12 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     const filterParams = pattern.length === 0
       ? []
       : Array.from({ length: 7 }, () => pattern);
+    const failuresSql = query.onlyFailures ? ` AND NOT (${observableCompletionSql})` : "";
     const matchedTotal = (this.database.prepare(`
       SELECT COUNT(*) AS n
       FROM model_request_metrics_enriched
       WHERE recorded_at_ms >= ?
-        AND recorded_at_ms < ?${filterSql}
+        AND recorded_at_ms < ?${failuresSql}${filterSql}
     `).get(
       query.startAtMs,
       query.endAtMs,
@@ -617,7 +618,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       FROM model_request_metrics_enriched
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
-        ${filterSql}
+        ${failuresSql}${filterSql}
       ORDER BY ${sortExpression} ${order}, id ${order}
       LIMIT ? OFFSET ?
     `).all(

@@ -1,4 +1,8 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
+import { ActivityCalendar } from "react-activity-calendar"
+import "react-activity-calendar/tooltips.css"
+import ReactECharts from "echarts-for-react"
+import type { EChartsOption } from "echarts"
 
 import {
   Alert,
@@ -19,15 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
 import {
   Table,
   TableBody,
@@ -61,6 +56,7 @@ import {
   fetchSettings,
 } from "@/lib/api"
 import { formatTime, formatTokens } from "@/lib/format"
+import { positionTrendTooltip, toStackedUsageTrend } from "@/lib/trend"
 import type {
   DeepseekBalanceResponse,
   GlobalCostRow,
@@ -268,19 +264,57 @@ function GlobalDashboard({
         ? <PageSkeleton rows={4} />
         : (
           <>
-            <GlobalTotalsCards totals={overview.data.totals} />
-            <GlobalQuotaCard quota={quota.data} loading={quota.loading} />
-            <GlobalTrendCard rows={daily.data?.daily ?? []} loading={daily.loading} />
-            <GlobalHeatmapCard rows={daily.data?.daily ?? []} loading={daily.loading} />
-            <GlobalCostTable rows={overview.data.costsByCurrency} />
-            <GlobalProviderTable rows={overview.data.providers} />
+            <DashboardSection title="核心指标" description="当前范围内所有设备的累计数据">
+              <GlobalTotalsCards totals={overview.data.totals} />
+            </DashboardSection>
+
+            <DashboardSection title="用量走势" description="从趋势和日历两个维度查看使用节奏">
+              <div className="grid items-start gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+                <div className="min-w-0 xl:self-center">
+                  <GlobalHeatmapCard rows={daily.data?.daily ?? []} loading={daily.loading} />
+                </div>
+                <div className="min-w-0 xl:self-center">
+                  <GlobalTrendCard rows={daily.data?.daily ?? []} loading={daily.loading} />
+                </div>
+              </div>
+            </DashboardSection>
+
+            {scope.kind === "all" ? (
+              <DashboardSection title="设备明细" description="确认哪些设备正在贡献数据，以及最近上报时间">
+                <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} />
+              </DashboardSection>
+            ) : null}
+
+            <DashboardSection title="额度与费用" description="渠道额度窗口、计价币种和 Provider 分布分开查看">
+              <GlobalQuotaCard quota={quota.data} loading={quota.loading} />
+              <div className="grid gap-6 xl:grid-cols-2">
+                <GlobalCostTable rows={overview.data.costsByCurrency} />
+                <GlobalProviderTable rows={overview.data.providers} />
+              </div>
+            </DashboardSection>
           </>
         )}
-
-      {scope.kind === "all"
-        ? <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} />
-        : null}
     </div>
+  )
+}
+
+function DashboardSection({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: ReactNode
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-1">
+        <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex flex-col gap-6">{children}</div>
+    </section>
   )
 }
 
@@ -295,31 +329,122 @@ function GlobalQuotaCard({
   if (quota === null || quota.periods.length === 0) {
     return <Alert><AlertTitle>暂无额度周期</AlertTitle><AlertDescription>中心库尚未收集到带重置时间的额度快照</AlertDescription></Alert>
   }
+  const groups = new Map<string, GlobalQuotaResponse["periods"]>()
+  for (const period of quota.periods) {
+    const key = `${period.provider}\u0000${period.windowId}`
+    const group = groups.get(key) ?? []
+    group.push(period)
+    groups.set(key, group)
+  }
+  const current = [...groups.values()]
+    .map((periods) => [...periods].sort((a, b) => b.resetsAt - a.resetsAt)[0]!)
+    .sort((a, b) => a.provider.localeCompare(b.provider) || a.windowId.localeCompare(b.windowId))
+  const history = [...groups.entries()]
+    .map(([key, periods]) => ({
+      key,
+      periods: [...periods].sort((a, b) => b.resetsAt - a.resetsAt).slice(1),
+    }))
+    .filter((group) => group.periods.length > 0)
   return (
     <Card>
       <CardHeader>
-        <CardTitle>多设备额度估算</CardTitle>
-        <CardDescription>最近 {quota.days} 天，按提供商与重置时间合并</CardDescription>
+        <CardTitle>渠道额度估算</CardTitle>
+        <CardDescription>最近 {quota.days} 天 · 按渠道和额度窗口汇总，默认展示最新周期</CardDescription>
       </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader><TableRow>
-            <TableHead>提供商 / 窗口</TableHead><TableHead>设备</TableHead><TableHead>本周期 Token</TableHead>
-            <TableHead>最新使用</TableHead><TableHead>推算 100% Token</TableHead>
-          </TableRow></TableHeader>
-          <TableBody>{quota.periods.map((period) => (
-            <TableRow key={`${period.provider}-${period.windowId}-${period.resetsAt}`}>
-              <TableCell>{period.provider} · {period.windowId}</TableCell>
-              <TableCell>{period.deviceCount}</TableCell>
-              <TableCell>{formatTokens(period.totalTokens)}</TableCell>
-              <TableCell>{period.latestUsedPercentMillionths === null ? "—" : `${(period.latestUsedPercentMillionths / 100_000).toFixed(2)}%`}</TableCell>
-              <TableCell>{period.estimatedTotalTokens === null ? "—" : formatTokens(period.estimatedTotalTokens)}</TableCell>
-            </TableRow>
-          ))}</TableBody>
-        </Table>
+      <CardContent className="flex flex-col gap-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {current.map((period) => <QuotaPeriodCard key={`${period.provider}-${period.windowId}`} period={period} />)}
+        </div>
+        {history.length === 0 ? null : (
+          <details className="group rounded-lg border bg-muted/20 px-3">
+            <summary className="cursor-pointer list-none py-3 text-sm font-medium">
+              历史周期
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {history.reduce((count, group) => count + group.periods.length, 0)} 个
+              </span>
+              <span className="float-right text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
+            </summary>
+            <div className="overflow-x-auto pb-3">
+              <Table className="min-w-[900px]">
+                <TableHeader><TableRow>
+                  <TableHead>渠道 / 额度窗口</TableHead><TableHead>周期开始</TableHead><TableHead>周期结束</TableHead><TableHead>周期时长</TableHead><TableHead>参与设备</TableHead>
+                  <TableHead>已使用 Token</TableHead><TableHead>最新使用率</TableHead><TableHead>推算周期容量</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>{history.flatMap((group) => group.periods.map((period) => (
+                  <TableRow key={`${period.provider}-${period.windowId}-${period.resetsAt}`}>
+                    <TableCell>{period.provider} · {period.windowId}</TableCell>
+                    <TableCell className="whitespace-nowrap tabular-nums">{formatTime(period.periodStartAtMs)}</TableCell>
+                    <TableCell className="whitespace-nowrap tabular-nums">{formatTime(period.periodEndAtMs)}</TableCell>
+                    <TableCell className="whitespace-nowrap tabular-nums">{formatQuotaSpan(period.periodStartAtMs, period.periodEndAtMs)}</TableCell>
+                    <TableCell>{period.deviceCount}</TableCell>
+                    <TableCell>{formatTokens(period.totalTokens)}</TableCell>
+                    <TableCell>{formatQuotaPercent(period.latestUsedPercentMillionths)}</TableCell>
+                    <TableCell>{period.estimatedTotalTokens === null ? "未提供" : formatTokens(period.estimatedTotalTokens)}</TableCell>
+                  </TableRow>
+                )))}</TableBody>
+              </Table>
+            </div>
+          </details>
+        )}
       </CardContent>
     </Card>
   )
+}
+
+function QuotaPeriodCard({ period }: { period: GlobalQuotaResponse["periods"][number] }) {
+  const hasPercent = period.latestUsedPercentMillionths !== null
+  return (
+    <div className="rounded-lg border bg-card p-4 shadow-xs">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-medium">渠道：{period.provider}</p>
+          <p className="text-xs text-muted-foreground">额度窗口：{period.windowId}</p>
+        </div>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          {period.deviceCount} 台设备
+        </span>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <div><p className="text-xs text-muted-foreground">{hasPercent ? "最新使用率" : "已使用 Token"}</p><p className="mt-1 text-lg font-semibold tabular-nums">{hasPercent ? formatQuotaPercent(period.latestUsedPercentMillionths) : formatTokens(period.totalTokens)}</p></div>
+        <div><p className="text-xs text-muted-foreground">{hasPercent ? "已使用 Token" : "额度百分比"}</p><p className="mt-1 text-lg font-semibold tabular-nums">{hasPercent ? formatTokens(period.totalTokens) : "未提供"}</p></div>
+      </div>
+      <div className="mt-3 overflow-x-auto border-t pt-3 text-xs text-muted-foreground">
+        <div className="flex min-w-max items-center gap-2 tabular-nums">
+          <span title="周期开始">{formatQuotaTimelineTime(period.periodStartAtMs)}</span>
+          <span className="flex items-center gap-1" aria-hidden="true">
+            <i className="size-1.5 rounded-full bg-primary" />
+            <i className="h-px w-4 bg-border" />
+            <span className="rounded-full border bg-muted px-2 py-0.5 font-medium text-foreground">{formatQuotaSpan(period.periodStartAtMs, period.periodEndAtMs)}</span>
+            <i className="h-px w-4 bg-border" />
+            <i className="size-1.5 rounded-full bg-primary" />
+          </span>
+          <span title="周期结束">{formatQuotaTimelineTime(period.periodEndAtMs)}</span>
+          {hasPercent && period.estimatedTotalTokens !== null ? <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">估算 {formatTokens(period.estimatedTotalTokens)}</span> : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function formatQuotaPercent(value: number | null): string {
+  return value === null ? "未提供" : `${(value / 1_000_000).toFixed(2)}%`
+}
+
+function formatQuotaSpan(startAtMs: number | null, endAtMs: number): string {
+  if (startAtMs === null || endAtMs < startAtMs) return "未知"
+  const minutes = Math.max(0, Math.round((endAtMs - startAtMs) / 60_000))
+  if (minutes < 60) return `${minutes} 分钟`
+  const hours = minutes / 60
+  if (hours < 24) return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`
+  const days = hours / 24
+  return `${Number.isInteger(days) ? days : days.toFixed(1)} 天`
+}
+
+function formatQuotaTimelineTime(value: number | null): string {
+  if (value === null) return "未知"
+  const date = new Date(value)
+  const pad = (part: number) => String(part).padStart(2, "0")
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"] | null }) {
@@ -357,12 +482,11 @@ function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"
   )
 }
 
-const HEATMAP_COLORS = ["#ebedf0", "#a7f3d0", "#6ee7b7", "#34d399", "#10b981"]
 const TREND_COLORS = {
+  total: "#fbbf24",
   input: "#38bdf8",
   cached: "#14b8a6",
   output: "#a78bfa",
-  reasoning: "#fb7185",
 }
 
 function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
@@ -371,17 +495,65 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
   const data = rows
     .filter((row) => row.day >= cutoffKey)
     .map((row) => ({
-      day: row.day.slice(5),
-      input: row.input_tokens,
-      cached: row.cached_input_tokens,
-      output: row.output_tokens,
-      reasoning: row.reasoning_output_tokens,
+      day: row.day,
+      inputTokens: row.input_tokens,
+      cachedInputTokens: row.cached_input_tokens,
+      outputTokens: row.output_tokens,
+      reasoningOutputTokens: row.reasoning_output_tokens,
+      totalTokens: row.total_tokens,
     }))
+  const stackedData = toStackedUsageTrend(data)
+  const chartOption: EChartsOption = {
+    animation: false,
+    grid: { top: 8, right: 56, bottom: 42, left: 56 },
+    legend: { bottom: 0, right: 0, textStyle: { color: "#a1a1aa" }, itemWidth: 12, itemHeight: 8 },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "line", snap: true },
+      confine: true,
+      position: (point, _params, _dom, _rect, size) => positionTrendTooltip(
+        point,
+        size.contentSize,
+        size.viewSize,
+      ),
+      backgroundColor: "#18181b",
+      borderColor: "#3f3f46",
+      textStyle: { color: "#fafafa" },
+      formatter: (params) => {
+        const items = Array.isArray(params) ? params : [params]
+        const first = items[0] as (typeof items)[number] & { axisValue?: unknown }
+        const day = String(first?.axisValue ?? "")
+        const index = Number(first?.dataIndex ?? 0)
+        const split = stackedData[index]
+        const total = Number(first?.value ?? 0)
+        const markerFor = (seriesName: string) =>
+          items.find((item) => item.seriesName === seriesName)?.marker ?? ""
+        return [
+          `<div style="margin-bottom:6px;font-weight:600">${day}</div>`,
+          `<div style="line-height:1.8">${markerFor("日总计")}日总计：${formatTokens(total)}</div>`,
+          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("未缓存输入")}未缓存输入：${formatTokens(split?.uncachedInputTokens ?? 0)}</div>`,
+          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("缓存输入")}缓存输入：${formatTokens(split?.cachedInputTokens ?? 0)}</div>`,
+          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("输出")}输出：${formatTokens((split?.nonReasoningOutputTokens ?? 0) + (split?.reasoningOutputTokens ?? 0))}</div>`,
+        ].join("")
+      },
+    },
+    xAxis: { type: "category", boundaryGap: false, data: stackedData.map((row) => row.day), axisLine: { lineStyle: { color: "#3f3f46" } }, axisLabel: { color: "#a1a1aa", interval: "auto" } },
+    yAxis: [
+      { type: "value", axisLabel: { color: "#a1a1aa", formatter: (value: number) => formatTokens(value) }, splitLine: { lineStyle: { color: "#27272a" } } },
+      { type: "value", position: "right", axisLabel: { color: "#a1a1aa", formatter: (value: number) => formatTokens(value) }, splitLine: { show: false } },
+    ],
+    series: [
+      { name: "日总计", type: "line", symbol: "none", lineStyle: { width: 2 }, itemStyle: { color: TREND_COLORS.total }, data: data.map((row) => row.totalTokens), z: 4 },
+      { name: "未缓存输入", type: "line", stack: "input", symbol: "none", areaStyle: { opacity: 0.32 }, lineStyle: { width: 1.5 }, itemStyle: { color: TREND_COLORS.input }, data: stackedData.map((row) => row.uncachedInputTokens) },
+      { name: "缓存输入", type: "line", stack: "input", symbol: "none", areaStyle: { opacity: 0.32 }, lineStyle: { width: 1.5 }, itemStyle: { color: TREND_COLORS.cached }, data: stackedData.map((row) => row.cachedInputTokens) },
+      { name: "输出", type: "line", yAxisIndex: 1, symbol: "circle", symbolSize: 4, lineStyle: { width: 2 }, itemStyle: { color: TREND_COLORS.output }, data: stackedData.map((row) => row.nonReasoningOutputTokens + row.reasoningOutputTokens), z: 5 },
+    ],
+  }
   return (
-    <Card>
+    <Card className="h-[340px]">
       <CardHeader>
         <CardTitle>用量趋势</CardTitle>
-        <CardDescription>最近 30 天，按输入 / 缓存 / 输出 / 推理堆叠</CardDescription>
+          <CardDescription>最近 30 天，输入按缓存拆分；输出使用右侧独立刻度</CardDescription>
       </CardHeader>
       <CardContent>
         {loading && data.length === 0 ? (
@@ -389,97 +561,75 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
         ) : data.length === 0 ? (
           <p className="text-sm text-muted-foreground">当前范围最近 90 天没有记录</p>
         ) : (
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="day"
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={48}
-                  tickFormatter={(value: number) => formatTokens(value)}
-                />
-                <Tooltip
-                  formatter={(value, name) => {
-                    const labels: Record<string, string> = {
-                      input: "输入",
-                      cached: "缓存输入",
-                      output: "输出",
-                      reasoning: "推理输出",
-                    }
-                    return [formatTokens(Number(value ?? 0)), labels[String(name)] ?? String(name)]
-                  }}
-                />
-                <Bar dataKey="reasoning" stackId="tokens" fill={TREND_COLORS.reasoning} />
-                <Bar dataKey="cached" stackId="tokens" fill={TREND_COLORS.cached} />
-                <Bar dataKey="output" stackId="tokens" fill={TREND_COLORS.output} />
-                <Bar dataKey="input" stackId="tokens" fill={TREND_COLORS.input} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <ReactECharts option={chartOption} style={{ height: 230, width: "100%" }} notMerge lazyUpdate />
         )}
       </CardContent>
     </Card>
   )
 }
 
-function GlobalHeatmapCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
+export function GlobalHeatmapCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
   const byDay = new Map(rows.map((row) => [row.day, row.total_tokens]))
   const days = 90
   const today = new Date()
-  const cells: Array<{ date: string; value: number }> = []
+  const cells: Array<{ date: string; count: number; level: number }> = []
   for (let index = days - 1; index >= 0; index -= 1) {
     const date = new Date(today.getTime() - index * 86_400_000)
     const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`
-    cells.push({ date: key, value: byDay.get(key) ?? 0 })
+    const count = byDay.get(key) ?? 0
+    cells.push({ date: key, count, level: 0 })
   }
+  const positive = cells.map((cell) => cell.count).filter((count) => count > 0).sort((a, b) => a - b)
+  const thresholds = positive.length === 0
+    ? [0, 0, 0]
+    : [positive[Math.floor(positive.length * 0.25)]!, positive[Math.floor(positive.length * 0.5)]!, positive[Math.floor(positive.length * 0.75)]!]
+  for (const cell of cells) {
+    cell.level = cell.count <= 0 ? 0 : cell.count <= thresholds[0]! ? 1 : cell.count <= thresholds[1]! ? 2 : cell.count <= thresholds[2]! ? 3 : 4
+  }
+  const total = cells.reduce((sum, cell) => sum + cell.count, 0)
+  const activeDays = cells.filter((cell) => cell.count > 0).length
   return (
-    <Card>
+    <Card className="h-[340px]">
       <CardHeader>
         <CardTitle>活动热力图</CardTitle>
         <CardDescription>最近 90 天每日 Token 量</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-1 flex-col justify-center">
         {loading && rows.length === 0 ? (
           <PageSkeleton rows={3} />
         ) : (
-          <div className="overflow-x-auto pb-1">
-            <div
-              className="grid w-max gap-[3px]"
-              style={{
-                gridAutoFlow: "column",
-                gridTemplateRows: "repeat(7, 12px)",
+          <>
+          <div className="flex justify-center overflow-x-auto pb-1">
+            <ActivityCalendar
+              data={cells}
+              blockSize={18}
+              blockMargin={5}
+              blockRadius={3}
+              weekStart={1}
+              showWeekdayLabels={["mon", "wed", "fri"]}
+              style={{ width: "100%" }}
+              showTotalCount={false}
+              colorScheme="dark"
+              theme={{
+                light: ["#f1f5f9", "#bbf7d0", "#4ade80", "#16a34a", "#15803d"],
+                dark: ["#202124", "#123b2a", "#17663f", "#1f9d63", "#35d07f"],
               }}
-            >
-              {cells.map((cell) => (
-                <div
-                  key={cell.date}
-                  title={`${cell.date} · ${formatTokens(cell.value)}`}
-                  className="rounded-[3px]"
-                  style={{ backgroundColor: heatColor(cell.value), width: 12, height: 12 }}
-                />
-              ))}
-            </div>
+              labels={{
+                months: ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"],
+                weekdays: ["日", "一", "二", "三", "四", "五", "六"],
+                legend: { less: "少", more: "多" },
+              }}
+              tooltips={{
+                activity: { text: (activity) => `${activity.date} · ${formatTokens(activity.count)} Token` },
+              }}
+            />
           </div>
+          <p className="mt-2 text-center text-xs text-muted-foreground">最近 90 天共 {formatTokens(total)} Token · 活跃 {activeDays} 天</p>
+          </>
         )}
       </CardContent>
     </Card>
   )
-}
-
-function heatColor(value: number): string {
-  if (value <= 0) return HEATMAP_COLORS[0]!
-  if (value < 1_000_000) return HEATMAP_COLORS[1]!
-  if (value < 10_000_000) return HEATMAP_COLORS[2]!
-  if (value < 50_000_000) return HEATMAP_COLORS[3]!
-  return HEATMAP_COLORS[4]!
 }
 
 function GlobalCostTable({ rows }: { rows: GlobalCostRow[] }) {
@@ -491,7 +641,8 @@ function GlobalCostTable({ rows }: { rows: GlobalCostRow[] }) {
         <CardDescription>不同币种不合并，按中心库计价快照统计</CardDescription>
       </CardHeader>
       <CardContent>
-        <Table>
+        <div className="overflow-x-auto">
+          <Table className="min-w-[560px]">
           <TableHeader>
             <TableRow>
               <TableHead>币种</TableHead>
@@ -512,7 +663,8 @@ function GlobalCostTable({ rows }: { rows: GlobalCostRow[] }) {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   )
@@ -526,7 +678,8 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
         <CardDescription>当前范围的累计请求与 Token</CardDescription>
       </CardHeader>
       <CardContent>
-        <Table>
+        <div className="overflow-x-auto">
+          <Table className="min-w-[720px]">
           <TableHeader>
             <TableRow>
               <TableHead>提供商</TableHead>
@@ -549,7 +702,8 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   )

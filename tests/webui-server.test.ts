@@ -425,6 +425,9 @@ describe("webui server", () => {
         requestCount: number;
         groups: Array<{ errorType: string; requestCount: number }>;
       };
+      records: Array<{ status: string; errorType: string | null }>;
+      total: number;
+      nextOffset: number | null;
     };
     expect(errorsBody.errors).toMatchObject({
       requestCount: 3,
@@ -434,6 +437,11 @@ describe("webui server", () => {
       errorType: "http_error",
       requestCount: 1,
     });
+    expect(errorsBody.records).toEqual([
+      expect.objectContaining({ status: "failed", errorType: "http_error" }),
+    ]);
+    expect(errorsBody.total).toBe(1);
+    expect(errorsBody.nextOffset).toBeNull();
   });
 
   it("validates query parameters and thread ids", async () => {

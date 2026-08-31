@@ -152,6 +152,9 @@ describe("shared Surface lifecycle presentation", () => {
     expect(formatOpenAiErrorMessage(
       "Your workspace is out of credits. Add credits to continue.",
     )).toBe("工作区额度已用完，请充值后继续。");
+    expect(formatOpenAiErrorMessage(
+      "Selected model is at capacity. Please try a different model.",
+    )).toBe("所选模型当前容量已满，请稍后重试或改用其他模型。");
     expect(formatOpenAiErrorMessage("未知错误：foo")).toBe("未知错误：foo");
   });
 

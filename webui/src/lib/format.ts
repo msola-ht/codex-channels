@@ -160,6 +160,10 @@ export function formatPlanType(value: string | null): string {
 const errorTypeNames: Record<string, { zh: string; en: string }> = {
   usage_limit_reached: { zh: "用量上限", en: "Usage limit" },
   rate_limit_reached: { zh: "速率限制", en: "Rate limit" },
+  service_unavailable_error: { zh: "服务暂不可用", en: "Service unavailable" },
+  invalid_request_error: { zh: "无效请求", en: "Invalid request" },
+  unknown_error: { zh: "未知错误", en: "Unknown error" },
+  new_api_error: { zh: "上游 API 错误", en: "Upstream API error" },
   upstream_handshake_error: { zh: "上游握手失败", en: "Upstream handshake failed" },
   upstream_error: { zh: "上游错误", en: "Upstream error" },
   upstream_request_error: { zh: "上游请求失败", en: "Upstream request failed" },
@@ -181,6 +185,53 @@ export function formatErrorType(
   if (value === null) return "—"
   const label = errorTypeNames[value]
   return label ? label[language] : value
+}
+
+const errorMessageTranslations: ReadonlyArray<{
+  includes: string
+  zh: string
+  en: string
+}> = [
+  {
+    includes: "Selected model is at capacity",
+    zh: "所选模型当前容量已满，请稍后重试或改用其他模型。",
+    en: "The selected model is currently at capacity. Please try again later or choose another model.",
+  },
+  {
+    includes: "Our servers are currently overloaded",
+    zh: "上游服务当前负载较高，请稍后重试。",
+    en: "The upstream service is currently overloaded. Please try again later.",
+  },
+  {
+    includes: "Responses websocket connection limit reached",
+    zh: "Responses WebSocket 已达到连接时长上限，请新建连接后继续。",
+    en: "The Responses WebSocket connection duration limit has been reached. Create a new connection to continue.",
+  },
+  {
+    includes: "model is not supported when using Codex with a ChatGPT account",
+    zh: "所选模型不支持通过 ChatGPT 账户使用 Codex，请切换受支持的模型。",
+    en: "The selected model is not supported when using Codex with a ChatGPT account. Choose a supported model.",
+  },
+  {
+    includes: "Insufficient Balance",
+    zh: "账户余额不足，请充值后继续。",
+    en: "The account balance is insufficient. Add funds to continue.",
+  },
+  {
+    includes: "Invalid prompt:",
+    zh: "提示词可能触发使用政策限制，请调整后重试。",
+    en: "The prompt may have triggered a usage-policy restriction. Revise it and try again.",
+  },
+]
+
+export function formatErrorMessage(value: string, language: DisplayLanguage): string {
+  const message = value.replace(/\s+/gu, " ").trim()
+  const translation = errorMessageTranslations.find((candidate) => {
+    if (!message.includes(candidate.includes)) return false
+    return candidate.includes !== "Invalid prompt:" || message.includes("usage policy")
+  })
+  if (translation) return translation[language]
+  return value
 }
 
 export function formatSuccessRate(requestCount: number, unsuccessful: number): string {

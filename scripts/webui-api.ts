@@ -265,6 +265,10 @@ export interface ErrorsResponse {
   range: Range
   generatedAt: string
   errors: ErrorsReport
+  /** 按发生时间倒序的单条失败请求。 */
+  records: RequestRecord[]
+  nextOffset: number | null
+  total: number
 }
 
 export interface SettingsResponse {
@@ -389,7 +393,13 @@ export interface GlobalQuotaPeriod {
   provider: string
   windowId: string
   resetsAt: number
+  /** 根据额度窗口推导的周期起点；无法识别窗口长度时为 null。 */
+  periodStartAtMs: number | null
+  /** 当前周期为计划重置时刻；历史周期提前重置时为下一周期的真实起点。 */
+  periodEndAtMs: number
+  /** 本地指标首次观测到该周期的时刻，不参与周期边界展示。 */
   firstObservedAtMs: number
+  /** 本地指标最后观测到该周期的时刻。 */
   lastObservedAtMs: number
   deviceCount: number
   requestCount: number

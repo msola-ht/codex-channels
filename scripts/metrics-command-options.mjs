@@ -23,6 +23,13 @@ export function isMetricsProviderId(value, environment = process.env) {
   return Object.prototype.hasOwnProperty.call(readPrimaryProviderBackup(environment), value);
 }
 
+// 清理历史指标时允许数据库中已经不存在于当前配置的合法 Provider ID。
+// 保持精确大小写匹配，避免把历史 `OpenAI` 误当成官方 `openai`。
+export function isPrunableMetricsProviderId(value) {
+  return typeof value === "string"
+    && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(value);
+}
+
 export const metricsCommandUsage = Object.freeze({
   run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
   turns: "用法：codexc metrics turns <Thread ID> [--format markdown|json|csv] [--stdout]",
@@ -102,7 +109,7 @@ export function parseMetricsOptions(args, allowed) {
   return result;
 }
 
-export function validateMetricsCommandArgs(subcommand, args, environment = process.env) {
+export function validateMetricsCommandArgs(subcommand, args) {
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   if (subcommand === "run") {
     parseMetricsRunArgs(withoutStdout);
@@ -152,7 +159,7 @@ export function validateMetricsCommandArgs(subcommand, args, environment = proce
     return;
   }
   if (subcommand === "prune") {
-    if (args.length !== 1 || !isMetricsProviderId(args[0], environment)) {
+    if (args.length !== 1 || !isPrunableMetricsProviderId(args[0])) {
       throw new Error("用法：codexc metrics prune <provider>");
     }
     return;

@@ -42,7 +42,7 @@ import {
 import { resolveConfiguredPath } from "./runtime-config.mjs";
 import {
   assertExportFormat,
-  isMetricsProviderId,
+  isPrunableMetricsProviderId,
   metricsProviderIds,
   parseCleanupOptions,
   parseLocalDate,
@@ -421,7 +421,7 @@ export function resetMetricsSyncStateWithGatewayRestart(
 }
 
 export function pruneProviderMetrics(provider, environment = process.env, options = {}) {
-  assertPruneProvider(provider, environment);
+  assertPruneProvider(provider);
   const localDatabasePath = options.localDatabasePath
     ?? resolveMetricsRuntime(environment).databasePath;
   const centerSettings = options.centerSettings
@@ -683,8 +683,8 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function assertPruneProvider(provider, environment = process.env) {
-  if (!isMetricsProviderId(provider, environment)) {
+function assertPruneProvider(provider) {
+  if (!isPrunableMetricsProviderId(provider)) {
     throw new Error("用法：codexc metrics prune <provider>");
   }
 }

@@ -49,7 +49,6 @@ export function parseMetricsOptions(
 export function validateMetricsCommandArgs(
   subcommand: string,
   args: string[],
-  environment?: NodeJS.ProcessEnv,
 ): void;
 
 export function parseCleanupOptions(args: string[]): MetricsCleanupOptions;
