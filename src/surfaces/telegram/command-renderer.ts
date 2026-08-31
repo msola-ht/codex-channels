@@ -537,6 +537,19 @@ function renderOutcome(
     { kind: "outcome" }
   >["outcome"],
 ): { text: string; expanded: boolean } {
+  // Brief notices are sent through Telegram's native text path (without a
+  // parse mode).  The shared formatter intentionally returns Markdown for
+  // other surfaces, so keep this acknowledgement plain here instead of
+  // exposing the literal `##` heading marker to Telegram users.
+  if (outcome.type === "turn.stop-requested") {
+    return {
+      text: outcome.stopped
+        ? "已请求停止当前任务。"
+        : "当前没有运行中的任务。",
+      expanded: false,
+    };
+  }
+
   return {
     text: formatConversationCommandOutcome(outcome),
     expanded: [

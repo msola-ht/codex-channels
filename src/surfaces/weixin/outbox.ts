@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
 
 import type {
   DisplayPriceCurrency,
@@ -17,7 +18,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { shouldDisplayOperation } from "../operation-presentation.js";
+import { isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
 import type {
   OperationUpdateDisplay,
   SurfaceOutputPort,
@@ -118,6 +119,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly operationUpdates =
     new OperationUpdateBuffer<ConversationTarget>();
+  private readonly activeOperations = new Set<string>();
+  private readonly pendingApprovalOperations = new Set<string>();
+  private readonly reasoningGenerations = new Map<string, number>();
   private readonly planProgress = new TurnPlanProgressState();
   private readonly accountId: string;
   private closed = false;
@@ -152,17 +156,18 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     if (event.type === "turn.started") {
+      this.clearExecutionTurns(event.threadId);
       this.options.typing?.start(event.target);
       this.delivery.enqueue(
         event.target.conversationId,
-        () => this.send(
+        (signal) => this.send(
           event.target,
           renderPlainLifecyclePresentation(
             createTurnStartedPresentation(
               event.background ? event.threadId : undefined,
               event.identity,
             ),
-          ),
+          ), maximumChunks, signal,
         ),
         true,
       );
@@ -172,25 +177,44 @@ export class WeixinOutbox implements SurfaceOutputPort {
       if (this.options.reasoningEnabled === false) {
         return;
       }
+      if (this.hasActiveOperation(event.threadId, event.turnId)) {
+        return;
+      }
       if (event.final !== true) {
         return;
       }
+      const generation = this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0;
       this.delivery.enqueue(
         event.target.conversationId,
-        () => this.send(
-          event.target,
-          renderPlainLifecyclePresentation(
-            createTurnReasoningPresentation(
-              event.background ? event.threadId : undefined,
-              event.elapsedMs,
-            ),
+        (signal) => (this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0) !== generation
+          || this.hasActiveOperation(event.threadId, event.turnId)
+          ? Promise.resolve()
+          : this.send(
+            event.target,
+            renderPlainLifecyclePresentation(
+              createTurnReasoningPresentation(
+                event.background ? event.threadId : undefined,
+                event.elapsedMs,
+                true,
+              ),
+            ), maximumChunks, signal,
           ),
-        ),
         true,
       );
       return;
     }
     if (event.type === "operation.updated") {
+      if (isExecutionOperation(event.operation)) {
+        const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
+        const turn = turnKey(event.threadId, event.turnId);
+        if (event.operation.status === "running") {
+          if (this.pendingApprovalOperations.has(key)) return;
+          this.activeOperations.add(key);
+          this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
+        } else {
+          this.activeOperations.delete(key);
+        }
+      }
       const imagePath = event.operation.imagePath;
       if (
         event.operation.kind === "imageGeneration"
@@ -199,17 +223,21 @@ export class WeixinOutbox implements SurfaceOutputPort {
       ) {
         this.delivery.enqueue(
           event.target.conversationId,
-          () => this.sendImage(event.target, imagePath),
+          (signal) => this.sendImage(event.target, imagePath, signal),
           true,
         );
       }
       if (
-        event.operation.status === "running"
-        || !shouldDisplayOperation(
+        !shouldDisplayOperation(
           event.operation,
           this.options.operationUpdateDisplay ?? "full",
         )
       ) {
+        return;
+      }
+      // 操作只发送终态卡片；运行中状态由审批/执行链路内部维护，避免
+      // 同一命令产生“运行中”和“已完成”两条刷屏消息。
+      if (event.operation.status === "running") {
         return;
       }
       if (
@@ -225,7 +253,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       );
       this.delivery.enqueue(
         event.target.conversationId,
-        () => this.send(event.target, rendered),
+        (signal) => this.send(event.target, rendered, maximumChunks, signal),
         true,
       );
       return;
@@ -237,9 +265,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
       for (const presentation of this.planProgress.accept(event)) {
         this.delivery.enqueue(
           event.target.conversationId,
-          () => this.send(
+          (signal) => this.send(
             event.target,
             formatWeixinCommandText(presentation.text, { structuredFields: true }),
+            maximumChunks,
+            signal,
           ),
           true,
         );
@@ -264,7 +294,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     this.delivery.enqueue(
       event.target.conversationId,
-      () => this.sendEvent(event, rendered),
+      (signal) => this.sendEvent(event, rendered, signal),
       isCriticalOutputEvent(event),
     );
   }
@@ -275,7 +305,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     return this.delivery.enqueue(
       target.conversationId,
-      () => this.send(target, text),
+      (signal) => this.send(target, text, maximumChunks, signal),
       true,
     );
   }
@@ -286,7 +316,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     return this.delivery.runOrdered(
       target.conversationId,
-      () => this.send(target, text),
+      (signal) => this.send(target, text, maximumChunks, signal),
     );
   }
 
@@ -299,9 +329,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     return this.delivery.runOrdered(
       target.conversationId,
-      async () => {
+      async (signal) => {
         for (const text of texts) {
-          await this.send(target, text);
+          await this.send(target, text, maximumChunks, signal);
         }
       },
     );
@@ -319,6 +349,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
     await this.options.typing?.close();
     await this.delivery.close();
     this.operationUpdates.clear();
+    this.activeOperations.clear();
+    this.reasoningGenerations.clear();
     this.planProgress.clear();
     this.contexts.clear();
   }
@@ -344,7 +376,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     );
     this.delivery.enqueue(
       target.conversationId,
-      () => this.send(target, text),
+      (signal) => this.send(target, text, maximumChunks, signal),
       true,
     );
   }
@@ -449,7 +481,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
   }
 
-  private async sendEvent(event: OutputEvent, text: string): Promise<void> {
+  private async sendEvent(event: OutputEvent, text: string, signal?: AbortSignal): Promise<void> {
+    signal = this.closed ? undefined : signal;
     if (
       event.type === "turn.completed"
       || event.type === "connection.lost"
@@ -464,17 +497,19 @@ export class WeixinOutbox implements SurfaceOutputPort {
       event.type === "text.completed"
       && event.phase === "final_answer"
       && text.length > maximumChunkCharacters * maximumChunks
-      && await this.sendLongFinalAnswer(event.target, text)
+      && await this.sendLongFinalAnswer(event.target, text, signal)
     ) {
       return;
     }
-    await this.send(event.target, text);
+    await this.send(event.target, text, maximumChunks, signal);
   }
 
   private async sendLongFinalAnswer(
     target: ConversationTarget,
     text: string,
+    signal?: AbortSignal,
   ): Promise<boolean> {
+    signal = this.closed ? undefined : signal;
     const fileClient = this.options.fileClient;
     const file = Buffer.from(text, "utf8");
     if (
@@ -488,7 +523,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       maximumChunkCharacters - previewNotice.length,
     );
     const preview = text.slice(0, previewLength) + previewNotice;
-    await this.send(target, preview);
+    await this.send(target, preview, maximumChunks, signal);
     const context = this.contexts.get(target);
     if (context === undefined) {
       throw new WeixinOutboxError("missing-reply-context");
@@ -501,17 +536,23 @@ export class WeixinOutbox implements SurfaceOutputPort {
       throw new WeixinOutboxError("unauthorized-recipient");
     }
     try {
-      await fileClient.sendFile({
+      const input = {
         actorId: context.actorId,
         contextToken: context.contextToken,
         fileName: finalAnswerFileName,
         file,
-      });
+      };
+      if (signal) {
+        await fileClient.sendFile(input, signal);
+      } else {
+        await fileClient.sendFile(input);
+      }
     } catch (error) {
       await this.send(
         target,
         fileFailureNotice + text.slice(previewLength),
         maximumChunks - 1,
+        signal,
       );
       throw error;
     }
@@ -522,7 +563,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
     target: ConversationTarget,
     text: string,
     maximumChunkCount = maximumChunks,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal = this.closed ? undefined : signal;
     const context = this.contexts.get(target);
     if (context === undefined) {
       throw new WeixinOutboxError("missing-reply-context");
@@ -536,11 +579,16 @@ export class WeixinOutbox implements SurfaceOutputPort {
         throw new WeixinOutboxError("unauthorized-recipient");
       }
       try {
-        await this.client.sendText({
+        const input = {
           actorId: context.actorId,
           contextToken: context.contextToken,
           text: chunk,
-        });
+        };
+        if (signal) {
+          await this.client.sendText(input, signal);
+        } else {
+          await this.client.sendText(input);
+        }
       } catch (error) {
         if (isRejectedReplyContext(error)) {
           await this.invalidateContext(target);
@@ -553,7 +601,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private async sendImage(
     target: ConversationTarget,
     path: string,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal = this.closed ? undefined : signal;
     const context = this.contexts.get(target);
     if (context === undefined) {
       throw new WeixinOutboxError("missing-reply-context");
@@ -579,11 +629,16 @@ export class WeixinOutbox implements SurfaceOutputPort {
       await this.invalidateContext(target);
       throw new WeixinOutboxError("unauthorized-recipient");
     }
-    await client.sendImage({
+    const input = {
       actorId: context.actorId,
       contextToken: context.contextToken,
       image,
-    });
+    };
+    if (signal) {
+      await client.sendImage(input, signal);
+    } else {
+      await client.sendImage(input);
+    }
   }
 
   sendChannelImage(
@@ -592,7 +647,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   ): Promise<void> {
     return this.delivery.runOrdered(
       target.conversationId,
-      () => this.sendImage(target, imagePath),
+      (signal) => this.sendImage(target, imagePath, signal),
     );
   }
 
@@ -608,6 +663,42 @@ export class WeixinOutbox implements SurfaceOutputPort {
       && target.accountId === this.accountId;
   }
 
+  private clearExecutionTurns(threadId: string): void {
+    const prefix = `${threadId}\u0000`;
+    for (const key of this.activeOperations) {
+      if (key.startsWith(prefix)) this.activeOperations.delete(key);
+    }
+    for (const key of this.reasoningGenerations.keys()) {
+      if (key.startsWith(prefix)) this.reasoningGenerations.delete(key);
+    }
+  }
+
+  private operationKey(threadId: string, turnId: string, itemId: string): string {
+    return `${turnKey(threadId, turnId)}\u0000${itemId}`;
+  }
+
+  prepareInteraction(request: InteractionRequest): void {
+    if (request.type === "approval") {
+      this.pendingApprovalOperations.add(this.operationKey(request.threadId, request.turnId, request.itemId));
+    }
+  }
+
+  finishInteraction(request: InteractionRequest, decision: InteractionDecision): void {
+    void decision;
+    if (request.type === "approval") {
+      this.pendingApprovalOperations.delete(this.operationKey(request.threadId, request.turnId, request.itemId));
+    }
+  }
+
+  private hasActiveOperation(threadId: string, turnId: string): boolean {
+    const prefix = `${turnKey(threadId, turnId)}\u0000`;
+    return [...this.activeOperations].some((key) => key.startsWith(prefix));
+  }
+
+}
+
+function turnKey(threadId: string, turnId: string): string {
+  return `${threadId}\u0000${turnId}`;
 }
 
 function splitWeixinText(

@@ -43,6 +43,8 @@ interface FeishuInteractionDelivery {
     messageId: string,
     card: FeishuCardDocument,
   ): Promise<void>;
+  prepareInteraction?(request: InteractionRequest): void;
+  finishInteraction?(request: InteractionRequest, decision: InteractionDecision): void;
 }
 
 interface PendingInteraction {
@@ -205,6 +207,7 @@ export class FeishuInteractionPort implements InteractionPort {
     if (!this.pending.reserve(request.requestId, token)) {
       return safeInteractionDecision(request);
     }
+    this.delivery.prepareInteraction?.(request);
     const preparation = this.prepareInteractionCard(
       target,
       request,
@@ -330,6 +333,7 @@ export class FeishuInteractionPort implements InteractionPort {
     if (!pending) {
       return;
     }
+    this.delivery?.finishInteraction?.(pending.request, decision);
     pending.resolve(decision);
 
     const statusUpdate = this.updateCard(

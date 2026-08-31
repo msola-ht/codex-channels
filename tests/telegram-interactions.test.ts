@@ -133,6 +133,7 @@ describe("TelegramInteractionPort", () => {
       6,
       expect.stringContaining("处理结果：已在本次会话中始终同意"),
       expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+      expect.any(AbortSignal),
     );
   });
 
@@ -226,6 +227,7 @@ describe("TelegramInteractionPort", () => {
       61,
       expect.stringContaining("处理结果：本会话已允许 api.example.com"),
       expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+      expect.any(AbortSignal),
     );
   });
 
@@ -320,6 +322,7 @@ describe("TelegramInteractionPort", () => {
       8,
       expect.stringContaining("处理结果：已保存命令前缀规则"),
       expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+      expect.any(AbortSignal),
     );
   });
 
@@ -427,6 +430,7 @@ describe("TelegramInteractionPort", () => {
       10,
       expect.stringContaining("处理结果：已保存网络拒绝规则"),
       expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+      expect.any(AbortSignal),
     );
   });
 
@@ -505,6 +509,7 @@ describe("TelegramInteractionPort", () => {
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: [] },
       },
+      expect.any(AbortSignal),
     );
   });
 
@@ -568,9 +573,9 @@ describe("TelegramInteractionPort", () => {
     const queue: TelegramInteractionQueue = {
       prepareInteraction,
       finishInteraction,
-      async runOrdered<T>(_chatId: string, run: () => Promise<T>): Promise<T> {
-        orderedRuns += 1;
-        return run();
+        async runOrdered<T>(_chatId: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+          orderedRuns += 1;
+          return run(new AbortController().signal);
       },
     };
     const bot = {
@@ -618,6 +623,7 @@ describe("TelegramInteractionPort", () => {
       expect.objectContaining({
         reply_markup: expect.objectContaining({ force_reply: true }),
       }),
+      expect.any(AbortSignal),
     );
     expect(await interactions.handleText(textContext("普通消息"))).toBe(false);
     expect(await interactions.handleText(textContext("回答", 9))).toBe(true);
@@ -879,17 +885,16 @@ describe("TelegramInteractionPort", () => {
     void decision.then(() => {
       settled = true;
     });
-    const reply = vi.fn(async () => ({ message_id: 11 }));
-
     expect(await interactions.handleText({
       ...textContext("C", 10),
-      reply,
     } as unknown as Context)).toBe(true);
     await settle();
     expect(settled).toBe(false);
-    expect(reply).toHaveBeenCalledWith(
+    expect(bot.api.sendMessage).toHaveBeenCalledWith(
+      "100",
       "回答不完整或不符合可选值，请按原请求重新回复；发送 /stop 可停止当前请求。",
       { reply_parameters: { message_id: 10 } },
+      expect.any(AbortSignal),
     );
 
     expect(await interactions.handleText(textContext("B", 10))).toBe(true);
@@ -1066,6 +1071,7 @@ describe("TelegramInteractionPort", () => {
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: [] },
       },
+      expect.any(AbortSignal),
     );
     await expect(interactions.request(target, {
       ...approvalRequest(),

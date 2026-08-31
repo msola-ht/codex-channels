@@ -85,23 +85,23 @@ describe("Feishu outbox thinking and runtime display", () => {
     await outbox.close();
 
     expect(created).toEqual([
-      { chatId: "oc_chat", initialText: "## 思考中…" },
-      { chatId: "oc_chat", initialText: "## 思考中…" },
+      { chatId: "oc_chat", initialText: "**思考中…**" },
+      { chatId: "oc_chat", initialText: "**思考中…**" },
     ]);
     expect(updated).toEqual([
       {
         cardId: "om_reason_1",
-        content: "## 思考中…\n\n---\n**耗时：** 3秒",
+        content: "**思考中…**\n\n---\n**耗时：** 3秒",
         sequence: 1,
       },
       {
         cardId: "om_reason_1",
-        content: "## 思考中…\n\n---\n**耗时：** 15秒",
+        content: "**思考完成**\n\n---\n**耗时：** 15秒",
         sequence: 2,
       },
       {
         cardId: "om_reason_2",
-        content: "## 思考中…\n\n---\n**耗时：** 2秒",
+        content: "**思考完成**\n\n---\n**耗时：** 2秒",
         sequence: 1,
       },
     ]);
@@ -109,12 +109,12 @@ describe("Feishu outbox thinking and runtime display", () => {
       {
         cardId: "om_reason_1",
         sequence: 3,
-        summary: "## 思考中…\n\n---\n**耗时：** 15秒",
+        summary: "**思考完成**\n\n---\n**耗时：** 15秒",
       },
       {
         cardId: "om_reason_2",
         sequence: 2,
-        summary: "## 思考中…\n\n---\n**耗时：** 2秒",
+        summary: "**思考完成**\n\n---\n**耗时：** 2秒",
       },
     ]);
   });
@@ -145,7 +145,7 @@ describe("Feishu outbox thinking and runtime display", () => {
     });
     await outbox.close();
 
-    expect(markdownCards).toEqual(["## 思考中…\n\n---\n**耗时：** 15秒"]);
+    expect(markdownCards).toEqual(["**思考完成**\n\n---\n**耗时：** 15秒"]);
   });
 
   it("does not let an old thinking-card failure delete a newer segment", async () => {

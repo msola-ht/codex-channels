@@ -1,10 +1,11 @@
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { OutputEvent } from "../src/conversation-core/index.js";
 import {
   FeishuMessageError,
   FeishuOutbox,
 } from "../src/surfaces/feishu/index.js";
-import { completed, delta, operationUpdated, threadStatus, turnCompleted } from "./support/feishu-outbox-fixtures.js";
+import { completed, delta, operationUpdated, target, threadStatus, turnCompleted } from "./support/feishu-outbox-fixtures.js";
 
 
 const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- Session：测试会话\n- Session ID：thread-1";
@@ -109,6 +110,75 @@ describe("Feishu outbox streaming lifecycle", () => {
 
     expect(operations[0]).toBe("stream:先说明，再执行命令。");
     expect(operations[1]).toMatch(/^operation:\*\*运行命令/u);
+  });
+
+  it("suppresses reasoning after a command operation starts", async () => {
+    const reasoning: OutputEvent = {
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "模型正在准备命令",
+      elapsedMs: 240_000,
+      final: false,
+    };
+    const created: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        createStreamingCard: async (_chatId, initialText) => {
+          created.push(initialText);
+          return { cardId: "reasoning", messageId: "reasoning-message" };
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    void outbox.handle(reasoning);
+    await outbox.handle(operationUpdated("running"));
+    await outbox.close();
+
+    expect(created).toEqual([]);
+  });
+
+  it("seals an already-created reasoning card without emitting an intermediate operation card", async () => {
+    const finished: string[] = [];
+    const operations: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => {
+          operations.push(markdown);
+        },
+        createStreamingCard: async () => ({ cardId: "reasoning", messageId: "reasoning-message" }),
+        finishStreamingCard: async (_cardId, _sequence, summary) => {
+          finished.push(summary);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 1_000,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await outbox.handle(operationUpdated("running"));
+    await outbox.close();
+
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toContain("思考中");
+    expect(operations).toHaveLength(0);
   });
 
   it("does not append a working footer to active Turn output", async () => {

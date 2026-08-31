@@ -1451,6 +1451,27 @@ describe("FeishuMessageClient", () => {
     await rejection;
   });
 
+  it("stops waiting for a message when its delivery signal is aborted", async () => {
+    const client = new FeishuMessageClient(
+      {
+        appId: "cli_0123456789abcdef",
+        appSecret: "secret",
+      },
+      {
+        sendTimeoutMs: 10_000,
+        createSdkClient: () => ({
+          createMessage: () => new Promise(() => {}),
+          patchMessage: successfulPatch,
+          downloadResource: successfulDownload,
+        }),
+      },
+    );
+    const controller = new AbortController();
+    const sending = client.sendText("oc_chat", "queued", controller.signal);
+    controller.abort();
+    await expect(sending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("neutralizes platform-native mention tags in rich Markdown", async () => {
     const createMessage = vi.fn(async () => ({
       data: { message_id: "om_message" },

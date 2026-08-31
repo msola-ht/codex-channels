@@ -35,6 +35,8 @@ interface WeixinInteractionDelivery {
     target: ConversationTarget,
     texts: readonly string[],
   ): Promise<void>;
+  prepareInteraction?(request: InteractionRequest): void;
+  finishInteraction?(request: InteractionRequest, decision: InteractionDecision): void;
 }
 
 interface PendingInteraction {
@@ -170,6 +172,7 @@ export class WeixinInteractionPort implements InteractionPort {
     if (!this.pending.reserve(request.requestId, token)) {
       return safeInteractionDecision(request);
     }
+    this.delivery.prepareInteraction?.(request);
     const prompt = renderInteractionPrompt(request, token);
     const promptCharacters = request.type === "user-input"
       ? request.questions.reduce(
@@ -465,6 +468,7 @@ export class WeixinInteractionPort implements InteractionPort {
     if (!pending) {
       return;
     }
+    this.delivery?.finishInteraction?.(pending.request, decision);
     pending.resolve(decision);
     if (outcome !== undefined) {
       await this.notify(pending.target, outcome);
