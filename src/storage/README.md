@@ -9,6 +9,8 @@
 - `memory-binding-store.ts`：用于测试和临时运行的内存实现。
 - `sqlite-binding-store.ts`：单机 Gateway 使用的 SQLite 实现，负责当前 Schema、Unix owner-only 权限、
   Windows 当前 SID 私有 ACL 和持久恢复。
+- `sqlite-session-display-cache.ts`：独立的会话展示缓存 SQLite 实现，保存状态和最近一次权威轮数结果，
+  使用独立 Schema；缓存损坏或版本不兼容时失败关闭，不修改绑定数据库。
 
 Conversation 使用 `surface + accountId + conversationId` 作为复合身份；每个 Conversation 最多
 有一个前台绑定，并可保存有界的运行中后台绑定；一个 Codex Thread 仍只能归属一个外部
@@ -28,3 +30,8 @@ Schema v4 保留原 `conversation_bindings` 前台表，并新增
 丢失，但 App Server Thread 不会被删除。
 
 存储实现必须保持可替换。新增字段应只服务于绑定恢复或必要偏好；持久化格式变化必须明确当前数据的重建或升级方式，不能静默兼容未知 Schema，也不能读取或复制 `~/.codex/sessions`。
+
+会话展示缓存位于 Gateway 数据目录的 `session-display-cache.sqlite3`。它只缓存由 App Server
+`thread/list` 和 `thread/turns/list` 产生的状态、筛选元数据及轮数，用于 `/r` 和清理预览避免重复读取
+历史；轮数缓存五分钟后重新向 App Server 校验。发送新消息会立即使对应轮数失效，官方
+`turn/completed` 到达后自动对该 Thread 异步回填；归档 Thread 会删除对应缓存。

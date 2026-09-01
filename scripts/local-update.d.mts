@@ -56,7 +56,11 @@ export interface LocalUpdatePlan {
   operation: "local-update";
   revision: string;
   config: { configPath: string; missingSafeDefaults?: string[]; removedPaths?: string[] };
-  databases: { state: DatabaseInspection; metrics: DatabaseInspection };
+  databases: {
+    state: DatabaseInspection;
+    metrics: DatabaseInspection;
+    sessionDisplayCache?: DatabaseInspection;
+  };
   services: CoreServiceInstallation;
   requiresServiceInterruption: boolean;
   steps: LocalUpdateStage[];
@@ -91,23 +95,46 @@ export function inspectDatabaseUpdates(
   options?: {
     inspectState?: () => DatabaseInspection;
     inspectMetrics?: () => DatabaseInspection;
+    inspectSessionDisplayCache?: () => DatabaseInspection;
     validateMetrics?: () => unknown;
   },
-): { state: DatabaseInspection; metrics: DatabaseInspection };
+): {
+  state: DatabaseInspection;
+  metrics: DatabaseInspection;
+  sessionDisplayCache?: DatabaseInspection;
+};
+
+export function inspectSessionDisplayCache(
+  environment?: LocalUpdateEnvironment,
+): DatabaseInspection;
 
 export function updateDatabases(
   environment?: LocalUpdateEnvironment,
   options?: {
-    inspect?: () => { state: DatabaseInspection; metrics: DatabaseInspection };
+    inspect?: () => {
+      state: DatabaseInspection;
+      metrics: DatabaseInspection;
+      sessionDisplayCache?: DatabaseInspection;
+    };
     onInspected?: (inspection: {
       state: DatabaseInspection;
       metrics: DatabaseInspection;
+      sessionDisplayCache?: DatabaseInspection;
     }) => void;
     onUpdated?: (name: string, result: DatabaseUpdateResult) => void;
     updateMetrics?: () => DatabaseUpdateResult;
+    updateSessionDisplayCache?: () => DatabaseUpdateResult;
     updateState?: () => DatabaseUpdateResult;
   },
-): { state: DatabaseUpdateResult; metrics: DatabaseUpdateResult };
+): {
+  state: DatabaseUpdateResult;
+  metrics: DatabaseUpdateResult;
+  "session-display-cache"?: DatabaseUpdateResult;
+};
+
+export function updateSessionDisplayCache(
+  environment?: LocalUpdateEnvironment,
+): DatabaseUpdateResult;
 
 export function inspectGatewayConfiguration(
   environment?: LocalUpdateEnvironment,
@@ -137,12 +164,20 @@ export function updateLocalInstallation(
       missingSafeDefaults?: string[];
       removedPaths?: string[];
     };
-    inspectDatabases?: () => { state: DatabaseInspection; metrics: DatabaseInspection };
+    inspectDatabases?: () => {
+      state: DatabaseInspection;
+      metrics: DatabaseInspection;
+      sessionDisplayCache?: DatabaseInspection;
+    };
     inspectServices?: () => CoreServiceInstallation;
     gatewayIsActive?: (configPath: string) => boolean | Promise<boolean>;
     onInspected?: (inspection: {
       config: { configPath: string; missingSafeDefaults?: string[]; removedPaths?: string[] };
-      databases: { state: DatabaseInspection; metrics: DatabaseInspection };
+      databases: {
+        state: DatabaseInspection;
+        metrics: DatabaseInspection;
+        sessionDisplayCache?: DatabaseInspection;
+      };
       services: CoreServiceInstallation;
     }) => void;
     onProgress?: (progress: LocalUpdateProgress) => void;

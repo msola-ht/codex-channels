@@ -23,6 +23,7 @@ export type UserFacingErrorCode =
   | "sessions.cleanup.usage"
   | "sessions.cleanup.confirmation-invalid"
   | "sessions.cleanup.unavailable"
+  | "sessions.cleanup.busy"
   | "archived-sessions.usage"
   | "thread-section.usage"
   | "thread-section.name.invalid"

@@ -146,7 +146,7 @@ codexc update
 codexc doctor
 ```
 
-更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断该设置。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
+更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断该设置。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
 
 卸载但保留用户数据：
 
@@ -169,8 +169,8 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 - 帮助：`/help`、`/whoami`
 
 `/stop` 会优先中断当前活动 Turn；`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
-`/resume`、`/sessions` 和 `/archived` 的当前页会话会显示已记录的 Turn 轮数；轮数读取失败时不会阻塞列表。
-可使用 `/session-cleanup <最大轮数>` 预览并按轮数批量归档短会话，确认时使用预览返回的、五分钟内有效的一次性令牌执行 `/session-cleanup confirm <令牌>`；该操作不会永久删除会话。
+`/resume`、`/sessions` 和 `/archived` 的当前页会话会显示已记录的 Turn 轮数；轮数读取失败时不会阻塞列表，近期结果会从本机派生缓存复用。新 Turn 开始时旧轮数会失效，Turn 完成后 Gateway 会针对该会话自动回填最新值。
+可使用 `/session-cleanup <最大轮数>` 预览并按轮数批量归档短会话。预览会读取完整 Thread 目录，但轮数优先复用五分钟内的缓存，并以有界并发读取过期历史；扫描期间同一会话的新普通消息会被暂时拦截；确认时使用预览返回的、五分钟内有效的一次性令牌执行 `/session-cleanup confirm <令牌>`；该操作不会永久删除会话。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。
 

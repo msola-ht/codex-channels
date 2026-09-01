@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import {
   copyFileSync,
   existsSync,
@@ -57,7 +58,7 @@ import {
   upgradeStateDatabase,
   validateStateDatabaseStructure,
 } from "./upgrade-state.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
+import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 import { backupAndMigrateProviderFiles } from "./backup-provider-migration.mjs";
 import {
   downloadDeepseekCatalog,
@@ -66,6 +67,69 @@ import {
 import { refreshOpencodeGoCatalogForUpdate } from "./opencode-go-setup.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
+const sessionDisplayCacheSchemaVersion = 1;
+
+export function inspectSessionDisplayCache(environment = process.env) {
+  const databasePath = resolveSessionDisplayCachePath(environment);
+  if (!existsSync(databasePath)) {
+    return {
+      compatible: true,
+      databasePath,
+      exists: false,
+      schemaVersion: null,
+      targetSchemaVersion: sessionDisplayCacheSchemaVersion,
+      updateable: true,
+    };
+  }
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const version = Number(database.prepare("PRAGMA user_version").get()?.user_version);
+    return {
+      compatible: version === sessionDisplayCacheSchemaVersion,
+      databasePath,
+      exists: true,
+      schemaVersion: version,
+      targetSchemaVersion: sessionDisplayCacheSchemaVersion,
+      updateable: true,
+    };
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * The session display cache is derived data, so an incompatible version is
+ * rebuilt rather than migrated. Keep the old file as a private backup.
+ */
+export function updateSessionDisplayCache(environment = process.env) {
+  const databasePath = resolveSessionDisplayCachePath(environment);
+  if (!existsSync(databasePath)) {
+    return { changed: false, databasePath, schemaVersion: null };
+  }
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  let version;
+  try {
+    version = Number(database.prepare("PRAGMA user_version").get()?.user_version);
+  } finally {
+    database.close();
+  }
+  if (version === sessionDisplayCacheSchemaVersion) {
+    return { changed: false, databasePath, schemaVersion: version };
+  }
+  const backupPath = `${databasePath}.v${version || "unknown"}.${backupTimestamp(new Date())}.bak`;
+  if (existsSync(backupPath)) {
+    throw new Error(`会话展示缓存备份已存在：${backupPath}`);
+  }
+  copyFileSync(databasePath, backupPath);
+  securePrivateFileSync(backupPath);
+  unlinkSync(databasePath);
+  return {
+    changed: true,
+    databasePath,
+    schemaVersion: sessionDisplayCacheSchemaVersion,
+    backupPath,
+  };
+}
 
 export function updateGatewayConfiguration(environment = process.env, options = {}) {
   const { configPath } = requireUserConfig(environment);
@@ -427,6 +491,9 @@ export function inspectCoreServiceInstallation(
 export function inspectDatabaseUpdates(environment = process.env, options = {}) {
   const state = (options.inspectState ?? (() => inspectStateDatabase(environment)))();
   const metrics = (options.inspectMetrics ?? (() => inspectMetricsDatabase(environment)))();
+  const sessionDisplayCache = options.inspectSessionDisplayCache
+    ? options.inspectSessionDisplayCache()
+    : undefined;
   const failures = [];
   if (!state.updateable) {
     failures.push(
@@ -456,7 +523,9 @@ export function inspectDatabaseUpdates(environment = process.env, options = {}) 
   }
   (options.validateMetrics
     ?? (() => validateMetricsDatabaseStructure(environment, { allowUpgradeable: true })))();
-  return { state, metrics };
+  return sessionDisplayCache === undefined
+    ? { state, metrics }
+    : { state, metrics, sessionDisplayCache };
 }
 
 export function updateDatabases(environment = process.env, options = {}) {
@@ -464,6 +533,7 @@ export function updateDatabases(environment = process.env, options = {}) {
     ?? (() => upgradeStateDatabase(environment, { allowMissing: true }));
   const updateMetrics = options.updateMetrics
     ?? (() => upgradeMetricsDatabase(environment));
+  const updateSessionDisplayCache = options.updateSessionDisplayCache;
   const inspect = options.inspect
     ?? (() => inspectDatabaseUpdates(environment));
   const onInspected = options.onInspected ?? (() => {});
@@ -480,6 +550,14 @@ export function updateDatabases(environment = process.env, options = {}) {
       onUpdated(name, results[name]);
     } catch (error) {
       failures.push({ name, error });
+    }
+  }
+  if (updateSessionDisplayCache) {
+    try {
+      results["session-display-cache"] = updateSessionDisplayCache();
+      onUpdated("session-display-cache", results["session-display-cache"]);
+    } catch (error) {
+      failures.push({ name: "session-display-cache", error });
     }
   }
 
@@ -608,6 +686,7 @@ function runCoreServiceAction(action, environment) {
 function failureLabel(name) {
   if (name === "state") return "状态数据库";
   if (name === "metrics") return "指标数据库";
+  if (name === "session-display-cache") return "会话展示缓存";
   return "核心服务恢复";
 }
 
@@ -665,7 +744,12 @@ function annotateLocalUpdateFailure(error, details) {
 }
 
 function printDatabaseResult(name, result) {
-  const label = name === "state" ? "状态数据库" : "指标数据库";
+  const labels = {
+    state: "状态数据库",
+    metrics: "指标数据库",
+    "session-display-cache": "会话展示缓存",
+  };
+  const label = labels[name] ?? name;
   const version = name === "state" ? result.version : result.schemaVersion;
   if (version === null) {
     writeCliMessage("note", `${label}尚未创建，无需更新。`);
@@ -682,7 +766,7 @@ function printDatabaseResult(name, result) {
   console.log(`更新前备份：${result.backupPath}`);
 }
 
-function printInspection({ state, metrics }) {
+function printInspection({ state, metrics, sessionDisplayCache }) {
   writeCliMessage("note", "数据库版本预检通过。");
   console.log(`状态数据库：${versionTransition(
     state.exists ? state.schemaVersion : null,
@@ -692,12 +776,30 @@ function printInspection({ state, metrics }) {
     metrics.exists ? metrics.schemaVersion : null,
     modelRequestMetricsSchemaVersion,
   )}`);
+  if (sessionDisplayCache) {
+    console.log(`会话展示缓存：${versionTransition(
+      sessionDisplayCache.exists ? sessionDisplayCache.schemaVersion : null,
+      sessionDisplayCache.targetSchemaVersion,
+    )}`);
+  }
 }
 
 function versionTransition(current, target) {
   if (current === null) return `尚未创建 → Schema ${target}`;
   if (current === target) return `Schema ${target}（已兼容）`;
   return `Schema ${current} → Schema ${target}`;
+}
+
+function resolveSessionDisplayCachePath(environment) {
+  const { configPath, dataDir } = requireUserConfig(environment);
+  const document = readGatewayConfig(configPath);
+  const storage = isRecord(document.storage) ? document.storage : {};
+  const databasePath = resolveConfiguredPath(
+    typeof storage.database_path === "string" ? storage.database_path : undefined,
+    dataDir,
+    "data/gateway.sqlite3",
+  );
+  return join(dirname(databasePath), "session-display-cache.sqlite3");
 }
 
 function backupTimestamp(date) {
@@ -813,9 +915,16 @@ if (
           },
         },
       ),
+      inspectDatabases: () => inspectDatabaseUpdates(process.env, {
+        inspectSessionDisplayCache: () => inspectSessionDisplayCache(process.env),
+      }),
       databaseOptions: {
+        inspect: () => inspectDatabaseUpdates(process.env, {
+          inspectSessionDisplayCache: () => inspectSessionDisplayCache(process.env),
+        }),
         onInspected: printInspection,
         onUpdated: printDatabaseResult,
+        updateSessionDisplayCache: () => updateSessionDisplayCache(process.env),
       },
     });
     writeCliMessage(

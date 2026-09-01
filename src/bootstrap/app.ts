@@ -100,6 +100,7 @@ import {
 } from "../session-routing/index.js";
 import {
   SqliteBindingStore,
+  SqliteSessionDisplayCache,
   type ConversationBinding,
 } from "../storage/index.js";
 import {
@@ -177,6 +178,7 @@ export class GatewayApplication {
   private readonly metricsSync: MetricsSync;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly bindings: SqliteBindingStore;
+  private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
   private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private readonly subagentCompletion: SubagentCompletionTracker;
@@ -300,6 +302,9 @@ export class GatewayApplication {
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
     this.output = new EventBus<OutputEvent>(logger, 1_000);
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
+    this.sessionDisplayCache = new SqliteSessionDisplayCache(
+      join(dirname(config.stateDatabasePath), "session-display-cache.sqlite3"),
+    );
     this.workspaces = new WorkspaceRegistry(config.workspaces, config.defaultWorkspaceId);
     this.router = new SessionRouter(
       this.codex,
@@ -594,6 +599,7 @@ export class GatewayApplication {
       ),
       (parentThreadId) =>
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
+      this.sessionDisplayCache,
     );
     this.output.subscribe("conversation-background-release", async (event) => {
       const threadId = event.type === "turn.completed"
@@ -625,6 +631,17 @@ export class GatewayApplication {
           message: "后台任务已完成，但订阅清理暂时失败；Gateway 重启后会重试。",
         }, true);
       }
+    });
+    this.output.subscribe("session-display-cache-refresh", (event) => {
+      if (event.type !== "turn.completed") return;
+      void this.trackQueueLifecycleTask(() =>
+        service.refreshSessionDisplayCache(event.threadId)
+      ).catch((error) => {
+        this.logger.warn(
+          { err: error, threadId: event.threadId, turnId: event.turnId },
+          "Turn 完成后的会话轮数缓存刷新失败",
+        );
+      });
     });
     this.providerIdleReleaser = new ProviderIdleReleaser({
       logger,
@@ -1115,6 +1132,7 @@ export class GatewayApplication {
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
       ["Binding Store", () => Promise.resolve(this.bindings.close())],
+      ["Session Display Cache", () => Promise.resolve(this.sessionDisplayCache?.close())],
       ["Scheduled Task Store", () => Promise.resolve(this.scheduledTasks?.close())],
     ] as const) {
       try {

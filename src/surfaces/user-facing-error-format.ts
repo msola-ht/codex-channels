@@ -65,6 +65,8 @@ export function formatSurfaceUserFacingError(
     case "sessions.cleanup.confirmation-invalid":
     case "sessions.cleanup.unavailable":
       return error.message;
+    case "sessions.cleanup.busy":
+      return error.message;
     case "archived-sessions.usage":
       return archivedSessionCommandUsageText;
     case "thread-section.usage":

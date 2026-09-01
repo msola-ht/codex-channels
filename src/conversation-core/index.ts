@@ -53,3 +53,8 @@ export type {
   RoutedThreadModelSettings,
   RoutedWorkspace,
 } from "./routing-port.js";
+export type {
+  SessionDisplayCacheEntry,
+  SessionDisplayCachePort,
+  SessionDisplayStatusType,
+} from "./session-display-cache.js";

@@ -33,9 +33,9 @@
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
-  校验 `config.toml`、状态库、指标库、计划任务库及核心服务定义的完整状态，并返回不含凭据的修订
+  校验 `config.toml`、状态库、指标库、计划任务库、会话展示缓存及核心服务定义的完整状态，并返回不含凭据的修订
   计划、是否需要中断服务及八阶段进度；预检与进度观察者异常不影响更新事务。服务已安装时在同一个
-  App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2），离线复核
+  App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2 以及可重建的会话展示缓存），离线复核
   后启动并通过 Socket 与监管拓扑确认核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线
   更新，不擅自安装或启动，检测到
   `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按

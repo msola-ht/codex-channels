@@ -11,6 +11,7 @@ import type { ThreadHistoryPort } from "../src/application/thread-history-port.j
 import {
   ConversationCore,
 } from "../src/conversation-core/index.js";
+import type { SessionDisplayCachePort } from "../src/conversation-core/index.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
@@ -831,6 +832,143 @@ describe("ConversationService conversation service session", () => {
     await expect(service.archiveSessionCleanup(target, preview.token!)).rejects.toMatchObject({
       code: "sessions.cleanup.confirmation-invalid",
     });
+  });
+
+  it("rejects input immediately while session cleanup is scanning", async () => {
+    let release!: (threads: unknown[]) => void;
+    const list = vi.fn(() => new Promise<unknown[]>((resolve) => {
+      release = resolve;
+    }));
+    const startTurn = vi.fn();
+    const router = {
+      list,
+      current: () => undefined,
+      targetForThread: () => undefined,
+      isBackgroundThread: () => false,
+      workspace: () => main,
+    } as unknown as SessionRouter;
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      router,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      { listThreadTurns: vi.fn(async () => ({ turns: [], nextCursor: null })) } as unknown as ThreadHistoryPort,
+    );
+
+    const scan = service.previewSessionCleanup(target, 3);
+    await Promise.resolve();
+    await expect(Promise.resolve().then(() => service.submit(target, "扫描期间不应进入 Turn")))
+      .rejects.toMatchObject({ code: "sessions.cleanup.busy" });
+    expect(startTurn).not.toHaveBeenCalled();
+    release([]);
+    await expect(scan).resolves.toEqual({ maxTurns: 3, candidates: [], token: null });
+  });
+
+  it("reuses a recent cached turn count for session listing", async () => {
+    const listThreadTurns = vi.fn(async () => ({
+      turns: [{ id: "turn-1", status: "completed" as const, startedAt: null, completedAt: null, durationMs: null, inputType: "text" as const, textPreview: null }],
+      nextCursor: null,
+    }));
+    const cache = new Map<string, Record<string, unknown>>();
+    const sessionDisplayCache = {
+      get: (id: string) => cache.get(id),
+      put: (entry: Record<string, unknown>) => cache.set(String(entry.threadId), entry),
+      invalidateTurnCount: vi.fn(),
+      remove: vi.fn(),
+    };
+    const router = {
+      list: async () => [{ id: "thread-cached", sessionId: "s", modelProvider: "openai", preview: "缓存", name: null, isPinned: false, status: { type: "idle" as const }, cwd: main.cwd, source: "cli" as const, activeTurnId: null }],
+      workspace: () => main,
+      modelSettingsForThread: () => undefined,
+    } as unknown as SessionRouter;
+    const history = { listThreadTurns } as unknown as ThreadHistoryPort;
+    const service = new ConversationService(
+      turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
+      {} as ModelSelectionService, queryPort(),
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, history, undefined, undefined,
+      sessionDisplayCache as unknown as import("../src/conversation-core/index.js").SessionDisplayCachePort,
+    );
+
+    await expect(service.listSessions(target, { page: 1 })).resolves.toEqual([
+      expect.objectContaining({ id: "thread-cached", turnCount: 1 }),
+    ]);
+    await expect(service.listSessions(target, { page: 1 })).resolves.toEqual([
+      expect.objectContaining({ id: "thread-cached", turnCount: 1 }),
+    ]);
+    expect(listThreadTurns).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes an invalidated session count after a completed Turn", async () => {
+    const listThreadTurns = vi.fn(async () => ({
+      turns: [
+        { id: "turn-1", status: "completed" as const, startedAt: null, completedAt: null, durationMs: null, inputType: "text" as const, textPreview: null },
+        { id: "turn-2", status: "completed" as const, startedAt: null, completedAt: null, durationMs: null, inputType: "text" as const, textPreview: null },
+        { id: "turn-3", status: "completed" as const, startedAt: null, completedAt: null, durationMs: null, inputType: "text" as const, textPreview: null },
+      ],
+      nextCursor: null,
+    }));
+    const entry = {
+      threadId: "thread-refresh",
+      workspaceId: "main",
+      archived: false,
+      preview: "刷新",
+      name: null,
+      modelProvider: "openai",
+      status: { type: "active" as const },
+      activeTurnId: "turn-3",
+      isPinned: false,
+      turnCount: null,
+      measuredAt: null,
+    };
+    const put = vi.fn();
+    const sessionDisplayCache = {
+      get: vi.fn(() => entry),
+      put,
+      invalidateTurnCount: vi.fn(),
+      remove: vi.fn(),
+    } satisfies SessionDisplayCachePort;
+    const router = {
+      targetForThread: () => target,
+      readThread: vi.fn(async () => ({
+        id: "thread-refresh",
+        sessionId: "session-refresh",
+        modelProvider: "openai",
+        preview: "刷新完成",
+        name: null,
+        isPinned: false,
+        status: { type: "idle" as const },
+        cwd: main.cwd,
+        source: "cli" as const,
+        historyMode: "paginated" as const,
+        activeTurnId: null,
+      })),
+    } as unknown as SessionRouter;
+    const service = new ConversationService(
+      turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
+      {} as ModelSelectionService, queryPort(),
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      { listThreadTurns } as unknown as ThreadHistoryPort, undefined, undefined,
+      sessionDisplayCache,
+    );
+
+    const first = service.refreshSessionDisplayCache("thread-refresh");
+    const second = service.refreshSessionDisplayCache("thread-refresh");
+    expect(second).toBe(first);
+    await first;
+
+    expect(listThreadTurns).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: "thread-refresh",
+      turnCount: 3,
+      measuredAt: expect.any(Number),
+      status: { type: "idle" },
+      activeTurnId: null,
+    }));
   });
 
   it("does not clean up a Session bound to another Conversation", async () => {

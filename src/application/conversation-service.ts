@@ -96,8 +96,11 @@ import {
   type ThreadQueueReorderResult,
 } from "./thread-queue-service.js";
 import { ThreadRevertService } from "./thread-revert-service.js";
+import type { SessionDisplayCachePort } from "../conversation-core/index.js";
 
 const sessionListPageSize = 20;
+const sessionTurnCountCacheTtlMs = 5 * 60_000;
+const sessionScanConcurrency = 3;
 
 export type {
   ThreadQueueListResult,
@@ -385,6 +388,13 @@ export class ConversationService implements ConversationUseCases {
     candidates: SessionCleanupCandidate[];
     expiresAt: number;
   }>();
+  private readonly sessionCleanupScans = new Set<string>();
+  private readonly sessionDisplayCacheRefreshes = new Map<string, {
+    promise: Promise<void>;
+    rerun: boolean;
+    generation: number;
+  }>();
+  private readonly sessionDisplayCacheGenerations = new Map<string, number>();
 
   constructor(
     private readonly codex: TurnExecutionPort,
@@ -412,6 +422,7 @@ export class ConversationService implements ConversationUseCases {
       resetsAt: number,
     ) => Promise<RemoteQuotaSummary | undefined>,
     private readonly hasPendingSubagentRuns?: (parentThreadId: string) => boolean,
+    private readonly sessionDisplayCache?: SessionDisplayCachePort,
   ) {
     this.queueUseCases = new ThreadQueueService(
       this.locks,
@@ -460,6 +471,7 @@ export class ConversationService implements ConversationUseCases {
   }
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
+    this.rejectIfSessionCleanupScanning(target);
     let input: TurnInput[];
     try {
       input = normalizeInput(value);
@@ -635,6 +647,7 @@ export class ConversationService implements ConversationUseCases {
     input: TurnInput[],
     identity?: TurnStartIdentity,
   ): Promise<Submission> {
+    this.rejectIfSessionCleanupScanning(target);
     if (input.some((item) => item.type === "image")) {
       await this.models.requireInputModality(target, "image");
     }
@@ -644,6 +657,7 @@ export class ConversationService implements ConversationUseCases {
     const active = this.core.activeTurn(target);
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
     if (active) {
+      this.invalidateSessionDisplayTurnCount(active.threadId);
       try {
         await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
       } catch (error) {
@@ -789,16 +803,36 @@ export class ConversationService implements ConversationUseCases {
           ...(model ? { model } : {}),
         };
       });
+    if (this.sessionDisplayCache) {
+      const workspaceId = this.router.workspace(target).id;
+      const archived = options.archived === true;
+      for (const thread of ordered) {
+        const previous = this.sessionDisplayCache.get(thread.id);
+        this.sessionDisplayCache.put({
+          threadId: thread.id,
+          workspaceId,
+          archived,
+          preview: thread.preview,
+          name: thread.name,
+          modelProvider: thread.modelProvider,
+          status: thread.status,
+          activeTurnId: thread.activeTurnId,
+          isPinned: thread.isPinned,
+          turnCount: previous?.turnCount ?? null,
+          measuredAt: previous?.measuredAt ?? null,
+        });
+      }
+    }
     const page = options.page;
     if (!this.threadHistory || typeof page !== "number" || !Number.isSafeInteger(page) || page < 1) {
       return sessions;
     }
     const start = (page - 1) * sessionListPageSize;
     const visible = sessions.slice(start, start + sessionListPageSize);
-    const counts = await Promise.all(visible.map(async (session) => [
+    const counts = await mapWithConcurrency(visible, sessionScanConcurrency, async (session) => [
       session.id,
-      await countThreadTurns(this.threadHistory!, session.id),
-    ] as const));
+      await this.cachedOrCountThreadTurns(session.id),
+    ] as const);
     const countByThread = new Map(
       counts.filter((entry): entry is readonly [string, number] => entry[1] !== undefined),
     );
@@ -1085,6 +1119,7 @@ export class ConversationService implements ConversationUseCases {
     return this.locked(target, async () => {
       this.requireIdle(target);
       const threadId = await this.router.archive(target);
+      this.removeSessionDisplayCache(threadId);
       this.invalidateRevertSnapshot(target);
       this.clearPendingSelections(target);
       return threadId;
@@ -1092,22 +1127,34 @@ export class ConversationService implements ConversationUseCases {
   }
 
   previewSessionCleanup(target: ConversationTarget, maxTurns: number): Promise<SessionCleanupPreview> {
+    const key = conversationTargetKey(target);
+    if (this.sessionCleanupScans.has(key)) {
+      throw new UserFacingError(
+        "sessions.cleanup.busy",
+        "当前正在扫描会话，请等待扫描完成后再试",
+      );
+    }
+    this.sessionCleanupScans.add(key);
     return this.locked(target, async () => {
-      const preview = await this.findSessionCleanupCandidates(target, maxTurns);
-      if (preview.candidates.length === 0) return preview;
-      const token = randomUUID();
-      this.sessionCleanupConfirmations.set(token, {
-        targetKey: conversationTargetKey(target),
-        maxTurns,
-        candidates: preview.candidates,
-        expiresAt: Date.now() + 5 * 60_000,
-      });
-      while (this.sessionCleanupConfirmations.size > 128) {
-        const oldest = this.sessionCleanupConfirmations.keys().next().value;
-        if (!oldest) break;
-        this.sessionCleanupConfirmations.delete(oldest);
+      try {
+        const preview = await this.findSessionCleanupCandidates(target, maxTurns);
+        if (preview.candidates.length === 0) return preview;
+        const token = randomUUID();
+        this.sessionCleanupConfirmations.set(token, {
+          targetKey: key,
+          maxTurns,
+          candidates: preview.candidates,
+          expiresAt: Date.now() + 5 * 60_000,
+        });
+        while (this.sessionCleanupConfirmations.size > 128) {
+          const oldest = this.sessionCleanupConfirmations.keys().next().value;
+          if (!oldest) break;
+          this.sessionCleanupConfirmations.delete(oldest);
+        }
+        return { ...preview, token };
+      } finally {
+        this.sessionCleanupScans.delete(key);
       }
-      return { ...preview, token };
     });
   }
 
@@ -1151,6 +1198,7 @@ export class ConversationService implements ConversationUseCases {
         }
         try {
           await this.router.archiveThread(candidate.id);
+          this.removeSessionDisplayCache(candidate.id);
           archived.push(candidate);
         } catch {
           failed.push(candidate);
@@ -1177,7 +1225,26 @@ export class ConversationService implements ConversationUseCases {
     const currentId = this.router.current(target)?.threadId;
     const targetKey = conversationTargetKey(target);
     const threads = await this.router.list(target, { fullScan: true });
-    const candidates = await Promise.all(threads.map(async (thread) => {
+    if (this.sessionDisplayCache) {
+      const workspaceId = this.router.workspace(target).id;
+      for (const thread of threads) {
+        const previous = this.sessionDisplayCache.get(thread.id);
+        this.sessionDisplayCache.put({
+          threadId: thread.id,
+          workspaceId,
+          archived: false,
+          preview: thread.preview,
+          name: thread.name,
+          modelProvider: thread.modelProvider,
+          status: thread.status,
+          activeTurnId: thread.activeTurnId,
+          isPinned: thread.isPinned,
+          turnCount: previous?.turnCount ?? null,
+          measuredAt: previous?.measuredAt ?? null,
+        });
+      }
+    }
+    const candidates = await mapWithConcurrency(threads, sessionScanConcurrency, async (thread) => {
       const owner = this.router.targetForThread(thread.id);
       if (
         thread.id === currentId
@@ -1187,16 +1254,121 @@ export class ConversationService implements ConversationUseCases {
         || thread.status.type === "active"
         || this.router.isBackgroundThread(thread.id)
       ) return null;
-      const turnCount = await countThreadTurns(this.threadHistory!, thread.id);
+      const turnCount = await this.cachedOrCountThreadTurns(thread.id);
       return turnCount !== undefined && turnCount <= maxTurns
         ? { id: thread.id, name: thread.name, turnCount }
         : null;
-    }));
+    });
     return {
       maxTurns,
       candidates: candidates.filter((candidate): candidate is SessionCleanupCandidate => candidate !== null),
       token: null,
     };
+  }
+
+  private rejectIfSessionCleanupScanning(target: ConversationTarget): void {
+    if (this.sessionCleanupScans.has(conversationTargetKey(target))) {
+      throw new UserFacingError(
+        "sessions.cleanup.busy",
+        "当前正在扫描会话，请等待扫描完成后再发送消息",
+      );
+    }
+  }
+
+  /** Reconcile one invalidated session without rescanning the Thread catalog. */
+  refreshSessionDisplayCache(threadId: string): Promise<void> {
+    const existing = this.sessionDisplayCacheRefreshes.get(threadId);
+    if (existing) {
+      if ((this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== existing.generation) {
+        existing.rerun = true;
+      }
+      return existing.promise;
+    }
+    const state = {
+      promise: Promise.resolve(),
+      rerun: false,
+      generation: this.sessionDisplayCacheGenerations.get(threadId) ?? 0,
+    };
+    state.promise = (async () => {
+      do {
+        state.rerun = false;
+        state.generation = this.sessionDisplayCacheGenerations.get(threadId) ?? 0;
+        await this.refreshSessionDisplayCacheNow(threadId);
+      } while (state.rerun);
+    })().finally(() => {
+      if (this.sessionDisplayCacheRefreshes.get(threadId) === state) {
+        this.sessionDisplayCacheRefreshes.delete(threadId);
+      }
+    });
+    this.sessionDisplayCacheRefreshes.set(threadId, state);
+    return state.promise;
+  }
+
+  private async refreshSessionDisplayCacheNow(threadId: string): Promise<void> {
+    const cache = this.sessionDisplayCache;
+    const history = this.threadHistory;
+    const entry = cache?.get(threadId);
+    if (!cache || !history || !entry) return;
+    const generation = this.sessionDisplayCacheGenerations.get(threadId) ?? 0;
+    const count = await countThreadTurns(history, threadId);
+    let snapshot: Awaited<ReturnType<SessionRouter["readThread"]>> | undefined;
+    try {
+      snapshot = await this.router.readThread(threadId);
+    } catch {
+      snapshot = undefined;
+    }
+    // A newer Turn may have started while the history request was in flight.
+    if ((this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== generation) return;
+    const latest = cache.get(threadId);
+    if (!latest || count === undefined) return;
+    cache.put({
+      ...latest,
+      ...(snapshot
+        ? {
+            preview: snapshot.preview,
+            name: snapshot.name,
+            modelProvider: snapshot.modelProvider,
+            status: snapshot.status,
+            activeTurnId: snapshot.activeTurnId,
+            isPinned: snapshot.isPinned,
+          }
+        : {
+            status: { type: "idle" as const },
+            activeTurnId: null,
+          }),
+      turnCount: count,
+      measuredAt: Date.now(),
+    });
+  }
+
+  private invalidateSessionDisplayTurnCount(threadId: string): void {
+    this.sessionDisplayCacheGenerations.set(
+      threadId,
+      (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) + 1,
+    );
+    this.sessionDisplayCache?.invalidateTurnCount(threadId);
+  }
+
+  private removeSessionDisplayCache(threadId: string): void {
+    this.sessionDisplayCacheGenerations.delete(threadId);
+    this.sessionDisplayCache?.remove(threadId);
+  }
+
+  private async cachedOrCountThreadTurns(threadId: string): Promise<number | undefined> {
+    const cached = this.sessionDisplayCache?.get(threadId);
+    if (
+      cached?.turnCount !== null
+      && cached?.turnCount !== undefined
+      && cached.measuredAt !== null
+      && Date.now() - cached.measuredAt <= sessionTurnCountCacheTtlMs
+    ) {
+      return cached.turnCount;
+    }
+    const count = await countThreadTurns(this.threadHistory!, threadId);
+    if (count !== undefined && cached && this.sessionDisplayCache) {
+      this.sessionDisplayCache.put({ ...cached, turnCount: count, measuredAt: Date.now() });
+    }
+    return count;
   }
 
   unarchive(target: ConversationTarget, selector: string): Promise<string> {
@@ -1895,6 +2067,7 @@ export class ConversationService implements ConversationUseCases {
     const binding = Object.keys(threadStartOptions).length > 0
       ? await this.router.ensure(target, threadStartOptions)
       : await this.router.ensure(target);
+    this.invalidateSessionDisplayTurnCount(binding.threadId);
     const workspace = this.router.workspace(target);
     const overrides = this.turnOverrides(target);
     if (overrides.modelProvider != null) {
@@ -2230,6 +2403,26 @@ async function countThreadTurns(
   } catch {
     return undefined;
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= values.length) return;
+      results[index] = await mapper(values[index]!);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, worker),
+  );
+  return results;
 }
 
 function pinnedFirst<T extends { isPinned: boolean }>(
