@@ -97,7 +97,7 @@ export async function runSetup({
         });
         if (isBackResult(result)) continue;
         if (stayOnMenu) continue;
-        return enrichSetupResult(result);
+        return enrichSetupResult(result, "restart-gateway");
       }
       case "codex_user": {
         const result = await codexUserSettingsSetup({
@@ -108,7 +108,7 @@ export async function runSetup({
         });
         if (isBackResult(result)) continue;
         if (stayOnMenu) continue;
-        return enrichSetupResult(result);
+        return enrichSetupResult(result, "restart-all");
       }
       case "models": {
         const result = await runModelSetup({
@@ -182,7 +182,7 @@ async function runModelSetup({
         officialLoginSetup,
       });
       if (isBackResult(result)) continue;
-      return result;
+      return enrichSetupResult(result, "restart-all");
     }
     if (category === "third_party") {
       const result = await runThirdPartyModelSetup({
@@ -197,7 +197,7 @@ async function runModelSetup({
         agentsSetup,
       });
       if (isBackResult(result)) continue;
-      return result;
+      return enrichSetupResult(result, "restart-all");
     }
     throw new Error(`未知模型与提供商设置：${String(category)}`);
   }
@@ -230,7 +230,7 @@ async function runOfficialModelSetup({
       throw new Error(`未知官方设置：${String(module)}`);
     }
     if (isBackResult(result)) continue;
-    return result;
+    return enrichSetupResult(result, "restart-all");
   }
 }
 
@@ -301,7 +301,7 @@ async function runThirdPartyModelSetup({
       throw new Error(`未知第三方设置：${String(module)}`);
     }
     if (isBackResult(result)) continue;
-    return result;
+    return enrichSetupResult(result, setupFallbackActivation(module, result));
   }
 }
 
@@ -358,12 +358,37 @@ function isBackResult(result) {
   return result?.action === "back";
 }
 
-function enrichSetupResult(value) {
+function enrichSetupResult(value, fallbackActivation) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  if (typeof value.activation !== "string" || value.activationResult !== undefined) {
+  if (value.activationResult !== undefined) {
     return value;
   }
-  return { ...value, activationResult: configActivationResult(value.activation) };
+  const activation = typeof value.activation === "string"
+    ? value.activation
+    : fallbackActivation;
+  if (typeof activation !== "string") return value;
+  return {
+    ...value,
+    activation,
+    activationResult: configActivationResult(activation),
+  };
+}
+
+function setupFallbackActivation(module, result) {
+  if (module === "opencode-go" && ["listed", "not-running", "in-use"].includes(result?.action)) {
+    return undefined;
+  }
+  if (module === "opencode-go" && result?.action === "model-settings") {
+    return "restart-app-server";
+  }
+  return {
+    custom_primary: "restart-all",
+    deepseek: "restart-all",
+    "opencode-go": "restart-all",
+    provider_default: "restart-app-server",
+    agents: "restart-all",
+    api_provider: "restart-gateway",
+  }[module];
 }
 
 function isDirectExecution(moduleUrl, argvPath) {

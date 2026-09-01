@@ -191,6 +191,34 @@ describe("Codex Connect setup", () => {
     expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts, allowBack: true });
   });
 
+  it("adds a stable activation result when a legacy provider setup omits it", async () => {
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("official")
+        .mockResolvedValueOnce("official_login"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const result = await runSetup({
+      input: {},
+      output: {},
+      prompts,
+      officialLoginSetup: vi.fn(async () => ({ mode: "official" })),
+    });
+
+    expect(result).toMatchObject({
+      mode: "official",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
+  });
+
   it("selects unified Codex user settings from the main category", async () => {
     const environment = { CODEX_HOME: "/tmp/codex-home" };
     const output = {};

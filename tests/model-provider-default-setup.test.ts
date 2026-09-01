@@ -32,6 +32,12 @@ describe("managed model provider default setup", () => {
       reasoningEffort: "max",
       autoCompactPercent: 75,
       mode: "switching",
+      activation: "restart-app-server",
+      activationResult: {
+        status: "restart",
+        target: "app-server",
+        commands: ["codexc service restart app-server"],
+      },
     });
 
     const profile = parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8"));

@@ -67,6 +67,8 @@ export async function runModelProviderDefaultSetup({
       reasoningEffort,
       autoCompactPercent,
       mode: result.provider.mode,
+      activation: "restart-app-server",
+      activationResult: configActivationResult("restart-app-server"),
     };
   } catch (error) {
     if (allowBack && error instanceof ModelProviderDefaultSetupCancelled) {
