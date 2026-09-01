@@ -31,7 +31,8 @@
   可把主 App Server 的 Codex 官方模型目录以精确自定义 Provider ID 克隆为切换菜单项，不复制或
   持久化模型目录；模型声明的 Codex 多代理运行时作为只读能力提示保留，OpenAI 替代模型与退役时间
   不复制到第三方 Provider，且不参与模型可用性、自动切换或审批判断；
-  在 Workspace、新会话或同 Provider 历史 Thread 切换前后捕获并恢复当前模型、思考等级与服务层级，
+  在 Workspace、新会话或同 Provider 历史 Thread 切换前后捕获并恢复当前模型、思考等级与服务层级；切换 Workspace
+  后下一条消息强制新建 Thread，不自动接续目标 Workspace 的历史 Thread，
   显式恢复不同 Provider 的历史 Thread 时则尊重该 Thread 的 Provider；偏好只保留在运行内存中；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
   `modelProvider` 的 Thread；思考等级优先采用目标 Provider App Server 的有效配置，目标模型不支持

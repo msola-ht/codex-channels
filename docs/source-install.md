@@ -25,6 +25,12 @@ Set-ExecutionPolicy -Scope Process Bypass
 & .\install.ps1
 ```
 
+也可以从官方 `main` 分支直接下载并运行安装器：
+
+```powershell
+irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 | iex
+```
+
 该脚本要求 Git、Node.js 22.13+、npm 和固定版本 Codex CLI；缺少 Codex CLI 时会通过 `npm.cmd`
 安装精确版本。它只使用当前用户目录，不要求管理员权限；安装失败会清理临时目录和不完整源码。
 默认克隆官方 `main`；本地开发验证可显式传入 `-Repository <本地仓库路径> -Branch <分支>`，该参数不改变

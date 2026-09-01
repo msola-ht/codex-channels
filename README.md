@@ -55,8 +55,14 @@ curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/instal
 安装器会从源码构建并注册 npm 全局 `codexc` 命令，不修改 Shell PATH。目录、环境检测、更新和失败处理见
 [`Git 源码安装`](docs/source-install.md)。
 
-Windows PowerShell 7 使用仓库根目录的 `install.ps1`；该入口目前属于 Windows 开发验证，不代表
-公开支持门槛已经完成。详见 [`Git 源码安装`](docs/source-install.md)。
+Windows PowerShell 7 可直接运行远程源码安装器；该入口目前属于 Windows 开发验证，不代表公开支持
+门槛已经完成：
+
+```powershell
+irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 | iex
+```
+
+也可以在仓库根目录直接运行 `& .\install.ps1`。完整参数和失败清理说明见 [`Git 源码安装`](docs/source-install.md)。
 
 初始化并配置通讯渠道：
 
@@ -225,8 +231,8 @@ codexc service restart all
 codexc service restart all
 ```
 
-聊天中使用 `/model` 切换；当前渠道模型会在切换 Workspace、新会话或同 Provider 历史会话时继续
-用于下一 Turn，显式恢复不同 Provider 的历史会话时仍尊重该 Thread 的 Provider。终端使用
+聊天中使用 `/model` 切换；切换 Workspace 后下一条消息会创建新会话，当前渠道模型仍会继续用于下一 Turn；
+新会话或同 Provider 历史会话切换也会保留模型偏好，显式恢复不同 Provider 的历史会话时仍尊重该 Thread 的 Provider。终端使用
 `codexc remote --profile sf-deepseek`。模型限制、原生视觉、自动压缩、
 子代理和跨 Provider 行为见 [`DeepSeek 使用说明`](docs/deepseek.md)。
 
