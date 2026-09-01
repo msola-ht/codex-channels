@@ -146,10 +146,12 @@ function createWeixinModule(
         access,
         config.accountId,
       ),
-      text: (target) => renderWeixinStartupNotification(
-        options.config.workspaces,
-        options.service.status(target, { includeGitBranch: true }),
-        {
+      text: async (target) => {
+        const status = options.service.status(target, { includeGitBranch: true });
+        return renderWeixinStartupNotification(
+          options.config.workspaces,
+          status,
+          {
           platform: process.platform,
           architecture: process.arch,
           gatewayVersion: options.gatewayVersion,
@@ -158,9 +160,11 @@ function createWeixinModule(
           codexUpstreamUserAgent:
             options.codexUpstreamUserAgent() ?? null,
           openAiConnectivity: options.openAiConnectivity(),
-          debugEnabled: isDebugLogLevel(options.config.logLevel),
-        },
-      ),
+            debugEnabled: isDebugLogLevel(options.config.logLevel),
+          },
+          await options.remoteQuota?.(status.modelProvider, status.weeklyLimit?.resetsAt),
+        );
+      },
     },
     operationUpdateDisplay: options.config.operationUpdateDisplay,
     planUpdatesEnabled: options.config.planUpdatesEnabled,
@@ -171,6 +175,7 @@ function createWeixinModule(
     ...(options.remainingUsage === undefined
       ? {}
       : { remainingUsage: options.remainingUsage }),
+    ...(options.remoteQuota === undefined ? {} : { remoteQuota: options.remoteQuota }),
     fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
@@ -250,11 +255,11 @@ function createFeishuModule(
       config.appId,
     ),
     startupNotification: {
-      messages: () => authorizedFeishuConversations(
+      messages: async () => Promise.all(authorizedFeishuConversations(
         options.bindings,
         access,
         config.appId,
-      ).map((chatId) => {
+      ).map(async (chatId) => {
         const status = options.service.status(
           {
             surface: "feishu",
@@ -279,9 +284,10 @@ function createFeishuModule(
               openAiConnectivity: options.openAiConnectivity(),
               debugEnabled: isDebugLogLevel(options.config.logLevel),
             },
+            await options.remoteQuota?.(status.modelProvider, status.weeklyLimit?.resetsAt),
           ),
         };
-      }),
+      })),
     },
   });
   return createFeishuRuntimeModule(
@@ -353,6 +359,7 @@ function createTelegramModule(
       ? {}
       : { remainingUsage: options.remainingUsage }),
     gatewayVersion: options.gatewayVersion,
+    ...(options.remoteQuota === undefined ? {} : { remoteQuota: options.remoteQuota }),
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
     openAiConnectivity: options.openAiConnectivity,
   });

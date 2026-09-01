@@ -742,6 +742,7 @@ export class GatewayApplication {
           config.stateDatabasePath,
         ),
       }),
+      remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(config.metricsView, provider, resetsAt, logger),
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(

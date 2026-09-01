@@ -35,7 +35,7 @@ class TelegramLifecycleError extends Error {
 }
 
 export interface TelegramStartupNotification {
-  messages: () => ReadonlyArray<{ chatId: number; text: string }>;
+  messages: () => ReadonlyArray<{ chatId: number; text: string }> | Promise<ReadonlyArray<{ chatId: number; text: string }>>;
 }
 
 export interface TelegramLifecycleOptions {
@@ -123,7 +123,7 @@ export class TelegramLifecycle {
     }
     let messages: ReadonlyArray<{ chatId: number; text: string }>;
     try {
-      messages = this.startupNotification.messages();
+      messages = await this.startupNotification.messages();
     } catch (error) {
       if (!this.stopping && !signal.aborted) {
         this.logger.warn(

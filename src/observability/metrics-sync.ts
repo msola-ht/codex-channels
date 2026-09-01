@@ -21,6 +21,7 @@ export interface MetricsSyncConfig {
   endpoint?: string;
   deviceToken?: string;
   deviceId?: string;
+  deviceName?: string;
   batchSize: number;
   intervalSeconds: number;
 }
@@ -169,7 +170,7 @@ export class MetricsSync {
     }
     const payload: MetricsSyncPayload = {
       deviceId: this.state.deviceId,
-      deviceName: hostname(),
+      deviceName: this.options.config.deviceName ?? hostname(),
       requestMetrics: requestRows.map(toSyncedRequestMetric),
       subagentThreads: subagentRows,
     };

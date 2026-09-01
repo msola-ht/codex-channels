@@ -69,6 +69,31 @@ describe("shared Surface lifecycle presentation", () => {
     )).toBe("思考完成\n\n耗时：500毫秒");
   });
 
+  it("includes metrics center quota details in the startup card", () => {
+    const presentation = createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      {
+        workspaceId: "main", model: "gpt-test", modelProvider: "openai", effort: null,
+        serviceTier: null, modelPending: false, effortPending: false, fastModePending: false,
+        collaborationMode: "default", collaborationModePending: false,
+      },
+      {
+        platform: "linux", architecture: "x64", gatewayVersion: "0.150.1", nodeVersion: "v24.0.0",
+        transport: "Unix WebSocket", codexUpstreamUserAgent: null,
+      },
+      {
+        provider: "openai", windowId: "codex", deviceCount: 3, requestCount: 12,
+        totalTokens: 123_000_000, totalCostNanos: null, latestUsedPercentMillionths: 35_000_000,
+        estimatedTotalTokens: 351_000_000, estimatedTotalCostNanos: null, resetsAt: 1_756_650_000_000,
+        observedAtMs: 1_756_000_000_000,
+      },
+    );
+    const rendered = renderPlainLifecyclePresentation(presentation);
+    expect(rendered).toContain("账户状态（额度中心）");
+    expect(rendered).toContain("3 台设备 · 12 次请求");
+    expect(rendered).toContain("最新使用率：35.00%");
+  });
+
   it("does not warn when at least one official OpenAI route is reachable", () => {
     const presentation = createStartupPresentation(
       [{ id: "main", name: "Main", cwd: "/workspace/main" }],

@@ -7,6 +7,7 @@ import type {
 } from "../../application/index.js";
 import type {
   OutputEvent,
+  RemoteQuotaSummary,
   UserFacingError,
 } from "../../conversation-core/index.js";
 import {
@@ -102,9 +103,10 @@ export function renderFeishuStartupNotification(
     | "gitBranch"
   >,
   runtime: FeishuStartupRuntimeInfo,
+  remoteQuota?: RemoteQuotaSummary,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createStartupPresentation(workspaces, status, runtime),
+    createStartupPresentation(workspaces, status, runtime, remoteQuota),
   );
 }
 

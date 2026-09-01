@@ -100,7 +100,7 @@ interface FeishuSurfaceDependencies {
 }
 
 export interface FeishuStartupNotification {
-  messages(): ReadonlyArray<{ chatId: string; text: string }>;
+  messages(): ReadonlyArray<{ chatId: string; text: string }> | Promise<ReadonlyArray<{ chatId: string; text: string }>>;
 }
 
 export interface FeishuSurfaceOptions {
@@ -541,7 +541,7 @@ export class FeishuSurface implements SurfaceAdapter {
     }
     this.connectionReady = true;
     this.logger.info(this.lifecycleContext(), "飞书长连接已就绪");
-    this.sendStartupNotifications();
+    void this.sendStartupNotifications();
   }
 
   stop(): Promise<void> {
@@ -605,13 +605,13 @@ export class FeishuSurface implements SurfaceAdapter {
     return recipients;
   }
 
-  private sendStartupNotifications(): void {
+  private async sendStartupNotifications(): Promise<void> {
     if (!this.startupNotification) {
       return;
     }
     let messages: ReadonlyArray<{ chatId: string; text: string }>;
     try {
-      messages = this.startupNotification.messages();
+      messages = await this.startupNotification.messages();
     } catch (error) {
       this.logger.warn(
         {

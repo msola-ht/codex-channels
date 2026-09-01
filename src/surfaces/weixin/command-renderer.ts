@@ -7,6 +7,7 @@ import {
 } from "../../application/index.js";
 import type {
   OutputEvent,
+  RemoteQuotaSummary,
   UserFacingError,
 } from "../../conversation-core/index.js";
 import {
@@ -80,9 +81,10 @@ export function renderWeixinStartupNotification(
     | "gitBranch"
   >,
   runtime: WeixinStartupRuntimeInfo,
+  remoteQuota?: RemoteQuotaSummary,
 ): string {
   return renderWeixinLifecyclePresentation(
-    createStartupPresentation(workspaces, status, runtime),
+    createStartupPresentation(workspaces, status, runtime, remoteQuota),
   );
 }
 

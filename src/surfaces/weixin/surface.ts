@@ -58,7 +58,7 @@ import { WeixinTypingController } from "./typing-controller.js";
 
 export interface WeixinStartupNotification {
   targets(): readonly ConversationTarget[];
-  text(target: ConversationTarget): string;
+  text(target: ConversationTarget): string | Promise<string>;
 }
 
 export interface WeixinSurfaceOptions {
@@ -403,7 +403,7 @@ export class WeixinSurface implements SurfaceAdapter {
     await this.notifyLifecycle("start");
     for (const target of restored) {
       try {
-        const text = this.startupNotification?.text(target);
+        const text = await this.startupNotification?.text(target);
         if (text) {
           await this.output.deliverText(
             target,
