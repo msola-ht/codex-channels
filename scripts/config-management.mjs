@@ -9,6 +9,7 @@ import {
 import { resolveHttpProxyUrl } from "../runtime/network-proxy.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import {
   applyMetricsSetting,
   projectMetricsSettings,
@@ -126,6 +127,7 @@ export function updateGatewaySetting(
       previousRevision: snapshot.revision,
       value: result.value,
       activation: "none",
+      activationResult: configActivationResult("none"),
       ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
     };
   }
@@ -162,6 +164,7 @@ export function updateGatewaySetting(
     previousRevision: snapshot.revision,
     value: result.value,
     activation: result.activation,
+    activationResult: configActivationResult(result.activation),
     ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
     ...(backupPath === null ? {} : { backupPath }),
   };

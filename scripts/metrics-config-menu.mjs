@@ -150,7 +150,7 @@ async function runMetricsStorage({ environment, output, prompts, writeConfig }) 
     writeConfig,
   });
   output.write(`本地指标保留策略已更新：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activation === "none" ? "none" : "restart");
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   output.write("需要立即清理时运行 codexc metrics cleanup。\n");
   return {
     storage: { retention_days: next.retentionDays, max_rows: next.maxRows },
@@ -237,12 +237,20 @@ async function runConnectToCenter({
   output.write(`设备名称：${normalizedDeviceName || hostname()}${normalizedDeviceName ? "" : "（系统主机名）"}\n`);
   output.write("配置已写入并备份。\n");
   if (result.activation === "none") {
-    writeGatewayConfigActivationNotice(output, environment, "none");
+    writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   } else if (restartGateway === undefined || restartWebui === undefined) {
-    writeGatewayConfigActivationNotice(output, environment, "restart");
+    writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   }
   if (result.activation !== "none") {
-    await applyMetricsConsumers({ output, restartGateway, restartWebui });
+    const activationState = await applyMetricsConsumers({ output, restartGateway, restartWebui });
+    return {
+      endpoint: base,
+      deviceId: null,
+      ...(normalizedDeviceName ? { deviceName: normalizedDeviceName } : {}),
+      configPath: result.configPath,
+      activation: result.activation,
+      ...(activationState === undefined ? {} : { activationState }),
+    };
   }
   return {
     endpoint: base,
@@ -338,7 +346,7 @@ async function runSyncParams({
         writeConfig,
       });
       output.write(`上报参数已更新：${result.configPath}\n`);
-      writeGatewayConfigActivationNotice(output, environment, result.activation === "none" ? "none" : "restart");
+      writeGatewayConfigActivationNotice(output, environment, result.activationResult);
       return { sync: { interval_seconds: parsed }, configPath: result.configPath, activation: result.activation };
     } else if (section === "batch_size") {
       const value = await prompts.text({
@@ -363,7 +371,7 @@ async function runSyncParams({
         writeConfig,
       });
       output.write(`上报参数已更新：${result.configPath}\n`);
-      writeGatewayConfigActivationNotice(output, environment, result.activation === "none" ? "none" : "restart");
+      writeGatewayConfigActivationNotice(output, environment, result.activationResult);
       return { sync: { batch_size: parsed }, configPath: result.configPath, activation: result.activation };
     } else {
       throw new Error(`未知上报参数：${String(section)}`);
@@ -380,9 +388,9 @@ async function runDisableConnection({ environment, output, writeConfig, restartG
   });
   output.write("已停用中心接入（本机数据中心，配置保留，可在「数据中心」中重新配置）。\n");
   if (result.activation === "none") {
-    writeGatewayConfigActivationNotice(output, environment, "none");
+    writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   } else if (restartGateway === undefined || restartWebui === undefined) {
-    writeGatewayConfigActivationNotice(output, environment, "restart");
+    writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   }
   if (result.activation !== "none") {
     await applyMetricsConsumers({ output, restartGateway, restartWebui });
@@ -399,6 +407,7 @@ async function applyMetricsConsumers({ output, restartGateway, restartWebui }) {
     await restartGateway();
     await restartWebui();
     output.write("Gateway 与 WebUI 已自动重启并加载数据中心配置。\n");
+    return "applied";
   } catch (error) {
     output.write("配置已保存，但 Gateway 或 WebUI 自动重启失败；请手动执行上述重启命令。\n");
     throw error;
@@ -565,7 +574,7 @@ export async function runCenterSettings({
       output.write("请立即保存这两组令牌；旧令牌已失效。\n");
     }
     if (result.activation === "none") {
-      writeGatewayConfigActivationNotice(output, environment, "none");
+      writeGatewayConfigActivationNotice(output, environment, result.activationResult);
     } else if (restartCenter !== undefined) {
       try {
         await restartCenter();
@@ -581,6 +590,11 @@ export async function runCenterSettings({
       center: result.value.center,
       configPath: result.configPath,
       activation: result.activation,
+      ...(result.activation === "none"
+        ? {}
+        : restartCenter === undefined
+          ? { activationState: "pending" }
+          : { activationState: "applied" }),
       ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
     };
   }

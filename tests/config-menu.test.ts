@@ -981,7 +981,7 @@ describe("Codex Connect config menu", () => {
       token: "view-token",
     });
     expect(output.join("")).toContain("已接入中心");
-    expect(output.join("")).toContain("需要重建 Gateway 连接");
+    expect(output.join("")).toContain("Gateway 与 WebUI 将分别重启以应用新配置");
     expect(output.join("")).toContain("本次变更同时影响 Gateway 与 WebUI");
   });
 
@@ -1170,6 +1170,7 @@ describe("Codex Connect config menu", () => {
       },
       configPath: fixture.configPath,
       activation: "restart-center",
+      activationState: "pending",
     });
     const center = readGatewayConfig(fixture.configPath).metrics as unknown as {
       center?: { enabled: boolean };

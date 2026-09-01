@@ -54,7 +54,9 @@ describe("Debug setup", () => {
       `level = "${expectedLevel}"`,
     );
     expect(output.join("")).toContain(enabled ? "已开启" : "已关闭");
-    expect(output.join("")).toContain("需要重建 Gateway 连接");
+    expect(output.join("")).toContain(
+      enabled ? "需要重建 Gateway 连接" : "当前值未变化，配置文件未写入，无需重启服务",
+    );
   });
 
   it("returns without changing config when going back", async () => {

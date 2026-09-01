@@ -16,6 +16,7 @@ import {
   normalizeGatewayActivation,
   updateGatewaySetting,
 } from "../scripts/config-management.mjs";
+import { configActivationResult } from "../scripts/config-activation-result.mjs";
 import {
   GatewayConfigConflictError,
   readGatewayConfig,
@@ -36,6 +37,22 @@ describe("Gateway Config management", () => {
     expect(normalizeGatewayActivation("reinstall-services")).toBe("reinstall-required");
     expect(normalizeGatewayActivation("reload")).toBe("reload");
     expect(normalizeGatewayActivation("unexpected")).toBe("failed");
+  });
+
+  it("projects activation scopes to stable targets and commands", () => {
+    expect(configActivationResult("restart-gateway-webui")).toEqual({
+      status: "restart",
+      target: "gateway+webui",
+      commands: [
+        "codexc service restart gateway",
+        "codexc service restart webui",
+      ],
+    });
+    expect(configActivationResult("reinstall-services")).toEqual({
+      status: "reinstall-required",
+      target: "services",
+      commands: ["codexc service install"],
+    });
   });
 
   it("loads a credential-free structured settings model", () => {
@@ -75,6 +92,11 @@ describe("Gateway Config management", () => {
     })).toMatchObject({
       value: "full",
       activation: "restart-gateway",
+      activationResult: {
+        status: "restart",
+        target: "gateway",
+        commands: ["codexc service restart gateway"],
+      },
       previousRevision: settings.revision,
     });
     settings = loadGatewaySettings(fixture.environment);

@@ -9,6 +9,8 @@ export type GatewaySettingActivation =
 
 export type StableGatewayActivation = "none" | "reload" | "restart" | "reinstall-required" | "failed";
 
+import type { ConfigActivationResult } from "./config-activation-result.mjs";
+
 export function normalizeGatewayActivation(activation: GatewaySettingActivation | string): StableGatewayActivation;
 
 export class ConfigManagementError extends Error {
@@ -179,5 +181,6 @@ export function updateGatewaySetting(
   backupPath?: string;
   value: unknown;
   activation: GatewaySettingActivation;
+  activationResult: ConfigActivationResult;
   generatedTokens?: { viewToken: string; deviceToken: string };
 };

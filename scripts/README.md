@@ -108,7 +108,8 @@
 - `metrics-center-settings.mjs`：中心服务与指标脚本共用的轻量配置解析（命令行参数、
   `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
 - `metrics-config-menu.mjs`：数据中心与中心服务设置的交互用例；集中管理本地保留策略、中心接入、
-  上报参数、接入状态和中心监听配置，`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
+  上报参数、接入状态和中心监听配置，返回配置激活状态（`pending`/`applied`），`config.mjs`
+  只保留顶层配置菜单编排与兼容重导出。
 - `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责收集查询、导出、清理和重置参数，
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
 - `metrics-center-payload.mjs` / `metrics-center-payload.d.mts`：中心服务与历史 Cloudflare
@@ -117,7 +118,8 @@
   `parent_turn_id`；历史 Cloudflare D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“Codex 新会话默认值”
   “模型与提供商”“通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
-  登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级。
+  登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级；配置写入后的激活结果由
+  `config-activation-result.mjs` 提供统一状态和目标定义。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   共享第三方子代理、直接 API Provider 数量、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
@@ -480,7 +482,9 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、旧 Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 明确失败关闭。
-- `config-activation-notice.mjs`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
+- `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
+  稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用，不承载服务控制。
+- `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
   Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
   WebUI 与指标中心的专属重启要求继续单独提示。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、

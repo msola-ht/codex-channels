@@ -64,7 +64,7 @@ export async function runTelegramMessageFormat({
     value: selected,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`Telegram 消息格式已设为 ${selected}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activation === "none" ? "none" : "restart");
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { messageFormat: selected, configPath: result.configPath, activation: result.activation };
 }
 
@@ -90,7 +90,7 @@ async function runOperationUpdatesToggle({ environment, output, prompts, writeCo
     value: selected,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`操作详情显示已设为${selected}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activation === "none" ? "none" : "restart");
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { operationUpdates: selected, configPath: result.configPath, activation: result.activation };
 }
 
@@ -116,7 +116,7 @@ async function runPlanUpdatesToggle({ environment, output, prompts, writeConfig 
     value: enabled,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`计划更新显示已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activation === "none" ? "none" : "restart");
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { planUpdatesEnabled: enabled, configPath: result.configPath, activation: result.activation };
 }
 
@@ -142,7 +142,7 @@ async function runReasoningToggle({ environment, output, prompts, writeConfig })
     value: enabled,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`思考状态显示已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activation === "none" ? "none" : "restart");
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { reasoningEnabled: enabled, configPath: result.configPath, activation: result.activation };
 }
 
@@ -167,6 +167,6 @@ async function runPriceCurrency({ environment, output, prompts, writeConfig }) {
     value: mode,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`全局价格显示方式已设为 ${mode}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activation === "none" ? "none" : "restart");
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { priceCurrency: mode, configPath: result.configPath, activation: result.activation };
 }

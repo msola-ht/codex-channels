@@ -104,7 +104,7 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
     writeGatewayConfigActivationNotice(
       output,
       environment,
-      result.activation,
+      result.activationResult,
     );
     return { webui: result.value, configPath: result.configPath, activation: result.activation };
   }

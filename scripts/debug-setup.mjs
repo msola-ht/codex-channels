@@ -72,6 +72,6 @@ export function writeLoggingLevel({
     writeConfig,
   });
   output.write(`${message}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { level, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { level, configPath: result.configPath, activationResult: result.activationResult };
 }
