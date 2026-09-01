@@ -36,6 +36,7 @@ import {
   formatConversationScheduledTasks,
   formatConversationSkills,
   formatConversationThreadSectionDeletePreview,
+  formatSessionCleanupPreview,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
   formatConversationThreadRevertPreview,
@@ -84,6 +85,9 @@ export async function renderTelegramCommandResult(
         context,
         formatConversationThreadSectionDeletePreview(result),
       );
+      return;
+    case "session-cleanup-preview":
+      await replyTelegramPanel(context, formatSessionCleanupPreview(result));
       return;
     case "thread-queue":
       await replyTelegramPanel(

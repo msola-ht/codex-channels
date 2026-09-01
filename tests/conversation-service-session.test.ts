@@ -792,6 +792,90 @@ describe("ConversationService conversation service session", () => {
     expect(capturePreference).toHaveBeenCalledWith(target);
     expect(restorePreference).not.toHaveBeenCalled();
   });
+
+  it("binds session cleanup confirmation to its preview and reports partial failures", async () => {
+    const archiveThread = vi.fn(async (threadId: string) => {
+      if (threadId === "thread-fail") throw new Error("archive failed");
+    });
+    const router = {
+      list: vi.fn(async () => [
+        { id: "thread-ok", sessionId: "ok", modelProvider: "openai", preview: "ok", name: null, isPinned: false, status: { type: "idle" as const }, cwd: main.cwd, source: "cli" as const, activeTurnId: null },
+        { id: "thread-fail", sessionId: "fail", modelProvider: "openai", preview: "fail", name: null, isPinned: false, status: { type: "idle" as const }, cwd: main.cwd, source: "cli" as const, activeTurnId: null },
+      ]),
+      current: () => ({ threadId: "main", workspaceId: "main" }),
+      targetForThread: () => undefined,
+      isBackgroundThread: () => false,
+      archiveThread,
+    } as unknown as SessionRouter;
+    const history = {
+      listThreadTurns: vi.fn(async (threadId: string) => ({
+        turns: [{ id: `${threadId}-turn`, status: "completed" as const, startedAt: null, completedAt: null, durationMs: null, inputType: "text" as const, textPreview: null }],
+        nextCursor: null,
+      })),
+    } as unknown as ThreadHistoryPort;
+    const service = new ConversationService(
+      turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService, queryPort(),
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, history,
+    );
+
+    const preview = await service.previewSessionCleanup(target, 1);
+    expect(preview.token).toEqual(expect.any(String));
+    expect(preview.candidates).toHaveLength(2);
+    await expect(service.archiveSessionCleanup(target, preview.token!)).resolves.toEqual({
+      maxTurns: 1,
+      archived: [expect.objectContaining({ id: "thread-ok" })],
+      failed: [expect.objectContaining({ id: "thread-fail" })],
+    });
+    await expect(service.archiveSessionCleanup(target, preview.token!)).rejects.toMatchObject({
+      code: "sessions.cleanup.confirmation-invalid",
+    });
+  });
+
+  it("does not clean up a Session bound to another Conversation", async () => {
+    const otherTarget = {
+      surface: "feishu" as const,
+      accountId: "tenant-a",
+      conversationId: "chat-a",
+    };
+    const archiveThread = vi.fn();
+    const router = {
+      list: vi.fn(async () => [{
+        id: "thread-owned",
+        sessionId: "owned",
+        modelProvider: "openai",
+        preview: "owned",
+        name: null,
+        isPinned: false,
+        status: { type: "idle" as const },
+        cwd: main.cwd,
+        source: "cli" as const,
+        activeTurnId: null,
+      }]),
+      current: () => undefined,
+      targetForThread: () => otherTarget,
+      isBackgroundThread: () => false,
+      archiveThread,
+    } as unknown as SessionRouter;
+    const history = {
+      listThreadTurns: vi.fn(async () => ({
+        turns: [],
+        nextCursor: null,
+      })),
+    } as unknown as ThreadHistoryPort;
+    const service = new ConversationService(
+      turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService, queryPort(),
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, history,
+    );
+
+    const preview = await service.previewSessionCleanup(target, 0);
+    expect(preview.candidates).toEqual([]);
+    expect(preview.token).toBeNull();
+    expect(archiveThread).not.toHaveBeenCalled();
+  });
 });
 
 

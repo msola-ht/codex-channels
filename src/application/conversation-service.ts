@@ -138,6 +138,24 @@ export interface ConversationSessionQuery {
   page?: number;
 }
 
+export interface SessionCleanupCandidate {
+  id: string;
+  name: string | null;
+  turnCount: number;
+}
+
+export interface SessionCleanupPreview {
+  maxTurns: number;
+  candidates: SessionCleanupCandidate[];
+  token: string | null;
+}
+
+export interface SessionCleanupResult {
+  maxTurns: number;
+  archived: SessionCleanupCandidate[];
+  failed: SessionCleanupCandidate[];
+}
+
 export interface ThreadSectionView extends ThreadSectionSnapshot {
   currentWorkspaceActiveCount: number;
   currentWorkspaceArchivedCount: number;
@@ -294,6 +312,8 @@ export interface ConversationUseCases {
   resume(target: ConversationTarget, selector: string): Promise<ConversationResumeResult>;
   newSession(target: ConversationTarget): Promise<string | undefined>;
   archive(target: ConversationTarget): Promise<string>;
+  previewSessionCleanup(target: ConversationTarget, maxTurns: number): Promise<SessionCleanupPreview>;
+  archiveSessionCleanup(target: ConversationTarget, token: string): Promise<SessionCleanupResult>;
   unarchive(target: ConversationTarget, selector: string): Promise<string>;
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
@@ -359,6 +379,12 @@ export class ConversationService implements ConversationUseCases {
   private readonly revertUseCases: ThreadRevertService;
   private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
+  private readonly sessionCleanupConfirmations = new Map<string, {
+    targetKey: string;
+    maxTurns: number;
+    candidates: SessionCleanupCandidate[];
+    expiresAt: number;
+  }>();
 
   constructor(
     private readonly codex: TurnExecutionPort,
@@ -1063,6 +1089,114 @@ export class ConversationService implements ConversationUseCases {
       this.clearPendingSelections(target);
       return threadId;
     });
+  }
+
+  previewSessionCleanup(target: ConversationTarget, maxTurns: number): Promise<SessionCleanupPreview> {
+    return this.locked(target, async () => {
+      const preview = await this.findSessionCleanupCandidates(target, maxTurns);
+      if (preview.candidates.length === 0) return preview;
+      const token = randomUUID();
+      this.sessionCleanupConfirmations.set(token, {
+        targetKey: conversationTargetKey(target),
+        maxTurns,
+        candidates: preview.candidates,
+        expiresAt: Date.now() + 5 * 60_000,
+      });
+      while (this.sessionCleanupConfirmations.size > 128) {
+        const oldest = this.sessionCleanupConfirmations.keys().next().value;
+        if (!oldest) break;
+        this.sessionCleanupConfirmations.delete(oldest);
+      }
+      return { ...preview, token };
+    });
+  }
+
+  archiveSessionCleanup(target: ConversationTarget, token: string): Promise<SessionCleanupResult> {
+    return this.locked(target, async () => {
+      this.requireIdle(target);
+      const confirmation = this.sessionCleanupConfirmations.get(token);
+      this.sessionCleanupConfirmations.delete(token);
+      if (
+        !confirmation
+        || confirmation.targetKey !== conversationTargetKey(target)
+        || confirmation.expiresAt < Date.now()
+      ) {
+        throw new UserFacingError(
+          "sessions.cleanup.confirmation-invalid",
+          "会话清理预览已失效，请重新执行 /session-cleanup <最大轮数>",
+        );
+      }
+      const threads = await this.router.list(target, { fullScan: true });
+      const currentId = this.router.current(target)?.threadId;
+      const targetKey = conversationTargetKey(target);
+      const archived: SessionCleanupCandidate[] = [];
+      const failed: SessionCleanupCandidate[] = [];
+      for (const candidate of confirmation.candidates) {
+        const thread = threads.find((item) => item.id === candidate.id);
+        const owner = thread ? this.router.targetForThread(thread.id) : undefined;
+        const eligible = thread
+          && thread.id !== currentId
+          && (!owner || conversationTargetKey(owner) === targetKey)
+          && !thread.isPinned
+          && thread.activeTurnId === null
+          && thread.status.type !== "active"
+          && !this.router.isBackgroundThread(thread.id)
+          && this.threadHistory;
+        const currentTurnCount = eligible
+          ? await countThreadTurns(this.threadHistory, thread.id)
+          : undefined;
+        if (!eligible || currentTurnCount !== candidate.turnCount || currentTurnCount > confirmation.maxTurns) {
+          failed.push(candidate);
+          continue;
+        }
+        try {
+          await this.router.archiveThread(candidate.id);
+          archived.push(candidate);
+        } catch {
+          failed.push(candidate);
+        }
+      }
+      if (archived.length > 0) this.invalidateRevertSnapshot(target);
+      return { maxTurns: confirmation.maxTurns, archived, failed };
+    });
+  }
+
+  private async findSessionCleanupCandidates(
+    target: ConversationTarget,
+    maxTurns: number,
+  ): Promise<SessionCleanupPreview> {
+    if (!Number.isSafeInteger(maxTurns) || maxTurns < 0 || maxTurns > 10_000) {
+      throw new UserFacingError("sessions.cleanup.usage", "最大轮数必须是 0–10000 的整数");
+    }
+    if (!this.threadHistory) {
+      throw new UserFacingError(
+        "sessions.cleanup.unavailable",
+        "当前 App Server 不提供会话历史，暂不支持按 Turn 清理会话",
+      );
+    }
+    const currentId = this.router.current(target)?.threadId;
+    const targetKey = conversationTargetKey(target);
+    const threads = await this.router.list(target, { fullScan: true });
+    const candidates = await Promise.all(threads.map(async (thread) => {
+      const owner = this.router.targetForThread(thread.id);
+      if (
+        thread.id === currentId
+        || (owner && conversationTargetKey(owner) !== targetKey)
+        || thread.isPinned
+        || thread.activeTurnId !== null
+        || thread.status.type === "active"
+        || this.router.isBackgroundThread(thread.id)
+      ) return null;
+      const turnCount = await countThreadTurns(this.threadHistory!, thread.id);
+      return turnCount !== undefined && turnCount <= maxTurns
+        ? { id: thread.id, name: thread.name, turnCount }
+        : null;
+    }));
+    return {
+      maxTurns,
+      candidates: candidates.filter((candidate): candidate is SessionCleanupCandidate => candidate !== null),
+      token: null,
+    };
   }
 
   unarchive(target: ConversationTarget, selector: string): Promise<string> {

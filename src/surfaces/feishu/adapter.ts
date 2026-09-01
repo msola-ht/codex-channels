@@ -1323,6 +1323,16 @@ function renderCommandCenterForm(
       multiline: true,
     };
   }
+  if (action === "session-cleanup") {
+    return {
+      kind: "form",
+      title: "清理短会话",
+      description: "输入最大 Turn 轮数；提交后会先生成预览，再使用一次性令牌确认归档。",
+      action,
+      fieldLabel: "最大轮数",
+      placeholder: "例如：3",
+    };
+  }
   return undefined;
 }
 

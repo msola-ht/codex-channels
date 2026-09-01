@@ -683,6 +683,7 @@ function renderFeishuCategorizedCommandsCard(
         ["历史回退", "revert", "default"],
       ]),
       actionRow(token, [
+        ["清理短会话", "session-cleanup", "default"],
         ["计划任务", "schedule", "default"],
       ]),
       sectionTitle("能力与集成"),

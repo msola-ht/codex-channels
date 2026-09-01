@@ -38,6 +38,7 @@ import {
   formatConversationScheduledRuns,
   formatConversationScheduledTasks,
   formatConversationThreadSectionDeletePreview,
+  formatSessionCleanupPreview,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
   formatConversationThreadRevertPreview,
@@ -166,6 +167,8 @@ export function renderWeixinCommandResult(
       return formatConversationThreadSections(result);
     case "thread-section-delete-preview":
       return formatConversationThreadSectionDeletePreview(result);
+    case "session-cleanup-preview":
+      return formatSessionCleanupPreview(result);
     case "thread-queue":
       return formatConversationThreadQueue(result);
     case "thread-revert":

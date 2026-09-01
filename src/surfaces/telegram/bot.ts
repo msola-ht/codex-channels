@@ -66,6 +66,7 @@ import { TelegramApiExecutor } from "./api-executor.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
   TelegramLifecycle,
+  telegramConversationCommandName,
   telegramUpdateGroupSize,
 } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
@@ -389,7 +390,8 @@ export class TelegramSurface {
           "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
-          ...conversationCommandHelpLines,
+          ...conversationCommandHelpLines.map((line) =>
+            line.replaceAll("/session-cleanup", "/session_cleanup")),
           "Telegram：",
           "- /whoami",
           "- /start · /help · /h",
@@ -399,7 +401,8 @@ export class TelegramSurface {
     for (const command of conversationCommandNames.filter(
       (candidate) => candidate !== "stop",
     )) {
-      this.bot.command(command, (context) => this.executeCommand(context, command));
+      this.bot.command(telegramConversationCommandName(command), (context) =>
+        this.executeCommand(context, command));
     }
     this.bot.command("work", (context) =>
       this.executeCommand(context, surfaceCommandAliases.work));

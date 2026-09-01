@@ -13,6 +13,7 @@ export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或�
 export const pluginCommandUsageText = "用法：/plugin [health | list [页码] [search <关键词>] | <名称、完整 ID 或序号> [任务]]";
 export const sessionCommandUsageText = "用法：/sessions [页码] [filter <all|running|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]";
 export const archivedSessionCommandUsageText = "用法：/archived [页码] [filter <all|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]";
+export const sessionCleanupCommandUsageText = "用法：/session-cleanup <最大轮数> | /session-cleanup confirm <一次性令牌>";
 export const threadSectionCommandUsageText = "用法：/section [list [页码] | create <名称> | rename <ID 或序号> <新名称> | move <ID 或序号> [before <会话选择器>] | remove | delete <ID 或序号> [confirm]]";
 export const threadQueueCommandUsageText = "用法：/queue add <文本> | /queue list [页码] | /queue update <完整 ID 或当前列表序号> <文本> | /queue delete <完整 ID 或当前列表序号> | /queue reorder <完整 ID 或当前列表序号> <目标位置> | /queue start [完整 ID 或当前列表序号]";
 export const threadRevertCommandUsageText = "用法：/revert list [页码] | /revert <Turn ID 或当前列表序号> | /revert confirm <一次性令牌>";
@@ -156,6 +157,23 @@ export function toSessionQuery(view: SessionListView): {
     ...(view.provider ? { provider: view.provider } : {}),
     ...(view.sectionSelector ? { sectionSelector: view.sectionSelector } : {}),
   };
+}
+
+export function parseSessionCleanupOperation(input: string):
+  | { type: "preview"; maxTurns: number }
+  | { type: "confirm"; token: string } {
+  const parts = input.trim().split(/\s+/u);
+  if (parts.length === 2 && parts[0] === "confirm" && (parts[1]?.length ?? 0) > 0 && (parts[1]?.length ?? 0) <= 256) {
+    return { type: "confirm", token: parts[1]! };
+  }
+  if (parts.length !== 1 || !/^\d+$/u.test(parts[0] ?? "")) {
+    throw new UserFacingError("sessions.cleanup.usage", sessionCleanupCommandUsageText);
+  }
+  const maxTurns = Number(parts[0]);
+  if (!Number.isSafeInteger(maxTurns) || maxTurns < 0 || maxTurns > 10_000) {
+    throw new UserFacingError("sessions.cleanup.usage", sessionCleanupCommandUsageText);
+  }
+  return { type: "preview", maxTurns };
 }
 
 export function parseThreadSectionOperation(input: string):

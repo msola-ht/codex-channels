@@ -128,6 +128,7 @@ Telegram 使用内联按钮，微信显示可输入的 `/effort` 选项。只支
 `/effort` 命令保持可用。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
 `/resume`、`/sessions` 和 `/archived` 的当前页会话还显示该 Thread 已记录的 Turn 轮数；轮数由
 App Server 的 `thread/turns/list` 汇总，历史读取失败时不阻塞会话列表且不显示猜测值。
+`/session-cleanup <最大轮数>` 会先预览可归档的短会话，确认时使用预览返回的、五分钟内有效的一次性令牌执行 `/session-cleanup confirm <令牌>`；当前、活动、后台、固定或无法读取轮数的会话会排除。
 跨 Provider 选择优先显示目标 Provider App Server 配置的有效思考等级；该等级缺失或不受目标模型支持时，
 才显示目标模型目录默认值，不继承原 Provider 的 Thread 设置。
 `/model` 还会只读显示当前模型声明的 Codex 多代理运行时；官方 OpenAI 模型带结构化替代信息时，

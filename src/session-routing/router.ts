@@ -614,6 +614,11 @@ export class SessionRouter {
     return current.threadId;
   }
 
+  async archiveThread(threadId: string): Promise<void> {
+    await this.codex.archiveThread(threadId);
+    this.forgetThread(threadId);
+  }
+
   async unarchive(target: ConversationTarget, threadId: string): Promise<ConversationBinding> {
     await this.codex.unarchiveThread(threadId);
     return this.resume(target, threadId);
