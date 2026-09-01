@@ -24,6 +24,9 @@
   `thread/start`，不调用 `ensure` 的空闲候选选择，并在写入前限制每个 Conversation 三个后台绑定；
   后台 Thread 不携带前台 `dynamicTools`，防止计划任务递归创建任务。
 
+切换到不同 Workspace 会解除当前前台 Thread，并在下一条消息中强制新建 Thread，不自动接续目标 Workspace
+中的历史空闲 Thread；当前模型、思考等级和服务层级偏好仍按 Conversation 保留。
+
 运行中的前台 Thread 在 `/resume` 或 `/new` 切换时转为后台绑定，保持 App Server 订阅与原
 Conversation 归属；新输入只路由到前台 Thread。后台 Turn 完成后先与原生 Queue 的自动派发
 协调；Queue 已启动下一 Turn、仍有排队条目或 Thread 仍为活动状态时保留绑定，只有权威状态确认

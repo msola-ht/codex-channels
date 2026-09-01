@@ -875,15 +875,19 @@ describe("SessionRouter", () => {
     expect(unsubscribed).toEqual([]);
   });
 
-  it("switches only to a preconfigured workspace and scopes thread discovery by cwd", async () => {
+  it("switches only to a preconfigured workspace and starts the Thread there", async () => {
     const listedCwds: string[] = [];
+    const startedCwds: string[] = [];
     const unsubscribed: string[] = [];
     const client = threadPort({
       listThreads: async (cwd: string) => {
         listedCwds.push(cwd);
         return [];
       },
-      startThread: async (cwd: string) => session({ ...thread("created", { type: "idle" }), cwd }),
+      startThread: async (cwd: string) => {
+        startedCwds.push(cwd);
+        return session({ ...thread("created", { type: "idle" }), cwd });
+      },
       unsubscribeThread: async (threadId: string) => {
         unsubscribed.push(threadId);
       },
@@ -897,9 +901,37 @@ describe("SessionRouter", () => {
 
     expect(selected.id).toBe("other");
     expect(unsubscribed).toEqual(["created"]);
-    expect(listedCwds).toEqual(["/workspace", "/workspace", "/other", "/other"]);
+    expect(listedCwds).toEqual(["/workspace", "/workspace"]);
+    expect(startedCwds).toEqual(["/workspace", "/other"]);
     expect(store.getWorkspace(target)).toBe("other");
     expect(router.current(target)?.workspaceId).toBe("other");
+  });
+
+  it("starts a new Thread after switching Workspace instead of resuming history", async () => {
+    const resumed: string[] = [];
+    const started: string[] = [];
+    const client = threadPort({
+      listThreads: async (cwd: string) =>
+        cwd === "/other" ? [thread("historical", { type: "idle" })] : [],
+      startThread: async (cwd: string) => {
+        started.push(cwd);
+        return session({ ...thread(`new-${started.length}`, { type: "idle" }), cwd });
+      },
+      resumeThread: async (threadId: string, cwd: string) => {
+        resumed.push(`${threadId}:${cwd}`);
+        return session({ ...thread(threadId, { type: "idle" }), cwd });
+      },
+      unsubscribeThread: async () => {},
+    });
+    const router = new SessionRouter(client, new MemoryBindingStore(), registry);
+
+    await router.ensure(target);
+    await router.selectWorkspace(target, "other");
+    const binding = await router.ensure(target);
+
+    expect(binding.threadId).toBe("new-2");
+    expect(started).toEqual(["/workspace", "/other"]);
+    expect(resumed).toEqual([]);
   });
 
   it("rejects workspace paths or ids that are not in the server registry", async () => {

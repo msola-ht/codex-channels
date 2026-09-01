@@ -119,7 +119,8 @@ Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review�
 
 旧 Thread 仍可通过 `/resume` 恢复。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
 生效。切换 Workspace、新会话或同 Provider 历史 Thread 时，渠道会在内存中保留当前模型、思考
-等级和服务层级并用于下一 Turn；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Provider。
+等级和服务层级并用于下一 Turn。切换 Workspace 后下一条消息会新建 Thread，不自动接续目标 Workspace 的历史
+Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Provider。
 跨 Provider 新建 Thread 使用目标模型目录的默认思考等级；当前 DeepSeek 默认是 `high`。
 
 任一 Provider 意外断开时，Gateway 只重连并恢复该侧绑定。任一受监管 App Server 子进程异常退出

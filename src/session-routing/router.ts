@@ -565,7 +565,10 @@ export class SessionRouter {
     }
     await this.detach(target);
     this.bindings.selectWorkspace(target, workspace.id);
-    this.forceNew.delete(this.key(target));
+    // Workspace changes start a fresh conversation.  Keep the marker until
+    // ensure() creates the first Thread so it cannot auto-resume history from
+    // the newly selected workspace.
+    this.forceNew.add(this.key(target));
     return workspace;
   }
 
