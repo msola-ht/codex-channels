@@ -5,6 +5,8 @@ import {
   loadCodexUserSettings,
   updateCodexUserSetting,
 } from "./codex-user-settings-management.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 
 const reasoningSummaryLabels = { auto: "自动", concise: "简洁", detailed: "详细", none: "关闭" };
 const verbosityLabels = { low: "简短", medium: "适中", high: "详细" };
@@ -178,7 +180,7 @@ async function runAllSettings({
   output.write(
     `Codex 核心默认值已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}\n`,
   );
-  output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }
 
@@ -200,7 +202,7 @@ async function runFastSetting({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 新会话默认 Fast 已${enabled ? "开启" : "关闭"}。\n`);
-  output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }
 
@@ -241,7 +243,7 @@ async function runWebSearchSetting({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 联网搜索模式已更新：${mode}\n`);
-  output.write("请运行 codexc service restart all，使新会话使用新设置。\n");
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }
 
@@ -252,7 +254,7 @@ async function runPreferencesSetting({ environment, output, prompts, settings, u
   if (prompts.isCancel(confirmed) || confirmed !== true) { output.write("已取消，未修改其他用户偏好。\n"); return undefined; }
   const result = await updateSetting({ kind: "preferences", ...preferences }, { environment, expectedVersion: settings.version, ...(createClient === undefined ? {} : { createClient }), ...(primaryProvider === undefined ? {} : { primaryProvider }) });
   output.write("Codex 其他用户偏好已更新。\n");
-  output.write("请运行 codexc service restart all，使新会话使用新设置。\n");
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }
 
@@ -318,7 +320,7 @@ async function runPermissionSettings({
   output.write(
     `Codex 用户权限已更新：${sandboxMode} · ${approvalPolicy} · 网络${networkAccess ? "开启" : "关闭"}\n`,
   );
-  output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }
 

@@ -6,6 +6,8 @@ import {
   loadCodexUserSettings,
   updateCodexUserSetting,
 } from "./codex-user-settings-management.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 
 export async function runCodexDefaultsSetup({
   environment = process.env,
@@ -97,6 +99,11 @@ export async function runCodexDefaultsSetup({
     primaryProvider,
   });
   output.write(`Codex 全局默认设置已更新：${model.model} · ${selectedEffort}\n`);
-  output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
-  return { model: model.model, effort: selectedEffort };
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  return {
+    model: model.model,
+    effort: selectedEffort,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }

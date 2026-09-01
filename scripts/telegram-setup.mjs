@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import {
   TelegramSetupSessionError,
@@ -204,6 +205,8 @@ export async function runTelegramSetup({
       botUsername: result.botUsername,
       allowedUserIds: result.allowedUserIds.join(","),
       configPath: result.configPath,
+      activation: result.activation,
+      activationResult: configActivationResult(result.activation),
     };
   } finally {
     unsubscribe?.();

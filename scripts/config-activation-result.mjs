@@ -8,7 +8,7 @@ export function configActivationResult(activation) {
     case "none":
       return result("none", "none", []);
     case "reload":
-      return result("reload", "gateway", ["codexc service reload gateway"]);
+      return result("reload", "gateway", ["codexc service reload"]);
     case "restart-gateway":
       return result("restart", "gateway", ["codexc service restart gateway"]);
     case "restart-webui":

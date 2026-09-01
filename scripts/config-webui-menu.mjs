@@ -106,6 +106,6 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
       environment,
       result.activationResult,
     );
-    return { webui: result.value, configPath: result.configPath, activation: result.activation };
+    return { webui: result.value, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
   }
 }

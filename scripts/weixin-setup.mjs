@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import qrcode from "qrcode";
 
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import {
   createWeixinQrContractClient,
   runWeixinQrLoginContract,
@@ -159,6 +160,8 @@ export async function runWeixinSetup({
       accountId: result.accountId,
       allowedUserIds: result.allowedUserIds,
       configPath: result.configPath,
+      activation: result.activation,
+      activationResult: configActivationResult(result.activation),
     };
   } finally {
     unsubscribe?.();

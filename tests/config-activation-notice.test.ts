@@ -25,4 +25,16 @@ describe("配置激活结果文案", () => {
 
     expect(output.join("")).toContain("codexc service install");
   });
+
+  it("为 Gateway 热加载输出公开命令", () => {
+    const output: string[] = [];
+    writeGatewayConfigActivationNotice(
+      { write: (value: string) => output.push(value) },
+      {},
+      configActivationResult("reload"),
+    );
+
+    expect(output.join("")).toContain("codexc service reload");
+    expect(output.join("")).not.toContain("codexc service reload gateway");
+  });
 });

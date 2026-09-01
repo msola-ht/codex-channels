@@ -108,8 +108,8 @@
 - `metrics-center-settings.mjs`：中心服务与指标脚本共用的轻量配置解析（命令行参数、
   `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
 - `metrics-config-menu.mjs`：数据中心与中心服务设置的交互用例；集中管理本地保留策略、中心接入、
-  上报参数、接入状态和中心监听配置，返回配置激活状态（`pending`/`applied`），`config.mjs`
-  只保留顶层配置菜单编排与兼容重导出。
+  上报参数、接入状态和中心监听配置，返回统一 `activationResult` 及自动激活状态
+  （`pending`/`applied`），`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
 - `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责收集查询、导出、清理和重置参数，
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
 - `metrics-center-payload.mjs` / `metrics-center-payload.d.mts`：中心服务与历史 Cloudflare

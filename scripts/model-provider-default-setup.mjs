@@ -10,6 +10,8 @@ import {
 import {
   applyManagedProviderDefaultChange,
 } from "./model-provider-default-management.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 
 class ModelProviderDefaultSetupCancelled extends Error {}
 
@@ -57,7 +59,7 @@ export async function runModelProviderDefaultSetup({
     output.write(`默认思考等级：${reasoningEffort}。\n`);
     output.write(`自动压缩阈值：${autoCompactPercent}%（约 ${result.autoCompactLimit} tokens）。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
-    output.write("请重启 App Server：codexc service restart app-server\n");
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
     return {
       action: "configured",
       provider: selected.provider,

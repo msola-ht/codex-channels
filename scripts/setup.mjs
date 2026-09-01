@@ -17,6 +17,7 @@ import { runCustomPrimaryProviderMenu } from "./primary-provider-cli.mjs";
 import { runOfficialLoginSetup } from "./official-login-setup.mjs";
 import { writeSetupConfigurationSummary } from "./setup-summary.mjs";
 import { runThirdPartyAgentSetup } from "./agents-setup.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 
 export async function runSetup({
   environment = process.env,
@@ -96,7 +97,7 @@ export async function runSetup({
         });
         if (isBackResult(result)) continue;
         if (stayOnMenu) continue;
-        return result;
+        return enrichSetupResult(result);
       }
       case "codex_user": {
         const result = await codexUserSettingsSetup({
@@ -107,7 +108,7 @@ export async function runSetup({
         });
         if (isBackResult(result)) continue;
         if (stayOnMenu) continue;
-        return result;
+        return enrichSetupResult(result);
       }
       case "models": {
         const result = await runModelSetup({
@@ -124,7 +125,7 @@ export async function runSetup({
         });
         if (isBackResult(result)) continue;
         if (stayOnMenu) continue;
-        return result;
+        return enrichSetupResult(result);
       }
       case "skills": {
         const result = await skillSetup({
@@ -134,7 +135,7 @@ export async function runSetup({
         });
         if (isBackResult(result)) continue;
         if (stayOnMenu) continue;
-        return result;
+        return enrichSetupResult(result);
       }
       default:
         throw new Error(`未知 Setup 类别：${String(section)}`);
@@ -355,6 +356,14 @@ async function runChannelSetup({
 
 function isBackResult(result) {
   return result?.action === "back";
+}
+
+function enrichSetupResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (typeof value.activation !== "string" || value.activationResult !== undefined) {
+    return value;
+  }
+  return { ...value, activationResult: configActivationResult(value.activation) };
 }
 
 function isDirectExecution(moduleUrl, argvPath) {

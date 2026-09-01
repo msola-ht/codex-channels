@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import qrcode from "qrcode";
 
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import {
   FeishuSetupSessionError,
   createFeishuSetupSession,
@@ -175,6 +176,8 @@ export async function runFeishuSetup({
       appId: result.appId,
       allowedOpenIds: result.allowedOpenIds,
       configPath: result.configPath,
+      activation: result.activation,
+      activationResult: configActivationResult(result.activation),
     };
   } finally {
     unsubscribe?.();

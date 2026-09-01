@@ -156,6 +156,7 @@ async function runMetricsStorage({ environment, output, prompts, writeConfig }) 
     storage: { retention_days: next.retentionDays, max_rows: next.maxRows },
     configPath: result.configPath,
     activation: result.activation,
+    activationResult: result.activationResult,
   };
 }
 
@@ -249,6 +250,7 @@ async function runConnectToCenter({
       ...(normalizedDeviceName ? { deviceName: normalizedDeviceName } : {}),
       configPath: result.configPath,
       activation: result.activation,
+      activationResult: result.activationResult,
       ...(activationState === undefined ? {} : { activationState }),
     };
   }
@@ -258,6 +260,7 @@ async function runConnectToCenter({
     ...(normalizedDeviceName ? { deviceName: normalizedDeviceName } : {}),
     configPath: result.configPath,
     activation: result.activation,
+    activationResult: result.activationResult,
   };
 }
 
@@ -347,7 +350,7 @@ async function runSyncParams({
       });
       output.write(`上报参数已更新：${result.configPath}\n`);
       writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-      return { sync: { interval_seconds: parsed }, configPath: result.configPath, activation: result.activation };
+      return { sync: { interval_seconds: parsed }, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
     } else if (section === "batch_size") {
       const value = await prompts.text({
         message: "单批条数上限（1–500，默认 200）",
@@ -372,7 +375,7 @@ async function runSyncParams({
       });
       output.write(`上报参数已更新：${result.configPath}\n`);
       writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-      return { sync: { batch_size: parsed }, configPath: result.configPath, activation: result.activation };
+      return { sync: { batch_size: parsed }, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
     } else {
       throw new Error(`未知上报参数：${String(section)}`);
     }
@@ -392,16 +395,21 @@ async function runDisableConnection({ environment, output, writeConfig, restartG
   } else if (restartGateway === undefined || restartWebui === undefined) {
     writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   }
-  if (result.activation !== "none") {
-    await applyMetricsConsumers({ output, restartGateway, restartWebui });
-  }
-  return { disabled: true, configPath: result.configPath, activation: result.activation };
+  const activationState = result.activation === "none"
+    ? undefined
+    : await applyMetricsConsumers({ output, restartGateway, restartWebui });
+  return {
+    disabled: true,
+    configPath: result.configPath,
+    activation: result.activation,
+    activationResult: result.activationResult,
+    ...(activationState === undefined ? {} : { activationState }),
+  };
 }
 
 async function applyMetricsConsumers({ output, restartGateway, restartWebui }) {
   if (restartGateway === undefined || restartWebui === undefined) {
-    output.write("本次变更同时影响 Gateway 与 WebUI；请执行 codexc service restart gateway 和 codexc service restart webui。\n");
-    return;
+    return "pending";
   }
   try {
     await restartGateway();
@@ -584,12 +592,13 @@ export async function runCenterSettings({
         throw error;
       }
     } else {
-      output.write("配置已保存，请执行：codexc service restart center\n");
+      writeGatewayConfigActivationNotice(output, environment, result.activationResult);
     }
     return {
       center: result.value.center,
       configPath: result.configPath,
       activation: result.activation,
+      activationResult: result.activationResult,
       ...(result.activation === "none"
         ? {}
         : restartCenter === undefined

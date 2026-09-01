@@ -73,7 +73,7 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`审批超时已设为 ${parsed} 秒：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { timeoutSeconds: parsed, configPath: result.configPath, activation: result.activation };
+  return { timeoutSeconds: parsed, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runSandbox({ environment, output, prompts, writeConfig }) {
@@ -98,7 +98,7 @@ async function runSandbox({ environment, output, prompts, writeConfig }) {
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`Gateway 渠道 Sandbox 已设为${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { sandbox: selected, configPath: result.configPath, activation: result.activation };
+  return { sandbox: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runDefaultWorkspace({ environment, output, prompts, writeConfig }) {
@@ -130,7 +130,7 @@ async function runDefaultWorkspace({ environment, output, prompts, writeConfig }
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`默认工作区已设为 ${selected}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { defaultWorkspace: selected, configPath: result.configPath, activation: result.activation };
+  return { defaultWorkspace: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runDefaultModel({ environment, output, prompts, writeConfig }) {
@@ -152,5 +152,5 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
       : `渠道新会话模型已恢复使用 Codex 全局默认：${result.configPath}\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { defaultModel: normalized || null, configPath: result.configPath, activation: result.activation };
+  return { defaultModel: normalized || null, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }

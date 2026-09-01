@@ -48,6 +48,11 @@ describe("Gateway Config management", () => {
         "codexc service restart webui",
       ],
     });
+    expect(configActivationResult("reload")).toEqual({
+      status: "reload",
+      target: "gateway",
+      commands: ["codexc service reload"],
+    });
     expect(configActivationResult("reinstall-services")).toEqual({
       status: "reinstall-required",
       target: "services",
