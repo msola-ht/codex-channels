@@ -258,6 +258,63 @@ describe("TelegramOutbox", () => {
     ]);
   });
 
+  it("starts an independent thinking message after tool execution begins", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 0,
+    });
+    await settle();
+
+    outbox.handle(operationUpdated("command-1", "running", "command", "git status --short"));
+    outbox.handle(operationUpdated("command-1", "completed", "command", "git status --short"));
+    outbox.handle({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 3_000,
+    });
+    await settle();
+
+    await settle();
+    await settle();
+    await settle();
+    expect(api.sent).toEqual([
+      "<b>思考中…</b>",
+      "<b>思考中…</b>\n\n<b>耗时：</b>3秒",
+    ]);
+    expect(api.edits).toEqual([
+      "<b>思考完成</b>",
+    ]);
+
+    await outbox.close();
+  });
+
+  it("keeps command workflow messages separate within one Turn", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(operationUpdated("command-1", "completed", "command", "git status --short"));
+    outbox.handle(operationUpdated("file-1", "completed", "fileChange", "README.md"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(2);
+    expect(api.sent[0]).toContain("运行命令 · 已完成");
+    expect(api.sent[1]).toContain("修改文件 · 已完成");
+  });
+
   it("does not send thinking status when reasoning display is disabled", async () => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox(
@@ -828,7 +885,7 @@ describe("TelegramOutbox", () => {
     });
   });
 
-  it("coalesces one turn's operation updates into one editable message", async () => {
+  it("keeps each operation in its own editable workflow message", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -868,10 +925,11 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toHaveLength(2);
-    expect(api.edits.at(-1)).toContain(
+    expect(api.sent).toHaveLength(3);
+    expect(api.sent.at(-2)).toContain(
       "🔧 <b>修改文件 · 已完成</b>\n<blockquote>README.md</blockquote>",
     );
+    expect(api.edits.at(-1)).toContain("运行命令 · 已完成");
     expect(api.sent.at(-1)).toBe(turnCompletedPanel);
   });
 
@@ -885,8 +943,13 @@ describe("TelegramOutbox", () => {
     await vi.advanceTimersByTimeAsync(750);
     await settle();
 
+    expect(api.sent).toHaveLength(2);
     expect(api.sent[0]).toContain(
-      "🔧 <b>修改文件 (×2) · 已完成</b>\n"
+      "🔧 <b>修改文件 · 已完成</b>\n"
+      + "<blockquote>src/a&lt;b&gt;.ts &amp; README.md</blockquote>",
+    );
+    expect(api.sent[1]).toContain(
+      "🔧 <b>修改文件 · 已完成</b>\n"
       + "<blockquote>src/a&lt;b&gt;.ts &amp; README.md</blockquote>",
     );
     await outbox.close();
@@ -1140,10 +1203,9 @@ describe("TelegramOutbox", () => {
     await vi.advanceTimersByTimeAsync(750);
     await settle();
 
-    expect(api.sent).toHaveLength(1);
-    expect(api.sent[0]).toContain("已省略较早的 81 项操作");
-    expect(api.sent[0]).not.toContain("命令 0\n");
-    expect(api.sent[0]).toContain(
+    expect(api.sent).toHaveLength(100);
+    expect(api.sent.some((text) => text.includes("命令 0\n"))).toBe(false);
+    expect(api.sent.at(-1)).toContain(
       "💻 ❌ <b>运行命令 · 失败</b>\n"
       + "<pre><code class=\"language-shell\">命令 100</code></pre>",
     );

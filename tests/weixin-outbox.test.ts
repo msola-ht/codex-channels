@@ -88,7 +88,7 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
-  it("shows the thinking status with elapsed time", async () => {
+  it("shows thinking immediately and only once per reasoning segment", async () => {
     const { outbox, sendText } = outboxFixture();
 
     outbox.handle({
@@ -119,7 +119,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "思考完成\n\n耗时：15秒",
+      "思考中…",
     ]);
   });
 
@@ -143,7 +143,7 @@ describe("WeixinOutbox", () => {
     expect(sendText).not.toHaveBeenCalled();
   });
 
-  it("drops queued final reasoning after command execution starts", async () => {
+  it("keeps queued thinking visible when command execution starts", async () => {
     let releaseStart!: () => void;
     const startGate = new Promise<void>((resolve) => {
       releaseStart = resolve;
@@ -176,6 +176,7 @@ describe("WeixinOutbox", () => {
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "已开始处理。",
+      "思考中…",
     ]);
   });
 
@@ -208,9 +209,9 @@ describe("WeixinOutbox", () => {
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "已开始处理。",
-      "思考完成\n\n耗时：1秒",
+      "思考中…",
       expect.stringContaining("运行命令 · 已完成"),
-      "思考完成\n\n耗时：2秒",
+      "思考中…",
     ]);
   });
 
