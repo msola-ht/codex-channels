@@ -65,6 +65,9 @@ codexc init
 codexc setup
 ```
 
+需要由脚本读取每次设置结果时，可运行 `codexc setup --json`；交互提示写入 stderr，脱敏 JSON Lines
+结果写入 stdout。
+
 `codexc config` 提供脱敏配置总览，并可交互调整 Gateway 的显示、系统、自动化、网络、WebUI
 和数据中心；在脚本或管道中运行时会输出用户目录与配置文件路径。
 

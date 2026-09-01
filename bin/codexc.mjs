@@ -119,7 +119,7 @@ const helpText = {
 
 初始化与配置：
   init                         初始化用户目录和配置
-  setup                        配置 Codex 新会话默认值、提供商、通讯渠道与项目技能（交互菜单）
+  setup [--json]               配置 Codex 新会话默认值、提供商、通讯渠道与项目技能（交互菜单）
   config                       打开日常设置菜单（交互菜单）
   doctor                       诊断安装、配置和服务
   security                     修复本机私有路径权限
@@ -152,9 +152,11 @@ const helpText = {
   init: `用法：codexc init
 
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
-  setup: `用法：codexc setup
+  setup: `用法：codexc setup [--json]
 
 打开脱敏配置总览，以及 Codex 新会话默认值、模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
+
+默认模式输出中文交互文本；--json 保留交互输入，将提示和进度写入 stderr，并将每次完成的设置以 JSON Lines 写入 stdout。
 
 常用入口：
   codexc setup → Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络
@@ -402,8 +404,10 @@ try {
       if (showRequestedHelp(args, "setup")) {
         break;
       }
-      requireNoArguments(args, "用法：codexc setup");
-      runSetup();
+      if (!(args.length === 0 || (args.length === 1 && args[0] === "--json"))) {
+        throw new Error("用法：codexc setup [--json]");
+      }
+      runSetup(args);
       break;
     case "start":
       if (showRequestedHelp(args, "start")) {
@@ -1501,9 +1505,9 @@ function opencodeGoAccount(args) {
   });
 }
 
-function runSetup() {
+function runSetup(args = []) {
   initializeUserData({ cwd: process.cwd() });
-  runScript("scripts/setup.mjs", [], { failureReportedByChild: true });
+  runScript("scripts/setup.mjs", args, { failureReportedByChild: true });
 }
 
 function runScript(relativePath, args, {

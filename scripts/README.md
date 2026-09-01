@@ -119,7 +119,8 @@
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“Codex 新会话默认值”
   “模型与提供商”“通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
   登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级；配置写入后的激活结果由
-  `config-activation-result.mjs` 提供统一状态和目标定义。
+  `config-activation-result.mjs` 提供统一状态和目标定义。公开 CLI 的 `codexc setup --json` 将交互提示
+  写入 stderr，并按每行一个事件把脱敏结果写入 stdout；默认 `codexc setup` 仍保持纯交互文本输出。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   共享第三方子代理、直接 API Provider 数量、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、

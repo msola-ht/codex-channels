@@ -39,6 +39,7 @@ export async function runSetup({
   setupSummary = writeSetupConfigurationSummary,
   agentsSetup = runThirdPartyAgentSetup,
   stayOnMenu = false,
+  onResult,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -80,6 +81,7 @@ export async function runSetup({
     });
     if (prompts.isCancel(section) || section === "cancel") {
       prompts.cancel("Setup 已取消");
+      emitSetupResult(onResult, undefined, undefined, "cancelled");
       return undefined;
     }
     switch (section) {
@@ -96,8 +98,10 @@ export async function runSetup({
           weixinSetup,
         });
         if (isBackResult(result)) continue;
+        const enriched = enrichSetupResult(result, "restart-gateway");
+        emitSetupResult(onResult, "channels", enriched);
         if (stayOnMenu) continue;
-        return enrichSetupResult(result, "restart-gateway");
+        return enriched;
       }
       case "codex_user": {
         const result = await codexUserSettingsSetup({
@@ -107,8 +111,10 @@ export async function runSetup({
           defaultsSetup: codexDefaultsSetup,
         });
         if (isBackResult(result)) continue;
+        const enriched = enrichSetupResult(result, "restart-all");
+        emitSetupResult(onResult, "codex_user", enriched);
         if (stayOnMenu) continue;
-        return enrichSetupResult(result, "restart-all");
+        return enriched;
       }
       case "models": {
         const result = await runModelSetup({
@@ -124,8 +130,10 @@ export async function runSetup({
           agentsSetup,
         });
         if (isBackResult(result)) continue;
+        const enriched = enrichSetupResult(result);
+        emitSetupResult(onResult, "models", enriched);
         if (stayOnMenu) continue;
-        return enrichSetupResult(result);
+        return enriched;
       }
       case "skills": {
         const result = await skillSetup({
@@ -134,8 +142,10 @@ export async function runSetup({
           prompts,
         });
         if (isBackResult(result)) continue;
+        const enriched = enrichSetupResult(result);
+        emitSetupResult(onResult, "skills", enriched);
         if (stayOnMenu) continue;
-        return enrichSetupResult(result);
+        return enriched;
       }
       default:
         throw new Error(`未知 Setup 类别：${String(section)}`);
@@ -358,6 +368,15 @@ function isBackResult(result) {
   return result?.action === "back";
 }
 
+function emitSetupResult(onResult, category, result, event = "result") {
+  if (typeof onResult !== "function") return;
+  onResult(sanitizeSetupEvent({
+    event,
+    ...(category === undefined ? {} : { category }),
+    ...(event === "result" ? { result: result === undefined ? null : result } : {}),
+  }));
+}
+
 function enrichSetupResult(value, fallbackActivation) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   if (value.activationResult !== undefined) {
@@ -395,9 +414,66 @@ function isDirectExecution(moduleUrl, argvPath) {
   return Boolean(argvPath) && moduleUrl === pathToFileURL(argvPath).href;
 }
 
+function createPromptOutputAdapter(prompts, output) {
+  const adapter = { ...prompts };
+  for (const method of ["intro", "outro", "cancel", "select", "text", "password", "confirm"]) {
+    adapter[method] = (...args) => {
+      const first = args[0];
+      if (first && typeof first === "object" && !Array.isArray(first)) {
+        return prompts[method]({ ...first, output }, ...args.slice(1));
+      }
+      return prompts[method](...args, { output });
+    };
+  }
+  return adapter;
+}
+
+function sanitizeSetupEvent(value, key) {
+  if (key === "generatedTokens") return { generated: true };
+  if (key === "message" && typeof value === "string") return sanitizeSetupText(value);
+  if (Array.isArray(value)) return value.map((entry) => sanitizeSetupEvent(entry));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [
+        entryKey,
+        sanitizeSetupEvent(entryValue, entryKey),
+      ]),
+    );
+  }
+  return value;
+}
+
+function sanitizeSetupText(value) {
+  return value
+    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)[^\s'";]+/giu, "$1[REDACTED]")
+    .replace(/(\b(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|cookie)\s*[:=]\s*)[^\s'";]+/giu, "$1[REDACTED]")
+    .replace(/(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|COOKIE)[A-Z0-9_]*\s*=\s*)[^\s;]+/giu, "$1[REDACTED]")
+    .slice(0, 320);
+}
+
 if (isDirectExecution(import.meta.url, process.argv[1])) {
-  await runSetup({ stayOnMenu: true }).catch((error) => {
-    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+  const args = process.argv.slice(2);
+  const json = args.length === 1 && args[0] === "--json";
+  if (args.length > 0 && !json) {
+    writeCliMessage("failure", "用法：codexc setup [--json]");
     process.exitCode = 1;
-  });
+  } else {
+    const output = json ? process.stderr : process.stdout;
+    const prompts = json
+      ? createPromptOutputAdapter(clackPrompts, process.stderr)
+      : clackPrompts;
+    const onResult = json
+      ? (event) => process.stdout.write(`${JSON.stringify(event)}\n`)
+      : undefined;
+    await runSetup({ stayOnMenu: true, output, prompts, onResult }).catch((error) => {
+      if (json) {
+        process.stdout.write(`${JSON.stringify(sanitizeSetupEvent({
+          event: "error",
+          message: error instanceof Error ? error.message : String(error),
+        }))}\n`);
+      }
+      writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+  }
 }
