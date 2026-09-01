@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ConfigManagementError,
   loadGatewaySettings,
+  normalizeGatewayActivation,
   updateGatewaySetting,
 } from "../scripts/config-management.mjs";
 import {
@@ -28,6 +29,15 @@ afterEach(() => {
 });
 
 describe("Gateway Config management", () => {
+  it("normalizes legacy activation scopes for machine consumers", () => {
+    expect(normalizeGatewayActivation("none")).toBe("none");
+    expect(normalizeGatewayActivation("restart-gateway-webui")).toBe("restart");
+    expect(normalizeGatewayActivation("restart-center")).toBe("restart");
+    expect(normalizeGatewayActivation("reinstall-services")).toBe("reinstall-required");
+    expect(normalizeGatewayActivation("reload")).toBe("reload");
+    expect(normalizeGatewayActivation("unexpected")).toBe("failed");
+  });
+
   it("loads a credential-free structured settings model", () => {
     const fixture = createFixture();
     const settings = loadGatewaySettings(fixture.environment);

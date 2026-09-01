@@ -280,7 +280,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史
   codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
-  codexc metrics prune <provider>   备份并清理指定提供商请求指标（自动重启 Gateway 与中心）`,
+  codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
   channel: `用法：codexc channel <send-image>
 
 渠道图片能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地 PNG/JPEG 图片。`,
@@ -1238,6 +1238,14 @@ async function service(args) {
   if (readinessTarget) {
     await waitForManagedServiceReadiness(readinessTarget);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));
+  } else if (action === "start" || action === "restart") {
+    const httpTarget = serviceArgs[0] === "webui" || serviceArgs[0] === "center"
+      ? serviceArgs[0]
+      : undefined;
+    if (httpTarget !== undefined) {
+      await waitForHttpServiceReadiness(httpTarget, controlEnvironment);
+      printCliMessage("success", `${httpTarget === "webui" ? "WebUI" : "指标中心"} 已就绪。`);
+    }
   }
 }
 
@@ -1265,6 +1273,46 @@ async function waitForManagedServiceReadiness(
 ) {
   const { waitForCoreServiceTarget } = await import("../scripts/local-update.mjs");
   await waitForCoreServiceTarget(target, environment, options);
+}
+
+async function waitForHttpServiceReadiness(target, environment) {
+  const configPath = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  if (!configPath) throw new Error("缺少 Gateway 配置路径，无法确认服务就绪");
+  const document = readGatewayConfig(configPath);
+  const section = target === "webui"
+    ? document.webui
+    : document.metrics?.center;
+  if (target === "webui" ? section === undefined : section?.enabled !== true) return;
+  const host = section?.host === "0.0.0.0" ? "127.0.0.1" : section?.host;
+  const port = section?.port;
+  if (typeof host !== "string" || !Number.isInteger(port)) {
+    throw new Error(`${target === "webui" ? "WebUI" : "指标中心"} 配置无效，无法确认服务就绪`);
+  }
+  const url = `http://${host.includes(":") ? `[${host}]` : host}:${port}/api/v1/health`;
+  const deadline = Date.now() + 5_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 750);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        ...(target === "webui" && typeof section?.token === "string"
+          ? { headers: { authorization: `Bearer ${section.token}` } }
+          : {}),
+      });
+      if (response.ok) return;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    } finally {
+      clearTimeout(timeout);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error(
+    `${target === "webui" ? "WebUI" : "指标中心"} 启动后未就绪：${lastError instanceof Error ? lastError.message : "健康检查超时"}`,
+  );
 }
 
 function coreServiceReadyMessage(target) {

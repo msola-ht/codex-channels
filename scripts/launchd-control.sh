@@ -246,9 +246,9 @@ case "$action" in
     if launchctl kill SIGHUP "$user_domain/$gateway_label" 2>/dev/null; then
       print_status success "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
     else
-      print_status note "Gateway 当前没有可接收信号的进程，正在启动..."
-      start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-      print_status note "Gateway 启动操作已完成，将在进程就绪后读取最新配置。"
+      print_status failure "Gateway 当前没有可接收信号的运行进程，未隐式启动服务。"
+      print_status remediation "请先执行 codexc service start gateway，再运行 codexc service reload。"
+      exit 1
     fi
     ;;
   status)

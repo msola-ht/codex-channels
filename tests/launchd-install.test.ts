@@ -203,10 +203,11 @@ describe("launchd installer", () => {
     const reloaded = execFileSync("/bin/zsh", [script, "reload"], { env: environment, encoding: "utf8" });
     const reloadCalls = readFileSync(launchctlLog, "utf8");
     writeFileSync(launchctlLog, "");
-    const recovered = execFileSync("/bin/zsh", [script, "reload"], {
+    expect(() => execFileSync("/bin/zsh", [script, "reload"], {
       env: { ...environment, LAUNCHCTL_KILL_FAIL: "1" },
       encoding: "utf8",
-    });
+      stdio: "pipe",
+    })).toThrow();
     const recoveryCalls = readFileSync(launchctlLog, "utf8");
     const runtimeDir = join(root, ".codex-connect", "runtime");
     mkdirSync(runtimeDir, { recursive: true });
@@ -245,9 +246,8 @@ describe("launchd installer", () => {
     expect(reloadCalls).toContain("kill SIGHUP");
     expect(reloadCalls).toContain("com.hegenai.codex-gateway");
     expect(reloadCalls).not.toContain("com.hegenai.codex-app-server");
-    expect(recovered).toContain("Gateway 启动操作已完成，将在进程就绪后读取最新配置");
     expect(recoveryCalls).toContain("kill SIGHUP");
-    expect(recoveryCalls).toContain("kickstart -k");
+    expect(recoveryCalls).not.toContain("kickstart -k");
     expect(recoveryCalls).not.toContain("com.hegenai.codex-app-server");
     expect(logs).toContain("gateway-latest");
     expect(logs).not.toContain("gateway-old");

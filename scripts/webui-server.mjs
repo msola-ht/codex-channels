@@ -190,6 +190,10 @@ async function routeApi(environment, url, response) {
     handleSettings(environment, response);
     return;
   }
+  if (apiPath === "/health") {
+    sendJson(response, 200, { ok: true, service: "webui" });
+    return;
+  }
   if (apiPath === "/deepseek-balance") {
     await handleDeepseekBalance(environment, response);
     return;

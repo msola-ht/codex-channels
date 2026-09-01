@@ -33,6 +33,18 @@ const proxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
 
 export { ConfigManagementError } from "./config-management-error.mjs";
 
+/**
+ * Map legacy activation scopes to the stable lifecycle vocabulary exposed to
+ * automation. Existing callers may continue to use `activation` unchanged.
+ */
+export function normalizeGatewayActivation(activation) {
+  if (activation === "none") return "none";
+  if (activation === "reinstall-services") return "reinstall-required";
+  if (typeof activation === "string" && activation.startsWith("restart-")) return "restart";
+  if (activation === "reload") return "reload";
+  return "failed";
+}
+
 export function loadGatewaySettings(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
   const snapshot = readConfigSnapshot(configPath);

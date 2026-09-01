@@ -12,6 +12,8 @@
 - [`docs/metrics-sync.md`](docs/metrics-sync.md)：多设备指标增量同步的本地配置、载荷与边界。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
+- [`docs/cli-audit.md`](docs/cli-audit.md)：CLI 全链路逐命令审查记录与后续统一修复依据。
+- [`docs/config-unification-plan.md`](docs/config-unification-plan.md)：配置格式、交互文案、生命周期、数据中心和 WebUI 的分阶段统一改造计划。
 
 ## 发行记录
 

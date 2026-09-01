@@ -191,7 +191,10 @@ case "$action" in
     webui_unit=$(service_ids webui stop)
     center_unit=$(service_ids center stop)
     set -- $resolved_units "$webui_unit" "$center_unit"
-    systemctl_user disable --now "$@" 2>/dev/null || true
+    if ! systemctl_user disable --now "$@"; then
+      print_status failure "systemd 服务未能停止或禁用，已保留服务定义以便排查。"
+      exit 1
+    fi
     for unit in "$@"; do rm -f "$units_dir/$unit"; done
     systemctl_user daemon-reload
     systemctl_user reset-failed "$@" 2>/dev/null || true

@@ -5,8 +5,11 @@ export type GatewaySettingActivation =
   | "restart-webui"
   | "restart-center"
   | "restart-all"
-  | "reinstall-services"
   | "reinstall-services";
+
+export type StableGatewayActivation = "none" | "reload" | "restart" | "reinstall-required" | "failed";
+
+export function normalizeGatewayActivation(activation: GatewaySettingActivation | string): StableGatewayActivation;
 
 export class ConfigManagementError extends Error {
   readonly code: string;

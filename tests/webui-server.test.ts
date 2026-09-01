@@ -28,6 +28,23 @@ afterEach(async () => {
 });
 
 describe("webui server", () => {
+  it("authenticates the health endpoint when WebUI exposes a token", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { token: "webui-token" },
+    );
+
+    const unauthorized = await fetch(`${origin}/api/v1/health`);
+    expect(unauthorized.status).toBe(401);
+    const authorized = await fetch(`${origin}/api/v1/health`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(authorized.status).toBe(200);
+    expect(await authorized.json()).toEqual({ ok: true, service: "webui" });
+  });
+
   it("returns 503 for global APIs when the center service is disabled", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);
@@ -87,7 +104,9 @@ describe("webui server", () => {
             usedPercentMillionths: 10_000_000,
             resetsAt: 1_800_000_000,
           },
-          recordedAtMs: 1_785_640_800_000,
+          // Keep the fixture inside the requested 30-day window regardless
+          // of when the test suite is executed.
+          recordedAtMs: Date.now() - 86_400_000,
         }],
         subagentThreads: [],
       }),
