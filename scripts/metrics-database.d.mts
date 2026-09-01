@@ -160,6 +160,8 @@ export function resetMetricsSyncStateWithGatewayRestart(
 
 export interface MetricsProviderPruneResult {
   provider: string;
+  gatewayWasRunning: boolean;
+  centerWasRunning: boolean;
   local: {
     databasePath: string;
     backupPath: string | null;
@@ -180,6 +182,8 @@ export function pruneProviderMetrics(
   options?: {
     localDatabasePath?: string;
     centerDatabasePath?: string | null;
+    gatewayRunning?: boolean;
+    centerRunning?: boolean;
     centerSettings?: {
       databasePath?: string;
     };

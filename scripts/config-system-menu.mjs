@@ -22,13 +22,13 @@ export async function runSystemSettings({
       {
         value: "sandbox",
         label: "Gateway 渠道 Sandbox",
-        hint: "外部渠道默认值；Codex 用户设置在 Setup 中管理",
+        hint: "外部渠道默认值；Codex 新会话默认值在 Setup 中管理",
       },
       { value: "default_workspace", label: "默认工作区", hint: "default_workspace" },
       {
         value: "default_model",
         label: "渠道新会话模型覆盖",
-        hint: "仅覆盖 Gateway 新 Thread；全局模型与思考等级请用 codexc setup",
+        hint: "仅覆盖 Gateway 新 Thread；Codex 全局模型与思考等级请用 codexc setup",
       },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
@@ -72,8 +72,8 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
     value: parsed,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`审批超时已设为 ${parsed} 秒：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { timeoutSeconds: parsed, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { timeoutSeconds: parsed, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runSandbox({ environment, output, prompts, writeConfig }) {
@@ -97,8 +97,8 @@ async function runSandbox({ environment, output, prompts, writeConfig }) {
     value: selected,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`Gateway 渠道 Sandbox 已设为${selected}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { sandbox: selected, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { sandbox: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runDefaultWorkspace({ environment, output, prompts, writeConfig }) {
@@ -129,8 +129,8 @@ async function runDefaultWorkspace({ environment, output, prompts, writeConfig }
     value: selected,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`默认工作区已设为 ${selected}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { defaultWorkspace: selected, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { defaultWorkspace: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runDefaultModel({ environment, output, prompts, writeConfig }) {
@@ -151,6 +151,6 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
       ? `渠道新会话模型已覆盖为 ${normalized}：${result.configPath}\n`
       : `渠道新会话模型已恢复使用 Codex 全局默认：${result.configPath}\n`,
   );
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { defaultModel: normalized || null, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { defaultModel: normalized || null, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }

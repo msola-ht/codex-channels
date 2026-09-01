@@ -70,6 +70,7 @@ export interface GatewayConfigDocument {
       endpoint?: string;
       device_token?: string;
       device_id?: string;
+      device_name?: string;
       batch_size: number;
       interval_seconds: number;
     };

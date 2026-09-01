@@ -212,6 +212,12 @@ describe("Feishu setup", () => {
       appId: "cli_0123456789abcdef",
       allowedOpenIds: ["ou_scanner"],
       configPath: fixture.configPath,
+      activation: "restart-gateway",
+      activationResult: {
+        status: "restart",
+        target: "gateway",
+        commands: ["codexc service restart gateway"],
+      },
     });
     expect(renderedOutput).toContain("选择新建应用或已有应用");
     expect(renderedOutput).toContain("cli_0123456789abcdef");

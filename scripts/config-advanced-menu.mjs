@@ -90,8 +90,8 @@ export async function runNetworkSettings({
     ...(action === "set" ? { value: stringValue(value) } : {}),
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`${proxyFields.find(([value]) => value === field)?.[1]}已${action === "clear" ? "清除" : "更新"}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "reinstall");
-  return { field, configured: action !== "clear", configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { field, configured: action !== "clear", configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runProxyBatch({ environment, output, prompts, writeConfig, settings }) {
@@ -114,8 +114,8 @@ async function runProxyBatch({ environment, output, prompts, writeConfig, settin
     values,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`HTTP、HTTPS、通用代理已一次性更新：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "reinstall");
-  return { fields: Object.keys(values), configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { fields: Object.keys(values), configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 export async function runAdvancedSettings(options) {
@@ -157,8 +157,8 @@ async function runScheduledTasks({ environment, output, prompts, writeConfig = w
     value: enabled,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`Gateway 计划任务已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { scheduledTasksEnabled: enabled, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { scheduledTasksEnabled: enabled, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runThreadSectionAdministrators({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
@@ -187,8 +187,8 @@ async function runThreadSectionAdministrators({ environment, output, prompts, wr
     value: selected,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`Thread 分区管理员已更新（${selected.length} 个）：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { threadSectionAdministrators: selected, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { threadSectionAdministrators: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runLoggingLevel({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
@@ -211,8 +211,8 @@ async function runLoggingLevel({ environment, output, prompts, writeConfig = wri
     value: selected,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`日志等级已设为 ${selected}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { logLevel: selected, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { logLevel: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runPluginApi({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
@@ -237,8 +237,8 @@ async function runPluginApi({ environment, output, prompts, writeConfig = writeG
     value: enabled,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(`Plugin API 已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
-  return { pluginApiEnabled: enabled, configPath: result.configPath };
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { pluginApiEnabled: enabled, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 function stringValue(value) {

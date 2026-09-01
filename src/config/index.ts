@@ -90,6 +90,7 @@ export interface GatewayConfig {
     endpoint?: string;
     deviceToken?: string;
     deviceId?: string;
+    deviceName?: string;
     batchSize: number;
     intervalSeconds: number;
   };
@@ -322,6 +323,9 @@ function loadValidatedConfigDocument(
         : {}),
       ...(raw.metrics.sync.device_id
         ? { deviceId: raw.metrics.sync.device_id }
+        : {}),
+      ...(raw.metrics.sync.device_name
+        ? { deviceName: raw.metrics.sync.device_name }
         : {}),
       batchSize: raw.metrics.sync.batch_size ?? 200,
       intervalSeconds: raw.metrics.sync.interval_seconds ?? 60,

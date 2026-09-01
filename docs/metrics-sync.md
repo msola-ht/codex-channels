@@ -18,28 +18,30 @@
 enabled = true
 endpoint = "http://127.0.0.1:8790/api/ingest"   # 或 https://中心服务器/api/ingest
 device_token = "中心分发的设备令牌"
-device_id = "device-a"        # 可选；不填时首次运行自动生成并持久化
+device_name = "Mac Pro"        # 可选；不填时使用系统名称，可含空格、-、_
 batch_size = 200              # 每次上报的请求条数上限，1–500，默认 200
 interval_seconds = 60         # 上报间隔，10–86400，默认 60
 ```
 
 - `enabled = true` 时必须配置 `endpoint` 和 `device_token`。`endpoint` 使用 HTTPS，
   或指向回环/私网地址的 HTTP；公网地址必须 HTTPS。
-- `device_id` 可选，格式为 `^[a-z0-9][a-z0-9_-]{0,63}$`。不配置时首次上报前自动生成
-  UUID 并持久化，之后保持不变；配置后以配置值为准。
+- 设备 ID 不需要手工配置。首次上报前自动生成 UUID 并持久化，之后保持不变，仅用于设备身份、
+  去重和筛选。
+- `device_name` 可选，填写后作为唯一设备显示名和上报名称，支持空格、连字符和下划线，最长 128
+  个字符；留空时使用系统主机名。中心和 WebUI 使用同一个名称，不再分别维护名称。
 - `device_token` 是敏感凭据，只放在请求头中，不写入日志。
-- 每次上报自动携带本机主机名作为 `deviceName` 显示名；中心首次收到后保存，未携带时
-  展示回退为 `device_id`。显示名只用于 WebUI 展示，不影响上报标识、水位或去重。
+- 每次上报携带配置的 `device_name`（未配置时为系统主机名）作为 `deviceName`；中心保存该名称并
+  直接用于 WebUI 展示。名称只用于展示，不影响设备 ID、水位或去重。
 
 ### 本机接入设置
 
-运行 `codexc config`，选择「指标设置 → 本机接入中心」，输入中心地址、设备上报令牌、
-全局查看令牌和可选
-设备 ID，即可同时写入 `[metrics.sync]` 与 `[metrics.view]`。菜单还提供「查看接入状态」
-「上报参数」（`interval_seconds` 与 `batch_size`）和「停用接入」（停用保留配置，可随时
-重新接入）。手工编辑 `config.toml` 效果相同；每次通过菜单修改都会先备份原配置。远程
-汇总端的中心服务设置不放在本机 config 菜单，由独立的 `codexc center config` /
-`codexc center info` 命令负责。
+运行 `codexc config`，选择「数据中心 → 本机接入数据中心」，输入中心地址、设备上报令牌、
+全局查看令牌和可选设备名称，即可同时写入 `[metrics.sync]` 与 `[metrics.view]`。菜单还提供「查看数据中心状态」
+「本机上报参数」（`interval_seconds` 与 `batch_size`）和「停用本机接入」（停用保留配置，可随时
+重新接入）。手工编辑 `config.toml` 效果相同；重新接入或停用本机接入时会先备份原配置，
+其他参数修改不复制整份配置。远程
+中心服务端设置也可从 `codexc config → 数据中心 → 数据中心服务（本机）` 进入；独立的
+`codexc center config` / `codexc center info` 命令仍然保留。
 
 ## WebUI 全局视图配置
 
@@ -56,8 +58,8 @@ token = "中心访问令牌"
   回环/私网地址的 HTTP（公网地址必须 HTTPS）。
 - WebUI 服务端携带该令牌访问中心，令牌不进入前端；`/api/v1/global/*` 不可达时返回
   `metrics_view_unavailable` / `metrics_view_unreachable`。
-- 只有「本机接入中心」会自动把令牌同时写入 `[metrics.view]`；手工配置时请保持两个
-  令牌一致（同一中心使用同一令牌）。
+- 「本机接入数据中心」会把查看令牌写入 `[metrics.view].token`，把设备上报令牌写入
+  `[metrics.sync].device_token`；两者属于不同用途，必须保持不同。
 
 ## 中心服务（VPS）
 
@@ -93,6 +95,9 @@ codexc service start center          # 启动指标中心后台服务
 - WebUI 控制台的「全部设备 / 单设备」范围通过 `/api/v1/global/*` 由 WebUI 服务端
   带令牌读取中心服务，前端不接触令牌；每台设备的 WebUI 都可以看到所有设备累计，
   明细页（Threads、请求、错误）保持只读本机指标库。
+- 渠道额度估算把额度周期与本地观测分开：周期开始由窗口长度和上游重置时间推导，历史中检测到
+  下一周期提前出现时以其起点修正上一周期结束；Token、使用率增量和容量估算仍只使用本地实际
+  观测到的请求区间。没有相邻快照时不会猜测未观测到的重置时刻。
 - `POST /api/ingest` 只接受 `device_token`；只读查询只接受 `token`，两者必须不同；绑定
   `0.0.0.0` 时必须同时配置，并建议用 nginx/Caddy 套 HTTPS。
 

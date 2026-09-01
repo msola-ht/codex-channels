@@ -94,16 +94,12 @@ export async function controlWindowsServices({
     return;
   }
   if (action === "stop") {
-    for (const definition of serviceDefinitionsForTarget(parsedTarget, "stop")) {
-      await stopDefinition(definition, definitionsDirectory, environment);
-    }
+    await stopDefinitions(parsedTarget, definitionsDirectory, environment);
     printLifecycleResult("stop", parsedTarget);
     return;
   }
   if (action === "restart") {
-    for (const definition of serviceDefinitionsForTarget(parsedTarget, "stop")) {
-      await stopDefinition(definition, definitionsDirectory, environment);
-    }
+    await stopDefinitions(parsedTarget, definitionsDirectory, environment);
     await startDefinitions(parsedTarget, definitionsDirectory, environment);
     printLifecycleResult("restart", parsedTarget);
     return;
@@ -178,24 +174,46 @@ export async function inspectWindowsServiceStatus({
 }
 
 async function startDefinitions(target, definitionsDirectory, environment) {
+  const failures = [];
   for (const service of serviceDefinitionsForTarget(target, "start")) {
-    const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
-    const host = await inspectHost(definition.controlPath);
-    if (host?.version === 1 && host.running === true) {
-      if (service.target === "app-server") await waitForAppServer(definition.socketPath);
-      continue;
-    }
-    const task = queryTask(service.windows, environment);
-    if (task.exists && String(task.state).toLowerCase() === "running") {
+    try {
+      const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
+      const host = await inspectHost(definition.controlPath);
+      if (host?.version === 1 && host.running === true) {
+        if (service.target === "app-server") await waitForAppServer(definition.socketPath);
+        continue;
+      }
+      const task = queryTask(service.windows, environment);
+      if (task.exists && String(task.state).toLowerCase() === "running") {
+        await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
+        if (service.target === "app-server") await waitForAppServer(definition.socketPath);
+        continue;
+      }
+      runTaskPrimitive("start", service.windows, environment, undefined, definition.pwshBinary);
       await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
-      if (service.target === "app-server") await waitForAppServer(definition.socketPath);
-      continue;
+      if (service.target === "app-server") {
+        await waitForAppServer(definition.socketPath);
+      }
+    } catch (error) {
+      failures.push(`${service.target}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    runTaskPrimitive("start", service.windows, environment, undefined, definition.pwshBinary);
-    await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
-    if (service.target === "app-server") {
-      await waitForAppServer(definition.socketPath);
+  }
+  if (failures.length > 0) {
+    throw new Error(`服务启动部分失败：${failures.join("；")}。请运行 codexc service status。`);
+  }
+}
+
+async function stopDefinitions(target, definitionsDirectory, environment) {
+  const failures = [];
+  for (const definition of serviceDefinitionsForTarget(target, "stop")) {
+    try {
+      await stopDefinition(definition, definitionsDirectory, environment);
+    } catch (error) {
+      failures.push(`${definition.target}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+  if (failures.length > 0) {
+    throw new Error(`服务停止部分失败：${failures.join("；")}。请运行 codexc service status。`);
   }
 }
 

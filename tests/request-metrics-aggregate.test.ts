@@ -190,6 +190,18 @@ describe("request metrics aggregate reports", () => {
         lastOccurredAtMs: now.getTime() - 60 * 60 * 1_000,
       },
     ]);
+    const failures = store.page({
+      startAtMs: now.getTime() - 7 * 24 * 60 * 60 * 1_000,
+      endAtMs: now.getTime() + 1,
+      limit: 10,
+      onlyFailures: true,
+    });
+    expect(failures.matchedTotal).toBe(3);
+    expect(failures.records.map((record) => record.status)).toEqual([
+      "incomplete",
+      "failed",
+      "failed",
+    ]);
     store.close();
   });
 

@@ -13,6 +13,8 @@ import {
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -138,10 +140,14 @@ export async function runOfficialLoginSetup({
   });
   output.write(
     backedUp.length === 0
-      ? "已恢复官方 OpenAI 模式。请运行 codexc service restart all 生效。\n"
-      : `已恢复官方 OpenAI 模式（自定义候选已备份：${backedUp.join("、")}）。`
-        + "请运行 codexc service restart all 生效。\n",
+      ? "已恢复官方 OpenAI 模式。\n"
+      : `已恢复官方 OpenAI 模式（自定义候选已备份：${backedUp.join("、")}）。\n`,
   );
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   output.write("旧会话仍使用创建时的 Provider，请用 /new 创建新会话。\n");
-  return { mode: "official" };
+  return {
+    mode: "official",
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }

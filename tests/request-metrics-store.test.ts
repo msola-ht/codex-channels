@@ -551,7 +551,7 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
-  it("keeps irregular OpenAI resets separate while merging reset timestamp jitter", () => {
+  it("keeps irregular OpenAI resets separate while merging jitter and early boundaries", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
       join(directory, "request-metrics.sqlite3"),
@@ -585,6 +585,7 @@ describe("SqliteModelRequestMetricsStore", () => {
         resetsAt: firstReset,
         snapshotCount: 1,
         latestUsedPercentMillionths: 55_000_000,
+        periodEndAtMs: (irregularReset - 7 * 24 * 60 * 60) * 1_000,
       }),
       expect.objectContaining({
         resetsAt: irregularReset,

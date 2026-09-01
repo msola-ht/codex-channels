@@ -3,10 +3,10 @@ import { useCurrency } from "@/hooks/currency-context"
 import { fetchErrors } from "@/lib/api"
 import type { RangeName } from "@/lib/types"
 
-export function useErrors(range: RangeName) {
+export function useErrors(range: RangeName, offset: number, limit: number) {
   const { currency } = useCurrency()
   return useApi(
-    (signal) => fetchErrors(range, currency, signal),
-    [range, currency],
+    (signal) => fetchErrors(range, currency, offset, limit, signal),
+    [range, currency, offset, limit],
   )
 }

@@ -103,7 +103,6 @@ describe("Codex user settings management", () => {
         sandboxMode: "workspace-write",
         approvalPolicy: "on-request",
         networkAccess: true,
-        webSearch: "cached",
       },
     });
 
@@ -114,14 +113,10 @@ describe("Codex user settings management", () => {
       { keyPath: "sandbox_mode", value: "workspace-write" },
       { keyPath: "approval_policy", value: "on-request" },
       { keyPath: "sandbox_workspace_write.network_access", value: true },
-      { keyPath: "web_search", value: "cached" },
-      { keyPath: "analytics.enabled", value: false },
-      { keyPath: "feedback.enabled", value: false },
-      { keyPath: "features.goals", value: true },
     ], { expectedVersion: "version-1" });
   });
 
-  it("writes the main Fast preference without consulting a third-party model catalog", async () => {
+  it("rejects Fast changes for a fixed third-party Provider", async () => {
     const client = settingsClient({ model: "deepseek-v4" });
 
     await expect(updateCodexUserSetting({
@@ -131,12 +126,10 @@ describe("Codex user settings management", () => {
       expectedVersion: "version-1",
       createClient: async () => client,
       primaryProvider: () => "deepseek",
-    })).resolves.toMatchObject({ kind: "fast", value: { enabled: true } });
+    })).rejects.toMatchObject({ code: "third-party-primary", field: "provider" });
 
     expect(client.listModels).not.toHaveBeenCalled();
-    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
-      { keyPath: "service_tier", value: "fast" },
-    ], { expectedVersion: "version-1" });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
   });
 
   it("writes the selected web search mode in a separate setting", async () => {

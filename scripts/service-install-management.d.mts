@@ -39,7 +39,7 @@ export class ServiceInstallManagementError extends Error {
   code: string;
   stage: ServiceInstallStage;
   completedStages: ServiceInstallStage[];
-  recovery: "unsupported" | "set-home" | "recreate-plan" | "fix-and-retry" | "retry-install" | "inspect-services";
+  recovery: "unsupported" | "set-home" | "recreate-plan" | "fix-and-retry" | "retry-install" | "inspect-services" | "manual-restore";
 }
 
 export interface ServiceInstallOptions {
@@ -58,6 +58,11 @@ export interface ServiceInstallOptions {
     environment: NodeJS.ProcessEnv,
     options: ServiceInstallOptions,
   ) => unknown;
+  rollbackCore?: (
+    plan: unknown,
+    environment: NodeJS.ProcessEnv,
+    options: ServiceInstallOptions,
+  ) => Promise<unknown> | unknown;
   waitForCore?: (
     target: "all",
     environment: NodeJS.ProcessEnv,

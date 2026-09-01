@@ -17,6 +17,8 @@ import {
   validCustomPrimaryProviderBaseUrl,
 } from "./custom-primary-provider-management.mjs";
 import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 
 export { primaryProviderId };
 
@@ -404,24 +406,36 @@ export async function runCustomPrimaryProviderSetup({
     output.write(
       backupCleanupFailed
         ? `配置已写入，但自定义主 Provider ${result.provider.id} 的私有备份清理失败；`
-          + "请修复私有备份权限后重试切换或删除。请运行 codexc service restart all 生效。\n"
-        : "配置已写入。请运行 codexc service restart all 生效。\n",
+          + "请修复私有备份权限后重试切换或删除。\n"
+        : "配置已写入。\n",
     );
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
     output.write(
       "旧 Thread 不会改变；重启后，在 /model 选择该 Provider，"
       + "下一条消息会创建新的 Provider Thread。可用 /model clear 清除会话偏好。\n",
     );
-    return { provider: result.provider.id, model: result.provider.model };
+    return {
+      provider: result.provider.id,
+      model: result.provider.model,
+      activation: "restart-all",
+      activationResult: configActivationResult("restart-all"),
+    };
   }
   output.write(
     backupCleanupFailed
       ? `配置已写入，但自定义主 Provider ${result.provider.id} 的私有备份清理失败；`
-        + "请修复私有备份权限后重试切换或删除。请运行 codexc service restart all 生效。\n"
-      : "配置已写入。请运行 codexc service restart all 生效。\n",
+        + "请修复私有备份权限后重试切换或删除。\n"
+      : "配置已写入。\n",
   );
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   output.write(
     "旧 Thread 不会改变；重启后新 Thread 使用该固定 Provider。"
     + "会话内 /model 偏好可用 /model clear 清除。\n",
   );
-  return { provider: result.provider.id, model: result.provider.model };
+  return {
+    provider: result.provider.id,
+    model: result.provider.model,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }

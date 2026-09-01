@@ -215,7 +215,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       {
         args: ["setup", "--help"],
         includes: [
-          "Codex 用户设置 → 一键配置全部 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络",
+          "Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络",
           "OpenAI 官方 → 登录并恢复官方",
           "受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）",
         ],
@@ -3516,7 +3516,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
   it("describes Setup by its model, provider, channel, and skill responsibilities", () => {
     const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
 
-    expect(output).toContain("配置 Codex 用户设置、提供商、通讯渠道与项目技能");
+    expect(output).toContain("配置 Codex 新会话默认值、提供商、通讯渠道与项目技能");
   });
 
   it("explains the Setup categories in scoped help", () => {

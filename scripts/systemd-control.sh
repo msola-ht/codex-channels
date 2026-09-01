@@ -124,7 +124,18 @@ case "$action" in
     target=${2:-all}
     require_target "$target"
     resolved_units=$(service_ids "$target" start)
-    for unit in $resolved_units; do systemctl_user start "$unit"; done
+    failed_units=""
+    for unit in $resolved_units; do
+      if ! systemctl_user start "$unit"; then
+        failed_units="$failed_units $unit"
+      fi
+    done
+    if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
+      print_status failure "服务启动部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
+      exit 1
+    elif [ -n "$failed_units" ]; then
+      exit 1
+    fi
     case "$target" in
       gateway) print_status note "Gateway 启动操作已完成，正在确认就绪状态。" ;;
       app-server) print_status note "Codex App Server 启动操作已完成，正在确认就绪状态。" ;;
@@ -137,7 +148,18 @@ case "$action" in
     target=${2:-all}
     require_target "$target"
     resolved_units=$(service_ids "$target" stop)
-    for unit in $resolved_units; do stop_unit "$unit"; done
+    failed_units=""
+    for unit in $resolved_units; do
+      if ! stop_unit "$unit"; then
+        failed_units="$failed_units $unit"
+      fi
+    done
+    if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
+      print_status failure "服务停止部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
+      exit 1
+    elif [ -n "$failed_units" ]; then
+      exit 1
+    fi
     case "$target" in
       gateway) print_status success "Gateway 已停止。" ;;
       app-server) print_status success "Codex App Server 已停止。" ;;
@@ -150,7 +172,18 @@ case "$action" in
     target=${2:-gateway}
     require_target "$target"
     resolved_units=$(service_ids "$target" start)
-    for unit in $resolved_units; do systemctl_user restart "$unit"; done
+    failed_units=""
+    for unit in $resolved_units; do
+      if ! systemctl_user restart "$unit"; then
+        failed_units="$failed_units $unit"
+      fi
+    done
+    if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
+      print_status failure "服务重启部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
+      exit 1
+    elif [ -n "$failed_units" ]; then
+      exit 1
+    fi
     case "$target" in
       gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
       app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
@@ -191,7 +224,10 @@ case "$action" in
     webui_unit=$(service_ids webui stop)
     center_unit=$(service_ids center stop)
     set -- $resolved_units "$webui_unit" "$center_unit"
-    systemctl_user disable --now "$@" 2>/dev/null || true
+    if ! systemctl_user disable --now "$@"; then
+      print_status failure "systemd 服务未能停止或禁用，已保留服务定义以便排查。"
+      exit 1
+    fi
     for unit in "$@"; do rm -f "$units_dir/$unit"; done
     systemctl_user daemon-reload
     systemctl_user reset-failed "$@" 2>/dev/null || true

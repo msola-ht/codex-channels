@@ -142,7 +142,16 @@ describe("custom primary Provider setup", () => {
       output,
       prompts,
       createClient,
-    })).resolves.toEqual({ provider: "127-0-0-1", model: "model-a" });
+    })).resolves.toMatchObject({
+      provider: "127-0-0-1",
+      model: "model-a",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
 
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -629,7 +638,16 @@ describe("custom primary Provider setup", () => {
       prompts,
       createClient,
       providerId: "thirdparty",
-    })).resolves.toEqual({ provider: "thirdparty", model: "model-a" });
+    })).resolves.toMatchObject({
+      provider: "thirdparty",
+      model: "model-a",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
 
     expect(existsSync(customPrimaryProviderProfilePath(environment, "thirdparty"))).toBe(false);
   });
@@ -708,7 +726,16 @@ describe("custom primary Provider setup", () => {
       prompts,
       createClient,
       providerId: "thirdparty",
-    })).resolves.toEqual({ provider: "thirdparty", model: "model-a" });
+    })).resolves.toMatchObject({
+      provider: "thirdparty",
+      model: "model-a",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
 
     expect(readFileSync(customPrimaryProviderProfilePath(environment, "thirdparty"), "utf8"))
       .not.toBe(previousProfile);
@@ -735,7 +762,16 @@ describe("custom primary Provider setup", () => {
       output: { write: vi.fn() },
       prompts,
       createClient,
-    })).resolves.toEqual({ provider: "OpenAI", model: "gpt-5.6-sol" });
+    })).resolves.toMatchObject({
+      provider: "OpenAI",
+      model: "gpt-5.6-sol",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
 
     expect(createClient).toHaveBeenCalledTimes(2);
     expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
@@ -774,7 +810,16 @@ describe("custom primary Provider setup", () => {
       prompts,
       createClient,
       providerId: "thirdparty",
-    })).resolves.toEqual({ provider: "thirdparty", model: "model-a" });
+    })).resolves.toMatchObject({
+      provider: "thirdparty",
+      model: "model-a",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
 
     expect(existsSync(customPrimaryProviderProfilePath(environment, "thirdparty"))).toBe(true);
     expect(output.write.mock.calls.flat().join("")).toContain("私有备份清理失败");

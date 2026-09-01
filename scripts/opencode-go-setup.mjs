@@ -23,6 +23,8 @@ import {
   readOpencodeGoOptionalJson,
 } from "./opencode-go-account-provisioning.mjs";
 import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import {
   loadManagedModelProviderRole,
   loadManagedModelProviderSettings,
@@ -169,8 +171,12 @@ export async function runOpenCodeGoSetup({
       }
       await applyOpencodeGoRestore({ confirmRestore: true }, { environment });
       output.write("已恢复配置 OpenCode Go 前的文件。\n");
-      output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
-      return { action: "restored" };
+      writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+      return {
+        action: "restored",
+        activation: "restart-all",
+        activationResult: configActivationResult("restart-all"),
+      };
     }
     if (action === "account-add") {
       const accountId = await prompt.accountId();
@@ -189,8 +195,12 @@ export async function runOpenCodeGoSetup({
       if (accountId === undefined) return { action: "back" };
       await setOpencodeGoDefaultAccount(accountId, { environment, configureRole });
       output.write(`默认 OpenCode Go 账户已设置为 ${accountId}。\n`);
-      output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
-      return { action: "default-set" };
+      writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+      return {
+        action: "default-set",
+        activation: "restart-all",
+        activationResult: configActivationResult("restart-all"),
+      };
     }
     if (action === "account-stop") {
       const accountId = await prompt.selectAccount(accounts);
@@ -269,8 +279,15 @@ export async function addOpencodeGoAccount(accountId, {
   if (preview.effects.updatesExternalAgent && !preview.account.exists) {
     output.write("共享第三方子代理（agents.external）已切换到默认账户。\n");
   }
-  output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
-  return { action: "configured", mode, accountId, ...paths };
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  return {
+    action: "configured",
+    mode,
+    accountId,
+    ...paths,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }
 
 export function printOpencodeGoAccounts(environment = process.env, output = process.stdout, { json = false } = {}) {
@@ -319,8 +336,13 @@ export async function removeOpencodeGoAccount(accountId, {
     environment,
   });
   output.write(`OpenCode Go 账户已删除：${accountId}（备份保留在 ${result.backupDirectory}）。\n`);
-  output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
-  return { action: "removed", accountId };
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  return {
+    action: "removed",
+    accountId,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }
 
 export async function setOpencodeGoDefaultAccount(accountId, {
@@ -534,7 +556,11 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
     });
     const output = options.output ?? process.stdout;
     output.write(`默认 OpenCode Go 账户已设置为 ${id}。\n`);
-    output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+    writeGatewayConfigActivationNotice(
+      output,
+      options.environment ?? process.env,
+      configActivationResult("restart-all"),
+    );
     return result;
   }
   return stopOpencodeGoAccount(id, {

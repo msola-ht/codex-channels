@@ -8,6 +8,7 @@ import {
   validateApiProviderName,
 } from "./api-provider-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 
 export async function runApiProviderSetup({
   environment = process.env,
@@ -98,7 +99,7 @@ export async function runApiProviderSetup({
   }, { environment, writeConfig });
   output.write(`直接 API Provider 已保存：${result.provider.name} (${providerId})\n`);
   output.write(`配置文件：${configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, "restart");
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-gateway"));
   return result;
 }
 
@@ -121,7 +122,11 @@ async function removeProvider(options) {
     writeConfig: options.writeConfig,
   });
   options.output.write(`已删除直接 API Provider：${provider.name} (${provider.id})\n`);
-  writeGatewayConfigActivationNotice(options.output, options.environment, "restart");
+  writeGatewayConfigActivationNotice(
+    options.output,
+    options.environment,
+    configActivationResult("restart-gateway"),
+  );
   return result;
 }
 

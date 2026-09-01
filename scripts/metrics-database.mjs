@@ -42,10 +42,11 @@ import {
   requireCompatibleMetricsDatabase,
   resolveMetricsDatabaseContext,
 } from "./metrics-database-access.mjs";
+import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { resolveConfiguredPath } from "./runtime-config.mjs";
 import {
   assertExportFormat,
-  isMetricsProviderId,
+  isPrunableMetricsProviderId,
   metricsProviderIds,
   parseCleanupOptions,
   parseLocalDate,
@@ -425,7 +426,7 @@ export function resetMetricsSyncStateWithGatewayRestart(
 }
 
 export function pruneProviderMetrics(provider, environment = process.env, options = {}) {
-  assertPruneProvider(provider, environment);
+  assertPruneProvider(provider);
   const localDatabasePath = options.localDatabasePath
     ?? resolveMetricsRuntime(environment).databasePath;
   const centerSettings = options.centerSettings
@@ -446,17 +447,31 @@ export function pruneProviderMetrics(provider, environment = process.env, option
   const startCenter = options.startCenter
     ?? (() => runServiceAction("center", "start", environment));
 
+  // Maintenance must restore the state that existed before the operation.
+  // Test/in-process callers can provide explicit state; the CLI queries the
+  // managed service status before stopping anything.
+  const gatewayWasRunning = options.gatewayRunning
+    ?? (options.stopGateway !== undefined || options.startGateway !== undefined
+      ? true
+      : isManagedServiceRunning("gateway", environment));
+  const centerWasRunning = options.centerRunning
+    ?? (options.stopCenter !== undefined || options.startCenter !== undefined
+      ? true
+      : isManagedServiceRunning("center", environment));
+
   const warnings = [];
   let gatewayStopped = false;
   let centerStopped = false;
   const stopErrors = [];
-  try {
-    stopGateway();
-    gatewayStopped = true;
-  } catch (error) {
-    stopErrors.push(error);
+  if (gatewayWasRunning) {
+    try {
+      stopGateway();
+      gatewayStopped = true;
+    } catch (error) {
+      stopErrors.push(error);
+    }
   }
-  if (centerConfigured) {
+  if (centerConfigured && centerWasRunning) {
     try {
       stopCenter();
       centerStopped = true;
@@ -486,17 +501,19 @@ export function pruneProviderMetrics(provider, environment = process.env, option
   }
 
   const startFailures = [];
-  if (centerConfigured) {
+  if (centerConfigured && centerWasRunning) {
     try {
       startCenter();
     } catch (error) {
       startFailures.push(`中心服务启动失败：${errorMessage(error)}`);
     }
   }
-  try {
-    startGateway();
-  } catch (error) {
-    startFailures.push(`Gateway 启动失败：${errorMessage(error)}`);
+  if (gatewayWasRunning) {
+    try {
+      startGateway();
+    } catch (error) {
+      startFailures.push(`Gateway 启动失败：${errorMessage(error)}`);
+    }
   }
 
   if (operationError !== undefined && startFailures.length > 0) {
@@ -511,6 +528,8 @@ export function pruneProviderMetrics(provider, environment = process.env, option
   }
   return {
     ...result,
+    gatewayWasRunning,
+    centerWasRunning: centerConfigured && centerWasRunning,
     warnings,
   };
 }
@@ -687,8 +706,8 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function assertPruneProvider(provider, environment = process.env) {
-  if (!isMetricsProviderId(provider, environment)) {
+function assertPruneProvider(provider) {
+  if (!isPrunableMetricsProviderId(provider)) {
     throw new Error("用法：codexc metrics prune <provider>");
   }
 }
@@ -792,6 +811,12 @@ function isGatewayRunning(environment) {
     return result.status === 0;
   }
   return false;
+}
+
+function isManagedServiceRunning(target, environment) {
+  if (environment.CODEX_CONNECT_SERVICE_ROLE === target) return true;
+  const status = inspectManagedServiceStatus({ environment, target });
+  return status.services.some((service) => service.running);
 }
 
 function metricsSocketIsActive(socketPath) {
@@ -976,11 +1001,12 @@ if (
       for (const warning of result.warnings) {
         writeCliMessage("note", `警告：${warning}`, { destination: "stderr" });
       }
-      if (result.center.skipped) {
-        writeCliMessage("success", "Gateway 已重新启动。");
-      } else {
-        writeCliMessage("success", "Gateway 与中心服务已重新启动。");
+      const restored = [];
+      restored.push(result.gatewayWasRunning ? "Gateway 已恢复运行" : "Gateway 原为停止，保持停止");
+      if (!result.center.skipped) {
+        restored.push(result.centerWasRunning ? "中心服务已恢复运行" : "中心服务原为停止，保持停止");
       }
+      writeCliMessage("success", restored.join("；") + "。");
     } else if (command === "cleanup" || command === "cleanup-restart") {
       const options = parseCleanupOptions(process.argv.slice(3));
       const result = command === "cleanup-restart"

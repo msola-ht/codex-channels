@@ -14,8 +14,9 @@
 - 结构化接口不得依赖 `@clack/prompts`、TTY、ANSI 文案或 `process.exitCode`。
 - 读取接口只返回完成管理操作所需的脱敏字段。API Key、Token、应用凭据和代理值只返回是否已配置。
 - 修改接口使用明确的可辨识输入，不接受任意 TOML 路径和值。
-- 修改结果必须返回生效动作：`none`、对应单服务重启、`restart-all` 或 `reinstall-services`；同时影响
-  Gateway 与只读 WebUI 的指标接入变更使用 `restart-all`，不能只提示重启其中一个进程。
+- 修改结果必须返回生效动作：`none`、对应单服务重启、`restart-gateway-webui`、`restart-all` 或
+  `reinstall-services`；同时影响 Gateway 与只读 WebUI 的数据中心接入变更使用
+  `restart-gateway-webui`，不能只提示重启其中一个进程。
 - 中文提示、选项标签和终端输出留在 CLI 适配器；领域接口不要求调用方解析文案。
 - 涉及二维码、OAuth、等待消息和自更新的长流程使用可取消的任务或会话，不伪装成普通 CRUD。
 - 管理认证、来源校验、并发修订和审计先由独立共享层确定；真正接入可视化写操作时必须完整组合这些

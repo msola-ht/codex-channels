@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 
 import { loadRuntimeConfig } from "../dist/config/index.js";
@@ -112,6 +112,9 @@ export function writeServiceDefinitions(
 async function executePlan(plan, environment, options) {
   assertFreshPlan(plan, environment, options);
   const completedStages = [];
+  const definitionSnapshot = captureDefinitionSnapshot(plan);
+  let writeStarted = false;
+  let activationStarted = false;
   const executeStage = async (stage, operation) => {
     emitProgress(options, plan, stage, "started", completedStages);
     try {
@@ -128,21 +131,65 @@ async function executePlan(plan, environment, options) {
     (options.validateConfig ?? loadRuntimeConfig)(environment));
   await executeStage("preflight", () =>
     (options.preflight ?? defaultPreflight)(plan, environment, options));
-  await executeStage("write-definitions", () => writeDefinitions(plan, options));
-  await executeStage("activate-core", () =>
-    (options.activateCore ?? defaultActivateCore)(plan, environment, options));
-  await executeStage("verify-core", () =>
-    (options.waitForCore ?? defaultWaitForCore)(
-      "all",
-      environment,
-      options.readinessOptions,
-    ));
+  try {
+    writeStarted = true;
+    await executeStage("write-definitions", () => writeDefinitions(plan, options));
+    activationStarted = true;
+    await executeStage("activate-core", () =>
+      (options.activateCore ?? defaultActivateCore)(plan, environment, options));
+    await executeStage("verify-core", () =>
+      (options.waitForCore ?? defaultWaitForCore)(
+        "all",
+        environment,
+        options.readinessOptions,
+      ));
+  } catch (error) {
+    if (writeStarted) {
+      try {
+        restoreDefinitionSnapshot(definitionSnapshot, options);
+        if (activationStarted) {
+          await (options.rollbackCore ?? defaultActivateCore)(plan, environment, options);
+        }
+      } catch (restoreError) {
+        throw new ServiceInstallManagementError(
+          "rollback-failed",
+          "write-definitions",
+          "服务安装失败，且旧服务定义恢复失败",
+          { completedStages, recovery: "manual-restore", cause: restoreError },
+          { cause: error },
+        );
+      }
+    }
+    throw error;
+  }
 
   return {
     action: "installed",
     ...publicPlan(plan),
     completedStages,
   };
+}
+
+function captureDefinitionSnapshot(plan) {
+  const paths = plan.files.flatMap((file) => [
+    file.destination,
+    ...(plan.serviceManager === "windows"
+      ? [JSON.parse(file.content).vbsLauncherPath]
+      : []),
+  ]);
+  return paths.map((path) => ({
+    path,
+    exists: existsSync(path),
+    content: existsSync(path) ? readFileSync(path) : null,
+  }));
+}
+
+function restoreDefinitionSnapshot(snapshot, options) {
+  const writer = options.writeDefinition ?? writePrivateFileAtomicSync;
+  for (const entry of snapshot) {
+    if (entry.exists) writer(entry.path, entry.content);
+    else if (existsSync(entry.path)) rmSync(entry.path);
+  }
 }
 
 function buildServiceInstallPlan(environment, options) {

@@ -7,7 +7,7 @@ import {
   type ExchangeRateSnapshot,
   type ModelSelectionState,
 } from "../../application/index.js";
-import type { OutputEvent } from "../../conversation-core/index.js";
+import type { OutputEvent, RemoteQuotaSummary } from "../../conversation-core/index.js";
 import {
   formatSurfaceConfigurationChange,
   formatWorkspacesAdded as formatSharedWorkspacesAdded,
@@ -122,9 +122,10 @@ export function formatStartupNotification(
   workspaces: Workspace[],
   status: Pick<ConversationStatus, "threadId" | "threadName" | "workspaceId" | "model" | "modelProvider" | "effort" | "serviceTier" | "modelPending" | "effortPending" | "fastModePending" | "collaborationMode" | "collaborationModePending" | "weeklyLimit" | "gitBranch">,
   runtime: StartupRuntimeInfo,
+  remoteQuota?: RemoteQuotaSummary,
 ): string {
   return renderTelegramLifecyclePresentation(
-    createStartupPresentation(workspaces, status, runtime),
+    createStartupPresentation(workspaces, status, runtime, remoteQuota),
   );
 }
 

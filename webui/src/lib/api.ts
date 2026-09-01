@@ -167,11 +167,18 @@ export function fetchRequests(
 export function fetchErrors(
   range: RangeName,
   currency: DisplayCurrency | null,
+  offset: number,
+  limit: number,
   signal?: AbortSignal,
 ): Promise<ErrorsResponse> {
-  const currencyQuery = currency === null ? "" : `&currency=${currency}`
+  const params = new URLSearchParams({
+    range,
+    offset: String(offset),
+    limit: String(limit),
+  })
+  if (currency !== null) params.set("currency", currency)
   return getJson<ErrorsResponse>(
-    `${API_PREFIX}/errors?range=${range}${currencyQuery}`,
+    `${API_PREFIX}/errors?${params.toString()}`,
     signal,
   )
 }

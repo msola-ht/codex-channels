@@ -119,7 +119,7 @@ const helpText = {
 
 初始化与配置：
   init                         初始化用户目录和配置
-  setup                        配置 Codex 用户设置、提供商、通讯渠道与项目技能（交互菜单）
+  setup [--json]               配置 Codex 新会话默认值、提供商、通讯渠道与项目技能（交互菜单）
   config                       打开日常设置菜单（交互菜单）
   doctor                       诊断安装、配置和服务
   security                     修复本机私有路径权限
@@ -152,12 +152,14 @@ const helpText = {
   init: `用法：codexc init
 
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
-  setup: `用法：codexc setup
+  setup: `用法：codexc setup [--json]
 
-打开脱敏配置总览，以及 Codex 用户设置、模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
+打开脱敏配置总览，以及 Codex 新会话默认值、模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
+
+默认模式输出中文交互文本；--json 保留交互输入，将提示和进度写入 stderr，并将每次完成的设置以 JSON Lines 写入 stdout。
 
 常用入口：
-  codexc setup → Codex 用户设置 → 一键配置全部 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络
+  codexc setup → Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
   codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
@@ -195,7 +197,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 
 打开日常 Gateway 配置菜单：脱敏配置总览、显示设置、系统设置、自动化（计划任务与
 Thread 分区管理员）、网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
-指标设置、Telegram 消息格式与配置路径查看。
+数据中心、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
   doctor: `用法：codexc doctor [--json]
 
@@ -280,7 +282,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史
   codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
-  codexc metrics prune <provider>   备份并清理指定提供商请求指标（自动重启 Gateway 与中心）`,
+  codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
   channel: `用法：codexc channel <send-image>
 
 渠道图片能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地 PNG/JPEG 图片。`,
@@ -308,7 +310,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 参数优先级：命令行 > config.toml 的 [metrics.center] 段 > 默认值。
 --host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
 --port 指定监听端口，范围 1-65535，默认 8790；
-查看令牌和设备上报令牌请使用 codexc config 的指标中心设置；绑定非回环地址（0.0.0.0）时两者必须提供且不同；
+查看令牌和设备上报令牌请使用 codexc config 的数据中心设置；绑定非回环地址（0.0.0.0）时两者必须提供且不同；
 --database 指定中心 SQLite 路径，默认 <配置目录>/data/central-metrics.sqlite3。
 上报接口：POST /api/ingest（Bearer 上报令牌）；查询接口使用 Bearer 查看令牌：/api/overview、/api/requests、
 /api/subagents、/api/devices、/api/health。`,
@@ -402,8 +404,10 @@ try {
       if (showRequestedHelp(args, "setup")) {
         break;
       }
-      requireNoArguments(args, "用法：codexc setup");
-      runSetup();
+      if (!(args.length === 0 || (args.length === 1 && args[0] === "--json"))) {
+        throw new Error("用法：codexc setup [--json]");
+      }
+      runSetup(args);
       break;
     case "start":
       if (showRequestedHelp(args, "start")) {
@@ -1238,6 +1242,14 @@ async function service(args) {
   if (readinessTarget) {
     await waitForManagedServiceReadiness(readinessTarget);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));
+  } else if (action === "start" || action === "restart") {
+    const httpTarget = serviceArgs[0] === "webui" || serviceArgs[0] === "center"
+      ? serviceArgs[0]
+      : undefined;
+    if (httpTarget !== undefined) {
+      await waitForHttpServiceReadiness(httpTarget, controlEnvironment);
+      printCliMessage("success", `${httpTarget === "webui" ? "WebUI" : "指标中心"} 已就绪。`);
+    }
   }
 }
 
@@ -1265,6 +1277,47 @@ async function waitForManagedServiceReadiness(
 ) {
   const { waitForCoreServiceTarget } = await import("../scripts/local-update.mjs");
   await waitForCoreServiceTarget(target, environment, options);
+}
+
+async function waitForHttpServiceReadiness(target, environment) {
+  const configPath = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  if (!configPath) throw new Error("缺少 Gateway 配置路径，无法确认服务就绪");
+  const document = readGatewayConfig(configPath);
+  const section = target === "webui"
+    ? document.webui
+    : document.metrics?.center;
+  if (target === "webui" ? section === undefined : section?.enabled !== true) return;
+  const host = section?.host === "0.0.0.0" ? "127.0.0.1" : section?.host;
+  const port = section?.port;
+  if (typeof host !== "string" || !Number.isInteger(port)) {
+    throw new Error(`${target === "webui" ? "WebUI" : "指标中心"} 配置无效，无法确认服务就绪`);
+  }
+  const healthPath = target === "webui" ? "/api/v1/health" : "/api/health";
+  const url = `http://${host.includes(":") ? `[${host}]` : host}:${port}${healthPath}`;
+  const deadline = Date.now() + 5_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 750);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        ...(target === "webui" && typeof section?.token === "string"
+          ? { headers: { authorization: `Bearer ${section.token}` } }
+          : {}),
+      });
+      if (response.ok) return;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    } finally {
+      clearTimeout(timeout);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error(
+    `${target === "webui" ? "WebUI" : "指标中心"} 启动后未就绪：${lastError instanceof Error ? lastError.message : "健康检查超时"}`,
+  );
 }
 
 function coreServiceReadyMessage(target) {
@@ -1452,9 +1505,9 @@ function opencodeGoAccount(args) {
   });
 }
 
-function runSetup() {
+function runSetup(args = []) {
   initializeUserData({ cwd: process.cwd() });
-  runScript("scripts/setup.mjs", [], { failureReportedByChild: true });
+  runScript("scripts/setup.mjs", args, { failureReportedByChild: true });
 }
 
 function runScript(relativePath, args, {

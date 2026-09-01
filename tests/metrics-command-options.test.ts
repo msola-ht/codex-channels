@@ -12,6 +12,7 @@ import {
   parseMetricsRunArgs,
   parseMetricsThreadsArgs,
   parseMetricsTurnsArgs,
+  isMetricsProviderId,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { primaryProviderBackupPath } from "../runtime/model-provider-runtime.mjs";
@@ -82,6 +83,15 @@ describe("metrics command options", () => {
       .toThrow("--format 只支持 markdown、json、csv");
   });
 
+  it("allows legacy Provider IDs for prune but rejects unsafe names", () => {
+    expect(() => validateMetricsCommandArgs("prune", ["OpenAI"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("prune", ["opencode-go-main"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("prune", ["provider with spaces"]))
+      .toThrow("codexc metrics prune <provider>");
+    expect(() => validateMetricsCommandArgs("prune", ["OpenAI/legacy"]))
+      .toThrow("codexc metrics prune <provider>");
+  });
+
   it("accepts a configured custom primary Provider for prune", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-metrics-prune-custom-"));
     temporaryDirectories.push(codexHome);
@@ -96,10 +106,7 @@ describe("metrics command options", () => {
     ].join("\n"), { mode: 0o600 });
     const environment = { ...process.env, CODEX_HOME: codexHome };
 
-    expect(() => validateMetricsCommandArgs("prune", ["OpenAI"], environment))
-      .not.toThrow();
-    expect(() => validateMetricsCommandArgs("prune", ["unknown"], environment))
-      .toThrow("codexc metrics prune <provider>");
+    expect(isMetricsProviderId("OpenAI", environment)).toBe(true);
   });
 
   it("accepts a backed-up custom primary Provider for prune", () => {
@@ -117,16 +124,13 @@ describe("metrics command options", () => {
     if (process.platform === "win32") securePrivateFileSync(backupPath);
     const environment = { ...process.env, CODEX_CONNECT_HOME: connectHome };
 
-    expect(() => validateMetricsCommandArgs("prune", ["OpenAI"], environment))
-      .not.toThrow();
-    expect(() => validateMetricsCommandArgs("prune", ["unknown"], environment))
-      .toThrow("codexc metrics prune <provider>");
+    expect(isMetricsProviderId("OpenAI", environment)).toBe(true);
   });
 
-  it("rejects Provider IDs outside the canonical OpenCode Go account namespace", () => {
+  it("accepts historical names outside the canonical OpenCode Go namespace", () => {
     expect(() => validateMetricsCommandArgs("prune", ["opencode-go-deepseek"]))
-      .toThrow("codexc metrics prune <provider>");
+      .not.toThrow();
     expect(() => validateMetricsCommandArgs("prune", ["opencode-go-opencode-go"]))
-      .toThrow("codexc metrics prune <provider>");
+      .not.toThrow();
   });
 });

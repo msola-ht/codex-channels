@@ -407,6 +407,8 @@ export interface ModelRequestMetricsPageQuery {
   sortKey?: ModelRequestMetricsSortKey;
   sortDirection?: "asc" | "desc";
   filter?: string;
+  /** 只返回未成功完成的请求，用于错误明细页。 */
+  onlyFailures?: boolean;
 }
 
 export type ModelRequestMetricsSortKey =

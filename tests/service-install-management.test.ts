@@ -164,6 +164,27 @@ describe("service install management", () => {
       && error.recovery === "retry-install");
   });
 
+  it("restores the service runtime after activation fails", async () => {
+    const fixture = createFixture();
+    const rollbackCore = vi.fn();
+    const prepared = prepareServiceInstall(fixture.environment, {
+      operatingSystem: "linux",
+      validateConfig: () => undefined,
+      preflight: () => undefined,
+      writeDefinition: () => undefined,
+      activateCore: () => {
+        throw new Error("activation failed");
+      },
+      rollbackCore,
+    });
+
+    await expect(prepared.execute()).rejects.toSatisfy((error: unknown) =>
+      error instanceof ServiceInstallManagementError
+      && error.code === "install-stage-failed"
+      && error.stage === "activate-core");
+    expect(rollbackCore).toHaveBeenCalledOnce();
+  });
+
   it("uses the same contract for launchd and Windows Scheduled Tasks", () => {
     const fixture = createFixture();
     const written: Array<{ path: string; content: string }> = [];
@@ -238,6 +259,7 @@ function createFixture() {
   const environment = {
     ...process.env,
     HOME: root,
+    USERPROFILE: root,
     XDG_CONFIG_HOME: join(root, ".config"),
     CODEX_CONNECT_HOME: home,
     CODEX_CONNECT_CONFIG_FILE: "",

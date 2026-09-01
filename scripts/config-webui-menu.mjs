@@ -2,6 +2,7 @@ import {
   loadGatewaySettings,
   updateGatewaySetting,
 } from "./config-management.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 
 export async function runWebuiSettings({ environment, output, prompts, writeConfig }) {
   while (true) {
@@ -100,7 +101,11 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
       writeConfig,
     });
     output.write(`WebUI 设置已更新：${result.configPath}\n`);
-    output.write("配置将在重启 codexc webui 后生效；CLI 参数优先于本配置。\n");
-    return { webui: result.value, configPath: result.configPath };
+    writeGatewayConfigActivationNotice(
+      output,
+      environment,
+      result.activationResult,
+    );
+    return { webui: result.value, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
   }
 }

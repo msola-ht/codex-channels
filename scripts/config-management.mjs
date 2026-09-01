@@ -9,6 +9,7 @@ import {
 import { resolveHttpProxyUrl } from "../runtime/network-proxy.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import {
   applyMetricsSetting,
   projectMetricsSettings,
@@ -32,6 +33,18 @@ const loggingLevelValues = ["fatal", "error", "warn", "info", "debug", "trace"];
 const proxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
 
 export { ConfigManagementError } from "./config-management-error.mjs";
+
+/**
+ * Map legacy activation scopes to the stable lifecycle vocabulary exposed to
+ * automation. Existing callers may continue to use `activation` unchanged.
+ */
+export function normalizeGatewayActivation(activation) {
+  if (activation === "none") return "none";
+  if (activation === "reinstall-services") return "reinstall-required";
+  if (typeof activation === "string" && activation.startsWith("restart-")) return "restart";
+  if (activation === "reload") return "reload";
+  return "failed";
+}
 
 export function loadGatewaySettings(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
@@ -105,7 +118,19 @@ export function updateGatewaySetting(
     throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
   }
   const document = snapshot.document;
+  const originalDocument = structuredClone(document);
   const result = applySetting(document, input);
+  if (JSON.stringify(document) === JSON.stringify(originalDocument)) {
+    return {
+      kind: input.kind,
+      configPath,
+      previousRevision: snapshot.revision,
+      value: result.value,
+      activation: "none",
+      activationResult: configActivationResult("none"),
+      ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
+    };
+  }
   if (readConfig(configPath, "utf8") !== snapshot.content) {
     throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
   }
@@ -139,6 +164,8 @@ export function updateGatewaySetting(
     previousRevision: snapshot.revision,
     value: result.value,
     activation: result.activation,
+    activationResult: configActivationResult(result.activation),
+    ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
     ...(backupPath === null ? {} : { backupPath }),
   };
 }

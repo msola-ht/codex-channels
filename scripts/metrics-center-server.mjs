@@ -21,6 +21,7 @@ import {
   securePrivateFileSync,
 } from "../runtime/private-file.mjs";
 import { runCenterSettings } from "./metrics-config-menu.mjs";
+import { restartMetricsCenter } from "./config.mjs";
 import { parseIngestPayload } from "./metrics-center-payload.mjs";
 import {
   assertMetricsCenterHost,
@@ -591,48 +592,96 @@ function handleQuota(url, database, response) {
       periods.set(key, period);
     }
   }
+  const publicPeriods = [...periods.values()].map((period) => {
+    const samples = period.quotaSamples.sort((a, b) => a.observedAtMs - b.observedAtMs);
+    let observedDeltaPercentMillionths = 0;
+    for (let index = 1; index < samples.length; index += 1) {
+      const delta = samples[index].usedPercentMillionths - samples[index - 1].usedPercentMillionths;
+      if (delta > 0) observedDeltaPercentMillionths += delta;
+    }
+    const tokensPerPercent = observedDeltaPercentMillionths > 0
+      ? period.totalTokens * 1_000_000 / observedDeltaPercentMillionths
+      : null;
+    const costPerPercentNanos = observedDeltaPercentMillionths > 0
+      ? period.totalCostNanos * 1_000_000 / observedDeltaPercentMillionths
+      : null;
+    const publicPeriod = {
+      provider: period.provider,
+      windowId: period.windowId,
+      resetsAt: period.resetsAt,
+      periodStartAtMs: quotaPeriodStartAtMs(period.windowId, period.resetsAt),
+      periodEndAtMs: period.resetsAt * 1_000,
+      firstObservedAtMs: period.firstObservedAtMs,
+      lastObservedAtMs: period.lastObservedAtMs,
+      requestCount: period.requestCount,
+      unsuccessfulRequestCount: period.unsuccessfulRequestCount,
+      inputTokens: period.inputTokens,
+      outputTokens: period.outputTokens,
+      totalTokens: period.totalTokens,
+      totalCostNanos: period.totalCostNanos,
+      pricedRequestCount: period.pricedRequestCount,
+      latestUsedPercentMillionths: period.latestUsedPercentMillionths,
+    };
+    return {
+      ...publicPeriod,
+      deviceCount: period.deviceIds.size,
+      observedDeltaPercentMillionths,
+      tokensPerPercent,
+      costPerPercentNanos: period.pricedRequestCount === 0 ? null : costPerPercentNanos,
+      estimatedTotalTokens: tokensPerPercent === null ? null : tokensPerPercent * 100,
+      estimatedTotalCostNanos: costPerPercentNanos === null ? null : costPerPercentNanos * 100,
+    };
+  });
+  applyObservedQuotaResetBoundaries(publicPeriods);
   sendJson(response, 200, {
     days,
     generatedAt: new Date().toISOString(),
-    periods: [...periods.values()].map((period) => {
-      const samples = period.quotaSamples.sort((a, b) => a.observedAtMs - b.observedAtMs);
-      let observedDeltaPercentMillionths = 0;
-      for (let index = 1; index < samples.length; index += 1) {
-        const delta = samples[index].usedPercentMillionths - samples[index - 1].usedPercentMillionths;
-        if (delta > 0) observedDeltaPercentMillionths += delta;
-      }
-      const tokensPerPercent = observedDeltaPercentMillionths > 0
-        ? period.totalTokens * 1_000_000 / observedDeltaPercentMillionths
-        : null;
-      const costPerPercentNanos = observedDeltaPercentMillionths > 0
-        ? period.totalCostNanos * 1_000_000 / observedDeltaPercentMillionths
-        : null;
-      const publicPeriod = {
-        provider: period.provider,
-        windowId: period.windowId,
-        resetsAt: period.resetsAt,
-        firstObservedAtMs: period.firstObservedAtMs,
-        lastObservedAtMs: period.lastObservedAtMs,
-        requestCount: period.requestCount,
-        unsuccessfulRequestCount: period.unsuccessfulRequestCount,
-        inputTokens: period.inputTokens,
-        outputTokens: period.outputTokens,
-        totalTokens: period.totalTokens,
-        totalCostNanos: period.totalCostNanos,
-        pricedRequestCount: period.pricedRequestCount,
-        latestUsedPercentMillionths: period.latestUsedPercentMillionths,
-      };
-      return {
-        ...publicPeriod,
-        deviceCount: period.deviceIds.size,
-        observedDeltaPercentMillionths,
-        tokensPerPercent,
-        costPerPercentNanos: period.pricedRequestCount === 0 ? null : costPerPercentNanos,
-        estimatedTotalTokens: tokensPerPercent === null ? null : tokensPerPercent * 100,
-        estimatedTotalCostNanos: costPerPercentNanos === null ? null : costPerPercentNanos * 100,
-      };
-    }),
+    periods: publicPeriods,
   });
+}
+
+function applyObservedQuotaResetBoundaries(periods) {
+  const groups = new Map();
+  for (const period of periods) {
+    if (period.periodStartAtMs === null) continue;
+    const key = `${period.provider}\u0000${period.windowId}`;
+    const group = groups.get(key) ?? [];
+    group.push(period);
+    groups.set(key, group);
+  }
+  for (const group of groups.values()) {
+    group.sort((left, right) => left.periodStartAtMs - right.periodStartAtMs);
+    for (let index = 0; index < group.length - 1; index += 1) {
+      const period = group[index];
+      const nextPeriod = group[index + 1];
+      const nominalDurationMs = period.periodEndAtMs - period.periodStartAtMs;
+      const resetOffsetMs = Math.abs(nextPeriod.periodStartAtMs - period.periodEndAtMs);
+      if (nextPeriod.periodStartAtMs > period.periodStartAtMs
+        && resetOffsetMs < nominalDurationMs) {
+        period.periodEndAtMs = nextPeriod.periodStartAtMs;
+      }
+    }
+  }
+}
+
+function quotaPeriodStartAtMs(windowId, resetsAt) {
+  const endAtMs = resetsAt * 1_000;
+  if (windowId === "codex" || windowId === "weekly") return endAtMs - 7 * 24 * 60 * 60 * 1_000;
+  if (windowId === "rolling") return endAtMs - 5 * 60 * 60 * 1_000;
+  if (windowId !== "monthly") return null;
+  const date = new Date(endAtMs);
+  const previousMonth = date.getUTCMonth() - 1;
+  const year = date.getUTCFullYear();
+  const lastDay = new Date(Date.UTC(year, previousMonth + 1, 0)).getUTCDate();
+  return Date.UTC(
+    year,
+    previousMonth,
+    Math.min(date.getUTCDate(), lastDay),
+    date.getUTCHours(),
+    date.getUTCMinutes(),
+    date.getUTCSeconds(),
+    date.getUTCMilliseconds(),
+  );
 }
 
 const requestSortColumns = {
@@ -771,6 +820,7 @@ function main() {
         output: process.stdout,
         prompts: clackPrompts,
         writeConfig: writeGatewayConfig,
+        restartCenter: () => restartMetricsCenter(process.env),
       }).catch((error) => {
         writeCliMessage("failure", error instanceof Error ? error.message : String(error));
         process.exitCode = 1;

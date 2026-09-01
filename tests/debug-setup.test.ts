@@ -38,6 +38,23 @@ describe("Debug setup", () => {
       isCancel: () => false,
     };
 
+    const expectedActivation = enabled
+      ? {
+          activation: "restart-gateway",
+          activationResult: {
+            status: "restart",
+            target: "gateway",
+            commands: ["codexc service restart gateway"],
+          },
+        }
+      : {
+          activation: "none",
+          activationResult: {
+            status: "none",
+            target: "none",
+            commands: [],
+          },
+        };
     await expect(runDebugSetup({
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value) },
@@ -45,6 +62,7 @@ describe("Debug setup", () => {
     })).resolves.toEqual({
       enabled,
       configPath: fixture.configPath,
+      ...expectedActivation,
     });
 
     expect(readGatewayConfig(fixture.configPath).logging).toEqual({
@@ -54,7 +72,9 @@ describe("Debug setup", () => {
       `level = "${expectedLevel}"`,
     );
     expect(output.join("")).toContain(enabled ? "已开启" : "已关闭");
-    expect(output.join("")).toContain("需要重建 Gateway 连接");
+    expect(output.join("")).toContain(
+      enabled ? "需要重建 Gateway 连接" : "当前值未变化，配置文件未写入，无需重启服务",
+    );
   });
 
   it("returns without changing config when going back", async () => {

@@ -29,6 +29,8 @@ import {
   assertThirdPartyRoleAvailable,
   configureThirdPartyRole,
 } from "./agents.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import {
   ManagedModelProviderSetupError,
@@ -294,7 +296,7 @@ export async function runDeepseekSetup({
       }
       await applyDeepseekRestore({ confirmRestore: true }, { environment });
       output.write("已恢复安装前的 Codex 配置；备份目录保留以便审计。\n");
-      output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+      writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
       return deepseekRestoreResult(paths);
     }
     const mode = choice === "1" ? "switching" : "exclusive";
@@ -335,7 +337,7 @@ export async function runDeepseekSetup({
     output.write(mode === "switching"
       ? `原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile ${deepseekProviderDefinition.profileName}\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile ${deepseekProviderDefinition.profileName}\n`
       : `原生 Codex 和 Gateway 将默认使用 ${supportedModel}。\n`);
-    output.write("请重启 Gateway 与 App Server：codexc service restart all\n");
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
     return deepseekSetupResult(paths, mode);
   } catch (error) {
     if (allowBack && error instanceof DeepseekSetupCancelled) {
@@ -1134,6 +1136,8 @@ function deepseekSetupResult(paths, mode) {
     gatewayProfilePath: paths.gatewayProfilePath,
     catalogPath: paths.catalogPath,
     backupPath: paths.backupPath,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
   };
 }
 

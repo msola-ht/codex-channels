@@ -90,6 +90,12 @@ describe("Weixin setup", () => {
       accountId: "bot-fixture@im.bot",
       allowedUserIds: ["actor-fixture@im.wechat"],
       configPath: fixture.configPath,
+      activation: "restart-gateway",
+      activationResult: {
+        status: "restart",
+        target: "gateway",
+        commands: ["codexc service restart gateway"],
+      },
     });
     expect(store.set).toHaveBeenCalledWith({
       version: 1,

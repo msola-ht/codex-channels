@@ -370,6 +370,8 @@ describe("metrics center server", () => {
     expect(body.periods[0]).toMatchObject({
       provider: "deepseek",
       windowId: "codex",
+      periodStartAtMs: resetAt * 1_000 - 7 * 24 * 60 * 60 * 1_000,
+      periodEndAtMs: resetAt * 1_000,
       deviceCount: 2,
       requestCount: 2,
       totalTokens: 2_200,
@@ -379,6 +381,57 @@ describe("metrics center server", () => {
     });
     const all = await fetchJson<{ days: number | "all" }>(`${origin}/api/quota?days=all`);
     expect(all.days).toBe("all");
+  });
+
+  it("uses the next observed cycle start as an early reset boundary", async () => {
+    const { origin } = await startServer();
+    const scheduledResetAt = 1_800_000_000;
+    const earlyResetAt = scheduledResetAt - 24 * 60 * 60;
+    const nextResetAt = earlyResetAt + 7 * 24 * 60 * 60;
+    await ingest(origin, payloadBody([{
+      ...requestRow(1),
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 40_000_000,
+        resetsAt: scheduledResetAt,
+      },
+    }, {
+      ...requestRow(2),
+      recordedAtMs: earlyResetAt * 1_000 + 60_000,
+      weeklyQuota: {
+        limitId: "codex",
+        usedPercentMillionths: 0,
+        resetsAt: nextResetAt,
+      },
+    }], []));
+
+    const body = await fetchJson<{
+      periods: Array<{
+        resetsAt: number;
+        periodStartAtMs: number | null;
+        periodEndAtMs: number;
+        firstObservedAtMs: number;
+        lastObservedAtMs: number;
+        totalTokens: number;
+      }>;
+    }>(`${origin}/api/quota?days=all`);
+    const periods = [...body.periods].sort((left, right) => left.resetsAt - right.resetsAt);
+    expect(periods).toHaveLength(2);
+    expect(periods[0]).toMatchObject({
+      periodStartAtMs: scheduledResetAt * 1_000 - 7 * 24 * 60 * 60 * 1_000,
+      periodEndAtMs: earlyResetAt * 1_000,
+      totalTokens: 1_100,
+    });
+    expect(periods[0]!.periodEndAtMs - periods[0]!.periodStartAtMs!).toBe(
+      6 * 24 * 60 * 60 * 1_000,
+    );
+    expect(periods[1]).toMatchObject({
+      periodStartAtMs: earlyResetAt * 1_000,
+      periodEndAtMs: nextResetAt * 1_000,
+      firstObservedAtMs: earlyResetAt * 1_000 + 60_000,
+      lastObservedAtMs: earlyResetAt * 1_000 + 60_000,
+      totalTokens: 1_100,
+    });
   });
 
   it("rejects invalid payloads and exposes public health", async () => {

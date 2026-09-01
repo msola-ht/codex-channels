@@ -906,6 +906,27 @@ describe("Gateway config.toml", () => {
     })).toThrow(/必须不同/u);
   });
 
+  it("accepts identical local metrics ingest and view tokens", () => {
+    const fixture = createFixture({
+      metrics: {
+        sync: {
+          enabled: true,
+          endpoint: "http://127.0.0.1:8790/api/ingest",
+          device_token: "shared-token",
+        },
+        view: {
+          enabled: true,
+          endpoint: "http://127.0.0.1:8790",
+          token: "shared-token",
+        },
+      },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    })).toBeDefined();
+  });
+
   it("loads an explicitly enabled Feishu account", () => {
     const fixture = createFixture({
       feishu: {

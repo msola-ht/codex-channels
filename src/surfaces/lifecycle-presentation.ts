@@ -7,6 +7,7 @@ import {
 } from "../application/index.js";
 import type {
   OutputEvent,
+  RemoteQuotaSummary,
   ThreadGoal,
   TurnStartIdentity,
 } from "../conversation-core/index.js";
@@ -107,6 +108,7 @@ export function createStartupPresentation(
   workspaces: ReadonlyArray<{ id: string; name: string; cwd: string }>,
   status: StartupStatus,
   runtime: StartupRuntimeInfo,
+  remoteQuota?: RemoteQuotaSummary,
 ): LifecyclePresentation {
   const workspace = workspaces.find(({ id }) => id === status.workspaceId);
   if (!workspace) {
@@ -187,13 +189,18 @@ export function createStartupPresentation(
           },
         ],
       },
-      ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
+      ...((remoteQuota !== undefined || usesOpenAiAccount(status.modelProvider)) && (status.weeklyLimit || remoteQuota)
         ? [{
-            title: "账户状态",
-            fields: [{
-              label: "周限",
-              value: formatWeeklyLimit(status.weeklyLimit),
-            }],
+            title: remoteQuota ? "账户状态（额度中心）" : "账户状态",
+            fields: remoteQuota
+              ? [
+                  { label: "设备与请求", value: `${remoteQuota.deviceCount} 台设备 · ${remoteQuota.requestCount} 次请求` },
+                  { label: "已使用 Token", value: formatTokenCount(remoteQuota.totalTokens) },
+                  ...(remoteQuota.resetsAt === null ? [] : [{ label: "重置时间", value: formatResetTime(remoteQuota.resetsAt) }]),
+                  ...(remoteQuota.latestUsedPercentMillionths === null ? [] : [{ label: "最新使用率", value: `${(remoteQuota.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%` }]),
+                  ...(remoteQuota.estimatedTotalTokens === null ? [] : [{ label: "推算容量", value: formatTokenCount(remoteQuota.estimatedTotalTokens) }]),
+                ]
+              : [{ label: "周限", value: formatWeeklyLimit(status.weeklyLimit!) }],
           }]
         : []),
     ],

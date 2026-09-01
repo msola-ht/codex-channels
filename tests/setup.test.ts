@@ -1,3 +1,6 @@
+import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+
 import { describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
@@ -46,8 +49,8 @@ describe("Codex Connect setup", () => {
         hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
       }, {
         value: "codex_user",
-        label: "Codex 用户设置",
-        hint: "默认模型、思考等级、Fast、沙盒、审批与网络",
+        label: "Codex 新会话默认值",
+        hint: "OpenAI 官方默认模型、思考等级、Fast、权限与用户偏好",
       }, {
         value: "models",
         label: "模型与提供商",
@@ -111,6 +114,74 @@ describe("Codex Connect setup", () => {
 
     expect(setupSummary).toHaveBeenCalledWith({ output });
     expect(select).toHaveBeenCalledTimes(2);
+  });
+
+  it("emits enriched JSON-mode results before returning to the menu", async () => {
+    const events: unknown[] = [];
+    const select = vi.fn()
+      .mockResolvedValueOnce("channels")
+      .mockResolvedValueOnce("telegram")
+      .mockResolvedValueOnce("cancel");
+
+    await expect(runSetup({
+      output: {},
+      prompts: {
+        intro: vi.fn(),
+        select,
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+      telegramSetup: vi.fn(async () => ({
+        action: "configured",
+        message: "api_key=secret",
+        generatedTokens: { deviceToken: "secret" },
+      })),
+      feishuSetup: vi.fn(),
+      weixinSetup: vi.fn(),
+      stayOnMenu: true,
+      onResult: (event: unknown) => events.push(event),
+    })).resolves.toBeUndefined();
+
+    expect(events).toEqual([
+      {
+        event: "result",
+        category: "channels",
+        result: {
+          action: "configured",
+          message: "api_key=[REDACTED]",
+          generatedTokens: { generated: true },
+          activation: "restart-gateway",
+          activationResult: {
+            status: "restart",
+            target: "gateway",
+            commands: ["codexc service restart gateway"],
+          },
+        },
+      },
+      { event: "cancelled" },
+    ]);
+  });
+
+  it("keeps JSON-mode stdout parseable when the interactive process is cancelled", () => {
+    const child = spawnSync(
+      process.execPath,
+      [resolve("scripts/setup.mjs"), "--json"],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, NO_COLOR: "1" },
+        input: "\u001b",
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(0);
+    expect(child.stdout.trim().split("\n").map((line) => JSON.parse(line))).toEqual([
+      { event: "cancelled" },
+    ]);
+    expect(child.stderr).toContain("选择设置类别");
+    expect(child.stdout).not.toContain("选择设置类别");
   });
 
   it("selects Feishu under the communication channels category", async () => {
@@ -189,6 +260,34 @@ describe("Codex Connect setup", () => {
 
     expect(result).toBe("deepseek-configured");
     expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts, allowBack: true });
+  });
+
+  it("adds a stable activation result when a legacy provider setup omits it", async () => {
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("models")
+        .mockResolvedValueOnce("official")
+        .mockResolvedValueOnce("official_login"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const result = await runSetup({
+      input: {},
+      output: {},
+      prompts,
+      officialLoginSetup: vi.fn(async () => ({ mode: "official" })),
+    });
+
+    expect(result).toMatchObject({
+      mode: "official",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
   });
 
   it("selects unified Codex user settings from the main category", async () => {

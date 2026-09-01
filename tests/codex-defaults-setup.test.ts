@@ -27,7 +27,16 @@ describe("Codex official defaults setup", () => {
       environment: { CODEX_HOME: "/tmp/codex-home" },
       loadSettings,
       updateSetting,
-    })).resolves.toEqual({ model: "gpt-test", effort: "high" });
+    })).resolves.toMatchObject({
+      model: "gpt-test",
+      effort: "high",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
 
     expect(updateSetting).toHaveBeenCalledWith({
       kind: "defaults",

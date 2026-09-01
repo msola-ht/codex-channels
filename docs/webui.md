@@ -71,7 +71,7 @@ codexc service stop webui        # 停止
 | Threads | `#/threads` | `GET /api/v1/threads`（包含指标库首个请求开始时间） |
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
-| 错误 | `#/errors` | `GET /api/v1/errors?range=` |
+| 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 设置 | — | `GET /api/v1/settings`（当前全局币种与汇率） |
 | DS 余额 | — | `GET /api/v1/deepseek-balance`（DeepSeek 官方账户余额；未配置凭据或查询失败时返回不可用） |
 | OpenCode Go 用量 | — | `GET /api/v1/opencode-go-usage`（返回全部已配置账户，每账户含官方 5 小时/7 天/月度配额窗口、各窗口总额（5 小时 $12 / 7 天 $30 / 月度 $60）与本地 Token 用量，以及按当前价格基线重算的模型本地用量与包含额度；账户未配置凭据或查询失败时该账户标记不可用，未配置任何账户时返回空列表） |
@@ -85,8 +85,8 @@ WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开�
 还支持 `filter` 关键字（最多 128 字符），在 Provider、模型、操作、状态、错误类型、错误码与
 错误消息中全库匹配后再分页，响应 `total` 为筛选后的匹配总数。
 错误统计同时包含代理观测到的失败模型请求和未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限），
-后者显示为无 Token/费用的 failed 记录；失败记录保存受限长度的错误消息，请求明细悬浮和错误页
-“最近错误”列可查看详情。
+后者显示为无 Token/费用的 failed 记录；失败记录保存受限长度的错误消息。错误页以发生时间倒序分页
+展示每一条失败请求，响应同时保留错误汇总供概览页展示。
 所有费用接口支持 `currency=cny|usd`（缺省跟随 `config.toml` 的 `display.price_currency`），
 服务端按请求币种统一换算，OpenAI 与 DeepSeek 不再混合显示。
 全局费用支持人民币/美元切换（顶部导航右侧，作用于所有页面），Threads、Thread 详情、

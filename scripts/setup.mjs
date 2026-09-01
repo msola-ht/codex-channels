@@ -17,6 +17,7 @@ import { runCustomPrimaryProviderMenu } from "./primary-provider-cli.mjs";
 import { runOfficialLoginSetup } from "./official-login-setup.mjs";
 import { writeSetupConfigurationSummary } from "./setup-summary.mjs";
 import { runThirdPartyAgentSetup } from "./agents-setup.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 
 export async function runSetup({
   environment = process.env,
@@ -37,6 +38,8 @@ export async function runSetup({
   officialLoginSetup = runOfficialLoginSetup,
   setupSummary = writeSetupConfigurationSummary,
   agentsSetup = runThirdPartyAgentSetup,
+  stayOnMenu = false,
+  onResult,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -51,8 +54,8 @@ export async function runSetup({
         },
         {
           value: "codex_user",
-          label: "Codex 用户设置",
-          hint: "默认模型、思考等级、Fast、沙盒、审批与网络",
+          label: "Codex 新会话默认值",
+          hint: "OpenAI 官方默认模型、思考等级、Fast、权限与用户偏好",
         },
         {
           value: "models",
@@ -78,6 +81,7 @@ export async function runSetup({
     });
     if (prompts.isCancel(section) || section === "cancel") {
       prompts.cancel("Setup 已取消");
+      emitSetupResult(onResult, undefined, undefined, "cancelled");
       return undefined;
     }
     switch (section) {
@@ -94,7 +98,10 @@ export async function runSetup({
           weixinSetup,
         });
         if (isBackResult(result)) continue;
-        return result;
+        const enriched = enrichSetupResult(result, "restart-gateway");
+        emitSetupResult(onResult, "channels", enriched);
+        if (stayOnMenu) continue;
+        return enriched;
       }
       case "codex_user": {
         const result = await codexUserSettingsSetup({
@@ -104,7 +111,10 @@ export async function runSetup({
           defaultsSetup: codexDefaultsSetup,
         });
         if (isBackResult(result)) continue;
-        return result;
+        const enriched = enrichSetupResult(result, "restart-all");
+        emitSetupResult(onResult, "codex_user", enriched);
+        if (stayOnMenu) continue;
+        return enriched;
       }
       case "models": {
         const result = await runModelSetup({
@@ -120,7 +130,10 @@ export async function runSetup({
           agentsSetup,
         });
         if (isBackResult(result)) continue;
-        return result;
+        const enriched = enrichSetupResult(result);
+        emitSetupResult(onResult, "models", enriched);
+        if (stayOnMenu) continue;
+        return enriched;
       }
       case "skills": {
         const result = await skillSetup({
@@ -129,7 +142,10 @@ export async function runSetup({
           prompts,
         });
         if (isBackResult(result)) continue;
-        return result;
+        const enriched = enrichSetupResult(result);
+        emitSetupResult(onResult, "skills", enriched);
+        if (stayOnMenu) continue;
+        return enriched;
       }
       default:
         throw new Error(`未知 Setup 类别：${String(section)}`);
@@ -176,7 +192,7 @@ async function runModelSetup({
         officialLoginSetup,
       });
       if (isBackResult(result)) continue;
-      return result;
+      return enrichSetupResult(result, "restart-all");
     }
     if (category === "third_party") {
       const result = await runThirdPartyModelSetup({
@@ -191,7 +207,7 @@ async function runModelSetup({
         agentsSetup,
       });
       if (isBackResult(result)) continue;
-      return result;
+      return enrichSetupResult(result, "restart-all");
     }
     throw new Error(`未知模型与提供商设置：${String(category)}`);
   }
@@ -224,7 +240,7 @@ async function runOfficialModelSetup({
       throw new Error(`未知官方设置：${String(module)}`);
     }
     if (isBackResult(result)) continue;
-    return result;
+    return enrichSetupResult(result, "restart-all");
   }
 }
 
@@ -295,7 +311,7 @@ async function runThirdPartyModelSetup({
       throw new Error(`未知第三方设置：${String(module)}`);
     }
     if (isBackResult(result)) continue;
-    return result;
+    return enrichSetupResult(result, setupFallbackActivation(module, result));
   }
 }
 
@@ -352,13 +368,112 @@ function isBackResult(result) {
   return result?.action === "back";
 }
 
+function emitSetupResult(onResult, category, result, event = "result") {
+  if (typeof onResult !== "function") return;
+  onResult(sanitizeSetupEvent({
+    event,
+    ...(category === undefined ? {} : { category }),
+    ...(event === "result" ? { result: result === undefined ? null : result } : {}),
+  }));
+}
+
+function enrichSetupResult(value, fallbackActivation) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (value.activationResult !== undefined) {
+    return value;
+  }
+  const activation = typeof value.activation === "string"
+    ? value.activation
+    : fallbackActivation;
+  if (typeof activation !== "string") return value;
+  return {
+    ...value,
+    activation,
+    activationResult: configActivationResult(activation),
+  };
+}
+
+function setupFallbackActivation(module, result) {
+  if (module === "opencode-go" && ["listed", "not-running", "in-use"].includes(result?.action)) {
+    return undefined;
+  }
+  if (module === "opencode-go" && result?.action === "model-settings") {
+    return "restart-app-server";
+  }
+  return {
+    custom_primary: "restart-all",
+    deepseek: "restart-all",
+    "opencode-go": "restart-all",
+    provider_default: "restart-app-server",
+    agents: "restart-all",
+    api_provider: "restart-gateway",
+  }[module];
+}
+
 function isDirectExecution(moduleUrl, argvPath) {
   return Boolean(argvPath) && moduleUrl === pathToFileURL(argvPath).href;
 }
 
+function createPromptOutputAdapter(prompts, output) {
+  const adapter = { ...prompts };
+  for (const method of ["intro", "outro", "cancel", "select", "text", "password", "confirm"]) {
+    adapter[method] = (...args) => {
+      const first = args[0];
+      if (first && typeof first === "object" && !Array.isArray(first)) {
+        return prompts[method]({ ...first, output }, ...args.slice(1));
+      }
+      return prompts[method](...args, { output });
+    };
+  }
+  return adapter;
+}
+
+function sanitizeSetupEvent(value, key) {
+  if (key === "generatedTokens") return { generated: true };
+  if (key === "message" && typeof value === "string") return sanitizeSetupText(value);
+  if (Array.isArray(value)) return value.map((entry) => sanitizeSetupEvent(entry));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [
+        entryKey,
+        sanitizeSetupEvent(entryValue, entryKey),
+      ]),
+    );
+  }
+  return value;
+}
+
+function sanitizeSetupText(value) {
+  return value
+    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)[^\s'";]+/giu, "$1[REDACTED]")
+    .replace(/(\b(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|cookie)\s*[:=]\s*)[^\s'";]+/giu, "$1[REDACTED]")
+    .replace(/(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|COOKIE)[A-Z0-9_]*\s*=\s*)[^\s;]+/giu, "$1[REDACTED]")
+    .slice(0, 320);
+}
+
 if (isDirectExecution(import.meta.url, process.argv[1])) {
-  await runSetup().catch((error) => {
-    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+  const args = process.argv.slice(2);
+  const json = args.length === 1 && args[0] === "--json";
+  if (args.length > 0 && !json) {
+    writeCliMessage("failure", "用法：codexc setup [--json]");
     process.exitCode = 1;
-  });
+  } else {
+    const output = json ? process.stderr : process.stdout;
+    const prompts = json
+      ? createPromptOutputAdapter(clackPrompts, process.stderr)
+      : clackPrompts;
+    const onResult = json
+      ? (event) => process.stdout.write(`${JSON.stringify(event)}\n`)
+      : undefined;
+    await runSetup({ stayOnMenu: true, output, prompts, onResult }).catch((error) => {
+      if (json) {
+        process.stdout.write(`${JSON.stringify(sanitizeSetupEvent({
+          event: "error",
+          message: error instanceof Error ? error.message : String(error),
+        }))}\n`);
+      }
+      writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+  }
 }

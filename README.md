@@ -65,8 +65,11 @@ codexc init
 codexc setup
 ```
 
+需要由脚本读取每次设置结果时，可运行 `codexc setup --json`；交互提示写入 stderr，脱敏 JSON Lines
+结果写入 stdout。
+
 `codexc config` 提供脱敏配置总览，并可交互调整 Gateway 的显示、系统、自动化、网络、WebUI
-和指标设置；在脚本或管道中运行时会输出用户目录与配置文件路径。
+和数据中心；在脚本或管道中运行时会输出用户目录与配置文件路径。
 
 注册需要让 Codex 操作的项目：
 
@@ -94,7 +97,7 @@ Windows 使用当前用户的计划任务，在该用户登录后通过隐藏的
 
 ## Setup 配置
 
-运行 `codexc setup`，可先查看不显示凭据的配置总览，再按菜单配置 Codex 用户设置、模型与提供商、
+运行 `codexc setup`，可先查看不显示凭据的配置总览，再按菜单配置 Codex 新会话默认值、模型与提供商、
 共享第三方子代理、通讯渠道和项目技能（安装到 `~/.agents/skills` 供当前 Codex 环境加载）。
 Gateway 与通讯渠道配置保存在：
 
@@ -149,7 +152,7 @@ price_currency = "cny"
 状态卡显示，`price_currency` 统一选择人民币或美元。完整显示与统计口径见
 [`docs/display.md`](docs/display.md)。
 
-运行 `codexc config` 选择「指标设置 → 本机接入中心」，即可把多台设备的脱敏指标汇总到中心。
+运行 `codexc config` 选择「数据中心 → 本机接入数据中心」，即可把多台设备的脱敏指标汇总到中心。
 服务端配置、令牌边界和数据说明见 [`docs/metrics-sync.md`](docs/metrics-sync.md)。
 
 在 `codexc config` 中选择“系统设置 → 调试模式”，可开启脱敏的运行阶段、耗时和统计详情。
@@ -168,12 +171,12 @@ plugin_api = true
 刷新配置。完整命令、限制和渠道显示规则见 [`docs/display.md`](docs/display.md)，协议采用范围见
 [`docs/index.md`](docs/index.md)。
 
-### Codex 用户设置
+### Codex 新会话默认值
 
-在 `codexc setup` 中选择“Codex 用户设置”，可统一设置 OpenAI 默认模型与思考等级、Fast 默认状态，
+在 `codexc setup` 中选择“Codex 新会话默认值”，可统一设置 OpenAI 默认模型与思考等级、Fast 默认状态，
 以及默认沙盒、审批策略和 Workspace Sandbox 网络权限；用户级审批策略只提供 Codex CLI 0.150.1
-公开支持的 `on-request` 与 `never`。“一键配置全部”会在一次确认后原子写入
-全部字段。设置通过 App Server 的版本化事务写入
+公开支持的 `on-request` 与 `never`。“配置核心默认值”会在一次确认后原子写入模型、思考等级、Fast
+和权限默认值；其他偏好通过同一菜单下的独立设置项写入。设置通过 App Server 的版本化事务写入
 `~/.codex/config.toml`，不会修改 Codex 登录状态或第三方 Provider 配置；第三方固定模式的模型、
 思考等级和服务层级仍在对应 Provider 设置中管理。完成后运行 `codexc service restart all`，让新
 App Server 会话使用新的默认值。旧版本若已在根级或任意 `[profiles.<name>]` 写入

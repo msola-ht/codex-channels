@@ -185,9 +185,18 @@ case "$action" in
     target="${2:-all}"
     require_target "$target"
     labels=$(service_ids "$target" start)
+    failed_labels=()
     for label in ${(f)labels}; do
-      start_job "$label" "$agents_dir/$label.plist"
+      if ! start_job "$label" "$agents_dir/$label.plist"; then
+        failed_labels+=("$label")
+      fi
     done
+    if (( ${#failed_labels[@]} > 0 )) && [[ "$target" == "all" ]]; then
+      print_status failure "服务启动部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc service status。"
+      exit 1
+    elif (( ${#failed_labels[@]} > 0 )); then
+      exit 1
+    fi
     case "$target" in
       gateway) print_status note "Gateway 启动操作已完成，正在确认就绪状态。" ;;
       app-server) print_status note "Codex App Server 启动操作已完成，正在确认就绪状态。" ;;
@@ -200,7 +209,18 @@ case "$action" in
     target="${2:-all}"
     require_target "$target"
     labels=$(service_ids "$target" stop)
-    for label in ${(f)labels}; do stop_job "$label"; done
+    failed_labels=()
+    for label in ${(f)labels}; do
+      if ! stop_job "$label"; then
+        failed_labels+=("$label")
+      fi
+    done
+    if (( ${#failed_labels[@]} > 0 )) && [[ "$target" == "all" ]]; then
+      print_status failure "服务停止部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc service status。"
+      exit 1
+    elif (( ${#failed_labels[@]} > 0 )); then
+      exit 1
+    fi
     case "$target" in
       gateway) print_status success "Gateway 已停止。" ;;
       app-server) print_status success "Codex App Server 已停止。" ;;
@@ -225,9 +245,18 @@ case "$action" in
     target="${2:-gateway}"
     require_target "$target"
     labels=$(service_ids "$target" start)
+    failed_labels=()
     for label in ${(f)labels}; do
-      start_job "$label" "$agents_dir/$label.plist"
+      if ! start_job "$label" "$agents_dir/$label.plist"; then
+        failed_labels+=("$label")
+      fi
     done
+    if (( ${#failed_labels[@]} > 0 )) && [[ "$target" == "all" ]]; then
+      print_status failure "服务重启部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc service status。"
+      exit 1
+    elif (( ${#failed_labels[@]} > 0 )); then
+      exit 1
+    fi
     case "$target" in
       gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
       app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
@@ -246,9 +275,9 @@ case "$action" in
     if launchctl kill SIGHUP "$user_domain/$gateway_label" 2>/dev/null; then
       print_status success "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
     else
-      print_status note "Gateway 当前没有可接收信号的进程，正在启动..."
-      start_job "$gateway_label" "$agents_dir/$gateway_label.plist"
-      print_status note "Gateway 启动操作已完成，将在进程就绪后读取最新配置。"
+      print_status failure "Gateway 当前没有可接收信号的运行进程，未隐式启动服务。"
+      print_status remediation "请先执行 codexc service start gateway，再运行 codexc service reload。"
+      exit 1
     fi
     ;;
   status)

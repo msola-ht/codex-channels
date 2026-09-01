@@ -214,6 +214,35 @@ describe("model request metrics database operations", () => {
     expect(calls).toEqual(["stop:gateway", "start:gateway"]);
   });
 
+  it("preserves stopped Gateway and center services during pruning", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), provider: "openai" });
+    store.close();
+    const centerPath = join(dirname(databasePath), "center.sqlite3");
+    const center = new DatabaseSync(centerPath);
+    center.exec(`CREATE TABLE request_metrics (id INTEGER PRIMARY KEY, provider TEXT NOT NULL)`);
+    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)").run("openai");
+    center.close();
+    const calls: string[] = [];
+
+    const result = pruneProviderMetrics("openai", environment, {
+      localDatabasePath: databasePath,
+      centerDatabasePath: centerPath,
+      gatewayRunning: false,
+      centerRunning: false,
+      stopGateway: () => calls.push("stop:gateway"),
+      startGateway: () => calls.push("start:gateway"),
+      stopCenter: () => calls.push("stop:center"),
+      startCenter: () => calls.push("start:center"),
+    });
+
+    expect(result.local.deleted).toBe(1);
+    expect(result.center.deleted).toBe(1);
+    expect(result).toMatchObject({ gatewayWasRunning: false, centerWasRunning: false });
+    expect(calls).toEqual([]);
+  });
+
   it("treats a missing local database as empty without creating it", () => {
     const { environment, databasePath } = fixture();
 
@@ -447,9 +476,9 @@ describe("model request metrics database operations", () => {
     local.close();
   });
 
-  it("rejects an unsupported provider", () => {
+  it("rejects an invalid provider identifier", () => {
     const { environment, databasePath } = fixture();
-    expect(() => pruneProviderMetrics("unknown", environment, {
+    expect(() => pruneProviderMetrics("provider with spaces", environment, {
       localDatabasePath: databasePath,
       centerDatabasePath: null,
       stopGateway: () => undefined,

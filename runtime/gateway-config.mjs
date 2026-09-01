@@ -129,6 +129,7 @@ const metricsSyncSchema = z.strictObject({
   endpoint: z.url().optional(),
   device_token: z.string().min(1).optional(),
   device_id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u).optional(),
+  device_name: z.string().trim().min(1).max(128).optional(),
   batch_size: z.number().int().min(1).max(500).default(200),
   interval_seconds: z.number().int().min(10).max(86400).default(60),
 }).superRefine((value, context) => {

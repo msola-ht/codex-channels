@@ -13,8 +13,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ConfigManagementError,
   loadGatewaySettings,
+  normalizeGatewayActivation,
   updateGatewaySetting,
 } from "../scripts/config-management.mjs";
+import { configActivationResult } from "../scripts/config-activation-result.mjs";
 import {
   GatewayConfigConflictError,
   readGatewayConfig,
@@ -28,6 +30,36 @@ afterEach(() => {
 });
 
 describe("Gateway Config management", () => {
+  it("normalizes legacy activation scopes for machine consumers", () => {
+    expect(normalizeGatewayActivation("none")).toBe("none");
+    expect(normalizeGatewayActivation("restart-gateway-webui")).toBe("restart");
+    expect(normalizeGatewayActivation("restart-center")).toBe("restart");
+    expect(normalizeGatewayActivation("reinstall-services")).toBe("reinstall-required");
+    expect(normalizeGatewayActivation("reload")).toBe("reload");
+    expect(normalizeGatewayActivation("unexpected")).toBe("failed");
+  });
+
+  it("projects activation scopes to stable targets and commands", () => {
+    expect(configActivationResult("restart-gateway-webui")).toEqual({
+      status: "restart",
+      target: "gateway+webui",
+      commands: [
+        "codexc service restart gateway",
+        "codexc service restart webui",
+      ],
+    });
+    expect(configActivationResult("reload")).toEqual({
+      status: "reload",
+      target: "gateway",
+      commands: ["codexc service reload"],
+    });
+    expect(configActivationResult("reinstall-services")).toEqual({
+      status: "reinstall-required",
+      target: "services",
+      commands: ["codexc service install"],
+    });
+  });
+
   it("loads a credential-free structured settings model", () => {
     const fixture = createFixture();
     const settings = loadGatewaySettings(fixture.environment);
@@ -65,6 +97,11 @@ describe("Gateway Config management", () => {
     })).toMatchObject({
       value: "full",
       activation: "restart-gateway",
+      activationResult: {
+        status: "restart",
+        target: "gateway",
+        commands: ["codexc service restart gateway"],
+      },
       previousRevision: settings.revision,
     });
     settings = loadGatewaySettings(fixture.environment);
@@ -255,7 +292,7 @@ describe("Gateway Config management", () => {
     });
 
     expect(result.backupPath).toEqual(expect.any(String));
-    expect(result.activation).toBe("restart-all");
+    expect(result.activation).toBe("restart-gateway-webui");
     expect(existsSync(result.backupPath!)).toBe(true);
     const updated = loadGatewaySettings(fixture.environment);
     expect(updated.metrics.sync).toMatchObject({
@@ -327,19 +364,29 @@ describe("Gateway Config management", () => {
     })).toThrow(expect.objectContaining({ code: "token-conflict" }));
   });
 
-  it("returns the center-specific activation action", () => {
+  it("generates two distinct center tokens", () => {
     const fixture = createFixture();
     const settings = loadGatewaySettings(fixture.environment);
-
-    const result = updateGatewaySetting({
-      kind: "metrics.center.enabled",
-      value: true,
-    }, {
+    updateGatewaySetting({ kind: "metrics.center.generate-tokens" }, {
       environment: fixture.environment,
       expectedRevision: settings.revision,
     });
+    const center = loadGatewaySettings(fixture.environment).metrics.center;
+    expect(center.tokenConfigured).toBe(true);
+    expect(center.deviceTokenConfigured).toBe(true);
+  });
 
-    expect(result.activation).toBe("restart-center");
+  it("rejects the removed center enable switch", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+
+    expect(() => updateGatewaySetting({
+      kind: "metrics.center.enabled",
+      value: true,
+    } as never, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toThrow(expect.objectContaining({ code: "unknown-setting" }));
   });
 });
 

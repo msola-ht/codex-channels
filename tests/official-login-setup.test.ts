@@ -47,7 +47,15 @@ describe("official login setup", () => {
       runLogin,
     });
 
-    expect(result).toEqual({ mode: "official" });
+    expect(result).toMatchObject({
+      mode: "official",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
     expect(runLogin).toHaveBeenCalledWith({
       codexBinary: "codex",
       environment,

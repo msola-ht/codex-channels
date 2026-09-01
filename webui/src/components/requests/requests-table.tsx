@@ -20,6 +20,7 @@ import {
   formatCost,
   formatCostDetail,
   formatDuration,
+  formatErrorMessage,
   formatErrorType,
   formatSpeed,
   formatTime,
@@ -189,7 +190,7 @@ export function RequestsTable({
               <span className="max-w-40 truncate">{label}</span>
             </TooltipTrigger>
             <TooltipContent side="right" className="max-w-md">
-              <p className="break-words text-xs">{message}</p>
+              <p className="break-words text-xs">{formatErrorMessage(message, language)}</p>
               {row.original.errorCode ? (
                 <p className="mt-1 text-xs text-muted-foreground">
                   错误码：{row.original.errorCode}
