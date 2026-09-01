@@ -10,6 +10,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   runDisplaySettings,
@@ -161,7 +162,15 @@ export function restartMetricsCenter(environment = process.env) {
 
 export function restartServiceTarget(target, environment = process.env) {
   return new Promise((resolve, reject) => {
-    execFile("codexc", ["service", "restart", target], { env: environment }, (error, stdout, stderr) => {
+    const invocation = resolveExecutableInvocation(
+      "codexc",
+      ["service", "restart", target],
+      environment,
+    );
+    execFile(invocation.file, invocation.args, {
+      env: environment,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(String(stderr || stdout || error.message).trim()));
         return;
