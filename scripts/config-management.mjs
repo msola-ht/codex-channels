@@ -105,7 +105,18 @@ export function updateGatewaySetting(
     throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
   }
   const document = snapshot.document;
+  const originalDocument = structuredClone(document);
   const result = applySetting(document, input);
+  if (JSON.stringify(document) === JSON.stringify(originalDocument)) {
+    return {
+      kind: input.kind,
+      configPath,
+      previousRevision: snapshot.revision,
+      value: result.value,
+      activation: "none",
+      ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
+    };
+  }
   if (readConfig(configPath, "utf8") !== snapshot.content) {
     throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
   }
@@ -139,6 +150,7 @@ export function updateGatewaySetting(
     previousRevision: snapshot.revision,
     value: result.value,
     activation: result.activation,
+    ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
     ...(backupPath === null ? {} : { backupPath }),
   };
 }

@@ -21,6 +21,7 @@ import {
   securePrivateFileSync,
 } from "../runtime/private-file.mjs";
 import { runCenterSettings } from "./metrics-config-menu.mjs";
+import { restartMetricsCenter } from "./config.mjs";
 import { parseIngestPayload } from "./metrics-center-payload.mjs";
 import {
   assertMetricsCenterHost,
@@ -819,6 +820,7 @@ function main() {
         output: process.stdout,
         prompts: clackPrompts,
         writeConfig: writeGatewayConfig,
+        restartCenter: () => restartMetricsCenter(process.env),
       }).catch((error) => {
         writeCliMessage("failure", error instanceof Error ? error.message : String(error));
         process.exitCode = 1;

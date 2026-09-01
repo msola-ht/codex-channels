@@ -40,7 +40,7 @@ export async function runCodexDefaultsSetup({
         label: model.displayName,
         hint: model.model,
       })),
-      ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 Codex 用户设置" }] : []),
+      ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 Codex 新会话默认值" }] : []),
     ],
   });
   if (prompts.isCancel(selectedModel) || selectedModel === "back") {
@@ -69,7 +69,7 @@ export async function runCodexDefaultsSetup({
         label: option.effort,
         hint: option.description,
       })),
-      ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 Codex 用户设置" }] : []),
+      ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 Codex 新会话默认值" }] : []),
     ],
   });
   if (prompts.isCancel(selectedEffort) || selectedEffort === "back") {

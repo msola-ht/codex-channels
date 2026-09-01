@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { isPrivateHttpEndpoint } from "../runtime/gateway-config.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
 
@@ -19,6 +20,7 @@ export function projectMetricsSettings(document) {
       enabled: sync.enabled === true,
       endpoint: optionalString(sync.endpoint),
       deviceId: optionalString(sync.device_id),
+      deviceName: optionalString(sync.device_name),
       deviceTokenConfigured: nonEmptyString(sync.device_token),
       intervalSeconds: integerInRange(sync.interval_seconds, 10, 86_400) ?? 60,
       batchSize: integerInRange(sync.batch_size, 1, 500) ?? 200,
@@ -42,6 +44,7 @@ export function projectMetricsSettings(document) {
 export function applyMetricsSetting(document, input) {
   if (!String(input.kind).startsWith("metrics.")) return undefined;
   const metrics = { ...table(document.metrics) };
+  let generatedTokens;
   switch (input.kind) {
     case "metrics.storage":
       metrics.storage = {
@@ -80,6 +83,10 @@ export function applyMetricsSetting(document, input) {
         device_token: deviceToken,
       };
       if (deviceId !== null) sync.device_id = deviceId;
+      else delete sync.device_id;
+      const deviceName = optionalString(input.deviceName);
+      if (deviceName !== null) sync.device_name = deviceName;
+      else delete sync.device_name;
       metrics.sync = sync;
       metrics.view = { enabled: true, endpoint, token: viewToken };
       break;
@@ -89,9 +96,6 @@ export function applyMetricsSetting(document, input) {
       if (metrics.view !== undefined) metrics.view = { ...table(metrics.view), enabled: false };
       break;
     }
-    case "metrics.center.enabled":
-      metrics.center = { ...table(metrics.center), enabled: boolean(input.value, "value", "中心服务状态") };
-      break;
     case "metrics.center.host": {
       const center = { ...table(metrics.center) };
       const value = nullableChoice(input.value, hosts, "value", "中心监听地址");
@@ -130,6 +134,14 @@ export function applyMetricsSetting(document, input) {
       metrics.center = center;
       break;
     }
+    case "metrics.center.generate-tokens": {
+      const center = { ...table(metrics.center) };
+      center.token = randomBytes(32).toString("hex");
+      center.device_token = randomBytes(32).toString("hex");
+      generatedTokens = { viewToken: center.token, deviceToken: center.device_token };
+      metrics.center = center;
+      break;
+    }
     case "metrics.center.database-path": {
       const center = { ...table(metrics.center) };
       const value = optionalString(input.value);
@@ -141,11 +153,11 @@ export function applyMetricsSetting(document, input) {
       break;
     }
     default:
-      throw invalidSetting("kind", "unknown-setting", `未知指标设置：${String(input.kind)}`);
+      throw invalidSetting("kind", "unknown-setting", `未知数据中心设置：${String(input.kind)}`);
   }
   document.metrics = metrics;
   const activation = input.kind === "metrics.connect" || input.kind === "metrics.disconnect"
-    ? "restart-all"
+    ? "restart-gateway-webui"
     : input.kind.startsWith("metrics.center.")
       ? "restart-center"
       : "restart-gateway";
@@ -153,6 +165,7 @@ export function applyMetricsSetting(document, input) {
     value: projectMetricsSettings(document),
     activation,
     backupRequired: input.kind === "metrics.connect" || input.kind === "metrics.disconnect",
+    ...(generatedTokens === undefined ? {} : { generatedTokens }),
   };
 }
 
@@ -188,11 +201,6 @@ function integer(value, minimum, maximum, field, label) {
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
     throw invalidSetting(field, "invalid-integer", `${label}必须为 ${minimum}–${maximum} 之间的整数`);
   }
-  return value;
-}
-
-function boolean(value, field, label) {
-  if (typeof value !== "boolean") throw invalidSetting(field, "invalid-boolean", `${label}必须是布尔值`);
   return value;
 }
 

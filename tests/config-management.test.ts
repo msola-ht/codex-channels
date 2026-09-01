@@ -255,7 +255,7 @@ describe("Gateway Config management", () => {
     });
 
     expect(result.backupPath).toEqual(expect.any(String));
-    expect(result.activation).toBe("restart-all");
+    expect(result.activation).toBe("restart-gateway-webui");
     expect(existsSync(result.backupPath!)).toBe(true);
     const updated = loadGatewaySettings(fixture.environment);
     expect(updated.metrics.sync).toMatchObject({
@@ -327,19 +327,29 @@ describe("Gateway Config management", () => {
     })).toThrow(expect.objectContaining({ code: "token-conflict" }));
   });
 
-  it("returns the center-specific activation action", () => {
+  it("generates two distinct center tokens", () => {
     const fixture = createFixture();
     const settings = loadGatewaySettings(fixture.environment);
-
-    const result = updateGatewaySetting({
-      kind: "metrics.center.enabled",
-      value: true,
-    }, {
+    updateGatewaySetting({ kind: "metrics.center.generate-tokens" }, {
       environment: fixture.environment,
       expectedRevision: settings.revision,
     });
+    const center = loadGatewaySettings(fixture.environment).metrics.center;
+    expect(center.tokenConfigured).toBe(true);
+    expect(center.deviceTokenConfigured).toBe(true);
+  });
 
-    expect(result.activation).toBe("restart-center");
+  it("rejects the removed center enable switch", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+
+    expect(() => updateGatewaySetting({
+      kind: "metrics.center.enabled",
+      value: true,
+    } as never, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toThrow(expect.objectContaining({ code: "unknown-setting" }));
   });
 });
 

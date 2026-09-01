@@ -37,6 +37,7 @@ export async function runSetup({
   officialLoginSetup = runOfficialLoginSetup,
   setupSummary = writeSetupConfigurationSummary,
   agentsSetup = runThirdPartyAgentSetup,
+  stayOnMenu = false,
 } = {}) {
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -51,8 +52,8 @@ export async function runSetup({
         },
         {
           value: "codex_user",
-          label: "Codex 用户设置",
-          hint: "默认模型、思考等级、Fast、沙盒、审批与网络",
+          label: "Codex 新会话默认值",
+          hint: "OpenAI 官方默认模型、思考等级、Fast、权限与用户偏好",
         },
         {
           value: "models",
@@ -94,6 +95,7 @@ export async function runSetup({
           weixinSetup,
         });
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "codex_user": {
@@ -104,6 +106,7 @@ export async function runSetup({
           defaultsSetup: codexDefaultsSetup,
         });
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "models": {
@@ -120,6 +123,7 @@ export async function runSetup({
           agentsSetup,
         });
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "skills": {
@@ -129,6 +133,7 @@ export async function runSetup({
           prompts,
         });
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       default:
@@ -357,7 +362,7 @@ function isDirectExecution(moduleUrl, argvPath) {
 }
 
 if (isDirectExecution(import.meta.url, process.argv[1])) {
-  await runSetup().catch((error) => {
+  await runSetup({ stayOnMenu: true }).catch((error) => {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });

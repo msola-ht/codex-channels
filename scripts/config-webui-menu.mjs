@@ -100,7 +100,9 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
       writeConfig,
     });
     output.write(`WebUI 设置已更新：${result.configPath}\n`);
-    output.write("配置将在重启 codexc webui 后生效；CLI 参数优先于本配置。\n");
-    return { webui: result.value, configPath: result.configPath };
+    output.write(result.activation === "none"
+      ? "当前值未变化，无需重启 WebUI；CLI 参数优先于本配置。\n"
+      : "配置将在重启 codexc webui 后生效；CLI 参数优先于本配置。\n");
+    return { webui: result.value, configPath: result.configPath, activation: result.activation };
   }
 }

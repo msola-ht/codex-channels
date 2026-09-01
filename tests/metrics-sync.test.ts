@@ -1,5 +1,4 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { hostname } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,6 +46,7 @@ describe("MetricsSync", () => {
         enabled: true,
         endpoint: "https://metrics.example.com/ingest",
         deviceToken: "secret-token",
+        deviceName: "Mac Pro",
         batchSize: 200,
         intervalSeconds: 1,
       },
@@ -74,7 +74,7 @@ describe("MetricsSync", () => {
       subagentThreads: unknown[];
     };
     expect(payload.deviceId).toMatch(/^[0-9a-f-]{36}$/u);
-    expect(payload.deviceName).toBe(hostname());
+    expect(payload.deviceName).toBe("Mac Pro");
     expect(payload.requestMetrics.map((row) => row.localId)).toEqual([1, 2]);
     expect(payload.requestMetrics[0]).not.toHaveProperty("errorMessage");
     expect(payload.requestMetrics[0]).not.toHaveProperty("id");

@@ -119,7 +119,7 @@ const helpText = {
 
 初始化与配置：
   init                         初始化用户目录和配置
-  setup                        配置 Codex 用户设置、提供商、通讯渠道与项目技能（交互菜单）
+  setup                        配置 Codex 新会话默认值、提供商、通讯渠道与项目技能（交互菜单）
   config                       打开日常设置菜单（交互菜单）
   doctor                       诊断安装、配置和服务
   security                     修复本机私有路径权限
@@ -154,10 +154,10 @@ const helpText = {
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
   setup: `用法：codexc setup
 
-打开脱敏配置总览，以及 Codex 用户设置、模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
+打开脱敏配置总览，以及 Codex 新会话默认值、模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
 
 常用入口：
-  codexc setup → Codex 用户设置 → 一键配置全部 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络
+  codexc setup → Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
   codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
@@ -195,7 +195,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 
 打开日常 Gateway 配置菜单：脱敏配置总览、显示设置、系统设置、自动化（计划任务与
 Thread 分区管理员）、网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
-指标设置、Telegram 消息格式与配置路径查看。
+数据中心、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
   doctor: `用法：codexc doctor [--json]
 
@@ -308,7 +308,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 参数优先级：命令行 > config.toml 的 [metrics.center] 段 > 默认值。
 --host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
 --port 指定监听端口，范围 1-65535，默认 8790；
-查看令牌和设备上报令牌请使用 codexc config 的指标中心设置；绑定非回环地址（0.0.0.0）时两者必须提供且不同；
+查看令牌和设备上报令牌请使用 codexc config 的数据中心设置；绑定非回环地址（0.0.0.0）时两者必须提供且不同；
 --database 指定中心 SQLite 路径，默认 <配置目录>/data/central-metrics.sqlite3。
 上报接口：POST /api/ingest（Bearer 上报令牌）；查询接口使用 Bearer 查看令牌：/api/overview、/api/requests、
 /api/subagents、/api/devices、/api/health。`,

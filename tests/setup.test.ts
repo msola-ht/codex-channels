@@ -46,8 +46,8 @@ describe("Codex Connect setup", () => {
         hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
       }, {
         value: "codex_user",
-        label: "Codex 用户设置",
-        hint: "默认模型、思考等级、Fast、沙盒、审批与网络",
+        label: "Codex 新会话默认值",
+        hint: "OpenAI 官方默认模型、思考等级、Fast、权限与用户偏好",
       }, {
         value: "models",
         label: "模型与提供商",

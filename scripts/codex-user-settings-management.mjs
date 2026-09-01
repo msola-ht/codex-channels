@@ -164,6 +164,7 @@ function createEdits(input, { config, provider, models }) {
     case "defaults":
       return defaultEdits(input, provider, models);
     case "fast":
+      assertOfficialDefaults(provider);
       return fastEdits(input, provider, config, models);
     case "permissions":
       return permissionEdits(input, config);
@@ -181,22 +182,12 @@ function allEdits(input, provider, config, models) {
   const defaults = defaultEdits(input, provider, models);
   const fast = fastEdit(input.fastEnabled, "fastEnabled");
   const permissions = permissionEdits(input, config);
-  const webSearch = { keyPath: "web_search", value: "cached" };
-  const privacy = [
-    { keyPath: "analytics.enabled", value: false },
-    { keyPath: "feedback.enabled", value: false },
-  ];
-  const goals = { keyPath: "features.goals", value: true };
   return {
-    edits: [...defaults.edits, ...fast.edits, ...permissions.edits, webSearch, ...privacy, goals],
+    edits: [...defaults.edits, ...fast.edits, ...permissions.edits],
     value: {
       ...defaults.value,
       fastEnabled: fast.value.enabled,
       ...permissions.value,
-      webSearch: webSearch.value,
-      analyticsEnabled: false,
-      feedbackEnabled: false,
-      goalsEnabled: true,
     },
   };
 }

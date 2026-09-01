@@ -1,9 +1,11 @@
 export type GatewaySettingActivation =
   | "none"
   | "restart-gateway"
+  | "restart-gateway-webui"
   | "restart-webui"
   | "restart-center"
   | "restart-all"
+  | "reinstall-services"
   | "reinstall-services";
 
 export class ConfigManagementError extends Error {
@@ -56,6 +58,7 @@ export interface GatewaySettings {
       enabled: boolean;
       endpoint: string | null;
       deviceId: string | null;
+      deviceName: string | null;
       deviceTokenConfigured: boolean;
       intervalSeconds: number;
       batchSize: number;
@@ -124,9 +127,9 @@ export type GatewaySettingInput =
       deviceToken: string;
       viewToken: string;
       deviceId?: string | null;
+      deviceName?: string | null;
     }
   | { kind: "metrics.disconnect" }
-  | { kind: "metrics.center.enabled"; value: boolean }
   | {
       kind: "metrics.center.host";
       value: "127.0.0.1" | "::1" | "0.0.0.0" | null;
@@ -140,6 +143,7 @@ export type GatewaySettingInput =
       action: "set" | "clear";
       value?: string;
     }
+  | { kind: "metrics.center.generate-tokens" }
   | { kind: "metrics.center.database-path"; value: string | null }
   | {
       kind: "workspace.permissions";
@@ -172,4 +176,5 @@ export function updateGatewaySetting(
   backupPath?: string;
   value: unknown;
   activation: GatewaySettingActivation;
+  generatedTokens?: { viewToken: string; deviceToken: string };
 };

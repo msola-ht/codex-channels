@@ -1,4 +1,5 @@
 import { statSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -35,6 +36,10 @@ export async function runConfig({
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
   debugSetup = runDebugSetup,
+  restartCenter,
+  restartGateway,
+  restartWebui,
+  stayOnMenu = false,
 } = {}) {
   const { configPath, dataDir } = resolveConfigPaths(environment);
   if (json) {
@@ -68,7 +73,7 @@ export async function runConfig({
         { value: "network", label: "网络代理", hint: "显式 HTTP、HTTPS、通用代理与直连规则" },
         { value: "advanced", label: "高级设置", hint: "日志等级与开发中功能" },
         { value: "webui", label: "WebUI 设置", hint: "监听地址、端口与访问令牌" },
-        { value: "metrics", label: "指标设置", hint: "本地保留、中心接入与全局视图" },
+        { value: "metrics", label: "数据中心", hint: "本机上报、全局查询与中心服务" },
         ...(telegramConfigured
           ? [{ value: "message_format", label: "Telegram 消息格式", hint: "html 或 rich" }]
           : []),
@@ -80,7 +85,15 @@ export async function runConfig({
       prompts.cancel("Config 已取消");
       return undefined;
     }
-    const common = { environment, output, prompts, writeConfig };
+    const common = {
+      environment,
+      output,
+      prompts,
+      writeConfig,
+      restartCenter,
+      restartGateway,
+      restartWebui,
+    };
     switch (section) {
       case "summary":
         writeGatewayConfigSummary(output, document, configPath);
@@ -88,41 +101,49 @@ export async function runConfig({
       case "display": {
         const result = await runDisplaySettings(common);
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "system": {
         const result = await runSystemSettings({ ...common, input, debugSetup });
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "automation": {
         const result = await runAutomationSettings(common);
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "network": {
         const result = await runNetworkSettings(common);
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "advanced": {
         const result = await runAdvancedSettings(common);
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "webui": {
         const result = await runWebuiSettings(common);
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "metrics": {
         const result = await runMetricsSettings(common);
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "message_format": {
         const result = await runTelegramMessageFormat(common);
         if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
         return result;
       }
       case "paths":
@@ -132,6 +153,22 @@ export async function runConfig({
         throw new Error(`未知 Config 类别：${String(section)}`);
     }
   }
+}
+
+export function restartMetricsCenter(environment = process.env) {
+  return restartServiceTarget("center", environment);
+}
+
+export function restartServiceTarget(target, environment = process.env) {
+  return new Promise((resolve, reject) => {
+    execFile("codexc", ["service", "restart", target], { env: environment }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(String(stderr || stdout || error.message).trim()));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 function resolveConfigPaths(environment) {
@@ -172,7 +209,13 @@ if (
     writeCliMessage("failure", "用法：codexc config [--json]");
     process.exitCode = 1;
   } else {
-    runConfig({ json }).catch((error) => {
+    runConfig({
+      json,
+      restartCenter: () => restartMetricsCenter(process.env),
+      restartGateway: () => restartServiceTarget("gateway", process.env),
+      restartWebui: () => restartServiceTarget("webui", process.env),
+      stayOnMenu: true,
+    }).catch((error) => {
       writeCliMessage("failure", error instanceof Error ? error.message : String(error));
       process.exitCode = 1;
     });

@@ -46,7 +46,7 @@ describe("Codex user settings setup", () => {
       environment: { CODEX_HOME: "/tmp/codex-home" },
       expectedVersion: "version-1",
     });
-    expect(output.join("")).toContain("Codex 用户设置已全部更新");
+    expect(output.join("")).toContain("Codex 核心默认值已更新");
   });
 
   it("updates all permission defaults from one preview", async () => {
@@ -120,7 +120,6 @@ describe("Codex user settings setup", () => {
       | undefined;
     const options = firstCall?.options ?? [];
     expect(options.map((option: { value: string }) => option.value)).toEqual([
-      "fast",
       "web-search",
       "permissions",
       "back",

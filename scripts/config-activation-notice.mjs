@@ -13,7 +13,9 @@ export function writeGatewayConfigActivationNotice(
   const message = action === "restart"
     ? "该设置需要重建 Gateway 连接；后台服务运行时会自动重启，前台进程需重新启动；"
       + "未运行时将在下次启动生效；现有 Thread 不会被修改。"
-    : action === "reinstall"
+    : action === "none"
+      ? "当前值未变化，配置文件未写入，无需重启服务。"
+    : action === "reinstall" || action === "reinstall-services"
       ? "该设置会改变 App Server 服务环境；运行中的服务继续使用旧值，请执行 codexc service install 重新生成并启动服务。"
       : gatewayConfigActivationNotice;
   writeCliMessage("note", message, {

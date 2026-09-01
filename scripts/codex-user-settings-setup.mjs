@@ -27,14 +27,14 @@ export async function runCodexUserSettingsSetup({
 } = {}) {
   const settings = await loadSettings({ environment, createClient, primaryProvider });
   const section = await prompts.select({
-    message: "选择 Codex 用户设置",
+    message: "选择 Codex 新会话默认值",
     showInstructions: false,
     options: [
       ...(settings.defaultsEditable && settings.permissions.editable
         ? [{
             value: "all",
-            label: "一键配置全部",
-            hint: "一次选择并原子写入全部用户默认值",
+            label: "配置核心默认值",
+            hint: "一次确认并写入模型、Fast 与权限默认值",
           }]
         : []),
       ...(settings.defaultsEditable
@@ -44,11 +44,11 @@ export async function runCodexUserSettingsSetup({
             hint: `${settings.defaults.model ?? "跟随官方默认"} · ${settings.defaults.reasoningEffort ?? "跟随模型默认"}`,
           }]
         : []),
-      {
+      ...(settings.defaultsEditable ? [{
         value: "fast",
         label: "Fast 默认状态",
         hint: settings.defaults.fastEnabled ? "当前：开启" : "当前：关闭",
-      },
+      }] : []),
       {
         value: "web-search",
         label: "联网搜索模式",
@@ -127,7 +127,7 @@ export async function runCodexUserSettingsSetup({
       primaryProvider,
     });
   }
-  throw new Error(`未知 Codex 用户设置：${String(section)}`);
+  throw new Error(`未知 Codex 新会话默认值：${String(section)}`);
 }
 
 async function runAllSettings({
@@ -151,20 +151,16 @@ async function runAllSettings({
   if (permissions === null) return { action: "back" };
   const confirmed = await prompts.confirm({
     message: [
-      "一次写入全部 Codex 用户设置：",
+      "一次写入 Codex 核心默认值：",
       `${modelDefaults.model.model} · ${modelDefaults.reasoningEffort}`,
       `Fast ${fastEnabled ? "开启" : "关闭"}`,
       `${permissions.sandboxMode} · ${permissions.approvalPolicy}`,
       `网络${permissions.networkAccess ? "开启" : "关闭"}`,
-      "联网搜索：缓存？",
-      "分析关闭",
-      "反馈关闭",
-      "Goals 开启？",
     ].join(" · "),
     initialValue: true,
   });
   if (prompts.isCancel(confirmed) || confirmed !== true) {
-    output.write("已取消，未修改 Codex 用户设置。\n");
+    output.write("已取消，未修改 Codex 核心默认值。\n");
     return undefined;
   }
   const result = await updateSetting({
@@ -180,7 +176,7 @@ async function runAllSettings({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(
-    `Codex 用户设置已全部更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"} · 联网搜索缓存 · 分析关闭 · 反馈关闭 · Goals 开启\n`,
+    `Codex 核心默认值已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}\n`,
   );
   output.write("请运行 codexc service restart all，使 App Server 新会话使用新默认值。\n");
   return result;

@@ -109,6 +109,7 @@ describe("Codex Connect config menu", () => {
     expect(result).toEqual({
       priceCurrency: "cny",
       configPath: fixture.configPath,
+      activation: "restart-gateway",
     });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
       price_currency: "cny",
@@ -228,7 +229,7 @@ describe("Codex Connect config menu", () => {
       },
     });
 
-    expect(result).toEqual({ scheduledTasksEnabled: true, configPath: fixture.configPath });
+    expect(result).toEqual({ scheduledTasksEnabled: true, configPath: fixture.configPath, activation: "restart-gateway" });
     expect(readGatewayConfig(fixture.configPath).scheduled_tasks).toEqual({ enabled: true });
     expect(output.join("")).toContain("需要重建 Gateway 连接");
   });
@@ -294,6 +295,7 @@ describe("Codex Connect config menu", () => {
     expect(result).toEqual({
       threadSectionAdministrators: ["telegram:456"],
       configPath: fixture.configPath,
+      activation: "restart-gateway",
     });
     expect(readGatewayConfig(fixture.configPath).thread_sections).toEqual({
       administrators: ["telegram:456"],
@@ -319,7 +321,7 @@ describe("Codex Connect config menu", () => {
       },
     });
 
-    expect(result).toEqual({ field: "https_proxy", configured: true, configPath: fixture.configPath });
+    expect(result).toEqual({ field: "https_proxy", configured: true, configPath: fixture.configPath, activation: "reinstall-services" });
     expect(readGatewayConfig(fixture.configPath).network).toMatchObject({ https_proxy: proxy });
     expect(output.join("")).toContain("codexc service install");
     expect(output.join("")).not.toContain("proxy-secret");
@@ -347,6 +349,7 @@ describe("Codex Connect config menu", () => {
     expect(result).toEqual({
       fields: ["http_proxy", "https_proxy", "all_proxy"],
       configPath: fixture.configPath,
+      activation: "reinstall-services",
     });
     expect(readGatewayConfig(fixture.configPath).network).toEqual({
       http_proxy: "http://127.0.0.1:7890",
@@ -511,7 +514,7 @@ describe("Codex Connect config menu", () => {
       prompts,
     });
 
-    expect(result).toEqual({ operationUpdates: "full", configPath: fixture.configPath });
+    expect(result).toEqual({ operationUpdates: "full", configPath: fixture.configPath, activation: "restart-gateway" });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
       operation_updates: "full",
     });
@@ -537,7 +540,7 @@ describe("Codex Connect config menu", () => {
       prompts,
     });
 
-    expect(result).toEqual({ planUpdatesEnabled: false, configPath: fixture.configPath });
+    expect(result).toEqual({ planUpdatesEnabled: false, configPath: fixture.configPath, activation: "restart-gateway" });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
       plan_updates: false,
     });
@@ -562,7 +565,7 @@ describe("Codex Connect config menu", () => {
       prompts,
     });
 
-    expect(result).toEqual({ reasoningEnabled: false, configPath: fixture.configPath });
+    expect(result).toEqual({ reasoningEnabled: false, configPath: fixture.configPath, activation: "restart-gateway" });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
       reasoning: false,
     });
@@ -587,7 +590,7 @@ describe("Codex Connect config menu", () => {
       prompts,
     });
 
-    expect(result).toEqual({ timeoutSeconds: 120, configPath: fixture.configPath });
+    expect(result).toEqual({ timeoutSeconds: 120, configPath: fixture.configPath, activation: "restart-gateway" });
     expect(readGatewayConfig(fixture.configPath).approval).toEqual({
       timeout_seconds: 120,
     });
@@ -616,6 +619,7 @@ describe("Codex Connect config menu", () => {
     expect(result).toEqual({
       webui: { host: "0.0.0.0", port: 8787, tokenConfigured: true },
       configPath: fixture.configPath,
+      activation: "restart-webui",
     });
     expect(readGatewayConfig(fixture.configPath).webui).toEqual({
       host: "0.0.0.0",
@@ -960,6 +964,7 @@ describe("Codex Connect config menu", () => {
       endpoint: "http://127.0.0.1:8790",
       deviceId: null,
       configPath: fixture.configPath,
+      activation: "restart-gateway-webui",
     });
     const metrics = readGatewayConfig(fixture.configPath).metrics as unknown as {
       sync: { enabled: boolean; endpoint?: string; device_token?: string };
@@ -977,7 +982,7 @@ describe("Codex Connect config menu", () => {
     });
     expect(output.join("")).toContain("已接入中心");
     expect(output.join("")).toContain("需要重建 Gateway 连接");
-    expect(output.join("")).toContain("WebUI 全局页将在重启 WebUI 后生效");
+    expect(output.join("")).toContain("本次变更同时影响 Gateway 与 WebUI");
   });
 
   it("prints the metrics connection status through the menu", async () => {
@@ -1051,6 +1056,7 @@ describe("Codex Connect config menu", () => {
     expect(result).toEqual({
       sync: { interval_seconds: 120 },
       configPath: fixture.configPath,
+      activation: "restart-gateway",
     });
     const metrics = readGatewayConfig(fixture.configPath).metrics as unknown as {
       sync?: { interval_seconds: number; batch_size: number };
@@ -1085,6 +1091,7 @@ describe("Codex Connect config menu", () => {
     expect(result).toEqual({
       storage: { retention_days: 90, max_rows: 250_000 },
       configPath: fixture.configPath,
+      activation: "restart-gateway",
     });
     expect(readGatewayConfig(fixture.configPath).metrics).toMatchObject({
       storage: { retention_days: 90, max_rows: 250_000 },
@@ -1140,8 +1147,8 @@ describe("Codex Connect config menu", () => {
     const output: string[] = [];
     const prompts = {
       select: vi.fn()
-        .mockResolvedValueOnce("enabled")
-        .mockResolvedValueOnce("enabled"),
+        .mockResolvedValueOnce("host")
+        .mockResolvedValueOnce("127.0.0.1"),
       isCancel: () => false,
     };
 
@@ -1154,7 +1161,7 @@ describe("Codex Connect config menu", () => {
 
     expect(result).toEqual({
       center: {
-        enabled: true,
+        enabled: false,
         host: "127.0.0.1",
         port: 8790,
         tokenConfigured: false,
@@ -1162,12 +1169,13 @@ describe("Codex Connect config menu", () => {
         databasePath: "data/central-metrics.sqlite3",
       },
       configPath: fixture.configPath,
+      activation: "restart-center",
     });
     const center = readGatewayConfig(fixture.configPath).metrics as unknown as {
       center?: { enabled: boolean };
     };
     expect(center.center).toEqual({
-      enabled: true,
+      host: "127.0.0.1",
     });
     expect(output.join("")).toContain("中心服务设置已更新");
   });

@@ -107,7 +107,7 @@
   `config.toml` 的 `[metrics.center]` 段，默认回环 `127.0.0.1:8790`。
 - `metrics-center-settings.mjs`：中心服务与指标脚本共用的轻量配置解析（命令行参数、
   `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
-- `metrics-config-menu.mjs`：指标设置与中心服务设置的交互用例；集中管理本地保留策略、中心接入、
+- `metrics-config-menu.mjs`：数据中心与中心服务设置的交互用例；集中管理本地保留策略、中心接入、
   上报参数、接入状态和中心监听配置，`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
 - `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责收集查询、导出、清理和重置参数，
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
@@ -115,7 +115,7 @@
   Worker 共用的上报载荷校验及类型声明。
 - `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema，子代理标注包含可空
   `parent_turn_id`；历史 Cloudflare D1 migration 保留部署参考，不作为生产中心运行时依赖。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“Codex 用户设置”
+- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“Codex 新会话默认值”
   “模型与提供商”“通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
   登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
@@ -190,12 +190,10 @@
   占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast，
-  一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入全部字段；Fast 始终作为
-  OpenAI 主配置偏好写入；一键写入全部时同时将顶层 `web_search` 设为 `cached`，单独设置页可选择
-  `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。第三方固定模式不开放官方默认模型与思考等级，
-  已有 `default_permissions` 时不混写传统 Sandbox 字段；一键写入全部还会关闭官方分析与反馈并开启
-  `features.goals`，这些设置不影响 Gateway 本地指标统计。
-- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 用户设置”
+  一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；Fast 仅作为
+  OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
+  第三方固定模式不开放官方默认模型、思考等级和 Fast；已有 `default_permissions` 时不混写传统 Sandbox 字段。
+- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 新会话默认值”
   适配器，只负责选择、预览和中文结果；可单独设置 Plan 思考等级、推理摘要、输出详细程度、人格、
   更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
@@ -217,9 +215,9 @@
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
   配置文件中可安全编辑的参数：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
   （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、自动化（计划任务与
-  Thread 分区管理员）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标设置
-  （本地保留策略、本机接入中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
-  `interval_seconds` / `batch_size`、停用接入）、
+  Thread 分区管理员）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
+  （本地保留策略、本机接入数据中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
+  `interval_seconds` / `batch_size`、停用本机接入）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
   配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
