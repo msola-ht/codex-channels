@@ -17,6 +17,56 @@
 - 生成协议出现类型或 RPC 不代表项目支持。公开能力仍以 [`docs/index.md`](index.md) 的支持矩阵、
   受控导出、业务入口和验证共同为准。
 
+## 0.152.0
+
+- 官方 Release：[`rust-v0.152.0`](https://github.com/openai/codex/releases/tag/rust-v0.152.0)
+- 项目决策：协议生成和上游差异审查已完成；`0.152.0` 作为下一开发基线，计划清单工具按上游默认关闭并由 Setup 显式管理，完成完整验证后再进入合并或发布
+- 评估范围：Windows 执行修复、Thread 恢复与分页、MCP 命名与缓存、限流与认证通知、命令超时、按工具输出预算、Recap/Memories，以及新增高权限字段
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 0.152.0 精确协议基线 | 让 Gateway、App Server 和生成类型保持同一正式版本 | 采用官方正式版并重新生成协议；不保留 0.150.1 兼容分支，待完成业务审查后同步 CI、索引和真实合同 | [`src/codex-protocol/`](../src/codex-protocol/README.md)、`npm run codex:upgrade -- 0.152.0` |
+| Windows PowerShell 与终端执行修复 | 让 Windows 沙盒命令和终端查询更少遇到启动失败或挂起 | 随锁定 App Server 自动获得；不在 Gateway 复制 PowerShell 选择或进程树逻辑 | Windows runtime CI、真实 App Server 合同 |
+| Thread 恢复与 MCP 缓存修复 | 让恢复会话保留工作目录，并让 MCP 工具在缓存刷新或鉴权失败后继续可用 | Gateway 继续把 Thread 和 MCP 状态交给 App Server，不建立平行缓存或恢复实现 | [`codex-client/`](../src/codex-client/README.md)、真实 App Server 合同 |
+| MCP 包样式名称 | 允许 MCP Server 名称包含 `: @ / .` 等包管理器常用字符 | Gateway 只做非空字符串校验，未复制旧字符白名单；新名称由上游直接承载 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、MCP 真实合同 |
+| Thread 分页读取提示 | 让客户端在长会话中优先使用元数据读取和分页历史 | Gateway 已使用 `includeTurns: false`、`thread/turns/list` 的元数据/摘要路径，无需新增兼容层 | [`client.ts`](../src/codex-client/client.ts)、[`thread-history-port.ts`](../src/application/thread-history-port.ts) |
+| 计划清单工具开关 | 让管理员决定模型是否可以创建和更新执行计划 | `codexc setup → Codex 新会话默认值 → 计划清单工具` 写入官方 `tools.update_plan.enabled`，默认关闭；`codexc update` 会提示状态，`codexc doctor` 只读诊断；Gateway `display.plan_updates` 仍只控制渠道展示 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`source-update.mjs`](../scripts/source-update.mjs)、[`doctor.mjs`](../scripts/doctor.mjs) |
+
+### 待评估
+
+| 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
+| --- | --- | --- | --- |
+| `thread/shellCommand` 超时 | 允许管理员为一次线程 Shell 命令设置超过一小时的截止时间 | 长时间诊断任务可能需要更长执行窗口 | 当前 Gateway 没有该 RPC 入口；只有出现明确的长命令需求并建立审批、上限和三渠道展示合同后才接入 |
+| `turn/settings/update` 与按 Turn 服务层级 | 在活动 Turn 中调整服务层级而不改变 Thread 默认设置 | 可减少切换 Fast 模式的等待 | 当前模型设置统一在下一 Turn 生效；只有 App Server 合同和 Surface 交互明确区分活动 Turn 后再评估 |
+| 认证恢复和限流营销通知 | 把 Provider 重新认证进度或后端限流提示展示给用户 | 可能减少用户对长时间等待或额度限制的疑惑 | 新通知和 `rateLimitUpsell` 尚无脱敏、文案和三渠道合同；先记录并忽略，出现明确用户需求后再设计 |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| `cyberAccessProgram` | 请求工作区授权的高权限网络或安全程序 | 会扩大外部聊天用户可触发的权限边界；当前无独立授权、审计和回滚合同 |
+| `toolOutput` 与单工具输出预算 | 让客户端直接向 Turn 注入工具输出或限制单工具输出 Token | Gateway 不保存或伪造工具正文，也没有把外部消息映射为工具输出的安全入口；仅保留生成类型 |
+| Project 最近度排序 | 按最近活动排列 App Server 项目 | 当前 Surface 没有 Project 目录入口，不能以项目排序替代 Workspace、Thread 授权和会话列表 |
+| `openaiForm` MCP elicitation | 让 MCP 以新的 OpenAI 表单模式请求用户输入 | 当前审批端口只定义 `form`、`openai/form`、`url`，不能把未知模式安全映射到三个渠道；当前适配器会明确拒绝，不伪造表单语义 |
+
+### 纯上游变化
+
+- `recap`（自动空闲回顾与 `/recap`）、Vim 搜索、限流操作菜单、凭据刷新进度和其他 TUI 展示优化由原生 Codex 客户端提供；`recap` 没有 App Server RPC 或配置开关，Gateway 不复制终端界面。
+- Memories 的 Rollout 提取/全局归并是上游后台能力，按 `min_rollout_idle_hours`（默认 6 小时）筛选空闲 Rollout；它受 `[features].memories` 控制且不属于 Gateway 渠道消息，不新增项目入口。
+- `accountId`、`rateLimitUpsell`、`rateLimitExceeded`、`misalignment`、`usageMetadata`、`functionCallOutput` 和 Project `recencyAt` 等生成字段目前只由上游内部/TUI 使用；Gateway 对未知通知和非核心可选字段保持忽略，不扩展 Application 类型。
+- Guardian 审查、云任务凭据来源、插件预加载、历史压缩授权保留和其他内部安全修复随锁定 App Server 获得，不新增 Gateway 公开入口。
+
+### App Server 维护决策
+
+- 协议生成以官方正式版本为准；生成类型完整不等于 Gateway 已支持。每次升级都必须逐项检查 Client Request、Server Notification、Server Request、初始化能力和可选字段的实际使用点。
+- 计划相关能力分为三层：上游 `tools.update_plan.enabled` 决定模型是否拥有待办/检查清单工具；Gateway `display.plan_updates` 只决定是否把 `turn/plan/updated` 通知展示到渠道；`/plan` 则切换官方 Plan 协作模式。三者不能互相替代，也不能因其中一项开启就推断另外两项已开启。
+- Gateway 只通过现有 `codex-client` 和 Application 公开端口消费已纳入支持矩阵的 App Server 能力；未接入的 RPC 或字段保留在生成层，不在渠道边界建立隐式兼容或旁路入口。
+- 当前 `openaiForm`、活动 Turn 设置更新、线程 Shell 超时、认证恢复/限流营销通知和 Project 最近度排序均记录为明确边界，不得因上游新增类型自动暴露。
+- `tools.update_plan.enabled` 默认关闭的兼容处理已由 Setup、`codexc update` 提示和 `codexc doctor` 诊断覆盖；固定源码基线已同步到 `0.152.0`，合并前仍需补齐真实 App Server 合同、Lint、测试、构建和打包验证。
+- `recap` 与 Memories 属于上游 TUI/后台能力，不纳入 App Server Gateway 支持矩阵；若未来要在 Feishu、Telegram 或微信提供类似能力，必须另立 Surface/Application 设计和协议合同。
+
 ## 0.145.0
 
 - 官方 Release：[`rust-v0.145.0`](https://github.com/openai/codex/releases/tag/rust-v0.145.0)

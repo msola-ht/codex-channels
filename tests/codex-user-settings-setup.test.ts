@@ -121,9 +121,44 @@ describe("Codex user settings setup", () => {
     const options = firstCall?.options ?? [];
     expect(options.map((option: { value: string }) => option.value)).toEqual([
       "web-search",
+      "update-plan",
       "permissions",
       "back",
     ]);
+  });
+
+  it("updates the upstream plan checklist tool setting", async () => {
+    const output: string[] = [];
+    const updateSetting = vi.fn(async () => ({
+      kind: "update-plan" as const,
+      previousVersion: "version-1",
+      value: { enabled: true },
+      activation: "restart-all" as const,
+    }));
+    const prompts = {
+      select: vi.fn()
+        .mockResolvedValueOnce("update-plan")
+        .mockResolvedValueOnce("enabled"),
+      confirm: vi.fn(async () => true),
+      isCancel: () => false,
+    };
+
+    await runCodexUserSettingsSetup({
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      output: { write: (value: string) => output.push(value) },
+      prompts,
+      loadSettings: async () => settingsState(),
+      updateSetting,
+    });
+
+    expect(updateSetting).toHaveBeenCalledWith({
+      kind: "update-plan",
+      enabled: true,
+    }, {
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      expectedVersion: "version-1",
+    });
+    expect(output.join("")).toContain("Codex 计划清单工具已开启");
   });
 
   it("refuses to mix Permission Profiles with traditional sandbox fields", async () => {
@@ -172,6 +207,7 @@ function settingsState(): CodexUserSettingsState {
       reasoningEffort: "medium",
       fastEnabled: false,
       webSearch: null,
+      updatePlanEnabled: false,
     },
     permissions: {
       editable: true,

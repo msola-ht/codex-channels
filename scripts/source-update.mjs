@@ -14,6 +14,9 @@ import {
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { parse } from "smol-toml";
+
+import { codexHomePath } from "../runtime/codex-home.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
@@ -167,6 +170,7 @@ export async function updateManagedSourceInstallation(
           options,
         ),
       );
+      writeCodexPlanSettingNotice(writeMessage, environment);
       if (plan.refreshCommand) {
         await runStage(
           "refresh-command",
@@ -286,6 +290,7 @@ export async function updateManagedSourceInstallation(
         options,
       ),
     );
+    writeCodexPlanSettingNotice(writeMessage, preparedCodex.validationEnvironment);
     await runStage(
       "install-codex-cli",
       () => installPreparedCodexVersion(
@@ -737,6 +742,39 @@ function validateCodexContract(checkout, environment, options) {
     environment,
     options.captureCommand,
   );
+}
+
+function writeCodexPlanSettingNotice(writeMessage, environment) {
+  const status = readCodexPlanSetting(environment);
+  if (status.error) {
+    writeMessageSafely(writeMessage, "note", `Codex 计划清单工具：无法读取（${status.error}）`);
+    return;
+  }
+  writeMessageSafely(
+    writeMessage,
+    "note",
+    `Codex 计划清单工具：${status.enabled ? "开启" : "关闭（默认）"}`
+      + "；可在 codexc setup → Codex 新会话默认值中修改",
+  );
+}
+
+function readCodexPlanSetting(environment) {
+  const path = join(codexHomePath(environment), "config.toml");
+  if (!existsSync(path)) return { enabled: false };
+  try {
+    const document = parse(readFileSync(path, "utf8"));
+    const tools = document?.tools;
+    const updatePlan = tools && typeof tools === "object" && !Array.isArray(tools)
+      ? tools.update_plan
+      : undefined;
+    const enabled = updatePlan
+      && typeof updatePlan === "object"
+      && !Array.isArray(updatePlan)
+      && updatePlan.enabled === true;
+    return { enabled };
+  } catch {
+    return { enabled: false, error: "Codex 用户配置无法解析" };
+  }
 }
 
 function installedCodexVersion(environment, captureCommand) {

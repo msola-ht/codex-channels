@@ -215,7 +215,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       {
         args: ["setup", "--help"],
         includes: [
-          "Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 沙盒、审批与网络",
+          "Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 计划清单工具 / 沙盒、审批与网络",
           "OpenAI 官方 → 登录并恢复官方",
           "受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）",
         ],
@@ -3905,7 +3905,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       section: "扩展能力",
       kind: "note",
       name: "Plugin API",
-      detail: expect.stringContaining("Codex 0.150.1"),
+      detail: expect.stringContaining("Codex 0.152.0"),
     }));
     expect(diagnosed.stdout).not.toContain(secret);
     expect(diagnosed.stdout).not.toContain("Codex Connect Doctor\n");

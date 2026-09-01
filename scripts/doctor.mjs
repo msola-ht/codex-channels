@@ -9,6 +9,7 @@ import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
 
 import WebSocket from "ws";
+import { parse } from "smol-toml";
 
 import {
   colorizeCliText,
@@ -414,6 +415,22 @@ if (document) {
     record("Codex CLI", false, errorMessage(error));
   }
 
+  const updatePlan = readCodexPlanSetting(process.env);
+  if (updatePlan.error) {
+    record(
+      "Codex 计划清单工具",
+      false,
+      updatePlan.error,
+      "修正 ~/.codex/config.toml 后重新运行 codexc doctor",
+    );
+  } else {
+    note(
+      "Codex 计划清单工具",
+      updatePlan.enabled ? "已开启" : "已关闭（上游默认）",
+      "运行 codexc setup → Codex 新会话默认值 → 计划清单工具可修改；Gateway 的 display.plan_updates 只控制渠道展示",
+    );
+  }
+
   const socketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
   let appServerTopology;
   let managedProviders = [];
@@ -752,6 +769,19 @@ function validAllowedWeixinUsers(value) {
 
 function table(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function readCodexPlanSetting(environment) {
+  const path = join(codexHomePath(environment), "config.toml");
+  if (!existsSync(path)) return { enabled: false };
+  try {
+    const document = parse(readFileSync(path, "utf8"));
+    const tools = table(document.tools);
+    const updatePlan = table(tools.update_plan);
+    return { enabled: updatePlan.enabled === true };
+  } catch {
+    return { enabled: false, error: "Codex 用户配置无法解析" };
+  }
 }
 
 function checkOpenAiProxy(document) {

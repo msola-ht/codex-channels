@@ -115,6 +115,8 @@ function projectSettings(snapshot, provider, rawModels) {
   const verbosity = verbosities.has(config.model_verbosity) ? config.model_verbosity : null;
   const personality = personalities.has(config.personality) ? config.personality : null;
   const history = record(config.history);
+  const tools = record(config.tools);
+  const updatePlan = record(tools.update_plan);
   const configuredPlanEffort = optionalString(config.plan_mode_reasoning_effort);
   const planModeReasoningEffort = models.some((model) => model.reasoningEfforts
     .some((option) => option.effort === configuredPlanEffort))
@@ -134,6 +136,7 @@ function projectSettings(snapshot, provider, rawModels) {
       reasoningEffort: effort ?? null,
       fastEnabled: isFastServiceTier(serviceTier),
       webSearch,
+      updatePlanEnabled: updatePlan.enabled === true,
       reasoningSummary,
       planModeReasoningEffort,
       verbosity,
@@ -170,6 +173,8 @@ function createEdits(input, { config, provider, models }) {
       return permissionEdits(input, config);
     case "web-search":
       return webSearchEdits(input);
+    case "update-plan":
+      return updatePlanEdits(input);
     case "preferences":
       return preferenceEdits(input, models);
     default:
@@ -232,6 +237,16 @@ function webSearchEdits(input) {
   return {
     edits: [{ keyPath: "web_search", value: input.mode }],
     value: { mode: input.mode },
+  };
+}
+
+function updatePlanEdits(input) {
+  if (typeof input?.enabled !== "boolean") {
+    throw invalid("enabled", "invalid-boolean", "计划清单工具状态必须是布尔值");
+  }
+  return {
+    edits: [{ keyPath: "tools.update_plan.enabled", value: input.enabled }],
+    value: { enabled: input.enabled },
   };
 }
 

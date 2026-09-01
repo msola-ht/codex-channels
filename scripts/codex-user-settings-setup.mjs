@@ -56,6 +56,11 @@ export async function runCodexUserSettingsSetup({
         label: "联网搜索模式",
         hint: settings.defaults.webSearch ?? "当前：未设置（默认缓存）",
       },
+      {
+        value: "update-plan",
+        label: "计划清单工具",
+        hint: settings.defaults.updatePlanEnabled ? "当前：开启" : "当前：关闭",
+      },
       ...(settings.defaultsEditable ? [{
         value: "preferences",
         label: "其他用户偏好",
@@ -114,6 +119,9 @@ export async function runCodexUserSettingsSetup({
       createClient,
       primaryProvider,
     });
+  }
+  if (section === "update-plan") {
+    return runUpdatePlanSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
   if (section === "preferences") {
     return runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
@@ -243,6 +251,41 @@ async function runWebSearchSetting({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 联网搜索模式已更新：${mode}\n`);
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  return result;
+}
+
+async function runUpdatePlanSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  const enabled = await prompts.select({
+    message: "计划清单工具",
+    showInstructions: false,
+    initialValue: settings.defaults.updatePlanEnabled ? "enabled" : "disabled",
+    options: [
+      { value: "enabled", label: "开启", hint: "允许模型创建和更新执行计划" },
+      { value: "disabled", label: "关闭", hint: "不向模型注册计划清单工具（默认）" },
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(enabled) || enabled === "back") return { action: "back" };
+  if (enabled !== "enabled" && enabled !== "disabled") {
+    throw new Error(`未知计划清单工具设置：${String(enabled)}`);
+  }
+  const value = enabled === "enabled";
+  const confirmed = await prompts.confirm({
+    message: `保存计划清单工具：${value ? "开启" : "关闭"}？`,
+    initialValue: true,
+  });
+  if (prompts.isCancel(confirmed) || confirmed !== true) {
+    output.write("已取消，未修改计划清单工具设置。\n");
+    return undefined;
+  }
+  const result = await updateSetting({ kind: "update-plan", enabled: value }, {
+    environment,
+    expectedVersion: settings.version,
+    ...(createClient === undefined ? {} : { createClient }),
+    ...(primaryProvider === undefined ? {} : { primaryProvider }),
+  });
+  output.write(`Codex 计划清单工具已${value ? "开启" : "关闭"}。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }

@@ -37,6 +37,7 @@ describe("Codex user settings management", () => {
         reasoningEffort: "high",
         fastEnabled: true,
         webSearch: null,
+        updatePlanEnabled: false,
         reasoningSummary: null,
         planModeReasoningEffort: null,
         verbosity: null,
@@ -181,6 +182,27 @@ describe("Codex user settings management", () => {
       { keyPath: "personality", value: "friendly" },
       { keyPath: "check_for_update_on_startup", value: false },
       { keyPath: "history.persistence", value: "none" },
+    ], { expectedVersion: "version-1" });
+  });
+
+  it("writes the upstream plan checklist tool setting separately", async () => {
+    const client = settingsClient({ tools: { update_plan: { enabled: false } } });
+
+    await expect(updateCodexUserSetting({
+      kind: "update-plan",
+      enabled: true,
+    }, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+      primaryProvider: () => "deepseek",
+    })).resolves.toMatchObject({
+      kind: "update-plan",
+      value: { enabled: true },
+      activation: "restart-all",
+    });
+
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "tools.update_plan.enabled", value: true },
     ], { expectedVersion: "version-1" });
   });
 
