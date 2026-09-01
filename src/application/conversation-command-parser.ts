@@ -147,8 +147,10 @@ export function toSessionQuery(view: SessionListView): {
   filter?: SessionListView["filter"];
   provider?: string;
   sectionSelector?: string;
+  page?: number;
 } {
   return {
+    page: view.page,
     ...(view.searchTerm ? { searchTerm: view.searchTerm } : {}),
     ...(view.filter !== "all" ? { filter: view.filter } : {}),
     ...(view.provider ? { provider: view.provider } : {}),

@@ -97,6 +97,8 @@ import {
 } from "./thread-queue-service.js";
 import { ThreadRevertService } from "./thread-revert-service.js";
 
+const sessionListPageSize = 20;
+
 export type {
   ThreadQueueListResult,
   ThreadQueueReorderResult,
@@ -124,6 +126,7 @@ export interface ConversationSession {
   modelProvider?: string;
   status: { type: "notLoaded" | "idle" | "systemError" | "active" };
   model?: string;
+  turnCount?: number;
 }
 
 export interface ConversationSessionQuery {
@@ -132,6 +135,7 @@ export interface ConversationSessionQuery {
   filter?: "all" | "running" | "pinned" | "unsectioned";
   provider?: string;
   sectionSelector?: string;
+  page?: number;
 }
 
 export interface ThreadSectionView extends ThreadSectionSnapshot {
@@ -376,7 +380,7 @@ export class ConversationService implements ConversationUseCases {
     },
     private readonly threadOccupancy?: ThreadOccupancyPort,
     private readonly threadQueue?: ThreadQueuePort,
-    threadHistory?: ThreadHistoryPort,
+    private readonly threadHistory?: ThreadHistoryPort,
     private readonly remoteQuotaReader?: (
       provider: string,
       resetsAt: number,
@@ -394,7 +398,7 @@ export class ConversationService implements ConversationUseCases {
       this.locks,
       router,
       threadQueue,
-      threadHistory,
+      this.threadHistory,
     );
   }
 
@@ -734,7 +738,7 @@ export class ConversationService implements ConversationUseCases {
         : all;
     const selectors = new Map(all.map((thread, index) => [thread.id, String(index + 1)]));
     const normalizedProvider = options.provider?.trim().toLowerCase() || null;
-    return ordered.map((thread) => ({ thread, selector: selectors.get(thread.id) }))
+    const sessions = ordered.map((thread) => ({ thread, selector: selectors.get(thread.id) }))
       .filter(({ thread }) => {
         if (normalizedProvider && thread.modelProvider.toLowerCase() !== normalizedProvider) {
           return false;
@@ -759,6 +763,23 @@ export class ConversationService implements ConversationUseCases {
           ...(model ? { model } : {}),
         };
       });
+    const page = options.page;
+    if (!this.threadHistory || typeof page !== "number" || !Number.isSafeInteger(page) || page < 1) {
+      return sessions;
+    }
+    const start = (page - 1) * sessionListPageSize;
+    const visible = sessions.slice(start, start + sessionListPageSize);
+    const counts = await Promise.all(visible.map(async (session) => [
+      session.id,
+      await countThreadTurns(this.threadHistory!, session.id),
+    ] as const));
+    const countByThread = new Map(
+      counts.filter((entry): entry is readonly [string, number] => entry[1] !== undefined),
+    );
+    return sessions.map((session) => {
+      const turnCount = countByThread.get(session.id);
+      return turnCount === undefined ? session : { ...session, turnCount };
+    });
   }
 
   async listThreadSections(target: ConversationTarget): Promise<ThreadSectionView[]> {
@@ -2049,6 +2070,32 @@ export function resolveThread<T extends Pick<ConversationSession, "id" | "name">
     ambiguous ? "session.selector.ambiguous" : "session.selector.not-found",
     ambiguous ? "会话选择不唯一" : "找不到指定会话",
   );
+}
+
+async function countThreadTurns(
+  history: ThreadHistoryPort,
+  threadId: string,
+): Promise<number | undefined> {
+  let count = 0;
+  let cursor: string | null = null;
+  const cursors = new Set<string>();
+  try {
+    do {
+      const page = await history.listThreadTurns(threadId, {
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      count += page.turns.length;
+      cursor = page.nextCursor;
+      if (cursor) {
+        if (cursors.has(cursor)) return undefined;
+        cursors.add(cursor);
+      }
+    } while (cursor);
+    return count;
+  } catch {
+    return undefined;
+  }
 }
 
 function pinnedFirst<T extends { isPinned: boolean }>(

@@ -7,6 +7,7 @@ import {
 import type { ModelSelectionService } from "../src/application/model-selection-service.js";
 import type { TurnExecutionPort } from "../src/application/turn-port.js";
 import type { ThreadQueuePort } from "../src/application/thread-queue-port.js";
+import type { ThreadHistoryPort } from "../src/application/thread-history-port.js";
 import {
   ConversationCore,
 } from "../src/conversation-core/index.js";
@@ -446,6 +447,75 @@ describe("ConversationService conversation service session", () => {
     await expect(service.listSessions(target)).resolves.toEqual([
       { selector: "1", id: "known-model", preview: "已知模型", name: null, isPinned: false, modelProvider: "openai", status: { type: "idle" }, model: "gpt-test" },
       { selector: "2", id: "unknown-model", preview: "未知模型", name: null, isPinned: false, modelProvider: "openai", status: { type: "idle" } },
+    ]);
+  });
+
+  it("annotates the visible session page with official turn counts", async () => {
+    const service = new ConversationService(
+      turnPort(),
+      {
+        list: async () => [
+          {
+            id: "thread-a",
+            sessionId: "session-a",
+            modelProvider: "openai",
+            preview: "会话 A",
+            name: null,
+            isPinned: false,
+            status: { type: "idle" as const },
+            cwd: main.cwd,
+            source: "cli" as const,
+            activeTurnId: null,
+          },
+          {
+            id: "thread-b",
+            sessionId: "session-b",
+            modelProvider: "openai",
+            preview: "会话 B",
+            name: null,
+            isPinned: false,
+            status: { type: "idle" as const },
+            cwd: main.cwd,
+            source: "cli" as const,
+            activeTurnId: null,
+          },
+        ],
+        modelSettingsForThread: () => undefined,
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { clear: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        listThreadTurns: vi.fn(async (threadId: string) => ({
+          turns: Array.from({ length: threadId === "thread-a" ? 2 : 4 }, (_, index) => ({
+            id: `${threadId}-turn-${index + 1}`,
+            status: "completed" as const,
+            startedAt: null,
+            completedAt: null,
+            durationMs: null,
+            inputType: "text" as const,
+            textPreview: null,
+          })),
+          nextCursor: null,
+        })),
+      } as unknown as ThreadHistoryPort,
+    );
+
+    await expect(service.listSessions(target, { page: 1 })).resolves.toEqual([
+      expect.objectContaining({ id: "thread-a", turnCount: 2 }),
+      expect.objectContaining({ id: "thread-b", turnCount: 4 }),
     ]);
   });
 

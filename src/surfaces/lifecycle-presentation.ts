@@ -360,7 +360,10 @@ export function createSubagentCompletedPresentation(
             label: "缓存命中率",
             value: formatCacheHitRate(event.inputTokens, cachedInputTokens),
           }]),
-    ] : [],
+    ] : cachedInputTokens === null ? [] : [{
+      label: "缓存命中率",
+      value: formatCacheHitRate(event.inputTokens, cachedInputTokens),
+    }],
   });
   if (debug && event.durationMs > 0) {
     fields.push({
@@ -629,7 +632,7 @@ export function createTurnCompletedPresentation(
       value: formatElapsedDuration(event.timing.modelRequestDurationMs),
     });
   }
-  if (debug && fallbackCacheField) {
+  if (fallbackCacheField) {
     runFields.push(fallbackCacheField);
   }
   if (
@@ -672,7 +675,10 @@ export function createTurnCompletedPresentation(
               label: "缓存命中率",
               value: formatCacheHitRate(inputTokens, cachedInputTokens),
             }]),
-      ] : [],
+      ] : cachedInputTokens === undefined ? [] : [{
+        label: "缓存命中率",
+        value: formatCacheHitRate(inputTokens, cachedInputTokens),
+      }],
     });
   }
   if (event.timing?.referenceCost) {
@@ -782,7 +788,10 @@ export function createTurnCompletedPresentation(
                 label: "缓存命中率",
                 value: formatCacheHitRate(task.inputTokens, task.cachedInputTokens),
               }]),
-        ] : [],
+        ] : task.cachedInputTokens === null ? [] : [{
+          label: "缓存命中率",
+          value: formatCacheHitRate(task.inputTokens, task.cachedInputTokens),
+        }],
       },
     ];
     if (successfulTaskRequestCount > 0) {

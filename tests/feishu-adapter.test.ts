@@ -1007,6 +1007,7 @@ describe("Feishu conversation adapter", () => {
       ]),
     });
     expect(listSessions).toHaveBeenCalledWith(message.target, {
+      page: 1,
       searchTerm: "认证",
     });
     await fixture.outbox.close();
@@ -1052,6 +1053,7 @@ describe("Feishu conversation adapter", () => {
     });
     expect(listSessions).toHaveBeenCalledWith(message.target, {
       archived: true,
+      page: 1,
       searchTerm: "认证",
     });
     await fixture.outbox.close();

@@ -169,6 +169,7 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 - 帮助：`/help`、`/whoami`
 
 `/stop` 会优先中断当前活动 Turn；`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
+`/resume`、`/sessions` 和 `/archived` 的当前页会话会显示已记录的 Turn 轮数；轮数读取失败时不会阻塞列表。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。
 

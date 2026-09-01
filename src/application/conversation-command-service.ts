@@ -353,7 +353,7 @@ export class ConversationCommandService {
           };
         }
         const view = defaultSessionListView();
-        const sessions = await this.conversations.listSessions(target);
+        const sessions = await this.conversations.listSessions(target, { page: view.page });
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {

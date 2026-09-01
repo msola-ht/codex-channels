@@ -224,6 +224,8 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 先通过当前模型能力检查。Codex Client 只映射这三个稳定输入变体。模块边界测试同时禁止生产 Client 调用 `thread/realtime/*`，Surface
 不得把平台音频地址、密钥、实时音频或未验证的编解码数据带入 Application/Core。
 
+会话列表命令（`/resume`、`/sessions`、`/archived`）会按当前页从 `thread/turns/list` 读取并显示每个 Thread 的官方 Turn 轮数；历史读取失败时仍返回会话列表，不猜测轮数。
+
 ## 本项目实现映射
 
 | 要查的问题 | 本项目入口 | 验证入口 |
