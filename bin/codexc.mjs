@@ -1288,7 +1288,8 @@ async function waitForHttpServiceReadiness(target, environment) {
   if (typeof host !== "string" || !Number.isInteger(port)) {
     throw new Error(`${target === "webui" ? "WebUI" : "指标中心"} 配置无效，无法确认服务就绪`);
   }
-  const url = `http://${host.includes(":") ? `[${host}]` : host}:${port}/api/v1/health`;
+  const healthPath = target === "webui" ? "/api/v1/health" : "/api/health";
+  const url = `http://${host.includes(":") ? `[${host}]` : host}:${port}${healthPath}`;
   const deadline = Date.now() + 5_000;
   let lastError;
   while (Date.now() < deadline) {
