@@ -16,7 +16,6 @@ import {
 export interface OperationLogView {
   order: readonly string[];
   records: ReadonlyMap<string, OperationUpdate>;
-  omittedCount: number;
 }
 
 interface OperationGroup {
@@ -32,12 +31,10 @@ export function formatOperationLog(
     .map((itemId) => state.records.get(itemId))
     .filter((record): record is OperationUpdate => record !== undefined);
   let visible = records.slice(-20);
-  let omitted = state.omittedCount + records.length - visible.length;
-  let text = renderOperationRecords(visible, omitted, display);
+  let text = renderOperationRecords(visible, display);
   while (Array.from(text).length > 3_900 && visible.length > 1) {
     visible = visible.slice(1);
-    omitted += 1;
-    text = renderOperationRecords(visible, omitted, display);
+    text = renderOperationRecords(visible, display);
   }
   return text;
 }
@@ -51,7 +48,6 @@ export function formatTelegramOperationSummary(
     return formatOperationLog({
       order: [record.itemId],
       records: new Map([[record.itemId, record]]),
-      omittedCount: 0,
     }, display);
   }
   const duration = summary.totalDurationMs === undefined
@@ -75,13 +71,9 @@ export function formatTelegramOperationSummary(
 
 function renderOperationRecords(
   records: OperationUpdate[],
-  omitted: number,
   display: Exclude<OperationUpdateDisplay, "hidden">,
 ): string {
   const lines = ["<b>操作过程</b>"];
-  if (omitted > 0) {
-    lines.push("", `<i>已省略较早的 ${omitted} 项操作</i>`);
-  }
   for (const { record, count } of groupOperations(records)) {
     const countLabel = count > 1 ? ` (×${count})` : "";
     const metadata = operationMetadata(record);

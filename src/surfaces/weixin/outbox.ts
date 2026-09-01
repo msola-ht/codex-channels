@@ -122,6 +122,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private readonly activeOperations = new Set<string>();
   private readonly pendingApprovalOperations = new Set<string>();
   private readonly reasoningGenerations = new Map<string, number>();
+  private readonly reasoningDisplayedGenerations = new Map<string, number>();
   private readonly planProgress = new TurnPlanProgressState();
   private readonly accountId: string;
   private closed = false;
@@ -180,25 +181,24 @@ export class WeixinOutbox implements SurfaceOutputPort {
       if (this.hasActiveOperation(event.threadId, event.turnId)) {
         return;
       }
-      if (event.final !== true) {
+      const turn = turnKey(event.threadId, event.turnId);
+      const generation = this.reasoningGenerations.get(turn) ?? 0;
+      if (this.reasoningDisplayedGenerations.get(turn) === generation) {
         return;
       }
-      const generation = this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0;
+      this.reasoningDisplayedGenerations.set(turn, generation);
       this.delivery.enqueue(
         event.target.conversationId,
-        (signal) => (this.reasoningGenerations.get(turnKey(event.threadId, event.turnId)) ?? 0) !== generation
-          || this.hasActiveOperation(event.threadId, event.turnId)
-          ? Promise.resolve()
-          : this.send(
-            event.target,
-            renderPlainLifecyclePresentation(
-              createTurnReasoningPresentation(
-                event.background ? event.threadId : undefined,
-                event.elapsedMs,
-                true,
-              ),
-            ), maximumChunks, signal,
-          ),
+        (signal) => this.send(
+          event.target,
+          renderPlainLifecyclePresentation(
+            createTurnReasoningPresentation(
+              event.background ? event.threadId : undefined,
+              undefined,
+              false,
+            ),
+          ), maximumChunks, signal,
+        ),
         true,
       );
       return;
@@ -351,6 +351,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.operationUpdates.clear();
     this.activeOperations.clear();
     this.reasoningGenerations.clear();
+    this.reasoningDisplayedGenerations.clear();
     this.planProgress.clear();
     this.contexts.clear();
   }
@@ -670,6 +671,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     for (const key of this.reasoningGenerations.keys()) {
       if (key.startsWith(prefix)) this.reasoningGenerations.delete(key);
+    }
+    for (const key of this.reasoningDisplayedGenerations.keys()) {
+      if (key.startsWith(prefix)) this.reasoningDisplayedGenerations.delete(key);
     }
   }
 
