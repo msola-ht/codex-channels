@@ -1136,6 +1136,8 @@ function deepseekSetupResult(paths, mode) {
     gatewayProfilePath: paths.gatewayProfilePath,
     catalogPath: paths.catalogPath,
     backupPath: paths.backupPath,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
   };
 }
 

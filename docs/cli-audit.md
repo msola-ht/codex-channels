@@ -444,7 +444,7 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 | 配置领域 | Setup | Config | 当前状态 |
 | --- | --- | --- | --- |
 | Gateway 基础/显示/权限 | 首次或跨领域设置 | 日常修改 | 底层激活结果和主要文案已统一；Setup 公开结果仍未结构化输出 |
-| 模型与 Provider | OpenAI、第三方 Provider、共享子代理 | 部分运行参数/数据中心关联项 | 多数只提示重启；部分 Setup 子模块返回对象缺少 `activationResult` |
+| 模型与 Provider | OpenAI、第三方 Provider、共享子代理 | 部分运行参数/数据中心关联项 | 主要 Setup 子模块已返回 `activation`/`activationResult`；公开 CLI 仍不输出机器可读变更结果 |
 | 通讯渠道 | 首次配置和恢复 | 日常渠道参数/格式 | Gateway 内部热加载分类已有测试；平台服务最终状态仍未统一返回 |
 | 数据中心 | 由 Setup 进入 Provider/子代理流程 | 本机上报、查看令牌、中心服务、WebUI | 正式 Config 可自动重启并确认；独立 `center config` 仍是保存与重启两个命令 |
 | 项目技能/Workspace | Setup 负责入口 | Config 不负责 | 边界清楚，不应互相复制 |

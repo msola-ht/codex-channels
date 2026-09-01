@@ -145,5 +145,9 @@ export async function runOfficialLoginSetup({
   );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   output.write("旧会话仍使用创建时的 Provider，请用 /new 创建新会话。\n");
-  return { mode: "official" };
+  return {
+    mode: "official",
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }

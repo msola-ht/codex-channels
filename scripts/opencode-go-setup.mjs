@@ -172,7 +172,11 @@ export async function runOpenCodeGoSetup({
       await applyOpencodeGoRestore({ confirmRestore: true }, { environment });
       output.write("已恢复配置 OpenCode Go 前的文件。\n");
       writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
-      return { action: "restored" };
+      return {
+        action: "restored",
+        activation: "restart-all",
+        activationResult: configActivationResult("restart-all"),
+      };
     }
     if (action === "account-add") {
       const accountId = await prompt.accountId();
@@ -192,7 +196,11 @@ export async function runOpenCodeGoSetup({
       await setOpencodeGoDefaultAccount(accountId, { environment, configureRole });
       output.write(`默认 OpenCode Go 账户已设置为 ${accountId}。\n`);
       writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
-      return { action: "default-set" };
+      return {
+        action: "default-set",
+        activation: "restart-all",
+        activationResult: configActivationResult("restart-all"),
+      };
     }
     if (action === "account-stop") {
       const accountId = await prompt.selectAccount(accounts);
@@ -272,7 +280,14 @@ export async function addOpencodeGoAccount(accountId, {
     output.write("共享第三方子代理（agents.external）已切换到默认账户。\n");
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
-  return { action: "configured", mode, accountId, ...paths };
+  return {
+    action: "configured",
+    mode,
+    accountId,
+    ...paths,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }
 
 export function printOpencodeGoAccounts(environment = process.env, output = process.stdout, { json = false } = {}) {
@@ -322,7 +337,12 @@ export async function removeOpencodeGoAccount(accountId, {
   });
   output.write(`OpenCode Go 账户已删除：${accountId}（备份保留在 ${result.backupDirectory}）。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
-  return { action: "removed", accountId };
+  return {
+    action: "removed",
+    accountId,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }
 
 export async function setOpencodeGoDefaultAccount(accountId, {

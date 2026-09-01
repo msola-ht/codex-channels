@@ -4,6 +4,7 @@ import {
   writeCliMessage,
   writeCliRemediationRestartAll,
 } from "../runtime/cli-presentation.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import {
   applyThirdPartyAgentChange,
   agentsStatus,
@@ -82,7 +83,12 @@ export async function runThirdPartyAgentSetup({
         environment,
       });
     }
-    return { action: "disabled" };
+    const activation = result.action === "disabled" ? "restart-all" : "none";
+    return {
+      action: "disabled",
+      activation,
+      activationResult: configActivationResult(activation),
+    };
   }
   if (action !== "configure") throw new Error(`未知第三方子代理操作：${String(action)}`);
 
@@ -140,5 +146,11 @@ export async function runThirdPartyAgentSetup({
     { stdout: output, environment },
   );
   writeCliRemediationRestartAll({ stdout: output, environment });
-  return { action: "configured", provider: selection.provider, model: selection.model };
+  return {
+    action: "configured",
+    provider: selection.provider,
+    model: selection.model,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }

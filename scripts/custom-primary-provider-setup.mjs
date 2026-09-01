@@ -414,7 +414,12 @@ export async function runCustomPrimaryProviderSetup({
       "旧 Thread 不会改变；重启后，在 /model 选择该 Provider，"
       + "下一条消息会创建新的 Provider Thread。可用 /model clear 清除会话偏好。\n",
     );
-    return { provider: result.provider.id, model: result.provider.model };
+    return {
+      provider: result.provider.id,
+      model: result.provider.model,
+      activation: "restart-all",
+      activationResult: configActivationResult("restart-all"),
+    };
   }
   output.write(
     backupCleanupFailed
@@ -427,5 +432,10 @@ export async function runCustomPrimaryProviderSetup({
     "旧 Thread 不会改变；重启后新 Thread 使用该固定 Provider。"
     + "会话内 /model 偏好可用 /model clear 清除。\n",
   );
-  return { provider: result.provider.id, model: result.provider.model };
+  return {
+    provider: result.provider.id,
+    model: result.provider.model,
+    activation: "restart-all",
+    activationResult: configActivationResult("restart-all"),
+  };
 }

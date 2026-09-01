@@ -10,6 +10,7 @@ import {
   removeApiProviderKey,
   writeApiProviderKey,
 } from "../runtime/api-provider-credential.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 export function listApiProviders(environment = process.env) {
@@ -102,6 +103,7 @@ function savedProviderResult(existing, provider, configPath) {
     provider: { ...provider, hasApiKey: true },
     configPath,
     activation: "restart-gateway",
+    activationResult: configActivationResult("restart-gateway"),
   };
 }
 
@@ -176,6 +178,7 @@ function removedProviderResult(providerId, configPath) {
     provider: providerId,
     configPath,
     activation: "restart-gateway",
+    activationResult: configActivationResult("restart-gateway"),
   };
 }
 

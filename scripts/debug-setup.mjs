@@ -49,7 +49,12 @@ export async function runDebugSetup({
     level,
     message: `全局调试模式已${selected === "enabled" ? "开启" : "关闭"}`,
   });
-  return { enabled: selected === "enabled", configPath: result.configPath };
+  return {
+    enabled: selected === "enabled",
+    configPath: result.configPath,
+    activation: result.activation,
+    activationResult: result.activationResult,
+  };
 }
 
 export function writeLoggingLevel({
@@ -73,5 +78,10 @@ export function writeLoggingLevel({
   });
   output.write(`${message}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { level, configPath: result.configPath, activationResult: result.activationResult };
+  return {
+    level,
+    configPath: result.configPath,
+    activation: result.activation,
+    activationResult: result.activationResult,
+  };
 }

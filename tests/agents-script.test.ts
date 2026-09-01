@@ -195,6 +195,12 @@ describe("codexc agents script", () => {
       action: "configured",
       provider: "deepseek",
       model: "deepseek-v4-pro",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
     });
     expect(configureRole).toHaveBeenCalledWith("deepseek", "deepseek-v4-pro", {});
     expect(output.join("")).toContain("已配置共享第三方子代理：deepseek / deepseek-v4-pro");
@@ -227,7 +233,15 @@ describe("codexc agents script", () => {
       disableRole,
     });
 
-    expect(result).toEqual({ action: "disabled" });
+    expect(result).toEqual({
+      action: "disabled",
+      activation: "restart-all",
+      activationResult: {
+        status: "restart",
+        target: "all",
+        commands: ["codexc service restart all"],
+      },
+    });
     expect(prompts.confirm).toHaveBeenCalledOnce();
     expect(disableRole).toHaveBeenCalledWith({});
     expect(output.join("")).toContain("已移除共享第三方子代理");

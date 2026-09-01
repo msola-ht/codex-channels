@@ -38,6 +38,23 @@ describe("Debug setup", () => {
       isCancel: () => false,
     };
 
+    const expectedActivation = enabled
+      ? {
+          activation: "restart-gateway",
+          activationResult: {
+            status: "restart",
+            target: "gateway",
+            commands: ["codexc service restart gateway"],
+          },
+        }
+      : {
+          activation: "none",
+          activationResult: {
+            status: "none",
+            target: "none",
+            commands: [],
+          },
+        };
     await expect(runDebugSetup({
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value) },
@@ -45,6 +62,7 @@ describe("Debug setup", () => {
     })).resolves.toEqual({
       enabled,
       configPath: fixture.configPath,
+      ...expectedActivation,
     });
 
     expect(readGatewayConfig(fixture.configPath).logging).toEqual({
