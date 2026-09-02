@@ -200,6 +200,7 @@ describe("mergeCompletionTiming", () => {
         currency: "USD",
         totalCostNanos: 12_000,
         inputTokens: 1_000,
+        cachedInputTokens: 800,
         outputTokens: 100,
         inputCostNanos: 8_000,
         cachedInputCostNanos: 1_000,

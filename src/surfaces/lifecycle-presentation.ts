@@ -44,6 +44,7 @@ import {
   formatCacheHitRate,
   formatTokenCount,
 } from "./token-format.js";
+import gatewayMetadata from "../version.json" with { type: "json" };
 
 export interface LifecyclePresentation {
   title: string;
@@ -122,6 +123,10 @@ export function createStartupPresentation(
         label: "系统",
         value: `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
       },
+      {
+        label: "版本",
+        value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}`,
+      },
       ...(runtime.openAiConnectivity === "unreachable"
         ? [{
             label: "OpenAI 网络",
@@ -135,8 +140,8 @@ export function createStartupPresentation(
             title: "运行环境",
             fields: [
               {
-                label: "版本",
-                value: `Codex Connect ${runtime.gatewayVersion} · Node.js ${runtime.nodeVersion}`,
+                label: "Node.js",
+                value: runtime.nodeVersion,
               },
               { label: "连接", value: runtime.transport },
               {
@@ -927,7 +932,15 @@ export function createTurnCompletedPresentation(
           event.sessionReferenceCost.inputTokens
             + event.sessionReferenceCost.outputTokens,
         ),
-        fields: [],
+        fields: event.sessionReferenceCost.cachedInputTokens === undefined
+          ? []
+          : [{
+              label: "缓存命中率",
+              value: formatCacheHitRate(
+                event.sessionReferenceCost.inputTokens,
+                event.sessionReferenceCost.cachedInputTokens,
+              ),
+            }],
       });
     }
     sessionFields.push({

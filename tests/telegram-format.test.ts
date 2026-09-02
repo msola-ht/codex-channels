@@ -13,6 +13,7 @@ import {
   splitTelegramText,
 } from "../src/surfaces/telegram/format.js";
 import type { ModelOption } from "../src/application/index.js";
+import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 function model(
   name: string,
@@ -236,7 +237,8 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("- App Server：已连接");
     expect(text).toContain("### 运行环境");
     expect(text).toContain("- 系统：macOS · arm64");
-    expect(text).toContain("版本：Codex Connect 0.146.0 · Node.js v24.18.0");
+    expect(text).toContain(`版本：Codex Connect ${gatewayMetadata.version} · Codex 0.146.0`);
+    expect(text).toContain("- Node.js：v24.18.0");
     expect(text).toContain(
       "App Server UA：codex_connect/0.146.0 (Mac OS 15.7.7; arm64) (codex_connect; 0.146.0)",
     );
