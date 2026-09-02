@@ -552,7 +552,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       options: [
         { value: "1", label: "OpenAI + DeepSeek 切换模式" },
         { value: "2", label: "仅 DeepSeek 固定模式" },
-        { value: "3", label: "恢复安装前配置" },
+        { value: "3", label: "删除 DeepSeek（恢复安装前配置）" },
         { value: "4", label: "修改模型设置（思考等级、自动压缩）" },
         { value: "5", label: "返回上一级" },
       ],

@@ -209,6 +209,15 @@ export async function runOpenCodeGoSetup({
       if (accountId === undefined) return { action: "back" };
       return stopOpencodeGoAccount(accountId, { environment, output });
     }
+    if (action === "account-remove") {
+      const accountId = await prompt.selectAccount(accounts);
+      if (accountId === undefined) return { action: "back" };
+      return removeOpencodeGoAccount(accountId, {
+        environment,
+        output,
+        prompts,
+      });
+    }
     if (action === "list") {
       printAccounts(environment, output);
       return { action: "listed" };
@@ -777,6 +786,7 @@ function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, leg
           { value: "list", label: "列出账户" },
           { value: "account-default", label: "设置默认账户" },
           { value: "account-stop", label: "停止账户 App Server" },
+          { value: "account-remove", label: "删除账户" },
         );
       }
       options.push(

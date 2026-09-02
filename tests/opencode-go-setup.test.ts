@@ -69,6 +69,31 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     ]);
   });
 
+  it("exposes account deletion in the configured OpenCode Go menu", async () => {
+    const codexHome = opencodeFixture();
+    let labels: string[] = [];
+
+    await expect(runOpenCodeGoSetup({
+      allowBack: true,
+      environment: {
+        CODEX_HOME: codexHome,
+        CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+      },
+      prompts: {
+        select: async (options: { options: Array<{ label: string }> }) => {
+          labels = options.options.map(({ label }) => label);
+          return "back";
+        },
+        text: vi.fn(),
+        password: vi.fn(),
+        confirm: vi.fn(),
+        isCancel: () => false,
+      } as never,
+    })).resolves.toEqual({ action: "back" });
+
+    expect(labels).toContain("删除账户");
+  });
+
   it("requires fixed-mode confirmation when called without a custom prompter", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-confirm-"));
     const password = vi.fn();
