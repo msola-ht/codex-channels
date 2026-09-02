@@ -688,7 +688,10 @@ describe("WeixinOutbox", () => {
 
     expect(fixture.sendImage).not.toHaveBeenCalled();
     expect(fixture.contexts.get(target)).toBeUndefined();
-    expect(fixture.onReplyContextInvalidated).toHaveBeenCalledWith(target);
+    expect(fixture.onReplyContextInvalidated).toHaveBeenCalledWith(
+      target,
+      "context-secret",
+    );
   });
 
   it("hides operation updates without suppressing Turn completion", async () => {
@@ -913,6 +916,31 @@ describe("WeixinOutbox", () => {
     expect(deliveredText).toBe(longText.slice(0, deliveredText.length));
   });
 
+  it("does not retry a rejected context with a long-answer text fallback", async () => {
+    const longText = "测".repeat(20_001);
+    const fixture = outboxFixture(
+      { value: true },
+      {},
+      async () => {},
+      async () => {},
+      async () => {
+        throw new WeixinProtocolError(
+          "api-error",
+          "private upstream response",
+          undefined,
+          -2,
+        );
+      },
+    );
+
+    fixture.outbox.handle(completed("final_answer", longText));
+    await fixture.outbox.close();
+
+    expect(fixture.sendText).toHaveBeenCalledOnce();
+    expect(fixture.sendFile).toHaveBeenCalledOnce();
+    expect(fixture.contexts.get(target)).toBeUndefined();
+  });
+
   it("keeps one Conversation ordered while allowing another to progress", async () => {
     const secondActorId = "second-fixture@im.wechat";
     const secondTarget = {
@@ -1009,7 +1037,10 @@ describe("WeixinOutbox", () => {
     await expect(outbox.deliverText(target, "blocked"))
       .rejects.toMatchObject({ code: "unauthorized-recipient" });
     expect(contexts.get(target)).toBeUndefined();
-    expect(onReplyContextInvalidated).toHaveBeenCalledWith(target);
+    expect(onReplyContextInvalidated).toHaveBeenCalledWith(
+      target,
+      "context-secret",
+    );
     expect(sendText).not.toHaveBeenCalled();
 
     allowed.value = true;
@@ -1054,8 +1085,69 @@ describe("WeixinOutbox", () => {
       contextToken: "other-context",
     });
     expect(onReplyContextInvalidated).toHaveBeenCalledOnce();
-    expect(onReplyContextInvalidated).toHaveBeenCalledWith(target);
+    expect(onReplyContextInvalidated).toHaveBeenCalledWith(
+      target,
+      "context-secret",
+    );
     await outbox.close();
+  });
+
+  it("does not invalidate a newer context when an older queued send is rejected", async () => {
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(
+      async ({ text, contextToken }) => {
+        if (text === "first") {
+          await firstGate;
+          return;
+        }
+        if (contextToken === "context-secret") {
+          throw new WeixinProtocolError(
+            "api-error",
+            "private upstream response",
+            undefined,
+            -2,
+          );
+        }
+      },
+    );
+    const contexts = new WeixinReplyContextStore(accountId);
+    contexts.remember(target, actorId, "context-secret");
+    const onReplyContextInvalidated = vi.fn(async () => {});
+    const outbox = new WeixinOutbox(
+      accountId,
+      { sendText },
+      contexts,
+      accessFixture(true),
+      pino({ level: "silent" }),
+      { onReplyContextInvalidated },
+    );
+
+    expect(outbox.notifyText(target, "first")).toBe(true);
+    await vi.waitFor(() => expect(sendText).toHaveBeenCalledOnce());
+    expect(outbox.notifyText(target, "old queued")).toBe(true);
+    contexts.remember(target, actorId, "new-context");
+    releaseFirst();
+
+    await vi.waitFor(() => {
+      expect(sendText.mock.calls.map(([input]) => input.text)).toContain(
+        "old queued",
+      );
+    });
+    expect(contexts.get(target)).toEqual({
+      actorId,
+      contextToken: "new-context",
+    });
+    expect(onReplyContextInvalidated).not.toHaveBeenCalled();
+
+    expect(outbox.notifyText(target, "new output")).toBe(true);
+    await outbox.close();
+    expect(sendText.mock.calls.at(-1)?.[0]).toMatchObject({
+      contextToken: "new-context",
+      text: "new output",
+    });
   });
 
   it("stops remaining chunks when authorization is revoked during delivery", async () => {

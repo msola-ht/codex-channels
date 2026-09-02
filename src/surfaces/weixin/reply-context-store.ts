@@ -60,6 +60,16 @@ export class WeixinReplyContextStore {
     this.contexts.delete(target.conversationId);
   }
 
+  removeIf(target: ConversationTarget, expectedContextToken: string): boolean {
+    this.assertTarget(target);
+    const current = this.contexts.get(target.conversationId);
+    if (current === undefined || current.contextToken !== expectedContextToken) {
+      return false;
+    }
+    this.contexts.delete(target.conversationId);
+    return true;
+  }
+
   clear(): void {
     this.contexts.clear();
   }
