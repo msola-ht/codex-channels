@@ -238,6 +238,7 @@ export type ConversationCommandOutcome =
       nextModel: ConversationModelSummary;
     }
   | { type: "thread.archived"; threadId: string }
+  | { type: "sessions.cleaned"; maxTurns: number; archivedCount: number; failedCount: number }
   | { type: "thread.unarchived"; threadId: string }
   | { type: "thread.pin-updated"; pinned: boolean; changed: boolean }
   | { type: "thread-section.created"; sectionId: string; name: string }
@@ -353,7 +354,7 @@ export class ConversationCommandService {
           };
         }
         const view = defaultSessionListView();
-        const sessions = await this.conversations.listSessions(target);
+        const sessions = await this.conversations.listSessions(target, { page: view.page });
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {

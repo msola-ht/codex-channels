@@ -9,10 +9,14 @@ import { isEmergencyStopCommand } from "../slash-command.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 
+export function telegramConversationCommandName(name: string): string {
+  return name.replaceAll("-", "_");
+}
+
 const commands = [
   { command: "start", description: "使用说明" },
   ...conversationCommandNames.map((name) => ({
-    command: name,
+    command: telegramConversationCommandName(name),
     description: conversationCommandDescriptions[name],
   })),
   { command: "whoami", description: "显示 Telegram 用户 ID" },

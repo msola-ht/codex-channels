@@ -469,6 +469,7 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(normal).toContain("Token：23 K");
+    expect(normal).toContain("缓存命中率：75.00%");
     expect(normal).toContain("耗时：1分5秒");
     expect(normal).toContain("均价：约 $4,347.83/100M");
     expect(normal).not.toContain("输入：20 K");
@@ -642,6 +643,7 @@ describe("shared Surface lifecycle presentation", () => {
       "错误：失败：[已隐藏]",
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
+      "最近请求缓存命中率：75.00%",
       "性能",
       "  总耗时：1分5秒",
       "",
@@ -1372,6 +1374,7 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(normal).toContain("费用：$1.000000");
     expect(normal).toContain("Token：200");
+    expect(normal).toContain("缓存命中率：66.67%");
     expect(normal).toContain("均价：约 $500,000.00/100M");
     expect(normal).not.toContain("输入命中缓存");
     expect(normal).not.toContain("输入价格");

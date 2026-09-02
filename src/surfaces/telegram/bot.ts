@@ -66,6 +66,7 @@ import { TelegramApiExecutor } from "./api-executor.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
   TelegramLifecycle,
+  telegramConversationCommandName,
   telegramUpdateGroupSize,
 } from "./lifecycle.js";
 import { TelegramOutbox, type TelegramFinalMessageFormat } from "./outbox.js";
@@ -399,7 +400,8 @@ export class TelegramSurface {
     for (const command of conversationCommandNames.filter(
       (candidate) => candidate !== "stop",
     )) {
-      this.bot.command(command, (context) => this.executeCommand(context, command));
+      this.bot.command(telegramConversationCommandName(command), (context) =>
+        this.executeCommand(context, command));
     }
     this.bot.command("work", (context) =>
       this.executeCommand(context, surfaceCommandAliases.work));

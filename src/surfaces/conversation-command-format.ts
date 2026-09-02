@@ -178,7 +178,7 @@ export function formatConversationSessions(
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.modelProvider ? ` · Provider：${session.modelProvider}` : ""} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.modelProvider ? ` · Provider：${session.modelProvider}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
@@ -498,6 +498,11 @@ export function formatConversationCommandOutcome(
         "已归档 Codex Session",
         `Session ID：${outcome.threadId}`,
         "下一条普通消息将创建新会话。",
+      ].join("\n"));
+    case "sessions.cleaned":
+      return toStructuredMarkdownList([
+        `已归档 ${outcome.archivedCount} 个会话（Turn ≤ ${outcome.maxTurns}）`,
+        ...(outcome.failedCount > 0 ? [`${outcome.failedCount} 个会话因状态变化或归档失败而跳过。`] : []),
       ].join("\n"));
     case "thread.unarchived":
       return toStructuredMarkdownList([

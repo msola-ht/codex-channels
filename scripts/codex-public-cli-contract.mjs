@@ -101,6 +101,13 @@ export function validateCodexUserSettingsAgainstContract(
   assertContract(contract);
   const accepted = normalizeOption(contract.options["--ask-for-approval"]).values;
   const document = record(config);
+  const updatePlan = record(record(document.tools).update_plan);
+  if (Object.hasOwn(updatePlan, "enabled") && typeof updatePlan.enabled !== "boolean") {
+    throw new Error(
+      `Codex 用户配置 ${configPath} 的 tools.update_plan.enabled 必须是布尔值；`
+      + "请修正后重新运行 codexc update",
+    );
+  }
   validateApprovalPolicy(
     document.approval_policy,
     "approval_policy",

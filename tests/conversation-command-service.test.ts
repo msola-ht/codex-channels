@@ -186,7 +186,7 @@ describe("ConversationCommandService", () => {
         searchTerm: "fix",
       },
     });
-    expect(listSessions).toHaveBeenCalledWith(target, { searchTerm: "fix" });
+    expect(listSessions).toHaveBeenCalledWith(target, { page: 1, searchTerm: "fix" });
   });
 
   it("parses session paging and filters while keeping the full matched count", async () => {
@@ -215,6 +215,7 @@ describe("ConversationCommandService", () => {
       },
     });
     expect(listSessions).toHaveBeenCalledWith(target, {
+      page: 2,
       filter: "running",
       provider: "deepseek",
       sectionSelector: "项目",
@@ -236,6 +237,7 @@ describe("ConversationCommandService", () => {
     );
 
     expect(listSessions).toHaveBeenCalledWith(target, {
+      page: 2,
       sectionSelector: "项目 Alpha",
       provider: "deepseek",
       searchTerm: "修复 CI",

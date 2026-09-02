@@ -224,6 +224,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       ["note", "正在克隆 Git main 候选源码。"],
       ["note", "正在构建并预检候选源码；详细日志仅在失败时显示。"],
       ["note", "正在核对候选版本的 Codex 公开合同。"],
+      ["note", "Codex 计划清单工具：关闭（默认）；可在 codexc setup → Codex 新会话默认值中修改"],
       ["note", "候选源码已通过校验，准备切换。"],
       ["note", "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。"],
     ]);

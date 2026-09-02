@@ -428,6 +428,7 @@ describe("Feishu output renderer", () => {
       "### 本次运行",
       "- 模型：gpt-test · medium · Fast 开启",
       "- 提供商：OpenAI 官方",
+      "- 最近请求缓存命中率：50.00%",
       "- **性能**",
       "  - 总耗时：1分5秒",
       "",
@@ -580,6 +581,7 @@ describe("Feishu output renderer", () => {
         preview: "预览",
         isPinned: true,
         status: { type: "idle" },
+        turnCount: 3,
       }],
       currentThreadId: "thread-1234567890",
       archived: false,
@@ -588,7 +590,7 @@ describe("Feishu output renderer", () => {
       matchedSessionCount: 1,
       view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: "会话" },
     });
-    expect(sessions).toContain("固定 · 会话名称 · thread-12345 · idle ← 当前");
+    expect(sessions).toContain("固定 · 会话名称 · 轮数：3 · thread-12345 · idle ← 当前");
 
     expect(renderFeishuCommandResult({
       kind: "skills",

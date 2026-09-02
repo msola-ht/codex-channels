@@ -119,6 +119,7 @@ function settingsState(): CodexUserSettingsState {
       reasoningEffort: "medium",
       fastEnabled: false,
       webSearch: null,
+      updatePlanEnabled: false,
     },
     permissions: {
       editable: true,

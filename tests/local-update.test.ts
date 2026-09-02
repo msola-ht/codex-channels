@@ -7,6 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -33,6 +34,8 @@ import {
   updateDatabases,
   updateGatewayConfiguration,
   updateLocalInstallation,
+  inspectSessionDisplayCache,
+  updateSessionDisplayCache,
   waitForCoreServiceTarget,
   waitForCoreServices,
 } from "../scripts/local-update.mjs";
@@ -283,6 +286,47 @@ describe("local update", () => {
     expect(calls).toEqual(["state", "metrics"]);
     expect(result.state.version).toBe(4);
     expect(result.metrics.schemaVersion).toBe(7);
+  });
+
+  it("backs up and rebuilds an incompatible derived session cache", () => {
+    const { dataDir, environment } = fixture();
+    const cachePath = join(dataDir, "data", "session-display-cache.sqlite3");
+    const database = new DatabaseSync(cachePath);
+    database.exec("PRAGMA user_version = 99;");
+    database.close();
+
+    const result = updateSessionDisplayCache(environment);
+    expect(result).toMatchObject({
+      changed: true,
+      databasePath: cachePath,
+      schemaVersion: 1,
+    });
+    expect(result.backupPath).toEqual(expect.any(String));
+    expect(existsSync(cachePath)).toBe(false);
+    expect(existsSync(result.backupPath!)).toBe(true);
+  });
+
+  it("reports the derived session cache during database preflight", () => {
+    const { dataDir, environment } = fixture();
+    const cachePath = join(dataDir, "data", "session-display-cache.sqlite3");
+    const database = new DatabaseSync(cachePath);
+    database.exec("PRAGMA user_version = 99;");
+    database.close();
+
+    expect(inspectSessionDisplayCache(environment)).toMatchObject({
+      compatible: false,
+      exists: true,
+      databasePath: cachePath,
+      schemaVersion: 99,
+      targetSchemaVersion: 1,
+      updateable: true,
+    });
+    expect(inspectDatabaseUpdates(environment, {
+      inspectState: () => ({ compatible: true, updateable: true }),
+      inspectMetrics: () => ({ compatible: true, exists: false }),
+      inspectSessionDisplayCache: () => inspectSessionDisplayCache(environment),
+      validateMetrics: () => undefined,
+    }).sessionDisplayCache?.schemaVersion).toBe(99);
   });
 
   it("keeps config and both databases inside one stopped service window", async () => {

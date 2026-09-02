@@ -2,7 +2,8 @@
 
 ## 使用与配置
 
-- [`README.md`](README.md)：安装、配置、日常使用、排障和升级。
+- [`README.md`](README.md)：最短安装入口、常用命令和专题导航。
+- [`docs/user-guide.md`](docs/user-guide.md)：完整安装、配置、渠道使用、服务管理、升级、排障和开发指导。
 - [`config.example.toml`](config.example.toml)：Gateway 配置示例。
 - [`docs/display.md`](docs/display.md)：渠道展示口径、`/metrics` 命令与调试模式说明。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。

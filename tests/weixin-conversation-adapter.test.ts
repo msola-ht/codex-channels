@@ -715,6 +715,7 @@ describe("WeixinConversationAdapter", () => {
     await adapter.handle({ ...message, text: "/sessions fix" });
 
     expect(listSessions).toHaveBeenCalledWith(target, {
+      page: 1,
       searchTerm: "fix",
     });
     expect(notifyText).toHaveBeenCalledWith(

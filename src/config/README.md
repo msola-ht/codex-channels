@@ -38,6 +38,10 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 
 `display.plan_updates` 是自动计划展示开关，默认开启；显式设为 `false` 可关闭。开启后只影响官方
 `turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
+
+上游模型是否能够产生这些通知由 Codex 用户配置的 `tools.update_plan.enabled` 控制，默认关闭；通过
+`codexc setup → Codex 新会话默认值 → 计划清单工具` 修改。该设置写入 `~/.codex/config.toml`，与 Gateway
+的 `display.plan_updates` 分开管理；`codexc update` 会在合同预检时提示当前状态，`codexc doctor` 只读诊断该项。
 变化需要重启 Gateway，不需要重启 App Server。
 
 `display.reasoning` 是“思考中”状态展示开关，默认开启；显式设为 `false` 时三渠道不再发送

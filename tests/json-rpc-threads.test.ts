@@ -61,6 +61,8 @@ describe("JsonRpcClient threads", () => {
         source: "other",
         activeTurnId: "turn-running",
         historyMode: "legacy",
+        updatedAt: 1,
+        recencyAt: 1,
       }]);
     });
 
