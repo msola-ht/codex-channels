@@ -169,7 +169,7 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 - 帮助：`/help`、`/whoami`
 
 `/stop` 会优先中断当前活动 Turn；`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
-`/resume`、`/sessions` 和 `/archived` 的当前页会话会显示已记录的 Turn 轮数；轮数读取失败时不会阻塞列表，近期结果会从本机派生缓存复用。新 Turn 开始时旧轮数会失效，Turn 完成后 Gateway 会针对该会话自动回填最新值。
+`/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc sessions cleanup` 仍会按候选读取。
 可使用 `codexc sessions cleanup <最大轮数>` 预览并按轮数批量归档短会话；追加 `--idle-days <天数>` 可进一步要求会话连续空闲达到指定天数（两个条件同时满足）。在交互终端追加 `--confirm` 后会再次展示候选并询问确认。执行前需停止 Gateway；命令覆盖配置中的全部 Workspace 和 Provider，Provider 不可连接时失败关闭，使用本机轮数缓存，归档不会永久删除会话。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。

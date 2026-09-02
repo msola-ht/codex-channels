@@ -186,7 +186,30 @@ describe("ConversationCommandService", () => {
         searchTerm: "fix",
       },
     });
-    expect(listSessions).toHaveBeenCalledWith(target, { page: 1, searchTerm: "fix" });
+    expect(listSessions).toHaveBeenCalledWith(target, {
+      page: 1,
+      searchTerm: "fix",
+      turnCountMode: "cached",
+    });
+  });
+
+  it("keeps the resume picker fast by avoiding turn-history scans", async () => {
+    const listSessions = vi.fn(async () => [{ id: "thread-1" }]);
+    const commands = new ConversationCommandService({
+      listSessions,
+      status: () => ({ threadId: "thread-1" }),
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "resume")).resolves.toMatchObject({
+      kind: "sessions",
+      sessions: [{ id: "thread-1" }],
+      page: 1,
+      matchedSessionCount: 1,
+    });
+    expect(listSessions).toHaveBeenCalledWith(target, {
+      page: 1,
+      turnCountMode: "cached",
+    });
   });
 
   it("parses session paging and filters while keeping the full matched count", async () => {
@@ -220,6 +243,7 @@ describe("ConversationCommandService", () => {
       provider: "deepseek",
       sectionSelector: "项目",
       searchTerm: "修复 CI",
+      turnCountMode: "cached",
     });
   });
 
@@ -241,6 +265,7 @@ describe("ConversationCommandService", () => {
       sectionSelector: "项目 Alpha",
       provider: "deepseek",
       searchTerm: "修复 CI",
+      turnCountMode: "cached",
     });
   });
 

@@ -14,7 +14,7 @@
 - `conversation-service.ts`：通过稳定的 `ConversationUseCases` 公开 Surface 和命令层所需用例，
   具体 `ConversationService` 负责新建、恢复、切换、归档、固定、原生分区和分页筛选 Thread，提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
-  会话列表当前页通过 Thread History 端口汇总官方 Turn 轮数，历史读取失败不阻塞列表且不伪造数量；
+  会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   并通过注入端口把项目规则操作限制
   到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；

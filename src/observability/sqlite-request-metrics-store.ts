@@ -1079,6 +1079,24 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     }));
   }
 
+  /**
+   * Count Turns recorded directly on a Thread without traversing subagent
+   * descendants. This is the inexpensive local equivalent used by session
+   * pickers; full summaries retain their aggregate/subagent semantics.
+   */
+  threadTurnCount(threadId: string): number | null {
+    this.requireOpen();
+    if (!threadId.trim() || threadId.length > 128) {
+      throw new Error("Thread ID 无效");
+    }
+    const row = this.database.prepare(`
+      SELECT COUNT(DISTINCT turn_id) AS turn_count, COUNT(*) AS request_count
+      FROM model_request_metrics_enriched
+      WHERE thread_id = ? AND turn_id IS NOT NULL
+    `).get(threadId) as { turn_count: number; request_count: number };
+    return row.request_count === 0 ? null : row.turn_count;
+  }
+
   threadList(): StoredThreadListItem[] {
     this.requireOpen();
     const rows = this.database.prepare(`

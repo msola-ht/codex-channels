@@ -66,6 +66,10 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
     };
   }
 
+  threadTurnCount(threadId: string): number | null {
+    return this.store.threadTurnCount(threadId);
+  }
+
   aggregate(
     view: RequestMetricsAggregateView,
     range: RequestMetricsTimeRange,

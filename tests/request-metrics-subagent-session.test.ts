@@ -27,6 +27,8 @@ describe("request metrics subagent session aggregation", () => {
     raw.prepare("INSERT INTO subagent_threads (thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms) VALUES (?, ?, ?, ?, ?)").run("root", "grandchild", "grand-turn", "/root/cycle", Date.now());
     raw.close();
     expect(store.threadSummary("root").threadAggregate).toMatchObject({ requestCount: 4, inputTokens: 1_000, outputTokens: 100, turnCount: 4 });
+    expect(store.threadTurnCount("root")).toBe(1);
+    expect(store.threadTurnCount("child")).toBe(1);
     expect(store.aggregate({ dimension: "global", startAtMs: 0, endAtMs: Date.now() + 1_000 }).aggregate).toMatchObject({ requestCount: 4, inputTokens: 1_000, outputTokens: 100 });
     store.close();
   });

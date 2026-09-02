@@ -84,6 +84,8 @@
   会话发送并归档，详见 `docs/channel-image.md`。
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc sessions cleanup`，通过
   App Server 枚举多 Provider/Workspace，会话元数据过滤后按 Turn 上限和可选空闲天数预览、确认归档。
+- `session-menu.mjs` / `session-menu.d.mts`：`codexc sessions` 无子命令时的交互菜单；收集 Turn 上限和空闲天数后调用
+  会话清理 CLI，并保留清理命令自身的候选预览与最终确认。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
   汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
   格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。

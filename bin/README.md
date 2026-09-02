@@ -28,6 +28,7 @@
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
+- `sessions`：无子命令时进入会话清理交互菜单；也可使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry；
   `check --json` 静默底层 Codex 展示并返回可解析的成功或失败结果。
 - `agents`：从已配置的受管或自定义 Provider 中选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；

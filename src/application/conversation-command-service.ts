@@ -354,7 +354,12 @@ export class ConversationCommandService {
           };
         }
         const view = defaultSessionListView();
-        const sessions = await this.conversations.listSessions(target, { page: view.page });
+        // `/resume` is the fast switching entry point.  Do not trigger the
+        // optional per-session turn-history scan while rendering the picker.
+        const sessions = await this.conversations.listSessions(target, {
+          page: view.page,
+          turnCountMode: "cached",
+        });
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {
@@ -365,7 +370,10 @@ export class ConversationCommandService {
       }
       case "sessions": {
         const view = parseSessionListView(argumentsText, false);
-        const sessions = await this.conversations.listSessions(target, toSessionQuery(view));
+        const sessions = await this.conversations.listSessions(target, {
+          ...toSessionQuery(view),
+          turnCountMode: "cached",
+        });
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {
@@ -379,6 +387,7 @@ export class ConversationCommandService {
         const sessions = await this.conversations.listSessions(target, {
           archived: true,
           ...toSessionQuery(view),
+          turnCountMode: "cached",
         });
         return sessionListResult(sessions, view, { archived: true });
       }

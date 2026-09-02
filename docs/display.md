@@ -126,9 +126,9 @@ HTML 和微信结构化字段渲染。
 区分当前 Thread 设置。模型支持多个思考等级时，选择模型后继续进入思考等级选择；飞书使用选择卡、
 Telegram 使用内联按钮，微信显示可输入的 `/effort` 选项。只支持一个等级时直接沿用该等级，独立
 `/effort` 命令保持可用。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
-`/resume`、`/sessions` 和 `/archived` 的当前页会话还显示该 Thread 已记录的 Turn 轮数；轮数由
-App Server 的 `thread/turns/list` 汇总并在本机派生缓存中短暂复用。新 Turn 开始时对应轮数立即失效，
-官方 `turn/completed` 到达后只对该 Thread 异步回填一次，因此完成后无需等待下一次全量扫描；历史读取失败时不阻塞会话列表且不显示猜测值。
+`/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话都优先显示本机指标/缓存中的 Turn 轮数；
+打开列表不会等待 `thread/turns/list` 历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn
+统计；本地没有记录时暂不显示猜测值。需要完整官方历史计数时，清理命令仍会按候选读取。
 会话清理已移至本机 CLI：`codexc sessions cleanup <最大轮数>` 先预览，交互终端追加 `--confirm` 后还会再次列出候选并询问确认才归档；可用 `--idle-days <天数>` 增加空闲时间条件。扫描只对通过元数据过滤的旧会话读取 Turn 历史，轮数命中本机派生缓存时跳过读取；执行前需停止 Gateway，Provider 不可连接或目录不完整时会失败关闭，当前、活动、后台、固定或无法读取轮数的会话会排除。
 跨 Provider 选择优先显示目标 Provider App Server 配置的有效思考等级；该等级缺失或不受目标模型支持时，
 才显示目标模型目录默认值，不继承原 Provider 的 Thread 设置。

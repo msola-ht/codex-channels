@@ -139,6 +139,8 @@ export interface ConversationSessionQuery {
   provider?: string;
   sectionSelector?: string;
   page?: number;
+  /** Use local counts without waiting on history RPCs. */
+  turnCountMode?: "scan" | "cached";
 }
 
 export interface ThreadSectionView extends ThreadSectionSnapshot {
@@ -777,7 +779,7 @@ export class ConversationService implements ConversationUseCases {
         };
       });
     const page = options.page;
-    if (!this.threadHistory || typeof page !== "number" || !Number.isSafeInteger(page) || page < 1) {
+    if (typeof page !== "number" || !Number.isSafeInteger(page) || page < 1) {
       return sessions;
     }
     const start = (page - 1) * sessionListPageSize;
@@ -786,7 +788,7 @@ export class ConversationService implements ConversationUseCases {
       const workspaceId = this.router.workspace(target).id;
       const archived = options.archived === true;
       // Only the page that will be rendered needs a display-cache row. Writing
-      // the complete catalog on every /r scan was the dominant local I/O cost.
+      // the complete catalog on every list command was the dominant local I/O cost.
       for (const session of visible) {
         const thread = ordered.find((item) => item.id === session.id);
         if (!thread) continue;
@@ -806,6 +808,29 @@ export class ConversationService implements ConversationUseCases {
         });
       }
     }
+    if (options.turnCountMode === "cached") {
+      const countByThread = new Map<string, number>();
+      for (const session of visible) {
+        // Prefer the direct local metric count. It is a single indexed query
+        // and, unlike the full summary, never traverses subagent Threads.
+        const metricsCount = this.requestMetricsQuery?.threadTurnCount !== undefined
+          ? this.requestMetricsQuery.threadTurnCount(session.id)
+          : this.requestMetricsQuery?.forThread(session.id)?.threadAggregate?.turnCount;
+        if (metricsCount !== undefined && metricsCount !== null) {
+          countByThread.set(session.id, metricsCount);
+          continue;
+        }
+        const cached = this.sessionDisplayCache?.get(session.id);
+        if (cached?.turnCount !== null && cached?.turnCount !== undefined) {
+          countByThread.set(session.id, cached.turnCount);
+        }
+      }
+      return sessions.map((session) => {
+        const turnCount = countByThread.get(session.id);
+        return turnCount === undefined ? session : { ...session, turnCount };
+      });
+    }
+    if (!this.threadHistory) return sessions;
     const counts = await mapWithConcurrency(visible, sessionScanConcurrency, async (session) => [
       session.id,
       await this.cachedOrCountThreadTurns(session.id),

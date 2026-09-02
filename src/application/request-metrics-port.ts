@@ -205,6 +205,14 @@ export type RequestMetricsResult =
 
 export interface RequestMetricsQueryPort {
   forThread(threadId: string): ThreadRequestMetricsSummary;
+  /**
+   * Return the locally observed Turn count for this Thread only.
+   *
+   * Unlike `forThread`, this deliberately excludes descendant subagent
+   * Threads and is intended for fast session pickers. `null` means that no
+   * local request metric exists for the Thread yet.
+   */
+  threadTurnCount?(threadId: string): number | null;
   aggregate(
     view: RequestMetricsAggregateView,
     range: RequestMetricsTimeRange,
