@@ -10,7 +10,6 @@ import {
   parsePluginOperation,
   parseReviewTarget,
   parseSessionListView,
-  parseSessionCleanupOperation,
   parseSkillInvocation,
   parseThreadRevertOperation,
   parseThreadQueueOperation,
@@ -32,7 +31,6 @@ import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
 
 export {
   archivedSessionCommandUsageText,
-  sessionCleanupCommandUsageText,
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
@@ -49,7 +47,6 @@ export const conversationCommandNames = [
   "resume",
   "sessions",
   "archived",
-  "session-cleanup",
   "new",
   "archive",
   "unarchive",
@@ -120,10 +117,6 @@ export type ConversationCommandResult =
   | {
       kind: "thread-section-delete-preview";
       preview: Awaited<ReturnType<ConversationUseCases["previewThreadSectionDelete"]>>;
-    }
-  | {
-      kind: "session-cleanup-preview";
-      preview: Awaited<ReturnType<ConversationUseCases["previewSessionCleanup"]>>;
     }
   | {
       kind: "thread-queue";
@@ -406,25 +399,6 @@ export class ConversationCommandService {
         return {
           kind: "outcome",
           outcome: { type: "thread.archived", threadId },
-        };
-      }
-      case "session-cleanup": {
-        const operation = parseSessionCleanupOperation(argumentsText);
-        if (operation.type === "preview") {
-          return {
-            kind: "session-cleanup-preview",
-            preview: await this.conversations.previewSessionCleanup(target, operation.maxTurns),
-          };
-        }
-        const result = await this.conversations.archiveSessionCleanup(target, operation.token);
-        return {
-          kind: "outcome",
-          outcome: {
-            type: "sessions.cleaned",
-            maxTurns: result.maxTurns,
-            archivedCount: result.archived.length,
-            failedCount: result.failed.length,
-          },
         };
       }
       case "unarchive": {

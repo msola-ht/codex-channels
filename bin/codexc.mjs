@@ -134,6 +134,7 @@ const helpText = {
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
+  sessions                     管理会话（包括按 Turn 清理旧会话）
   channel                      发送渠道图片
   webui                        启动指标 WebUI
   center                       启动或配置多设备指标中心
@@ -356,6 +357,8 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 
 按配置 [metrics.storage] 或命令行覆盖值清理最旧请求指标。默认要求 Gateway 已停止；
 加 --restart-gateway 自动停止并重新启动。清理前创建 0600 备份；--vacuum 会立即回收文件空间。`,
+  sessions: "用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]\n\n默认只预览；交互终端加 --confirm 后还会再次询问，确认后才归档。执行前必须停止 Gateway。",
+  "sessions.cleanup": "用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]",
   "metrics.report": `${metricsCommandUsage.report}
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
@@ -508,6 +511,11 @@ try {
       break;
     case "metrics":
       await metrics(args);
+      break;
+    case "sessions":
+      if (showRequestedHelp(args, "sessions") || showSubcommandHelp(args, "cleanup", "sessions.cleanup")) break;
+      if (args[0] !== "cleanup") throw new Error("用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]");
+      runScript("scripts/session-cleanup.mjs", args.slice(1), { failureReportedByChild: true });
       break;
     case "channel":
       await channel(args);

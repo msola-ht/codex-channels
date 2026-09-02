@@ -3,7 +3,6 @@ import {
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
-  sessionCleanupCommandUsageText,
   scheduledTaskCommandUsageText,
   threadQueueCommandUsageText,
   threadRevertCommandUsageText,
@@ -60,13 +59,6 @@ export function formatSurfaceUserFacingError(
       return "找不到指定会话";
     case "sessions.usage":
       return sessionCommandUsageText;
-    case "sessions.cleanup.usage":
-      return sessionCleanupCommandUsageText;
-    case "sessions.cleanup.confirmation-invalid":
-    case "sessions.cleanup.unavailable":
-      return error.message;
-    case "sessions.cleanup.busy":
-      return error.message;
     case "archived-sessions.usage":
       return archivedSessionCommandUsageText;
     case "thread-section.usage":

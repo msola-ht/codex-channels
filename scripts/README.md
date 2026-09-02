@@ -82,6 +82,8 @@
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到
   `data/channel-outbox/pending/` 并写入 manifest；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
+- `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc sessions cleanup`，通过
+  App Server 枚举多 Provider/Workspace，会话元数据过滤后按 Turn 上限和可选空闲天数预览、确认归档。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
   汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
   格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
@@ -521,3 +523,7 @@
   只读探针，不修改系统或服务配置。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。
+
+`session-cleanup.mjs` 实现 `codexc sessions cleanup`：Gateway 停止时通过 App Server 枚举全部
+Workspace/Provider，先按 Thread 元数据过滤活动/近期会话，再复用会话轮数缓存，并仅在交互终端
+`--confirm` 二次询问通过后归档符合 Turn 上限的旧会话；可用 `--idle-days` 增加空闲天数条件；不会从渠道触发。

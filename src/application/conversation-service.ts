@@ -141,24 +141,6 @@ export interface ConversationSessionQuery {
   page?: number;
 }
 
-export interface SessionCleanupCandidate {
-  id: string;
-  name: string | null;
-  turnCount: number;
-}
-
-export interface SessionCleanupPreview {
-  maxTurns: number;
-  candidates: SessionCleanupCandidate[];
-  token: string | null;
-}
-
-export interface SessionCleanupResult {
-  maxTurns: number;
-  archived: SessionCleanupCandidate[];
-  failed: SessionCleanupCandidate[];
-}
-
 export interface ThreadSectionView extends ThreadSectionSnapshot {
   currentWorkspaceActiveCount: number;
   currentWorkspaceArchivedCount: number;
@@ -315,8 +297,8 @@ export interface ConversationUseCases {
   resume(target: ConversationTarget, selector: string): Promise<ConversationResumeResult>;
   newSession(target: ConversationTarget): Promise<string | undefined>;
   archive(target: ConversationTarget): Promise<string>;
-  previewSessionCleanup(target: ConversationTarget, maxTurns: number): Promise<SessionCleanupPreview>;
-  archiveSessionCleanup(target: ConversationTarget, token: string): Promise<SessionCleanupResult>;
+  /** Invalidate derived session display statistics after an external App Server event. */
+  invalidateSessionDisplayCache?(threadId: string): void;
   unarchive(target: ConversationTarget, selector: string): Promise<string>;
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
@@ -382,13 +364,6 @@ export class ConversationService implements ConversationUseCases {
   private readonly revertUseCases: ThreadRevertService;
   private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
-  private readonly sessionCleanupConfirmations = new Map<string, {
-    targetKey: string;
-    maxTurns: number;
-    candidates: SessionCleanupCandidate[];
-    expiresAt: number;
-  }>();
-  private readonly sessionCleanupScans = new Set<string>();
   private readonly sessionDisplayCacheRefreshes = new Map<string, {
     promise: Promise<void>;
     rerun: boolean;
@@ -471,7 +446,6 @@ export class ConversationService implements ConversationUseCases {
   }
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
-    this.rejectIfSessionCleanupScanning(target);
     let input: TurnInput[];
     try {
       input = normalizeInput(value);
@@ -647,7 +621,6 @@ export class ConversationService implements ConversationUseCases {
     input: TurnInput[],
     identity?: TurnStartIdentity,
   ): Promise<Submission> {
-    this.rejectIfSessionCleanupScanning(target);
     if (input.some((item) => item.type === "image")) {
       await this.models.requireInputModality(target, "image");
     }
@@ -803,10 +776,20 @@ export class ConversationService implements ConversationUseCases {
           ...(model ? { model } : {}),
         };
       });
+    const page = options.page;
+    if (!this.threadHistory || typeof page !== "number" || !Number.isSafeInteger(page) || page < 1) {
+      return sessions;
+    }
+    const start = (page - 1) * sessionListPageSize;
+    const visible = sessions.slice(start, start + sessionListPageSize);
     if (this.sessionDisplayCache) {
       const workspaceId = this.router.workspace(target).id;
       const archived = options.archived === true;
-      for (const thread of ordered) {
+      // Only the page that will be rendered needs a display-cache row. Writing
+      // the complete catalog on every /r scan was the dominant local I/O cost.
+      for (const session of visible) {
+        const thread = ordered.find((item) => item.id === session.id);
+        if (!thread) continue;
         const previous = this.sessionDisplayCache.get(thread.id);
         this.sessionDisplayCache.put({
           threadId: thread.id,
@@ -823,12 +806,6 @@ export class ConversationService implements ConversationUseCases {
         });
       }
     }
-    const page = options.page;
-    if (!this.threadHistory || typeof page !== "number" || !Number.isSafeInteger(page) || page < 1) {
-      return sessions;
-    }
-    const start = (page - 1) * sessionListPageSize;
-    const visible = sessions.slice(start, start + sessionListPageSize);
     const counts = await mapWithConcurrency(visible, sessionScanConcurrency, async (session) => [
       session.id,
       await this.cachedOrCountThreadTurns(session.id),
@@ -1126,155 +1103,6 @@ export class ConversationService implements ConversationUseCases {
     });
   }
 
-  previewSessionCleanup(target: ConversationTarget, maxTurns: number): Promise<SessionCleanupPreview> {
-    const key = conversationTargetKey(target);
-    if (this.sessionCleanupScans.has(key)) {
-      throw new UserFacingError(
-        "sessions.cleanup.busy",
-        "当前正在扫描会话，请等待扫描完成后再试",
-      );
-    }
-    this.sessionCleanupScans.add(key);
-    return this.locked(target, async () => {
-      try {
-        const preview = await this.findSessionCleanupCandidates(target, maxTurns);
-        if (preview.candidates.length === 0) return preview;
-        const token = randomUUID();
-        this.sessionCleanupConfirmations.set(token, {
-          targetKey: key,
-          maxTurns,
-          candidates: preview.candidates,
-          expiresAt: Date.now() + 5 * 60_000,
-        });
-        while (this.sessionCleanupConfirmations.size > 128) {
-          const oldest = this.sessionCleanupConfirmations.keys().next().value;
-          if (!oldest) break;
-          this.sessionCleanupConfirmations.delete(oldest);
-        }
-        return { ...preview, token };
-      } finally {
-        this.sessionCleanupScans.delete(key);
-      }
-    });
-  }
-
-  archiveSessionCleanup(target: ConversationTarget, token: string): Promise<SessionCleanupResult> {
-    return this.locked(target, async () => {
-      this.requireIdle(target);
-      const confirmation = this.sessionCleanupConfirmations.get(token);
-      this.sessionCleanupConfirmations.delete(token);
-      if (
-        !confirmation
-        || confirmation.targetKey !== conversationTargetKey(target)
-        || confirmation.expiresAt < Date.now()
-      ) {
-        throw new UserFacingError(
-          "sessions.cleanup.confirmation-invalid",
-          "会话清理预览已失效，请重新执行 /session-cleanup <最大轮数>",
-        );
-      }
-      const threads = await this.router.list(target, { fullScan: true });
-      const currentId = this.router.current(target)?.threadId;
-      const targetKey = conversationTargetKey(target);
-      const archived: SessionCleanupCandidate[] = [];
-      const failed: SessionCleanupCandidate[] = [];
-      for (const candidate of confirmation.candidates) {
-        const thread = threads.find((item) => item.id === candidate.id);
-        const owner = thread ? this.router.targetForThread(thread.id) : undefined;
-        const eligible = thread
-          && thread.id !== currentId
-          && (!owner || conversationTargetKey(owner) === targetKey)
-          && !thread.isPinned
-          && thread.activeTurnId === null
-          && thread.status.type !== "active"
-          && !this.router.isBackgroundThread(thread.id)
-          && this.threadHistory;
-        const currentTurnCount = eligible
-          ? await countThreadTurns(this.threadHistory, thread.id)
-          : undefined;
-        if (!eligible || currentTurnCount !== candidate.turnCount || currentTurnCount > confirmation.maxTurns) {
-          failed.push(candidate);
-          continue;
-        }
-        try {
-          await this.router.archiveThread(candidate.id);
-          this.removeSessionDisplayCache(candidate.id);
-          archived.push(candidate);
-        } catch {
-          failed.push(candidate);
-        }
-      }
-      if (archived.length > 0) this.invalidateRevertSnapshot(target);
-      return { maxTurns: confirmation.maxTurns, archived, failed };
-    });
-  }
-
-  private async findSessionCleanupCandidates(
-    target: ConversationTarget,
-    maxTurns: number,
-  ): Promise<SessionCleanupPreview> {
-    if (!Number.isSafeInteger(maxTurns) || maxTurns < 0 || maxTurns > 10_000) {
-      throw new UserFacingError("sessions.cleanup.usage", "最大轮数必须是 0–10000 的整数");
-    }
-    if (!this.threadHistory) {
-      throw new UserFacingError(
-        "sessions.cleanup.unavailable",
-        "当前 App Server 不提供会话历史，暂不支持按 Turn 清理会话",
-      );
-    }
-    const currentId = this.router.current(target)?.threadId;
-    const targetKey = conversationTargetKey(target);
-    const threads = await this.router.list(target, { fullScan: true });
-    if (this.sessionDisplayCache) {
-      const workspaceId = this.router.workspace(target).id;
-      for (const thread of threads) {
-        const previous = this.sessionDisplayCache.get(thread.id);
-        this.sessionDisplayCache.put({
-          threadId: thread.id,
-          workspaceId,
-          archived: false,
-          preview: thread.preview,
-          name: thread.name,
-          modelProvider: thread.modelProvider,
-          status: thread.status,
-          activeTurnId: thread.activeTurnId,
-          isPinned: thread.isPinned,
-          turnCount: previous?.turnCount ?? null,
-          measuredAt: previous?.measuredAt ?? null,
-        });
-      }
-    }
-    const candidates = await mapWithConcurrency(threads, sessionScanConcurrency, async (thread) => {
-      const owner = this.router.targetForThread(thread.id);
-      if (
-        thread.id === currentId
-        || (owner && conversationTargetKey(owner) !== targetKey)
-        || thread.isPinned
-        || thread.activeTurnId !== null
-        || thread.status.type === "active"
-        || this.router.isBackgroundThread(thread.id)
-      ) return null;
-      const turnCount = await this.cachedOrCountThreadTurns(thread.id);
-      return turnCount !== undefined && turnCount <= maxTurns
-        ? { id: thread.id, name: thread.name, turnCount }
-        : null;
-    });
-    return {
-      maxTurns,
-      candidates: candidates.filter((candidate): candidate is SessionCleanupCandidate => candidate !== null),
-      token: null,
-    };
-  }
-
-  private rejectIfSessionCleanupScanning(target: ConversationTarget): void {
-    if (this.sessionCleanupScans.has(conversationTargetKey(target))) {
-      throw new UserFacingError(
-        "sessions.cleanup.busy",
-        "当前正在扫描会话，请等待扫描完成后再发送消息",
-      );
-    }
-  }
-
   /** Reconcile one invalidated session without rescanning the Thread catalog. */
   refreshSessionDisplayCache(threadId: string): Promise<void> {
     const existing = this.sessionDisplayCacheRefreshes.get(threadId);
@@ -1347,6 +1175,10 @@ export class ConversationService implements ConversationUseCases {
       (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) + 1,
     );
     this.sessionDisplayCache?.invalidateTurnCount(threadId);
+  }
+
+  invalidateSessionDisplayCache(threadId: string): void {
+    this.invalidateSessionDisplayTurnCount(threadId);
   }
 
   private removeSessionDisplayCache(threadId: string): void {

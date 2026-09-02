@@ -20,7 +20,7 @@
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
   已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
-- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 与自定义分区、运行状态、来源（含稳定的
+- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 与自定义分区、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
   缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，

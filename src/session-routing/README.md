@@ -8,7 +8,7 @@
 - `thread-port.ts`：定义 Thread 查询与生命周期窄端口，以及只包含路由、恢复和会话列表所需字段的
   稳定快照；快照保留 App Server 返回的 `historyMode`（`legacy` 或 `paginated`），新建 Thread 使用分页
   历史，既有 legacy Thread 不宣称支持 Revert；官方分区裁剪为稳定 `id/name/builtIn`，内置 Pinned 另投影为 `isPinned`，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
-  模型 Provider、
+  模型 Provider、更新时间/最近活跃时间、
   压缩 Item ID，不向业务层暴露完整官方 Turn。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
   权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、

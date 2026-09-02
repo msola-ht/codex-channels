@@ -58,7 +58,6 @@ export const conversationCommandDescriptions = {
   resume: "列出或恢复 Codex 会话",
   sessions: "搜索可恢复会话",
   archived: "搜索已归档会话",
-  "session-cleanup": "按 Turn 轮数批量归档会话",
   new: "下一条消息创建新会话",
   archive: "归档当前会话",
   unarchive: "恢复已归档会话",
@@ -101,7 +100,6 @@ export const conversationCommandHelpSections = [
       "/resume [序号|名称|Session ID]",
       "/sessions [页码] [filter all|running|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]",
       "/archived [页码] [filter all|pinned|unsectioned] [provider 名称] [section 分区] [search 搜索词]",
-      "/session-cleanup <最大轮数> | /session-cleanup confirm <一次性令牌>",
       "/new · /archive · /unarchive <序号|名称|Session ID>",
       "/pin · /unpin",
       "/section（查看）· 管理员：/section create <名称> · /section rename <分区序号或 ID> <新名称>",
@@ -707,23 +705,6 @@ export function formatConversationCommandOutcome(
         ...(outcome.run.threadId ? [`Session ID：${outcome.run.threadId}`] : []),
       ].join("\n"));
   }
-}
-
-export function formatSessionCleanupPreview(
-  result: Extract<ConversationCommandResult, { kind: "session-cleanup-preview" }>,
-): string {
-  const { maxTurns, candidates } = result.preview;
-  return toStructuredMarkdownList([
-    `待归档会话（Turn ≤ ${maxTurns}）：${candidates.length} 个`,
-    ...(candidates.length === 0
-      ? ["没有符合条件且可归档的会话。"]
-      : candidates.map((candidate, index) =>
-          `${index + 1}. ${candidate.name ?? "未命名"} · ${candidate.turnCount} 轮 · ${candidate.id}`)),
-    ...(candidates.length > 0
-      ? ["", `确认：/session-cleanup confirm ${result.preview.token}`]
-      : []),
-    "当前、活动、后台和固定会话已自动排除。",
-  ].join("\n"));
 }
 
 function scheduledTaskOutcomeTitle(type: Extract<ConversationCommandOutcome, {

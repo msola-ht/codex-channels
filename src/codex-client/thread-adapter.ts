@@ -64,6 +64,10 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
     source: toThreadSource(thread.source, thread.threadSource),
     historyMode: toThreadHistoryMode(thread.historyMode),
     activeTurnId: activeTurn?.id ?? null,
+    updatedAt: requireUnixSeconds(thread.updatedAt, "updatedAt"),
+    recencyAt: thread.recencyAt === null
+      ? null
+      : requireUnixSeconds(thread.recencyAt, "recencyAt"),
   };
 }
 
@@ -145,4 +149,11 @@ function requireString(value: unknown, field: string): asserts value is string {
   if (typeof value !== "string") {
     throw new Error(`Codex Thread 响应缺少有效 ${field}`);
   }
+}
+
+function requireUnixSeconds(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Codex Thread 响应缺少有效 ${field}`);
+  }
+  return value;
 }

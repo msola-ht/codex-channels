@@ -26,6 +26,10 @@ export interface ThreadSnapshot {
   source: ThreadSource;
   historyMode: ThreadHistoryMode;
   activeTurnId: string | null;
+  /** Unix timestamp (seconds) when the Thread was last updated by App Server. */
+  updatedAt?: number;
+  /** Unix timestamp (seconds) used by App Server for recency ordering. */
+  recencyAt?: number | null;
 }
 
 export interface ThreadSession {

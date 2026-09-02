@@ -866,6 +866,15 @@ export class GatewayApplication {
         ) {
           service.invalidateRevertSnapshot(coreEvent.threadId);
         }
+        if (
+          coreEvent.type === "turn.started"
+          || coreEvent.type === "turn.completed"
+          || coreEvent.type === "thread.reverted"
+        ) {
+          // The display cache is derived data. Invalidate before any list command
+          // can observe a stale count, including Turns started by the native TUI.
+          service.invalidateSessionDisplayCache(coreEvent.threadId);
+        }
         if (coreEvent.type === "turn.started") {
           // A TUI or another App Server client may have consumed a native Queue
           // entry. Pending model/effort/Fast/Plan choices are Conversation-local

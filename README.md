@@ -53,6 +53,7 @@ codexc config                # Gateway 显示、系统、服务、代理、WebUI
 codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server
 codexc doctor                # 只读诊断
+codexc sessions cleanup 3    # 预览 Turn 数较少的旧会话（交互终端加 --confirm 再确认）
 codexc update                # 源码安装更新
 codexc remote                # 连接 Gateway 共享的原生 TUI
 ```

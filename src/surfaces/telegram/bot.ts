@@ -390,8 +390,7 @@ export class TelegramSurface {
           "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
-          ...conversationCommandHelpLines.map((line) =>
-            line.replaceAll("/session-cleanup", "/session_cleanup")),
+          ...conversationCommandHelpLines,
           "Telegram：",
           "- /whoami",
           "- /start · /help · /h",

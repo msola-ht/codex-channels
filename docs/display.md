@@ -129,7 +129,7 @@ Telegram 使用内联按钮，微信显示可输入的 `/effort` 选项。只支
 `/resume`、`/sessions` 和 `/archived` 的当前页会话还显示该 Thread 已记录的 Turn 轮数；轮数由
 App Server 的 `thread/turns/list` 汇总并在本机派生缓存中短暂复用。新 Turn 开始时对应轮数立即失效，
 官方 `turn/completed` 到达后只对该 Thread 异步回填一次，因此完成后无需等待下一次全量扫描；历史读取失败时不阻塞会话列表且不显示猜测值。
-`/session-cleanup <最大轮数>` 会先读取完整 Thread 目录，再使用有界并发复核缓存过期的轮数，避免对每个会话串行读取历史；确认时使用预览返回的、五分钟内有效的一次性令牌执行 `/session-cleanup confirm <令牌>`。当前、活动、后台、固定或无法读取轮数的会话会排除。扫描期间同一会话的新普通消息会立即提示正在扫描，避免进入旧 Turn。
+会话清理已移至本机 CLI：`codexc sessions cleanup <最大轮数>` 先预览，交互终端追加 `--confirm` 后还会再次列出候选并询问确认才归档；可用 `--idle-days <天数>` 增加空闲时间条件。扫描只对通过元数据过滤的旧会话读取 Turn 历史，轮数命中本机派生缓存时跳过读取；执行前需停止 Gateway，Provider 不可连接或目录不完整时会失败关闭，当前、活动、后台、固定或无法读取轮数的会话会排除。
 跨 Provider 选择优先显示目标 Provider App Server 配置的有效思考等级；该等级缺失或不受目标模型支持时，
 才显示目标模型目录默认值，不继承原 Provider 的 Thread 设置。
 `/model` 还会只读显示当前模型声明的 Codex 多代理运行时；官方 OpenAI 模型带结构化替代信息时，
