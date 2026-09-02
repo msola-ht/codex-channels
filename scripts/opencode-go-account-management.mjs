@@ -364,6 +364,7 @@ function buildDefaultPlan(accountId, { environment, loadAccounts, loadRole }) {
     account,
     accounts,
     nextAccounts: accounts.map((candidate) => ({
+      ...candidate,
       id: candidate.id,
       default: candidate.id === normalizedId,
     })),
@@ -477,7 +478,12 @@ async function buildRemovalPlan(
 function publicDefaultPreview(plan) {
   return {
     operation: "set-default",
-    account: { id: plan.account.id, default: true },
+    account: {
+      id: plan.account.id,
+      default: true,
+      ...(plan.account.email === undefined ? {} : { email: plan.account.email }),
+      ...(plan.account.phone === undefined ? {} : { phone: plan.account.phone }),
+    },
     currentDefaultAccountId: plan.currentDefaultAccountId,
     updatesExternalAgent: plan.updatesExternalAgent,
     willChange: plan.willChange,
@@ -488,7 +494,10 @@ function publicDefaultPreview(plan) {
 function publicStopPreview(plan) {
   return {
     operation: "stop",
-    account: { id: plan.accountId, provider: plan.provider },
+    account: {
+      id: plan.accountId,
+      provider: plan.provider,
+    },
     status: plan.running ? "running" : "not-running",
     willChange: plan.running,
     activation: "none",
@@ -502,6 +511,8 @@ function publicRemovalPreview(plan) {
       id: plan.account.id,
       provider: opencodeGoProviderId(plan.account.id),
       default: plan.account.default,
+      ...(plan.account.email === undefined ? {} : { email: plan.account.email }),
+      ...(plan.account.phone === undefined ? {} : { phone: plan.account.phone }),
     },
     effects: {
       stopsRunningAppServer: plan.stop.status === "running",

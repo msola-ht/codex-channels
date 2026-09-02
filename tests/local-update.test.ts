@@ -88,7 +88,7 @@ describe("local update", () => {
     expect(download).toHaveBeenCalledOnce();
     expect(result).toEqual({
       deepseek: { status: "updated", provider: "deepseek" },
-      "opencode-go": { status: "updated", provider: "opencode-go" },
+      ocg: { status: "updated", provider: "opencode-go" },
       "future-provider": { status: "not-applicable" },
     });
   });

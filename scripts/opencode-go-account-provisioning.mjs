@@ -14,10 +14,13 @@ import {
 import {
   loadOpencodeGoAccounts,
   opencodeGoAccountsFilePath,
-  opencodeGoDefaultAccountId,
   opencodeGoProviderId,
   readOpencodeGoAccountMarker,
   validateOpencodeGoAccountId,
+  validateOpencodeGoContact,
+  validateOpencodeGoEmail,
+  validateOpencodeGoPhone,
+  opencodeGoAccountDisplayName,
   writeOpencodeGoAccountMarker,
   writeOpencodeGoAccounts,
 } from "../runtime/opencode-go-accounts.mjs";
@@ -48,7 +51,6 @@ import {
 
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
-const defaultAccountId = opencodeGoDefaultAccountId;
 const maximumPrivateConfigBytes = 2_097_152;
 const previousDefaultModel = "deepseek-v4-flash";
 
@@ -62,14 +64,14 @@ export class OpenCodeGoAccountProvisioningError extends Error {
 }
 
 export async function previewOpencodeGoAccountConfiguration(
-  { accountId, mode = "switching", reconfigure = false },
+  { accountId, email, phone, contact, mode = "switching", reconfigure = false },
   {
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
     loadPrimaryProvider = loadPrimaryModelProvider,
   } = {},
 ) {
-  return publicPreview(await buildPlan({ accountId, mode, reconfigure }, {
+  return publicPreview(await buildPlan({ accountId, email, phone, contact, mode, reconfigure }, {
     environment,
     loadAccounts,
     loadPrimaryProvider,
@@ -92,6 +94,9 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     accountId,
     mode = "switching",
     reconfigure = false,
+    email,
+    phone,
+    contact,
     apiKey,
     confirmExclusiveConfigChange = false,
   },
@@ -104,7 +109,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     configureRole = configureThirdPartyRole,
   } = {},
 ) {
-  const plan = await buildPlan({ accountId, mode, reconfigure }, {
+  const plan = await buildPlan({ accountId, email, phone, contact, mode, reconfigure }, {
     environment,
     loadAccounts,
     loadPrimaryProvider,
@@ -168,7 +173,9 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     await assertOpencodeGoFileSnapshots(guards);
     mkdirSync(plan.paths.accountDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(plan.paths.backupDirectory, { recursive: true, mode: 0o700 });
-    if (plan.accounts.length === 0) await preserveInitialFiles(plan.paths);
+    if (plan.accounts.length === 0) {
+      await preserveInitialFiles(plan.paths, plan.account.id);
+    }
     const currentConfig = await readTomlFile(plan.paths.configPath);
     const initialConfig = await readBackupToml(plan.paths);
     let nextConfig = currentConfig;
@@ -178,10 +185,10 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
         nextConfig = restoreProviderBaseConfig(
           currentConfig,
           initialConfig,
-          opencodeGoAccountDefinition(accountId),
+          opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
         );
       }
-      if (hasProviderBaseConfig(nextConfig, opencodeGoAccountDefinition(accountId))) {
+      if (hasProviderBaseConfig(nextConfig, opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone))) {
         throw new Error(
           `安装前的 Codex config.toml 已占用 ${plan.account.provider} Provider 或 Profile；请先手工移除或改名`,
         );
@@ -194,7 +201,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
         throw new Error("OpenCode Go 模型目录缺少默认思考等级");
       }
       profileContent = stringify(createSwitchingProviderProfile(
-        opencodeGoAccountDefinition(accountId),
+        opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
         {
           apiKey,
           catalogPath: plan.paths.catalogPath,
@@ -205,7 +212,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     } else {
       nextConfig = applyExclusiveProviderConfig(
         currentConfig,
-        opencodeGoAccountDefinition(accountId),
+        opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
         { apiKey, catalogPath: plan.paths.catalogPath, model: selectedModel },
       );
     }
@@ -264,7 +271,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
 }
 
 async function buildPlan(
-  { accountId, mode, reconfigure },
+  { accountId, email, phone, contact, mode, reconfigure },
   { environment, loadAccounts, loadPrimaryProvider },
 ) {
   try {
@@ -284,6 +291,35 @@ async function buildPlan(
   const existing = accounts.find((account) => account.id === accountId);
   if (existing !== undefined && reconfigure !== true) {
     throw invalid("account-exists", "accountId", `OpenCode Go 账户已存在：${accountId}`);
+  }
+  if ([contact, email, phone].filter((value) => value !== undefined).length > 1) {
+    throw invalid(
+      "invalid-contact",
+      "contact",
+      "OpenCode Go 账户的邮箱和手机号只能二选一",
+    );
+  }
+  let normalizedEmail = existing?.email;
+  let normalizedPhone = existing?.phone;
+  if (contact !== undefined || email !== undefined || phone !== undefined) {
+    try {
+      if (contact !== undefined) {
+        const normalizedContact = validateOpencodeGoContact(contact);
+        normalizedEmail = normalizedContact.type === "email" ? normalizedContact.value : undefined;
+        normalizedPhone = normalizedContact.type === "phone" ? normalizedContact.value : undefined;
+      } else if (email !== undefined) {
+        normalizedEmail = validateOpencodeGoEmail(email);
+        normalizedPhone = undefined;
+      } else {
+        normalizedPhone = validateOpencodeGoPhone(phone);
+        normalizedEmail = undefined;
+      }
+    } catch (error) {
+      throw normalize("invalid-contact", "contact", error);
+    }
+  }
+  if (normalizedEmail === undefined && normalizedPhone === undefined) {
+    throw invalid("invalid-contact", "contact", "OpenCode Go 账户必须提供邮箱或手机号码");
   }
   if (mode === "exclusive") {
     let primary;
@@ -314,14 +350,32 @@ async function buildPlan(
     account: {
       id: accountId,
       provider: opencodeGoProviderId(accountId),
+      email: normalizedEmail,
+      phone: normalizedPhone,
+      displayName: opencodeGoAccountDisplayName({
+        id: accountId,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+      }),
       exists: existing !== undefined,
       default: accounts.length === 0 || existing?.default === true,
     },
     accounts,
     nextAccounts: existing === undefined
-      ? [...accounts, { id: accountId, default: accounts.length === 0 }]
+      ? [...accounts, {
+          id: accountId,
+          default: accounts.length === 0,
+          email: normalizedEmail,
+          phone: normalizedPhone,
+        }]
       : accounts.map((account) => account.id === accountId
-          ? { id: accountId, default: account.default }
+          ? {
+              ...account,
+              id: accountId,
+              default: account.default,
+              ...(normalizedEmail === undefined ? { email: undefined } : { email: normalizedEmail }),
+              ...(normalizedPhone === undefined ? { phone: undefined } : { phone: normalizedPhone }),
+            }
           : account),
     mode,
     reconfigure,
@@ -401,16 +455,18 @@ async function readBackupToml(paths) {
     : {};
 }
 
-async function preserveInitialFiles(paths) {
+async function preserveInitialFiles(paths, accountId) {
   const backup = join(paths.providerDirectory, definition.backupDirectoryName);
   const statePath = join(backup, "state.json");
   if (existsSync(statePath)) return;
   mkdirSync(backup, { recursive: true, mode: 0o700 });
   const state = {
+    version: 2,
+    accountId,
     config: await backupOptional(paths.configPath, join(backup, "config.toml")),
     profile: await backupOptional(
       paths.profilePath,
-      join(backup, opencodeGoProfileFileName(defaultAccountId)),
+      join(backup, opencodeGoProfileFileName(accountId)),
     ),
     marker: await backupOptional(paths.markerPath, join(backup, "managed.toml")),
     roleConfig: await backupOptional(

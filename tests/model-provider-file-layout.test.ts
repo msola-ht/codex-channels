@@ -68,14 +68,12 @@ describe.skipIf(process.platform === "win32")("managed model provider file layou
     });
 
     expect(result.changed).toBe(true);
-    expect(result.moved).toHaveLength(7);
+    expect(result.moved).toHaveLength(5);
     for (const legacy of [
       "deepseek.config.toml",
       "deepseek.models.json",
       "deepseek.models.manifest.json",
       "codex-connect-deepseek.config.toml",
-      "opencode-go.config.toml",
-      "codex-connect-opencode-go.config.toml",
       "codex-connect-third-party-subagent.config.toml",
     ]) {
       expect(existsSync(join(codexHome, legacy))).toBe(false);
@@ -95,19 +93,28 @@ describe.skipIf(process.platform === "win32")("managed model provider file layou
     expect(existsSync(
       join(connectHome, "providers", "deepseek", "managed.toml"),
     )).toBe(true);
-    const openCodeProfile = parse(
-      readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8"),
-    );
-    expect(openCodeProfile.model_catalog_json).toBe(
-      join(connectHome, "providers", "deepseek", "models.json"),
-    );
-    expect(existsSync(
-      join(connectHome, "providers", "opencode-go", "managed.toml"),
-    )).toBe(true);
+    expect(existsSync(join(codexHome, "opencode-go.config.toml"))).toBe(true);
+    expect(existsSync(join(codexHome, "codex-connect-opencode-go.config.toml"))).toBe(true);
     expect(existsSync(
       join(connectHome, "providers", "deepseek", "models.manifest.json"),
     )).toBe(true);
     expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(true);
+  });
+
+  it("leaves an accountless OpenCode Go legacy backup untouched", () => {
+    const { codexHome, connectHome } = fixtureHome();
+    const legacyBackup = join(codexHome, "backup-codex-connect-opencode-go");
+    secureTestDirectory(legacyBackup);
+    writePrivate(join(legacyBackup, "session.json"), '{"legacy":true}\n');
+
+    const result = migrateManagedModelProviderFiles({
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    });
+
+    expect(result.changed).toBe(false);
+    expect(readFileSync(join(legacyBackup, "session.json"), "utf8"))
+      .toBe('{"legacy":true}\n');
   });
 
   it("migrates the original managed ds role file and agents.ds entry", () => {
@@ -240,19 +247,23 @@ describe.skipIf(process.platform === "win32")("managed model provider file layou
     writeManagedProvider(
       codexHome,
       connectHome,
-      "opencode-go",
+      "ocg-work",
       sharedCatalog,
       "deepseek-v4-pro",
       629_146,
     );
     writePrivate(join(codexHome, "sf-agent.config.toml"), [
       'model = "deepseek-v4-flash"',
-      'model_provider = "opencode-go"',
+      'model_provider = "ocg-work"',
       'model_reasoning_effort = "high"',
       `model_catalog_json = ${JSON.stringify(sharedCatalog)}`,
       "model_context_window = 1048576",
       "model_auto_compact_token_limit = 629146",
       'model_auto_compact_token_limit_scope = "total"',
+      "[model_providers.ocg-work]",
+      'name = "ocg-work"',
+      'base_url = "https://opencode.ai/zen/go/v1"',
+      'wire_api = "responses"',
       "",
     ].join("\n"));
 
@@ -287,14 +298,15 @@ describe.skipIf(process.platform === "win32")("managed model provider file layou
     expect(openCodeFlash.auto_compact_token_limit).toBeNull();
     expect(openCodePro.auto_compact_token_limit).toBe(629_146);
     expect(openCodePro.context_window).toBe(900_000);
-    for (const [provider, catalogPath] of [
-      ["deepseek", sharedCatalog],
-      ["opencode-go", openCodeCatalogPath],
-    ]) {
+    for (const [provider, catalogPath, profileFileName] of [
+      ["deepseek", sharedCatalog, "sf-deepseek.config.toml"],
+      ["ocg-work", openCodeCatalogPath, "sf-ocg-work.config.toml"],
+    ] as const) {
       const profile = parse(readFileSync(
-        join(codexHome, `sf-${provider}.config.toml`),
+        join(codexHome, profileFileName),
         "utf8",
       ));
+      expect(profile.model_provider).toBe(provider);
       expect(profile.model_catalog_json).toBe(catalogPath);
       expect(profile.model_reasoning_effort).toBe("high");
       expect(profile.model_context_window).toBeUndefined();
@@ -311,25 +323,50 @@ describe.skipIf(process.platform === "win32")("managed model provider file layou
 function writeManagedProvider(
   codexHome: string,
   connectHome: string,
-  provider: "deepseek" | "opencode-go",
+  provider: "deepseek" | "ocg-work",
   catalogPath: string,
   model: "deepseek-v4-flash" | "deepseek-v4-pro",
   autoCompactLimit: number,
 ) {
-  const providerDirectory = join(connectHome, "providers", provider);
-  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
-  writePrivate(
-    join(providerDirectory, "managed.toml"),
-    `version = 1\nprovider = "${provider}"\nmode = "switching"\n`,
+  const isOpenCodeGo = provider === "ocg-work";
+  const providerDirectory = join(
+    connectHome,
+    "providers",
+    isOpenCodeGo ? "opencode-go" : provider,
   );
-  writePrivate(join(codexHome, `sf-${provider}.config.toml`), [
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  if (isOpenCodeGo) {
+    mkdirSync(join(providerDirectory, "accounts", "work"), {
+      recursive: true,
+      mode: 0o700,
+    });
+    writePrivate(
+      join(providerDirectory, "accounts.json"),
+      `${JSON.stringify([{ id: "work", default: true }])}\n`,
+    );
+    writePrivate(
+      join(providerDirectory, "accounts", "work", "managed.toml"),
+      'version = 1\nprovider = "ocg-work"\nmode = "switching"\n',
+    );
+  }
+  if (!isOpenCodeGo) {
+    writePrivate(
+      join(providerDirectory, "managed.toml"),
+      `version = 1\nprovider = "${provider}"\nmode = "switching"\n`,
+    );
+  }
+  writePrivate(join(codexHome, isOpenCodeGo ? "sf-ocg-work.config.toml" : `sf-${provider}.config.toml`), [
     `model = "${model}"`,
     `model_provider = "${provider}"`,
     'model_reasoning_effort = "high"',
-    `model_context_window = ${provider === "opencode-go" ? 900_000 : 1_048_576}`,
+    `model_context_window = ${isOpenCodeGo ? 900_000 : 1_048_576}`,
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
     `model_auto_compact_token_limit = ${autoCompactLimit}`,
     'model_auto_compact_token_limit_scope = "total"',
+    `[model_providers.${provider}]`,
+    `name = "${provider}"`,
+    'base_url = "https://opencode.ai/zen/go/v1"',
+    'wire_api = "responses"',
     "",
   ].join("\n"));
 }

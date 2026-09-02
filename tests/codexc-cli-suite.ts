@@ -21,6 +21,7 @@ import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsActive, GatewayOwner } from "../runtime/gateway-owner.mjs";
 import {
   deepseekProviderDefinition,
+  opencodeGoAccountDefinition,
   opencodeGoProviderDefinition,
   type ModelProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
@@ -238,7 +239,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       },
       {
         args: ["remote", "--help"],
-        includes: ["sf-opencode-go-<账户>", "sf-custom-<Provider ID>"],
+        includes: ["sf-ocg-<账户>", "sf-custom-<Provider ID>"],
       },
       {
         args: ["channel", "--help"],
@@ -2080,7 +2081,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const roleConfigPath = join(codexHome, "sf-agent.config.toml");
     writeFileSync(
       roleConfigPath,
-      'model = "deepseek-v4-flash"\nmodel_provider = "opencode-go"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "ocg-main"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -2121,7 +2122,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
           ? undefined
           : new Error(`App Server 服务提前退出：${stderr}`),
       );
-      await ensureAppServerProvider(primarySocketPath, "opencode-go");
+      await ensureAppServerProvider(primarySocketPath, "ocg-main");
       const beforeRelease = readFileSync(roleConfigPath, "utf8");
       const roleBaseUrl = /base_url = "([^"]+)"/u.exec(beforeRelease)?.[1];
       expect(roleBaseUrl).toBeDefined();
@@ -2129,7 +2130,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       await expect(fetch(new URL("/health", roleBaseUrl)).then((response) => response.status))
         .resolves.toBe(404);
 
-      await expect(releaseAppServerProvider(primarySocketPath, "opencode-go"))
+      await expect(releaseAppServerProvider(primarySocketPath, "ocg-main"))
         .resolves.toEqual({ released: true, reason: "released" });
 
       expect(readFileSync(roleConfigPath, "utf8")).toBe(beforeRelease);
@@ -2232,7 +2233,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
       "import { get } from 'node:http';",
-      "const baseUrlArg = process.argv.slice(2).find((value) => value.startsWith('model_providers.opencode-go.base_url='));",
+      "const baseUrlArg = process.argv.slice(2).find((value) => value.startsWith('model_providers.ocg-main.base_url='));",
       "if (!baseUrlArg) { await new Promise((resolve) => setTimeout(resolve, 500)); process.exit(0); }",
       "const baseUrl = JSON.parse(baseUrlArg.slice(baseUrlArg.indexOf('=') + 1));",
       "const status = await new Promise((resolve) => {",
@@ -4420,34 +4421,53 @@ function writeManagedProviderFixture(
   mode: "switching" | "exclusive",
   apiKey = "sk-service-secret",
 ) {
-  const providerDirectory = join(connectHome, "providers", definition.id);
+  const resolvedDefinition = definition.capabilities.instanceAdapter === "opencode-go-accounts"
+    && definition.accountId === undefined
+    ? opencodeGoAccountDefinition("main")
+    : definition;
+  const providerDirectory = join(
+    connectHome,
+    "providers",
+    resolvedDefinition.storageId ?? resolvedDefinition.id,
+  );
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
-  const catalogPath = join(providerDirectory, definition.catalogFileName);
-  writeFileSync(catalogPath, managedModelCatalog(definition), { mode: 0o600 });
+  const catalogPath = join(providerDirectory, resolvedDefinition.catalogFileName);
+  writeFileSync(catalogPath, managedModelCatalog(resolvedDefinition), { mode: 0o600 });
   const target = mode === "exclusive"
     ? join(codexHome, "config.toml")
-    : join(codexHome, definition.profileFileName);
+    : join(codexHome, resolvedDefinition.profileFileName);
   writeFileSync(target, stringify({
-    model: definition.defaultModel,
-    model_provider: definition.id,
-    model_reasoning_effort: definition.defaultReasoningEffort,
+    model: resolvedDefinition.defaultModel,
+    model_provider: resolvedDefinition.id,
+    model_reasoning_effort: resolvedDefinition.defaultReasoningEffort,
     model_catalog_json: catalogPath,
     model_providers: {
-      [definition.id]: {
-        name: definition.id,
-        base_url: definition.baseUrl,
-        wire_api: definition.wireApi,
+      [resolvedDefinition.id]: {
+        name: resolvedDefinition.id,
+        base_url: resolvedDefinition.baseUrl,
+        wire_api: resolvedDefinition.wireApi,
         requires_openai_auth: false,
-        ...(definition.supportsWebsockets === undefined
+        ...(resolvedDefinition.supportsWebsockets === undefined
           ? {}
-          : { supports_websockets: definition.supportsWebsockets }),
+          : { supports_websockets: resolvedDefinition.supportsWebsockets }),
         experimental_bearer_token: apiKey,
       },
     },
   }), { mode: 0o600 });
+  const markerDirectory = resolvedDefinition.accountId === undefined
+    ? providerDirectory
+    : join(providerDirectory, "accounts", resolvedDefinition.accountId);
+  mkdirSync(markerDirectory, { recursive: true, mode: 0o700 });
+  if (resolvedDefinition.accountId !== undefined) {
+    writeFileSync(
+      join(providerDirectory, "accounts.json"),
+      `${JSON.stringify([{ id: resolvedDefinition.accountId, default: true }], null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  }
   writeFileSync(
-    join(providerDirectory, definition.managedMarkerFileName),
-    stringify({ version: 1, provider: definition.id, mode }),
+    join(markerDirectory, resolvedDefinition.managedMarkerFileName),
+    stringify({ version: 1, provider: resolvedDefinition.id, mode }),
     { mode: 0o600 },
   );
 }

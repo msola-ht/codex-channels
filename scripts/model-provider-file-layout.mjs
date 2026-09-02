@@ -15,11 +15,17 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import { providerStorageRoot } from "../runtime/connect-home.mjs";
 import {
   deepseekProviderDefinition,
+  loadManagedModelProviderDefinitions,
   managedModelProviderDefinitions,
 } from "../runtime/model-provider-definitions.mjs";
+import { migrateLegacyOpencodeGoAccount } from "../runtime/opencode-go-accounts.mjs";
+import { managedProviderMarkerPath } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 const layoutVersion = 1;
+const profileManagedProviderDefinitions = managedModelProviderDefinitions.filter(
+  ({ capabilities }) => capabilities.instanceAdapter === "single",
+);
 
 export function migrateManagedModelProviderFiles(environment = process.env) {
   const codexHome = codexHomePath(environment);
@@ -40,7 +46,7 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
   const snapshots = snapshotPaths([
     ...paths.flatMap(({ legacy, current }) => [legacy, current]),
     join(codexHome, "config.toml"),
-    ...managedModelProviderDefinitions.map((definition) =>
+    ...profileManagedProviderDefinitions.map((definition) =>
       join(codexHome, definition.profileFileName)),
     join(codexHome, "sf-agent.config.toml"),
   ]);
@@ -59,8 +65,11 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
       unlinkSync(legacy);
     }
     rewriteManagedFileReferences(environment);
-    for (const definition of managedModelProviderDefinitions) {
-      const legacyBackup = join(codexHome, `backup-codex-connect-${definition.id}`);
+    for (const definition of profileManagedProviderDefinitions) {
+      const legacyBackup = join(
+        codexHome,
+        `backup-codex-connect-${legacyProviderId(definition)}`,
+      );
       if (existsSync(legacyBackup)) {
         try {
           rmdirSync(legacyBackup);
@@ -81,12 +90,10 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
 }
 
 export function migrateManagedModelProviderModelSettings(environment = process.env) {
+  migrateLegacyOpencodeGoAccount(environment);
   const codexHome = codexHomePath(environment);
-  const configured = managedModelProviderDefinitions.flatMap((definition) => {
-    const markerPath = join(
-      providerStorage(environment, definition),
-      definition.managedMarkerFileName,
-    );
+  const configured = loadManagedModelProviderDefinitions(environment).flatMap((definition) => {
+    const markerPath = managedProviderMarkerPath(environment, definition);
     if (!existsSync(markerPath)) return [];
     assertPrivateRegularFile(markerPath);
     let marker;
@@ -227,7 +234,7 @@ function migrateProviderModelSettings(environment, { definition, mode }) {
 function migrateRoleModelSettings(environment, rolePath) {
   assertPrivateRegularFile(rolePath);
   const document = parseManagedToml(rolePath);
-  const definition = managedModelProviderDefinitions.find(
+  const definition = loadManagedModelProviderDefinitions(environment).find(
     (candidate) => candidate.id === document.model_provider,
   );
   if (!definition || typeof document.model !== "string") {
@@ -315,7 +322,7 @@ function modelEntry(catalog, model, sourcePath) {
 }
 
 function providerStorage(environment, definition) {
-  return join(providerStorageRoot(environment), definition.id);
+  return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
 }
 
 function providerCatalogPath(environment, definition) {
@@ -326,57 +333,66 @@ function providerCatalogPath(environment, definition) {
 }
 
 function legacyCatalogPaths(codexHome, definition) {
+  const legacyId = legacyProviderId(definition);
   return [
-    join(codexHome, `${definition.id}.models.json`),
-    join(codexHome, `sf-${definition.id}.models.json`),
+    join(codexHome, `${legacyId}.models.json`),
+    join(codexHome, `sf-${legacyId}.models.json`),
   ];
+}
+
+function legacyProviderId(definition) {
+  return definition.storageId ?? definition.id;
 }
 
 export function migrationPaths(environment) {
   const codexHome = codexHomePath(environment);
   const roleTarget = join(codexHome, "sf-agent.config.toml");
   const entries = [];
-  for (const definition of managedModelProviderDefinitions) {
+  for (const definition of profileManagedProviderDefinitions) {
+    const legacyId = legacyProviderId(definition);
     const directory = providerStorage(environment, definition);
     const backup = join(directory, definition.backupDirectoryName);
     entries.push(
       {
         definition,
-        legacy: join(codexHome, `${definition.id}.config.toml`),
+        legacy: join(codexHome, `${legacyId}.config.toml`),
         current: join(codexHome, definition.profileFileName),
       },
       {
         definition,
-        legacy: join(codexHome, `${definition.id}.models.json`),
+        legacy: join(codexHome, `${legacyId}.models.json`),
         current: join(directory, definition.catalogFileName),
       },
       {
         definition,
-        legacy: join(codexHome, `sf-${definition.id}.models.json`),
+        legacy: join(codexHome, `sf-${legacyId}.models.json`),
         current: join(directory, definition.catalogFileName),
       },
       {
         definition,
-        legacy: join(codexHome, `${definition.id}.models.manifest.json`),
+        legacy: join(codexHome, `${legacyId}.models.manifest.json`),
         current: join(directory, definition.catalogManifestFileName),
       },
       {
         definition,
-        legacy: join(codexHome, `sf-${definition.id}.models.manifest.json`),
+        legacy: join(codexHome, `sf-${legacyId}.models.manifest.json`),
         current: join(directory, definition.catalogManifestFileName),
       },
       {
         definition,
-        legacy: join(codexHome, `codex-connect-${definition.id}.config.toml`),
+        legacy: join(codexHome, `codex-connect-${legacyId}.config.toml`),
         current: join(directory, definition.managedMarkerFileName),
       },
       {
         definition,
-        legacy: join(codexHome, `sf-${definition.id}.managed.toml`),
+        legacy: join(codexHome, `sf-${legacyId}.managed.toml`),
         current: join(directory, definition.managedMarkerFileName),
       },
     );
-    const legacyBackup = join(codexHome, `backup-codex-connect-${definition.id}`);
+    const legacyBackup = join(
+      codexHome,
+      `backup-codex-connect-${legacyId}`,
+    );
     if (existsSync(legacyBackup)) {
       for (const name of readdirSync(legacyBackup)) {
         entries.push({
@@ -401,22 +417,23 @@ export function migrationPaths(environment) {
 }
 
 function backupFileName(definition, name) {
-  if (name === `${definition.id}.config.toml`) return definition.profileFileName;
+  const legacyId = legacyProviderId(definition);
+  if (name === `${legacyId}.config.toml`) return definition.profileFileName;
   if (
-    name === `${definition.id}.models.json`
-    || name === `sf-${definition.id}.models.json`
+    name === `${legacyId}.models.json`
+    || name === `sf-${legacyId}.models.json`
   ) {
     return definition.catalogFileName;
   }
   if (
-    name === `${definition.id}.models.manifest.json`
-    || name === `sf-${definition.id}.models.manifest.json`
+    name === `${legacyId}.models.manifest.json`
+    || name === `sf-${legacyId}.models.manifest.json`
   ) {
     return definition.catalogManifestFileName;
   }
   if (
-    name === `codex-connect-${definition.id}.config.toml`
-    || name === `sf-${definition.id}.managed.toml`
+    name === `codex-connect-${legacyId}.config.toml`
+    || name === `sf-${legacyId}.managed.toml`
   ) {
     return definition.managedMarkerFileName;
   }
@@ -447,7 +464,7 @@ function rewriteManagedFileReferences(environment) {
   const rolePath = join(codexHome, "sf-agent.config.toml");
   const targets = [
     join(codexHome, "config.toml"),
-    ...managedModelProviderDefinitions.map((definition) =>
+    ...profileManagedProviderDefinitions.map((definition) =>
       join(codexHome, definition.profileFileName)),
     rolePath,
   ];

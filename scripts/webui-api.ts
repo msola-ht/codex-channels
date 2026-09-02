@@ -318,6 +318,7 @@ export type OpencodeGoModelUsageEstimate = ModelUsageEstimate
 
 export interface OpencodeGoAccountUsage {
   account: string
+  displayName: string
   default: boolean
   available: boolean
   windows: OpencodeGoQuotaWindow[]
@@ -348,6 +349,9 @@ export interface GlobalCostRow {
 
 export interface GlobalProviderRow {
   provider: string | null
+  provider_display_name?: string | null
+  provider_email?: string | null
+  provider_phone?: string | null
   request_count: number
   input_tokens: number
   output_tokens: number
@@ -391,6 +395,7 @@ export interface GlobalDailyResponse {
 
 export interface GlobalQuotaPeriod {
   provider: string
+  providerDisplayName?: string | null
   windowId: string
   resetsAt: number
   /** 根据额度窗口推导的周期起点；无法识别窗口长度时为 null。 */

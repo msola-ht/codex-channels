@@ -178,7 +178,7 @@ export function formatConversationSessions(
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.modelProvider ? ` · Provider：${session.modelProvider}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
@@ -248,7 +248,7 @@ export function formatConversationScheduledTasks(
       `   ID：${task.taskId}`,
       `   计划：${formatSchedule(task.schedule, task.timezone)}`,
       `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
-      `   Workspace：${task.workspaceId} · 模型：${task.modelProvider}/${task.model ?? "默认"} · ${task.sandbox}`,
+      `   Workspace：${task.workspaceId} · 模型：${formatDisplayedProvider(task.modelProvider)}/${task.model ?? "默认"} · ${task.sandbox}`,
     ].join("\n")),
     "",
     "此处列出循环任务定义；每次执行结果与终态：/schedule runs <任务>",
@@ -304,7 +304,7 @@ export function formatConversationScheduledConfirmation(
     ...(preview.action === "delete" ? [`任务：${preview.task.taskId}`] : []),
     `计划：${formatSchedule(preview.task.schedule, preview.task.timezone)}`,
     `Workspace：${preview.task.workspaceId}`,
-    `模型：${preview.task.modelProvider}/${preview.task.model ?? "默认"}`,
+    `模型：${formatDisplayedProvider(preview.task.modelProvider)}/${preview.task.model ?? "默认"}`,
     `思考等级：${preview.task.reasoningEffort ?? "默认"}`,
     `下次运行：${formatScheduledAt(preview.task.nextRunAt)}`,
     `Sandbox：${preview.task.sandbox}`,
@@ -681,7 +681,7 @@ export function formatConversationCommandOutcome(
         `状态：${formatScheduledTaskStatusLabel(outcome.task.status)}`,
         `计划：${formatSchedule(outcome.task.schedule, outcome.task.timezone)}`,
         `下次运行：${formatScheduledAt(outcome.task.nextRunAt)}`,
-        `模型：${outcome.task.modelProvider}/${outcome.task.model ?? "默认"}`,
+        `模型：${formatDisplayedProvider(outcome.task.modelProvider)}/${outcome.task.model ?? "默认"}`,
         `思考等级：${outcome.task.reasoningEffort ?? "默认"}`,
       ].join("\n"));
     case "scheduled-task.run-requested":
@@ -1729,7 +1729,11 @@ function formatConversationModel(
   label: string,
   value: { model: string; modelProvider?: string },
 ): string {
-  return `${label}：${value.model}${value.modelProvider ? ` · Provider：${value.modelProvider}` : ""}`;
+  return `${label}：${value.model}${value.modelProvider ? ` · Provider：${formatDisplayedProvider(value.modelProvider)}` : ""}`;
+}
+
+function formatDisplayedProvider(provider: string): string {
+  return provider.startsWith("ocg-") ? formatCodexProviderLabel(provider) : provider;
 }
 
 function formatModelStateLine(

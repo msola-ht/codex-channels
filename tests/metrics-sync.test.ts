@@ -116,6 +116,59 @@ describe("MetricsSync", () => {
     await sync.close();
   });
 
+  it("仅身份快照变化时也会上传，且不污染请求 Provider", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-identities-"));
+    temporaryDirectories.push(directory);
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    const sync = new MetricsSync(createOptions({
+      config: enabledConfig(),
+      statePath: join(directory, "metrics-sync-state.json"),
+      store: createStore(),
+      fetchImpl,
+      providerIdentities: () => [{
+        provider: "ocg-main",
+        displayName: "ocg-user@example.com",
+        email: "user@example.com",
+      }],
+    }));
+
+    await (sync as unknown as { syncOnce: () => Promise<void> }).syncOnce();
+    const payload = JSON.parse(String((fetchImpl.mock.calls[0]![1] as RequestInit).body));
+    expect(payload.requestMetrics).toEqual([]);
+    expect(payload.providerIdentities).toEqual([{
+      provider: "ocg-main",
+      displayName: "ocg-user@example.com",
+      email: "user@example.com",
+    }]);
+    await sync.close();
+  });
+
+  it("联系人移除时上传空身份快照", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-identities-"));
+    temporaryDirectories.push(directory);
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    const identities = [{
+      provider: "ocg-main",
+      displayName: "ocg-user@example.com",
+      email: "user@example.com",
+    }];
+    const sync = new MetricsSync(createOptions({
+      config: enabledConfig(),
+      statePath: join(directory, "metrics-sync-state.json"),
+      store: createStore(),
+      fetchImpl,
+      providerIdentities: () => identities,
+    }));
+
+    const runOnce = () => (sync as unknown as { syncOnce: () => Promise<void> }).syncOnce();
+    await runOnce();
+    identities.splice(0);
+    await runOnce();
+    const secondPayload = JSON.parse(String((fetchImpl.mock.calls[1]![1] as RequestInit).body));
+    expect(secondPayload.providerIdentities).toEqual([]);
+    await sync.close();
+  });
+
   it.skipIf(process.platform === "win32")("失败时不推进水位，退避后重试成功再推进", async () => {
     vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-sync-"));
@@ -264,9 +317,14 @@ function createOptions(options: {
   statePath: string;
   store: ModelRequestMetricsStore;
   fetchImpl: typeof fetch;
+  providerIdentities?: MetricsSyncOptions["providerIdentities"];
 }): MetricsSyncOptions {
+  const { providerIdentities, ...requiredOptions } = options;
   return {
-    ...options,
+    ...requiredOptions,
+    ...(providerIdentities === undefined
+      ? {}
+      : { providerIdentities }),
     logger: pino({ level: "silent" }),
   };
 }

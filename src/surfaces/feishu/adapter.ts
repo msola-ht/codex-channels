@@ -22,6 +22,7 @@ import {
   formatSessionListCommand,
   formatThreadQueueInputTypeLabel,
 } from "../conversation-command-format.js";
+import { formatCodexProviderLabel } from "../provider-format.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
   formatOperationFailure,
@@ -1400,7 +1401,7 @@ function renderCommandCenterChoices(
         "",
         "**执行配置**",
         `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,
-        `- Provider：${escapeFeishuCardMarkdown(task.modelProvider)}`,
+        `- Provider：${escapeFeishuCardMarkdown(formatCodexProviderLabel(task.modelProvider))}`,
         `- 模型：${escapeFeishuCardMarkdown(task.model ?? "默认")}`,
         `- 思考等级：${escapeFeishuCardMarkdown(task.reasoningEffort ?? "默认")}`,
         `- Sandbox：${escapeFeishuCardMarkdown(task.sandbox)}`,
@@ -1674,7 +1675,7 @@ function renderCommandCenterChoices(
       description: [
         "当前模型",
         `- 模型：${result.state.model}`,
-        `- Provider：${result.state.modelProvider ?? "OpenAI 官方"}`,
+        `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
         `- 思考等级：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
         "",
         "选择模型后将继续选择思考等级。",

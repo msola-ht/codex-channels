@@ -1,8 +1,8 @@
 import {
   loadOpencodeGoAccounts,
-  opencodeGoDefaultAccountId,
   opencodeGoApiKeyEnvironmentKey,
   opencodeGoProviderId,
+  opencodeGoAccountDisplayName,
 } from "./opencode-go-accounts.mjs";
 
 const managedProviderCapabilityKinds = Object.freeze({
@@ -32,7 +32,8 @@ const opencodeGoProviderCapabilities = Object.freeze({
 });
 
 const deepseekProfileName = "sf-deepseek";
-const opencodeGoProfileName = "sf-opencode-go";
+// 仅用于识别迁移前的单账户 Profile；实际账户 Profile 一律由账户 ID 派生。
+const opencodeGoLegacyProfileName = "sf-opencode-go";
 
 export const deepseekProviderDefinition = Object.freeze({
   id: "deepseek",
@@ -57,10 +58,11 @@ export const deepseekProviderDefinition = Object.freeze({
 });
 
 export const opencodeGoProviderDefinition = Object.freeze({
-  id: "opencode-go",
+  id: "ocg",
+  storageId: "opencode-go",
   displayName: "OpenCode Go",
-  profileName: opencodeGoProfileName,
-  profileFileName: `${opencodeGoProfileName}.config.toml`,
+  profileName: opencodeGoLegacyProfileName,
+  profileFileName: `${opencodeGoLegacyProfileName}.config.toml`,
   catalogFileName: "models.json",
   catalogManifestFileName: "models.manifest.json",
   managedMarkerFileName: "managed.toml",
@@ -86,7 +88,7 @@ export const managedModelProviderDefinitions = Object.freeze([
 
 export function loadOpencodeGoAccountDefinitions(environment = process.env) {
   return loadOpencodeGoAccounts(environment).map((account) =>
-    opencodeGoAccountDefinition(account.id));
+    opencodeGoAccountDefinition(account.id, account.email, account.phone));
 }
 
 export function loadManagedModelProviderDefinitions(environment = process.env) {
@@ -137,17 +139,16 @@ function assertManagedModelProviderProfile(definition) {
   }
 }
 
-export function opencodeGoAccountDefinition(accountId) {
+export function opencodeGoAccountDefinition(accountId, email, phone) {
   const provider = opencodeGoProviderId(accountId);
-  const isDefaultAccount = accountId === opencodeGoDefaultAccountId;
-  const profileName = isDefaultAccount
-    ? opencodeGoProfileName
-    : `${opencodeGoProfileName}-${accountId}`;
+  const profileName = `sf-ocg-${accountId}`;
   return Object.freeze({
     id: provider,
     accountId,
+    ...(email === undefined ? {} : { email }),
+    ...(phone === undefined ? {} : { phone }),
     storageId: "opencode-go",
-    displayName: isDefaultAccount ? "OpenCode Go" : `OpenCode Go（${accountId}）`,
+    displayName: opencodeGoAccountDisplayName({ id: accountId, email, phone }),
     profileName,
     profileFileName: `${profileName}.config.toml`,
     catalogFileName: opencodeGoProviderDefinition.catalogFileName,

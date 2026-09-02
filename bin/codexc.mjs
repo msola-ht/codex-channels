@@ -172,7 +172,7 @@ const helpText = {
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
-切换模式可用 --profile sf-deepseek、sf-opencode-go、sf-opencode-go-<账户> 或
+切换模式可用 --profile sf-deepseek、sf-ocg-<账户> 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
   service: `用法：codexc service <命令>
 
@@ -232,13 +232,13 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 
 管理 OpenCode Go 多账户。Key 只写入 0600 私有 Codex Profile，不进入 Gateway config.toml、命令行或日志。
 
-  add <id>     新增账户（交互输入 API Key）
+  add <id>     新增账户（交互输入邮箱或手机号、API Key）
   list         列出账户与默认标记
   remove <id>  备份后删除账户 Profile 与注册表项
   default <id> 设置新会话默认账户（当前为 OpenCode Go 时同步 agents.external）
   stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）`,
   "opencode_go.account": `用法：codexc opencode-go account <add|list|remove|default|stop> [id]`,
-  "opencode_go.account.add": "用法：codexc opencode-go account add <id>",
+  "opencode_go.account.add": "用法：codexc opencode-go account add <id>（交互输入邮箱或手机号、API Key）",
   "opencode_go.account.list": "用法：codexc opencode-go account list [--json]",
   "opencode_go.account.remove": "用法：codexc opencode-go account remove <id>",
   "opencode_go.account.default": "用法：codexc opencode-go account default <id>",
@@ -694,8 +694,8 @@ async function runServiceAppServer(args) {
     return agent;
   };
   const startProviderProxy = async (provider, options) => {
-    if (provider === "opencode-go") {
-      const existing = providerProxyRuntimes.get("opencode-go");
+    if (provider === "ocg") {
+      const existing = providerProxyRuntimes.get("ocg");
       if (existing) return { ...existing, created: false };
       const modelProxy = new ProviderProxy("127.0.0.1:0", {
         ...options,
@@ -708,11 +708,9 @@ async function runServiceAppServer(args) {
           return quota ? quota() : Promise.resolve(null);
         },
         onMetrics: (metrics, accountId) => {
-          const targetProvider = accountId === undefined
-            ? goDefaultAccountId === undefined
-              ? "opencode-go"
-              : opencodeGoProviderId(goDefaultAccountId)
-            : opencodeGoProviderId(accountId);
+          const targetAccountId = accountId ?? goDefaultAccountId;
+          if (targetAccountId === undefined) return undefined;
+          const targetProvider = opencodeGoProviderId(targetAccountId);
           return sendProviderProxyMetrics(
             providerMetricsSocketPath(socketPath, targetProvider),
             metrics,
@@ -729,7 +727,7 @@ async function runServiceAppServer(args) {
         baseUrl: `http://${modelProxy.address()}`,
         proxy: modelProxy,
       };
-      providerProxyRuntimes.set("opencode-go", proxyRuntime);
+      providerProxyRuntimes.set("ocg", proxyRuntime);
       console.log(`opencode-go 模型统计代理已启动：${modelProxy.address()}`);
       return { ...proxyRuntime, created: true };
     }
@@ -951,7 +949,7 @@ async function runServiceAppServer(args) {
       const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
       const roleUsesGoProxy = thirdPartyRole && isGoProvider(thirdPartyRole.provider);
       if (!remainingGoChild && !roleUsesGoProxy) {
-        const goProxy = providerProxyRuntimes.get("opencode-go")?.proxy;
+        const goProxy = providerProxyRuntimes.get("ocg")?.proxy;
         if (goProxy) await closeProviderProxy(goProxy);
       }
     }
@@ -1011,7 +1009,7 @@ async function runServiceAppServer(args) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
-      const providerKey = isGoProvider(definition.id) ? "opencode-go" : definition.id;
+      const providerKey = isGoProvider(definition.id) ? "ocg" : definition.id;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(definition.id, isGoProvider(definition.id)
@@ -1036,7 +1034,7 @@ async function runServiceAppServer(args) {
       const definition = providerDefinitions.get(provider);
       const customDefinition = customSwitchingProvidersById.get(provider);
       if (!definition && !customDefinition) throw new Error(`未知第三方 Provider：${provider}`);
-      const providerKey = isGoProvider(provider) ? "opencode-go" : provider;
+      const providerKey = isGoProvider(provider) ? "ocg" : provider;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(provider, isGoProvider(provider)
@@ -1092,6 +1090,14 @@ function withoutManagedProviderApiKeys(environment) {
   managedKeys.add("CODEX_CONNECT_OPENCODE_GO_API_KEY");
   for (const key of managedKeys) {
     delete childEnvironment[key];
+  }
+  for (const key of Object.keys(childEnvironment)) {
+    if (
+      /^CODEX_CONNECT_OPENCODE_GO(?:_[A-Z0-9_]+)?_API_KEY$/u.test(key)
+      || /^CODEX_CONNECT_CUSTOM_[A-F0-9]+_API_KEY$/u.test(key)
+    ) {
+      delete childEnvironment[key];
+    }
   }
   return childEnvironment;
 }

@@ -103,7 +103,7 @@ describe("ProviderSettingsWatcher", () => {
       CODEX_CONNECT_HOME: connectHome,
     };
     writeOpencodeGoAccounts(environment, [
-      { id: "opencode-go", default: true },
+      { id: "main", default: true },
       { id: "lunare", default: false },
     ]);
     const scheduledProviders: string[][] = [];
@@ -119,7 +119,7 @@ describe("ProviderSettingsWatcher", () => {
 
     expect(restartCalls).toEqual(["restart"]);
     expect(scheduledProviders).toEqual([
-      ["opencode-go", "opencode-go-lunare"],
+      ["ocg", "ocg-main", "ocg-lunare"],
     ]);
   });
 
@@ -169,10 +169,10 @@ describe("ProviderSettingsWatcher", () => {
       CODEX_CONNECT_HOME: connectHome,
     };
     writeOpencodeGoAccounts(environment, [
-      { id: "opencode-go", default: true },
+      { id: "main", default: true },
       { id: "lunare", default: false },
     ]);
-    const defaultMarkerPath = opencodeGoAccountMarkerPath(environment, "opencode-go");
+    const defaultMarkerPath = opencodeGoAccountMarkerPath(environment, "main");
     const accountMarkerPath = opencodeGoAccountMarkerPath(environment, "lunare");
     mkdirSync(dirname(defaultMarkerPath), { recursive: true, mode: 0o700 });
     mkdirSync(dirname(accountMarkerPath), { recursive: true, mode: 0o700 });

@@ -241,6 +241,7 @@ describe("Codex user settings management", () => {
     }, {
       expectedVersion: "version-1",
       createClient: async () => client,
+      primaryProvider: () => "openai",
     })).rejects.toMatchObject({
       code: "invalid-approval-policy",
       field: "approvalPolicy",
@@ -259,6 +260,7 @@ describe("Codex user settings management", () => {
     }, {
       expectedVersion: "version-1",
       createClient: async () => client,
+      primaryProvider: () => "openai",
     })).rejects.toMatchObject({
       code: "permission-profile-active",
       field: "sandboxMode",
@@ -294,6 +296,7 @@ describe("Codex user settings management", () => {
     }, {
       expectedVersion: "old-version",
       createClient: async () => client,
+      primaryProvider: () => "openai",
     })).rejects.toMatchObject({
       code: "stale-revision",
       field: "revision",
@@ -315,6 +318,7 @@ describe("Codex user settings management", () => {
     }, {
       expectedVersion: "version-1",
       createClient: async () => client,
+      primaryProvider: () => "openai",
     })).rejects.toMatchObject({
       code: "stale-revision",
       field: "revision",

@@ -50,7 +50,7 @@ describe("OpenCode Go account adapter", () => {
 
     await expect(adapter.accountUsage()).resolves.toEqual({
       kind: "quota-windows",
-      provider: "opencode-go",
+      provider: "ocg-main",
       available: true,
       windows: [
         {
@@ -102,7 +102,7 @@ describe("OpenCode Go account adapter", () => {
 
     await expect(adapter.accountUsage()).resolves.toMatchObject({
       kind: "quota-windows",
-      provider: "opencode-go",
+      provider: "ocg-main",
       available: true,
       windows: [{ windowId: "rolling", usedPercent: 10 }],
     });
@@ -135,6 +135,7 @@ describe("OpenCode Go account adapter", () => {
       `model = "deepseek-v4-flash"\n${providerConfig("sk-fixed-secret")}`,
       { mode: 0o600 },
     );
+    await createAccountRegistry(codexHome, "exclusive");
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       usage: {
         rolling: { status: "ok", percent: 10, resetsAt: "2026-08-16T18:03:54.934Z" },
@@ -147,7 +148,7 @@ describe("OpenCode Go account adapter", () => {
 
     await expect(adapter.accountUsage()).resolves.toMatchObject({
       kind: "quota-windows",
-      provider: "opencode-go",
+      provider: "ocg-main",
       available: true,
       windows: [{ windowId: "rolling", usedPercent: 10 }],
     });
@@ -180,7 +181,7 @@ describe("OpenCode Go account adapter", () => {
     );
     const store = new SqliteModelRequestMetricsStore(metricsPath);
     store.record({
-      provider: "opencode-go",
+      provider: "ocg-main",
       pricing: null,
       transport: "http",
       responseFormat: "sse",
@@ -216,7 +217,7 @@ describe("OpenCode Go account adapter", () => {
       weeklyQuota: null,
     });
     store.record({
-      provider: "opencode-go",
+      provider: "ocg-main",
       pricing: {
         billingMode: "subscription",
         currency: "USD",
@@ -260,7 +261,7 @@ describe("OpenCode Go account adapter", () => {
       weeklyQuota: null,
     });
     store.record({
-      provider: "opencode-go",
+      provider: "ocg-main",
       pricing: {
         billingMode: "subscription",
         currency: "USD",
@@ -670,7 +671,7 @@ describe("OpenCode Go account adapter", () => {
       Date.parse("2026-08-22T05:00:00.000Z"),
     );
     store.record({
-      provider: "opencode-go",
+      provider: "ocg-main",
       pricing: {
         billingMode: "subscription",
         currency: "USD",
@@ -765,7 +766,7 @@ describe("OpenCode Go account adapter", () => {
     );
     const store = new SqliteModelRequestMetricsStore(metricsPath);
     store.record({
-      provider: "opencode-go",
+      provider: "ocg-main",
       pricing: {
         billingMode: "subscription",
         currency: "USD",
@@ -860,7 +861,7 @@ describe("OpenCode Go account adapter", () => {
     );
     const store = new SqliteModelRequestMetricsStore(metricsPath);
     store.record({
-      provider: "opencode-go",
+      provider: "ocg-main",
       pricing: {
         billingMode: "subscription",
         currency: "USD",
@@ -955,42 +956,53 @@ async function createCodexHome(): Promise<string> {
     "opencode-go",
   );
   await mkdir(providerDirectory, { recursive: true, mode: 0o700 });
+  const accountDirectory = join(providerDirectory, "accounts", "main");
+  await mkdir(accountDirectory, { recursive: true, mode: 0o700 });
   await writeFile(join(directory, "config.toml"), 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
   await writeFile(
-    join(directory, "sf-opencode-go.config.toml"),
-    `model = "deepseek-v4-flash"\nmodel_provider = "opencode-go"\n${providerConfig("sk-test-secret")}`,
+    join(directory, "sf-ocg-main.config.toml"),
+    `model = "deepseek-v4-flash"\nmodel_provider = "ocg-main"\n${providerConfig("sk-test-secret")}`,
     { mode: 0o600 },
   );
   await writeFile(
-    join(providerDirectory, "managed.toml"),
-    'version = 1\nprovider = "opencode-go"\n',
+    join(providerDirectory, "accounts.json"),
+    `${JSON.stringify([{ id: "main", default: true, email: "user@example.com" }], null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(accountDirectory, "managed.toml"),
+    'version = 1\nprovider = "ocg-main"\nmode = "switching"\n',
     { mode: 0o600 },
   );
   return directory;
 }
 
 async function createAccountRegistryCodexHome(): Promise<string> {
-  const directory = await createCodexHome();
+  return createCodexHome();
+}
+
+async function createAccountRegistry(
+  codexHome: string,
+  mode: "switching" | "exclusive",
+): Promise<void> {
   const providerDirectory = join(
-    directory,
+    codexHome,
     ".codex-connect",
     "providers",
     "opencode-go",
   );
-  await rm(join(providerDirectory, "managed.toml"));
-  const accountDirectory = join(providerDirectory, "accounts", "opencode-go");
+  const accountDirectory = join(providerDirectory, "accounts", "main");
   await mkdir(accountDirectory, { recursive: true, mode: 0o700 });
   await writeFile(
     join(providerDirectory, "accounts.json"),
-    `${JSON.stringify([{ id: "opencode-go", default: true }], null, 2)}\n`,
+    `${JSON.stringify([{ id: "main", default: true, email: "user@example.com" }], null, 2)}\n`,
     { mode: 0o600 },
   );
   await writeFile(
     join(accountDirectory, "managed.toml"),
-    'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+    `version = 1\nprovider = "ocg-main"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
-  return directory;
 }
 
 function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
@@ -1001,7 +1013,7 @@ function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
 }
 
 function providerConfig(apiKey: string): string {
-  return `[model_providers.opencode-go]\nname = "opencode-go"\nbase_url = "https://opencode.ai/zen/go/v1"\nwire_api = "responses"\nsupports_websockets = false\nrequires_openai_auth = false\nexperimental_bearer_token = "${apiKey}"\n`;
+  return `[model_providers.ocg-main]\nname = "ocg-main"\nbase_url = "https://opencode.ai/zen/go/v1"\nwire_api = "responses"\nsupports_websockets = false\nrequires_openai_auth = false\nexperimental_bearer_token = "${apiKey}"\n`;
 }
 
 function recordWindowSample(
@@ -1014,7 +1026,7 @@ function recordWindowSample(
   quotaWindows?: ReadonlyArray<{ windowId: string; resetsAt: number | null }> | null,
 ): void {
   store.record({
-    provider: "opencode-go",
+    provider: "ocg-main",
     pricing: null,
     transport: "http",
     responseFormat: "sse",

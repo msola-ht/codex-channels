@@ -10,29 +10,29 @@ Codex Connect 支持在一个 Gateway 内配置多个 OpenCode Go 账户。每�
 
 ## Provider 与 Thread 语义
 
-默认账户保持 Provider id `opencode-go`，新增账户使用 `opencode-go-<accountId>`：
+首次和后续添加都必须输入账户 ID。所有账户使用 `ocg-<accountId>`；默认账户只由注册表中的
+`default: true` 标记决定：
 
 ```text
-opencode-go          默认账户
-opencode-go-b        账户 b
+ocg-work             默认账户 work
+ocg-b                账户 b
 ```
 
 Codex Thread 的 `modelProvider` 创建后不可变。因此：
 
 - 同一账户内切换模型不会新建 Thread；
 - 跨账户切换会保留并解绑当前 Thread，下一条消息使用目标账户新建 Thread，不复制历史；
-- `/resume` 按原 `modelProvider` 恢复历史 Thread，并在需要时拉起对应账户 App Server；
-- `/model` 中默认账户显示为 `OpenCode Go`，其他账户显示为 `OpenCode Go（<accountId>）`；
-- `codexc remote --profile sf-opencode-go` 连接默认账户，
-  `codexc remote --profile sf-opencode-go-<accountId>` 连接其他账户。
+- `/resume` 按原 `modelProvider` 恢复仍映射到现有账户的历史 Thread，并在需要时拉起对应账户 App Server；已删除账户或无法映射的旧 Thread 不保证可恢复；
+- `/model` 和指标展示使用注册表中的 `ocg-<邮箱或手机号>`，未配置联系方式时回退到 `ocg-<accountId>`；
+- `codexc remote --profile sf-ocg-<accountId>` 连接对应账户。
 
 ## 账户文件
 
-账户注册表和共享模型目录位于 Gateway 数据目录，不保存 Key：
+账户注册表和共享模型目录位于 Gateway 数据目录，不保存 Key；注册表中的联系方式只用于展示和数据中心身份快照：
 
 ```text
 ~/.codex-connect/providers/opencode-go/
-  accounts.json                            账户注册表（id、default）
+  accounts.json                            账户注册表（id、default、email 或 phone）
   models.json / models.manifest.json       共享模型目录
   accounts/<account>/managed.toml          管理标记（version、provider、mode）
   accounts/<account>/backup/               删除前的私有 Profile 与管理标记备份
@@ -41,16 +41,15 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
 切换模式下，每个账户使用独立的 0600 Profile：
 
 ```text
-~/.codex/sf-opencode-go.config.toml
-~/.codex/sf-opencode-go-<account>.config.toml
+~/.codex/sf-ocg-<account>.config.toml
 ```
 
 Profile 保存该账户的 Key、Provider 配置、模型目录、默认模型与默认思考等级。Key 不进入
 `accounts.json`、Gateway 配置、日志或平台消息。Profile 与管理标记继续执行无符号链接、属主和
 权限校验。
 
-账户 id 使用小写字母、数字、`-` 或 `_`，长度为 1–32；默认账户 id 固定为
-`opencode-go`，其他 id 不得与现有 Provider 冲突。
+账户 id 使用小写字母、数字、`-` 或 `_`，长度为 1–32；Provider 始终使用
+`ocg-<accountId>`，默认账户不使用固定 ID。添加账户时邮箱和手机号必须二选一。
 
 ## CLI 与原子性
 
@@ -63,7 +62,7 @@ codexc opencode-go account default <id>
 codexc opencode-go account stop <id>
 ```
 
-`list --json` 只输出账户 ID、默认标记、Provider ID 与运行模式，不包含 API Key 或 Profile 路径。
+`list --json` 输出账户 ID、邮箱或手机号（若有）、展示名、默认标记、Provider ID 与运行模式，不包含 API Key 或 Profile 路径。
 
 - `add` 下载或复用共享模型目录，写入账户 Profile、管理标记与注册表；失败时按写入前快照回滚；
 - `remove` 先停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
@@ -76,9 +75,9 @@ codexc opencode-go account stop <id>
   退出 TUI 后重试；
 - 删除账户后，该账户历史 Thread 因 Provider 不再存在而不可恢复，CLI 会要求明确确认。
 
-旧版单账户配置升级时只补注册表和管理标记，不重命名 `opencode-go`、Profile 或角色文件。
-早期预发布版本使用过 `opencode-go-main`；受管切换模式会保留该账户以恢复历史 Thread，并建立新的
-`opencode-go` 默认账户。固定模式不自动转换。
+已注册的旧账户升级时会改为 `sf-ocg-<accountId>.config.toml`，并把配置和角色中的 Provider
+引用迁移到 `ocg-<accountId>`。没有账户 ID 的旧单账户配置不会被擅自命名为 `main`，需使用明确 ID
+重新添加。迁移无法获得联系方式，因此身份快照会在补充联系方式前省略该账户；旧会话若仍引用已不存在的旧 Provider，则不保证可恢复。
 
 ## 共享统计代理
 
@@ -87,7 +86,7 @@ App Server 从自己的进程环境注入。
 
 账户 App Server 的 `base_url` 指向共享代理并带 `/go/<accountId>` 前缀。代理转发时剥离前缀，
 按账户选择指标 Socket，使指标库中的 `provider` 保持为对应账户 Provider id。因此现有 Provider
-过滤、指标中心同步和 `codexc metrics prune opencode-go-<accountId>` 无需新增数据表。
+过滤、指标中心同步和 `codexc metrics prune ocg-<accountId>` 无需新增请求指标表；身份快照单独存放在中心 `provider_identities` 表。
 
 ## App Server 生命周期
 

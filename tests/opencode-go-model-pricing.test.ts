@@ -27,7 +27,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
     expect(baseline.limitedFreeModels.has("ox-alpha-free")).toBe(true);
     expect(baseline.models.has("ox-alpha-free")).toBe(false);
     expect(new OpenCodeGoModelPricingResolver(baseline).resolve({
-      provider: "opencode-go",
+      provider: "ocg-main",
       model: "ox-alpha-free",
       serviceTier: null,
       inputTokens: 1_000,
@@ -59,7 +59,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
     const resolver = new OpenCodeGoModelPricingResolver();
 
     expect(resolver.resolve({
-      provider: "opencode-go",
+      provider: "ocg-main",
       model: "deepseek-v4-flash",
       serviceTier: null,
       inputTokens: 1_000,
@@ -86,7 +86,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
     const resolver = new OpenCodeGoModelPricingResolver();
 
     expect(resolver.resolve({
-      provider: "opencode-go-lunare",
+      provider: "ocg-lunare",
       model: "deepseek-v4-flash",
       serviceTier: null,
       inputTokens: 1_000,
@@ -110,7 +110,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
     const resolver = new OpenCodeGoModelPricingResolver();
 
     expect(resolver.resolve({
-      provider: "opencode-go",
+      provider: "ocg-main",
       model: "deepseek-v4-flash",
       serviceTier: null,
       inputTokens: 1_000,
@@ -130,7 +130,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
     expect(baseline.models.get("deepseek-v4-flash-vision-exp")?.includedUsageUsd)
       .toBe(15);
     expect(resolver.resolve({
-      provider: "opencode-go",
+      provider: "ocg-main",
       model: "deepseek-v4-flash-vision-exp",
       serviceTier: null,
       inputTokens: 1_000,
@@ -147,7 +147,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
     const resolver = new OpenCodeGoModelPricingResolver();
 
     expect(resolver.resolve({
-      provider: "opencode-go",
+      provider: "ocg-main",
       model: "qwen3.7-plus",
       serviceTier: null,
       inputTokens: 300_000,

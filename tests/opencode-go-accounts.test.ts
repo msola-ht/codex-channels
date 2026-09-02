@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   isOpencodeGoProvider,
   loadOpencodeGoAccounts,
+  loadOpencodeGoDefaultAccount,
   opencodeGoAccountIdFromProvider,
   opencodeGoAccountMarkerPath,
   opencodeGoApiKeyEnvironmentKey,
@@ -16,31 +17,31 @@ import {
   validateOpencodeGoAccountId,
   writeOpencodeGoAccountMarker,
   writeOpencodeGoAccounts,
+  opencodeGoAccountDisplayName,
+  loadOpencodeGoProviderIdentities,
+  validateOpencodeGoContact,
 } from "../runtime/opencode-go-accounts.mjs";
 
 describe("OpenCode Go account registry", () => {
   it("validates account ids and derives provider ids", () => {
-    expect(opencodeGoProviderId("main")).toBe("opencode-go-main");
-    expect(opencodeGoProviderId("opencode-go")).toBe("opencode-go");
-    expect(opencodeGoProviderId("b-2")).toBe("opencode-go-b-2");
-    expect(opencodeGoAccountIdFromProvider("opencode-go")).toBe("opencode-go");
-    expect(opencodeGoAccountIdFromProvider("opencode-go-main")).toBe("main");
-    expect(opencodeGoAccountIdFromProvider("opencode-go-b-2")).toBe("b-2");
-    expect(opencodeGoAccountIdFromProvider("opencode-go-")).toBeUndefined();
-    expect(opencodeGoAccountIdFromProvider("opencode-go-INVALID")).toBeUndefined();
-    expect(opencodeGoAccountIdFromProvider("opencode-go-opencode-go")).toBeUndefined();
+    expect(opencodeGoProviderId("main")).toBe("ocg-main");
+    expect(opencodeGoProviderId("opencode-go")).toBe("ocg-opencode-go");
+    expect(opencodeGoProviderId("b-2")).toBe("ocg-b-2");
+    expect(opencodeGoAccountIdFromProvider("opencode-go")).toBeUndefined();
+    expect(opencodeGoAccountIdFromProvider("ocg-main")).toBe("main");
+    expect(opencodeGoAccountIdFromProvider("ocg-b-2")).toBe("b-2");
+    expect(opencodeGoAccountIdFromProvider("ocg-")).toBeUndefined();
+    expect(opencodeGoAccountIdFromProvider("ocg-INVALID")).toBeUndefined();
+    expect(opencodeGoAccountIdFromProvider("ocg-ocg-opencode-go")).toBe("ocg-opencode-go");
     expect(opencodeGoAccountIdFromProvider("openai")).toBeUndefined();
-    expect(isOpencodeGoProvider("opencode-go")).toBe(true);
-    expect(isOpencodeGoProvider("opencode-go-lunare")).toBe(true);
-    expect(isOpencodeGoProvider("opencode-go-")).toBe(false);
-    expect(isOpencodeGoProvider("opencode-go-INVALID")).toBe(false);
-    expect(isOpencodeGoProvider("opencode-go-opencode-go")).toBe(false);
+    expect(isOpencodeGoProvider("ocg-main")).toBe(true);
+    expect(isOpencodeGoProvider("ocg-lunare")).toBe(true);
+    expect(isOpencodeGoProvider("ocg-")).toBe(false);
+    expect(isOpencodeGoProvider("ocg-INVALID")).toBe(false);
+    expect(isOpencodeGoProvider("ocg-ocg-opencode-go")).toBe(true);
     expect(isOpencodeGoProvider("deepseek")).toBe(false);
-    expect(opencodeGoApiKeyEnvironmentKey("main")).toBe(
-      "CODEX_CONNECT_OPENCODE_GO_MAIN_API_KEY",
-    );
     expect(opencodeGoApiKeyEnvironmentKey("opencode-go")).toBe(
-      "CODEX_CONNECT_OPENCODE_GO_API_KEY",
+      "CODEX_CONNECT_OPENCODE_GO_OPENCODE_GO_API_KEY",
     );
     for (const invalid of ["", "A", "a b", "a".repeat(33), "openai", "deepseek"]) {
       expect(() => validateOpencodeGoAccountId(invalid)).toThrow("账户 id");
@@ -48,8 +49,8 @@ describe("OpenCode Go account registry", () => {
   });
 
   it("reuses the shared statistics proxy for every OpenCode Go account", () => {
-    expect(sharedProviderProxyKey("opencode-go-main")).toBe("opencode-go");
-    expect(sharedProviderProxyKey("opencode-go-lunare")).toBe("opencode-go");
+    expect(sharedProviderProxyKey("ocg-main")).toBe("ocg");
+    expect(sharedProviderProxyKey("ocg-lunare")).toBe("ocg");
     expect(sharedProviderProxyKey("deepseek")).toBe("deepseek");
     expect(sharedProviderProxyKey("openai")).toBe("openai");
   });
@@ -58,14 +59,34 @@ describe("OpenCode Go account registry", () => {
     const home = fixture();
     const environment = testEnvironment(home);
     writeOpencodeGoAccounts(environment, [
-      { id: "main", default: true },
-      { id: "b", default: false },
+      { id: "main", default: true, email: "User@Example.com" },
+      { id: "b", default: false, phone: "+1 (555) 123-4567" },
     ]);
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "main", default: true },
-      { id: "b", default: false },
+      { id: "main", default: true, email: "user@example.com" },
+      { id: "b", default: false, phone: "+15551234567" },
     ]);
+    expect(opencodeGoAccountDisplayName({ id: "main", email: "user@example.com" }))
+      .toBe("ocg-user@example.com");
+    expect(opencodeGoAccountDisplayName({ id: "b", phone: "+15551234567" }))
+      .toBe("ocg-+15551234567");
+    expect(validateOpencodeGoContact(" User@Example.com "))
+      .toEqual({ type: "email", value: "user@example.com" });
+    expect(validateOpencodeGoContact("+1 (555) 123-4567"))
+      .toEqual({ type: "phone", value: "+15551234567" });
+    expect(() => validateOpencodeGoContact(""))
+      .toThrow("必须提供邮箱或手机号码");
+  });
+
+  it("does not infer a default account from registry order", () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    writeOpencodeGoAccounts(environment, [
+      { id: "work", default: false, email: "user@example.com" },
+    ]);
+
+    expect(loadOpencodeGoDefaultAccount(environment)).toBeUndefined();
   });
 
   it("rejects multiple defaults and duplicate ids", () => {
@@ -79,6 +100,10 @@ describe("OpenCode Go account registry", () => {
       { id: "main", default: true },
       { id: "main", default: false },
     ])).toThrow("注册表无效");
+    expect(() => writeOpencodeGoAccounts(environment, [
+      { id: "a-b", default: true, email: "a@example.com" },
+      { id: "a_b", default: false, email: "b@example.com" },
+    ])).toThrow("API Key 环境变量名冲突");
   });
 
   it("writes and reads account markers in the shared provider directory", () => {
@@ -88,12 +113,34 @@ describe("OpenCode Go account registry", () => {
 
     expect(readOpencodeGoAccountMarker(environment, "main")).toEqual({
       version: 1,
-      provider: "opencode-go-main",
+      provider: "ocg-main",
       mode: "switching",
     });
     expect(existsSync(opencodeGoAccountMarkerPath(environment, "main"))).toBe(true);
     expect(readFileSync(opencodeGoAccountMarkerPath(environment, "main"), "utf8"))
-      .toContain('provider = "opencode-go-main"');
+      .toContain('provider = "ocg-main"');
+  });
+
+  it("exports contact identities without changing request provider ids", () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    writeOpencodeGoAccounts(environment, [
+      { id: "main", default: true, email: "user@example.com" },
+      { id: "b", default: false, phone: "+15551234567" },
+    ]);
+
+    expect(loadOpencodeGoProviderIdentities(environment)).toEqual([
+      {
+        provider: "ocg-main",
+        displayName: "ocg-user@example.com",
+        email: "user@example.com",
+      },
+      {
+        provider: "ocg-b",
+        displayName: "ocg-+15551234567",
+        phone: "+15551234567",
+      },
+    ]);
   });
 });
 

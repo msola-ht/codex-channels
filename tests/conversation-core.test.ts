@@ -2097,7 +2097,7 @@ describe("ConversationCore", () => {
       targetForThread: () => target,
       modelSettingsForThread: () => ({
         model: "deepseek-v4-flash",
-        modelProvider: "opencode-go",
+        modelProvider: "ocg-main",
         effort: "high",
         serviceTier: null,
       }),

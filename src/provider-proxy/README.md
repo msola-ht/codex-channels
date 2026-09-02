@@ -50,7 +50,7 @@
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
   `network.proxy` 选择传入上游 Agent。OpenCode Go 共享代理额外接受
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
-  携带账户标识供服务侧按 `opencode-go-<账户>` Socket 上报；私有 `/role/external` 请求归属
+  携带账户标识供服务侧按 `ocg-<账户>` Socket 上报；私有 `/role/external` 请求归属
   `agents.external` 选择的默认账户并在转发前剥离该前缀。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。

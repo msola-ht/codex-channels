@@ -5,13 +5,23 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
-import { parseCodexRemoteOptions } from "../scripts/codex-remote-options.mjs";
+import { parseCodexRemoteOptions as parseCodexRemoteOptionsRaw } from "../scripts/codex-remote-options.mjs";
+
+const isolatedEnvironment = {
+  CODEX_HOME: join(tmpdir(), "codexc-remote-options-empty-codex"),
+  CODEX_CONNECT_HOME: join(tmpdir(), "codexc-remote-options-empty-connect"),
+};
+
+function parseCodexRemoteOptions(
+  args: Parameters<typeof parseCodexRemoteOptionsRaw>[0],
+  options: NonNullable<Parameters<typeof parseCodexRemoteOptionsRaw>[1]> = {},
+) {
+  return parseCodexRemoteOptionsRaw(args, { environment: isolatedEnvironment, ...options });
+}
 
 describe("Codex Remote options", () => {
   it.each([
     [["--profile", "sf-deepseek"], "sf-deepseek"],
-    [["--profile=sf-opencode-go"], "sf-opencode-go"],
-    [["-psf-opencode-go"], "sf-opencode-go"],
   ] as const)("selects a managed Provider profile from %j", (args, selectedProfile) => {
     expect(parseCodexRemoteOptions([...args])).toEqual({
       passthrough: [],
@@ -94,7 +104,6 @@ describe("Codex Remote options", () => {
 
   it.each([
     ["deepseek", "sf-deepseek"],
-    ["opencode-go", "sf-opencode-go"],
   ])("rejects the old managed Profile %s", (profileName, canonicalProfileName) => {
     expect(() => parseCodexRemoteOptions(["--profile", profileName], {
       customSwitchingProfiles: [],
@@ -127,22 +136,22 @@ describe("Codex Remote options", () => {
     const environment = { ...process.env, CODEX_CONNECT_HOME: root };
     try {
       writeOpencodeGoAccounts(environment, [
-        { id: "opencode-go", default: true },
+        { id: "work", default: true },
         { id: "lunare", default: false },
       ]);
-      expect(parseCodexRemoteOptions(["--profile", "sf-opencode-go-lunare"], {
+      expect(parseCodexRemoteOptions(["--profile", "sf-ocg-lunare"], {
         environment,
         customSwitchingProfiles: [],
       })).toEqual({
         passthrough: [],
-        selectedProfile: "sf-opencode-go-lunare",
+        selectedProfile: "sf-ocg-lunare",
         workspaceId: undefined,
       });
       expect(() => parseCodexRemoteOptions(["--profile", "opencode-go-lunare"], {
         environment,
         customSwitchingProfiles: [],
       })).toThrow(
-        "Profile opencode-go-lunare 不是该 Provider 的规范名称；请使用 --profile sf-opencode-go-lunare",
+        "Profile opencode-go-lunare 不是该 Provider 的规范名称；请使用 --profile sf-ocg-lunare",
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -150,7 +159,8 @@ describe("Codex Remote options", () => {
   });
 
   it.each([
-    ["sf-opencode-go-missing", "OpenCode Go Profile sf-opencode-go-missing 尚未配置"],
+    ["sf-ocg-missing", "OpenCode Go Profile sf-ocg-missing 尚未配置"],
+    ["sf-opencode-go-missing", "OpenCode Go Profile sf-opencode-go-missing 已废弃"],
   ])("rejects an unconfigured project-owned Profile namespace %s", (profileName, message) => {
     expect(() => parseCodexRemoteOptions(["--profile", profileName], {
       customSwitchingProfiles: [],
@@ -181,12 +191,12 @@ describe("Codex Remote options", () => {
   it("rejects selecting two managed Provider profiles", () => {
     expect(() => parseCodexRemoteOptions([
       "--profile", "sf-deepseek",
-      "--profile", "sf-opencode-go",
+      "--profile", "sf-deepseek",
     ])).toThrow("受管模型 Provider --profile 不能与其他 --profile 同时使用");
   });
 
   it.each([
-    [["--profile", "personal", "--profile", "sf-opencode-go"]],
+    [["--profile", "personal", "--profile", "sf-deepseek"]],
     [["--profile=sf-deepseek", "-ppersonal"]],
   ])("rejects mixing managed and unmanaged profiles in %j", (args) => {
     expect(() => parseCodexRemoteOptions(args))

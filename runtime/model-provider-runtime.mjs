@@ -18,7 +18,6 @@ import { withGatewayConfigLock } from "./gateway-config.mjs";
 import {
   deepseekProviderDefinition,
   loadManagedModelProviderDefinitions,
-  opencodeGoProviderDefinition,
 } from "./model-provider-definitions.mjs";
 import {
   modelProviderBlockEdits,
@@ -27,7 +26,10 @@ import {
 } from "./model-provider-profile.mjs";
 import {
   isOpencodeGoProviderNamespace,
+  loadOpencodeGoDefaultAccount,
+  opencodeGoProviderId,
   opencodeGoAccountMarkerPath,
+  readOpencodeGoAccountMarker,
 } from "./opencode-go-accounts.mjs";
 import {
   readPrivateFileSync,
@@ -1049,36 +1051,33 @@ export function loadDeepseekAccountCredential(environment = process.env) {
 }
 
 export function loadOpencodeGoAccountCredential(environment = process.env) {
-  const managed = loadManagedProviderProfileFor(
-    environment,
-    opencodeGoProviderDefinition,
-  );
-  if (managed !== undefined) return managed.apiKey;
-  const configPath = join(codexHomePath(environment), "config.toml");
-  return readProviderProfile(
-    configPath,
-    providerDescriptor(opencodeGoProviderDefinition),
-    { requireSelection: false },
-  ).apiKey;
+  const account = loadOpencodeGoDefaultAccount(environment);
+  if (account === undefined) throw new Error("尚未配置 OpenCode Go 账户");
+  return loadOpencodeGoAccountCredentialFor(opencodeGoProviderId(account.id), environment);
 }
 
 export function loadOpencodeGoAccountCredentialFor(provider, environment = process.env) {
-  if (provider === undefined) {
-    return loadOpencodeGoAccountCredential(environment);
-  }
+  if (provider === undefined) return loadOpencodeGoAccountCredential(environment);
   const definition = findManagedProviderDefinition(environment, provider);
   if (!definition) {
-    // 默认账户在账户注册表出现前使用旧版单 Provider 布局。
-    if (provider === "opencode-go") {
-      return loadOpencodeGoAccountCredential(environment);
-    }
     throw new Error(`未知 OpenCode Go 账户：${provider}`);
+  }
+  if (
+    definition.accountId !== undefined
+    && readOpencodeGoAccountMarker(environment, definition.accountId)?.mode === "exclusive"
+  ) {
+    const configPath = join(codexHomePath(environment), "config.toml");
+    return readProviderProfile(
+      configPath,
+      providerDescriptor(definition),
+      { requireSelection: false },
+    ).apiKey;
   }
   const managed = loadManagedProviderProfileFor(environment, definition);
   if (managed !== undefined) return managed.apiKey;
   const profile = loadConfiguredProviderProfile(environment, definition);
-  if (!profile) throw new Error(`OpenCode Go 账户尚未配置：${provider}`);
-  return profile.apiKey;
+  if (profile) return profile.apiKey;
+  throw new Error(`OpenCode Go 账户尚未配置：${provider}`);
 }
 
 export function managedModelProviderRoleConfigPath(environment = process.env) {

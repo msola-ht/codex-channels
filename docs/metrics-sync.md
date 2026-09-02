@@ -1,7 +1,7 @@
 # 多设备指标同步
 
 每台设备各自运行 Gateway 并维护本地指标库。`[metrics.sync]` 让本机 Gateway 把脱敏的模型
-请求指标和子代理标注增量上报到中心服务，供汇总后统一查看。
+请求指标、子代理标注和受管 Provider 身份快照增量上报到中心服务，供汇总后统一查看。
 
 ## 当前状态
 
@@ -85,8 +85,10 @@ codexc service start center          # 启动指标中心后台服务
 
 - 中心库是独立 SQLite（默认 `~/.codex-connect/data/central-metrics.sqlite3`），
   主键 `(device_id, local_id)`，按主键 `ON CONFLICT ... DO UPDATE` 覆盖写入；重复上报
-  不会新增行，但会用最新值覆盖该条记录，因此重置本机水位后全量重放可修复云端历史。表结构与
-  [`cloudflare/migrations/0001_init.sql`](../cloudflare/migrations/0001_init.sql) 一致。
+  不会新增行，但会用最新值覆盖该条记录，因此重置本机水位后全量重放可修复云端历史。指标基础表与
+  [`cloudflare/migrations/0001_init.sql`](../cloudflare/migrations/0001_init.sql) 兼容；当前 VPS 中心
+  Schema 以 `scripts/metrics-center-schema.sql` 和版本升级逻辑为准，Schema v2 额外包含
+  `provider_identities` 身份快照表。
 - 中心库使用独立 Schema 版本。服务启动不会自动修改已有表；升级时先停止中心服务，运行
   `codexc center upgrade`，命令会在数据库旁创建带版本和时间戳的 `0600` 备份，完成受控升级后
   才允许服务重新启动。Schema 不受支持或结构不完整时会失败关闭。
@@ -124,6 +126,9 @@ codexc service start center          # 启动指标中心后台服务
 - 上报只包含脱敏指标，不含消息正文、提示词、图片、识别结果、审批内容，也不上传
   `errorMessage` 原始错误文本。指标保留期以本地 `[metrics.storage]` 为准，默认 365 天、
   最多 1,000,000 行；中心已接收的历史不会因本地自动清理而删除。
+- OCG 账户的 `providerIdentities` 身份快照包含 `ocg-<accountId>`、展示名和邮箱或手机号。
+  联系方式不写入 `requestMetrics[].provider`，只用于中心展示和身份关联；每次明确上传快照时，
+  中心会先删除该设备旧快照，再写入完整列表，因此删除本地账户后中心不会保留过期联系方式。
 
 ## 本地状态文件
 
@@ -155,6 +160,13 @@ codexc service start center          # 启动指标中心后台服务
       "parentThreadId": "main-1",
       "agentPath": "/root/ds_probe",
       "recordedAtMs": 1780000000000
+    }
+  ],
+  "providerIdentities": [
+    {
+      "provider": "ocg-main",
+      "displayName": "ocg-user@example.com",
+      "email": "user@example.com"
     }
   ]
 }

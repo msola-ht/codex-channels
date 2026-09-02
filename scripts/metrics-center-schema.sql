@@ -27,6 +27,19 @@ CREATE INDEX IF NOT EXISTS idx_request_metrics_recorded
 CREATE INDEX IF NOT EXISTS idx_request_metrics_provider_model
   ON request_metrics (provider, model, recorded_at_ms);
 
+CREATE TABLE IF NOT EXISTS provider_identities (
+  device_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (device_id, provider)
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_identities_provider
+  ON provider_identities (provider);
+
 CREATE TABLE IF NOT EXISTS subagent_threads (
   device_id TEXT NOT NULL,
   thread_id TEXT NOT NULL,

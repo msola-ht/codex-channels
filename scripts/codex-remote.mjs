@@ -12,7 +12,6 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import {
   loadManagedModelProviderDefinitions,
-  opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
@@ -78,7 +77,6 @@ async function runRemoteCli() {
       }
     : [
     ...loadManagedModelProviderDefinitions(process.env),
-    opencodeGoProviderDefinition,
     ].find(({ profileName }) => profileName === selectedProfile);
   if (selectedProfile !== undefined && selectedDefinition === undefined) {
     throw new Error(`模型 Provider Profile ${selectedProfile} 已不再可用`);

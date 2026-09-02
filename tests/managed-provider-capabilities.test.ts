@@ -29,6 +29,10 @@ describe("managed Provider capability registry", () => {
       expect(definition.profileName).toMatch(/^sf-/u);
       expect(definition.profileFileName).toBe(`${definition.profileName}.config.toml`);
     }
+    expect(opencodeGoAccountDefinition("work")).toMatchObject({
+      profileName: "sf-ocg-work",
+      profileFileName: "sf-ocg-work.config.toml",
+    });
   });
 
   it("fails closed when a future Provider Profile file diverges from its canonical name", () => {
@@ -114,14 +118,14 @@ describe("managed Provider capability registry", () => {
         CODEX_CONNECT_HOME: join(home, ".codex-connect"),
       };
       expect(loadManagedModelProviderWatcherDefinitions(environment).map(({ id }) => id))
-        .toEqual(["deepseek", "opencode-go"]);
+        .toEqual(["deepseek", "ocg"]);
 
       writeOpencodeGoAccounts(environment, [
-        { id: "opencode-go", default: true },
+        { id: "main", default: true },
         { id: "lunare", default: false },
       ]);
       expect(loadManagedModelProviderWatcherDefinitions(environment).map(({ id }) => id))
-        .toEqual(["deepseek", "opencode-go", "opencode-go", "opencode-go-lunare"]);
+        .toEqual(["deepseek", "ocg", "ocg-main", "ocg-lunare"]);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -139,7 +143,7 @@ describe("managed Provider capability registry", () => {
         source: "cache",
       }),
     });
-    expect([...pricing.keys()]).toEqual(["deepseek", "opencode-go-lunare"]);
+    expect([...pricing.keys()]).toEqual(["deepseek", "ocg-lunare"]);
     expect(pricing.get("deepseek")?.resolve({
       provider: "deepseek",
       model: "deepseek-v4-flash",
@@ -147,15 +151,15 @@ describe("managed Provider capability registry", () => {
       inputTokens: 1,
       atMs: Date.parse("2026-08-21T09:00:00.000Z"),
     })).not.toBeNull();
-    expect(pricing.get("opencode-go-lunare")?.resolve({
-      provider: "opencode-go-lunare",
+    expect(pricing.get("ocg-lunare")?.resolve({
+      provider: "ocg-lunare",
       model: "deepseek-v4-flash",
       serviceTier: null,
       inputTokens: 1,
       atMs: Date.parse("2026-08-21T09:00:00.000Z"),
     })).not.toBeNull();
-    expect(pricing.get("opencode-go-lunare")?.resolve({
-      provider: "opencode-go-unknown",
+    expect(pricing.get("ocg-lunare")?.resolve({
+      provider: "ocg-unknown",
       model: "deepseek-v4-flash",
       serviceTier: null,
       inputTokens: 1,
@@ -169,10 +173,10 @@ describe("managed Provider capability registry", () => {
     });
     expect(accounts.map(({ provider }) => provider)).toEqual([
       "deepseek",
-      "opencode-go-lunare",
+      "ocg-lunare",
     ]);
     expect(managedProviderNeedsExchangeRate(definitions, new Set(["deepseek"]))).toBe(true);
-    expect(managedProviderNeedsExchangeRate(definitions, new Set(["opencode-go-lunare"])))
+    expect(managedProviderNeedsExchangeRate(definitions, new Set(["ocg-lunare"])))
       .toBe(false);
   });
 

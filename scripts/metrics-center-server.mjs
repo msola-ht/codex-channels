@@ -32,6 +32,7 @@ import {
 
 const maximumBodyBytes = 10 * 1024 * 1024;
 const maximumListLimit = 200;
+const metricsCenterSchemaVersion = 2;
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCHEMA_PATH = join(PACKAGE_DIR, "scripts", "metrics-center-schema.sql");
 
@@ -74,6 +75,21 @@ const insertSubagentThreadSql = `
     ingested_at_ms = excluded.ingested_at_ms
 `;
 
+const upsertProviderIdentitySql = `
+  INSERT INTO provider_identities
+    (device_id, provider, display_name, email, phone, updated_at_ms)
+  VALUES (?, ?, ?, ?, ?, ?)
+  ON CONFLICT(device_id, provider) DO UPDATE SET
+    display_name = excluded.display_name,
+    email = excluded.email,
+    phone = excluded.phone,
+    updated_at_ms = excluded.updated_at_ms
+`;
+
+const deleteProviderIdentitiesSql = `
+  DELETE FROM provider_identities WHERE device_id = ?
+`;
+
 const upsertDeviceSql = `
   INSERT INTO devices
     (device_id, first_seen_at_ms, last_seen_at_ms, last_ingested_at_ms, display_name)
@@ -89,32 +105,47 @@ export function openCentralDatabase(databasePath) {
   mkdirSync(dirname(databasePath), { recursive: true });
   securePrivateDirectorySync(dirname(databasePath));
   const database = new DatabaseSync(databasePath);
-  database.exec("PRAGMA journal_mode = WAL;");
-  database.exec("PRAGMA busy_timeout = 10000;");
-  database.exec(readFileSync(SCHEMA_PATH, "utf8"));
-  if (!existed) database.exec("PRAGMA user_version = 1");
-  securePrivateFileSync(databasePath);
-  const schemaVersion = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
-  if (schemaVersion !== 1) {
+  try {
+    database.exec("PRAGMA busy_timeout = 10000;");
+    const schemaVersion = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
+    if (existed && schemaVersion !== metricsCenterSchemaVersion) {
+      throw new Error(
+        `指标中心数据库 Schema ${schemaVersion} 不受支持，请先运行 codexc center upgrade`,
+      );
+    }
+    if (!existed) {
+      database.exec("PRAGMA journal_mode = WAL;");
+      database.exec(readFileSync(SCHEMA_PATH, "utf8"));
+      database.exec(`PRAGMA user_version = ${metricsCenterSchemaVersion}`);
+    } else {
+      database.exec("PRAGMA journal_mode = WAL;");
+    }
+    securePrivateFileSync(databasePath);
+    return database;
+  } catch (error) {
     database.close();
-    throw new Error(
-      `指标中心数据库 Schema ${schemaVersion} 不受支持，请先运行 codexc center upgrade`,
-    );
+    throw error;
   }
-  return database;
 }
 
 export function upgradeMetricsCenterDatabase(databasePath) {
   if (!existsSync(databasePath)) {
     throw new Error(`指标中心数据库不存在：${databasePath}`);
   }
-  const backupPath = `${databasePath}.v0.${new Date().toISOString().replace(/[:.]/gu, "-")}.bak`;
+  const backupPathFor = (version) => `${databasePath}.v${version}.${new Date().toISOString().replace(/[:.]/gu, "-")}.bak`;
   const database = new DatabaseSync(databasePath);
   try {
     database.exec("PRAGMA busy_timeout = 10000;");
     const version = Number(database.prepare("PRAGMA user_version").get()?.user_version ?? 0);
-    if (version === 1) return { changed: false, backupPath: null, schemaVersion: 1 };
-    if (version !== 0) throw new Error(`指标中心数据库 Schema ${version} 不受支持`);
+    const backupPath = backupPathFor(version);
+    if (version === metricsCenterSchemaVersion) {
+      return {
+        changed: false,
+        backupPath: null,
+        schemaVersion: metricsCenterSchemaVersion,
+      };
+    }
+    if (version !== 0 && version !== 1) throw new Error(`指标中心数据库 Schema ${version} 不受支持`);
     const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
     if (!tables.has("devices") || !tables.has("subagent_threads")) {
       throw new Error("指标中心数据库结构不完整，无法升级");
@@ -133,13 +164,32 @@ export function upgradeMetricsCenterDatabase(databasePath) {
       if (!subagentColumns.some((column) => column.name === "parent_turn_id")) {
         database.exec("ALTER TABLE subagent_threads ADD COLUMN parent_turn_id TEXT");
       }
-      database.exec("PRAGMA user_version = 1");
+      if (version < 2) {
+        database.exec(`
+          CREATE TABLE IF NOT EXISTS provider_identities (
+            device_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            email TEXT,
+            phone TEXT,
+            updated_at_ms INTEGER NOT NULL,
+            PRIMARY KEY (device_id, provider)
+          );
+          CREATE INDEX IF NOT EXISTS idx_provider_identities_provider
+            ON provider_identities (provider);
+        `);
+      }
+      database.exec(`PRAGMA user_version = ${metricsCenterSchemaVersion}`);
       database.exec("COMMIT");
     } catch (error) {
       database.exec("ROLLBACK");
       throw error;
     }
-    return { changed: true, backupPath, schemaVersion: 1 };
+    return {
+      changed: true,
+      backupPath,
+      schemaVersion: metricsCenterSchemaVersion,
+    };
   } finally {
     database.close();
   }
@@ -336,9 +386,12 @@ async function handleIngest(request, database, response) {
   const nowMs = Date.now();
   const insertRequest = database.prepare(insertRequestMetricSql);
   const insertSubagent = database.prepare(insertSubagentThreadSql);
+  const upsertProviderIdentity = database.prepare(upsertProviderIdentitySql);
+  const deleteProviderIdentities = database.prepare(deleteProviderIdentitiesSql);
   const upsertDevice = database.prepare(upsertDeviceSql);
   let insertedRequests = 0;
   let insertedSubagents = 0;
+  let updatedProviderIdentities = 0;
   database.exec("BEGIN IMMEDIATE");
   try {
     for (const row of parsed.requestMetrics) {
@@ -377,6 +430,20 @@ async function handleIngest(request, database, response) {
       );
       if (Number(result.changes) > 0) insertedSubagents += 1;
     }
+    if (parsed.providerIdentities !== undefined) {
+      deleteProviderIdentities.run(parsed.deviceId);
+      for (const identity of parsed.providerIdentities) {
+        const result = upsertProviderIdentity.run(
+          parsed.deviceId,
+          identity.provider,
+          identity.displayName,
+          identity.email ?? null,
+          identity.phone ?? null,
+          nowMs,
+        );
+        if (Number(result.changes) > 0) updatedProviderIdentities += 1;
+      }
+    }
     upsertDevice.run(
       parsed.deviceId,
       nowMs,
@@ -394,6 +461,7 @@ async function handleIngest(request, database, response) {
     deviceId: parsed.deviceId,
     insertedRequests,
     insertedSubagents,
+    updatedProviderIdentities,
   });
 }
 
@@ -426,18 +494,34 @@ function handleOverview(url, database, response) {
     ORDER BY request_count DESC
   `).all(...params);
   const providers = database.prepare(`
-    SELECT provider,
+    SELECT r.provider,
+           i.display_name AS provider_display_name,
+           i.email AS provider_email,
+           i.phone AS provider_phone,
            COUNT(*) AS request_count,
            COALESCE(SUM(input_tokens), 0) AS input_tokens,
            COALESCE(SUM(output_tokens), 0) AS output_tokens,
            COALESCE(SUM(total_tokens), 0) AS total_tokens
-    FROM request_metrics
-    ${where}
-    GROUP BY provider
+    FROM request_metrics r
+    LEFT JOIN provider_identities i
+      ON i.device_id = r.device_id AND i.provider = r.provider
+    ${hasDevice ? "WHERE r.device_id = ?" : ""}
+    GROUP BY r.provider, i.display_name, i.email, i.phone
     ORDER BY request_count DESC
     LIMIT 50
   `).all(...params);
-  sendJson(response, 200, { totals, costsByCurrency: costs, providers });
+  const providerIdentities = database.prepare(`
+    SELECT device_id, provider, display_name, email, phone, updated_at_ms
+    FROM provider_identities
+    ${hasDevice ? "WHERE device_id = ?" : ""}
+    ORDER BY provider ASC, device_id ASC
+  `).all(...(hasDevice ? [deviceId] : []));
+  sendJson(response, 200, {
+    totals,
+    costsByCurrency: costs,
+    providers,
+    providerIdentities,
+  });
 }
 
 function handleRequests(url, database, response) {
@@ -452,30 +536,35 @@ function handleRequests(url, database, response) {
   const clauses = [];
   const params = [];
   if (deviceId) {
-    clauses.push("device_id = ?");
+    clauses.push("r.device_id = ?");
     params.push(deviceId);
   }
   if (provider) {
-    clauses.push("provider = ?");
+    clauses.push("r.provider = ?");
     params.push(provider);
   }
   if (status) {
-    clauses.push("status = ?");
+    clauses.push("r.status = ?");
     params.push(status);
   }
   const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
   const total = Number(
     database.prepare(
-      `SELECT COUNT(*) AS n FROM request_metrics ${where}`,
+      `SELECT COUNT(*) AS n FROM request_metrics r ${where}`,
     ).get(...params)?.n ?? 0,
   );
   const rows = database.prepare(`
-    SELECT device_id, local_id, recorded_at_ms, provider, model, status, operation,
+    SELECT r.device_id, r.local_id, r.recorded_at_ms, r.provider, r.model, r.status, r.operation,
+           i.display_name AS provider_display_name,
+           i.email AS provider_email,
+           i.phone AS provider_phone,
            input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
            total_tokens, cache_hit_rate, pricing_currency, total_cost_nanos
-    FROM request_metrics
+    FROM request_metrics r
+    LEFT JOIN provider_identities i
+      ON i.device_id = r.device_id AND i.provider = r.provider
     ${where}
-    ORDER BY ${sortColumn} ${direction}, device_id ASC, local_id DESC
+    ORDER BY r.${sortColumn} ${direction}, r.device_id ASC, r.local_id DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
   sendJson(response, 200, { requests: rows, total });
@@ -525,6 +614,19 @@ function handleQuota(url, database, response) {
   `).all(...(days === "all"
     ? (deviceId ? [deviceId] : [])
     : [Date.now() - days * 86_400_000, ...(deviceId ? [deviceId] : [])]));
+  const identityRows = database.prepare(`
+    SELECT provider, display_name
+    FROM provider_identities
+    ${deviceId ? "WHERE device_id = ?" : ""}
+    ORDER BY updated_at_ms DESC
+  `).all(...(deviceId ? [deviceId] : []));
+  const providerDisplayNames = new Map();
+  for (const identity of identityRows) {
+    if (typeof identity.provider !== "string" || typeof identity.display_name !== "string") continue;
+    const names = providerDisplayNames.get(identity.provider) ?? new Set();
+    names.add(identity.display_name);
+    providerDisplayNames.set(identity.provider, names);
+  }
   const periods = new Map();
   for (const row of rows) {
     let payload;
@@ -607,6 +709,9 @@ function handleQuota(url, database, response) {
       : null;
     const publicPeriod = {
       provider: period.provider,
+      providerDisplayName: providerDisplayNames.get(period.provider)?.size === 1
+        ? [...providerDisplayNames.get(period.provider)][0]
+        : null,
       windowId: period.windowId,
       resetsAt: period.resetsAt,
       periodStartAtMs: quotaPeriodStartAtMs(period.windowId, period.resetsAt),

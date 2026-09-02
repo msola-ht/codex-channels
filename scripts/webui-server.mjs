@@ -28,6 +28,7 @@ import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
   loadOpencodeGoAccounts,
+  opencodeGoAccountDisplayName,
   opencodeGoProviderId,
 } from "../runtime/opencode-go-accounts.mjs";
 
@@ -311,6 +312,7 @@ async function handleOpencodeGoUsage(environment, response) {
     const usage = await adapter.accountUsage();
     return {
       account: account.id,
+      displayName: opencodeGoAccountDisplayName(account),
       default: account.default,
       available: usage.available,
       windows: usage.windows.map((window) => ({
@@ -331,6 +333,7 @@ async function handleOpencodeGoUsage(environment, response) {
       ? result.value
       : {
           account: account.id,
+          displayName: opencodeGoAccountDisplayName(account),
           default: account.default,
           available: false,
           windows: [],

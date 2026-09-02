@@ -22,6 +22,32 @@ afterEach(async () => {
 });
 
 describe("metrics center server", () => {
+  it("does not mutate an unsupported legacy database when opening the center", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-center-open-legacy-"));
+    temporaryDirectories.push(directory);
+    const databasePath = join(directory, "central.sqlite3");
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      CREATE TABLE devices (device_id TEXT PRIMARY KEY, first_seen_at_ms INTEGER NOT NULL,
+        last_seen_at_ms INTEGER NOT NULL, last_ingested_at_ms INTEGER);
+      CREATE TABLE subagent_threads (device_id TEXT NOT NULL, thread_id TEXT NOT NULL,
+        parent_thread_id TEXT, agent_path TEXT, recorded_at_ms INTEGER NOT NULL,
+        ingested_at_ms INTEGER NOT NULL, PRIMARY KEY (device_id, thread_id));
+    `);
+    database.close();
+
+    expect(() => openCentralDatabase(databasePath)).toThrow(/请先运行 codexc center upgrade/u);
+
+    const reopened = new DatabaseSync(databasePath);
+    const tables = new Set(
+      reopened.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+        .map((row) => row.name),
+    );
+    reopened.close();
+    expect(tables.has("request_metrics")).toBe(false);
+    expect(tables.has("provider_identities")).toBe(false);
+  });
+
   it("upgrades a legacy center database explicitly and keeps a backup", () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-center-upgrade-"));
     temporaryDirectories.push(directory);
@@ -38,7 +64,7 @@ describe("metrics center server", () => {
 
     const result = upgradeMetricsCenterDatabase(databasePath);
     expect(result.changed).toBe(true);
-    expect(result.schemaVersion).toBe(1);
+    expect(result.schemaVersion).toBe(2);
     expect(result.backupPath).toBeTypeOf("string");
     const upgraded = openCentralDatabase(databasePath);
     upgraded.close();
@@ -160,6 +186,58 @@ describe("metrics center server", () => {
         parent_turn_id: "turn-1",
       }),
     ]);
+  });
+
+  it("stores provider identity snapshots separately from request providers", async () => {
+    const { origin } = await startServer();
+    const payload = payloadBody([
+      { ...requestRow(1), provider: "ocg-main" },
+    ], [], "device-a", [{
+      provider: "ocg-main",
+      displayName: "ocg-user@example.com",
+      email: "user@example.com",
+    }]);
+    await ingest(origin, payload);
+
+    const overview = await fetchJson<OverviewResponse>(`${origin}/api/overview`);
+    expect(overview.providers).toEqual([
+      expect.objectContaining({
+        provider: "ocg-main",
+        provider_display_name: "ocg-user@example.com",
+        provider_email: "user@example.com",
+      }),
+    ]);
+    expect(overview.providerIdentities).toEqual([
+      expect.objectContaining({
+        device_id: "device-a",
+        provider: "ocg-main",
+        display_name: "ocg-user@example.com",
+        email: "user@example.com",
+      }),
+    ]);
+
+    const requests = await fetchJson<RequestsResponse>(`${origin}/api/requests`);
+    expect(requests.requests[0]).toMatchObject({
+      provider: "ocg-main",
+      provider_display_name: "ocg-user@example.com",
+      provider_email: "user@example.com",
+    });
+  });
+
+  it("replaces snapshots on explicit empty uploads but preserves them for legacy uploads", async () => {
+    const { origin } = await startServer();
+    const identity = {
+      provider: "ocg-main",
+      displayName: "ocg-user@example.com",
+      email: "user@example.com",
+    };
+    await ingest(origin, payloadBody([], [], "device-a", [identity]));
+    await ingest(origin, payloadBody([], [], "device-a"));
+    expect((await fetchJson<OverviewResponse>(`${origin}/api/overview`)).providerIdentities)
+      .toHaveLength(1);
+    await ingest(origin, payloadBody([], [], "device-a", []));
+    expect((await fetchJson<OverviewResponse>(`${origin}/api/overview`)).providerIdentities)
+      .toEqual([]);
   });
 
   it("accepts legacy subagent uploads and preserves a null parent Turn", async () => {
@@ -352,7 +430,11 @@ describe("metrics center server", () => {
         usedPercentMillionths: 10_000_000,
         resetsAt: resetAt,
       },
-    }], []));
+    }], [], "device-a", [{
+      provider: "deepseek",
+      displayName: "DeepSeek",
+      email: "quota@example.com",
+    }]));
     await ingest(origin, payloadBody([{
       ...requestRow(2),
       recordedAtMs: 1_785_640_900_000,
@@ -369,6 +451,7 @@ describe("metrics center server", () => {
     expect(body.periods).toHaveLength(1);
     expect(body.periods[0]).toMatchObject({
       provider: "deepseek",
+      providerDisplayName: "DeepSeek",
       windowId: "codex",
       periodStartAtMs: resetAt * 1_000 - 7 * 24 * 60 * 60 * 1_000,
       periodEndAtMs: resetAt * 1_000,
@@ -568,6 +651,7 @@ interface OverviewResponse {
     total_tokens: number;
   };
   providers: Array<{ provider: string; request_count: number }>;
+  providerIdentities?: Array<Record<string, unknown>>;
   costsByCurrency: Array<{
     currency: string;
     request_count: number;
@@ -610,11 +694,13 @@ function payloadBody(
   requestMetrics: unknown[],
   subagentThreads: unknown[],
   deviceId = "device-a",
+  providerIdentities?: unknown[],
 ) {
   return {
     deviceId,
     requestMetrics,
     subagentThreads,
+    ...(providerIdentities === undefined ? {} : { providerIdentities }),
   };
 }
 

@@ -50,6 +50,7 @@ export {
   type MetricsSyncConfig,
   type MetricsSyncOptions,
   type MetricsSyncPayload,
+  type MetricsProviderIdentity,
   type SyncedRequestMetric,
 } from "./metrics-sync.js";
 export {

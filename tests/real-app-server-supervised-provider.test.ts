@@ -445,18 +445,19 @@ contractSuite("real supervised App Server provider", () => {
       const workspace = join(testRuntime, "workspace");
       const configPath = join(testRuntime, "config.toml");
       const socketPath = join(testRuntime, "codex-app-server.sock");
-      const openCodeSocketPath = providerAppServerSocketPath(socketPath, "opencode-go");
+      const openCodeSocketPath = providerAppServerSocketPath(socketPath, "ocg-main");
       const supervisorSocketPath = appServerSupervisorSocketPath(socketPath);
       const providerDirectory = join(testRuntime, "providers", "opencode-go");
+      const accountDirectory = join(providerDirectory, "accounts", "main");
       mkdirSync(codexHome, { recursive: true, mode: 0o700 });
-      mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+      mkdirSync(accountDirectory, { recursive: true, mode: 0o700 });
       mkdirSync(workspace, { recursive: true, mode: 0o700 });
       const roleConfigPath = join(codexHome, "sf-agent.config.toml");
       writeFileSync(
         roleConfigPath,
         [
           'model = "deepseek-v4-flash"',
-          'model_provider = "opencode-go"',
+          'model_provider = "ocg-main"',
           'model_reasoning_effort = "high"',
           'developer_instructions = "Integration fixture role"',
           "",
@@ -522,19 +523,24 @@ contractSuite("real supervised App Server provider", () => {
         { mode: 0o600 },
       );
       writeFileSync(
-        join(providerDirectory, "managed.toml"),
-        'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+        join(providerDirectory, "accounts.json"),
+        '[{"id":"main","default":true,"email":"user@example.com"}]\n',
         { mode: 0o600 },
       );
       writeFileSync(
-        join(codexHome, "sf-opencode-go.config.toml"),
+        join(accountDirectory, "managed.toml"),
+        'version = 1\nprovider = "ocg-main"\nmode = "switching"\n',
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(codexHome, "sf-ocg-main.config.toml"),
         [
           'model = "deepseek-v4-flash"',
-          'model_provider = "opencode-go"',
+          'model_provider = "ocg-main"',
           'model_reasoning_effort = "high"',
           `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-          "[model_providers.opencode-go]",
-          'name = "opencode-go"',
+          "[model_providers.ocg-main]",
+          'name = "ocg-main"',
           'base_url = "https://opencode.ai/zen/go/v1"',
           'wire_api = "responses"',
           "requires_openai_auth = false",
@@ -607,7 +613,7 @@ contractSuite("real supervised App Server provider", () => {
         const topology = await inspectAppServerSupervisor(socketPath);
         expect(sameAppServerTopology(topology, {
           primaryProvider: "openai",
-          managedProviders: ["opencode-go"],
+          managedProviders: ["ocg-main"],
           socketPaths: [socketPath, openCodeSocketPath],
         })).toBe(true);
 
@@ -618,8 +624,8 @@ contractSuite("real supervised App Server provider", () => {
         const initialized = await client.connect();
         expect(initialized.userAgent).toContain("codex_connect/");
 
-        await expect(ensureAppServerProvider(socketPath, "opencode-go"))
-          .rejects.toThrow("模型 Provider App Server 启动失败：opencode-go（exit=1）");
+        await expect(ensureAppServerProvider(socketPath, "ocg-main"))
+          .rejects.toThrow("模型 Provider App Server 启动失败：ocg-main（exit=1）");
         expect(service.exitCode).toBeNull();
         expect(await client.listModels()).not.toHaveLength(0);
         expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
@@ -627,7 +633,7 @@ contractSuite("real supervised App Server provider", () => {
         });
 
         writeFileSync(catalogPath, validCatalog, { mode: 0o600 });
-        await ensureAppServerProvider(socketPath, "opencode-go").catch((error) => {
+        await ensureAppServerProvider(socketPath, "ocg-main").catch((error) => {
           throw new Error(appServerFailure(
             error instanceof Error ? error.message : String(error),
             `${stdout}\n${stderr}`,
@@ -640,12 +646,12 @@ contractSuite("real supervised App Server provider", () => {
         );
         const openCodeInitialized = await openCodeClient.connect();
         expect(openCodeInitialized.userAgent).toContain("codex_connect/");
-        const providerLease = await acquireAppServerProviderLease(socketPath, "opencode-go");
+        const providerLease = await acquireAppServerProviderLease(socketPath, "ocg-main");
         try {
           expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
-            leasedProviders: ["opencode-go"],
+            leasedProviders: ["ocg-main"],
           });
-          await expect(releaseAppServerProvider(socketPath, "opencode-go"))
+          await expect(releaseAppServerProvider(socketPath, "ocg-main"))
             .resolves.toEqual({ released: false, reason: "leased" });
         } finally {
           await providerLease.close();

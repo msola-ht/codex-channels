@@ -11,6 +11,7 @@ import { initializeUserData } from "../scripts/runtime-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createMetricsCenterServer } from "../scripts/metrics-center-server.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
 import {
   requestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
@@ -93,7 +94,7 @@ describe("webui server", () => {
         deviceId: "device-a",
         requestMetrics: [{
           localId: 1,
-          provider: "deepseek",
+          provider: "ocg-main",
           model: "deepseek-v4-flash",
           status: "completed",
           inputTokens: 1_000,
@@ -109,6 +110,11 @@ describe("webui server", () => {
           recordedAtMs: Date.now() - 86_400_000,
         }],
         subagentThreads: [],
+        providerIdentities: [{
+          provider: "ocg-main",
+          displayName: "ocg-user@example.com",
+          email: "user@example.com",
+        }],
       }),
     });
     expect(ingest.status).toBe(200);
@@ -117,8 +123,17 @@ describe("webui server", () => {
     const overview = await fetch(`${origin}/api/v1/global/overview`);
 
     expect(overview.status).toBe(200);
-    const body = await overview.json() as { totals: { request_count: number } };
+    const body = await overview.json() as {
+      totals: { request_count: number };
+      providers: Array<{ provider: string; provider_display_name: string }>;
+    };
     expect(body.totals.request_count).toBe(1);
+    expect(body.providers).toEqual([
+      expect.objectContaining({
+        provider: "ocg-main",
+        provider_display_name: "ocg-user@example.com",
+      }),
+    ]);
 
     const daily = await fetch(`${origin}/api/v1/global/daily?days=30`);
     expect(daily.status).toBe(200);
@@ -130,7 +145,11 @@ describe("webui server", () => {
     const quota = await fetch(`${origin}/api/v1/global/quota?days=365`);
     expect(quota.status).toBe(200);
     expect(await quota.json()).toMatchObject({
-      periods: [expect.objectContaining({ provider: "deepseek", windowId: "codex" })],
+      periods: [expect.objectContaining({
+        provider: "ocg-main",
+        providerDisplayName: "ocg-user@example.com",
+        windowId: "codex",
+      })],
     });
   });
 
@@ -316,6 +335,27 @@ describe("webui server", () => {
       }>;
     };
     expect(body.accounts).toEqual([]);
+  });
+
+  it("returns the configured OCG contact display name for usage cards", async () => {
+    const fixture = createFixture();
+    writeOpencodeGoAccounts(fixture.environment, [{
+      id: "main",
+      default: true,
+      email: "User@Example.com",
+    }]);
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/opencode-go-usage`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      accounts: [{
+        account: "main",
+        displayName: "ocg-user@example.com",
+        available: false,
+      }],
+    });
   });
 
   it("lists threads and returns run and turns details", async () => {

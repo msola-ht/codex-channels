@@ -1,4 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../runtime/opencode-go-accounts.mjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../runtime/opencode-go-accounts.mjs")>();
+  return {
+    ...actual,
+    opencodeGoProviderDisplayName: (provider: string) => provider === "ocg-main"
+      ? "ocg-user@example.com"
+      : provider,
+  };
+});
 
 import {
   conversationCommandHelpLines,
@@ -1269,7 +1279,7 @@ describe("provider-aware conversation command formatting", () => {
       kind: "usage",
       result: {
         kind: "quota-windows",
-        provider: "opencode-go",
+        provider: "ocg-main",
         available: true,
         windows: [
           {
@@ -1293,7 +1303,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("OpenCode Go 账户用量");
+    expect(rendered).toContain("ocg-user@example.com 账户用量");
     expect(rendered).toContain("5小时：已用 0% · 总额 $12.00 · 本地 Token 约 123.4 K");
     expect(rendered).toContain("月度：已用 12.5% · 总额 $60.00 · 重置 未知");
     expect(rendered).not.toContain("累计 Tokens");
@@ -1304,7 +1314,7 @@ describe("provider-aware conversation command formatting", () => {
       kind: "usage",
       result: {
         kind: "quota-windows",
-        provider: "opencode-go",
+        provider: "ocg-main",
         available: true,
         windows: [{
           windowId: "monthly",

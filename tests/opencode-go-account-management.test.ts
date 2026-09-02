@@ -11,7 +11,7 @@ import {
 } from "../scripts/opencode-go-account-management.mjs";
 
 const accounts = [
-  { id: "opencode-go", default: true },
+  { id: "main", default: true, email: "user@example.com" },
   { id: "b", default: false },
 ];
 
@@ -21,7 +21,7 @@ describe("OpenCode Go account management", () => {
       environment: {},
       loadAccounts: () => accounts,
       loadRole: () => ({
-        provider: "opencode-go" as const,
+        provider: "ocg-main" as const,
         model: "deepseek-v4-flash-vision-exp",
       }),
     });
@@ -29,7 +29,7 @@ describe("OpenCode Go account management", () => {
     expect(preview).toEqual({
       operation: "set-default",
       account: { id: "b", default: true },
-      currentDefaultAccountId: "opencode-go",
+      currentDefaultAccountId: "main",
       updatesExternalAgent: true,
       willChange: true,
       activation: "restart-all",
@@ -45,11 +45,11 @@ describe("OpenCode Go account management", () => {
       environment: {},
       loadAccounts: () => accounts,
       loadRole: () => ({
-        provider: "opencode-go" as const,
+        provider: "ocg-main" as const,
         model: "deepseek-v4-flash-vision-exp",
       }),
       loadProviders: () => [{
-        provider: "opencode-go-b",
+        provider: "ocg-b",
         displayName: "OpenCode Go (b)",
         model: "deepseek-v4-pro",
         reasoningEffort: "medium",
@@ -66,11 +66,11 @@ describe("OpenCode Go account management", () => {
       activation: "restart-all",
     });
     expect(writeAccounts).toHaveBeenCalledWith({}, [
-      { id: "opencode-go", default: false },
+      { id: "main", default: false, email: "user@example.com" },
       { id: "b", default: true },
     ]);
     expect(configureRole).toHaveBeenCalledWith(
-      "opencode-go-b",
+      "ocg-b",
       "deepseek-v4-pro",
       {},
     );
@@ -113,18 +113,18 @@ describe("OpenCode Go account management", () => {
           version: 4 as const,
           pid: 123,
           primaryProvider: "openai",
-          managedProviders: ["opencode-go", "opencode-go-b"],
+          managedProviders: ["ocg-main", "ocg-b"],
           socketPaths: ["/tmp/app-server.sock"],
-          runningProviders: ["opencode-go-b"],
+          runningProviders: ["ocg-b"],
           releasedProviders: [],
-          leasedProviders: ["opencode-go-b"],
+          leasedProviders: ["ocg-b"],
         },
       }),
     };
 
     await expect(previewOpencodeGoAccountStop("b", options)).resolves.toEqual({
       operation: "stop",
-      account: { id: "b", provider: "opencode-go-b" },
+      account: { id: "b", provider: "ocg-b" },
       status: "running",
       willChange: true,
       activation: "none",
@@ -136,7 +136,7 @@ describe("OpenCode Go account management", () => {
     })).resolves.toEqual({
       action: "in-use",
       operation: "stop",
-      account: { id: "b", provider: "opencode-go-b" },
+      account: { id: "b", provider: "ocg-b" },
       status: "in-use",
       willChange: false,
       activation: "none",
@@ -156,7 +156,7 @@ describe("OpenCode Go account management", () => {
     expect(result).toEqual({
       action: "not-running",
       operation: "stop",
-      account: { id: "b", provider: "opencode-go-b" },
+      account: { id: "b", provider: "ocg-b" },
       status: "not-running",
       willChange: false,
       activation: "none",
@@ -165,7 +165,7 @@ describe("OpenCode Go account management", () => {
   });
 
   it("previews account removal without exposing credentials", async () => {
-    const preview = await previewOpencodeGoAccountRemoval("opencode-go", {
+    const preview = await previewOpencodeGoAccountRemoval("main", {
       environment: {},
       loadAccounts: () => accounts,
       loadRole: () => undefined,
@@ -176,8 +176,9 @@ describe("OpenCode Go account management", () => {
     expect(preview).toEqual({
       operation: "remove",
       account: {
-        id: "opencode-go",
-        provider: "opencode-go",
+        id: "main",
+        provider: "ocg-main",
+        email: "user@example.com",
         default: true,
       },
       effects: {

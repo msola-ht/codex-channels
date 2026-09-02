@@ -19,13 +19,13 @@
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 OpenCode
-  Go 账户注册表动态生成 `opencode-go-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
+  Go 账户注册表动态生成 `ocg-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
   更新、计价、账户和汇率需求，允许显式无更新/无计价/无账户能力。账户实例继承共享定义；
   `loadManagedModelProviderWatcherDefinitions` 额外保留未配置的共享目录，watcher 再按 Provider ID
   合并并去重文件路径。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
-  （`accounts.json`）、账户目录与管理标记，以及旧版单账户配置原地迁移为默认账户
-  `opencode-go`（新增账户才使用 `opencode-go-<账户>`）；Key 不进入注册表。
+  （`accounts.json`）、账户目录与管理标记，以及已注册旧账户到 `ocg-<账户>` 与
+  `sf-ocg-<账户>` 的迁移；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于展示和数据中心身份快照。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
   config 编辑映射；DeepSeek、OpenCode Go 与自定义 Provider 共用一次 HTTP 重试、零次流重连的

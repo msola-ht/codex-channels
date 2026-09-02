@@ -372,7 +372,7 @@ function GlobalQuotaCard({
                 </TableRow></TableHeader>
                 <TableBody>{history.flatMap((group) => group.periods.map((period) => (
                   <TableRow key={`${period.provider}-${period.windowId}-${period.resetsAt}`}>
-                    <TableCell>{period.provider} · {period.windowId}</TableCell>
+                    <TableCell>{period.providerDisplayName?.trim() || period.provider} · {period.windowId}</TableCell>
                     <TableCell className="whitespace-nowrap tabular-nums">{formatTime(period.periodStartAtMs)}</TableCell>
                     <TableCell className="whitespace-nowrap tabular-nums">{formatTime(period.periodEndAtMs)}</TableCell>
                     <TableCell className="whitespace-nowrap tabular-nums">{formatQuotaSpan(period.periodStartAtMs, period.periodEndAtMs)}</TableCell>
@@ -397,7 +397,7 @@ function QuotaPeriodCard({ period }: { period: GlobalQuotaResponse["periods"][nu
     <div className="rounded-lg border bg-card p-4 shadow-xs">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-medium">渠道：{period.provider}</p>
+          <p className="font-medium">渠道：{period.providerDisplayName?.trim() || period.provider}</p>
           <p className="text-xs text-muted-foreground">额度窗口：{period.windowId}</p>
         </div>
         <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
@@ -690,17 +690,26 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.provider ?? "unknown"}>
-                <TableCell>{row.provider ?? "未知"}</TableCell>
-                <TableCell className="tabular-nums">
-                  {row.request_count.toLocaleString("zh-CN")}
-                </TableCell>
-                <TableCell className="tabular-nums">{formatTokens(row.input_tokens)}</TableCell>
-                <TableCell className="tabular-nums">{formatTokens(row.output_tokens)}</TableCell>
-                <TableCell className="tabular-nums">{formatTokens(row.total_tokens)}</TableCell>
-              </TableRow>
-            ))}
+            {rows.map((row) => {
+              const label = row.provider_display_name?.trim() || row.provider || "未知"
+              const key = [
+                row.provider ?? "unknown",
+                row.provider_display_name ?? "",
+                row.provider_email ?? "",
+                row.provider_phone ?? "",
+              ].join("\u0000")
+              return (
+                <TableRow key={key}>
+                  <TableCell>{label}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.request_count.toLocaleString("zh-CN")}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{formatTokens(row.input_tokens)}</TableCell>
+                  <TableCell className="tabular-nums">{formatTokens(row.output_tokens)}</TableCell>
+                  <TableCell className="tabular-nums">{formatTokens(row.total_tokens)}</TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
           </Table>
         </div>

@@ -1,4 +1,8 @@
 import { usesOpenAiAccount } from "../conversation-core/index.js";
+import {
+  isOpencodeGoProvider,
+  opencodeGoProviderDisplayName,
+} from "../../runtime/opencode-go-accounts.mjs";
 
 let configuredCustomPrimaryProviderIds = new Set<string>();
 
@@ -13,10 +17,8 @@ export function setConfiguredCustomPrimaryProviderId(
 export function formatProviderLabel(provider: string): string {
   if (provider === "openai") return "OpenAI";
   if (provider === "deepseek") return "DeepSeek";
-  if (provider === "opencode-go") return "OpenCode Go";
-  const accountPrefix = "opencode-go-";
-  if (provider.startsWith(accountPrefix) && provider.length > accountPrefix.length) {
-    return `OpenCode Go（${provider.slice(accountPrefix.length)}）`;
+  if (isOpencodeGoProvider(provider)) {
+    return opencodeGoProviderDisplayName(provider);
   }
   const normalized = provider.replace(/\s+/gu, " ").trim();
   return normalized ? normalized.slice(0, 64) : "未知提供商";

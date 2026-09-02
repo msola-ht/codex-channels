@@ -98,7 +98,7 @@
   和解析异常不进入日志或业务事件。官方账户只有余额接口，没有用量窗口，不展示本地用量估算。
 - `opencode-go-account-adapter.ts`：通过同一共享 Provider 运行时按请求读取 OpenCode Go Key，调用官方
   `/zen/go/v1/usage` 接口，把 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与
-  重置时间）；参数化工厂按 `modelProvider` 区分 `opencode-go-<账户>`，指标库按账户过滤，并按
+  重置时间）；参数化工厂按 `modelProvider` 区分 `ocg-<账户>`，指标库按账户过滤，并按
   官方价格基线从本机指标库重算模型本地用量；DeepSeek 模型按请求时间拆分
   Off-Peak / Peak 两档、各自对照官方包含额度；重算优先使用请求保存的价格快照档位，缺失时才按
   当前基线判定；Key、响应正文和解析异常同样不进入日志或业务事件。

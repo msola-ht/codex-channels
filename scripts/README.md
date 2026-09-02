@@ -71,8 +71,7 @@
   设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
   Gateway，用于重放修复中心历史数据。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
   备份后清理最旧请求记录，可选 `--vacuum` 立即回收 SQLite 文件空间。
-  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、opencode-go、
-  `opencode-go-<账户>` 或当前配置/私有备份中的自定义主 Provider）的全部请求
+  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、`ocg-<账户>` 或当前配置/私有备份中的自定义主 Provider）的全部请求
   行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的

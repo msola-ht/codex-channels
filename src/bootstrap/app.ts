@@ -36,7 +36,11 @@ import {
   inspectAppServerSupervisor,
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
-import { opencodeGoAccountIdFromProvider } from "../../runtime/opencode-go-accounts.mjs";
+import {
+  loadOpencodeGoProviderIdentities,
+  opencodeGoAccountIdFromProvider,
+  opencodeGoProviderDisplayName,
+} from "../../runtime/opencode-go-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -336,6 +340,7 @@ export class GatewayApplication {
       statePath: join(dirname(config.stateDatabasePath), "metrics-sync-state.json"),
       fetchImpl: createProxyFetch(config.networkProxy),
       logger,
+      providerIdentities: () => loadOpencodeGoProviderIdentities(),
     });
     const recordTurnErrorMetric = (
       provider: string,
@@ -667,7 +672,7 @@ export class GatewayApplication {
         const accountId = opencodeGoAccountIdFromProvider(provider);
         const label = accountId === undefined
           ? provider
-          : `OpenCode Go 账户 ${accountId}`;
+          : opencodeGoProviderDisplayName(provider);
         const message = providerIdleReleaseMessage(label);
         if (targets.length === 0) {
           this.logger.info({ provider }, "OpenCode Go 账户已释放，无渠道会话需要通知");

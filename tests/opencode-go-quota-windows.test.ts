@@ -199,18 +199,25 @@ async function createCodexHome(): Promise<string> {
     "opencode-go",
   );
   await mkdir(providerDirectory, { recursive: true, mode: 0o700 });
+  const accountDirectory = join(providerDirectory, "accounts", "main");
+  await mkdir(accountDirectory, { recursive: true, mode: 0o700 });
   if (process.platform === "win32") securePrivateDirectorySync(providerDirectory);
   await writeFile(join(directory, "config.toml"), 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
   if (process.platform === "win32") securePrivateFileSync(join(directory, "config.toml"));
   await writeFile(
-    join(directory, "sf-opencode-go.config.toml"),
-    `model = "deepseek-v4-flash"\nmodel_provider = "opencode-go"\n${providerConfig("sk-test-secret")}`,
+    join(directory, "sf-ocg-main.config.toml"),
+    `model = "deepseek-v4-flash"\nmodel_provider = "ocg-main"\n${providerConfig("sk-test-secret")}`,
     { mode: 0o600 },
   );
-  if (process.platform === "win32") securePrivateFileSync(join(directory, "sf-opencode-go.config.toml"));
+  if (process.platform === "win32") securePrivateFileSync(join(directory, "sf-ocg-main.config.toml"));
   await writeFile(
-    join(providerDirectory, "managed.toml"),
-    'version = 1\nprovider = "opencode-go"\n',
+    join(providerDirectory, "accounts.json"),
+    `${JSON.stringify([{ id: "main", default: true, email: "user@example.com" }], null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(accountDirectory, "managed.toml"),
+    'version = 1\nprovider = "ocg-main"\nmode = "switching"\n',
     { mode: 0o600 },
   );
   if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "managed.toml"));
@@ -225,5 +232,5 @@ function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
 }
 
 function providerConfig(apiKey: string): string {
-  return `[model_providers.opencode-go]\nname = "opencode-go"\nbase_url = "https://opencode.ai/zen/go/v1"\nwire_api = "responses"\nsupports_websockets = false\nrequires_openai_auth = false\nexperimental_bearer_token = "${apiKey}"\n`;
+  return `[model_providers.ocg-main]\nname = "ocg-main"\nbase_url = "https://opencode.ai/zen/go/v1"\nwire_api = "responses"\nsupports_websockets = false\nrequires_openai_auth = false\nexperimental_bearer_token = "${apiKey}"\n`;
 }

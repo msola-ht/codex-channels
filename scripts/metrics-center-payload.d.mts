@@ -18,6 +18,14 @@ export interface IngestPayload {
   deviceName?: string;
   requestMetrics: IngestRequestMetric[];
   subagentThreads: IngestSubagentThread[];
+  providerIdentities?: IngestProviderIdentity[];
+}
+
+export interface IngestProviderIdentity {
+  provider: string;
+  displayName: string;
+  email?: string;
+  phone?: string;
 }
 
 export type IngestPayloadResult =

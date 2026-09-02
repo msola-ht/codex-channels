@@ -247,6 +247,7 @@ export function OpencodeGoUsageCard({
 }: {
   accounts: Array<{
     account: string
+    displayName: string
     default: boolean
     available: boolean
     windows: OpencodeGoQuotaWindow[]
@@ -273,13 +274,13 @@ export function OpencodeGoUsageCard({
 }
 
 function OpencodeGoAccountCard({
-  account,
+  displayName,
   default: isDefault,
   available,
   windows,
   modelUsage,
 }: {
-  account: string
+  displayName: string
   default: boolean
   available: boolean
   windows: OpencodeGoQuotaWindow[]
@@ -289,7 +290,7 @@ function OpencodeGoAccountCard({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>OpenCode Go（{account}）</CardTitle>
+          <CardTitle>{displayName}</CardTitle>
           <CardDescription>
             {isDefault ? "默认账户 · " : ""}账户用量暂不可用
           </CardDescription>
@@ -300,7 +301,7 @@ function OpencodeGoAccountCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>OpenCode Go（{account}）</CardTitle>
+        <CardTitle>{displayName}</CardTitle>
         <CardDescription>{isDefault ? "默认账户 · " : ""}账户配额</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
