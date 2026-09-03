@@ -77,14 +77,23 @@ function ChartLegend(props: React.ComponentProps<typeof RechartsPrimitive.Legend
   return <RechartsPrimitive.Legend {...props} />
 }
 
-function ChartLegendContent({ className }: { className?: string }) {
+function ChartLegendContent({
+  className,
+  payload,
+}: {
+  className?: string
+  payload?: Array<{ dataKey?: string | number; value?: React.ReactNode; color?: string }>
+}) {
   const { config } = React.useContext(ChartContext)
+  const entries = payload?.length
+    ? payload.map((item) => [String(item.dataKey ?? item.value ?? ""), item] as const)
+    : Object.entries(config).map(([key, entry]) => [key, { value: entry.label, color: `var(--color-${key})` }] as const)
   return (
     <div className={cn("flex flex-wrap items-center justify-center gap-x-4 gap-y-2", className)}>
-      {Object.entries(config).map(([key, entry]) => (
+      {entries.map(([key, item]) => (
         <div key={key} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="size-2 rounded-full" style={{ backgroundColor: `var(--color-${key})` }} />
-          {entry.label ?? key}
+          <span className="size-2 rounded-full" style={{ backgroundColor: item.color ?? `var(--color-${key})` }} />
+          {config[key]?.label ?? item.value ?? key}
         </div>
       ))}
     </div>

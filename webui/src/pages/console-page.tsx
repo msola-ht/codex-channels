@@ -55,6 +55,7 @@ import {
 import { formatTime, formatTokens } from "@/lib/format"
 import type { DisplayCurrency } from "@/lib/format"
 import { toStackedUsageTrend } from "@/lib/trend"
+import { resolveDisplayCost } from "@/lib/cost"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import type {
@@ -312,7 +313,7 @@ function GlobalDashboard({
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold">全局模块</h2>
-        <p className="text-sm text-muted-foreground">数据中心累计视图：核心指标、用量走势、设备明细、额度费用和 Provider。</p>
+        <p className="text-sm text-muted-foreground">数据中心累计视图：核心指标、用量走势、设备明细、费用和 Provider。</p>
       </div>
       <ErrorBanner error={overview.error} />
 
@@ -425,15 +426,12 @@ function CostStatCard({
   currency: DisplayCurrency
   exchangeRate: number | null
 }) {
-  const usd = costs.find((cost) => cost.currency.toLowerCase() === "usd")
-  const cny = costs.find((cost) => cost.currency.toLowerCase() === "cny")
-  const usdNanos = usd?.total_cost_nanos
-    ?? (cny && exchangeRate ? Math.round(cny.total_cost_nanos / exchangeRate) : null)
-  const cnyNanos = cny?.total_cost_nanos
-    ?? (usd && exchangeRate ? Math.round(usd.total_cost_nanos * exchangeRate) : null)
-  const requestCount = usd?.request_count ?? cny?.request_count ?? 0
-  const primary = currency === "cny" ? formatNanos(cnyNanos, "CNY", 2) : formatNanos(usdNanos, "USD", 2)
-  const equivalent = currency === "cny" ? formatNanos(usdNanos, "USD", 2) : formatNanos(cnyNanos, "CNY", 2)
+  const displayCost = resolveDisplayCost(costs, currency, exchangeRate)
+  const primary = displayCost ? formatNanos(displayCost.primaryNanos, displayCost.primaryCurrency, 2) : formatNanos(null, currency === "cny" ? "CNY" : "USD", 2)
+  const equivalent = displayCost?.equivalentNanos === null || displayCost?.equivalentNanos === undefined
+    ? "—"
+    : formatNanos(displayCost.equivalentNanos, displayCost.equivalentCurrency, 2)
+  const requestCount = displayCost?.requestCount ?? 0
   return (
     <StatCard
       title="费用"
@@ -451,6 +449,7 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
   const cutoff = new Date(referenceDate.getTime() - (daysToSubtract - 1) * 86_400_000)
   const cutoffKey = `${cutoff.getUTCFullYear()}-${String(cutoff.getUTCMonth() + 1).padStart(2, "0")}-${String(cutoff.getUTCDate()).padStart(2, "0")}`
   const data = rows
+    .toSorted((a, b) => a.day.localeCompare(b.day))
     .filter((row) => row.day >= cutoffKey)
     .map((row) => ({
       day: row.day,
@@ -506,12 +505,13 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
               </defs>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} />
-              <YAxis tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <YAxis yAxisId="tokens" tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <YAxis yAxisId="output" orientation="right" tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
               <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
-              <Area dataKey="uncachedInputTokens" type="monotone" stackId="input" stroke="var(--color-uncachedInputTokens)" fill="url(#fillUncachedInput)" />
-              <Area dataKey="cachedInputTokens" type="monotone" stackId="input" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
-              <Area dataKey="totalTokens" type="monotone" stroke="var(--color-totalTokens)" fill="none" strokeWidth={2} />
-              <Area dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
+              <Area yAxisId="tokens" dataKey="uncachedInputTokens" type="monotone" stackId="input" stroke="var(--color-uncachedInputTokens)" fill="url(#fillUncachedInput)" />
+              <Area yAxisId="tokens" dataKey="cachedInputTokens" type="monotone" stackId="input" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
+              <Area yAxisId="tokens" dataKey="totalTokens" type="monotone" stroke="var(--color-totalTokens)" fill="none" strokeWidth={2} />
+              <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
               <ChartLegend content={<ChartLegendContent />} />
             </AreaChart>
           </ChartContainer>
@@ -524,7 +524,8 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
 export function GlobalHeatmapCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
   const byDay = new Map(rows.map((row) => [row.day, row.total_tokens]))
   const days = 90
-  const today = new Date()
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   const cells: Array<{ date: string; count: number; level: number }> = []
   for (let index = days - 1; index >= 0; index -= 1) {
     const date = new Date(today.getTime() - index * 86_400_000)
@@ -699,16 +700,13 @@ function GlobalDeviceTable({ rows, loading, currency, exchangeRate }: { rows: Gl
 }
 
 function formatDeviceCost(costs: GlobalCostRow[], currency: DisplayCurrency, exchangeRate: number | null): string {
-  const usd = costs.find((cost) => cost.currency.toLowerCase() === "usd")
-  const cny = costs.find((cost) => cost.currency.toLowerCase() === "cny")
-  const primary = currency === "cny"
-    ? (cny ?? (usd && exchangeRate ? { ...usd, currency: "CNY", total_cost_nanos: Math.round(usd.total_cost_nanos * exchangeRate) } : null))
-    : (usd ?? (cny && exchangeRate ? { ...cny, currency: "USD", total_cost_nanos: Math.round(cny.total_cost_nanos / exchangeRate) } : null))
-  if (!primary) return "—"
-  const equivalent = currency === "cny"
-    ? (usd ? formatNanos(usd.total_cost_nanos, "USD", 2) : null)
-    : (cny ? formatNanos(cny.total_cost_nanos, "CNY", 2) : null)
-  return equivalent ? `${formatNanos(primary.total_cost_nanos, primary.currency, 2)} · ${equivalent}` : formatNanos(primary.total_cost_nanos, primary.currency, 2)
+  const displayCost = resolveDisplayCost(costs, currency, exchangeRate)
+  if (!displayCost) return "—"
+  const primary = formatNanos(displayCost.primaryNanos, displayCost.primaryCurrency, 2)
+  const equivalent = displayCost.equivalentNanos === null
+    ? null
+    : formatNanos(displayCost.equivalentNanos, displayCost.equivalentCurrency, 2)
+  return equivalent ? `${primary} · ${equivalent}` : primary
 }
 
 function formatNanos(nanos: number | null, currency: string | null, fractionDigits = 4): string {
