@@ -129,7 +129,7 @@
   共享第三方子代理、直接 API Provider 数量、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
   允许名单、代理值或 Provider URL。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
-  新增时从 URL 主机名派生 Provider ID 或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
+  新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
   必须属于 App Server 返回的 Codex 官方目录；不调用第三方 `/models`，不生成 `models.json` 或
   `model_catalog_json`，目录来源保留为可辨识的 `official` 接口。
