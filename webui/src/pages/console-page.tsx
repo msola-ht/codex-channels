@@ -621,7 +621,7 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
                       <TooltipTrigger asChild>
                         <button type="button" className="font-medium hover:underline">{label}</button>
                       </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-none border border-border bg-card p-0 text-card-foreground shadow-lg">
+                      <TooltipContent side="right" className="max-h-[60vh] max-w-none overflow-y-auto border border-border bg-card p-0 text-card-foreground shadow-lg">
                         <div className="max-w-[720px] overflow-x-auto p-3">
                           <p className="mb-2 text-xs font-medium text-card-foreground">按模型统计</p>
                           <Table className="min-w-[620px]">

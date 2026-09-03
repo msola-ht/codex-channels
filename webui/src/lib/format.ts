@@ -133,7 +133,8 @@ export function formatTime(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—"
   const date = new Date(value)
   const pad = (part: number) => String(part).padStart(2, "0")
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+  const year = date.getFullYear() === new Date().getFullYear() ? "" : `${date.getFullYear()}-`
+  return `${year}${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
     + `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 

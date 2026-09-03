@@ -48,12 +48,13 @@ function ChartTooltipContent({
   label,
   className,
   valueFormatter = (value) => value?.toLocaleString("zh-CN") ?? "—",
-}: Partial<RechartsPrimitive.TooltipContentProps<number, string>> & { className?: string; valueFormatter?: (value: number | undefined) => string }) {
+  labelFormatter = (value) => value,
+}: Partial<RechartsPrimitive.TooltipContentProps<number, string>> & { className?: string; valueFormatter?: (value: number | undefined) => string; labelFormatter?: (value: React.ReactNode) => React.ReactNode }) {
   const { config } = React.useContext(ChartContext)
   if (!active || !payload?.length) return null
   return (
     <div className={cn("grid min-w-[9rem] gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs text-card-foreground shadow-xl", className)}>
-      <div className="font-medium">{label}</div>
+      <div className="font-medium">{labelFormatter(label)}</div>
       <div className="grid gap-1">
         {payload.map((item) => {
           const key = String(item.dataKey ?? item.name ?? "value")
