@@ -7,7 +7,7 @@ import {
 
 export interface WeixinReplyContext {
   readonly actorId: string;
-  readonly contextToken: string;
+  readonly contextToken: string | undefined;
 }
 
 const maximumContextTokenLength = 65_536;

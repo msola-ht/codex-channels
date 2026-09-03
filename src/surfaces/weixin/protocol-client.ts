@@ -47,7 +47,7 @@ export interface WeixinProtocolClient {
   sendText(
     input: {
       actorId: string;
-      contextToken: string;
+      contextToken?: string;
       text: string;
     },
     signal?: AbortSignal,
@@ -58,7 +58,7 @@ export interface WeixinImageSendProtocolClient {
   sendImage(
     input: {
       actorId: string;
-      contextToken: string;
+      contextToken?: string;
       image: Buffer;
     },
     signal?: AbortSignal,
@@ -69,7 +69,7 @@ export interface WeixinFileSendProtocolClient {
   sendFile(
     input: {
       actorId: string;
-      contextToken: string;
+      contextToken?: string;
       fileName: string;
       file: Buffer;
     },
@@ -83,7 +83,7 @@ export interface WeixinTypingProtocolClient {
   getTypingTicket(
     input: {
       actorId: string;
-      contextToken: string;
+      contextToken?: string;
     },
     signal?: AbortSignal,
   ): Promise<string>;
@@ -312,7 +312,7 @@ export function createWeixinProtocolClient(
               type: 1,
               text_item: { text },
             }],
-            context_token: contextToken,
+            ...(contextToken === undefined ? {} : { context_token: contextToken }),
           },
           base_info: baseInfo(),
         },
@@ -364,7 +364,7 @@ export function createWeixinProtocolClient(
                 mid_size: uploaded.ciphertext.length,
               },
             }],
-            context_token: contextToken,
+            ...(contextToken === undefined ? {} : { context_token: contextToken }),
           },
           base_info: baseInfo(),
         },
@@ -418,7 +418,7 @@ export function createWeixinProtocolClient(
                 len: String(file.length),
               },
             }],
-            context_token: contextToken,
+            ...(contextToken === undefined ? {} : { context_token: contextToken }),
           },
           base_info: baseInfo(),
         },
@@ -445,7 +445,7 @@ export function createWeixinProtocolClient(
         endpoint: "getconfig",
         body: {
           ilink_user_id: actorId,
-          context_token: contextToken,
+          ...(contextToken === undefined ? {} : { context_token: contextToken }),
           base_info: baseInfo(),
         },
         timeoutMs: typingTimeoutMs,
