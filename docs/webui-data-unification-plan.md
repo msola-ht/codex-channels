@@ -94,6 +94,8 @@
 - [x] 建立数据链路与分层步骤文档。
 - [x] `settings` 收拢到 `CurrencyProvider`，页面内复用同一份设置数据。
 - [x] 本机 `overview` 提升到控制台页面级，范围切换和账户额度卡复用同一请求。
+- [x] 本地范围不再请求中心设备列表，切换到全局范围时再加载。
+- [x] DeepSeek 与 OpenCode Go 官方只读源收拢为统一账户源 hook。
 - [ ] 将 OpenAI、DeepSeek、OpenCode Go 官方账户快照统一写入数据库读模型。
 - [ ] 为 WebUI 与渠道卡片提供统一 Application 查询端口。
 - [ ] 清理全局设备数据的非必要获取并迁移渠道卡片。

@@ -45,14 +45,13 @@ import {
 } from "@/components/overview/overview-sections"
 import { useApi } from "@/hooks/use-api"
 import { useCurrency } from "@/hooks/currency-context"
+import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import { useOverview } from "@/hooks/use-overview"
 import {
-  fetchDeepseekBalance,
   fetchGlobalDaily,
   fetchGlobalDevices,
   fetchGlobalOverview,
   fetchGlobalQuota,
-  fetchOpencodeGoUsage,
 } from "@/lib/api"
 import { formatTime, formatTokens } from "@/lib/format"
 import { positionTrendTooltip, toStackedUsageTrend } from "@/lib/trend"
@@ -106,10 +105,14 @@ function persistScope(scope: Scope) {
 export function ConsolePage() {
   const [scope, setScope] = useState<Scope>(readScope)
   const [range, setRange] = useState<RangeName>("24h")
-  const devices = useApi((signal) => fetchGlobalDevices(signal), [])
+  const devices = useApi(
+    (signal) => scope.kind === "local"
+      ? Promise.resolve({ devices: [] })
+      : fetchGlobalDevices(signal),
+    [scope.kind],
+  )
   const account = useOverview(scope.kind === "local" ? range : "24h")
-  const balance = useApi((signal) => fetchDeepseekBalance(signal), [])
-  const opencodeGoUsage = useApi((signal) => fetchOpencodeGoUsage(signal), [])
+  const officialAccounts = useOfficialAccountSources()
   const { settings } = useCurrency()
   const deviceLabel = (deviceId: string) =>
     devices.data?.devices.find((device) => device.device_id === deviceId)
@@ -163,8 +166,8 @@ export function ConsolePage() {
       <AccountStatusCards
         overview={account.data}
         settings={settings}
-        balance={balance.data}
-        opencodeGoUsage={opencodeGoUsage.data}
+        balance={officialAccounts.data?.deepseek ?? null}
+        opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
       />
     </div>
   )
