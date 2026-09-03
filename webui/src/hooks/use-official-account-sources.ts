@@ -31,7 +31,13 @@ function toOpencodeAccounts(snapshot: { accountId: string | null; available: boo
     displayName: snapshot.accountId ?? "OpenCode Go",
     default: snapshot.accountId === null,
     available: snapshot.available,
-    windows: Array.isArray(usage.windows) ? usage.windows : [],
+    windows: Array.isArray(usage.windows)
+      ? usage.windows.map((window) => ({
+        ...window,
+        // 快照库保存官方接口的秒级时间；WebUI 展示统一使用毫秒 Unix 时间戳。
+        resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
+      }))
+      : [],
     modelUsage: Array.isArray(usage.modelUsage) ? usage.modelUsage : [],
   }]
 }

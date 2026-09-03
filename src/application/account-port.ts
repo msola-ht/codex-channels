@@ -210,4 +210,5 @@ export interface OfficialAccountSnapshot {
 
 export interface OfficialAccountSnapshotQueryPort {
   latestOfficialAccountSnapshot(provider: string, accountId?: string): Promise<OfficialAccountSnapshot | null>;
+  latestOfficialAccountSnapshots?(): Promise<OfficialAccountSnapshot[]>;
 }

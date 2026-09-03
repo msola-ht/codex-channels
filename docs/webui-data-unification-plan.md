@@ -123,9 +123,13 @@ account_snapshots
 - [x] 指标数据库升级到 Schema v12，新增账户源与账户快照表，支持幂等写入和最新快照读取。
 - [x] Provider 账户查询服务接入快照写入端口，官方只读查询结果统一落入快照读模型。
 - [x] WebUI 账户卡片改为读取指标库统一快照接口，页面不再直接请求 DeepSeek/OpenCode Go 官方接口。
-- [ ] 将 OpenAI、DeepSeek、OpenCode Go 官方账户快照统一写入数据库读模型。
-- [x] 为 WebUI 提供统一账户快照查询接口；渠道卡片迁移仍待下一批完成。
+- [x] 将 OpenAI、DeepSeek、OpenCode Go 官方账户快照统一写入数据库读模型。
+- [x] 为 WebUI 与渠道提供统一账户快照查询端口；渠道卡片沿用 Application 产生的账户事件与共享格式器。
 - [ ] 清理全局设备数据的非必要获取并迁移渠道卡片。
+
+本批审查确认：飞书、微信、Telegram 的账户与额度卡片均只消费 Application/Core 发出的
+`account.updated`、`account.rateLimits.updated` 事件，并复用 `runtime-status-format`，没有直接
+调用官方适配器、WebUI HTTP API 或指标数据库；OpenCode Go 快照中的秒级重置时间在 WebUI 边界统一转换为毫秒。
 
 ## 下一批一次性完成范围
 

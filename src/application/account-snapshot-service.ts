@@ -7,4 +7,8 @@ export class OfficialAccountSnapshotService {
   latest(provider: string, accountId?: string): Promise<OfficialAccountSnapshot | null> {
     return this.query.latestOfficialAccountSnapshot(provider, accountId);
   }
+
+  latestAll(): Promise<OfficialAccountSnapshot[]> {
+    return this.query.latestOfficialAccountSnapshots?.() ?? Promise.resolve([]);
+  }
 }
