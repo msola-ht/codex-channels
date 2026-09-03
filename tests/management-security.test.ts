@@ -117,8 +117,9 @@ describe("management security core", () => {
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
     });
-    expect(managementSessionCookie("session_token", { secure: true }))
-      .toContain("HttpOnly; SameSite=Strict; Max-Age=1800; Secure");
+    const sessionCookie = managementSessionCookie("session_token", { secure: true });
+    expect(sessionCookie).toContain("Path=/api/v1/management");
+    expect(sessionCookie).toContain("HttpOnly; SameSite=Strict; Max-Age=1800; Secure");
     const limiter = new ManagementRateLimiter();
     for (let index = 0; index < 5; index += 1) {
       limiter.consume({ sessionId: "session-a", category: "high-risk" });

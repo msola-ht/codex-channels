@@ -223,7 +223,7 @@ export function managementSessionCookie(sessionToken, { secure = false } = {}) {
   if (!/^[A-Za-z0-9_-]+$/u.test(token)) throw new Error("管理会话令牌格式无效");
   return [
     `codexc_management=${token}`,
-    "Path=/management",
+    "Path=/api/v1/management",
     "HttpOnly",
     "SameSite=Strict",
     "Max-Age=1800",
@@ -234,7 +234,7 @@ export function managementSessionCookie(sessionToken, { secure = false } = {}) {
 export function clearManagementSessionCookie({ secure = false } = {}) {
   return [
     "codexc_management=",
-    "Path=/management",
+    "Path=/api/v1/management",
     "HttpOnly",
     "SameSite=Strict",
     "Max-Age=0",

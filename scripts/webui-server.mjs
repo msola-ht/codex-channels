@@ -24,9 +24,24 @@ import {
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
-import { loadGatewaySettings } from "./config-management.mjs";
+import {
+  ConfigManagementError,
+  loadGatewaySettings,
+  updateGatewaySetting,
+} from "./config-management.mjs";
 import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import {
+  ManagementAccessController,
+  ManagementAuditWriter,
+  ManagementRateLimiter,
+  ManagementSecurityError,
+  fingerprintManagementValue,
+  managementSecurityHeaders,
+  managementSessionCookie,
+  readManagementCredential,
+  validateManagementJsonRequest,
+} from "./management-security.mjs";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
@@ -79,6 +94,8 @@ export function createWebuiServer({
   host = DEFAULT_HOST,
   staticDir = join(PACKAGE_DIR, "webui", "dist"),
   token = null,
+  port = DEFAULT_PORT,
+  managementOrigin = null,
 } = {}) {
   assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
@@ -87,8 +104,9 @@ export function createWebuiServer({
     );
   }
   const serviceStatusCache = { expiresAtMs: 0, value: null, pending: null };
+  const management = createManagementState(environment, host, port, managementOrigin);
   const server = createServer((request, response) => {
-    handleRequest(environment, staticDir, host, token, serviceStatusCache, request, response);
+    handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
   });
   return { host, server, staticDir, token };
 }
@@ -114,8 +132,13 @@ export function resolveWebuiSettings({
   };
 }
 
-async function handleRequest(environment, staticDir, host, token, serviceStatusCache, request, response) {
+async function handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response) {
   try {
+    const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (requestUrl.pathname.startsWith(`${API_PREFIX}/management`)) {
+      await routeManagement(environment, requestUrl, request, response, management);
+      return;
+    }
     if (request.method !== "GET") {
       sendJson(response, 405, {
         error: { code: "method_not_allowed", message: "WebUI 只提供只读 GET 接口" },
@@ -123,7 +146,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
       return;
     }
     // 只取 pathname 与查询参数，固定回环 base，避免协议相对路径被重解析。
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const url = requestUrl;
     if (url.pathname.startsWith("/api/")) {
       if (token !== null && !authorized(request, token)) {
         sendJson(response, 401, {
@@ -136,6 +159,16 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
     }
     serveStatic(staticDir, url.pathname, response);
   } catch (error) {
+    if (error instanceof ManagementSecurityError) {
+      sendManagementJson(response, error.status, { error: { code: error.code, message: error.message } });
+      return;
+    }
+    if (error instanceof ConfigManagementError) {
+      sendManagementJson(response, error.code === "stale-revision" ? 409 : 400, {
+        error: { code: error.code, field: error.field, message: error.message },
+      });
+      return;
+    }
     if (error instanceof ApiError) {
       sendJson(response, error.status, { error: { code: error.code, message: error.message } });
       return;
@@ -145,6 +178,217 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
       error: { code: "internal_error", message: "WebUI 内部错误" },
     });
   }
+}
+
+function createManagementState(environment, host, port, configuredOrigin) {
+  const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  const dataDir = explicitConfig ? dirname(resolve(explicitConfig)) : userDataDir(environment);
+  const loopback = host === "127.0.0.1" || host === "::1";
+  const originHost = host.includes(":") ? `[${host}]` : host;
+  return {
+    credentialPath: join(dataDir, "management-credential"),
+    auditPath: join(dataDir, "management-audit.jsonl"),
+    origin: configuredOrigin ?? (loopback ? `http://${originHost}:${port}` : null),
+    controller: null,
+    limiter: new ManagementRateLimiter(),
+    audit: null,
+  };
+}
+
+function managementController(state) {
+  if (state.origin === null) throw new ApiError(503, "management_unavailable", "管理接口只允许回环访问");
+  if (state.controller !== null) return state.controller;
+  let credential;
+  try {
+    credential = readManagementCredential(state.credentialPath);
+  } catch {
+    throw new ApiError(503, "management_not_enabled", "管理接口尚未启用，请在终端运行 codexc management enable");
+  }
+  state.controller = new ManagementAccessController({ credential, origin: state.origin });
+  state.audit = new ManagementAuditWriter(state.auditPath);
+  return state.controller;
+}
+
+async function routeManagement(environment, url, request, response, state) {
+  const origin = request.headers.origin ?? (request.method === "GET" ? state.origin : undefined);
+  const contentLength = request.headers["content-length"] === undefined
+    ? undefined
+    : Number(request.headers["content-length"]);
+  const requestLineBytes = Buffer.byteLength(`${request.method ?? ""} ${request.url ?? ""}`);
+  const headerBytes = Object.entries(request.headers)
+    .reduce((total, [key, value]) => total + Buffer.byteLength(key) + Buffer.byteLength(String(value ?? "")), 0);
+  const validation = validateManagementJsonRequest({
+    method: request.method,
+    origin,
+    expectedOrigin: state.origin ?? "http://127.0.0.1",
+    contentType: request.headers["content-type"],
+    contentLength,
+    requestLineBytes,
+    headerBytes,
+  });
+  const path = url.pathname.slice(`${API_PREFIX}/management`.length) || "/";
+  if (path === "/login" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    const credential = body?.credential;
+    const controller = managementController(state);
+    const source = request.socket.remoteAddress ?? "unknown";
+    const result = controller.login({ credential, origin, source });
+    sendManagementJson(response, 200, {
+      expiresAt: result.expiresAt,
+      csrfToken: result.csrfToken,
+    }, { "set-cookie": managementSessionCookie(result.sessionToken) });
+    return;
+  }
+  const controller = managementController(state);
+  const sessionToken = parseCookie(request.headers.cookie, "codexc_management");
+  if (sessionToken === "") {
+    throw new ApiError(401, "management_session_invalid", "管理会话无效或已过期");
+  }
+  const authorized = controller.authorize({
+    sessionToken,
+    csrfToken: request.headers["x-codex-csrf"],
+    origin,
+    method: request.method,
+  });
+  state.limiter.consume({ sessionId: authorized.sessionId, category: request.method === "GET" ? "read" : "write" });
+  if (path === "/settings" && request.method === "GET") {
+    sendManagementJson(response, 200, redactManagedSettings(loadGatewaySettings(environment)));
+    return;
+  }
+  if (path === "/settings/preview" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    assertManagedSetting(body?.setting);
+    const result = updateGatewaySetting(body.setting, {
+      environment,
+      expectedRevision: body.revision,
+      writeConfig: () => undefined,
+    });
+    sendManagementJson(response, 200, {
+      revision: body.revision,
+      value: result.value,
+      activation: result.activationResult,
+    });
+    return;
+  }
+  if (path === "/settings" && request.method === "PATCH") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new ApiError(400, "invalid_json", "管理请求正文必须是对象");
+    }
+    const input = body.setting;
+    assertManagedSetting(input);
+    const result = updateGatewaySetting(input, {
+      environment,
+      expectedRevision: body.revision,
+    });
+    try {
+      state.audit.record({
+        sessionId: authorized.sessionId,
+        source: "webui",
+        operation: "settings.update",
+        target: String(input?.kind ?? "unknown"),
+        inputFingerprint: fingerprintManagementValue(input),
+        revision: result.previousRevision,
+        phase: "completed",
+        resultCode: "updated",
+        recovery: "none",
+      });
+    } catch (error) {
+      console.error("管理设置已写入，但审计记录失败", error);
+      sendManagementJson(response, 500, {
+        error: {
+          code: "management_audit_failed",
+          message: "设置已写入，但审计记录失败；请检查 Gateway 数据目录权限和磁盘空间",
+        },
+      });
+      return;
+    }
+    sendManagementJson(response, 200, {
+      revision: loadGatewaySettings(environment).revision,
+      value: result.value,
+      activation: result.activationResult,
+    });
+    return;
+  }
+  throw new ApiError(404, "not_found", `未知管理 API：${path}`);
+}
+
+const managedSettingKinds = new Set([
+  "display.operation-updates",
+  "display.plan-updates",
+  "display.reasoning",
+  "display.price-currency",
+  "system.approval-timeout",
+  "system.sandbox",
+  "system.default-model",
+  "automation.scheduled-tasks",
+  "advanced.logging-level",
+  "metrics.storage",
+  "metrics.sync-params",
+  "webui.port",
+]);
+
+function assertManagedSetting(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || !managedSettingKinds.has(input.kind)) {
+    throw new ApiError(400, "setting_not_allowed", "该设置暂不支持 WebUI 修改");
+  }
+}
+
+function redactManagedSettings(settings) {
+  return {
+    revision: settings.revision,
+    display: settings.display,
+    system: {
+      approvalTimeoutSeconds: settings.system.approvalTimeoutSeconds,
+      sandbox: settings.system.sandbox,
+      defaultModel: settings.system.defaultModel,
+    },
+    automation: { scheduledTasksEnabled: settings.automation.scheduledTasksEnabled },
+    advanced: { loggingLevel: settings.advanced.loggingLevel },
+    metrics: {
+      storage: settings.metrics.storage,
+      sync: {
+        enabled: settings.metrics.sync.enabled,
+        intervalSeconds: settings.metrics.sync.intervalSeconds,
+        batchSize: settings.metrics.sync.batchSize,
+      },
+    },
+    webui: { host: settings.webui.host, port: settings.webui.port },
+  };
+}
+
+function sendManagementJson(response, status, payload, extraHeaders = {}) {
+  response.writeHead(status, { ...managementSecurityHeaders(), "content-type": "application/json; charset=utf-8", ...extraHeaders });
+  response.end(JSON.stringify(payload));
+}
+
+function parseCookie(value, name) {
+  const prefix = `${name}=`;
+  return String(value ?? "").split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix))?.slice(prefix.length) ?? "";
+}
+
+function readJsonBody(request, maximumBytes) {
+  return new Promise((resolveBody, reject) => {
+    let total = 0;
+    const chunks = [];
+    request.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > maximumBytes) {
+        reject(new ApiError(413, "body_too_large", "管理请求正文过大"));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => {
+      try {
+        resolveBody(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch {
+        reject(new ApiError(400, "invalid_json", "管理请求正文不是有效 JSON"));
+      }
+    });
+    request.on("error", reject);
+  });
 }
 
 function authorized(request, token) {
@@ -853,6 +1097,7 @@ function main() {
     const { host, server } = createWebuiServer({
       environment: process.env,
       host: settings.host,
+      port: settings.port,
       token: settings.token,
     });
     server.on("error", (error) => {

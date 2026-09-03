@@ -93,6 +93,7 @@
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的只读 HTTP 服务与共享 API 类型；设置摘要接口
   复用 Config 脱敏投影与跨平台服务状态查询，只返回配置修订、非凭据字段和 Secret 配置状态。
+  管理设置接口使用独立管理凭据、短期会话、CSRF、限速和审计；凭据通过 `codexc management enable` 生成。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
   `/api/v1/global/*` 按 `[metrics.view]` 配置由服务端代理到中心服务（前端不接触令牌）；
@@ -250,7 +251,8 @@
 - `management-access.mjs`、`management-confirmations.mjs`、`management-audit.mjs`、
   `management-security.mjs` / `management-security.d.mts`：未来本机管理适配器复用的无 HTTP 安全基础，
   覆盖独立管理凭据、短期会话、Origin/CSRF、限速、请求上限、安全响应头、一次性高风险确认和脱敏审计；
-  当前不监听端口、不接入只读 WebUI，也不开放管理写路由。
+  WebUI 管理路由复用其中的认证、会话、请求约束和审计原语。
+- `management-command.mjs` / `management-command.d.mts`：实现 `codexc management enable`，在用户数据目录生成一次性显示的独立管理凭据。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
   Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
 - `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API

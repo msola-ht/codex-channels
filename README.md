@@ -50,6 +50,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```bash
 codexc setup                 # Codex 用户设置、Provider、渠道和项目技能
 codexc config                # Gateway 显示、系统、服务、代理、WebUI 和指标设置
+codexc management enable    # 生成 WebUI 管理接口的独立凭据
 codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server
 codexc doctor                # 只读诊断

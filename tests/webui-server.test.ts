@@ -12,6 +12,8 @@ import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { createMetricsCenterServer } from "../scripts/metrics-center-server.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { provisionManagementCredential } from "../scripts/management-security.mjs";
+import { loadGatewaySettings } from "../scripts/config-management.mjs";
 import {
   requestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
@@ -387,6 +389,44 @@ describe("webui server", () => {
     expect(serialized).not.toContain("metrics-secret");
     expect(serialized).not.toContain("private-path");
     expect(serialized).not.toContain(configPath);
+  });
+
+  it("protects low-risk management writes with a separate session and CSRF token", async () => {
+    const fixture = createFixture();
+    provisionManagementCredential(join(fixture.home, "management-credential"));
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const login = await fetch(`${origin}/api/v1/management/login`, {
+      method: "POST",
+      headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ credential: readFileSync(join(fixture.home, "management-credential"), "utf8").trim() }),
+    });
+    expect(login.status).toBe(200);
+    const csrfToken = (await login.json() as { csrfToken: string }).csrfToken;
+    const setCookie = login.headers.get("set-cookie");
+    expect(setCookie).toContain("Path=/api/v1/management");
+    const cookie = setCookie?.split(";", 1)[0];
+    expect(cookie).toContain("codexc_management=");
+    const settings = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { origin: managementOrigin, cookie: cookie! },
+    });
+    expect(settings.status).toBe(200);
+    const body = await settings.json() as { revision: string };
+    const update = await fetch(`${origin}/api/v1/management/settings`, {
+      method: "PATCH",
+      headers: {
+        origin: managementOrigin,
+        cookie: cookie!,
+        "x-codex-csrf": csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: body.revision,
+        setting: { kind: "display.reasoning", value: false },
+      }),
+    });
+    expect(update.status).toBe(200);
+    expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(false);
   });
 
   it("returns an actionable settings error before Gateway initialization", async () => {
@@ -864,6 +904,7 @@ async function startServer(
   options: {
     host?: string
     token?: string
+    managementOrigin?: string
   } = {},
 ) {
   const { server } = createWebuiServer({
@@ -871,6 +912,7 @@ async function startServer(
     ...(staticDir === undefined ? {} : { staticDir }),
     ...(options.host === undefined ? {} : { host: options.host }),
     ...(options.token === undefined ? {} : { token: options.token }),
+    ...(options.managementOrigin === undefined ? {} : { managementOrigin: options.managementOrigin }),
   });
   await new Promise<void>((resolve) => {
     server.listen(0, options.host ?? "127.0.0.1", resolve);
