@@ -1,8 +1,37 @@
 import { describe, expect, it } from "vitest";
 
-import { inspectManagedServiceStatus } from "../scripts/service-status.mjs";
+import {
+  inspectManagedServiceStatus,
+  inspectManagedServiceStatusAsync,
+} from "../scripts/service-status.mjs";
 
 describe("managed service JSON status", () => {
+  it("supports asynchronous supervisor queries for WebUI callers", async () => {
+    const calls: string[][] = [];
+    const status = await inspectManagedServiceStatusAsync({
+      environment: {},
+      platform: "linux",
+      run: async (_executable, args) => {
+        calls.push([...args]);
+        return {
+          status: 0,
+          stdout: "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=789\n",
+          stderr: "",
+        };
+      },
+      target: "webui",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("codex-connect-webui.service");
+    expect(status).toMatchObject({
+      platform: "systemd",
+      target: "webui",
+      healthy: true,
+      services: [{ target: "webui", running: true, pid: 789 }],
+    });
+  });
+
   it("normalizes systemd service properties and reports unhealthy targets", () => {
     const run = (_executable: string, args: readonly string[]) => {
       const gateway = args.includes("codex-connect-gateway.service");

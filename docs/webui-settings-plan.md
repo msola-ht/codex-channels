@@ -8,7 +8,8 @@
 
 ## 现状与事实来源
 
-- `scripts/webui-server.mjs` 当前只提供 GET API，`GET /api/v1/settings` 仅返回全局显示币种与汇率。
+- `scripts/webui-server.mjs` 当前只提供 GET API；`GET /api/v1/settings` 返回全局显示币种与汇率，
+  `GET /api/v1/settings/summary` 返回脱敏配置与四类受管服务状态。
 - Config/Setup 的结构化管理接口和修订保护已在 `scripts/` 与 `runtime/` 完成，CLI 菜单只是交互适配器。
 - 管理接口认证、Origin/CSRF、请求限制、一次性确认、审计和任务安全原语已记录在
   `docs/management-interface-security.md`，接入 HTTP 写路由时必须完整组合，不能复用 WebUI Bearer Token。
@@ -19,7 +20,7 @@
 
 ### 首期允许
 
-- 脱敏配置总览：语言、货币、WebUI、Gateway 显示、日志、代理状态、数据中心状态、服务状态。
+- 脱敏配置总览：货币、WebUI、Gateway 显示、日志、代理状态、数据中心状态、服务状态。
 - 低风险、可逆设置的读取、预览和修改：显示偏好、日志等级、指标保留期、数据中心设备名称及已定义的
   非凭据连接参数。
 - 返回结构化修订值、字段错误、变更摘要和明确生效动作（无需重启、reload、重启 Gateway、重启 WebUI
@@ -36,14 +37,14 @@
 
 ### 阶段一：文档与只读设置页
 
-状态：进行中
+状态：阶段一完成，阶段二未开始
 
 - [x] 建立本计划并加入项目文档索引。
 - [x] 增加 `/settings` 页面和导航入口（首期只读）。
-- [ ] 扩展只读设置 API，返回脱敏配置快照、修订、服务状态和可执行 CLI 提示。
-- [ ] 明确“已配置/未配置”，不返回 Token、Key、Secret、代理值或配置正文。
+- [x] 扩展只读设置 API，返回脱敏配置快照、修订、服务状态和可执行 CLI 提示。
+- [x] 明确“已配置/未配置”，不返回 Token、Key、Secret、代理值或配置正文。
 - [x] 增加页面 loading/error/空状态，接口失败时不显示伪造默认值并允许重试。
-- [ ] 增加管理 API 类型和路由测试。
+- [x] 增加设置 API 共享类型和路由测试，覆盖旧接口兼容与敏感值不泄露。
 
 ### 阶段二：低风险配置管理
 
@@ -69,7 +70,7 @@
 ```text
 设置
 ├── 配置总览
-├── 显示与语言
+├── 显示
 ├── Gateway
 ├── WebUI
 ├── 数据中心
@@ -82,12 +83,14 @@
 ## API 草案
 
 ```text
-GET  /api/v1/management/settings       脱敏设置快照、revision、生效能力
+GET  /api/v1/settings/summary          脱敏设置快照、revision、服务状态和 CLI 提示
 PATCH /api/v1/management/settings      阶段二低风险设置修改（JSON + revision）
 GET  /api/v1/management/services       服务状态（只读）
 ```
 
-阶段一只实现 GET，且管理路由必须使用独立管理认证；已有 `/api/v1/settings` 保持只读兼容，不改变其响应语义。
+阶段一只实现 WebUI 只读的 `/api/v1/settings/summary`，继续使用已有 WebUI Bearer Token；它不提供配置写入，
+也不替代未来必须使用独立管理认证的 `/api/v1/management/*` 路由。已有 `/api/v1/settings` 保持只读兼容，
+不改变其响应语义。
 
 ## 验收标准
 

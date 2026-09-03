@@ -1,39 +1,21 @@
 import { Fragment } from "react"
 import { RefreshCwIcon } from "lucide-react"
 
-import { useCurrency } from "@/hooks/currency-context"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useCurrency } from "@/hooks/currency-context"
+import { useApi } from "@/hooks/use-api"
+import { fetchSettingsSummary } from "@/lib/api"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
 
-const cliGroups = [
-  { label: "Gateway 与显示", command: "codexc config", detail: "进入 Gateway、显示和 WebUI 设置" },
-  { label: "Codex 默认值与 Provider", command: "codexc setup", detail: "进入 Codex 与 Provider 设置" },
-  { label: "通讯渠道", command: "codexc setup", detail: "菜单路径：通讯渠道" },
-  { label: "数据中心", command: "codexc config", detail: "菜单路径：数据中心" },
-  { label: "查看服务状态", command: "codexc service status all", detail: "查看全部受管服务" },
-  { label: "重启全部服务", command: "codexc service restart all", detail: "配置变更需要整体生效时使用" },
-] as const
-
-const exchangeRateSourceLabels = {
-  "open-er-api": "Open Exchange Rate API",
-  ecb: "欧洲中央银行",
-  cache: "本地缓存",
-} as const
-
 export function SettingsPage() {
-  const {
-    currency,
-    settings,
-    settingsLoading,
-    settingsError,
-    refetchSettings,
-  } = useCurrency()
-  const loadState = resolveSettingsLoadState(settings, settingsLoading, settingsError)
+  const { currency, settings } = useCurrency()
+  const summary = useApi(fetchSettingsSummary, [])
+  const loadState = resolveSettingsLoadState(summary.data, summary.loading, summary.error)
 
   return (
     <div className="flex flex-col gap-6">
@@ -41,73 +23,112 @@ export function SettingsPage() {
         <h1 className="text-xl font-semibold">设置</h1>
         <p className="text-sm text-muted-foreground">查看 WebUI 当前显示配置和 CLI 设置入口。</p>
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle>显示配置</CardTitle><CardDescription>当前页面使用的显示偏好（浏览器选择优先）。</CardDescription></CardHeader>
-          <CardContent className="text-sm">
-            {loadState === "loading" ? (
-              <div className="flex flex-col gap-3" aria-label="正在加载显示配置">
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-full" />
-              </div>
-            ) : null}
-            {loadState === "error" ? (
-              <Alert variant="destructive">
-                <AlertTitle>显示配置加载失败</AlertTitle>
-                <AlertDescription>{settingsError}</AlertDescription>
-                <AlertAction>
-                  <Button variant="outline" size="sm" onClick={refetchSettings}>
-                    <RefreshCwIcon data-icon="inline-start" />
-                    重试
-                  </Button>
-                </AlertAction>
-              </Alert>
-            ) : null}
-            {loadState === "empty" ? (
-              <Alert>
-                <AlertTitle>暂无显示配置</AlertTitle>
-                <AlertDescription>服务未返回可用的显示配置，请稍后重试。</AlertDescription>
-                <AlertAction>
-                  <Button variant="outline" size="sm" onClick={refetchSettings}>
-                    <RefreshCwIcon data-icon="inline-start" />
-                    重试
-                  </Button>
-                </AlertAction>
-              </Alert>
-            ) : null}
-            {loadState === "ready" && settings !== null ? (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">页面显示货币</span><Badge variant="secondary">{(currency ?? settings.currency).toUpperCase()}</Badge></div>
-                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">服务端默认货币</span><span>{settings.currency.toUpperCase()}</span></div>
-                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">汇率来源</span><span>{settings.exchangeRate === null ? "暂无" : exchangeRateSourceLabels[settings.exchangeRate.source]}</span></div>
-                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">美元兑人民币</span><span className="tabular-nums">{settings.exchangeRate?.usdToCny ?? "暂无"}</span></div>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle>CLI 设置入口</CardTitle><CardDescription>凭据、高权限和执行型操作暂通过 CLI 管理。</CardDescription></CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {cliGroups.map((entry, index) => (
-              <Fragment key={entry.label}>
-                {index > 0 ? <Separator /> : null}
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium">{entry.label}</span>
-                    <span className="text-xs text-muted-foreground">{entry.detail}</span>
+      {loadState === "loading" ? <SettingsSkeleton /> : null}
+      {loadState === "error" ? <SettingsError message={summary.error ?? "设置快照加载失败"} retry={summary.refetch} /> : null}
+      {loadState === "empty" ? <SettingsError message="服务未返回可用的设置快照" retry={summary.refetch} /> : null}
+      {loadState === "ready" && summary.data !== null ? (
+        <>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader><CardTitle>Gateway 与显示</CardTitle><CardDescription>当前配置文件的脱敏快照，部分变更需重启后生效</CardDescription></CardHeader>
+              <CardContent className="flex flex-col gap-3 text-sm">
+                <SettingsRow label="页面显示货币" value={(currency ?? summary.data.gateway.display.priceCurrency).toUpperCase()} badge />
+                <SettingsRow label="服务端默认货币" value={summary.data.gateway.display.priceCurrency.toUpperCase()} />
+                <SettingsRow label="美元兑人民币" value={settings?.exchangeRate?.usdToCny.toString() ?? "暂无"} />
+                <SettingsRow label="汇率来源" value={exchangeRateSourceLabel(settings?.exchangeRate?.source)} />
+                <SettingsRow label="Sandbox" value={summary.data.gateway.system.sandbox} />
+                <SettingsRow label="默认 Workspace" value={summary.data.gateway.system.defaultWorkspace ?? "未配置"} />
+                <SettingsRow label="渠道新会话模型" value={summary.data.gateway.system.defaultModel ?? "跟随 Provider"} />
+                <SettingsRow label="审批超时" value={`${summary.data.gateway.system.approvalTimeoutSeconds} 秒`} />
+                <SettingsRow label="操作详情" value={summary.data.gateway.display.operationUpdates} />
+                <SettingsRow label="计划显示" value={enabledLabel(summary.data.gateway.display.planUpdatesEnabled)} />
+                <SettingsRow label="思考状态" value={enabledLabel(summary.data.gateway.display.reasoningEnabled)} />
+                <SettingsRow label="日志等级" value={summary.data.gateway.advanced.loggingLevel} />
+                <SettingsRow label="Plugin API" value={enabledLabel(summary.data.gateway.advanced.pluginApiEnabled)} />
+                <SettingsRow label="计划任务" value={enabledLabel(summary.data.gateway.automation.scheduledTasksEnabled)} />
+                <SettingsRow label="通讯渠道" value={summary.data.gateway.channels.map((channel) => `${channel.displayName}（${enabledLabel(channel.enabled)}）`).join("、") || "未配置"} />
+                <SettingsRow label="Thread 分区管理员" value={`${summary.data.gateway.automation.threadSectionAdministratorCount} 个`} />
+                <SettingsRow label="配置修订" value={summary.data.revision.slice(0, 12)} code />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle>WebUI 与数据中心</CardTitle><CardDescription>凭据只显示是否已配置</CardDescription></CardHeader>
+              <CardContent className="flex flex-col gap-3 text-sm">
+                <SettingsRow label="WebUI 地址" value={formatHostPort(summary.data.gateway.webui.host, summary.data.gateway.webui.port)} />
+                <SettingsRow label="WebUI 令牌" value={configuredLabel(summary.data.gateway.webui.tokenConfigured)} />
+                <SettingsRow label="指标保留" value={`${summary.data.gateway.metrics.storage.retentionDays} 天 / 最多 ${summary.data.gateway.metrics.storage.maxRows.toLocaleString("zh-CN")} 行`} />
+                <SettingsRow label="设备同步" value={enabledLabel(summary.data.gateway.metrics.sync.enabled)} />
+                <SettingsRow label="设备上报令牌" value={configuredLabel(summary.data.gateway.metrics.sync.deviceTokenConfigured)} />
+                <SettingsRow label="全局视图" value={enabledLabel(summary.data.gateway.metrics.view.enabled)} />
+                <SettingsRow label="全局查看令牌" value={configuredLabel(summary.data.gateway.metrics.view.tokenConfigured)} />
+                <SettingsRow label="数据中心" value={enabledLabel(summary.data.gateway.metrics.center.enabled)} />
+                <SettingsRow label="中心地址" value={formatHostPort(summary.data.gateway.metrics.center.host, summary.data.gateway.metrics.center.port)} />
+                <SettingsRow label="显式代理" value={summary.data.gateway.network.configuredFields.join("、") || "未配置"} />
+              </CardContent>
+            </Card>
+          </div>
+          <Card>
+            <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>由当前平台服务管理器实时查询</CardDescription></CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {summary.data.services.available ? summary.data.services.entries.map((service, index) => (
+                <Fragment key={service.target}>
+                  {index > 0 ? <Separator /> : null}
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <div className="flex flex-col gap-0.5"><span className="font-medium">{service.name}</span><span className="text-xs text-muted-foreground">{service.state}{service.pid === null ? "" : ` · PID ${service.pid}`}</span></div>
+                    <Badge variant={service.running ? "secondary" : "destructive"}>{serviceStatusLabel(service)}</Badge>
                   </div>
-                  <code className="rounded bg-muted px-2 py-1 text-xs">{entry.command}</code>
-                </div>
-              </Fragment>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-      <Card>
-        <CardHeader><CardTitle>当前管理边界</CardTitle><CardDescription>WebUI 暂不直接修改用户配置或执行 CLI。</CardDescription></CardHeader>
-        <CardContent className="text-sm text-muted-foreground">API Key、Token、扫码授权、Provider 变更、数据库维护、服务重启和源码更新，请在服务器终端运行对应的 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">codexc</code> 命令。</CardContent>
-      </Card>
+                </Fragment>
+              )) : <span className="text-sm text-muted-foreground">当前平台服务状态不可用，请使用 CLI 查看。</span>}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>CLI 设置入口</CardTitle><CardDescription>凭据、高权限和执行型操作暂通过 CLI 管理</CardDescription></CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {summary.data.cli.map((entry, index) => (
+                <Fragment key={entry.id}>
+                  {index > 0 ? <Separator /> : null}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-col gap-0.5"><span className="text-sm font-medium">{entry.label}</span><span className="text-xs text-muted-foreground">{entry.detail}</span></div>
+                    <code className="rounded bg-muted px-2 py-1 text-xs">{entry.command}</code>
+                  </div>
+                </Fragment>
+              ))}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>当前管理边界</CardTitle><CardDescription>WebUI 暂不直接修改用户配置或执行 CLI</CardDescription></CardHeader>
+            <CardContent className="text-sm text-muted-foreground">API Key、Token、扫码授权、Provider 变更、数据库维护、服务重启和源码更新，请在服务器终端运行对应的 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">codexc</code> 命令。</CardContent>
+          </Card>
+        </>
+      ) : null}
     </div>
   )
+}
+
+function SettingsRow({ label, value, badge = false, code = false }: { label: string; value: string; badge?: boolean; code?: boolean }) {
+  return <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">{label}</span>{badge ? <Badge variant="secondary">{value}</Badge> : code ? <code className="rounded bg-muted px-2 py-1 text-xs">{value}</code> : <span className="text-right">{value}</span>}</div>
+}
+
+function SettingsSkeleton() {
+  return <div className="grid gap-6 lg:grid-cols-2" aria-label="正在加载设置快照"><Skeleton className="h-72 w-full" /><Skeleton className="h-72 w-full" /></div>
+}
+
+function SettingsError({ message, retry }: { message: string; retry: () => void }) {
+  return <Alert variant="destructive"><AlertTitle>设置快照加载失败</AlertTitle><AlertDescription>{message}</AlertDescription><AlertAction><Button variant="outline" size="sm" onClick={retry}><RefreshCwIcon data-icon="inline-start" />重试</Button></AlertAction></Alert>
+}
+
+function enabledLabel(value: boolean): string { return value ? "已启用" : "未启用" }
+function configuredLabel(value: boolean): string { return value ? "已配置" : "未配置" }
+function serviceStatusLabel(service: { loaded: boolean; running: boolean; state: string }): string {
+  if (service.running) return "运行中"
+  if (service.state === "unavailable") return "状态不可用"
+  return service.loaded ? "已停止" : "未安装"
+}
+function formatHostPort(host: string, port: number): string {
+  return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`
+}
+function exchangeRateSourceLabel(value: "open-er-api" | "ecb" | "cache" | undefined): string {
+  if (value === "open-er-api") return "Open Exchange Rate API"
+  if (value === "ecb") return "欧洲中央银行"
+  return value === "cache" ? "本地缓存" : "暂无"
 }

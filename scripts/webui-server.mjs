@@ -24,6 +24,9 @@ import {
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
+import { loadGatewaySettings } from "./config-management.mjs";
+import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
+import { serviceDefinitions } from "../runtime/service-targets.mjs";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
@@ -83,8 +86,9 @@ export function createWebuiServer({
       "WebUI 绑定非回环地址时必须提供访问令牌（请通过 codexc config 或配置 [webui] token 设置）",
     );
   }
+  const serviceStatusCache = { expiresAtMs: 0, value: null, pending: null };
   const server = createServer((request, response) => {
-    handleRequest(environment, staticDir, host, token, request, response);
+    handleRequest(environment, staticDir, host, token, serviceStatusCache, request, response);
   });
   return { host, server, staticDir, token };
 }
@@ -110,7 +114,7 @@ export function resolveWebuiSettings({
   };
 }
 
-async function handleRequest(environment, staticDir, host, token, request, response) {
+async function handleRequest(environment, staticDir, host, token, serviceStatusCache, request, response) {
   try {
     if (request.method !== "GET") {
       sendJson(response, 405, {
@@ -127,7 +131,7 @@ async function handleRequest(environment, staticDir, host, token, request, respo
         });
         return;
       }
-      await routeApi(environment, url, response);
+      await routeApi(environment, url, response, serviceStatusCache);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
@@ -154,7 +158,7 @@ function authorized(request, token) {
     && timingSafeEqual(provided, expected);
 }
 
-async function routeApi(environment, url, response) {
+async function routeApi(environment, url, response, serviceStatusCache) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -189,6 +193,10 @@ async function routeApi(environment, url, response) {
   }
   if (apiPath === "/settings") {
     handleSettings(environment, response);
+    return;
+  }
+  if (apiPath === "/settings/summary") {
+    await handleSettingsSummary(environment, response, serviceStatusCache);
     return;
   }
   if (apiPath === "/health") {
@@ -596,6 +604,119 @@ function handleSettings(environment, response) {
     currency: display.priceCurrency,
     exchangeRate: display.exchangeRate,
   });
+}
+
+async function handleSettingsSummary(environment, response, serviceStatusCache) {
+  const { configPath } = resolveWebuiSettings({ environment });
+  if (!existsSync(configPath)) {
+    sendJson(response, 503, {
+      error: {
+        code: "configuration_unavailable",
+        message: "Gateway 尚未初始化，请先运行 codexc init",
+      },
+    });
+    return;
+  }
+  const gateway = loadGatewaySettings(environment);
+  const serviceResults = await loadServiceStatusSummary(environment, serviceStatusCache);
+  const platform = serviceResults.find((result) => result.platform !== null)?.platform ?? null;
+  const entries = serviceResults.map((result) => result.entry);
+  const services = {
+    available: platform !== null,
+    platform,
+    healthy: platform === null ? null : entries.every((service) => service.running),
+    entries,
+  };
+  sendJson(response, 200, {
+    observedAt: new Date().toISOString(),
+    revision: gateway.revision,
+    gateway: {
+      display: gateway.display,
+      system: {
+        approvalTimeoutSeconds: gateway.system.approvalTimeoutSeconds,
+        sandbox: gateway.system.sandbox,
+        defaultWorkspace: gateway.system.defaultWorkspace,
+        defaultModel: gateway.system.defaultModel,
+      },
+      automation: {
+        scheduledTasksEnabled: gateway.automation.scheduledTasksEnabled,
+        threadSectionAdministratorCount: gateway.automation.threadSectionAdministrators.length,
+      },
+      network: {
+        configuredFields: Object.entries(gateway.network)
+          .filter(([, value]) => value.configured).map(([field]) => field),
+      },
+      advanced: gateway.advanced,
+      webui: gateway.webui,
+      metrics: {
+        storage: gateway.metrics.storage,
+        sync: {
+          enabled: gateway.metrics.sync.enabled,
+          endpointConfigured: gateway.metrics.sync.endpoint !== null,
+          deviceName: gateway.metrics.sync.deviceName,
+          deviceTokenConfigured: gateway.metrics.sync.deviceTokenConfigured,
+        },
+        view: {
+          enabled: gateway.metrics.view.enabled,
+          endpointConfigured: gateway.metrics.view.endpoint !== null,
+          tokenConfigured: gateway.metrics.view.tokenConfigured,
+        },
+        center: {
+          enabled: gateway.metrics.center.enabled,
+          host: gateway.metrics.center.host,
+          port: gateway.metrics.center.port,
+          tokenConfigured: gateway.metrics.center.tokenConfigured,
+          deviceTokenConfigured: gateway.metrics.center.deviceTokenConfigured,
+        },
+      },
+      channels: gateway.channels,
+    },
+    services,
+    cli: [
+      { id: "gateway-config", label: "Gateway 与显示", command: "codexc config", detail: "进入 Gateway、显示和 WebUI 设置" },
+      { id: "codex-setup", label: "Codex 默认值与 Provider", command: "codexc setup", detail: "进入 Codex 与 Provider 设置" },
+      { id: "channels", label: "通讯渠道", command: "codexc setup", detail: "菜单路径：通讯渠道" },
+      { id: "metrics-center", label: "数据中心", command: "codexc config", detail: "菜单路径：数据中心" },
+      { id: "service-status", label: "查看核心服务状态", command: "codexc service status all", detail: "查看 Gateway 与 App Server 状态" },
+      { id: "service-webui", label: "查看 WebUI 状态", command: "codexc service status webui", detail: "查看 WebUI 服务状态" },
+      { id: "service-center", label: "查看指标中心状态", command: "codexc service status center", detail: "查看指标中心服务状态" },
+      { id: "service-restart", label: "重启核心服务", command: "codexc service restart all", detail: "重启 Gateway 与 App Server" },
+    ],
+  });
+}
+
+const SERVICE_STATUS_CACHE_TTL_MS = 2_000;
+
+function loadServiceStatusSummary(environment, cache) {
+  const now = Date.now();
+  if (cache.value !== null && cache.expiresAtMs > now) return Promise.resolve(cache.value);
+  if (cache.pending !== null) return cache.pending;
+  cache.pending = Promise.all(serviceDefinitions.map(async (definition) => {
+    try {
+      const status = await inspectManagedServiceStatusAsync({ environment, target: definition.target });
+      if (!status.services[0]) throw new Error("服务状态响应缺少目标条目");
+      return { platform: status.platform, entry: status.services[0] };
+    } catch {
+      return {
+        platform: null,
+        entry: {
+          target: definition.target,
+          name: definition.displayName,
+          loaded: false,
+          running: false,
+          state: "unavailable",
+          pid: null,
+        },
+      };
+    }
+  })).then((results) => {
+    cache.value = results;
+    cache.expiresAtMs = Date.now() + SERVICE_STATUS_CACHE_TTL_MS;
+    return results;
+  }).finally(() => {
+    cache.pending = null;
+  });
+  return cache.pending;
 }
 
 function parseCurrency(url) {

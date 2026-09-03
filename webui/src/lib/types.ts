@@ -33,6 +33,7 @@ export type {
   RequestSortKey,
   RequestsResponse,
   SettingsResponse,
+  SettingsSummaryResponse,
   ThreadListItem,
   ThreadRunResponse,
   ThreadsResponse,

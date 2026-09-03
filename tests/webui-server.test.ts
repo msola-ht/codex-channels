@@ -331,6 +331,83 @@ describe("webui server", () => {
     });
   });
 
+  it("returns a redacted settings summary without changing the legacy response", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const document = readGatewayConfig(configPath);
+    document.webui = { token: "webui-secret" };
+    document.network = { https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" };
+    document.metrics = {
+      view: {
+        enabled: true,
+        endpoint: "https://metrics.example.com/private-path",
+        token: "metrics-secret",
+      },
+    };
+    writeGatewayConfig(configPath, document);
+    const { origin } = await startServer(fixture.environment);
+
+    const legacy = await fetch(`${origin}/api/v1/settings`);
+    expect(await legacy.json()).toEqual({
+      currency: "cny",
+      exchangeRate: expect.objectContaining({ source: "cache", usdToCny: 7.2 }),
+    });
+
+    const response = await fetch(`${origin}/api/v1/settings/summary`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      revision: string;
+      gateway: {
+        webui: { tokenConfigured: boolean };
+        network: { configuredFields: string[] };
+        metrics: { view: { endpointConfigured: boolean; tokenConfigured: boolean } };
+      };
+      services: { available: boolean; entries: Array<{ target: string }> };
+      cli: Array<{ command: string }>;
+    };
+    expect(body.revision).toMatch(/^[0-9a-f]{64}$/u);
+    expect(body.gateway).toMatchObject({
+      webui: { tokenConfigured: true },
+      network: { configuredFields: ["https_proxy"] },
+      metrics: { view: { endpointConfigured: true, tokenConfigured: true } },
+    });
+    expect(body.services.entries).toBeInstanceOf(Array);
+    expect(new Set(body.services.entries.map((entry) => entry.target))).toEqual(new Set([
+      "app-server",
+      "gateway",
+      "webui",
+      "center",
+    ]));
+    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status all");
+    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status webui");
+    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status center");
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("webui-secret");
+    expect(serialized).not.toContain("proxy-secret");
+    expect(serialized).not.toContain("metrics-secret");
+    expect(serialized).not.toContain("private-path");
+    expect(serialized).not.toContain(configPath);
+  });
+
+  it("returns an actionable settings error before Gateway initialization", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-webui-uninitialized-"));
+    temporaryDirectories.push(home);
+    const { origin } = await startServer({
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    });
+
+    const response = await fetch(`${origin}/api/v1/settings/summary`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "configuration_unavailable",
+        message: "Gateway 尚未初始化，请先运行 codexc init",
+      },
+    });
+  });
+
   it("reports deepseek balance as unavailable without credentials", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);

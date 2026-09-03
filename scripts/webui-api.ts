@@ -281,6 +281,59 @@ export interface SettingsResponse {
   } | null
 }
 
+export interface SettingsSummaryResponse {
+  observedAt: string
+  revision: string
+  gateway: {
+    display: {
+      operationUpdates: "full" | "compact" | "hidden"
+      planUpdatesEnabled: boolean
+      reasoningEnabled: boolean
+      priceCurrency: "cny" | "usd"
+    }
+    system: {
+      approvalTimeoutSeconds: number
+      sandbox: "read-only" | "workspace-write"
+      defaultWorkspace: string | null
+      defaultModel: string | null
+    }
+    automation: { scheduledTasksEnabled: boolean; threadSectionAdministratorCount: number }
+    network: { configuredFields: string[] }
+    advanced: {
+      loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace"
+      pluginApiEnabled: boolean
+    }
+    webui: { host: string; port: number; tokenConfigured: boolean }
+    metrics: {
+      storage: { retentionDays: number; maxRows: number }
+      sync: { enabled: boolean; endpointConfigured: boolean; deviceName: string | null; deviceTokenConfigured: boolean }
+      view: { enabled: boolean; endpointConfigured: boolean; tokenConfigured: boolean }
+      center: {
+        enabled: boolean
+        host: string
+        port: number
+        tokenConfigured: boolean
+        deviceTokenConfigured: boolean
+      }
+    }
+    channels: Array<{ id: "telegram" | "feishu" | "weixin"; displayName: string; configured: true; enabled: boolean }>
+  }
+  services: {
+    available: boolean
+    platform: "systemd" | "launchd" | "windows" | null
+    healthy: boolean | null
+    entries: Array<{
+      target: string
+      name: string
+      loaded: boolean
+      running: boolean
+      state: string
+      pid: number | null
+    }>
+  }
+  cli: Array<{ id: string; label: string; command: string; detail: string }>
+}
+
 export interface DeepseekBalance {
   currency: string
   totalBalance: string

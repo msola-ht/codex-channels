@@ -14,6 +14,7 @@ import type {
   RequestSortKey,
   RequestsResponse,
   SettingsResponse,
+  SettingsSummaryResponse,
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
@@ -188,6 +189,10 @@ export function fetchSettings(
   signal?: AbortSignal,
 ): Promise<SettingsResponse> {
   return getJson<SettingsResponse>(`${API_PREFIX}/settings`, signal)
+}
+
+export function fetchSettingsSummary(signal?: AbortSignal): Promise<SettingsSummaryResponse> {
+  return getJson<SettingsSummaryResponse>(`${API_PREFIX}/settings/summary`, signal)
 }
 
 export function fetchDeepseekBalance(

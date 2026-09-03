@@ -1,4 +1,5 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -47,6 +48,92 @@ export function inspectManagedServiceStatus({
     healthy: services.every((service) => service.running),
     services,
   };
+}
+
+export async function inspectManagedServiceStatusAsync({
+  environment = process.env,
+  platform = process.platform,
+  run = runServiceCommand,
+  target = "all",
+  userId = typeof process.getuid === "function" ? process.getuid() : undefined,
+} = {}) {
+  const resolvedTarget = parseServiceTarget(target);
+  const definitions = serviceDefinitionsForTarget(resolvedTarget);
+  let services;
+  let servicePlatform;
+  if (platform === "linux") {
+    servicePlatform = "systemd";
+    services = await Promise.all(definitions.map(async (definition) =>
+      parseSystemdServiceResult(definition, await run(
+        environment.SYSTEMCTL_BINARY?.trim() || "systemctl",
+        ["--user", "show", definition.systemd, "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID", "--no-pager"],
+        { encoding: "utf8", env: environment },
+      ))));
+  } else if (platform === "darwin") {
+    if (!Number.isSafeInteger(userId) || userId < 0) {
+      throw new Error("无法确定当前用户 ID，不能查询 launchd 服务状态");
+    }
+    servicePlatform = "launchd";
+    services = await Promise.all(definitions.map(async (definition) =>
+      parseLaunchdServiceResult(definition, await run(
+        environment.LAUNCHCTL_BINARY?.trim() || "launchctl",
+        ["print", `gui/${userId}/${definition.launchd}`],
+        { encoding: "utf8", env: environment },
+      ))));
+  } else if (platform === "win32") {
+    const dataDir = environment.CODEX_CONNECT_HOME?.trim();
+    if (!dataDir) {
+      throw new Error("Windows 后台服务状态查询需要 CODEX_CONNECT_HOME");
+    }
+    const result = await run(process.execPath, [
+      join(packageDir, "scripts", "windows-service-control.mjs"),
+      "status",
+      resolvedTarget,
+      "--json",
+      "--definitions",
+      join(dataDir, "services"),
+    ], { encoding: "utf8", env: environment, windowsHide: true });
+    services = parseWindowsServiceResult(result);
+    servicePlatform = "windows";
+  } else {
+    throw new Error("codexc service status --json 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+  }
+  return {
+    platform: servicePlatform,
+    target: resolvedTarget,
+    healthy: services.every((service) => service.running),
+    services,
+  };
+}
+
+const runServiceCommand = async (command, args, options) => {
+  const result = await promisify(execFile)(command, args, {
+    ...options,
+    timeout: 3_000,
+    maxBuffer: 1_024 * 1_024,
+  }).then(({ stdout, stderr }) => ({ status: 0, stdout, stderr }))
+    .catch((error) => ({
+      error: typeof error?.code === "number" ? undefined : error,
+      status: typeof error?.code === "number" ? error.code : null,
+      stdout: error?.stdout ?? "",
+      stderr: error?.stderr ?? "",
+    }));
+  return result;
+};
+
+function parseWindowsServiceResult(result) {
+  if (result.error) throw result.error;
+  const json = String(result.stdout ?? "")
+    .split(/\r?\n/u)
+    .findLast((line) => line.trim().startsWith("{"));
+  if (!json || (result.status !== 0 && result.status !== 1)) {
+    throw new Error(`无法查询 Windows 计划任务：${safeProcessError(result)}`);
+  }
+  try {
+    return JSON.parse(json).services;
+  } catch (error) {
+    throw new Error("Windows 计划任务状态响应无效", { cause: error });
+  }
 }
 
 /**
@@ -145,6 +232,10 @@ function inspectSystemdService(definition, environment, run) {
     encoding: "utf8",
     env: environment,
   });
+  return parseSystemdServiceResult(definition, result);
+}
+
+function parseSystemdServiceResult(definition, result) {
   if (result.error) {
     throw new Error(`无法查询 systemd 服务 ${definition.systemd}：${result.error.message}`);
   }
@@ -176,6 +267,10 @@ function inspectLaunchdService(definition, environment, run, userId) {
     ["print", `gui/${userId}/${definition.launchd}`],
     { encoding: "utf8", env: environment },
   );
+  return parseLaunchdServiceResult(definition, result);
+}
+
+function parseLaunchdServiceResult(definition, result) {
   if (result.error) {
     throw new Error(`无法查询 launchd 服务 ${definition.launchd}：${result.error.message}`);
   }

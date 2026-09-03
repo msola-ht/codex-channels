@@ -1,9 +1,7 @@
-import type { SettingsResponse } from "./types.js"
-
 export type SettingsLoadState = "loading" | "error" | "empty" | "ready"
 
 export function resolveSettingsLoadState(
-  settings: SettingsResponse | null,
+  settings: unknown | null,
   loading: boolean,
   error: string | null,
 ): SettingsLoadState {

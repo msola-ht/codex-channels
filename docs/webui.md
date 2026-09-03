@@ -72,7 +72,7 @@ codexc service stop webui        # 停止
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | `#/settings` | `GET /api/v1/settings`（当前全局币种与汇率；修改仍通过 CLI） |
+| 设置 | `#/settings` | `GET /api/v1/settings`（币种与汇率）、`GET /api/v1/settings/summary`（脱敏配置与服务状态；修改仍通过 CLI） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
 所有接口只接受 GET；`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
@@ -154,7 +154,7 @@ webui/src/
   lib/         API 客户端、共享类型转出与格式化（价格/Token/耗时）
   hooks/       资源数据 hook（统一 loading/error/refetch）与全局货币上下文
   components/  Sidebar 布局、指标区块与共享数据表格组件
-  pages/       概览、Threads、Thread 详情、请求、错误
+  pages/       概览、Threads、Thread 详情、请求、错误、设置
 ```
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
