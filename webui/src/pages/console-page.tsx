@@ -53,7 +53,6 @@ import {
   fetchGlobalOverview,
   fetchGlobalQuota,
   fetchOpencodeGoUsage,
-  fetchSettings,
 } from "@/lib/api"
 import { formatTime, formatTokens } from "@/lib/format"
 import { positionTrendTooltip, toStackedUsageTrend } from "@/lib/trend"
@@ -66,7 +65,7 @@ import type {
   GlobalQuotaResponse,
   GlobalProviderRow,
   OpencodeGoUsageResponse,
-  SettingsResponse,
+  OverviewResponse,
   RangeName,
 } from "@/lib/types"
 
@@ -106,11 +105,12 @@ function persistScope(scope: Scope) {
 
 export function ConsolePage() {
   const [scope, setScope] = useState<Scope>(readScope)
+  const [range, setRange] = useState<RangeName>("24h")
   const devices = useApi((signal) => fetchGlobalDevices(signal), [])
-  const account = useOverview("24h")
-  const settings = useApi((signal) => fetchSettings(signal), [])
+  const account = useOverview(scope.kind === "local" ? range : "24h")
   const balance = useApi((signal) => fetchDeepseekBalance(signal), [])
   const opencodeGoUsage = useApi((signal) => fetchOpencodeGoUsage(signal), [])
+  const { settings } = useCurrency()
   const deviceLabel = (deviceId: string) =>
     devices.data?.devices.find((device) => device.device_id === deviceId)
       ?.display_name ?? deviceId
@@ -157,12 +157,12 @@ export function ConsolePage() {
       </div>
 
       {scope.kind === "local"
-        ? <LocalDashboard />
+        ? <LocalDashboard range={range} onRangeChange={setRange} data={account.data} loading={account.loading} error={account.error} />
         : <GlobalDashboard scope={scope} devices={devices.data?.devices ?? []} />}
 
       <AccountStatusCards
         overview={account.data}
-        settings={settings.data}
+        settings={settings}
         balance={balance.data}
         opencodeGoUsage={opencodeGoUsage.data}
       />
@@ -170,15 +170,25 @@ export function ConsolePage() {
   )
 }
 
-function LocalDashboard() {
-  const [range, setRange] = useState<RangeName>("24h")
+function LocalDashboard({
+  range,
+  onRangeChange,
+  data,
+  loading,
+  error,
+}: {
+  range: RangeName
+  onRangeChange: (range: RangeName) => void
+  data: OverviewResponse | null
+  loading: boolean
+  error: string | null
+}) {
   const { currency } = useCurrency()
-  const { data, loading, error } = useOverview(range)
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <RangeSelector value={range} onChange={setRange} />
+        <RangeSelector value={range} onChange={onRangeChange} />
       </div>
 
       <ErrorBanner error={error} />
@@ -203,7 +213,7 @@ function AccountStatusCards({
   opencodeGoUsage,
 }: {
   overview: ReturnType<typeof useOverview>["data"]
-  settings: SettingsResponse | null
+  settings: ReturnType<typeof useCurrency>["settings"]
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
 }) {
