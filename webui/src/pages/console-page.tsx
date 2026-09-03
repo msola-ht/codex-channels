@@ -46,6 +46,7 @@ import {
 import { useApi } from "@/hooks/use-api"
 import { useCurrency } from "@/hooks/currency-context"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
+import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
 import { useOverview } from "@/hooks/use-overview"
 import {
   fetchGlobalDaily,
@@ -163,12 +164,15 @@ export function ConsolePage() {
         ? <LocalDashboard range={range} onRangeChange={setRange} data={account.data} loading={account.loading} error={account.error} />
         : <GlobalDashboard scope={scope} devices={devices.data?.devices ?? []} />}
 
-      <AccountStatusCards
-        overview={account.data}
-        settings={settings}
-        balance={officialAccounts.data?.deepseek ?? null}
-        opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
-      />
+      {scope.kind === "local" ? (
+        <AccountStatusCards
+          overview={account.data}
+          settings={settings}
+          balance={officialAccounts.data?.deepseek ?? null}
+          opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
+          freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
+        />
+      ) : null}
     </div>
   )
 }
@@ -190,6 +194,10 @@ function LocalDashboard({
 
   return (
     <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">本地模块</h2>
+        <p className="text-sm text-muted-foreground">本机指标、请求错误和官方账户额度。</p>
+      </div>
       <div className="flex flex-wrap items-center justify-end gap-3">
         <RangeSelector value={range} onChange={onRangeChange} />
       </div>
@@ -214,11 +222,13 @@ function AccountStatusCards({
   settings,
   balance,
   opencodeGoUsage,
+  freshness,
 }: {
   overview: ReturnType<typeof useOverview>["data"]
   settings: ReturnType<typeof useCurrency>["settings"]
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
+  freshness: { deepseek: AccountSnapshotFreshness; opencodeGo: AccountSnapshotFreshness }
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -230,21 +240,50 @@ function AccountStatusCards({
           </AlertDescription>
         </Alert>
       ) : null}
+      <div>
+        <h2 className="text-lg font-semibold">本地账户与额度</h2>
+        <p className="text-sm text-muted-foreground">数据来自本机 Gateway 的账户快照；全局模块不展示本机账户。</p>
+      </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <WeeklyQuotaCard
           usedPercent={overview?.weeklyQuota?.usedPercent ?? null}
           resetsAt={overview?.weeklyQuota?.resetsAt ?? null}
           planType={overview?.weeklyQuota?.planType ?? null}
         />
-        <DeepseekBalanceCard
-          available={balance?.available ?? false}
-          balances={balance?.balances ?? []}
-        />
-        <OpencodeGoUsageCard
-          accounts={opencodeGoUsage?.accounts ?? []}
-        />
+        <div className="flex flex-col gap-2">
+          <FreshnessNotice provider="DS" status={freshness.deepseek} />
+          <DeepseekBalanceCard
+            available={balance?.available ?? false}
+            balances={balance?.balances ?? []}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <FreshnessNotice provider="OCG" status={freshness.opencodeGo} />
+          <OpencodeGoUsageCard
+            accounts={opencodeGoUsage?.accounts ?? []}
+          />
+        </div>
       </div>
     </div>
+  )
+}
+
+function FreshnessNotice({
+  provider,
+  status,
+}: {
+  provider: "DS" | "OCG"
+  status: AccountSnapshotFreshness
+}) {
+  if (status === "fresh") return null
+  return (
+    <Alert>
+      <AlertTitle>{provider} 账户快照需要刷新</AlertTitle>
+      <AlertDescription>
+        {status === "missing" ? "尚未获取到账户快照。" : "本地快照已超过 15 分钟。"}
+        请在对应渠道执行 /usage 或 /limits 后刷新本页面。
+      </AlertDescription>
+    </Alert>
   )
 }
 
@@ -271,6 +310,10 @@ function GlobalDashboard({
 
   return (
     <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">全局模块</h2>
+        <p className="text-sm text-muted-foreground">数据中心累计视图：核心指标、用量走势、设备明细、额度费用和 Provider。</p>
+      </div>
       <ErrorBanner error={overview.error} />
 
       {overview.loading || overview.data === null

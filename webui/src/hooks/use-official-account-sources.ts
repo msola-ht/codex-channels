@@ -2,6 +2,10 @@ import { useApi } from "@/hooks/use-api"
 import { fetchOfficialAccountSnapshots } from "@/lib/api"
 import type { DeepseekBalance, OpencodeGoAccountUsage, OpencodeGoQuotaWindow, OpencodeGoModelUsageEstimate } from "@/lib/types"
 
+const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000
+
+export type AccountSnapshotFreshness = "fresh" | "stale" | "missing"
+
 export function useOfficialAccountSources() {
   return useApi(async (signal) => {
     const result = await fetchOfficialAccountSnapshots(signal)
@@ -13,9 +17,24 @@ export function useOfficialAccountSources() {
     const opencodeGo = opencodeSnapshots.length > 0
       ? { accounts: opencodeSnapshots.flatMap((snapshot) => toOpencodeAccounts(snapshot)) }
       : null
+    const now = Date.now()
+    const freshness = (observedAtMs: number | null): AccountSnapshotFreshness =>
+      observedAtMs === null || observedAtMs <= 0
+        ? "missing"
+        : now - observedAtMs > ACCOUNT_SNAPSHOT_MAX_AGE_MS
+          ? "stale"
+          : "fresh"
     return {
       deepseek,
       opencodeGo,
+      freshness: {
+        deepseek: freshness(deepseekSnapshot?.observedAtMs ?? null),
+        opencodeGo: freshness(
+          opencodeSnapshots.length === 0
+            ? null
+            : Math.max(...opencodeSnapshots.map((snapshot) => snapshot.observedAtMs)),
+        ),
+      },
     }
   }, [])
 }

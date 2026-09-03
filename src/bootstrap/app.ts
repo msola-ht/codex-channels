@@ -181,6 +181,7 @@ export class GatewayApplication {
   private readonly exchangeRate: RemoteExchangeRate;
   private readonly metricsSync: MetricsSync;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
+  private readonly providerAccounts?: ProviderAccountService;
   private readonly bindings: SqliteBindingStore;
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
   private readonly workspaces: WorkspaceRegistry;
@@ -531,7 +532,7 @@ export class GatewayApplication {
         },
       ),
     ];
-    const providerAccounts = new ProviderAccountService(accountAdapters, {
+    this.providerAccounts = new ProviderAccountService(accountAdapters, {
       writeOfficialAccountSnapshot: (snapshot) => {
         const accountId = snapshot.accountId
           ?? opencodeGoAccountIdFromProvider(snapshot.provider)
@@ -583,7 +584,7 @@ export class GatewayApplication {
           }, true);
         },
       },
-      providerAccounts,
+      this.providerAccounts,
       new RequestMetricsQueryAdapter(metricsStore, this.router, config.apiProviders),
       this.workspacePermissions,
       {
@@ -1122,6 +1123,9 @@ export class GatewayApplication {
         "Codex App Server 已连接",
       );
       await this.surfaceManager.start();
+      void this.providerAccounts?.refreshSnapshots().catch((error) => {
+        this.logger.warn({ err: error }, "账户快照异步预热失败");
+      });
       await this.channelImageSpool.start();
       this.scheduledTasks?.start();
       this.providerIdleReleaser?.start();

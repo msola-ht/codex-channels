@@ -88,6 +88,14 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     return result;
   }
 
+  /** 按需预热所有已注册账户；调用方应异步触发，不阻塞主服务启动。 */
+  async refreshSnapshots(): Promise<void> {
+    await Promise.allSettled([...this.adapters.keys()].flatMap((provider) => [
+      this.accountUsage(provider),
+      this.accountLimits(provider),
+    ]));
+  }
+
   private persist(usage: ProviderAccountUsage, limits: ProviderAccountLimits): void {
     if (!this.snapshotWriter) return;
     this.snapshotUsage.set(usage.provider, usage);

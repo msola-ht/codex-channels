@@ -131,6 +131,9 @@ account_snapshots
 `account.updated`、`account.rateLimits.updated` 事件，并复用 `runtime-status-format`，没有直接
 调用官方适配器、WebUI HTTP API 或指标数据库；OpenCode Go 快照中的秒级重置时间在 WebUI 边界统一转换为毫秒。
 
+账户刷新策略暂定为按需刷新：渠道执行 `/usage` 或 `/limits` 时由 Gateway 实时查询并写入快照，
+WebUI 只读快照；暂不增加定时采集或 WebUI↔Gateway IPC，避免重复的跨进程凭据访问和刷新协议。
+
 ## 下一批一次性完成范围
 
 下一轮不要再拆成单个小步骤，按一个完整批次推进：

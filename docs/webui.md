@@ -73,8 +73,7 @@ codexc service stop webui        # 停止
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 设置 | — | `GET /api/v1/settings`（当前全局币种与汇率） |
-| DS 余额 | — | `GET /api/v1/deepseek-balance`（DeepSeek 官方账户余额；未配置凭据或查询失败时返回不可用） |
-| OpenCode Go 用量 | — | `GET /api/v1/opencode-go-usage`（返回全部已配置账户，每账户含官方 5 小时/7 天/月度配额窗口、各窗口总额（5 小时 $12 / 7 天 $30 / 月度 $60）与本地 Token 用量，以及按当前价格基线重算的模型本地用量与包含额度；账户未配置凭据或查询失败时该账户标记不可用，未配置任何账户时返回空列表） |
+| 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
 所有接口只接受 GET；`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
 `this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
@@ -96,6 +95,8 @@ WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开�
 `localStorage` 键 `codex-webui:language`），错误类型等英文原始值会按语言显示；聊天卡片中的
 已知 OpenAI 用量上限/额度类错误消息默认以中文展示。
 全局深色/浅色主题默认深色，顶部导航右侧按钮切换，选择持久化，刷新后保持。
+
+控制台分为两个互不混用的模块：选择“本机”时显示本地指标、错误和官方账户额度；选择“全部设备”或具体设备时只显示数据中心的核心指标、用量走势、设备明细、额度费用和 Provider。OCG 与 DS 快照超过 15 分钟或尚未采集时，账户卡片会提示在对应渠道执行 `/usage` 或 `/limits` 后刷新页面；WebUI 本身不主动刷新官方账户。
 
 API 响应类型由 `scripts/webui-api.ts` 声明，前端从该共享类型导入，不再单独手写镜像。
 
