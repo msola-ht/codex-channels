@@ -29,6 +29,30 @@ afterEach(async () => {
 });
 
 describe("webui server", () => {
+  it("returns the latest unified account snapshots without calling provider APIs", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.upsertAccountSnapshot!({
+      sourceId: "deepseek:default",
+      provider: "deepseek",
+      accountId: null,
+      displayName: "DeepSeek",
+      enabled: true,
+      observedAtMs: 1_800_000_000_000,
+      available: true,
+      usage: { kind: "balance", provider: "deepseek", available: true, balances: [] },
+      limits: { kind: "unsupported", provider: "deepseek" },
+    });
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/accounts`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      observedAtMs: 1_800_000_000_000,
+      snapshots: [{ provider: "deepseek", available: true }],
+    });
+  });
+
   it("authenticates the health endpoint when WebUI exposes a token", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(
