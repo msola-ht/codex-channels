@@ -13,11 +13,14 @@ export {
   type ProviderAccountAdapter,
   type ProviderAccountLimits,
   type ProviderAccountQueryPort,
+  type OfficialAccountSnapshot,
+  type OfficialAccountSnapshotQueryPort,
   type ProviderAccountUsage,
   type ProviderBalance,
   type ProviderModelUsageEstimate,
   type ProviderQuotaWindow,
 } from "./account-port.js";
+export { createOfficialAccountSnapshot } from "./account-snapshot.js";
 export {
   ProviderAccountService,
   createOpenAiAccountAdapter,

@@ -263,7 +263,7 @@ describe("local update", () => {
       inspectMetrics: () => ({
         compatible: true,
         exists: true,
-          schemaVersion: 11,
+          schemaVersion: 12,
       }),
       validateMetrics: () => undefined,
     })).toThrow(/计划任务数据库 Schema 3/u);
@@ -420,7 +420,7 @@ describe("local update", () => {
       }),
       inspectDatabases: () => ({
         state: { schemaVersion: 4, targetSchemaVersion: 4 },
-        metrics: { schemaVersion: 10, targetSchemaVersion: 11 },
+        metrics: { schemaVersion: 10, targetSchemaVersion: 12 },
       }),
       inspectServices: () => ({ installed: true }),
     });

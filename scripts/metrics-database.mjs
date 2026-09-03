@@ -173,7 +173,7 @@ export function upgradeMetricsDatabase(
     if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
     checkpoint(status.databasePath);
@@ -216,6 +216,29 @@ export function upgradeMetricsDatabase(
       if (previousSchemaVersion < 9) {
         statements.push(`
           ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
+        `);
+      }
+      if (previousSchemaVersion < 12) {
+        statements.push(`
+          CREATE TABLE IF NOT EXISTS account_sources (
+            source_id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            account_id TEXT,
+            display_name TEXT NOT NULL,
+            enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+            UNIQUE (provider, account_id)
+          );
+          CREATE TABLE IF NOT EXISTS account_snapshots (
+            snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL REFERENCES account_sources(source_id) ON DELETE CASCADE,
+            observed_at_ms INTEGER NOT NULL,
+            available INTEGER NOT NULL CHECK (available IN (0, 1)),
+            usage_json TEXT NOT NULL,
+            limits_json TEXT NOT NULL,
+            UNIQUE (source_id, observed_at_ms)
+          );
+          CREATE INDEX IF NOT EXISTS account_snapshots_latest
+            ON account_snapshots (source_id, observed_at_ms DESC);
         `);
       }
       if (!databaseHasTable(database, "subagent_threads")) {
@@ -905,6 +928,8 @@ function requireMigratedMetricsColumns(database) {
   if (missingSubagentTurns.length > 0) {
     throw new Error(`subagent_turns 缺少 ${missingSubagentTurns.join("、")}`);
   }
+  if (!databaseHasTable(database, "account_sources")) throw new Error("account_sources 表缺失");
+  if (!databaseHasTable(database, "account_snapshots")) throw new Error("account_snapshots 表缺失");
 }
 
 function backupTimestamp(date) {

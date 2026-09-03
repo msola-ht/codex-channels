@@ -76,6 +76,25 @@
    - 先兼容读取现有数据库，再按明确版本执行迁移。
    - 验证 WebUI、各渠道卡片和 CLI 的字段、单位、更新时间及失败状态一致。
 
+## 数据库模型草案
+
+账户快照与请求指标分开存储，不把账户余额或额度字段追加到 `model_request_metrics`：
+
+```text
+account_sources
+  source_id / provider / account_id / display_name / enabled
+
+account_snapshots
+  source_id / observed_at_ms / available / usage_json / limits_json
+```
+
+- `usage_json`、`limits_json` 只保存已脱敏、已规范化的展示字段，不保存凭据和完整上游响应。
+- `source_id + observed_at_ms` 用于幂等写入和历史追踪。
+- 余额、额度窗口和模型用量分别保留，避免把不同 Provider 的字段强行合并。
+- 额度窗口当前作为规范化 `usage_json` 的 Provider 结构保存；拆分为 `account_quota_windows` 前先补齐跨 Provider 查询契约。
+- 计算结果继续由查询层按快照生成；只有确认查询热点后才增加派生表。
+- 新表进入指标库前必须升级 Schema 版本、提供备份/回滚路径，并补齐本地与中心库测试。
+
 ## 完成标准
 
 - 每个数据字段都有唯一来源和明确单位。
@@ -96,6 +115,10 @@
 - [x] 本机 `overview` 提升到控制台页面级，范围切换和账户额度卡复用同一请求。
 - [x] 本地范围不再请求中心设备列表，切换到全局范围时再加载。
 - [x] DeepSeek 与 OpenCode Go 官方只读源收拢为统一账户源 hook。
+- [x] 完成账户快照数据库模型草案与持久化边界审查。
+- [x] 建立平台无关的官方账户快照查询端口类型。
+- [x] 建立 Provider 返回值到统一官方账户快照的规范化函数。
+- [x] 指标数据库升级到 Schema v12，新增账户源与账户快照表，支持幂等写入和最新快照读取。
 - [ ] 将 OpenAI、DeepSeek、OpenCode Go 官方账户快照统一写入数据库读模型。
 - [ ] 为 WebUI 与渠道卡片提供统一 Application 查询端口。
 - [ ] 清理全局设备数据的非必要获取并迁移渠道卡片。

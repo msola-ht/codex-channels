@@ -193,3 +193,17 @@ export interface ProviderAccountQueryPort {
   accountUsage(modelProvider: string, threadId?: string): Promise<ProviderAccountUsage>;
   accountLimits(modelProvider: string): Promise<ProviderAccountLimits>;
 }
+
+/** 跨展示端复用的、已脱敏官方账户快照读模型。 */
+export interface OfficialAccountSnapshot {
+  provider: string;
+  accountId: string | null;
+  observedAtMs: number;
+  available: boolean;
+  usage: ProviderAccountUsage;
+  limits: ProviderAccountLimits;
+}
+
+export interface OfficialAccountSnapshotQueryPort {
+  latestOfficialAccountSnapshot(provider: string, accountId?: string): Promise<OfficialAccountSnapshot | null>;
+}

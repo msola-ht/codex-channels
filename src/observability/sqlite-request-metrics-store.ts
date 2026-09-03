@@ -571,6 +571,51 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     return periods.sort((a, b) => b.lastObservedAtMs - a.lastObservedAtMs);
   }
 
+  upsertAccountSnapshot(snapshot: {
+    sourceId: string; provider: string; accountId: string | null; displayName: string;
+    enabled: boolean; observedAtMs: number; available: boolean; usage: unknown; limits: unknown;
+  }): void {
+    if (this.closed) throw new Error("指标数据库已关闭");
+    this.database.prepare(`
+      INSERT INTO account_sources (source_id, provider, account_id, display_name, enabled)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(source_id) DO UPDATE SET provider=excluded.provider,
+        account_id=excluded.account_id, display_name=excluded.display_name,
+        enabled=excluded.enabled
+    `).run(snapshot.sourceId, snapshot.provider, snapshot.accountId, snapshot.displayName,
+      snapshot.enabled ? 1 : 0);
+    this.database.prepare(`
+      INSERT INTO account_snapshots
+        (source_id, observed_at_ms, available, usage_json, limits_json)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(source_id, observed_at_ms) DO UPDATE SET available=excluded.available,
+        usage_json=excluded.usage_json, limits_json=excluded.limits_json
+    `).run(snapshot.sourceId, snapshot.observedAtMs, snapshot.available ? 1 : 0,
+      JSON.stringify(snapshot.usage), JSON.stringify(snapshot.limits));
+  }
+
+  latestAccountSnapshot(provider: string, accountId?: string) {
+    const row = this.database.prepare(`
+      SELECT s.provider, s.account_id, a.observed_at_ms, a.available,
+        a.usage_json, a.limits_json
+      FROM account_snapshots a JOIN account_sources s ON s.source_id = a.source_id
+      WHERE s.provider = ? AND (? IS NULL OR s.account_id = ?)
+      ORDER BY a.observed_at_ms DESC LIMIT 1
+    `).get(provider, accountId ?? null, accountId ?? null) as {
+      provider: string; account_id: string | null; observed_at_ms: number;
+      available: number; usage_json: string; limits_json: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      provider: row.provider,
+      accountId: row.account_id,
+      observedAtMs: row.observed_at_ms,
+      available: row.available === 1,
+      usage: JSON.parse(row.usage_json) as unknown,
+      limits: JSON.parse(row.limits_json) as unknown,
+    };
+  }
+
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
     this.requireOpen();
     validateMetricsTimeRange(query);

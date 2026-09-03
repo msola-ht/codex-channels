@@ -17,7 +17,7 @@ import {
 } from "./metrics-command-options.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
-export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10]);
+export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10, 11]);
 const baseMetricsColumns = Object.freeze([
   "id", "provider", "billing_mode", "pricing_currency", "pricing_source",
   "pricing_effective_at_ms", "uncached_input_price_per_million_nanos",
