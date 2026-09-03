@@ -72,7 +72,7 @@ codexc service stop webui        # 停止
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | — | `GET /api/v1/settings`（当前全局币种与汇率） |
+| 设置 | `#/settings` | `GET /api/v1/settings`（当前全局币种与汇率；修改仍通过 CLI） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
 所有接口只接受 GET；`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、

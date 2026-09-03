@@ -7,6 +7,9 @@ export const CurrencyContext = createContext<{
   currency: DisplayCurrency | null
   setCurrency: (currency: DisplayCurrency) => void
   settings: SettingsResponse | null
+  settingsLoading: boolean
+  settingsError: string | null
+  refetchSettings: () => void
 } | null>(null)
 
 export function useCurrency() {

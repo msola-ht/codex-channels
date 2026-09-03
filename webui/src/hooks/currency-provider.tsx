@@ -4,12 +4,11 @@ import type { ReactNode } from "react"
 import { CurrencyContext } from "@/hooks/currency-context"
 import type { DisplayCurrency } from "@/lib/format"
 import { fetchSettings } from "@/lib/api"
-import type { SettingsResponse } from "@/lib/types"
+import { useApi } from "@/hooks/use-api"
 
 const STORAGE_KEY = "codex-webui:currency"
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<SettingsResponse | null>(null)
   const [currency, setCurrencyState] = useState<DisplayCurrency | null>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
@@ -18,6 +17,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       return null
     }
   })
+  const settingsRequest = useApi(fetchSettings, [])
 
   useEffect(() => {
     if (currency !== null) {
@@ -30,20 +30,21 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   }, [currency])
 
   useEffect(() => {
-    const controller = new AbortController()
-    fetchSettings(controller.signal)
-      .then((next) => {
-        if (controller.signal.aborted) return
-        setSettings(next)
-        setCurrencyState((current) => current ?? next.currency)
-      })
-      .catch(() => undefined)
-    return () => controller.abort()
-  }, [])
+    const settings = settingsRequest.data
+    if (settings === null) return
+    setCurrencyState((current) => current ?? settings.currency)
+  }, [settingsRequest.data])
 
   return (
     <CurrencyContext.Provider
-      value={{ currency, setCurrency: setCurrencyState, settings }}
+      value={{
+        currency,
+        setCurrency: setCurrencyState,
+        settings: settingsRequest.data,
+        settingsLoading: settingsRequest.loading,
+        settingsError: settingsRequest.error,
+        refetchSettings: settingsRequest.refetch,
+      }}
     >
       {children}
     </CurrencyContext.Provider>

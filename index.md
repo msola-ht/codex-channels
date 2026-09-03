@@ -10,6 +10,7 @@
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行、受控模型与官方价格维护。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地只读指标 WebUI 的命令、架构、页面、API、边界与安全。
+- [`docs/webui-settings-plan.md`](docs/webui-settings-plan.md)：WebUI 设置页、CLI 可视化边界、管理接口阶段与验收计划。
 - [`docs/webui-data-unification-plan.md`](docs/webui-data-unification-plan.md)：官方账户数据、Gateway 统计、计算结果、WebUI 与渠道卡片的统一数据链路和分阶段改造步骤。
 - [`docs/metrics-sync.md`](docs/metrics-sync.md)：多设备指标增量同步的本地配置、载荷与边界。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
