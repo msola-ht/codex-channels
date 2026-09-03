@@ -1,6 +1,7 @@
 import {
   fastServiceTierId,
   isFastServiceTier,
+  listProviders,
   supportsMcpOAuthLogin,
   type ConversationCommandName,
   type ConversationCommandOutcome,
@@ -126,7 +127,7 @@ export const conversationCommandHelpSections = [
   {
     title: "模型与能力：",
     lines: [
-      "/model [序号|模型 ID|名称|clear]",
+      "/model [提供商序号或 ID|模型序号、ID 或名称|clear]",
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill · /skills [名称或序号 任务]",
       "/agents [角色名称或序号 任务]",
@@ -1671,6 +1672,21 @@ export function formatConversationModels(
       ),
       "",
       "切换：/effort <序号或档位>",
+    ].join("\n"));
+  }
+  const providers = listProviders(state.models);
+  if (state.providerFilter === undefined && providers.length > 1) {
+    const currentProvider = state.modelProvider ?? "openai";
+    return toStructuredMarkdownList([
+      formatModelStateLine(state),
+      `思考等级：${state.effort ?? "模型默认"}`,
+      "",
+      "可用提供商：",
+      ...providers.map((provider, index) =>
+        `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,
+      ),
+      "",
+      "下一步：/model <提供商序号或 ID>",
     ].join("\n"));
   }
   return toStructuredMarkdownList([

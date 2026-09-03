@@ -28,6 +28,7 @@ import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
 import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
+import { resolveProvider } from "./model-selection-service.js";
 
 export {
   archivedSessionCommandUsageText,
@@ -700,7 +701,21 @@ export class ConversationCommandService {
             state: argumentsText === "clear"
               ? await this.conversations.clearModelSelection(target)
               : await this.conversations.clearModelBrowse(target),
-          };
+            };
+        }
+        if (typeof this.conversations.modelState === "function") {
+          const browseState = await this.conversations.modelState(target);
+          if (
+            browseState.providerFilter === undefined
+            && (/^\d+$/u.test(argumentsText)
+              || resolveProvider(browseState.models, argumentsText) !== undefined)
+          ) {
+            return {
+              kind: "models",
+              view: "model",
+              state: await this.conversations.browseProviderModels(target, argumentsText),
+            };
+          }
         }
         let state: Awaited<ReturnType<ConversationUseCases["selectModel"]>>;
         try {

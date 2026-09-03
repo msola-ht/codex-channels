@@ -455,6 +455,8 @@ describe("Feishu conversation adapter", () => {
         isDefault: true,
       }],
       model: "gpt-a",
+      modelProvider: "openai",
+      providerFilter: "openai",
       effort: "medium",
       serviceTier: "default",
       pending: false,

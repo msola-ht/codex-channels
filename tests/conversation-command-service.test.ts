@@ -1392,4 +1392,44 @@ describe("ConversationCommandService", () => {
     expect(selectModel).toHaveBeenCalledWith(target, "gpt-main");
     expect(browseProviderModels).not.toHaveBeenCalled();
   });
+
+  it("treats a numeric provider selector as provider browsing before model selection", async () => {
+    const modelState = vi.fn(async () => ({
+      models: [
+        { provider: "openai", model: "gpt-main", id: "gpt-main" },
+        { provider: "codeproxy-dev", model: "proxy-main", id: "proxy-main" },
+      ],
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "low",
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const browseProviderModels = vi.fn(async () => ({
+      models: [{ provider: "codeproxy-dev", model: "proxy-main", id: "proxy-main" }],
+      model: "gpt-main",
+      modelProvider: "openai",
+      providerFilter: "codeproxy-dev",
+      effort: "low",
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const selectModel = vi.fn();
+    const commands = new ConversationCommandService({
+      modelState,
+      browseProviderModels,
+      selectModel,
+    } as unknown as ConversationUseCases);
+
+    const result = await commands.execute(target, "model", "2");
+    expect(result).toMatchObject({ state: { providerFilter: "codeproxy-dev" } });
+    expect(browseProviderModels).toHaveBeenCalledWith(target, "2");
+    expect(selectModel).not.toHaveBeenCalled();
+  });
 });

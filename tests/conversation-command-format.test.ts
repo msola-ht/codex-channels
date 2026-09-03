@@ -1126,6 +1126,55 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("切换：/effort <序号或档位>");
   });
 
+  it("renders providers first for plain-text model selection", () => {
+    const rendered = formatConversationModels({
+      kind: "models",
+      view: "model",
+      state: {
+        models: [
+          {
+            id: "gpt-test",
+            model: "gpt-test",
+            displayName: "GPT Test",
+            provider: "openai",
+            supportedReasoningEfforts: [{ effort: "medium", description: "平衡" }],
+            defaultReasoningEffort: "medium",
+            serviceTiers: [],
+            defaultServiceTier: null,
+            isDefault: true,
+            inputModalities: ["text"],
+          },
+          {
+            id: "deepseek-v4",
+            model: "deepseek-v4",
+            displayName: "DeepSeek V4",
+            provider: "deepseek",
+            supportedReasoningEfforts: [{ effort: "high", description: "深入" }],
+            defaultReasoningEffort: "high",
+            serviceTiers: [],
+            defaultServiceTier: null,
+            isDefault: false,
+            inputModalities: ["text"],
+          },
+        ],
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: null,
+        pending: false,
+        modelPending: false,
+        effortPending: false,
+        serviceTierPending: false,
+      },
+    });
+
+    expect(rendered).toContain("### 可用提供商");
+    expect(rendered).toContain("1. OpenAI 官方 ← 当前 · 1 个模型");
+    expect(rendered).toContain("2. DeepSeek · 1 个模型");
+    expect(rendered).toContain("下一步：/model <提供商序号或 ID>");
+    expect(rendered).not.toContain("模型列表（2）");
+  });
+
   it("renders DeepSeek balance instead of OpenAI account usage", () => {
     const rendered = formatConversationUsage({
       kind: "usage",
