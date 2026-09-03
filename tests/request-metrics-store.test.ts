@@ -54,6 +54,7 @@ describe("SqliteModelRequestMetricsStore", () => {
       observedAtMs: 1_700_000_000_001,
       available: false,
     });
+    expect(store.latestAccountSnapshots!()).toHaveLength(1);
     store.close();
   });
 

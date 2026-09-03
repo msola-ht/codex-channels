@@ -329,6 +329,20 @@ export interface OpencodeGoUsageResponse {
   accounts: OpencodeGoAccountUsage[]
 }
 
+export interface OfficialAccountSnapshot {
+  provider: string
+  accountId: string | null
+  observedAtMs: number
+  available: boolean
+  usage: unknown
+  limits: unknown
+}
+
+export interface OfficialAccountSnapshotsResponse {
+  observedAtMs: number
+  snapshots: OfficialAccountSnapshot[]
+}
+
 export interface GlobalTotals {
   device_count: number
   request_count: number

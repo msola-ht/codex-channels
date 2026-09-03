@@ -7,6 +7,7 @@ import type {
   GlobalQuotaResponse,
   GlobalRequestsResponse,
   OpencodeGoUsageResponse,
+  OfficialAccountSnapshotsResponse,
   OverviewResponse,
   RangeName,
   RequestSortDirection,
@@ -205,6 +206,12 @@ export function fetchOpencodeGoUsage(
     `${API_PREFIX}/opencode-go-usage`,
     signal,
   )
+}
+
+export function fetchOfficialAccountSnapshots(
+  signal?: AbortSignal,
+): Promise<OfficialAccountSnapshotsResponse> {
+  return getJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
 }
 
 export function fetchGlobalOverview(

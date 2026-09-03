@@ -502,6 +502,14 @@ export interface ModelRequestMetricsStore {
     usage: unknown;
     limits: unknown;
   } | null;
+  latestAccountSnapshots?(): Array<{
+    provider: string;
+    accountId: string | null;
+    observedAtMs: number;
+    available: boolean;
+    usage: unknown;
+    limits: unknown;
+  }>;
   threadTurnTaskSummary(
     threadId: string,
     turnId: string,

@@ -531,7 +531,24 @@ export class GatewayApplication {
         },
       ),
     ];
-    const providerAccounts = new ProviderAccountService(accountAdapters);
+    const providerAccounts = new ProviderAccountService(accountAdapters, {
+      writeOfficialAccountSnapshot: (snapshot) => {
+        const accountId = snapshot.accountId
+          ?? opencodeGoAccountIdFromProvider(snapshot.provider)
+          ?? null;
+        metricsStore.upsertAccountSnapshot?.({
+          sourceId: `${snapshot.provider}:${accountId ?? "default"}`,
+          provider: snapshot.provider,
+          accountId,
+          displayName: snapshot.provider,
+          enabled: true,
+          observedAtMs: snapshot.observedAtMs,
+          available: snapshot.available,
+          usage: snapshot.usage,
+          limits: snapshot.limits,
+        });
+      },
+    });
     const service = new ConversationService(
       this.codex,
       this.router,

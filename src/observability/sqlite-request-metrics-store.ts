@@ -616,6 +616,30 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     };
   }
 
+  latestAccountSnapshots() {
+    const rows = this.database.prepare(`
+      SELECT s.provider, s.account_id, a.observed_at_ms, a.available,
+        a.usage_json, a.limits_json
+      FROM account_snapshots a JOIN account_sources s ON s.source_id = a.source_id
+      WHERE a.observed_at_ms = (
+        SELECT MAX(a2.observed_at_ms) FROM account_snapshots a2
+        WHERE a2.source_id = a.source_id
+      )
+      ORDER BY s.provider, s.account_id
+    `).all() as Array<{
+      provider: string; account_id: string | null; observed_at_ms: number;
+      available: number; usage_json: string; limits_json: string;
+    }>;
+    return rows.map((row) => ({
+      provider: row.provider,
+      accountId: row.account_id,
+      observedAtMs: row.observed_at_ms,
+      available: row.available === 1,
+      usage: JSON.parse(row.usage_json) as unknown,
+      limits: JSON.parse(row.limits_json) as unknown,
+    }));
+  }
+
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
     this.requireOpen();
     validateMetricsTimeRange(query);

@@ -203,6 +203,10 @@ async function routeApi(environment, url, response) {
     await handleOpencodeGoUsage(environment, response);
     return;
   }
+  if (apiPath === "/accounts") {
+    handleAccountSnapshots(environment, response);
+    return;
+  }
   if (apiPath === "/global/overview") {
     await proxyGlobalCenter(environment, url, response, "/api/overview");
     return;
@@ -224,6 +228,21 @@ async function routeApi(environment, url, response) {
     return;
   }
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
+}
+
+function handleAccountSnapshots(environment, response) {
+  const store = openMetricsStore(environment);
+  try {
+    const snapshots = typeof store.latestAccountSnapshots === "function"
+      ? store.latestAccountSnapshots()
+      : [];
+    sendJson(response, 200, {
+      observedAtMs: snapshots.reduce((latest, item) => Math.max(latest, item.observedAtMs), 0),
+      snapshots,
+    });
+  } finally {
+    store.close();
+  }
 }
 
 async function proxyGlobalCenter(environment, url, response, upstreamPath) {

@@ -15,12 +15,14 @@ export {
   type ProviderAccountQueryPort,
   type OfficialAccountSnapshot,
   type OfficialAccountSnapshotQueryPort,
+  type OfficialAccountSnapshotWriter,
   type ProviderAccountUsage,
   type ProviderBalance,
   type ProviderModelUsageEstimate,
   type ProviderQuotaWindow,
 } from "./account-port.js";
 export { createOfficialAccountSnapshot } from "./account-snapshot.js";
+export { OfficialAccountSnapshotService } from "./account-snapshot-service.js";
 export {
   ProviderAccountService,
   createOpenAiAccountAdapter,

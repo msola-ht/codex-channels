@@ -194,6 +194,10 @@ export interface ProviderAccountQueryPort {
   accountLimits(modelProvider: string): Promise<ProviderAccountLimits>;
 }
 
+export interface OfficialAccountSnapshotWriter {
+  writeOfficialAccountSnapshot(snapshot: OfficialAccountSnapshot): void;
+}
+
 /** 跨展示端复用的、已脱敏官方账户快照读模型。 */
 export interface OfficialAccountSnapshot {
   provider: string;
