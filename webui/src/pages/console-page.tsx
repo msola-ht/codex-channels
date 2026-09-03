@@ -1,8 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { ActivityCalendar } from "react-activity-calendar"
 import "react-activity-calendar/tooltips.css"
-import ReactECharts from "echarts-for-react"
-import type { EChartsOption } from "echarts"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import {
   Alert,
@@ -55,8 +54,9 @@ import {
 } from "@/lib/api"
 import { formatTime, formatTokens } from "@/lib/format"
 import type { DisplayCurrency } from "@/lib/format"
-import { positionTrendTooltip, toStackedUsageTrend } from "@/lib/trend"
+import { toStackedUsageTrend } from "@/lib/trend"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import type {
   DeepseekBalanceResponse,
   GlobalCostRow,
@@ -443,15 +443,12 @@ function CostStatCard({
   )
 }
 
-const TREND_COLORS = {
-  total: "#fbbf24",
-  input: "#38bdf8",
-  cached: "#14b8a6",
-  output: "#a78bfa",
-}
-
 function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
-  const cutoff = new Date(Date.now() - 29 * 86_400_000)
+  const [timeRange, setTimeRange] = useState("30d")
+  const daysToSubtract = timeRange === "7d" ? 7 : timeRange === "90d" ? 90 : 30
+  const latestDay = rows.reduce((latest, row) => row.day > latest ? row.day : latest, "")
+  const referenceDate = latestDay ? new Date(`${latestDay}T00:00:00Z`) : new Date()
+  const cutoff = new Date(referenceDate.getTime() - (daysToSubtract - 1) * 86_400_000)
   const cutoffKey = `${cutoff.getUTCFullYear()}-${String(cutoff.getUTCMonth() + 1).padStart(2, "0")}-${String(cutoff.getUTCDate()).padStart(2, "0")}`
   const data = rows
     .filter((row) => row.day >= cutoffKey)
@@ -464,57 +461,36 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
       totalTokens: row.total_tokens,
     }))
   const stackedData = toStackedUsageTrend(data)
-  const chartOption: EChartsOption = {
-    animation: false,
-    grid: { top: 8, right: 56, bottom: 42, left: 56 },
-    legend: { bottom: 0, right: 0, textStyle: { color: "#a1a1aa" }, itemWidth: 12, itemHeight: 8 },
-    tooltip: {
-      trigger: "axis",
-      axisPointer: { type: "line", snap: true },
-      confine: true,
-      position: (point, _params, _dom, _rect, size) => positionTrendTooltip(
-        point,
-        size.contentSize,
-        size.viewSize,
-      ),
-      backgroundColor: "#18181b",
-      borderColor: "#3f3f46",
-      textStyle: { color: "#fafafa" },
-      formatter: (params) => {
-        const items = Array.isArray(params) ? params : [params]
-        const first = items[0] as (typeof items)[number] & { axisValue?: unknown }
-        const day = String(first?.axisValue ?? "")
-        const index = Number(first?.dataIndex ?? 0)
-        const split = stackedData[index]
-        const total = Number(first?.value ?? 0)
-        const markerFor = (seriesName: string) =>
-          items.find((item) => item.seriesName === seriesName)?.marker ?? ""
-        return [
-          `<div style="margin-bottom:6px;font-weight:600">${day}</div>`,
-          `<div style="line-height:1.8">${markerFor("日总计")}日总计：${formatTokens(total)}</div>`,
-          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("未缓存输入")}未缓存输入：${formatTokens(split?.uncachedInputTokens ?? 0)}</div>`,
-          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("缓存输入")}缓存输入：${formatTokens(split?.cachedInputTokens ?? 0)}</div>`,
-          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("输出")}输出：${formatTokens((split?.nonReasoningOutputTokens ?? 0) + (split?.reasoningOutputTokens ?? 0))}</div>`,
-        ].join("")
-      },
-    },
-    xAxis: { type: "category", boundaryGap: false, data: stackedData.map((row) => row.day), axisLine: { lineStyle: { color: "#3f3f46" } }, axisLabel: { color: "#a1a1aa", interval: "auto" } },
-    yAxis: [
-      { type: "value", axisLabel: { color: "#a1a1aa", formatter: (value: number) => formatTokens(value) }, splitLine: { lineStyle: { color: "#27272a" } } },
-      { type: "value", position: "right", axisLabel: { color: "#a1a1aa", formatter: (value: number) => formatTokens(value) }, splitLine: { show: false } },
-    ],
-    series: [
-      { name: "日总计", type: "line", symbol: "none", lineStyle: { width: 2 }, itemStyle: { color: TREND_COLORS.total }, data: data.map((row) => row.totalTokens), z: 4 },
-      { name: "未缓存输入", type: "line", stack: "input", symbol: "none", areaStyle: { opacity: 0.32 }, lineStyle: { width: 1.5 }, itemStyle: { color: TREND_COLORS.input }, data: stackedData.map((row) => row.uncachedInputTokens) },
-      { name: "缓存输入", type: "line", stack: "input", symbol: "none", areaStyle: { opacity: 0.32 }, lineStyle: { width: 1.5 }, itemStyle: { color: TREND_COLORS.cached }, data: stackedData.map((row) => row.cachedInputTokens) },
-      { name: "输出", type: "line", yAxisIndex: 1, symbol: "circle", symbolSize: 4, lineStyle: { width: 2 }, itemStyle: { color: TREND_COLORS.output }, data: stackedData.map((row) => row.nonReasoningOutputTokens + row.reasoningOutputTokens), z: 5 },
-    ],
+  const chartData = stackedData.map((row, index) => ({
+    ...row,
+    totalTokens: data[index]?.totalTokens ?? 0,
+    outputTokens: (row.nonReasoningOutputTokens ?? 0) + (row.reasoningOutputTokens ?? 0),
+  }))
+  const chartConfig: ChartConfig = {
+    totalTokens: { label: "日总计", color: "var(--chart-1)" },
+    uncachedInputTokens: { label: "未缓存输入", color: "var(--chart-2)" },
+    cachedInputTokens: { label: "缓存输入", color: "var(--chart-3)" },
+    outputTokens: { label: "输出", color: "var(--chart-4)" },
   }
   return (
     <Card className="h-[340px]">
       <CardHeader>
-        <CardTitle>用量趋势</CardTitle>
-          <CardDescription>最近 30 天，输入按缓存拆分；输出使用右侧独立刻度</CardDescription>
+        <div className="flex items-center gap-2">
+          <div className="grid flex-1 gap-1">
+            <CardTitle>用量趋势</CardTitle>
+            <CardDescription>最近 {daysToSubtract} 天，输入按缓存拆分；输出独立显示</CardDescription>
+          </div>
+          <Select value={timeRange} onValueChange={setTimeRange}>
+            <SelectTrigger className="hidden w-[140px] rounded-lg sm:flex" aria-label="选择趋势时间范围">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="90d" className="rounded-lg">最近 90 天</SelectItem>
+              <SelectItem value="30d" className="rounded-lg">最近 30 天</SelectItem>
+              <SelectItem value="7d" className="rounded-lg">最近 7 天</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </CardHeader>
       <CardContent>
         {loading && data.length === 0 ? (
@@ -522,7 +498,23 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
         ) : data.length === 0 ? (
           <p className="text-sm text-muted-foreground">当前范围最近 90 天没有记录</p>
         ) : (
-          <ReactECharts option={chartOption} style={{ height: 230, width: "100%" }} notMerge lazyUpdate />
+          <ChartContainer config={chartConfig} className="h-[230px] w-full">
+            <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+              <defs>
+                <linearGradient id="fillUncachedInput" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-uncachedInputTokens)" stopOpacity={0.5} /><stop offset="95%" stopColor="var(--color-uncachedInputTokens)" stopOpacity={0.05} /></linearGradient>
+                <linearGradient id="fillCachedInput" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-cachedInputTokens)" stopOpacity={0.5} /><stop offset="95%" stopColor="var(--color-cachedInputTokens)" stopOpacity={0.05} /></linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} />
+              <YAxis tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
+              <Area dataKey="uncachedInputTokens" type="monotone" stackId="input" stroke="var(--color-uncachedInputTokens)" fill="url(#fillUncachedInput)" />
+              <Area dataKey="cachedInputTokens" type="monotone" stackId="input" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
+              <Area dataKey="totalTokens" type="monotone" stroke="var(--color-totalTokens)" fill="none" strokeWidth={2} />
+              <Area dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
+              <ChartLegend content={<ChartLegendContent />} />
+            </AreaChart>
+          </ChartContainer>
         )}
       </CardContent>
     </Card>
