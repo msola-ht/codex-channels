@@ -318,6 +318,8 @@ export interface ConversationUseCases {
   startPlan(target: ConversationTarget, prompt: string): Promise<Submission>;
   review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission>;
   modelState(target: ConversationTarget): Promise<ModelSelectionState>;
+  clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState>;
+  browseProviderModels(target: ConversationTarget, provider: string): Promise<ModelSelectionState>;
   clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState>;
   selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
   selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
@@ -1425,6 +1427,15 @@ export class ConversationService implements ConversationUseCases {
 
   modelState(target: ConversationTarget): Promise<ModelSelectionState> {
     return this.models.state(target);
+  }
+
+  clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState> {
+    this.models.clearProviderBrowse(target);
+    return this.models.state(target);
+  }
+
+  browseProviderModels(target: ConversationTarget, provider: string): Promise<ModelSelectionState> {
+    return this.models.browseProvider(target, provider);
   }
 
   clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState> {

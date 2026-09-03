@@ -169,6 +169,10 @@ export function formatSurfaceUserFacingError(
       return "模型选择不唯一";
     case "model.selector.not-found":
       return "找不到指定模型";
+    case "model.provider.not-found":
+      return `找不到指定提供商：${detail(error, "provider", "未知")}`;
+    case "model.provider.no-models":
+      return `提供商 ${detail(error, "provider", "未知")} 下没有可用模型`;
     case "model.selection.expired":
       return "模型已变化，请重新发送 /model 选择";
     case "effort.unsupported": {

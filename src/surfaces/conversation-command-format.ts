@@ -1636,6 +1636,11 @@ export function formatConversationModels(
   const providerSwitchNotice = state.providerPending
     ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。", ""]
     : [];
+  const scopedModels = state.providerFilter === undefined
+    ? state.models
+    : state.models.filter(
+        (model) => (model.provider ?? "openai") === state.providerFilter,
+      );
   if (result.view === "fast") {
     return toStructuredMarkdownList([
       formatModelStateLine(state),
@@ -1677,8 +1682,8 @@ export function formatConversationModels(
     ...formatCurrentModelNotices(current),
     "",
     ...providerSwitchNotice,
-    `模型列表（${state.models.length}）：`,
-    ...state.models.map(
+    `模型列表（${scopedModels.length}）：`,
+    ...scopedModels.map(
       (model, index) =>
         `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
     ),

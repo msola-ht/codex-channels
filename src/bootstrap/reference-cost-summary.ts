@@ -239,12 +239,24 @@ function combineReferenceCosts(
   if (left.pricedRequestCount === 0) {
     return {
       ...right,
+      inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
+      ...(left.cachedInputTokens !== undefined
+        && right.cachedInputTokens !== undefined
+        ? { cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens }
+        : {}),
+      outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0),
       requestCount: left.requestCount + right.requestCount,
     };
   }
   if (right.pricedRequestCount === 0) {
     return {
       ...left,
+      inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
+      ...(left.cachedInputTokens !== undefined
+        && right.cachedInputTokens !== undefined
+        ? { cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens }
+        : {}),
+      outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0),
       requestCount: left.requestCount + right.requestCount,
     };
   }

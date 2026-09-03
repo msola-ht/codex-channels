@@ -8,7 +8,10 @@ import {
   type InstalledPlugin,
 } from "../src/application/index.js";
 import { parseThreadQueueOperation } from "../src/application/conversation-command-parser.js";
-import type { ConversationTarget } from "../src/conversation-core/index.js";
+import {
+  UserFacingError,
+  type ConversationTarget,
+} from "../src/conversation-core/index.js";
 
 const target: ConversationTarget = {
   surface: "telegram",
@@ -1334,5 +1337,59 @@ describe("ConversationCommandService", () => {
       });
     }
     expect(getGoal).not.toHaveBeenCalled();
+  });
+
+  it("falls back to provider browsing when /model does not resolve to a model", async () => {
+    const browseProviderModels = vi.fn(async () => ({
+      models: [],
+      model: "gpt-main",
+      modelProvider: "openai",
+      providerFilter: "deepseek",
+      effort: null,
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const selectModel = vi.fn(async () => {
+      throw new UserFacingError("model.selector.not-found", "找不到指定模型");
+    });
+    const commands = new ConversationCommandService({
+      browseProviderModels,
+      selectModel,
+    } as unknown as ConversationUseCases);
+
+    const result = await commands.execute(target, "model", "deepseek");
+    expect(result).toMatchObject({
+      kind: "models",
+      view: "model",
+      state: expect.objectContaining({ providerFilter: "deepseek" }),
+    });
+    expect(selectModel).toHaveBeenCalledWith(target, "deepseek");
+    expect(browseProviderModels).toHaveBeenCalledWith(target, "deepseek");
+  });
+
+  it("keeps selecting a model directly when the selector matches a model", async () => {
+    const selectModel = vi.fn(async () => ({
+      models: [],
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: null,
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const browseProviderModels = vi.fn(async () => ({}));
+    const commands = new ConversationCommandService({
+      selectModel,
+      browseProviderModels,
+    } as unknown as ConversationUseCases);
+
+    await commands.execute(target, "model", "gpt-main");
+    expect(selectModel).toHaveBeenCalledWith(target, "gpt-main");
+    expect(browseProviderModels).not.toHaveBeenCalled();
   });
 });

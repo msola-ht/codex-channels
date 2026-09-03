@@ -699,10 +699,28 @@ export class ConversationCommandService {
             view: "model",
             state: argumentsText === "clear"
               ? await this.conversations.clearModelSelection(target)
-              : await this.conversations.modelState(target),
+              : await this.conversations.clearModelBrowse(target),
           };
         }
-        const state = await this.conversations.selectModel(target, argumentsText);
+        let state: Awaited<ReturnType<ConversationUseCases["selectModel"]>>;
+        try {
+          state = await this.conversations.selectModel(target, argumentsText);
+        } catch (error) {
+          if (
+            error instanceof UserFacingError
+            && error.code === "model.selector.not-found"
+          ) {
+            return {
+              kind: "models",
+              view: "model",
+              state: await this.conversations.browseProviderModels(
+                target,
+                argumentsText,
+              ),
+            };
+          }
+          throw error;
+        }
         const selected = state.models.find((model) =>
           model.model === state.model
           && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));

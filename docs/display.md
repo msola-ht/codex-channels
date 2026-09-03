@@ -128,8 +128,10 @@ Codex CLI）；Node.js 运行时、连接方式和 App Server User-Agent 仍作�
 `/resume` 恢复结果会显示该 Thread 的会话模型和 Provider；`/new` 与 Workspace 切换结果会显示
 下一条普通消息使用的模型和 Provider；`/model` 产生待生效选择时也使用“下一条消息模型”明确
 区分当前 Thread 设置。模型支持多个思考等级时，选择模型后继续进入思考等级选择；飞书使用选择卡、
-Telegram 使用内联按钮，微信显示可输入的 `/effort` 选项。只支持一个等级时直接沿用该等级，独立
-`/effort` 命令保持可用。提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
+Telegram 使用内联按钮，微信显示可输入的 `/effort` 选项。飞书与 Telegram 的模型切换采用两级菜单：
+先选择提供商，再选择该提供商下的模型，第一级不展示模型列表；微信用文本 `/model <提供商>` 也能
+先过滤到指定提供商的模型再选择。只支持一个等级时直接沿用该等级，独立 `/effort` 命令保持可用。
+提示只回显 Application 已归约的模型选择，不会提前创建 Thread 或启动 Turn。
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话都优先显示本机指标/缓存中的 Turn 轮数；
 打开列表不会等待 `thread/turns/list` 历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn
 统计；本地没有记录时暂不显示猜测值。需要完整官方历史计数时，清理命令仍会按候选读取。

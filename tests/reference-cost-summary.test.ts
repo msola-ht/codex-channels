@@ -151,6 +151,47 @@ describe("mergeSessionReferenceCost", () => {
       pricingBuckets: [],
     });
   });
+
+  it("keeps token totals when priced and unpriced summaries are combined", () => {
+    const unpriced = threadSummary({
+      requestCount: 2,
+      pricedRequestCount: 0,
+      inputTokens: 1_000,
+      cachedInputTokens: 800,
+      outputTokens: 100,
+      pricingCurrency: null,
+      totalCostNanos: null,
+      inputCostNanos: null,
+      cachedInputCostNanos: null,
+      outputCostNanos: null,
+    });
+    const priced = {
+      currency: "USD",
+      requestCount: 1,
+      pricedRequestCount: 1,
+      inputTokens: 500,
+      cachedInputTokens: 300,
+      outputTokens: 50,
+      totalCostNanos: 100_000,
+      inputCostNanos: 40_000,
+      cachedInputCostNanos: 20_000,
+      outputCostNanos: 40_000,
+      ...rates,
+      hasMixedPrices: false,
+    };
+
+    expect(mergeSessionReferenceCost({
+      threadId: "thread-1",
+      latestTurn: null,
+      threadAggregate: unpriced,
+      latestDirectApi: null,
+    }, "turn-1", priced)).toMatchObject({
+      requestCount: 3,
+      inputTokens: 1_500,
+      cachedInputTokens: 1_100,
+      outputTokens: 150,
+    });
+  });
 });
 
 describe("mergeCompletionTiming", () => {

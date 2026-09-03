@@ -15,6 +15,7 @@ export interface ModelSelectionState {
   models: ModelOption[];
   model: string;
   modelProvider?: string;
+  providerFilter?: string;
   effort: string | null;
   serviceTier: string | null;
   pending: boolean;
@@ -41,6 +42,7 @@ const standardServiceTierRequestValue = "default";
 
 export class ModelSelectionService {
   private readonly pendingByConversation = new Map<string, TurnOverrides>();
+  private readonly providerFilterByConversation = new Map<string, string>();
 
   constructor(
     private readonly codex: ModelSelectionPort,
@@ -53,7 +55,38 @@ export class ModelSelectionService {
 
   async state(target: ConversationTarget): Promise<ModelSelectionState> {
     const models = await this.listModels();
-    return this.resolveState(target, models);
+    const filter = this.providerFilterByConversation.get(this.key(target));
+    return this.resolveState(
+      target,
+      filter === undefined ? models : filterModelsByProvider(models, filter),
+      filter,
+    );
+  }
+
+  async browseProvider(target: ConversationTarget, provider: string): Promise<ModelSelectionState> {
+    const models = await this.listModels();
+    const resolvedProvider = resolveProvider(models, provider);
+    if (resolvedProvider === undefined) {
+      throw new UserFacingError(
+        "model.provider.not-found",
+        `找不到指定提供商：${provider}`,
+        { provider },
+      );
+    }
+    const filtered = filterModelsByProvider(models, resolvedProvider);
+    if (filtered.length === 0) {
+      throw new UserFacingError(
+        "model.provider.no-models",
+        `提供商 ${resolvedProvider} 下没有可用模型`,
+        { provider: resolvedProvider },
+      );
+    }
+    this.providerFilterByConversation.set(this.key(target), resolvedProvider);
+    return this.resolveState(target, filtered, resolvedProvider);
+  }
+
+  clearProviderBrowse(target: ConversationTarget): void {
+    this.providerFilterByConversation.delete(this.key(target));
   }
 
   async requireInputModality(
@@ -95,7 +128,11 @@ export class ModelSelectionService {
 
   async selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     const models = await this.listModels();
-    const selected = resolveModel(models, selector);
+    const providerFilter = this.providerFilterByConversation.get(this.key(target));
+    const selectableModels = providerFilter === undefined
+      ? models
+      : filterModelsByProvider(models, providerFilter);
+    const selected = resolveModel(selectableModels, selector);
     if (selected.available === false) {
       throw new UserFacingError(
         "model.unavailable",
@@ -155,7 +192,12 @@ export class ModelSelectionService {
           ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
           : {}),
     });
-    return this.resolveState(target, models);
+    this.providerFilterByConversation.set(this.key(target), selectedProvider);
+    return this.resolveState(
+      target,
+      filterModelsByProvider(models, selectedProvider),
+      selectedProvider,
+    );
   }
 
   async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
@@ -289,6 +331,7 @@ export class ModelSelectionService {
 
   clear(target: ConversationTarget): void {
     this.pendingByConversation.delete(this.key(target));
+    this.providerFilterByConversation.delete(this.key(target));
   }
 
   status(target: ConversationTarget): Omit<ModelSelectionState, "models"> {
@@ -309,7 +352,11 @@ export class ModelSelectionService {
     };
   }
 
-  private resolveState(target: ConversationTarget, models: ModelOption[]): ModelSelectionState {
+  private resolveState(
+    target: ConversationTarget,
+    models: ModelOption[],
+    filter?: string,
+  ): ModelSelectionState {
     if (models.length === 0) {
       throw new Error("App Server 没有返回可用模型");
     }
@@ -344,6 +391,7 @@ export class ModelSelectionService {
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       models,
+      ...(filter === undefined ? {} : { providerFilter: filter }),
       model,
       modelProvider: this.normalizeProvider(
         pending?.modelProvider
@@ -416,6 +464,42 @@ function findModel(
   const normalizedProvider = provider ?? "openai";
   return models.find((candidate) =>
     candidate.model === model && (candidate.provider ?? "openai") === normalizedProvider);
+}
+
+function filterModelsByProvider(
+  models: ModelOption[],
+  provider: string,
+): ModelOption[] {
+  const normalizedProvider = provider === "openai" ? "openai" : provider;
+  return models.filter(
+    (model) => (model.provider ?? "openai") === normalizedProvider,
+  );
+}
+
+export function listProviders(models: ModelOption[]): string[] {
+  const seen = new Set<string>();
+  const providers: string[] = [];
+  for (const model of models) {
+    const provider = model.provider ?? "openai";
+    if (!seen.has(provider)) {
+      seen.add(provider);
+      providers.push(provider);
+    }
+  }
+  return providers;
+}
+
+export function resolveProvider(models: ModelOption[], selector: string): string | undefined {
+  const normalized = selector.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  const providers = listProviders(models);
+  if (/^\d+$/.test(normalized)) {
+    return providers[Number(normalized) - 1];
+  }
+  const matches = providers.filter((provider) => provider === normalized);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function modelKey(model: ModelOption): string {

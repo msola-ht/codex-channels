@@ -523,6 +523,71 @@ describe("Feishu conversation adapter", () => {
     });
   });
 
+  it("renders provider choices before any provider is chosen", async () => {
+    const fixture = createOutbox();
+    const modelState = vi.fn(async () => ({
+      models: [
+        {
+          id: "gpt-test",
+          model: "gpt-test",
+          provider: "openai",
+          displayName: "GPT Test",
+          supportedReasoningEfforts: [{ effort: "medium", description: "平衡" }],
+          defaultReasoningEffort: "medium",
+          serviceTiers: [],
+          defaultServiceTier: null,
+          isDefault: true,
+          inputModalities: ["text"],
+        },
+        {
+          id: "deepseek-v4",
+          model: "deepseek-v4",
+          provider: "deepseek",
+          displayName: "DeepSeek V4",
+          supportedReasoningEfforts: [{ effort: "high", description: "深入" }],
+          defaultReasoningEffort: "high",
+          serviceTiers: [],
+          defaultServiceTier: null,
+          isDefault: false,
+          inputModalities: ["text"],
+        },
+      ],
+      model: "gpt-test",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const clearModelBrowse = vi.fn(async () => (await modelState()));
+    const adapter = new FeishuConversationAdapter(
+      { modelState, clearModelBrowse } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+
+    const response = await adapter.handleCommandCenterAction(
+      message.target,
+      "model",
+      message.actorId,
+      "",
+    );
+    expect(response).toMatchObject({
+      title: "选择提供商",
+      descriptionFormat: "markdown",
+    });
+    if (response === undefined || "kind" in response) {
+      throw new Error("预期返回选择卡片");
+    }
+    expect(response.choices).toEqual([
+      expect.objectContaining({ action: "model", input: "openai" }),
+      expect.objectContaining({ action: "model", input: "deepseek" }),
+    ]);
+    await fixture.outbox.close();
+  });
+
   it("opens a reasoning-effort card after a directly typed model selection", async () => {
     const fixture = createOutbox();
     const openResponse = vi.fn(async () => {});
@@ -568,6 +633,63 @@ describe("Feishu conversation adapter", () => {
       expect.objectContaining({ title: "选择思考等级" }),
     );
     expect(fixture.sent).toEqual([]);
+  });
+
+  it("opens the provider model choices card after selecting a provider", async () => {
+    const fixture = createOutbox();
+    const modelState = vi.fn(async () => ({
+      models: [{
+        id: "deepseek-v4",
+        model: "deepseek-v4",
+        provider: "deepseek",
+        displayName: "DeepSeek · DeepSeek V4",
+        supportedReasoningEfforts: [{ effort: "high", description: "深入" }],
+        defaultReasoningEffort: "high",
+        serviceTiers: [],
+        defaultServiceTier: null,
+        isDefault: true,
+        inputModalities: ["text" as const],
+      }],
+      model: "deepseek-v4",
+      modelProvider: "deepseek",
+      providerFilter: "deepseek",
+      effort: "high",
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const selectModel = vi.fn(async () => {
+      throw new UserFacingError("model.selector.not-found", "找不到指定模型");
+    });
+    const browseProviderModels = vi.fn(async () => modelState());
+    const adapter = new FeishuConversationAdapter(
+      { modelState, selectModel, browseProviderModels } as unknown as ConversationUseCases,
+      fixture.outbox,
+      imagePort,
+    );
+
+    const response = await adapter.handleCommandCenterAction(
+      message.target,
+      "model",
+      message.actorId,
+      "deepseek",
+    );
+
+    expect(response).toMatchObject({ title: "选择模型" });
+    if (response === undefined || "kind" in response) {
+      throw new Error("预期返回选择卡片");
+    }
+    expect(response.choices).toEqual([
+      expect.objectContaining({
+        action: "model",
+        input: "deepseek-v4",
+        label: "✓ DeepSeek V4",
+      }),
+    ]);
+    expect(fixture.sent).toEqual([]);
+    await fixture.outbox.close();
   });
 
   it("adds related action shortcuts to the Feishu status card", async () => {

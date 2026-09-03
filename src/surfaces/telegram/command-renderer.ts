@@ -8,6 +8,9 @@ import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
 } from "../../application/index.js";
+import { listProviders } from "../../application/index.js";
+import { formatCodexProviderLabel } from "../provider-format.js";
+import { toStructuredMarkdownList } from "../markdown-list.js";
 import {
   formatConversationAgents,
   formatConversationArtifacts,
@@ -133,13 +136,24 @@ export async function renderTelegramCommandResult(
       );
       return;
     case "models":
-      await replyTelegramPanel(
-        context,
-        formatConversationModels(result),
-        result.view === "model"
-          ? modelSelectionKeyboard(result)
-          : modelEffortKeyboard(result),
-      );
+      if (result.view === "model") {
+        const providerOnly = result.state.providerFilter === undefined;
+        await replyTelegramPanel(
+          context,
+          providerOnly
+            ? modelProviderSelectionText(result)
+            : formatConversationModels(result),
+          providerOnly
+            ? modelProviderSelectionKeyboard(result)
+            : modelSelectionKeyboard(result),
+        );
+      } else {
+        await replyTelegramPanel(
+          context,
+          formatConversationModels(result),
+          modelEffortKeyboard(result),
+        );
+      }
       return;
     case "collaboration-mode":
       await replyTelegramPanel(
@@ -278,10 +292,58 @@ export function modelEffortKeyboard(
   };
 }
 
+function modelProviderSelectionText(
+  result: Extract<ConversationCommandResult, { kind: "models" }>,
+): string {
+  const providers = listProviders(result.state.models);
+  const current = result.state.modelProvider ?? "openai";
+  return toStructuredMarkdownList([
+    `当前模型：${result.state.model}（Provider：${formatCodexProviderLabel(current)}）`,
+    `思考等级：${result.state.effort ?? "模型默认"}`,
+    "",
+    "可用提供商：",
+    ...providers.map((provider, index) =>
+      `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${result.state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`),
+    "",
+    "请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号或 ID>。",
+  ].join("\n"));
+}
+
+export function modelProviderSelectionKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "models" }>,
+): InlineKeyboardMarkup | undefined {
+  if (
+    result.view !== "model"
+    || result.state.providerFilter !== undefined
+    || result.state.models.length === 0
+  ) {
+    return undefined;
+  }
+  const providers = listProviders(result.state.models);
+  const current = result.state.modelProvider ?? "openai";
+  const token = telegramModelSelectionToken(
+    result.state.model,
+    result.state.modelProvider ?? "openai",
+  );
+  return {
+    inline_keyboard: providers.map((provider, index) => [{
+      text: boundedButtonLabel(
+        `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)}`,
+      ),
+      callback_data: `mp:${index + 1}:${token}`,
+    }]),
+  };
+}
+
 export function modelSelectionKeyboard(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
 ): InlineKeyboardMarkup | undefined {
-  if (result.view !== "model" || result.state.models.length === 0) {
+  const models = result.state.providerFilter === undefined
+    ? result.state.models
+    : result.state.models.filter(
+        (model) => (model.provider ?? "openai") === result.state.providerFilter,
+      );
+  if (result.view !== "model" || models.length === 0) {
     return undefined;
   }
   const token = telegramModelSelectionToken(
@@ -289,7 +351,7 @@ export function modelSelectionKeyboard(
     result.state.modelProvider ?? "openai",
   );
   return {
-    inline_keyboard: result.state.models.map((model, index) => [{
+    inline_keyboard: models.map((model, index) => [{
       text: boundedButtonLabel(
         `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
       ),
