@@ -340,6 +340,9 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
+  "metrics.normalize_currency": `用法：codexc metrics normalize-currency
+
+要求 Gateway 已停止；备份现有指标库，并清除历史非 USD 费用字段，保留请求、Token 和错误指标。`,
   "metrics.upgrade": `用法：codexc metrics upgrade [--restart-gateway]
 
 默认要求 Gateway 已停止；加 --restart-gateway 时自动停止 Gateway、备份升级并重新启动。`,
@@ -1731,7 +1734,8 @@ async function metrics(args) {
     showSubcommandHelp(args, "prune", "metrics.prune") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
     showSubcommandHelp(args, "export", "metrics.export") ||
-    showSubcommandHelp(args, "quota", "metrics.quota")) {
+    showSubcommandHelp(args, "quota", "metrics.quota") ||
+    showSubcommandHelp(args, "normalize-currency", "metrics.normalize_currency")) {
     return;
   }
   if (args.some(isHelpArgument)) {
@@ -1747,6 +1751,8 @@ async function metrics(args) {
       prune: "metrics.prune",
       report: "metrics.report",
       export: "metrics.export",
+      quota: "metrics.quota",
+      "normalize-currency": "metrics.normalize_currency",
     }[args[0]];
     throw new Error(key === undefined ? helpText.metrics : helpText[key]);
   }
@@ -1775,10 +1781,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export", "quota"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export", "quota", "normalize-currency"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export|quota>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export|quota|normalize-currency>");
   }
   validateMetricsCommandArgs(subcommand, rest);
   if (
@@ -1815,7 +1821,7 @@ async function metrics(args) {
   if (subcommand === "prune" && rest.length !== 1) {
     throw new Error("用法：codexc metrics prune <provider>");
   }
-  if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
+  if (new Set(["upgrade", "reset", "sync-reset", "normalize-currency"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
   if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {

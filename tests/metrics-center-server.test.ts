@@ -166,6 +166,8 @@ describe("metrics center server", () => {
         device_id: "device-a",
         display_name: "device-a",
         request_count: 2,
+        total_tokens: 2_200,
+        costs_by_currency: [{ currency: "USD", request_count: 2, total_cost_nanos: 12_000 }],
         subagent_count: 1,
       }),
     ]);

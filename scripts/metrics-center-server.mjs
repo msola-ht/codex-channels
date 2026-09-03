@@ -510,6 +510,31 @@ function handleOverview(url, database, response) {
     ORDER BY request_count DESC
     LIMIT 50
   `).all(...params);
+  const providerModels = database.prepare(`
+    SELECT provider, model, COUNT(*) AS request_count,
+           COALESCE(SUM(input_tokens), 0) AS input_tokens,
+           COALESCE(SUM(output_tokens), 0) AS output_tokens,
+           COALESCE(SUM(total_tokens), 0) AS total_tokens
+    FROM request_metrics
+    ${where}
+    GROUP BY provider, model
+    ORDER BY request_count DESC
+  `).all(...params);
+  const modelsByProvider = new Map();
+  for (const model of providerModels) {
+    const models = modelsByProvider.get(model.provider) ?? [];
+    models.push({
+      model: model.model,
+      request_count: model.request_count,
+      input_tokens: model.input_tokens,
+      output_tokens: model.output_tokens,
+      total_tokens: model.total_tokens,
+    });
+    modelsByProvider.set(model.provider, models);
+  }
+  for (const provider of providers) {
+    provider.models = modelsByProvider.get(provider.provider) ?? [];
+  }
   const providerIdentities = database.prepare(`
     SELECT device_id, provider, display_name, email, phone, updated_at_ms
     FROM provider_identities
@@ -823,11 +848,35 @@ function handleDevices(database, response) {
            COALESCE(d.display_name, d.device_id) AS display_name,
            (SELECT COUNT(*) FROM request_metrics r WHERE r.device_id = d.device_id)
              AS request_count,
+           (SELECT COALESCE(SUM(r.total_tokens), 0) FROM request_metrics r WHERE r.device_id = d.device_id)
+             AS total_tokens,
            (SELECT COUNT(*) FROM subagent_threads s WHERE s.device_id = d.device_id)
              AS subagent_count
     FROM devices d
     ORDER BY d.last_seen_at_ms DESC
   `).all();
+  const costs = database.prepare(`
+    SELECT device_id, COALESCE(pricing_currency, 'unknown') AS currency,
+           COUNT(*) AS request_count,
+           COALESCE(SUM(total_cost_nanos), 0) AS total_cost_nanos
+    FROM request_metrics
+    WHERE total_cost_nanos IS NOT NULL
+    GROUP BY device_id, pricing_currency
+    ORDER BY request_count DESC
+  `).all();
+  const costsByDevice = new Map();
+  for (const cost of costs) {
+    const deviceCosts = costsByDevice.get(cost.device_id) ?? [];
+    deviceCosts.push({
+      currency: cost.currency,
+      request_count: cost.request_count,
+      total_cost_nanos: cost.total_cost_nanos,
+    });
+    costsByDevice.set(cost.device_id, deviceCosts);
+  }
+  for (const row of rows) {
+    row.costs_by_currency = costsByDevice.get(row.device_id) ?? [];
+  }
   sendJson(response, 200, { devices: rows });
 }
 

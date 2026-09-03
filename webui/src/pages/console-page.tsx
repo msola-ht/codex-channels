@@ -52,17 +52,17 @@ import {
   fetchGlobalDaily,
   fetchGlobalDevices,
   fetchGlobalOverview,
-  fetchGlobalQuota,
 } from "@/lib/api"
 import { formatTime, formatTokens } from "@/lib/format"
+import type { DisplayCurrency } from "@/lib/format"
 import { positionTrendTooltip, toStackedUsageTrend } from "@/lib/trend"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type {
   DeepseekBalanceResponse,
   GlobalCostRow,
   GlobalDailyRow,
   GlobalDeviceRow,
   GlobalOverviewResponse,
-  GlobalQuotaResponse,
   GlobalProviderRow,
   OpencodeGoUsageResponse,
   OverviewResponse,
@@ -114,7 +114,7 @@ export function ConsolePage() {
   )
   const account = useOverview(scope.kind === "local" ? range : "24h")
   const officialAccounts = useOfficialAccountSources()
-  const { settings } = useCurrency()
+  const { currency, settings } = useCurrency()
   const deviceLabel = (deviceId: string) =>
     devices.data?.devices.find((device) => device.device_id === deviceId)
       ?.display_name ?? deviceId
@@ -162,7 +162,7 @@ export function ConsolePage() {
 
       {scope.kind === "local"
         ? <LocalDashboard range={range} onRangeChange={setRange} data={account.data} loading={account.loading} error={account.error} />
-        : <GlobalDashboard scope={scope} devices={devices.data?.devices ?? []} />}
+        : <GlobalDashboard scope={scope} devices={devices.data?.devices ?? []} currency={currency ?? settings?.currency ?? "usd"} exchangeRate={settings?.exchangeRate?.usdToCny ?? null} />}
 
       {scope.kind === "local" ? (
         <AccountStatusCards
@@ -290,9 +290,13 @@ function FreshnessNotice({
 function GlobalDashboard({
   scope,
   devices,
+  currency,
+  exchangeRate,
 }: {
   scope: Extract<Scope, { kind: "all" } | { kind: "device" }>
   devices: GlobalDeviceRow[]
+  currency: DisplayCurrency
+  exchangeRate: number | null
 }) {
   const deviceId = scope.kind === "device" ? scope.deviceId : null
   const overview = useApi(
@@ -301,10 +305,6 @@ function GlobalDashboard({
   )
   const daily = useApi(
     (signal) => fetchGlobalDaily(deviceId, 90, signal),
-    [deviceId],
-  )
-  const quota = useApi(
-    (signal) => fetchGlobalQuota(365, deviceId, signal),
     [deviceId],
   )
 
@@ -321,7 +321,7 @@ function GlobalDashboard({
         : (
           <>
             <DashboardSection title="核心指标" description="当前范围内所有设备的累计数据">
-              <GlobalTotalsCards totals={overview.data.totals} />
+              <GlobalTotalsCards totals={overview.data.totals} costs={overview.data.costsByCurrency} currency={currency} exchangeRate={exchangeRate} />
             </DashboardSection>
 
             <DashboardSection title="用量走势" description="从趋势和日历两个维度查看使用节奏">
@@ -337,16 +337,12 @@ function GlobalDashboard({
 
             {scope.kind === "all" ? (
               <DashboardSection title="设备明细" description="确认哪些设备正在贡献数据，以及最近上报时间">
-                <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} />
+                <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} currency={currency} exchangeRate={exchangeRate} />
               </DashboardSection>
             ) : null}
 
-            <DashboardSection title="额度与费用" description="渠道额度窗口、计价币种和 Provider 分布分开查看">
-              <GlobalQuotaCard quota={quota.data} loading={quota.loading} />
-              <div className="grid gap-6 xl:grid-cols-2">
-                <GlobalCostTable rows={overview.data.costsByCurrency} />
-                <GlobalProviderTable rows={overview.data.providers} />
-              </div>
+            <DashboardSection title="费用与 Provider" description="计价费用和 Provider 分布分开查看">
+              <GlobalProviderTable rows={overview.data.providers} />
             </DashboardSection>
           </>
         )}
@@ -374,136 +370,17 @@ function DashboardSection({
   )
 }
 
-function GlobalQuotaCard({
-  quota,
-  loading,
+function GlobalTotalsCards({
+  totals,
+  costs,
+  currency,
+  exchangeRate,
 }: {
-  quota: GlobalQuotaResponse | null
-  loading: boolean
+  totals: GlobalOverviewResponse["totals"] | null
+  costs: GlobalCostRow[]
+  currency: DisplayCurrency
+  exchangeRate: number | null
 }) {
-  if (loading && quota === null) return <PageSkeleton rows={2} />
-  if (quota === null || quota.periods.length === 0) {
-    return <Alert><AlertTitle>暂无额度周期</AlertTitle><AlertDescription>中心库尚未收集到带重置时间的额度快照</AlertDescription></Alert>
-  }
-  const groups = new Map<string, GlobalQuotaResponse["periods"]>()
-  for (const period of quota.periods) {
-    const key = `${period.provider}\u0000${period.windowId}`
-    const group = groups.get(key) ?? []
-    group.push(period)
-    groups.set(key, group)
-  }
-  const current = [...groups.values()]
-    .map((periods) => [...periods].sort((a, b) => b.resetsAt - a.resetsAt)[0]!)
-    .sort((a, b) => a.provider.localeCompare(b.provider) || a.windowId.localeCompare(b.windowId))
-  const history = [...groups.entries()]
-    .map(([key, periods]) => ({
-      key,
-      periods: [...periods].sort((a, b) => b.resetsAt - a.resetsAt).slice(1),
-    }))
-    .filter((group) => group.periods.length > 0)
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>渠道额度估算</CardTitle>
-        <CardDescription>最近 {quota.days} 天 · 按渠道和额度窗口汇总，默认展示最新周期</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {current.map((period) => <QuotaPeriodCard key={`${period.provider}-${period.windowId}`} period={period} />)}
-        </div>
-        {history.length === 0 ? null : (
-          <details className="group rounded-lg border bg-muted/20 px-3">
-            <summary className="cursor-pointer list-none py-3 text-sm font-medium">
-              历史周期
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {history.reduce((count, group) => count + group.periods.length, 0)} 个
-              </span>
-              <span className="float-right text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
-            </summary>
-            <div className="overflow-x-auto pb-3">
-              <Table className="min-w-[900px]">
-                <TableHeader><TableRow>
-                  <TableHead>渠道 / 额度窗口</TableHead><TableHead>周期开始</TableHead><TableHead>周期结束</TableHead><TableHead>周期时长</TableHead><TableHead>参与设备</TableHead>
-                  <TableHead>已使用 Token</TableHead><TableHead>最新使用率</TableHead><TableHead>推算周期容量</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>{history.flatMap((group) => group.periods.map((period) => (
-                  <TableRow key={`${period.provider}-${period.windowId}-${period.resetsAt}`}>
-                    <TableCell>{period.providerDisplayName?.trim() || period.provider} · {period.windowId}</TableCell>
-                    <TableCell className="whitespace-nowrap tabular-nums">{formatTime(period.periodStartAtMs)}</TableCell>
-                    <TableCell className="whitespace-nowrap tabular-nums">{formatTime(period.periodEndAtMs)}</TableCell>
-                    <TableCell className="whitespace-nowrap tabular-nums">{formatQuotaSpan(period.periodStartAtMs, period.periodEndAtMs)}</TableCell>
-                    <TableCell>{period.deviceCount}</TableCell>
-                    <TableCell>{formatTokens(period.totalTokens)}</TableCell>
-                    <TableCell>{formatQuotaPercent(period.latestUsedPercentMillionths)}</TableCell>
-                    <TableCell>{period.estimatedTotalTokens === null ? "未提供" : formatTokens(period.estimatedTotalTokens)}</TableCell>
-                  </TableRow>
-                )))}</TableBody>
-              </Table>
-            </div>
-          </details>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function QuotaPeriodCard({ period }: { period: GlobalQuotaResponse["periods"][number] }) {
-  const hasPercent = period.latestUsedPercentMillionths !== null
-  return (
-    <div className="rounded-lg border bg-card p-4 shadow-xs">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-medium">渠道：{period.providerDisplayName?.trim() || period.provider}</p>
-          <p className="text-xs text-muted-foreground">额度窗口：{period.windowId}</p>
-        </div>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-          {period.deviceCount} 台设备
-        </span>
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div><p className="text-xs text-muted-foreground">{hasPercent ? "最新使用率" : "已使用 Token"}</p><p className="mt-1 text-lg font-semibold tabular-nums">{hasPercent ? formatQuotaPercent(period.latestUsedPercentMillionths) : formatTokens(period.totalTokens)}</p></div>
-        <div><p className="text-xs text-muted-foreground">{hasPercent ? "已使用 Token" : "额度百分比"}</p><p className="mt-1 text-lg font-semibold tabular-nums">{hasPercent ? formatTokens(period.totalTokens) : "未提供"}</p></div>
-      </div>
-      <div className="mt-3 overflow-x-auto border-t pt-3 text-xs text-muted-foreground">
-        <div className="flex min-w-max items-center gap-2 tabular-nums">
-          <span title="周期开始">{formatQuotaTimelineTime(period.periodStartAtMs)}</span>
-          <span className="flex items-center gap-1" aria-hidden="true">
-            <i className="size-1.5 rounded-full bg-primary" />
-            <i className="h-px w-4 bg-border" />
-            <span className="rounded-full border bg-muted px-2 py-0.5 font-medium text-foreground">{formatQuotaSpan(period.periodStartAtMs, period.periodEndAtMs)}</span>
-            <i className="h-px w-4 bg-border" />
-            <i className="size-1.5 rounded-full bg-primary" />
-          </span>
-          <span title="周期结束">{formatQuotaTimelineTime(period.periodEndAtMs)}</span>
-          {hasPercent && period.estimatedTotalTokens !== null ? <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">估算 {formatTokens(period.estimatedTotalTokens)}</span> : null}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function formatQuotaPercent(value: number | null): string {
-  return value === null ? "未提供" : `${(value / 1_000_000).toFixed(2)}%`
-}
-
-function formatQuotaSpan(startAtMs: number | null, endAtMs: number): string {
-  if (startAtMs === null || endAtMs < startAtMs) return "未知"
-  const minutes = Math.max(0, Math.round((endAtMs - startAtMs) / 60_000))
-  if (minutes < 60) return `${minutes} 分钟`
-  const hours = minutes / 60
-  if (hours < 24) return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`
-  const days = hours / 24
-  return `${Number.isInteger(days) ? days : days.toFixed(1)} 天`
-}
-
-function formatQuotaTimelineTime(value: number | null): string {
-  if (value === null) return "未知"
-  const date = new Date(value)
-  const pad = (part: number) => String(part).padStart(2, "0")
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"] | null }) {
   if (totals === null) {
     return (
       <Alert>
@@ -513,7 +390,7 @@ function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"
     )
   }
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
       <StatCard
         title="设备数"
         value={totals.device_count.toLocaleString("zh-CN")}
@@ -529,12 +406,40 @@ function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"
         value={formatTokens(totals.total_tokens)}
         description={`输入 ${formatTokens(totals.input_tokens)} · 输出 ${formatTokens(totals.output_tokens)}`}
       />
+      <CostStatCard costs={costs} currency={currency} exchangeRate={exchangeRate} />
       <StatCard
         title="最近上报"
         value={totals.last_recorded_at_ms === null ? "—" : formatTime(totals.last_recorded_at_ms)}
         description="中心最后一条记录"
       />
     </div>
+  )
+}
+
+function CostStatCard({
+  costs,
+  currency,
+  exchangeRate,
+}: {
+  costs: GlobalCostRow[]
+  currency: DisplayCurrency
+  exchangeRate: number | null
+}) {
+  const usd = costs.find((cost) => cost.currency.toLowerCase() === "usd")
+  const cny = costs.find((cost) => cost.currency.toLowerCase() === "cny")
+  const usdNanos = usd?.total_cost_nanos
+    ?? (cny && exchangeRate ? Math.round(cny.total_cost_nanos / exchangeRate) : null)
+  const cnyNanos = cny?.total_cost_nanos
+    ?? (usd && exchangeRate ? Math.round(usd.total_cost_nanos * exchangeRate) : null)
+  const requestCount = usd?.request_count ?? cny?.request_count ?? 0
+  const primary = currency === "cny" ? formatNanos(cnyNanos, "CNY", 2) : formatNanos(usdNanos, "USD", 2)
+  const equivalent = currency === "cny" ? formatNanos(usdNanos, "USD", 2) : formatNanos(cnyNanos, "CNY", 2)
+  return (
+    <StatCard
+      title="费用"
+      value={primary}
+      description={`${equivalent} · ${requestCount.toLocaleString("zh-CN")} 个已计价请求`}
+    />
   )
 }
 
@@ -688,44 +593,6 @@ export function GlobalHeatmapCard({ rows, loading }: { rows: GlobalDailyRow[]; l
   )
 }
 
-function GlobalCostTable({ rows }: { rows: GlobalCostRow[] }) {
-  if (rows.length === 0) return null
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>费用（按币种）</CardTitle>
-        <CardDescription>不同币种不合并，按中心库计价快照统计</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <Table className="min-w-[560px]">
-          <TableHeader>
-            <TableRow>
-              <TableHead>币种</TableHead>
-              <TableHead>已计价请求</TableHead>
-              <TableHead>费用</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.currency}>
-                <TableCell>{row.currency}</TableCell>
-                <TableCell className="tabular-nums">
-                  {row.request_count.toLocaleString("zh-CN")}
-                </TableCell>
-                <TableCell className="tabular-nums">
-                  {formatNanos(row.total_cost_nanos, row.currency)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
   return (
     <Card>
@@ -756,7 +623,32 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
               ].join("\u0000")
               return (
                 <TableRow key={key}>
-                  <TableCell>{label}</TableCell>
+                  <TableCell>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button type="button" className="font-medium hover:underline">{label}</button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-none border border-border bg-card p-0 text-card-foreground shadow-lg">
+                        <div className="max-w-[720px] overflow-x-auto p-3">
+                          <p className="mb-2 text-xs font-medium text-card-foreground">按模型统计</p>
+                          <Table className="min-w-[620px]">
+                            <TableHeader><TableRow><TableHead>模型</TableHead><TableHead>请求数</TableHead><TableHead>输入 Token</TableHead><TableHead>输出 Token</TableHead><TableHead>总 Token</TableHead></TableRow></TableHeader>
+                            <TableBody>
+                              {(row.models ?? []).length === 0 ? <TableRow><TableCell colSpan={5}>暂无模型数据</TableCell></TableRow> : (row.models ?? []).map((model) => (
+                                <TableRow key={model.model ?? "unknown"}>
+                                  <TableCell>{model.model ?? "未知模型"}</TableCell>
+                                  <TableCell className="tabular-nums">{model.request_count.toLocaleString("zh-CN")}</TableCell>
+                                  <TableCell className="tabular-nums">{formatTokens(model.input_tokens)}</TableCell>
+                                  <TableCell className="tabular-nums">{formatTokens(model.output_tokens)}</TableCell>
+                                  <TableCell className="tabular-nums">{formatTokens(model.total_tokens)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TableCell>
                   <TableCell className="tabular-nums">
                     {row.request_count.toLocaleString("zh-CN")}
                   </TableCell>
@@ -774,7 +666,7 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
   )
 }
 
-function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading: boolean }) {
+function GlobalDeviceTable({ rows, loading, currency, exchangeRate }: { rows: GlobalDeviceRow[]; loading: boolean; currency: DisplayCurrency; exchangeRate: number | null }) {
   if (loading && rows.length === 0) return null
   return (
     <Card>
@@ -790,6 +682,8 @@ function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading
               <TableHead>首次上报</TableHead>
               <TableHead>最后上报</TableHead>
               <TableHead>请求数</TableHead>
+              <TableHead>总 Token</TableHead>
+              <TableHead>费用</TableHead>
               <TableHead>子代理数</TableHead>
             </TableRow>
           </TableHeader>
@@ -800,6 +694,8 @@ function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading
                 <TableCell className="tabular-nums">{formatTime(row.first_seen_at_ms)}</TableCell>
                 <TableCell className="tabular-nums">{formatTime(row.last_seen_at_ms)}</TableCell>
                 <TableCell className="tabular-nums">{row.request_count.toLocaleString("zh-CN")}</TableCell>
+                <TableCell className="tabular-nums">{formatTokens(row.total_tokens)}</TableCell>
+                <TableCell className="tabular-nums">{formatDeviceCost(row.costs_by_currency, currency, exchangeRate)}</TableCell>
                 <TableCell className="tabular-nums">{row.subagent_count.toLocaleString("zh-CN")}</TableCell>
               </TableRow>
             ))}
@@ -810,9 +706,26 @@ function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading
   )
 }
 
-function formatNanos(nanos: number | null, currency: string | null): string {
+function formatDeviceCost(costs: GlobalCostRow[], currency: DisplayCurrency, exchangeRate: number | null): string {
+  const usd = costs.find((cost) => cost.currency.toLowerCase() === "usd")
+  const cny = costs.find((cost) => cost.currency.toLowerCase() === "cny")
+  const primary = currency === "cny"
+    ? (cny ?? (usd && exchangeRate ? { ...usd, currency: "CNY", total_cost_nanos: Math.round(usd.total_cost_nanos * exchangeRate) } : null))
+    : (usd ?? (cny && exchangeRate ? { ...cny, currency: "USD", total_cost_nanos: Math.round(cny.total_cost_nanos / exchangeRate) } : null))
+  if (!primary) return "—"
+  const equivalent = currency === "cny"
+    ? (usd ? formatNanos(usd.total_cost_nanos, "USD", 2) : null)
+    : (cny ? formatNanos(cny.total_cost_nanos, "CNY", 2) : null)
+  return equivalent ? `${formatNanos(primary.total_cost_nanos, primary.currency, 2)} · ${equivalent}` : formatNanos(primary.total_cost_nanos, primary.currency, 2)
+}
+
+function formatNanos(nanos: number | null, currency: string | null, fractionDigits = 4): string {
   const amount = Number(nanos ?? 0) / 1e9
-  if (currency === "CNY") return `¥${amount.toFixed(4)}`
-  if (currency === "USD") return `$${amount.toFixed(4)}`
-  return `${amount.toFixed(4)} ${currency ?? ""}`.trim()
+  const formatted = amount.toLocaleString("zh-CN", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  })
+  if (currency === "CNY") return `¥${formatted}`
+  if (currency === "USD") return `$${formatted}`
+  return `${formatted} ${currency ?? ""}`.trim()
 }

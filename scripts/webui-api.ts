@@ -370,6 +370,15 @@ export interface GlobalProviderRow {
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  models?: GlobalProviderModelRow[]
+}
+
+export interface GlobalProviderModelRow {
+  model: string | null
+  request_count: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
 }
 
 export interface GlobalOverviewResponse {
@@ -385,6 +394,8 @@ export interface GlobalDeviceRow {
   last_seen_at_ms: number
   last_ingested_at_ms: number | null
   request_count: number
+  total_tokens: number
+  costs_by_currency: GlobalCostRow[]
   subagent_count: number
 }
 
