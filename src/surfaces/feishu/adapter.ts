@@ -1682,6 +1682,9 @@ function renderCommandCenterChoices(
           `- 模型：${result.state.model}`,
           `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
           `- 思考等级：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+          ...(currentModel && fastServiceTierId(currentModel)
+            ? [`- Fast 模式：${isFastServiceTier(result.state.serviceTier, currentModel) ? "开启" : "关闭"}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
+            : []),
           "",
           "请先选择提供商，再选择该提供商下的模型。",
         ].join("\n"),
@@ -1699,7 +1702,7 @@ function renderCommandCenterChoices(
         "当前设置",
         `- Provider：${formatCodexProviderLabel(result.state.providerFilter)}`,
         "",
-        "选择模型后将继续选择思考等级。",
+        "已选择该 Provider，请继续选择模型。选择模型后将继续选择思考等级。",
       ].join("\n"),
       descriptionFormat: "markdown",
       choices: result.state.models

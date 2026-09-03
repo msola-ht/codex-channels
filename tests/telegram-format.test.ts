@@ -74,7 +74,7 @@ describe("model formatting", () => {
     expect(text).not.toContain("当前模型：gpt-fast（下一次 Turn 生效）");
     expect(text).toContain("2. gpt-fast · gpt-fast · 支持 Fast ← 当前");
     expect(text).toContain("Fast 模式：开启（下一次 Turn 生效）");
-    expect(text).toContain("/model <序号、模型 ID 或名称>");
+    expect(text).toContain("/model <模型序号、ID 或名称>");
   });
 
   it("shows structured lifecycle hints without changing availability", () => {

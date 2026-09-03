@@ -536,8 +536,8 @@ describe("Feishu conversation adapter", () => {
           displayName: "GPT Test",
           supportedReasoningEfforts: [{ effort: "medium", description: "平衡" }],
           defaultReasoningEffort: "medium",
-          serviceTiers: [],
-          defaultServiceTier: null,
+          serviceTiers: [{ id: "priority", name: "Fast" }],
+          defaultServiceTier: "priority",
           isDefault: true,
           inputModalities: ["text"],
         },
@@ -557,11 +557,11 @@ describe("Feishu conversation adapter", () => {
       model: "gpt-test",
       modelProvider: "openai",
       effort: "medium",
-      serviceTier: null,
+      serviceTier: "priority",
       pending: false,
       modelPending: false,
       effortPending: false,
-      serviceTierPending: false,
+      serviceTierPending: true,
     }));
     const clearModelBrowse = vi.fn(async () => (await modelState()));
     const adapter = new FeishuConversationAdapter(
@@ -583,6 +583,7 @@ describe("Feishu conversation adapter", () => {
     if (response === undefined || "kind" in response) {
       throw new Error("预期返回选择卡片");
     }
+    expect(response.description).toContain("Fast 模式：开启（下一次 Turn 生效）");
     expect(response.choices).toEqual([
       expect.objectContaining({ action: "model", input: "openai" }),
       expect.objectContaining({ action: "model", input: "deepseek" }),

@@ -8,8 +8,12 @@ import type {
   DisplayPriceCurrency,
   ExchangeRateSnapshot,
 } from "../../application/index.js";
-import { listProviders } from "../../application/index.js";
-import { formatCodexProviderLabel } from "../provider-format.js";
+import {
+  fastServiceTierId,
+  isFastServiceTier,
+  listProviders,
+} from "../../application/index.js";
+import { formatCodexProviderLabel, formatProviderLabel } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import {
   formatConversationAgents,
@@ -297,10 +301,17 @@ function modelProviderSelectionText(
 ): string {
   const providers = listProviders(result.state.models);
   const current = result.state.modelProvider ?? "openai";
+  const currentModel = result.state.models.find((model) =>
+    model.model === result.state.model
+    && (model.provider ?? "openai") === current);
   return toStructuredMarkdownList([
     `当前模型：${result.state.model}（Provider：${formatCodexProviderLabel(current)}）`,
     `思考等级：${result.state.effort ?? "模型默认"}`,
+    ...(currentModel && fastServiceTierId(currentModel)
+      ? [`Fast 模式：${isFastServiceTier(result.state.serviceTier, currentModel) ? "开启" : "关闭"}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
+      : []),
     "",
+    `当前 Provider：${formatCodexProviderLabel(current)}`,
     "可用提供商：",
     ...providers.map((provider, index) =>
       `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${result.state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`),
@@ -353,7 +364,7 @@ export function modelSelectionKeyboard(
   return {
     inline_keyboard: models.map((model, index) => [{
       text: boundedButtonLabel(
-        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
+        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter)}${model.available === false ? "（暂不可用）" : ""}`,
       ),
       callback_data: `ms:${index + 1}:${token}`,
     }]),
@@ -362,6 +373,17 @@ export function modelSelectionKeyboard(
 
 export function telegramModelSelectionToken(model: string, provider: string): string {
   return createHash("sha256").update(`${provider}\0${model}`).digest("base64url");
+}
+
+function scopedModelDisplayName(displayName: string, provider: string | undefined): string {
+  if (!provider) return displayName;
+  for (const label of [formatProviderLabel(provider), provider]) {
+    const prefix = `${label} · `;
+    if (displayName.startsWith(prefix)) {
+      return displayName.slice(prefix.length);
+    }
+  }
+  return displayName;
 }
 
 export function scheduledTaskConfirmationKeyboard(

@@ -1169,6 +1169,7 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain("### 可用提供商");
+    expect(rendered).toContain("当前 Provider：OpenAI 官方");
     expect(rendered).toContain("1. OpenAI 官方 ← 当前 · 1 个模型");
     expect(rendered).toContain("2. DeepSeek · 1 个模型");
     expect(rendered).toContain("下一步：/model <提供商序号或 ID>");

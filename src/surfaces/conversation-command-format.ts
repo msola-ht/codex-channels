@@ -1680,7 +1680,11 @@ export function formatConversationModels(
     return toStructuredMarkdownList([
       formatModelStateLine(state),
       `思考等级：${state.effort ?? "模型默认"}`,
+      ...(current && fastServiceTierId(current)
+        ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
+        : []),
       "",
+      `当前 Provider：${formatCodexProviderLabel(currentProvider)}`,
       "可用提供商：",
       ...providers.map((provider, index) =>
         `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,
@@ -1698,13 +1702,14 @@ export function formatConversationModels(
     ...formatCurrentModelNotices(current),
     "",
     ...providerSwitchNotice,
+    `当前 Provider：${formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0])}`,
     `模型列表（${scopedModels.length}）：`,
     ...scopedModels.map(
       (model, index) =>
         `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
     ),
     "",
-    "切换：/model <序号、模型 ID 或名称>",
+    "切换：/model <模型序号、ID 或名称>",
   ].join("\n"));
 }
 
