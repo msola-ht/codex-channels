@@ -3,9 +3,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { useManagementTasks } from "@/hooks/use-management-tasks"
-
-type ManagementTasks = ReturnType<typeof useManagementTasks>
+import type { ManagementTaskController } from "@/lib/settings-management"
 
 const maintenanceActions = [
   ["upgrade", "升级指标库"],
@@ -14,7 +12,7 @@ const maintenanceActions = [
   ["reset", "重建指标库"],
 ] as const
 
-export function ManagementTaskControls({ tasks, providerIds }: { tasks: ManagementTasks; providerIds: string[] }) {
+export function ManagementTaskControls({ tasks, providerIds }: { tasks: ManagementTaskController; providerIds: string[] }) {
   const providerOptions = [...new Set(providerIds.filter((providerId) => providerId.length > 0))]
   const [pruneProvider, setPruneProvider] = useState(providerOptions[0] ?? "openai")
   const hasActiveTask = tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))

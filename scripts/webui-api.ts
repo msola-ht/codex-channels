@@ -461,12 +461,72 @@ export interface ManagementTask {
   auditStatus?: "recorded" | "degraded"
 }
 
+export type ManagementTaskInput =
+  | { operation: "update"; action?: "source" }
+  | { operation: "service"; action: "install" | "uninstall" }
+  | { operation: "service"; action: "reload" }
+  | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "center" | "all" }
+  | { operation: "metrics"; action: "upgrade" | "sync-reset" | "cleanup" | "reset" }
+  | { operation: "metrics"; action: "prune"; target: string }
+
+export interface ManagementTaskPreview {
+  operation: ManagementTaskInput["operation"]
+  action: string
+  target: string | null
+  effects: string[]
+  preconditions: string[]
+  recovery: string
+  activation: string | { status: string; target: string; commands: readonly string[] }
+  resource?: unknown
+  requiresConfirmation: true
+}
+
+export type ManagementApiProviderMutationInput =
+  | {
+      operation: "save"
+      provider: { id: string; name: string; endpoint: string; apiKey?: string }
+    }
+  | { operation: "delete"; id: string }
+
 export interface ManagementApiProvider {
   id: string
   name: string
   protocol: "responses"
   endpoint: string
   hasApiKey: boolean
+}
+
+export interface ManagementApiProviderActivation {
+  status: string
+  target: string
+  commands: readonly string[]
+}
+
+export interface ManagementApiProviderPreview {
+  operation: "create" | "update" | "delete"
+  provider: {
+    id: string
+    name: string
+    protocol?: "responses"
+    endpoint?: string
+    apiKeyChange?: boolean
+  }
+  activation: ManagementApiProviderActivation
+}
+
+export interface ManagementApiProviderPreviewResponse {
+  preview: ManagementApiProviderPreview
+  resourceRevision: string
+  confirmationToken: string
+  confirmationExpiresAt: number
+}
+
+export interface ManagementApiProviderMutationResponse {
+  action: string
+  provider?: ManagementApiProvider | { id: string; name: string } | string
+  activation?: string
+  activationResult?: ManagementApiProviderActivation
+  auditStatus?: "recorded" | "degraded"
 }
 
 export interface DeepseekBalance {

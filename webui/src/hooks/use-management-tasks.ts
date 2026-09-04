@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react"
 
 import { useApi } from "@/hooks/use-api"
 import { cancelManagementTask, fetchManagementTasks, previewManagementTask, startManagementTask } from "@/lib/api"
+import type { ManagementTaskController } from "@/lib/settings-management"
+import type { ManagementTaskInput } from "@/lib/types"
 
-export function useManagementTasks() {
+export function useManagementTasks(): ManagementTaskController {
   const request = useApi(fetchManagementTasks, [])
   const [actionError, setActionError] = useState<string | null>(null)
   useEffect(() => {
@@ -11,7 +13,7 @@ export function useManagementTasks() {
     const timer = window.setInterval(request.refetch, 2_000)
     return () => window.clearInterval(timer)
   }, [request.data, request.refetch])
-  const run = useCallback(async (input: { operation: "service" | "metrics" | "update"; action?: string; target?: string }) => {
+  const run = useCallback(async (input: ManagementTaskInput) => {
     setActionError(null)
     try {
       const preview = await previewManagementTask(input)

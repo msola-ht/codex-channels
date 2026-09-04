@@ -96,6 +96,13 @@
   `/api/v1/management/services` 在同一 WebUI Bearer 鉴权下提供受管服务状态、版本和受限的最近错误摘要；
   `/api/v1/management/providers` 提供不含 URL、Profile 或凭据的 Provider 安全概览。
   管理设置接口复用 WebUI `Authorization: Bearer` 令牌，并保留精确 Origin、JSON 请求约束、限速和审计。
+- `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
+  管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
+- `webui-management-providers.mjs`：Provider 管理结果脱敏、资源修订快照和 Provider 状态投影；不读取或返回凭据正文。
+- `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
+  设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
+- `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置与 Provider 的输入校验、预览投影、缓存查询，以及
+  WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务只负责路由和领域处理。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标维护和源码更新异步任务；
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按 WebUI 令牌隔离，输出不回传且支持取消。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、

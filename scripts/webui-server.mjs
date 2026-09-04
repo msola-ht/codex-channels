@@ -1,5 +1,4 @@
 import { createServer } from "node:http";
-import { timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -30,15 +29,22 @@ import {
   updateGatewaySetting,
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
-import { inspectManagedServiceStatusAsync, readManagedServiceErrorAsync } from "./service-status.mjs";
-import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import { readManagedServiceErrorAsync } from "./service-status.mjs";
+import { loadServiceStatusSummary, serviceVersion } from "./webui-service-status.mjs";
+import {
+  ApiError,
+  authorized,
+  isLoopbackAddress,
+  readJsonBody,
+  sendJson,
+  sendManagementJson,
+} from "./webui-http.mjs";
 import {
   ManagementAuditWriter,
   ManagementConfirmationStore,
   ManagementRateLimiter,
   ManagementSecurityError,
   fingerprintManagementValue,
-  managementSecurityHeaders,
   validateManagementJsonRequest,
 } from "./management-security.mjs";
 import {
@@ -51,11 +57,25 @@ import {
   deleteApiProvider,
   listApiProviders,
   saveApiProvider,
-  validateApiProviderEndpoint,
-  validateApiProviderId,
-  validateApiProviderName,
 } from "./api-provider-management.mjs";
 import { WebuiManagementTaskRunner } from "./webui-management-tasks.mjs";
+import { apiProviderResourceStateFromList, redactApiProviderResult } from "./webui-management-providers.mjs";
+import { managementTaskResourceState, normalizeTaskRequestShape } from "./webui-management-task-resource.mjs";
+import {
+  isHighRiskManagedSetting,
+  normalizeManagedSetting,
+  redactManagedSettings,
+} from "./webui-management-settings.mjs";
+import {
+  apiProviderResourceState,
+  assertManagedSetting,
+  codexManagementError,
+  isHighRiskManagementPath,
+  loadProviderManagementSummary,
+  ManagementOperationError,
+  normalizeApiProviderMutation,
+  previewApiProviderOperation,
+} from "./webui-management-operations.mjs";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
@@ -99,14 +119,6 @@ const contentTypes = {
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
 };
-
-class ApiError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
 
 export function createWebuiServer({
   environment = process.env,
@@ -197,6 +209,16 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
     }
     serveStatic(staticDir, url.pathname, response);
   } catch (error) {
+    if (error instanceof ManagementOperationError) {
+      sendManagementJson(response, error.code === "stale-revision" ? 409 : 400, {
+        error: {
+          code: error.code,
+          ...(error.field === undefined ? {} : { field: error.field }),
+          message: error.message,
+        },
+      });
+      return;
+    }
     if (error instanceof ManagementSecurityError) {
       sendManagementJson(response, error.status, { error: { code: error.code, message: error.message } });
       return;
@@ -481,7 +503,7 @@ async function routeManagement(environment, url, request, response, state, token
     try { preview = state.tasks.preview(body); } catch (error) { throw new ApiError(400, "invalid_task", error instanceof Error ? error.message : "任务输入无效"); }
     const normalized = normalizeTaskRequestShape(body);
     const inputFingerprint = fingerprintManagementValue(normalized);
-    const resource = await managementTaskResourceState(normalized, environment, state.serviceStatusCache);
+    const resource = await managementTaskResourceState(normalized, environment, state.serviceStatusCache, SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null, (...args) => new ApiError(...args));
     preview = { ...preview, resource };
     const resourceRevision = fingerprintManagementValue(
       resource,
@@ -497,7 +519,7 @@ async function routeManagement(environment, url, request, response, state, token
     let preview;
     try { preview = state.tasks.preview(normalized); } catch (error) { throw new ApiError(400, "invalid_task", error instanceof Error ? error.message : "任务输入无效"); }
     const inputFingerprint = fingerprintManagementValue(normalized);
-    const resource = await managementTaskResourceState(normalized, environment, state.serviceStatusCache);
+    const resource = await managementTaskResourceState(normalized, environment, state.serviceStatusCache, SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null, (...args) => new ApiError(...args));
     preview = { ...preview, resource };
     const resourceRevision = fingerprintManagementValue(
       resource,
@@ -666,152 +688,13 @@ async function routeManagement(environment, url, request, response, state, token
   throw new ApiError(404, "not_found", `未知管理 API：${path}`);
 }
 
-function codexManagementError(error) {
-  if (error instanceof ApiError) return error;
-  const code = typeof error?.code === "string" ? error.code : "codex_settings_failed";
-  const status = code === "stale-revision" ? 409 : 400;
-  return new ApiError(status, code, error instanceof Error ? error.message : "App Server 用户设置操作失败");
-}
-
-function normalizeApiProviderMutation(input, environment) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new ApiError(400, "invalid_json", "Provider 操作正文必须是对象");
-  }
-  if (input.operation === "delete") return { operation: "delete", id: input.id };
-  const provider = input.provider ?? input;
-  const requested = input.operation === "create" || input.operation === "update" ? input.operation : "save";
-  const existing = listApiProviders(environment).providers.some(({ id }) => id === provider?.id);
-  return {
-    operation: "save",
-    provider: {
-      operation: requested === "save" ? (existing ? "update" : "create") : requested,
-      id: provider?.id,
-      name: provider?.name,
-      endpoint: provider?.endpoint,
-      ...(typeof provider?.apiKey === "string" ? { apiKey: provider.apiKey } : {}),
-    },
-  };
-}
-
-function normalizeTaskRequestShape(input) {
-  const shape = { operation: input?.operation };
-  if (input?.action !== undefined) shape.action = input.action;
-  else if (input?.operation === "update") shape.action = "source";
-  if (input?.target !== undefined) shape.target = input.target;
-  return shape;
-}
-
-async function managementTaskResourceState(normalized, environment, serviceStatusCache) {
-  if (normalized.operation === "metrics") {
-    try {
-      const status = inspectMetricsDatabase(environment);
-      const serviceStatuses = await loadServiceStatusSummary(environment, serviceStatusCache);
-      const gatewayEntry = serviceStatuses.find(({ entry }) => entry.target === "gateway")?.entry;
-      return {
-        operation: normalized.operation,
-        action: normalized.action,
-        target: normalized.target ?? null,
-        gateway: gatewayEntry === undefined
-          ? null
-          : {
-              loaded: gatewayEntry.loaded,
-              running: gatewayEntry.running,
-              state: gatewayEntry.state,
-            },
-        database: {
-          exists: status.exists,
-          schemaVersion: status.schemaVersion,
-          count: status.count,
-        },
-      };
-    } catch {
-      throw new ApiError(503, "task_resource_unavailable", "指标数据库状态暂不可用，请稍后重试");
-    }
-  }
-  if (normalized.operation === "service") {
-    const statuses = await loadServiceStatusSummary(environment, serviceStatusCache);
-    return {
-      operation: normalized.operation,
-      action: normalized.action,
-      target: normalized.target ?? null,
-      services: statuses.map(({ entry }) => ({
-        target: entry.target,
-        loaded: entry.loaded,
-        running: entry.running,
-        state: entry.state,
-      })),
-    };
-  }
-  return {
-    operation: normalized.operation,
-    action: normalized.action,
-    sourceVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
-  };
-}
-
-function apiProviderResourceState(environment) {
-  return apiProviderResourceStateFromList(listApiProviders(environment).providers);
-}
-
-function apiProviderResourceStateFromList(providers) {
-  return providers.map(({ id, name, protocol, endpoint, hasApiKey }) => ({
-    id,
-    name,
-    protocol,
-    endpoint,
-    hasApiKey: hasApiKey === true,
-  }));
-}
-
-function previewApiProviderOperation(input, environment) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new ApiError(400, "invalid_json", "Provider 操作正文必须是对象");
-  }
-  if (input.operation === "delete") {
-    const idError = validateApiProviderId(input.id);
-    if (idError !== undefined) throw new ApiError(400, "invalid_provider", idError);
-    const current = listApiProviders(environment).providers.find((provider) => provider.id === input.id);
-    if (current === undefined) throw new ApiError(400, "provider_not_found", `找不到直接 API Provider：${input.id}`);
-    return { operation: "delete", provider: { id: current.id, name: current.name }, activation: configActivationResult("restart-gateway") };
-  }
-  if (input.operation !== "save" && input.operation !== "create" && input.operation !== "update") {
-    throw new ApiError(400, "invalid_provider_operation", "Provider 操作必须是 create、update 或 delete");
-  }
-  const provider = input.provider ?? input;
-  const idError = validateApiProviderId(provider?.id);
-  const nameError = validateApiProviderName(provider?.name);
-  const endpointError = validateApiProviderEndpoint(provider?.endpoint);
-  if (idError !== undefined) throw new ApiError(400, "invalid_provider", idError);
-  if (nameError !== undefined) throw new ApiError(400, "invalid_provider", nameError);
-  if (endpointError !== undefined) throw new ApiError(400, "invalid_provider", endpointError);
-  const operation = input.operation === "save" ? (listApiProviders(environment).providers.some(({ id }) => id === provider.id) ? "update" : "create") : input.operation;
-  return {
-    operation,
-    provider: { id: provider.id, name: provider.name, protocol: "responses", endpoint: provider.endpoint, apiKeyChange: typeof provider.apiKey === "string" && provider.apiKey.length > 0 },
-    activation: configActivationResult("restart-gateway"),
-  };
-}
-
-function redactApiProviderResult(result) {
-  if (!result || typeof result !== "object") return { action: "completed" };
-  const provider = result.provider && typeof result.provider === "object"
-    ? { id: result.provider.id, name: result.provider.name, protocol: result.provider.protocol, endpoint: result.provider.endpoint, hasApiKey: result.provider.hasApiKey }
-    : result.provider;
-  return {
-    action: result.action,
-    ...(provider === undefined ? {} : { provider }),
-    activation: result.activation,
-    activationResult: result.activationResult,
-  };
-}
-
 async function handleManagementServices(environment, response, serviceStatusCache) {
   const serviceResults = await loadServiceStatusSummary(environment, serviceStatusCache);
   const platform = serviceResults.find((result) => result.platform !== null)?.platform ?? null;
   const entries = await Promise.all(serviceResults.map(async (result) => ({
     ...result.entry,
     identifier: result.entry.identifier ?? null,
-    version: serviceVersion(result.entry.target),
+    version: serviceVersion(result.entry.target, { gatewayVersion: GATEWAY_VERSION, codexCliVersion: CODEX_CLI_VERSION }),
     recentError: await readManagedServiceErrorAsync({ environment, target: result.entry.target }),
   })));
   sendManagementJson(response, 200, {
@@ -833,129 +716,6 @@ async function handleManagementProviders(environment, response, providerStateCac
   sendManagementJson(response, 200, providers);
 }
 
-const PROVIDER_STATE_CACHE_TTL_MS = 5_000;
-
-function loadProviderManagementSummary(environment, cache, loadProviderState) {
-  const now = Date.now();
-  if (cache.value !== null && cache.expiresAtMs > now) return Promise.resolve(cache.value);
-  if (cache.pending !== null) return cache.pending;
-  cache.pending = loadProviderState({ environment })
-    .then(projectProviderManagementState)
-    .then((value) => {
-      cache.value = value;
-      cache.expiresAtMs = Date.now() + PROVIDER_STATE_CACHE_TTL_MS;
-      return value;
-    })
-    .finally(() => {
-      cache.pending = null;
-    });
-  return cache.pending;
-}
-
-function projectProviderManagementState(state) {
-  const providers = [];
-  const addProvider = (provider) => {
-    providers.push({
-      ...provider,
-      id: publicProviderId(provider.id),
-      displayName: publicProviderDisplayName(provider.displayName, provider.id),
-      model: publicProviderText(provider.model),
-    });
-  };
-  for (const provider of state.managedProviders) {
-    addProvider({
-      id: provider.id,
-      displayName: provider.displayName,
-      kind: "managed",
-      mode: provider.mode,
-      state: "configured",
-      model: provider.model,
-      modelCount: boundedCount(provider.models.length),
-      selected: state.primary.id === provider.id,
-    });
-  }
-  for (const provider of state.customProviders.fixedCandidates) {
-    addProvider({
-      id: provider.id,
-      displayName: provider.displayName,
-      kind: "custom",
-      mode: provider.active ? "exclusive" : "fixed",
-      state: provider.state,
-      model: null,
-      modelCount: null,
-      selected: provider.active,
-    });
-  }
-  for (const provider of state.customProviders.switchingProviders) {
-    addProvider({
-      id: provider.id,
-      displayName: provider.displayName,
-      kind: "custom",
-      mode: "switching",
-      state: "configured",
-      model: provider.model,
-      modelCount: null,
-      selected: state.primary.id === provider.id,
-    });
-  }
-  for (const provider of state.customProviders.backupCandidates) {
-    addProvider({
-      id: provider.id,
-      displayName: provider.displayName,
-      kind: "custom",
-      mode: "backup",
-      state: "backup",
-      model: null,
-      modelCount: null,
-      selected: provider.active,
-    });
-  }
-  return {
-    observedAt: new Date().toISOString(),
-    available: true,
-    configVersion: state.configVersion ?? null,
-    defaults: {
-      model: publicProviderText(state.defaults.model),
-      reasoningEffort: publicProviderText(state.defaults.reasoningEffort),
-    },
-    primary: {
-      id: publicProviderId(state.primary.id),
-      displayName: publicProviderDisplayName(state.primary.displayName, state.primary.id),
-      kind: state.primary.kind,
-      mode: state.primary.mode,
-    },
-    providers,
-    externalAgent: state.externalAgent.status === "configured"
-      ? {
-          status: "configured",
-          provider: publicProviderId(state.externalAgent.provider),
-          model: publicProviderText(state.externalAgent.model) ?? "unknown",
-        }
-      : { status: state.externalAgent.status },
-  };
-}
-
-function publicProviderId(value) {
-  return publicProviderText(value) ?? "unknown";
-}
-
-function publicProviderDisplayName(value, fallback) {
-  return publicProviderText(value) ?? publicProviderId(fallback);
-}
-
-function publicProviderText(value) {
-  if (typeof value !== "string") return null;
-  return value.replace(/\p{Cc}/gu, " ").replace(/\s+/gu, " ").trim().slice(0, 120) || null;
-}
-
-function boundedCount(value) {
-  return Number.isSafeInteger(value) && value >= 0 && value <= 1_000 ? value : null;
-}
-
-function serviceVersion(target) {
-  return target === "app-server" ? CODEX_CLI_VERSION : GATEWAY_VERSION;
-}
-
 function readJsonMetadata(path) {
   try {
     const value = JSON.parse(readFileSync(path, "utf8"));
@@ -963,174 +723,6 @@ function readJsonMetadata(path) {
   } catch {
     return null;
   }
-}
-
-const managedSettingKinds = new Set([
-  "display.operation-updates",
-  "display.plan-updates",
-  "display.reasoning",
-  "display.price-currency",
-  "system.approval-timeout",
-  "system.sandbox",
-  "system.default-model",
-  "automation.scheduled-tasks",
-  "advanced.logging-level",
-  "metrics.storage",
-  "metrics.sync-params",
-  "webui.port",
-  "webui.host",
-  "webui.token",
-  "telegram.message-format",
-  "system.default-workspace",
-  "automation.thread-section-administrators",
-  "advanced.plugin-api",
-  "network.proxy",
-  "network.proxy-batch",
-  "metrics.connect",
-  "metrics.disconnect",
-  "metrics.center.host",
-  "metrics.center.port",
-  "metrics.center.token",
-  "metrics.center.generate-tokens",
-  "workspace.permissions",
-]);
-
-const highRiskManagedSettingKinds = new Set([
-  "webui.host",
-  "webui.token",
-  "network.proxy",
-  "network.proxy-batch",
-  "metrics.connect",
-  "metrics.disconnect",
-  "metrics.center.token",
-  "metrics.center.generate-tokens",
-  "workspace.permissions",
-]);
-
-function isHighRiskManagedSetting(input) {
-  return highRiskManagedSettingKinds.has(input?.kind);
-}
-
-function isHighRiskManagementPath(path) {
-  return path.startsWith("/api-providers")
-    || path.startsWith("/tasks");
-}
-
-function assertManagedSetting(input) {
-  if (!input || typeof input !== "object" || Array.isArray(input) || !managedSettingKinds.has(input.kind)) {
-    throw new ApiError(400, "setting_not_allowed", "该设置暂不支持 WebUI 修改");
-  }
-}
-
-function normalizeManagedSetting(input) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
-  if ((input.kind === "metrics.storage" || input.kind === "metrics.sync-params")
-    && input.value !== null && typeof input.value === "object" && !Array.isArray(input.value)) {
-    return { ...input.value, kind: input.kind };
-  }
-  return input;
-}
-
-function redactManagedSettings(settings) {
-  return {
-    revision: settings.revision,
-    display: settings.display,
-    system: {
-      approvalTimeoutSeconds: settings.system.approvalTimeoutSeconds,
-      sandbox: settings.system.sandbox,
-      defaultWorkspace: settings.system.defaultWorkspace,
-      defaultModel: settings.system.defaultModel,
-      workspaces: settings.system.workspaces,
-    },
-    automation: {
-      scheduledTasksEnabled: settings.automation.scheduledTasksEnabled,
-      threadSectionAdministratorCount: settings.automation.threadSectionAdministrators.length,
-    },
-    advanced: {
-      loggingLevel: settings.advanced.loggingLevel,
-      pluginApiEnabled: settings.advanced.pluginApiEnabled,
-    },
-    network: {
-      configuredFields: Object.entries(settings.network)
-        .filter(([, value]) => value.configured)
-        .map(([field]) => field),
-    },
-    metrics: {
-      storage: settings.metrics.storage,
-      sync: {
-        enabled: settings.metrics.sync.enabled,
-        endpointConfigured: settings.metrics.sync.endpoint !== null,
-        deviceName: settings.metrics.sync.deviceName,
-        deviceTokenConfigured: settings.metrics.sync.deviceTokenConfigured,
-        intervalSeconds: settings.metrics.sync.intervalSeconds,
-        batchSize: settings.metrics.sync.batchSize,
-      },
-      view: {
-        enabled: settings.metrics.view.enabled,
-        endpointConfigured: settings.metrics.view.endpoint !== null,
-        tokenConfigured: settings.metrics.view.tokenConfigured,
-      },
-      center: {
-        enabled: settings.metrics.center.enabled,
-        host: settings.metrics.center.host,
-        port: settings.metrics.center.port,
-        tokenConfigured: settings.metrics.center.tokenConfigured,
-        deviceTokenConfigured: settings.metrics.center.deviceTokenConfigured,
-      },
-    },
-    webui: {
-      host: settings.webui.host,
-      port: settings.webui.port,
-      tokenConfigured: settings.webui.tokenConfigured,
-    },
-    channels: settings.channels,
-  };
-}
-
-function sendManagementJson(response, status, payload, extraHeaders = {}) {
-  response.writeHead(status, { ...managementSecurityHeaders(), "content-type": "application/json; charset=utf-8", ...extraHeaders });
-  response.end(JSON.stringify(payload));
-}
-
-function readJsonBody(request, maximumBytes) {
-  return new Promise((resolveBody, reject) => {
-    let total = 0;
-    const chunks = [];
-    request.on("data", (chunk) => {
-      total += chunk.length;
-      if (total > maximumBytes) {
-        reject(new ApiError(413, "body_too_large", "管理请求正文过大"));
-        request.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on("end", () => {
-      try {
-        resolveBody(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch {
-        reject(new ApiError(400, "invalid_json", "管理请求正文不是有效 JSON"));
-      }
-    });
-    request.on("error", reject);
-  });
-}
-
-function authorized(request, token) {
-  const header = request.headers.authorization;
-  if (typeof header !== "string" || !header.startsWith("Bearer ")) {
-    return false;
-  }
-  const provided = Buffer.from(header.slice("Bearer ".length));
-  const expected = Buffer.from(token);
-  return provided.length === expected.length
-    && timingSafeEqual(provided, expected);
-}
-
-function isLoopbackAddress(address) {
-  return address === "127.0.0.1"
-    || address === "::1"
-    || address === "::ffff:127.0.0.1";
 }
 
 async function routeApi(environment, url, response, serviceStatusCache) {
@@ -1660,40 +1252,6 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
   });
 }
 
-const SERVICE_STATUS_CACHE_TTL_MS = 2_000;
-
-function loadServiceStatusSummary(environment, cache) {
-  const now = Date.now();
-  if (cache.value !== null && cache.expiresAtMs > now) return Promise.resolve(cache.value);
-  if (cache.pending !== null) return cache.pending;
-  cache.pending = Promise.all(serviceDefinitions.map(async (definition) => {
-    try {
-      const status = await inspectManagedServiceStatusAsync({ environment, target: definition.target });
-      if (!status.services[0]) throw new Error("服务状态响应缺少目标条目");
-      return { platform: status.platform, entry: status.services[0] };
-    } catch {
-      return {
-        platform: null,
-        entry: {
-          target: definition.target,
-          name: definition.displayName,
-          loaded: false,
-          running: false,
-          state: "unavailable",
-          pid: null,
-        },
-      };
-    }
-  })).then((results) => {
-    cache.value = results;
-    cache.expiresAtMs = Date.now() + SERVICE_STATUS_CACHE_TTL_MS;
-    return results;
-  }).finally(() => {
-    cache.pending = null;
-  });
-  return cache.pending;
-}
-
 function parseCurrency(url) {
   const value = url.searchParams.get("currency");
   if (value === null) return null;
@@ -1810,16 +1368,6 @@ function serveStatic(staticDir, pathname, response) {
     }
     throw new ApiError(404, "not_found", `静态文件不存在：${pathname}`);
   }
-}
-
-function sendJson(response, status, payload) {
-  const body = JSON.stringify(payload);
-  response.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-  });
-  response.end(body);
 }
 
 function main() {

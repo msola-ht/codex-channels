@@ -23,6 +23,11 @@ import type {
   CodexUserSettingsResponse,
   CodexUserSettingInput,
   ManagementTask,
+  ManagementTaskInput,
+  ManagementTaskPreview,
+  ManagementApiProviderMutationInput,
+  ManagementApiProviderPreviewResponse,
+  ManagementApiProviderMutationResponse,
   ManagementApiProvider,
   ThreadRunResponse,
   ThreadsResponse,
@@ -271,11 +276,11 @@ export function fetchManagementTasks(signal?: AbortSignal): Promise<{ tasks: Man
   return getJson<{ tasks: ManagementTask[] }>(`${API_PREFIX}/management/tasks`, signal)
 }
 
-export function previewManagementTask(input: { operation: "service" | "metrics" | "update"; action?: string; target?: string }, signal?: AbortSignal): Promise<{ preview: unknown; confirmationToken: string; confirmationExpiresAt: number }> {
+export function previewManagementTask(input: ManagementTaskInput, signal?: AbortSignal): Promise<{ preview: ManagementTaskPreview; confirmationToken: string; confirmationExpiresAt: number }> {
   return requestJson(`${API_PREFIX}/management/tasks/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
 }
 
-export function startManagementTask(input: { operation: "service" | "metrics" | "update"; action?: string; target?: string; confirmationToken: string }, signal?: AbortSignal): Promise<ManagementTask> {
+export function startManagementTask(input: ManagementTaskInput & { confirmationToken: string }, signal?: AbortSignal): Promise<ManagementTask> {
   return requestJson<ManagementTask>(`${API_PREFIX}/management/tasks`, { method: "POST", body: JSON.stringify(input) }, signal)
 }
 
@@ -287,12 +292,12 @@ export function fetchManagementApiProviders(signal?: AbortSignal): Promise<{ pro
   return getJson<{ providers: ManagementApiProvider[] }>(`${API_PREFIX}/management/api-providers`, signal)
 }
 
-export function previewManagementApiProvider(input: unknown, signal?: AbortSignal): Promise<{ preview: unknown; confirmationToken: string; confirmationExpiresAt: number }> {
-  return requestJson(`${API_PREFIX}/management/api-providers/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+export function previewManagementApiProvider(input: ManagementApiProviderMutationInput, signal?: AbortSignal): Promise<ManagementApiProviderPreviewResponse> {
+  return requestJson<ManagementApiProviderPreviewResponse>(`${API_PREFIX}/management/api-providers/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
 }
 
-export function applyManagementApiProvider(input: unknown, confirmationToken: string, signal?: AbortSignal): Promise<unknown> {
-  return requestJson(`${API_PREFIX}/management/api-providers`, { method: "POST", body: JSON.stringify({ ...input as object, confirmationToken }) }, signal)
+export function applyManagementApiProvider(input: ManagementApiProviderMutationInput, confirmationToken: string, signal?: AbortSignal): Promise<ManagementApiProviderMutationResponse> {
+  return requestJson<ManagementApiProviderMutationResponse>(`${API_PREFIX}/management/api-providers`, { method: "POST", body: JSON.stringify({ ...input as object, confirmationToken }) }, signal)
 }
 
 export function fetchDeepseekBalance(

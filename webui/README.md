@@ -18,9 +18,9 @@ npm run lint       # oxlint
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
   lib/         API 客户端、共享类型转出与格式化
-  hooks/       数据 hook（useApi 统一 loading/error/refetch）、设置管理、请求排序状态与全局货币上下文
-  components/  layout（Sidebar）、metrics（指标区块与共享数据表格）、requests（请求明细数据表格）、settings（设置控件）
-  pages/       概览、Threads、Thread 详情、请求、错误、设置
+  hooks/       数据 hook（useApi 统一 loading/error/refetch）、设置管理（共用版本化预览/确认状态机）、请求排序状态与全局货币上下文
+  components/  layout（Sidebar）、metrics（指标区块与共享数据表格）、requests（请求明细数据表格）、settings（按设置域拆分的卡片与控件）
+  pages/       概览、Threads、Thread 详情、请求、错误、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
 
@@ -42,7 +42,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 - 业务组件按领域分目录组合：`components/layout/`（布局与鉴权）、
   `components/overview/`、`components/threads/`、`components/metrics/`（指标区块），
   `components/requests/`（请求明细数据表格），只做组件组合与数据编排，不直接发请求；
-- 数据获取统一走 `hooks/`（`useApi` 系列，集中 loading/error/refetch），组件不直接
+- 数据获取统一走 `hooks/`（`useApi` 系列，集中 loading/error/refetch；设置变更共用版本化预览/确认 Hook），组件不直接
   `fetch`（唯一例外：`AuthGate` 在提交令牌前用原始请求验证一次）；API 路径统一从
   `src/lib/api.ts` 的 `API_PREFIX` 拼接；
 - 类型从 `src/lib/types.ts` 转出，格式化（价格/Token/耗时）放 `src/lib/format.ts`；
