@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ChannelStatusCard, ProviderStatusCard } from "@/components/settings/provider-channel-status"
 import { ApiProviderManagement } from "@/components/settings/api-provider-management"
+import { ManagementTaskControls } from "@/components/settings/management-task-controls"
 import { ManagedInputRow, ManagedSelect, PendingSettingCard, SettingsRow } from "@/components/settings/settings-controls"
 import { useCurrency } from "@/hooks/currency-context"
 import { useApi } from "@/hooks/use-api"
@@ -114,7 +115,7 @@ export function SettingsPage() {
           <ChannelStatusCard channels={summary.data.gateway.channels} />
           {actionError !== null ? <p className="text-sm text-destructive">{actionError}</p> : null}
           <Card>
-            <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态、版本和最近错误由当前平台服务管理器只读查询</CardDescription></CardHeader>
+            <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态、版本和最近错误由当前平台服务管理器查询；启停、重载和安装操作需要确认</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-3">
               {services.loading ? <><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></> : null}
               {services.error ? <SettingsError message={services.error} retry={services.refetch} /> : null}
@@ -124,8 +125,12 @@ export function SettingsPage() {
               {tasks.actionError !== null ? <p className="text-sm text-destructive" role="status">{tasks.actionError}</p> : null}
             </CardContent>
           </Card>
+          <ManagementTaskControls
+            tasks={tasks}
+            providerIds={[...(providers.data?.primary.id ? [providers.data.primary.id] : []), ...(providers.data?.providers.map((provider) => provider.id) ?? [])]}
+          />
           <Card>
-            <CardHeader><CardTitle>CLI 设置入口</CardTitle><CardDescription>尚未接入页面的凭据、高权限和执行型操作暂通过 CLI 管理</CardDescription></CardHeader>
+            <CardHeader><CardTitle>CLI 设置入口</CardTitle><CardDescription>尚未接入页面的凭据、渠道 Setup 和账户授权暂通过 CLI 管理</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-3">
               {summary.data.cli.map((entry, index) => (
                 <Fragment key={entry.id}>
@@ -178,8 +183,13 @@ function ManagedServices({ services, tasks }: { services: ManagementServicesResp
   if (services.entries.length === 0) {
     return <span className="text-sm text-muted-foreground">当前平台没有可展示的受管服务。</span>
   }
+  const taskBusy = tasks.loading || tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
   return (
     <>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" disabled={taskBusy || services.platform === null} onClick={() => void tasks.run({ operation: "service", action: "install" })}>安装全部服务</Button>
+        <Button variant="outline" size="sm" disabled={taskBusy || services.platform === null} onClick={() => void tasks.run({ operation: "service", action: "uninstall" })}>卸载全部服务</Button>
+      </div>
       {services.entries.map((service, index) => (
         <Fragment key={service.target}>
           {index > 0 ? <Separator /> : null}
@@ -195,8 +205,9 @@ function ManagedServices({ services, tasks }: { services: ManagementServicesResp
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={service.running ? "secondary" : "destructive"}>{serviceStatusLabel(service)}</Badge>
-                <Button variant="outline" size="sm" disabled={tasks.loading} onClick={() => void tasks.run({ operation: "service", action: service.running ? "restart" : "start", target: service.target })}>{service.running ? "重启" : "启动"}</Button>
-                {service.running ? <Button variant="outline" size="sm" disabled={tasks.loading} onClick={() => void tasks.run({ operation: "service", action: "stop", target: service.target })}>停止</Button> : null}
+                <Button variant="outline" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: service.running ? "restart" : "start", target: service.target })}>{service.running ? "重启" : "启动"}</Button>
+                {service.target === "gateway" ? <Button variant="outline" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: "reload" })}>重载</Button> : null}
+                {service.running ? <Button variant="outline" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: "stop", target: service.target })}>停止</Button> : null}
               </div>
             </div>
             {service.recentError !== null ? (

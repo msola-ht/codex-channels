@@ -140,13 +140,11 @@ export class WebuiManagementTaskRunner {
       const child = spawn(invocation.file, invocation.args, {
         env: environment,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "ignore", "ignore"],
         windowsHide: true,
       });
       task.process = child;
-      let output = "";
       let settled = false;
-      const collect = (chunk) => { output = `${output}${String(chunk)}`.slice(-4_096); };
       const finish = (state, error, resultCode, recovery) => {
         if (settled) return;
         settled = true;
@@ -162,17 +160,17 @@ export class WebuiManagementTaskRunner {
         this.#emitTerminal(task, state, resultCode, recovery);
         resolve();
       };
-      child.stdout.on("data", collect);
-      child.stderr.on("data", collect);
-      child.once("error", (error) => {
-        finish("failed", error.message, "failed", "retry-task");
+      child.once("error", () => {
+        // Do not expose the platform error text: it can contain executable
+        // paths or environment-specific details that are not actionable here.
+        finish("failed", "任务启动失败", "failed", "retry-task");
       });
       child.once("close", (code) => {
         const cancelled = task.state === "cancelling";
         const state = cancelled ? "cancelled" : code === 0 ? "completed" : "failed";
-        const error = state === "failed" ? sanitizeTaskText(output) || `任务退出码 ${String(code)}` : null;
-        // Command output is intentionally not returned: even after redaction a
-        // third-party maintenance command may include credentials or paths.
+        const error = state === "failed" ? `任务失败（退出码 ${code === null ? "未知" : String(code)}）` : null;
+        // Command output is intentionally neither retained nor returned: even
+        // after redaction a third-party command may include credentials or paths.
         finish(state, error, state === "cancelled" ? "cancelled" : state, state === "failed" ? "retry-task" : "none");
       });
     });
@@ -215,6 +213,10 @@ export function normalizeTaskInput(input) {
   if (input.operation === "service") {
     if (!serviceActions.has(input.action)) throw new Error("服务任务动作无效");
     if (["install", "uninstall"].includes(input.action)) return { operation: "service", action: input.action, target: undefined };
+    if (input.action === "reload") {
+      if (input.target !== undefined) throw new Error("服务重载不接受服务目标");
+      return { operation: "service", action: input.action, target: undefined };
+    }
     if (!targets.has(input.target)) throw new Error("服务任务目标无效");
     return { operation: "service", action: input.action, target: input.target };
   }

@@ -15,7 +15,15 @@ export function useManagementTasks() {
     setActionError(null)
     try {
       const preview = await previewManagementTask(input)
-      const confirmed = window.confirm(`确认执行：${String((preview.preview as { effects?: string[] })?.effects?.[0] ?? input.action)}？`)
+      const details = preview.preview !== null && typeof preview.preview === "object" && !Array.isArray(preview.preview)
+        ? preview.preview as { effects?: string[]; preconditions?: string[]; recovery?: string }
+        : {}
+      const description = [
+        ...(details.effects ?? []),
+        ...(details.preconditions ?? []).map((condition) => `前置条件：${condition}`),
+        details.recovery ? `失败处理：${details.recovery}` : null,
+      ].filter((item): item is string => item !== null)
+      const confirmed = window.confirm(`确认执行：${description.join("\n") || input.action}？`)
       if (!confirmed) return null
       const task = await startManagementTask({ ...input, confirmationToken: preview.confirmationToken })
       request.refetch()

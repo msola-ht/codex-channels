@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -537,6 +537,57 @@ describe("webui server", () => {
       method: "POST",
       headers,
       body: JSON.stringify({ operation: "save", provider: { operation: "create", id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" }, confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(replay.status).toBe(409);
+  });
+
+  it("previews and starts a confirmed source maintenance task without replay", async () => {
+    const fixture = createFixture();
+    const executableDirectory = mkdtempSync(join(tmpdir(), "codexc-webui-task-route-"));
+    temporaryDirectories.push(executableDirectory);
+    const executable = process.platform === "win32" ? join(executableDirectory, "codexc.cmd") : join(executableDirectory, "codexc");
+    if (process.platform === "win32") {
+      writeFileSync(executable, "@echo off\r\nexit /b 0\r\n", { mode: 0o700 });
+    } else {
+      writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+      chmodSync(executable, 0o700);
+    }
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(
+      { ...fixture.environment, PATH: executableDirectory + delimiter },
+      undefined,
+      { token: "webui-token", managementOrigin },
+    );
+    const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
+    const preview = await fetch(`${origin}/api/v1/management/tasks/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "update" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken: string };
+    const startBody = { operation: "update", confirmationToken: previewBody.confirmationToken };
+    const started = await fetch(`${origin}/api/v1/management/tasks`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(startBody),
+    });
+    expect(started.status).toBe(202);
+    const taskId = (await started.json() as { id: string }).id;
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const list = await fetch(`${origin}/api/v1/management/tasks`, { headers: { authorization: "Bearer webui-token" } });
+      expect(list.status).toBe(200);
+      const task = (await list.json() as { tasks: Array<{ id: string; state: string }> }).tasks.find((candidate) => candidate.id === taskId);
+      if (task?.state === "completed") break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      if (attempt === 99) throw new Error("管理任务未在预期时间内完成");
+    }
+
+    const replay = await fetch(`${origin}/api/v1/management/tasks`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(startBody),
     });
     expect(replay.status).toBe(409);
   });

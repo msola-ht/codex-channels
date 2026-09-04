@@ -18,8 +18,9 @@ export function PendingSettingCard({ pending, saving, onConfirm, onCancel }: { p
 }
 
 export function ManagedSelect({ label, value, options, disabled, onChange }: { label: string; value: string; options: string[][]; disabled: boolean; onChange: (value: string) => void }) {
-  const effectiveOptions = options.some(([option]) => option === value) ? options : [[value, value], ...options]
-  return <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">{label}</span><Select value={value} disabled={disabled} onValueChange={onChange}><SelectTrigger size="sm" className="w-[160px]" aria-label={label}><SelectValue /></SelectTrigger><SelectContent>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectContent></Select></div>
+  const nonEmptyOptions = options.filter(([option]) => option !== "")
+  const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
+  return <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">{label}</span><Select value={value === "" ? undefined : value} disabled={disabled} onValueChange={onChange}><SelectTrigger size="sm" className="w-[160px]" aria-label={label}><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>{effectiveOptions.length > 0 ? <SelectContent>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectContent> : null}</Select></div>
 }
 
 function formatPreviewValue(value: unknown): string {
