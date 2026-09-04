@@ -334,6 +334,27 @@ export interface SettingsSummaryResponse {
   cli: Array<{ id: string; label: string; command: string; detail: string }>
 }
 
+export interface ManagementSettingsResponse {
+  revision: string
+  display: SettingsSummaryResponse["gateway"]["display"]
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultModel">
+  automation: { scheduledTasksEnabled: boolean }
+  advanced: { loggingLevel: SettingsSummaryResponse["gateway"]["advanced"]["loggingLevel"] }
+  metrics: {
+    storage: SettingsSummaryResponse["gateway"]["metrics"]["storage"]
+    sync: { enabled: boolean; intervalSeconds: number; batchSize: number }
+  }
+  webui: { host: string; port: number }
+}
+
+export interface ManagementSettingInput { kind: string; value: unknown }
+export interface ManagementLoginResponse { expiresAt: number; csrfToken: string }
+export interface ManagementSettingMutationResponse {
+  revision: string
+  value: unknown
+  activation: { status: string; target: string; commands: readonly string[] }
+}
+
 export interface DeepseekBalance {
   currency: string
   totalBalance: string

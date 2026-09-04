@@ -15,6 +15,10 @@ import type {
   RequestsResponse,
   SettingsResponse,
   SettingsSummaryResponse,
+  ManagementLoginResponse,
+  ManagementSettingsResponse,
+  ManagementSettingInput,
+  ManagementSettingMutationResponse,
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
@@ -95,6 +99,85 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
     throw new ApiClientError(message, response.status, code)
   }
   return await response.json() as T
+}
+
+let managementCsrfToken: string | null = null
+let managementUnauthorizedHandler: (() => void) | null = null
+
+export function onManagementUnauthorized(handler: () => void): () => void {
+  managementUnauthorizedHandler = handler
+  return () => {
+    if (managementUnauthorizedHandler === handler) managementUnauthorizedHandler = null
+  }
+}
+
+export function clearManagementSession(): void {
+  managementCsrfToken = null
+  managementUnauthorizedHandler?.()
+}
+
+async function managementJson<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(30_000)
+  const effectiveSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal])
+  const response = await fetch(path, {
+    ...init,
+    credentials: "same-origin",
+    headers: {
+      accept: "application/json",
+      ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+      ...(managementCsrfToken === null ? {} : { "x-codex-csrf": managementCsrfToken }),
+      ...init.headers,
+    },
+    signal: effectiveSignal,
+  })
+  if (!response.ok) {
+    if (response.status === 401) clearManagementSession()
+    const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null
+    throw new ApiClientError(
+      body?.error?.message ?? `请求失败：HTTP ${response.status}`,
+      response.status,
+      body?.error?.code ?? "http_error",
+    )
+  }
+  return await response.json() as T
+}
+
+export async function loginManagement(credential: string): Promise<ManagementLoginResponse> {
+  const result = await managementJson<ManagementLoginResponse>(`${API_PREFIX}/management/login`, {
+    method: "POST",
+    body: JSON.stringify({ credential }),
+  })
+  managementCsrfToken = result.csrfToken
+  return result
+}
+
+export async function logoutManagement(): Promise<void> {
+  await managementJson<{ ok: boolean }>(`${API_PREFIX}/management/logout`, { method: "POST" })
+  managementCsrfToken = null
+}
+
+export function fetchManagementSettings(signal?: AbortSignal): Promise<ManagementSettingsResponse> {
+  return managementJson<ManagementSettingsResponse>(`${API_PREFIX}/management/settings`, {}, signal)
+}
+
+export function previewManagementSetting(
+  revision: string,
+  setting: ManagementSettingInput,
+  signal?: AbortSignal,
+): Promise<ManagementSettingMutationResponse> {
+  return managementJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/settings/preview`, {
+    method: "POST", body: JSON.stringify({ revision, setting }),
+  }, signal)
+}
+
+export function updateManagementSetting(
+  revision: string,
+  setting: ManagementSettingInput,
+  signal?: AbortSignal,
+): Promise<ManagementSettingMutationResponse> {
+  return managementJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/settings`, {
+    method: "PATCH", body: JSON.stringify({ revision, setting }),
+  }, signal)
 }
 
 export function fetchOverview(

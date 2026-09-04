@@ -36,6 +36,7 @@ import {
   ManagementAuditWriter,
   ManagementRateLimiter,
   ManagementSecurityError,
+  clearManagementSessionCookie,
   fingerprintManagementValue,
   managementSecurityHeaders,
   managementSessionCookie,
@@ -241,6 +242,15 @@ async function routeManagement(environment, url, request, response, state) {
   }
   const controller = managementController(state);
   const sessionToken = parseCookie(request.headers.cookie, "codexc_management");
+  if (path === "/logout" && request.method === "POST") {
+    if (sessionToken !== "") {
+      const authorized = controller.authorize({ sessionToken, csrfToken: request.headers["x-codex-csrf"], origin, method: request.method });
+      controller.logout(sessionToken);
+      state.limiter.consume({ sessionId: authorized.sessionId, category: "write" });
+    }
+    sendManagementJson(response, 200, { ok: true }, { "set-cookie": clearManagementSessionCookie() });
+    return;
+  }
   if (sessionToken === "") {
     throw new ApiError(401, "management_session_invalid", "管理会话无效或已过期");
   }

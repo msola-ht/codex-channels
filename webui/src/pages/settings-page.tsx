@@ -1,21 +1,74 @@
-import { Fragment } from "react"
+import { Fragment, useEffect } from "react"
 import { RefreshCwIcon } from "lucide-react"
+import { useState } from "react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useCurrency } from "@/hooks/currency-context"
 import { useApi } from "@/hooks/use-api"
 import { fetchSettingsSummary } from "@/lib/api"
+import { clearManagementSession, fetchManagementSettings, loginManagement, logoutManagement, onManagementUnauthorized, previewManagementSetting, updateManagementSetting } from "@/lib/api"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
 
 export function SettingsPage() {
   const { currency, settings } = useCurrency()
   const summary = useApi(fetchSettingsSummary, [])
   const loadState = resolveSettingsLoadState(summary.data, summary.loading, summary.error)
+  const [credential, setCredential] = useState("")
+  const [management, setManagement] = useState<Awaited<ReturnType<typeof fetchManagementSettings>> | null>(null)
+  const [managementError, setManagementError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [pendingReasoning, setPendingReasoning] = useState<{ value: boolean; target: string } | null>(null)
+
+  useEffect(() => onManagementUnauthorized(() => {
+    setManagement(null)
+    setPendingReasoning(null)
+    setManagementError("管理会话已过期，请重新登录")
+  }), [])
+
+  async function signIn() {
+    setManagementError(null)
+    try { await loginManagement(credential); setCredential(""); setManagement(await fetchManagementSettings()) }
+    catch (error) { setManagementError(error instanceof Error ? error.message : String(error)) }
+  }
+
+  async function saveReasoning(value: boolean) {
+    if (management === null) return
+    setSaving(true); setManagementError(null)
+    try {
+      const preview = await previewManagementSetting(management.revision, { kind: "display.reasoning", value })
+      setPendingReasoning({ value, target: preview.activation.target })
+    } catch (error) { setManagementError(error instanceof Error ? error.message : String(error)) }
+    finally { setSaving(false) }
+  }
+
+  async function confirmReasoning() {
+    if (management === null || pendingReasoning === null) return
+    setSaving(true); setManagementError(null)
+    try {
+      await updateManagementSetting(management.revision, { kind: "display.reasoning", value: pendingReasoning.value })
+      setPendingReasoning(null)
+      setManagement(await fetchManagementSettings())
+    } catch (error) { setManagementError(error instanceof Error ? error.message : String(error)) }
+    finally { setSaving(false) }
+  }
+
+  async function signOut() {
+    setSaving(true)
+    try { await logoutManagement() } catch { /* 会话已失效时仍清理本地状态 */ }
+    finally {
+      clearManagementSession()
+      setManagement(null)
+      setPendingReasoning(null)
+      setManagementError(null)
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -28,6 +81,13 @@ export function SettingsPage() {
       {loadState === "empty" ? <SettingsError message="服务未返回可用的设置快照" retry={summary.refetch} /> : null}
       {loadState === "ready" && summary.data !== null ? (
         <>
+          <Card>
+            <CardHeader><CardTitle>低风险设置管理</CardTitle><CardDescription>使用终端生成的独立管理凭据；凭据不会保存到浏览器。</CardDescription></CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              {management === null ? <div className="flex flex-col gap-2 sm:flex-row"><Input type="password" value={credential} onChange={(event) => setCredential(event.target.value)} placeholder="管理凭据" autoComplete="off" /><Button onClick={() => void signIn()} disabled={credential.length === 0}>登录管理接口</Button></div> : <div className="flex flex-col gap-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span>已登录，管理会话短期有效。思考状态：{management.display.reasoningEnabled ? "已启用" : "未启用"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={saving || pendingReasoning !== null} onClick={() => void saveReasoning(!management.display.reasoningEnabled)}>{saving ? "预览中…" : "切换思考状态"}</Button><Button variant="ghost" size="sm" disabled={saving} onClick={() => void signOut()}>退出管理</Button></div></div>{pendingReasoning !== null ? <div className="rounded-lg border border-border bg-muted/40 p-3"><p>预览：思考状态将{pendingReasoning.value ? "启用" : "禁用"}。</p><p className="mt-1 text-muted-foreground">生效目标：{pendingReasoning.target}。保存不会自动重启服务。</p><div className="mt-3 flex gap-2"><Button size="sm" disabled={saving} onClick={() => void confirmReasoning()}>确认写入</Button><Button variant="outline" size="sm" disabled={saving} onClick={() => setPendingReasoning(null)}>取消</Button></div></div> : null}</div>}
+              {managementError !== null ? <p className="text-sm text-destructive">{managementError}</p> : null}
+            </CardContent>
+          </Card>
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader><CardTitle>Gateway 与显示</CardTitle><CardDescription>当前配置文件的脱敏快照，部分变更需重启后生效</CardDescription></CardHeader>
