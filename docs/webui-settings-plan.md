@@ -10,8 +10,8 @@
 
 - WebUI 的指标读取和设置读写始终使用同一个 `webui.token`；不恢复独立管理凭据、管理登录、登出接口、
   管理 Cookie 或第二套浏览器会话。
-- 高风险操作继续保留在 CLI。即使未来评估接入 WebUI，也只能在同一 Bearer 鉴权上叠加操作级预览、确认、
-  任务和审计，不得重新引入另一套管理认证。
+- 高风险操作即使接入 WebUI，也只能在同一 Bearer 鉴权上叠加操作级预览、确认、任务和审计；当前白名单任务已接入，
+  不得重新引入另一套管理认证。
 
 ## 现状与事实来源
 
@@ -33,7 +33,7 @@
 - 返回结构化修订值、字段错误、变更摘要和明确生效动作（无需重启、reload、重启 Gateway、重启 WebUI
   或重启全部服务）。
 
-### 首期禁止
+### 首期禁止（阶段一至四边界；阶段五已按新契约部分开放）
 
 - OpenAI/第三方登录、扫码 OAuth、Bot Token、API Key、代理值或任何已有 Secret 的读取和写入。
 - Provider 新增/删除/切换、OpenCode Go 账户操作、渠道 Setup、数据库 reset/upgrade/normalize、源码更新、
@@ -44,7 +44,7 @@
 
 ### 阶段一：文档与设置总览页
 
-状态：阶段一、阶段二完成；阶段三只读集成完成，执行型操作仍未开放
+状态：阶段一、阶段二完成；阶段三状态展示完成，执行型操作已由后续阶段的白名单任务接管
 
 - [x] 建立本计划并加入项目文档索引。
 - [x] 增加 `/settings` 页面和导航入口（总览只读，低风险修改由阶段二提供）。
@@ -64,8 +64,8 @@
 ### 阶段三：服务与执行型操作只读集成
 
 - [x] 展示 Gateway、App Server、WebUI、指标中心服务状态、版本和最近错误。
-- [x] 对高风险 CLI 提供“复制命令/打开终端”提示，不在 WebUI 直接执行。
-- [ ] 若未来开放执行任务，必须先补预览、一次性确认、进度、取消/恢复、任务串行和审计契约。
+- [x] 对未接入的高风险 CLI 保留“复制命令”提示。
+- [x] 已接入的服务/指标维护任务具备预览、一次性确认、状态、取消、串行和审计契约。
 
 ### 阶段四：Provider/渠道可视化评估
 
@@ -73,18 +73,15 @@
 - [x] 根据管理接口成熟度逐项评估 Provider 和渠道 Setup 是否具备可视化条件。
 - [x] 凭据、扫码、OAuth 和服务中断操作维持独立任务边界，未满足安全门槛不得接入页面。
 
-当前批次结果：Provider 只展示主 Provider、Codex 默认模型/思考等级、已配置、可切换和备份 Provider 的安全摘要和共享
-第三方子代理状态；渠道只展示 Gateway 已配置与启用状态。Provider URL、Profile、API Key、Token、OAuth、
-扫码、账户操作、服务重启和任何配置写入均不进入 WebUI。Provider 读取复用现有 `config/read` 结构化适配器和
-`loadModelProviderManagementState`，后端只返回白名单投影；渠道读取复用 Gateway 配置管理的 `channels` 快照。
-当前未开放 Provider/渠道运行健康探测、OAuth/扫码流程和配置写入；这些能力需要独立任务、明确审批和审计契约。
+当前批次结果：Provider 概览继续只返回安全摘要；App Server 用户设置和直接 API Provider 已开放结构化写入，渠道与托管 Provider
+仍只读。OAuth/扫码、账户和其他 Provider 变更需要独立授权任务与明确审批契约。
 
 ## 页面结构
 
 ```text
 设置
-├── App Server 设置（当前状态 + CLI 入口）
-├── Provider 状态（只读安全概览）
+├── App Server 设置（当前值 + 修改）
+├── Provider 状态与直接 API Provider（当前值 + 修改）
 ├── Gateway 设置（当前值 + 修改）
 ├── WebUI 与数据中心设置（当前值 + 修改）
 ├── 通讯渠道状态（只读）
@@ -93,8 +90,8 @@
 ```
 
 每个可编辑区块把当前值和修改入口放在同一位置，只提交对应领域的明确字段，不提供通用键值编辑器。App Server
-用户设置、Provider 和账户尚未接入本地 WebUI 时只显示 CLI 入口，不把 Gateway 配置伪装成 App Server 设置。
-凭据字段仅显示状态和“使用 CLI 配置”提示，不再额外建立独立的“管理设置”或重复的只读快照区块。
+尚未满足授权任务门槛的账户和渠道操作仍显示 CLI 入口，不把 Gateway 配置伪装成 App Server 设置。凭据字段只允许写入，
+仅显示是否已配置，不在页面回显或缓存。
 
 ## API 草案
 
@@ -102,8 +99,18 @@
 GET  /api/v1/management/settings       读取可编辑设置与 revision（复用 WebUI Bearer 令牌）
 POST /api/v1/management/settings/preview 预览低风险设置变更
 PATCH /api/v1/management/settings      写入低风险设置（JSON + revision）
+GET  /api/v1/management/codex/settings 读取 App Server 用户设置（同一 Bearer 令牌）
+POST /api/v1/management/codex/settings/preview 预览 App Server 用户设置变更
+PATCH /api/v1/management/codex/settings 写入 App Server 用户设置（JSON + revision）
 GET  /api/v1/management/services       服务状态、版本和最近错误（只读；复用 WebUI Bearer 令牌）
 GET  /api/v1/management/providers      Provider 安全概览（只读；复用 WebUI Bearer 令牌）
+GET  /api/v1/management/api-providers  直接 API Provider 脱敏列表
+POST /api/v1/management/api-providers/preview 生成 Provider 变更预览和一次性确认令牌
+POST /api/v1/management/api-providers  消费确认令牌并写入 Provider/凭据事务
+POST /api/v1/management/tasks/preview  预览白名单服务/指标维护任务并生成一次性确认令牌
+POST /api/v1/management/tasks          消费确认令牌并异步启动任务
+GET  /api/v1/management/tasks          查询当前令牌所属任务
+DELETE /api/v1/management/tasks/:id    取消排队或运行中的任务
 ```
 
 `/api/v1/settings/summary` 和 `/api/v1/management/*` 均使用同一个 WebUI Bearer Token。未配置 WebUI 令牌时，
@@ -124,3 +131,44 @@ GET  /api/v1/management/providers      Provider 安全概览（只读；复用 W
 - 阶段一只新增页面和只读路由，删除路由/导航即可回滚，不影响现有指标 API。
 - 阶段二每次配置写入沿用现有备份和原子写入机制；冲突或失败不覆盖用户文件。
 - 设置管理与指标读取共享 WebUI Token；关闭设置页不影响指标 WebUI 和 Gateway。
+
+## 后续全功能可视化管理
+
+用户已确认继续接入全部管理能力。以下阶段属于当前计划的扩展范围，仍必须沿用同一 WebUI Bearer 鉴权，不能
+把浏览器变成任意文件或命令执行器。
+
+### 阶段五：全部配置可视化写入
+
+状态：进行中；App Server 用户设置与直接 API Provider 接入完成，其余 Provider/账户/任务仍在后续闭环
+
+- [x] App Server 用户默认值、模型、思考等级、Fast、Sandbox、审批和网络权限接入同一设置页；通过 App Server RPC 使用版本修订保护。
+- [x] 直接 API Provider 新增、编辑、删除接入结构化预览与一次性确认；API Key 只写入凭据目录，不返回页面。
+- [ ] 托管 Provider/自定义 Provider 切换、删除、模型目录和共享第三方子代理接入结构化表单。
+- [ ] OpenCode Go 多账户、DeepSeek 配置/恢复、渠道配置和数据中心连接参数接入结构化表单。
+- [ ] 凭据字段只允许写入，不允许读取、回显、缓存或进入日志；所有配置操作携带修订保护和脱敏审计。
+
+### 阶段六：账户与授权任务
+
+状态：未完成
+
+- [ ] Telegram、飞书、微信 Setup 会话接入页面，支持开始、状态、确认、取消和过期恢复。
+- [ ] OAuth、扫码、配对码和等待消息使用有所有者、期限、取消路径的异步任务，不阻塞 WebUI 请求。
+- [ ] Provider/账户凭据事务复用现有凭据隔离和原子写入实现，不把 Secret 放入任务结果。
+
+### 阶段七：服务与维护任务
+
+状态：进行中；服务、指标维护和源码更新已接入白名单异步任务，Provider 清理和完整恢复细节仍待补齐
+
+- [x] 服务安装、卸载、启动、停止、重载、重启接入白名单异步任务，并展示任务状态、失败和取消。
+- [x] 指标库升级、清理、重置、同步重置和 Provider 清理接入预览与一次性确认任务入口。
+- [ ] 数据库备份恢复细节和 Provider 清理接入完整阶段进度。
+- [x] 本地源码更新接入独立子进程任务，不由 WebUI 进程直接替换自身；版本切换和服务恢复仍按 CLI 更新流程执行。
+- [ ] 所有高风险任务统一使用一次性确认、任务串行、审计和客户端断开不自动批准语义。
+
+### 阶段八：全功能验收
+
+状态：未完成
+
+- [ ] 为每个写入/任务入口补充共享契约、权限、修订冲突、失败恢复和敏感字段测试。
+- [ ] 完成 Linux、macOS 和 Windows 可执行边界验证、WebUI 构建、打包安装和源码部署冒烟。
+- [ ] 重新审查文档、模块边界和回滚路径后再提交。

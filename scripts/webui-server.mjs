@@ -34,12 +34,28 @@ import { inspectManagedServiceStatusAsync, readManagedServiceErrorAsync } from "
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
 import {
   ManagementAuditWriter,
+  ManagementConfirmationStore,
   ManagementRateLimiter,
   ManagementSecurityError,
   fingerprintManagementValue,
   managementSecurityHeaders,
   validateManagementJsonRequest,
 } from "./management-security.mjs";
+import {
+  loadCodexUserSettings,
+  previewCodexUserSetting,
+  updateCodexUserSetting,
+} from "./codex-user-settings-management.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
+import {
+  deleteApiProvider,
+  listApiProviders,
+  saveApiProvider,
+  validateApiProviderEndpoint,
+  validateApiProviderId,
+  validateApiProviderName,
+} from "./api-provider-management.mjs";
+import { WebuiManagementTaskRunner } from "./webui-management-tasks.mjs";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
@@ -100,6 +116,9 @@ export function createWebuiServer({
   port = DEFAULT_PORT,
   managementOrigin = null,
   loadProviderState = loadModelProviderManagementState,
+  loadCodexSettings = loadCodexUserSettings,
+  previewCodexSetting = previewCodexUserSetting,
+  updateCodexSetting = updateCodexUserSetting,
 } = {}) {
   assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
@@ -117,6 +136,9 @@ export function createWebuiServer({
     serviceStatusCache,
     providerStateCache,
     loadProviderState,
+    loadCodexSettings,
+    previewCodexSetting,
+    updateCodexSetting,
   );
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
@@ -206,10 +228,26 @@ function createManagementState(
   serviceStatusCache,
   providerStateCache,
   loadProviderState,
+  loadCodexSettings,
+  previewCodexSetting,
+  updateCodexSetting,
 ) {
   const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const dataDir = explicitConfig ? dirname(resolve(explicitConfig)) : userDataDir(environment);
   const originHost = host === "::1" ? "[::1]" : "127.0.0.1";
+  const audit = new ManagementAuditWriter(join(dataDir, "management-audit.jsonl"));
+  const tasks = new WebuiManagementTaskRunner({
+    onEvent: ({ task, phase, resultCode, recovery, ...metadata }) => {
+      if (typeof metadata.sessionId !== "string") return;
+      audit.record({
+        ...metadata,
+        target: metadata.target ?? `${task.operation}:${task.action}:${task.target ?? ""}`,
+        phase,
+        resultCode,
+        recovery,
+      });
+    },
+  });
   return {
     // 管理请求始终只接受回环连接；即使 WebUI 绑定 0.0.0.0，也允许通过 SSH
     // 隧道访问 127.0.0.1，再由下面的 socket 检查拒绝公网直连管理接口。
@@ -217,8 +255,13 @@ function createManagementState(
     serviceStatusCache,
     providerStateCache,
     loadProviderState,
+    loadCodexSettings,
+    previewCodexSetting,
+    updateCodexSetting,
+    confirmations: new ManagementConfirmationStore(),
+    tasks,
     limiter: new ManagementRateLimiter(),
-    audit: new ManagementAuditWriter(join(dataDir, "management-audit.jsonl")),
+    audit,
   };
 }
 
@@ -249,8 +292,263 @@ async function routeManagement(environment, url, request, response, state, token
     throw new ApiError(401, "unauthorized", "需要有效的访问令牌");
   }
   const principalId = fingerprintManagementValue(token);
-  state.limiter.consume({ principalId, category: request.method === "GET" ? "read" : "write" });
   const path = url.pathname.slice(`${API_PREFIX}/management`.length) || "/";
+  state.limiter.consume({ principalId, category: request.method === "GET" ? "read" : "write" });
+  if (request.method !== "GET" && isHighRiskManagementPath(path)) {
+    state.limiter.consume({ principalId, category: "high-risk" });
+  }
+  if (path === "/codex/settings" && request.method === "GET") {
+    try {
+      sendManagementJson(response, 200, await state.loadCodexSettings({ environment }));
+    } catch {
+      throw new ApiError(503, "codex_settings_unavailable", "App Server 用户设置暂不可用，请检查 App Server 状态");
+    }
+    return;
+  }
+  if (path === "/codex/settings/preview" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new ApiError(400, "invalid_json", "管理请求正文必须是对象");
+    }
+    try {
+      const result = await state.previewCodexSetting(body.setting, {
+        environment,
+        expectedVersion: body.revision,
+      });
+      sendManagementJson(response, 200, {
+        revision: result.previousVersion,
+        value: result.value,
+        activation: configActivationResult(result.activation),
+      });
+    } catch (error) {
+      throw codexManagementError(error);
+    }
+    return;
+  }
+  if (path === "/codex/settings" && request.method === "PATCH") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new ApiError(400, "invalid_json", "管理请求正文必须是对象");
+    }
+    let result;
+    try {
+      state.audit.assertWritable();
+      result = await state.updateCodexSetting(body.setting, {
+        environment,
+        expectedVersion: body.revision,
+      });
+    } catch (error) {
+      throw codexManagementError(error);
+    }
+    let current = null;
+    try {
+      current = await state.loadCodexSettings({ environment });
+    } catch (error) {
+      console.error("App Server 用户设置已写入，但新修订读取失败", error);
+    }
+    let auditStatus = "recorded";
+    try {
+      state.audit.record({
+        sessionId: principalId,
+        source: "webui",
+        operation: "codex.settings.update",
+        target: String(body.setting?.kind ?? "unknown"),
+        inputFingerprint: fingerprintManagementValue(body.setting),
+        revision: fingerprintManagementValue(result.previousVersion),
+        phase: "completed",
+        resultCode: "updated",
+        recovery: current === null ? "re-read" : "none",
+      });
+    } catch (error) {
+      auditStatus = "degraded";
+      console.error("App Server 用户设置已写入，但审计记录失败", error);
+    }
+    sendManagementJson(response, 200, {
+      revision: current?.version ?? null,
+      value: result.value,
+      activation: configActivationResult(result.activation),
+      ...(current === null ? { consistency: "unknown" } : {}),
+      auditStatus,
+    });
+    return;
+  }
+  if (path === "/api-providers" && request.method === "GET") {
+    try {
+      const state = listApiProviders(environment);
+      sendManagementJson(response, 200, {
+        observedAt: new Date().toISOString(),
+        providers: state.providers.map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          protocol: provider.protocol,
+          endpoint: provider.endpoint,
+          hasApiKey: provider.hasApiKey,
+        })),
+      });
+    } catch {
+      throw new ApiError(503, "api_provider_state_unavailable", "直接 API Provider 配置暂不可用");
+    }
+    return;
+  }
+  if (path === "/api-providers/preview" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    const input = normalizeApiProviderMutation(body, environment);
+    const preview = previewApiProviderOperation(input, environment);
+    const inputFingerprint = fingerprintManagementValue(input);
+    const resourceState = apiProviderResourceState(environment);
+    const resourceRevision = fingerprintManagementValue(resourceState);
+    const issued = state.confirmations.issue({
+      sessionId: principalId,
+      operation: "api-provider.write",
+      inputFingerprint,
+      resourceRevision,
+      previewFingerprint: fingerprintManagementValue(preview),
+    });
+    sendManagementJson(response, 200, {
+      preview,
+      resourceRevision,
+      confirmationToken: issued.token,
+      confirmationExpiresAt: issued.expiresAt,
+    });
+    return;
+  }
+  if (path === "/api-providers" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.confirmationToken !== "string") {
+      throw new ApiError(400, "invalid_json", "Provider 写入请求必须包含 confirmationToken");
+    }
+    const input = normalizeApiProviderMutation(body, environment);
+    const operation = input.operation === "delete" ? "delete" : "save";
+    const inputFingerprint = fingerprintManagementValue(input);
+    const current = listApiProviders(environment);
+    const resourceState = apiProviderResourceStateFromList(current.providers);
+    const resourceRevision = fingerprintManagementValue(resourceState);
+    const preview = previewApiProviderOperation(input, environment);
+    state.confirmations.consume(body.confirmationToken, {
+      sessionId: principalId,
+      operation: "api-provider.write",
+      inputFingerprint,
+      resourceRevision,
+      previewFingerprint: fingerprintManagementValue(preview),
+    });
+    let result;
+    try {
+      state.audit.assertWritable();
+      result = operation === "delete"
+        ? deleteApiProvider(input.id, { environment, expectedState: resourceState })
+        : saveApiProvider({ ...input.provider, operation: preview.operation }, { environment, expectedState: resourceState });
+    } catch (error) {
+      if (error?.code === "stale-revision") {
+        throw new ApiError(409, "stale-revision", "Provider 配置已变化，请重新预览后重试");
+      }
+      throw new ApiError(400, "api_provider_write_failed", error instanceof Error ? error.message : "Provider 写入失败");
+    }
+    let auditStatus = "recorded";
+    try {
+      state.audit.record({
+        sessionId: principalId,
+        source: "webui",
+        operation: "api-provider.write",
+        target: String(operation === "delete" ? input.id : input.provider?.id ?? "unknown"),
+        inputFingerprint,
+        revision: resourceRevision,
+        previewId: fingerprintManagementValue(preview),
+        confirmationId: fingerprintManagementValue(body.confirmationToken),
+        phase: "completed",
+        resultCode: result.action,
+        recovery: "none",
+      });
+    } catch (error) {
+      auditStatus = "degraded";
+      console.error("Provider 已写入，但审计记录失败", error);
+    }
+    sendManagementJson(response, 200, { ...redactApiProviderResult(result), auditStatus });
+    return;
+  }
+  const taskMatch = path.match(/^\/tasks(?:\/([^/]+))?$/u);
+  if (taskMatch && request.method === "GET") {
+    if (taskMatch[1] === undefined) sendManagementJson(response, 200, { tasks: state.tasks.list(principalId) });
+    else {
+      const task = state.tasks.get(taskMatch[1], principalId);
+      if (task === null) throw new ApiError(404, "task_not_found", "找不到管理任务");
+      sendManagementJson(response, 200, task);
+    }
+    return;
+  }
+  if (path === "/tasks/preview" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    let preview;
+    try { preview = state.tasks.preview(body); } catch (error) { throw new ApiError(400, "invalid_task", error instanceof Error ? error.message : "任务输入无效"); }
+    const normalized = normalizeTaskRequestShape(body);
+    const inputFingerprint = fingerprintManagementValue(normalized);
+    const resource = await managementTaskResourceState(normalized, environment, state.serviceStatusCache);
+    preview = { ...preview, resource };
+    const resourceRevision = fingerprintManagementValue(
+      resource,
+    );
+    const issued = state.confirmations.issue({ sessionId: principalId, operation: "management.task", inputFingerprint, resourceRevision, previewFingerprint: fingerprintManagementValue(preview) });
+    sendManagementJson(response, 200, { preview, resourceRevision, confirmationToken: issued.token, confirmationExpiresAt: issued.expiresAt });
+    return;
+  }
+  if (path === "/tasks" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    if (!body || typeof body !== "object" || typeof body.confirmationToken !== "string") throw new ApiError(400, "invalid_task", "任务写入请求必须包含 confirmationToken");
+    const normalized = normalizeTaskRequestShape(body);
+    let preview;
+    try { preview = state.tasks.preview(normalized); } catch (error) { throw new ApiError(400, "invalid_task", error instanceof Error ? error.message : "任务输入无效"); }
+    const inputFingerprint = fingerprintManagementValue(normalized);
+    const resource = await managementTaskResourceState(normalized, environment, state.serviceStatusCache);
+    preview = { ...preview, resource };
+    const resourceRevision = fingerprintManagementValue(
+      resource,
+    );
+    state.confirmations.consume(body.confirmationToken, { sessionId: principalId, operation: "management.task", inputFingerprint, resourceRevision, previewFingerprint: fingerprintManagementValue(preview) });
+    try {
+      state.audit.assertWritable();
+      const task = state.tasks.start(normalized, {
+        owner: principalId,
+        environment,
+        auditMetadata: {
+          sessionId: principalId,
+          source: "webui",
+          operation: "management.task",
+          target: `${normalized.operation}:${normalized.action}:${normalized.target ?? ""}`,
+          inputFingerprint,
+          revision: resourceRevision,
+          previewId: fingerprintManagementValue(preview),
+          confirmationId: fingerprintManagementValue(body.confirmationToken),
+        },
+      });
+      let auditStatus = "recorded";
+      try {
+        state.audit.record({
+          sessionId: principalId,
+          source: "webui",
+          operation: "management.task",
+          target: `${normalized.operation}:${normalized.action}:${normalized.target ?? ""}`,
+          inputFingerprint,
+          revision: resourceRevision,
+          previewId: fingerprintManagementValue(preview),
+          confirmationId: fingerprintManagementValue(body.confirmationToken),
+          phase: "started",
+          resultCode: "queued",
+          recovery: "retry-task",
+        });
+      } catch (error) {
+        auditStatus = "degraded";
+        console.error("管理任务已启动，但启动审计记录失败", error);
+      }
+      sendManagementJson(response, 202, { ...task, auditStatus });
+    } catch (error) { throw new ApiError(400, "task_start_failed", error instanceof Error ? error.message : "任务启动失败"); }
+    return;
+  }
+  const cancelMatch = path.match(/^\/tasks\/([^/]+)$/u);
+  if (cancelMatch && request.method === "DELETE") {
+    const task = state.tasks.cancel(cancelMatch[1], principalId);
+    if (task === null) throw new ApiError(404, "task_not_found", "找不到管理任务");
+    sendManagementJson(response, 200, task);
+    return;
+  }
   if (path === "/settings" && request.method === "GET") {
     sendManagementJson(response, 200, redactManagedSettings(loadGatewaySettings(environment)));
     return;
@@ -267,16 +565,33 @@ async function routeManagement(environment, url, request, response, state, token
     const body = await readJsonBody(request, validation.maximumBodyBytes);
     const setting = normalizeManagedSetting(body?.setting);
     assertManagedSetting(setting);
+    if (isHighRiskManagedSetting(setting)) {
+      state.limiter.consume({ principalId, category: "high-risk" });
+    }
     const result = updateGatewaySetting(setting, {
       environment,
       expectedRevision: body.revision,
       writeConfig: () => undefined,
+      skipBackup: true,
     });
-    sendManagementJson(response, 200, {
+    const payload = {
       revision: body.revision,
       value: result.value,
       activation: result.activationResult,
-    });
+    };
+    if (isHighRiskManagedSetting(setting)) {
+      const issued = state.confirmations.issue({
+        sessionId: principalId,
+        operation: "gateway.settings.write",
+        inputFingerprint: fingerprintManagementValue(setting),
+        resourceRevision: body.revision,
+        previewFingerprint: fingerprintManagementValue(payload),
+      });
+      payload.confirmationRequired = true;
+      payload.confirmationToken = issued.token;
+      payload.confirmationExpiresAt = issued.expiresAt;
+    }
+    sendManagementJson(response, 200, payload);
     return;
   }
   if (path === "/settings" && request.method === "PATCH") {
@@ -286,6 +601,27 @@ async function routeManagement(environment, url, request, response, state, token
     }
     const input = normalizeManagedSetting(body.setting);
     assertManagedSetting(input);
+    if (isHighRiskManagedSetting(input)) {
+      state.limiter.consume({ principalId, category: "high-risk" });
+      const dryRun = updateGatewaySetting(input, {
+        environment,
+        expectedRevision: body.revision,
+        writeConfig: () => undefined,
+        skipBackup: true,
+      });
+      const preview = {
+        revision: body.revision,
+        value: dryRun.value,
+        activation: dryRun.activationResult,
+      };
+      state.confirmations.consume(body.confirmationToken, {
+        sessionId: principalId,
+        operation: "gateway.settings.write",
+        inputFingerprint: fingerprintManagementValue(input),
+        resourceRevision: body.revision,
+        previewFingerprint: fingerprintManagementValue(preview),
+      });
+    }
     try {
       state.audit.assertWritable();
     } catch (error) {
@@ -302,6 +638,7 @@ async function routeManagement(environment, url, request, response, state, token
       environment,
       expectedRevision: body.revision,
     });
+    let auditStatus = "recorded";
     try {
       state.audit.record({
         sessionId: principalId,
@@ -315,23 +652,157 @@ async function routeManagement(environment, url, request, response, state, token
         recovery: "none",
       });
     } catch (error) {
+      auditStatus = "degraded";
       console.error("管理设置已写入，但审计记录失败", error);
-      sendManagementJson(response, 500, {
-        error: {
-          code: "management_audit_failed",
-          message: "设置已写入，但审计记录失败；请检查 Gateway 数据目录权限和磁盘空间",
-        },
-      });
-      return;
     }
     sendManagementJson(response, 200, {
       revision: loadGatewaySettings(environment).revision,
       value: result.value,
       activation: result.activationResult,
+      auditStatus,
     });
     return;
   }
   throw new ApiError(404, "not_found", `未知管理 API：${path}`);
+}
+
+function codexManagementError(error) {
+  if (error instanceof ApiError) return error;
+  const code = typeof error?.code === "string" ? error.code : "codex_settings_failed";
+  const status = code === "stale-revision" ? 409 : 400;
+  return new ApiError(status, code, error instanceof Error ? error.message : "App Server 用户设置操作失败");
+}
+
+function normalizeApiProviderMutation(input, environment) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ApiError(400, "invalid_json", "Provider 操作正文必须是对象");
+  }
+  if (input.operation === "delete") return { operation: "delete", id: input.id };
+  const provider = input.provider ?? input;
+  const requested = input.operation === "create" || input.operation === "update" ? input.operation : "save";
+  const existing = listApiProviders(environment).providers.some(({ id }) => id === provider?.id);
+  return {
+    operation: "save",
+    provider: {
+      operation: requested === "save" ? (existing ? "update" : "create") : requested,
+      id: provider?.id,
+      name: provider?.name,
+      endpoint: provider?.endpoint,
+      ...(typeof provider?.apiKey === "string" ? { apiKey: provider.apiKey } : {}),
+    },
+  };
+}
+
+function normalizeTaskRequestShape(input) {
+  const shape = { operation: input?.operation };
+  if (input?.action !== undefined) shape.action = input.action;
+  else if (input?.operation === "update") shape.action = "source";
+  if (input?.target !== undefined) shape.target = input.target;
+  return shape;
+}
+
+async function managementTaskResourceState(normalized, environment, serviceStatusCache) {
+  if (normalized.operation === "metrics") {
+    try {
+      const status = inspectMetricsDatabase(environment);
+      const serviceStatuses = await loadServiceStatusSummary(environment, serviceStatusCache);
+      const gatewayEntry = serviceStatuses.find(({ entry }) => entry.target === "gateway")?.entry;
+      return {
+        operation: normalized.operation,
+        action: normalized.action,
+        target: normalized.target ?? null,
+        gateway: gatewayEntry === undefined
+          ? null
+          : {
+              loaded: gatewayEntry.loaded,
+              running: gatewayEntry.running,
+              state: gatewayEntry.state,
+            },
+        database: {
+          exists: status.exists,
+          schemaVersion: status.schemaVersion,
+          count: status.count,
+        },
+      };
+    } catch {
+      throw new ApiError(503, "task_resource_unavailable", "指标数据库状态暂不可用，请稍后重试");
+    }
+  }
+  if (normalized.operation === "service") {
+    const statuses = await loadServiceStatusSummary(environment, serviceStatusCache);
+    return {
+      operation: normalized.operation,
+      action: normalized.action,
+      target: normalized.target ?? null,
+      services: statuses.map(({ entry }) => ({
+        target: entry.target,
+        loaded: entry.loaded,
+        running: entry.running,
+        state: entry.state,
+      })),
+    };
+  }
+  return {
+    operation: normalized.operation,
+    action: normalized.action,
+    sourceVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
+  };
+}
+
+function apiProviderResourceState(environment) {
+  return apiProviderResourceStateFromList(listApiProviders(environment).providers);
+}
+
+function apiProviderResourceStateFromList(providers) {
+  return providers.map(({ id, name, protocol, endpoint, hasApiKey }) => ({
+    id,
+    name,
+    protocol,
+    endpoint,
+    hasApiKey: hasApiKey === true,
+  }));
+}
+
+function previewApiProviderOperation(input, environment) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ApiError(400, "invalid_json", "Provider 操作正文必须是对象");
+  }
+  if (input.operation === "delete") {
+    const idError = validateApiProviderId(input.id);
+    if (idError !== undefined) throw new ApiError(400, "invalid_provider", idError);
+    const current = listApiProviders(environment).providers.find((provider) => provider.id === input.id);
+    if (current === undefined) throw new ApiError(400, "provider_not_found", `找不到直接 API Provider：${input.id}`);
+    return { operation: "delete", provider: { id: current.id, name: current.name }, activation: configActivationResult("restart-gateway") };
+  }
+  if (input.operation !== "save" && input.operation !== "create" && input.operation !== "update") {
+    throw new ApiError(400, "invalid_provider_operation", "Provider 操作必须是 create、update 或 delete");
+  }
+  const provider = input.provider ?? input;
+  const idError = validateApiProviderId(provider?.id);
+  const nameError = validateApiProviderName(provider?.name);
+  const endpointError = validateApiProviderEndpoint(provider?.endpoint);
+  if (idError !== undefined) throw new ApiError(400, "invalid_provider", idError);
+  if (nameError !== undefined) throw new ApiError(400, "invalid_provider", nameError);
+  if (endpointError !== undefined) throw new ApiError(400, "invalid_provider", endpointError);
+  const operation = input.operation === "save" ? (listApiProviders(environment).providers.some(({ id }) => id === provider.id) ? "update" : "create") : input.operation;
+  return {
+    operation,
+    provider: { id: provider.id, name: provider.name, protocol: "responses", endpoint: provider.endpoint, apiKeyChange: typeof provider.apiKey === "string" && provider.apiKey.length > 0 },
+    activation: configActivationResult("restart-gateway"),
+  };
+}
+
+function redactApiProviderResult(result) {
+  if (!result || typeof result !== "object") return { action: "completed" };
+  const provider = result.provider && typeof result.provider === "object"
+    ? { id: result.provider.id, name: result.provider.name, protocol: result.provider.protocol, endpoint: result.provider.endpoint, hasApiKey: result.provider.hasApiKey }
+    : result.provider;
+  return {
+    action: result.action,
+    ...(provider === undefined ? {} : { provider }),
+    activation: result.activation,
+    activationResult: result.activationResult,
+  };
 }
 
 async function handleManagementServices(environment, response, serviceStatusCache) {
@@ -507,7 +978,43 @@ const managedSettingKinds = new Set([
   "metrics.storage",
   "metrics.sync-params",
   "webui.port",
+  "webui.host",
+  "webui.token",
+  "telegram.message-format",
+  "system.default-workspace",
+  "automation.thread-section-administrators",
+  "advanced.plugin-api",
+  "network.proxy",
+  "network.proxy-batch",
+  "metrics.connect",
+  "metrics.disconnect",
+  "metrics.center.host",
+  "metrics.center.port",
+  "metrics.center.token",
+  "metrics.center.generate-tokens",
+  "workspace.permissions",
 ]);
+
+const highRiskManagedSettingKinds = new Set([
+  "webui.host",
+  "webui.token",
+  "network.proxy",
+  "network.proxy-batch",
+  "metrics.connect",
+  "metrics.disconnect",
+  "metrics.center.token",
+  "metrics.center.generate-tokens",
+  "workspace.permissions",
+]);
+
+function isHighRiskManagedSetting(input) {
+  return highRiskManagedSettingKinds.has(input?.kind);
+}
+
+function isHighRiskManagementPath(path) {
+  return path.startsWith("/api-providers")
+    || path.startsWith("/tasks");
+}
 
 function assertManagedSetting(input) {
   if (!input || typeof input !== "object" || Array.isArray(input) || !managedSettingKinds.has(input.kind)) {
@@ -533,6 +1040,7 @@ function redactManagedSettings(settings) {
       sandbox: settings.system.sandbox,
       defaultWorkspace: settings.system.defaultWorkspace,
       defaultModel: settings.system.defaultModel,
+      workspaces: settings.system.workspaces,
     },
     automation: {
       scheduledTasksEnabled: settings.automation.scheduledTasksEnabled,

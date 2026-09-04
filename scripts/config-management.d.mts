@@ -173,6 +173,7 @@ export function updateGatewaySetting(
     expectedRevision: string;
     readConfig?: (configPath: string, encoding: "utf8") => string;
     writeConfig?: (configPath: string, document: unknown) => void;
+    skipBackup?: boolean;
   },
 ): {
   kind: GatewaySettingInput["kind"];

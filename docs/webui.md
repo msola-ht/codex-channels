@@ -1,8 +1,7 @@
 # 本地指标 WebUI
 
 `codexc webui` 启动本地指标 WebUI，展示模型请求指标数据库（`request-metrics.sqlite3`）中的全局统计、
-会话、请求明细与错误聚合；设置页还可在同一登录令牌下修改已开放的低风险 Gateway 设置。WebUI 不读取
-业务会话库，不执行任意命令或高风险操作。
+会话、请求明细与错误聚合；设置页还可在同一登录令牌下修改结构化配置，并通过白名单异步任务执行受保护的服务与维护动作。WebUI 不读取业务会话库，不接受任意命令。
 
 ## 命令
 
@@ -73,11 +72,11 @@ codexc service stop webui        # 停止
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | `#/settings` | `GET /api/v1/settings`（币种与汇率）、`GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近错误）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（同一 WebUI Bearer 令牌下的低风险设置读取/预览/修改） |
+| 设置 | `#/settings` | `GET /api/v1/settings`（币种与汇率）、`GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近错误）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/api-providers`（直接 API Provider 预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
-指标接口只接受 GET；设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH 执行预览与写入，均要求同一
-WebUI Bearer 令牌和精确 Origin。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志），不在 WebUI 执行 CLI；高风险操作在页面中仅提供复制命令提示。
+指标接口只接受 GET；设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消，均要求同一
+WebUI Bearer 令牌和精确 Origin。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 `range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
 `this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
 WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
@@ -111,7 +110,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
                             ▼
               scripts/webui-server.mjs（codexc webui 服务）
                 ├─ /api/v1/* 指标只读 JSON API（Observability Store 只读模式）
-                ├─ /api/v1/management/* 同一 WebUI Bearer 令牌的低风险设置 API
+                ├─ /api/v1/management/* 同一 WebUI Bearer 令牌的结构化配置管理 API
                 └─ webui/dist 静态托管
                             ▲
                             │ /api/v1/*（同源，令牌可选）
@@ -144,9 +143,9 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 
 边界约束：
 
-- WebUI 不读取、不解析业务会话库，也不连接 App Server；
-- 指标 API 不提供写接口；设置管理仅允许计划内字段，并修改用户配置的对应结构化入口；
-- 指标 API 只接受 GET，设置管理只接受明确的 JSON POST/PATCH；未知 API 与非 `/api/v1` 前缀统一返回 JSON 404；
+- WebUI 不读取、不解析业务会话库；App Server 用户设置通过后端结构化 RPC 适配器访问，不把协议或凭据暴露给前端；
+- 指标 API 不提供写接口；设置管理仅允许计划内字段，并修改对应结构化入口；敏感 Provider 凭据只写入私有凭据目录；
+- 指标 API 只接受 GET，设置管理只接受明确的 JSON POST/PATCH/DELETE；未知 API 与非 `/api/v1` 前缀统一返回 JSON 404；
 - 令牌只用于 API 鉴权，不写入 `localStorage`，不进入日志或响应体。
 
 ## 前端
@@ -161,9 +160,7 @@ webui/src/
   pages/       概览、Threads、Thread 详情、请求、错误、设置
 ```
 
-设置页按 App Server、Gateway、WebUI 与数据中心分区；Gateway、WebUI 与数据中心的每个可编辑分区在同一位置
-展示当前值和修改控件，预览与确认写入紧邻对应设置。App Server 用户设置、Provider 和账户暂显示 CLI 入口，
-不把 Gateway 配置伪装成 App Server 设置，也不再拆成独立的“读取快照”和“设置管理”两套页面。
+设置页按 App Server、Gateway、WebUI 与数据中心分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。App Server 用户默认值已经通过结构化 RPC 接入；直接 API Provider 使用一次性确认令牌写入，托管 Provider、账户授权和服务维护任务仍保留独立任务边界。
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与

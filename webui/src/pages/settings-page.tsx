@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { CheckIcon, CopyIcon, RefreshCwIcon } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -8,10 +8,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ChannelStatusCard, ProviderStatusCard } from "@/components/settings/provider-channel-status"
+import { ApiProviderManagement } from "@/components/settings/api-provider-management"
 import { ManagedInputRow, ManagedSelect, PendingSettingCard, SettingsRow } from "@/components/settings/settings-controls"
 import { useCurrency } from "@/hooks/currency-context"
 import { useApi } from "@/hooks/use-api"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
+import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
+import { useManagementTasks } from "@/hooks/use-management-tasks"
 import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary } from "@/lib/api"
 import type { ManagementServicesResponse } from "@/lib/types"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
@@ -22,6 +25,13 @@ export function SettingsPage() {
   const services = useApi(fetchManagementServices, [])
   const providers = useApi(fetchManagementProviders, [])
   const management = useSettingsManagement()
+  const codexManagement = useCodexSettingsManagement()
+  const tasks = useManagementTasks()
+  useEffect(() => {
+    if (!tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))) return undefined
+    const timer = window.setInterval(services.refetch, 2_000)
+    return () => window.clearInterval(timer)
+  }, [services.refetch, tasks.tasks])
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [copyError, setCopyError] = useState(false)
   const copyCommand = async (id: string, command: string) => {
@@ -52,16 +62,11 @@ export function SettingsPage() {
           {management.loading ? <p className="text-sm text-muted-foreground">正在读取可编辑设置…</p> : null}
           {managedSettings === null && !management.loading ? <SettingsError message={management.error ?? "设置管理暂不可用"} retry={management.refetch} /> : null}
           {pendingSetting !== null ? <PendingSettingCard pending={pendingSetting} saving={saving} onConfirm={() => void confirmSetting()} onCancel={cancelSetting} /> : null}
-          <Card>
-            <CardHeader><CardTitle>App Server 设置</CardTitle><CardDescription>App Server 用户默认值、Provider 和账户由 codexc setup 管理；当前 WebUI 不直接修改这部分配置。</CardDescription></CardHeader>
-            <CardContent className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
-              <SettingsRow label="用户默认值" value="codexc setup" code />
-              <SettingsRow label="Provider 与账户" value="codexc setup" code />
-            </CardContent>
-          </Card>
+          <CodexSettingsCard management={codexManagement} />
           {providers.loading ? <Card><CardHeader><CardTitle>Provider 状态</CardTitle></CardHeader><CardContent className="flex flex-col gap-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></CardContent></Card> : null}
           {providers.error ? <SettingsError message={providers.error} retry={providers.refetch} /> : null}
           {!providers.loading && providers.error === null && providers.data !== null ? <ProviderStatusCard state={providers.data} /> : null}
+          <ApiProviderManagement />
           {managedSettings !== null ? (
             <>
               <Card>
@@ -70,7 +75,7 @@ export function SettingsPage() {
                   <ManagedSelect label="Sandbox" value={managedSettings.system.sandbox} options={[["read-only", "只读"], ["workspace-write", "工作区可写"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("system.sandbox", value, "Sandbox")} />
                   <ManagedSelect label="审批超时" value={String(managedSettings.system.approvalTimeoutSeconds)} options={[["300", "300 秒"], ["600", "600 秒"], ["900", "900 秒"], ["1800", "1800 秒"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("system.approval-timeout", Number(value), "审批超时")} />
                   <ManagedInputRow key={managedSettings.revision} label="渠道新会话模型" defaultValue={managedSettings.system.defaultModel ?? ""} placeholder="留空跟随 Codex 全局默认" disabled={saving || pendingSetting !== null} onBlur={(value) => void previewSetting("system.default-model", value === "" ? null : value, "渠道新会话模型")} />
-                  <SettingsRow label="默认 Workspace" value={managedSettings.system.defaultWorkspace ?? "未配置"} />
+                  <ManagedSelect label="默认 Workspace" value={managedSettings.system.defaultWorkspace ?? ""} options={managedSettings.system.workspaces.map((workspace) => [workspace.id, workspace.name])} disabled={saving || pendingSetting !== null || managedSettings.system.workspaces.length === 0} onChange={(value) => void previewSetting("system.default-workspace", value, "默认 Workspace")} />
                   <ManagedSelect label="操作详情" value={managedSettings.display.operationUpdates} options={[["full", "完整"], ["compact", "紧凑"], ["hidden", "隐藏"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.operation-updates", value, "操作详情")} />
                   <ManagedSelect label="计划更新" value={String(managedSettings.display.planUpdatesEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.plan-updates", value === "true", "计划更新")} />
                   <ManagedSelect label="思考状态" value={String(managedSettings.display.reasoningEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.reasoning", value === "true", "思考状态")} />
@@ -80,7 +85,7 @@ export function SettingsPage() {
                   <SettingsRow label="当前页面货币" value={(currency ?? managedSettings.display.priceCurrency).toUpperCase()} badge />
                   <SettingsRow label="美元兑人民币" value={settings?.exchangeRate?.usdToCny.toString() ?? "暂无"} />
                   <SettingsRow label="汇率来源" value={exchangeRateSourceLabel(settings?.exchangeRate?.source)} />
-                  <SettingsRow label="Plugin API" value={enabledLabel(managedSettings.advanced.pluginApiEnabled)} />
+                  <ManagedSelect label="Plugin API" value={String(managedSettings.advanced.pluginApiEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("advanced.plugin-api", value === "true", "Plugin API")} />
                   <SettingsRow label="Thread 分区管理员" value={`${managedSettings.automation.threadSectionAdministratorCount} 个`} />
                   <SettingsRow label="配置修订" value={managedSettings.revision.slice(0, 12)} code />
                 </CardContent>
@@ -92,7 +97,8 @@ export function SettingsPage() {
                   <ManagedSelect label="上报间隔" value={String(managedSettings.metrics.sync.intervalSeconds)} options={[["30", "30 秒"], ["60", "60 秒"], ["300", "5 分钟"], ["900", "15 分钟"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("metrics.sync-params", { intervalSeconds: Number(value), batchSize: managedSettings.metrics.sync.batchSize }, "上报间隔")} />
                   <ManagedSelect label="批量大小" value={String(managedSettings.metrics.sync.batchSize)} options={[["50", "50 条"], ["100", "100 条"], ["200", "200 条"], ["500", "500 条"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("metrics.sync-params", { intervalSeconds: managedSettings.metrics.sync.intervalSeconds, batchSize: Number(value) }, "批量大小")} />
                   <ManagedSelect label="WebUI 端口" value={String(managedSettings.webui.port)} options={[["8787", "8787"], ["8790", "8790"], ["8800", "8800"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("webui.port", Number(value), "WebUI 端口")} />
-                  <SettingsRow label="监听地址" value={managedSettings.webui.host} />
+                  <ManagedSelect label="WebUI 监听地址" value={managedSettings.webui.host} options={[["127.0.0.1", "127.0.0.1"], ["::1", "::1"], ["0.0.0.0", "0.0.0.0"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("webui.host", value, "WebUI 监听地址")} />
+                  <ManagedInputRow label="WebUI 访问令牌" type="password" defaultValue="" placeholder={managedSettings.webui.tokenConfigured ? "留空保持不变" : "输入新令牌"} disabled={saving || pendingSetting !== null} onBlur={(value) => { if (value !== "") void previewSetting("webui.token", { action: "set", value }, "WebUI 访问令牌") }} />
                   <SettingsRow label="WebUI 令牌" value={configuredLabel(managedSettings.webui.tokenConfigured)} />
                   <SettingsRow label="设备同步" value={enabledLabel(managedSettings.metrics.sync.enabled)} />
                   <SettingsRow label="设备上报令牌" value={configuredLabel(managedSettings.metrics.sync.deviceTokenConfigured)} />
@@ -113,12 +119,13 @@ export function SettingsPage() {
               {services.loading ? <><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></> : null}
               {services.error ? <SettingsError message={services.error} retry={services.refetch} /> : null}
               {!services.loading && services.error === null && services.data !== null
-                ? <ManagedServices services={services.data} />
+                ? <ManagedServices services={services.data} tasks={tasks} />
                 : null}
+              {tasks.actionError !== null ? <p className="text-sm text-destructive" role="status">{tasks.actionError}</p> : null}
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>CLI 设置入口</CardTitle><CardDescription>凭据、高权限和执行型操作暂通过 CLI 管理</CardDescription></CardHeader>
+            <CardHeader><CardTitle>CLI 设置入口</CardTitle><CardDescription>尚未接入页面的凭据、高权限和执行型操作暂通过 CLI 管理</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-3">
               {summary.data.cli.map((entry, index) => (
                 <Fragment key={entry.id}>
@@ -133,17 +140,41 @@ export function SettingsPage() {
               {copyError ? <p className="text-xs text-destructive" role="status">浏览器未允许访问剪贴板，请手动选择并复制命令。</p> : null}
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader><CardTitle>当前管理边界</CardTitle><CardDescription>WebUI 只修改上方已开放的低风险设置，不执行 CLI</CardDescription></CardHeader>
-            <CardContent className="text-sm text-muted-foreground">WebUI 只修改上方已开放的低风险设置。API Key、Token、扫码授权、Provider 变更、数据库维护、服务重启和源码更新，请在服务器终端运行对应的 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">codexc</code> 命令。</CardContent>
-          </Card>
         </>
       ) : null}
     </div>
   )
 }
 
-function ManagedServices({ services }: { services: ManagementServicesResponse }) {
+function CodexSettingsCard({ management }: { management: ReturnType<typeof useCodexSettingsManagement> }) {
+  const settings = management.codexSettings
+  if (management.loading) return <Card><CardHeader><CardTitle>App Server 设置</CardTitle></CardHeader><CardContent><Skeleton className="h-28 w-full" /></CardContent></Card>
+  if (settings === null) return <SettingsError message={management.error ?? "App Server 用户设置暂不可用"} retry={management.refetch} />
+  const selected = settings.models.find((model) => model.model === settings.defaults.model) ?? settings.models[0]
+  const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
+  const disabled = management.saving || management.pendingSetting !== null || !settings.defaultsEditable
+  return <>
+    {management.pendingSetting !== null ? <PendingSettingCard pending={management.pendingSetting} saving={management.saving} onConfirm={() => void management.confirmSetting()} onCancel={management.cancelSetting} /> : null}
+    <Card>
+      <CardHeader><CardTitle>App Server 设置</CardTitle><CardDescription>通过 App Server 用户配置 RPC 写入，修订冲突会要求重新读取；写入后需重启全部服务生效。</CardDescription></CardHeader>
+      <CardContent className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
+        <SettingsRow label="当前 Provider" value={settings.provider} badge />
+        <ManagedSelect label="默认模型" value={settings.defaults.model ?? ""} options={settings.models.map((model) => [model.model, model.displayName])} disabled={disabled} onChange={(value) => { const model = settings.models.find((candidate) => candidate.model === value); void management.previewSetting({ kind: "defaults", model: value, reasoningEffort: model?.defaultReasoningEffort ?? "medium" }, "默认模型") }} />
+        <ManagedSelect label="思考等级" value={settings.defaults.reasoningEffort ?? ""} options={effortOptions} disabled={disabled || selected === undefined} onChange={(value) => void management.previewSetting({ kind: "defaults", model: selected?.model ?? "", reasoningEffort: value }, "思考等级")} />
+        <ManagedSelect label="Fast" value={String(settings.defaults.fastEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting({ kind: "fast", enabled: value === "true" }, "Fast")} />
+        <ManagedSelect label="联网搜索" value={settings.defaults.webSearch ?? "disabled"} options={[["live", "实时"], ["indexed", "索引"], ["cached", "缓存"], ["disabled", "关闭"]]} disabled={management.saving || management.pendingSetting !== null} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, "联网搜索")} />
+        <ManagedSelect label="计划清单工具" value={String(settings.defaults.updatePlanEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={management.saving || management.pendingSetting !== null} onChange={(value) => void management.previewSetting({ kind: "update-plan", enabled: value === "true" }, "计划清单工具")} />
+        <ManagedSelect label="Sandbox" value={settings.permissions.sandboxMode ?? "read-only"} options={[["read-only", "只读"], ["workspace-write", "工作区可写"]]} disabled={management.saving || management.pendingSetting !== null || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: value, approvalPolicy: settings.permissions.approvalPolicy ?? "on-request", networkAccess: settings.permissions.networkAccess ?? false }, "Sandbox")} />
+        <ManagedSelect label="审批策略" value={settings.permissions.approvalPolicy ?? "on-request"} options={[["on-request", "按需"], ["never", "从不"]]} disabled={management.saving || management.pendingSetting !== null || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: settings.permissions.sandboxMode ?? "read-only", approvalPolicy: value, networkAccess: settings.permissions.networkAccess ?? false }, "审批策略")} />
+        <ManagedSelect label="网络访问" value={String(settings.permissions.networkAccess ?? false)} options={[["true", "已允许"], ["false", "已禁止"]]} disabled={management.saving || management.pendingSetting !== null || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: settings.permissions.sandboxMode ?? "read-only", approvalPolicy: settings.permissions.approvalPolicy ?? "on-request", networkAccess: value === "true" }, "网络访问")} />
+        <SettingsRow label="Permission Profile" value={settings.permissions.defaultPermissions ?? "未配置"} code />
+        {management.actionError !== null ? <p className="text-sm text-destructive md:col-span-2">{management.actionError}</p> : null}
+      </CardContent>
+    </Card>
+  </>
+}
+
+function ManagedServices({ services, tasks }: { services: ManagementServicesResponse; tasks: ReturnType<typeof useManagementTasks> }) {
   if (services.entries.length === 0) {
     return <span className="text-sm text-muted-foreground">当前平台没有可展示的受管服务。</span>
   }
@@ -162,7 +193,11 @@ function ManagedServices({ services }: { services: ManagementServicesResponse })
                   {service.pid === null ? "" : ` · PID ${service.pid}`}
                 </span>
               </div>
-              <Badge variant={service.running ? "secondary" : "destructive"}>{serviceStatusLabel(service)}</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant={service.running ? "secondary" : "destructive"}>{serviceStatusLabel(service)}</Badge>
+                <Button variant="outline" size="sm" disabled={tasks.loading} onClick={() => void tasks.run({ operation: "service", action: service.running ? "restart" : "start", target: service.target })}>{service.running ? "重启" : "启动"}</Button>
+                {service.running ? <Button variant="outline" size="sm" disabled={tasks.loading} onClick={() => void tasks.run({ operation: "service", action: "stop", target: service.target })}>停止</Button> : null}
+              </div>
             </div>
             {service.recentError !== null ? (
               <p className="text-xs text-destructive">最近错误：{service.recentError.message}</p>
@@ -171,6 +206,8 @@ function ManagedServices({ services }: { services: ManagementServicesResponse })
         </Fragment>
       ))}
       {services.platform === null ? <p className="text-xs text-muted-foreground">当前平台服务状态不可用，请使用 CLI 查看详细信息。</p> : null}
+      {tasks.error !== null ? <p className="mt-2 text-xs text-destructive" role="status">任务状态读取失败：{tasks.error}</p> : null}
+      {tasks.tasks.length > 0 ? <div className="mt-2 rounded-md border p-2 text-xs"><span className="font-medium">最近管理任务</span>{tasks.tasks.slice(-3).map((task) => <div key={task.id} className="mt-1 flex items-center justify-between gap-2"><span>{task.operation}:{task.action}{task.target ? `:${task.target}` : ""}</span><div className="flex items-center gap-2"><Badge variant={task.state === "completed" ? "secondary" : task.state === "failed" ? "destructive" : "outline"}>{task.state}</Badge>{["queued", "running", "cancelling"].includes(task.state) ? <Button variant="ghost" size="sm" disabled={tasks.loading || task.state === "cancelling"} onClick={() => void tasks.cancel(task.id)}>取消</Button> : null}</div></div>)}</div> : null}
     </>
   )
 }

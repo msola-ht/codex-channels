@@ -20,6 +20,10 @@ import type {
   ManagementProvidersResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,
+  CodexUserSettingsResponse,
+  CodexUserSettingInput,
+  ManagementTask,
+  ManagementApiProvider,
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
@@ -125,10 +129,11 @@ export function previewManagementSetting(
 export function updateManagementSetting(
   revision: string,
   setting: ManagementSettingInput,
+  confirmationToken?: string,
   signal?: AbortSignal,
 ): Promise<ManagementSettingMutationResponse> {
   return requestJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/settings`, {
-    method: "PATCH", body: JSON.stringify({ revision, setting }),
+    method: "PATCH", body: JSON.stringify({ revision, setting, ...(confirmationToken === undefined ? {} : { confirmationToken }) }),
   }, signal)
 }
 
@@ -236,6 +241,58 @@ export function fetchManagementServices(signal?: AbortSignal): Promise<Managemen
 
 export function fetchManagementProviders(signal?: AbortSignal): Promise<ManagementProvidersResponse> {
   return getJson<ManagementProvidersResponse>(`${API_PREFIX}/management/providers`, signal)
+}
+
+export function fetchCodexUserSettings(signal?: AbortSignal): Promise<CodexUserSettingsResponse> {
+  return getJson<CodexUserSettingsResponse>(`${API_PREFIX}/management/codex/settings`, signal)
+}
+
+export function previewCodexUserSetting(
+  revision: string,
+  setting: CodexUserSettingInput,
+  signal?: AbortSignal,
+): Promise<ManagementSettingMutationResponse> {
+  return requestJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/codex/settings/preview`, {
+    method: "POST", body: JSON.stringify({ revision, setting }),
+  }, signal)
+}
+
+export function updateCodexUserSetting(
+  revision: string,
+  setting: CodexUserSettingInput,
+  signal?: AbortSignal,
+): Promise<ManagementSettingMutationResponse> {
+  return requestJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/codex/settings`, {
+    method: "PATCH", body: JSON.stringify({ revision, setting }),
+  }, signal)
+}
+
+export function fetchManagementTasks(signal?: AbortSignal): Promise<{ tasks: ManagementTask[] }> {
+  return getJson<{ tasks: ManagementTask[] }>(`${API_PREFIX}/management/tasks`, signal)
+}
+
+export function previewManagementTask(input: { operation: "service" | "metrics" | "update"; action?: string; target?: string }, signal?: AbortSignal): Promise<{ preview: unknown; confirmationToken: string; confirmationExpiresAt: number }> {
+  return requestJson(`${API_PREFIX}/management/tasks/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+
+export function startManagementTask(input: { operation: "service" | "metrics" | "update"; action?: string; target?: string; confirmationToken: string }, signal?: AbortSignal): Promise<ManagementTask> {
+  return requestJson<ManagementTask>(`${API_PREFIX}/management/tasks`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+
+export function cancelManagementTask(id: string, signal?: AbortSignal): Promise<ManagementTask> {
+  return requestJson<ManagementTask>(`${API_PREFIX}/management/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }, signal)
+}
+
+export function fetchManagementApiProviders(signal?: AbortSignal): Promise<{ providers: ManagementApiProvider[] }> {
+  return getJson<{ providers: ManagementApiProvider[] }>(`${API_PREFIX}/management/api-providers`, signal)
+}
+
+export function previewManagementApiProvider(input: unknown, signal?: AbortSignal): Promise<{ preview: unknown; confirmationToken: string; confirmationExpiresAt: number }> {
+  return requestJson(`${API_PREFIX}/management/api-providers/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+
+export function applyManagementApiProvider(input: unknown, confirmationToken: string, signal?: AbortSignal): Promise<unknown> {
+  return requestJson(`${API_PREFIX}/management/api-providers`, { method: "POST", body: JSON.stringify({ ...input as object, confirmationToken }) }, signal)
 }
 
 export function fetchDeepseekBalance(

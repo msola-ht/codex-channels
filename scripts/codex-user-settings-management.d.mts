@@ -89,3 +89,13 @@ export function updateCodexUserSetting(
   value: Record<string, unknown>;
   activation: "restart-all";
 }>;
+
+export function previewCodexUserSetting(
+  input: CodexUserSettingInput,
+  options: CodexUserSettingsDependencies & { expectedVersion: string },
+): Promise<{
+  kind: CodexUserSettingInput["kind"];
+  previousVersion: string;
+  value: Record<string, unknown>;
+  activation: "restart-all";
+}>;

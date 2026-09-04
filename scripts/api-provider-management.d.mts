@@ -1,4 +1,5 @@
 import type { TomlTable } from "smol-toml";
+import type { ConfigActivationResult } from "./config-activation-result.mjs";
 
 export interface ApiProviderSummary {
   id: string;
@@ -6,6 +7,10 @@ export interface ApiProviderSummary {
   protocol: "responses";
   endpoint: string;
   hasApiKey: boolean;
+}
+
+export class ApiProviderRevisionConflictError extends Error {
+  code: "stale-revision";
 }
 
 export function listApiProviders(environment?: NodeJS.ProcessEnv): {
@@ -24,12 +29,14 @@ export function saveApiProvider(
   options?: {
     environment?: NodeJS.ProcessEnv;
     writeConfig?: (configPath: string, document: TomlTable) => void;
+    expectedState?: ApiProviderSummary[];
   },
 ): {
   action: "created" | "updated";
   provider: ApiProviderSummary;
   configPath: string;
   activation: "restart-gateway";
+  activationResult: ConfigActivationResult;
 };
 
 export function deleteApiProvider(
@@ -37,12 +44,14 @@ export function deleteApiProvider(
   options?: {
     environment?: NodeJS.ProcessEnv;
     writeConfig?: (configPath: string, document: TomlTable) => void;
+    expectedState?: ApiProviderSummary[];
   },
 ): {
   action: "removed";
   provider: string;
   configPath: string;
   activation: "restart-gateway";
+  activationResult: ConfigActivationResult;
 };
 
 export function validateApiProviderId(value: unknown): string | undefined;

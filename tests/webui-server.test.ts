@@ -506,6 +506,56 @@ describe("webui server", () => {
     });
   });
 
+  it("manages direct API Providers with a one-time confirmation token and no key echo", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const document = readGatewayConfig(configPath);
+    document.api_providers = [];
+    writeGatewayConfig(configPath, document);
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token",
+      managementOrigin: "http://127.0.0.1:0",
+    });
+    const headers = { authorization: "Bearer webui-token", origin: "http://127.0.0.1:0", "content-type": "application/json" };
+    const preview = await fetch(`${origin}/api/v1/management/api-providers/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "create", provider: { id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" } }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken: string; preview: { provider: { apiKeyChange: boolean } } };
+    expect(previewBody.preview.provider.apiKeyChange).toBe(true);
+    expect(JSON.stringify(previewBody)).not.toContain("secret-key");
+    const apply = await fetch(`${origin}/api/v1/management/api-providers`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "save", provider: { operation: "create", id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" }, confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(apply.status).toBe(200);
+    expect(JSON.stringify(await apply.json())).not.toContain("secret-key");
+    const replay = await fetch(`${origin}/api/v1/management/api-providers`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "save", provider: { operation: "create", id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" }, confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(replay.status).toBe(409);
+  });
+
+  it("requires a one-time confirmation for secret-bearing Gateway settings", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token", managementOrigin });
+    const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
+    const current = await (await fetch(`${origin}/api/v1/management/settings`, { headers })).json() as { revision: string };
+    const preview = await fetch(`${origin}/api/v1/management/settings/preview`, { method: "POST", headers, body: JSON.stringify({ revision: current.revision, setting: { kind: "webui.token", action: "set", value: "new-secret" } }) });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken?: string; confirmationRequired?: boolean };
+    expect(previewBody.confirmationRequired).toBe(true);
+    expect(previewBody.confirmationToken).toEqual(expect.any(String));
+    const update = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers, body: JSON.stringify({ revision: current.revision, confirmationToken: previewBody.confirmationToken, setting: { kind: "webui.token", action: "set", value: "new-secret" } }) });
+    expect(update.status).toBe(200);
+  });
+
   it("protects low-risk management writes with the same WebUI token", async () => {
     const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";
@@ -541,6 +591,54 @@ describe("webui server", () => {
       body: JSON.stringify({}),
     });
     expect(legacyLogin.status).toBe(404);
+  });
+
+  it("does not expose arbitrary metrics database paths through WebUI management", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const headers = {
+      origin: managementOrigin,
+      authorization: "Bearer webui-token",
+      "content-type": "application/json",
+    };
+    const current = await (await fetch(`${origin}/api/v1/management/settings`, { headers })).json() as { revision: string };
+    const response = await fetch(`${origin}/api/v1/management/settings/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ revision: current.revision, setting: { kind: "metrics.center.database-path", value: "/tmp/redirected.sqlite3" } }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "setting_not_allowed" } });
+  });
+
+  it("reads, previews and writes App Server user settings through the shared management token", async () => {
+    const fixture = createFixture();
+    let settings = {
+      version: "codex-v1",
+      provider: "openai",
+      defaultsEditable: true,
+      models: [{ model: "gpt-test", displayName: "GPT Test", reasoningEfforts: [{ effort: "medium", description: "" }], defaultReasoningEffort: "medium", isDefault: true }],
+      defaults: { model: "gpt-test", reasoningEffort: "medium", fastEnabled: false, webSearch: "disabled", updatePlanEnabled: false },
+      permissions: { editable: true, defaultPermissions: null, sandboxMode: "read-only", approvalPolicy: "on-request", networkAccess: false },
+    };
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token",
+      managementOrigin: "http://127.0.0.1:0",
+      loadCodexSettings: async () => settings,
+      previewCodexSetting: async (input: unknown) => ({ kind: (input as { kind: string }).kind, previousVersion: settings.version, value: { enabled: true }, activation: "restart-all" as const }),
+      updateCodexSetting: async (input: unknown) => { settings = { ...settings, version: "codex-v2" }; return { kind: (input as { kind: string }).kind, previousVersion: "codex-v1", value: { enabled: true }, activation: "restart-all" as const }; },
+    });
+    const headers = { authorization: "Bearer webui-token" };
+    const read = await fetch(`${origin}/api/v1/management/codex/settings`, { headers });
+    expect(read.status).toBe(200);
+    expect((await read.json()).version).toBe("codex-v1");
+    const preview = await fetch(`${origin}/api/v1/management/codex/settings/preview`, { method: "POST", headers: { ...headers, origin: "http://127.0.0.1:0", "content-type": "application/json" }, body: JSON.stringify({ revision: "codex-v1", setting: { kind: "fast", enabled: true } }) });
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).activation.status).toBe("restart");
+    const update = await fetch(`${origin}/api/v1/management/codex/settings`, { method: "PATCH", headers: { ...headers, origin: "http://127.0.0.1:0", "content-type": "application/json" }, body: JSON.stringify({ revision: "codex-v1", setting: { kind: "fast", enabled: true } }) });
+    expect(update.status).toBe(200);
+    expect((await update.json()).revision).toBe("codex-v2");
   });
 
   it("returns one complete redacted configuration snapshot for the settings page", async () => {
@@ -1182,6 +1280,9 @@ async function startServer(
     token?: string
     managementOrigin?: string
     loadProviderState?: (options: { environment: NodeJS.ProcessEnv }) => Promise<unknown>
+    loadCodexSettings?: (options: { environment: NodeJS.ProcessEnv }) => Promise<unknown>
+    previewCodexSetting?: (input: unknown, options: { environment: NodeJS.ProcessEnv; expectedVersion: string }) => Promise<unknown>
+    updateCodexSetting?: (input: unknown, options: { environment: NodeJS.ProcessEnv; expectedVersion: string }) => Promise<unknown>
   } = {},
 ) {
   const { server } = createWebuiServer({
@@ -1191,6 +1292,9 @@ async function startServer(
     ...(options.token === undefined ? {} : { token: options.token }),
     ...(options.managementOrigin === undefined ? {} : { managementOrigin: options.managementOrigin }),
     ...(options.loadProviderState === undefined ? {} : { loadProviderState: options.loadProviderState }),
+    ...(options.loadCodexSettings === undefined ? {} : { loadCodexSettings: options.loadCodexSettings }),
+    ...(options.previewCodexSetting === undefined ? {} : { previewCodexSetting: options.previewCodexSetting }),
+    ...(options.updateCodexSetting === undefined ? {} : { updateCodexSetting: options.updateCodexSetting }),
   });
   await new Promise<void>((resolve) => {
     server.listen(0, options.host ?? "127.0.0.1", resolve);

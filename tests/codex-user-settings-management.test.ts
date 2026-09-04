@@ -6,6 +6,7 @@ import type {
 } from "../scripts/codex-user-config.mjs";
 import {
   loadCodexUserSettings,
+  previewCodexUserSetting,
   updateCodexUserSetting,
 } from "../scripts/codex-user-settings-management.mjs";
 
@@ -183,6 +184,29 @@ describe("Codex user settings management", () => {
       { keyPath: "check_for_update_on_startup", value: false },
       { keyPath: "history.persistence", value: "none" },
     ], { expectedVersion: "version-1" });
+  });
+
+  it("does not echo unknown preference fields in a preview", async () => {
+    const client = settingsClient({});
+
+    const input = {
+      kind: "preferences",
+      reasoningSummary: "concise",
+      planModeReasoningEffort: "high",
+      verbosity: "high",
+      personality: "friendly",
+      checkForUpdateOnStartup: false,
+      historyPersistence: "none",
+      apiKey: "must-not-echo",
+    } as unknown as Parameters<typeof previewCodexUserSetting>[0];
+
+    await expect(previewCodexUserSetting(input, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+      primaryProvider: () => "openai",
+    })).resolves.toMatchObject({
+      value: expect.not.objectContaining({ apiKey: "must-not-echo" }),
+    });
   });
 
   it("writes the upstream plan checklist tool setting separately", async () => {

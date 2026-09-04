@@ -84,6 +84,24 @@ describe("direct API Provider management", () => {
     expect(() => readApiProviderKey(fixture.credentialsDirectory, "relay-a")).toThrow();
   });
 
+  it("rejects a stale Provider resource state before writing", () => {
+    const fixture = createFixture();
+    saveApiProvider({
+      operation: "create",
+      id: "relay-a",
+      name: "中转 A",
+      endpoint: "https://a.example/v1/responses",
+      apiKey: "private-key-a",
+    }, { environment: fixture.environment });
+
+    expect(() => saveApiProvider({
+      operation: "update",
+      id: "relay-a",
+      name: "中转 A2",
+      endpoint: "https://a2.example/v1/responses",
+    }, { environment: fixture.environment, expectedState: [] })).toThrow(/Provider 配置已变化/u);
+  });
+
   it("rolls back a new credential when the config transaction fails", () => {
     const fixture = createFixture();
 

@@ -3,7 +3,7 @@ import { useCallback, useState } from "react"
 import { useApi } from "@/hooks/use-api"
 import { ApiClientError, fetchManagementSettings, previewManagementSetting, updateManagementSetting } from "@/lib/api"
 
-export type PendingSetting = { kind: string; before: unknown; value: unknown; label: string; target: string }
+export type PendingSetting = { kind: string; before: unknown; value: unknown; label: string; target: string; confirmationToken?: string }
 
 export function useSettingsManagement() {
   const request = useApi(fetchManagementSettings, [])
@@ -19,7 +19,7 @@ export function useSettingsManagement() {
     setActionError(null)
     try {
       const preview = await previewManagementSetting(settings.revision, { kind, value })
-      setPendingSetting({ kind, before: currentManagedValue(settings, kind), value, label, target: preview.activation.target })
+      setPendingSetting({ kind, before: currentManagedValue(settings, kind), value, label, target: preview.activation.target, ...(preview.confirmationToken === undefined ? {} : { confirmationToken: preview.confirmationToken }) })
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error))
       if (error instanceof ApiClientError && error.code === "stale-revision") {
@@ -38,7 +38,7 @@ export function useSettingsManagement() {
     setSaving(true)
     setActionError(null)
     try {
-      await updateManagementSetting(settings.revision, { kind: pending.kind, value: pending.value })
+      await updateManagementSetting(settings.revision, { kind: pending.kind, value: pending.value }, pending.confirmationToken)
       setPendingSetting(null)
       refetch()
     } catch (error) {
@@ -81,6 +81,9 @@ function currentManagedValue(settings: Awaited<ReturnType<typeof fetchManagement
   if (kind === "metrics.storage") return settings.metrics.storage
   if (kind === "metrics.sync-params") return settings.metrics.sync
   if (kind === "webui.port") return settings.webui.port
+  if (kind === "webui.host") return settings.webui.host
+  if (kind === "webui.token") return settings.webui.tokenConfigured ? "已配置" : "未配置"
+  if (kind === "advanced.plugin-api") return settings.advanced.pluginApiEnabled
   if (kind === "system.default-model") return settings.system.defaultModel
   return null
 }

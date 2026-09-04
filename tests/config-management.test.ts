@@ -124,6 +124,25 @@ describe("Gateway Config management", () => {
     expect(JSON.stringify(settings)).not.toContain("127.0.0.1:7890");
   });
 
+  it("can validate a change without creating a backup artifact", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+    const before = readdirSync(dirname(fixture.configPath)).filter((entry) => entry.startsWith("config.toml.bak-"));
+    const result = updateGatewaySetting({
+      kind: "metrics.connect",
+      endpoint: "https://metrics.example",
+      deviceToken: "device-token",
+      viewToken: "view-token",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+      writeConfig: () => undefined,
+      skipBackup: true,
+    });
+    expect(result.backupPath).toBeUndefined();
+    expect(readdirSync(dirname(fixture.configPath)).filter((entry) => entry.startsWith("config.toml.bak-"))).toEqual(before);
+  });
+
   it("writes three proxy endpoints atomically", () => {
     const fixture = createFixture();
     const settings = loadGatewaySettings(fixture.environment);

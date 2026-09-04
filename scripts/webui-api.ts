@@ -385,7 +385,9 @@ export interface ManagementProvidersResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel">
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel"> & {
+    workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null }>
+  }
   automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled" | "threadSectionAdministratorCount">
   advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
   network: Pick<SettingsSummaryResponse["gateway"]["network"], "configuredFields">
@@ -401,9 +403,70 @@ export interface ManagementSettingsResponse {
 
 export interface ManagementSettingInput { kind: string; value: unknown }
 export interface ManagementSettingMutationResponse {
-  revision: string
+  revision: string | null
   value: unknown
   activation: { status: string; target: string; commands: readonly string[] }
+  auditStatus?: "recorded" | "degraded"
+  consistency?: "unknown"
+  confirmationRequired?: boolean
+  confirmationToken?: string
+  confirmationExpiresAt?: number
+}
+
+export interface CodexUserSettingsResponse {
+  version: string
+  provider: string
+  defaultsEditable: boolean
+  models: Array<{
+    model: string
+    displayName: string
+    reasoningEfforts: Array<{ effort: string; description: string }>
+    defaultReasoningEffort: string
+    isDefault: boolean
+  }>
+  defaults: {
+    model: string | null
+    reasoningEffort: string | null
+    fastEnabled: boolean
+    webSearch: "live" | "indexed" | "cached" | "disabled" | null
+    updatePlanEnabled: boolean
+    reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null
+    planModeReasoningEffort?: string | null
+    verbosity?: "low" | "medium" | "high" | null
+    personality?: "none" | "friendly" | "pragmatic" | null
+    checkForUpdateOnStartup?: boolean | null
+    historyPersistence?: "save-all" | "none" | null
+  }
+  permissions: {
+    editable: boolean
+    defaultPermissions: string | null
+    sandboxMode: "read-only" | "workspace-write" | null
+    approvalPolicy: "on-request" | "never" | null
+    networkAccess: boolean | null
+  }
+}
+
+export interface CodexUserSettingInput { kind: string; [key: string]: unknown }
+
+export interface ManagementTask {
+  id: string
+  operation: "service" | "metrics" | "update"
+  action: string
+  target: string | null
+  state: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed"
+  createdAt: string
+  updatedAt: string
+  error: string | null
+  result: { output: string | null } | null
+  auditStatus?: "recorded" | "degraded"
+}
+
+export interface ManagementApiProvider {
+  id: string
+  name: string
+  protocol: "responses"
+  endpoint: string
+  hasApiKey: boolean
 }
 
 export interface DeepseekBalance {

@@ -13,6 +13,14 @@ import {
 import { configActivationResult } from "./config-activation-result.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
+export class ApiProviderRevisionConflictError extends Error {
+  constructor(message = "Provider 配置已变化，请重新预览后重试") {
+    super(message);
+    this.name = "ApiProviderRevisionConflictError";
+    this.code = "stale-revision";
+  }
+}
+
 export function listApiProviders(environment = process.env) {
   const context = loadApiProviderContext(environment);
   return {
@@ -35,12 +43,13 @@ export function saveApiProvider(
 
 function saveApiProviderLocked(
   { operation, id, name, endpoint, apiKey },
-  { environment = process.env, writeConfig = writeGatewayConfig },
+  { environment = process.env, writeConfig = writeGatewayConfig, expectedState = undefined },
 ) {
   if (operation !== "create" && operation !== "update") {
     throw new Error(`未知直接 API Provider 保存操作：${String(operation)}`);
   }
   const context = loadApiProviderContext(environment);
+  assertExpectedProviderState(context, expectedState);
   const providerId = normalizedProviderId(id);
   const existing = context.providers.find((provider) => provider.id === providerId);
   if (operation === "create" && existing !== undefined) {
@@ -118,9 +127,10 @@ export function deleteApiProvider(
 
 function deleteApiProviderLocked(
   id,
-  { environment = process.env, writeConfig = writeGatewayConfig },
+  { environment = process.env, writeConfig = writeGatewayConfig, expectedState = undefined },
 ) {
   const context = loadApiProviderContext(environment);
+  assertExpectedProviderState(context, expectedState);
   const providerId = normalizedProviderId(id);
   const provider = context.providers.find((candidate) => candidate.id === providerId);
   if (provider === undefined) throw new Error(`找不到直接 API Provider：${providerId}`);
@@ -240,6 +250,18 @@ function loadApiProviderContext(environment) {
     document,
     providers: providerList(document.api_providers),
   };
+}
+
+function assertExpectedProviderState(context, expectedState) {
+  if (expectedState === undefined) return;
+  if (!Array.isArray(expectedState)) throw new Error("Provider 修订状态无效");
+  const currentState = context.providers.map((provider) => ({
+    ...provider,
+    hasApiKey: optionalProviderKey(context.credentialsDirectory, provider.id) !== undefined,
+  }));
+  if (JSON.stringify(currentState) !== JSON.stringify(expectedState)) {
+    throw new ApiProviderRevisionConflictError();
+  }
 }
 
 function providerList(value) {
