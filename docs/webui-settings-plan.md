@@ -104,6 +104,9 @@ POST /api/v1/management/codex/settings/preview 预览 App Server 用户设置变
 PATCH /api/v1/management/codex/settings 写入 App Server 用户设置（JSON + revision）
 GET  /api/v1/management/services       服务状态、版本和最近错误（只读；复用 WebUI Bearer 令牌）
 GET  /api/v1/management/providers      Provider 安全概览（只读；复用 WebUI Bearer 令牌）
+GET  /api/v1/management/provider-settings 读取 Provider 设置资源与修订（同一 Bearer 令牌）
+POST /api/v1/management/provider-settings/preview 预览主 Provider、托管 Provider 默认值和共享子代理变更并生成一次性确认令牌
+POST /api/v1/management/provider-settings 消费确认令牌并写入 Provider 设置
 GET  /api/v1/management/api-providers  直接 API Provider 脱敏列表
 POST /api/v1/management/api-providers/preview 生成 Provider 变更预览和一次性确认令牌
 POST /api/v1/management/api-providers  消费确认令牌并写入 Provider/凭据事务
@@ -139,11 +142,13 @@ DELETE /api/v1/management/tasks/:id    取消排队或运行中的任务
 
 ### 阶段五：全部配置可视化写入
 
-状态：进行中；App Server 用户设置与直接 API Provider 接入完成，其余 Provider/账户/任务仍在后续闭环
+状态：进行中；App Server 用户设置、直接 API Provider 与 Provider 设置基础写入已接入，其余账户/渠道/任务仍在后续闭环
 
 - [x] App Server 用户默认值、模型、思考等级、Fast、Sandbox、审批和网络权限接入同一设置页；通过 App Server RPC 使用版本修订保护。
 - [x] 直接 API Provider 新增、编辑、删除接入结构化预览与一次性确认；API Key 只写入凭据目录，不返回页面。
-- [ ] 托管 Provider/自定义 Provider 切换、删除、模型目录和共享第三方子代理接入结构化表单。
+- [x] 托管 Provider 默认模型、思考等级和自动压缩，以及自定义 Provider 切换、删除、新增和编辑接入结构化预览与一次性确认；模型目录使用现有官方目录。
+- [x] 共享第三方子代理 Provider/模型选择与停用接入同一结构化预览、确认和审计边界。
+- [ ] 其他 Provider 专属目录能力接入结构化表单。
 - [ ] OpenCode Go 多账户、DeepSeek 配置/恢复、渠道配置和数据中心连接参数接入结构化表单。
 - [ ] 凭据字段只允许写入，不允许读取、回显、缓存或进入日志；所有配置操作携带修订保护和脱敏审计。
 

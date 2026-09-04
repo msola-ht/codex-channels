@@ -3,6 +3,10 @@ import type {
   CodexUserSettingsResponse,
   ManagementApiProvider,
   ManagementApiProviderMutationInput,
+  ManagementProviderSettingsMutationInput,
+  ManagementProviderSettingsPreview,
+  ManagementProviderSettingsResponse,
+  ManagementProviderSettingsMutationResponse,
   ManagementSettingMutationResponse,
   ManagementSettingsResponse,
   ManagementTask,
@@ -68,6 +72,20 @@ export interface ApiProviderListController {
   loading: boolean
   error: string | null
   refetch: () => void
+}
+
+export interface ProviderSettingsController {
+  settings: ManagementProviderSettingsResponse | null
+  loading: boolean
+  error: string | null
+  actionError: string | null
+  busy: boolean
+  pendingPreview: { input: ManagementProviderSettingsMutationInput; preview: ManagementProviderSettingsPreview; confirmationToken: string } | null
+  refetch: () => void
+  mutate: (input: ManagementProviderSettingsMutationInput) => Promise<ManagementProviderSettingsMutationResponse | null>
+  confirm: () => Promise<ManagementProviderSettingsMutationResponse | null>
+  cancel: () => void
+  clearError: () => void
 }
 
 export type SettingMutationPreview = ManagementSettingMutationResponse

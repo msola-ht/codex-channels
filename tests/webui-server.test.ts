@@ -504,6 +504,13 @@ describe("webui server", () => {
     expect(await response.json()).toEqual({
       error: { code: "provider_state_unavailable", message: "Provider 状态暂不可用，请使用 codexc setup 查看" },
     });
+    const settingsResponse = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(settingsResponse.status).toBe(503);
+    expect(await settingsResponse.json()).toEqual({
+      error: { code: "provider_state_unavailable", message: "Provider 设置暂不可用，请检查 Codex 配置" },
+    });
   });
 
   it("manages direct API Providers with a one-time confirmation token and no key echo", async () => {
@@ -537,6 +544,130 @@ describe("webui server", () => {
       method: "POST",
       headers,
       body: JSON.stringify({ operation: "save", provider: { operation: "create", id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" }, confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(replay.status).toBe(409);
+  });
+
+  it("manages unified Provider settings with the shared token and one-time confirmation", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const providerState = {
+      configVersion: "provider-v1",
+      defaults: { model: "gpt-test", reasoningEffort: "medium" },
+      primary: { id: "openai", displayName: "OpenAI", kind: "official", mode: "exclusive", active: true },
+      managedProviders: [{
+        id: "deepseek",
+        displayName: "DeepSeek",
+        kind: "managed",
+        mode: "switching",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "medium",
+        models: [{ id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", contextWindow: 128000 }],
+      }],
+      customProviders: { fixedCandidates: [], switchingProviders: [], backupCandidates: [] },
+      externalAgent: { status: "unconfigured", provider: null, model: null },
+    };
+    let appliedInput: unknown = null;
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token",
+      managementOrigin,
+      loadProviderState: async () => providerState,
+      previewProviderSettings: async (input: unknown) => {
+        const normalized = input as { operation: string; providerId?: string };
+        if (normalized.operation === "external-agent") {
+          return {
+            operation: "configure",
+            current: { configured: false, provider: null, model: null },
+            selection: { provider: "deepseek", providerDisplayName: "DeepSeek", model: "deepseek-v4-flash", modelDisplayName: "DeepSeek V4 Flash" },
+            willChange: true,
+            activation: "restart-all",
+          };
+        }
+        return {
+          operation: "switch",
+          target: { id: normalized.providerId ?? "unknown", displayName: "Relay", source: "switching" },
+          activation: "restart-all",
+          effects: { currentProviderId: "openai", restoresFromBackup: false },
+        };
+      },
+      applyProviderSettings: async (input: unknown) => {
+        appliedInput = input;
+        if ((input as { operation?: string }).operation === "external-agent") {
+          return {
+            action: "configured",
+            operation: "configure",
+            selection: { provider: "deepseek", model: "deepseek-v4-flash" },
+            activation: "restart-all",
+          };
+        }
+        return {
+          action: "switched",
+          operation: "switch",
+          target: { id: "relay", displayName: "Relay", source: "switching" },
+          activation: "restart-all",
+          effects: { currentProviderId: "openai", restoresFromBackup: false },
+        };
+      },
+    });
+    const headers = {
+      origin: managementOrigin,
+      authorization: "Bearer webui-token",
+      "content-type": "application/json",
+    };
+    const resource = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(resource.status).toBe(200);
+    const resourceBody = await resource.json() as { resourceRevision: string; primary: { id: string }; managedProviders: unknown[] };
+    expect(resourceBody.primary.id).toBe("openai");
+    expect(resourceBody.managedProviders).toHaveLength(1);
+    expect(resourceBody.resourceRevision).toMatch(/^[a-f0-9]{64}$/u);
+    expect(JSON.stringify(resourceBody)).not.toContain("secret");
+
+    const preview = await fetch(`${origin}/api/v1/management/provider-settings/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "primary.switch", providerId: "relay" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken: string; preview: { operation: string } };
+    expect(previewBody.preview.operation).toBe("switch");
+    expect(previewBody.confirmationToken).toMatch(/^[A-Za-z0-9_-]+$/u);
+
+    const agentPreview = await fetch(`${origin}/api/v1/management/provider-settings/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek", model: "deepseek-v4-flash" }),
+    });
+    expect(agentPreview.status).toBe(200);
+    const agentPreviewBody = await agentPreview.json() as { confirmationToken: string; preview: { selection?: { provider: string } } };
+    expect(agentPreviewBody.preview.selection?.provider).toBe("deepseek");
+    const agentApply = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek", model: "deepseek-v4-flash", confirmationToken: agentPreviewBody.confirmationToken }),
+    });
+    expect(agentApply.status).toBe(200);
+    expect(await agentApply.json()).toMatchObject({ action: "configured", auditStatus: "recorded" });
+    const auditEntries = readFileSync(join(fixture.home, "management-audit.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { target?: string });
+    expect(auditEntries.some((entry) => entry.target === "deepseek")).toBe(true);
+
+    const apply = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "primary.switch", providerId: "relay", confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(apply.status).toBe(200);
+    expect(appliedInput).toEqual({ operation: "primary.switch", providerId: "relay" });
+    expect(await apply.json()).toMatchObject({ action: "switched", auditStatus: "recorded" });
+
+    const replay = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "primary.switch", providerId: "relay", confirmationToken: previewBody.confirmationToken }),
     });
     expect(replay.status).toBe(409);
   });
@@ -1334,6 +1465,8 @@ async function startServer(
     loadCodexSettings?: (options: { environment: NodeJS.ProcessEnv }) => Promise<unknown>
     previewCodexSetting?: (input: unknown, options: { environment: NodeJS.ProcessEnv; expectedVersion: string }) => Promise<unknown>
     updateCodexSetting?: (input: unknown, options: { environment: NodeJS.ProcessEnv; expectedVersion: string }) => Promise<unknown>
+    previewProviderSettings?: (input: unknown, environment: NodeJS.ProcessEnv) => Promise<unknown>
+    applyProviderSettings?: (input: unknown, environment: NodeJS.ProcessEnv, preview: unknown) => Promise<unknown>
   } = {},
 ) {
   const { server } = createWebuiServer({
@@ -1346,6 +1479,8 @@ async function startServer(
     ...(options.loadCodexSettings === undefined ? {} : { loadCodexSettings: options.loadCodexSettings }),
     ...(options.previewCodexSetting === undefined ? {} : { previewCodexSetting: options.previewCodexSetting }),
     ...(options.updateCodexSetting === undefined ? {} : { updateCodexSetting: options.updateCodexSetting }),
+    ...(options.previewProviderSettings === undefined ? {} : { previewProviderSettings: options.previewProviderSettings }),
+    ...(options.applyProviderSettings === undefined ? {} : { applyProviderSettings: options.applyProviderSettings }),
   });
   await new Promise<void>((resolve) => {
     server.listen(0, options.host ?? "127.0.0.1", resolve);

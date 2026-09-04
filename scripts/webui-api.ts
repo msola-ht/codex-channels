@@ -529,6 +529,154 @@ export interface ManagementApiProviderMutationResponse {
   auditStatus?: "recorded" | "degraded"
 }
 
+export interface ManagementProviderSettingsResponse {
+  observedAt: string
+  resourceRevision: string
+  configVersion: string | number | null
+  defaults: { model: string | null; reasoningEffort: string | null }
+  primary: {
+    id: string
+    displayName: string
+    kind: "official" | "managed" | "custom" | "unknown"
+    mode: "official" | "exclusive" | "backup" | "unknown"
+  }
+  managedProviders: Array<{
+    id: string
+    displayName: string
+    mode: "switching" | "exclusive"
+    model: string
+    reasoningEffort: string
+    models: Array<{
+      id: string
+      displayName: string
+      contextWindow: number
+      reasoningEffort: string
+      reasoningEfforts: Array<{ effort: string; description: string }>
+      autoCompactLimit?: number
+      autoCompactPercent?: number
+    }>
+  }>
+  customProviders: {
+    fixedCandidates: Array<{
+      id: string
+      displayName: string
+      kind: "custom"
+      state: "configured" | "backup"
+      active: boolean
+      supportsWebsockets?: boolean
+      baseUrl: string
+    }>
+    switchingProviders: Array<{
+      id: string
+      displayName: string
+      mode: "switching"
+      model: string
+      reasoningEffort: string | null
+      supportsWebsockets?: boolean
+      baseUrl: string
+    }>
+    backupCandidates: Array<{
+      id: string
+      displayName: string
+      kind: "custom"
+      state: "configured" | "backup"
+      active: boolean
+      supportsWebsockets?: boolean
+      baseUrl: string
+    }>
+  }
+  externalAgent:
+    | { status: "configured"; provider: string; model: string }
+    | { status: "unavailable" | "not-configured" }
+}
+
+export type ManagementProviderSettingsMutationInput =
+  | { operation: "primary.switch"; providerId: string; model?: string }
+  | { operation: "primary.remove"; providerId: string }
+  | {
+      operation: "primary.custom.save"
+      provider: {
+        operation: "create" | "update"
+        providerId: string
+        name: string
+        baseUrl: string
+        mode: "switching" | "exclusive"
+        model: string
+        supportsWebsockets: boolean
+        credential: { action: "preserve" } | { action: "replace"; apiKey: string }
+        confirmRemoveTopLevelBaseUrl?: boolean
+      }
+    }
+  | {
+      operation: "managed.default"
+      provider: string
+      model: string
+      reasoningEffort: string
+      autoCompactPercent: number
+    }
+  | { operation: "external-agent"; action: "configure"; provider: string; model?: string }
+  | { operation: "external-agent"; action: "disable" }
+
+export interface ManagementProviderSettingsPreview {
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "configure" | "disable"
+  activation: string
+  target?: {
+    id: string
+    displayName: string
+    source?: string
+    state?: string
+    baseUrl?: string
+    model?: string | null
+  }
+  provider?: {
+    id: string
+    displayName?: string
+    name?: string
+    baseUrl?: string
+    mode?: string
+    catalog?: string
+    apiKeyChange?: boolean
+  }
+  model?: { id: string; displayName: string; contextWindow?: number }
+  reasoningEffort?: string
+  autoCompactPercent?: number
+  autoCompactLimit?: number
+  willChange?: boolean
+  effects?: Record<string, boolean | string[] | string | null>
+  credential?: {
+    action?: "preserve" | "replace"
+    storedAsPlaintext?: true
+    destination?: "private-profile" | "main-config"
+  }
+  current?: { configured: boolean; provider: string | null; model: string | null }
+  selection?: { provider: string; providerDisplayName?: string; model: string; modelDisplayName?: string }
+}
+
+export interface ManagementProviderSettingsPreviewResponse {
+  preview: ManagementProviderSettingsPreview
+  resourceRevision: string
+  confirmationToken: string
+  confirmationExpiresAt: number
+}
+
+export interface ManagementProviderSettingsMutationResponse {
+  action: string
+  operation?: string
+  target?: ManagementProviderSettingsPreview["target"]
+  provider?: ManagementProviderSettingsPreview["provider"]
+  model?: ManagementProviderSettingsPreview["model"]
+  reasoningEffort?: string
+  autoCompactPercent?: number
+  autoCompactLimit?: number
+  effects?: Record<string, boolean | string[] | string | null>
+  warnings?: Array<{ code: string; providerId?: string }>
+  activation?: string
+  auditStatus?: "recorded" | "degraded"
+  current?: { configured: boolean; provider: string | null; model: string | null }
+  previous?: { configured: boolean; provider: string | null; model: string | null }
+  selection?: { provider: string; providerDisplayName?: string; model: string; modelDisplayName?: string }
+}
+
 export interface DeepseekBalance {
   currency: string
   totalBalance: string

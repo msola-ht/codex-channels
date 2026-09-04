@@ -76,6 +76,13 @@ import {
   normalizeApiProviderMutation,
   previewApiProviderOperation,
 } from "./webui-management-operations.mjs";
+import {
+  applyProviderSettingsMutation,
+  loadProviderSettingsResource,
+  normalizeProviderSettingsMutation,
+  previewProviderSettingsMutation,
+  redactProviderSettingsResult,
+} from "./webui-provider-settings-management.mjs";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
@@ -131,6 +138,8 @@ export function createWebuiServer({
   loadCodexSettings = loadCodexUserSettings,
   previewCodexSetting = previewCodexUserSetting,
   updateCodexSetting = updateCodexUserSetting,
+  previewProviderSettings = previewProviderSettingsMutation,
+  applyProviderSettings = applyProviderSettingsMutation,
 } = {}) {
   assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
@@ -151,6 +160,8 @@ export function createWebuiServer({
     loadCodexSettings,
     previewCodexSetting,
     updateCodexSetting,
+    previewProviderSettings,
+    applyProviderSettings,
   );
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
@@ -253,6 +264,8 @@ function createManagementState(
   loadCodexSettings,
   previewCodexSetting,
   updateCodexSetting,
+  previewProviderSettings,
+  applyProviderSettings,
 ) {
   const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const dataDir = explicitConfig ? dirname(resolve(explicitConfig)) : userDataDir(environment);
@@ -280,6 +293,8 @@ function createManagementState(
     loadCodexSettings,
     previewCodexSetting,
     updateCodexSetting,
+    previewProviderSettings,
+    applyProviderSettings,
     confirmations: new ManagementConfirmationStore(),
     tasks,
     limiter: new ManagementRateLimiter(),
@@ -485,6 +500,87 @@ async function routeManagement(environment, url, request, response, state, token
       console.error("Provider 已写入，但审计记录失败", error);
     }
     sendManagementJson(response, 200, { ...redactApiProviderResult(result), auditStatus });
+    return;
+  }
+  if (path === "/provider-settings" && request.method === "GET") {
+    const resource = await readProviderSettingsResource(environment, state);
+    sendManagementJson(response, 200, {
+      observedAt: new Date().toISOString(),
+      resourceRevision: fingerprintManagementValue(resource),
+      ...resource,
+    });
+    return;
+  }
+  if (path === "/provider-settings/preview" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    const input = normalizeProviderSettingsMutation(body);
+    const preview = await state.previewProviderSettings(input, environment);
+    const safePreview = redactProviderSettingsResult(preview);
+    const resource = await readProviderSettingsResource(environment, state);
+    const inputFingerprint = fingerprintManagementValue(input);
+    const resourceRevision = fingerprintManagementValue(resource);
+    const issued = state.confirmations.issue({
+      sessionId: principalId,
+      operation: "provider-settings.write",
+      inputFingerprint,
+      resourceRevision,
+      previewFingerprint: fingerprintManagementValue(safePreview),
+    });
+    sendManagementJson(response, 200, {
+      preview: safePreview,
+      resourceRevision,
+      confirmationToken: issued.token,
+      confirmationExpiresAt: issued.expiresAt,
+    });
+    return;
+  }
+  if (path === "/provider-settings" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.confirmationToken !== "string") {
+      throw new ApiError(400, "invalid_json", "Provider 设置写入请求必须包含 confirmationToken");
+    }
+    const input = normalizeProviderSettingsMutation(body);
+    const resource = await readProviderSettingsResource(environment, state);
+    const preview = await state.previewProviderSettings(input, environment);
+    const safePreview = redactProviderSettingsResult(preview);
+    const inputFingerprint = fingerprintManagementValue(input);
+    const resourceRevision = fingerprintManagementValue(resource);
+    state.confirmations.consume(body.confirmationToken, {
+      sessionId: principalId,
+      operation: "provider-settings.write",
+      inputFingerprint,
+      resourceRevision,
+      previewFingerprint: fingerprintManagementValue(safePreview),
+    });
+    let result;
+    try {
+      state.audit.assertWritable();
+      result = await state.applyProviderSettings(input, environment, safePreview);
+    } catch (error) {
+      throw error instanceof ManagementOperationError
+        ? error
+        : new ApiError(400, "provider_settings_write_failed", error instanceof Error ? error.message : "Provider 设置写入失败");
+    }
+    let auditStatus = "recorded";
+    try {
+      state.audit.record({
+        sessionId: principalId,
+        source: "webui",
+        operation: "provider-settings.write",
+        target: providerSettingsAuditTarget(input),
+        inputFingerprint,
+        revision: resourceRevision,
+        previewId: fingerprintManagementValue(safePreview),
+        confirmationId: fingerprintManagementValue(body.confirmationToken),
+        phase: "completed",
+        resultCode: result.action ?? "updated",
+        recovery: "none",
+      });
+    } catch (error) {
+      auditStatus = "degraded";
+      console.error("Provider 设置已写入，但审计记录失败", error);
+    }
+    sendManagementJson(response, 200, { ...redactProviderSettingsResult(result), auditStatus });
     return;
   }
   const taskMatch = path.match(/^\/tasks(?:\/([^/]+))?$/u);
@@ -714,6 +810,21 @@ async function handleManagementProviders(environment, response, providerStateCac
     throw new ApiError(503, "provider_state_unavailable", "Provider 状态暂不可用，请使用 codexc setup 查看");
   }
   sendManagementJson(response, 200, providers);
+}
+
+function providerSettingsAuditTarget(input) {
+  if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
+  if (input.operation === "managed.default") return String(input.provider ?? "unknown");
+  if (input.operation === "external-agent") return String(input.provider ?? input.action ?? "unknown");
+  return String(input.providerId ?? "unknown");
+}
+
+async function readProviderSettingsResource(environment, state) {
+  try {
+    return await loadProviderSettingsResource(environment, state.loadProviderState);
+  } catch {
+    throw new ApiError(503, "provider_state_unavailable", "Provider 设置暂不可用，请检查 Codex 配置");
+  }
 }
 
 function readJsonMetadata(path) {

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ApiProviderManagement } from "@/components/settings/api-provider-management"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
 import { ChannelStatusCard, ProviderStatusCard } from "@/components/settings/provider-channel-status"
+import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
 import { CliCommandRow } from "@/components/settings/cli-command-row"
 import { GatewaySettingsCard } from "@/components/settings/gateway-settings-card"
 import { ManagementTaskControls } from "@/components/settings/management-task-controls"
@@ -16,12 +17,13 @@ import type { UseApiState } from "@/hooks/use-api"
 import { useApi } from "@/hooks/use-api"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useManagementTasks } from "@/hooks/use-management-tasks"
+import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary } from "@/lib/api"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
 import type { DisplayCurrency } from "@/lib/format"
 import type { ManagementProvidersResponse, ManagementServicesResponse, SettingsResponse, SettingsSummaryResponse } from "@/lib/types"
-import type { CodexSettingsController, GatewaySettingsController, ManagementTaskController } from "@/lib/settings-management"
+import type { CodexSettingsController, GatewaySettingsController, ManagementTaskController, ProviderSettingsController } from "@/lib/settings-management"
 
 export function SettingsPage() {
   const { currency, settings } = useCurrency()
@@ -31,6 +33,7 @@ export function SettingsPage() {
   const management = useSettingsManagement()
   const codexManagement = useCodexSettingsManagement()
   const tasks = useManagementTasks()
+  const providerSettings = useProviderSettingsManagement()
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [copyError, setCopyError] = useState(false)
 
@@ -70,6 +73,7 @@ export function SettingsPage() {
       management={management}
       codexManagement={codexManagement}
       tasks={tasks}
+      providerSettings={providerSettings}
       copiedCommand={copiedCommand}
       copyError={copyError}
       onCopy={copyCommand}
@@ -86,12 +90,13 @@ interface SettingsContentProps {
   management: GatewaySettingsController
   codexManagement: CodexSettingsController
   tasks: ManagementTaskController
+  providerSettings: ProviderSettingsController
   copiedCommand: string | null
   copyError: boolean
   onCopy: (id: string, command: string) => Promise<void>
 }
 
-function SettingsContent({ currency, settings, summary, services, providers, management, codexManagement, tasks, copiedCommand, copyError, onCopy }: SettingsContentProps) {
+function SettingsContent({ currency, settings, summary, services, providers, management, codexManagement, tasks, providerSettings, copiedCommand, copyError, onCopy }: SettingsContentProps) {
   return <>
     {management.loading ? <p className="text-sm text-muted-foreground">正在读取可编辑设置…</p> : null}
     {management.managedSettings === null && !management.loading ? <SettingsError message={management.error ?? "设置管理暂不可用"} retry={management.refetch} /> : null}
@@ -99,6 +104,7 @@ function SettingsContent({ currency, settings, summary, services, providers, man
     {providers.loading ? <LoadingSettingsCard title="Provider 状态" /> : null}
     {providers.error ? <SettingsError message={providers.error} retry={providers.refetch} /> : null}
     {!providers.loading && providers.error === null && providers.data !== null ? <ProviderStatusCard state={providers.data} /> : null}
+    <ProviderSettingsManagement management={providerSettings} />
     <ApiProviderManagement />
     {management.pendingSetting !== null ? <PendingSettingCard pending={management.pendingSetting} saving={management.saving} onConfirm={() => void management.confirmSetting()} onCancel={management.cancelSetting} /> : null}
     {management.actionError !== null ? <p className="text-sm text-destructive" role="status">{management.actionError}</p> : null}

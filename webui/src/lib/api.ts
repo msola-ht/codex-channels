@@ -29,6 +29,10 @@ import type {
   ManagementApiProviderPreviewResponse,
   ManagementApiProviderMutationResponse,
   ManagementApiProvider,
+  ManagementProviderSettingsResponse,
+  ManagementProviderSettingsMutationInput,
+  ManagementProviderSettingsPreviewResponse,
+  ManagementProviderSettingsMutationResponse,
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
@@ -298,6 +302,31 @@ export function previewManagementApiProvider(input: ManagementApiProviderMutatio
 
 export function applyManagementApiProvider(input: ManagementApiProviderMutationInput, confirmationToken: string, signal?: AbortSignal): Promise<ManagementApiProviderMutationResponse> {
   return requestJson<ManagementApiProviderMutationResponse>(`${API_PREFIX}/management/api-providers`, { method: "POST", body: JSON.stringify({ ...input as object, confirmationToken }) }, signal)
+}
+
+export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<ManagementProviderSettingsResponse> {
+  return getJson<ManagementProviderSettingsResponse>(`${API_PREFIX}/management/provider-settings`, signal)
+}
+
+export function previewManagementProviderSettings(
+  input: ManagementProviderSettingsMutationInput,
+  signal?: AbortSignal,
+): Promise<ManagementProviderSettingsPreviewResponse> {
+  return requestJson<ManagementProviderSettingsPreviewResponse>(`${API_PREFIX}/management/provider-settings/preview`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }, signal)
+}
+
+export function applyManagementProviderSettings(
+  input: ManagementProviderSettingsMutationInput,
+  confirmationToken: string,
+  signal?: AbortSignal,
+): Promise<ManagementProviderSettingsMutationResponse> {
+  return requestJson<ManagementProviderSettingsMutationResponse>(`${API_PREFIX}/management/provider-settings`, {
+    method: "POST",
+    body: JSON.stringify({ ...input, confirmationToken }),
+  }, signal)
 }
 
 export function fetchDeepseekBalance(
