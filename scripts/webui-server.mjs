@@ -29,7 +29,7 @@ import {
   loadGatewaySettings,
   updateGatewaySetting,
 } from "./config-management.mjs";
-import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
+import { inspectManagedServiceStatusAsync, readManagedServiceErrorAsync } from "./service-status.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
 import {
   ManagementAuditWriter,
@@ -67,6 +67,11 @@ const requestSortKeys = {
   cost: "totalCostNanos",
 };
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
+const PACKAGE_VERSION = readJsonMetadata(join(PACKAGE_DIR, "package.json"))?.version ?? null;
+const SOURCE_GATEWAY_VERSION = readJsonMetadata(join(PACKAGE_DIR, "src", "version.json"))?.version ?? null;
+const GATEWAY_VERSION = PACKAGE_VERSION ?? SOURCE_GATEWAY_VERSION;
+const CODEX_CLI_VERSION = (readJsonMetadata(join(PACKAGE_DIR, "src", "codex-protocol", "version.json"))?.codexCli ?? null)
+  ?.replace(/^codex-cli\s+/u, "") ?? null;
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -101,7 +106,7 @@ export function createWebuiServer({
     );
   }
   const serviceStatusCache = { expiresAtMs: 0, value: null, pending: null };
-  const management = createManagementState(environment, host, port, managementOrigin);
+  const management = createManagementState(environment, host, port, managementOrigin, serviceStatusCache);
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
   });
@@ -182,7 +187,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
   }
 }
 
-function createManagementState(environment, host, port, configuredOrigin) {
+function createManagementState(environment, host, port, configuredOrigin, serviceStatusCache) {
   const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const dataDir = explicitConfig ? dirname(resolve(explicitConfig)) : userDataDir(environment);
   const originHost = host === "::1" ? "[::1]" : "127.0.0.1";
@@ -190,6 +195,7 @@ function createManagementState(environment, host, port, configuredOrigin) {
     // 管理请求始终只接受回环连接；即使 WebUI 绑定 0.0.0.0，也允许通过 SSH
     // 隧道访问 127.0.0.1，再由下面的 socket 检查拒绝公网直连管理接口。
     origin: configuredOrigin ?? `http://${originHost}:${port}`,
+    serviceStatusCache,
     limiter: new ManagementRateLimiter(),
     audit: new ManagementAuditWriter(join(dataDir, "management-audit.jsonl")),
   };
@@ -226,6 +232,10 @@ async function routeManagement(environment, url, request, response, state, token
   const path = url.pathname.slice(`${API_PREFIX}/management`.length) || "/";
   if (path === "/settings" && request.method === "GET") {
     sendManagementJson(response, 200, redactManagedSettings(loadGatewaySettings(environment)));
+    return;
+  }
+  if (path === "/services" && request.method === "GET") {
+    await handleManagementServices(environment, response, state.serviceStatusCache);
     return;
   }
   if (path === "/settings/preview" && request.method === "POST") {
@@ -297,6 +307,37 @@ async function routeManagement(environment, url, request, response, state, token
     return;
   }
   throw new ApiError(404, "not_found", `未知管理 API：${path}`);
+}
+
+async function handleManagementServices(environment, response, serviceStatusCache) {
+  const serviceResults = await loadServiceStatusSummary(environment, serviceStatusCache);
+  const platform = serviceResults.find((result) => result.platform !== null)?.platform ?? null;
+  const entries = await Promise.all(serviceResults.map(async (result) => ({
+    ...result.entry,
+    identifier: result.entry.identifier ?? null,
+    version: serviceVersion(result.entry.target),
+    recentError: await readManagedServiceErrorAsync({ environment, target: result.entry.target }),
+  })));
+  sendManagementJson(response, 200, {
+    observedAt: new Date().toISOString(),
+    available: platform !== null,
+    platform,
+    healthy: platform === null ? null : entries.every((service) => service.running),
+    entries,
+  });
+}
+
+function serviceVersion(target) {
+  return target === "app-server" ? CODEX_CLI_VERSION : GATEWAY_VERSION;
+}
+
+function readJsonMetadata(path) {
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    return value && typeof value === "object" ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 const managedSettingKinds = new Set([

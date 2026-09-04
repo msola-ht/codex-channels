@@ -390,6 +390,34 @@ describe("webui server", () => {
     expect(serialized).not.toContain(configPath);
   });
 
+  it("returns service status, versions and a redacted recent error through the shared WebUI token", async () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.home, "runtime", "gateway.error.log"),
+      "Error: authorization: Bearer service-secret\n",
+    );
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token" });
+
+    const response = await fetch(`${origin}/api/v1/management/services`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      available: boolean;
+      entries: Array<{ target: string; version: string | null; recentError: { message: string } | null }>;
+    };
+    expect(body.entries).toHaveLength(4);
+    expect(body.entries.map((entry) => entry.target)).toEqual([
+      "app-server", "gateway", "webui", "center",
+    ]);
+    expect(body.entries.every((entry) => entry.version !== null)).toBe(true);
+    expect(body.entries.find((entry) => entry.target === "gateway")?.version).toBe("0.152.0");
+    expect(body.entries.find((entry) => entry.target === "app-server")?.version).toBe("0.152.0");
+    const gateway = body.entries.find((entry) => entry.target === "gateway");
+    expect(gateway?.recentError?.message).toBe("Error: authorization: Bearer [已隐藏]");
+    expect(JSON.stringify(body)).not.toContain("service-secret");
+  });
+
   it("protects low-risk management writes with the same WebUI token", async () => {
     const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";

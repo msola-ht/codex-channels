@@ -49,3 +49,21 @@ export function inspectManagedServiceStatusAsync(options?: {
   target?: ManagedServiceStatus["target"];
   userId?: number;
 }): Promise<ManagedServiceStatus>;
+
+export interface ManagedServiceError {
+  message: string;
+  observedAt: string | null;
+}
+
+export function readManagedServiceError(options: {
+  environment?: NodeJS.ProcessEnv;
+  target: ManagedServiceStatusEntry["target"];
+  now?: number;
+}): ManagedServiceError | null;
+
+export function readManagedServiceErrorAsync(options: {
+  environment?: NodeJS.ProcessEnv;
+  target: ManagedServiceStatusEntry["target"];
+  platform?: NodeJS.Platform;
+  run?: AsyncServiceStatusRunner;
+}): Promise<ManagedServiceError | null>;

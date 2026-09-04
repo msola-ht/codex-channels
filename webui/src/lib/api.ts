@@ -16,6 +16,7 @@ import type {
   SettingsResponse,
   SettingsSummaryResponse,
   ManagementSettingsResponse,
+  ManagementServicesResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,
   ThreadRunResponse,
@@ -226,6 +227,10 @@ export function fetchSettings(
 
 export function fetchSettingsSummary(signal?: AbortSignal): Promise<SettingsSummaryResponse> {
   return getJson<SettingsSummaryResponse>(`${API_PREFIX}/settings/summary`, signal)
+}
+
+export function fetchManagementServices(signal?: AbortSignal): Promise<ManagementServicesResponse> {
+  return getJson<ManagementServicesResponse>(`${API_PREFIX}/management/services`, signal)
 }
 
 export function fetchDeepseekBalance(

@@ -1,5 +1,5 @@
-import { Fragment } from "react"
-import { RefreshCwIcon } from "lucide-react"
+import { Fragment, useState } from "react"
+import { CheckIcon, CopyIcon, RefreshCwIcon } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -11,13 +11,28 @@ import { ManagedInputRow, ManagedSelect, PendingSettingCard, SettingsRow } from 
 import { useCurrency } from "@/hooks/currency-context"
 import { useApi } from "@/hooks/use-api"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
-import { fetchSettingsSummary } from "@/lib/api"
+import { fetchManagementServices, fetchSettingsSummary } from "@/lib/api"
+import type { ManagementServicesResponse } from "@/lib/types"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
 
 export function SettingsPage() {
   const { currency, settings } = useCurrency()
   const summary = useApi(fetchSettingsSummary, [])
+  const services = useApi(fetchManagementServices, [])
   const management = useSettingsManagement()
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
+  const [copyError, setCopyError] = useState(false)
+  const copyCommand = async (id: string, command: string) => {
+    try {
+      if (!navigator.clipboard) throw new Error("clipboard_unavailable")
+      await navigator.clipboard.writeText(command)
+      setCopiedCommand(id)
+      setCopyError(false)
+    } catch {
+      setCopiedCommand(null)
+      setCopyError(true)
+    }
+  }
   const { managedSettings, actionError, saving, pendingSetting, previewSetting, confirmSetting, cancelSetting } = management
   const loadState = resolveSettingsLoadState(summary.data, summary.loading, summary.error)
 
@@ -88,17 +103,13 @@ export function SettingsPage() {
           ) : null}
           {actionError !== null ? <p className="text-sm text-destructive">{actionError}</p> : null}
           <Card>
-            <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>由当前平台服务管理器实时查询</CardDescription></CardHeader>
+            <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态、版本和最近错误由当前平台服务管理器只读查询</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-3">
-              {summary.data.services.available ? summary.data.services.entries.map((service, index) => (
-                <Fragment key={service.target}>
-                  {index > 0 ? <Separator /> : null}
-                  <div className="flex items-center justify-between gap-4 text-sm">
-                    <div className="flex flex-col gap-0.5"><span className="font-medium">{service.name}</span><span className="text-xs text-muted-foreground">{service.state}{service.pid === null ? "" : ` · PID ${service.pid}`}</span></div>
-                    <Badge variant={service.running ? "secondary" : "destructive"}>{serviceStatusLabel(service)}</Badge>
-                  </div>
-                </Fragment>
-              )) : <span className="text-sm text-muted-foreground">当前平台服务状态不可用，请使用 CLI 查看。</span>}
+              {services.loading ? <><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></> : null}
+              {services.error ? <SettingsError message={services.error} retry={services.refetch} /> : null}
+              {!services.loading && services.error === null && services.data !== null
+                ? <ManagedServices services={services.data} />
+                : null}
             </CardContent>
           </Card>
           <Card>
@@ -107,12 +118,14 @@ export function SettingsPage() {
               {summary.data.cli.map((entry, index) => (
                 <Fragment key={entry.id}>
                   {index > 0 ? <Separator /> : null}
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex flex-col gap-0.5"><span className="text-sm font-medium">{entry.label}</span><span className="text-xs text-muted-foreground">{entry.detail}</span></div>
-                    <code className="rounded bg-muted px-2 py-1 text-xs">{entry.command}</code>
-                  </div>
+                  <CliCommandRow
+                    entry={entry}
+                    copied={copiedCommand === entry.id}
+                    onCopy={() => void copyCommand(entry.id, entry.command)}
+                  />
                 </Fragment>
               ))}
+              {copyError ? <p className="text-xs text-destructive" role="status">浏览器未允许访问剪贴板，请手动选择并复制命令。</p> : null}
             </CardContent>
           </Card>
           <Card>
@@ -121,6 +134,64 @@ export function SettingsPage() {
           </Card>
         </>
       ) : null}
+    </div>
+  )
+}
+
+function ManagedServices({ services }: { services: ManagementServicesResponse }) {
+  if (services.entries.length === 0) {
+    return <span className="text-sm text-muted-foreground">当前平台没有可展示的受管服务。</span>
+  }
+  return (
+    <>
+      {services.entries.map((service, index) => (
+        <Fragment key={service.target}>
+          {index > 0 ? <Separator /> : null}
+          <div className="flex flex-col gap-1 text-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span className="font-medium">{service.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {service.state}
+                  {service.version === null ? " · 版本未知" : ` · ${service.version}`}
+                  {service.pid === null ? "" : ` · PID ${service.pid}`}
+                </span>
+              </div>
+              <Badge variant={service.running ? "secondary" : "destructive"}>{serviceStatusLabel(service)}</Badge>
+            </div>
+            {service.recentError !== null ? (
+              <p className="text-xs text-destructive">最近错误：{service.recentError.message}</p>
+            ) : null}
+          </div>
+        </Fragment>
+      ))}
+      {services.platform === null ? <p className="text-xs text-muted-foreground">当前平台服务状态不可用，请使用 CLI 查看详细信息。</p> : null}
+    </>
+  )
+}
+
+function CliCommandRow({
+  entry,
+  copied,
+  onCopy,
+}: {
+  entry: { label: string; command: string; detail: string }
+  copied: boolean
+  onCopy: () => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-sm font-medium">{entry.label}</span>
+        <span className="text-xs text-muted-foreground">{entry.detail} · 请在服务器终端执行</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <code className="rounded bg-muted px-2 py-1 text-xs">{entry.command}</code>
+        <Button type="button" variant="outline" size="sm" onClick={onCopy} aria-label={`复制命令：${entry.command}`}>
+          {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+          {copied ? "已复制" : "复制"}
+        </Button>
+      </div>
     </div>
   )
 }

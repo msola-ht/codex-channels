@@ -16,7 +16,7 @@
 ## 现状与事实来源
 
 - `scripts/webui-server.mjs` 提供指标 GET API 与受保护的低风险设置 API；`GET /api/v1/settings` 返回全局显示币种与汇率，
-  `GET /api/v1/settings/summary` 返回脱敏配置与四类受管服务状态。
+  `GET /api/v1/settings/summary` 返回脱敏配置摘要（保留基础服务状态兼容字段），`GET /api/v1/management/services` 返回四类受管服务状态、版本和最近错误。
 - Config/Setup 的结构化管理接口和修订保护已在 `scripts/` 与 `runtime/` 完成，CLI 菜单只是交互适配器。
 - 管理接口的 Origin、请求限制、一次性确认、审计和任务安全原语已记录在
   `docs/management-interface-security.md`；WebUI 设置接口直接复用 WebUI Bearer Token，不建立第二套登录。
@@ -44,7 +44,7 @@
 
 ### 阶段一：文档与设置总览页
 
-状态：阶段一、阶段二完成；阶段三尚未开始
+状态：阶段一、阶段二完成；阶段三只读集成完成，执行型操作仍未开放
 
 - [x] 建立本计划并加入项目文档索引。
 - [x] 增加 `/settings` 页面和导航入口（总览只读，低风险修改由阶段二提供）。
@@ -63,8 +63,8 @@
 
 ### 阶段三：服务与执行型操作只读集成
 
-- [ ] 展示 Gateway、App Server、WebUI、指标中心服务状态、版本和最近错误。
-- [ ] 对高风险 CLI 提供“复制命令/打开终端”提示，不在 WebUI 直接执行。
+- [x] 展示 Gateway、App Server、WebUI、指标中心服务状态、版本和最近错误。
+- [x] 对高风险 CLI 提供“复制命令/打开终端”提示，不在 WebUI 直接执行。
 - [ ] 若未来开放执行任务，必须先补预览、一次性确认、进度、取消/恢复、任务串行和审计契约。
 
 ### 阶段四：Provider/渠道可视化评估
@@ -93,7 +93,7 @@
 GET  /api/v1/management/settings       读取可编辑设置与 revision（复用 WebUI Bearer 令牌）
 POST /api/v1/management/settings/preview 预览低风险设置变更
 PATCH /api/v1/management/settings      写入低风险设置（JSON + revision）
-GET  /api/v1/management/services       服务状态（只读；阶段三规划，尚未实现）
+GET  /api/v1/management/services       服务状态、版本和最近错误（只读；复用 WebUI Bearer 令牌）
 ```
 
 `/api/v1/settings/summary` 和 `/api/v1/management/*` 均使用同一个 WebUI Bearer Token。未配置 WebUI 令牌时，

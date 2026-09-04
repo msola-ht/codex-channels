@@ -125,11 +125,14 @@ account_snapshots
 - [x] WebUI 账户卡片改为读取指标库统一快照接口，页面不再直接请求 DeepSeek/OpenCode Go 官方接口。
 - [x] 将 OpenAI、DeepSeek、OpenCode Go 官方账户快照统一写入数据库读模型。
 - [x] 为 WebUI 与渠道提供统一账户快照查询端口；渠道卡片沿用 Application 产生的账户事件与共享格式器。
-- [ ] 清理全局设备数据的非必要获取并迁移渠道卡片。
+- [x] 清理全局设备数据的非必要获取并迁移渠道卡片。
 
 本批审查确认：飞书、微信、Telegram 的账户与额度卡片均只消费 Application/Core 发出的
 `account.updated`、`account.rateLimits.updated` 事件，并复用 `runtime-status-format`，没有直接
 调用官方适配器、WebUI HTTP API 或指标数据库；OpenCode Go 快照中的秒级重置时间在 WebUI 边界统一转换为毫秒。
+
+全局范围页面只在需要中心设备选择或设备明细时读取 `/global/devices`；本机范围不请求中心设备列表。
+渠道卡片不再建立独立的全局设备读取链路，额度中心信息只由 Gateway 的统一远端额度查询在需要时附加。
 
 账户刷新策略暂定为按需刷新：渠道执行 `/usage` 或 `/limits` 时由 Gateway 实时查询并写入快照，
 WebUI 只读快照；暂不增加定时采集或 WebUI↔Gateway IPC，避免重复的跨进程凭据访问和刷新协议。

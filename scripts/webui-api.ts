@@ -334,6 +334,26 @@ export interface SettingsSummaryResponse {
   cli: Array<{ id: string; label: string; command: string; detail: string }>
 }
 
+export interface ManagementServiceEntry {
+  target: "gateway" | "app-server" | "webui" | "center"
+  name: string
+  identifier: string | null
+  loaded: boolean
+  running: boolean
+  state: string
+  pid: number | null
+  version: string | null
+  recentError: { message: string; observedAt: string | null } | null
+}
+
+export interface ManagementServicesResponse {
+  observedAt: string
+  available: boolean
+  platform: "systemd" | "launchd" | "windows" | null
+  healthy: boolean | null
+  entries: ManagementServiceEntry[]
+}
+
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
