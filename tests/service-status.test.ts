@@ -245,6 +245,16 @@ describe("managed service JSON status", () => {
     expect(error).toEqual({ message: "2026-09-04T00:00:00Z host gateway[123]: Error access_token=[已隐藏]", observedAt: null });
   });
 
+  it("treats an empty Linux journald result as no recent error", async () => {
+    const error = await readManagedServiceErrorAsync({
+      environment: {},
+      platform: "linux",
+      target: "gateway",
+      run: async () => ({ status: 0, stdout: "-- No entries --\n", stderr: "" }),
+    });
+    expect(error).toBeNull();
+  });
+
   it("drops a truncated first log line before sanitizing the bounded tail", () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-service-error-tail-"));
     try {

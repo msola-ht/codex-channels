@@ -193,7 +193,7 @@ export async function readManagedServiceErrorAsync({
   const message = String(result.stdout ?? "")
     .split(/\r?\n/u)
     .map((line) => sanitizeServiceError(line))
-    .filter((line) => line.length > 0)
+    .filter((line) => line.length > 0 && line !== "-- No entries --")
     .slice(-3)
     .join("；")
     .slice(-600);

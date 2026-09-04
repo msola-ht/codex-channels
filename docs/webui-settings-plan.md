@@ -69,16 +69,25 @@
 
 ### 阶段四：Provider/渠道可视化评估
 
-- [ ] 根据管理接口成熟度逐项评估 Provider 和渠道 Setup 是否具备可视化条件。
-- [ ] 凭据、扫码、OAuth 和服务中断操作维持独立任务边界，未满足安全门槛不得接入页面。
+- 状态：阶段四只读概览完成；Provider 和渠道写操作仍未开放。
+- [x] 根据管理接口成熟度逐项评估 Provider 和渠道 Setup 是否具备可视化条件。
+- [x] 凭据、扫码、OAuth 和服务中断操作维持独立任务边界，未满足安全门槛不得接入页面。
+
+当前批次结果：Provider 只展示主 Provider、Codex 默认模型/思考等级、已配置、可切换和备份 Provider 的安全摘要和共享
+第三方子代理状态；渠道只展示 Gateway 已配置与启用状态。Provider URL、Profile、API Key、Token、OAuth、
+扫码、账户操作、服务重启和任何配置写入均不进入 WebUI。Provider 读取复用现有 `config/read` 结构化适配器和
+`loadModelProviderManagementState`，后端只返回白名单投影；渠道读取复用 Gateway 配置管理的 `channels` 快照。
+当前未开放 Provider/渠道运行健康探测、OAuth/扫码流程和配置写入；这些能力需要独立任务、明确审批和审计契约。
 
 ## 页面结构
 
 ```text
 设置
 ├── App Server 设置（当前状态 + CLI 入口）
+├── Provider 状态（只读安全概览）
 ├── Gateway 设置（当前值 + 修改）
 ├── WebUI 与数据中心设置（当前值 + 修改）
+├── 通讯渠道状态（只读）
 ├── 服务状态
 └── CLI 操作提示
 ```
@@ -94,6 +103,7 @@ GET  /api/v1/management/settings       读取可编辑设置与 revision（复�
 POST /api/v1/management/settings/preview 预览低风险设置变更
 PATCH /api/v1/management/settings      写入低风险设置（JSON + revision）
 GET  /api/v1/management/services       服务状态、版本和最近错误（只读；复用 WebUI Bearer 令牌）
+GET  /api/v1/management/providers      Provider 安全概览（只读；复用 WebUI Bearer 令牌）
 ```
 
 `/api/v1/settings/summary` 和 `/api/v1/management/*` 均使用同一个 WebUI Bearer Token。未配置 WebUI 令牌时，

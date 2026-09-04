@@ -418,6 +418,94 @@ describe("webui server", () => {
     expect(JSON.stringify(body)).not.toContain("service-secret");
   });
 
+  it("returns a redacted Provider overview without credentials or profiles", async () => {
+    const fixture = createFixture();
+    let providerLoads = 0;
+    const providerState = {
+      configVersion: "v7",
+      defaults: { model: "gpt-test", reasoningEffort: "high" },
+      primary: { id: "relay", displayName: "Relay", kind: "custom", mode: "exclusive" },
+      managedProviders: [{
+        id: "deepseek",
+        displayName: "DeepSeek",
+        kind: "managed",
+        mode: "switching",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "high",
+        models: [{ id: "deepseek-v4-flash" }],
+      }],
+      customProviders: {
+        fixedCandidates: [{
+          id: "relay",
+          displayName: "Relay",
+          kind: "custom",
+          state: "configured",
+          active: true,
+          baseUrl: "https://user:secret@relay.example/v1",
+        }],
+        switchingProviders: [{
+          id: "backup-relay",
+          displayName: "Backup Relay",
+          kind: "custom",
+          mode: "switching",
+          model: "gpt-test",
+          reasoningEffort: "medium",
+          baseUrl: "https://relay.example/v1",
+          profileName: "sf-custom-backup-relay",
+        }],
+        backupCandidates: [],
+      },
+      switchingProviders: [],
+      externalAgent: { status: "configured", provider: "deepseek", model: "deepseek-v4-flash" },
+    };
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { token: "webui-token", loadProviderState: async () => { providerLoads += 1; return providerState; } },
+    );
+
+    const unauthorized = await fetch(`${origin}/api/v1/management/providers`);
+    expect(unauthorized.status).toBe(401);
+    const response = await fetch(`${origin}/api/v1/management/providers`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      providers: Array<Record<string, unknown>>;
+      primary: { id: string; mode: string };
+      externalAgent: { status: string; provider?: string; model?: string };
+    };
+    expect(body.primary).toEqual({ id: "relay", displayName: "Relay", kind: "custom", mode: "exclusive" });
+    expect(body.providers).toHaveLength(3);
+    expect(body.providers.find((provider) => provider.id === "relay")).toMatchObject({ selected: true, model: null });
+    expect(body.externalAgent).toEqual({ status: "configured", provider: "deepseek", model: "deepseek-v4-flash" });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("secret");
+    expect(serialized).not.toContain("sf-custom-backup-relay");
+    expect(serialized).not.toContain("baseUrl");
+    const cached = await fetch(`${origin}/api/v1/management/providers`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(cached.status).toBe(200);
+    expect(providerLoads).toBe(1);
+  });
+
+  it("fails closed when the Provider overview cannot be read", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { token: "webui-token", loadProviderState: async () => { throw new Error("provider read failed"); } },
+    );
+    const response = await fetch(`${origin}/api/v1/management/providers`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { code: "provider_state_unavailable", message: "Provider 状态暂不可用，请使用 codexc setup 查看" },
+    });
+  });
+
   it("protects low-risk management writes with the same WebUI token", async () => {
     const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";
@@ -1093,6 +1181,7 @@ async function startServer(
     host?: string
     token?: string
     managementOrigin?: string
+    loadProviderState?: (options: { environment: NodeJS.ProcessEnv }) => Promise<unknown>
   } = {},
 ) {
   const { server } = createWebuiServer({
@@ -1101,6 +1190,7 @@ async function startServer(
     ...(options.host === undefined ? {} : { host: options.host }),
     ...(options.token === undefined ? {} : { token: options.token }),
     ...(options.managementOrigin === undefined ? {} : { managementOrigin: options.managementOrigin }),
+    ...(options.loadProviderState === undefined ? {} : { loadProviderState: options.loadProviderState }),
   });
   await new Promise<void>((resolve) => {
     server.listen(0, options.host ?? "127.0.0.1", resolve);

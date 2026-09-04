@@ -73,7 +73,7 @@ codexc service stop webui        # 停止
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | `#/settings` | `GET /api/v1/settings`（币种与汇率）、`GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近错误）、`/api/v1/management/settings`（同一 WebUI Bearer 令牌下的低风险设置读取/预览/修改） |
+| 设置 | `#/settings` | `GET /api/v1/settings`（币种与汇率）、`GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近错误）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（同一 WebUI Bearer 令牌下的低风险设置读取/预览/修改） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
 指标接口只接受 GET；设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH 执行预览与写入，均要求同一

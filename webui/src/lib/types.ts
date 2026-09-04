@@ -36,6 +36,7 @@ export type {
   SettingsSummaryResponse,
   ManagementSettingsResponse,
   ManagementServicesResponse,
+  ManagementProvidersResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,
   ThreadListItem,

@@ -354,6 +354,34 @@ export interface ManagementServicesResponse {
   entries: ManagementServiceEntry[]
 }
 
+export interface ManagementProviderEntry {
+  id: string
+  displayName: string
+  kind: "managed" | "custom"
+  mode: "exclusive" | "fixed" | "switching" | "backup"
+  state: "configured" | "backup"
+  model: string | null
+  modelCount: number | null
+  selected: boolean
+}
+
+export interface ManagementProvidersResponse {
+  observedAt: string
+  available: boolean
+  configVersion: string | number | null
+  defaults: { model: string | null; reasoningEffort: string | null }
+  primary: {
+    id: string
+    displayName: string
+    kind: "official" | "managed" | "custom" | "unknown"
+    mode: "official" | "exclusive" | "backup" | "unknown"
+  }
+  providers: ManagementProviderEntry[]
+  externalAgent:
+    | { status: "configured"; provider: string | null; model: string | null }
+    | { status: "unavailable" | "not-configured" }
+}
+
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]

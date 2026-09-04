@@ -29,6 +29,7 @@ import {
   loadGatewaySettings,
   updateGatewaySetting,
 } from "./config-management.mjs";
+import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { inspectManagedServiceStatusAsync, readManagedServiceErrorAsync } from "./service-status.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
 import {
@@ -98,6 +99,7 @@ export function createWebuiServer({
   token = null,
   port = DEFAULT_PORT,
   managementOrigin = null,
+  loadProviderState = loadModelProviderManagementState,
 } = {}) {
   assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
@@ -106,7 +108,16 @@ export function createWebuiServer({
     );
   }
   const serviceStatusCache = { expiresAtMs: 0, value: null, pending: null };
-  const management = createManagementState(environment, host, port, managementOrigin, serviceStatusCache);
+  const providerStateCache = { expiresAtMs: 0, value: null, pending: null };
+  const management = createManagementState(
+    environment,
+    host,
+    port,
+    managementOrigin,
+    serviceStatusCache,
+    providerStateCache,
+    loadProviderState,
+  );
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
   });
@@ -187,7 +198,15 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
   }
 }
 
-function createManagementState(environment, host, port, configuredOrigin, serviceStatusCache) {
+function createManagementState(
+  environment,
+  host,
+  port,
+  configuredOrigin,
+  serviceStatusCache,
+  providerStateCache,
+  loadProviderState,
+) {
   const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const dataDir = explicitConfig ? dirname(resolve(explicitConfig)) : userDataDir(environment);
   const originHost = host === "::1" ? "[::1]" : "127.0.0.1";
@@ -196,6 +215,8 @@ function createManagementState(environment, host, port, configuredOrigin, servic
     // 隧道访问 127.0.0.1，再由下面的 socket 检查拒绝公网直连管理接口。
     origin: configuredOrigin ?? `http://${originHost}:${port}`,
     serviceStatusCache,
+    providerStateCache,
+    loadProviderState,
     limiter: new ManagementRateLimiter(),
     audit: new ManagementAuditWriter(join(dataDir, "management-audit.jsonl")),
   };
@@ -236,6 +257,10 @@ async function routeManagement(environment, url, request, response, state, token
   }
   if (path === "/services" && request.method === "GET") {
     await handleManagementServices(environment, response, state.serviceStatusCache);
+    return;
+  }
+  if (path === "/providers" && request.method === "GET") {
+    await handleManagementProviders(environment, response, state.providerStateCache, state.loadProviderState);
     return;
   }
   if (path === "/settings/preview" && request.method === "POST") {
@@ -325,6 +350,135 @@ async function handleManagementServices(environment, response, serviceStatusCach
     healthy: platform === null ? null : entries.every((service) => service.running),
     entries,
   });
+}
+
+async function handleManagementProviders(environment, response, providerStateCache, loadProviderState) {
+  let providers;
+  try {
+    providers = await loadProviderManagementSummary(environment, providerStateCache, loadProviderState);
+  } catch {
+    throw new ApiError(503, "provider_state_unavailable", "Provider 状态暂不可用，请使用 codexc setup 查看");
+  }
+  sendManagementJson(response, 200, providers);
+}
+
+const PROVIDER_STATE_CACHE_TTL_MS = 5_000;
+
+function loadProviderManagementSummary(environment, cache, loadProviderState) {
+  const now = Date.now();
+  if (cache.value !== null && cache.expiresAtMs > now) return Promise.resolve(cache.value);
+  if (cache.pending !== null) return cache.pending;
+  cache.pending = loadProviderState({ environment })
+    .then(projectProviderManagementState)
+    .then((value) => {
+      cache.value = value;
+      cache.expiresAtMs = Date.now() + PROVIDER_STATE_CACHE_TTL_MS;
+      return value;
+    })
+    .finally(() => {
+      cache.pending = null;
+    });
+  return cache.pending;
+}
+
+function projectProviderManagementState(state) {
+  const providers = [];
+  const addProvider = (provider) => {
+    providers.push({
+      ...provider,
+      id: publicProviderId(provider.id),
+      displayName: publicProviderDisplayName(provider.displayName, provider.id),
+      model: publicProviderText(provider.model),
+    });
+  };
+  for (const provider of state.managedProviders) {
+    addProvider({
+      id: provider.id,
+      displayName: provider.displayName,
+      kind: "managed",
+      mode: provider.mode,
+      state: "configured",
+      model: provider.model,
+      modelCount: boundedCount(provider.models.length),
+      selected: state.primary.id === provider.id,
+    });
+  }
+  for (const provider of state.customProviders.fixedCandidates) {
+    addProvider({
+      id: provider.id,
+      displayName: provider.displayName,
+      kind: "custom",
+      mode: provider.active ? "exclusive" : "fixed",
+      state: provider.state,
+      model: null,
+      modelCount: null,
+      selected: provider.active,
+    });
+  }
+  for (const provider of state.customProviders.switchingProviders) {
+    addProvider({
+      id: provider.id,
+      displayName: provider.displayName,
+      kind: "custom",
+      mode: "switching",
+      state: "configured",
+      model: provider.model,
+      modelCount: null,
+      selected: state.primary.id === provider.id,
+    });
+  }
+  for (const provider of state.customProviders.backupCandidates) {
+    addProvider({
+      id: provider.id,
+      displayName: provider.displayName,
+      kind: "custom",
+      mode: "backup",
+      state: "backup",
+      model: null,
+      modelCount: null,
+      selected: provider.active,
+    });
+  }
+  return {
+    observedAt: new Date().toISOString(),
+    available: true,
+    configVersion: state.configVersion ?? null,
+    defaults: {
+      model: publicProviderText(state.defaults.model),
+      reasoningEffort: publicProviderText(state.defaults.reasoningEffort),
+    },
+    primary: {
+      id: publicProviderId(state.primary.id),
+      displayName: publicProviderDisplayName(state.primary.displayName, state.primary.id),
+      kind: state.primary.kind,
+      mode: state.primary.mode,
+    },
+    providers,
+    externalAgent: state.externalAgent.status === "configured"
+      ? {
+          status: "configured",
+          provider: publicProviderId(state.externalAgent.provider),
+          model: publicProviderText(state.externalAgent.model) ?? "unknown",
+        }
+      : { status: state.externalAgent.status },
+  };
+}
+
+function publicProviderId(value) {
+  return publicProviderText(value) ?? "unknown";
+}
+
+function publicProviderDisplayName(value, fallback) {
+  return publicProviderText(value) ?? publicProviderId(fallback);
+}
+
+function publicProviderText(value) {
+  if (typeof value !== "string") return null;
+  return value.replace(/\p{Cc}/gu, " ").replace(/\s+/gu, " ").trim().slice(0, 120) || null;
+}
+
+function boundedCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= 1_000 ? value : null;
 }
 
 function serviceVersion(target) {

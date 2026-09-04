@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ChannelStatusCard, ProviderStatusCard } from "@/components/settings/provider-channel-status"
 import { ManagedInputRow, ManagedSelect, PendingSettingCard, SettingsRow } from "@/components/settings/settings-controls"
 import { useCurrency } from "@/hooks/currency-context"
 import { useApi } from "@/hooks/use-api"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
-import { fetchManagementServices, fetchSettingsSummary } from "@/lib/api"
+import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary } from "@/lib/api"
 import type { ManagementServicesResponse } from "@/lib/types"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
 
@@ -19,6 +20,7 @@ export function SettingsPage() {
   const { currency, settings } = useCurrency()
   const summary = useApi(fetchSettingsSummary, [])
   const services = useApi(fetchManagementServices, [])
+  const providers = useApi(fetchManagementProviders, [])
   const management = useSettingsManagement()
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [copyError, setCopyError] = useState(false)
@@ -57,6 +59,9 @@ export function SettingsPage() {
               <SettingsRow label="Provider 与账户" value="codexc setup" code />
             </CardContent>
           </Card>
+          {providers.loading ? <Card><CardHeader><CardTitle>Provider 状态</CardTitle></CardHeader><CardContent className="flex flex-col gap-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-full" /></CardContent></Card> : null}
+          {providers.error ? <SettingsError message={providers.error} retry={providers.refetch} /> : null}
+          {!providers.loading && providers.error === null && providers.data !== null ? <ProviderStatusCard state={providers.data} /> : null}
           {managedSettings !== null ? (
             <>
               <Card>
@@ -76,7 +81,6 @@ export function SettingsPage() {
                   <SettingsRow label="美元兑人民币" value={settings?.exchangeRate?.usdToCny.toString() ?? "暂无"} />
                   <SettingsRow label="汇率来源" value={exchangeRateSourceLabel(settings?.exchangeRate?.source)} />
                   <SettingsRow label="Plugin API" value={enabledLabel(managedSettings.advanced.pluginApiEnabled)} />
-                  <SettingsRow label="通讯渠道" value={managedSettings.channels.map((channel) => `${channel.displayName}（${enabledLabel(channel.enabled)}）`).join("、") || "未配置"} />
                   <SettingsRow label="Thread 分区管理员" value={`${managedSettings.automation.threadSectionAdministratorCount} 个`} />
                   <SettingsRow label="配置修订" value={managedSettings.revision.slice(0, 12)} code />
                 </CardContent>
@@ -101,6 +105,7 @@ export function SettingsPage() {
               </Card>
             </>
           ) : null}
+          <ChannelStatusCard channels={summary.data.gateway.channels} />
           {actionError !== null ? <p className="text-sm text-destructive">{actionError}</p> : null}
           <Card>
             <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态、版本和最近错误由当前平台服务管理器只读查询</CardDescription></CardHeader>
