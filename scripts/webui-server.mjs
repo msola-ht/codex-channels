@@ -134,9 +134,12 @@ export function resolveWebuiSettings({
 }
 
 async function handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response) {
+  let managementRequest = false;
   try {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
-    if (requestUrl.pathname.startsWith(`${API_PREFIX}/management`)) {
+    const managementPrefix = `${API_PREFIX}/management`;
+    managementRequest = requestUrl.pathname === managementPrefix || requestUrl.pathname.startsWith(`${managementPrefix}/`);
+    if (managementRequest) {
       await routeManagement(environment, requestUrl, request, response, management);
       return;
     }
@@ -171,11 +174,13 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
       return;
     }
     if (error instanceof ApiError) {
-      sendJson(response, error.status, { error: { code: error.code, message: error.message } });
+      const sendError = managementRequest ? sendManagementJson : sendJson;
+      sendError(response, error.status, { error: { code: error.code, message: error.message } });
       return;
     }
     console.error(error);
-    sendJson(response, 500, {
+    const sendInternalError = managementRequest ? sendManagementJson : sendJson;
+    sendInternalError(response, 500, {
       error: { code: "internal_error", message: "WebUI 内部错误" },
     });
   }
@@ -287,6 +292,18 @@ async function routeManagement(environment, url, request, response, state) {
     }
     const input = body.setting;
     assertManagedSetting(input);
+    try {
+      state.audit.assertWritable();
+    } catch (error) {
+      console.error("管理设置未写入，审计记录不可用", error);
+      sendManagementJson(response, 500, {
+        error: {
+          code: "management_audit_unavailable",
+          message: "设置未写入，审计记录不可用；请检查 Gateway 数据目录权限和磁盘空间",
+        },
+      });
+      return;
+    }
     const result = updateGatewaySetting(input, {
       environment,
       expectedRevision: body.revision,

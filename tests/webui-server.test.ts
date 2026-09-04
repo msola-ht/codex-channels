@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -427,6 +427,81 @@ describe("webui server", () => {
     });
     expect(update.status).toBe(200);
     expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(false);
+  });
+
+  it("revokes management sessions on logout", async () => {
+    const fixture = createFixture();
+    provisionManagementCredential(join(fixture.home, "management-credential"));
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const login = await fetch(`${origin}/api/v1/management/login`, { method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ credential: readFileSync(join(fixture.home, "management-credential"), "utf8").trim() }) });
+    const csrf = (await login.json() as { csrfToken: string }).csrfToken;
+    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
+    const logout = await fetch(`${origin}/api/v1/management/logout`, { method: "POST", headers: { origin: managementOrigin, cookie, "x-codex-csrf": csrf, "content-type": "application/json" } });
+    expect(logout.status).toBe(200);
+    expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+    const stale = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, cookie } });
+    expect(stale.status).toBe(401);
+  });
+
+  it("rejects management writes with stale revision and invalid CSRF", async () => {
+    const fixture = createFixture();
+    provisionManagementCredential(join(fixture.home, "management-credential"));
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const credential = readFileSync(join(fixture.home, "management-credential"), "utf8").trim();
+    const login = await fetch(`${origin}/api/v1/management/login`, { method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ credential }) });
+    const loginBody = await login.json() as { csrfToken: string };
+    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
+    const settings = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, cookie } });
+    const current = await settings.json() as { revision: string; display: { reasoningEnabled: boolean } };
+    const revision = current.revision;
+    const changedValue = !current.display.reasoningEnabled;
+    const badCsrf = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, cookie, "x-codex-csrf": "invalid", "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: true } }) });
+    expect(badCsrf.status).toBe(403);
+    const first = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, cookie, "x-codex-csrf": loginBody.csrfToken, "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: changedValue } }) });
+    expect(first.status).toBe(200);
+    const stale = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, cookie, "x-codex-csrf": loginBody.csrfToken, "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: !changedValue } }) });
+    expect(stale.status).toBe(409);
+  });
+
+  it("fails closed when management audit storage is unavailable", async () => {
+    const fixture = createFixture();
+    provisionManagementCredential(join(fixture.home, "management-credential"));
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const credential = readFileSync(join(fixture.home, "management-credential"), "utf8").trim();
+    const login = await fetch(`${origin}/api/v1/management/login`, { method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ credential }) });
+    const loginBody = await login.json() as { csrfToken: string };
+    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
+    const settings = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, cookie } });
+    const current = await settings.json() as { revision: string; display: { reasoningEnabled: boolean } };
+    const auditPath = join(fixture.home, "management-audit.jsonl");
+    mkdirSync(auditPath);
+    const update = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, cookie, "x-codex-csrf": loginBody.csrfToken, "content-type": "application/json" }, body: JSON.stringify({ revision: current.revision, setting: { kind: "display.reasoning", value: !current.display.reasoningEnabled } }) });
+    expect(update.status).toBe(500);
+    expect((await update.json() as { error: { code: string } }).error.code).toBe("management_audit_unavailable");
+    expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(current.display.reasoningEnabled);
+  });
+
+  it("rejects unauthorized, cross-origin, and unsupported management requests", async () => {
+    const fixture = createFixture();
+    provisionManagementCredential(join(fixture.home, "management-credential"));
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const unauthorized = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin } });
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers.get("x-content-type-options")).toBe("nosniff");
+    const credential = readFileSync(join(fixture.home, "management-credential"), "utf8").trim();
+    const login = await fetch(`${origin}/api/v1/management/login`, { method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ credential }) });
+    const loginBody = await login.json() as { csrfToken: string };
+    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
+    const crossOrigin = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: "https://evil.example", cookie, "x-codex-csrf": loginBody.csrfToken } });
+    expect(crossOrigin.status).toBe(403);
+    expect(crossOrigin.headers.get("x-content-type-options")).toBe("nosniff");
+    const unsupported = await fetch(`${origin}/api/v1/management/settings/preview`, { method: "POST", headers: { origin: managementOrigin, cookie, "x-codex-csrf": loginBody.csrfToken, "content-type": "application/json" }, body: JSON.stringify({ revision: "0".repeat(64), setting: { kind: "credentials.api-key", value: "secret" } }) });
+    expect(unsupported.status).toBe(400);
+    expect((await unsupported.json() as { error: { code: string } }).error.code).toBe("setting_not_allowed");
   });
 
   it("returns an actionable settings error before Gateway initialization", async () => {

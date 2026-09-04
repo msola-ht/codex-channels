@@ -37,7 +37,7 @@
 
 ### 阶段一：文档与只读设置页
 
-状态：阶段一完成，阶段二进行中（管理认证与低风险写入后端已接入，前端编辑界面待完成）
+状态：阶段一、阶段二完成；阶段三尚未开始
 
 - [x] 建立本计划并加入项目文档索引。
 - [x] 增加 `/settings` 页面和导航入口（首期只读）。
@@ -51,8 +51,8 @@
 - [x] 复用现有 Config 结构化接口，增加明确输入、修订检查和原子写入适配。
 - [x] 接入管理认证、短期会话、Origin/CSRF、限速、请求上限和审计共享层。
 - [x] 写入接口只接受 JSON，拒绝缺失/过期修订，不自动合并并发修改。
-- [ ] 页面展示预览差异、生效动作和重启提示；写入不自动重启服务。
-- [ ] 增加冲突、字段错误、未授权、CSRF 和审计失败关闭测试。
+- [x] 页面展示预览差异、生效动作和重启提示；写入不自动重启服务。
+- [x] 增加冲突、字段错误、未授权、CSRF 和审计失败关闭测试。
 
 ### 阶段三：服务与执行型操作只读集成
 
@@ -87,6 +87,7 @@ POST /api/v1/management/login          使用独立管理凭据建立短期会�
 GET  /api/v1/management/settings       读取可编辑设置与 revision（管理会话）
 POST /api/v1/management/settings/preview 预览低风险设置变更
 PATCH /api/v1/management/settings      写入低风险设置（JSON + revision）
+POST /api/v1/management/logout         撤销当前管理会话并清理 Cookie
 GET  /api/v1/management/services       服务状态（只读）
 ```
 

@@ -17,6 +17,11 @@ export class ManagementAuditWriter {
     this.#now = now;
   }
 
+  assertWritable() {
+    const current = existsSync(this.#path) ? readPrivateFileSync(this.#path, maximumAuditBytes) : "";
+    writePrivateFileAtomicSync(this.#path, current);
+  }
+
   record(event) {
     const entry = normalizeAuditEvent(event, this.#now());
     const line = `${JSON.stringify(entry)}\n`;
