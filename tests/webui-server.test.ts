@@ -672,6 +672,54 @@ describe("webui server", () => {
     expect(replay.status).toBe(409);
   });
 
+  it("manages account settings with the shared token and redacted credentials", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    let appliedInput: unknown = null;
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token",
+      managementOrigin,
+      loadAccountSettings: async () => ({
+        opencodeGo: {
+          configured: true,
+          defaultAccountId: "main",
+          accounts: [{ id: "main", displayName: "ocg-main", email: "main@example.com", default: true }],
+        },
+        deepseek: { configured: false, mode: null, model: null, restoreAvailable: false },
+      }),
+      previewAccountSettings: async (input: unknown) => ({
+        operation: (input as { operation: string }).operation,
+        account: { id: "main", displayName: "ocg-main", email: "main@example.com", exists: true },
+        effects: { updatesExternalAgent: true },
+        activation: "restart-all",
+      }),
+      applyAccountSettings: async (input: unknown) => {
+        appliedInput = input;
+        return { action: "configured", operation: "opencode.account.configure", account: { id: "main", displayName: "ocg-main" }, activation: "restart-all" };
+      },
+    });
+    const headers = { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" };
+    const resource = await fetch(`${origin}/api/v1/management/account-settings`, { headers: { authorization: "Bearer webui-token" } });
+    expect(resource.status).toBe(200);
+    expect((await resource.json() as { opencodeGo: { accounts: unknown[] } }).opencodeGo.accounts).toHaveLength(1);
+    const preview = await fetch(`${origin}/api/v1/management/account-settings/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "opencode.account.configure", accountId: "main", contact: "main@example.com", apiKey: "secret-key" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken: string };
+    expect(JSON.stringify(previewBody)).not.toContain("secret-key");
+    const apply = await fetch(`${origin}/api/v1/management/account-settings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "opencode.account.configure", accountId: "main", contact: "main@example.com", apiKey: "secret-key", confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(apply.status).toBe(200);
+    expect(appliedInput).toMatchObject({ operation: "opencode.account.configure", apiKey: "secret-key" });
+    expect(await apply.json()).toMatchObject({ action: "configured", auditStatus: "recorded" });
+  });
+
   it("previews and starts a confirmed source maintenance task without replay", async () => {
     const fixture = createFixture();
     const executableDirectory = mkdtempSync(join(tmpdir(), "codexc-webui-task-route-"));
@@ -1467,6 +1515,9 @@ async function startServer(
     updateCodexSetting?: (input: unknown, options: { environment: NodeJS.ProcessEnv; expectedVersion: string }) => Promise<unknown>
     previewProviderSettings?: (input: unknown, environment: NodeJS.ProcessEnv) => Promise<unknown>
     applyProviderSettings?: (input: unknown, environment: NodeJS.ProcessEnv, preview: unknown) => Promise<unknown>
+    loadAccountSettings?: (environment: NodeJS.ProcessEnv) => Promise<unknown>
+    previewAccountSettings?: (input: unknown, environment: NodeJS.ProcessEnv) => Promise<unknown>
+    applyAccountSettings?: (input: unknown, environment: NodeJS.ProcessEnv, preview: unknown) => Promise<unknown>
   } = {},
 ) {
   const { server } = createWebuiServer({
@@ -1481,6 +1532,9 @@ async function startServer(
     ...(options.updateCodexSetting === undefined ? {} : { updateCodexSetting: options.updateCodexSetting }),
     ...(options.previewProviderSettings === undefined ? {} : { previewProviderSettings: options.previewProviderSettings }),
     ...(options.applyProviderSettings === undefined ? {} : { applyProviderSettings: options.applyProviderSettings }),
+    ...(options.loadAccountSettings === undefined ? {} : { loadAccountSettings: options.loadAccountSettings }),
+    ...(options.previewAccountSettings === undefined ? {} : { previewAccountSettings: options.previewAccountSettings }),
+    ...(options.applyAccountSettings === undefined ? {} : { applyAccountSettings: options.applyAccountSettings }),
   });
   await new Promise<void>((resolve) => {
     server.listen(0, options.host ?? "127.0.0.1", resolve);

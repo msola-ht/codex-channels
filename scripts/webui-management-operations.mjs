@@ -87,6 +87,7 @@ export function previewApiProviderOperation(input, environment) {
 export function isHighRiskManagementPath(path) {
   return path.startsWith("/api-providers")
     || path.startsWith("/provider-settings")
+    || path.startsWith("/account-settings")
     || path.startsWith("/tasks");
 }
 

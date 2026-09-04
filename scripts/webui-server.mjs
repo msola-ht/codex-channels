@@ -83,6 +83,13 @@ import {
   previewProviderSettingsMutation,
   redactProviderSettingsResult,
 } from "./webui-provider-settings-management.mjs";
+import {
+  applyAccountSettingsMutation,
+  loadAccountSettingsResource,
+  normalizeAccountSettingsMutation,
+  previewAccountSettingsMutation,
+  redactAccountSettingsResult,
+} from "./webui-account-settings-management.mjs";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
@@ -140,6 +147,9 @@ export function createWebuiServer({
   updateCodexSetting = updateCodexUserSetting,
   previewProviderSettings = previewProviderSettingsMutation,
   applyProviderSettings = applyProviderSettingsMutation,
+  previewAccountSettings = previewAccountSettingsMutation,
+  applyAccountSettings = applyAccountSettingsMutation,
+  loadAccountSettings = loadAccountSettingsResource,
 } = {}) {
   assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
@@ -162,6 +172,9 @@ export function createWebuiServer({
     updateCodexSetting,
     previewProviderSettings,
     applyProviderSettings,
+    previewAccountSettings,
+    applyAccountSettings,
+    loadAccountSettings,
   );
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
@@ -266,6 +279,9 @@ function createManagementState(
   updateCodexSetting,
   previewProviderSettings,
   applyProviderSettings,
+  previewAccountSettings,
+  applyAccountSettings,
+  loadAccountSettings,
 ) {
   const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const dataDir = explicitConfig ? dirname(resolve(explicitConfig)) : userDataDir(environment);
@@ -295,6 +311,9 @@ function createManagementState(
     updateCodexSetting,
     previewProviderSettings,
     applyProviderSettings,
+    previewAccountSettings,
+    applyAccountSettings,
+    loadAccountSettings,
     confirmations: new ManagementConfirmationStore(),
     tasks,
     limiter: new ManagementRateLimiter(),
@@ -509,6 +528,87 @@ async function routeManagement(environment, url, request, response, state, token
       resourceRevision: fingerprintManagementValue(resource),
       ...resource,
     });
+    return;
+  }
+  if (path === "/account-settings" && request.method === "GET") {
+    const resource = await readAccountSettingsResource(environment, state);
+    sendManagementJson(response, 200, {
+      observedAt: new Date().toISOString(),
+      resourceRevision: fingerprintManagementValue(resource),
+      ...resource,
+    });
+    return;
+  }
+  if (path === "/account-settings/preview" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    const input = normalizeAccountSettingsMutation(body);
+    const preview = await state.previewAccountSettings(input, environment);
+    const safePreview = redactAccountSettingsResult(preview);
+    const resource = await readAccountSettingsResource(environment, state);
+    const inputFingerprint = fingerprintManagementValue(input);
+    const resourceRevision = fingerprintManagementValue(resource);
+    const issued = state.confirmations.issue({
+      sessionId: principalId,
+      operation: "account-settings.write",
+      inputFingerprint,
+      resourceRevision,
+      previewFingerprint: fingerprintManagementValue(safePreview),
+    });
+    sendManagementJson(response, 200, {
+      preview: safePreview,
+      resourceRevision,
+      confirmationToken: issued.token,
+      confirmationExpiresAt: issued.expiresAt,
+    });
+    return;
+  }
+  if (path === "/account-settings" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.confirmationToken !== "string") {
+      throw new ApiError(400, "invalid_json", "账户设置写入请求必须包含 confirmationToken");
+    }
+    const input = normalizeAccountSettingsMutation(body);
+    const resource = await readAccountSettingsResource(environment, state);
+    const preview = await state.previewAccountSettings(input, environment);
+    const safePreview = redactAccountSettingsResult(preview);
+    const inputFingerprint = fingerprintManagementValue(input);
+    const resourceRevision = fingerprintManagementValue(resource);
+    state.confirmations.consume(body.confirmationToken, {
+      sessionId: principalId,
+      operation: "account-settings.write",
+      inputFingerprint,
+      resourceRevision,
+      previewFingerprint: fingerprintManagementValue(safePreview),
+    });
+    let result;
+    try {
+      state.audit.assertWritable();
+      result = await state.applyAccountSettings(input, environment, safePreview);
+    } catch (error) {
+      throw error instanceof ManagementOperationError
+        ? error
+        : new ApiError(400, "account_settings_write_failed", error instanceof Error ? error.message : "账户设置写入失败");
+    }
+    let auditStatus = "recorded";
+    try {
+      state.audit.record({
+        sessionId: principalId,
+        source: "webui",
+        operation: "account-settings.write",
+        target: accountSettingsAuditTarget(input),
+        inputFingerprint,
+        revision: resourceRevision,
+        previewId: fingerprintManagementValue(safePreview),
+        confirmationId: fingerprintManagementValue(body.confirmationToken),
+        phase: "completed",
+        resultCode: result.action ?? "updated",
+        recovery: "none",
+      });
+    } catch (error) {
+      auditStatus = "degraded";
+      console.error("账户设置已写入，但审计记录失败", error);
+    }
+    sendManagementJson(response, 200, { ...redactAccountSettingsResult(result), auditStatus });
     return;
   }
   if (path === "/provider-settings/preview" && request.method === "POST") {
@@ -819,11 +919,24 @@ function providerSettingsAuditTarget(input) {
   return String(input.providerId ?? "unknown");
 }
 
+function accountSettingsAuditTarget(input) {
+  if (input.operation.startsWith("opencode.account.")) return String(input.accountId ?? "unknown");
+  return input.operation.startsWith("deepseek.") ? "deepseek" : "unknown";
+}
+
 async function readProviderSettingsResource(environment, state) {
   try {
     return await loadProviderSettingsResource(environment, state.loadProviderState);
   } catch {
     throw new ApiError(503, "provider_state_unavailable", "Provider 设置暂不可用，请检查 Codex 配置");
+  }
+}
+
+async function readAccountSettingsResource(environment, state) {
+  try {
+    return await state.loadAccountSettings(environment);
+  } catch {
+    throw new ApiError(503, "account_state_unavailable", "账户设置暂不可用，请检查 Provider 配置");
   }
 }
 

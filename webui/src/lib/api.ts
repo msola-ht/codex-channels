@@ -33,6 +33,10 @@ import type {
   ManagementProviderSettingsMutationInput,
   ManagementProviderSettingsPreviewResponse,
   ManagementProviderSettingsMutationResponse,
+  ManagementAccountSettingsResponse,
+  ManagementAccountSettingsMutationInput,
+  ManagementAccountSettingsPreviewResponse,
+  ManagementAccountSettingsMutationResponse,
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
@@ -324,6 +328,31 @@ export function applyManagementProviderSettings(
   signal?: AbortSignal,
 ): Promise<ManagementProviderSettingsMutationResponse> {
   return requestJson<ManagementProviderSettingsMutationResponse>(`${API_PREFIX}/management/provider-settings`, {
+    method: "POST",
+    body: JSON.stringify({ ...input, confirmationToken }),
+  }, signal)
+}
+
+export function fetchManagementAccountSettings(signal?: AbortSignal): Promise<ManagementAccountSettingsResponse> {
+  return getJson<ManagementAccountSettingsResponse>(`${API_PREFIX}/management/account-settings`, signal)
+}
+
+export function previewManagementAccountSettings(
+  input: ManagementAccountSettingsMutationInput,
+  signal?: AbortSignal,
+): Promise<ManagementAccountSettingsPreviewResponse> {
+  return requestJson<ManagementAccountSettingsPreviewResponse>(`${API_PREFIX}/management/account-settings/preview`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }, signal)
+}
+
+export function applyManagementAccountSettings(
+  input: ManagementAccountSettingsMutationInput,
+  confirmationToken: string,
+  signal?: AbortSignal,
+): Promise<ManagementAccountSettingsMutationResponse> {
+  return requestJson<ManagementAccountSettingsMutationResponse>(`${API_PREFIX}/management/account-settings`, {
     method: "POST",
     body: JSON.stringify({ ...input, confirmationToken }),
   }, signal)

@@ -677,6 +677,96 @@ export interface ManagementProviderSettingsMutationResponse {
   selection?: { provider: string; providerDisplayName?: string; model: string; modelDisplayName?: string }
 }
 
+export interface ManagementAccountSettingsResponse {
+  observedAt: string
+  resourceRevision: string
+  opencodeGo: {
+    configured: boolean
+    defaultAccountId: string | null
+    accounts: Array<{
+      id: string
+      displayName: string
+      email?: string
+      phone?: string
+      mode?: "switching" | "exclusive"
+      default: boolean
+    }>
+  }
+  deepseek: {
+    configured: boolean
+    mode: "switching" | "exclusive" | null
+    model: string | null
+    restoreAvailable: boolean
+  }
+}
+
+export type ManagementAccountSettingsMutationInput =
+  | {
+      operation: "opencode.account.configure"
+      accountId: string
+      contact?: string
+      email?: string
+      phone?: string
+      mode?: "switching" | "exclusive"
+      reconfigure?: boolean
+      apiKey: string
+      confirmExclusiveConfigChange?: boolean
+    }
+  | { operation: "opencode.account.default"; accountId: string }
+  | { operation: "opencode.account.stop"; accountId: string }
+  | { operation: "opencode.account.remove"; accountId: string; confirmHistoryLoss?: boolean }
+  | {
+      operation: "deepseek.configure"
+      mode?: "switching" | "exclusive"
+      apiKey: string
+      autoCompactPercent?: number
+      confirmExclusiveConfigChange?: boolean
+    }
+  | { operation: "deepseek.restore"; confirmRestore?: boolean }
+
+export interface ManagementAccountSettingsPreview {
+  operation: string
+  activation?: string
+  account?: {
+    id?: string
+    provider?: string
+    displayName?: string
+    email?: string
+    phone?: string
+    default?: boolean
+    exists?: boolean
+  }
+  provider?: { id?: string; name?: string }
+  mode?: string
+  model?: string
+  status?: string
+  willChange?: boolean
+  effects?: Record<string, boolean | string[] | string | null>
+  confirmation?: { required?: boolean; field?: string }
+}
+
+export interface ManagementAccountSettingsPreviewResponse {
+  preview: ManagementAccountSettingsPreview
+  resourceRevision: string
+  confirmationToken: string
+  confirmationExpiresAt: number
+}
+
+export interface ManagementAccountSettingsMutationResponse {
+  action: string
+  operation?: string
+  account?: ManagementAccountSettingsPreview["account"]
+  provider?: ManagementAccountSettingsPreview["provider"]
+  mode?: string
+  model?: string
+  status?: string
+  willChange?: boolean
+  effects?: ManagementAccountSettingsPreview["effects"]
+  activation?: string
+  warnings?: Array<{ code: string; providerId?: string }>
+  auditStatus?: "recorded" | "degraded"
+}
+
 export interface DeepseekBalance {
   currency: string
   totalBalance: string

@@ -7,6 +7,10 @@ import type {
   ManagementProviderSettingsPreview,
   ManagementProviderSettingsResponse,
   ManagementProviderSettingsMutationResponse,
+  ManagementAccountSettingsMutationInput,
+  ManagementAccountSettingsMutationResponse,
+  ManagementAccountSettingsPreview,
+  ManagementAccountSettingsResponse,
   ManagementSettingMutationResponse,
   ManagementSettingsResponse,
   ManagementTask,
@@ -84,6 +88,24 @@ export interface ProviderSettingsController {
   refetch: () => void
   mutate: (input: ManagementProviderSettingsMutationInput) => Promise<ManagementProviderSettingsMutationResponse | null>
   confirm: () => Promise<ManagementProviderSettingsMutationResponse | null>
+  cancel: () => void
+  clearError: () => void
+}
+
+export interface AccountSettingsController {
+  settings: ManagementAccountSettingsResponse | null
+  loading: boolean
+  error: string | null
+  actionError: string | null
+  busy: boolean
+  pendingPreview: {
+    input: ManagementAccountSettingsMutationInput
+    preview: ManagementAccountSettingsPreview
+    confirmationToken: string
+  } | null
+  refetch: () => void
+  mutate: (input: ManagementAccountSettingsMutationInput) => Promise<ManagementAccountSettingsMutationResponse | null>
+  confirm: () => Promise<ManagementAccountSettingsMutationResponse | null>
   cancel: () => void
   clearError: () => void
 }

@@ -100,6 +100,7 @@
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-management-providers.mjs`：Provider 管理结果脱敏、资源修订快照和 Provider 状态投影；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
+- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek Setup 的配置、默认切换、停止、删除与恢复接口，为 WebUI 提供账户资源投影、统一预览、确认后写入和结果脱敏；不返回凭据正文。
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置与 Provider 的输入校验、预览投影、缓存查询，以及
