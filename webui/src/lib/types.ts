@@ -34,7 +34,6 @@ export type {
   RequestsResponse,
   SettingsResponse,
   SettingsSummaryResponse,
-  ManagementLoginResponse,
   ManagementSettingsResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,

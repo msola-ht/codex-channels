@@ -146,7 +146,7 @@ Windows 版本使用：
 ### 私有文件与凭据
 
 - 飞书用户 OAuth、微信 Bot 凭据和微信回复上下文只实现 macOS Keychain 与 Linux 加密文件后端。
-- 第三方 Provider API Key、管理凭据、配置、数据库、任务库、指标库、媒体临时文件和多个运行时目录
+- 第三方 Provider API Key、WebUI/指标 Token、配置、数据库、任务库、指标库、媒体临时文件和多个运行时目录
   使用 POSIX mode、UID 与 `O_NOFOLLOW` 等安全条件。
 - Windows 上接受 `chmod` 调用不等于已经建立等价 NTFS ACL；不能只跳过现有检查。
 
@@ -806,7 +806,7 @@ Windows 环境变量键、真实 `PATH` npm/Codex shim 和生产调用入口均�
   说明并取得确认。
 - [x] 首选使用 DPAPI 保护每个数据目录的随机主密钥，复用现有 AES-256-GCM 记录载荷和严格解析。
 - [x] 接入飞书用户 OAuth、微信 Bot 凭据、微信回复上下文及第三方 Provider API Key。
-- [x] 覆盖管理凭据、WebUI/指标 Token、配置、数据库、计划任务库、媒体临时文件、输出和备份的私有
+- [x] 覆盖 WebUI/指标 Token、配置、数据库、计划任务库、媒体临时文件、输出和备份的私有
   文件结果；不只修复渠道 Token Store。
 - [x] `codexc doctor` 校验 ACL、所有者、凭据后端和损坏状态，不读取或回显凭据正文。
 

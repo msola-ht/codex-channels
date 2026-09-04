@@ -337,18 +337,21 @@ export interface SettingsSummaryResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultModel">
-  automation: { scheduledTasksEnabled: boolean }
-  advanced: { loggingLevel: SettingsSummaryResponse["gateway"]["advanced"]["loggingLevel"] }
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel">
+  automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled" | "threadSectionAdministratorCount">
+  advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
+  network: Pick<SettingsSummaryResponse["gateway"]["network"], "configuredFields">
   metrics: {
     storage: SettingsSummaryResponse["gateway"]["metrics"]["storage"]
-    sync: { enabled: boolean; intervalSeconds: number; batchSize: number }
+    sync: Pick<SettingsSummaryResponse["gateway"]["metrics"]["sync"], "enabled" | "endpointConfigured" | "deviceName" | "deviceTokenConfigured"> & { intervalSeconds: number; batchSize: number }
+    view: Pick<SettingsSummaryResponse["gateway"]["metrics"]["view"], "enabled" | "endpointConfigured" | "tokenConfigured">
+    center: Pick<SettingsSummaryResponse["gateway"]["metrics"]["center"], "enabled" | "host" | "port" | "tokenConfigured" | "deviceTokenConfigured">
   }
-  webui: { host: string; port: number }
+  webui: Pick<SettingsSummaryResponse["gateway"]["webui"], "host" | "port" | "tokenConfigured">
+  channels: SettingsSummaryResponse["gateway"]["channels"]
 }
 
 export interface ManagementSettingInput { kind: string; value: unknown }
-export interface ManagementLoginResponse { expiresAt: number; csrfToken: string }
 export interface ManagementSettingMutationResponse {
   revision: string
   value: unknown

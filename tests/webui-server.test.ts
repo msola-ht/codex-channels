@@ -12,7 +12,6 @@ import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { createMetricsCenterServer } from "../scripts/metrics-center-server.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
-import { provisionManagementCredential } from "../scripts/management-security.mjs";
 import { loadGatewaySettings } from "../scripts/config-management.mjs";
 import {
   requestMetricsDatabasePath,
@@ -391,24 +390,14 @@ describe("webui server", () => {
     expect(serialized).not.toContain(configPath);
   });
 
-  it("protects low-risk management writes with a separate session and CSRF token", async () => {
+  it("protects low-risk management writes with the same WebUI token", async () => {
     const fixture = createFixture();
-    provisionManagementCredential(join(fixture.home, "management-credential"));
     const managementOrigin = "http://127.0.0.1:0";
-    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
-    const login = await fetch(`${origin}/api/v1/management/login`, {
-      method: "POST",
-      headers: { origin: managementOrigin, "content-type": "application/json" },
-      body: JSON.stringify({ credential: readFileSync(join(fixture.home, "management-credential"), "utf8").trim() }),
-    });
-    expect(login.status).toBe(200);
-    const csrfToken = (await login.json() as { csrfToken: string }).csrfToken;
-    const setCookie = login.headers.get("set-cookie");
-    expect(setCookie).toContain("Path=/api/v1/management");
-    const cookie = setCookie?.split(";", 1)[0];
-    expect(cookie).toContain("codexc_management=");
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const unauthorized = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin } });
+    expect(unauthorized.status).toBe(401);
     const settings = await fetch(`${origin}/api/v1/management/settings`, {
-      headers: { origin: managementOrigin, cookie: cookie! },
+      headers: { authorization: "Bearer webui-token" },
     });
     expect(settings.status).toBe(200);
     const body = await settings.json() as { revision: string };
@@ -416,8 +405,7 @@ describe("webui server", () => {
       method: "PATCH",
       headers: {
         origin: managementOrigin,
-        cookie: cookie!,
-        "x-codex-csrf": csrfToken,
+        authorization: "Bearer webui-token",
         "content-type": "application/json",
       },
       body: JSON.stringify({
@@ -427,58 +415,145 @@ describe("webui server", () => {
     });
     expect(update.status).toBe(200);
     expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(false);
+    const legacyLogin = await fetch(`${origin}/api/v1/management/login`, {
+      method: "POST",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    expect(legacyLogin.status).toBe(404);
   });
 
-  it("revokes management sessions on logout", async () => {
+  it("returns one complete redacted configuration snapshot for the settings page", async () => {
     const fixture = createFixture();
-    provisionManagementCredential(join(fixture.home, "management-credential"));
-    const managementOrigin = "http://127.0.0.1:0";
-    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
-    const login = await fetch(`${origin}/api/v1/management/login`, { method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ credential: readFileSync(join(fixture.home, "management-credential"), "utf8").trim() }) });
-    const csrf = (await login.json() as { csrfToken: string }).csrfToken;
-    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
-    const logout = await fetch(`${origin}/api/v1/management/logout`, { method: "POST", headers: { origin: managementOrigin, cookie, "x-codex-csrf": csrf, "content-type": "application/json" } });
-    expect(logout.status).toBe(200);
-    expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
-    const stale = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, cookie } });
-    expect(stale.status).toBe(401);
+    const configPath = join(fixture.home, "config.toml");
+    const document = readGatewayConfig(configPath);
+    document.webui = { host: "127.0.0.1", port: 8787, token: "webui-secret" };
+    document.network = { https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" };
+    writeGatewayConfig(configPath, document);
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-secret" });
+
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { authorization: "Bearer webui-secret" },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      system: { defaultWorkspace: string | null };
+      network: { configuredFields: string[] };
+      webui: { host: string; port: number; tokenConfigured: boolean };
+      metrics: {
+        sync: { intervalSeconds: number; batchSize: number; deviceTokenConfigured: boolean };
+        view: { tokenConfigured: boolean };
+        center: { tokenConfigured: boolean; deviceTokenConfigured: boolean };
+      };
+      channels: unknown[];
+    };
+    expect(body).toMatchObject({
+      system: { defaultWorkspace: "codex-connect" },
+      network: { configuredFields: ["https_proxy"] },
+      webui: { host: "127.0.0.1", port: 8787, tokenConfigured: true },
+      metrics: {
+        sync: { intervalSeconds: 60, batchSize: 200, deviceTokenConfigured: false },
+        view: { tokenConfigured: false },
+        center: { tokenConfigured: false, deviceTokenConfigured: false },
+      },
+      channels: expect.any(Array),
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("webui-secret");
+    expect(serialized).not.toContain("proxy-secret");
   });
 
-  it("rejects management writes with stale revision and invalid CSRF", async () => {
+  it("normalizes structured metrics settings from the WebUI payload", async () => {
     const fixture = createFixture();
-    provisionManagementCredential(join(fixture.home, "management-credential"));
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const settings = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    const current = await settings.json() as {
+      revision: string;
+      metrics: {
+        storage: { retentionDays: number; maxRows: number };
+        sync: { intervalSeconds: number; batchSize: number };
+      };
+    };
+    const retentionDays = current.metrics.storage.retentionDays === 30 ? 90 : 30;
+    const preview = await fetch(`${origin}/api/v1/management/settings/preview`, {
+      method: "POST",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: current.revision,
+        setting: {
+          kind: "metrics.storage",
+          value: { retentionDays, maxRows: current.metrics.storage.maxRows },
+        },
+      }),
+    });
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({ value: { storage: { retentionDays } } });
+
+    const intervalSeconds = current.metrics.sync.intervalSeconds === 60 ? 300 : 60;
+    const update = await fetch(`${origin}/api/v1/management/settings`, {
+      method: "PATCH",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: current.revision,
+        setting: {
+          kind: "metrics.sync-params",
+          value: { intervalSeconds, batchSize: current.metrics.sync.batchSize },
+        },
+      }),
+    });
+    expect(update.status).toBe(200);
+    expect(loadGatewaySettings(fixture.environment).metrics.sync.intervalSeconds).toBe(intervalSeconds);
+  });
+
+  it("does not expose a second management login and reports missing WebUI auth", async () => {
+    const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";
     const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
-    const credential = readFileSync(join(fixture.home, "management-credential"), "utf8").trim();
-    const login = await fetch(`${origin}/api/v1/management/login`, { method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ credential }) });
-    const loginBody = await login.json() as { csrfToken: string };
-    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
-    const settings = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, cookie } });
+    const response = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin } });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "management_requires_webui_token" } });
+  });
+
+  it("rejects management writes with stale revision and cross-origin requests", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const settings = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, authorization: "Bearer webui-token" } });
     const current = await settings.json() as { revision: string; display: { reasoningEnabled: boolean } };
     const revision = current.revision;
     const changedValue = !current.display.reasoningEnabled;
-    const badCsrf = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, cookie, "x-codex-csrf": "invalid", "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: true } }) });
-    expect(badCsrf.status).toBe(403);
-    const first = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, cookie, "x-codex-csrf": loginBody.csrfToken, "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: changedValue } }) });
+    const crossOrigin = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: "https://evil.example", authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: changedValue } }) });
+    expect(crossOrigin.status).toBe(403);
+    const first = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: changedValue } }) });
     expect(first.status).toBe(200);
-    const stale = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, cookie, "x-codex-csrf": loginBody.csrfToken, "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: !changedValue } }) });
+    const stale = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: !changedValue } }) });
     expect(stale.status).toBe(409);
   });
 
   it("fails closed when management audit storage is unavailable", async () => {
     const fixture = createFixture();
-    provisionManagementCredential(join(fixture.home, "management-credential"));
     const managementOrigin = "http://127.0.0.1:0";
-    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
-    const credential = readFileSync(join(fixture.home, "management-credential"), "utf8").trim();
-    const login = await fetch(`${origin}/api/v1/management/login`, { method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ credential }) });
-    const loginBody = await login.json() as { csrfToken: string };
-    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
-    const settings = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, cookie } });
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const settings = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, authorization: "Bearer webui-token" } });
     const current = await settings.json() as { revision: string; display: { reasoningEnabled: boolean } };
     const auditPath = join(fixture.home, "management-audit.jsonl");
     mkdirSync(auditPath);
-    const update = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, cookie, "x-codex-csrf": loginBody.csrfToken, "content-type": "application/json" }, body: JSON.stringify({ revision: current.revision, setting: { kind: "display.reasoning", value: !current.display.reasoningEnabled } }) });
+    const update = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision: current.revision, setting: { kind: "display.reasoning", value: !current.display.reasoningEnabled } }) });
     expect(update.status).toBe(500);
     expect((await update.json() as { error: { code: string } }).error.code).toBe("management_audit_unavailable");
     expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(current.display.reasoningEnabled);
@@ -486,20 +561,15 @@ describe("webui server", () => {
 
   it("rejects unauthorized, cross-origin, and unsupported management requests", async () => {
     const fixture = createFixture();
-    provisionManagementCredential(join(fixture.home, "management-credential"));
     const managementOrigin = "http://127.0.0.1:0";
-    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
     const unauthorized = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin } });
     expect(unauthorized.status).toBe(401);
     expect(unauthorized.headers.get("x-content-type-options")).toBe("nosniff");
-    const credential = readFileSync(join(fixture.home, "management-credential"), "utf8").trim();
-    const login = await fetch(`${origin}/api/v1/management/login`, { method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ credential }) });
-    const loginBody = await login.json() as { csrfToken: string };
-    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
-    const crossOrigin = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: "https://evil.example", cookie, "x-codex-csrf": loginBody.csrfToken } });
+    const crossOrigin = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: "https://evil.example", authorization: "Bearer webui-token" } });
     expect(crossOrigin.status).toBe(403);
     expect(crossOrigin.headers.get("x-content-type-options")).toBe("nosniff");
-    const unsupported = await fetch(`${origin}/api/v1/management/settings/preview`, { method: "POST", headers: { origin: managementOrigin, cookie, "x-codex-csrf": loginBody.csrfToken, "content-type": "application/json" }, body: JSON.stringify({ revision: "0".repeat(64), setting: { kind: "credentials.api-key", value: "secret" } }) });
+    const unsupported = await fetch(`${origin}/api/v1/management/settings/preview`, { method: "POST", headers: { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision: "0".repeat(64), setting: { kind: "credentials.api-key", value: "secret" } }) });
     expect(unsupported.status).toBe(400);
     expect((await unsupported.json() as { error: { code: string } }).error.code).toBe("setting_not_allowed");
   });
@@ -925,6 +995,21 @@ describe("webui server", () => {
       headers: { authorization: "Bearer secret-token" },
     });
     expect(response.status).toBe(200);
+  });
+
+  it("allows the loopback management path through an SSH tunnel when bound publicly", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token", managementOrigin },
+    );
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { authorization: "Bearer secret-token" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toHaveProperty("revision");
   });
 });
 

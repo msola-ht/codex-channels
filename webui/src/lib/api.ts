@@ -15,7 +15,6 @@ import type {
   RequestsResponse,
   SettingsResponse,
   SettingsSummaryResponse,
-  ManagementLoginResponse,
   ManagementSettingsResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,
@@ -68,17 +67,19 @@ export function onUnauthorized(handler: () => void): () => void {
   }
 }
 
-async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function requestJson<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
   const token = getToken()
   const timeoutSignal = AbortSignal.timeout(30_000)
   const effectiveSignal = signal === undefined
     ? timeoutSignal
     : AbortSignal.any([signal, timeoutSignal])
+  const headers = new Headers(init.headers)
+  headers.set("accept", "application/json")
+  if (init.body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json")
+  if (token !== null) headers.set("authorization", `Bearer ${token}`)
   const response = await fetch(path, {
-    headers: {
-      accept: "application/json",
-      ...(token === null ? {} : { authorization: `Bearer ${token}` }),
-    },
+    ...init,
+    headers,
     signal: effectiveSignal,
   })
   if (response.status === 401) {
@@ -101,63 +102,12 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return await response.json() as T
 }
 
-let managementCsrfToken: string | null = null
-let managementUnauthorizedHandler: (() => void) | null = null
-
-export function onManagementUnauthorized(handler: () => void): () => void {
-  managementUnauthorizedHandler = handler
-  return () => {
-    if (managementUnauthorizedHandler === handler) managementUnauthorizedHandler = null
-  }
-}
-
-export function clearManagementSession(): void {
-  managementCsrfToken = null
-  managementUnauthorizedHandler?.()
-}
-
-async function managementJson<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
-  const timeoutSignal = AbortSignal.timeout(30_000)
-  const effectiveSignal = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal])
-  const response = await fetch(path, {
-    ...init,
-    credentials: "same-origin",
-    headers: {
-      accept: "application/json",
-      ...(init.body === undefined ? {} : { "content-type": "application/json" }),
-      ...(managementCsrfToken === null ? {} : { "x-codex-csrf": managementCsrfToken }),
-      ...init.headers,
-    },
-    signal: effectiveSignal,
-  })
-  if (!response.ok) {
-    if (response.status === 401) clearManagementSession()
-    const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null
-    throw new ApiClientError(
-      body?.error?.message ?? `请求失败：HTTP ${response.status}`,
-      response.status,
-      body?.error?.code ?? "http_error",
-    )
-  }
-  return await response.json() as T
-}
-
-export async function loginManagement(credential: string): Promise<ManagementLoginResponse> {
-  const result = await managementJson<ManagementLoginResponse>(`${API_PREFIX}/management/login`, {
-    method: "POST",
-    body: JSON.stringify({ credential }),
-  })
-  managementCsrfToken = result.csrfToken
-  return result
-}
-
-export async function logoutManagement(): Promise<void> {
-  await managementJson<{ ok: boolean }>(`${API_PREFIX}/management/logout`, { method: "POST" })
-  managementCsrfToken = null
+async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>(path, {}, signal)
 }
 
 export function fetchManagementSettings(signal?: AbortSignal): Promise<ManagementSettingsResponse> {
-  return managementJson<ManagementSettingsResponse>(`${API_PREFIX}/management/settings`, {}, signal)
+  return getJson<ManagementSettingsResponse>(`${API_PREFIX}/management/settings`, signal)
 }
 
 export function previewManagementSetting(
@@ -165,7 +115,7 @@ export function previewManagementSetting(
   setting: ManagementSettingInput,
   signal?: AbortSignal,
 ): Promise<ManagementSettingMutationResponse> {
-  return managementJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/settings/preview`, {
+  return requestJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/settings/preview`, {
     method: "POST", body: JSON.stringify({ revision, setting }),
   }, signal)
 }
@@ -175,7 +125,7 @@ export function updateManagementSetting(
   setting: ManagementSettingInput,
   signal?: AbortSignal,
 ): Promise<ManagementSettingMutationResponse> {
-  return managementJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/settings`, {
+  return requestJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/settings`, {
     method: "PATCH", body: JSON.stringify({ revision, setting }),
   }, signal)
 }

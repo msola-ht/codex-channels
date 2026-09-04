@@ -1,7 +1,8 @@
 # 本地指标 WebUI
 
-`codexc webui` 启动本地只读指标 WebUI，展示模型请求指标数据库（`request-metrics.sqlite3`）
-中的全局统计、会话、请求明细与错误聚合。WebUI 不读取业务会话库，不提供任何写接口。
+`codexc webui` 启动本地指标 WebUI，展示模型请求指标数据库（`request-metrics.sqlite3`）中的全局统计、
+会话、请求明细与错误聚合；设置页还可在同一登录令牌下修改已开放的低风险 Gateway 设置。WebUI 不读取
+业务会话库，不执行任意命令或高风险操作。
 
 ## 命令
 
@@ -34,14 +35,14 @@ token = "你的_访问令牌"
 | 方式 | 服务器绑定 | 令牌 | 典型命令 |
 | --- | --- | --- | --- |
 | 本机浏览器 | `127.0.0.1` | 不需要 | `codexc webui` |
-| SSH 隧道 | `127.0.0.1` | 不需要 | 本机执行 `ssh -L 8787:127.0.0.1:8787 user@服务器`，再访问 `http://127.0.0.1:8787/` |
+| SSH 隧道 | `127.0.0.1`（或 `0.0.0.0` 经回环转发） | 绑定 `0.0.0.0` 时需要 | 本机执行 `ssh -L 8787:127.0.0.1:8787 user@服务器`，再访问 `http://127.0.0.1:8787/` |
 | 反向代理 | `127.0.0.1` | 不需要（反代层鉴权） | Nginx/Caddy `proxy_pass http://127.0.0.1:8787` |
 | Cloudflare Tunnel | `127.0.0.1` | 不需要（Cloudflare Access） | `cloudflared tunnel --url http://127.0.0.1:8787` |
 | 局域网直连 | `0.0.0.0` | 需要 | 先运行 `codexc config` 设置 WebUI 令牌，再运行 `codexc webui --host 0.0.0.0`，访问 `http://<局域网IP>:8787/?token=令牌` |
 | 公网直连 / Tailscale 直连 | `0.0.0.0` | 需要 | 同上，地址换成公网 IP 或 Tailscale IP |
 
-- SSH 隧道、反向代理与 Cloudflare Tunnel 都连接服务器的回环地址，可以保持无令牌，
-  认证由 SSH、反代层或 Tailnet ACL 负责；
+- SSH 隧道、反向代理与 Cloudflare Tunnel 都连接服务器的回环地址；绑定 `127.0.0.1` 时可以保持无令牌，
+  认证由 SSH、反代层或 Tailnet ACL 负责。绑定 `0.0.0.0` 时仍需 WebUI 令牌，但设置管理只接受这类回环连接；
 - 只有直接绑定 `0.0.0.0`（局域网、公网、Tailscale IP 直连）才必须设置令牌；
 - 所有入口共用一个实例与端口，配置一次 `[webui]` 后各方式同时生效。
 
@@ -72,10 +73,12 @@ codexc service stop webui        # 停止
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | `#/settings` | `GET /api/v1/settings`（币种与汇率）、`GET /api/v1/settings/summary`（脱敏配置与服务状态）；管理修改见设置计划 |
+| 设置 | `#/settings` | `GET /api/v1/settings`（币种与汇率）、`GET /api/v1/settings/summary`（脱敏配置与服务状态）、`/api/v1/management/settings`（同一 WebUI Bearer 令牌下的低风险设置读取/预览/修改） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
-所有接口只接受 GET；`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
+指标接口只接受 GET；设置管理接口使用 GET 读取，并仅以明确的 JSON POST/PATCH 执行预览与写入，均要求同一
+WebUI Bearer 令牌和精确 Origin。
+`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
 `this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
 WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
@@ -107,7 +110,8 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
                             │ 只读
                             ▼
               scripts/webui-server.mjs（codexc webui 服务）
-                ├─ /api/v1/* 只读 JSON API（Observability Store 只读模式）
+                ├─ /api/v1/* 指标只读 JSON API（Observability Store 只读模式）
+                ├─ /api/v1/management/* 同一 WebUI Bearer 令牌的低风险设置 API
                 └─ webui/dist 静态托管
                             ▲
                             │ /api/v1/*（同源，令牌可选）
@@ -135,14 +139,14 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 
 - 默认只监听回环地址；绑定非回环地址（`0.0.0.0`）时必须启用访问令牌，否则拒绝启动，
   令牌比较使用常数时间算法，令牌只存浏览器 `sessionStorage`，关闭标签页失效；
-- 无任何写接口，指标数据库以只读模式打开；
+- 指标数据库以只读模式打开；设置修改只经过 Config 结构化写入口，不直接写数据库；
 - 静态资源按白名单扩展名提供，路径限制在 `webui/dist` 内。
 
 边界约束：
 
 - WebUI 不读取、不解析业务会话库，也不连接 App Server；
-- 不提供写接口，不修改用户配置、指标数据库或任何持久化状态；
-- API 只接受 GET；未知 API 与非 `/api/v1` 前缀统一返回 JSON 404；
+- 指标 API 不提供写接口；设置管理仅允许计划内字段，并修改用户配置的对应结构化入口；
+- 指标 API 只接受 GET，设置管理只接受明确的 JSON POST/PATCH；未知 API 与非 `/api/v1` 前缀统一返回 JSON 404；
 - 令牌只用于 API 鉴权，不写入 `localStorage`，不进入日志或响应体。
 
 ## 前端
@@ -157,6 +161,10 @@ webui/src/
   pages/       概览、Threads、Thread 详情、请求、错误、设置
 ```
 
+设置页按 App Server、Gateway、WebUI 与数据中心分区；Gateway、WebUI 与数据中心的每个可编辑分区在同一位置
+展示当前值和修改控件，预览与确认写入紧邻对应设置。App Server 用户设置、Provider 和账户暂显示 CLI 入口，
+不把 Gateway 配置伪装成 App Server 设置，也不再拆成独立的“读取快照”和“设置管理”两套页面。
+
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与
 费用列悬浮显示明细；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
@@ -169,6 +177,7 @@ Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，�
 `webui/dist/`，产物随 npm 包发布，由 `codexc webui` 托管。
 
 开发：仓库根目录 `npm run webui:dev` 一键并行启动 `codexc webui`
-（API，默认 `127.0.0.1:8787`）与 Vite dev server（热更新，默认 `5173`，
-`/api` 代理到 `8787`）；也可以手动先运行 `codexc webui`，再
-`cd webui && npm run dev`。
+（API，默认 `127.0.0.1:8787`）与 Vite dev server（热更新，默认 `5173`）。
+开发入口会读取 `[webui]` 配置并让 `/api` 代理跟随实际 API 端口；也可以手动先运行
+`codexc webui`，再 `cd webui && npm run dev`（手动启动时代理默认指向 `8787`）。
+开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套精确 Origin 约束。

@@ -1,6 +1,6 @@
 # Codex WebUI 前端
 
-`codexc webui` 的本地只读指标前端。Vite + React 19 + TypeScript，UI 组件全部来自
+`codexc webui` 的本地指标与低风险设置前端。Vite + React 19 + TypeScript，UI 组件全部来自
 shadcn（`npx shadcn@latest add` 安装），业务层只做组件组合与数据编排。
 
 ## 开发
@@ -18,14 +18,15 @@ npm run lint       # oxlint
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
   lib/         API 客户端、共享类型转出与格式化
-  hooks/       数据 hook（useApi 统一 loading/error/refetch）、请求排序状态与全局货币上下文
-  components/  layout（Sidebar）、metrics（指标区块与共享数据表格）、requests（请求明细数据表格）
+  hooks/       数据 hook（useApi 统一 loading/error/refetch）、设置管理、请求排序状态与全局货币上下文
+  components/  layout（Sidebar）、metrics（指标区块与共享数据表格）、requests（请求明细数据表格）、settings（设置控件）
   pages/       概览、Threads、Thread 详情、请求、错误、设置
   App.tsx      路由布局与页面级懒加载（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
 
 令牌登录：服务端配置 `--token` 时，API 返回 401 会显示令牌输入页；令牌存入
-`sessionStorage`，也可用 `?token=` 查询参数打开页面自动登录。全局费用的人民币/美元
+`sessionStorage`，也可用 `?token=` 查询参数打开页面自动登录。该令牌同时用于指标读取和设置页的低风险
+预览/修改。全局费用的人民币/美元
 切换（顶部导航右侧）作用于所有页面，存入 `localStorage`（`codex-webui:currency`）。
 
 全局深色/浅色主题默认深色，右上角按钮切换，选择存入浏览器 `localStorage`

@@ -1,148 +1,92 @@
-import { Fragment, useEffect } from "react"
+import { Fragment } from "react"
 import { RefreshCwIcon } from "lucide-react"
-import { useState } from "react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ManagedInputRow, ManagedSelect, PendingSettingCard, SettingsRow } from "@/components/settings/settings-controls"
 import { useCurrency } from "@/hooks/currency-context"
 import { useApi } from "@/hooks/use-api"
+import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { fetchSettingsSummary } from "@/lib/api"
-import { clearManagementSession, fetchManagementSettings, loginManagement, logoutManagement, onManagementUnauthorized, previewManagementSetting, updateManagementSetting } from "@/lib/api"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
-
-type PendingSetting = { kind: string; before: unknown; value: unknown; label: string; target: string }
 
 export function SettingsPage() {
   const { currency, settings } = useCurrency()
   const summary = useApi(fetchSettingsSummary, [])
+  const management = useSettingsManagement()
+  const { managedSettings, actionError, saving, pendingSetting, previewSetting, confirmSetting, cancelSetting } = management
   const loadState = resolveSettingsLoadState(summary.data, summary.loading, summary.error)
-  const [credential, setCredential] = useState("")
-  const [management, setManagement] = useState<Awaited<ReturnType<typeof fetchManagementSettings>> | null>(null)
-  const [managementError, setManagementError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [pendingSetting, setPendingSetting] = useState<PendingSetting | null>(null)
-
-  useEffect(() => onManagementUnauthorized(() => {
-    setManagement(null)
-    setPendingSetting(null)
-    setManagementError("管理会话已过期，请重新登录")
-  }), [])
-
-  async function signIn() {
-    setManagementError(null)
-    try { await loginManagement(credential); setCredential(""); setManagement(await fetchManagementSettings()) }
-    catch (error) { setManagementError(error instanceof Error ? error.message : String(error)) }
-  }
-
-  async function saveReasoning(value: boolean) {
-    if (management === null) return
-    setSaving(true); setManagementError(null)
-    try {
-      const preview = await previewManagementSetting(management.revision, { kind: "display.reasoning", value })
-      setPendingSetting({ kind: "display.reasoning", before: management.display.reasoningEnabled, value, label: "思考状态", target: preview.activation.target })
-    } catch (error) { setManagementError(error instanceof Error ? error.message : String(error)) }
-    finally { setSaving(false) }
-  }
-
-  async function previewSetting(kind: string, value: unknown, label: string) {
-    if (management === null) return
-    setSaving(true); setManagementError(null)
-    try {
-      const preview = await previewManagementSetting(management.revision, { kind, value })
-      setPendingSetting({ kind, before: currentManagedValue(management, kind), value, label, target: preview.activation.target })
-    } catch (error) { setManagementError(error instanceof Error ? error.message : String(error)) }
-    finally { setSaving(false) }
-  }
-
-  async function confirmSetting() {
-    if (management === null || pendingSetting === null) return
-    setSaving(true); setManagementError(null)
-    try {
-      await updateManagementSetting(management.revision, { kind: pendingSetting.kind, value: pendingSetting.value })
-      setPendingSetting(null)
-      setManagement(await fetchManagementSettings())
-    } catch (error) { setManagementError(error instanceof Error ? error.message : String(error)) }
-    finally { setSaving(false) }
-  }
-
-  async function signOut() {
-    setSaving(true)
-    try { await logoutManagement() } catch { /* 会话已失效时仍清理本地状态 */ }
-    finally {
-      clearManagementSession()
-      setManagement(null)
-      setPendingSetting(null)
-      setManagementError(null)
-      setSaving(false)
-    }
-  }
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-xl font-semibold">设置</h1>
-        <p className="text-sm text-muted-foreground">查看 WebUI 当前显示配置和 CLI 设置入口。</p>
+        <p className="text-sm text-muted-foreground">按 App Server、Gateway 和 WebUI 边界查看并修改配置。</p>
       </div>
       {loadState === "loading" ? <SettingsSkeleton /> : null}
       {loadState === "error" ? <SettingsError message={summary.error ?? "设置快照加载失败"} retry={summary.refetch} /> : null}
       {loadState === "empty" ? <SettingsError message="服务未返回可用的设置快照" retry={summary.refetch} /> : null}
       {loadState === "ready" && summary.data !== null ? (
         <>
+          {management.loading ? <p className="text-sm text-muted-foreground">正在读取可编辑设置…</p> : null}
+          {managedSettings === null && !management.loading ? <SettingsError message={management.error ?? "设置管理暂不可用"} retry={management.refetch} /> : null}
+          {pendingSetting !== null ? <PendingSettingCard pending={pendingSetting} saving={saving} onConfirm={() => void confirmSetting()} onCancel={cancelSetting} /> : null}
           <Card>
-            <CardHeader><CardTitle>低风险设置管理</CardTitle><CardDescription>使用终端生成的独立管理凭据；凭据不会保存到浏览器。</CardDescription></CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              {management === null ? <div className="flex flex-col gap-2 sm:flex-row"><Input type="password" value={credential} onChange={(event) => setCredential(event.target.value)} placeholder="管理凭据" autoComplete="off" /><Button onClick={() => void signIn()} disabled={credential.length === 0}>登录管理接口</Button></div> : <div className="flex flex-col gap-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span>已登录，管理会话短期有效。思考状态：{management.display.reasoningEnabled ? "已启用" : "未启用"}</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={saving || pendingSetting !== null} onClick={() => void saveReasoning(!management.display.reasoningEnabled)}>{saving ? "预览中…" : "切换思考状态"}</Button><Button variant="ghost" size="sm" disabled={saving} onClick={() => void signOut()}>退出管理</Button></div></div></div>}
-              {pendingSetting !== null ? <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm"><p>预览：{pendingSetting.label}将从“{formatPreviewValue(pendingSetting.before)}”改为“{formatPreviewValue(pendingSetting.value)}”。</p><p className="mt-1 text-muted-foreground">生效目标：{pendingSetting.target}。保存不会自动重启服务。</p><div className="mt-3 flex gap-2"><Button size="sm" disabled={saving} onClick={() => void confirmSetting()}>确认写入</Button><Button variant="outline" size="sm" disabled={saving} onClick={() => setPendingSetting(null)}>取消</Button></div></div> : null}
-              {management !== null ? <div className="grid gap-3 border-t pt-4 text-sm sm:grid-cols-2"><ManagedSelect label="操作详情" value={management.display.operationUpdates} options={[["full", "完整"], ["compact", "紧凑"], ["hidden", "隐藏"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.operation-updates", value, "操作详情")} /><ManagedSelect label="计划更新" value={String(management.display.planUpdatesEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.plan-updates", value === "true", "计划更新")} /><ManagedSelect label="价格币种" value={management.display.priceCurrency} options={[["cny", "人民币"], ["usd", "美元"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.price-currency", value, "价格币种")} /><ManagedSelect label="Sandbox" value={management.system.sandbox} options={[["read-only", "只读"], ["workspace-write", "工作区可写"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("system.sandbox", value, "Sandbox")} /><ManagedSelect label="审批超时" value={String(management.system.approvalTimeoutSeconds)} options={[["300", "300 秒"], ["600", "600 秒"], ["900", "900 秒"], ["1800", "1800 秒"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("system.approval-timeout", Number(value), "审批超时")} /><ManagedSelect label="计划任务" value={String(management.automation.scheduledTasksEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("automation.scheduled-tasks", value === "true", "计划任务")} /><ManagedSelect label="日志等级" value={management.advanced.loggingLevel} options={[["fatal", "fatal"], ["error", "error"], ["warn", "warn"], ["info", "info"], ["debug", "debug"], ["trace", "trace"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("advanced.logging-level", value, "日志等级")} /><ManagedSelect label="指标保留" value={String(management.metrics.storage.retentionDays)} options={[["30", "30 天"], ["90", "90 天"], ["365", "365 天"], ["730", "730 天"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("metrics.storage", { retentionDays: Number(value), maxRows: management.metrics.storage.maxRows }, "指标保留")} /><ManagedSelect label="上报间隔" value={String(management.metrics.sync.intervalSeconds)} options={[["30", "30 秒"], ["60", "60 秒"], ["300", "5 分钟"], ["900", "15 分钟"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("metrics.sync-params", { intervalSeconds: Number(value), batchSize: management.metrics.sync.batchSize }, "上报间隔")} /><ManagedSelect label="批量大小" value={String(management.metrics.sync.batchSize)} options={[["50", "50 条"], ["100", "100 条"], ["200", "200 条"], ["500", "500 条"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("metrics.sync-params", { intervalSeconds: management.metrics.sync.intervalSeconds, batchSize: Number(value) }, "批量大小")} /><ManagedSelect label="WebUI 端口" value={String(management.webui.port)} options={[["8787", "8787"], ["8790", "8790"], ["8800", "8800"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("webui.port", Number(value), "WebUI 端口")} /></div> : null}
-              {managementError !== null ? <p className="text-sm text-destructive">{managementError}</p> : null}
+            <CardHeader><CardTitle>App Server 设置</CardTitle><CardDescription>App Server 用户默认值、Provider 和账户由 codexc setup 管理；当前 WebUI 不直接修改这部分配置。</CardDescription></CardHeader>
+            <CardContent className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
+              <SettingsRow label="用户默认值" value="codexc setup" code />
+              <SettingsRow label="Provider 与账户" value="codexc setup" code />
             </CardContent>
           </Card>
-          {management !== null ? <Card><CardHeader><CardTitle>默认模型</CardTitle><CardDescription>留空表示跟随当前 Provider；修改后需重启 Gateway。</CardDescription></CardHeader><CardContent><Input key={management.revision} defaultValue={management.system.defaultModel ?? ""} placeholder="例如 gpt-5.6-sol" disabled={saving || pendingSetting !== null} onBlur={(event) => { const value = event.target.value.trim(); void previewSetting("system.default-model", value === "" ? null : value, "默认模型") }} /></CardContent></Card> : null}
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader><CardTitle>Gateway 与显示</CardTitle><CardDescription>当前配置文件的脱敏快照，部分变更需重启后生效</CardDescription></CardHeader>
-              <CardContent className="flex flex-col gap-3 text-sm">
-                <SettingsRow label="页面显示货币" value={(currency ?? summary.data.gateway.display.priceCurrency).toUpperCase()} badge />
-                <SettingsRow label="服务端默认货币" value={summary.data.gateway.display.priceCurrency.toUpperCase()} />
-                <SettingsRow label="美元兑人民币" value={settings?.exchangeRate?.usdToCny.toString() ?? "暂无"} />
-                <SettingsRow label="汇率来源" value={exchangeRateSourceLabel(settings?.exchangeRate?.source)} />
-                <SettingsRow label="Sandbox" value={summary.data.gateway.system.sandbox} />
-                <SettingsRow label="默认 Workspace" value={summary.data.gateway.system.defaultWorkspace ?? "未配置"} />
-                <SettingsRow label="渠道新会话模型" value={summary.data.gateway.system.defaultModel ?? "跟随 Provider"} />
-                <SettingsRow label="审批超时" value={`${summary.data.gateway.system.approvalTimeoutSeconds} 秒`} />
-                <SettingsRow label="操作详情" value={summary.data.gateway.display.operationUpdates} />
-                <SettingsRow label="计划显示" value={enabledLabel(summary.data.gateway.display.planUpdatesEnabled)} />
-                <SettingsRow label="思考状态" value={enabledLabel(summary.data.gateway.display.reasoningEnabled)} />
-                <SettingsRow label="日志等级" value={summary.data.gateway.advanced.loggingLevel} />
-                <SettingsRow label="Plugin API" value={enabledLabel(summary.data.gateway.advanced.pluginApiEnabled)} />
-                <SettingsRow label="计划任务" value={enabledLabel(summary.data.gateway.automation.scheduledTasksEnabled)} />
-                <SettingsRow label="通讯渠道" value={summary.data.gateway.channels.map((channel) => `${channel.displayName}（${enabledLabel(channel.enabled)}）`).join("、") || "未配置"} />
-                <SettingsRow label="Thread 分区管理员" value={`${summary.data.gateway.automation.threadSectionAdministratorCount} 个`} />
-                <SettingsRow label="配置修订" value={summary.data.revision.slice(0, 12)} code />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle>WebUI 与数据中心</CardTitle><CardDescription>凭据只显示是否已配置</CardDescription></CardHeader>
-              <CardContent className="flex flex-col gap-3 text-sm">
-                <SettingsRow label="WebUI 地址" value={formatHostPort(summary.data.gateway.webui.host, summary.data.gateway.webui.port)} />
-                <SettingsRow label="WebUI 令牌" value={configuredLabel(summary.data.gateway.webui.tokenConfigured)} />
-                <SettingsRow label="指标保留" value={`${summary.data.gateway.metrics.storage.retentionDays} 天 / 最多 ${summary.data.gateway.metrics.storage.maxRows.toLocaleString("zh-CN")} 行`} />
-                <SettingsRow label="设备同步" value={enabledLabel(summary.data.gateway.metrics.sync.enabled)} />
-                <SettingsRow label="设备上报令牌" value={configuredLabel(summary.data.gateway.metrics.sync.deviceTokenConfigured)} />
-                <SettingsRow label="全局视图" value={enabledLabel(summary.data.gateway.metrics.view.enabled)} />
-                <SettingsRow label="全局查看令牌" value={configuredLabel(summary.data.gateway.metrics.view.tokenConfigured)} />
-                <SettingsRow label="数据中心" value={enabledLabel(summary.data.gateway.metrics.center.enabled)} />
-                <SettingsRow label="中心地址" value={formatHostPort(summary.data.gateway.metrics.center.host, summary.data.gateway.metrics.center.port)} />
-                <SettingsRow label="显式代理" value={summary.data.gateway.network.configuredFields.join("、") || "未配置"} />
-              </CardContent>
-            </Card>
-          </div>
+          {managedSettings !== null ? (
+            <>
+              <Card>
+                <CardHeader><CardTitle>Gateway 设置</CardTitle><CardDescription>Gateway 渠道、系统、显示、自动化和运行日志；当前值与修改入口在同一分区。</CardDescription></CardHeader>
+                <CardContent className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
+                  <ManagedSelect label="Sandbox" value={managedSettings.system.sandbox} options={[["read-only", "只读"], ["workspace-write", "工作区可写"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("system.sandbox", value, "Sandbox")} />
+                  <ManagedSelect label="审批超时" value={String(managedSettings.system.approvalTimeoutSeconds)} options={[["300", "300 秒"], ["600", "600 秒"], ["900", "900 秒"], ["1800", "1800 秒"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("system.approval-timeout", Number(value), "审批超时")} />
+                  <ManagedInputRow key={managedSettings.revision} label="渠道新会话模型" defaultValue={managedSettings.system.defaultModel ?? ""} placeholder="留空跟随 Codex 全局默认" disabled={saving || pendingSetting !== null} onBlur={(value) => void previewSetting("system.default-model", value === "" ? null : value, "渠道新会话模型")} />
+                  <SettingsRow label="默认 Workspace" value={managedSettings.system.defaultWorkspace ?? "未配置"} />
+                  <ManagedSelect label="操作详情" value={managedSettings.display.operationUpdates} options={[["full", "完整"], ["compact", "紧凑"], ["hidden", "隐藏"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.operation-updates", value, "操作详情")} />
+                  <ManagedSelect label="计划更新" value={String(managedSettings.display.planUpdatesEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.plan-updates", value === "true", "计划更新")} />
+                  <ManagedSelect label="思考状态" value={String(managedSettings.display.reasoningEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.reasoning", value === "true", "思考状态")} />
+                  <ManagedSelect label="价格币种" value={managedSettings.display.priceCurrency} options={[["cny", "人民币"], ["usd", "美元"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("display.price-currency", value, "价格币种")} />
+                  <ManagedSelect label="计划任务" value={String(managedSettings.automation.scheduledTasksEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("automation.scheduled-tasks", value === "true", "计划任务")} />
+                  <ManagedSelect label="日志等级" value={managedSettings.advanced.loggingLevel} options={[["fatal", "fatal"], ["error", "error"], ["warn", "warn"], ["info", "info"], ["debug", "debug"], ["trace", "trace"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("advanced.logging-level", value, "日志等级")} />
+                  <SettingsRow label="当前页面货币" value={(currency ?? managedSettings.display.priceCurrency).toUpperCase()} badge />
+                  <SettingsRow label="美元兑人民币" value={settings?.exchangeRate?.usdToCny.toString() ?? "暂无"} />
+                  <SettingsRow label="汇率来源" value={exchangeRateSourceLabel(settings?.exchangeRate?.source)} />
+                  <SettingsRow label="Plugin API" value={enabledLabel(managedSettings.advanced.pluginApiEnabled)} />
+                  <SettingsRow label="通讯渠道" value={managedSettings.channels.map((channel) => `${channel.displayName}（${enabledLabel(channel.enabled)}）`).join("、") || "未配置"} />
+                  <SettingsRow label="Thread 分区管理员" value={`${managedSettings.automation.threadSectionAdministratorCount} 个`} />
+                  <SettingsRow label="配置修订" value={managedSettings.revision.slice(0, 12)} code />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>WebUI 与数据中心设置</CardTitle><CardDescription>监听和指标同步参数可修改；凭据只显示是否已配置。</CardDescription></CardHeader>
+                <CardContent className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
+                  <ManagedSelect label="指标保留" value={String(managedSettings.metrics.storage.retentionDays)} options={[["30", "30 天"], ["90", "90 天"], ["365", "365 天"], ["730", "730 天"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("metrics.storage", { retentionDays: Number(value), maxRows: managedSettings.metrics.storage.maxRows }, "指标保留")} />
+                  <ManagedSelect label="上报间隔" value={String(managedSettings.metrics.sync.intervalSeconds)} options={[["30", "30 秒"], ["60", "60 秒"], ["300", "5 分钟"], ["900", "15 分钟"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("metrics.sync-params", { intervalSeconds: Number(value), batchSize: managedSettings.metrics.sync.batchSize }, "上报间隔")} />
+                  <ManagedSelect label="批量大小" value={String(managedSettings.metrics.sync.batchSize)} options={[["50", "50 条"], ["100", "100 条"], ["200", "200 条"], ["500", "500 条"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("metrics.sync-params", { intervalSeconds: managedSettings.metrics.sync.intervalSeconds, batchSize: Number(value) }, "批量大小")} />
+                  <ManagedSelect label="WebUI 端口" value={String(managedSettings.webui.port)} options={[["8787", "8787"], ["8790", "8790"], ["8800", "8800"]]} disabled={saving || pendingSetting !== null} onChange={(value) => void previewSetting("webui.port", Number(value), "WebUI 端口")} />
+                  <SettingsRow label="监听地址" value={managedSettings.webui.host} />
+                  <SettingsRow label="WebUI 令牌" value={configuredLabel(managedSettings.webui.tokenConfigured)} />
+                  <SettingsRow label="设备同步" value={enabledLabel(managedSettings.metrics.sync.enabled)} />
+                  <SettingsRow label="设备上报令牌" value={configuredLabel(managedSettings.metrics.sync.deviceTokenConfigured)} />
+                  <SettingsRow label="全局视图" value={enabledLabel(managedSettings.metrics.view.enabled)} />
+                  <SettingsRow label="全局查看令牌" value={configuredLabel(managedSettings.metrics.view.tokenConfigured)} />
+                  <SettingsRow label="数据中心" value={enabledLabel(managedSettings.metrics.center.enabled)} />
+                  <SettingsRow label="中心地址" value={formatHostPort(managedSettings.metrics.center.host, managedSettings.metrics.center.port)} />
+                  <SettingsRow label="显式代理" value={managedSettings.network.configuredFields.join("、") || "未配置"} />
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+          {actionError !== null ? <p className="text-sm text-destructive">{actionError}</p> : null}
           <Card>
             <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>由当前平台服务管理器实时查询</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -172,8 +116,8 @@ export function SettingsPage() {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>当前管理边界</CardTitle><CardDescription>WebUI 暂不直接修改用户配置或执行 CLI</CardDescription></CardHeader>
-            <CardContent className="text-sm text-muted-foreground">API Key、Token、扫码授权、Provider 变更、数据库维护、服务重启和源码更新，请在服务器终端运行对应的 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">codexc</code> 命令。</CardContent>
+            <CardHeader><CardTitle>当前管理边界</CardTitle><CardDescription>WebUI 只修改上方已开放的低风险设置，不执行 CLI</CardDescription></CardHeader>
+            <CardContent className="text-sm text-muted-foreground">WebUI 只修改上方已开放的低风险设置。API Key、Token、扫码授权、Provider 变更、数据库维护、服务重启和源码更新，请在服务器终端运行对应的 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">codexc</code> 命令。</CardContent>
           </Card>
         </>
       ) : null}
@@ -181,12 +125,8 @@ export function SettingsPage() {
   )
 }
 
-function SettingsRow({ label, value, badge = false, code = false }: { label: string; value: string; badge?: boolean; code?: boolean }) {
-  return <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">{label}</span>{badge ? <Badge variant="secondary">{value}</Badge> : code ? <code className="rounded bg-muted px-2 py-1 text-xs">{value}</code> : <span className="text-right">{value}</span>}</div>
-}
-
 function SettingsSkeleton() {
-  return <div className="grid gap-6 lg:grid-cols-2" aria-label="正在加载设置快照"><Skeleton className="h-72 w-full" /><Skeleton className="h-72 w-full" /></div>
+  return <div className="grid gap-6" aria-label="正在加载设置快照"><Skeleton className="h-48 w-full" /><Skeleton className="h-72 w-full" /><Skeleton className="h-72 w-full" /></div>
 }
 
 function SettingsError({ message, retry }: { message: string; retry: () => void }) {
@@ -202,28 +142,6 @@ function serviceStatusLabel(service: { loaded: boolean; running: boolean; state:
 }
 function formatHostPort(host: string, port: number): string {
   return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`
-}
-function currentManagedValue(settings: Awaited<ReturnType<typeof fetchManagementSettings>>, kind: string): unknown {
-  if (kind === "display.operation-updates") return settings.display.operationUpdates
-  if (kind === "display.plan-updates") return settings.display.planUpdatesEnabled
-  if (kind === "display.price-currency") return settings.display.priceCurrency
-  if (kind === "system.sandbox") return settings.system.sandbox
-  if (kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
-  if (kind === "automation.scheduled-tasks") return settings.automation.scheduledTasksEnabled
-  if (kind === "advanced.logging-level") return settings.advanced.loggingLevel
-  if (kind === "metrics.storage") return settings.metrics.storage
-  if (kind === "metrics.sync-params") return settings.metrics.sync
-  if (kind === "webui.port") return settings.webui.port
-  if (kind === "system.default-model") return settings.system.defaultModel
-  return null
-}
-function ManagedSelect({ label, value, options, disabled, onChange }: { label: string; value: string; options: string[][]; disabled: boolean; onChange: (value: string) => void }) {
-  const effectiveOptions = options.some(([option]) => option === value) ? options : [[value, value], ...options]
-  return <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">{label}</span><Select value={value} disabled={disabled} onValueChange={onChange}><SelectTrigger size="sm" className="w-[160px]" aria-label={label}><SelectValue /></SelectTrigger><SelectContent>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectContent></Select></div>
-}
-function formatPreviewValue(value: unknown): string {
-  if (value !== null && typeof value === "object") return JSON.stringify(value)
-  return String(value)
 }
 function exchangeRateSourceLabel(value: "open-er-api" | "ecb" | "cache" | undefined): string {
   if (value === "open-er-api") return "Open Exchange Rate API"

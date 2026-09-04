@@ -64,7 +64,8 @@ function repositoryFiles() {
   );
   return output
     .split(/\r?\n/)
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((file) => existsSync(join(root, file)));
 }
 
 function checkMarkdownLinks(file) {

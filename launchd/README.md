@@ -7,7 +7,7 @@
 
 - `com.hegenai.codex-app-server.plist.template`：启动共享 Codex App Server，并监听私有 Unix Socket。
 - `com.hegenai.codex-gateway.plist.template`：启动连接该 Socket 的 Gateway。
-- `com.hegenai.codex-webui.plist.template`：启动只读指标 WebUI，读取 `[webui]` 配置。
+- `com.hegenai.codex-webui.plist.template`：启动指标与低风险设置 WebUI，读取 `[webui]` 配置。
 - `com.hegenai.codex-center.plist.template`：启动多设备指标中心服务，读取 `[metrics.center]` 配置。
 
 模板中的占位符由 `scripts/install-launchd.mjs` 写入实际路径和运行环境。服务都通过 CLI

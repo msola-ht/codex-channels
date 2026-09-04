@@ -104,7 +104,6 @@ import {
 import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
 import { runSessionMenu } from "../scripts/session-menu.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
-import { enableManagement } from "../scripts/management-command.mjs";
 import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
 import {
   readWorkspaceConfig,
@@ -139,7 +138,6 @@ const helpText = {
   sessions                     管理会话（包括按 Turn 清理旧会话）
   channel                      发送渠道图片
   webui                        启动指标 WebUI
-  management                  管理 WebUI 管理凭据
   center                       启动或配置多设备指标中心
 
 服务与维护：
@@ -298,15 +296,12 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
   webui: `用法：codexc webui [--host 地址] [--port 端口]
 
-启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）。
+启动本地指标 WebUI（默认 http://127.0.0.1:8787/）；设置页可在同一令牌下修改已开放的低风险设置。
 参数优先级：命令行 > config.toml 的 [webui] 段 > 默认值。
 --host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
 --port 指定监听端口，范围 1-65535；
 访问令牌请使用 codexc config 的 WebUI 设置，或手工编辑 [webui] 段。
-页面与 JSON API 均来自指标数据库，不提供任何写接口。`,
-  management: `用法：codexc management enable
-
-生成 WebUI 管理接口使用的独立凭据。凭据只在首次生成时显示一次；管理接口仍只允许回环访问。`,
+指标 JSON API 来自指标数据库；设置管理只允许白名单字段并复用 Config 修订保护。`,
   center: `用法：codexc center [--host 地址] [--port 端口] [--database 路径]
       codexc center info [--json]      查看中心地址、双令牌状态与运行状态
       codexc center config    交互配置 [metrics.center]
@@ -474,11 +469,6 @@ try {
         process.cwd(),
         { failureReportedByChild: true },
       );
-      break;
-    case "management":
-      if (showRequestedHelp(args, "management")) break;
-      if (args.length !== 1 || args[0] !== "enable") throw new Error(helpText.management);
-      enableManagement();
       break;
     case "doctor":
       if (showRequestedHelp(args, "doctor")) {

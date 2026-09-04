@@ -184,7 +184,7 @@ codexc metrics export --range 30d --format json
 codexc webui
 ```
 
-WebUI 只读展示脱敏指标；非回环监听必须配置令牌。多设备指标中心使用 `codexc config` 配置，详情见 [`WebUI`](webui.md) 和 [`指标同步`](metrics-sync.md)。
+WebUI 默认只读展示脱敏指标；设置页可在同一 WebUI 令牌下修改已开放的低风险 Gateway 设置，非回环监听必须配置令牌。多设备指标中心使用 `codexc config` 配置，详情见 [`WebUI`](webui.md) 和 [`指标同步`](metrics-sync.md)。
 
 从本机向绑定渠道发送图片：
 
