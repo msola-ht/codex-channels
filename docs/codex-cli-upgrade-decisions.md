@@ -21,7 +21,7 @@
 
 - 官方 Release：[`rust-v0.153.4`](https://github.com/openai/codex/releases/tag/rust-v0.153.4)
 - 项目决策：以 `0.153.4` 作为新的开发基线；已重新生成协议类型并完成版本、协议结构和类型检查，业务入口继续只采用当前支持矩阵列出的能力，不保留旧 CLI 兼容层。
-- 评估范围：Thread 元数据字段、异步用户输入问题、Plugin reconcile、App Links、Turn 审批审查者设置，以及 Astra 模型目录和 TUI/Guardian 更新。
+- 评估范围：Thread 元数据字段、异步用户输入问题、Plugin reconcile、App Links、Turn 审批审查者设置、上下文管理实验开关，以及 Astra 模型目录和 TUI/Guardian 更新。
 
 ### 已采用
 
@@ -44,18 +44,19 @@
 
 | 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
 | --- | --- | --- | --- |
-| Thread 列表/读取中的模型与思考等级元数据 | 让会话列表直接显示 App Server 记录的模型和思考等级 | 可减少从本地缓存或最近 Turn 推断展示信息的需要 | 现有 Gateway 已从 Thread 启动/恢复结果取得这些字段；只有会话列表产品需要精确显示服务端元数据时，才补齐快照模型、Surface 文案和合同测试 |
+| Thread 列表/读取中的模型与思考等级元数据 | 让会话列表直接显示 App Server 记录的模型和思考等级 | 可减少从本地缓存或最近 Turn 推断展示信息的需要 | 当前会话列表只在 Gateway 已启动或恢复过该 Thread 时，从 Router 内存缓存最佳努力显示模型；历史 Thread 可能缺失，外部客户端修改后也可能陈旧，且不显示思考等级。只有产品要求准确展示服务端持久化值时，才把字段映射到稳定快照、补三渠道文案，并以“当前配置或最近持久化值，非每 Turn 执行遥测”的语义完成真实合同测试 |
 | `ResponseUsageMetadata.metadata` | 让用量响应携带额外结构化元数据 | 未来可用于诊断或计费审计 | 当前指标模型没有定义该数据的来源、保留期限和脱敏规则；建立稳定字段合同后再评估 |
 
 ### 纯上游变化
 
 - Astra picker、Bedrock 选择器、异步澄清提示、Vim/TUI 历史和 Guardian 行为属于原生 Codex 客户端或上游内部能力；Gateway 不新增对应渠道入口。TUI 的自动回顾开关例外由 Codex 用户设置管理入口写入，但 Gateway 不复制回顾生成逻辑。
-- `Thread.model`、`Thread.reasoningEffort`、`agentMessage.questions`、`plugin/reconcile` 及相关生成类型已保留在生成层，但未加入 [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) 的受控业务导出。
+- `context_management.experimental_mode` 是默认关闭的上游开发中开关；它属于 Codex 用户配置 `~/.codex/config.toml`，不属于 Gateway 的 `~/.codex-connect/config.toml`。当前 Gateway 不通过 Setup、Doctor 或公共配置入口管理它，也不因该开关新增渠道会话语义。
+- `Thread` 已由 [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) 受控导出，但新增的 `model`、`reasoningEffort` 尚未映射到稳定 Thread 快照或 Application 会话接口；`agentMessage.questions`、`plugin/reconcile` 及相关类型仍只保留在生成层，未建立业务入口。
 
 ### App Server 维护决策
 
 - 本次升级只提升精确版本基线并重新生成协议，不把新增 RPC、可选字段或异步问题格式解释为已支持功能；后续任何接入都必须先更新支持矩阵、公开端口、授权语义和真实合同。
-- 协议结构、版本和 Gateway 兼容性检查已通过；Lint、全量测试、真实 App Server 合同、构建与 tarball/干净源码全局安装冒烟均已通过，合并前仍由 CI 再次复核。
+- 协议结构、版本和 Gateway 兼容性检查已通过。合并前 CI 已通过 Lint、全量测试、构建、tarball 安装冒烟和独立的真实 App Server 合同；干净源码全局安装不属于日常 PR CI，本次合并没有将其作为已通过项记录，仍由正式升级验证或发布流程执行。
 
 ## 0.152.0
 
