@@ -80,6 +80,20 @@ describe("Weixin reply context persistence", () => {
     )).rejects.toThrow("微信回复上下文载荷无效");
   });
 
+  it("removes only the expected context token", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-weixin-context-"));
+    temporaryDirectories.push(directory);
+    const store = new EncryptedFileWeixinReplyContextPersistence(directory);
+
+    await store.set(target, target.conversationId, "context-old");
+    await expect(store.removeIf(target, "context-new")).resolves.toBe(false);
+    await expect(store.get(target)).resolves.toMatchObject({
+      contextToken: "context-old",
+    });
+    await expect(store.removeIf(target, "context-old")).resolves.toBe(true);
+    await expect(store.get(target)).resolves.toBeNull();
+  });
+
   it("uses a dedicated macOS Keychain service and exact target key", async () => {
     const record = {
       version: 1,

@@ -48,7 +48,7 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
   const legacyFiles = [...legacyByProvider.values()].flat();
   const currentFiles = unique(entries.map((entry) => entry.current)).filter(existsSync);
   const providerDirectories = managedModelProviderDefinitions
-    .map((definition) => join(storageRoot, definition.id))
+    .map((definition) => join(storageRoot, definition.storageId ?? definition.id))
     .filter((path) => existsSync(path));
   const referenceFiles = [
     join(codexHome, "config.toml"),
@@ -125,9 +125,13 @@ export function backupAndMigrateProviderFiles(environment = process.env, options
   const movedDirectories = [];
   for (const definition of managedModelProviderDefinitions) {
     if (!legacyByProvider.has(definition.id)) continue;
-    const directory = join(storageRoot, definition.id);
+    const directory = join(storageRoot, definition.storageId ?? definition.id);
     if (!existsSync(directory)) continue;
-    const target = join(backupRoot, "original-providers", definition.id);
+    const target = join(
+      backupRoot,
+      "original-providers",
+      definition.storageId ?? definition.id,
+    );
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
     securePrivateDirectorySync(dirname(target));
     renameSync(directory, target);

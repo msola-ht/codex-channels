@@ -3,6 +3,8 @@ import type { ReactNode } from "react"
 
 import { CurrencyContext } from "@/hooks/currency-context"
 import type { DisplayCurrency } from "@/lib/format"
+import { fetchSettings } from "@/lib/api"
+import { useApi } from "@/hooks/use-api"
 
 const STORAGE_KEY = "codex-webui:currency"
 
@@ -15,6 +17,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       return null
     }
   })
+  const settingsRequest = useApi(fetchSettings, [])
 
   useEffect(() => {
     if (currency !== null) {
@@ -26,9 +29,22 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     }
   }, [currency])
 
+  useEffect(() => {
+    const settings = settingsRequest.data
+    if (settings === null) return
+    setCurrencyState((current) => current ?? settings.currency)
+  }, [settingsRequest.data])
+
   return (
     <CurrencyContext.Provider
-      value={{ currency, setCurrency: setCurrencyState }}
+      value={{
+        currency,
+        setCurrency: setCurrencyState,
+        settings: settingsRequest.data,
+        settingsLoading: settingsRequest.loading,
+        settingsError: settingsRequest.error,
+        refetchSettings: settingsRequest.refetch,
+      }}
     >
       {children}
     </CurrencyContext.Provider>

@@ -1,7 +1,11 @@
 import {
   loadOpencodeGoAccountCredentialFor,
 } from "../../runtime/model-provider-runtime.mjs";
-import { isOpencodeGoProvider } from "../../runtime/opencode-go-accounts.mjs";
+import {
+  isOpencodeGoProvider,
+  loadOpencodeGoDefaultAccount,
+  opencodeGoProviderId,
+} from "../../runtime/opencode-go-accounts.mjs";
 import {
   calculateModelRequestCostComponents,
   SqliteModelRequestMetricsStore,
@@ -44,7 +48,7 @@ export function createOpencodeGoAccountAdapter(
 ): ProviderAccountAdapter {
   const environment = options.environment ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const provider = options.provider ?? "opencode-go";
+  const provider = options.provider ?? defaultOpencodeGoProvider(environment);
   return {
     provider,
     async accountUsage() {
@@ -148,7 +152,7 @@ export function createOpencodeGoRemainingUsageReader(
   return async (model, requestStartedAtMs, modelProvider) => {
     const resolvedProvider = modelProvider !== undefined && isOpencodeGoProvider(modelProvider)
       ? modelProvider
-      : options.provider ?? "opencode-go";
+      : options.provider ?? defaultOpencodeGoProvider(options.environment ?? process.env);
     if (modelProvider !== undefined && !isOpencodeGoProvider(modelProvider)) {
       return null;
     }
@@ -173,6 +177,12 @@ export function createOpencodeGoRemainingUsageReader(
       return null;
     }
   };
+}
+
+function defaultOpencodeGoProvider(environment: NodeJS.ProcessEnv): string {
+  const account = loadOpencodeGoDefaultAccount(environment);
+  if (account === undefined) throw new Error("尚未配置 OpenCode Go 账户");
+  return opencodeGoProviderId(account.id);
 }
 
 function readWindowLocalTokens(

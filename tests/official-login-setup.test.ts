@@ -97,7 +97,10 @@ describe("official login setup", () => {
     };
 
     await expect(runOfficialLoginSetup({
-      environment: {},
+      environment: {
+        CODEX_HOME: join(tmpdir(), "codexc-official-login-empty-codex"),
+        CODEX_CONNECT_HOME: join(tmpdir(), "codexc-official-login-empty-connect"),
+      },
       output,
       prompts,
       createClient,
@@ -180,6 +183,8 @@ describe("official login setup", () => {
     await runOfficialLoginSetup({
       environment: {
         CODEX_BINARY: loginScript,
+        CODEX_HOME: join(dir, "codex"),
+        CODEX_CONNECT_HOME: join(dir, "connect"),
         ...(process.platform === "win32"
           ? { ComSpec: process.env.ComSpec ?? `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\cmd.exe` }
           : {}),

@@ -7,7 +7,7 @@ import {
 
 export interface WeixinReplyContext {
   readonly actorId: string;
-  readonly contextToken: string;
+  readonly contextToken: string | undefined;
 }
 
 const maximumContextTokenLength = 65_536;
@@ -58,6 +58,16 @@ export class WeixinReplyContextStore {
   remove(target: ConversationTarget): void {
     this.assertTarget(target);
     this.contexts.delete(target.conversationId);
+  }
+
+  removeIf(target: ConversationTarget, expectedContextToken: string): boolean {
+    this.assertTarget(target);
+    const current = this.contexts.get(target.conversationId);
+    if (current === undefined || current.contextToken !== expectedContextToken) {
+      return false;
+    }
+    this.contexts.delete(target.conversationId);
+    return true;
   }
 
   clear(): void {

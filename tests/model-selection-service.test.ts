@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  listProviders,
   ModelSelectionService,
+  resolveProvider,
   type ModelOption,
   type ModelSelectionPort,
 } from "../src/application/index.js";
@@ -798,5 +800,61 @@ describe("ModelSelectionService", () => {
     await expect(service.selectModel(target, "deepseek-v5-preview"))
       .rejects.toThrow("该模型尚未完成项目适配");
     expect(newSession).not.toHaveBeenCalled();
+  });
+
+  it("filters models by the chosen provider and exposes providerFilter", async () => {
+    const deep = { ...model("deepseek-v4-flash", ["high"], "high"), provider: "deepseek" };
+    const service = createService(
+      { model: "gpt-main", modelProvider: "openai", effort: "medium", serviceTier: "default" },
+      [...models, deep],
+    );
+
+    expect(listProviders((await service.state(target)).models)).toEqual([
+      "openai",
+      "deepseek",
+    ]);
+
+    const browsed = await service.browseProvider(target, "deepseek");
+    expect(browsed.providerFilter).toBe("deepseek");
+    expect(browsed.models).toEqual([deep]);
+
+    const after = await service.state(target);
+    expect(after.providerFilter).toBe("deepseek");
+    expect(after.models).toEqual([deep]);
+    expect(resolveProvider(after.models, "1")).toBe("deepseek");
+  });
+
+  it("resolves numeric model selections within the active provider browse scope", async () => {
+    const openAi = model("gpt-main", ["medium"], "medium", true);
+    const deepseek = {
+      ...model("deepseek-v4-flash", ["high"], "high"),
+      provider: "deepseek",
+    };
+    const service = createService(
+      { model: openAi.model, modelProvider: "openai", effort: "medium", serviceTier: "default" },
+      [openAi, deepseek],
+    );
+
+    await service.browseProvider(target, "deepseek");
+    await service.selectModel(target, "1");
+
+    expect(service.turnOverrides(target)).toMatchObject({
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+    });
+  });
+
+  it("returns the selected provider scope after selecting a model", async () => {
+    const deep = { ...model("deepseek-v4-flash", ["high"], "high"), provider: "deepseek" };
+    const service = createService(
+      { model: "gpt-main", modelProvider: "openai", effort: "medium", serviceTier: "default" },
+      [...models, deep],
+    );
+
+    await service.browseProvider(target, "deepseek");
+    const selected = await service.selectModel(target, "1");
+
+    expect(selected.providerFilter).toBe("deepseek");
+    expect(selected.models).toEqual([deep]);
   });
 });

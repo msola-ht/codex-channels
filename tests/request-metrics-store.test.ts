@@ -25,6 +25,39 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("幂等保存并读取最新官方账户快照", () => {
+    const directory = temporaryDirectory();
+    const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"));
+    store.upsertAccountSnapshot!({
+      sourceId: "deepseek:default",
+      provider: "deepseek",
+      accountId: null,
+      displayName: "DeepSeek",
+      enabled: true,
+      observedAtMs: 1_700_000_000_000,
+      available: true,
+      usage: { kind: "balance", provider: "deepseek", available: true, balances: [] },
+      limits: { kind: "unsupported", provider: "deepseek" },
+    });
+    store.upsertAccountSnapshot!({
+      sourceId: "deepseek:default",
+      provider: "deepseek",
+      accountId: null,
+      displayName: "DeepSeek",
+      enabled: true,
+      observedAtMs: 1_700_000_000_001,
+      available: false,
+      usage: { kind: "unsupported", provider: "deepseek" },
+      limits: { kind: "unsupported", provider: "deepseek" },
+    });
+    expect(store.latestAccountSnapshot!("deepseek")).toMatchObject({
+      observedAtMs: 1_700_000_000_001,
+      available: false,
+    });
+    expect(store.latestAccountSnapshots!()).toHaveLength(1);
+    store.close();
+  });
+
   it("persists complete sanitized request metrics in a private standalone database", () => {
     const directory = temporaryDirectory();
     const statePath = join(directory, "gateway.sqlite3");

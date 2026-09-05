@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react"
+import { lazy, Suspense } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
@@ -20,7 +20,6 @@ import { CurrencyProvider } from "@/hooks/currency-provider"
 import { useCurrency } from "@/hooks/currency-context"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useLanguage } from "@/hooks/language-context"
-import { fetchSettings } from "@/lib/api"
 
 const ConsolePage = lazy(() =>
   import("@/pages/console-page").then((module) => ({ default: module.ConsolePage })))
@@ -32,12 +31,15 @@ const ThreadDetailPage = lazy(() =>
   import("@/pages/thread-detail-page").then((module) => ({ default: module.ThreadDetailPage })))
 const ThreadsPage = lazy(() =>
   import("@/pages/threads-page").then((module) => ({ default: module.ThreadsPage })))
+const SettingsPage = lazy(() =>
+  import("@/pages/settings-page").then((module) => ({ default: module.SettingsPage })))
 
 function pageTitle(pathname: string): string {
   if (pathname.startsWith("/threads/")) return "Thread 详情"
   if (pathname === "/threads") return "Threads"
   if (pathname === "/requests") return "请求"
   if (pathname === "/errors") return "错误"
+  if (pathname === "/settings") return "设置"
   return "控制台"
 }
 
@@ -72,21 +74,6 @@ function Layout() {
   const { currency, setCurrency } = useCurrency()
   const { language, setLanguage } = useLanguage()
 
-  useEffect(() => {
-    if (currency !== null) return
-    const controller = new AbortController()
-    fetchSettings(controller.signal)
-      .then((settings) => {
-        if (!controller.signal.aborted) {
-          setCurrency(settings.currency)
-        }
-      })
-      .catch(() => {
-        // 初始化失败时保持跟随服务端配置，不阻塞页面
-      })
-    return () => controller.abort()
-  }, [currency, setCurrency])
-
   return (
     <SidebarProvider className="min-h-0 min-w-0">
       <AppSidebar />
@@ -118,6 +105,7 @@ function Layout() {
               <Route path="/threads/:id" element={<ThreadDetailPage />} />
               <Route path="/requests" element={<RequestsPage />} />
               <Route path="/errors" element={<ErrorsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </Suspense>
         </div>
@@ -130,13 +118,13 @@ export default function App() {
   return (
     <TooltipProvider>
       <LanguageProvider>
-        <CurrencyProvider>
-          <AuthGate>
+        <AuthGate>
+          <CurrencyProvider>
             <HashRouter>
               <Layout />
             </HashRouter>
-          </AuthGate>
-        </CurrencyProvider>
+          </CurrencyProvider>
+        </AuthGate>
       </LanguageProvider>
     </TooltipProvider>
   )

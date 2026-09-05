@@ -51,6 +51,11 @@ export async function runMetricsMenu({
         label: "重置指标库",
         hint: "备份并重建（需 Gateway 停止）",
       },
+      {
+        value: "normalize-currency",
+        label: "统一费用币种",
+        hint: "备份并清除历史非 USD 费用（保留其他指标）",
+      },
       { value: "cancel", label: "取消" },
     ],
   });
@@ -72,6 +77,18 @@ export async function runMetricsMenu({
       return;
     }
     runDatabaseCommand(["reset"]);
+    return;
+  }
+  if (action === "normalize-currency") {
+    const confirmed = await prompts.confirm({
+      message: "将备份并清除历史非 USD 费用字段，确认继续？",
+      initialValue: false,
+    });
+    if (prompts.isCancel(confirmed) || confirmed !== true) {
+      prompts.cancel("已取消");
+      return;
+    }
+    runDatabaseCommand(["normalize-currency"]);
     return;
   }
   if (action === "cleanup") {

@@ -193,13 +193,33 @@ export async function runCustomPrimaryProviderSetup({
           label: `${primaryProviderId}（推荐；允许 Codex 使用远程压缩）`,
           hint: "上游仍需兼容远程压缩接口",
         },
+        {
+          value: "__custom__",
+          label: "自定义标识符",
+          hint: "不使用上游地址作为 Provider ID",
+        },
       ],
       initialValue: activeProviderId === derivedProviderId ? derivedProviderId : primaryProviderId,
     });
     if (prompts.isCancel(providerId) || providerId === "back") {
       return { action: allowBack ? "back" : "cancel" };
     }
-    normalizedId = String(providerId);
+    if (providerId === "__custom__") {
+      const customId = await prompts.text({
+        message: "自定义 Provider ID",
+        validate: (value) => validateCustomPrimaryModelProviderId(String(value).trim(), environment)
+          ?? undefined,
+      });
+      if (prompts.isCancel(customId) || customId === "back") {
+        return { action: allowBack ? "back" : "cancel" };
+      }
+      normalizedId = String(customId).trim();
+    } else {
+      normalizedId = String(providerId);
+    }
+    if (normalizedId === "") return { action: allowBack ? "back" : "cancel" };
+    const customIdValidationError = validateCustomPrimaryModelProviderId(normalizedId, environment);
+    if (customIdValidationError !== null) throw new Error(customIdValidationError);
     const configured = Object.prototype.hasOwnProperty.call(currentProviders, normalizedId)
       || switchingProviders.some(({ id }) => id === normalizedId);
     const backedUp = !configured

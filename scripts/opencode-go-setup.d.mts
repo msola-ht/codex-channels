@@ -4,6 +4,7 @@ import type { ManagedModelProviderRestorePreview } from "./managed-model-provide
 export interface OpenCodeGoSetupPrompter {
   select(): Promise<string>;
   accountId?(): Promise<string>;
+  contact?(): Promise<string>;
   selectAccount?(
     accounts: ReadonlyArray<{ id: string; default: boolean }>,
   ): Promise<string>;
@@ -57,6 +58,9 @@ export function addOpencodeGoAccount(
   options?: {
     mode?: "switching" | "exclusive";
     reconfigure?: boolean;
+    email?: string;
+    phone?: string;
+    contact?: string;
     environment?: NodeJS.ProcessEnv;
     output?: { write(value: string): unknown };
     fetchImpl?: typeof fetch;

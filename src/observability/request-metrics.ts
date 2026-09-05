@@ -483,6 +483,33 @@ export interface ModelRequestMetricsStore {
     query: ModelRequestMetricsErrorQuery,
   ): StoredModelRequestMetricsErrorReport;
   quotaHistory?(query: QuotaHistoryQuery): StoredQuotaPeriod[];
+  upsertAccountSnapshot?(snapshot: {
+    sourceId: string;
+    provider: string;
+    accountId: string | null;
+    displayName: string;
+    enabled: boolean;
+    observedAtMs: number;
+    available: boolean;
+    usage: unknown;
+    limits: unknown;
+  }): void;
+  latestAccountSnapshot?(provider: string, accountId?: string): {
+    provider: string;
+    accountId: string | null;
+    observedAtMs: number;
+    available: boolean;
+    usage: unknown;
+    limits: unknown;
+  } | null;
+  latestAccountSnapshots?(): Array<{
+    provider: string;
+    accountId: string | null;
+    observedAtMs: number;
+    available: boolean;
+    usage: unknown;
+    limits: unknown;
+  }>;
   threadTurnTaskSummary(
     threadId: string,
     turnId: string,

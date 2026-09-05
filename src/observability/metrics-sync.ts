@@ -32,6 +32,14 @@ export interface MetricsSyncOptions {
   statePath: string;
   fetchImpl: typeof fetch;
   logger: Logger;
+  providerIdentities?: () => readonly MetricsProviderIdentity[];
+}
+
+export interface MetricsProviderIdentity {
+  provider: string;
+  displayName: string;
+  email?: string;
+  phone?: string;
 }
 
 export interface SyncedRequestMetric
@@ -44,6 +52,7 @@ export interface MetricsSyncPayload {
   deviceName: string;
   requestMetrics: SyncedRequestMetric[];
   subagentThreads: StoredSubagentThreadRecord[];
+  providerIdentities?: readonly MetricsProviderIdentity[];
 }
 
 export class MetricsSyncHttpError extends Error {
@@ -64,6 +73,7 @@ interface PersistedMetricsSyncState {
   lastRequestLocalId: number;
   lastSubagentRecordedAtMs: number;
   lastSubagentThreadId: string | null;
+  lastProviderIdentitySignature?: string;
 }
 
 export class MetricsSync {
@@ -165,7 +175,14 @@ export class MetricsSync {
       this.state.lastSubagentRecordedAtMs,
       this.state.lastSubagentThreadId ?? undefined,
     );
-    if (requestRows.length === 0 && subagentRows.length === 0) {
+    const providerIdentities = this.options.providerIdentities?.() ?? [];
+    const providerIdentitySignature = JSON.stringify(
+      [...providerIdentities].sort((left, right) => left.provider.localeCompare(right.provider)),
+    );
+    const identitiesConfigured = this.options.providerIdentities !== undefined;
+    const identitiesChanged = identitiesConfigured
+      && providerIdentitySignature !== this.state.lastProviderIdentitySignature;
+    if (requestRows.length === 0 && subagentRows.length === 0 && !identitiesChanged) {
       return;
     }
     const payload: MetricsSyncPayload = {
@@ -173,6 +190,7 @@ export class MetricsSync {
       deviceName: this.options.config.deviceName ?? hostname(),
       requestMetrics: requestRows.map(toSyncedRequestMetric),
       subagentThreads: subagentRows,
+      ...(identitiesConfigured ? { providerIdentities } : {}),
     };
     await this.postBatch(endpoint, deviceToken, payload);
     const lastRequest = requestRows[requestRows.length - 1];
@@ -184,6 +202,7 @@ export class MetricsSync {
       this.state.lastSubagentRecordedAtMs = lastSubagent.recordedAtMs;
       this.state.lastSubagentThreadId = lastSubagent.threadId;
     }
+    this.state.lastProviderIdentitySignature = providerIdentitySignature;
     this.options.logger.info(
       {
         deviceId: this.state.deviceId,

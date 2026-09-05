@@ -16,6 +16,7 @@ import {
 } from "../src/surfaces/reference-cost-format.js";
 import { formatOpenAiErrorMessage } from "../src/surfaces/account-format.js";
 import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-format.js";
+import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
   beforeEach(() => {
@@ -51,6 +52,10 @@ describe("shared Surface lifecycle presentation", () => {
     expect(presentation.fields).toEqual([
       { label: "App Server", value: "已连接" },
       { label: "系统", value: "Linux · x64" },
+      {
+        label: "版本",
+        value: `Codex Connect ${gatewayMetadata.version} · Codex 0.147.0`,
+      },
       { label: "OpenAI 网络", value: "连接失败；请检查代理设置" },
     ]);
   });
@@ -123,6 +128,10 @@ describe("shared Surface lifecycle presentation", () => {
     expect(presentation.fields).toEqual([
       { label: "App Server", value: "已连接" },
       { label: "系统", value: "Linux · x64" },
+      {
+        label: "版本",
+        value: `Codex Connect ${gatewayMetadata.version} · Codex 0.147.0`,
+      },
     ]);
   });
 
@@ -265,9 +274,10 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "App Server：已连接",
       "系统：Linux · x64",
+      `版本：Codex Connect ${gatewayMetadata.version} · Codex 0.146.0`,
       "",
       "运行环境：",
-      "版本：Codex Connect 0.146.0 · Node.js v22.23.1",
+      "Node.js：v22.23.1",
       "连接：Unix WebSocket",
       "App Server UA：codex/0.146.0 (Linux; x64) (gateway; 0.146.0)",
       "",
@@ -1589,6 +1599,43 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("思考速度");
     expect(rendered).not.toContain("生成速度");
   });
+});
+
+it("shows the session-aggregate cache hit rate in normal mode", () => {
+  const rendered = renderPlainLifecyclePresentation(
+    createTurnCompletedPresentation({
+      type: "turn.completed",
+      target: {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "100",
+      },
+      threadId: "thread-session",
+      turnId: "turn-session",
+      status: "completed",
+      modelProvider: "openai",
+      sessionReferenceCost: {
+        currency: "USD",
+        totalCostNanos: null,
+        inputTokens: 400,
+        cachedInputTokens: 300,
+        outputTokens: 100,
+        inputCostNanos: null,
+        cachedInputCostNanos: null,
+        outputCostNanos: null,
+        pricedRequestCount: 0,
+        requestCount: 2,
+        uncachedInputPricePerMillionNanos: null,
+        cachedInputPricePerMillionNanos: null,
+        outputPricePerMillionNanos: null,
+        hasMixedPrices: false,
+      },
+    }),
+  );
+
+  expect(rendered).toContain("模型请求：2 次");
+  expect(rendered).toContain("Token：500");
+  expect(rendered).toContain("缓存命中率：75.00%");
 });
 
 function tokenBreakdown(

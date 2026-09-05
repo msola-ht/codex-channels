@@ -534,7 +534,10 @@ describe("WeixinSurface", () => {
 
     await surface.start();
 
-    expect(replyContextPersistence.remove).toHaveBeenCalledWith(target);
+    expect(replyContextPersistence.removeIf).toHaveBeenCalledWith(
+      target,
+      "restored-context",
+    );
     releaseInbound();
     await vi.waitFor(() => {
       expect(replyContextPersistence.set).toHaveBeenCalledWith(
@@ -1076,10 +1079,12 @@ function replyContextPersistenceFixture(
   get: ReturnType<typeof vi.fn>;
   set: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>;
+  removeIf: ReturnType<typeof vi.fn>;
 } {
   return {
     get: vi.fn(async () => restored),
     set: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
+    removeIf: vi.fn(async () => true),
   };
 }

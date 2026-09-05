@@ -7,6 +7,7 @@ export function parseIngestPayload(body) {
     return { ok: false, error: "请求体必须是 JSON 对象" };
   }
   const { deviceId, deviceName, requestMetrics, subagentThreads } = body;
+  const providerIdentities = body.providerIdentities;
   if (typeof deviceId !== "string" || !deviceIdPattern.test(deviceId)) {
     return { ok: false, error: "deviceId 无效" };
   }
@@ -18,6 +19,18 @@ export function parseIngestPayload(body) {
   }
   if (!Array.isArray(requestMetrics) || !Array.isArray(subagentThreads)) {
     return { ok: false, error: "requestMetrics 与 subagentThreads 必须是数组" };
+  }
+  if (providerIdentities !== undefined) {
+    if (!Array.isArray(providerIdentities) || providerIdentities.length > 100) {
+      return { ok: false, error: "providerIdentities 必须是最多 100 条的数组" };
+    }
+    const seenProviders = new Set();
+    for (const identity of providerIdentities) {
+      if (!isProviderIdentity(identity) || seenProviders.has(identity.provider)) {
+        return { ok: false, error: "providerIdentities 包含无效或重复记录" };
+      }
+      seenProviders.add(identity.provider);
+    }
   }
   if (requestMetrics.length > maximumRequestMetrics) {
     return { ok: false, error: `requestMetrics 最多 ${maximumRequestMetrics} 条` };
@@ -43,7 +56,25 @@ export function parseIngestPayload(body) {
       : undefined,
     requestMetrics,
     subagentThreads,
+    ...(providerIdentities === undefined ? {} : { providerIdentities }),
   };
+}
+
+function isProviderIdentity(value) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof value.provider === "string"
+    && value.provider.length > 0
+    && value.provider.length <= 128
+    && typeof value.displayName === "string"
+    && value.displayName.length > 0
+    && value.displayName.length <= 384
+    && (
+      (typeof value.email === "string" && value.email.length > 0 && value.email.length <= 320)
+      || (typeof value.phone === "string" && value.phone.length > 0 && value.phone.length <= 32)
+    )
+    && !(value.email !== undefined && value.phone !== undefined);
 }
 
 function isRequestMetric(row) {

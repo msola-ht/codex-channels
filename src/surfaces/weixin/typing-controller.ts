@@ -114,6 +114,7 @@ export class WeixinTypingController {
     const context = this.contexts.get(session.target);
     if (
       context === undefined
+      || context.contextToken === undefined
       || !this.access.isAllowed({
         target: session.target,
         actorId: context.actorId,

@@ -11,7 +11,7 @@ export class OpenCodeGoAccountManagementError extends Error {
 
 export interface OpenCodeGoDefaultAccountPreview {
   operation: "set-default";
-  account: { id: string; default: true };
+  account: { id: string; default: true; email?: string; phone?: string };
   currentDefaultAccountId: string | null;
   updatesExternalAgent: boolean;
   willChange: boolean;
@@ -20,7 +20,7 @@ export interface OpenCodeGoDefaultAccountPreview {
 
 export interface OpenCodeGoAccountStopPreview {
   operation: "stop";
-  account: { id: string; provider: string };
+  account: { id: string; provider: string; email?: string; phone?: string };
   status: "running" | "not-running";
   willChange: boolean;
   activation: "none";
@@ -28,7 +28,7 @@ export interface OpenCodeGoAccountStopPreview {
 
 export interface OpenCodeGoAccountRemovalPreview {
   operation: "remove";
-  account: { id: string; provider: string; default: boolean };
+  account: { id: string; provider: string; default: boolean; email?: string; phone?: string };
   effects: {
     stopsRunningAppServer: boolean;
     promotesDefaultAccountId: string | null;
@@ -44,6 +44,8 @@ interface AccountManagementOptions {
   loadAccounts?: (environment: NodeJS.ProcessEnv) => Array<{
     id: string;
     default: boolean;
+    email?: string;
+    phone?: string;
   }>;
 }
 
@@ -66,7 +68,7 @@ export function applyOpencodeGoDefaultAccountChange(
       .loadManagedModelProviderSettings;
     writeAccounts?: (
       environment: NodeJS.ProcessEnv,
-      accounts: Array<{ id: string; default: boolean }>,
+      accounts: Array<{ id: string; default: boolean; email?: string; phone?: string }>,
     ) => void;
     configureRole?: (
       provider: ManagedModelProviderId,
@@ -122,7 +124,7 @@ export function applyOpencodeGoAccountRemoval(
   options?: RemovalOptions & {
     writeAccounts?: (
       environment: NodeJS.ProcessEnv,
-      accounts: Array<{ id: string; default: boolean }>,
+      accounts: Array<{ id: string; default: boolean; email?: string; phone?: string }>,
     ) => void;
     releaseProvider?: (
       socketPath: string,

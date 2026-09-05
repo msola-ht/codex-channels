@@ -32,6 +32,7 @@ export async function loadModelProviderManagementState({
       mode: "switching",
       model: provider.model,
       reasoningEffort: provider.reasoningEffort,
+      supportsWebsockets: provider.supportsWebsockets,
       baseUrl: publicBaseUrl(provider.baseUrl),
       profileName: provider.profileName,
     }));
@@ -125,6 +126,7 @@ function customCandidate(id, value, state, active) {
     kind: "custom",
     state,
     active,
+    supportsWebsockets: provider.supports_websockets === true,
     baseUrl: publicBaseUrl(provider.base_url),
   };
 }

@@ -1,6 +1,5 @@
 import {
   loadManagedModelProviderDefinitions,
-  opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import { loadConfiguredCustomSwitchingModelProviders } from "../runtime/model-provider-runtime.mjs";
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
@@ -24,11 +23,6 @@ export function parseCodexRemoteOptions(
   const managedProfileDefinitions = [
     ...customSwitchingProfiles,
     ...configuredManagedProfileDefinitions,
-    ...(configuredManagedProfileDefinitions.some(
-      ({ profileName }) => profileName === opencodeGoProviderDefinition.profileName,
-    )
-      ? []
-      : [opencodeGoProviderDefinition]),
   ];
   assertManagedProfileDefinitions(managedProfileDefinitions);
   const passthrough = [];
@@ -184,6 +178,11 @@ function nonCanonicalManagedProfileName(definition) {
   if (typeof definition.providerId === "string") {
     return `custom-${definition.providerId}`;
   }
+  if (definition.storageId === "opencode-go") {
+    return definition.accountId === undefined
+      ? "opencode-go"
+      : `opencode-go-${definition.accountId}`;
+  }
   return definition.id === "deepseek" || isOpencodeGoProviderNamespace(definition.id)
     ? definition.id
     : undefined;
@@ -203,7 +202,10 @@ function reservedManagedProfileArgument(args, index) {
   }
   return profile === "sf-custom"
     || profile?.startsWith("sf-custom-")
+    || profile === "sf-opencode-go"
     || profile?.startsWith("sf-opencode-go-")
+    || profile === "sf-ocg"
+    || profile?.startsWith("sf-ocg-")
     ? profile
     : undefined;
 }
@@ -215,7 +217,10 @@ function reservedManagedProfileMessage(profile) {
   if (profile.startsWith("sf-custom-")) {
     return `Codex Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应 Provider`;
   }
-  if (profile.startsWith("sf-opencode-go-")) {
+  if (profile === "sf-opencode-go" || profile.startsWith("sf-opencode-go-")) {
+    return `OpenCode Go Profile ${profile} 已废弃；请使用 --profile sf-ocg-<账户>`;
+  }
+  if (profile === "sf-ocg" || profile.startsWith("sf-ocg-")) {
     return `OpenCode Go Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应账户`;
   }
   return `Codex Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应 Provider`;

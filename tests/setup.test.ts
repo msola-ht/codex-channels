@@ -351,7 +351,7 @@ describe("Codex Connect setup", () => {
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "custom_primary",
       label: "自定义 Responses Provider",
-      hint: "管理固定或切换模式的 OpenAI Responses 兼容 Provider",
+      hint: "新增、编辑、切换或删除 OpenAI Responses 兼容 Provider",
     });
   });
 

@@ -794,81 +794,6 @@ describe("ConversationService conversation service session", () => {
     expect(restorePreference).not.toHaveBeenCalled();
   });
 
-  /* legacy channel cleanup tests were removed; coverage lives in tests/session-cleanup.test.ts. */
-  /*
-  it.skip("binds session cleanup confirmation to its preview and reports partial failures", async () => {
-    const archiveThread = vi.fn(async (threadId: string) => {
-      if (threadId === "thread-fail") throw new Error("archive failed");
-    });
-    const router = {
-      list: vi.fn(async () => [
-        { id: "thread-ok", sessionId: "ok", modelProvider: "openai", preview: "ok", name: null, isPinned: false, status: { type: "idle" as const }, cwd: main.cwd, source: "cli" as const, activeTurnId: null },
-        { id: "thread-fail", sessionId: "fail", modelProvider: "openai", preview: "fail", name: null, isPinned: false, status: { type: "idle" as const }, cwd: main.cwd, source: "cli" as const, activeTurnId: null },
-      ]),
-      current: () => ({ threadId: "main", workspaceId: "main" }),
-      targetForThread: () => undefined,
-      isBackgroundThread: () => false,
-      archiveThread,
-    } as unknown as SessionRouter;
-    const history = {
-      listThreadTurns: vi.fn(async (threadId: string) => ({
-        turns: [{ id: `${threadId}-turn`, status: "completed" as const, startedAt: null, completedAt: null, durationMs: null, inputType: "text" as const, textPreview: null }],
-        nextCursor: null,
-      })),
-    } as unknown as ThreadHistoryPort;
-    const service = new ConversationService(
-      turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
-      { clear: vi.fn() } as unknown as ModelSelectionService, queryPort(),
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, undefined, history,
-    );
-
-    const preview = await service.legacyPreviewCleanup(target, 1);
-    expect(preview.token).toEqual(expect.any(String));
-    expect(preview.candidates).toHaveLength(2);
-    await expect(service.legacyArchiveCleanup(target, preview.token!)).resolves.toEqual({
-      maxTurns: 1,
-      archived: [expect.objectContaining({ id: "thread-ok" })],
-      failed: [expect.objectContaining({ id: "thread-fail" })],
-    });
-    await expect(service.legacyArchiveCleanup(target, preview.token!)).rejects.toMatchObject({
-      code: "legacy-cleanup.confirmation-invalid",
-    });
-  });
-
-  it.skip("rejects input immediately while session cleanup is scanning", async () => {
-    let release!: (threads: unknown[]) => void;
-    const list = vi.fn(() => new Promise<unknown[]>((resolve) => {
-      release = resolve;
-    }));
-    const startTurn = vi.fn();
-    const router = {
-      list,
-      current: () => undefined,
-      targetForThread: () => undefined,
-      isBackgroundThread: () => false,
-      workspace: () => main,
-    } as unknown as SessionRouter;
-    const service = new ConversationService(
-      turnPort({ startTurn }),
-      router,
-      { activeTurn: () => undefined } as unknown as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, undefined,
-      { listThreadTurns: vi.fn(async () => ({ turns: [], nextCursor: null })) } as unknown as ThreadHistoryPort,
-    );
-
-    const scan = service.legacyPreviewCleanup(target, 3);
-    await Promise.resolve();
-    await expect(Promise.resolve().then(() => service.submit(target, "扫描期间不应进入 Turn")))
-      .rejects.toMatchObject({ code: "legacy-cleanup.busy" });
-    expect(startTurn).not.toHaveBeenCalled();
-    release([]);
-    await expect(scan).resolves.toEqual({ maxTurns: 3, candidates: [], token: null });
-  });
-  */
 
   it("reuses a recent cached turn count for session listing", async () => {
     const listThreadTurns = vi.fn(async () => ({
@@ -899,7 +824,7 @@ describe("ConversationService conversation service session", () => {
     await expect(service.listSessions(target, { page: 1 })).resolves.toEqual([
       expect.objectContaining({ id: "thread-cached", turnCount: 1 }),
     ]);
-    await expect(service.listSessions(target, { page: 1 })).resolves.toEqual([
+    await expect(service.listSessions(target, { page: 1, turnCountMode: "cached" })).resolves.toEqual([
       expect.objectContaining({ id: "thread-cached", turnCount: 1 }),
     ]);
     expect(listThreadTurns).toHaveBeenCalledTimes(1);
@@ -974,51 +899,6 @@ describe("ConversationService conversation service session", () => {
     }));
   });
 
-  /*
-  it("does not clean up a Session bound to another Conversation", async () => {
-    const otherTarget = {
-      surface: "feishu" as const,
-      accountId: "tenant-a",
-      conversationId: "chat-a",
-    };
-    const archiveThread = vi.fn();
-    const router = {
-      list: vi.fn(async () => [{
-        id: "thread-owned",
-        sessionId: "owned",
-        modelProvider: "openai",
-        preview: "owned",
-        name: null,
-        isPinned: false,
-        status: { type: "idle" as const },
-        cwd: main.cwd,
-        source: "cli" as const,
-        activeTurnId: null,
-      }]),
-      current: () => undefined,
-      targetForThread: () => otherTarget,
-      isBackgroundThread: () => false,
-      archiveThread,
-    } as unknown as SessionRouter;
-    const history = {
-      listThreadTurns: vi.fn(async () => ({
-        turns: [],
-        nextCursor: null,
-      })),
-    } as unknown as ThreadHistoryPort;
-    const service = new ConversationService(
-      turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
-      { clear: vi.fn() } as unknown as ModelSelectionService, queryPort(),
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, undefined, history,
-    );
-
-    const preview = await service.legacyPreviewCleanup(target, 0);
-    expect(preview.candidates).toEqual([]);
-    expect(preview.token).toBeNull();
-    expect(archiveThread).not.toHaveBeenCalled();
-  });
-  */
 });
 
 

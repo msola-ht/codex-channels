@@ -263,7 +263,7 @@ export async function runDeepseekSetup({
     output.write("\nCodex Connect DeepSeek Setup\n\n");
     output.write("1. OpenAI + DeepSeek 切换模式（保留 OpenAI 默认）\n");
     output.write("2. 仅 DeepSeek 固定模式（原生 Codex 也默认使用 DeepSeek）\n");
-    output.write("3. 恢复安装前的 Codex 配置\n");
+    output.write("3. 删除 DeepSeek（恢复安装前的 Codex 配置）\n");
     output.write("4. 修改模型设置（思考等级、自动压缩）\n");
     if (allowBack) output.write("5. 返回上一级\n");
     const choice = await askChoice(
@@ -1274,7 +1274,7 @@ function createHiddenPrompter(prompts, { allowBack }) {
   const installOptions = [
     { value: "1", label: "OpenAI + DeepSeek 切换模式" },
     { value: "2", label: "仅 DeepSeek 固定模式" },
-    { value: "3", label: "恢复安装前配置" },
+    { value: "3", label: "删除 DeepSeek（恢复安装前配置）" },
     { value: "4", label: "修改模型设置（思考等级、自动压缩）" },
     ...(allowBack ? [{ value: "5", label: "返回上一级" }] : []),
   ];

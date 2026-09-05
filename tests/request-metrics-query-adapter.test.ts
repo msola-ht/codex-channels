@@ -7,6 +7,19 @@ import {
 import type { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 
 describe("RequestMetricsQueryAdapter", () => {
+  it("exposes a direct local Turn count without loading the full summary", () => {
+    const threadTurnCount = vi.fn(() => 4);
+    const store = { threadTurnCount } as unknown as SqliteModelRequestMetricsStore;
+    const adapter = new RequestMetricsQueryAdapter(
+      store,
+      { modelSettingsForThread: () => undefined } as never,
+      [],
+    );
+
+    expect(adapter.threadTurnCount("thread-1")).toBe(4);
+    expect(threadTurnCount).toHaveBeenCalledWith("thread-1");
+  });
+
   it("maps provider labels without leaking Store pricing rows", () => {
     const aggregate = vi.fn(() => ({
       startAtMs: 1,

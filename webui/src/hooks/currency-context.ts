@@ -1,10 +1,15 @@
 import { createContext, useContext } from "react"
 
 import type { DisplayCurrency } from "@/lib/format"
+import type { SettingsResponse } from "@/lib/types"
 
 export const CurrencyContext = createContext<{
   currency: DisplayCurrency | null
   setCurrency: (currency: DisplayCurrency) => void
+  settings: SettingsResponse | null
+  settingsLoading: boolean
+  settingsError: string | null
+  refetchSettings: () => void
 } | null>(null)
 
 export function useCurrency() {

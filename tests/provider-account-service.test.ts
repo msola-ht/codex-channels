@@ -45,6 +45,21 @@ describe("ProviderAccountService", () => {
     });
   });
 
+  it("can asynchronously prewarm all registered account sources", async () => {
+    const usage = vi.fn(async () => ({
+      kind: "unsupported" as const,
+      provider: "deepseek",
+    }));
+    const limits = vi.fn(async () => ({
+      kind: "unsupported" as const,
+      provider: "deepseek",
+    }));
+    const service = new ProviderAccountService([{ provider: "deepseek", accountUsage: usage, accountLimits: limits }]);
+    await service.refreshSnapshots();
+    expect(usage).toHaveBeenCalledOnce();
+    expect(limits).toHaveBeenCalledOnce();
+  });
+
   it("rejects duplicate provider registrations", () => {
     const adapter = {
       provider: "duplicate",

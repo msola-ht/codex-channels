@@ -47,7 +47,7 @@ export interface WeixinProtocolClient {
   sendText(
     input: {
       actorId: string;
-      contextToken: string;
+      contextToken?: string;
       text: string;
     },
     signal?: AbortSignal,
@@ -58,7 +58,7 @@ export interface WeixinImageSendProtocolClient {
   sendImage(
     input: {
       actorId: string;
-      contextToken: string;
+      contextToken?: string;
       image: Buffer;
     },
     signal?: AbortSignal,
@@ -69,7 +69,7 @@ export interface WeixinFileSendProtocolClient {
   sendFile(
     input: {
       actorId: string;
-      contextToken: string;
+      contextToken?: string;
       fileName: string;
       file: Buffer;
     },
@@ -83,7 +83,7 @@ export interface WeixinTypingProtocolClient {
   getTypingTicket(
     input: {
       actorId: string;
-      contextToken: string;
+      contextToken?: string;
     },
     signal?: AbortSignal,
   ): Promise<string>;
@@ -285,7 +285,7 @@ export function createWeixinProtocolClient(
 
     async sendText(input, signal) {
       const actorId = validateActorInput(input.actorId);
-      const contextToken = requiredInputString(
+      const contextToken = optionalContextToken(
         input.contextToken,
         "微信回复上下文无效",
         65_536,
@@ -312,7 +312,7 @@ export function createWeixinProtocolClient(
               type: 1,
               text_item: { text },
             }],
-            context_token: contextToken,
+            ...(contextToken === undefined ? {} : { context_token: contextToken }),
           },
           base_info: baseInfo(),
         },
@@ -326,7 +326,7 @@ export function createWeixinProtocolClient(
 
     async sendImage(input, signal) {
       const actorId = validateActorInput(input.actorId);
-      const contextToken = requiredInputString(
+      const contextToken = optionalContextToken(
         input.contextToken,
         "微信图片回复上下文无效",
         maximumImageParameterLength,
@@ -364,7 +364,7 @@ export function createWeixinProtocolClient(
                 mid_size: uploaded.ciphertext.length,
               },
             }],
-            context_token: contextToken,
+            ...(contextToken === undefined ? {} : { context_token: contextToken }),
           },
           base_info: baseInfo(),
         },
@@ -378,7 +378,7 @@ export function createWeixinProtocolClient(
 
     async sendFile(input, signal) {
       const actorId = validateActorInput(input.actorId);
-      const contextToken = requiredInputString(
+      const contextToken = optionalContextToken(
         input.contextToken,
         "微信文件回复上下文无效",
         maximumImageParameterLength,
@@ -418,7 +418,7 @@ export function createWeixinProtocolClient(
                 len: String(file.length),
               },
             }],
-            context_token: contextToken,
+            ...(contextToken === undefined ? {} : { context_token: contextToken }),
           },
           base_info: baseInfo(),
         },
@@ -432,7 +432,7 @@ export function createWeixinProtocolClient(
 
     async getTypingTicket(input, signal) {
       const actorId = validateActorInput(input.actorId);
-      const contextToken = requiredInputString(
+      const contextToken = optionalContextToken(
         input.contextToken,
         "微信输入状态上下文无效",
         65_536,
@@ -445,7 +445,7 @@ export function createWeixinProtocolClient(
         endpoint: "getconfig",
         body: {
           ilink_user_id: actorId,
-          context_token: contextToken,
+          ...(contextToken === undefined ? {} : { context_token: contextToken }),
           base_info: baseInfo(),
         },
         timeoutMs: typingTimeoutMs,
@@ -944,6 +944,15 @@ function requiredInputString(
     throw new WeixinProtocolError("invalid-input", message);
   }
   return value;
+}
+
+function optionalContextToken(
+  value: unknown,
+  message: string,
+  maximumLength: number,
+): string | undefined {
+  if (value === undefined) return undefined;
+  return requiredInputString(value, message, maximumLength);
 }
 
 function requiredResponseString(

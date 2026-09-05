@@ -95,6 +95,51 @@ export async function updateCodexUserSetting(
   }
 }
 
+/** Validate and project a change without writing the App Server config. */
+export async function previewCodexUserSetting(
+  input,
+  {
+    environment = process.env,
+    expectedVersion,
+    createClient = createCodexUserConfigClient,
+    primaryProvider = loadPrimaryModelProvider,
+  } = {},
+) {
+  if (typeof expectedVersion !== "string" || expectedVersion.trim() === "") {
+    throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
+  }
+  const provider = primaryProvider(environment);
+  if (["all", "defaults", "preferences"].includes(input?.kind)) {
+    assertOfficialDefaults(provider);
+  }
+  const client = await createClient({ environment });
+  try {
+    await client.connect();
+    const [snapshot, models] = await Promise.all([
+      client.readUserConfigSnapshot(),
+      ["all", "defaults", "preferences"].includes(input?.kind)
+        ? client.listModels()
+        : Promise.resolve([]),
+    ]);
+    if (snapshot.version !== expectedVersion) {
+      throw invalid("revision", "stale-revision", "Codex 用户配置已变化，请重新读取设置");
+    }
+    const { value } = createEdits(input, {
+      config: snapshot.config,
+      provider,
+      models,
+    });
+    return {
+      kind: input.kind,
+      previousVersion: expectedVersion,
+      value,
+      activation: "restart-all",
+    };
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 function projectSettings(snapshot, provider, rawModels) {
   const config = record(snapshot.config);
   const models = rawModels.filter((model) => model.available !== false).map(projectModel);
@@ -278,7 +323,14 @@ function preferenceEdits(input, models) {
       { keyPath: "check_for_update_on_startup", value: input.checkForUpdateOnStartup },
       { keyPath: "history.persistence", value: input.historyPersistence },
     ],
-    value: { ...input },
+    value: {
+      reasoningSummary: input.reasoningSummary,
+      planModeReasoningEffort: effort,
+      verbosity: input.verbosity,
+      personality: input.personality,
+      checkForUpdateOnStartup: input.checkForUpdateOnStartup,
+      historyPersistence: input.historyPersistence,
+    },
   };
 }
 

@@ -30,6 +30,24 @@ const schemaMetadataSql = `
 `;
 
 const initialSchemaSql = `
+  CREATE TABLE account_sources (
+    source_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    account_id TEXT,
+    display_name TEXT NOT NULL,
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    UNIQUE (provider, account_id)
+  );
+  CREATE TABLE account_snapshots (
+    snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id TEXT NOT NULL REFERENCES account_sources(source_id) ON DELETE CASCADE,
+    observed_at_ms INTEGER NOT NULL,
+    available INTEGER NOT NULL CHECK (available IN (0, 1)),
+    usage_json TEXT NOT NULL,
+    limits_json TEXT NOT NULL,
+    UNIQUE (source_id, observed_at_ms)
+  );
+  CREATE INDEX account_snapshots_latest ON account_snapshots (source_id, observed_at_ms DESC);
   CREATE TABLE subagent_threads (
     thread_id TEXT PRIMARY KEY,
     parent_thread_id TEXT NOT NULL,
@@ -318,6 +336,14 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
       SELECT id, total_cost_nanos
       FROM model_request_metrics_enriched
       LIMIT 0
+    `).all();
+    database.prepare(`
+      SELECT source_id, provider, account_id, display_name, enabled
+      FROM account_sources LIMIT 0
+    `).all();
+    database.prepare(`
+      SELECT snapshot_id, source_id, observed_at_ms, available, usage_json, limits_json
+      FROM account_snapshots LIMIT 0
     `).all();
   } catch (error) {
     throw new ModelRequestMetricsSchemaError(value, schemaVersion, { cause: error });

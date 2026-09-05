@@ -17,6 +17,7 @@ const probeSequenceTexts = [
 ];
 const probeLengthText = createFixedLengthProbeText(4_000);
 const probeEchoText = "微信发送合同验证：服务端消息 ID 映射。";
+const probeRejectedContextText = "微信发送合同验证：失效上下文拒绝探针。";
 
 export class WeixinSendContractError extends Error {
   constructor(code, message) {
@@ -238,6 +239,34 @@ export async function runWeixinReplyEchoContract({
   return { inbound, outbound, echo };
 }
 
+export async function runWeixinRejectedContextContract({
+  updatesClient,
+  sendClient,
+  credential,
+  allowedUserIds,
+  signal,
+}) {
+  const inbound = await updatesClient.pollOnce({
+    baseUrl: credential.baseUrl,
+    botToken: credential.botToken,
+    signal,
+  });
+  if (inbound.kind !== "success") {
+    return { inbound };
+  }
+  const replyContext = selectWeixinReplyContext(inbound, allowedUserIds);
+  const invalidContextToken = invalidateContextToken(replyContext.contextToken);
+  const outbound = await sendClient.sendText({
+    baseUrl: credential.baseUrl,
+    botToken: credential.botToken,
+    toUserId: replyContext.toUserId,
+    contextToken: invalidContextToken,
+    text: probeRejectedContextText,
+    signal,
+  });
+  return { inbound, outbound };
+}
+
 async function runWeixinReplyTextsContract({
   updatesClient,
   sendClient,
@@ -284,6 +313,11 @@ function createFixedLengthProbeText(length) {
     );
   }
   return `${prefix}${"测".repeat(fillerLength)}${suffix}`;
+}
+
+function invalidateContextToken(contextToken) {
+  const last = contextToken.at(-1);
+  return `${contextToken.slice(0, -1)}${last === "0" ? "1" : "0"}`;
 }
 
 export function summarizeSendResponse(raw) {
@@ -422,12 +456,14 @@ async function main(argv) {
       "",
       "用法：",
       "  node scripts/weixin-send-contract-probe.mjs reply --live",
+      "  node scripts/weixin-send-contract-probe.mjs reject --live",
       "  node scripts/weixin-send-contract-probe.mjs sequence --live",
       "  node scripts/weixin-send-contract-probe.mjs limit --live",
       "  node scripts/weixin-send-contract-probe.mjs echo --live",
       "",
       "显式执行后会读取微信安全凭据，从一条已授权完成态文本中取得内存回复上下文，",
       "reply 发送一条固定短文本；sequence 使用同一上下文连续发送两条固定短文本。",
+      "reject 使用同长度无效上下文调用一次发送接口，验证平台拒绝码（预期 ret: -2）。",
       "limit 发送一条固定 4000 字符中文消息，只验证官方分片值，不探测最大上限。",
       "echo 发送一条固定回复后继续轮询一次，只检查服务端消息 ID 与 client_id 形状。",
       "不会输出或保存正文、Token、context_token、游标、client_id 或完整用户标识。",
@@ -437,7 +473,7 @@ async function main(argv) {
   }
   if (
     argv.length !== 2
-    || !["reply", "sequence", "limit", "echo"].includes(argv[0])
+    || !["reply", "reject", "sequence", "limit", "echo"].includes(argv[0])
     || argv[1] !== "--live"
   ) {
     process.stderr.write("参数无效；请使用 --help 查看用法。\n");
@@ -462,6 +498,8 @@ async function main(argv) {
     };
     const result = argv[0] === "sequence"
       ? await runWeixinReplySequenceContract(contractOptions)
+      : argv[0] === "reject"
+        ? await runWeixinRejectedContextContract(contractOptions)
       : argv[0] === "limit"
         ? await runWeixinReplyLengthContract(contractOptions)
         : argv[0] === "echo"
@@ -470,6 +508,8 @@ async function main(argv) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     const replyDescription = argv[0] === "sequence"
       ? "两条固定测试回复"
+      : argv[0] === "reject"
+        ? "一次失效上下文拒绝请求"
       : argv[0] === "limit"
         ? "一条 4000 字符测试回复"
         : argv[0] === "echo"
@@ -484,6 +524,13 @@ async function main(argv) {
         ? []
         : [result.outbound];
     const expectedCount = argv[0] === "sequence" ? 2 : 1;
+    if (argv[0] === "reject") {
+      return outbound.length === 1
+        && outbound[0]?.kind === "api-error"
+        && outbound[0]?.ret === -2
+        ? 0
+        : 1;
+    }
     return outbound.length === expectedCount
       && outbound.every((item) => item.kind === "success")
       ? 0

@@ -788,8 +788,7 @@ export class ConversationCore {
 
 function supportsDetailedModelTiming(modelProvider: string | undefined): boolean {
   return modelProvider === "deepseek"
-    || modelProvider === "opencode-go"
-    || (typeof modelProvider === "string" && modelProvider.startsWith("opencode-go-"));
+    || (typeof modelProvider === "string" && modelProvider.startsWith("ocg-"));
 }
 
 function rateLimitNoticeFingerprint(snapshot: RateLimitSnapshot): string | undefined {

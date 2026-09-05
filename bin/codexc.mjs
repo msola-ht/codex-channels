@@ -102,6 +102,7 @@ import {
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
+import { runSessionMenu } from "../scripts/session-menu.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
 import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
 import {
@@ -171,7 +172,7 @@ const helpText = {
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
-切换模式可用 --profile sf-deepseek、sf-opencode-go、sf-opencode-go-<账户> 或
+切换模式可用 --profile sf-deepseek、sf-ocg-<账户> 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
   service: `用法：codexc service <命令>
 
@@ -231,13 +232,13 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 
 管理 OpenCode Go 多账户。Key 只写入 0600 私有 Codex Profile，不进入 Gateway config.toml、命令行或日志。
 
-  add <id>     新增账户（交互输入 API Key）
+  add <id>     新增账户（交互输入邮箱或手机号、API Key）
   list         列出账户与默认标记
   remove <id>  备份后删除账户 Profile 与注册表项
   default <id> 设置新会话默认账户（当前为 OpenCode Go 时同步 agents.external）
   stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）`,
   "opencode_go.account": `用法：codexc opencode-go account <add|list|remove|default|stop> [id]`,
-  "opencode_go.account.add": "用法：codexc opencode-go account add <id>",
+  "opencode_go.account.add": "用法：codexc opencode-go account add <id>（交互输入邮箱或手机号、API Key）",
   "opencode_go.account.list": "用法：codexc opencode-go account list [--json]",
   "opencode_go.account.remove": "用法：codexc opencode-go account remove <id>",
   "opencode_go.account.default": "用法：codexc opencode-go account default <id>",
@@ -295,12 +296,12 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
   webui: `用法：codexc webui [--host 地址] [--port 端口]
 
-启动本地只读指标 WebUI（默认 http://127.0.0.1:8787/）。
+启动本地指标 WebUI（默认 http://127.0.0.1:8787/）；设置页可在同一令牌下修改已开放的低风险设置。
 参数优先级：命令行 > config.toml 的 [webui] 段 > 默认值。
 --host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
 --port 指定监听端口，范围 1-65535；
 访问令牌请使用 codexc config 的 WebUI 设置，或手工编辑 [webui] 段。
-页面与 JSON API 均来自指标数据库，不提供任何写接口。`,
+指标 JSON API 来自指标数据库；设置管理只允许白名单字段并复用 Config 修订保护。`,
   center: `用法：codexc center [--host 地址] [--port 端口] [--database 路径]
       codexc center info [--json]      查看中心地址、双令牌状态与运行状态
       codexc center config    交互配置 [metrics.center]
@@ -339,6 +340,9 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
+  "metrics.normalize_currency": `用法：codexc metrics normalize-currency
+
+要求 Gateway 已停止；备份现有指标库，并清除历史非 USD 费用字段，保留请求、Token 和错误指标。`,
   "metrics.upgrade": `用法：codexc metrics upgrade [--restart-gateway]
 
 默认要求 Gateway 已停止；加 --restart-gateway 时自动停止 Gateway、备份升级并重新启动。`,
@@ -357,7 +361,7 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 
 按配置 [metrics.storage] 或命令行覆盖值清理最旧请求指标。默认要求 Gateway 已停止；
 加 --restart-gateway 自动停止并重新启动。清理前创建 0600 备份；--vacuum 会立即回收文件空间。`,
-  sessions: "用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]\n\n默认只预览；交互终端加 --confirm 后还会再次询问，确认后才归档。执行前必须停止 Gateway。",
+  sessions: "用法：codexc sessions [cleanup <最大轮数> [--idle-days <天数>] [--confirm]]\n\n无子命令时进入交互菜单；清理默认只预览，交互终端确认后才归档。执行前必须停止 Gateway。",
   "sessions.cleanup": "用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]",
   "metrics.report": `${metricsCommandUsage.report}
 
@@ -514,6 +518,17 @@ try {
       break;
     case "sessions":
       if (showRequestedHelp(args, "sessions") || showSubcommandHelp(args, "cleanup", "sessions.cleanup")) break;
+      if (args.length === 0) {
+        if (!process.stdout.isTTY) {
+          console.log(helpText.sessions);
+          break;
+        }
+        await runSessionMenu({
+          runCleanup: (cleanupArgs) =>
+            runScript("scripts/session-cleanup.mjs", cleanupArgs, { failureReportedByChild: true }),
+        });
+        break;
+      }
       if (args[0] !== "cleanup") throw new Error("用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]");
       runScript("scripts/session-cleanup.mjs", args.slice(1), { failureReportedByChild: true });
       break;
@@ -682,8 +697,8 @@ async function runServiceAppServer(args) {
     return agent;
   };
   const startProviderProxy = async (provider, options) => {
-    if (provider === "opencode-go") {
-      const existing = providerProxyRuntimes.get("opencode-go");
+    if (provider === "ocg") {
+      const existing = providerProxyRuntimes.get("ocg");
       if (existing) return { ...existing, created: false };
       const modelProxy = new ProviderProxy("127.0.0.1:0", {
         ...options,
@@ -696,11 +711,9 @@ async function runServiceAppServer(args) {
           return quota ? quota() : Promise.resolve(null);
         },
         onMetrics: (metrics, accountId) => {
-          const targetProvider = accountId === undefined
-            ? goDefaultAccountId === undefined
-              ? "opencode-go"
-              : opencodeGoProviderId(goDefaultAccountId)
-            : opencodeGoProviderId(accountId);
+          const targetAccountId = accountId ?? goDefaultAccountId;
+          if (targetAccountId === undefined) return undefined;
+          const targetProvider = opencodeGoProviderId(targetAccountId);
           return sendProviderProxyMetrics(
             providerMetricsSocketPath(socketPath, targetProvider),
             metrics,
@@ -717,7 +730,7 @@ async function runServiceAppServer(args) {
         baseUrl: `http://${modelProxy.address()}`,
         proxy: modelProxy,
       };
-      providerProxyRuntimes.set("opencode-go", proxyRuntime);
+      providerProxyRuntimes.set("ocg", proxyRuntime);
       console.log(`opencode-go 模型统计代理已启动：${modelProxy.address()}`);
       return { ...proxyRuntime, created: true };
     }
@@ -939,7 +952,7 @@ async function runServiceAppServer(args) {
       const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
       const roleUsesGoProxy = thirdPartyRole && isGoProvider(thirdPartyRole.provider);
       if (!remainingGoChild && !roleUsesGoProxy) {
-        const goProxy = providerProxyRuntimes.get("opencode-go")?.proxy;
+        const goProxy = providerProxyRuntimes.get("ocg")?.proxy;
         if (goProxy) await closeProviderProxy(goProxy);
       }
     }
@@ -999,7 +1012,7 @@ async function runServiceAppServer(args) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
-      const providerKey = isGoProvider(definition.id) ? "opencode-go" : definition.id;
+      const providerKey = isGoProvider(definition.id) ? "ocg" : definition.id;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(definition.id, isGoProvider(definition.id)
@@ -1024,7 +1037,7 @@ async function runServiceAppServer(args) {
       const definition = providerDefinitions.get(provider);
       const customDefinition = customSwitchingProvidersById.get(provider);
       if (!definition && !customDefinition) throw new Error(`未知第三方 Provider：${provider}`);
-      const providerKey = isGoProvider(provider) ? "opencode-go" : provider;
+      const providerKey = isGoProvider(provider) ? "ocg" : provider;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(provider, isGoProvider(provider)
@@ -1080,6 +1093,14 @@ function withoutManagedProviderApiKeys(environment) {
   managedKeys.add("CODEX_CONNECT_OPENCODE_GO_API_KEY");
   for (const key of managedKeys) {
     delete childEnvironment[key];
+  }
+  for (const key of Object.keys(childEnvironment)) {
+    if (
+      /^CODEX_CONNECT_OPENCODE_GO(?:_[A-Z0-9_]+)?_API_KEY$/u.test(key)
+      || /^CODEX_CONNECT_CUSTOM_[A-F0-9]+_API_KEY$/u.test(key)
+    ) {
+      delete childEnvironment[key];
+    }
   }
   return childEnvironment;
 }
@@ -1713,7 +1734,8 @@ async function metrics(args) {
     showSubcommandHelp(args, "prune", "metrics.prune") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
     showSubcommandHelp(args, "export", "metrics.export") ||
-    showSubcommandHelp(args, "quota", "metrics.quota")) {
+    showSubcommandHelp(args, "quota", "metrics.quota") ||
+    showSubcommandHelp(args, "normalize-currency", "metrics.normalize_currency")) {
     return;
   }
   if (args.some(isHelpArgument)) {
@@ -1729,6 +1751,8 @@ async function metrics(args) {
       prune: "metrics.prune",
       report: "metrics.report",
       export: "metrics.export",
+      quota: "metrics.quota",
+      "normalize-currency": "metrics.normalize_currency",
     }[args[0]];
     throw new Error(key === undefined ? helpText.metrics : helpText[key]);
   }
@@ -1757,10 +1781,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export", "quota"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export", "quota", "normalize-currency"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export|quota>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export|quota|normalize-currency>");
   }
   validateMetricsCommandArgs(subcommand, rest);
   if (
@@ -1797,7 +1821,7 @@ async function metrics(args) {
   if (subcommand === "prune" && rest.length !== 1) {
     throw new Error("用法：codexc metrics prune <provider>");
   }
-  if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
+  if (new Set(["upgrade", "reset", "sync-reset", "normalize-currency"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
   if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {

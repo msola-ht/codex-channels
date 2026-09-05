@@ -71,8 +71,7 @@
   设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
   Gateway，用于重放修复中心历史数据。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
   备份后清理最旧请求记录，可选 `--vacuum` 立即回收 SQLite 文件空间。
-  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、opencode-go、
-  `opencode-go-<账户>` 或当前配置/私有备份中的自定义主 Provider）的全部请求
+  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、`ocg-<账户>` 或当前配置/私有备份中的自定义主 Provider）的全部请求
   行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
@@ -84,13 +83,30 @@
   会话发送并归档，详见 `docs/channel-image.md`。
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc sessions cleanup`，通过
   App Server 枚举多 Provider/Workspace，会话元数据过滤后按 Turn 上限和可选空闲天数预览、确认归档。
+- `session-menu.mjs` / `session-menu.d.mts`：`codexc sessions` 无子命令时的交互菜单；收集 Turn 上限和空闲天数后调用
+  会话清理 CLI，并保留清理命令自身的候选预览与最终确认。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
   汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
   格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
-- `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的只读 HTTP 服务与共享 API 类型。
+- `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务与共享 API 类型；设置摘要接口
+  复用 Config 脱敏投影与跨平台服务状态查询，只返回配置修订、非凭据字段和 Secret 配置状态；
+  `/api/v1/management/services` 在同一 WebUI Bearer 鉴权下提供受管服务状态、版本和受限的最近错误摘要；
+  `/api/v1/management/providers` 提供不含 URL、Profile 或凭据的 Provider 安全概览。
+  管理设置接口复用 WebUI `Authorization: Bearer` 令牌，并保留精确 Origin、JSON 请求约束、限速和审计。
+- `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
+  管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
+- `webui-management-providers.mjs`：Provider 管理结果脱敏、资源修订快照和 Provider 状态投影；不读取或返回凭据正文。
+- `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
+- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek Setup 的配置、默认切换、停止、删除与恢复接口，为 WebUI 提供账户资源投影、统一预览、确认后写入和结果脱敏；不返回凭据正文。
+- `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
+  设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
+- `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置与 Provider 的输入校验、预览投影、缓存查询，以及
+  WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务只负责路由和领域处理。
+- `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标维护和源码更新异步任务；
+  只接受固定动作，任务由独立 `codexc` 子进程执行，状态按 WebUI 令牌隔离，输出不回传且支持取消。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
   `/api/v1/global/*` 按 `[metrics.view]` 配置由服务端代理到中心服务（前端不接触令牌）；
@@ -128,7 +144,7 @@
   共享第三方子代理、直接 API Provider 数量、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
   允许名单、代理值或 Provider URL。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
-  新增时从 URL 主机名派生 Provider ID 或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
+  新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
   必须属于 App Server 返回的 Codex 官方目录；不调用第三方 `/models`，不生成 `models.json` 或
   `model_catalog_json`，目录来源保留为可辨识的 `official` 接口。
@@ -246,9 +262,9 @@
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
   保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
 - `management-access.mjs`、`management-confirmations.mjs`、`management-audit.mjs`、
-  `management-security.mjs` / `management-security.d.mts`：未来本机管理适配器复用的无 HTTP 安全基础，
-  覆盖独立管理凭据、短期会话、Origin/CSRF、限速、请求上限、安全响应头、一次性高风险确认和脱敏审计；
-  当前不监听端口、不接入只读 WebUI，也不开放管理写路由。
+  `management-security.mjs` / `management-security.d.mts`：本机管理适配器复用的无 HTTP 安全基础，
+  覆盖高风险确认、Origin、限速、请求上限、安全响应头和脱敏审计；WebUI 管理路由复用其中的请求约束、
+  限速和审计原语，认证直接使用 WebUI Bearer 令牌。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
   Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
 - `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API
@@ -405,7 +421,8 @@
   包含 Unicode、emoji 和 Markdown 符号；不输出或保存消息、游标、回复上下文、`client_id`
   或完整身份，首条发送失败时不继续；`limit --live` 只发送一条固定 4000 字符中文消息，
   验证官方宿主分片值而不探测未知最大上限；`echo --live` 发送固定回复后再轮询一次，只检查
-  服务端消息 ID 与 `client_id` 形状，不把回送内容写入日志或 Fixture。
+  服务端消息 ID 与 `client_id` 形状，不把回送内容写入日志或 Fixture；`reject --live` 仅在
+  内存把上下文令牌改成同长度无效值后调用一次发送接口，预期返回 `ret: -2`，不应产生可见消息。
 - `weixin-typing-contract-probe.mjs`：显式 `lifecycle --live` 后从一条已授权完成态微信文本中
   仅在内存取得回复目标和 `context_token`，按固定 `v2.4.6` 合同调用 `getconfig` 获取临时
   `typing_ticket`，再执行开始、5 秒续期和取消输入状态；不输出或保存消息、游标、回复上下文、

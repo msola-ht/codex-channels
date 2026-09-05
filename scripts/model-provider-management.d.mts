@@ -43,6 +43,7 @@ export interface CustomProviderCandidate {
   kind: "custom";
   state: "configured" | "backup";
   active: boolean;
+  supportsWebsockets?: boolean;
   baseUrl: string;
 }
 
@@ -53,6 +54,7 @@ export interface CustomSwitchingProviderEntry {
   mode: "switching";
   model: string;
   reasoningEffort?: string;
+  supportsWebsockets?: boolean;
   baseUrl: string;
   profileName: string;
 }
@@ -84,6 +86,7 @@ export function loadModelProviderManagementState(options?: {
     name: string;
     model: string;
     reasoningEffort?: string;
+    supportsWebsockets?: boolean;
     baseUrl: string;
     profileName: string;
     apiKey?: string;

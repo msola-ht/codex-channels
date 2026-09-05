@@ -3,6 +3,7 @@ import {
   fastServiceTierId,
   isConversationCommandName,
   isFastServiceTier,
+  listProviders,
   type ConversationCommandResult,
   type ConversationUseCases,
   type ScheduledTaskConfirmation,
@@ -22,6 +23,7 @@ import {
   formatSessionListCommand,
   formatThreadQueueInputTypeLabel,
 } from "../conversation-command-format.js";
+import { formatCodexProviderLabel, formatProviderLabel } from "../provider-format.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
   formatOperationFailure,
@@ -464,6 +466,7 @@ export class FeishuConversationAdapter {
       const choices = followUpChoices ?? (
         (
           input === ""
+          || action === "model"
           || action === "sessions"
           || action === "archived"
           || (action === "plugin" && result.kind === "plugins")
@@ -1400,7 +1403,7 @@ function renderCommandCenterChoices(
         "",
         "**执行配置**",
         `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,
-        `- Provider：${escapeFeishuCardMarkdown(task.modelProvider)}`,
+        `- Provider：${escapeFeishuCardMarkdown(formatCodexProviderLabel(task.modelProvider))}`,
         `- 模型：${escapeFeishuCardMarkdown(task.model ?? "默认")}`,
         `- 思考等级：${escapeFeishuCardMarkdown(task.reasoningEffort ?? "默认")}`,
         `- Sandbox：${escapeFeishuCardMarkdown(task.sandbox)}`,
@@ -1669,22 +1672,46 @@ function renderCommandCenterChoices(
     if (result.state.models.length === 0) {
       return undefined;
     }
+    if (result.state.providerFilter === undefined) {
+      const providers = listProviders(result.state.models);
+      const current = result.state.modelProvider ?? "openai";
+      return {
+        title: "选择提供商",
+        description: [
+          "当前模型",
+          `- 模型：${result.state.model}`,
+          `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
+          `- 思考等级：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+          ...(currentModel && fastServiceTierId(currentModel)
+            ? [`- Fast 模式：${isFastServiceTier(result.state.serviceTier, currentModel) ? "开启" : "关闭"}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
+            : []),
+          "",
+          "请先选择提供商，再选择该提供商下的模型。",
+        ].join("\n"),
+        descriptionFormat: "markdown",
+        choices: providers.map((provider) => ({
+          label: `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)} · ${result.state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,
+          action: "model",
+          input: provider,
+        })),
+      };
+    }
     return {
       title: "选择模型",
       description: [
-        "当前模型",
-        `- 模型：${result.state.model}`,
-        `- Provider：${result.state.modelProvider ?? "OpenAI 官方"}`,
-        `- 思考等级：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+        "当前设置",
+        `- Provider：${formatCodexProviderLabel(result.state.providerFilter)}`,
         "",
-        "选择模型后将继续选择思考等级。",
+        "已选择该 Provider，请继续选择模型。选择模型后将继续选择思考等级。",
       ].join("\n"),
       descriptionFormat: "markdown",
-      choices: result.state.models.map((model, index) => ({
-        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${model.displayName}${model.available === false ? "（暂不可用）" : ""}`,
+      choices: result.state.models
+        .filter((model) => (model.provider ?? "openai") === result.state.providerFilter)
+        .map((model) => ({
+        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter!)}${model.available === false ? "（暂不可用）" : ""}`,
         action: "model",
-        input: String(index + 1),
-      })),
+        input: model.id,
+        })),
     };
   }
   if (action === "effort") {
@@ -1732,6 +1759,19 @@ function renderCommandCenterChoices(
     };
   }
   return undefined;
+}
+
+function scopedModelDisplayName(displayName: string, provider: string): string {
+  // 受管 Provider 的展示名会带上 definition.displayName 前缀（对 OpenCode Go 是
+  // 账户邮箱），而 providerFilter 是原始 provider id（如 ocg-<accountId>），两者不同。
+  // 优先按格式化后的提供商标签剥离，其次回退到原始 id，避免已单独展示 Provider 的卡片里重复前缀。
+  for (const label of [formatProviderLabel(provider), provider]) {
+    const prefix = `${label} · `;
+    if (displayName.startsWith(prefix)) {
+      return displayName.slice(prefix.length);
+    }
+  }
+  return displayName;
 }
 
 function scheduleChoiceSummary(

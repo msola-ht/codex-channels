@@ -8,7 +8,10 @@ import {
   type InstalledPlugin,
 } from "../src/application/index.js";
 import { parseThreadQueueOperation } from "../src/application/conversation-command-parser.js";
-import type { ConversationTarget } from "../src/conversation-core/index.js";
+import {
+  UserFacingError,
+  type ConversationTarget,
+} from "../src/conversation-core/index.js";
 
 const target: ConversationTarget = {
   surface: "telegram",
@@ -186,7 +189,30 @@ describe("ConversationCommandService", () => {
         searchTerm: "fix",
       },
     });
-    expect(listSessions).toHaveBeenCalledWith(target, { page: 1, searchTerm: "fix" });
+    expect(listSessions).toHaveBeenCalledWith(target, {
+      page: 1,
+      searchTerm: "fix",
+      turnCountMode: "cached",
+    });
+  });
+
+  it("keeps the resume picker fast by avoiding turn-history scans", async () => {
+    const listSessions = vi.fn(async () => [{ id: "thread-1" }]);
+    const commands = new ConversationCommandService({
+      listSessions,
+      status: () => ({ threadId: "thread-1" }),
+    } as unknown as ConversationUseCases);
+
+    await expect(commands.execute(target, "resume")).resolves.toMatchObject({
+      kind: "sessions",
+      sessions: [{ id: "thread-1" }],
+      page: 1,
+      matchedSessionCount: 1,
+    });
+    expect(listSessions).toHaveBeenCalledWith(target, {
+      page: 1,
+      turnCountMode: "cached",
+    });
   });
 
   it("parses session paging and filters while keeping the full matched count", async () => {
@@ -220,6 +246,7 @@ describe("ConversationCommandService", () => {
       provider: "deepseek",
       sectionSelector: "项目",
       searchTerm: "修复 CI",
+      turnCountMode: "cached",
     });
   });
 
@@ -241,6 +268,7 @@ describe("ConversationCommandService", () => {
       sectionSelector: "项目 Alpha",
       provider: "deepseek",
       searchTerm: "修复 CI",
+      turnCountMode: "cached",
     });
   });
 
@@ -1309,5 +1337,99 @@ describe("ConversationCommandService", () => {
       });
     }
     expect(getGoal).not.toHaveBeenCalled();
+  });
+
+  it("falls back to provider browsing when /model does not resolve to a model", async () => {
+    const browseProviderModels = vi.fn(async () => ({
+      models: [],
+      model: "gpt-main",
+      modelProvider: "openai",
+      providerFilter: "deepseek",
+      effort: null,
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const selectModel = vi.fn(async () => {
+      throw new UserFacingError("model.selector.not-found", "找不到指定模型");
+    });
+    const commands = new ConversationCommandService({
+      browseProviderModels,
+      selectModel,
+    } as unknown as ConversationUseCases);
+
+    const result = await commands.execute(target, "model", "deepseek");
+    expect(result).toMatchObject({
+      kind: "models",
+      view: "model",
+      state: expect.objectContaining({ providerFilter: "deepseek" }),
+    });
+    expect(selectModel).toHaveBeenCalledWith(target, "deepseek");
+    expect(browseProviderModels).toHaveBeenCalledWith(target, "deepseek");
+  });
+
+  it("keeps selecting a model directly when the selector matches a model", async () => {
+    const selectModel = vi.fn(async () => ({
+      models: [],
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: null,
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const browseProviderModels = vi.fn(async () => ({}));
+    const commands = new ConversationCommandService({
+      selectModel,
+      browseProviderModels,
+    } as unknown as ConversationUseCases);
+
+    await commands.execute(target, "model", "gpt-main");
+    expect(selectModel).toHaveBeenCalledWith(target, "gpt-main");
+    expect(browseProviderModels).not.toHaveBeenCalled();
+  });
+
+  it("treats a numeric provider selector as provider browsing before model selection", async () => {
+    const modelState = vi.fn(async () => ({
+      models: [
+        { provider: "openai", model: "gpt-main", id: "gpt-main" },
+        { provider: "codeproxy-dev", model: "proxy-main", id: "proxy-main" },
+      ],
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "low",
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const browseProviderModels = vi.fn(async () => ({
+      models: [{ provider: "codeproxy-dev", model: "proxy-main", id: "proxy-main" }],
+      model: "gpt-main",
+      modelProvider: "openai",
+      providerFilter: "codeproxy-dev",
+      effort: "low",
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    }));
+    const selectModel = vi.fn();
+    const commands = new ConversationCommandService({
+      modelState,
+      browseProviderModels,
+      selectModel,
+    } as unknown as ConversationUseCases);
+
+    const result = await commands.execute(target, "model", "2");
+    expect(result).toMatchObject({ state: { providerFilter: "codeproxy-dev" } });
+    expect(browseProviderModels).toHaveBeenCalledWith(target, "2");
+    expect(selectModel).not.toHaveBeenCalled();
   });
 });

@@ -12,13 +12,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   fingerprintManagementValue,
   managementSecurityHeaders,
-  managementSessionCookie,
-  ManagementAccessController,
   ManagementAuditWriter,
   ManagementConfirmationStore,
   ManagementRateLimiter,
-  provisionManagementCredential,
-  readManagementCredential,
   validateManagementJsonRequest,
 } from "../scripts/management-security.mjs";
 
@@ -29,103 +25,19 @@ afterEach(() => {
 });
 
 describe("management security core", () => {
-  it("binds short-lived sessions to an exact Origin and CSRF token", () => {
-    let now = 1_000;
-    let fill = 1;
-    const access = new ManagementAccessController({
-      credential: "management-secret",
-      origin: "http://127.0.0.1:8787",
-      now: () => now,
-      randomBytesImpl: (length) => Buffer.alloc(length, fill++),
-      absoluteTtlMs: 1_000,
-      idleTtlMs: 500,
-    });
-    const session = access.login({
-      credential: "management-secret",
-      origin: "http://127.0.0.1:8787",
-      source: "loopback",
-    });
-
-    expect(access.authorize({
-      sessionToken: session.sessionToken,
-      csrfToken: session.csrfToken,
-      origin: "http://127.0.0.1:8787",
-      method: "POST",
-    })).toMatchObject({ sessionId: session.sessionId });
-    expect(() => access.authorize({
-      sessionToken: session.sessionToken,
-      csrfToken: "wrong",
-      origin: "http://127.0.0.1:8787",
-      method: "POST",
-    })).toThrow(expect.objectContaining({ code: "management.csrf-invalid" }));
-    expect(() => access.authorize({
-      sessionToken: session.sessionToken,
-      origin: "http://localhost:8787",
-      method: "GET",
-    })).toThrow(expect.objectContaining({ code: "management.origin-invalid" }));
-    now = 2_001;
-    expect(() => access.authorize({
-      sessionToken: session.sessionToken,
-      origin: "http://127.0.0.1:8787",
-      method: "GET",
-    })).toThrow(expect.objectContaining({ code: "management.session-invalid" }));
-  });
-
-  it("rate limits repeated authentication failures per source", () => {
-    const access = new ManagementAccessController({
-      credential: "management-secret",
-      origin: "http://127.0.0.1:8787",
-      maximumAttempts: 2,
-    });
-    const attempt = () => access.login({
-      credential: "wrong",
-      origin: "http://127.0.0.1:8787",
-      source: "loopback",
-    });
-
-    expect(attempt).toThrow(expect.objectContaining({ code: "management.authentication-failed" }));
-    expect(attempt).toThrow(expect.objectContaining({ code: "management.authentication-failed" }));
-    expect(attempt).toThrow(expect.objectContaining({ code: "management.rate-limited" }));
-  });
-
-  it("provisions a private 256-bit credential and only replaces it explicitly", () => {
-    const root = mkdtempSync(join(tmpdir(), "codexc-management-credential-"));
-    roots.push(root);
-    const path = join(root, "credential");
-    let fill = 1;
-    const randomBytesImpl = (length: number) => Buffer.alloc(length, fill++);
-
-    const created = provisionManagementCredential(path, { randomBytesImpl });
-    expect(created).toMatchObject({ created: true, rotated: false });
-    expect(created.credential).toHaveLength(43);
-    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(readManagementCredential(path)).toBe(created.credential);
-    expect(provisionManagementCredential(path, { randomBytesImpl })).toEqual({
-      path,
-      created: false,
-      rotated: false,
-      credential: null,
-    });
-    const rotated = provisionManagementCredential(path, { rotate: true, randomBytesImpl });
-    expect(rotated).toMatchObject({ created: false, rotated: true });
-    expect(rotated.credential).not.toBe(created.credential);
-  });
-
-  it("provides shared response headers, session cookies and category limits", () => {
+  it("provides shared response headers and category limits", () => {
     expect(managementSecurityHeaders()).toMatchObject({
       "cache-control": "no-store",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
     });
-    expect(managementSessionCookie("session_token", { secure: true }))
-      .toContain("HttpOnly; SameSite=Strict; Max-Age=1800; Secure");
     const limiter = new ManagementRateLimiter();
     for (let index = 0; index < 5; index += 1) {
-      limiter.consume({ sessionId: "session-a", category: "high-risk" });
+      limiter.consume({ principalId: "principal-a", category: "high-risk" });
     }
-    expect(() => limiter.consume({ sessionId: "session-a", category: "high-risk" }))
+    expect(() => limiter.consume({ principalId: "principal-a", category: "high-risk" }))
       .toThrow(expect.objectContaining({ code: "management.rate-limited" }));
-    expect(limiter.consume({ sessionId: "session-a", category: "read" }).remaining).toBe(119);
+    expect(limiter.consume({ principalId: "principal-a", category: "read" }).remaining).toBe(119);
   });
 
   it("consumes confirmations once and binds every preview field", () => {

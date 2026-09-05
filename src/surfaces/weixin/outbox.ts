@@ -60,7 +60,10 @@ import {
   readWeixinOutboundImage,
   WeixinOutboundImageError,
 } from "./outbound-image.js";
-import { WeixinReplyContextStore } from "./reply-context-store.js";
+import {
+  WeixinReplyContextStore,
+  type WeixinReplyContext,
+} from "./reply-context-store.js";
 import {
   formatWeixinCommandText,
   renderWeixinSubagentCompleted,
@@ -108,7 +111,10 @@ export interface WeixinOutboxOptions {
     requestStartedAtMs?: number,
     modelProvider?: string,
   ) => Promise<ProviderModelUsageEstimate | null>;
-  onReplyContextInvalidated?: (target: ConversationTarget) => Promise<void>;
+  onReplyContextInvalidated?: (
+    target: ConversationTarget,
+    expectedContextToken?: string,
+  ) => Promise<void>;
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
   readImage?: typeof readWeixinOutboundImage;
@@ -156,19 +162,23 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       return;
     }
+    // Weixin allows only a small number of downstream messages per inbound
+    // reply window. Keep the window for the user-visible lifecycle contract:
+    // start, approval (delivered by InteractionPort), final answer and done.
+    // Reasoning, operation progress, plan updates and connection notices must
+    // not consume that budget.
+    if (!isAllowedWeixinOutputEvent(event)) {
+      return;
+    }
     if (event.type === "turn.started") {
       this.clearExecutionTurns(event.threadId);
-      this.options.typing?.start(event.target);
-      this.delivery.enqueue(
-        event.target.conversationId,
-        (signal) => this.send(
-          event.target,
-          renderPlainLifecyclePresentation(
-            createTurnStartedPresentation(
-              event.background ? event.threadId : undefined,
-              event.identity,
-            ),
-          ), maximumChunks, signal,
+      this.enqueueText(
+        event.target,
+        renderPlainLifecyclePresentation(
+          createTurnStartedPresentation(
+            event.background ? event.threadId : undefined,
+            event.identity,
+          ),
         ),
         true,
       );
@@ -187,17 +197,14 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return;
       }
       this.reasoningDisplayedGenerations.set(turn, generation);
-      this.delivery.enqueue(
-        event.target.conversationId,
-        (signal) => this.send(
-          event.target,
-          renderPlainLifecyclePresentation(
-            createTurnReasoningPresentation(
-              event.background ? event.threadId : undefined,
-              undefined,
-              false,
-            ),
-          ), maximumChunks, signal,
+      this.enqueueText(
+        event.target,
+        renderPlainLifecyclePresentation(
+          createTurnReasoningPresentation(
+            event.background ? event.threadId : undefined,
+            undefined,
+            false,
+          ),
         ),
         true,
       );
@@ -221,9 +228,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
         && event.operation.status === "completed"
         && imagePath !== undefined
       ) {
-        this.delivery.enqueue(
-          event.target.conversationId,
-          (signal) => this.sendImage(event.target, imagePath, signal),
+        this.enqueueImage(
+          event.target,
+          imagePath,
           true,
         );
       }
@@ -251,11 +258,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
           ? "compact"
           : "full",
       );
-      this.delivery.enqueue(
-        event.target.conversationId,
-        (signal) => this.send(event.target, rendered, maximumChunks, signal),
-        true,
-      );
+      this.enqueueText(event.target, rendered, true);
       return;
     }
     if (event.type === "plan.updated") {
@@ -263,14 +266,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return;
       }
       for (const presentation of this.planProgress.accept(event)) {
-        this.delivery.enqueue(
-          event.target.conversationId,
-          (signal) => this.send(
-            event.target,
-            formatWeixinCommandText(presentation.text, { structuredFields: true }),
-            maximumChunks,
-            signal,
-          ),
+        this.enqueueText(
+          event.target,
+          formatWeixinCommandText(presentation.text, { structuredFields: true }),
           true,
         );
       }
@@ -294,7 +292,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     this.delivery.enqueue(
       event.target.conversationId,
-      (signal) => this.sendEvent(event, rendered, signal),
+      (signal) => this.sendEvent(
+        event,
+        rendered,
+        signal,
+        this.contexts.get(event.target),
+      ),
       isCriticalOutputEvent(event),
     );
   }
@@ -303,11 +306,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     if (this.closed || !this.matches(target)) {
       return false;
     }
-    return this.delivery.enqueue(
-      target.conversationId,
-      (signal) => this.send(target, text, maximumChunks, signal),
-      true,
-    );
+    return this.enqueueText(target, text, true);
   }
 
   deliverText(target: ConversationTarget, text: string): Promise<void> {
@@ -316,7 +315,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     return this.delivery.runOrdered(
       target.conversationId,
-      (signal) => this.send(target, text, maximumChunks, signal),
+      (signal) => this.send(
+        target,
+        text,
+        maximumChunks,
+        signal,
+        this.contexts.get(target),
+      ),
     );
   }
 
@@ -331,7 +336,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
       target.conversationId,
       async (signal) => {
         for (const text of texts) {
-          await this.send(target, text, maximumChunks, signal);
+          await this.send(
+            target,
+            text,
+            maximumChunks,
+            signal,
+            this.contexts.get(target),
+          );
         }
       },
     );
@@ -375,11 +386,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       summary,
       this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
     );
-    this.delivery.enqueue(
-      target.conversationId,
-      (signal) => this.send(target, text, maximumChunks, signal),
-      true,
-    );
+    this.enqueueText(target, text, true);
   }
 
   private async render(event: OutputEvent): Promise<string | null> {
@@ -482,7 +489,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
   }
 
-  private async sendEvent(event: OutputEvent, text: string, signal?: AbortSignal): Promise<void> {
+  private async sendEvent(
+    event: OutputEvent,
+    text: string,
+    signal: AbortSignal | undefined,
+    context: WeixinReplyContext | undefined,
+  ): Promise<void> {
     signal = this.closed ? undefined : signal;
     if (
       event.type === "turn.completed"
@@ -498,19 +510,24 @@ export class WeixinOutbox implements SurfaceOutputPort {
       event.type === "text.completed"
       && event.phase === "final_answer"
       && text.length > maximumChunkCharacters * maximumChunks
-      && await this.sendLongFinalAnswer(event.target, text, signal)
+      && await this.sendLongFinalAnswer(event.target, text, signal, context)
     ) {
       return;
     }
-    await this.send(event.target, text, maximumChunks, signal);
+    await this.send(event.target, text, maximumChunks, signal, context);
   }
 
   private async sendLongFinalAnswer(
     target: ConversationTarget,
     text: string,
     signal?: AbortSignal,
+    context?: WeixinReplyContext,
   ): Promise<boolean> {
     signal = this.closed ? undefined : signal;
+    context ??= {
+      actorId: target.conversationId,
+      contextToken: undefined,
+    };
     const fileClient = this.options.fileClient;
     const file = Buffer.from(text, "utf8");
     if (
@@ -524,36 +541,47 @@ export class WeixinOutbox implements SurfaceOutputPort {
       maximumChunkCharacters - previewNotice.length,
     );
     const preview = text.slice(0, previewLength) + previewNotice;
-    await this.send(target, preview, maximumChunks, signal);
-    const context = this.contexts.get(target);
-    if (context === undefined) {
-      throw new WeixinOutboxError("missing-reply-context");
-    }
+    await this.send(target, preview, maximumChunks, signal, context);
     if (!this.access.isAllowed({
       target,
       actorId: context.actorId,
     })) {
-      await this.invalidateContext(target);
+      await this.invalidateContext(target, context.contextToken);
       throw new WeixinOutboxError("unauthorized-recipient");
     }
     try {
       const input = {
         actorId: context.actorId,
-        contextToken: context.contextToken,
+        ...(context.contextToken === undefined
+          ? {}
+          : { contextToken: context.contextToken }),
         fileName: finalAnswerFileName,
         file,
       };
-      if (signal) {
-        await fileClient.sendFile(input, signal);
-      } else {
-        await fileClient.sendFile(input);
+      try {
+        if (signal) {
+          await fileClient.sendFile(input, signal);
+        } else {
+          await fileClient.sendFile(input);
+        }
+      } catch (error) {
+        if (isRejectedReplyContext(error)) {
+          await this.invalidateContext(target, context.contextToken);
+        }
+        throw error;
       }
     } catch (error) {
+      if (isRejectedReplyContext(error)) {
+        // 已确认上下文被拒绝时，回退文本仍会复用同一个失效 token，
+        // 只会制造第二次无意义的 sendmessage 请求。
+        throw error;
+      }
       await this.send(
         target,
         fileFailureNotice + text.slice(previewLength),
         maximumChunks - 1,
         signal,
+        context,
       );
       throw error;
     }
@@ -565,24 +593,31 @@ export class WeixinOutbox implements SurfaceOutputPort {
     text: string,
     maximumChunkCount = maximumChunks,
     signal?: AbortSignal,
+    context = this.contexts.get(target),
   ): Promise<void> {
     signal = this.closed ? undefined : signal;
-    const context = this.contexts.get(target);
-    if (context === undefined) {
-      throw new WeixinOutboxError("missing-reply-context");
-    }
+    // The upstream Weixin implementation treats context_token as optional.
+    // A known, authorized Conversation can still receive a message after the
+    // previous token has expired; omit the stale token until the next inbound
+    // message refreshes it.
+    context ??= {
+      actorId: target.conversationId,
+      contextToken: undefined,
+    };
     for (const chunk of splitWeixinText(text, maximumChunkCount)) {
       if (!this.access.isAllowed({
         target,
         actorId: context.actorId,
       })) {
-        await this.invalidateContext(target);
+        await this.invalidateContext(target, context.contextToken);
         throw new WeixinOutboxError("unauthorized-recipient");
       }
       try {
         const input = {
           actorId: context.actorId,
-          contextToken: context.contextToken,
+          ...(context.contextToken === undefined
+            ? {}
+            : { contextToken: context.contextToken }),
           text: chunk,
         };
         if (signal) {
@@ -592,7 +627,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         }
       } catch (error) {
         if (isRejectedReplyContext(error)) {
-          await this.invalidateContext(target);
+          await this.invalidateContext(target, context.contextToken);
         }
         throw error;
       }
@@ -603,17 +638,18 @@ export class WeixinOutbox implements SurfaceOutputPort {
     target: ConversationTarget,
     path: string,
     signal?: AbortSignal,
+    context = this.contexts.get(target),
   ): Promise<void> {
     signal = this.closed ? undefined : signal;
-    const context = this.contexts.get(target);
-    if (context === undefined) {
-      throw new WeixinOutboxError("missing-reply-context");
-    }
+    context ??= {
+      actorId: target.conversationId,
+      contextToken: undefined,
+    };
     if (!this.access.isAllowed({
       target,
       actorId: context.actorId,
     })) {
-      await this.invalidateContext(target);
+      await this.invalidateContext(target, context.contextToken);
       throw new WeixinOutboxError("unauthorized-recipient");
     }
     const client = this.options.imageClient;
@@ -627,18 +663,27 @@ export class WeixinOutbox implements SurfaceOutputPort {
       target,
       actorId: context.actorId,
     })) {
-      await this.invalidateContext(target);
+      await this.invalidateContext(target, context.contextToken);
       throw new WeixinOutboxError("unauthorized-recipient");
     }
     const input = {
       actorId: context.actorId,
-      contextToken: context.contextToken,
+      ...(context.contextToken === undefined
+        ? {}
+        : { contextToken: context.contextToken }),
       image,
     };
-    if (signal) {
-      await client.sendImage(input, signal);
-    } else {
-      await client.sendImage(input);
+    try {
+      if (signal) {
+        await client.sendImage(input, signal);
+      } else {
+        await client.sendImage(input);
+      }
+    } catch (error) {
+      if (isRejectedReplyContext(error)) {
+        await this.invalidateContext(target, context.contextToken);
+      }
+      throw error;
     }
   }
 
@@ -648,15 +693,61 @@ export class WeixinOutbox implements SurfaceOutputPort {
   ): Promise<void> {
     return this.delivery.runOrdered(
       target.conversationId,
-      (signal) => this.sendImage(target, imagePath, signal),
+      (signal) => this.sendImage(
+        target,
+        imagePath,
+        signal,
+        this.contexts.get(target),
+      ),
     );
   }
 
   private async invalidateContext(
     target: ConversationTarget,
+    expectedContextToken?: string,
   ): Promise<void> {
-    this.contexts.remove(target);
-    await this.options.onReplyContextInvalidated?.(target);
+    if (expectedContextToken === undefined) {
+      return;
+    }
+    if (!this.contexts.removeIf(target, expectedContextToken)) {
+      return;
+    }
+    await this.options.onReplyContextInvalidated?.(target, expectedContextToken);
+  }
+
+  private enqueueText(
+    target: ConversationTarget,
+    text: string,
+    critical: boolean,
+  ): boolean {
+    return this.delivery.enqueue(
+      target.conversationId,
+      (signal) => this.send(
+        target,
+        text,
+        maximumChunks,
+        signal,
+        this.contexts.get(target),
+      ),
+      critical,
+    );
+  }
+
+  private enqueueImage(
+    target: ConversationTarget,
+    imagePath: string,
+    critical: boolean,
+  ): boolean {
+    return this.delivery.enqueue(
+      target.conversationId,
+      (signal) => this.sendImage(
+        target,
+        imagePath,
+        signal,
+        this.contexts.get(target),
+      ),
+      critical,
+    );
   }
 
   private matches(target: ConversationTarget): boolean {
@@ -699,6 +790,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
     return [...this.activeOperations].some((key) => key.startsWith(prefix));
   }
 
+}
+
+function isAllowedWeixinOutputEvent(event: OutputEvent): boolean {
+  return event.type === "turn.started"
+    || event.type === "turn.completed"
+    || (event.type === "text.completed" && event.phase === "final_answer");
 }
 
 function turnKey(threadId: string, turnId: string): string {

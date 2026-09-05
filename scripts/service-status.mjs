@@ -1,4 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
+import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -6,6 +8,7 @@ import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import {
   parseServiceTarget,
+  serviceDefinitions,
   serviceDefinitionsForTarget,
 } from "../runtime/service-targets.mjs";
 import { appServerSocketAcceptsWebSocket } from "../runtime/app-server-supervisor.mjs";
@@ -47,6 +50,195 @@ export function inspectManagedServiceStatus({
     healthy: services.every((service) => service.running),
     services,
   };
+}
+
+export async function inspectManagedServiceStatusAsync({
+  environment = process.env,
+  platform = process.platform,
+  run = runServiceCommand,
+  target = "all",
+  userId = typeof process.getuid === "function" ? process.getuid() : undefined,
+} = {}) {
+  const resolvedTarget = parseServiceTarget(target);
+  const definitions = serviceDefinitionsForTarget(resolvedTarget);
+  let services;
+  let servicePlatform;
+  if (platform === "linux") {
+    servicePlatform = "systemd";
+    services = await Promise.all(definitions.map(async (definition) =>
+      parseSystemdServiceResult(definition, await run(
+        environment.SYSTEMCTL_BINARY?.trim() || "systemctl",
+        ["--user", "show", definition.systemd, "--property=LoadState", "--property=ActiveState", "--property=SubState", "--property=MainPID", "--no-pager"],
+        { encoding: "utf8", env: environment },
+      ))));
+  } else if (platform === "darwin") {
+    if (!Number.isSafeInteger(userId) || userId < 0) {
+      throw new Error("无法确定当前用户 ID，不能查询 launchd 服务状态");
+    }
+    servicePlatform = "launchd";
+    services = await Promise.all(definitions.map(async (definition) =>
+      parseLaunchdServiceResult(definition, await run(
+        environment.LAUNCHCTL_BINARY?.trim() || "launchctl",
+        ["print", `gui/${userId}/${definition.launchd}`],
+        { encoding: "utf8", env: environment },
+      ))));
+  } else if (platform === "win32") {
+    const dataDir = environment.CODEX_CONNECT_HOME?.trim();
+    if (!dataDir) {
+      throw new Error("Windows 后台服务状态查询需要 CODEX_CONNECT_HOME");
+    }
+    const result = await run(process.execPath, [
+      join(packageDir, "scripts", "windows-service-control.mjs"),
+      "status",
+      resolvedTarget,
+      "--json",
+      "--definitions",
+      join(dataDir, "services"),
+    ], { encoding: "utf8", env: environment, windowsHide: true });
+    services = parseWindowsServiceResult(result);
+    servicePlatform = "windows";
+  } else {
+    throw new Error("codexc service status --json 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+  }
+  return {
+    platform: servicePlatform,
+    target: resolvedTarget,
+    healthy: services.every((service) => service.running),
+    services,
+  };
+}
+
+/**
+ * Read the latest bounded stderr line for a managed service.
+ *
+ * Service installers keep stderr logs in the private runtime directory on
+ * macOS and Windows. Linux journald is handled by the async wrapper below.
+ * This helper deliberately reads only known paths; it never accepts a
+ * caller-provided path or returns the file name.
+ */
+export function readManagedServiceError({
+  environment = process.env,
+  target,
+  now = Date.now(),
+} = {}) {
+  if (target !== "gateway" && target !== "app-server" && target !== "webui" && target !== "center") {
+    return null;
+  }
+  let dataDir;
+  try {
+    dataDir = runtimeConfig(environment).dataDir;
+  } catch {
+    return null;
+  }
+  const logBase = target === "app-server" ? "codex-app-server" : target;
+  const path = join(dataDir, "runtime", `${logBase}.error.log`);
+  if (!existsSync(path)) return null;
+  try {
+    const linkStats = lstatSync(path);
+    if (linkStats.isSymbolicLink() || !linkStats.isFile() || linkStats.size <= 0) return null;
+    const fd = openSync(path, "r");
+    let content;
+    try {
+      const fileStats = fstatSync(fd);
+      const start = Math.max(0, fileStats.size - 16 * 1024);
+      const buffer = Buffer.alloc(fileStats.size - start);
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, start);
+      content = buffer.toString("utf8", 0, bytesRead);
+      if (start > 0) {
+        const firstLineBreak = content.indexOf("\n");
+        content = firstLineBreak === -1 ? "" : content.slice(firstLineBreak + 1);
+      }
+    } finally {
+      closeSync(fd);
+    }
+    const lines = content
+      .split(/\r?\n/u)
+      .map((line) => sanitizeServiceError(line))
+      .filter((line) => line.length > 0);
+    const message = lines.slice(-3).join("；").slice(-600);
+    if (!message) return null;
+    return {
+      message,
+      observedAt: Number.isFinite(linkStats.mtimeMs)
+        ? new Date(Math.min(linkStats.mtimeMs, now)).toISOString()
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function readManagedServiceErrorAsync({
+  environment = process.env,
+  target,
+  platform = process.platform,
+  run = runServiceCommand,
+} = {}) {
+  const fileError = readManagedServiceError({ environment, target });
+  if (fileError !== null || platform !== "linux") return fileError;
+  const definition = serviceDefinitions.find((item) => item.target === target);
+  if (!definition) return null;
+  const result = await run(
+    environment.JOURNALCTL_BINARY?.trim() || "journalctl",
+    [
+      `--user-unit=${definition.systemd}`,
+      "--priority=err",
+      "--lines=3",
+      "--no-pager",
+      "--output=short-iso",
+    ],
+    { encoding: "utf8", env: environment },
+  );
+  if (result.error || result.status !== 0) return null;
+  const message = String(result.stdout ?? "")
+    .split(/\r?\n/u)
+    .map((line) => sanitizeServiceError(line))
+    .filter((line) => line.length > 0 && line !== "-- No entries --")
+    .slice(-3)
+    .join("；")
+    .slice(-600);
+  return message ? { message, observedAt: null } : null;
+}
+
+function sanitizeServiceError(value) {
+  return String(value)
+    .replace(/authorization\s*[:=]\s*bearer\s+[^\s,;]+/giu, "authorization: Bearer [已隐藏]")
+    .replace(/(["']?)(access[-_ ]?token|refresh[-_ ]?token|api[-_ ]?key|client[-_ ]?secret|auth[-_ ]?token|token|secret|cookie|password)\1\s*([:=])\s*(["']?)[^"'\s,;}]+\4/giu, "$1$2$1$3$4[已隐藏]$4")
+    .replace(/https?:\/\/[^\s/@:]+:[^\s/@]+@/giu, "https://[已隐藏]@")
+    .replace(/([?&](?:access[-_ ]?token|api[-_ ]?key|token|secret)=)[^&\s]+/giu, "$1[已隐藏]")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 240);
+}
+
+const runServiceCommand = async (command, args, options) => {
+  const result = await promisify(execFile)(command, args, {
+    ...options,
+    timeout: 3_000,
+    maxBuffer: 1_024 * 1_024,
+  }).then(({ stdout, stderr }) => ({ status: 0, stdout, stderr }))
+    .catch((error) => ({
+      error: typeof error?.code === "number" ? undefined : error,
+      status: typeof error?.code === "number" ? error.code : null,
+      stdout: error?.stdout ?? "",
+      stderr: error?.stderr ?? "",
+    }));
+  return result;
+};
+
+function parseWindowsServiceResult(result) {
+  if (result.error) throw result.error;
+  const json = String(result.stdout ?? "")
+    .split(/\r?\n/u)
+    .findLast((line) => line.trim().startsWith("{"));
+  if (!json || (result.status !== 0 && result.status !== 1)) {
+    throw new Error(`无法查询 Windows 计划任务：${safeProcessError(result)}`);
+  }
+  try {
+    return JSON.parse(json).services;
+  } catch (error) {
+    throw new Error("Windows 计划任务状态响应无效", { cause: error });
+  }
 }
 
 /**
@@ -145,6 +337,10 @@ function inspectSystemdService(definition, environment, run) {
     encoding: "utf8",
     env: environment,
   });
+  return parseSystemdServiceResult(definition, result);
+}
+
+function parseSystemdServiceResult(definition, result) {
   if (result.error) {
     throw new Error(`无法查询 systemd 服务 ${definition.systemd}：${result.error.message}`);
   }
@@ -176,6 +372,10 @@ function inspectLaunchdService(definition, environment, run, userId) {
     ["print", `gui/${userId}/${definition.launchd}`],
     { encoding: "utf8", env: environment },
   );
+  return parseLaunchdServiceResult(definition, result);
+}
+
+function parseLaunchdServiceResult(definition, result) {
   if (result.error) {
     throw new Error(`无法查询 launchd 服务 ${definition.launchd}：${result.error.message}`);
   }

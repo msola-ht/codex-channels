@@ -26,7 +26,8 @@ describe("OpenCode Go account provisioning", () => {
   it("previews a first switching account without prompts or credentials", async () => {
     const environment = previewEnvironment();
     const preview = await previewOpencodeGoAccountConfiguration({
-      accountId: "opencode-go",
+      accountId: "work",
+      contact: "user@example.com",
       mode: "switching",
     }, {
       environment,
@@ -37,8 +38,10 @@ describe("OpenCode Go account provisioning", () => {
     expect(preview).toEqual({
       operation: "add",
       account: {
-        id: "opencode-go",
-        provider: "opencode-go",
+        id: "work",
+        provider: "ocg-work",
+        email: "user@example.com",
+        displayName: "ocg-user@example.com",
         exists: false,
         default: true,
       },
@@ -60,18 +63,33 @@ describe("OpenCode Go account provisioning", () => {
 
   it("returns a stable field error for an existing account", async () => {
     await expect(previewOpencodeGoAccountConfiguration({
-      accountId: "opencode-go",
+      accountId: "work",
+      contact: "user@example.com",
       mode: "switching",
     }, {
       environment: previewEnvironment(),
-      loadAccounts: () => [{ id: "opencode-go", default: true }],
+      loadAccounts: () => [{ id: "work", default: true, email: "user@example.com" }],
       loadPrimaryProvider: () => "openai",
     })).rejects.toMatchObject({ code: "account-exists", field: "accountId" });
   });
 
+  it("rejects multiple contact fields instead of silently choosing one", async () => {
+    await expect(previewOpencodeGoAccountConfiguration({
+      accountId: "work",
+      email: "user@example.com",
+      phone: "+8613800138000",
+      mode: "switching",
+    }, {
+      environment: previewEnvironment(),
+      loadAccounts: () => [],
+      loadPrimaryProvider: () => "openai",
+    })).rejects.toMatchObject({ code: "invalid-contact", field: "contact" });
+  });
+
   it("requires explicit confirmation before fixed-mode configuration", async () => {
     await expect(applyOpencodeGoAccountConfiguration({
-      accountId: "opencode-go",
+      accountId: "work",
+      contact: "user@example.com",
       mode: "exclusive",
       apiKey: "sk-test",
     }, {
@@ -86,7 +104,8 @@ describe("OpenCode Go account provisioning", () => {
 
   it("rejects an invalid API key before downloading the model catalog", async () => {
     await expect(applyOpencodeGoAccountConfiguration({
-      accountId: "opencode-go",
+      accountId: "work",
+      contact: "user@example.com",
       mode: "switching",
       apiKey: "invalid",
     }, {

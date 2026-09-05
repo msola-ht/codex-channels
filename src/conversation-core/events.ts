@@ -127,6 +127,7 @@ export interface ReferenceCostSummary {
   currency: string | null;
   totalCostNanos: number | null;
   inputTokens?: number;
+  cachedInputTokens?: number;
   outputTokens?: number;
   inputCostNanos: number | null;
   cachedInputCostNanos: number | null;

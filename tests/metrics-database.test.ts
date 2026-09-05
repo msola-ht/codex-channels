@@ -1249,14 +1249,14 @@ describe("model request metrics database operations", () => {
     expect(result).toMatchObject({
       changed: true,
       previousSchemaVersion: 10,
-      schemaVersion: 11,
+      schemaVersion: 12,
     });
     expect(result.backupPath).toContain(".v10.2026-08-05T12-34-56-789Z.bak");
     if (process.platform !== "win32") expect(statSync(result.backupPath!).mode & 0o777).toBe(0o600);
     const upgraded = new DatabaseSync(databasePath, { readOnly: true });
     expect(upgraded.prepare(
       "SELECT value FROM schema_metadata WHERE name = 'schema_version'",
-    ).get()).toEqual({ value: 11 });
+    ).get()).toEqual({ value: 12 });
     expect(upgraded.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get())
       .toEqual({ count: 1 });
     expect(upgraded.prepare("SELECT COUNT(*) AS count FROM subagent_threads").get())
@@ -1355,7 +1355,7 @@ describe("model request metrics database operations", () => {
 
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
-    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10 升级到 v11/u);
+    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11 升级到 v12/u);
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
   });
 

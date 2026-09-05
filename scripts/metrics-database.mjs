@@ -137,6 +137,58 @@ export function resetMetricsDatabase(
   }
 }
 
+export function normalizeMetricsCurrency(
+  environment = process.env,
+  options = {},
+) {
+  const runtime = resolveMetricsRuntime(environment);
+  const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
+  if (gatewayRunning() || runtime.metricsSocketPaths.some(metricsSocketIsActive)) {
+    throw new Error("Gateway 仍在运行；请先执行 codexc service stop gateway，再重试");
+  }
+  if (!existsSync(runtime.databasePath)) {
+    return { backupPath: null, changed: false, databasePath: runtime.databasePath, cleared: 0 };
+  }
+  const lock = acquireRequestMetricsDatabaseLock(runtime.databasePath);
+  try {
+    const status = inspectMetricsDatabase(environment);
+    if (!status.exists || !status.compatible) throw new Error("指标数据库版本不兼容，无法规范化费用币种");
+    checkpoint(status.databasePath);
+    const now = options.now ?? (() => new Date());
+    const backupPath = `${status.databasePath}.usd-normalize.${backupTimestamp(now())}.bak`;
+    copyFileSync(status.databasePath, backupPath);
+    securePrivateFileSync(backupPath);
+    const database = new DatabaseSync(status.databasePath);
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      const result = database.prepare(`
+        SELECT COUNT(*) AS count FROM model_request_metrics
+        WHERE pricing_currency IS NOT NULL AND UPPER(pricing_currency) <> 'USD'
+      `).get();
+      const cleared = Number(result?.count ?? 0);
+      database.prepare(`
+        UPDATE model_request_metrics SET
+          billing_mode = NULL, pricing_currency = NULL, pricing_source = NULL,
+          pricing_effective_at_ms = NULL, pricing_bucket = NULL,
+          uncached_input_price_per_million_nanos = NULL,
+          cached_input_price_per_million_nanos = NULL,
+          output_price_per_million_nanos = NULL
+        WHERE pricing_currency IS NOT NULL AND UPPER(pricing_currency) <> 'USD'
+      `).run();
+      database.prepare("UPDATE model_request_metrics SET pricing_currency = 'USD' WHERE UPPER(pricing_currency) = 'USD'").run();
+      database.exec("COMMIT");
+      return { backupPath, changed: cleared > 0, databasePath: status.databasePath, cleared };
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    } finally {
+      database.close();
+    }
+  } finally {
+    lock.release();
+  }
+}
+
 export function upgradeMetricsDatabase(
   environment = process.env,
   options = {},
@@ -173,7 +225,7 @@ export function upgradeMetricsDatabase(
     if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
     checkpoint(status.databasePath);
@@ -216,6 +268,29 @@ export function upgradeMetricsDatabase(
       if (previousSchemaVersion < 9) {
         statements.push(`
           ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
+        `);
+      }
+      if (previousSchemaVersion < 12) {
+        statements.push(`
+          CREATE TABLE IF NOT EXISTS account_sources (
+            source_id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            account_id TEXT,
+            display_name TEXT NOT NULL,
+            enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+            UNIQUE (provider, account_id)
+          );
+          CREATE TABLE IF NOT EXISTS account_snapshots (
+            snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL REFERENCES account_sources(source_id) ON DELETE CASCADE,
+            observed_at_ms INTEGER NOT NULL,
+            available INTEGER NOT NULL CHECK (available IN (0, 1)),
+            usage_json TEXT NOT NULL,
+            limits_json TEXT NOT NULL,
+            UNIQUE (source_id, observed_at_ms)
+          );
+          CREATE INDEX IF NOT EXISTS account_snapshots_latest
+            ON account_snapshots (source_id, observed_at_ms DESC);
         `);
       }
       if (!databaseHasTable(database, "subagent_threads")) {
@@ -905,6 +980,8 @@ function requireMigratedMetricsColumns(database) {
   if (missingSubagentTurns.length > 0) {
     throw new Error(`subagent_turns 缺少 ${missingSubagentTurns.join("、")}`);
   }
+  if (!databaseHasTable(database, "account_sources")) throw new Error("account_sources 表缺失");
+  if (!databaseHasTable(database, "account_snapshots")) throw new Error("account_snapshots 表缺失");
 }
 
 function backupTimestamp(date) {
@@ -936,6 +1013,11 @@ if (
         console.log(`旧库备份：${result.backupPath}`);
         writeCliMessage("remediation", "启动 Gateway 后将自动创建当前 Schema。");
       }
+    } else if (command === "normalize-currency" && process.argv.length === 3) {
+      const result = normalizeMetricsCurrency();
+      writeCliMessage("success", result.changed ? `已清除 ${result.cleared} 条历史非 USD 费用` : "指标库没有历史非 USD 费用");
+      console.log(`数据库：${result.databasePath}`);
+      if (result.backupPath) console.log(`规范化前备份：${result.backupPath}`);
     } else if (command === "upgrade" && process.argv.length === 3) {
       const result = upgradeMetricsDatabase();
       if (!result.changed) {
@@ -1074,7 +1156,7 @@ if (
       );
     } else {
       throw new Error(
-        "用法：codexc metrics <status|run|threads|turns|report|export|quota|upgrade|reset|sync-reset|cleanup|prune>",
+        "用法：codexc metrics <status|run|threads|turns|report|export|quota|normalize-currency|upgrade|reset|sync-reset|cleanup|prune>",
       );
     }
   } catch (error) {

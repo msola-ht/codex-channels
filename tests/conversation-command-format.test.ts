@@ -1,4 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../runtime/opencode-go-accounts.mjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../runtime/opencode-go-accounts.mjs")>();
+  return {
+    ...actual,
+    opencodeGoProviderDisplayName: (provider: string) => provider === "ocg-main"
+      ? "ocg-user@example.com"
+      : provider,
+  };
+});
 
 import {
   conversationCommandHelpLines,
@@ -1116,6 +1126,56 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("切换：/effort <序号或档位>");
   });
 
+  it("renders providers first for plain-text model selection", () => {
+    const rendered = formatConversationModels({
+      kind: "models",
+      view: "model",
+      state: {
+        models: [
+          {
+            id: "gpt-test",
+            model: "gpt-test",
+            displayName: "GPT Test",
+            provider: "openai",
+            supportedReasoningEfforts: [{ effort: "medium", description: "平衡" }],
+            defaultReasoningEffort: "medium",
+            serviceTiers: [],
+            defaultServiceTier: null,
+            isDefault: true,
+            inputModalities: ["text"],
+          },
+          {
+            id: "deepseek-v4",
+            model: "deepseek-v4",
+            displayName: "DeepSeek V4",
+            provider: "deepseek",
+            supportedReasoningEfforts: [{ effort: "high", description: "深入" }],
+            defaultReasoningEffort: "high",
+            serviceTiers: [],
+            defaultServiceTier: null,
+            isDefault: false,
+            inputModalities: ["text"],
+          },
+        ],
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: "medium",
+        serviceTier: null,
+        pending: false,
+        modelPending: false,
+        effortPending: false,
+        serviceTierPending: false,
+      },
+    });
+
+    expect(rendered).toContain("### 可用提供商");
+    expect(rendered).toContain("当前 Provider：OpenAI 官方");
+    expect(rendered).toContain("1. OpenAI 官方 ← 当前 · 1 个模型");
+    expect(rendered).toContain("2. DeepSeek · 1 个模型");
+    expect(rendered).toContain("下一步：/model <提供商序号或 ID>");
+    expect(rendered).not.toContain("模型列表（2）");
+  });
+
   it("renders DeepSeek balance instead of OpenAI account usage", () => {
     const rendered = formatConversationUsage({
       kind: "usage",
@@ -1269,7 +1329,7 @@ describe("provider-aware conversation command formatting", () => {
       kind: "usage",
       result: {
         kind: "quota-windows",
-        provider: "opencode-go",
+        provider: "ocg-main",
         available: true,
         windows: [
           {
@@ -1293,7 +1353,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("OpenCode Go 账户用量");
+    expect(rendered).toContain("ocg-user@example.com 账户用量");
     expect(rendered).toContain("5小时：已用 0% · 总额 $12.00 · 本地 Token 约 123.4 K");
     expect(rendered).toContain("月度：已用 12.5% · 总额 $60.00 · 重置 未知");
     expect(rendered).not.toContain("累计 Tokens");
@@ -1304,7 +1364,7 @@ describe("provider-aware conversation command formatting", () => {
       kind: "usage",
       result: {
         kind: "quota-windows",
-        provider: "opencode-go",
+        provider: "ocg-main",
         available: true,
         windows: [{
           windowId: "monthly",

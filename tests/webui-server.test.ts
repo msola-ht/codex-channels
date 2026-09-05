@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -11,6 +11,8 @@ import { initializeUserData } from "../scripts/runtime-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createMetricsCenterServer } from "../scripts/metrics-center-server.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { loadGatewaySettings } from "../scripts/config-management.mjs";
 import {
   requestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
@@ -28,6 +30,30 @@ afterEach(async () => {
 });
 
 describe("webui server", () => {
+  it("returns the latest unified account snapshots without calling provider APIs", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.upsertAccountSnapshot!({
+      sourceId: "deepseek:default",
+      provider: "deepseek",
+      accountId: null,
+      displayName: "DeepSeek",
+      enabled: true,
+      observedAtMs: 1_800_000_000_000,
+      available: true,
+      usage: { kind: "balance", provider: "deepseek", available: true, balances: [] },
+      limits: { kind: "unsupported", provider: "deepseek" },
+    });
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/accounts`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      observedAtMs: 1_800_000_000_000,
+      snapshots: [{ provider: "deepseek", available: true }],
+    });
+  });
+
   it("authenticates the health endpoint when WebUI exposes a token", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(
@@ -93,7 +119,7 @@ describe("webui server", () => {
         deviceId: "device-a",
         requestMetrics: [{
           localId: 1,
-          provider: "deepseek",
+          provider: "ocg-main",
           model: "deepseek-v4-flash",
           status: "completed",
           inputTokens: 1_000,
@@ -109,6 +135,11 @@ describe("webui server", () => {
           recordedAtMs: Date.now() - 86_400_000,
         }],
         subagentThreads: [],
+        providerIdentities: [{
+          provider: "ocg-main",
+          displayName: "ocg-user@example.com",
+          email: "user@example.com",
+        }],
       }),
     });
     expect(ingest.status).toBe(200);
@@ -117,8 +148,17 @@ describe("webui server", () => {
     const overview = await fetch(`${origin}/api/v1/global/overview`);
 
     expect(overview.status).toBe(200);
-    const body = await overview.json() as { totals: { request_count: number } };
+    const body = await overview.json() as {
+      totals: { request_count: number };
+      providers: Array<{ provider: string; provider_display_name: string }>;
+    };
     expect(body.totals.request_count).toBe(1);
+    expect(body.providers).toEqual([
+      expect.objectContaining({
+        provider: "ocg-main",
+        provider_display_name: "ocg-user@example.com",
+      }),
+    ]);
 
     const daily = await fetch(`${origin}/api/v1/global/daily?days=30`);
     expect(daily.status).toBe(200);
@@ -130,7 +170,11 @@ describe("webui server", () => {
     const quota = await fetch(`${origin}/api/v1/global/quota?days=365`);
     expect(quota.status).toBe(200);
     expect(await quota.json()).toMatchObject({
-      periods: [expect.objectContaining({ provider: "deepseek", windowId: "codex" })],
+      periods: [expect.objectContaining({
+        provider: "ocg-main",
+        providerDisplayName: "ocg-user@example.com",
+        windowId: "codex",
+      })],
     });
   });
 
@@ -288,6 +332,740 @@ describe("webui server", () => {
     });
   });
 
+  it("returns a redacted settings summary without changing the legacy response", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const document = readGatewayConfig(configPath);
+    document.webui = { token: "webui-secret" };
+    document.network = { https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" };
+    document.metrics = {
+      view: {
+        enabled: true,
+        endpoint: "https://metrics.example.com/private-path",
+        token: "metrics-secret",
+      },
+    };
+    writeGatewayConfig(configPath, document);
+    const { origin } = await startServer(fixture.environment);
+
+    const legacy = await fetch(`${origin}/api/v1/settings`);
+    expect(await legacy.json()).toEqual({
+      currency: "cny",
+      exchangeRate: expect.objectContaining({ source: "cache", usdToCny: 7.2 }),
+    });
+
+    const response = await fetch(`${origin}/api/v1/settings/summary`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      revision: string;
+      gateway: {
+        webui: { tokenConfigured: boolean };
+        network: { configuredFields: string[] };
+        metrics: { view: { endpointConfigured: boolean; tokenConfigured: boolean } };
+      };
+      services: { available: boolean; entries: Array<{ target: string }> };
+      cli: Array<{ command: string }>;
+    };
+    expect(body.revision).toMatch(/^[0-9a-f]{64}$/u);
+    expect(body.gateway).toMatchObject({
+      webui: { tokenConfigured: true },
+      network: { configuredFields: ["https_proxy"] },
+      metrics: { view: { endpointConfigured: true, tokenConfigured: true } },
+    });
+    expect(body.services.entries).toBeInstanceOf(Array);
+    expect(new Set(body.services.entries.map((entry) => entry.target))).toEqual(new Set([
+      "app-server",
+      "gateway",
+      "webui",
+      "center",
+    ]));
+    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status all");
+    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status webui");
+    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status center");
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("webui-secret");
+    expect(serialized).not.toContain("proxy-secret");
+    expect(serialized).not.toContain("metrics-secret");
+    expect(serialized).not.toContain("private-path");
+    expect(serialized).not.toContain(configPath);
+  });
+
+  it("returns service status, versions and a redacted recent error through the shared WebUI token", async () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.home, "runtime", "gateway.error.log"),
+      "Error: authorization: Bearer service-secret\n",
+    );
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token" });
+
+    const response = await fetch(`${origin}/api/v1/management/services`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      available: boolean;
+      entries: Array<{ target: string; version: string | null; recentError: { message: string } | null }>;
+    };
+    expect(body.entries).toHaveLength(4);
+    expect(body.entries.map((entry) => entry.target)).toEqual([
+      "app-server", "gateway", "webui", "center",
+    ]);
+    expect(body.entries.every((entry) => entry.version !== null)).toBe(true);
+    expect(body.entries.find((entry) => entry.target === "gateway")?.version).toBe("0.152.0");
+    expect(body.entries.find((entry) => entry.target === "app-server")?.version).toBe("0.152.0");
+    const gateway = body.entries.find((entry) => entry.target === "gateway");
+    expect(gateway?.recentError?.message).toBe("Error: authorization: Bearer [已隐藏]");
+    expect(JSON.stringify(body)).not.toContain("service-secret");
+  });
+
+  it("returns a redacted Provider overview without credentials or profiles", async () => {
+    const fixture = createFixture();
+    let providerLoads = 0;
+    const providerState = {
+      configVersion: "v7",
+      defaults: { model: "gpt-test", reasoningEffort: "high" },
+      primary: { id: "relay", displayName: "Relay", kind: "custom", mode: "exclusive" },
+      managedProviders: [{
+        id: "deepseek",
+        displayName: "DeepSeek",
+        kind: "managed",
+        mode: "switching",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "high",
+        models: [{ id: "deepseek-v4-flash" }],
+      }],
+      customProviders: {
+        fixedCandidates: [{
+          id: "relay",
+          displayName: "Relay",
+          kind: "custom",
+          state: "configured",
+          active: true,
+          baseUrl: "https://user:secret@relay.example/v1",
+        }],
+        switchingProviders: [{
+          id: "backup-relay",
+          displayName: "Backup Relay",
+          kind: "custom",
+          mode: "switching",
+          model: "gpt-test",
+          reasoningEffort: "medium",
+          baseUrl: "https://relay.example/v1",
+          profileName: "sf-custom-backup-relay",
+        }],
+        backupCandidates: [],
+      },
+      switchingProviders: [],
+      externalAgent: { status: "configured", provider: "deepseek", model: "deepseek-v4-flash" },
+    };
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { token: "webui-token", loadProviderState: async () => { providerLoads += 1; return providerState; } },
+    );
+
+    const unauthorized = await fetch(`${origin}/api/v1/management/providers`);
+    expect(unauthorized.status).toBe(401);
+    const response = await fetch(`${origin}/api/v1/management/providers`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      providers: Array<Record<string, unknown>>;
+      primary: { id: string; mode: string };
+      externalAgent: { status: string; provider?: string; model?: string };
+    };
+    expect(body.primary).toEqual({ id: "relay", displayName: "Relay", kind: "custom", mode: "exclusive" });
+    expect(body.providers).toHaveLength(3);
+    expect(body.providers.find((provider) => provider.id === "relay")).toMatchObject({ selected: true, model: null });
+    expect(body.externalAgent).toEqual({ status: "configured", provider: "deepseek", model: "deepseek-v4-flash" });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("secret");
+    expect(serialized).not.toContain("sf-custom-backup-relay");
+    expect(serialized).not.toContain("baseUrl");
+    const cached = await fetch(`${origin}/api/v1/management/providers`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(cached.status).toBe(200);
+    expect(providerLoads).toBe(1);
+  });
+
+  it("fails closed when the Provider overview cannot be read", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { token: "webui-token", loadProviderState: async () => { throw new Error("provider read failed"); } },
+    );
+    const response = await fetch(`${origin}/api/v1/management/providers`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { code: "provider_state_unavailable", message: "Provider 状态暂不可用，请使用 codexc setup 查看" },
+    });
+    const settingsResponse = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(settingsResponse.status).toBe(503);
+    expect(await settingsResponse.json()).toEqual({
+      error: { code: "provider_state_unavailable", message: "Provider 设置暂不可用，请检查 Codex 配置" },
+    });
+  });
+
+  it("manages direct API Providers with a one-time confirmation token and no key echo", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const document = readGatewayConfig(configPath);
+    document.api_providers = [];
+    writeGatewayConfig(configPath, document);
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token",
+      managementOrigin: "http://127.0.0.1:0",
+    });
+    const headers = { authorization: "Bearer webui-token", origin: "http://127.0.0.1:0", "content-type": "application/json" };
+    const preview = await fetch(`${origin}/api/v1/management/api-providers/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "create", provider: { id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" } }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken: string; preview: { provider: { apiKeyChange: boolean } } };
+    expect(previewBody.preview.provider.apiKeyChange).toBe(true);
+    expect(JSON.stringify(previewBody)).not.toContain("secret-key");
+    const apply = await fetch(`${origin}/api/v1/management/api-providers`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "save", provider: { operation: "create", id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" }, confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(apply.status).toBe(200);
+    expect(JSON.stringify(await apply.json())).not.toContain("secret-key");
+    const replay = await fetch(`${origin}/api/v1/management/api-providers`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "save", provider: { operation: "create", id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" }, confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(replay.status).toBe(409);
+  });
+
+  it("manages unified Provider settings with the shared token and one-time confirmation", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const providerState = {
+      configVersion: "provider-v1",
+      defaults: { model: "gpt-test", reasoningEffort: "medium" },
+      primary: { id: "openai", displayName: "OpenAI", kind: "official", mode: "exclusive", active: true },
+      managedProviders: [{
+        id: "deepseek",
+        displayName: "DeepSeek",
+        kind: "managed",
+        mode: "switching",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "medium",
+        models: [{ id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", contextWindow: 128000 }],
+      }],
+      customProviders: { fixedCandidates: [], switchingProviders: [], backupCandidates: [] },
+      externalAgent: { status: "unconfigured", provider: null, model: null },
+    };
+    let appliedInput: unknown = null;
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token",
+      managementOrigin,
+      loadProviderState: async () => providerState,
+      previewProviderSettings: async (input: unknown) => {
+        const normalized = input as { operation: string; providerId?: string };
+        if (normalized.operation === "external-agent") {
+          return {
+            operation: "configure",
+            current: { configured: false, provider: null, model: null },
+            selection: { provider: "deepseek", providerDisplayName: "DeepSeek", model: "deepseek-v4-flash", modelDisplayName: "DeepSeek V4 Flash" },
+            willChange: true,
+            activation: "restart-all",
+          };
+        }
+        return {
+          operation: "switch",
+          target: { id: normalized.providerId ?? "unknown", displayName: "Relay", source: "switching" },
+          activation: "restart-all",
+          effects: { currentProviderId: "openai", restoresFromBackup: false },
+        };
+      },
+      applyProviderSettings: async (input: unknown) => {
+        appliedInput = input;
+        if ((input as { operation?: string }).operation === "external-agent") {
+          return {
+            action: "configured",
+            operation: "configure",
+            selection: { provider: "deepseek", model: "deepseek-v4-flash" },
+            activation: "restart-all",
+          };
+        }
+        return {
+          action: "switched",
+          operation: "switch",
+          target: { id: "relay", displayName: "Relay", source: "switching" },
+          activation: "restart-all",
+          effects: { currentProviderId: "openai", restoresFromBackup: false },
+        };
+      },
+    });
+    const headers = {
+      origin: managementOrigin,
+      authorization: "Bearer webui-token",
+      "content-type": "application/json",
+    };
+    const resource = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(resource.status).toBe(200);
+    const resourceBody = await resource.json() as { resourceRevision: string; primary: { id: string }; managedProviders: unknown[] };
+    expect(resourceBody.primary.id).toBe("openai");
+    expect(resourceBody.managedProviders).toHaveLength(1);
+    expect(resourceBody.resourceRevision).toMatch(/^[a-f0-9]{64}$/u);
+    expect(JSON.stringify(resourceBody)).not.toContain("secret");
+
+    const preview = await fetch(`${origin}/api/v1/management/provider-settings/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "primary.switch", providerId: "relay" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken: string; preview: { operation: string } };
+    expect(previewBody.preview.operation).toBe("switch");
+    expect(previewBody.confirmationToken).toMatch(/^[A-Za-z0-9_-]+$/u);
+
+    const agentPreview = await fetch(`${origin}/api/v1/management/provider-settings/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek", model: "deepseek-v4-flash" }),
+    });
+    expect(agentPreview.status).toBe(200);
+    const agentPreviewBody = await agentPreview.json() as { confirmationToken: string; preview: { selection?: { provider: string } } };
+    expect(agentPreviewBody.preview.selection?.provider).toBe("deepseek");
+    const agentApply = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek", model: "deepseek-v4-flash", confirmationToken: agentPreviewBody.confirmationToken }),
+    });
+    expect(agentApply.status).toBe(200);
+    expect(await agentApply.json()).toMatchObject({ action: "configured", auditStatus: "recorded" });
+    const auditEntries = readFileSync(join(fixture.home, "management-audit.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { target?: string });
+    expect(auditEntries.some((entry) => entry.target === "deepseek")).toBe(true);
+
+    const apply = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "primary.switch", providerId: "relay", confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(apply.status).toBe(200);
+    expect(appliedInput).toEqual({ operation: "primary.switch", providerId: "relay" });
+    expect(await apply.json()).toMatchObject({ action: "switched", auditStatus: "recorded" });
+
+    const replay = await fetch(`${origin}/api/v1/management/provider-settings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "primary.switch", providerId: "relay", confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(replay.status).toBe(409);
+  });
+
+  it("manages account settings with the shared token and redacted credentials", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    let appliedInput: unknown = null;
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token",
+      managementOrigin,
+      loadAccountSettings: async () => ({
+        opencodeGo: {
+          configured: true,
+          defaultAccountId: "main",
+          accounts: [{ id: "main", displayName: "ocg-main", email: "main@example.com", default: true }],
+        },
+        deepseek: { configured: false, mode: null, model: null, restoreAvailable: false },
+      }),
+      previewAccountSettings: async (input: unknown) => ({
+        operation: (input as { operation: string }).operation,
+        account: { id: "main", displayName: "ocg-main", email: "main@example.com", exists: true },
+        effects: { updatesExternalAgent: true },
+        activation: "restart-all",
+      }),
+      applyAccountSettings: async (input: unknown) => {
+        appliedInput = input;
+        return { action: "configured", operation: "opencode.account.configure", account: { id: "main", displayName: "ocg-main" }, activation: "restart-all" };
+      },
+    });
+    const headers = { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" };
+    const resource = await fetch(`${origin}/api/v1/management/account-settings`, { headers: { authorization: "Bearer webui-token" } });
+    expect(resource.status).toBe(200);
+    expect((await resource.json() as { opencodeGo: { accounts: unknown[] } }).opencodeGo.accounts).toHaveLength(1);
+    const preview = await fetch(`${origin}/api/v1/management/account-settings/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "opencode.account.configure", accountId: "main", contact: "main@example.com", apiKey: "secret-key" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken: string };
+    expect(JSON.stringify(previewBody)).not.toContain("secret-key");
+    const apply = await fetch(`${origin}/api/v1/management/account-settings`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "opencode.account.configure", accountId: "main", contact: "main@example.com", apiKey: "secret-key", confirmationToken: previewBody.confirmationToken }),
+    });
+    expect(apply.status).toBe(200);
+    expect(appliedInput).toMatchObject({ operation: "opencode.account.configure", apiKey: "secret-key" });
+    expect(await apply.json()).toMatchObject({ action: "configured", auditStatus: "recorded" });
+  });
+
+  it("previews and starts a confirmed source maintenance task without replay", async () => {
+    const fixture = createFixture();
+    const executableDirectory = mkdtempSync(join(tmpdir(), "codexc-webui-task-route-"));
+    temporaryDirectories.push(executableDirectory);
+    const executable = process.platform === "win32" ? join(executableDirectory, "codexc.cmd") : join(executableDirectory, "codexc");
+    if (process.platform === "win32") {
+      writeFileSync(executable, "@echo off\r\nexit /b 0\r\n", { mode: 0o700 });
+    } else {
+      writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+      chmodSync(executable, 0o700);
+    }
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(
+      { ...fixture.environment, PATH: executableDirectory + delimiter },
+      undefined,
+      { token: "webui-token", managementOrigin },
+    );
+    const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
+    const preview = await fetch(`${origin}/api/v1/management/tasks/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ operation: "update" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken: string };
+    const startBody = { operation: "update", confirmationToken: previewBody.confirmationToken };
+    const started = await fetch(`${origin}/api/v1/management/tasks`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(startBody),
+    });
+    expect(started.status).toBe(202);
+    const taskId = (await started.json() as { id: string }).id;
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const list = await fetch(`${origin}/api/v1/management/tasks`, { headers: { authorization: "Bearer webui-token" } });
+      expect(list.status).toBe(200);
+      const task = (await list.json() as { tasks: Array<{ id: string; state: string }> }).tasks.find((candidate) => candidate.id === taskId);
+      if (task?.state === "completed") break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      if (attempt === 99) throw new Error("管理任务未在预期时间内完成");
+    }
+
+    const replay = await fetch(`${origin}/api/v1/management/tasks`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(startBody),
+    });
+    expect(replay.status).toBe(409);
+  });
+
+  it("requires a one-time confirmation for secret-bearing Gateway settings", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token", managementOrigin });
+    const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
+    const current = await (await fetch(`${origin}/api/v1/management/settings`, { headers })).json() as { revision: string };
+    const preview = await fetch(`${origin}/api/v1/management/settings/preview`, { method: "POST", headers, body: JSON.stringify({ revision: current.revision, setting: { kind: "webui.token", action: "set", value: "new-secret" } }) });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json() as { confirmationToken?: string; confirmationRequired?: boolean };
+    expect(previewBody.confirmationRequired).toBe(true);
+    expect(previewBody.confirmationToken).toEqual(expect.any(String));
+    const update = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers, body: JSON.stringify({ revision: current.revision, confirmationToken: previewBody.confirmationToken, setting: { kind: "webui.token", action: "set", value: "new-secret" } }) });
+    expect(update.status).toBe(200);
+  });
+
+  it("protects low-risk management writes with the same WebUI token", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const unauthorized = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin } });
+    expect(unauthorized.status).toBe(401);
+    const settings = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    expect(settings.status).toBe(200);
+    const body = await settings.json() as { revision: string };
+    const update = await fetch(`${origin}/api/v1/management/settings`, {
+      method: "PATCH",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: body.revision,
+        setting: { kind: "display.reasoning", value: false },
+      }),
+    });
+    expect(update.status).toBe(200);
+    expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(false);
+    const legacyLogin = await fetch(`${origin}/api/v1/management/login`, {
+      method: "POST",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    expect(legacyLogin.status).toBe(404);
+  });
+
+  it("does not expose arbitrary metrics database paths through WebUI management", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const headers = {
+      origin: managementOrigin,
+      authorization: "Bearer webui-token",
+      "content-type": "application/json",
+    };
+    const current = await (await fetch(`${origin}/api/v1/management/settings`, { headers })).json() as { revision: string };
+    const response = await fetch(`${origin}/api/v1/management/settings/preview`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ revision: current.revision, setting: { kind: "metrics.center.database-path", value: "/tmp/redirected.sqlite3" } }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "setting_not_allowed" } });
+  });
+
+  it("reads, previews and writes App Server user settings through the shared management token", async () => {
+    const fixture = createFixture();
+    let settings = {
+      version: "codex-v1",
+      provider: "openai",
+      defaultsEditable: true,
+      models: [{ model: "gpt-test", displayName: "GPT Test", reasoningEfforts: [{ effort: "medium", description: "" }], defaultReasoningEffort: "medium", isDefault: true }],
+      defaults: { model: "gpt-test", reasoningEffort: "medium", fastEnabled: false, webSearch: "disabled", updatePlanEnabled: false },
+      permissions: { editable: true, defaultPermissions: null, sandboxMode: "read-only", approvalPolicy: "on-request", networkAccess: false },
+    };
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token",
+      managementOrigin: "http://127.0.0.1:0",
+      loadCodexSettings: async () => settings,
+      previewCodexSetting: async (input: unknown) => ({ kind: (input as { kind: string }).kind, previousVersion: settings.version, value: { enabled: true }, activation: "restart-all" as const }),
+      updateCodexSetting: async (input: unknown) => { settings = { ...settings, version: "codex-v2" }; return { kind: (input as { kind: string }).kind, previousVersion: "codex-v1", value: { enabled: true }, activation: "restart-all" as const }; },
+    });
+    const headers = { authorization: "Bearer webui-token" };
+    const read = await fetch(`${origin}/api/v1/management/codex/settings`, { headers });
+    expect(read.status).toBe(200);
+    expect((await read.json()).version).toBe("codex-v1");
+    const preview = await fetch(`${origin}/api/v1/management/codex/settings/preview`, { method: "POST", headers: { ...headers, origin: "http://127.0.0.1:0", "content-type": "application/json" }, body: JSON.stringify({ revision: "codex-v1", setting: { kind: "fast", enabled: true } }) });
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).activation.status).toBe("restart");
+    const update = await fetch(`${origin}/api/v1/management/codex/settings`, { method: "PATCH", headers: { ...headers, origin: "http://127.0.0.1:0", "content-type": "application/json" }, body: JSON.stringify({ revision: "codex-v1", setting: { kind: "fast", enabled: true } }) });
+    expect(update.status).toBe(200);
+    expect((await update.json()).revision).toBe("codex-v2");
+  });
+
+  it("returns one complete redacted configuration snapshot for the settings page", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const document = readGatewayConfig(configPath);
+    document.webui = { host: "127.0.0.1", port: 8787, token: "webui-secret" };
+    document.network = { https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" };
+    writeGatewayConfig(configPath, document);
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-secret" });
+
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { authorization: "Bearer webui-secret" },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      system: { defaultWorkspace: string | null };
+      network: { configuredFields: string[] };
+      webui: { host: string; port: number; tokenConfigured: boolean };
+      metrics: {
+        sync: { intervalSeconds: number; batchSize: number; deviceTokenConfigured: boolean };
+        view: { tokenConfigured: boolean };
+        center: { tokenConfigured: boolean; deviceTokenConfigured: boolean };
+      };
+      channels: unknown[];
+    };
+    expect(body).toMatchObject({
+      system: { defaultWorkspace: "codex-connect" },
+      network: { configuredFields: ["https_proxy"] },
+      webui: { host: "127.0.0.1", port: 8787, tokenConfigured: true },
+      metrics: {
+        sync: { intervalSeconds: 60, batchSize: 200, deviceTokenConfigured: false },
+        view: { tokenConfigured: false },
+        center: { tokenConfigured: false, deviceTokenConfigured: false },
+      },
+      channels: expect.any(Array),
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("webui-secret");
+    expect(serialized).not.toContain("proxy-secret");
+  });
+
+  it("normalizes structured metrics settings from the WebUI payload", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const settings = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { authorization: "Bearer webui-token" },
+    });
+    const current = await settings.json() as {
+      revision: string;
+      metrics: {
+        storage: { retentionDays: number; maxRows: number };
+        sync: { intervalSeconds: number; batchSize: number };
+      };
+    };
+    const retentionDays = current.metrics.storage.retentionDays === 30 ? 90 : 30;
+    const preview = await fetch(`${origin}/api/v1/management/settings/preview`, {
+      method: "POST",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: current.revision,
+        setting: {
+          kind: "metrics.storage",
+          value: { retentionDays, maxRows: current.metrics.storage.maxRows },
+        },
+      }),
+    });
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({ value: { storage: { retentionDays } } });
+
+    const intervalSeconds = current.metrics.sync.intervalSeconds === 60 ? 300 : 60;
+    const update = await fetch(`${origin}/api/v1/management/settings`, {
+      method: "PATCH",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: current.revision,
+        setting: {
+          kind: "metrics.sync-params",
+          value: { intervalSeconds, batchSize: current.metrics.sync.batchSize, deviceName: "build-server" },
+        },
+      }),
+    });
+    expect(update.status).toBe(200);
+    expect(loadGatewaySettings(fixture.environment).metrics.sync.intervalSeconds).toBe(intervalSeconds);
+    expect(loadGatewaySettings(fixture.environment).metrics.sync.deviceName).toBe("build-server");
+  });
+
+  it("writes the metrics center port through the WebUI settings endpoint", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const settings = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { origin: managementOrigin, authorization: "Bearer webui-token" },
+    });
+    const current = await settings.json() as {
+      revision: string;
+      metrics: { center: { port: number } };
+    };
+    const nextPort = current.metrics.center.port === 9_001 ? 9_002 : 9_001;
+    const update = await fetch(`${origin}/api/v1/management/settings`, {
+      method: "PATCH",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: current.revision,
+        setting: { kind: "metrics.center.port", value: nextPort },
+      }),
+    });
+    expect(update.status).toBe(200);
+    expect(loadGatewaySettings(fixture.environment).metrics.center.port).toBe(nextPort);
+  });
+
+  it("does not expose a second management login and reports missing WebUI auth", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const response = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin } });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "management_requires_webui_token" } });
+  });
+
+  it("rejects management writes with stale revision and cross-origin requests", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const settings = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, authorization: "Bearer webui-token" } });
+    const current = await settings.json() as { revision: string; display: { reasoningEnabled: boolean } };
+    const revision = current.revision;
+    const changedValue = !current.display.reasoningEnabled;
+    const crossOrigin = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: "https://evil.example", authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: changedValue } }) });
+    expect(crossOrigin.status).toBe(403);
+    const first = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: changedValue } }) });
+    expect(first.status).toBe(200);
+    const stale = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision, setting: { kind: "display.reasoning", value: !changedValue } }) });
+    expect(stale.status).toBe(409);
+  });
+
+  it("fails closed when management audit storage is unavailable", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const settings = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin, authorization: "Bearer webui-token" } });
+    const current = await settings.json() as { revision: string; display: { reasoningEnabled: boolean } };
+    const auditPath = join(fixture.home, "management-audit.jsonl");
+    mkdirSync(auditPath);
+    const update = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH", headers: { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision: current.revision, setting: { kind: "display.reasoning", value: !current.display.reasoningEnabled } }) });
+    expect(update.status).toBe(500);
+    expect((await update.json() as { error: { code: string } }).error.code).toBe("management_audit_unavailable");
+    expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(current.display.reasoningEnabled);
+  });
+
+  it("rejects unauthorized, cross-origin, and unsupported management requests", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const unauthorized = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin } });
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.headers.get("x-content-type-options")).toBe("nosniff");
+    const crossOrigin = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: "https://evil.example", authorization: "Bearer webui-token" } });
+    expect(crossOrigin.status).toBe(403);
+    expect(crossOrigin.headers.get("x-content-type-options")).toBe("nosniff");
+    const unsupported = await fetch(`${origin}/api/v1/management/settings/preview`, { method: "POST", headers: { origin: managementOrigin, authorization: "Bearer webui-token", "content-type": "application/json" }, body: JSON.stringify({ revision: "0".repeat(64), setting: { kind: "credentials.api-key", value: "secret" } }) });
+    expect(unsupported.status).toBe(400);
+    expect((await unsupported.json() as { error: { code: string } }).error.code).toBe("setting_not_allowed");
+  });
+
+  it("returns an actionable settings error before Gateway initialization", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-webui-uninitialized-"));
+    temporaryDirectories.push(home);
+    const { origin } = await startServer({
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    });
+
+    const response = await fetch(`${origin}/api/v1/settings/summary`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "configuration_unavailable",
+        message: "Gateway 尚未初始化，请先运行 codexc init",
+      },
+    });
+  });
+
   it("reports deepseek balance as unavailable without credentials", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);
@@ -316,6 +1094,27 @@ describe("webui server", () => {
       }>;
     };
     expect(body.accounts).toEqual([]);
+  });
+
+  it("returns the configured OCG contact display name for usage cards", async () => {
+    const fixture = createFixture();
+    writeOpencodeGoAccounts(fixture.environment, [{
+      id: "main",
+      default: true,
+      email: "User@Example.com",
+    }]);
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/opencode-go-usage`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      accounts: [{
+        account: "main",
+        displayName: "ocg-user@example.com",
+        available: false,
+      }],
+    });
   });
 
   it("lists threads and returns run and turns details", async () => {
@@ -670,6 +1469,21 @@ describe("webui server", () => {
     });
     expect(response.status).toBe(200);
   });
+
+  it("allows the loopback management path through an SSH tunnel when bound publicly", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token", managementOrigin },
+    );
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { authorization: "Bearer secret-token" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toHaveProperty("revision");
+  });
 });
 
 function createFixture() {
@@ -723,6 +1537,16 @@ async function startServer(
   options: {
     host?: string
     token?: string
+    managementOrigin?: string
+    loadProviderState?: (options: { environment: NodeJS.ProcessEnv }) => Promise<unknown>
+    loadCodexSettings?: (options: { environment: NodeJS.ProcessEnv }) => Promise<unknown>
+    previewCodexSetting?: (input: unknown, options: { environment: NodeJS.ProcessEnv; expectedVersion: string }) => Promise<unknown>
+    updateCodexSetting?: (input: unknown, options: { environment: NodeJS.ProcessEnv; expectedVersion: string }) => Promise<unknown>
+    previewProviderSettings?: (input: unknown, environment: NodeJS.ProcessEnv) => Promise<unknown>
+    applyProviderSettings?: (input: unknown, environment: NodeJS.ProcessEnv, preview: unknown) => Promise<unknown>
+    loadAccountSettings?: (environment: NodeJS.ProcessEnv) => Promise<unknown>
+    previewAccountSettings?: (input: unknown, environment: NodeJS.ProcessEnv) => Promise<unknown>
+    applyAccountSettings?: (input: unknown, environment: NodeJS.ProcessEnv, preview: unknown) => Promise<unknown>
   } = {},
 ) {
   const { server } = createWebuiServer({
@@ -730,6 +1554,16 @@ async function startServer(
     ...(staticDir === undefined ? {} : { staticDir }),
     ...(options.host === undefined ? {} : { host: options.host }),
     ...(options.token === undefined ? {} : { token: options.token }),
+    ...(options.managementOrigin === undefined ? {} : { managementOrigin: options.managementOrigin }),
+    ...(options.loadProviderState === undefined ? {} : { loadProviderState: options.loadProviderState }),
+    ...(options.loadCodexSettings === undefined ? {} : { loadCodexSettings: options.loadCodexSettings }),
+    ...(options.previewCodexSetting === undefined ? {} : { previewCodexSetting: options.previewCodexSetting }),
+    ...(options.updateCodexSetting === undefined ? {} : { updateCodexSetting: options.updateCodexSetting }),
+    ...(options.previewProviderSettings === undefined ? {} : { previewProviderSettings: options.previewProviderSettings }),
+    ...(options.applyProviderSettings === undefined ? {} : { applyProviderSettings: options.applyProviderSettings }),
+    ...(options.loadAccountSettings === undefined ? {} : { loadAccountSettings: options.loadAccountSettings }),
+    ...(options.previewAccountSettings === undefined ? {} : { previewAccountSettings: options.previewAccountSettings }),
+    ...(options.applyAccountSettings === undefined ? {} : { applyAccountSettings: options.applyAccountSettings }),
   });
   await new Promise<void>((resolve) => {
     server.listen(0, options.host ?? "127.0.0.1", resolve);

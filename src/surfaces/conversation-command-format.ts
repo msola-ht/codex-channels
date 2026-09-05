@@ -1,6 +1,7 @@
 import {
   fastServiceTierId,
   isFastServiceTier,
+  listProviders,
   supportsMcpOAuthLogin,
   type ConversationCommandName,
   type ConversationCommandOutcome,
@@ -126,7 +127,7 @@ export const conversationCommandHelpSections = [
   {
     title: "模型与能力：",
     lines: [
-      "/model [序号|模型 ID|名称|clear]",
+      "/model [提供商序号或 ID|模型序号、ID 或名称|clear]",
       "/effort [序号|档位] · /fast [on|off|status]",
       "/skill · /skills [名称或序号 任务]",
       "/agents [角色名称或序号 任务]",
@@ -178,7 +179,7 @@ export function formatConversationSessions(
     `${result.archived ? "已归档会话" : "历史会话"}（匹配 ${result.matchedSessionCount} · 第 ${result.page}/${result.pageCount} 页）${result.view.searchTerm ? ` · 搜索：${result.view.searchTerm}` : ""}：`,
     ...visibleSessions.map(
       (session, index) =>
-        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.modelProvider ? ` · Provider：${session.modelProvider}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
+        `${session.selector ?? index + 1}. ${formatSessionSection(session)}${formatSessionLabel(session.name ?? session.preview)}${session.model ? ` · 模型：${session.model}` : ""}${session.modelProvider ? ` · Provider：${formatDisplayedProvider(session.modelProvider)}` : ""}${session.turnCount === undefined ? "" : ` · 轮数：${session.turnCount}`} · ${session.id.slice(0, 12)} · ${session.status.type}${session.id === result.currentThreadId ? " ← 当前" : backgroundThreadIds.has(session.id) ? " · 后台运行" : ""}`,
     ),
     ...(hiddenCount > 0
       ? [
@@ -248,7 +249,7 @@ export function formatConversationScheduledTasks(
       `   ID：${task.taskId}`,
       `   计划：${formatSchedule(task.schedule, task.timezone)}`,
       `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
-      `   Workspace：${task.workspaceId} · 模型：${task.modelProvider}/${task.model ?? "默认"} · ${task.sandbox}`,
+      `   Workspace：${task.workspaceId} · 模型：${formatDisplayedProvider(task.modelProvider)}/${task.model ?? "默认"} · ${task.sandbox}`,
     ].join("\n")),
     "",
     "此处列出循环任务定义；每次执行结果与终态：/schedule runs <任务>",
@@ -304,7 +305,7 @@ export function formatConversationScheduledConfirmation(
     ...(preview.action === "delete" ? [`任务：${preview.task.taskId}`] : []),
     `计划：${formatSchedule(preview.task.schedule, preview.task.timezone)}`,
     `Workspace：${preview.task.workspaceId}`,
-    `模型：${preview.task.modelProvider}/${preview.task.model ?? "默认"}`,
+    `模型：${formatDisplayedProvider(preview.task.modelProvider)}/${preview.task.model ?? "默认"}`,
     `思考等级：${preview.task.reasoningEffort ?? "默认"}`,
     `下次运行：${formatScheduledAt(preview.task.nextRunAt)}`,
     `Sandbox：${preview.task.sandbox}`,
@@ -681,7 +682,7 @@ export function formatConversationCommandOutcome(
         `状态：${formatScheduledTaskStatusLabel(outcome.task.status)}`,
         `计划：${formatSchedule(outcome.task.schedule, outcome.task.timezone)}`,
         `下次运行：${formatScheduledAt(outcome.task.nextRunAt)}`,
-        `模型：${outcome.task.modelProvider}/${outcome.task.model ?? "默认"}`,
+        `模型：${formatDisplayedProvider(outcome.task.modelProvider)}/${outcome.task.model ?? "默认"}`,
         `思考等级：${outcome.task.reasoningEffort ?? "默认"}`,
       ].join("\n"));
     case "scheduled-task.run-requested":
@@ -1636,6 +1637,11 @@ export function formatConversationModels(
   const providerSwitchNotice = state.providerPending
     ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。", ""]
     : [];
+  const scopedModels = state.providerFilter === undefined
+    ? state.models
+    : state.models.filter(
+        (model) => (model.provider ?? "openai") === state.providerFilter,
+      );
   if (result.view === "fast") {
     return toStructuredMarkdownList([
       formatModelStateLine(state),
@@ -1668,6 +1674,25 @@ export function formatConversationModels(
       "切换：/effort <序号或档位>",
     ].join("\n"));
   }
+  const providers = listProviders(state.models);
+  if (state.providerFilter === undefined && providers.length > 1) {
+    const currentProvider = state.modelProvider ?? "openai";
+    return toStructuredMarkdownList([
+      formatModelStateLine(state),
+      `思考等级：${state.effort ?? "模型默认"}`,
+      ...(current && fastServiceTierId(current)
+        ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
+        : []),
+      "",
+      `当前 Provider：${formatCodexProviderLabel(currentProvider)}`,
+      "可用提供商：",
+      ...providers.map((provider, index) =>
+        `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,
+      ),
+      "",
+      "下一步：/model <提供商序号或 ID>",
+    ].join("\n"));
+  }
   return toStructuredMarkdownList([
     formatModelStateLine(state),
     `思考等级：${state.effort ?? "模型默认"}`,
@@ -1677,13 +1702,14 @@ export function formatConversationModels(
     ...formatCurrentModelNotices(current),
     "",
     ...providerSwitchNotice,
-    `模型列表（${state.models.length}）：`,
-    ...state.models.map(
+    `当前 Provider：${formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0])}`,
+    `模型列表（${scopedModels.length}）：`,
+    ...scopedModels.map(
       (model, index) =>
         `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
     ),
     "",
-    "切换：/model <序号、模型 ID 或名称>",
+    "切换：/model <模型序号、ID 或名称>",
   ].join("\n"));
 }
 
@@ -1729,7 +1755,11 @@ function formatConversationModel(
   label: string,
   value: { model: string; modelProvider?: string },
 ): string {
-  return `${label}：${value.model}${value.modelProvider ? ` · Provider：${value.modelProvider}` : ""}`;
+  return `${label}：${value.model}${value.modelProvider ? ` · Provider：${formatDisplayedProvider(value.modelProvider)}` : ""}`;
+}
+
+function formatDisplayedProvider(provider: string): string {
+  return provider.startsWith("ocg-") ? formatCodexProviderLabel(provider) : provider;
 }
 
 function formatModelStateLine(

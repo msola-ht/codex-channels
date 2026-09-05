@@ -28,6 +28,10 @@ export interface WeixinReplyContextPersistence {
     contextToken: string,
   ): Promise<void>;
   remove(target: ConversationTarget): Promise<void>;
+  removeIf(
+    target: ConversationTarget,
+    expectedContextToken: string,
+  ): Promise<boolean>;
 }
 
 const keychainService = "codexc-weixin-reply-context";
@@ -35,6 +39,8 @@ const maximumContextTokenLength = 65_536;
 
 class StrictWeixinReplyContextPersistence
 implements WeixinReplyContextPersistence {
+  private readonly operations = new Map<string, Promise<void>>();
+
   constructor(
     private readonly records: SecureCredentialRecordStore,
     private readonly now: () => number = Date.now,
@@ -64,11 +70,47 @@ implements WeixinReplyContextPersistence {
       contextToken,
       updatedAt: this.now(),
     }, target);
-    await this.records.set(targetKey(target), JSON.stringify(record));
+    await this.serialize(target, () =>
+      this.records.set(targetKey(target), JSON.stringify(record))
+    );
   }
 
   async remove(target: ConversationTarget): Promise<void> {
-    await this.records.remove(targetKey(target));
+    await this.serialize(target, () => this.records.remove(targetKey(target)));
+  }
+
+  async removeIf(
+    target: ConversationTarget,
+    expectedContextToken: string,
+  ): Promise<boolean> {
+    let removed = false;
+    await this.serialize(target, async () => {
+      const current = await this.records.get(targetKey(target));
+      if (current === null) return;
+      const parsed = parseStoredContext(current, target);
+      if (parsed.contextToken !== expectedContextToken) return;
+      await this.records.remove(targetKey(target));
+      removed = true;
+    });
+    return removed;
+  }
+
+  private async serialize(
+    target: ConversationTarget,
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    const key = targetKey(target);
+    const previous = this.operations.get(key) ?? Promise.resolve();
+    // 一个失败的磁盘操作不应让同一 Conversation 的后续上下文写入永久跳过。
+    const current = previous.catch(() => undefined).then(operation);
+    this.operations.set(key, current);
+    try {
+      await current;
+    } finally {
+      if (this.operations.get(key) === current) {
+        this.operations.delete(key);
+      }
+    }
   }
 }
 

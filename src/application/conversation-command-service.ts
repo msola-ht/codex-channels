@@ -28,6 +28,7 @@ import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
 import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
+import { resolveProvider } from "./model-selection-service.js";
 
 export {
   archivedSessionCommandUsageText,
@@ -354,7 +355,12 @@ export class ConversationCommandService {
           };
         }
         const view = defaultSessionListView();
-        const sessions = await this.conversations.listSessions(target, { page: view.page });
+        // `/resume` is the fast switching entry point.  Do not trigger the
+        // optional per-session turn-history scan while rendering the picker.
+        const sessions = await this.conversations.listSessions(target, {
+          page: view.page,
+          turnCountMode: "cached",
+        });
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {
@@ -365,7 +371,10 @@ export class ConversationCommandService {
       }
       case "sessions": {
         const view = parseSessionListView(argumentsText, false);
-        const sessions = await this.conversations.listSessions(target, toSessionQuery(view));
+        const sessions = await this.conversations.listSessions(target, {
+          ...toSessionQuery(view),
+          turnCountMode: "cached",
+        });
         const currentThreadId = this.conversations.status(target).threadId;
         const backgroundThreadIds = this.conversations.backgroundThreadIds?.(target) ?? [];
         return sessionListResult(sessions, view, {
@@ -379,6 +388,7 @@ export class ConversationCommandService {
         const sessions = await this.conversations.listSessions(target, {
           archived: true,
           ...toSessionQuery(view),
+          turnCountMode: "cached",
         });
         return sessionListResult(sessions, view, { archived: true });
       }
@@ -690,10 +700,42 @@ export class ConversationCommandService {
             view: "model",
             state: argumentsText === "clear"
               ? await this.conversations.clearModelSelection(target)
-              : await this.conversations.modelState(target),
-          };
+              : await this.conversations.clearModelBrowse(target),
+            };
         }
-        const state = await this.conversations.selectModel(target, argumentsText);
+        if (typeof this.conversations.modelState === "function") {
+          const browseState = await this.conversations.modelState(target);
+          if (
+            browseState.providerFilter === undefined
+            && (/^\d+$/u.test(argumentsText)
+              || resolveProvider(browseState.models, argumentsText) !== undefined)
+          ) {
+            return {
+              kind: "models",
+              view: "model",
+              state: await this.conversations.browseProviderModels(target, argumentsText),
+            };
+          }
+        }
+        let state: Awaited<ReturnType<ConversationUseCases["selectModel"]>>;
+        try {
+          state = await this.conversations.selectModel(target, argumentsText);
+        } catch (error) {
+          if (
+            error instanceof UserFacingError
+            && error.code === "model.selector.not-found"
+          ) {
+            return {
+              kind: "models",
+              view: "model",
+              state: await this.conversations.browseProviderModels(
+                target,
+                argumentsText,
+              ),
+            };
+          }
+          throw error;
+        }
         const selected = state.models.find((model) =>
           model.model === state.model
           && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));

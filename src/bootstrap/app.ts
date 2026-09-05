@@ -36,7 +36,11 @@ import {
   inspectAppServerSupervisor,
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
-import { opencodeGoAccountIdFromProvider } from "../../runtime/opencode-go-accounts.mjs";
+import {
+  loadOpencodeGoProviderIdentities,
+  opencodeGoAccountIdFromProvider,
+  opencodeGoProviderDisplayName,
+} from "../../runtime/opencode-go-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -177,6 +181,7 @@ export class GatewayApplication {
   private readonly exchangeRate: RemoteExchangeRate;
   private readonly metricsSync: MetricsSync;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
+  private readonly providerAccounts?: ProviderAccountService;
   private readonly bindings: SqliteBindingStore;
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
   private readonly workspaces: WorkspaceRegistry;
@@ -336,6 +341,7 @@ export class GatewayApplication {
       statePath: join(dirname(config.stateDatabasePath), "metrics-sync-state.json"),
       fetchImpl: createProxyFetch(config.networkProxy),
       logger,
+      providerIdentities: () => loadOpencodeGoProviderIdentities(),
     });
     const recordTurnErrorMetric = (
       provider: string,
@@ -526,7 +532,24 @@ export class GatewayApplication {
         },
       ),
     ];
-    const providerAccounts = new ProviderAccountService(accountAdapters);
+    this.providerAccounts = new ProviderAccountService(accountAdapters, {
+      writeOfficialAccountSnapshot: (snapshot) => {
+        const accountId = snapshot.accountId
+          ?? opencodeGoAccountIdFromProvider(snapshot.provider)
+          ?? null;
+        metricsStore.upsertAccountSnapshot?.({
+          sourceId: `${snapshot.provider}:${accountId ?? "default"}`,
+          provider: snapshot.provider,
+          accountId,
+          displayName: snapshot.provider,
+          enabled: true,
+          observedAtMs: snapshot.observedAtMs,
+          available: snapshot.available,
+          usage: snapshot.usage,
+          limits: snapshot.limits,
+        });
+      },
+    });
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -561,7 +584,7 @@ export class GatewayApplication {
           }, true);
         },
       },
-      providerAccounts,
+      this.providerAccounts,
       new RequestMetricsQueryAdapter(metricsStore, this.router, config.apiProviders),
       this.workspacePermissions,
       {
@@ -667,7 +690,7 @@ export class GatewayApplication {
         const accountId = opencodeGoAccountIdFromProvider(provider);
         const label = accountId === undefined
           ? provider
-          : `OpenCode Go 账户 ${accountId}`;
+          : opencodeGoProviderDisplayName(provider);
         const message = providerIdleReleaseMessage(label);
         if (targets.length === 0) {
           this.logger.info({ provider }, "OpenCode Go 账户已释放，无渠道会话需要通知");
@@ -1100,6 +1123,9 @@ export class GatewayApplication {
         "Codex App Server 已连接",
       );
       await this.surfaceManager.start();
+      void this.providerAccounts?.refreshSnapshots().catch((error) => {
+        this.logger.warn({ err: error }, "账户快照异步预热失败");
+      });
       await this.channelImageSpool.start();
       this.scheduledTasks?.start();
       this.providerIdleReleaser?.start();

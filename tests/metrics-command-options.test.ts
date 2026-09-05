@@ -104,7 +104,11 @@ describe("metrics command options", () => {
       'wire_api = "responses"',
       "",
     ].join("\n"), { mode: 0o600 });
-    const environment = { ...process.env, CODEX_HOME: codexHome };
+    const environment = {
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+    };
 
     expect(isMetricsProviderId("OpenAI", environment)).toBe(true);
   });

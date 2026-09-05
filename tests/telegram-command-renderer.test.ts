@@ -3,6 +3,8 @@ import type { Context } from "grammy";
 
 import {
   modelEffortKeyboard,
+  modelProviderSelectionKeyboard,
+  modelSelectionKeyboard,
   renderTelegramCommandResult,
   threadQueueDeleteConfirmationKeyboard,
   threadQueueItemKeyboard,
@@ -594,5 +596,77 @@ describe("Telegram command renderer", () => {
       totalSectionCount: 17,
       canManageCustomSections: false,
     })).toBeUndefined();
+  });
+
+  it("renders provider buttons first and model buttons after provider browsing", () => {
+    const baseState = {
+      models: [
+        {
+          id: "gpt-main",
+          model: "gpt-main",
+          provider: "openai",
+          displayName: "GPT Main",
+          supportedReasoningEfforts: [{ effort: "medium", description: "Medium" }],
+          defaultReasoningEffort: "medium",
+          serviceTiers: [],
+          defaultServiceTier: null,
+          isDefault: true,
+          inputModalities: ["text" as const],
+        },
+        {
+          id: "deepseek-v4-flash",
+          model: "deepseek-v4-flash",
+          provider: "deepseek",
+          displayName: "DeepSeek V4 Flash",
+          supportedReasoningEfforts: [{ effort: "high", description: "High" }],
+          defaultReasoningEffort: "high",
+          serviceTiers: [],
+          defaultServiceTier: null,
+          isDefault: false,
+          inputModalities: ["text" as const],
+        },
+      ],
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: "medium",
+      serviceTier: null,
+      pending: false,
+      modelPending: false,
+      effortPending: false,
+      serviceTierPending: false,
+    };
+
+    const providerResult = {
+      kind: "models" as const,
+      view: "model" as const,
+      state: baseState,
+    };
+    const providerKeyboard = modelProviderSelectionKeyboard(providerResult);
+    expect(providerKeyboard?.inline_keyboard).toHaveLength(2);
+    expect(
+      (providerKeyboard?.inline_keyboard[0]?.[0] as { callback_data?: string })
+        ?.callback_data,
+    ).toMatch(/^mp:1:/);
+    expect(
+      (providerKeyboard?.inline_keyboard[1]?.[0] as { callback_data?: string })
+        ?.callback_data,
+    ).toMatch(/^mp:2:/);
+
+    const filteredResult = {
+      kind: "models" as const,
+      view: "model" as const,
+      state: {
+        ...baseState,
+        providerFilter: "deepseek",
+        models: [baseState.models[1]!],
+      },
+    };
+    expect(modelProviderSelectionKeyboard(filteredResult)).toBeUndefined();
+    const modelKeyboard = modelSelectionKeyboard(filteredResult);
+    expect(modelKeyboard?.inline_keyboard).toHaveLength(1);
+    expect(
+      (modelKeyboard?.inline_keyboard[0]?.[0] as { callback_data?: string })
+        ?.callback_data,
+    ).toMatch(/^ms:1:/);
   });
 });

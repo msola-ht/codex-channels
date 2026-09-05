@@ -194,7 +194,7 @@ describe("backup provider migration", () => {
     }
   });
 
-  it("migrates both providers together", () => {
+  it("migrates DeepSeek while preserving accountless legacy OpenCode Go files", () => {
     const fixture = createFixture();
     try {
       writeLegacyProvider(fixture, deepseekProviderDefinition);
@@ -204,15 +204,20 @@ describe("backup provider migration", () => {
       const result = backupAndMigrateProviderFiles(fixture.environment, { apply: true });
 
       expect(result.status).toBe("migrated");
-      for (const id of ["deepseek", "opencode-go"]) {
-        expect(existsSync(join(
-          fixture.connectHome,
-          "providers",
-          id,
-          "models.json",
-        ))).toBe(true);
-      }
-      expect(existsSync(join(fixture.codexHome, "sf-opencode-go.models.json"))).toBe(false);
+      expect(existsSync(join(
+        fixture.connectHome,
+        "providers",
+        "deepseek",
+        "models.json",
+      ))).toBe(true);
+      expect(existsSync(join(
+        fixture.connectHome,
+        "providers",
+        "opencode-go",
+        "models.json",
+      ))).toBe(false);
+      expect(existsSync(join(fixture.codexHome, "sf-opencode-go.models.json"))).toBe(true);
+      expect(existsSync(join(fixture.codexHome, "sf-opencode-go.config.toml"))).toBe(true);
     } finally {
       fixture.remove();
     }
@@ -241,27 +246,28 @@ function writeLegacyProvider(
   fixture: ReturnType<typeof createFixture>,
   definition: ModelProviderDefinition,
 ) {
-  const catalogPath = join(fixture.codexHome, `sf-${definition.id}.models.json`);
+  const legacyId = definition.storageId ?? definition.id;
+  const catalogPath = join(fixture.codexHome, `sf-${legacyId}.models.json`);
   writeFileSync(catalogPath, legacyCatalog(), { mode: 0o600 });
   writeFileSync(
-    join(fixture.codexHome, `sf-${definition.id}.models.manifest.json`),
-    JSON.stringify({ sha256: `legacy-${definition.id}` }),
+    join(fixture.codexHome, `sf-${legacyId}.models.manifest.json`),
+    JSON.stringify({ sha256: `legacy-${legacyId}` }),
     { mode: 0o600 },
   );
   writeFileSync(
-    join(fixture.codexHome, `sf-${definition.id}.managed.toml`),
-    `version = 1\nprovider = "${definition.id}"\nmode = "switching"\n`,
+    join(fixture.codexHome, `sf-${legacyId}.managed.toml`),
+    `version = 1\nprovider = "${legacyId}"\nmode = "switching"\n`,
     { mode: 0o600 },
   );
   writeFileSync(
-    join(fixture.codexHome, `sf-${definition.id}.config.toml`),
+    join(fixture.codexHome, definition.profileFileName),
     [
       'model = "deepseek-v4-flash"',
-      `model_provider = "${definition.id}"`,
+      `model_provider = "${legacyId}"`,
       'model_reasoning_effort = "high"',
       `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-      `[model_providers.${definition.id}]`,
-      `name = "${definition.id}"`,
+      `[model_providers.${legacyId}]`,
+      `name = "${legacyId}"`,
       `base_url = "${definition.baseUrl}"`,
       'wire_api = "responses"',
       "requires_openai_auth = false",
@@ -277,7 +283,11 @@ function writeCurrentProviderDirectory(
   definition: ModelProviderDefinition,
   catalogMarker = "current-catalog",
 ) {
-  const directory = join(fixture.connectHome, "providers", definition.id);
+  const directory = join(
+    fixture.connectHome,
+    "providers",
+    definition.storageId ?? definition.id,
+  );
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   writeFileSync(
     join(directory, "models.json"),

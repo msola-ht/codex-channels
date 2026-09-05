@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   MessagesSquare,
   TriangleAlert,
+  Settings,
   type LucideIcon,
 } from "lucide-react"
 
@@ -17,4 +18,5 @@ export const navItems: NavItem[] = [
   { to: "/threads", label: "Threads", icon: MessagesSquare },
   { to: "/requests", label: "请求", icon: Activity },
   { to: "/errors", label: "错误", icon: TriangleAlert },
+  { to: "/settings", label: "设置", icon: Settings },
 ]

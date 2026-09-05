@@ -1,8 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { ActivityCalendar } from "react-activity-calendar"
 import "react-activity-calendar/tooltips.css"
-import ReactECharts from "echarts-for-react"
-import type { EChartsOption } from "echarts"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import {
   Alert,
@@ -45,28 +44,29 @@ import {
 } from "@/components/overview/overview-sections"
 import { useApi } from "@/hooks/use-api"
 import { useCurrency } from "@/hooks/currency-context"
+import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
+import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
 import { useOverview } from "@/hooks/use-overview"
 import {
-  fetchDeepseekBalance,
   fetchGlobalDaily,
   fetchGlobalDevices,
   fetchGlobalOverview,
-  fetchGlobalQuota,
-  fetchOpencodeGoUsage,
-  fetchSettings,
 } from "@/lib/api"
 import { formatTime, formatTokens } from "@/lib/format"
-import { positionTrendTooltip, toStackedUsageTrend } from "@/lib/trend"
+import type { DisplayCurrency } from "@/lib/format"
+import { toStackedUsageTrend } from "@/lib/trend"
+import { resolveDisplayCost } from "@/lib/cost"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import type {
   DeepseekBalanceResponse,
   GlobalCostRow,
   GlobalDailyRow,
   GlobalDeviceRow,
   GlobalOverviewResponse,
-  GlobalQuotaResponse,
   GlobalProviderRow,
   OpencodeGoUsageResponse,
-  SettingsResponse,
+  OverviewResponse,
   RangeName,
 } from "@/lib/types"
 
@@ -106,11 +106,16 @@ function persistScope(scope: Scope) {
 
 export function ConsolePage() {
   const [scope, setScope] = useState<Scope>(readScope)
-  const devices = useApi((signal) => fetchGlobalDevices(signal), [])
-  const account = useOverview("24h")
-  const settings = useApi((signal) => fetchSettings(signal), [])
-  const balance = useApi((signal) => fetchDeepseekBalance(signal), [])
-  const opencodeGoUsage = useApi((signal) => fetchOpencodeGoUsage(signal), [])
+  const [range, setRange] = useState<RangeName>("24h")
+  const devices = useApi(
+    (signal) => scope.kind === "local"
+      ? Promise.resolve({ devices: [] })
+      : fetchGlobalDevices(signal),
+    [scope.kind],
+  )
+  const account = useOverview(scope.kind === "local" ? range : "24h")
+  const officialAccounts = useOfficialAccountSources()
+  const { currency, settings } = useCurrency()
   const deviceLabel = (deviceId: string) =>
     devices.data?.devices.find((device) => device.device_id === deviceId)
       ?.display_name ?? deviceId
@@ -157,28 +162,45 @@ export function ConsolePage() {
       </div>
 
       {scope.kind === "local"
-        ? <LocalDashboard />
-        : <GlobalDashboard scope={scope} devices={devices.data?.devices ?? []} />}
+        ? <LocalDashboard range={range} onRangeChange={setRange} data={account.data} loading={account.loading} error={account.error} />
+        : <GlobalDashboard scope={scope} devices={devices.data?.devices ?? []} currency={currency ?? settings?.currency ?? "usd"} exchangeRate={settings?.exchangeRate?.usdToCny ?? null} />}
 
-      <AccountStatusCards
-        overview={account.data}
-        settings={settings.data}
-        balance={balance.data}
-        opencodeGoUsage={opencodeGoUsage.data}
-      />
+      {scope.kind === "local" ? (
+        <AccountStatusCards
+          overview={account.data}
+          settings={settings}
+          balance={officialAccounts.data?.deepseek ?? null}
+          opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
+          freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
+        />
+      ) : null}
     </div>
   )
 }
 
-function LocalDashboard() {
-  const [range, setRange] = useState<RangeName>("24h")
+function LocalDashboard({
+  range,
+  onRangeChange,
+  data,
+  loading,
+  error,
+}: {
+  range: RangeName
+  onRangeChange: (range: RangeName) => void
+  data: OverviewResponse | null
+  loading: boolean
+  error: string | null
+}) {
   const { currency } = useCurrency()
-  const { data, loading, error } = useOverview(range)
 
   return (
     <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">本地模块</h2>
+        <p className="text-sm text-muted-foreground">本机指标、请求错误和官方账户额度。</p>
+      </div>
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <RangeSelector value={range} onChange={setRange} />
+        <RangeSelector value={range} onChange={onRangeChange} />
       </div>
 
       <ErrorBanner error={error} />
@@ -201,11 +223,13 @@ function AccountStatusCards({
   settings,
   balance,
   opencodeGoUsage,
+  freshness,
 }: {
   overview: ReturnType<typeof useOverview>["data"]
-  settings: SettingsResponse | null
+  settings: ReturnType<typeof useCurrency>["settings"]
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
+  freshness: { deepseek: AccountSnapshotFreshness; opencodeGo: AccountSnapshotFreshness }
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -217,30 +241,63 @@ function AccountStatusCards({
           </AlertDescription>
         </Alert>
       ) : null}
+      <div>
+        <h2 className="text-lg font-semibold">本地账户与额度</h2>
+        <p className="text-sm text-muted-foreground">数据来自本机 Gateway 的账户快照；全局模块不展示本机账户。</p>
+      </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <WeeklyQuotaCard
           usedPercent={overview?.weeklyQuota?.usedPercent ?? null}
           resetsAt={overview?.weeklyQuota?.resetsAt ?? null}
           planType={overview?.weeklyQuota?.planType ?? null}
         />
-        <DeepseekBalanceCard
-          available={balance?.available ?? false}
-          balances={balance?.balances ?? []}
-        />
-        <OpencodeGoUsageCard
-          accounts={opencodeGoUsage?.accounts ?? []}
-        />
+        <div className="flex flex-col gap-2">
+          <FreshnessNotice provider="DS" status={freshness.deepseek} />
+          <DeepseekBalanceCard
+            available={balance?.available ?? false}
+            balances={balance?.balances ?? []}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <FreshnessNotice provider="OCG" status={freshness.opencodeGo} />
+          <OpencodeGoUsageCard
+            accounts={opencodeGoUsage?.accounts ?? []}
+          />
+        </div>
       </div>
     </div>
+  )
+}
+
+function FreshnessNotice({
+  provider,
+  status,
+}: {
+  provider: "DS" | "OCG"
+  status: AccountSnapshotFreshness
+}) {
+  if (status === "fresh") return null
+  return (
+    <Alert>
+      <AlertTitle>{provider} 账户快照需要刷新</AlertTitle>
+      <AlertDescription>
+        {status === "missing" ? "尚未获取到账户快照。" : "本地快照已超过 15 分钟。"}
+        请在对应渠道执行 /usage 或 /limits 后刷新本页面。
+      </AlertDescription>
+    </Alert>
   )
 }
 
 function GlobalDashboard({
   scope,
   devices,
+  currency,
+  exchangeRate,
 }: {
   scope: Extract<Scope, { kind: "all" } | { kind: "device" }>
   devices: GlobalDeviceRow[]
+  currency: DisplayCurrency
+  exchangeRate: number | null
 }) {
   const deviceId = scope.kind === "device" ? scope.deviceId : null
   const overview = useApi(
@@ -251,13 +308,13 @@ function GlobalDashboard({
     (signal) => fetchGlobalDaily(deviceId, 90, signal),
     [deviceId],
   )
-  const quota = useApi(
-    (signal) => fetchGlobalQuota(365, deviceId, signal),
-    [deviceId],
-  )
 
   return (
     <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-lg font-semibold">全局模块</h2>
+        <p className="text-sm text-muted-foreground">数据中心累计视图：核心指标、用量走势、设备明细、费用和 Provider。</p>
+      </div>
       <ErrorBanner error={overview.error} />
 
       {overview.loading || overview.data === null
@@ -265,7 +322,7 @@ function GlobalDashboard({
         : (
           <>
             <DashboardSection title="核心指标" description="当前范围内所有设备的累计数据">
-              <GlobalTotalsCards totals={overview.data.totals} />
+              <GlobalTotalsCards totals={overview.data.totals} costs={overview.data.costsByCurrency} currency={currency} exchangeRate={exchangeRate} />
             </DashboardSection>
 
             <DashboardSection title="用量走势" description="从趋势和日历两个维度查看使用节奏">
@@ -281,16 +338,12 @@ function GlobalDashboard({
 
             {scope.kind === "all" ? (
               <DashboardSection title="设备明细" description="确认哪些设备正在贡献数据，以及最近上报时间">
-                <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} />
+                <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} currency={currency} exchangeRate={exchangeRate} />
               </DashboardSection>
             ) : null}
 
-            <DashboardSection title="额度与费用" description="渠道额度窗口、计价币种和 Provider 分布分开查看">
-              <GlobalQuotaCard quota={quota.data} loading={quota.loading} />
-              <div className="grid gap-6 xl:grid-cols-2">
-                <GlobalCostTable rows={overview.data.costsByCurrency} />
-                <GlobalProviderTable rows={overview.data.providers} />
-              </div>
+            <DashboardSection title="费用与 Provider" description="计价费用和 Provider 分布分开查看">
+              <GlobalProviderTable rows={overview.data.providers} />
             </DashboardSection>
           </>
         )}
@@ -318,136 +371,17 @@ function DashboardSection({
   )
 }
 
-function GlobalQuotaCard({
-  quota,
-  loading,
+function GlobalTotalsCards({
+  totals,
+  costs,
+  currency,
+  exchangeRate,
 }: {
-  quota: GlobalQuotaResponse | null
-  loading: boolean
+  totals: GlobalOverviewResponse["totals"] | null
+  costs: GlobalCostRow[]
+  currency: DisplayCurrency
+  exchangeRate: number | null
 }) {
-  if (loading && quota === null) return <PageSkeleton rows={2} />
-  if (quota === null || quota.periods.length === 0) {
-    return <Alert><AlertTitle>暂无额度周期</AlertTitle><AlertDescription>中心库尚未收集到带重置时间的额度快照</AlertDescription></Alert>
-  }
-  const groups = new Map<string, GlobalQuotaResponse["periods"]>()
-  for (const period of quota.periods) {
-    const key = `${period.provider}\u0000${period.windowId}`
-    const group = groups.get(key) ?? []
-    group.push(period)
-    groups.set(key, group)
-  }
-  const current = [...groups.values()]
-    .map((periods) => [...periods].sort((a, b) => b.resetsAt - a.resetsAt)[0]!)
-    .sort((a, b) => a.provider.localeCompare(b.provider) || a.windowId.localeCompare(b.windowId))
-  const history = [...groups.entries()]
-    .map(([key, periods]) => ({
-      key,
-      periods: [...periods].sort((a, b) => b.resetsAt - a.resetsAt).slice(1),
-    }))
-    .filter((group) => group.periods.length > 0)
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>渠道额度估算</CardTitle>
-        <CardDescription>最近 {quota.days} 天 · 按渠道和额度窗口汇总，默认展示最新周期</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {current.map((period) => <QuotaPeriodCard key={`${period.provider}-${period.windowId}`} period={period} />)}
-        </div>
-        {history.length === 0 ? null : (
-          <details className="group rounded-lg border bg-muted/20 px-3">
-            <summary className="cursor-pointer list-none py-3 text-sm font-medium">
-              历史周期
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {history.reduce((count, group) => count + group.periods.length, 0)} 个
-              </span>
-              <span className="float-right text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
-            </summary>
-            <div className="overflow-x-auto pb-3">
-              <Table className="min-w-[900px]">
-                <TableHeader><TableRow>
-                  <TableHead>渠道 / 额度窗口</TableHead><TableHead>周期开始</TableHead><TableHead>周期结束</TableHead><TableHead>周期时长</TableHead><TableHead>参与设备</TableHead>
-                  <TableHead>已使用 Token</TableHead><TableHead>最新使用率</TableHead><TableHead>推算周期容量</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>{history.flatMap((group) => group.periods.map((period) => (
-                  <TableRow key={`${period.provider}-${period.windowId}-${period.resetsAt}`}>
-                    <TableCell>{period.provider} · {period.windowId}</TableCell>
-                    <TableCell className="whitespace-nowrap tabular-nums">{formatTime(period.periodStartAtMs)}</TableCell>
-                    <TableCell className="whitespace-nowrap tabular-nums">{formatTime(period.periodEndAtMs)}</TableCell>
-                    <TableCell className="whitespace-nowrap tabular-nums">{formatQuotaSpan(period.periodStartAtMs, period.periodEndAtMs)}</TableCell>
-                    <TableCell>{period.deviceCount}</TableCell>
-                    <TableCell>{formatTokens(period.totalTokens)}</TableCell>
-                    <TableCell>{formatQuotaPercent(period.latestUsedPercentMillionths)}</TableCell>
-                    <TableCell>{period.estimatedTotalTokens === null ? "未提供" : formatTokens(period.estimatedTotalTokens)}</TableCell>
-                  </TableRow>
-                )))}</TableBody>
-              </Table>
-            </div>
-          </details>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function QuotaPeriodCard({ period }: { period: GlobalQuotaResponse["periods"][number] }) {
-  const hasPercent = period.latestUsedPercentMillionths !== null
-  return (
-    <div className="rounded-lg border bg-card p-4 shadow-xs">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-medium">渠道：{period.provider}</p>
-          <p className="text-xs text-muted-foreground">额度窗口：{period.windowId}</p>
-        </div>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-          {period.deviceCount} 台设备
-        </span>
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div><p className="text-xs text-muted-foreground">{hasPercent ? "最新使用率" : "已使用 Token"}</p><p className="mt-1 text-lg font-semibold tabular-nums">{hasPercent ? formatQuotaPercent(period.latestUsedPercentMillionths) : formatTokens(period.totalTokens)}</p></div>
-        <div><p className="text-xs text-muted-foreground">{hasPercent ? "已使用 Token" : "额度百分比"}</p><p className="mt-1 text-lg font-semibold tabular-nums">{hasPercent ? formatTokens(period.totalTokens) : "未提供"}</p></div>
-      </div>
-      <div className="mt-3 overflow-x-auto border-t pt-3 text-xs text-muted-foreground">
-        <div className="flex min-w-max items-center gap-2 tabular-nums">
-          <span title="周期开始">{formatQuotaTimelineTime(period.periodStartAtMs)}</span>
-          <span className="flex items-center gap-1" aria-hidden="true">
-            <i className="size-1.5 rounded-full bg-primary" />
-            <i className="h-px w-4 bg-border" />
-            <span className="rounded-full border bg-muted px-2 py-0.5 font-medium text-foreground">{formatQuotaSpan(period.periodStartAtMs, period.periodEndAtMs)}</span>
-            <i className="h-px w-4 bg-border" />
-            <i className="size-1.5 rounded-full bg-primary" />
-          </span>
-          <span title="周期结束">{formatQuotaTimelineTime(period.periodEndAtMs)}</span>
-          {hasPercent && period.estimatedTotalTokens !== null ? <span className="ml-1 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">估算 {formatTokens(period.estimatedTotalTokens)}</span> : null}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function formatQuotaPercent(value: number | null): string {
-  return value === null ? "未提供" : `${(value / 1_000_000).toFixed(2)}%`
-}
-
-function formatQuotaSpan(startAtMs: number | null, endAtMs: number): string {
-  if (startAtMs === null || endAtMs < startAtMs) return "未知"
-  const minutes = Math.max(0, Math.round((endAtMs - startAtMs) / 60_000))
-  if (minutes < 60) return `${minutes} 分钟`
-  const hours = minutes / 60
-  if (hours < 24) return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`
-  const days = hours / 24
-  return `${Number.isInteger(days) ? days : days.toFixed(1)} 天`
-}
-
-function formatQuotaTimelineTime(value: number | null): string {
-  if (value === null) return "未知"
-  const date = new Date(value)
-  const pad = (part: number) => String(part).padStart(2, "0")
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"] | null }) {
   if (totals === null) {
     return (
       <Alert>
@@ -457,7 +391,7 @@ function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"
     )
   }
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
       <StatCard
         title="设备数"
         value={totals.device_count.toLocaleString("zh-CN")}
@@ -473,6 +407,7 @@ function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"
         value={formatTokens(totals.total_tokens)}
         description={`输入 ${formatTokens(totals.input_tokens)} · 输出 ${formatTokens(totals.output_tokens)}`}
       />
+      <CostStatCard costs={costs} currency={currency} exchangeRate={exchangeRate} />
       <StatCard
         title="最近上报"
         value={totals.last_recorded_at_ms === null ? "—" : formatTime(totals.last_recorded_at_ms)}
@@ -482,17 +417,39 @@ function GlobalTotalsCards({ totals }: { totals: GlobalOverviewResponse["totals"
   )
 }
 
-const TREND_COLORS = {
-  total: "#fbbf24",
-  input: "#38bdf8",
-  cached: "#14b8a6",
-  output: "#a78bfa",
+function CostStatCard({
+  costs,
+  currency,
+  exchangeRate,
+}: {
+  costs: GlobalCostRow[]
+  currency: DisplayCurrency
+  exchangeRate: number | null
+}) {
+  const displayCost = resolveDisplayCost(costs, currency, exchangeRate)
+  const primary = displayCost ? formatNanos(displayCost.primaryNanos, displayCost.primaryCurrency, 2) : formatNanos(null, currency === "cny" ? "CNY" : "USD", 2)
+  const equivalent = displayCost?.equivalentNanos === null || displayCost?.equivalentNanos === undefined
+    ? "—"
+    : formatNanos(displayCost.equivalentNanos, displayCost.equivalentCurrency, 2)
+  const requestCount = displayCost?.requestCount ?? 0
+  return (
+    <StatCard
+      title="费用"
+      value={primary}
+      description={`${equivalent} · ${requestCount.toLocaleString("zh-CN")} 个已计价请求`}
+    />
+  )
 }
 
 function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
-  const cutoff = new Date(Date.now() - 29 * 86_400_000)
+  const [timeRange, setTimeRange] = useState("30d")
+  const daysToSubtract = timeRange === "7d" ? 7 : timeRange === "90d" ? 90 : 30
+  const latestDay = rows.reduce((latest, row) => row.day > latest ? row.day : latest, "")
+  const referenceDate = latestDay ? new Date(`${latestDay}T00:00:00Z`) : new Date()
+  const cutoff = new Date(referenceDate.getTime() - (daysToSubtract - 1) * 86_400_000)
   const cutoffKey = `${cutoff.getUTCFullYear()}-${String(cutoff.getUTCMonth() + 1).padStart(2, "0")}-${String(cutoff.getUTCDate()).padStart(2, "0")}`
   const data = rows
+    .toSorted((a, b) => a.day.localeCompare(b.day))
     .filter((row) => row.day >= cutoffKey)
     .map((row) => ({
       day: row.day,
@@ -503,57 +460,36 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
       totalTokens: row.total_tokens,
     }))
   const stackedData = toStackedUsageTrend(data)
-  const chartOption: EChartsOption = {
-    animation: false,
-    grid: { top: 8, right: 56, bottom: 42, left: 56 },
-    legend: { bottom: 0, right: 0, textStyle: { color: "#a1a1aa" }, itemWidth: 12, itemHeight: 8 },
-    tooltip: {
-      trigger: "axis",
-      axisPointer: { type: "line", snap: true },
-      confine: true,
-      position: (point, _params, _dom, _rect, size) => positionTrendTooltip(
-        point,
-        size.contentSize,
-        size.viewSize,
-      ),
-      backgroundColor: "#18181b",
-      borderColor: "#3f3f46",
-      textStyle: { color: "#fafafa" },
-      formatter: (params) => {
-        const items = Array.isArray(params) ? params : [params]
-        const first = items[0] as (typeof items)[number] & { axisValue?: unknown }
-        const day = String(first?.axisValue ?? "")
-        const index = Number(first?.dataIndex ?? 0)
-        const split = stackedData[index]
-        const total = Number(first?.value ?? 0)
-        const markerFor = (seriesName: string) =>
-          items.find((item) => item.seriesName === seriesName)?.marker ?? ""
-        return [
-          `<div style="margin-bottom:6px;font-weight:600">${day}</div>`,
-          `<div style="line-height:1.8">${markerFor("日总计")}日总计：${formatTokens(total)}</div>`,
-          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("未缓存输入")}未缓存输入：${formatTokens(split?.uncachedInputTokens ?? 0)}</div>`,
-          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("缓存输入")}缓存输入：${formatTokens(split?.cachedInputTokens ?? 0)}</div>`,
-          `<div style="color:#a1a1aa;line-height:1.8">${markerFor("输出")}输出：${formatTokens((split?.nonReasoningOutputTokens ?? 0) + (split?.reasoningOutputTokens ?? 0))}</div>`,
-        ].join("")
-      },
-    },
-    xAxis: { type: "category", boundaryGap: false, data: stackedData.map((row) => row.day), axisLine: { lineStyle: { color: "#3f3f46" } }, axisLabel: { color: "#a1a1aa", interval: "auto" } },
-    yAxis: [
-      { type: "value", axisLabel: { color: "#a1a1aa", formatter: (value: number) => formatTokens(value) }, splitLine: { lineStyle: { color: "#27272a" } } },
-      { type: "value", position: "right", axisLabel: { color: "#a1a1aa", formatter: (value: number) => formatTokens(value) }, splitLine: { show: false } },
-    ],
-    series: [
-      { name: "日总计", type: "line", symbol: "none", lineStyle: { width: 2 }, itemStyle: { color: TREND_COLORS.total }, data: data.map((row) => row.totalTokens), z: 4 },
-      { name: "未缓存输入", type: "line", stack: "input", symbol: "none", areaStyle: { opacity: 0.32 }, lineStyle: { width: 1.5 }, itemStyle: { color: TREND_COLORS.input }, data: stackedData.map((row) => row.uncachedInputTokens) },
-      { name: "缓存输入", type: "line", stack: "input", symbol: "none", areaStyle: { opacity: 0.32 }, lineStyle: { width: 1.5 }, itemStyle: { color: TREND_COLORS.cached }, data: stackedData.map((row) => row.cachedInputTokens) },
-      { name: "输出", type: "line", yAxisIndex: 1, symbol: "circle", symbolSize: 4, lineStyle: { width: 2 }, itemStyle: { color: TREND_COLORS.output }, data: stackedData.map((row) => row.nonReasoningOutputTokens + row.reasoningOutputTokens), z: 5 },
-    ],
+  const chartData = stackedData.map((row, index) => ({
+    ...row,
+    totalTokens: data[index]?.totalTokens ?? 0,
+    outputTokens: (row.nonReasoningOutputTokens ?? 0) + (row.reasoningOutputTokens ?? 0),
+  }))
+  const chartConfig: ChartConfig = {
+    totalTokens: { label: "日总计", color: "var(--chart-1)" },
+    uncachedInputTokens: { label: "未缓存输入", color: "var(--chart-2)" },
+    cachedInputTokens: { label: "缓存输入", color: "var(--chart-3)" },
+    outputTokens: { label: "输出", color: "var(--chart-4)" },
   }
   return (
     <Card className="h-[340px]">
       <CardHeader>
-        <CardTitle>用量趋势</CardTitle>
-          <CardDescription>最近 30 天，输入按缓存拆分；输出使用右侧独立刻度</CardDescription>
+        <div className="flex items-center gap-2">
+          <div className="grid flex-1 gap-1">
+            <CardTitle>用量趋势</CardTitle>
+            <CardDescription>最近 {daysToSubtract} 天，输入按缓存拆分；输出独立显示</CardDescription>
+          </div>
+          <Select value={timeRange} onValueChange={setTimeRange}>
+            <SelectTrigger className="hidden w-[140px] rounded-lg sm:flex" aria-label="选择趋势时间范围">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="90d" className="rounded-lg">最近 90 天</SelectItem>
+              <SelectItem value="30d" className="rounded-lg">最近 30 天</SelectItem>
+              <SelectItem value="7d" className="rounded-lg">最近 7 天</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </CardHeader>
       <CardContent>
         {loading && data.length === 0 ? (
@@ -561,7 +497,24 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
         ) : data.length === 0 ? (
           <p className="text-sm text-muted-foreground">当前范围最近 90 天没有记录</p>
         ) : (
-          <ReactECharts option={chartOption} style={{ height: 230, width: "100%" }} notMerge lazyUpdate />
+          <ChartContainer config={chartConfig} className="h-[230px] w-full">
+            <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+              <defs>
+                <linearGradient id="fillUncachedInput" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-uncachedInputTokens)" stopOpacity={0.5} /><stop offset="95%" stopColor="var(--color-uncachedInputTokens)" stopOpacity={0.05} /></linearGradient>
+                <linearGradient id="fillCachedInput" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-cachedInputTokens)" stopOpacity={0.5} /><stop offset="95%" stopColor="var(--color-cachedInputTokens)" stopOpacity={0.05} /></linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} />
+              <YAxis yAxisId="tokens" tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <YAxis yAxisId="output" orientation="right" tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
+              <Area yAxisId="tokens" dataKey="uncachedInputTokens" type="monotone" stackId="input" stroke="var(--color-uncachedInputTokens)" fill="url(#fillUncachedInput)" />
+              <Area yAxisId="tokens" dataKey="cachedInputTokens" type="monotone" stackId="input" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
+              <Area yAxisId="tokens" dataKey="totalTokens" type="monotone" stroke="var(--color-totalTokens)" fill="none" strokeWidth={2} />
+              <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
+              <ChartLegend content={<ChartLegendContent />} />
+            </AreaChart>
+          </ChartContainer>
         )}
       </CardContent>
     </Card>
@@ -571,7 +524,8 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
 export function GlobalHeatmapCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: boolean }) {
   const byDay = new Map(rows.map((row) => [row.day, row.total_tokens]))
   const days = 90
-  const today = new Date()
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   const cells: Array<{ date: string; count: number; level: number }> = []
   for (let index = days - 1; index >= 0; index -= 1) {
     const date = new Date(today.getTime() - index * 86_400_000)
@@ -632,44 +586,6 @@ export function GlobalHeatmapCard({ rows, loading }: { rows: GlobalDailyRow[]; l
   )
 }
 
-function GlobalCostTable({ rows }: { rows: GlobalCostRow[] }) {
-  if (rows.length === 0) return null
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>费用（按币种）</CardTitle>
-        <CardDescription>不同币种不合并，按中心库计价快照统计</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <Table className="min-w-[560px]">
-          <TableHeader>
-            <TableRow>
-              <TableHead>币种</TableHead>
-              <TableHead>已计价请求</TableHead>
-              <TableHead>费用</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.currency}>
-                <TableCell>{row.currency}</TableCell>
-                <TableCell className="tabular-nums">
-                  {row.request_count.toLocaleString("zh-CN")}
-                </TableCell>
-                <TableCell className="tabular-nums">
-                  {formatNanos(row.total_cost_nanos, row.currency)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
   return (
     <Card>
@@ -690,17 +606,51 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.provider ?? "unknown"}>
-                <TableCell>{row.provider ?? "未知"}</TableCell>
-                <TableCell className="tabular-nums">
-                  {row.request_count.toLocaleString("zh-CN")}
-                </TableCell>
-                <TableCell className="tabular-nums">{formatTokens(row.input_tokens)}</TableCell>
-                <TableCell className="tabular-nums">{formatTokens(row.output_tokens)}</TableCell>
-                <TableCell className="tabular-nums">{formatTokens(row.total_tokens)}</TableCell>
-              </TableRow>
-            ))}
+            {rows.map((row) => {
+              const label = row.provider_display_name?.trim() || row.provider || "未知"
+              const key = [
+                row.provider ?? "unknown",
+                row.provider_display_name ?? "",
+                row.provider_email ?? "",
+                row.provider_phone ?? "",
+              ].join("\u0000")
+              return (
+                <TableRow key={key}>
+                  <TableCell>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button type="button" className="font-medium hover:underline">{label}</button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-h-[60vh] max-w-none overflow-y-auto border border-border bg-card p-0 text-card-foreground shadow-lg">
+                        <div className="max-w-[720px] overflow-x-auto p-3">
+                          <p className="mb-2 text-xs font-medium text-card-foreground">按模型统计</p>
+                          <Table className="min-w-[620px]">
+                            <TableHeader><TableRow><TableHead>模型</TableHead><TableHead>请求数</TableHead><TableHead>输入 Token</TableHead><TableHead>输出 Token</TableHead><TableHead>总 Token</TableHead></TableRow></TableHeader>
+                            <TableBody>
+                              {(row.models ?? []).length === 0 ? <TableRow><TableCell colSpan={5}>暂无模型数据</TableCell></TableRow> : (row.models ?? []).map((model) => (
+                                <TableRow key={model.model ?? "unknown"}>
+                                  <TableCell>{model.model ?? "未知模型"}</TableCell>
+                                  <TableCell className="tabular-nums">{model.request_count.toLocaleString("zh-CN")}</TableCell>
+                                  <TableCell className="tabular-nums">{formatTokens(model.input_tokens)}</TableCell>
+                                  <TableCell className="tabular-nums">{formatTokens(model.output_tokens)}</TableCell>
+                                  <TableCell className="tabular-nums">{formatTokens(model.total_tokens)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {row.request_count.toLocaleString("zh-CN")}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{formatTokens(row.input_tokens)}</TableCell>
+                  <TableCell className="tabular-nums">{formatTokens(row.output_tokens)}</TableCell>
+                  <TableCell className="tabular-nums">{formatTokens(row.total_tokens)}</TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
           </Table>
         </div>
@@ -709,7 +659,7 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
   )
 }
 
-function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading: boolean }) {
+function GlobalDeviceTable({ rows, loading, currency, exchangeRate }: { rows: GlobalDeviceRow[]; loading: boolean; currency: DisplayCurrency; exchangeRate: number | null }) {
   if (loading && rows.length === 0) return null
   return (
     <Card>
@@ -725,6 +675,8 @@ function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading
               <TableHead>首次上报</TableHead>
               <TableHead>最后上报</TableHead>
               <TableHead>请求数</TableHead>
+              <TableHead>总 Token</TableHead>
+              <TableHead>费用</TableHead>
               <TableHead>子代理数</TableHead>
             </TableRow>
           </TableHeader>
@@ -735,6 +687,8 @@ function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading
                 <TableCell className="tabular-nums">{formatTime(row.first_seen_at_ms)}</TableCell>
                 <TableCell className="tabular-nums">{formatTime(row.last_seen_at_ms)}</TableCell>
                 <TableCell className="tabular-nums">{row.request_count.toLocaleString("zh-CN")}</TableCell>
+                <TableCell className="tabular-nums">{formatTokens(row.total_tokens)}</TableCell>
+                <TableCell className="tabular-nums">{formatDeviceCost(row.costs_by_currency, currency, exchangeRate)}</TableCell>
                 <TableCell className="tabular-nums">{row.subagent_count.toLocaleString("zh-CN")}</TableCell>
               </TableRow>
             ))}
@@ -745,9 +699,23 @@ function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading
   )
 }
 
-function formatNanos(nanos: number | null, currency: string | null): string {
+function formatDeviceCost(costs: GlobalCostRow[], currency: DisplayCurrency, exchangeRate: number | null): string {
+  const displayCost = resolveDisplayCost(costs, currency, exchangeRate)
+  if (!displayCost) return "—"
+  const primary = formatNanos(displayCost.primaryNanos, displayCost.primaryCurrency, 2)
+  const equivalent = displayCost.equivalentNanos === null
+    ? null
+    : formatNanos(displayCost.equivalentNanos, displayCost.equivalentCurrency, 2)
+  return equivalent ? `${primary} · ${equivalent}` : primary
+}
+
+function formatNanos(nanos: number | null, currency: string | null, fractionDigits = 4): string {
   const amount = Number(nanos ?? 0) / 1e9
-  if (currency === "CNY") return `¥${amount.toFixed(4)}`
-  if (currency === "USD") return `$${amount.toFixed(4)}`
-  return `${amount.toFixed(4)} ${currency ?? ""}`.trim()
+  const formatted = amount.toLocaleString("zh-CN", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  })
+  if (currency === "CNY") return `¥${formatted}`
+  if (currency === "USD") return `$${formatted}`
+  return `${formatted} ${currency ?? ""}`.trim()
 }

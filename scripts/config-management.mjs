@@ -109,6 +109,7 @@ export function updateGatewaySetting(
     expectedRevision,
     readConfig = readFileSync,
     writeConfig = writeGatewayConfig,
+    skipBackup = false,
   } = {},
 ) {
   const { configPath } = requireUserConfig(environment);
@@ -134,7 +135,7 @@ export function updateGatewaySetting(
   if (readConfig(configPath, "utf8") !== snapshot.content) {
     throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
   }
-  const backupPath = result.backupRequired
+  const backupPath = result.backupRequired && !skipBackup
     ? writeConfigBackup(configPath, snapshot.content)
     : null;
   try {

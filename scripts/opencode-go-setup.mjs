@@ -36,12 +36,13 @@ import {
   isOpencodeGoProvider,
   loadOpencodeGoAccounts,
   migrateLegacyOpencodeGoAccount,
-  opencodeGoDefaultAccountId,
   opencodeGoAccountDirectory,
   opencodeGoAccountsFilePath,
   opencodeGoProviderId,
+  opencodeGoAccountDisplayName,
   readOpencodeGoAccountMarker,
   validateOpencodeGoAccountId,
+  validateOpencodeGoContact,
 } from "../runtime/opencode-go-accounts.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
@@ -68,7 +69,6 @@ import { withModelProviderManagementTransaction } from "./model-provider-managem
 
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
-const defaultAccountId = opencodeGoDefaultAccountId;
 const maximumPrivateConfigBytes = 2_097_152;
 const previousDefaultModel = "deepseek-v4-flash";
 
@@ -141,7 +141,7 @@ export async function runOpenCodeGoSetup({
   configureRole = configureThirdPartyRole,
 } = {}) {
   const accounts = loadOpencodeGoAccounts(environment);
-  const defaultAccount = accounts.find((account) => account.default) ?? accounts[0];
+  const defaultAccount = accounts.find((account) => account.default);
   const hasModelSettings = loadManagedModelProviderSettings(environment)
     .some((candidate) => isOpencodeGoProvider(candidate.provider));
   const prompt = prompter ?? createPrompter(prompts, {
@@ -180,7 +180,9 @@ export async function runOpenCodeGoSetup({
     }
     if (action === "account-add") {
       const accountId = await prompt.accountId();
+      const contact = await prompt.contact();
       return addOpencodeGoAccount(accountId, {
+        contact,
         environment,
         output,
         fetchImpl,
@@ -207,15 +209,29 @@ export async function runOpenCodeGoSetup({
       if (accountId === undefined) return { action: "back" };
       return stopOpencodeGoAccount(accountId, { environment, output });
     }
+    if (action === "account-remove") {
+      const accountId = await prompt.selectAccount(accounts);
+      if (accountId === undefined) return { action: "back" };
+      return removeOpencodeGoAccount(accountId, {
+        environment,
+        output,
+        prompts,
+      });
+    }
     if (action === "list") {
       printAccounts(environment, output);
       return { action: "listed" };
     }
     if (action === "switching" || action === "exclusive") {
-      const accountId = defaultAccount?.id ?? defaultAccountId;
+      const accountId = defaultAccount?.id
+        ?? (typeof prompt.accountId === "function" ? await prompt.accountId() : undefined);
+      if (accountId === undefined) return { action: "back" };
+      const contact = defaultAccount?.email ?? defaultAccount?.phone
+        ?? (typeof prompt.contact === "function" ? await prompt.contact() : undefined);
       return addOpencodeGoAccount(accountId, {
         mode: action,
         reconfigure: true,
+        contact,
         environment,
         output,
         fetchImpl,
@@ -233,6 +249,9 @@ export async function runOpenCodeGoSetup({
 }
 
 export async function addOpencodeGoAccount(accountId, {
+  email,
+  phone,
+  contact,
   mode = "switching",
   reconfigure = false,
   environment = process.env,
@@ -243,8 +262,19 @@ export async function addOpencodeGoAccount(accountId, {
   prompter,
   configureRole = configureThirdPartyRole,
 } = {}) {
+  let resolvedContact = contact;
+  if (resolvedContact === undefined && email === undefined && phone === undefined) {
+    if (prompter && typeof prompter.contact === "function") {
+      resolvedContact = await prompter.contact();
+    } else if (prompts && typeof prompts.text === "function") {
+      resolvedContact = await contactPrompt(prompts);
+    }
+  }
   const preview = await previewOpencodeGoAccountConfiguration({
     accountId,
+    email,
+    phone,
+    contact: resolvedContact,
     mode,
     reconfigure,
   }, { environment });
@@ -266,6 +296,8 @@ export async function addOpencodeGoAccount(accountId, {
     : await secretPrompt(prompts);
   const result = await applyOpencodeGoAccountConfiguration({
     accountId: preview.account.id,
+    email: preview.account.email,
+    phone: preview.account.phone,
     mode,
     reconfigure,
     apiKey,
@@ -298,6 +330,9 @@ export function printOpencodeGoAccounts(environment = process.env, output = proc
         const marker = readOpencodeGoAccountMarker(environment, account.id);
         return {
           id: account.id,
+          email: account.email,
+          phone: account.phone,
+          displayName: opencodeGoAccountDisplayName(account),
           default: account.default,
           provider: opencodeGoProviderId(account.id),
           mode: marker?.mode ?? "unconfigured",
@@ -313,7 +348,7 @@ export function printOpencodeGoAccounts(environment = process.env, output = proc
   for (const account of accounts) {
     const marker = readOpencodeGoAccountMarker(environment, account.id);
     output.write(
-      `${account.id}${account.default ? "（默认）" : ""} · ${marker?.mode ?? "未配置"} · Provider ${opencodeGoProviderId(account.id)}\n`,
+      `${opencodeGoAccountDisplayName(account)}${account.default ? "（默认）" : ""} · ${marker?.mode ?? "未配置"} · Provider ${opencodeGoProviderId(account.id)}\n`,
     );
   }
 }
@@ -570,9 +605,9 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
 }
 
 async function restoreOpencodeGoSetup(environment) {
-  const { legacyBackup, state } = readOpencodeGoRestoreState(environment);
+  const { accountId, legacyBackup, state } = readOpencodeGoRestoreState(environment);
   const codexHome = codexHomePath(environment);
-  const accountPathsValue = opencodeGoAccountPaths(environment, defaultAccountId);
+  const accountPathsValue = opencodeGoAccountPaths(environment, accountId);
   await restoreBackup(
     accountPathsValue.configPath,
     join(legacyBackup, "config.toml"),
@@ -580,7 +615,7 @@ async function restoreOpencodeGoSetup(environment) {
   );
   await restoreBackup(
     accountPathsValue.profilePath,
-    join(legacyBackup, opencodeGoProfileFileName(defaultAccountId)),
+    join(legacyBackup, opencodeGoProfileFileName(accountId)),
     state.profile,
   );
   await restoreBackup(
@@ -603,23 +638,13 @@ async function restoreOpencodeGoSetup(environment) {
     join(legacyBackup, definition.catalogManifestFileName),
     state.manifest === undefined ? false : state.manifest,
   );
-  if (existsSync(accountPathsValue.markerPath)) {
-    const marker = parse(readPrivateFileSync(accountPathsValue.markerPath));
-    if (marker.provider === "opencode-go") {
-      writePrivateFileAtomic(accountPathsValue.markerPath, stringify({
-        version: 1,
-        provider: opencodeGoProviderId(defaultAccountId),
-        mode: marker.mode,
-      }));
-    }
-  }
   try {
     unlinkSync(opencodeGoAccountsFilePath(environment));
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
   try {
-    rmSync(opencodeGoAccountDirectory(environment, defaultAccountId), {
+    rmSync(opencodeGoAccountDirectory(environment, accountId), {
       recursive: true,
       force: true,
     });
@@ -629,7 +654,7 @@ async function restoreOpencodeGoSetup(environment) {
   for (const file of [
     "sf-agent.config.toml",
     "config.toml",
-    opencodeGoProfileFileName(defaultAccountId),
+    opencodeGoProfileFileName(accountId),
   ]) {
     const target = join(codexHome, file);
     if (existsSync(target) && state[backupKey(file)] === false) {
@@ -673,6 +698,23 @@ function readOpencodeGoRestoreState(environment) {
       "OpenCode Go 初始配置备份状态无效",
     );
   }
+  if (state.version !== 2 || typeof state.accountId !== "string") {
+    throw managedSetupInvalid(
+      "backup-invalid",
+      "restore",
+      "OpenCode Go 初始配置备份不包含账户 ID，不能自动恢复为 main；请手工恢复或重新添加账户",
+    );
+  }
+  try {
+    validateOpencodeGoAccountId(state.accountId);
+  } catch (error) {
+    throw managedSetupInvalid(
+      "backup-invalid",
+      "restore",
+      "OpenCode Go 初始配置备份中的账户 ID 无效",
+      error,
+    );
+  }
   const legacyCatalogState = state.catalog === undefined && state.manifest === undefined;
   const restoredState = {
     config: state.config,
@@ -689,13 +731,13 @@ function readOpencodeGoRestoreState(environment) {
       "OpenCode Go 初始配置备份状态无效",
     );
   }
-  return { legacyBackup, state };
+  return { accountId: state.accountId, legacyBackup, state };
 }
 
 function backupKey(file) {
   if (file === "config.toml") return "config";
   if (file === "sf-agent.config.toml") return "roleConfig";
-  if (file.startsWith("sf-opencode-go")) return "profile";
+  if (file.startsWith("sf-ocg-")) return "profile";
   return file;
 }
 
@@ -744,15 +786,16 @@ function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, leg
           { value: "list", label: "列出账户" },
           { value: "account-default", label: "设置默认账户" },
           { value: "account-stop", label: "停止账户 App Server" },
+          { value: "account-remove", label: "删除账户" },
         );
       }
       options.push(
         { value: "switching", label: hasAccounts
           ? "切换模式（配置默认账户为切换模式）"
-          : `OpenAI + OpenCode Go 切换模式（创建默认账户 ${defaultAccountId}）` },
+          : "OpenAI + OpenCode Go 切换模式（先输入账户 ID）" },
         { value: "exclusive", label: hasAccounts
           ? "固定模式（配置默认账户为固定模式）"
-          : `仅 OpenCode Go 固定模式（创建默认账户 ${defaultAccountId}）` },
+          : "仅 OpenCode Go 固定模式（先输入账户 ID）" },
       );
       if (hasModelSettings) {
         options.push({ value: "model-settings", label: "修改模型设置（思考等级、自动压缩）" });
@@ -780,12 +823,27 @@ function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, leg
       if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
       return value;
     },
+    contact: async () => {
+      const value = await prompts.text({
+        message: "OpenCode Go 账户邮箱或手机号码（用于展示和指标中心，二选一）",
+        validate: (candidate) => {
+          try {
+            validateOpencodeGoContact(candidate);
+            return undefined;
+          } catch (error) {
+            return error instanceof Error ? error.message : "邮箱无效";
+          }
+        },
+      });
+      if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
+      return value.trim();
+    },
     selectAccount: async (accounts) => {
       const value = await prompts.select({
         message: "选择 OpenCode Go 账户",
         options: accounts.map((account) => ({
           value: account.id,
-          label: `${account.id}${account.default ? "（默认）" : ""}`,
+          label: `${opencodeGoAccountDisplayName(account)}${account.default ? "（默认）" : ""}`,
         })),
       });
       if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
@@ -808,6 +866,22 @@ async function secretPrompt(prompts) {
   const value = await prompts.password({ message: "OpenCode Go API Key（以 sk- 开头）" });
   if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
   return value;
+}
+
+async function contactPrompt(prompts) {
+  const value = await prompts.text({
+    message: "OpenCode Go 账户邮箱或手机号码（用于展示和指标中心，二选一）",
+    validate: (candidate) => {
+      try {
+        validateOpencodeGoContact(candidate);
+        return undefined;
+      } catch (error) {
+        return error instanceof Error ? error.message : "邮箱或手机号码无效";
+      }
+    },
+  });
+  if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
+  return value.trim();
 }
 
 async function confirmPrompt(prompts, message, initialValue) {

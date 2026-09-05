@@ -263,17 +263,17 @@ async function runThirdPartyModelSetup({
         {
           value: "custom_primary",
           label: "自定义 Responses Provider",
-          hint: "管理固定或切换模式的 OpenAI Responses 兼容 Provider",
+          hint: "新增、编辑、切换或删除 OpenAI Responses 兼容 Provider",
         },
         {
           value: "deepseek",
           label: "DeepSeek 官方",
-          hint: "安装、切换、恢复或修改模型设置（思考等级、自动压缩）",
+          hint: "安装、切换、删除（恢复安装前配置）或修改模型设置",
         },
         {
           value: "opencode-go",
           label: "OpenCode Go 官方",
-          hint: "安装、移除或修改模型设置（思考等级、自动压缩）",
+          hint: "添加、列出、设置默认、停止、删除或修改模型设置",
         },
         {
           value: "provider_default",

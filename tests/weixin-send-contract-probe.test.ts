@@ -12,6 +12,7 @@ import * as updatesProbe from "../scripts/weixin-updates-contract-probe.mjs";
 const {
   createWeixinSendContractClient,
   runWeixinReplyContract,
+  runWeixinRejectedContextContract,
   runWeixinReplyLengthContract,
   runWeixinReplyEchoContract,
   runWeixinReplySequenceContract,
@@ -34,6 +35,7 @@ describe("Weixin sendmessage contract probe", () => {
 
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("reply --live");
+    expect(help.stdout).toContain("reject --live");
     expect(help.stdout).toContain("sequence --live");
     expect(help.stdout).toContain("limit --live");
     expect(help.stdout).toContain("echo --live");
@@ -170,6 +172,29 @@ describe("Weixin sendmessage contract probe", () => {
 
     expect(result).toEqual({ kind: "api-error", ret: -14 });
     expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
+  it("uses an in-memory invalidated context for the rejection probe", async () => {
+    const updatesClient = createUpdatesClient(
+      inboundMessage("allowed-user@im.wechat", "reply-context", 1n),
+    );
+    const sendText = vi.fn(async (input: { contextToken: string }) => {
+      expect(input.contextToken).toBe("reply-contex0");
+      return { kind: "api-error", ret: -2 };
+    });
+
+    await expect(runWeixinRejectedContextContract({
+      updatesClient,
+      sendClient: { sendText },
+      credential: {
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        botToken: "bot-secret",
+      },
+      allowedUserIds: ["allowed-user@im.wechat"],
+    })).resolves.toMatchObject({
+      inbound: { kind: "success" },
+      outbound: { kind: "api-error", ret: -2 },
+    });
   });
 
   it("fails closed on malformed responses", () => {

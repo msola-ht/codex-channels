@@ -7,8 +7,10 @@ import {
   signalChildProcesses,
 } from "../runtime/process-lifecycle.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { resolveWebuiSettings } from "./webui-server.mjs";
 
 const packageDir = dirname(dirname(fileURLToPath(import.meta.url)));
+const webuiSettings = resolveWebuiSettings({ environment: process.env });
 const children = new Set();
 let shuttingDown = false;
 
@@ -52,4 +54,7 @@ installProcessSignalHandlers({
 });
 
 start(process.execPath, [join(packageDir, "bin", "codexc.mjs"), "webui"]);
-start("npm", ["run", "dev"], { cwd: join(packageDir, "webui") });
+start("npm", ["run", "dev"], {
+  cwd: join(packageDir, "webui"),
+  env: { ...process.env, CODEXC_WEBUI_PORT: String(webuiSettings.port) },
+});

@@ -41,7 +41,6 @@ import type {
   Aggregate,
   DeepseekBalance,
   ErrorsReport,
-  OpencodeGoModelUsageEstimate,
   OpencodeGoQuotaWindow,
   ProviderGroup,
 } from "@/lib/types"
@@ -247,10 +246,10 @@ export function OpencodeGoUsageCard({
 }: {
   accounts: Array<{
     account: string
+    displayName: string
     default: boolean
     available: boolean
     windows: OpencodeGoQuotaWindow[]
-    modelUsage: OpencodeGoModelUsageEstimate[]
   }>
 }) {
   if (accounts.length === 0) {
@@ -273,23 +272,21 @@ export function OpencodeGoUsageCard({
 }
 
 function OpencodeGoAccountCard({
-  account,
+  displayName,
   default: isDefault,
   available,
   windows,
-  modelUsage,
 }: {
-  account: string
+  displayName: string
   default: boolean
   available: boolean
   windows: OpencodeGoQuotaWindow[]
-  modelUsage: OpencodeGoModelUsageEstimate[]
 }) {
   if (!available || windows.length === 0) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>OpenCode Go（{account}）</CardTitle>
+          <CardTitle>{displayName}</CardTitle>
           <CardDescription>
             {isDefault ? "默认账户 · " : ""}账户用量暂不可用
           </CardDescription>
@@ -300,7 +297,7 @@ function OpencodeGoAccountCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>OpenCode Go（{account}）</CardTitle>
+        <CardTitle>{displayName}</CardTitle>
         <CardDescription>{isDefault ? "默认账户 · " : ""}账户配额</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -330,54 +327,11 @@ function OpencodeGoAccountCard({
             ) : null}
           </div>
         ))}
-        {modelUsage.length === 0 ? null : (
-          <div className="flex flex-col gap-2 border-t pt-3">
-            <p className="text-xs text-muted-foreground">
-              模型本地用量
-              {modelUsage[0]?.windowStartAtMs !== null &&
-              modelUsage[0]?.windowStartAtMs !== undefined &&
-              modelUsage[0]?.windowEndAtMs !== null &&
-              modelUsage[0]?.windowEndAtMs !== undefined
-                ? `（月度窗口 ${formatTime(modelUsage[0].windowStartAtMs)} – ${formatTime(modelUsage[0].windowEndAtMs)}）`
-                : ""}
-              （按当前价格基线重算）
-            </p>
-            {modelUsage.map((estimate) => (
-              <div
-                key={`${estimate.model}:${estimate.bucket ?? "default"}`}
-                className="flex flex-col gap-1"
-              >
-                <div className="flex items-center justify-between text-sm">
-                  <span>
-                    {estimate.model}
-                    {estimate.bucket === undefined
-                      ? ""
-                      : `（${estimate.bucket === "peak" ? "Peak" : "Off-Peak"}）`}
-                  </span>
-                  <span className="tabular-nums text-muted-foreground">
-                    {estimate.usedPercent === null
-                      ? "未知"
-                      : `${estimate.usedPercent.toFixed(1)}%`}
-                  </span>
-                </div>
-                <Progress value={Math.min(100, estimate.usedPercent ?? 0)} />
-                <p className="text-xs text-muted-foreground">
-                  已用 {formatUsd(estimate.usedUsdNanos)} / 包含{" "}
-                  {formatUsd(Math.round(estimate.includedUsageUsd * 1_000_000_000))}{" "}
-                  · 剩余 {formatUsd(estimate.remainingUsdNanos)}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
       </CardContent>
     </Card>
   )
 }
 
-function formatUsd(nanos: number | null): string {
-  return nanos === null ? "未知" : `$${(nanos / 1_000_000_000).toFixed(2)}`
-}
 
 function formatDeepseekAmount(value: string, currency: string): string {
   const amount = Number(value)

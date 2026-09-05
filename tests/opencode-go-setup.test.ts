@@ -41,7 +41,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     privateFileFailure.path = undefined;
   });
 
-  it("shows the stable default account id in first-time setup choices", async () => {
+  it("shows that first-time setup requires an explicit account id", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-first-menu-"));
     let labels: string[] = [];
 
@@ -63,10 +63,35 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       } as never,
     })).resolves.toEqual({ action: "back" });
 
-    expect(labels.filter((label) => label.includes("创建默认账户"))).toEqual([
-      "OpenAI + OpenCode Go 切换模式（创建默认账户 opencode-go）",
-      "仅 OpenCode Go 固定模式（创建默认账户 opencode-go）",
+    expect(labels.filter((label) => label.includes("先输入账户 ID"))).toEqual([
+      "OpenAI + OpenCode Go 切换模式（先输入账户 ID）",
+      "仅 OpenCode Go 固定模式（先输入账户 ID）",
     ]);
+  });
+
+  it("exposes account deletion in the configured OpenCode Go menu", async () => {
+    const codexHome = opencodeFixture();
+    let labels: string[] = [];
+
+    await expect(runOpenCodeGoSetup({
+      allowBack: true,
+      environment: {
+        CODEX_HOME: codexHome,
+        CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+      },
+      prompts: {
+        select: async (options: { options: Array<{ label: string }> }) => {
+          labels = options.options.map(({ label }) => label);
+          return "back";
+        },
+        text: vi.fn(),
+        password: vi.fn(),
+        confirm: vi.fn(),
+        isCancel: () => false,
+      } as never,
+    })).resolves.toEqual({ action: "back" });
+
+    expect(labels).toContain("删除账户");
   });
 
   it("requires fixed-mode confirmation when called without a custom prompter", async () => {
@@ -74,8 +99,9 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     const password = vi.fn();
     const output = { write: vi.fn() };
 
-    await expect(addOpencodeGoAccount("opencode-go", {
+    await expect(addOpencodeGoAccount("main", {
       mode: "exclusive",
+      contact: "user@example.com",
       environment: {
         CODEX_HOME: codexHome,
         CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
@@ -86,7 +112,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
         password,
         isCancel: () => false,
       } as never,
-    })).resolves.toEqual({ action: "cancelled", accountId: "opencode-go" });
+    })).resolves.toEqual({ action: "cancelled", accountId: "main" });
 
     expect(password).not.toHaveBeenCalled();
     expect(output.write).toHaveBeenCalledWith("已取消，未修改任何文件。\n");
@@ -114,7 +140,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
 
     expect(result).toMatchObject({
       action: "configured",
-      provider: "opencode-go",
+      provider: "ocg-main",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
       autoCompactPercent: 60,
@@ -130,12 +156,12 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
   });
 
   it.each(["switching", "exclusive"] as const)(
-    "configures %s mode and selects the shared third-party role",
+    "configures the first %s account with its account-scoped Profile and selects the shared third-party role",
     async (mode) => {
       const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-setup-"));
       const configureRole = vi.fn(async () => ({
         role: "external",
-        provider: "opencode-go",
+        provider: "ocg-work",
         model: "deepseek-v4-flash-vision-exp",
       }));
       const result = await runOpenCodeGoSetup({
@@ -143,21 +169,23 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
         output: { write: vi.fn() },
         prompter: {
           select: async () => mode,
+          accountId: async () => "work",
           secret: async () => "sk-opencode-test",
           confirm: async () => true,
+          contact: async () => "user@example.com",
         },
         configureRole,
         downloadCatalog: successfulCatalog,
       });
 
       expect(result).toMatchObject({ action: "configured", mode });
-      const target = mode === "switching" ? "sf-opencode-go.config.toml" : "config.toml";
+      const target = mode === "switching" ? "sf-ocg-work.config.toml" : "config.toml";
       const config = parse(readFileSync(join(codexHome, target), "utf8"));
       expect(config).toMatchObject({
         model: "deepseek-v4-flash-vision-exp",
-        model_provider: "opencode-go",
+        model_provider: "ocg-work",
         model_providers: {
-          "opencode-go": {
+          "ocg-work": {
             base_url: "https://opencode.ai/zen/go/v1",
             wire_api: "responses",
             supports_websockets: false,
@@ -183,16 +211,16 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
         auto_compact_token_limit: 600_000,
       });
       expect(parse(readFileSync(
-        join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"),
+        join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "work", "managed.toml"),
         "utf8",
-      ))).toEqual({ version: 1, provider: "opencode-go", mode });
+      ))).toEqual({ version: 1, provider: "ocg-work", mode });
       expect(configureRole).toHaveBeenCalledWith(
-        "opencode-go",
+        "ocg-work",
         "deepseek-v4-flash-vision-exp",
         expect.objectContaining({ CODEX_HOME: codexHome }),
       );
       if (mode === "exclusive") {
-        expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
+        expect(existsSync(join(codexHome, "sf-ocg-work.config.toml"))).toBe(false);
       }
     },
   );
@@ -218,8 +246,8 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8"))).toEqual({
       custom: true,
     });
-    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
-      .toMatchObject({ model_provider: "opencode-go" });
+    expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
+      .toMatchObject({ model_provider: "ocg-main" });
   });
 
   it("restores the initial config and provider files", async () => {
@@ -243,8 +271,8 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
 
     expect(result).toMatchObject({ action: "restored" });
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-ocg-main.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(false);
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
   });
@@ -265,7 +293,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
 
     expect(previewOpencodeGoRestore({ environment })).toEqual({
       operation: "restore",
-      provider: { id: "opencode-go", name: "OpenCode Go" },
+      provider: { id: "ocg", name: "OpenCode Go" },
       effects: {
         restoresInitialConfig: true,
         removesManagedCatalog: true,
@@ -357,7 +385,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     });
-    writeManagedModelProviderProfileDefault("opencode-go", {
+    writeManagedModelProviderProfileDefault("ocg-main", {
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
       autoCompactLimit: 750_000,
@@ -372,7 +400,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       downloadCatalog: async () => updatedCatalog(2_000_000),
     });
 
-    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
+    expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
       .toMatchObject({
         model: "deepseek-v4-pro",
         model_reasoning_effort: "max",
@@ -389,7 +417,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       default_reasoning_level: "max",
       auto_compact_token_limit: 1_500_000,
     });
-    expect(configureRole).toHaveBeenCalledWith("opencode-go", "deepseek-v4-pro", environment);
+    expect(configureRole).toHaveBeenCalledWith("ocg-main", "deepseek-v4-pro", environment);
   });
 
   it("migrates the previous OpenCode Go default during codexc update", async () => {
@@ -406,7 +434,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     );
     writeFileSync(
       rolePath,
-      'model = "deepseek-v4-flash"\nmodel_provider = "opencode-go"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-v4-flash"\nmodel_provider = "ocg-main"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
 
@@ -418,18 +446,18 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     expect(result).toMatchObject({
       status: "updated",
       modelCount: 3,
-      migratedProviders: ["opencode-go"],
+      migratedProviders: ["ocg-main"],
       roleMigrated: true,
       defaultModelMigrationApplied: true,
     });
-    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
+    expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
       .toMatchObject({
         model: "deepseek-v4-flash-vision-exp",
         model_reasoning_effort: "high",
       });
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
       model: "deepseek-v4-flash-vision-exp",
-      model_provider: "opencode-go",
+      model_provider: "ocg-main",
       model_reasoning_effort: "high",
     });
     expect(JSON.parse(readFileSync(
@@ -463,7 +491,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       },
     });
 
-    writeManagedModelProviderProfileDefault("opencode-go", {
+    writeManagedModelProviderProfileDefault("ocg-main", {
       model: "deepseek-v4-flash",
       reasoningEffort: "high",
       autoCompactLimit: 1_200_000,
@@ -478,7 +506,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       roleMigrated: false,
       defaultModelMigrationApplied: false,
     });
-    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
+    expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
       .toMatchObject({ model: "deepseek-v4-flash" });
   });
 
@@ -488,7 +516,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       CODEX_HOME: codexHome,
       CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
     };
-    writeManagedModelProviderProfileDefault("opencode-go", {
+    writeManagedModelProviderProfileDefault("ocg-main", {
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
       autoCompactLimit: 750_000,
@@ -503,7 +531,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       migratedProviders: [],
       roleMigrated: false,
     });
-    expect(parse(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8")))
+    expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
       .toMatchObject({
         model: "deepseek-v4-pro",
         model_reasoning_effort: "max",
@@ -512,7 +540,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
 
   it("refuses to overwrite an unmanaged OpenCode Go Profile", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-unmanaged-"));
-    const profilePath = join(codexHome, "sf-opencode-go.config.toml");
+    const profilePath = join(codexHome, "sf-ocg-main.config.toml");
     writeFileSync(profilePath, 'model = "user-managed"\n', { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
@@ -526,7 +554,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
   it("refuses a user-managed OpenCode Go Provider in config.toml", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-config-owner-"));
     const configPath = join(codexHome, "config.toml");
-    const original = '[model_providers.opencode-go]\nname = "user-managed"\n';
+    const original = '[model_providers.ocg-main]\nname = "user-managed"\n';
     writeFileSync(configPath, original, { mode: 0o600 });
 
     await expect(runOpenCodeGoSetup({
@@ -534,11 +562,11 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       output: { write: () => undefined },
       prompter: prompt("switching"),
       downloadCatalog: successfulCatalog,
-    })).rejects.toThrow("已占用 opencode-go Provider 或 Profile");
+    })).rejects.toThrow("已占用 ocg-main Provider 或 Profile");
 
     expect(readFileSync(configPath, "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-ocg-main.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
   });
 
   it("rolls back every file when shared-role configuration fails", async () => {
@@ -555,8 +583,8 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     })).rejects.toThrow("config conflict");
 
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "opencode-go", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-ocg-main.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
   });
 
   it("rolls back earlier files when a setup write fails midway", async () => {
@@ -578,7 +606,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
 
     expect(readFileSync(configPath, "utf8")).toBe(original);
     expect(existsSync(join(providerDirectory, "models.json"))).toBe(false);
-    expect(existsSync(join(codexHome, "sf-opencode-go.config.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-ocg-main.config.toml"))).toBe(false);
     expect(existsSync(join(providerDirectory, "accounts.json"))).toBe(false);
   });
 });
@@ -586,8 +614,10 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
 function prompt(action: "switching" | "exclusive" | "restore") {
   return {
     select: async () => action,
+    accountId: async () => "main",
     secret: async () => "sk-opencode-test",
     confirm: async () => true,
+    contact: async () => "user@example.com",
   };
 }
 
@@ -600,16 +630,16 @@ function opencodeFixture(): string {
     "opencode-go",
   );
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
-  const accountDirectory = join(providerDirectory, "accounts", "opencode-go");
+  const accountDirectory = join(providerDirectory, "accounts", "main");
   mkdirSync(accountDirectory, { recursive: true, mode: 0o700 });
   const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
-    'model_provider = "opencode-go"',
+    'model_provider = "ocg-main"',
     'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-    "[model_providers.opencode-go]",
-    'name = "opencode-go"',
+    "[model_providers.ocg-main]",
+    'name = "ocg-main"',
     'base_url = "https://opencode.ai/zen/go/v1"',
     'wire_api = "responses"',
     "supports_websockets = false",
@@ -619,12 +649,12 @@ function opencodeFixture(): string {
   ].join("\n");
   writeFileSync(
     join(providerDirectory, "accounts.json"),
-    `${JSON.stringify([{ id: "opencode-go", default: true }], null, 2)}\n`,
+    `${JSON.stringify([{ id: "main", default: true, email: "user@example.com" }], null, 2)}\n`,
     { mode: 0o600 },
   );
   writeFileSync(
     join(accountDirectory, "managed.toml"),
-    'version = 1\nprovider = "opencode-go"\nmode = "switching"\n',
+    'version = 1\nprovider = "ocg-main"\nmode = "switching"\n',
     { mode: 0o600 },
   );
   writeFileSync(catalogPath, JSON.stringify({
@@ -646,7 +676,7 @@ function opencodeFixture(): string {
     })),
   }), { mode: 0o600 });
   writeFileSync(
-    join(codexHome, "sf-opencode-go.config.toml"),
+    join(codexHome, "sf-ocg-main.config.toml"),
     providerLines,
     { mode: 0o600 },
   );

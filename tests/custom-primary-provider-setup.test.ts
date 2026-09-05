@@ -96,6 +96,30 @@ function switchingMainConfig(): string {
 }
 
 describe("custom primary Provider setup", () => {
+  it("uses a manually entered Provider ID instead of deriving it from the URL", async () => {
+    const environment = testEnvironment();
+    const { createClient } = clientFixture();
+    const output = { write: vi.fn() };
+    const prompts = promptFixture({
+      texts: ["https://api.example.test/v1", "my-provider", "My Provider", "gpt-5.6-sol"],
+      selects: ["__custom__", "switching", "no"],
+    });
+
+    await runCustomPrimaryProviderSetup({
+      environment,
+      output,
+      prompts,
+      createClient,
+    });
+
+    expect(existsSync(customPrimaryProviderProfilePath(environment, "my-provider"))).toBe(true);
+    expect(existsSync(customPrimaryProviderProfilePath(environment, "api-example-test"))).toBe(false);
+    expect(parse(readFileSync(
+      customPrimaryProviderProfilePath(environment, "my-provider"),
+      "utf8",
+    )).model_provider).toBe("my-provider");
+  });
+
   it("rejects a remote HTTP base URL before requesting an API key", async () => {
     const environment = testEnvironment();
     const { client, createClient } = clientFixture();
@@ -206,10 +230,10 @@ describe("custom primary Provider setup", () => {
 
     expect(prompts.select).toHaveBeenNthCalledWith(1, expect.objectContaining({
       message: "Provider ID",
-      options: [
+      options: expect.arrayContaining([
         expect.objectContaining({ value: "api-example-test" }),
         expect.objectContaining({ value: "OpenAI" }),
-      ],
+      ]),
     }));
     expect(prompts.select).toHaveBeenNthCalledWith(2, expect.objectContaining({
       message: "运行模式",

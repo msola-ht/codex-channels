@@ -7,7 +7,7 @@
 
 - `codex-connect-app-server.service.template`：启动共享 Codex App Server，并监听私有 Unix Socket。
 - `codex-connect-gateway.service.template`：启动连接该 Socket 的 Gateway。
-- `codex-connect-webui.service.template`：启动只读指标 WebUI，读取 `[webui]` 配置。
+- `codex-connect-webui.service.template`：启动指标与低风险设置 WebUI，读取 `[webui]` 配置。
 - `codex-connect-center.service.template`：启动多设备指标中心服务，读取 `[metrics.center]` 配置。
 
 模板由 `scripts/install-systemd.mjs` 渲染到 `~/.config/systemd/user`（或 `$XDG_CONFIG_HOME/systemd/user`）。

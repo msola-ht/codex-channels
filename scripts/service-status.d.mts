@@ -28,6 +28,12 @@ export type ServiceStatusRunner = (
   options: { encoding: "utf8"; env: NodeJS.ProcessEnv; windowsHide?: boolean },
 ) => ServiceStatusRunResult;
 
+export type AsyncServiceStatusRunner = (
+  command: string,
+  args: readonly string[],
+  options: { encoding: "utf8"; env: NodeJS.ProcessEnv; windowsHide?: boolean },
+) => Promise<ServiceStatusRunResult>;
+
 export function inspectManagedServiceStatus(options?: {
   environment?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
@@ -35,3 +41,29 @@ export function inspectManagedServiceStatus(options?: {
   target?: ManagedServiceStatus["target"];
   userId?: number;
 }): ManagedServiceStatus;
+
+export function inspectManagedServiceStatusAsync(options?: {
+  environment?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  run?: AsyncServiceStatusRunner;
+  target?: ManagedServiceStatus["target"];
+  userId?: number;
+}): Promise<ManagedServiceStatus>;
+
+export interface ManagedServiceError {
+  message: string;
+  observedAt: string | null;
+}
+
+export function readManagedServiceError(options: {
+  environment?: NodeJS.ProcessEnv;
+  target: ManagedServiceStatusEntry["target"];
+  now?: number;
+}): ManagedServiceError | null;
+
+export function readManagedServiceErrorAsync(options: {
+  environment?: NodeJS.ProcessEnv;
+  target: ManagedServiceStatusEntry["target"];
+  platform?: NodeJS.Platform;
+  run?: AsyncServiceStatusRunner;
+}): Promise<ManagedServiceError | null>;

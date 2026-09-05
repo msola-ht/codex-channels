@@ -187,8 +187,14 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.replyContextPersistence === undefined
           ? {}
           : {
-              onReplyContextInvalidated: (target) =>
-                options.replyContextPersistence!.remove(target),
+              onReplyContextInvalidated: async (target, expectedContextToken) => {
+                const persistence = options.replyContextPersistence!;
+                if (expectedContextToken === undefined) {
+                  await persistence.remove(target);
+                  return;
+                }
+                await persistence.removeIf(target, expectedContextToken);
+              },
             }),
       },
     );

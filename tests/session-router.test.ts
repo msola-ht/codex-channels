@@ -84,6 +84,19 @@ describe("SessionRouter", () => {
     expect(store.get(target)).toBeUndefined();
   });
 
+  it("removes a binding when its Workspace was removed from the registry", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "removed", threadId: "bound", sessionId: "bound" });
+    const router = new SessionRouter(threadPort(), store, registry);
+
+    const failures = await router.restoreSubscriptions();
+
+    expect(failures).toEqual([
+      expect.objectContaining({ bindingRemoved: true, reason: "unavailable" }),
+    ]);
+    expect(store.get(target)).toBeUndefined();
+  });
+
   it("passes workspace permissions to startThread and resumeThread", async () => {
     const store = new MemoryBindingStore();
     const entitledRegistry = new WorkspaceRegistry([

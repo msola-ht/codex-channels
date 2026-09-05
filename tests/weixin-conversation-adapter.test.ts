@@ -717,6 +717,7 @@ describe("WeixinConversationAdapter", () => {
     expect(listSessions).toHaveBeenCalledWith(target, {
       page: 1,
       searchTerm: "fix",
+      turnCountMode: "cached",
     });
     expect(notifyText).toHaveBeenCalledWith(
       target,

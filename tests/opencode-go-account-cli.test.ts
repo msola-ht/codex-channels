@@ -47,7 +47,7 @@ describe("OpenCode Go account CLI", () => {
     const configureRole = vi.fn(async () => undefined);
     const output = { write: vi.fn() };
 
-    const result = await addOpencodeGoAccount("opencode-go", {
+    const result = await addOpencodeGoAccount("main", {
       environment,
       output,
       prompter: testPrompter(),
@@ -63,16 +63,16 @@ describe("OpenCode Go account CLI", () => {
     });
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "opencode-go", default: true },
-      { id: "b", default: false },
+      { id: "main", default: true, email: "user@example.com" },
+      { id: "b", default: false, email: "user@example.com" },
     ]);
-    expect(existsSync(join(codexHome(home), "sf-opencode-go.config.toml"))).toBe(true);
-    expect(existsSync(join(codexHome(home), "sf-opencode-go-b.config.toml"))).toBe(true);
-    expect(existsSync(opencodeGoAccountMarkerPath(environment, "opencode-go"))).toBe(true);
+    expect(existsSync(join(codexHome(home), "sf-ocg-main.config.toml"))).toBe(true);
+    expect(existsSync(join(codexHome(home), "sf-ocg-b.config.toml"))).toBe(true);
+    expect(existsSync(opencodeGoAccountMarkerPath(environment, "main"))).toBe(true);
     expect(existsSync(opencodeGoAccountMarkerPath(environment, "b"))).toBe(true);
     expect(configureRole).toHaveBeenCalledTimes(1);
     expect(configureRole).toHaveBeenCalledWith(
-      "opencode-go",
+      "ocg-main",
       "deepseek-v4-flash-vision-exp",
       environment,
     );
@@ -82,7 +82,7 @@ describe("OpenCode Go account CLI", () => {
   it("lists accounts and prints the default marker", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -94,14 +94,14 @@ describe("OpenCode Go account CLI", () => {
     printOpencodeGoAccounts(environment, output);
 
     expect(output.write).toHaveBeenCalledWith(
-      expect.stringContaining("opencode-go（默认）"),
+      expect.stringContaining("ocg-user@example.com（默认）"),
     );
   });
 
   it("removes an account after backing up its profile and marker", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -115,7 +115,7 @@ describe("OpenCode Go account CLI", () => {
       configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
-    const profilePath = join(codexHome(home), "sf-opencode-go-b.config.toml");
+    const profilePath = join(codexHome(home), "sf-ocg-b.config.toml");
 
     await removeOpencodeGoAccount("b", {
       environment,
@@ -125,7 +125,7 @@ describe("OpenCode Go account CLI", () => {
 
     expect(existsSync(profilePath)).toBe(false);
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "opencode-go", default: true },
+      { id: "main", default: true, email: "user@example.com" },
     ]);
     const backup = join(
       home,
@@ -137,13 +137,13 @@ describe("OpenCode Go account CLI", () => {
       "backup",
     );
     expect(existsSync(join(backup, "managed.toml"))).toBe(true);
-    expect(existsSync(join(backup, "sf-opencode-go-b.config.toml"))).toBe(true);
+    expect(existsSync(join(backup, "sf-ocg-b.config.toml"))).toBe(true);
   });
 
   it("restores the account when removing a managed file fails midway", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -157,7 +157,7 @@ describe("OpenCode Go account CLI", () => {
       configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
-    const profilePath = join(codexHome(home), "sf-opencode-go-b.config.toml");
+    const profilePath = join(codexHome(home), "sf-ocg-b.config.toml");
     const markerPath = opencodeGoAccountMarkerPath(environment, "b");
     fileRemovalFailure.path = markerPath;
 
@@ -172,8 +172,8 @@ describe("OpenCode Go account CLI", () => {
     }
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "opencode-go", default: true },
-      { id: "b", default: false },
+      { id: "main", default: true, email: "user@example.com" },
+      { id: "b", default: false, email: "user@example.com" },
     ]);
     expect(existsSync(profilePath)).toBe(true);
     expect(existsSync(markerPath)).toBe(true);
@@ -182,7 +182,7 @@ describe("OpenCode Go account CLI", () => {
   it("refuses to delete the final account before stopping its App Server", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -190,21 +190,21 @@ describe("OpenCode Go account CLI", () => {
       downloadCatalog: successfulCatalog,
     });
 
-    await expect(removeOpencodeGoAccount("opencode-go", {
+    await expect(removeOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       confirm: false,
     })).rejects.toThrow("不能删除最后一个");
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "opencode-go", default: true },
+      { id: "main", default: true, email: "user@example.com" },
     ]);
   });
 
   it("promotes the remaining account when the default is removed", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -227,7 +227,7 @@ describe("OpenCode Go account CLI", () => {
     });
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "opencode-go", default: true },
+      { id: "main", default: true, email: "user@example.com" },
     ]);
   });
 
@@ -235,7 +235,7 @@ describe("OpenCode Go account CLI", () => {
     const home = fixture();
     const environment = testEnvironment(home);
     const rolePath = join(codexHome(home), "sf-agent.config.toml");
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -267,15 +267,15 @@ describe("OpenCode Go account CLI", () => {
     })).rejects.toThrow("role update failed");
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "opencode-go", default: true },
-      { id: "b", default: false },
+      { id: "main", default: true, email: "user@example.com" },
+      { id: "b", default: false, email: "user@example.com" },
     ]);
   });
 
   it.skipIf(process.platform === "win32")("does not replace a DeepSeek shared role when the GO default account changes", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -306,15 +306,15 @@ describe("OpenCode Go account CLI", () => {
 
     expect(configureRole).not.toHaveBeenCalled();
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "opencode-go", default: false },
-      { id: "b", default: true },
+      { id: "main", default: false, email: "user@example.com" },
+      { id: "b", default: true, email: "user@example.com" },
     ]);
   });
 
   it("does not change the default when the shared role cannot be read safely", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -340,15 +340,15 @@ describe("OpenCode Go account CLI", () => {
       .rejects.toThrow("第三方子代理角色配置无法安全读取");
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "opencode-go", default: true },
-      { id: "b", default: false },
+      { id: "main", default: true, email: "user@example.com" },
+      { id: "b", default: false, email: "user@example.com" },
     ]);
   });
 
   it("runs the list subcommand through the CLI entry", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -359,7 +359,7 @@ describe("OpenCode Go account CLI", () => {
 
     await runOpencodeGoAccountCli(["account", "list"], { environment, output });
 
-    expect(output.write).toHaveBeenCalledWith(expect.stringContaining("opencode-go（默认）"));
+    expect(output.write).toHaveBeenCalledWith(expect.stringContaining("ocg-user@example.com（默认）"));
   });
 
   it("prints a structured JSON account list without secrets", async () => {
@@ -372,7 +372,7 @@ describe("OpenCode Go account CLI", () => {
     });
     expect(JSON.parse(emptyOutput.write.mock.calls[0]?.[0] as string)).toEqual({ accounts: [] });
 
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -385,16 +385,18 @@ describe("OpenCode Go account CLI", () => {
       output: configuredOutput,
     });
     expect(JSON.parse(configuredOutput.write.mock.calls[0]?.[0] as string).accounts[0].mode).toBe("switching");
-    const markerPath = opencodeGoAccountMarkerPath(environment, "opencode-go");
+    const markerPath = opencodeGoAccountMarkerPath(environment, "main");
     unlinkSync(markerPath);
     const output = { write: vi.fn() };
     await runOpencodeGoAccountCli(["account", "list", "--json"], { environment, output });
     const payload = JSON.parse(output.write.mock.calls[0]?.[0] as string);
     expect(payload).toEqual({
       accounts: [{
-        id: "opencode-go",
+        id: "main",
+        email: "user@example.com",
+        displayName: "ocg-user@example.com",
         default: true,
-        provider: "opencode-go",
+        provider: "ocg-main",
         mode: "unconfigured",
       }],
     });
@@ -405,7 +407,7 @@ describe("OpenCode Go account CLI", () => {
   it("reports the default-account change and required restart through the CLI", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -435,7 +437,7 @@ describe("OpenCode Go account CLI", () => {
   it("reports a not-running account on stop", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -445,17 +447,17 @@ describe("OpenCode Go account CLI", () => {
     const output = { write: vi.fn() };
 
     const result = await runOpencodeGoAccountCli(
-      ["account", "stop", "opencode-go"],
+      ["account", "stop", "main"],
       { environment, output },
     );
 
-    expect(result).toEqual({ action: "not-running", accountId: "opencode-go" });
+    expect(result).toEqual({ action: "not-running", accountId: "main" });
   });
 
   it("does not remove an account while a Remote TUI holds its Provider lease", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -476,14 +478,14 @@ describe("OpenCode Go account CLI", () => {
     );
     const owner = new AppServerSupervisorOwner(primarySocketPath, {
       primaryProvider: "openai",
-      managedProviders: ["opencode-go", "opencode-go-b"],
+      managedProviders: ["ocg-main", "ocg-b"],
       socketPaths: [primarySocketPath],
     }, {
       ensureProvider: async () => undefined,
       releaseProvider: async () => true,
     });
     await owner.start();
-    const lease = await acquireAppServerProviderLease(primarySocketPath, "opencode-go-b");
+    const lease = await acquireAppServerProviderLease(primarySocketPath, "ocg-b");
 
     try {
       await expect(removeOpencodeGoAccount("b", {
@@ -492,8 +494,8 @@ describe("OpenCode Go account CLI", () => {
         confirm: false,
       })).rejects.toThrow("Remote TUI");
       expect(loadOpencodeGoAccounts(environment)).toEqual([
-        { id: "opencode-go", default: true },
-        { id: "b", default: false },
+        { id: "main", default: true, email: "user@example.com" },
+        { id: "b", default: false, email: "user@example.com" },
       ]);
     } finally {
       await lease.close();
@@ -504,7 +506,7 @@ describe("OpenCode Go account CLI", () => {
   it.skipIf(process.platform === "win32")("does not remove an account when the running Supervisor protocol is incompatible", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    await addOpencodeGoAccount("opencode-go", {
+    await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
@@ -529,9 +531,9 @@ describe("OpenCode Go account CLI", () => {
         version: 3,
         pid: process.pid,
         primaryProvider: "openai",
-        managedProviders: ["opencode-go", "opencode-go-b"],
+        managedProviders: ["ocg-main", "ocg-b"],
         socketPaths: [primarySocketPath],
-        runningProviders: ["opencode-go-b"],
+        runningProviders: ["ocg-b"],
         releasedProviders: [],
       })}\n`));
     });
@@ -548,8 +550,8 @@ describe("OpenCode Go account CLI", () => {
         confirm: false,
       })).rejects.toThrow("监管协议");
       expect(loadOpencodeGoAccounts(environment)).toEqual([
-        { id: "opencode-go", default: true },
-        { id: "b", default: false },
+        { id: "main", default: true, email: "user@example.com" },
+        { id: "b", default: false, email: "user@example.com" },
       ]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -601,8 +603,9 @@ function testPrompter() {
   return {
     secret: async () => "sk-opencode-test",
     confirm: async () => true,
-    accountId: async () => "opencode-go",
-    selectAccount: async () => "opencode-go",
+    contact: async () => "user@example.com",
+    accountId: async () => "main",
+    selectAccount: async () => "main",
     select: async () => "switching",
   };
 }

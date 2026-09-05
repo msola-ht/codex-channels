@@ -16,6 +16,7 @@ import {
   renderFeishuStartupNotification,
 } from "../src/surfaces/feishu/index.js";
 import { renderFeishuUserFacingError } from "../src/surfaces/feishu/renderer.js";
+import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 const target = {
   surface: "feishu",
@@ -93,9 +94,10 @@ describe("Feishu output renderer", () => {
       "",
       "- App Server：已连接",
       "- 系统：macOS · arm64",
+      `- 版本：Codex Connect ${gatewayMetadata.version} · Codex 0.146.0`,
       "",
       "### 运行环境",
-      "- 版本：Codex Connect 0.146.0 · Node.js v24.0.0",
+      "- Node.js：v24.0.0",
       "- 连接：Unix WebSocket",
       "- App Server UA：codex-cli/0.146.0 (macOS 15.0) (arm64)",
       "",

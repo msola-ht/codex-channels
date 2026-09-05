@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 import {
   ConversationCommandService,
   conversationCommandNames,
+  listProviders,
   type ConversationCommandName,
   type ConversationUseCases,
   type DisplayPriceCurrency,
@@ -438,6 +439,47 @@ export class TelegramSurface {
       );
     });
     this.bot.callbackQuery(
+      /^mp:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
+      async (context) => {
+        const modelTarget = target(context);
+        const state = await this.service.modelState(modelTarget);
+        if (
+          telegramModelSelectionToken(
+            state.model,
+            state.modelProvider ?? "openai",
+          ) !== context.match[2]
+        ) {
+          throw new UserFacingError(
+            "model.selection.expired",
+            "提供商列表已变化，请重新发送 /model 选择",
+          );
+        }
+        const providers = listProviders(state.models);
+        const provider = providers[Number(context.match[1]) - 1];
+        if (!provider) {
+          throw new UserFacingError(
+            "model.selection.expired",
+            "提供商列表已变化，请重新发送 /model 选择",
+          );
+        }
+        await context.answerCallbackQuery({ text: "已选择提供商" });
+        await context.editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: [] },
+        });
+        const result = await this.commands.execute(
+          modelTarget,
+          "model",
+          provider,
+        );
+        await renderTelegramCommandResult(
+          context,
+          result,
+          this.priceCurrency,
+          this.exchangeRate?.() ?? null,
+        );
+      },
+    );
+    this.bot.callbackQuery(
       /^ms:([1-9]\d*):([A-Za-z0-9_-]{43})$/,
       async (context) => {
         const modelTarget = target(context);
@@ -467,7 +509,7 @@ export class TelegramSurface {
         const result = await this.commands.execute(
           modelTarget,
           "model",
-          String(Number(context.match[1])),
+          selected.id,
         );
         await renderTelegramCommandResult(
           context,

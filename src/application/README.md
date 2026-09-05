@@ -14,7 +14,7 @@
 - `conversation-service.ts`：通过稳定的 `ConversationUseCases` 公开 Surface 和命令层所需用例，
   具体 `ConversationService` 负责新建、恢复、切换、归档、固定、原生分区和分页筛选 Thread，提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
-  会话列表当前页通过 Thread History 端口汇总官方 Turn 轮数，历史读取失败不阻塞列表且不伪造数量；
+  会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   并通过注入端口把项目规则操作限制
   到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
@@ -51,8 +51,11 @@
   Application 和 Surface 不接收完整官方模型对象。
 - `account-port.ts`：分别定义 OpenAI 账户 Token/额度、当前 Thread 官方估算、第三方余额和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
+- `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
+- `account-snapshot-service.ts`：提供跨 WebUI 与渠道复用的最新官方账户快照查询入口。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
+  查询结果可通过快照写入端口落入统一读模型。
 - `exchange-rate-port.ts`：定义稳定汇率快照与全局价格显示币种（`cny` / `usd`），并在全局币种为
   人民币时决定启动 USD/CNY 汇率刷新；Application 不执行网络请求或读取汇率缓存。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread

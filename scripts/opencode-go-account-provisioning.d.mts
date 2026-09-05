@@ -10,6 +10,9 @@ export interface OpenCodeGoAccountConfigurationPreview {
   account: {
     id: string;
     provider: string;
+    email?: string;
+    phone?: string;
+    displayName?: string;
     exists: boolean;
     default: boolean;
   };
@@ -41,6 +44,9 @@ interface ProvisioningOptions {
 export function previewOpencodeGoAccountConfiguration(
   input: {
     accountId: string;
+    email?: string;
+    phone?: string;
+    contact?: string;
     mode?: "switching" | "exclusive";
     reconfigure?: boolean;
   },
@@ -50,6 +56,9 @@ export function previewOpencodeGoAccountConfiguration(
 export function applyOpencodeGoAccountConfiguration(
   input: {
     accountId: string;
+    email?: string;
+    phone?: string;
+    contact?: string;
     mode?: "switching" | "exclusive";
     reconfigure?: boolean;
     apiKey: string;
