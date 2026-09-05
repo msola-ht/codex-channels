@@ -191,7 +191,6 @@ export class FakeTransport extends BaseTransport {
   resumeThreadData: Record<string, unknown> = appServerThread();
   threadReadData: Record<string, unknown> = appServerThread();
   metadataUpdateThreadData: Record<string, unknown> | undefined;
-  threadSections: Array<{ id: string; name: string }> = [pinnedThreadSection];
   goal = appServerGoal();
 
   async connect(): Promise<void> {}
@@ -293,33 +292,6 @@ export class FakeTransport extends BaseTransport {
           result: { thread: appServerThread() },
         })),
       );
-    } else if (decoded.method === "threadSection/list") {
-      queueMicrotask(() =>
-        this.emitMessage(JSON.stringify({
-          id: decoded.id,
-          result: { data: this.threadSections, nextCursor: null },
-        })),
-      );
-    } else if (decoded.method === "threadSection/create") {
-      const params = decoded.params as { name: string };
-      const section = { id: `section-${this.threadSections.length}`, name: params.name };
-      this.threadSections.push(section);
-      queueMicrotask(() =>
-        this.emitMessage(JSON.stringify({ id: decoded.id, result: { section } })),
-      );
-    } else if (decoded.method === "threadSection/update") {
-      const params = decoded.params as { sectionId: string; name: string };
-      const section = this.threadSections.find((entry) => entry.id === params.sectionId)!;
-      section.name = params.name;
-      queueMicrotask(() =>
-        this.emitMessage(JSON.stringify({ id: decoded.id, result: { section } })),
-      );
-    } else if (decoded.method === "threadSection/delete") {
-      const params = decoded.params as { sectionId: string };
-      this.threadSections = this.threadSections.filter((entry) => entry.id !== params.sectionId);
-      queueMicrotask(() =>
-        this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
-      );
     } else if (decoded.method === "thread/metadata/update") {
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({
@@ -329,9 +301,9 @@ export class FakeTransport extends BaseTransport {
       );
     } else if (decoded.method === "thread/section/move") {
       const params = decoded.params as { sectionId: string | null };
-      const section = params.sectionId === null
-        ? null
-        : this.threadSections.find((entry) => entry.id === params.sectionId) ?? null;
+      const section = params.sectionId === pinnedThreadSection.id
+        ? pinnedThreadSection
+        : null;
       this.threadReadData = appServerThread({
         section,
         sectionEnteredAt: params.sectionId === null ? null : 2,

@@ -120,6 +120,7 @@ function settingsState(): CodexUserSettingsState {
       fastEnabled: false,
       webSearch: null,
       updatePlanEnabled: false,
+      contextManagementEnabled: false,
       autoRecapEnabled: false,
     },
     permissions: {

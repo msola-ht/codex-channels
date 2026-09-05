@@ -57,11 +57,6 @@ plugin_api = false
 # Gateway 计划任务默认关闭；启用后使用独立私有数据库并由 App Server 执行 Turn。
 enabled = false
 
-[thread_sections]
-# 自定义 Thread 分区是 App Server 全局状态；只有这里列出的 Actor 可以修改。
-# 格式：telegram:<用户 ID>、feishu:<open_id>、weixin:<用户 ID>。
-administrators = []
-
 # 预留给直接 API 功能的第三方 Responses 提供商：
 # [[api_providers]]
 # id = "responses-relay"

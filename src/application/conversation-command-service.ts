@@ -13,7 +13,6 @@ import {
   parseSkillInvocation,
   parseThreadRevertOperation,
   parseThreadQueueOperation,
-  parseThreadSectionOperation,
   parseWorkspacePermissionCommand,
   toSessionQuery,
   type McpDetailView,
@@ -23,7 +22,6 @@ import {
 import type { ConversationUseCases } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
 import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
-import type { SurfaceAccessPolicy } from "../policy/index.js";
 import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
@@ -86,7 +84,6 @@ export const conversationCommandNames = [
 export type ConversationCommandName = typeof conversationCommandNames[number];
 const conversationCommandNameSet = new Set<string>(conversationCommandNames);
 const maximumSessionListEntries = 20;
-const maximumThreadSectionListEntries = 8;
 const maximumPluginListEntries = 8;
 
 export function isConversationCommandName(value: string): value is ConversationCommandName {
@@ -105,19 +102,6 @@ export type ConversationCommandResult =
       pageCount: number;
       matchedSessionCount: number;
       view: SessionListView;
-    }
-  | {
-      kind: "thread-sections";
-      sections: Awaited<ReturnType<ConversationUseCases["listThreadSections"]>>;
-      selectors: string[];
-      page: number;
-      pageCount: number;
-      totalSectionCount: number;
-      canManageCustomSections: boolean;
-    }
-  | {
-      kind: "thread-section-delete-preview";
-      preview: Awaited<ReturnType<ConversationUseCases["previewThreadSectionDelete"]>>;
     }
   | {
       kind: "thread-queue";
@@ -242,11 +226,6 @@ export type ConversationCommandOutcome =
   | { type: "sessions.cleaned"; maxTurns: number; archivedCount: number; failedCount: number }
   | { type: "thread.unarchived"; threadId: string }
   | { type: "thread.pin-updated"; pinned: boolean; changed: boolean }
-  | { type: "thread-section.created"; sectionId: string; name: string }
-  | { type: "thread-section.renamed"; sectionId: string; name: string }
-  | { type: "thread-section.moved"; sectionId: string; name: string; pinned: boolean; ordered: boolean }
-  | { type: "thread-section.removed" }
-  | { type: "thread-section.deleted"; sectionId: string; name: string }
   | {
       type: "workspace.selected";
       workspace: Awaited<ReturnType<ConversationUseCases["selectWorkspace"]>>;
@@ -320,11 +299,13 @@ export type ConversationCommandOutcome =
     };
 
 export class ConversationCommandService {
+  private readonly scheduledTasks: ScheduledTaskUseCases | undefined;
   constructor(
     private readonly conversations: ConversationUseCases,
-    private readonly threadSectionAccess?: SurfaceAccessPolicy,
-    private readonly scheduledTasks?: ScheduledTaskUseCases,
-  ) {}
+    scheduledTasks?: ScheduledTaskUseCases,
+  ) {
+    this.scheduledTasks = scheduledTasks;
+  }
 
   async execute(
     target: ConversationTarget,
@@ -435,97 +416,7 @@ export class ConversationCommandService {
           };
         }
       case "section": {
-        const operation = parseThreadSectionOperation(argumentsText);
-        const canManageCustomSections = Boolean(
-          actorId
-          && this.threadSectionAccess?.isAllowed({ target, actorId }),
-        );
-        if (operation.type === "list") {
-          const sections = await this.conversations.listThreadSections(target);
-          const pageCount = Math.max(
-            1,
-            Math.ceil(sections.length / maximumThreadSectionListEntries),
-          );
-          const start = (operation.page - 1) * maximumThreadSectionListEntries;
-          const entries = sections.map((section, index) => ({
-            section,
-            selector: String(index + 1),
-          }));
-          const pageEntries = operation.page <= pageCount
-            ? entries.slice(start, start + maximumThreadSectionListEntries)
-            : [];
-          return {
-            kind: "thread-sections",
-            sections: pageEntries.map(({ section }) => section),
-            selectors: pageEntries.map(({ selector }) => selector),
-            page: operation.page,
-            pageCount,
-            totalSectionCount: sections.length,
-            canManageCustomSections,
-          };
-        }
-        if (!canManageCustomSections) {
-          throw new UserFacingError(
-            "thread-section.admin-required",
-            "只有配置的会话分区管理员可以修改全局分区",
-          );
-        }
-        if (operation.type === "create") {
-          const section = await this.conversations.createThreadSection(target, operation.name);
-          return {
-            kind: "outcome",
-            outcome: { type: "thread-section.created", sectionId: section.id, name: section.name },
-          };
-        }
-        if (operation.type === "rename") {
-          const section = await this.conversations.renameThreadSection(
-            target,
-            operation.selector,
-            operation.name,
-          );
-          return {
-            kind: "outcome",
-            outcome: { type: "thread-section.renamed", sectionId: section.id, name: section.name },
-          };
-        }
-        if (operation.type === "move") {
-          const section = await this.conversations.moveCurrentThreadToSection(
-            target,
-            operation.selector,
-            operation.beforeThreadSelector ?? undefined,
-          );
-          return {
-            kind: "outcome",
-            outcome: {
-              type: "thread-section.moved",
-              sectionId: section.id,
-              name: section.name,
-              pinned: section.builtIn === "pinned",
-              ordered: operation.beforeThreadSelector !== null,
-            },
-          };
-        }
-        if (operation.type === "remove") {
-          await this.conversations.removeCurrentThreadSection(target);
-          return { kind: "outcome", outcome: { type: "thread-section.removed" } };
-        }
-        if (!operation.confirmed) {
-          return {
-            kind: "thread-section-delete-preview",
-            preview: await this.conversations.previewThreadSectionDelete(
-              target,
-              operation.selector,
-            ),
-          };
-        }
-        const section = await this.conversations.deleteThreadSection(
-          target,
-          operation.selector,
-        );
-        return {
-          kind: "outcome",
-          outcome: { type: "thread-section.deleted", sectionId: section.id, name: section.name },
-        };
+        throw new UserFacingError("thread-section.removed", "会话分区功能已移除；请使用 /pin、/unpin 和 /rename");
       }
       case "status":
         return {

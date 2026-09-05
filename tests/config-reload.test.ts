@@ -117,9 +117,6 @@ describe("Gateway config reload", () => {
     ["display.price-currency", "global", { priceCurrency: "usd" }],
     ["experimental.plugin-api", "global", { pluginApiEnabled: false }],
     ["scheduled-tasks.enabled", "global", { scheduledTasksEnabled: true }],
-    ["thread-sections.administrators", "global", {
-      threadSectionAdministrators: new Set(["telegram:123"]),
-    }],
     ["codex.default-model", "global", { codexModel: "other-model" }],
     ["metrics.sync", "global", {
       metricsSync: {
@@ -468,7 +465,6 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     reasoningEnabled: true,
     pluginApiEnabled: true,
     scheduledTasksEnabled: false,
-    threadSectionAdministrators: new Set(),
     priceCurrency: "cny",
     apiProviders: [],
     credentialsDirectory: "/tmp/credentials",

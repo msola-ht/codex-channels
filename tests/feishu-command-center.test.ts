@@ -106,7 +106,7 @@ describe("Feishu command center", () => {
     );
     expect([...visibleSharedCommands].sort()).toEqual(
       conversationCommandNames
-        .filter((command) => command !== "unarchive")
+        .filter((command) => command !== "unarchive" && command !== "section")
         .toSorted(),
     );
     expect(collectCardActions(categorized).some((action) =>

@@ -185,7 +185,6 @@ describe("ConversationCommandService", () => {
         page: 1,
         filter: "all",
         provider: null,
-        sectionSelector: null,
         searchTerm: "fix",
       },
     });
@@ -226,7 +225,7 @@ describe("ConversationCommandService", () => {
     await expect(commands.execute(
       target,
       "sessions",
-      "2 filter running provider deepseek section 项目 search 修复 CI",
+      "2 filter running provider deepseek search 修复 CI",
     )).resolves.toMatchObject({
       kind: "sessions",
       sessions: [{ id: "thread-21" }],
@@ -236,7 +235,6 @@ describe("ConversationCommandService", () => {
       view: {
         filter: "running",
         provider: "deepseek",
-        sectionSelector: "项目",
         searchTerm: "修复 CI",
       },
     });
@@ -244,32 +242,21 @@ describe("ConversationCommandService", () => {
       page: 2,
       filter: "running",
       provider: "deepseek",
-      sectionSelector: "项目",
       searchTerm: "修复 CI",
       turnCountMode: "cached",
     });
   });
 
-  it("keeps a multi-word Thread Section selector until the next session option", async () => {
+  it("rejects removed Thread Section filters", async () => {
     const listSessions = vi.fn(async () => []);
     const commands = new ConversationCommandService({
       listSessions,
       status: () => ({}),
     } as unknown as ConversationUseCases);
 
-    await commands.execute(
-      target,
-      "sessions",
-      "2 section 项目 Alpha provider deepseek search 修复 CI",
-    );
-
-    expect(listSessions).toHaveBeenCalledWith(target, {
-      page: 2,
-      sectionSelector: "项目 Alpha",
-      provider: "deepseek",
-      searchTerm: "修复 CI",
-      turnCountMode: "cached",
-    });
+    await expect(commands.execute(target, "sessions", "section 项目"))
+      .rejects.toMatchObject({ code: "sessions.usage" });
+    expect(listSessions).not.toHaveBeenCalled();
   });
 
   it("reports archived session filter errors with the archived command usage", async () => {
@@ -278,74 +265,18 @@ describe("ConversationCommandService", () => {
     await expect(commands.execute(target, "archived", "filter running"))
       .rejects.toMatchObject({
         code: "archived-sessions.usage",
-        message: "用法：/archived [页码] [filter <all|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]",
+        message: "用法：/archived [页码] [filter <all|pinned>] [provider <名称>] [search <关键词>]",
       });
   });
 
-  it("routes Thread Section list, move and confirmed delete operations", async () => {
-    const section = {
-      id: "section-project",
-      name: "项目",
-      builtIn: null,
-      currentWorkspaceActiveCount: 1,
-      currentWorkspaceArchivedCount: 0,
-    };
-    const moveCurrentThreadToSection = vi.fn(async () => section);
-    const previewThreadSectionDelete = vi.fn(async () => ({ section }));
-    const deleteThreadSection = vi.fn(async () => section);
-    const commands = new ConversationCommandService({
-      listThreadSections: vi.fn(async () => [section]),
-      moveCurrentThreadToSection,
-      previewThreadSectionDelete,
-      deleteThreadSection,
-    } as unknown as ConversationUseCases, {
-      isAllowed: ({ actorId }) => actorId === "actor-admin",
-    });
-
-    await expect(commands.execute(target, "section", ""))
-      .resolves.toMatchObject({
-        kind: "thread-sections",
-        selectors: ["1"],
-        canManageCustomSections: false,
-      });
-    await expect(commands.execute(target, "section", "", "actor-admin"))
-      .resolves.toMatchObject({
-        kind: "thread-sections",
-        selectors: ["1"],
-        canManageCustomSections: true,
-      });
-    await expect(commands.execute(target, "section", "move 1 before thread-2", "actor-admin"))
-      .resolves.toMatchObject({
-        kind: "outcome",
-        outcome: { type: "thread-section.moved", ordered: true },
-      });
-    expect(moveCurrentThreadToSection).toHaveBeenCalledWith(target, "1", "thread-2");
-    await expect(commands.execute(target, "section", "delete 1", "actor-admin"))
-      .resolves.toEqual({ kind: "thread-section-delete-preview", preview: { section } });
-    expect(deleteThreadSection).not.toHaveBeenCalled();
-    await expect(commands.execute(target, "section", "delete section-project confirm", "actor-admin"))
-      .resolves.toMatchObject({
-        kind: "outcome",
-        outcome: { type: "thread-section.deleted", sectionId: "section-project" },
-      });
-  });
-
-  it("allows Thread Section reads but denies global writes without an administrator", async () => {
-    const listThreadSections = vi.fn(async () => []);
-    const createThreadSection = vi.fn();
-    const commands = new ConversationCommandService({
-      listThreadSections,
-      createThreadSection,
-    } as unknown as ConversationUseCases);
+  it("rejects the removed Thread Section command", async () => {
+    const commands = new ConversationCommandService({} as ConversationUseCases);
 
     await expect(commands.execute(target, "section", "list"))
-      .resolves.toMatchObject({
-        kind: "thread-sections",
-        canManageCustomSections: false,
+      .rejects.toMatchObject({
+        code: "thread-section.removed",
+        message: "会话分区功能已移除；请使用 /pin、/unpin 和 /rename",
       });
-    await expect(commands.execute(target, "section", "create 项目", "actor-user"))
-      .rejects.toMatchObject({ code: "thread-section.admin-required" });
-    expect(createThreadSection).not.toHaveBeenCalled();
   });
 
   it("shows and updates workspace permissions through /workspaceperm", async () => {
@@ -1113,7 +1044,6 @@ describe("ConversationCommandService", () => {
       archive: vi.fn(async () => "thread-archived"),
       unarchive: vi.fn(async () => "thread-unarchived"),
       setPinned: vi.fn(async () => true),
-      listThreadSections: vi.fn(async () => []),
       selectWorkspace: vi.fn(async () => ({ id: "main", name: "Main", cwd: "/workspace" })),
       listWorkspaces: vi.fn(() => [{ id: "main", name: "Main", cwd: "/workspace" }]),
       updateWorkspacePermissions: vi.fn(async () => ({
@@ -1234,7 +1164,6 @@ describe("ConversationCommandService", () => {
     };
     const commands = new ConversationCommandService(
       service as unknown as ConversationUseCases,
-      undefined,
       { list: service.scheduleList } as never,
     );
     const cases = [
@@ -1246,7 +1175,6 @@ describe("ConversationCommandService", () => {
       ["unarchive", "thread-1", "unarchive"],
       ["pin", "", "setPinned"],
       ["unpin", "", "setPinned"],
-      ["section", "", "listThreadSections"],
       ["status", "", "status"],
       ["workspace", "main", "selectWorkspace"],
       ["workspaceperm", "approval never", "updateWorkspacePermissions"],
@@ -1276,12 +1204,16 @@ describe("ConversationCommandService", () => {
       ["schedule", "", "scheduleList"],
     ] as const;
 
-    expect(cases.map(([command]) => command)).toEqual(conversationCommandNames);
+    expect(cases.map(([command]) => command)).toEqual(
+      conversationCommandNames.filter((command) => command !== "section"),
+    );
     for (const [command, input, method] of cases) {
       const before = service[method].mock.calls.length;
       await expect(commands.execute(target, command, input, "actor-1")).resolves.toHaveProperty("kind");
       expect(service[method].mock.calls.length).toBeGreaterThan(before);
     }
+    await expect(commands.execute(target, "section", "", "actor-1"))
+      .rejects.toMatchObject({ code: "thread-section.removed" });
     expect(service.status).toHaveBeenCalledWith(target, {
       includeGitBranch: true,
     });

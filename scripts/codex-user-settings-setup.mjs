@@ -62,6 +62,11 @@ export async function runCodexUserSettingsSetup({
         hint: settings.defaults.updatePlanEnabled ? "当前：开启" : "当前：关闭",
       },
       {
+        value: "context-management",
+        label: "实验性上下文管理",
+        hint: settings.defaults.contextManagementEnabled ? "当前：开启" : "当前：关闭（默认）",
+      },
+      {
         value: "auto-recap",
         label: "空闲总结",
         hint: settings.defaults.autoRecapEnabled ? "当前：开启" : "当前：关闭（默认）",
@@ -127,6 +132,9 @@ export async function runCodexUserSettingsSetup({
   }
   if (section === "update-plan") {
     return runUpdatePlanSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
+  if (section === "context-management") {
+    return runContextManagementSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
   if (section === "auto-recap") {
     return runAutoRecapSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
@@ -294,6 +302,41 @@ async function runUpdatePlanSetting({ environment, output, prompts, settings, up
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 计划清单工具已${value ? "开启" : "关闭"}。\n`);
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  return result;
+}
+
+async function runContextManagementSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  const enabled = await prompts.select({
+    message: "实验性上下文管理",
+    showInstructions: false,
+    initialValue: settings.defaults.contextManagementEnabled ? "enabled" : "disabled",
+    options: [
+      { value: "disabled", label: "关闭", hint: "保持上游默认关闭" },
+      { value: "enabled", label: "开启", hint: "仅 ChatGPT Plus、Pro、Pro Lite 的官方 Codex 新会话生效" },
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(enabled) || enabled === "back") return { action: "back" };
+  if (enabled !== "enabled" && enabled !== "disabled") {
+    throw new Error(`未知实验性上下文管理设置：${String(enabled)}`);
+  }
+  const value = enabled === "enabled";
+  const confirmed = await prompts.confirm({
+    message: `保存实验性上下文管理：${value ? "开启" : "关闭"}？`,
+    initialValue: true,
+  });
+  if (prompts.isCancel(confirmed) || confirmed !== true) {
+    output.write("已取消，未修改实验性上下文管理设置。\n");
+    return undefined;
+  }
+  const result = await updateSetting({ kind: "context-management", enabled: value }, {
+    environment,
+    expectedVersion: settings.version,
+    ...(createClient === undefined ? {} : { createClient }),
+    ...(primaryProvider === undefined ? {} : { primaryProvider }),
+  });
+  output.write(`实验性上下文管理已${value ? "开启" : "关闭"}；重启服务后，仅符合条件的官方 ChatGPT Codex 新会话生效。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }

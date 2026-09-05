@@ -139,7 +139,7 @@ describe("Weixin command renderer", () => {
         page: 1,
         pageCount: 1,
         matchedSessionCount: 0,
-        view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
+        view: { page: 1, filter: "all", provider: null, searchTerm: null },
       },
       {
         kind: "status",

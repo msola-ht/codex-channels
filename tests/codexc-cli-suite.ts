@@ -210,13 +210,13 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const detailedCases = [
       {
         args: ["config", "--help"],
-        includes: ["codexc config [--json]", "脱敏配置总览", "网络代理", "Thread 分区管理员"],
-        excludes: ["工作区设置（沙箱、审批策略、权限 Profile）"],
+        includes: ["codexc config [--json]", "脱敏配置总览", "网络代理"],
+        excludes: ["Thread 分区管理员"],
       },
       {
         args: ["setup", "--help"],
         includes: [
-          "Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 计划清单工具 / 沙盒、审批与网络",
+          "Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 计划清单工具 / 实验性上下文管理 / 沙盒、审批与网络",
           "OpenAI 官方 → 登录并恢复官方",
           "受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）",
         ],
@@ -4306,7 +4306,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(diagnosed.stdout).toContain("Unrecognized key");
   });
 
-  it("reports unreachable Thread Section administrators as invalid configuration", () => {
+  it("reports removed Thread Section configuration as invalid", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-doctor-section-admin-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -4334,10 +4334,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
 
     expect(diagnosed.status).toBe(1);
     expect(diagnosed.stdout).toContain("[失败] 配置格式");
-    expect(diagnosed.stdout).toContain(
-      "Thread 分区管理员必须属于对应已启用渠道的允许名单",
-    );
-    expect(diagnosed.stdout).not.toContain("已配置 1 个管理员");
+    expect(diagnosed.stdout).toContain("Unrecognized key");
+    expect(diagnosed.stdout).not.toContain("管理员");
   });
     }
   });

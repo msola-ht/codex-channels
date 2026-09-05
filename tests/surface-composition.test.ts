@@ -545,7 +545,6 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     reasoningEnabled: true,
     pluginApiEnabled: true,
     scheduledTasksEnabled: false,
-    threadSectionAdministrators: new Set(),
     priceCurrency: "cny",
     apiProviders: [],
     credentialsDirectory: "/tmp/credentials",

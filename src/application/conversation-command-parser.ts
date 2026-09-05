@@ -11,9 +11,9 @@ import type { WorkspacePermissionUpdate } from "./workspace-permission-port.js";
 
 export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
 export const pluginCommandUsageText = "用法：/plugin [health | list [页码] [search <关键词>] | <名称、完整 ID 或序号> [任务]]";
-export const sessionCommandUsageText = "用法：/sessions [页码] [filter <all|running|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]";
-export const archivedSessionCommandUsageText = "用法：/archived [页码] [filter <all|pinned|unsectioned>] [provider <名称>] [section <名称、ID 或序号>] [search <关键词>]";
-export const threadSectionCommandUsageText = "用法：/section [list [页码] | create <名称> | rename <ID 或序号> <新名称> | move <ID 或序号> [before <会话选择器>] | remove | delete <ID 或序号> [confirm]]";
+export const sessionCommandUsageText = "用法：/sessions [页码] [filter <all|running|pinned>] [provider <名称>] [search <关键词>]";
+export const archivedSessionCommandUsageText = "用法：/archived [页码] [filter <all|pinned>] [provider <名称>] [search <关键词>]";
+export const threadSectionCommandUsageText = "会话分区功能已移除；请使用 /pin、/unpin 和 /rename";
 export const threadQueueCommandUsageText = "用法：/queue add <文本> | /queue list [页码] | /queue update <完整 ID 或当前列表序号> <文本> | /queue delete <完整 ID 或当前列表序号> | /queue reorder <完整 ID 或当前列表序号> <目标位置> | /queue start [完整 ID 或当前列表序号]";
 export const threadRevertCommandUsageText = "用法：/revert list [页码] | /revert <Turn ID 或当前列表序号> | /revert confirm <一次性令牌>";
 
@@ -30,9 +30,8 @@ export interface PluginListView {
 
 export interface SessionListView {
   page: number;
-  filter: "all" | "running" | "pinned" | "unsectioned";
+  filter: "all" | "running" | "pinned";
   provider: string | null;
-  sectionSelector: string | null;
   searchTerm: string | null;
 }
 
@@ -81,7 +80,6 @@ export function defaultSessionListView(): SessionListView {
     page: 1,
     filter: "all",
     provider: null,
-    sectionSelector: null,
     searchTerm: null,
   };
 }
@@ -98,7 +96,10 @@ export function parseSessionListView(input: string, archived: boolean): SessionL
     }
     index = 1;
   }
-  const recognized = new Set(["filter", "provider", "section", "search"]);
+  const recognized = new Set(["filter", "provider", "search"]);
+  if (parts[0] === "section" || parts[0] === "unsectioned") {
+    throw sessionListUsageError(archived);
+  }
   if (index === 0 && !recognized.has(parts[0] ?? "")) {
     if (input.length > 128) throw sessionListUsageError(archived);
     return { ...view, searchTerm: input };
@@ -112,18 +113,10 @@ export function parseSessionListView(input: string, archived: boolean): SessionL
       index = parts.length;
       continue;
     }
-    if (option === "section") {
-      const start = index;
-      while (index < parts.length && !recognized.has(parts[index]!)) index += 1;
-      const value = parts.slice(start, index).join(" ");
-      if (!value || value.length > 128) throw sessionListUsageError(archived);
-      view.sectionSelector = value;
-      continue;
-    }
     const value = parts[index++];
     if (!value) throw sessionListUsageError(archived);
     if (option === "filter") {
-      if (!(["all", "running", "pinned", "unsectioned"] as const).includes(
+      if (!(["all", "running", "pinned"] as const).includes(
         value as SessionListView["filter"],
       )) {
         throw sessionListUsageError(archived);
@@ -146,7 +139,6 @@ export function toSessionQuery(view: SessionListView): {
   searchTerm?: string;
   filter?: SessionListView["filter"];
   provider?: string;
-  sectionSelector?: string;
   page?: number;
 } {
   return {
@@ -154,48 +146,7 @@ export function toSessionQuery(view: SessionListView): {
     ...(view.searchTerm ? { searchTerm: view.searchTerm } : {}),
     ...(view.filter !== "all" ? { filter: view.filter } : {}),
     ...(view.provider ? { provider: view.provider } : {}),
-    ...(view.sectionSelector ? { sectionSelector: view.sectionSelector } : {}),
   };
-}
-
-export function parseThreadSectionOperation(input: string):
-  | { type: "list"; page: number }
-  | { type: "create"; name: string }
-  | { type: "rename"; selector: string; name: string }
-  | { type: "move"; selector: string; beforeThreadSelector: string | null }
-  | { type: "remove" }
-  | { type: "delete"; selector: string; confirmed: boolean } {
-  const parts = input ? input.split(/\s+/u) : [];
-  if (parts.length === 0 || (parts[0] === "list" && parts.length <= 2)) {
-    const pageText = parts[0] === "list" ? parts[1] : undefined;
-    const page = pageText === undefined ? 1 : Number(pageText);
-    if (!Number.isSafeInteger(page) || page < 1 || page > 10_000) {
-      throw new UserFacingError("thread-section.usage", threadSectionCommandUsageText);
-    }
-    return { type: "list", page };
-  }
-  if (parts[0] === "create" && parts.length >= 2) {
-    return { type: "create", name: parts.slice(1).join(" ") };
-  }
-  if (parts[0] === "rename" && parts[1] && parts.length >= 3) {
-    return { type: "rename", selector: parts[1], name: parts.slice(2).join(" ") };
-  }
-  if (parts[0] === "move" && parts[1]) {
-    if (parts.length === 2) {
-      return { type: "move", selector: parts[1], beforeThreadSelector: null };
-    }
-    if (parts.length === 4 && parts[2] === "before") {
-      return { type: "move", selector: parts[1], beforeThreadSelector: parts[3]! };
-    }
-  }
-  if (parts[0] === "remove" && parts.length === 1) return { type: "remove" };
-  if (parts[0] === "delete" && parts[1] && parts.length <= 3) {
-    if (parts.length === 3 && parts[2] !== "confirm") {
-      throw new UserFacingError("thread-section.usage", threadSectionCommandUsageText);
-    }
-    return { type: "delete", selector: parts[1], confirmed: parts[2] === "confirm" };
-  }
-  throw new UserFacingError("thread-section.usage", threadSectionCommandUsageText);
 }
 
 export function parseThreadQueueOperation(input: string):

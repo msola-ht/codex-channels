@@ -94,9 +94,6 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
     scheduled_tasks: {
       enabled: false,
     },
-    thread_sections: {
-      administrators: [],
-    },
     storage: { database_path: "data/gateway.sqlite3" },
     logging: { level: "info" },
     workspaces: [defaultWorkspace],

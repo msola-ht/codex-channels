@@ -57,7 +57,6 @@ import {
   telegramPluginSelectionToken,
   threadQueueDeleteConfirmationKeyboard,
   threadQueueItemKeyboard,
-  telegramThreadSectionToken,
   workspacePermissionFieldKeyboard,
   workspacePermissionPrompt,
   telegramWorkspaceSwitchToken,
@@ -108,7 +107,6 @@ export interface TelegramAudioPort {
 export interface TelegramSurfaceOptions {
   gatewayVersion: string;
   actorRegistry?: ConversationActorRegistry;
-  threadSectionAccess?: SurfaceAccessPolicy;
   scheduledTasks?: ScheduledTaskUseCases;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
@@ -229,7 +227,6 @@ export class TelegramSurface {
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(
       service,
-      options.threadSectionAccess,
       options.scheduledTasks,
     );
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
@@ -684,36 +681,6 @@ export class TelegramSurface {
         });
       },
     );
-    this.bot.callbackQuery(/^section:page:([1-9]\d*)$/, async (context) => {
-      await context.answerCallbackQuery({ text: "正在加载会话分区" });
-      const result = await this.commands.execute(
-        target(context),
-        "section",
-        `list ${context.match[1]}`,
-        String(context.from.id),
-      );
-      await renderTelegramCommandResult(
-        context,
-        result,
-        this.priceCurrency,
-        this.exchangeRate?.() ?? null,
-      );
-    });
-    this.bot.callbackQuery("section:pin", async (context) => {
-      await context.answerCallbackQuery({ text: "正在固定当前会话" });
-      const result = await this.commands.execute(
-        target(context),
-        "pin",
-        "",
-        String(context.from.id),
-      );
-      await renderTelegramCommandResult(
-        context,
-        result,
-        this.priceCurrency,
-        this.exchangeRate?.() ?? null,
-      );
-    });
     this.bot.callbackQuery(/^queue:(?:page|refresh):([1-9]\d*)$/, async (context) => {
       await context.answerCallbackQuery({ text: "正在加载 Queue" });
       const result = await this.commands.execute(
@@ -819,34 +786,6 @@ export class TelegramSurface {
           target(context),
           "queue",
           `delete ${context.match[2]}`,
-          String(context.from.id),
-        );
-        await renderTelegramCommandResult(
-          context,
-          result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
-        );
-      },
-    );
-    this.bot.callbackQuery(
-      /^section:move:([A-Za-z0-9_-]{43})$/,
-      async (context) => {
-        const sectionTarget = target(context);
-        const matches = (await this.service.listThreadSections(sectionTarget)).filter(
-          (section) => telegramThreadSectionToken(section.id) === context.match[1],
-        );
-        if (matches.length !== 1) {
-          throw new UserFacingError(
-            "thread-section.selector.not-found",
-            "会话分区按钮已失效",
-          );
-        }
-        await context.answerCallbackQuery({ text: `正在移动到 ${matches[0]!.name}` });
-        const result = await this.commands.execute(
-          sectionTarget,
-          "section",
-          `move ${matches[0]!.id}`,
           String(context.from.id),
         );
         await renderTelegramCommandResult(

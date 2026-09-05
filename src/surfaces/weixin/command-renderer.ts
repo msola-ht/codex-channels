@@ -37,11 +37,9 @@ import {
   formatConversationScheduledConfirmation,
   formatConversationScheduledRuns,
   formatConversationScheduledTasks,
-  formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
   formatConversationThreadRevertPreview,
-  formatConversationThreadSections,
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
@@ -162,10 +160,6 @@ export function renderWeixinCommandResult(
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
       return formatConversationSessions(result);
-    case "thread-sections":
-      return formatConversationThreadSections(result);
-    case "thread-section-delete-preview":
-      return formatConversationThreadSectionDeletePreview(result);
     case "thread-queue":
       return formatConversationThreadQueue(result);
     case "thread-revert":
@@ -227,6 +221,7 @@ export function renderWeixinCommandResult(
     case "occupancy":
       return formatConversationOccupancy(result);
   }
+  return null;
 }
 
 export function renderWeixinUserFacingError(

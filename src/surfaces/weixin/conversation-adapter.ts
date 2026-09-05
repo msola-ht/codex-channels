@@ -9,7 +9,6 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
-import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import type { InputImageMimeType } from "../generated-image.js";
 import {
@@ -113,7 +112,6 @@ export class WeixinConversationAdapter {
       priceCurrency?: (
         provider: string | null | undefined,
       ) => DisplayPriceCurrency;
-      threadSectionAccess?: SurfaceAccessPolicy;
       scheduledTasks?: ScheduledTaskUseCases;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
@@ -121,7 +119,6 @@ export class WeixinConversationAdapter {
   ) {
     this.commands = new ConversationCommandService(
       conversations,
-      inputOptions.threadSectionAccess,
       inputOptions.scheduledTasks,
     );
     this.inputs = new SurfaceInputCoalescer(

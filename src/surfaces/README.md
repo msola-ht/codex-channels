@@ -84,15 +84,13 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 单价；所有 Provider 的完成卡片与 `/metrics` 最近运行和会话累计按本机实际用量展示均价；
 聚合存在多档价格时只标记多档、
 不显示伪统一单价。信息类聊天指令（`/status`、`/usage`、
-`/limits`、`/models`、`/sessions`、`/section`、`/skills`、`/mcp`、`/plugin`、`/permissions`、`/goal`、
+`/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugin`、`/permissions`、`/goal`、
 `/project-rules`、`/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
 Markdown、Telegram HTML、微信结构化字段渲染列表。
-`/sessions` 和 `/archived` 共用可复制的分页/筛选命令，并保持完整目录选择器；`/section` 共用
-全局影响说明、管理员校验和删除确认文案。三渠道把当前已授权 Actor 传给共享命令边界；未列入
-`thread_sections.administrators` 时只能查看和筛选自定义分区。内置 Pinned 在三渠道统一复用 `/pin` 与 `/unpin`；
-飞书选择卡与 Telegram 内联按钮只向管理员展示自定义分区移动，并向所有用户提供翻页，微信使用同一
-文字命令。渠道只提交选择，不保存分区状态。
+`/sessions` 和 `/archived` 共用可复制的分页/筛选命令，仅支持运行状态、固定状态、Provider 和关键词。
+自定义会话分区入口及其管理员权限已移除；`/section` 只返回移除提示。内置 Pinned 在三渠道统一复用
+`/pin` 与 `/unpin`，渠道只提交选择，不保存分区状态。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
 Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，
 Turn、Thread 或 Surface 关闭时清理。

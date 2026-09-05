@@ -68,7 +68,6 @@ export interface GatewayConfig {
   reasoningEnabled: boolean;
   pluginApiEnabled: boolean;
   scheduledTasksEnabled: boolean;
-  threadSectionAdministrators: ReadonlySet<string>;
   priceCurrency: "cny" | "usd";
   apiProviders: ReadonlyArray<{
     id: string;
@@ -301,7 +300,6 @@ function loadValidatedConfigDocument(
     reasoningEnabled: raw.display.reasoning,
     pluginApiEnabled: raw.experimental.plugin_api,
     scheduledTasksEnabled: raw.scheduled_tasks.enabled,
-    threadSectionAdministrators: new Set(raw.thread_sections.administrators),
     priceCurrency: raw.display.price_currency,
     apiProviders: raw.api_providers.map(toApiProviderConfig),
     credentialsDirectory: resolve(baseDirectory, "credentials"),

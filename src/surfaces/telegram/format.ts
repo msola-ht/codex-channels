@@ -69,7 +69,6 @@ export function formatSessions(
       page: 1,
       filter: "all",
       provider: null,
-      sectionSelector: null,
       searchTerm,
     },
     ...(currentThreadId ? { currentThreadId } : {}),

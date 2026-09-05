@@ -132,7 +132,7 @@ describe("Feishu output renderer", () => {
         page: 1,
         pageCount: 1,
         matchedSessionCount: 0,
-        view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
+        view: { page: 1, filter: "all", provider: null, searchTerm: null },
       },
       {
         kind: "status",
@@ -590,7 +590,7 @@ describe("Feishu output renderer", () => {
       page: 1,
       pageCount: 1,
       matchedSessionCount: 1,
-      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: "会话" },
+      view: { page: 1, filter: "all", provider: null, searchTerm: "会话" },
     });
     expect(sessions).toContain("固定 · 会话名称 · 轮数：3 · thread-12345 · idle ← 当前");
 
@@ -734,7 +734,7 @@ describe("Feishu output renderer", () => {
       page: 1,
       pageCount: 1,
       matchedSessionCount: 21,
-      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
+      view: { page: 1, filter: "all", provider: null, searchTerm: null },
     });
 
     expect(sessions).toContain(
@@ -763,7 +763,7 @@ describe("Feishu output renderer", () => {
       page: 1,
       pageCount: 1,
       matchedSessionCount: 1,
-      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
+      view: { page: 1, filter: "all", provider: null, searchTerm: null },
     });
 
     expect(sessions).toContain(

@@ -1431,7 +1431,6 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
       },
       automation: {
         scheduledTasksEnabled: gateway.automation.scheduledTasksEnabled,
-        threadSectionAdministratorCount: gateway.automation.threadSectionAdministrators.length,
       },
       network: {
         configuredFields: Object.entries(gateway.network)

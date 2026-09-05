@@ -29,7 +29,6 @@ export interface CreateWeixinSurfaceOptions {
   accountId: string;
   service: ConversationUseCases;
   access: SurfaceAccessPolicy;
-  threadSectionAccess?: SurfaceAccessPolicy;
   scheduledTasks?: ScheduledTaskUseCases;
   actorRegistry: ConversationActorRegistry;
   credentialDirectory: string;
@@ -76,9 +75,6 @@ export function createWeixinSurface(
     cursorStore: new FileWeixinUpdatesCursorStore(options.cursorDirectory),
     service: options.service,
     access: options.access,
-    ...(options.threadSectionAccess === undefined
-      ? {}
-      : { threadSectionAccess: options.threadSectionAccess }),
     ...(options.scheduledTasks === undefined
       ? {}
       : { scheduledTasks: options.scheduledTasks }),

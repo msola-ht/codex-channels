@@ -14,7 +14,6 @@ import {
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
-  ThreadSectionAccessPolicy,
   WeixinAccessPolicy,
 } from "../policy/index.js";
 import type { BindingStore } from "../storage/index.js";
@@ -118,9 +117,6 @@ function createWeixinModule(
     accountId: config.accountId,
     service: options.service,
     access,
-    threadSectionAccess: new ThreadSectionAccessPolicy(
-      options.config.threadSectionAdministrators,
-    ),
     ...(options.scheduledTasks === undefined ? {} : { scheduledTasks: options.scheduledTasks }),
     actorRegistry: options.bindings,
     credentialDirectory: join(
@@ -215,9 +211,6 @@ function createFeishuModule(
     appSecret: config.appSecret,
     service: options.service,
     access,
-    threadSectionAccess: new ThreadSectionAccessPolicy(
-      options.config.threadSectionAdministrators,
-    ),
     ...(options.scheduledTasks === undefined ? {} : { scheduledTasks: options.scheduledTasks }),
     logger: options.logger,
     uploadsDirectory: join(
@@ -338,9 +331,6 @@ function createTelegramModule(
     ...(proxyUrl === undefined ? {} : { proxyUrl }),
     service: options.service,
     access,
-    threadSectionAccess: new ThreadSectionAccessPolicy(
-      config.threadSectionAdministrators,
-    ),
     ...(options.scheduledTasks === undefined ? {} : { scheduledTasks: options.scheduledTasks }),
     startupRecipients: config.telegramAllowedUserIds,
     workspaces: config.workspaces,

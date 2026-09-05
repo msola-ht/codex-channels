@@ -156,12 +156,12 @@ const helpText = {
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
   setup: `用法：codexc setup [--json]
 
-打开脱敏配置总览，以及 Codex 新会话默认值（含计划清单工具）、模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
+打开脱敏配置总览，以及 Codex 新会话默认值（含计划清单工具和实验性上下文管理）、模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
 
 默认模式输出中文交互文本；--json 保留交互输入，将提示和进度写入 stderr，并将每次完成的设置以 JSON Lines 写入 stdout。
 
 常用入口：
-  codexc setup → Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 计划清单工具 / 沙盒、审批与网络
+  codexc setup → Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 计划清单工具 / 实验性上下文管理 / 沙盒、审批与网络
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
   codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
@@ -197,8 +197,8 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
   "service.logs": `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
   config: `用法：codexc config [--json]
 
-打开日常 Gateway 配置菜单：脱敏配置总览、显示设置、系统设置、自动化（计划任务与
-Thread 分区管理员）、网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
+打开日常 Gateway 配置菜单：脱敏配置总览、显示设置、系统设置、自动化（计划任务）、
+网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
 数据中心、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
   doctor: `用法：codexc doctor [--json]

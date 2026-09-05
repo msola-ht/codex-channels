@@ -113,7 +113,6 @@ export interface FeishuSurfaceOptions {
   credentialsDirectory: string;
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
-  threadSectionAccess?: SurfaceAccessPolicy;
   scheduledTasks?: ScheduledTaskUseCases;
   openApiAgent?: unknown;
   accountsAgent?: unknown;
@@ -230,9 +229,6 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.remainingUsage === undefined
           ? {}
           : { remainingUsage: options.remainingUsage }),
-        ...(options.threadSectionAccess === undefined
-          ? {}
-          : { threadSectionAccess: options.threadSectionAccess }),
         debugEnabled: options.debugEnabled ?? false,
       },
     );
@@ -301,9 +297,6 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
-        ...(options.threadSectionAccess === undefined
-          ? {}
-          : { threadSectionAccess: options.threadSectionAccess }),
         ...(options.scheduledTasks === undefined
           ? {}
           : { scheduledTasks: options.scheduledTasks }),

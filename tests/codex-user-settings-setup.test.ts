@@ -122,6 +122,7 @@ describe("Codex user settings setup", () => {
     expect(options.map((option: { value: string }) => option.value)).toEqual([
       "web-search",
       "update-plan",
+      "context-management",
       "auto-recap",
       "permissions",
       "back",
@@ -196,6 +197,40 @@ describe("Codex user settings setup", () => {
     expect(output.join("")).toContain("Codex 空闲总结已关闭");
   });
 
+  it("updates experimental context management with disabled as the default", async () => {
+    const output: string[] = [];
+    const updateSetting = vi.fn(async () => ({
+      kind: "context-management" as const,
+      previousVersion: "version-1",
+      value: { enabled: true },
+      activation: "restart-all" as const,
+    }));
+    const prompts = {
+      select: vi.fn()
+        .mockResolvedValueOnce("context-management")
+        .mockResolvedValueOnce("enabled"),
+      confirm: vi.fn(async () => true),
+      isCancel: () => false,
+    };
+
+    await runCodexUserSettingsSetup({
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      output: { write: (value: string) => output.push(value) },
+      prompts,
+      loadSettings: async () => settingsState(),
+      updateSetting,
+    });
+
+    expect(updateSetting).toHaveBeenCalledWith({
+      kind: "context-management",
+      enabled: true,
+    }, {
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      expectedVersion: "version-1",
+    });
+    expect(output.join("")).toContain("仅符合条件的官方 ChatGPT Codex 新会话生效");
+  });
+
   it("refuses to mix Permission Profiles with traditional sandbox fields", async () => {
     const output: string[] = [];
     const updateSetting = vi.fn();
@@ -243,6 +278,7 @@ function settingsState(): CodexUserSettingsState {
       fastEnabled: false,
       webSearch: null,
       updatePlanEnabled: false,
+      contextManagementEnabled: false,
       autoRecapEnabled: false,
     },
     permissions: {

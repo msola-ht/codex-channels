@@ -64,10 +64,7 @@ Gateway，不需要重启 App Server。
 `scheduled-tasks.sqlite3`、恢复既有 Run 并启动领取循环；关闭时不创建数据库，也不接管普通
 Thread 的 Server Request。变化需要重启 Gateway，不需要重装或重启 App Server。
 
-`thread_sections.administrators` 是全局 Thread 分区写操作的 Actor 允许名单，条目格式为
-`telegram:<用户 ID>`、`feishu:<open_id>` 或 `weixin:<用户 ID>`。默认空数组；未配置时
-`/section` 只允许列表和会话筛选，新建、重命名、移动、移出与删除失败关闭。每个管理员必须属于
-对应已启用渠道的用户允许名单，否则配置校验失败。变化需要重启 Gateway。
+自定义 Thread 分区管理入口已移除。旧配置中的 `[thread_sections]` 段属于不支持字段，需手动删除后再启动 Gateway。
 
 `[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（
 `read-only` / `workspace-write` / `danger-full-access`）、`approval_policy`（

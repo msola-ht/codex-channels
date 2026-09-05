@@ -61,22 +61,8 @@ export function formatSurfaceUserFacingError(
       return sessionCommandUsageText;
     case "archived-sessions.usage":
       return archivedSessionCommandUsageText;
-    case "thread-section.usage":
-      return "用法：/section [list [页码]|create <名称>|rename <分区 ID 或序号> <新名称>|move <分区 ID 或序号> [before <会话>]|remove|delete <分区 ID 或序号> [confirm]]";
-    case "thread-section.name.invalid":
-      return "会话分区名称必须为 1–64 个字符，且不能包含控制字符";
-    case "thread-section.selector.ambiguous":
-      return "会话分区选择不唯一，请使用完整 ID";
-    case "thread-section.selector.not-found":
-      return "找不到指定会话分区";
-    case "thread-section.pinned.immutable":
-      return "内置固定区不能重命名或删除；请使用 /pin 或 /unpin 管理固定状态";
-    case "thread-section.before.invalid":
-      return "before 指定的会话必须已经位于目标分区";
-    case "thread-section.delete-confirmation.invalid":
-      return "删除确认必须使用预览返回的完整会话分区 ID";
-    case "thread-section.admin-required":
-      return "当前用户没有会话分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway";
+    case "thread-section.removed":
+      return "会话分区功能已移除；请使用 /pin、/unpin 和 /rename";
     case "thread.bound":
       return "该 Codex Session 已绑定到其他会话";
     case "thread.takeover.busy":

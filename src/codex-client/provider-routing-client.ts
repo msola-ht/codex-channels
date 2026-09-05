@@ -34,11 +34,6 @@ type ProviderClientMethod =
   | "interruptTurn"
   | "setThreadName"
   | "setThreadPinned"
-  | "listThreadSections"
-  | "createThreadSection"
-  | "renameThreadSection"
-  | "deleteThreadSection"
-  | "moveThreadToSection"
   | "compactThread"
   | "listModels"
   | "writeDefaultFastMode"
@@ -434,36 +429,6 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["setThreadPinned"]>
   ): ReturnType<ProviderClientInstance["setThreadPinned"]> {
     return this.callForThread(args[0], (client) => client.setThreadPinned(...args));
-  }
-
-  listThreadSections(
-    ...args: Parameters<ProviderClientInstance["listThreadSections"]>
-  ): ReturnType<ProviderClientInstance["listThreadSections"]> {
-    return this.primaryClient().listThreadSections(...args);
-  }
-
-  createThreadSection(
-    ...args: Parameters<ProviderClientInstance["createThreadSection"]>
-  ): ReturnType<ProviderClientInstance["createThreadSection"]> {
-    return this.primaryClient().createThreadSection(...args);
-  }
-
-  renameThreadSection(
-    ...args: Parameters<ProviderClientInstance["renameThreadSection"]>
-  ): ReturnType<ProviderClientInstance["renameThreadSection"]> {
-    return this.primaryClient().renameThreadSection(...args);
-  }
-
-  deleteThreadSection(
-    ...args: Parameters<ProviderClientInstance["deleteThreadSection"]>
-  ): ReturnType<ProviderClientInstance["deleteThreadSection"]> {
-    return this.primaryClient().deleteThreadSection(...args);
-  }
-
-  moveThreadToSection(
-    ...args: Parameters<ProviderClientInstance["moveThreadToSection"]>
-  ): ReturnType<ProviderClientInstance["moveThreadToSection"]> {
-    return this.callForThread(args[0], (client) => client.moveThreadToSection(...args));
   }
 
   compactThread(

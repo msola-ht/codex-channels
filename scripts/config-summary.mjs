@@ -15,7 +15,6 @@ export function writeGatewayConfigSummary(output, document, configPath) {
     `- Plugin API：${enabledLabel(summary.pluginApi)}（开发中）`,
     `- 日志等级：${summary.logLevel}`,
     `- 显式网络代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
-    `- Thread 分区管理员：${summary.threadSectionAdministratorCount} 个`,
     `- WebUI：${summary.webui}`,
     `- 指标中心接入：${enabledLabel(summary.metricsSync)}`,
     "- 作用范围：以上均为 Gateway 配置；Codex 官方与第三方 Provider 配置由 codexc setup 管理。",
@@ -31,7 +30,6 @@ export function gatewayConfigSummary(document, configPath) {
   const scheduledTasks = table(document.scheduled_tasks);
   const logging = table(document.logging);
   const network = table(document.network);
-  const threadSections = table(document.thread_sections);
   const metrics = table(document.metrics);
   const metricsSync = table(metrics.sync);
   const webui = table(document.webui);
@@ -60,9 +58,6 @@ export function gatewayConfigSummary(document, configPath) {
     logLevel: stringValue(logging.level) || "info",
     networkFields: ["http_proxy", "https_proxy", "all_proxy", "no_proxy"]
       .filter((field) => stringValue(network[field])),
-    threadSectionAdministratorCount: Array.isArray(threadSections.administrators)
-      ? threadSections.administrators.length
-      : 0,
     webui: Object.keys(webui).length === 0
       ? "使用命令行默认值"
       : formatHostPort(

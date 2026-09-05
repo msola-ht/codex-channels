@@ -58,8 +58,8 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         "inspect-candidate",
         "prepare-codex-cli",
         "validate-codex-contract",
-        "install-codex-cli",
         "stop-services",
+        "install-codex-cli",
         "switch-source",
         "refresh-command",
         "local-update",
@@ -693,6 +693,52 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     });
   });
 
+  it("stops installed services before applying a confirmed Codex upgrade", async () => {
+    const fixture = createInstalledFixture("codexc-source-version-install-services-");
+    writePackageVersion(fixture.repository, "0.148.0");
+    runGit(fixture.repository, ["add", "."]);
+    runGit(fixture.repository, ["commit", "--quiet", "-m", "upgrade"]);
+    const calls: string[] = [];
+    const candidateCodex = join(fixture.installRoot, "candidate-codex");
+
+    await updateManagedSourceInstallation(fixture.environment, {
+      buildCheckout: () => undefined,
+      confirmCodexCliInstall: () => true,
+      installCodexCliForValidation: (version) => {
+        calls.push("prepare-codex");
+        return writeFakeCodex(candidateCodex, version);
+      },
+      validateCodexContract: () => {
+        calls.push("validate-codex-contract");
+      },
+      inspectStaged: async () => ({ services: { installed: true } }),
+      stopServices: () => {
+        calls.push("stop-services");
+      },
+      installCodexCli: (version) => {
+        calls.push("install-codex");
+        writeFakeCodex(fixture.codex, version);
+      },
+      installGlobalPackage: () => {
+        calls.push("install-gateway");
+      },
+      runLocalUpdate: () => {
+        calls.push("local-update");
+      },
+      projectDir: fixture.checkout,
+      repository: fixture.repository,
+    });
+
+    expect(calls).toEqual([
+      "prepare-codex",
+      "validate-codex-contract",
+      "stop-services",
+      "install-codex",
+      "install-gateway",
+      "local-update",
+    ]);
+  });
+
   it("keeps the current source and services when the candidate Codex contract needs adaptation", async () => {
     const fixture = createInstalledFixture("codexc-source-contract-mismatch-");
     writePackageVersion(fixture.repository, "0.148.0");
@@ -767,6 +813,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         projectDir: fixture.checkout,
         repository: fixture.repository,
         stopServices: () => { servicesStopped = true; },
+        startServices: () => undefined,
       });
     } catch (error) {
       failure = error;
@@ -780,7 +827,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       "安装完成后重新运行 codexc update",
     ]);
     expect(candidateBuilt).toBe(true);
-    expect(servicesStopped).toBe(false);
+    expect(servicesStopped).toBe(true);
     expect(JSON.parse(readFileSync(join(fixture.checkout, "package.json"), "utf8")).version)
       .toBe("0.147.0");
   });

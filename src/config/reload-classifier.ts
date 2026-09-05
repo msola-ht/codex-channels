@@ -111,11 +111,6 @@ function restartRequiredReasons(
       current.scheduledTasksEnabled,
       next.scheduledTasksEnabled,
     ],
-    [
-      configChange("thread-sections.administrators"),
-      JSON.stringify([...current.threadSectionAdministrators].sort()),
-      JSON.stringify([...next.threadSectionAdministrators].sort()),
-    ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [
       configChange("api.providers"),

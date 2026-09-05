@@ -40,7 +40,6 @@ import type {
 } from "./permission-port.js";
 import type {
   SessionRouter,
-  ThreadSectionSnapshot,
 } from "../session-routing/index.js";
 import type {
   ThreadOccupancyPort,
@@ -125,31 +124,21 @@ export interface ConversationSession {
   preview: string;
   name: string | null;
   isPinned: boolean;
-  section?: ThreadSectionSnapshot | null;
   modelProvider?: string;
   status: { type: "notLoaded" | "idle" | "systemError" | "active" };
   model?: string;
+  reasoningEffort?: string;
   turnCount?: number;
 }
 
 export interface ConversationSessionQuery {
   archived?: boolean;
   searchTerm?: string;
-  filter?: "all" | "running" | "pinned" | "unsectioned";
+  filter?: "all" | "running" | "pinned";
   provider?: string;
-  sectionSelector?: string;
   page?: number;
   /** Use local counts without waiting on history RPCs. */
   turnCountMode?: "scan" | "cached";
-}
-
-export interface ThreadSectionView extends ThreadSectionSnapshot {
-  currentWorkspaceActiveCount: number;
-  currentWorkspaceArchivedCount: number;
-}
-
-export interface ThreadSectionDeletePreview {
-  section: ThreadSectionView;
 }
 
 export interface ProjectRulesResult {
@@ -277,24 +266,6 @@ export interface ConversationUseCases {
     target: ConversationTarget,
     options?: ConversationSessionQuery,
   ): Promise<ConversationSession[]>;
-  listThreadSections(target: ConversationTarget): Promise<ThreadSectionView[]>;
-  createThreadSection(target: ConversationTarget, name: string): Promise<ThreadSectionSnapshot>;
-  renameThreadSection(
-    target: ConversationTarget,
-    selector: string,
-    name: string,
-  ): Promise<ThreadSectionSnapshot>;
-  moveCurrentThreadToSection(
-    target: ConversationTarget,
-    selector: string,
-    beforeThreadSelector?: string,
-  ): Promise<ThreadSectionSnapshot>;
-  removeCurrentThreadSection(target: ConversationTarget): Promise<void>;
-  previewThreadSectionDelete(
-    target: ConversationTarget,
-    selector: string,
-  ): Promise<ThreadSectionDeletePreview>;
-  deleteThreadSection(target: ConversationTarget, selector: string): Promise<ThreadSectionSnapshot>;
   backgroundThreadIds?(target: ConversationTarget): string[];
   resume(target: ConversationTarget, selector: string): Promise<ConversationResumeResult>;
   newSession(target: ConversationTarget): Promise<string | undefined>;
@@ -723,13 +694,9 @@ export class ConversationService implements ConversationUseCases {
     target: ConversationTarget,
     options: ConversationSessionQuery = {},
   ): Promise<ConversationSession[]> {
-    const sectionId = options.sectionSelector
-      ? resolveThreadSection(await this.codex.listThreadSections(), options.sectionSelector).id
-      : null;
     const archiveOptions = options.archived === undefined ? {} : { archived: options.archived };
     const needsCompleteCatalog = Boolean(
-      sectionId
-      || options.searchTerm
+      options.searchTerm
       || options.provider
       || (options.filter && options.filter !== "all"),
     );
@@ -737,16 +704,7 @@ export class ConversationService implements ConversationUseCases {
       ...archiveOptions,
       ...(needsCompleteCatalog ? { fullScan: true } : {}),
     }));
-    const ordered = sectionId
-      ? await this.router.list(target, {
-          ...archiveOptions,
-          fullScan: true,
-          sectionId,
-          sortKey: "section_position",
-          sortDirection: "asc",
-          ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
-        })
-      : options.searchTerm
+    const ordered = options.searchTerm
         ? await this.router.list(target, {
             ...archiveOptions,
             fullScan: true,
@@ -760,24 +718,22 @@ export class ConversationService implements ConversationUseCases {
         if (normalizedProvider && thread.modelProvider.toLowerCase() !== normalizedProvider) {
           return false;
         }
-        if (sectionId && thread.section?.id !== sectionId) return false;
         if (options.filter === "running" && thread.status.type !== "active") return false;
         if (options.filter === "pinned" && !thread.isPinned) return false;
-        if (options.filter === "unsectioned" && thread.section != null) return false;
         return true;
       })
-      .map(({ thread: { id, preview, name, isPinned, section, modelProvider, status }, selector }) => {
-        const model = this.router.modelSettingsForThread(id)?.model;
+      .map(({ thread: { id, preview, name, isPinned, modelProvider, status }, selector }) => {
+        const routed = this.router.modelSettingsForThread(id);
         return {
           ...(selector ? { selector } : {}),
           id,
           preview,
           name,
           isPinned,
-          ...(section === undefined ? {} : { section }),
           modelProvider,
           status,
-          ...(model ? { model } : {}),
+          ...(routed?.model ? { model: routed.model } : {}),
+          ...(routed?.effort ? { reasoningEffort: routed.effort } : {}),
         };
       });
     const page = options.page;
@@ -843,118 +799,6 @@ export class ConversationService implements ConversationUseCases {
     return sessions.map((session) => {
       const turnCount = countByThread.get(session.id);
       return turnCount === undefined ? session : { ...session, turnCount };
-    });
-  }
-
-  async listThreadSections(target: ConversationTarget): Promise<ThreadSectionView[]> {
-    const [sections, active, archived] = await Promise.all([
-      this.codex.listThreadSections(),
-      this.router.list(target, { fullScan: true }),
-      this.router.list(target, { archived: true, fullScan: true }),
-    ]);
-    return sections.map((section) => ({
-      ...section,
-      currentWorkspaceActiveCount: active.filter((thread) =>
-        thread.section?.id === section.id
-      ).length,
-      currentWorkspaceArchivedCount: archived.filter((thread) =>
-        thread.section?.id === section.id
-      ).length,
-    }));
-  }
-
-  createThreadSection(
-    target: ConversationTarget,
-    name: string,
-  ): Promise<ThreadSectionSnapshot> {
-    const normalized = normalizeThreadSectionName(name);
-    return this.lockedThreadSections(
-      target,
-      () => this.codex.createThreadSection(normalized),
-    );
-  }
-
-  renameThreadSection(
-    target: ConversationTarget,
-    selector: string,
-    name: string,
-  ): Promise<ThreadSectionSnapshot> {
-    const normalized = normalizeThreadSectionName(name);
-    return this.lockedThreadSections(target, async () => {
-      const section = resolveMutableThreadSection(
-        await this.codex.listThreadSections(),
-        selector,
-      );
-      return this.codex.renameThreadSection(section.id, normalized);
-    });
-  }
-
-  moveCurrentThreadToSection(
-    target: ConversationTarget,
-    selector: string,
-    beforeThreadSelector?: string,
-  ): Promise<ThreadSectionSnapshot> {
-    return this.lockedThreadSections(target, async () => {
-      const binding = this.router.current(target);
-      if (!binding) {
-        throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
-      }
-      const section = resolveThreadSection(
-        await this.codex.listThreadSections(),
-        selector,
-      );
-      let beforeThreadId: string | undefined;
-      if (beforeThreadSelector) {
-        const sessions = pinnedFirst(await this.router.list(target, { fullScan: true }));
-        const before = resolveThread(sessions, beforeThreadSelector);
-        if (before.section?.id !== section.id) {
-          throw new UserFacingError(
-            "thread-section.before.invalid",
-            "排序目标 Session 不在所选分区中",
-          );
-        }
-        beforeThreadId = before.id;
-      }
-      await this.codex.moveThreadToSection(binding.threadId, section.id, beforeThreadId);
-      return section;
-    });
-  }
-
-  removeCurrentThreadSection(target: ConversationTarget): Promise<void> {
-    return this.lockedThreadSections(target, async () => {
-      const binding = this.router.current(target);
-      if (!binding) {
-        throw new UserFacingError("conversation.missing", "当前还没有 Codex Session");
-      }
-      await this.codex.moveThreadToSection(binding.threadId, null);
-    });
-  }
-
-  async previewThreadSectionDelete(
-    target: ConversationTarget,
-    selector: string,
-  ): Promise<ThreadSectionDeletePreview> {
-    const sections = await this.listThreadSections(target);
-    return { section: resolveMutableThreadSection(sections, selector) };
-  }
-
-  deleteThreadSection(
-    target: ConversationTarget,
-    selector: string,
-  ): Promise<ThreadSectionSnapshot> {
-    return this.lockedThreadSections(target, async () => {
-      const section = resolveMutableThreadSection(
-        await this.codex.listThreadSections(),
-        selector,
-      );
-      if (selector.trim() !== section.id) {
-        throw new UserFacingError(
-          "thread-section.delete-confirmation.invalid",
-          "删除确认必须使用预览返回的完整会话分区 ID",
-        );
-      }
-      await this.codex.deleteThreadSection(section.id);
-      return section;
     });
   }
 
@@ -2146,13 +1990,6 @@ export class ConversationService implements ConversationUseCases {
     return this.locks.forConversation(target, action);
   }
 
-  private lockedThreadSections<T>(
-    target: ConversationTarget,
-    action: () => Promise<T>,
-  ): Promise<T> {
-    return this.locks.forThreadSections(target, action);
-  }
-
   private lockedTargets<T>(
     targets: readonly ConversationTarget[],
     action: () => Promise<T> | T,
@@ -2300,63 +2137,6 @@ function pinnedFirst<T extends { isPinned: boolean }>(
     Number(right.isPinned) - Number(left.isPinned));
 }
 
-function normalizeThreadSectionName(value: string): string {
-  const normalized = value.trim();
-  if (
-    normalized.length === 0
-    || normalized.length > 64
-    || [...normalized].some((character) => {
-      const code = character.codePointAt(0);
-      return code !== undefined && (code <= 0x1f || code === 0x7f);
-    })
-  ) {
-    throw new UserFacingError(
-      "thread-section.name.invalid",
-      "会话分区名称必须为 1–64 个不含控制字符的字符",
-    );
-  }
-  return normalized;
-}
-
-function resolveThreadSection<T extends ThreadSectionSnapshot>(
-  sections: readonly T[],
-  selector: string,
-): T {
-  const normalized = selector.trim();
-  if (/^[1-9]\d*$/u.test(normalized)) {
-    const section = sections[Number(normalized) - 1];
-    if (section) return section;
-  }
-  const lowered = normalized.toLowerCase();
-  const exact = sections.filter((section) =>
-    section.id.toLowerCase() === lowered || section.name.toLowerCase() === lowered
-  );
-  if (exact.length === 1) return exact[0]!;
-  const prefixes = sections.filter((section) => section.id.toLowerCase().startsWith(lowered));
-  if (prefixes.length === 1) return prefixes[0]!;
-  throw new UserFacingError(
-    exact.length > 1 || prefixes.length > 1
-      ? "thread-section.selector.ambiguous"
-      : "thread-section.selector.not-found",
-    exact.length > 1 || prefixes.length > 1
-      ? "会话分区选择不唯一，请使用序号或完整 ID"
-      : "找不到指定会话分区",
-  );
-}
-
-function resolveMutableThreadSection<T extends ThreadSectionSnapshot>(
-  sections: readonly T[],
-  selector: string,
-): T {
-  const section = resolveThreadSection(sections, selector);
-  if (section.builtIn === "pinned") {
-    throw new UserFacingError(
-      "thread-section.pinned.immutable",
-      "官方内置 Pinned 分区不能改名或删除",
-    );
-  }
-  return section;
-}
 
 function resolveAgentRole(
   roles: readonly AgentRoleEntry[],
