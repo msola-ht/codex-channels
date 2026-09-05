@@ -31,6 +31,7 @@ import {
   formatConversationScheduledTasks,
   formatConversationScheduledRuns,
   formatScheduledTaskStatusLabel,
+  formatConversationSessions,
   formatConversationStatus,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
@@ -43,6 +44,30 @@ import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
 import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-format.js";
 
 describe("provider-aware conversation command formatting", () => {
+  it("renders the reasoning effort for a listed session", () => {
+    const rendered = formatConversationSessions({
+      kind: "sessions",
+      sessions: [{
+        id: "thread-000000000001",
+        preview: "网关会话元数据",
+        name: null,
+        isPinned: false,
+        model: "gpt-server",
+        reasoningEffort: "high",
+        modelProvider: "openai",
+        status: { type: "idle" },
+      }],
+      archived: false,
+      page: 1,
+      pageCount: 1,
+      matchedSessionCount: 1,
+      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
+    });
+
+    expect(rendered).toContain("模型：gpt-server");
+    expect(rendered).toContain("思考等级：high");
+  });
+
   it("distinguishes an empty Queue from an out-of-range page", () => {
     const missingPage = formatConversationThreadQueue({
       kind: "thread-queue",

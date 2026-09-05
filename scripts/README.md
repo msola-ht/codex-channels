@@ -210,12 +210,12 @@
   模式恢复时清除第三方顶层模型。设备登录完成后在统一 Provider 管理事务内重新读取配置与角色
   占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
-  Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast、计划清单工具、TUI 空闲总结，
+  Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast、计划清单工具、实验性上下文管理、TUI 空闲总结，
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；Fast 仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和 Fast；已有 `default_permissions` 时不混写传统 Sandbox 字段。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 新会话默认值”
-  适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、TUI 空闲总结、Plan 思考等级、推理摘要、输出详细程度、人格、
+  适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、实验性上下文管理、TUI 空闲总结、Plan 思考等级、推理摘要、输出详细程度、人格、
   更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。

@@ -129,6 +129,7 @@ export interface ConversationSession {
   modelProvider?: string;
   status: { type: "notLoaded" | "idle" | "systemError" | "active" };
   model?: string;
+  reasoningEffort?: string;
   turnCount?: number;
 }
 
@@ -767,7 +768,7 @@ export class ConversationService implements ConversationUseCases {
         return true;
       })
       .map(({ thread: { id, preview, name, isPinned, section, modelProvider, status }, selector }) => {
-        const model = this.router.modelSettingsForThread(id)?.model;
+        const routed = this.router.modelSettingsForThread(id);
         return {
           ...(selector ? { selector } : {}),
           id,
@@ -777,7 +778,8 @@ export class ConversationService implements ConversationUseCases {
           ...(section === undefined ? {} : { section }),
           modelProvider,
           status,
-          ...(model ? { model } : {}),
+          ...(routed?.model ? { model: routed.model } : {}),
+          ...(routed?.effort ? { reasoningEffort: routed.effort } : {}),
         };
       });
     const page = options.page;

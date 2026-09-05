@@ -408,7 +408,7 @@ describe("ConversationService conversation service session", () => {
     expect(resume).toHaveBeenCalledWith(target, "selected", true);
   });
 
-  it("annotates sessions with the model the router knows", async () => {
+  it("annotates sessions with the model and effort the router knows", async () => {
     const service = new ConversationService(
       turnPort(),
       {
@@ -437,7 +437,7 @@ describe("ConversationService conversation service session", () => {
         }],
         modelSettingsForThread: (threadId: string) =>
           threadId === "known-model"
-            ? { model: "gpt-test", effort: null, serviceTier: null, collaborationMode: "default" }
+            ? { model: "gpt-test", effort: "high", serviceTier: null, collaborationMode: "default" }
             : undefined,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined } as unknown as ConversationCore,
@@ -446,7 +446,7 @@ describe("ConversationService conversation service session", () => {
     );
 
     await expect(service.listSessions(target)).resolves.toEqual([
-      { selector: "1", id: "known-model", preview: "已知模型", name: null, isPinned: false, modelProvider: "openai", status: { type: "idle" }, model: "gpt-test" },
+      { selector: "1", id: "known-model", preview: "已知模型", name: null, isPinned: false, modelProvider: "openai", status: { type: "idle" }, model: "gpt-test", reasoningEffort: "high" },
       { selector: "2", id: "unknown-model", preview: "未知模型", name: null, isPinned: false, modelProvider: "openai", status: { type: "idle" } },
     ]);
   });

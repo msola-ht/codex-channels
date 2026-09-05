@@ -190,7 +190,7 @@ DeepSeek V4 Flash 每月 $30、V4 Pro 每月 $15）计算已用百分比与剩�
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。
-模型、思考等级、Fast、
+模型、思考等级、Fast、计划清单工具、实验性上下文管理、
 `multi_agent_v2` 与受控共享第三方角色 `agents.external` 的普通键级写入共用一次官方
 `config/batchWrite` 事务。角色只保存当前选择的 Provider 与模型；DeepSeek、OpenCode Go 的
 切换和固定模式都复用同一角色机制；切换模式受管 Profile 镜像所选模型的默认思考等级，第三方
@@ -198,7 +198,9 @@ App Server 启动时读取 Profile 的该设置并显式携带，原生 `codex -
 App Server 保持一致，避免继承全局 `config.toml` 的官方思考等级。角色模型请求还使用本地私有
 `/role/external` 代理路径携带该默认思考等级进入脱敏指标；普通渠道和 Remote TUI 不走此路径。
 受控角色的读改写从同一 Client 的原始用户层取得版本并传入 `expectedVersion`，版本冲突失败关闭，
-不自动重试或覆盖用户并发修改。
+不自动重试或覆盖用户并发修改。实验性上下文管理仅写入 Codex 用户层
+`features.context_management.experimental_mode`，默认关闭；它只对符合条件的官方 ChatGPT Codex
+新会话可用，不改变 Gateway 的渠道会话语义。
 DeepSeek 完整安装、备份恢复和 App Server 无法管理的专属文件仍由 Setup 执行私有文件级事务。
 
 完成卡片中的“思考次数”表示本轮明确返回推理 Usage 且推理输出大于零的模型请求数；上游未返回
@@ -235,7 +237,7 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 | Turn、Review 和 Goal 如何隔离官方协议 | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) | [`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
 | Thread/Turn/Item 如何适配并归约 | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`input-events.ts`](../src/conversation-core/input-events.ts)、[`core.ts`](../src/conversation-core/core.ts) | [`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | 多 Provider Thread 如何选择 App Server | [`provider-routing-client.ts`](../src/codex-client/provider-routing-client.ts)、[`app.ts`](../src/bootstrap/app.ts)、[`model-provider-runtime.mjs`](../runtime/model-provider-runtime.mjs) | [`provider-routing-client.test.ts`](../tests/provider-routing-client.test.ts)、[`model-provider-runtime.test.ts`](../tests/model-provider-runtime.test.ts)、[`gateway-startup-cleanup.test.ts`](../tests/gateway-startup-cleanup.test.ts) |
-| 官方 Thread 如何进入稳定业务边界 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`thread-port.ts`](../src/session-routing/thread-port.ts) | [`json-rpc.test.ts`](../tests/json-rpc.test.ts) |
+| 官方 Thread 如何进入稳定业务边界 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 将官方 Thread 映射为稳定快照；会话列表中的模型和思考等级仅使用 Gateway Router 已知设置 | [`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-service-session.test.ts`](../tests/conversation-service-session.test.ts) |
 | Thread 路由通知如何隔离 | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts) | [`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | Workspace、Conversation、Thread 如何绑定 | [`session-routing/`](../src/session-routing/README.md) | [`session-router.test.ts`](../tests/session-router.test.ts)、[`module-boundaries.test.ts`](../tests/module-boundaries.test.ts) |
 | 模型、思考等级和 Fast 如何隔离并同步 | [`model-port.ts`](../src/application/model-port.ts)、[`model-adapter.ts`](../src/codex-client/model-adapter.ts)、[`thread-state-sync.ts`](../src/session-routing/thread-state-sync.ts) | [`model-selection-service.test.ts`](../tests/model-selection-service.test.ts)、[`thread-state-sync.test.ts`](../tests/thread-state-sync.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |

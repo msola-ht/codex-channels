@@ -415,6 +415,22 @@ if (document) {
     record("Codex CLI", false, errorMessage(error));
   }
 
+  const contextManagement = readCodexContextManagementSetting(process.env);
+  if (contextManagement.error) {
+    record(
+      "实验性上下文管理",
+      false,
+      contextManagement.error,
+      "修正 ~/.codex/config.toml 后重新运行 codexc doctor",
+    );
+  } else {
+    note(
+      "实验性上下文管理",
+      contextManagement.enabled ? "已开启" : "已关闭（上游默认）",
+      "仅 ChatGPT Plus、Pro、Pro Lite 的官方 Codex 新会话可用；运行 codexc setup → Codex 新会话默认值可修改，重启服务后生效",
+    );
+  }
+
   const updatePlan = readCodexPlanSetting(process.env);
   if (updatePlan.error) {
     record(
@@ -779,6 +795,23 @@ function readCodexPlanSetting(environment) {
     const tools = table(document.tools);
     const updatePlan = table(tools.update_plan);
     return { enabled: updatePlan.enabled === true };
+  } catch {
+    return { enabled: false, error: "Codex 用户配置无法解析" };
+  }
+}
+
+function readCodexContextManagementSetting(environment) {
+  const path = join(codexHomePath(environment), "config.toml");
+  if (!existsSync(path)) return { enabled: false };
+  try {
+    const document = parse(readFileSync(path, "utf8"));
+    const features = table(document.features);
+    const contextManagement = table(features.context_management);
+    const value = contextManagement.experimental_mode;
+    if (value !== undefined && typeof value !== "boolean") {
+      return { enabled: false, error: "features.context_management.experimental_mode 必须是布尔值" };
+    }
+    return { enabled: value === true };
   } catch {
     return { enabled: false, error: "Codex 用户配置无法解析" };
   }

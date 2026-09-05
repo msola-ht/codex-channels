@@ -162,6 +162,16 @@ function projectSettings(snapshot, provider, rawModels) {
   const history = record(config.history);
   const tools = record(config.tools);
   const updatePlan = record(tools.update_plan);
+  const features = record(config.features);
+  const contextManagement = record(features.context_management);
+  const contextManagementEnabled = contextManagement.experimental_mode;
+  if (contextManagementEnabled !== undefined && typeof contextManagementEnabled !== "boolean") {
+    throw invalid(
+      "features.context_management.experimental_mode",
+      "invalid-boolean",
+      "实验性上下文管理状态必须是布尔值",
+    );
+  }
   const tui = record(config.tui);
   const configuredPlanEffort = optionalString(config.plan_mode_reasoning_effort);
   const planModeReasoningEffort = models.some((model) => model.reasoningEfforts
@@ -183,6 +193,7 @@ function projectSettings(snapshot, provider, rawModels) {
       fastEnabled: isFastServiceTier(serviceTier),
       webSearch,
       updatePlanEnabled: updatePlan.enabled === true,
+      contextManagementEnabled: contextManagementEnabled === true,
       autoRecapEnabled: tui.auto_recap === true,
       reasoningSummary,
       planModeReasoningEffort,
@@ -222,6 +233,8 @@ function createEdits(input, { config, provider, models }) {
       return webSearchEdits(input);
     case "update-plan":
       return updatePlanEdits(input);
+    case "context-management":
+      return contextManagementEdits(input);
     case "auto-recap":
       return autoRecapEdits(input);
     case "preferences":
@@ -295,6 +308,16 @@ function updatePlanEdits(input) {
   }
   return {
     edits: [{ keyPath: "tools.update_plan.enabled", value: input.enabled }],
+    value: { enabled: input.enabled },
+  };
+}
+
+function contextManagementEdits(input) {
+  if (typeof input?.enabled !== "boolean") {
+    throw invalid("enabled", "invalid-boolean", "实验性上下文管理状态必须是布尔值");
+  }
+  return {
+    edits: [{ keyPath: "features.context_management.experimental_mode", value: input.enabled }],
     value: { enabled: input.enabled },
   };
 }
