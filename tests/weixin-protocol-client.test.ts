@@ -754,6 +754,25 @@ describe("WeixinProtocolClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("omits an expired reply context when sending text", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ ret: 0 }), { status: 200 }));
+    const client = createClient({ fetchImpl });
+
+    await expect(client.sendText({
+      actorId,
+      text: "reply without context",
+    })).resolves.toBeUndefined();
+
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toMatchObject({
+      msg: {
+        to_user_id: actorId,
+        item_list: [{ type: 1, text_item: { text: "reply without context" } }],
+      },
+    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).msg).not.toHaveProperty("context_token");
+  });
+
   it("uploads and sends one fixed v2.4.6 PNG image contract", async () => {
     const image = Buffer.from([
       0x89,

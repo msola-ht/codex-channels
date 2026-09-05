@@ -285,7 +285,7 @@ export function createWeixinProtocolClient(
 
     async sendText(input, signal) {
       const actorId = validateActorInput(input.actorId);
-      const contextToken = requiredInputString(
+      const contextToken = optionalContextToken(
         input.contextToken,
         "微信回复上下文无效",
         65_536,
@@ -326,7 +326,7 @@ export function createWeixinProtocolClient(
 
     async sendImage(input, signal) {
       const actorId = validateActorInput(input.actorId);
-      const contextToken = requiredInputString(
+      const contextToken = optionalContextToken(
         input.contextToken,
         "微信图片回复上下文无效",
         maximumImageParameterLength,
@@ -378,7 +378,7 @@ export function createWeixinProtocolClient(
 
     async sendFile(input, signal) {
       const actorId = validateActorInput(input.actorId);
-      const contextToken = requiredInputString(
+      const contextToken = optionalContextToken(
         input.contextToken,
         "微信文件回复上下文无效",
         maximumImageParameterLength,
@@ -432,7 +432,7 @@ export function createWeixinProtocolClient(
 
     async getTypingTicket(input, signal) {
       const actorId = validateActorInput(input.actorId);
-      const contextToken = requiredInputString(
+      const contextToken = optionalContextToken(
         input.contextToken,
         "微信输入状态上下文无效",
         65_536,
@@ -944,6 +944,15 @@ function requiredInputString(
     throw new WeixinProtocolError("invalid-input", message);
   }
   return value;
+}
+
+function optionalContextToken(
+  value: unknown,
+  message: string,
+  maximumLength: number,
+): string | undefined {
+  if (value === undefined) return undefined;
+  return requiredInputString(value, message, maximumLength);
 }
 
 function requiredResponseString(
