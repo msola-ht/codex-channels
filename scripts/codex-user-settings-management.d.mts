@@ -14,6 +14,7 @@ export type CodexUserSettingInput =
   | { kind: "fast"; enabled: boolean }
   | { kind: "web-search"; mode: "live" | "indexed" | "cached" | "disabled" }
   | { kind: "update-plan"; enabled: boolean }
+  | { kind: "auto-recap"; enabled: boolean }
   | {
       kind: "preferences";
       reasoningSummary: "auto" | "concise" | "detailed" | "none";
@@ -47,6 +48,7 @@ export interface CodexUserSettingsState {
     fastEnabled: boolean;
     webSearch: "live" | "indexed" | "cached" | "disabled" | null;
     updatePlanEnabled: boolean;
+    autoRecapEnabled: boolean;
     reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null;
     planModeReasoningEffort?: string | null;
     verbosity?: "low" | "medium" | "high" | null;

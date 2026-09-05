@@ -79,6 +79,17 @@ enabled = true
 
 上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改 Codex 用户设置后运行 `codexc service restart all`。
 
+### TUI 空闲总结
+
+在 `codexc setup → Codex 新会话默认值 → 空闲总结` 中控制 TUI 失去焦点后的自动回顾，默认写入关闭：
+
+```toml
+[tui]
+auto_recap = false
+```
+
+关闭只影响自动回顾，手动 `/recap` 仍然可用；修改后运行 `codexc service restart all`。
+
 ### 代理与权限
 
 无法直连 OpenAI 时，在 Gateway 配置中设置 HTTP(S) 代理：

@@ -290,4 +290,4 @@ rg -o '"method": "[^"]+"' src/codex-protocol/generated/ServerRequest.ts | wc -l
 rg -c '^export type ' src/codex-protocol/index.ts
 ```
 
-Setup 文案说明：协议索引中的“Codex 用户设置”“一键配置全部”为历史称谓。当前入口统一使用“Codex 新会话默认值”和“配置核心默认值”；计划清单工具通过 Setup 单独控制且默认关闭，Fast 仅对 OpenAI 官方主配置开放，核心默认值操作不会隐式修改联网搜索、分析、反馈或 Goals。
+Setup 文案说明：协议索引中的“Codex 用户设置”“一键配置全部”为历史称谓。当前入口统一使用“Codex 新会话默认值”和“配置核心默认值”；计划清单工具通过 Setup 单独控制且默认关闭，TUI 空闲总结通过 Setup 单独控制且默认写入关闭，Fast 仅对 OpenAI 官方主配置开放，核心默认值操作不会隐式修改联网搜索、分析、反馈或 Goals。

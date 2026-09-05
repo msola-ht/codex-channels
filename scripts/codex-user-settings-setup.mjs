@@ -61,6 +61,11 @@ export async function runCodexUserSettingsSetup({
         label: "计划清单工具",
         hint: settings.defaults.updatePlanEnabled ? "当前：开启" : "当前：关闭",
       },
+      {
+        value: "auto-recap",
+        label: "空闲总结",
+        hint: settings.defaults.autoRecapEnabled ? "当前：开启" : "当前：关闭（默认）",
+      },
       ...(settings.defaultsEditable ? [{
         value: "preferences",
         label: "其他用户偏好",
@@ -122,6 +127,9 @@ export async function runCodexUserSettingsSetup({
   }
   if (section === "update-plan") {
     return runUpdatePlanSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
+  if (section === "auto-recap") {
+    return runAutoRecapSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
   if (section === "preferences") {
     return runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
@@ -286,6 +294,41 @@ async function runUpdatePlanSetting({ environment, output, prompts, settings, up
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 计划清单工具已${value ? "开启" : "关闭"}。\n`);
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  return result;
+}
+
+async function runAutoRecapSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  const enabled = await prompts.select({
+    message: "空闲总结",
+    showInstructions: false,
+    initialValue: settings.defaults.autoRecapEnabled ? "enabled" : "disabled",
+    options: [
+      { value: "disabled", label: "关闭", hint: "不在 TUI 失去焦点后自动生成总结（默认）" },
+      { value: "enabled", label: "开启", hint: "TUI 失去焦点后自动生成总结" },
+      { value: "back", label: "返回" },
+    ],
+  });
+  if (prompts.isCancel(enabled) || enabled === "back") return { action: "back" };
+  if (enabled !== "enabled" && enabled !== "disabled") {
+    throw new Error(`未知空闲总结设置：${String(enabled)}`);
+  }
+  const value = enabled === "enabled";
+  const confirmed = await prompts.confirm({
+    message: `保存空闲总结：${value ? "开启" : "关闭"}？`,
+    initialValue: true,
+  });
+  if (prompts.isCancel(confirmed) || confirmed !== true) {
+    output.write("已取消，未修改空闲总结设置。\n");
+    return undefined;
+  }
+  const result = await updateSetting({ kind: "auto-recap", enabled: value }, {
+    environment,
+    expectedVersion: settings.version,
+    ...(createClient === undefined ? {} : { createClient }),
+    ...(primaryProvider === undefined ? {} : { primaryProvider }),
+  });
+  output.write(`Codex 空闲总结已${value ? "开启" : "关闭"}。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }

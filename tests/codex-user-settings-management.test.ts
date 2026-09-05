@@ -39,6 +39,7 @@ describe("Codex user settings management", () => {
         fastEnabled: true,
         webSearch: null,
         updatePlanEnabled: false,
+        autoRecapEnabled: false,
         reasoningSummary: null,
         planModeReasoningEffort: null,
         verbosity: null,
@@ -227,6 +228,27 @@ describe("Codex user settings management", () => {
 
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "tools.update_plan.enabled", value: true },
+    ], { expectedVersion: "version-1" });
+  });
+
+  it("writes the TUI automatic recap setting separately", async () => {
+    const client = settingsClient({ tui: { auto_recap: true } });
+
+    await expect(updateCodexUserSetting({
+      kind: "auto-recap",
+      enabled: false,
+    }, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+      primaryProvider: () => "deepseek",
+    })).resolves.toMatchObject({
+      kind: "auto-recap",
+      value: { enabled: false },
+      activation: "restart-all",
+    });
+
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "tui.auto_recap", value: false },
     ], { expectedVersion: "version-1" });
   });
 
