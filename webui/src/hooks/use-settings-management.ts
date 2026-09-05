@@ -36,6 +36,7 @@ function currentValue(settings: ManagementSettingsResponse, setting: { kind: str
   if (setting.kind === "advanced.logging-level") return settings.advanced.loggingLevel
   if (setting.kind === "metrics.storage") return settings.metrics.storage
   if (setting.kind === "metrics.sync-params") return settings.metrics.sync
+  if (setting.kind === "metrics.center.port") return settings.metrics.center.port
   if (setting.kind === "webui.port") return settings.webui.port
   if (setting.kind === "webui.host") return settings.webui.host
   if (setting.kind === "webui.token") return settings.webui.tokenConfigured ? "已配置" : "未配置"

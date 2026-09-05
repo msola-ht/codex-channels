@@ -160,7 +160,7 @@ webui/src/
   pages/       概览、Threads、Thread 详情、请求、错误、设置
 ```
 
-设置页按 App Server、Gateway、WebUI 与数据中心分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。App Server 用户默认值已经通过结构化 RPC 接入；直接 API Provider 使用一次性确认令牌写入，托管 Provider、账户授权和服务维护任务仍保留独立任务边界。
+设置页按 App Server、Gateway、WebUI 与数据中心分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。App Server 用户默认值已经通过结构化 RPC 接入；直接 API Provider、托管 Provider 和账户设置使用一次性确认令牌写入，数据中心设备名称和中心端口可直接修改，渠道授权和服务维护任务仍保留独立任务边界。
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与

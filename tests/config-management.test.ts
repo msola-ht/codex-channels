@@ -329,6 +329,53 @@ describe("Gateway Config management", () => {
     expect(JSON.stringify(updated)).not.toContain("private-view-token");
   });
 
+  it("updates and clears the metrics device name without credentials", () => {
+    const fixture = createFixture();
+    let settings = loadGatewaySettings(fixture.environment);
+
+    const result = updateGatewaySetting({
+      kind: "metrics.sync-params",
+      deviceName: "  build-server  ",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+    expect(result).toMatchObject({
+      value: { sync: { deviceName: "build-server" } },
+      activation: "restart-gateway",
+    });
+    settings = loadGatewaySettings(fixture.environment);
+    expect(settings.metrics.sync.deviceName).toBe("build-server");
+
+    updateGatewaySetting({
+      kind: "metrics.sync-params",
+      deviceName: null,
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+    expect(loadGatewaySettings(fixture.environment).metrics.sync.deviceName).toBeNull();
+
+    settings = loadGatewaySettings(fixture.environment);
+    expect(() => updateGatewaySetting({
+      kind: "metrics.sync-params",
+      deviceName: "x".repeat(129),
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toThrow(expect.objectContaining({ code: "invalid-device-name", field: "deviceName" }));
+
+    const portResult = updateGatewaySetting({
+      kind: "metrics.center.port",
+      value: 9_001,
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+    expect(portResult).toMatchObject({ value: { center: { port: 9_001 } }, activation: "restart-center" });
+    expect(loadGatewaySettings(fixture.environment).metrics.center.port).toBe(9_001);
+  });
+
   it("updates Workspace permissions and returns a stable conflict", () => {
     const fixture = createFixture();
     let settings = loadGatewaySettings(fixture.environment);

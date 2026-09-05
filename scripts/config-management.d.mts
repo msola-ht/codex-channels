@@ -125,7 +125,7 @@ export type GatewaySettingInput =
   | { kind: "webui.port"; value: number | null }
   | { kind: "webui.token"; action: "set" | "clear"; value?: string }
   | { kind: "metrics.storage"; retentionDays: number; maxRows: number }
-  | { kind: "metrics.sync-params"; intervalSeconds?: number; batchSize?: number }
+  | { kind: "metrics.sync-params"; intervalSeconds?: number; batchSize?: number; deviceName?: string | null }
   | {
       kind: "metrics.connect";
       endpoint: string;

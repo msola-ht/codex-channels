@@ -9,7 +9,7 @@ export function SettingsRow({ label, value, badge = false, code = false }: { lab
   return <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">{label}</span>{badge ? <Badge variant="secondary">{value}</Badge> : code ? <code className="rounded bg-muted px-2 py-1 text-xs">{value}</code> : <span className="text-right">{value}</span>}</div>
 }
 
-export function ManagedInputRow({ label, defaultValue, placeholder, disabled, type = "text", onBlur }: { label: string; defaultValue: string; placeholder: string; disabled: boolean; type?: "text" | "password"; onBlur: (value: string) => void }) {
+export function ManagedInputRow({ label, defaultValue, placeholder, disabled, type = "text", onBlur }: { label: string; defaultValue: string; placeholder: string; disabled: boolean; type?: "text" | "password" | "number"; onBlur: (value: string) => void }) {
   return <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">{label}</span><Input className="w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} defaultValue={defaultValue} placeholder={placeholder} disabled={disabled} onBlur={(event) => onBlur(event.target.value.trim())} /></div>
 }
 

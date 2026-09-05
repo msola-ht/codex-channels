@@ -54,7 +54,7 @@ export function applyMetricsSetting(document, input) {
       break;
     case "metrics.sync-params": {
       const sync = { ...table(metrics.sync) };
-      if (input.intervalSeconds === undefined && input.batchSize === undefined) {
+      if (input.intervalSeconds === undefined && input.batchSize === undefined && input.deviceName === undefined) {
         throw invalidSetting("input", "required", "至少提供一个指标上报参数");
       }
       if (input.intervalSeconds !== undefined) {
@@ -62,6 +62,11 @@ export function applyMetricsSetting(document, input) {
       }
       if (input.batchSize !== undefined) {
         sync.batch_size = integer(input.batchSize, 1, 500, "batchSize", "单批上限");
+      }
+      if (input.deviceName !== undefined) {
+        const deviceName = nullableDeviceName(input.deviceName);
+        if (deviceName === null) delete sync.device_name;
+        else sync.device_name = deviceName;
       }
       metrics.sync = sync;
       break;
@@ -222,6 +227,19 @@ function requiredString(value, field, label) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function nullableDeviceName(value) {
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw invalidSetting("deviceName", "invalid-device-name", "设备名称必须是字符串");
+  }
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (normalized.length > 128 || /[\0\r\n]/u.test(normalized)) {
+    throw invalidSetting("deviceName", "invalid-device-name", "设备名称必须为 128 字符以内且不能包含换行");
+  }
+  return normalized;
 }
 
 function integerInRange(value, minimum, maximum) {

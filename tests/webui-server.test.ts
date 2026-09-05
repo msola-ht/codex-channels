@@ -956,12 +956,41 @@ describe("webui server", () => {
         revision: current.revision,
         setting: {
           kind: "metrics.sync-params",
-          value: { intervalSeconds, batchSize: current.metrics.sync.batchSize },
+          value: { intervalSeconds, batchSize: current.metrics.sync.batchSize, deviceName: "build-server" },
         },
       }),
     });
     expect(update.status).toBe(200);
     expect(loadGatewaySettings(fixture.environment).metrics.sync.intervalSeconds).toBe(intervalSeconds);
+    expect(loadGatewaySettings(fixture.environment).metrics.sync.deviceName).toBe("build-server");
+  });
+
+  it("writes the metrics center port through the WebUI settings endpoint", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const settings = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: { origin: managementOrigin, authorization: "Bearer webui-token" },
+    });
+    const current = await settings.json() as {
+      revision: string;
+      metrics: { center: { port: number } };
+    };
+    const nextPort = current.metrics.center.port === 9_001 ? 9_002 : 9_001;
+    const update = await fetch(`${origin}/api/v1/management/settings`, {
+      method: "PATCH",
+      headers: {
+        origin: managementOrigin,
+        authorization: "Bearer webui-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: current.revision,
+        setting: { kind: "metrics.center.port", value: nextPort },
+      }),
+    });
+    expect(update.status).toBe(200);
+    expect(loadGatewaySettings(fixture.environment).metrics.center.port).toBe(nextPort);
   });
 
   it("does not expose a second management login and reports missing WebUI auth", async () => {
