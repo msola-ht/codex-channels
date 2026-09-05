@@ -235,8 +235,7 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
   配置文件中可安全编辑的参数：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
-  （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、自动化（计划任务与
-  Thread 分区管理员）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
+  （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
   （本地保留策略、本机接入数据中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用本机接入）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
@@ -251,8 +250,8 @@
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
-- `config-advanced-menu.mjs`：管理计划任务、Thread 分区管理员、显式 HTTP(S) 代理、日志等级与
-  开发中的 Plugin API；复用 Config 管理接口，管理员只能从已启用渠道的允许名单中选择，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
+- `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
+  开发中的 Plugin API；复用 Config 管理接口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理调试入口、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace 和

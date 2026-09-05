@@ -182,7 +182,7 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 
 在聊天中发送 `/help` 查看当前渠道完整命令。常用命令包括：
 
-- 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
+- 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue`、`/revert`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`

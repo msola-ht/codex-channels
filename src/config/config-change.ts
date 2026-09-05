@@ -12,7 +12,6 @@ export type GlobalConfigChangeCode =
   | "display.price-currency"
   | "experimental.plugin-api"
   | "scheduled-tasks.enabled"
-  | "thread-sections.administrators"
   | "api.providers"
   | "metrics.sync"
   | "metrics.storage"

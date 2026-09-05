@@ -655,34 +655,6 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.resolvePlugin).not.toHaveBeenCalled();
   });
 
-  it("keeps global Thread Section catalog operations on primary and routes moves by Thread", async () => {
-    const openai = client();
-    const deepseek = client();
-    const sections = [{ id: "section-1", name: "项目", builtIn: null }];
-    openai.listThreadSections.mockResolvedValue(sections);
-    openai.listThreads.mockResolvedValue([
-      snapshot("thread-deepseek", "deepseek", "idle"),
-    ]);
-    deepseek.listThreads.mockResolvedValue([]);
-    const routed = routing(openai, deepseek);
-
-    await expect(routed.listThreadSections()).resolves.toBe(sections);
-    await routed.createThreadSection("项目");
-    await routed.renameThreadSection("section-1", "项目二");
-    await routed.deleteThreadSection("section-1");
-    await routed.listThreads(cwd);
-    await routed.moveThreadToSection("thread-deepseek", "section-1");
-
-    expect(openai.createThreadSection).toHaveBeenCalledWith("项目");
-    expect(openai.renameThreadSection).toHaveBeenCalledWith("section-1", "项目二");
-    expect(openai.deleteThreadSection).toHaveBeenCalledWith("section-1");
-    expect(deepseek.moveThreadToSection).toHaveBeenCalledWith(
-      "thread-deepseek",
-      "section-1",
-    );
-    expect(openai.moveThreadToSection).not.toHaveBeenCalled();
-  });
-
   it("routes MCP detail, OAuth, and resource reads through the Thread Provider", async () => {
     const openai = client();
     const deepseek = client();
@@ -1023,11 +995,6 @@ function client() {
     }),
     setServerRequestHandler: vi.fn((handler) => { result.serverRequestHandler = handler; }),
     listThreads: vi.fn(),
-    listThreadSections: vi.fn(),
-    createThreadSection: vi.fn(),
-    renameThreadSection: vi.fn(),
-    deleteThreadSection: vi.fn(),
-    moveThreadToSection: vi.fn(),
     listCollaborationModes: vi.fn(),
     readThread: vi.fn(),
     startThread: vi.fn(),

@@ -61,7 +61,7 @@ describe("provider-aware conversation command formatting", () => {
       page: 1,
       pageCount: 1,
       matchedSessionCount: 1,
-      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
+      view: { page: 1, filter: "all", provider: null, searchTerm: null },
     });
 
     expect(rendered).toContain("模型：gpt-server");

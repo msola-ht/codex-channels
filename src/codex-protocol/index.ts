@@ -27,10 +27,6 @@ export type { ThreadListResponse } from "./generated/v2/ThreadListResponse.js";
 export type {
   ThreadSectionMoveResponse,
 } from "./generated/v2/ThreadSectionMoveResponse.js";
-export type { ThreadSectionListResponse } from "./generated/v2/ThreadSectionListResponse.js";
-export type { ThreadSectionCreateResponse } from "./generated/v2/ThreadSectionCreateResponse.js";
-export type { ThreadSectionUpdateResponse } from "./generated/v2/ThreadSectionUpdateResponse.js";
-export type { ThreadSectionDeleteResponse } from "./generated/v2/ThreadSectionDeleteResponse.js";
 export type {
   ThreadMetadataUpdateResponse,
 } from "./generated/v2/ThreadMetadataUpdateResponse.js";

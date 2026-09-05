@@ -185,19 +185,7 @@ describe("JsonRpcClient threads", () => {
       await expect(client.setThreadPinned("thread-1", true)).resolves.toBe(false);
     });
 
-    it.each([
-      {
-        entry: "/pin",
-        operate: (client: CodexAppServerClient) => client.setThreadPinned("thread-1", true),
-      },
-      {
-        entry: "custom Thread Section move",
-        operate: (client: CodexAppServerClient) =>
-          client.moveThreadToSection("thread-1", "section-project"),
-      },
-    ])("fails closed before $entry when Thread metadata update returns another target", async ({
-      operate,
-    }) => {
+    it("fails closed before /pin when Thread metadata update returns another target", async () => {
       const transport = new FakeTransport();
       transport.metadataUpdateThreadData = appServerThread({ id: "thread-other" });
       const client = new CodexAppServerClient(new JsonRpcClient(transport), {
@@ -205,64 +193,10 @@ describe("JsonRpcClient threads", () => {
       });
       await client.connect();
 
-      await expect(operate(client))
+      await expect(client.setThreadPinned("thread-1", true))
         .rejects.toThrow("Codex Thread 分区元数据更新目标不一致");
       expect(transport.sent.some((message) => message.method === "thread/section/move"))
         .toBe(false);
     });
 
-    it("passes stable Thread Section filters and position ordering", async () => {
-      const transport = new FakeTransport();
-      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
-        sandbox: "workspace-write",
-      });
-      await client.connect();
-
-      await client.listThreads("/tmp/project", {
-        fullScan: true,
-        sectionId: "section-project",
-        sortKey: "section_position",
-        sortDirection: "asc",
-      });
-
-      expect(transport.sent.find((message) => message.method === "thread/list")?.params)
-        .toMatchObject({
-          useStateDbOnly: false,
-          sectionId: "section-project",
-          sortKey: "section_position",
-          sortDirection: "asc",
-        });
-    });
-
-    it("manages stable Thread Sections and preserves the requested thread order", async () => {
-      const transport = new FakeTransport();
-      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
-        sandbox: "workspace-write",
-      });
-      await client.connect();
-
-      await expect(client.listThreadSections()).resolves.toEqual([{
-        ...pinnedThreadSection,
-        builtIn: "pinned",
-      }]);
-      const created = await client.createThreadSection("项目甲");
-      await expect(client.renameThreadSection(created.id, "项目乙")).resolves.toMatchObject({
-        id: created.id,
-        name: "项目乙",
-        builtIn: null,
-      });
-      await client.moveThreadToSection("thread-1", created.id, "thread-before");
-      await expect(client.readThread("thread-1")).resolves.toMatchObject({
-        section: { id: created.id, name: "项目乙", builtIn: null },
-        isPinned: false,
-      });
-      expect(transport.sent.findLast((message) => message.method === "thread/section/move")?.params)
-        .toEqual({
-          threadId: "thread-1",
-          sectionId: created.id,
-          beforeThreadId: "thread-before",
-        });
-      await client.deleteThreadSection(created.id);
-      await expect(client.listThreadSections()).resolves.toHaveLength(1);
-    });
 });

@@ -36,13 +36,6 @@ export interface GatewaySettings {
   };
   automation: {
     scheduledTasksEnabled: boolean;
-    threadSectionAdministrators: string[];
-    threadSectionAdministratorCandidates: Array<{
-      value: string;
-      surface: "telegram" | "feishu" | "weixin";
-      actorId: string;
-      displayName: string;
-    }>;
   };
   network: Record<"http_proxy" | "https_proxy" | "all_proxy" | "no_proxy", {
     configured: boolean;
@@ -104,7 +97,6 @@ export type GatewaySettingInput =
   | { kind: "system.default-workspace"; value: string }
   | { kind: "system.default-model"; value: string | null }
   | { kind: "automation.scheduled-tasks"; value: boolean }
-  | { kind: "automation.thread-section-administrators"; value: string[] }
   | { kind: "advanced.logging-level"; value: GatewaySettings["advanced"]["loggingLevel"] }
   | { kind: "advanced.plugin-api"; value: boolean }
   | {

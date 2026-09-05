@@ -12,7 +12,7 @@
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
 - `conversation-service.ts`：通过稳定的 `ConversationUseCases` 公开 Surface 和命令层所需用例，
-  具体 `ConversationService` 负责新建、恢复、切换、归档、固定、原生分区和分页筛选 Thread，提交、steer 或将纯文本
+ 具体 `ConversationService` 负责新建、恢复、切换、归档、固定和分页筛选 Thread，提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   并通过注入端口把项目规则操作限制
@@ -22,8 +22,8 @@
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
   扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile
   均使用稳定结果。
-- `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁和全局 Thread Section
-  写操作提供共享串行化；Queue、Revert 与主会话生命周期共用同一实例。
+- `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁；Queue、Revert
+  与主会话生命周期共用同一实例。
 - `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；
   不负责 Thread 绑定切换或后台释放。
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
@@ -129,11 +129,8 @@ Turn、steer、停止、重命名、固定、压缩、Review 和 Goal 只依赖 
 `codex-client` 负责映射。停止直接读取 Core 中精确的活动 Thread/Turn 并发送中断，不进入同一
 Conversation 的普通操作互斥区，因此不会被尚未返回的 steer 阻塞。Goal set/clear 请求成功后，Application 使用已确认结果立即更新 Core；
 App Server 通知继续处理其他客户端修改与恢复后的状态校正。
-自定义 Thread 分区也只依赖 `TurnExecutionPort`：Application 解析全局选择器、统计当前 Workspace
-活动与归档成员、校验 `before` 目标仍在同一分区，并在删除前返回结构化影响预览；关键词搜索使用
-完整历史目录，分区视图按官方 `section_position` 排序，同时保留完整目录选择器；不持久化分区目录。
-内置 Pinned 分区继续由 `/pin` 与 `/unpin` 提供会话级快捷入口；共享命令边界只允许配置的当前
-Surface Actor 执行自定义分区写操作，读取与筛选不需要管理员权限。
+自定义 Thread 分区的 Application 命令和管理员权限已移除；`/section` 仅返回移除提示。内置 Pinned
+仍由 `/pin` 与 `/unpin` 提供会话级快捷入口。
 模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪，以及目标
 Provider App Server 的有效思考等级与服务层级读取均由 `codex-client` 统一处理。CLI Setup 直接依赖
 具体 Client 的全局默认值读写，不扩大 Surface 可用的会话端口。

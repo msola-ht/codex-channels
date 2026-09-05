@@ -54,7 +54,6 @@ export function loadGatewaySettings(environment = process.env) {
   const codex = table(document.codex);
   const approval = table(document.approval);
   const scheduledTasks = table(document.scheduled_tasks);
-  const threadSections = table(document.thread_sections);
   const logging = table(document.logging);
   const experimental = table(document.experimental);
   const network = table(document.network);
@@ -80,8 +79,6 @@ export function loadGatewaySettings(environment = process.env) {
     },
     automation: {
       scheduledTasksEnabled: scheduledTasks.enabled === true,
-      threadSectionAdministrators: stringArray(threadSections.administrators),
-      threadSectionAdministratorCandidates: threadSectionAdministratorCandidates(document),
     },
     network: Object.fromEntries(proxyFields.map((field) => [
       field,
@@ -245,15 +242,6 @@ function applySetting(document, input) {
       document.scheduled_tasks = { ...table(document.scheduled_tasks), enabled: value };
       return changed(value, "restart-gateway");
     }
-    case "automation.thread-section-administrators": {
-      const candidates = threadSectionAdministratorCandidates(document);
-      const value = uniqueStrings(input.value, "value", "Thread 分区管理员");
-      if (value.some((actor) => !candidates.some((candidate) => candidate.value === actor))) {
-        throw invalid("value", "unknown-actor", "Thread 分区管理员选择无效");
-      }
-      document.thread_sections = { administrators: value };
-      return changed(value, "restart-gateway");
-    }
     case "advanced.logging-level": {
       const value = enumValue(input.value, loggingLevelValues, "value", "日志等级");
       document.logging = { ...table(document.logging), level: value };
@@ -361,35 +349,6 @@ function workspaceOptions(document) {
     }));
 }
 
-function threadSectionAdministratorCandidates(document) {
-  return [
-    ...(stringValue(table(document.telegram).bot_token)
-      ? numberArray(table(document.telegram).allowed_user_ids).map((actorId) => ({
-          value: `telegram:${actorId}`,
-          surface: "telegram",
-          actorId: String(actorId),
-          displayName: `Telegram · ${actorId}`,
-        }))
-      : []),
-    ...(table(document.feishu).enabled === true
-      ? stringArray(table(document.feishu).allowed_open_ids).map((actorId) => ({
-          value: `feishu:${actorId}`,
-          surface: "feishu",
-          actorId,
-          displayName: `飞书 · ${actorId}`,
-        }))
-      : []),
-    ...(table(document.weixin).enabled === true
-      ? stringArray(table(document.weixin).allowed_user_ids).map((actorId) => ({
-          value: `weixin:${actorId}`,
-          surface: "weixin",
-          actorId,
-          displayName: `微信 · ${actorId}`,
-        }))
-      : []),
-  ];
-}
-
 function validateProxyUrl(value) {
   if (value.length > 2_048 || /[\0\r\n]/u.test(value)) return "代理 URL 无效或过长";
   try {
@@ -442,27 +401,12 @@ function optionalString(value, maximum, field, label) {
   return normalized;
 }
 
-function uniqueStrings(value, field, label) {
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
-    throw invalid(field, "invalid-list", `${label}必须是字符串数组`);
-  }
-  return [...new Set(value.map((entry) => entry.trim()).filter(Boolean))];
-}
-
 function invalid(field, code, message) {
   return invalidSetting(field, code, message);
 }
 
 function integerInRange(value, minimum, maximum) {
   return Number.isInteger(value) && value >= minimum && value <= maximum ? value : undefined;
-}
-
-function numberArray(value) {
-  return Array.isArray(value) ? value.filter((entry) => Number.isInteger(entry) && entry > 0) : [];
-}
-
-function stringArray(value) {
-  return Array.isArray(value) ? value.filter((entry) => stringValue(entry)).map(stringValue) : [];
 }
 
 function stringValue(value) {

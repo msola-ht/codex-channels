@@ -371,18 +371,6 @@ if (document) {
   } else {
     note("Gateway 计划任务", "已关闭");
   }
-  const threadSections = table(document.thread_sections);
-  const threadSectionAdministrators = Array.isArray(threadSections.administrators)
-    ? threadSections.administrators.filter((value) => typeof value === "string")
-    : [];
-  note(
-    "Thread 分区写权限",
-    threadSectionAdministrators.length > 0
-      ? `已配置 ${threadSectionAdministrators.length} 个管理员，均属于已启用渠道允许名单`
-      : "未配置管理员；仅允许查看和筛选",
-    "在 thread_sections.administrators 中使用 <渠道>:<用户 ID> 配置；变更后重启 Gateway",
-  );
-
   setSection("Workspace");
   try {
     const { workspaces, defaultWorkspace } = readWorkspaceConfig(document);

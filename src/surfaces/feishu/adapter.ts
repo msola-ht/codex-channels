@@ -13,7 +13,6 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
-import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatDelayMinutes,
@@ -127,13 +126,11 @@ export class FeishuConversationAdapter {
       priceCurrency?: (
         provider: string | null | undefined,
       ) => DisplayPriceCurrency;
-      threadSectionAccess?: SurfaceAccessPolicy;
       scheduledTasks?: ScheduledTaskUseCases;
     } = { quietWindowMs: 0 },
   ) {
     this.commands = new ConversationCommandService(
       conversations,
-      inputOptions.threadSectionAccess,
       inputOptions.scheduledTasks,
     );
     this.inputs = new SurfaceInputCoalescer(
@@ -470,7 +467,6 @@ export class FeishuConversationAdapter {
           || action === "sessions"
           || action === "archived"
           || (action === "plugin" && result.kind === "plugins")
-          || (action === "section" && result.kind === "thread-sections")
           || action === "schedule"
         )
           ? renderCommandCenterChoices(action, result)
@@ -1524,55 +1520,6 @@ function renderCommandCenterChoices(
           action: "unarchive" as const,
           input: session.id,
         })),
-      ],
-    };
-  }
-  if (action === "section" && result.kind === "thread-sections") {
-    const navigation = [
-      ...(result.page > 1
-        ? [{ label: "上一页", action: "section" as const, input: `list ${result.page - 1}` }]
-        : []),
-      ...(result.page < result.pageCount
-        ? [{ label: "下一页", action: "section" as const, input: `list ${result.page + 1}` }]
-        : []),
-    ];
-    if (result.sections.length === 0 && navigation.length === 0) return undefined;
-    const sectionChoices: Array<FeishuCommandCenterChoices["choices"][number]> = [];
-    for (const section of result.sections) {
-      if (section.builtIn === "pinned") {
-        sectionChoices.push({
-          label: `${section.name} · 固定`,
-          action: "pin",
-          input: "",
-        });
-      } else if (result.canManageCustomSections) {
-        sectionChoices.push({
-          label: section.name,
-          action: "section",
-          input: `move ${section.id}`,
-        });
-      }
-    }
-    const readOnlySections = result.sections.flatMap((section, index) =>
-      section.builtIn === "pinned"
-        ? []
-        : [
-            `${result.selectors[index] ?? section.id}. ${section.name} · 当前 Workspace：活动 ${section.currentWorkspaceActiveCount} / 归档 ${section.currentWorkspaceArchivedCount}`,
-          ]
-    );
-    return {
-      title: `${result.canManageCustomSections ? "固定或移动当前会话" : "查看分区或固定当前会话"} · 第 ${result.page}/${result.pageCount} 页`,
-      description: result.canManageCustomSections
-        ? "固定复用 /pin；移动到自定义分区会取消固定。"
-        : [
-            "可固定当前会话；自定义分区当前仅可查看和筛选。",
-            ...(readOnlySections.length > 0
-              ? ["", "自定义分区（只读）：", ...readOnlySections]
-              : []),
-          ].join("\n"),
-      choices: [
-        ...sectionChoices,
-        ...navigation,
       ],
     };
   }

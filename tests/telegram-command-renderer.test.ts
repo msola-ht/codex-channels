@@ -8,7 +8,6 @@ import {
   renderTelegramCommandResult,
   threadQueueDeleteConfirmationKeyboard,
   threadQueueItemKeyboard,
-  threadSectionKeyboard,
   workspacePermissionFieldKeyboard,
   workspacePermissionKeyboard,
 } from "../src/surfaces/telegram/command-renderer.js";
@@ -533,69 +532,6 @@ describe("Telegram command renderer", () => {
     expect(approval.inline_keyboard.flatMap((row) =>
       row.map((button) => (button as { callback_data: string }).callback_data)))
       .toContain("wp:approval:never");
-  });
-
-  it("builds bounded Thread Section move and paging buttons", () => {
-    const keyboard = threadSectionKeyboard({
-      kind: "thread-sections",
-      sections: [
-        {
-          id: "section-pinned",
-          name: "Pinned",
-          builtIn: "pinned",
-          currentWorkspaceActiveCount: 1,
-          currentWorkspaceArchivedCount: 0,
-        },
-        {
-          id: "section-project",
-          name: "项目",
-          builtIn: null,
-          currentWorkspaceActiveCount: 1,
-          currentWorkspaceArchivedCount: 0,
-        },
-      ],
-      selectors: ["1", "2"],
-      page: 2,
-      pageCount: 3,
-      totalSectionCount: 17,
-      canManageCustomSections: false,
-    });
-    const callbacks = keyboard?.inline_keyboard.flatMap((row) =>
-      row.map((button) => (button as { callback_data: string }).callback_data));
-    expect(callbacks).toContain("section:pin");
-    expect(callbacks?.some((callback) => callback.startsWith("section:move:")))
-      .toBe(false);
-    expect(callbacks).toContain("section:page:1");
-    expect(callbacks).toContain("section:page:3");
-
-    const administratorKeyboard = threadSectionKeyboard({
-      kind: "thread-sections",
-      sections: [{
-        id: "section-project",
-        name: "项目",
-        builtIn: null,
-        currentWorkspaceActiveCount: 1,
-        currentWorkspaceArchivedCount: 0,
-      }],
-      selectors: ["2"],
-      page: 1,
-      pageCount: 1,
-      totalSectionCount: 2,
-      canManageCustomSections: true,
-    });
-    const administratorCallbacks = administratorKeyboard?.inline_keyboard.flatMap((row) =>
-      row.map((button) => (button as { callback_data: string }).callback_data));
-    expect(administratorCallbacks?.[0]).toMatch(/^section:move:[A-Za-z0-9_-]{43}$/u);
-
-    expect(threadSectionKeyboard({
-      kind: "thread-sections",
-      sections: [],
-      selectors: [],
-      page: 4,
-      pageCount: 3,
-      totalSectionCount: 17,
-      canManageCustomSections: false,
-    })).toBeUndefined();
   });
 
   it("renders provider buttons first and model buttons after provider browsing", () => {

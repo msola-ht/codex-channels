@@ -15,7 +15,6 @@ export const managedSettingKinds = new Set([
   "webui.token",
   "telegram.message-format",
   "system.default-workspace",
-  "automation.thread-section-administrators",
   "advanced.plugin-api",
   "network.proxy",
   "network.proxy-batch",
@@ -66,7 +65,6 @@ export function redactManagedSettings(settings) {
     },
     automation: {
       scheduledTasksEnabled: settings.automation.scheduledTasksEnabled,
-      threadSectionAdministratorCount: settings.automation.threadSectionAdministrators.length,
     },
     advanced: {
       loggingLevel: settings.advanced.loggingLevel,

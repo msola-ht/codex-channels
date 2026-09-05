@@ -79,10 +79,6 @@ import type {
   ThreadResumeResponse,
   ThreadStartResponse,
   ThreadSectionMoveResponse,
-  ThreadSectionListResponse,
-  ThreadSectionCreateResponse,
-  ThreadSectionUpdateResponse,
-  ThreadSectionDeleteResponse,
   ThreadUnsubscribeResponse,
   ThreadUnarchiveResponse,
   TurnStartResponse,
@@ -97,13 +93,11 @@ import type {
   ThreadSession,
   ThreadStartOptions,
   ThreadSnapshot,
-  ThreadSectionSnapshot,
 } from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
 import { codexConnectIntegrationId } from "./protocol-info.js";
 import {
   PINNED_THREAD_SECTION_ID,
-  toThreadSectionSnapshot,
   toThreadSession,
   toThreadSnapshot,
 } from "./thread-adapter.js";
@@ -542,76 +536,6 @@ export class CodexAppServerClient implements
       throw new Error("Codex Thread 固定状态更新结果不一致");
     }
     return true;
-  }
-
-  async listThreadSections(): Promise<ThreadSectionSnapshot[]> {
-    const sections: ThreadSectionSnapshot[] = [];
-    const cursors = new Set<string>();
-    let cursor: string | null = null;
-    do {
-      const response: ThreadSectionListResponse = await this.rpc.request<ThreadSectionListResponse>({
-        method: "threadSection/list",
-        params: { limit: 100, ...(cursor ? { cursor } : {}) },
-      }, { retryOverload: true });
-      sections.push(...response.data.map(toThreadSectionSnapshot));
-      cursor = response.nextCursor;
-      if (cursor) {
-        if (cursors.has(cursor)) {
-          throw new Error("Codex threadSection/list 返回了循环分页游标");
-        }
-        cursors.add(cursor);
-      }
-    } while (cursor);
-    return sections;
-  }
-
-  async createThreadSection(name: string): Promise<ThreadSectionSnapshot> {
-    const response = await this.rpc.request<ThreadSectionCreateResponse>({
-      method: "threadSection/create",
-      params: { name },
-    }, { retryOverload: false });
-    return toThreadSectionSnapshot(response.section);
-  }
-
-  async renameThreadSection(
-    sectionId: string,
-    name: string,
-  ): Promise<ThreadSectionSnapshot> {
-    const response = await this.rpc.request<ThreadSectionUpdateResponse>({
-      method: "threadSection/update",
-      params: { sectionId, name },
-    }, { retryOverload: false });
-    return toThreadSectionSnapshot(response.section);
-  }
-
-  async deleteThreadSection(sectionId: string): Promise<void> {
-    await this.rpc.request<ThreadSectionDeleteResponse>({
-      method: "threadSection/delete",
-      params: { sectionId },
-    }, { retryOverload: false });
-  }
-
-  async moveThreadToSection(
-    threadId: string,
-    sectionId: string | null,
-    beforeThreadId?: string,
-  ): Promise<void> {
-    const observed = await this.rpc.request<ThreadReadResponse>({
-      method: "thread/read",
-      params: { threadId, includeTurns: false },
-    }, { retryOverload: true });
-    if (observed.thread.id !== threadId) {
-      throw new Error("Codex Thread 分区更新目标不一致");
-    }
-    const updated = await this.applyThreadSectionMove(
-      threadId,
-      observed,
-      sectionId,
-      beforeThreadId,
-    );
-    if (updated.section?.id !== sectionId && !(updated.section === null && sectionId === null)) {
-      throw new Error("Codex Thread 分区更新结果不一致");
-    }
   }
 
   private async applyThreadSectionMove(

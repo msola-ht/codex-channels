@@ -297,7 +297,7 @@ export interface SettingsSummaryResponse {
       defaultWorkspace: string | null
       defaultModel: string | null
     }
-    automation: { scheduledTasksEnabled: boolean; threadSectionAdministratorCount: number }
+    automation: { scheduledTasksEnabled: boolean }
     network: { configuredFields: string[] }
     advanced: {
       loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace"
@@ -388,7 +388,7 @@ export interface ManagementSettingsResponse {
   system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel"> & {
     workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null }>
   }
-  automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled" | "threadSectionAdministratorCount">
+  automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled">
   advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
   network: Pick<SettingsSummaryResponse["gateway"]["network"], "configuredFields">
   metrics: {

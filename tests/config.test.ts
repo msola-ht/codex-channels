@@ -210,7 +210,6 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.reasoningEnabled).toBe(true);
     expect(runtime.config.pluginApiEnabled).toBe(false);
     expect(runtime.config.scheduledTasksEnabled).toBe(false);
-    expect(runtime.config.threadSectionAdministrators).toEqual(new Set());
     expect(runtime.config.apiProviders).toEqual([]);
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
@@ -243,67 +242,15 @@ describe("Gateway config.toml", () => {
     expect(runtime.feishu).toBeDefined();
   });
 
-  it("loads canonical Thread Section administrator principals", () => {
-    const fixture = createFixture({
-      feishu: {
-        enabled: true,
-        app_id: "cli_0123456789abcdef",
-        app_secret: "secret",
-        allowed_open_ids: ["ou_admin"],
-      },
-    });
-    const document = readGatewayConfig(fixture.configPath);
-    document.thread_sections = {
-      administrators: ["telegram:123", "feishu:ou_admin"],
-    };
-    writeGatewayConfig(fixture.configPath, document);
-
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.threadSectionAdministrators).toEqual(new Set([
-      "telegram:123",
-      "feishu:ou_admin",
-    ]));
-  });
-
-  it("allows an enabled Weixin actor containing a colon to administer Thread Sections", () => {
-    const actorId = "actor:tenant@im.wechat";
-    const fixture = createFixture({
-      weixin: {
-        enabled: true,
-        account_id: "bot-fixture@im.bot",
-        allowed_user_ids: [actorId],
-      },
-    });
-    const document = readGatewayConfig(fixture.configPath);
-    document.thread_sections = { administrators: [`weixin:${actorId}`] };
-    writeGatewayConfig(fixture.configPath, document);
-
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.threadSectionAdministrators).toEqual(new Set([`weixin:${actorId}`]));
-  });
-
-  it("rejects malformed Thread Section administrator principals", () => {
+  it("rejects removed Thread Section configuration", () => {
     const fixture = createFixture();
     const document = readGatewayConfig(fixture.configPath);
-    document.thread_sections = { administrators: ["ou_admin"] };
+    document.thread_sections = { administrators: ["telegram:123"] };
     writeGatewayConfig(fixture.configPath, document);
 
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toThrow("Thread 分区管理员必须使用 <渠道>:<用户 ID>");
-  });
-
-  it("rejects Thread Section administrators outside the enabled channel allowlists", () => {
-    const fixture = createFixture();
-    const document = readGatewayConfig(fixture.configPath);
-    document.thread_sections = { administrators: ["telegram:456"] };
-    writeGatewayConfig(fixture.configPath, document);
-
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toThrow("Thread 分区管理员必须属于对应已启用渠道的允许名单");
+    })).toThrow('Unrecognized key: "thread_sections"');
   });
 
   it("rejects a configuration without any enabled channel", () => {

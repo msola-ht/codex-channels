@@ -22,13 +22,11 @@ export async function runAutomationSettings(options) {
     showInstructions: false,
     options: [
       { value: "scheduled_tasks", label: "计划任务", hint: "启用或关闭 Gateway 无人值守计划任务" },
-      { value: "thread_sections", label: "Thread 分区管理员", hint: "从已启用渠道允许名单中选择" },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
   if (prompts.isCancel(section) || section === "back") return { action: "back" };
   if (section === "scheduled_tasks") return runScheduledTasks(options);
-  if (section === "thread_sections") return runThreadSectionAdministrators(options);
   throw new Error(`未知自动化设置：${String(section)}`);
 }
 
@@ -159,36 +157,6 @@ async function runScheduledTasks({ environment, output, prompts, writeConfig = w
   output.write(`Gateway 计划任务已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { scheduledTasksEnabled: enabled, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
-}
-
-async function runThreadSectionAdministrators({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
-  const settings = loadGatewaySettings(environment);
-  const candidates = settings.automation.threadSectionAdministratorCandidates;
-  if (candidates.length === 0) {
-    output.write("已启用渠道的允许名单为空；请先通过 codexc setup 配置渠道用户。\n");
-    return { action: "back" };
-  }
-  const selected = await prompts.multiselect({
-    message: "选择 Thread 分区管理员（可留空）",
-    showInstructions: false,
-    required: false,
-    initialValues: settings.automation.threadSectionAdministrators,
-    options: candidates.map((candidate) => ({
-      value: candidate.value,
-      label: candidate.displayName,
-    })),
-  });
-  if (prompts.isCancel(selected)) return { action: "back" };
-  if (!Array.isArray(selected) || selected.some((value) => !candidates.some((entry) => entry.value === value))) {
-    throw new Error("Thread 分区管理员选择无效");
-  }
-  const result = updateGatewaySetting({
-    kind: "automation.thread-section-administrators",
-    value: selected,
-  }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`Thread 分区管理员已更新（${selected.length} 个）：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { threadSectionAdministrators: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 async function runLoggingLevel({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
