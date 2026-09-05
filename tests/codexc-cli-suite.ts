@@ -511,6 +511,9 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       cwd: workspace,
       env: environment,
     });
+    updateGatewayConfig(join(home, "config.toml"), (document) => {
+      table(document.display).price_currency = "cny";
+    });
     writeFileSync(join(home, "data", "exchange-rate.json"), JSON.stringify({
       version: 1,
       source: "open-er-api",

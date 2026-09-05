@@ -68,10 +68,10 @@ export function loadGatewaySettings(environment = process.env) {
         : "compact",
       planUpdatesEnabled: display.plan_updates !== false,
       reasoningEnabled: display.reasoning !== false,
-      priceCurrency: display.price_currency === "usd" ? "usd" : "cny",
+      priceCurrency: display.price_currency === "cny" ? "cny" : "usd",
     },
     system: {
-      approvalTimeoutSeconds: integerInRange(approval.timeout_seconds, 30, 3_600) ?? 300,
+      approvalTimeoutSeconds: integerInRange(approval.timeout_seconds, 30, 3_600) ?? 900,
       sandbox: codex.sandbox === "read-only" ? "read-only" : "workspace-write",
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,

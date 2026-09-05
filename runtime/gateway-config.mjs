@@ -255,8 +255,8 @@ const gatewayDocumentSchema = z.strictObject({
   }).optional(),
   codex: codexSchema,
   approval: z.strictObject({
-    timeout_seconds: z.number().int().min(30).max(3600).default(600),
-  }).default({ timeout_seconds: 600 }),
+    timeout_seconds: z.number().int().min(30).max(3600).default(900),
+  }).default({ timeout_seconds: 900 }),
   display: z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),

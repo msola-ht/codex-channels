@@ -325,7 +325,7 @@ describe("webui server", () => {
       currency: string;
       exchangeRate: { usdToCny: number; source: string } | null;
     };
-    expect(body.currency).toBe("cny");
+    expect(body.currency).toBe("usd");
     expect(body.exchangeRate).toMatchObject({
       usdToCny: 7.2,
       source: "cache",
@@ -350,7 +350,7 @@ describe("webui server", () => {
 
     const legacy = await fetch(`${origin}/api/v1/settings`);
     expect(await legacy.json()).toEqual({
-      currency: "cny",
+      currency: "usd",
       exchangeRate: expect.objectContaining({ source: "cache", usdToCny: 7.2 }),
     });
 
@@ -1147,6 +1147,15 @@ describe("webui server", () => {
       httpStatus: 429,
       errorType: "http_error",
     });
+    const configPath = join(fixture.home, "config.toml");
+    const configDocument = readGatewayConfig(configPath);
+    configDocument.display = {
+      operation_updates: "compact",
+      plan_updates: true,
+      reasoning: true,
+      price_currency: "cny",
+    };
+    writeGatewayConfig(configPath, configDocument);
     const { origin } = await startServer(fixture.environment);
 
     const threads = await fetch(`${origin}/api/v1/threads`);

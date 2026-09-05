@@ -443,7 +443,7 @@ describe("Gateway config.toml", () => {
       socket_path: "runtime/codex-app-server.sock",
       sandbox: "workspace-write",
     });
-    expect(persisted.approval).toEqual({ timeout_seconds: 600 });
+    expect(persisted.approval).toEqual({ timeout_seconds: 900 });
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,

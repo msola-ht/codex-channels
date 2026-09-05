@@ -71,10 +71,10 @@ describe("Gateway Config management", () => {
         operationUpdates: "compact",
         planUpdatesEnabled: true,
         reasoningEnabled: true,
-        priceCurrency: "cny",
+        priceCurrency: "usd",
       },
       system: {
-        approvalTimeoutSeconds: 300,
+        approvalTimeoutSeconds: 900,
         sandbox: "workspace-write",
         defaultWorkspace: expect.any(String),
       },

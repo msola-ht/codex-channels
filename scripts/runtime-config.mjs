@@ -82,7 +82,7 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
       default_model: "",
       sandbox: "workspace-write",
     },
-    approval: { timeout_seconds: 300 },
+    approval: { timeout_seconds: 900 },
     display: {
       operation_updates: "compact",
       plan_updates: true,

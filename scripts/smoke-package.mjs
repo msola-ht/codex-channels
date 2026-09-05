@@ -186,7 +186,7 @@ try {
       socket_path: "runtime/codex-app-server.sock",
       sandbox: "workspace-write",
     },
-    approval: { timeout_seconds: 300 },
+    approval: { timeout_seconds: 900 },
     storage: { database_path: "data/gateway.sqlite3" },
     logging: { level: "info" },
     workspaces: [{ id: "smoke", name: "Smoke", cwd: temporaryDirectory }],

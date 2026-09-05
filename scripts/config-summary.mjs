@@ -52,7 +52,7 @@ export function gatewayConfigSummary(document, configPath) {
       : "compact",
     planUpdates: display.plan_updates !== false,
     reasoning: display.reasoning !== false,
-    priceCurrency: display.price_currency === "usd" ? "usd" : "cny",
+    priceCurrency: display.price_currency === "cny" ? "cny" : "usd",
     scheduledTasks: scheduledTasks.enabled === true,
     pluginApi: experimental.plugin_api === true,
     logLevel: stringValue(logging.level) || "info",

@@ -36,7 +36,7 @@ default_model = ""
 sandbox = "workspace-write"
 
 [approval]
-timeout_seconds = 300
+timeout_seconds = 900
 
 [display]
 # full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
@@ -47,7 +47,7 @@ plan_updates = true
 reasoning = true
 # 模型价格显示币种：全局统一为 cny（人民币）或 usd（美元）；
 # 选择 cny 时 Gateway 会刷新并持久化汇率，拉取失败时继续使用最后一次缓存。
-price_currency = "cny"
+price_currency = "usd"
 
 [experimental]
 # Codex 0.148.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。
