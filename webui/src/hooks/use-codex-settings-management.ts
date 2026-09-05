@@ -23,6 +23,7 @@ function currentValue(settings: CodexUserSettingsResponse, setting: CodexUserSet
   if (setting.kind === "permissions") return settings.permissions
   if (setting.kind === "web-search") return settings.defaults.webSearch
   if (setting.kind === "update-plan") return settings.defaults.updatePlanEnabled
+  if (setting.kind === "auto-recap") return settings.defaults.autoRecapEnabled
   if (setting.kind === "preferences") return settings.defaults
   return null
 }

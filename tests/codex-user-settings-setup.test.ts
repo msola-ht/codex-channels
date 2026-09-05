@@ -122,6 +122,7 @@ describe("Codex user settings setup", () => {
     expect(options.map((option: { value: string }) => option.value)).toEqual([
       "web-search",
       "update-plan",
+      "auto-recap",
       "permissions",
       "back",
     ]);
@@ -159,6 +160,40 @@ describe("Codex user settings setup", () => {
       expectedVersion: "version-1",
     });
     expect(output.join("")).toContain("Codex 计划清单工具已开启");
+  });
+
+  it("updates automatic TUI recaps with disabled as the default", async () => {
+    const output: string[] = [];
+    const updateSetting = vi.fn(async () => ({
+      kind: "auto-recap" as const,
+      previousVersion: "version-1",
+      value: { enabled: false },
+      activation: "restart-all" as const,
+    }));
+    const prompts = {
+      select: vi.fn()
+        .mockResolvedValueOnce("auto-recap")
+        .mockResolvedValueOnce("disabled"),
+      confirm: vi.fn(async () => true),
+      isCancel: () => false,
+    };
+
+    await runCodexUserSettingsSetup({
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      output: { write: (value: string) => output.push(value) },
+      prompts,
+      loadSettings: async () => settingsState(),
+      updateSetting,
+    });
+
+    expect(updateSetting).toHaveBeenCalledWith({
+      kind: "auto-recap",
+      enabled: false,
+    }, {
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      expectedVersion: "version-1",
+    });
+    expect(output.join("")).toContain("Codex 空闲总结已关闭");
   });
 
   it("refuses to mix Permission Profiles with traditional sandbox fields", async () => {
@@ -208,6 +243,7 @@ function settingsState(): CodexUserSettingsState {
       fastEnabled: false,
       webSearch: null,
       updatePlanEnabled: false,
+      autoRecapEnabled: false,
     },
     permissions: {
       editable: true,

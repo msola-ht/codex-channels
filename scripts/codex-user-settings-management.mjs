@@ -162,6 +162,7 @@ function projectSettings(snapshot, provider, rawModels) {
   const history = record(config.history);
   const tools = record(config.tools);
   const updatePlan = record(tools.update_plan);
+  const tui = record(config.tui);
   const configuredPlanEffort = optionalString(config.plan_mode_reasoning_effort);
   const planModeReasoningEffort = models.some((model) => model.reasoningEfforts
     .some((option) => option.effort === configuredPlanEffort))
@@ -182,6 +183,7 @@ function projectSettings(snapshot, provider, rawModels) {
       fastEnabled: isFastServiceTier(serviceTier),
       webSearch,
       updatePlanEnabled: updatePlan.enabled === true,
+      autoRecapEnabled: tui.auto_recap === true,
       reasoningSummary,
       planModeReasoningEffort,
       verbosity,
@@ -220,6 +222,8 @@ function createEdits(input, { config, provider, models }) {
       return webSearchEdits(input);
     case "update-plan":
       return updatePlanEdits(input);
+    case "auto-recap":
+      return autoRecapEdits(input);
     case "preferences":
       return preferenceEdits(input, models);
     default:
@@ -291,6 +295,16 @@ function updatePlanEdits(input) {
   }
   return {
     edits: [{ keyPath: "tools.update_plan.enabled", value: input.enabled }],
+    value: { enabled: input.enabled },
+  };
+}
+
+function autoRecapEdits(input) {
+  if (typeof input?.enabled !== "boolean") {
+    throw invalid("enabled", "invalid-boolean", "空闲总结状态必须是布尔值");
+  }
+  return {
+    edits: [{ keyPath: "tui.auto_recap", value: input.enabled }],
     value: { enabled: input.enabled },
   };
 }

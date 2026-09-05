@@ -17,6 +17,46 @@
 - 生成协议出现类型或 RPC 不代表项目支持。公开能力仍以 [`docs/index.md`](index.md) 的支持矩阵、
   受控导出、业务入口和验证共同为准。
 
+## 0.153.4
+
+- 官方 Release：[`rust-v0.153.4`](https://github.com/openai/codex/releases/tag/rust-v0.153.4)
+- 项目决策：以 `0.153.4` 作为新的开发基线；已重新生成协议类型并完成版本、协议结构和类型检查，业务入口继续只采用当前支持矩阵列出的能力，不保留旧 CLI 兼容层。
+- 评估范围：Thread 元数据字段、异步用户输入问题、Plugin reconcile、App Links、Turn 审批审查者设置，以及 Astra 模型目录和 TUI/Guardian 更新。
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| `0.153.4` 精确协议基线 | 让 Gateway、App Server 和生成类型使用同一正式版本 | 采用官方正式版并重新生成协议；不保留旧 CLI 兼容分支，继续由受控导出和支持矩阵限制公开能力 | [`src/codex-protocol/`](../src/codex-protocol/README.md)、`npm run codex:upgrade -- 0.153.4`、`npm run protocol:check`、`npm run check` |
+| Astra 模型选择器与异步澄清提示 | 让原生 Codex 客户端使用捆绑的 Astra 模型选择器，并在需要澄清时给出更准确的提示 | 随锁定 CLI 自动获得；Gateway 不复制 TUI、模型选择器或提示文案逻辑 | 目标 CLI 版本检查、真实 App Server 合同 |
+| TUI 空闲总结开关 | 让管理员控制终端失去焦点后是否自动生成会话回顾 | 通过 `codexc setup → Codex 新会话默认值 → 空闲总结` 写入 `tui.auto_recap`，默认写入 `false`；手动 `/recap` 不受影响 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、设置写入测试 |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| `plugin/reconcile` | 让客户端请求 App Server 重新核对 Plugin 状态 | 当前项目只在开发开关开启时读取 `plugin/installed` 并通过受控 mention 调用，不需要主动同步 Plugin，也没有跨 Surface 的同步交互合同 |
+| 异步用户输入问题（`agentMessage.questions`） | 让模型在消息内容中携带需要用户稍后回答的问题 | 当前审批/用户输入必须绑定 Thread、Turn、请求 ID，具备一次性令牌、过期和跨客户端失效；该字段没有等价的响应 RPC，不能安全映射到现有渠道交互 |
+| `turn/settings/update.approvalsReviewer` | 在活动 Turn 中切换审批审查者 | Gateway 的模型和审批设置按下一 Turn 生效，当前没有活动 Turn 设置更新入口，接入会改变既有授权语义 |
+| App Links 配置 | 为 App 提供外部链接配置 | Gateway 不暴露 App 账号配置或链接管理入口，新增会扩大插件配置和授权边界 |
+
+### 待评估
+
+| 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
+| --- | --- | --- | --- |
+| Thread 列表/读取中的模型与思考等级元数据 | 让会话列表直接显示 App Server 记录的模型和思考等级 | 可减少从本地缓存或最近 Turn 推断展示信息的需要 | 现有 Gateway 已从 Thread 启动/恢复结果取得这些字段；只有会话列表产品需要精确显示服务端元数据时，才补齐快照模型、Surface 文案和合同测试 |
+| `ResponseUsageMetadata.metadata` | 让用量响应携带额外结构化元数据 | 未来可用于诊断或计费审计 | 当前指标模型没有定义该数据的来源、保留期限和脱敏规则；建立稳定字段合同后再评估 |
+
+### 纯上游变化
+
+- Astra picker、Bedrock 选择器、异步澄清提示、Vim/TUI 历史和 Guardian 行为属于原生 Codex 客户端或上游内部能力；Gateway 不新增对应渠道入口。TUI 的自动回顾开关例外由 Codex 用户设置管理入口写入，但 Gateway 不复制回顾生成逻辑。
+- `Thread.model`、`Thread.reasoningEffort`、`agentMessage.questions`、`plugin/reconcile` 及相关生成类型已保留在生成层，但未加入 [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) 的受控业务导出。
+
+### App Server 维护决策
+
+- 本次升级只提升精确版本基线并重新生成协议，不把新增 RPC、可选字段或异步问题格式解释为已支持功能；后续任何接入都必须先更新支持矩阵、公开端口、授权语义和真实合同。
+- 协议结构、版本和 Gateway 兼容性检查已通过；Lint、全量测试、真实 App Server 合同、构建与 tarball/干净源码全局安装冒烟均已通过，合并前仍由 CI 再次复核。
+
 ## 0.152.0
 
 - 官方 Release：[`rust-v0.152.0`](https://github.com/openai/codex/releases/tag/rust-v0.152.0)
