@@ -533,10 +533,16 @@ export function createTurnCompletedPresentation(
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
   let fallbackCacheField: LifecyclePresentationField | undefined;
-  if (event.remoteQuota?.windows !== undefined && !debug) {
+  const monthlyRemoteQuota = event.remoteQuota?.windows?.find(
+    (window) => window.windowId === "monthly",
+  );
+  const completionRemoteQuota = event.remoteQuota?.windows === undefined
+    ? event.remoteQuota
+    : monthlyRemoteQuota;
+  if (completionRemoteQuota !== undefined && !debug) {
     accountFields.push({
       label: "额度中心",
-      value: `${remoteQuotaWindowLabel(event.remoteQuota.windowId)}：${event.remoteQuota.deviceCount} 台设备 · ${event.remoteQuota.requestCount} 次请求 · ${formatTokenCount(event.remoteQuota.totalTokens)}${event.remoteQuota.resetsAt === null ? "" : ` · 重置 ${formatResetTime(event.remoteQuota.resetsAt)}`}`,
+      value: `${remoteQuotaWindowLabel(completionRemoteQuota.windowId)}：${completionRemoteQuota.deviceCount} 台设备 · ${completionRemoteQuota.requestCount} 次请求 · ${formatTokenCount(completionRemoteQuota.totalTokens)}${completionRemoteQuota.resetsAt === null ? "" : ` · 重置 ${formatResetTime(completionRemoteQuota.resetsAt)}`}`,
     });
   } else if (event.remoteQuota?.windows !== undefined) {
     accountFields.push(
@@ -647,7 +653,7 @@ export function createTurnCompletedPresentation(
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
-  if (remainingUsage && event.remoteQuota === undefined) {
+  if (remainingUsage && completionRemoteQuota === undefined) {
     accountFields.push({
       label: `剩余用量${remainingUsage.bucket === undefined
         ? ""

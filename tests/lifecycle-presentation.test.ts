@@ -855,6 +855,65 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("剩余用量");
   });
 
+  it("falls back to local OpenCode Go usage when the monthly center window is absent", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation(
+        {
+          type: "turn.completed",
+          target: { surface: "telegram", accountId: "default", conversationId: "100" },
+          threadId: "thread-ocg-short-window",
+          turnId: "turn-ocg-short-window",
+          status: "completed",
+          model: "deepseek-v4-flash",
+          modelProvider: "ocg-lunare",
+          remoteQuota: {
+            provider: "ocg-lunare",
+            windowId: "weekly",
+            deviceCount: 2,
+            requestCount: 7,
+            totalTokens: 700_000,
+            totalCostNanos: null,
+            latestUsedPercentMillionths: null,
+            estimatedTotalTokens: null,
+            estimatedTotalCostNanos: null,
+            resetsAt: 1_790_000_000,
+            observedAtMs: 1_800_000_000_000,
+            windows: [
+              {
+                provider: "ocg-lunare",
+                windowId: "weekly",
+                deviceCount: 2,
+                requestCount: 7,
+                totalTokens: 700_000,
+                totalCostNanos: null,
+                latestUsedPercentMillionths: null,
+                estimatedTotalTokens: null,
+                estimatedTotalCostNanos: null,
+                resetsAt: 1_790_000_000,
+                observedAtMs: 1_800_000_000_000,
+              },
+            ],
+          },
+        },
+        undefined,
+        undefined,
+        false,
+        {
+          model: "deepseek-v4-flash",
+          bucket: "off-peak",
+          includedUsageUsd: 30,
+          usedUsdNanos: 10_000_000_000,
+          usedPercent: 33,
+          remainingUsdNanos: 20_000_000_000,
+          windowStartAtMs: 1_700_000_000_000,
+          windowEndAtMs: 1_800_000_000_000,
+        },
+      ),
+    );
+    expect(rendered).toContain("剩余用量");
+    expect(rendered).not.toContain("额度中心：周");
+  });
+
   it("keeps Thread metrics but hides OpenAI-only fields for DeepSeek", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
