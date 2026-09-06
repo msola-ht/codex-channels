@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript management helper intentionally has no declaration file.
-import { assertManagedSetting, codexManagementError, isHighRiskManagementPath, ManagementOperationError } from "../scripts/webui-management-operations.mjs";
+import { assertManagedSetting, codexManagementError, invalidateProviderManagementSummary, isHighRiskManagementPath, loadProviderManagementSummary, ManagementOperationError } from "../scripts/webui-management-operations.mjs";
 // @ts-expect-error JavaScript Provider settings helper intentionally has no declaration file.
 import { redactProviderSettingsResult } from "../scripts/webui-provider-settings-management.mjs";
 // @ts-expect-error JavaScript account settings helper intentionally has no declaration file.
@@ -39,6 +39,31 @@ describe("WebUI management operation boundaries", () => {
     expect(isHighRiskManagementPath("/account-settings/preview")).toBe(true);
     expect(isHighRiskManagementPath("/tasks/preview")).toBe(true);
     expect(isHighRiskManagementPath("/settings")).toBe(false);
+  });
+
+  it("does not let an in-flight provider read repopulate an invalidated cache", async () => {
+    const state = {
+      configVersion: "v1",
+      defaults: { model: null, reasoningEffort: null },
+      primary: { id: "openai", displayName: "OpenAI", kind: "official", mode: "official" },
+      managedProviders: [],
+      customProviders: { fixedCandidates: [], switchingProviders: [], backupCandidates: [] },
+      externalAgent: { status: "not-configured" },
+    };
+    let resolveState: ((value: typeof state) => void) | undefined;
+    const cache = { value: null, expiresAtMs: 0, pending: null } as { value: unknown; expiresAtMs: number; pending: Promise<unknown> | null; generation?: number };
+    const first = loadProviderManagementSummary(
+      {},
+      cache,
+      () => new Promise<typeof state>((resolve) => { resolveState = resolve; }),
+    );
+    invalidateProviderManagementSummary(cache);
+    resolveState?.(state);
+    await first;
+    expect(cache.value).toBeNull();
+    const fresh = await loadProviderManagementSummary({}, cache, async () => state);
+    expect(fresh.primary.id).toBe("openai");
+    expect(cache.value).not.toBeNull();
   });
 
   it("redacts Provider credentials from preview and result projections", () => {

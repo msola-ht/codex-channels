@@ -59,22 +59,24 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
     }
   }, [currentValue, data, preview, refetch, revisionOf])
 
-  const confirmSetting = useCallback(async () => {
+  const confirmSetting = useCallback(async (): Promise<boolean> => {
     const snapshot = data
     const pendingSetting = pending
-    if (snapshot === null || pendingSetting === null) return
+    if (snapshot === null || pendingSetting === null) return false
     const operationId = ++operationSequence.current
     setSaving(true)
     setActionError(null)
     try {
       await update(revisionOf(snapshot), pendingSetting.setting, pendingSetting.value.confirmationToken)
-      if (operationId !== operationSequence.current) return
+      if (operationId !== operationSequence.current) return false
       setPending(null)
       refetch()
+      return true
     } catch (error) {
       if (operationId === operationSequence.current) {
         handleError(error, refetch, () => setPending(null), setActionError)
       }
+      return false
     } finally {
       if (operationId === operationSequence.current) setSaving(false)
     }

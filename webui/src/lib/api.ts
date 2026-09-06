@@ -42,6 +42,9 @@ import type {
   ThreadTurnsResponse,
 } from "@/lib/types"
 import type { DisplayCurrency } from "@/lib/format"
+import { getToken } from "@/lib/token-storage"
+
+export { getToken, setToken } from "@/lib/token-storage"
 
 export class ApiClientError extends Error {
   readonly status: number
@@ -59,25 +62,8 @@ export class ApiClientError extends Error {
   }
 }
 
-const TOKEN_KEY = "codex-webui:token"
 export const API_PREFIX = "/api/v1"
 let unauthorizedHandler: (() => void) | null = null
-
-export function getToken(): string | null {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY)
-  } catch {
-    return null
-  }
-}
-
-export function setToken(token: string): void {
-  try {
-    sessionStorage.setItem(TOKEN_KEY, token)
-  } catch {
-    // 存储不可用时仅本次会话内保留
-  }
-}
 
 export function onUnauthorized(handler: () => void): () => void {
   unauthorizedHandler = handler

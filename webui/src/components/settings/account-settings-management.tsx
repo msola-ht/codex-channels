@@ -8,14 +8,14 @@ import { ManagedSelect } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { AccountSettingsController } from "@/lib/settings-management"
 
-export function AccountSettingsManagement({ management }: { management: AccountSettingsController }) {
+export function AccountSettingsManagement({ management, onChanged }: { management: AccountSettingsController; onChanged?: () => void }) {
   const settings = management.settings
-  if (management.loading) return <LoadingSettingsCard title="账户设置" />
+  if (management.loading && settings === null) return <LoadingSettingsCard title="账户设置" />
   if (settings === null) return <SettingsError message={management.error ?? "账户设置暂不可用"} retry={management.refetch} />
-  return <AccountSettingsCard management={management} settings={settings} />
+  return <AccountSettingsCard management={management} settings={settings} onChanged={onChanged} />
 }
 
-function AccountSettingsCard({ management, settings }: { management: AccountSettingsController; settings: NonNullable<AccountSettingsController["settings"]> }) {
+function AccountSettingsCard({ management, settings, onChanged }: { management: AccountSettingsController; settings: NonNullable<AccountSettingsController["settings"]>; onChanged?: () => void }) {
   const [accountId, setAccountId] = useState("")
   const [contact, setContact] = useState("")
   const [accountMode, setAccountMode] = useState<"switching" | "exclusive">("switching")
@@ -56,6 +56,7 @@ function AccountSettingsCard({ management, settings }: { management: AccountSett
       setAccountReconfigure(false)
     }
     if (result !== null && pending?.input.operation === "deepseek.configure") setDeepseekKey("")
+    if (result !== null) onChanged?.()
   }
   const editAccount = (account: typeof settings.opencodeGo.accounts[number]) => {
     setAccountId(account.id)
@@ -64,7 +65,7 @@ function AccountSettingsCard({ management, settings }: { management: AccountSett
     setAccountReconfigure(true)
     setAccountKey("")
   }
-  const disabled = management.busy || pending !== null
+  const disabled = management.busy || management.loading || pending !== null
 
   return <Card>
     <CardHeader>

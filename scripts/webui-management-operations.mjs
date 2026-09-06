@@ -103,15 +103,27 @@ export function loadProviderManagementSummary(environment, cache, loadProviderSt
   const now = Date.now();
   if (cache.value !== null && cache.expiresAtMs > now) return Promise.resolve(cache.value);
   if (cache.pending !== null) return cache.pending;
-  cache.pending = loadProviderState({ environment })
+  const generation = cache.generation ?? 0;
+  let pending;
+  pending = loadProviderState({ environment })
     .then(projectProviderManagementState)
     .then((value) => {
-      cache.value = value;
-      cache.expiresAtMs = Date.now() + PROVIDER_STATE_CACHE_TTL_MS;
+      if ((cache.generation ?? 0) === generation) {
+        cache.value = value;
+        cache.expiresAtMs = Date.now() + PROVIDER_STATE_CACHE_TTL_MS;
+      }
       return value;
     })
     .finally(() => {
-      cache.pending = null;
+      if (cache.pending === pending) cache.pending = null;
     });
-  return cache.pending;
+  cache.pending = pending;
+  return pending;
+}
+
+export function invalidateProviderManagementSummary(cache) {
+  cache.generation = (cache.generation ?? 0) + 1;
+  cache.value = null;
+  cache.expiresAtMs = 0;
+  cache.pending = null;
 }

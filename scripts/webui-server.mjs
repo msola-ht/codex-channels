@@ -30,7 +30,7 @@ import {
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { readManagedServiceErrorAsync } from "./service-status.mjs";
-import { loadServiceStatusSummary, serviceVersion } from "./webui-service-status.mjs";
+import { invalidateServiceStatusSummary, loadServiceStatusSummary, serviceVersion } from "./webui-service-status.mjs";
 import {
   ApiError,
   authorized,
@@ -72,6 +72,7 @@ import {
   codexManagementError,
   isHighRiskManagementPath,
   loadProviderManagementSummary,
+  invalidateProviderManagementSummary,
   ManagementOperationError,
   normalizeApiProviderMutation,
   previewApiProviderOperation,
@@ -90,6 +91,7 @@ import {
   previewAccountSettingsMutation,
   redactAccountSettingsResult,
 } from "./webui-account-settings-management.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
@@ -321,7 +323,7 @@ function createManagementState(
   };
 }
 
-async function routeManagement(environment, url, request, response, state, token) {
+async function routeManagement(environment, url, request, response, state, token, managementLockHeld = false) {
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
     throw new ApiError(503, "management_unavailable", "管理接口只允许回环访问");
   }
@@ -356,9 +358,25 @@ async function routeManagement(environment, url, request, response, state, token
   }
   const principalId = fingerprintManagementValue(token);
   const path = url.pathname.slice(`${API_PREFIX}/management`.length) || "/";
-  state.limiter.consume({ principalId, category: request.method === "GET" ? "read" : "write" });
-  if (request.method !== "GET" && isHighRiskManagementPath(path)) {
+  if (!managementLockHeld
+    && request.method === "POST"
+    && (path === "/provider-settings" || path === "/account-settings")) {
+    // 限速必须先于正文解析，避免无效或超大正文绕过写入与高风险配额。
+    state.limiter.consume({ principalId, category: "write" });
     state.limiter.consume({ principalId, category: "high-risk" });
+    // 完整读取并校验正文后再获取管理锁，避免慢速客户端占住 Provider
+    // 管理事务；readJsonBody 会缓存结果，递归路由不会重复消费请求流。
+    await readJsonBody(request, validation.maximumBodyBytes);
+    return withModelProviderManagementTransaction(
+      environment,
+      () => routeManagement(environment, url, request, response, state, token, true),
+    );
+  }
+  if (!managementLockHeld) {
+    state.limiter.consume({ principalId, category: request.method === "GET" ? "read" : "write" });
+    if (request.method !== "GET" && isHighRiskManagementPath(path)) {
+      state.limiter.consume({ principalId, category: "high-risk" });
+    }
   }
   if (path === "/codex/settings" && request.method === "GET") {
     try {
@@ -403,6 +421,7 @@ async function routeManagement(environment, url, request, response, state, token
     } catch (error) {
       throw codexManagementError(error);
     }
+    invalidateProviderManagementSummary(state.providerStateCache);
     let current = null;
     try {
       current = await state.loadCodexSettings({ environment });
@@ -506,6 +525,7 @@ async function routeManagement(environment, url, request, response, state, token
       }
       throw new ApiError(400, "api_provider_write_failed", error instanceof Error ? error.message : "Provider 写入失败");
     }
+    invalidateProviderManagementSummary(state.providerStateCache);
     let auditStatus = "recorded";
     try {
       state.audit.record({
@@ -596,6 +616,8 @@ async function routeManagement(environment, url, request, response, state, token
         ? error
         : new ApiError(400, "account_settings_write_failed", error instanceof Error ? error.message : "账户设置写入失败");
     }
+    invalidateProviderManagementSummary(state.providerStateCache);
+    invalidateServiceStatusSummary(state.serviceStatusCache);
     let auditStatus = "recorded";
     try {
       state.audit.record({
@@ -668,6 +690,8 @@ async function routeManagement(environment, url, request, response, state, token
         ? error
         : new ApiError(400, "provider_settings_write_failed", error instanceof Error ? error.message : "Provider 设置写入失败");
     }
+    invalidateProviderManagementSummary(state.providerStateCache);
+    invalidateServiceStatusSummary(state.serviceStatusCache);
     let auditStatus = "recorded";
     try {
       state.audit.record({

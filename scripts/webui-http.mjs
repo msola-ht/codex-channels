@@ -30,6 +30,7 @@ export function sendManagementJson(response, status, payload, extraHeaders = {})
 }
 
 export function readJsonBody(request, maximumBytes) {
+  if (request._codexManagementBody !== undefined) return Promise.resolve(request._codexManagementBody);
   return new Promise((resolveBody, reject) => {
     let total = 0;
     const chunks = [];
@@ -44,7 +45,9 @@ export function readJsonBody(request, maximumBytes) {
     });
     request.on("end", () => {
       try {
-        resolveBody(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        request._codexManagementBody = body;
+        resolveBody(body);
       } catch {
         reject(new ApiError(400, "invalid_json", "管理请求正文不是有效 JSON"));
       }

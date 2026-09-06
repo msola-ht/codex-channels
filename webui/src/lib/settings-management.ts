@@ -34,7 +34,7 @@ export interface GatewaySettingsController {
   saving: boolean
   pendingSetting: PendingSetting | null
   previewSetting: (kind: string, value: unknown, label: string) => Promise<void>
-  confirmSetting: () => Promise<void>
+  confirmSetting: () => Promise<boolean>
   cancelSetting: () => void
   refetch: () => void
 }
@@ -47,7 +47,7 @@ export interface CodexSettingsController {
   saving: boolean
   pendingSetting: PendingSetting | null
   previewSetting: (setting: CodexUserSettingInput, label: string) => Promise<void>
-  confirmSetting: () => Promise<void>
+  confirmSetting: () => Promise<boolean>
   cancelSetting: () => void
   refetch: () => void
 }

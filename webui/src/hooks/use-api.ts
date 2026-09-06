@@ -28,11 +28,11 @@ export function useApi<T>(
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          setState({
-            data: null,
+          setState((previous) => ({
+            data: previous.data,
             loading: false,
             error: error instanceof Error ? error.message : String(error),
-          })
+          }))
         }
       })
     return () => controller.abort()

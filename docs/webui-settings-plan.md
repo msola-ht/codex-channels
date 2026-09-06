@@ -4,7 +4,7 @@
 
 在现有指标 WebUI 中增加受控的本机设置页，让用户能够查看 CLI `codexc config`、`codexc setup` 和
 `codexc service` 的可视化状态，并逐步开放低风险配置修改。设置页不执行任意 Shell，不解析终端文案，
-设置读取和低风险修改复用同一个 WebUI Bearer 令牌，不把凭据写入浏览器。
+设置读取和低风险修改复用同一个 WebUI Bearer 令牌；Provider 凭据不写入浏览器，登录令牌按管理接口安全设计保存。
 
 ## 不可回退约束
 

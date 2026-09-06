@@ -10,19 +10,21 @@ import { LoadingSettingsCard, SettingsError } from "@/components/settings/settin
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 
-export function ProviderSettingsManagement({ management }: { management: ProviderSettingsController }) {
+export function ProviderSettingsManagement({ management, onChanged }: { management: ProviderSettingsController; onChanged?: () => void }) {
   const settings = management.settings
-  if (management.loading) return <LoadingSettingsCard title="Provider 设置" />
+  if (management.loading && settings === null) return <LoadingSettingsCard title="Provider 设置" />
   if (settings === null) return <SettingsError message={management.error ?? "Provider 设置暂不可用"} retry={management.refetch} />
-  return <ProviderSettingsCard settings={settings} management={management} />
+  return <ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} />
 }
 
 function ProviderSettingsCard({
   settings,
   management,
+  onChanged,
 }: {
   settings: ManagementProviderSettingsResponse
   management: ProviderSettingsController
+  onChanged?: () => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [providerId, setProviderId] = useState("")
@@ -79,7 +81,7 @@ function ProviderSettingsCard({
     ...settings.customProviders.switchingProviders,
     ...settings.customProviders.backupCandidates,
   ], [settings.customProviders])
-  const busy = management.busy
+  const busy = management.busy || management.loading
   const pending = management.pendingPreview
 
   useEffect(() => {
@@ -190,6 +192,7 @@ function ProviderSettingsCard({
     const operation = management.pendingPreview?.input.operation
     const result = await management.confirm()
     if (result !== null && operation === "primary.custom.save") resetForm()
+    if (result !== null) onChanged?.()
   }
 
   return <Card>

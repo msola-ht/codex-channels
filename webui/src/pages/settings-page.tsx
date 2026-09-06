@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ApiProviderManagement } from "@/components/settings/api-provider-management"
@@ -10,7 +10,7 @@ import { CliCommandRow } from "@/components/settings/cli-command-row"
 import { GatewaySettingsCard } from "@/components/settings/gateway-settings-card"
 import { ManagementTaskControls } from "@/components/settings/management-task-controls"
 import { ManagedServices } from "@/components/settings/managed-services"
-import { PendingSettingCard } from "@/components/settings/settings-controls"
+import { PendingSettingDialog } from "@/components/settings/settings-controls"
 import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings-card"
 import { SettingsError, SettingsSkeleton, LoadingSettingsCard } from "@/components/settings/settings-feedback"
 import { useCurrency } from "@/hooks/currency-context"
@@ -20,15 +20,16 @@ import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-managemen
 import { useManagementTasks } from "@/hooks/use-management-tasks"
 import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
 import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
+import { useApiProviderManagement } from "@/hooks/use-api-provider-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary } from "@/lib/api"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
 import type { DisplayCurrency } from "@/lib/format"
 import type { ManagementProvidersResponse, ManagementServicesResponse, SettingsResponse, SettingsSummaryResponse } from "@/lib/types"
-import type { AccountSettingsController, CodexSettingsController, GatewaySettingsController, ManagementTaskController, ProviderSettingsController } from "@/lib/settings-management"
+import type { AccountSettingsController, ApiProviderManagementController, CodexSettingsController, GatewaySettingsController, ManagementTaskController, ProviderSettingsController } from "@/lib/settings-management"
 
 export function SettingsPage() {
-  const { currency, settings } = useCurrency()
+  const { currency, settings, refetchSettings } = useCurrency()
   const summary = useApi(fetchSettingsSummary, [])
   const services = useApi(fetchManagementServices, [])
   const providers = useApi(fetchManagementProviders, [])
@@ -37,14 +38,47 @@ export function SettingsPage() {
   const tasks = useManagementTasks()
   const providerSettings = useProviderSettingsManagement()
   const accountSettings = useAccountSettingsManagement()
+  const apiProviders = useApiProviderManagement()
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [copyError, setCopyError] = useState(false)
+  const refetchSummary = summary.refetch
+  const refetchServices = services.refetch
+  const refetchProviders = providers.refetch
+  const refetchManagedSettings = management.refetch
+  const refetchCodexSettings = codexManagement.refetch
+  const refetchProviderSettings = providerSettings.refetch
+  const refetchAccountSettings = accountSettings.refetch
+  const refetchApiProviders = apiProviders.providers.refetch
+  const summaryLoaded = summary.data !== null
+  const refreshAllSettings = useCallback(() => {
+    refetchSummary()
+    refetchServices()
+    refetchProviders()
+    refetchManagedSettings()
+    refetchCodexSettings()
+    refetchProviderSettings()
+    refetchAccountSettings()
+    refetchApiProviders()
+    refetchSettings()
+  }, [refetchAccountSettings, refetchApiProviders, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSettings, refetchSummary])
 
   useEffect(() => {
     if (!tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))) return undefined
     const timer = window.setInterval(services.refetch, 2_000)
     return () => window.clearInterval(timer)
   }, [services.refetch, tasks.tasks])
+
+  const refreshVisibleSettings = useCallback(() => {
+    if (summaryLoaded && document.visibilityState === "visible") refreshAllSettings()
+  }, [refreshAllSettings, summaryLoaded])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => refreshVisibleSettings()
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [refreshVisibleSettings])
 
   const copyCommand = async (id: string, command: string) => {
     try {
@@ -73,11 +107,13 @@ export function SettingsPage() {
       summary={summary.data}
       services={services}
       providers={providers}
+      apiProviders={apiProviders}
       management={management}
       codexManagement={codexManagement}
       tasks={tasks}
       providerSettings={providerSettings}
       accountSettings={accountSettings}
+      onSettingsChanged={refreshAllSettings}
       copiedCommand={copiedCommand}
       copyError={copyError}
       onCopy={copyCommand}
@@ -91,28 +127,33 @@ interface SettingsContentProps {
   summary: SettingsSummaryResponse
   services: UseApiState<ManagementServicesResponse> & { refetch: () => void }
   providers: UseApiState<ManagementProvidersResponse> & { refetch: () => void }
+  apiProviders: ApiProviderManagementController
   management: GatewaySettingsController
   codexManagement: CodexSettingsController
   tasks: ManagementTaskController
   providerSettings: ProviderSettingsController
   accountSettings: AccountSettingsController
+  onSettingsChanged: () => void
   copiedCommand: string | null
   copyError: boolean
   onCopy: (id: string, command: string) => Promise<void>
 }
 
-function SettingsContent({ currency, settings, summary, services, providers, management, codexManagement, tasks, providerSettings, accountSettings, copiedCommand, copyError, onCopy }: SettingsContentProps) {
+function SettingsContent({ currency, settings, summary, services, providers, apiProviders, management, codexManagement, tasks, providerSettings, accountSettings, onSettingsChanged, copiedCommand, copyError, onCopy }: SettingsContentProps) {
+  const confirmGatewaySetting = async () => {
+    if (await management.confirmSetting()) onSettingsChanged()
+  }
   return <>
     {management.loading ? <p className="text-sm text-muted-foreground">正在读取可编辑设置…</p> : null}
     {management.managedSettings === null && !management.loading ? <SettingsError message={management.error ?? "设置管理暂不可用"} retry={management.refetch} /> : null}
-    <AppServerSettingsCard management={codexManagement} />
-    {providers.loading ? <LoadingSettingsCard title="Provider 状态" /> : null}
+    <AppServerSettingsCard management={codexManagement} onChanged={onSettingsChanged} />
+    {providers.loading && providers.data === null ? <LoadingSettingsCard title="Provider 状态" /> : null}
     {providers.error ? <SettingsError message={providers.error} retry={providers.refetch} /> : null}
-    {!providers.loading && providers.error === null && providers.data !== null ? <ProviderStatusCard state={providers.data} /> : null}
-    <ProviderSettingsManagement management={providerSettings} />
-    <AccountSettingsManagement management={accountSettings} />
-    <ApiProviderManagement />
-    {management.pendingSetting !== null ? <PendingSettingCard pending={management.pendingSetting} saving={management.saving} onConfirm={() => void management.confirmSetting()} onCancel={management.cancelSetting} /> : null}
+    {providers.error === null && providers.data !== null ? <ProviderStatusCard state={providers.data} /> : null}
+    <ProviderSettingsManagement management={providerSettings} onChanged={onSettingsChanged} />
+    <AccountSettingsManagement management={accountSettings} onChanged={onSettingsChanged} />
+    <ApiProviderManagement management={apiProviders} onChanged={onSettingsChanged} />
+    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmGatewaySetting()} onCancel={management.cancelSetting} />
     {management.actionError !== null ? <p className="text-sm text-destructive" role="status">{management.actionError}</p> : null}
     <GatewaySettingsCard management={management} currency={currency} settings={settings} />
     <WebuiDataSettingsCard management={management} />
@@ -123,7 +164,7 @@ function SettingsContent({ currency, settings, summary, services, providers, man
       <CardContent className="flex flex-col gap-3">
         {services.loading ? <p className="text-sm text-muted-foreground">正在读取服务状态…</p> : null}
         {services.error ? <SettingsError message={services.error} retry={services.refetch} /> : null}
-        {!services.loading && services.error === null && services.data !== null ? <ManagedServices services={services.data} tasks={tasks} /> : null}
+        {services.error === null && services.data !== null ? <ManagedServices services={services.data} tasks={tasks} /> : null}
       </CardContent>
     </Card>
     <ManagementTaskControls tasks={tasks} providerIds={[...(providers.data?.primary.id ? [providers.data.primary.id] : []), ...(providers.data?.providers.map((provider) => provider.id) ?? [])]} />
