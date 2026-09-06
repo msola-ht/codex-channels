@@ -477,7 +477,7 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
         <div className="flex items-center gap-2">
           <div className="grid flex-1 gap-1">
             <CardTitle>用量趋势</CardTitle>
-            <CardDescription>最近 {daysToSubtract} 天，输入按缓存拆分；输出独立显示</CardDescription>
+            <CardDescription>最近 {daysToSubtract} 天，输入按缓存拆分；输出与输入使用同一 Token 刻度</CardDescription>
           </div>
           <Select value={timeRange} onValueChange={setTimeRange}>
             <SelectTrigger className="hidden w-[140px] rounded-lg sm:flex" aria-label="选择趋势时间范围">
@@ -506,12 +506,11 @@ function GlobalTrendCard({ rows, loading }: { rows: GlobalDailyRow[]; loading: b
               <CartesianGrid vertical={false} />
               <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} />
               <YAxis yAxisId="tokens" tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
-              <YAxis yAxisId="output" orientation="right" tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
-              <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
+              <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} sortByValue />} />
               <Area yAxisId="tokens" dataKey="uncachedInputTokens" type="monotone" stackId="input" stroke="var(--color-uncachedInputTokens)" fill="url(#fillUncachedInput)" />
               <Area yAxisId="tokens" dataKey="cachedInputTokens" type="monotone" stackId="input" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
               <Area yAxisId="tokens" dataKey="totalTokens" type="monotone" stroke="var(--color-totalTokens)" fill="none" strokeWidth={2} />
-              <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
+              <Area yAxisId="tokens" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
               <ChartLegend content={<ChartLegendContent />} />
             </AreaChart>
           </ChartContainer>
