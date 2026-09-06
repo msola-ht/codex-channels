@@ -45,6 +45,10 @@ token = "你的_访问令牌"
 - 只有直接绑定 `0.0.0.0`（局域网、公网、Tailscale IP 直连）才必须设置令牌；
 - 所有入口共用一个实例与端口，配置一次 `[webui]` 后各方式同时生效。
 
+设置管理的精确 Origin 白名单固定接受 `http://127.0.0.1:<端口>`、`http://localhost:<端口>`
+和 `http://[::1]:<端口>`（按监听地址取可用项），不会从 `Host`、`X-Forwarded-Host` 或其他
+转发头扩信任；SSH 隧道建议统一使用 `127.0.0.1`，不要用服务器公网 IP、Tailscale IP 直连管理接口。
+
 ## 后台服务
 
 WebUI 是独立后台服务，不并入 `all`：`codexc service install` 只生成服务单元并启动 App Server

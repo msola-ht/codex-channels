@@ -160,9 +160,17 @@ export function projectModelCompression(models) {
     displayName: model.displayName,
     contextWindow: model.contextWindow,
     providers: model.providers,
-    autoCompactPercent: model.autoCompactPercent,
+    ...(model.autoCompactPercent === undefined
+      ? {}
+      : { autoCompactPercent: model.autoCompactPercent }),
     conflicts: model.conflicts === true,
     windowConflict: model.windowConflict === true,
-    perProvider: model.perProvider,
+    ...(model.perProvider === undefined
+      ? {}
+      : {
+          perProvider: Object.fromEntries(
+            Object.entries(model.perProvider).filter(([, value]) => value !== undefined),
+          ),
+        }),
   }));
 }

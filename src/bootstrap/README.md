@@ -102,6 +102,9 @@
   官方价格基线从本机指标库重算模型本地用量；DeepSeek 模型按请求时间拆分
   Off-Peak / Peak 两档、各自对照官方包含额度；重算优先使用请求保存的价格快照档位，缺失时才按
   当前基线判定；Key、响应正文和解析异常同样不进入日志或业务事件。
+- `quota-center.ts`：读取已配置指标中心的 `/api/quota`，按 Provider 选择当前额度周期（OpenAI
+  `codex`，OpenCode Go 5小时/7天/30天三个窗口），返回完成卡片与启动卡片使用的多设备摘要；中心不可用时
+  保持原有本机/官方估算回退，不把中心命令或令牌暴露到 Surface。
 - `provider-idle-releaser.ts`：定期扫描已启动的 OpenCode Go 账户隔离 App Server，无 Conversation
   绑定、Gateway 最近无 Turn 活动且空闲超过 5 分钟时通过 supervisor `releaseProvider` 释放；
   `agents.external` 复用主 App Server 和共享统计代理，不锁定同账户的隔离实例；Supervisor 还会

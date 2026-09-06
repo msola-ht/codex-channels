@@ -29,4 +29,18 @@ describe("WebUI query token bootstrap", () => {
     expect(storeToken).not.toHaveBeenCalled();
     expect(replaceUrl).not.toHaveBeenCalled();
   });
+
+  it("stores a token from a HashRouter route and removes it from the hash", () => {
+    const storeToken = vi.fn();
+    const replaceUrl = vi.fn();
+
+    expect(consumeQueryToken({
+      currentUrl: "https://metrics.example.com/#/settings?token=secret-value&range=24h",
+      storeToken,
+      replaceUrl,
+    })).toBe(true);
+
+    expect(storeToken).toHaveBeenCalledWith("secret-value");
+    expect(replaceUrl).toHaveBeenCalledWith("/#/settings?range=24h");
+  });
 });

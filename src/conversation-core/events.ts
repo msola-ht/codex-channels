@@ -296,6 +296,7 @@ export interface RemoteQuotaSummary {
   tokensPerPercent?: number | null;
   costPerPercentNanos?: number | null;
   observedAtMs: number;
+  windows?: readonly RemoteQuotaSummary[];
 }
 
 export type OutputEvent =

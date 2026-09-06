@@ -25,8 +25,9 @@
 
 ## Origin 与浏览器边界
 
-- 管理请求不开放 CORS。所有修改状态的请求必须携带与配置完全匹配的 `Origin`；同源 GET 读取仍受
-  回环地址和 WebUI Bearer 令牌保护，不得从 `Host`、`X-Forwarded-Host` 或任意转发头自动扩展可信来源。
+- 管理请求不开放 CORS。同源 GET 读取仍受回环地址和 WebUI Bearer 令牌保护；修改状态的请求必须携带
+  固定白名单中与当前端口完全匹配的回环 `Origin`（`127.0.0.1`、`localhost`，`::1` 监听时另加
+  `[::1]`），不得从 `Host`、`X-Forwarded-Host` 或任意转发头自动扩展可信来源。
 - Bearer 令牌不通过 Cookie 自动附带，因此跨站请求无法获得管理权限；Origin 检查仍作为第二道边界。
 - 管理响应统一设置 `Cache-Control: no-store`、严格 CSP、`frame-ancestors 'none'`、
   `X-Content-Type-Options: nosniff` 和禁止 Referrer 泄露的策略。

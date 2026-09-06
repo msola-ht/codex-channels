@@ -60,5 +60,5 @@ export function projectModelCompression(
   autoCompactPercent?: number;
   conflicts?: boolean;
   windowConflict?: boolean;
-  perProvider?: Record<string, number | undefined>;
+  perProvider?: Record<string, number>;
 }>;

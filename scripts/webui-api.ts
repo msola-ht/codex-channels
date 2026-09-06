@@ -600,7 +600,7 @@ export interface ManagementProviderSettingsResponse {
     providers: string[]
     autoCompactPercent?: number
     conflicts?: boolean
-    perProvider?: Record<string, number | undefined>
+    perProvider?: Record<string, number>
   }>
 }
 

@@ -21,7 +21,7 @@
 
 - 官方 Release：[`rust-v0.153.4`](https://github.com/openai/codex/releases/tag/rust-v0.153.4)
 - 项目决策：以 `0.153.4` 作为新的开发基线；已重新生成协议类型并完成版本、协议结构和类型检查，业务入口继续只采用当前支持矩阵列出的能力，不保留旧 CLI 兼容层。
-- 评估范围：Thread 元数据字段、异步用户输入问题、Plugin reconcile、App Links、Turn 审批审查者设置、上下文管理实验开关，以及 Astra 模型目录和 TUI/Guardian 更新。
+- 评估范围：Thread 元数据字段、Thread 分区决策收敛、异步用户输入问题、Plugin reconcile、App Links、Turn 审批审查者设置、上下文管理实验开关，以及 Astra 模型目录和 TUI/Guardian 更新。
 
 ### 已采用
 
@@ -31,6 +31,7 @@
 | Astra 模型选择器与异步澄清提示 | 让原生 Codex 客户端使用捆绑的 Astra 模型选择器，并在需要澄清时给出更准确的提示 | 随锁定 CLI 自动获得；Gateway 不复制 TUI、模型选择器或提示文案逻辑 | 目标 CLI 版本检查、真实 App Server 合同 |
 | TUI 空闲总结开关 | 让管理员控制终端失去焦点后是否自动生成会话回顾 | 通过 `codexc setup → Codex 新会话默认值 → 空闲总结` 写入 `tui.auto_recap`，默认写入 `false`；手动 `/recap` 不受影响 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、设置写入测试 |
 | 实验性上下文管理开关 | 为符合条件的官方 ChatGPT Codex 新会话启用上游上下文管理 | `codexc setup → Codex 新会话默认值 → 实验性上下文管理` 通过版本化 `config/batchWrite` 写入 `features.context_management.experimental_mode`，默认关闭；Doctor 只读显示状态 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`doctor.mjs`](../scripts/doctor.mjs)、真实 App Server 配置合同 |
+| 官方内置 Pinned 分区保留与自定义 Thread 分区撤回 | 让用户继续通过 `/pin`、`/unpin` 固定会话，并明确不再提供本项目的自定义分区目录、管理员权限和外观扩展 | 0.153.4 起撤回 0.147.0 曾采用的自定义 Thread 分区管理：删除共享 `/section`、`thread_sections.administrators`、`ThreadSectionAccessPolicy` 与 `threadSection/*` 客户端方法，保留官方内置 Pinned 分区并由既有 `/pin`、`/unpin` 使用 `thread/section/move`；`/section` 只返回移除提示，旧配置中的 `[thread_sections]` 失败关闭，同步更新 config schema、Surface、WebUI、错误文案和文档 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`conversation-service.ts`](../src/application/conversation-service.ts)、[`client.ts`](../src/codex-client/client.ts)、[`errors.md`](errors.md)、[`channel-acceptance-matrix.md`](channel-acceptance-matrix.md)、[`config.test.ts`](../tests/config.test.ts)、[`json-rpc-threads.test.ts`](../tests/json-rpc-threads.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 ### 明确不采用
 

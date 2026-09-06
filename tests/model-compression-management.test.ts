@@ -4,7 +4,9 @@ import {
   ModelCompressionManagementError,
   applyModelCompressionChange,
   previewModelCompressionChange,
+  projectModelCompression,
 } from "../scripts/model-compression-management.mjs";
+import { fingerprintManagementValue } from "../scripts/management-security.mjs";
 
 describe("model compression management", () => {
   it("previews a compression change with an exact activation action", () => {
@@ -151,6 +153,33 @@ describe("model compression management", () => {
       environment: {},
       loadCompression: () => [],
     })).toThrow();
+  });
+
+  it("projects unset compression values as JSON-safe resource fields", () => {
+    const projected = projectModelCompression([
+      {
+        model: "deepseek-v4-flash",
+        displayName: "DeepSeek V4 Flash",
+        contextWindow: 1_048_576,
+        autoCompactPercent: 40,
+        providers: ["deepseek", "ocg-lunare"],
+        perProvider: { deepseek: 40, "ocg-lunare": undefined },
+        conflicts: false,
+      },
+      {
+        model: "deepseek-v4-pro",
+        displayName: "DeepSeek V4 Pro",
+        contextWindow: 1_048_576,
+        providers: ["deepseek", "ocg-lunare"],
+        perProvider: { deepseek: undefined, "ocg-lunare": undefined },
+        conflicts: false,
+      },
+    ]);
+    expect(projected[0]?.perProvider).toEqual({ deepseek: 40 });
+    expect(projected[0]?.autoCompactPercent).toBe(40);
+    expect(projected[1]?.perProvider).toEqual({});
+    expect(projected[1]).not.toHaveProperty("autoCompactPercent");
+    expect(() => fingerprintManagementValue(projected)).not.toThrow();
   });
 });
 

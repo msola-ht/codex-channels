@@ -99,6 +99,59 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("最新使用率：35.00%");
   });
 
+  it("shows all OpenCode Go quota windows in the startup card", () => {
+    const monthlyWindow = {
+      provider: "ocg-lunare",
+      windowId: "monthly",
+      deviceCount: 1,
+      requestCount: 456,
+      totalTokens: 109_733_718,
+      totalCostNanos: null,
+      latestUsedPercentMillionths: null,
+      estimatedTotalTokens: null,
+      estimatedTotalCostNanos: null,
+      resetsAt: 1_789_482_127,
+      observedAtMs: 1_788_683_501_836,
+    };
+    const presentation = createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      {
+        workspaceId: "main",
+        model: "deepseek-v4-flash",
+        modelProvider: "ocg-lunare",
+        effort: null,
+        serviceTier: null,
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
+      },
+      {
+        platform: "linux",
+        architecture: "x64",
+        gatewayVersion: "0.150.1",
+        nodeVersion: "v24.0.0",
+        transport: "Unix WebSocket",
+        codexUpstreamUserAgent: null,
+      },
+      {
+        ...monthlyWindow,
+        windows: [
+          monthlyWindow,
+          { ...monthlyWindow, windowId: "weekly", resetsAt: 1_788_739_200 },
+          { ...monthlyWindow, windowId: "rolling", resetsAt: 1_788_683_809 },
+        ],
+      },
+    );
+    const rendered = renderPlainLifecyclePresentation(presentation);
+    expect(rendered).toContain("5小时");
+    expect(rendered).toContain("7天");
+    expect(rendered).toContain("月度（30天）");
+    expect(rendered.indexOf("5小时")).toBeLessThan(rendered.indexOf("7天"));
+    expect(rendered.indexOf("7天")).toBeLessThan(rendered.indexOf("月度（30天）"));
+  });
+
   it("does not warn when at least one official OpenAI route is reachable", () => {
     const presentation = createStartupPresentation(
       [{ id: "main", name: "Main", cwd: "/workspace/main" }],
@@ -732,6 +785,74 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("周限：剩余 63% · 重置 ");
     expect(rendered).not.toContain("额度中心：3 台设备");
     expect(rendered).not.toContain("本周期 Token");
+  });
+
+  it("uses the metrics center summary instead of local OpenCode Go usage", () => {
+    const monthlyWindow = {
+      provider: "ocg-lunare",
+      windowId: "monthly",
+      deviceCount: 3,
+      requestCount: 12,
+      totalTokens: 1_200_000,
+      totalCostNanos: 500_000_000,
+      latestUsedPercentMillionths: null,
+      estimatedTotalTokens: null,
+      estimatedTotalCostNanos: null,
+      resetsAt: 1_800_000_000,
+      observedAtMs: 1_800_000_000_000,
+    };
+    const weeklyWindow = {
+      ...monthlyWindow,
+      windowId: "weekly",
+      deviceCount: 2,
+      requestCount: 7,
+      totalTokens: 700_000,
+      resetsAt: 1_790_000_000,
+    };
+    const rollingWindow = {
+      ...monthlyWindow,
+      windowId: "rolling",
+      deviceCount: 1,
+      requestCount: 1,
+      totalTokens: 11_000,
+      resetsAt: 1_780_000_000,
+    };
+    const remainingUsage = {
+      model: "deepseek-v4-flash",
+      bucket: "off-peak" as const,
+      includedUsageUsd: 30,
+      usedUsdNanos: 10_000_000_000,
+      usedPercent: 33,
+      remainingUsdNanos: 20_000_000_000,
+      windowStartAtMs: 1_700_000_000_000,
+      windowEndAtMs: 1_800_000_000_000,
+    };
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation(
+        {
+          type: "turn.completed",
+          target: { surface: "telegram", accountId: "default", conversationId: "100" },
+          threadId: "thread-ocg-center",
+          turnId: "turn-ocg-center",
+          status: "completed",
+          model: "deepseek-v4-flash",
+          modelProvider: "ocg-lunare",
+          remoteQuota: {
+            ...monthlyWindow,
+            windows: [monthlyWindow, weeklyWindow, rollingWindow],
+          },
+        },
+        undefined,
+        undefined,
+        false,
+        remainingUsage,
+      ),
+    );
+    expect(rendered).toContain("账户状态（额度中心）：");
+    expect(rendered).toContain("额度中心：月度（30天）");
+    expect(rendered).toContain("3 台设备 · 12 次请求");
+    expect(rendered).toContain("1.2 M");
+    expect(rendered).not.toContain("剩余用量");
   });
 
   it("keeps Thread metrics but hides OpenAI-only fields for DeepSeek", () => {

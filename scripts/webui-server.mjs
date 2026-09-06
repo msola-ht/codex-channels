@@ -332,9 +332,16 @@ async function routeManagement(environment, url, request, response, state, token
   const requestLineBytes = Buffer.byteLength(`${request.method ?? ""} ${request.url ?? ""}`);
   const headerBytes = Object.entries(request.headers)
     .reduce((total, [key, value]) => total + Buffer.byteLength(key) + Buffer.byteLength(String(value ?? "")), 0);
+  // SSH 隧道用户可能用 localhost 打开；两者都解析到服务器回环地址，因此在
+  // 精确 Origin 校验前以固定回环主机名白名单归一化，不读取 Host 或转发头。
+  const normalizedOrigin = normalizeLoopbackOrigin(
+    origin,
+    state.origin,
+    request.socket.localPort,
+  );
   const validation = validateManagementJsonRequest({
     method: request.method,
-    origin,
+    origin: normalizedOrigin,
     expectedOrigin: state.origin ?? "http://127.0.0.1",
     contentType: request.headers["content-type"],
     contentLength,
@@ -882,6 +889,24 @@ async function routeManagement(environment, url, request, response, state, token
     return;
   }
   throw new ApiError(404, "not_found", `未知管理 API：${path}`);
+}
+
+function normalizeLoopbackOrigin(value, expectedOrigin, localPort) {
+  if (typeof value !== "string" || typeof expectedOrigin !== "string") return value;
+  try {
+    const candidate = new URL(value);
+    const expected = new URL(expectedOrigin);
+    const loopback = candidate.hostname === "127.0.0.1"
+      || candidate.hostname === "localhost"
+      || candidate.hostname === "[::1]"
+      || candidate.hostname === "::1";
+    // 只归一化同协议、同端口的回环 Origin，测试夹具通过 socket 实际端口匹配。
+    const sameOrigin = candidate.protocol === expected.protocol
+      && (candidate.port === String(localPort) || candidate.port === expected.port);
+    return loopback && sameOrigin ? expectedOrigin : value;
+  } catch {
+    return value;
+  }
 }
 
 async function handleManagementServices(environment, response, serviceStatusCache) {

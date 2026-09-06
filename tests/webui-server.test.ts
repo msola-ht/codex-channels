@@ -1493,6 +1493,58 @@ describe("webui server", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toHaveProperty("revision");
   });
+
+  it("accepts the localhost loopback Origin for management requests", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token" },
+    );
+    const { port } = new URL(origin);
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: `http://localhost:${port}`,
+      },
+    });
+    expect(response.status).toBe(200);
+    const settings = await response.json() as { revision: string };
+    expect(settings).toHaveProperty("revision");
+    const preview = await fetch(`${origin}/api/v1/management/settings/preview`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: `http://localhost:${port}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: settings.revision,
+        setting: { kind: "display.reasoning", value: false },
+      }),
+    });
+    expect(preview.status).toBe(200);
+  });
+
+  it("rejects an https localhost Origin for management requests", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token" },
+    );
+    const { port } = new URL(origin);
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: `https://localhost:${port}`,
+      },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "management.origin-invalid" },
+    });
+  });
 });
 
 function createFixture() {
