@@ -170,8 +170,8 @@ Codex App Server RPC。它负责受管实例的按需启动和主动释放；`co
 模型或计划缺失时不回退通用目录。模型目录与价格基线由人工对照 DeepSeek 官方文档审查更新，
 运行中的 Gateway 不抓取价格 HTML。
 OpenCode Go 使用独立的 [`opencode-go-model-pricing.ts`](../src/bootstrap/opencode-go-model-pricing.ts)
-读取人工审查的官方美元价格基线并按请求开始时间（UTC）选择 Peak/Off-Peak 价；维护时同时核对
-官方页面全部模型的价格、时段、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.153.4
+读取人工审查的官方美元价格基线并按请求开始时间（UTC）与工作日/周末规则选择 Peak/Off-Peak 价；维护时同时核对
+官方页面全部模型的价格、时段与周末规则、端点和 SDK 协议，但只为编译期受控且通过 Codex 0.153.4
 真实 App Server 按需启动、初始化与模型列表合同验证的模型计价和开放选择。`/usage` 与 WebUI
 在官方账户窗口外，还用当前官方价格基线按请求开始时间重新计价（峰谷对齐）当前官方月度窗口
 （由 `resetsAt` 倒推开始时间）内各模型已用金额；价格更新生效时间（基线 `sourceUpdatedAt`）之前

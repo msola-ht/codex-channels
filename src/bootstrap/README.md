@@ -54,7 +54,7 @@
   快照，并把请求时段对应的峰谷档位写入快照；没有汇率、精确模型或有效计划时不回退通用目录。Provider 路由器保持该专属
   解析器优先，不改变历史价格。
 - `opencode-go-model-pricing.ts`：严格读取随包发布的 OpenCode Go 官方美元价格基线，按请求 Provider、
-  精确模型和输入 Token 选择普通或长上下文档位，支持 Peak/Off-Peak 的模型同时写入请求时段对应的
+  精确模型和输入 Token 选择普通或长上下文档位，支持 Peak/Off-Peak 的模型按工作日/周末规则写入请求时段对应的
   峰谷档位；不回退 DeepSeek 官方价格或通用远程目录。
 - `pricing-bucket.ts`：Provider 无关的峰谷档位判定工具，按时区把请求开始时间转换为本地分钟和
   周末状态，并在半开区间内选择 Peak/Off-Peak；DeepSeek 与 OpenCode Go 的价格解析、账户用量重算共用同一实现。

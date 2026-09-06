@@ -2,18 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import {
   OpenCodeGoModelPricingResolver,
+  isOpenCodeGoPeakMinute,
   loadOpenCodeGoPricingBaseline,
 } from "../src/bootstrap/opencode-go-model-pricing.js";
 
 describe("OpenCodeGoModelPricingResolver", () => {
   it("tracks limited-free models without creating a numeric price", () => {
     const baseline = loadOpenCodeGoPricingBaseline(JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-21T14:49:25.000Z",
       currency: "USD",
       unit: "per_million_tokens",
       timezone: "UTC",
+      weekendsOffPeak: true,
       peakHours: ["01:00-04:00", "06:00-10:00"],
       models: {
         "ox-alpha-free": {
@@ -37,12 +39,13 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects numeric prices on a limited-free model", () => {
     expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-21T14:49:25.000Z",
       currency: "USD",
       unit: "per_million_tokens",
       timezone: "UTC",
+      weekendsOffPeak: true,
       peakHours: ["01:00-04:00", "06:00-10:00"],
       models: {
         "ox-alpha-free": {
@@ -114,13 +117,31 @@ describe("OpenCodeGoModelPricingResolver", () => {
       model: "deepseek-v4-flash",
       serviceTier: null,
       inputTokens: 1_000,
-      atMs: Date.parse("2026-08-16T02:00:00.000Z"),
+      atMs: Date.parse("2026-08-17T02:00:00.000Z"),
     })).toMatchObject({
       bucket: "peak",
       uncachedInputPricePerMillionNanos: 440_000_000,
       cachedInputPricePerMillionNanos: 14_000_000,
       outputPricePerMillionNanos: 1_320_000_000,
     });
+  });
+
+  it("uses Off-Peak prices on weekends inside official Peak hours", () => {
+    const baseline = loadOpenCodeGoPricingBaseline();
+
+    expect(baseline.weekendsOffPeak).toBe(true);
+    expect(isOpenCodeGoPeakMinute(
+      new Date("2026-08-23T02:00:00.000Z"),
+      baseline,
+    )).toBe(false);
+    expect(isOpenCodeGoPeakMinute(
+      new Date("2026-08-23T07:00:00.000Z"),
+      baseline,
+    )).toBe(false);
+    expect(isOpenCodeGoPeakMinute(
+      new Date("2026-08-24T02:00:00.000Z"),
+      baseline,
+    )).toBe(true);
   });
 
   it("prices the OpenCode Go Vision model with its own included usage", () => {
@@ -160,12 +181,13 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects an incomplete tiered baseline", () => {
     expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",
       unit: "per_million_tokens",
       timezone: "UTC",
+      weekendsOffPeak: true,
       peakHours: ["01:00-04:00", "06:00-10:00"],
       models: {
         "test-model": {
@@ -185,12 +207,13 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects an incomplete Peak/Off-Peak baseline", () => {
     expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",
       unit: "per_million_tokens",
       timezone: "UTC",
+      weekendsOffPeak: true,
       peakHours: ["01:00-04:00", "06:00-10:00"],
       models: {
         "test-model": {
@@ -212,12 +235,13 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects a baseline without official Peak hours", () => {
     expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",
       unit: "per_million_tokens",
       timezone: "UTC",
+      weekendsOffPeak: true,
       peakHours: [],
       models: {
         "test-model": {
@@ -235,12 +259,13 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
   it("rejects a model endpoint outside the official API boundary", () => {
     const baseline = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       source: "https://opencode.ai/docs/go/",
       sourceUpdatedAt: "2026-08-14T05:48:32.000Z",
       currency: "USD",
       unit: "per_million_tokens",
       timezone: "UTC",
+      weekendsOffPeak: true,
       peakHours: ["01:00-04:00", "06:00-10:00"],
       models: {
         "test-model": {
@@ -257,5 +282,31 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
     expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify(baseline)))
       .toThrow("模型端点无效");
+  });
+
+  it("rejects a baseline with an invalid weekend pricing rule", () => {
+    const baseline = {
+      schemaVersion: 4,
+      source: "https://opencode.ai/docs/go/",
+      sourceUpdatedAt: "2026-08-24T08:21:37.000Z",
+      currency: "USD",
+      unit: "per_million_tokens",
+      timezone: "UTC",
+      weekendsOffPeak: "yes",
+      peakHours: ["01:00-04:00", "06:00-10:00"],
+      models: {
+        "test-model": {
+          endpoint: "https://opencode.ai/zen/go/v1/chat/completions",
+          aiSdkPackage: "@ai-sdk/openai-compatible",
+          input: 1,
+          output: 2,
+          cachedRead: 0.1,
+          includedUsageUsd: 10,
+        },
+      },
+    };
+
+    expect(() => loadOpenCodeGoPricingBaseline(JSON.stringify(baseline)))
+      .toThrow("官方价格基线格式无效");
   });
 });

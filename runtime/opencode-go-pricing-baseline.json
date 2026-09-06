@@ -1,10 +1,11 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "source": "https://opencode.ai/docs/go/",
-  "sourceUpdatedAt": "2026-08-21T14:49:25.000Z",
+  "sourceUpdatedAt": "2026-08-24T08:21:37.000Z",
   "currency": "USD",
   "unit": "per_million_tokens",
   "timezone": "UTC",
+  "weekendsOffPeak": true,
   "peakHours": [
     "01:00-04:00",
     "06:00-10:00"
