@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import type { ManagementTaskController } from "@/lib/settings-management"
 
@@ -33,7 +34,7 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="management-prune-provider" className="text-muted-foreground">清理 Provider 指标</label>
+          <Label htmlFor="management-prune-provider" className="text-muted-foreground">清理 Provider 指标</Label>
           <Input
             id="management-prune-provider"
             className="w-[180px]"

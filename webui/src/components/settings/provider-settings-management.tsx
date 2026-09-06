@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
@@ -40,6 +41,7 @@ function ProviderSettingsCard({
   const [managedReasoning, setManagedReasoning] = useState(settings.managedProviders[0]?.reasoningEffort ?? "")
   const [compressionModel, setCompressionModel] = useState(settings.modelCompression[0]?.id ?? "")
   const [compressionPercent, setCompressionPercent] = useState("60")
+  const [compressionError, setCompressionError] = useState<string | null>(null)
   const [agentProvider, setAgentProvider] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.provider : settings.managedProviders[0]?.id ?? settings.customProviders.switchingProviders[0]?.id ?? "")
   const [agentModel, setAgentModel] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.model : settings.managedProviders[0]?.models[0]?.id ?? settings.customProviders.switchingProviders[0]?.model ?? "")
 
@@ -169,10 +171,16 @@ function ProviderSettingsCard({
 
   const updateCompression = async () => {
     if (compressionEntry === undefined) return
+    const parsedPercent = Number(compressionPercent)
+    if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 90) {
+      setCompressionError("自动压缩百分比必须是 10–90 的整数")
+      return
+    }
+    setCompressionError(null)
     const result = await management.mutate({
       operation: "managed.compression",
       model: compressionEntry.id,
-      autoCompactPercent: Number(compressionPercent),
+      autoCompactPercent: parsedPercent,
     })
     if (result !== null) {
       setCompressionPercent(String(result.autoCompactPercent ?? compressionPercent))
@@ -186,6 +194,11 @@ function ProviderSettingsCard({
 
   const disableAgent = async () => {
     await management.mutate({ operation: "external-agent", action: "disable" })
+  }
+
+  const cancelPending = () => {
+    management.cancel()
+    setApiKey("")
   }
 
   const confirmPending = async () => {
@@ -220,7 +233,8 @@ function ProviderSettingsCard({
         </div>
         {compressionEntry === undefined ? <p className="text-muted-foreground">当前没有可设置的受管模型。</p> : <>
           <ManagedSelect label="模型" value={compressionEntry.id} options={settings.modelCompression.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => { setCompressionModel(value); const next = settings.modelCompression.find((candidate) => candidate.id === value); if (next !== undefined) setCompressionPercent(String(next.autoCompactPercent ?? 60)) }} />
-          <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">自动压缩百分比</span><Input className="w-[160px]" type="number" min={10} max={90} value={compressionPercent} disabled={busy || pending !== null} onChange={(event) => setCompressionPercent(event.target.value)} /></div>
+          <div className="flex items-center justify-between gap-3"><Label className="text-muted-foreground" htmlFor="provider-compression-percent">自动压缩百分比</Label><Input id="provider-compression-percent" aria-invalid={compressionError !== null} aria-describedby={compressionError === null ? undefined : "provider-compression-percent-error"} className="w-[160px]" type="number" min={10} max={90} value={compressionPercent} disabled={busy || pending !== null} onChange={(event) => { setCompressionPercent(event.target.value); setCompressionError(null) }} /></div>
+          {compressionError !== null ? <p id="provider-compression-percent-error" className="text-right text-xs text-destructive" role="status">{compressionError}</p> : null}
           <p className="text-xs text-muted-foreground">应用 Provider：{compressionEntry.providers.join("、") || "无"} · 上下文窗口 {compressionEntry.contextWindow.toLocaleString()} tokens</p>
           {compressionEntry.conflicts === true ? <p className="text-xs text-amber-600">当前不同 Provider 的压缩值不一致：{Object.entries(compressionEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join("；") || "部分未设置"}；保存后将以本次输入统一。</p> : null}
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || compressionEntry === undefined} onClick={() => void updateCompression()}>保存模型自动压缩</Button>
@@ -241,11 +255,11 @@ function ProviderSettingsCard({
       <section className="flex flex-col gap-3 border-t pt-5">
         <div><h3 className="font-medium">自定义主 Provider</h3><p className="text-xs text-muted-foreground">可切换模式保留官方主 Provider；固定模式会修改 Codex 主配置并需要重启全部服务。</p></div>
         {candidates.length === 0 ? <p className="text-muted-foreground">当前没有自定义主 Provider。</p> : candidates.map((candidate) => <div key={`${candidate.id}:${candidate.baseUrl}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-2"><div className="min-w-0"><div className="font-medium">{candidate.displayName} {"active" in candidate && candidate.active ? <Badge variant="secondary">当前</Badge> : null}</div><div className="truncate text-xs text-muted-foreground">{candidate.id} · {candidate.baseUrl || "地址未返回"}</div></div><div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>编辑</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>切换</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>删除</Button></div></div>)}
-        <div className="grid gap-2 md:grid-cols-2"><Input placeholder="Provider ID" value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /><Input placeholder="显示名称" value={providerName} disabled={busy || pending !== null} onChange={(event) => setProviderName(event.target.value)} /><Input className="md:col-span-2" placeholder="Responses Endpoint（HTTPS）" value={baseUrl} disabled={busy || pending !== null} onChange={(event) => setBaseUrl(event.target.value)} /><Input placeholder="模型 ID" value={model} disabled={busy || pending !== null} onChange={(event) => setModel(event.target.value)} /><ManagedSelect label="运行模式" value={mode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={busy || pending !== null} onChange={(value) => setMode(value as "switching" | "exclusive")} /><ManagedSelect label="WebSocket" value={supportsWebsockets} options={[["true", "支持"], ["false", "不支持"]]} disabled={busy || pending !== null} onChange={setSupportsWebsockets} /><Input className="md:col-span-2" type="password" autoComplete="new-password" placeholder="API Key（留空沿用已有凭据）" value={apiKey} disabled={busy || pending !== null} onChange={(event) => setApiKey(event.target.value)} /></div>
-        {mode === "exclusive" ? <label className="flex items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} />确认固定模式需要时移除顶层 openai_base_url</label> : null}
+        <div className="grid gap-2 md:grid-cols-2"><Input aria-label="Provider ID" placeholder="Provider ID" value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /><Input aria-label="显示名称" placeholder="显示名称" value={providerName} disabled={busy || pending !== null} onChange={(event) => setProviderName(event.target.value)} /><Input aria-label="Responses Endpoint（HTTPS）" className="md:col-span-2" placeholder="Responses Endpoint（HTTPS）" value={baseUrl} disabled={busy || pending !== null} onChange={(event) => setBaseUrl(event.target.value)} /><Input aria-label="模型 ID" placeholder="模型 ID" value={model} disabled={busy || pending !== null} onChange={(event) => setModel(event.target.value)} /><ManagedSelect label="运行模式" value={mode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={busy || pending !== null} onChange={(value) => setMode(value as "switching" | "exclusive")} /><ManagedSelect label="WebSocket" value={supportsWebsockets} options={[["true", "支持"], ["false", "不支持"]]} disabled={busy || pending !== null} onChange={setSupportsWebsockets} /><Input aria-label="API Key（留空沿用已有凭据）" className="md:col-span-2" type="password" autoComplete="new-password" placeholder="API Key（留空沿用已有凭据）" value={apiKey} disabled={busy || pending !== null} onChange={(event) => setApiKey(event.target.value)} /></div>
+        {mode === "exclusive" ? <Label className="text-xs text-muted-foreground"><Checkbox checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} />确认固定模式需要时移除顶层 openai_base_url</Label> : null}
         <div className="flex gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? "新增自定义 Provider" : "保存自定义 Provider"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>取消编辑</Button> : null}<Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>切回官方 OpenAI</Button></div>
       </section>
-      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={busy} onConfirm={() => void confirmPending()} onCancel={management.cancel} /> : null}
+      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={busy} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <p className="text-destructive" role="status">{management.actionError}</p> : null}
     </CardContent>
   </Card>

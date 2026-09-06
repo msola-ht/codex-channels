@@ -24,6 +24,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   const [deepseekMode, setDeepseekMode] = useState<"switching" | "exclusive">(settings.deepseek.mode ?? "switching")
   const [deepseekKey, setDeepseekKey] = useState("")
   const [autoCompactPercent, setAutoCompactPercent] = useState("60")
+  const [autoCompactError, setAutoCompactError] = useState<string | null>(null)
   const pending = management.pendingPreview
 
   useEffect(() => {
@@ -42,11 +43,17 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     })
   }
   const configureDeepseek = async () => {
+    const parsedPercent = Number(autoCompactPercent)
+    if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 90) {
+      setAutoCompactError("自动压缩百分比必须是 10–90 的整数")
+      return
+    }
+    setAutoCompactError(null)
     await management.mutate({
       operation: "deepseek.configure",
       mode: deepseekMode,
       apiKey: deepseekKey,
-      autoCompactPercent: Number(autoCompactPercent),
+      autoCompactPercent: parsedPercent,
     })
   }
   const confirmPending = async () => {
@@ -57,6 +64,11 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     }
     if (result !== null && pending?.input.operation === "deepseek.configure") setDeepseekKey("")
     if (result !== null) onChanged?.()
+  }
+  const cancelPending = () => {
+    management.cancel()
+    setAccountKey("")
+    setDeepseekKey("")
   }
   const editAccount = (account: typeof settings.opencodeGo.accounts[number]) => {
     setAccountId(account.id)
@@ -76,15 +88,16 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3"><div><h3 className="font-medium">OpenCode Go 多账户</h3><p className="text-xs text-muted-foreground">联系方式只用于账户展示和指标身份；切换默认账户不影响共享第三方子代理，请通过共享子代理设置显式选择。</p></div><Badge variant="outline">{settings.opencodeGo.accounts.length} 个</Badge></div>
         {settings.opencodeGo.accounts.length === 0 ? <p className="text-muted-foreground">尚未配置 OpenCode Go 账户。</p> : settings.opencodeGo.accounts.map((account) => <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-2"><div><div className="font-medium">{account.displayName} {account.default ? <Badge variant="secondary">默认</Badge> : null}</div><div className="text-xs text-muted-foreground">{account.email ?? account.phone ?? account.id}</div></div><div className="flex gap-2"><Button variant="outline" size="sm" disabled={disabled} onClick={() => editAccount(account)}>编辑</Button><Button variant="outline" size="sm" disabled={disabled || account.default} onClick={() => void management.mutate({ operation: "opencode.account.default", accountId: account.id })}>设为默认</Button><Button variant="outline" size="sm" disabled={disabled} onClick={() => void management.mutate({ operation: "opencode.account.stop", accountId: account.id })}>停止</Button><Button variant="outline" size="sm" disabled={disabled} onClick={() => void management.mutate({ operation: "opencode.account.remove", accountId: account.id })}>删除</Button></div></div>)}
-        <div className="grid gap-2 md:grid-cols-2"><Input placeholder="账户 ID（小写字母、数字、-、_）" value={accountId} disabled={disabled || accountReconfigure} onChange={(event) => setAccountId(event.target.value)} /><Input placeholder="邮箱或手机号（二选一）" value={contact} disabled={disabled} onChange={(event) => setContact(event.target.value)} /><ManagedSelect label="运行模式" value={accountMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setAccountMode(value as "switching" | "exclusive")} /><Input type="password" autoComplete="new-password" placeholder="API Key（仅写入）" value={accountKey} disabled={disabled} onChange={(event) => setAccountKey(event.target.value)} /></div>
+        <div className="grid gap-2 md:grid-cols-2"><Input aria-label="账户 ID" placeholder="账户 ID（小写字母、数字、-、_）" value={accountId} disabled={disabled || accountReconfigure} onChange={(event) => setAccountId(event.target.value)} /><Input aria-label="邮箱或手机号" placeholder="邮箱或手机号（二选一）" value={contact} disabled={disabled} onChange={(event) => setContact(event.target.value)} /><ManagedSelect label="运行模式" value={accountMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setAccountMode(value as "switching" | "exclusive")} /><Input aria-label="API Key（仅写入）" type="password" autoComplete="new-password" placeholder="API Key（仅写入）" value={accountKey} disabled={disabled} onChange={(event) => setAccountKey(event.target.value)} /></div>
         <div className="flex gap-2"><Button disabled={disabled || accountId.trim() === "" || contact.trim() === "" || accountKey.trim() === ""} onClick={() => void configureAccount()}>{accountReconfigure ? "重新配置账户" : "新增账户"}</Button>{accountReconfigure ? <Button variant="outline" disabled={disabled} onClick={() => { setAccountId(""); setContact(""); setAccountKey(""); setAccountReconfigure(false) }}>取消编辑</Button> : null}</div>
       </section>
       <section className="flex flex-col gap-3 border-t pt-5">
         <div className="flex items-center justify-between gap-3"><div><h3 className="font-medium">DeepSeek</h3><p className="text-xs text-muted-foreground">配置官方模型目录和独立 Profile；固定模式会修改并备份 Codex 主配置。</p></div><Badge variant="outline">{settings.deepseek.configured ? `已配置 · ${settings.deepseek.mode ?? "未知模式"}` : "未配置"}</Badge></div>
-        <div className="grid gap-2 md:grid-cols-3"><ManagedSelect label="运行模式" value={deepseekMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setDeepseekMode(value as "switching" | "exclusive")} /><Input type="number" min={10} max={90} value={autoCompactPercent} disabled={disabled} onChange={(event) => setAutoCompactPercent(event.target.value)} placeholder="自动压缩百分比" /><Input type="password" autoComplete="new-password" placeholder="DeepSeek API Key（仅写入）" value={deepseekKey} disabled={disabled} onChange={(event) => setDeepseekKey(event.target.value)} /></div>
+        <div className="grid gap-2 md:grid-cols-3"><ManagedSelect label="运行模式" value={deepseekMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setDeepseekMode(value as "switching" | "exclusive")} /><Input id="deepseek-compression-percent" aria-label="自动压缩百分比" aria-invalid={autoCompactError !== null} aria-describedby={autoCompactError === null ? undefined : "deepseek-compression-percent-error"} type="number" min={10} max={90} value={autoCompactPercent} disabled={disabled} onChange={(event) => { setAutoCompactPercent(event.target.value); setAutoCompactError(null) }} placeholder="自动压缩百分比" /><Input aria-label="DeepSeek API Key（仅写入）" type="password" autoComplete="new-password" placeholder="DeepSeek API Key（仅写入）" value={deepseekKey} disabled={disabled} onChange={(event) => setDeepseekKey(event.target.value)} /></div>
+        {autoCompactError !== null ? <p id="deepseek-compression-percent-error" className="text-xs text-destructive" role="status">{autoCompactError}</p> : null}
         <div className="flex gap-2"><Button disabled={disabled || deepseekKey.trim() === ""} onClick={() => void configureDeepseek()}>{settings.deepseek.configured ? "重新配置 DeepSeek" : "配置 DeepSeek"}</Button>{settings.deepseek.restoreAvailable ? <Button variant="outline" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.restore" })}>恢复安装前配置</Button> : null}</div>
       </section>
-      {pending !== null ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} onConfirm={() => void confirmPending()} onCancel={management.cancel} /> : null}
+      {pending !== null ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <p className="text-destructive" role="status">{management.actionError}</p> : null}
     </CardContent>
   </Card>

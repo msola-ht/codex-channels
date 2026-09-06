@@ -75,16 +75,21 @@ export function ApiProviderManagement({
     clearError()
   }
 
+  const cancelPending = () => {
+    management.cancel()
+    setApiKey("")
+  }
+
   return <Card>
     <CardHeader><CardTitle>直接 API Provider</CardTitle><CardDescription>新增、编辑和删除使用结构化配置；API Key 只写入私有凭据目录，不会回显。</CardDescription></CardHeader>
     <CardContent className="flex flex-col gap-3 text-sm">
       {providers.loading ? <p className="text-muted-foreground">正在读取 Provider…</p> : null}
       {providers.error !== null ? <div className="flex items-center justify-between gap-3 text-destructive"><span>{providers.error}</span><Button variant="outline" size="sm" onClick={providers.refetch}>重试</Button></div> : null}
       {providers.error === null ? providers.data?.providers.map((provider) => <div key={provider.id} className="flex items-center justify-between gap-3 rounded-md border p-2"><div className="min-w-0"><div className="font-medium">{provider.name} <span className="text-muted-foreground">({provider.id})</span></div><div className="truncate text-xs text-muted-foreground">{provider.endpoint} · API Key {provider.hasApiKey ? "已配置" : "未配置"}</div></div><div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(provider)}>编辑</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void deleteProvider(provider.id)}>删除</Button></div></div>) : null}
-      <div className="grid gap-2 md:grid-cols-2"><Input placeholder="Provider ID" value={id} disabled={editingId !== null} onChange={(event) => setId(event.target.value)} /><Input placeholder="显示名称" value={name} onChange={(event) => setName(event.target.value)} /><Input className="md:col-span-2" placeholder="Responses Endpoint (HTTPS)" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /><Input className="md:col-span-2" type="password" autoComplete="new-password" placeholder="API Key（仅写入，不读取）" value={apiKey} onChange={(event) => setApiKey(event.target.value)} /></div>
+      <div className="grid gap-2 md:grid-cols-2"><Input aria-label="Provider ID" placeholder="Provider ID" value={id} disabled={editingId !== null} onChange={(event) => setId(event.target.value)} /><Input aria-label="显示名称" placeholder="显示名称" value={name} onChange={(event) => setName(event.target.value)} /><Input aria-label="Responses Endpoint (HTTPS)" className="md:col-span-2" placeholder="Responses Endpoint (HTTPS)" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /><Input aria-label="API Key（仅写入，不读取）" className="md:col-span-2" type="password" autoComplete="new-password" placeholder="API Key（仅写入，不读取）" value={apiKey} onChange={(event) => setApiKey(event.target.value)} /></div>
       <div className="flex gap-2"><Button disabled={busy || pending !== null || id.trim() === "" || name.trim() === "" || endpoint.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void save()}>{editingId === null ? "新增 Provider" : "保存修改"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={cancelEdit}>取消编辑</Button> : null}</div>
       {error !== null ? <p className="text-destructive" role="status">{error}</p> : null}
-      {pending !== null ? <ManagementConfirmationDialog open saving={busy} title={pending.input.operation === "delete" ? "确认删除 Provider" : "确认保存 Provider"} description="确认后写入直接 API Provider 配置，不会自动执行生效目标。" onConfirm={() => void confirmPending()} onCancel={management.cancel}>
+      {pending !== null ? <ManagementConfirmationDialog open saving={busy} title={pending.input.operation === "delete" ? "确认删除 Provider" : "确认保存 Provider"} description="确认后写入直接 API Provider 配置，不会自动执行生效目标。" onConfirm={() => void confirmPending()} onCancel={cancelPending}>
         <p className="whitespace-pre-line">{formatProviderPreview(pending.preview, pending.input.operation === "delete" ? `删除 Provider ${pending.input.id}` : "保存 Provider")}</p>
       </ManagementConfirmationDialog> : null}
     </CardContent>

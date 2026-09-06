@@ -1,9 +1,11 @@
+import { useId } from "react"
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { PendingSetting } from "@/lib/settings-management"
 
@@ -28,7 +30,7 @@ export function ManagementConfirmationDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !saving) onCancel() }}>
-      <DialogContent>
+      <DialogContent showCloseButton={!saving}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -47,8 +49,10 @@ export function SettingsRow({ label, value, badge = false, code = false }: { lab
   return <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">{label}</span>{badge ? <Badge variant="secondary">{value}</Badge> : code ? <code className="rounded bg-muted px-2 py-1 text-xs">{value}</code> : <span className="text-right">{value}</span>}</div>
 }
 
-export function ManagedInputRow({ label, defaultValue, placeholder, disabled, type = "text", onBlur }: { label: string; defaultValue: string; placeholder: string; disabled: boolean; type?: "text" | "password" | "number"; onBlur: (value: string) => void }) {
-  return <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">{label}</span><Input className="w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} defaultValue={defaultValue} placeholder={placeholder} disabled={disabled} onBlur={(event) => onBlur(event.target.value.trim())} /></div>
+export function ManagedInputRow({ id, label, defaultValue, value, placeholder, disabled, type = "text", onChange, onBlur }: { id?: string; label: string; defaultValue: string; value?: string; placeholder: string; disabled: boolean; type?: "text" | "password" | "number"; onChange?: (value: string) => void; onBlur: (value: string) => void }) {
+  const generatedId = useId()
+  const inputId = id ?? generatedId
+  return <div className="flex items-center justify-between gap-3"><Label className="text-muted-foreground" htmlFor={inputId}>{label}</Label><Input id={inputId} className="w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} defaultValue={value === undefined ? defaultValue : undefined} value={value} placeholder={placeholder} disabled={disabled} onChange={onChange === undefined ? undefined : (event) => onChange(event.target.value)} onBlur={(event) => onBlur(event.target.value.trim())} /></div>
 }
 
 export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; onConfirm: () => void; onCancel: () => void }) {
