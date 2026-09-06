@@ -20,44 +20,26 @@ describe("OpenCode Go account management", () => {
     const preview = previewOpencodeGoDefaultAccountChange("b", {
       environment: {},
       loadAccounts: () => accounts,
-      loadRole: () => ({
-        provider: "ocg-main" as const,
-        model: "deepseek-v4-flash-vision-exp",
-      }),
     });
 
     expect(preview).toEqual({
       operation: "set-default",
       account: { id: "b", default: true },
       currentDefaultAccountId: "main",
-      updatesExternalAgent: true,
+      updatesExternalAgent: false,
       willChange: true,
       activation: "restart-all",
     });
     expect(JSON.stringify(preview)).not.toContain("apiKey");
   });
 
-  it("applies a default-account change and updates the shared agent", async () => {
+  it("applies a default-account change without touching the shared agent", async () => {
     const writeAccounts = vi.fn();
-    const configureRole = vi.fn(async () => undefined);
 
     const result = await applyOpencodeGoDefaultAccountChange("b", {
       environment: {},
       loadAccounts: () => accounts,
-      loadRole: () => ({
-        provider: "ocg-main" as const,
-        model: "deepseek-v4-flash-vision-exp",
-      }),
-      loadProviders: () => [{
-        provider: "ocg-b",
-        displayName: "OpenCode Go (b)",
-        model: "deepseek-v4-pro",
-        reasoningEffort: "medium",
-        mode: "switching",
-        models: [],
-      }],
       writeAccounts,
-      configureRole,
     });
 
     expect(result).toMatchObject({
@@ -69,11 +51,6 @@ describe("OpenCode Go account management", () => {
       { id: "main", default: false, email: "user@example.com" },
       { id: "b", default: true },
     ]);
-    expect(configureRole).toHaveBeenCalledWith(
-      "ocg-b",
-      "deepseek-v4-pro",
-      {},
-    );
   });
 
   it("returns a stable field error for an unknown account", () => {
@@ -81,7 +58,6 @@ describe("OpenCode Go account management", () => {
       previewOpencodeGoDefaultAccountChange("missing", {
         environment: {},
         loadAccounts: () => accounts,
-        loadRole: () => undefined,
       });
       throw new Error("expected unknown account validation to fail");
     } catch (error) {
@@ -94,7 +70,6 @@ describe("OpenCode Go account management", () => {
     expect(() => previewOpencodeGoDefaultAccountChange("b", {
       environment: {},
       loadAccounts: () => { throw new Error("private registry rejected"); },
-      loadRole: () => undefined,
     })).toThrowError(expect.objectContaining({
       code: "account-state-unavailable",
       field: "accountId",

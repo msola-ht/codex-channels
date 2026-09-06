@@ -25,10 +25,6 @@ import {
 import {
   createManagedProviderMarker,
 } from "../runtime/model-provider-profile.mjs";
-import {
-  assertThirdPartyRoleAvailable,
-  configureThirdPartyRole,
-} from "./agents.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
@@ -68,16 +64,6 @@ export function previewDeepseekConfiguration(
       "DeepSeek 模式必须是 switching 或 exclusive",
     );
   }
-  try {
-    assertThirdPartyRoleAvailable(environment);
-  } catch (error) {
-    throw managedSetupInvalid(
-      "provider-conflict",
-      "provider",
-      error instanceof Error ? error.message : String(error),
-      error,
-    );
-  }
   if (mode === "exclusive") {
     let primary;
     try {
@@ -107,7 +93,7 @@ export function previewDeepseekConfiguration(
       writesMainConfig: mode === "exclusive",
       writesIsolatedProfile: mode === "switching",
       downloadsCatalog: true,
-      updatesExternalAgent: true,
+      updatesExternalAgent: false,
       preservesInitialConfig: true,
     },
     confirmation: {
@@ -140,7 +126,6 @@ async function applyDeepseekConfigurationUnlocked(
     environment = process.env,
     fetchImpl = globalThis.fetch,
     downloadCatalog = downloadDeepseekCatalog,
-    configureRole = configureThirdPartyRole,
   } = {},
 ) {
   const preview = previewDeepseekConfiguration({ mode }, { environment });
@@ -189,7 +174,6 @@ async function applyDeepseekConfigurationUnlocked(
       autoCompactPercent,
       downloaded,
       environment,
-      configureRole,
       preview,
     });
   } catch (error) {
@@ -256,7 +240,6 @@ export async function runDeepseekSetup({
   fetchImpl = globalThis.fetch,
   prompter,
   prompts = clackPrompts,
-  configureRole = configureThirdPartyRole,
 } = {}) {
   const prompt = prompter ?? createHiddenPrompter(prompts, { allowBack });
   try {
@@ -323,16 +306,14 @@ export async function runDeepseekSetup({
     }, {
       environment,
       fetchImpl,
-      configureRole,
     });
     if (mode === "switching") {
       output.write(`\nOpenAI 默认模型与认证保持不变：${configPath}\n`);
       output.write(`DeepSeek CLI Profile 已保存：${profilePath}\n`);
-      output.write("已将共享第三方子代理（agents.external）切换到 DeepSeek。\n");
     } else {
       output.write(`\nDeepSeek 固定配置已保存：${configPath}\n`);
-      output.write("已将共享第三方子代理（agents.external）切换到 DeepSeek。\n");
     }
+    output.write("未自动修改共享第三方子代理（agents.external）；如需启用请运行 codexc agents configure deepseek <模型>。\n");
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
     output.write(mode === "switching"
       ? `原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile ${deepseekProviderDefinition.profileName}\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile ${deepseekProviderDefinition.profileName}\n`
@@ -355,7 +336,6 @@ async function configureDeepseekInstallation({
   autoCompactPercent,
   downloaded,
   environment,
-  configureRole,
   preview,
 }) {
   const paths = deepseekSetupPaths(environment);
@@ -460,7 +440,6 @@ async function configureDeepseekInstallation({
     rollbackGuards = await snapshotFiles(installationPaths);
     await setBackupRestoredState(backupStatePath, false);
     rollbackGuards = await snapshotFiles(installationPaths);
-    await configureRole(providerId, selectedModel, environment);
     return {
       action: "configured",
       model: selectedModel,

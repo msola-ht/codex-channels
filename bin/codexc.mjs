@@ -235,7 +235,7 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   add <id>     新增账户（交互输入邮箱或手机号、API Key）
   list         列出账户与默认标记
   remove <id>  备份后删除账户 Profile 与注册表项
-  default <id> 设置新会话默认账户（当前为 OpenCode Go 时同步 agents.external）
+  default <id> 设置新会话默认账户（不自动修改 agents.external）
   stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）`,
   "opencode_go.account": `用法：codexc opencode-go account <add|list|remove|default|stop> [id]`,
   "opencode_go.account.add": "用法：codexc opencode-go account add <id>（交互输入邮箱或手机号、API Key）",

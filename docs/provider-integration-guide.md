@@ -119,7 +119,9 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 - GO 形态优先复用/参数化 `opencode-go-setup.mjs`；否则新建 `scripts/<id>-setup.mjs`；
 - 必须包含：API Key 校验、switching/exclusive 选择、模型目录下载与校验、Profile/
-  基础配置写入、管理标记、`agents.external` 切换、首次备份、失败回滚；
+  基础配置写入、管理标记、首次备份、失败回滚；
+- Provider Setup 不得自动创建或切换 `agents.external`；共享子代理只通过显式
+  `codexc agents configure` 或设置菜单中的“共享第三方子代理”入口修改；
 - 文件权限 `0600`，目录 `0700`，符号链接与越权读取失败关闭；
 - `codexc setup` 菜单同步加入入口。
 
@@ -131,7 +133,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - Profile 镜像校验与失败关闭（`model-provider-runtime.test.ts` 风格）；
 - 计价基线 schema、峰谷档位、生效时间与历史快照；
 - 账户适配器：余额或用量窗口、本地用量重算、窗口边界、窗口快照归属与缺失回退；
-- Setup：新增、更新、恢复、回滚、角色切换；
+- Setup：新增、更新、恢复、回滚，以及确认不会自动创建或切换共享角色；
 - 生命周期：空闲停止判定、释放后自动拉起、释放通知一次；
 - 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
 

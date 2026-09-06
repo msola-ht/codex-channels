@@ -154,14 +154,9 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
   });
 
   it.each(["switching", "exclusive"] as const)(
-    "configures the first %s account with its account-scoped Profile and selects the shared third-party role",
+    "configures the first %s account with its account-scoped Profile without selecting the shared third-party role",
     async (mode) => {
       const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-setup-"));
-      const configureRole = vi.fn(async () => ({
-        role: "external",
-        provider: "ocg-work",
-        model: "deepseek-v4-flash-vision-exp",
-      }));
       const result = await runOpenCodeGoSetup({
         environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
         output: { write: vi.fn() },
@@ -172,7 +167,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
           confirm: async () => true,
           contact: async () => "user@example.com",
         },
-        configureRole,
         downloadCatalog: successfulCatalog,
       });
 
@@ -212,11 +206,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
         join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "work", "managed.toml"),
         "utf8",
       ))).toEqual({ version: 1, provider: "ocg-work", mode });
-      expect(configureRole).toHaveBeenCalledWith(
-        "ocg-work",
-        "deepseek-v4-flash-vision-exp",
-        expect.objectContaining({ CODEX_HOME: codexHome }),
-      );
+      expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(false);
       if (mode === "exclusive") {
         expect(existsSync(join(codexHome, "sf-ocg-work.config.toml"))).toBe(false);
       }
@@ -229,7 +219,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     const base = {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
-      configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     };
     await runOpenCodeGoSetup({
@@ -256,7 +245,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("exclusive"),
-      configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     });
 
@@ -264,7 +252,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("restore"),
-      configureRole: vi.fn(async () => undefined),
     });
 
     expect(result).toMatchObject({ action: "restored" });
@@ -285,7 +272,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment,
       output: { write: () => undefined },
       prompter: prompt("switching"),
-      configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     });
 
@@ -327,7 +313,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("switching"),
-      configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     });
     const statePath = join(codexHome, ".codex-connect", "providers", "opencode-go", "backup", "state.json");
@@ -353,7 +338,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("switching"),
-      configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     });
     const configPath = join(codexHome, "config.toml");
@@ -380,7 +364,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment,
       output: { write: () => undefined },
       prompter: prompt("switching"),
-      configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     });
     writeManagedModelProviderProfileDefault("ocg-main", {
@@ -388,13 +371,10 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       reasoningEffort: "max",
       autoCompactLimit: 750_000,
     }, environment);
-    const configureRole = vi.fn(async () => undefined);
-
     await runOpenCodeGoSetup({
       environment,
       output: { write: () => undefined },
       prompter: prompt("switching"),
-      configureRole,
       downloadCatalog: async () => updatedCatalog(2_000_000),
     });
 
@@ -415,7 +395,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       default_reasoning_level: "max",
       auto_compact_token_limit: 1_500_000,
     });
-    expect(configureRole).toHaveBeenCalledWith("ocg-main", "deepseek-v4-pro", environment);
+    expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(false);
   });
 
   it("migrates the previous OpenCode Go default during codexc update", async () => {
@@ -475,7 +455,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment,
       output: { write: () => undefined },
       prompter: prompt("switching"),
-      configureRole: vi.fn(async () => undefined),
       downloadCatalog: async () => updatedCatalog(2_000_000),
     });
     expect(JSON.parse(readFileSync(
@@ -567,22 +546,21 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
   });
 
-  it("rolls back every file when shared-role configuration fails", async () => {
+  it("does not run shared-role configuration during provider setup", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-rollback-"));
     const original = "custom = true\n";
     writeFileSync(join(codexHome, "config.toml"), original, { mode: 0o600 });
 
-    await expect(runOpenCodeGoSetup({
+    await runOpenCodeGoSetup({
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("switching"),
-      configureRole: vi.fn(async () => { throw new Error("config conflict"); }),
       downloadCatalog: successfulCatalog,
-    })).rejects.toThrow("config conflict");
+    });
 
-    expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "sf-ocg-main.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
+    expect(existsSync(join(codexHome, "sf-ocg-main.config.toml"))).toBe(true);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(true);
+    expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(false);
   });
 
   it("rolls back earlier files when a setup write fails midway", async () => {
@@ -598,7 +576,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: connectHome },
       output: { write: () => undefined },
       prompter: prompt("switching"),
-      configureRole: vi.fn(async () => undefined),
       downloadCatalog: successfulCatalog,
     })).rejects.toThrow("injected private write failure");
 

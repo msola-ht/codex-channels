@@ -68,7 +68,7 @@ OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或�
 镜像所选模型的默认思考等级；迁移不保留旧的 `body_after_prefix` 压缩作用域，升级后统一按
 `total` 作用域应用。迁移后同一命令会下载并校验最新官方模型目录，补入新受控模型，并保留现有
 模型的思考等级与自动压缩百分比。首次更新到 Flash Vision Exp 默认版本时，仍使用旧默认 Flash
-的受管 Profile 与同 Provider 共享子代理会一次性迁移到 Flash Vision Exp，并在
+的受管 Profile，以及已显式配置的同 Provider 共享子代理，会一次性迁移到 Flash Vision Exp，并在
 `models.manifest.json` 记录迁移；已经选择 Pro 等其他模型时只记录迁移已处理，不改变选择。
 记录完成后，后续 Update 与重复 Setup 都保留用户当前选择，包括主动切回 Flash。
 
@@ -177,15 +177,20 @@ Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此
 
 ## 共享第三方子代理
 
-DeepSeek 与 OpenCode Go 共用 `agents.external`，不按 Provider 注册重复角色。任一模式配置成功后，
-Setup 会把该角色切换到刚配置的 Provider 与默认模型；也可以手动选择已配置 Provider 和模型：
+DeepSeek 与 OpenCode Go 共用 `agents.external`，不按 Provider 注册重复角色。配置 Provider 不会
+自动创建或切换该角色；只有明确进入“模型与提供商 → 第三方 Provider → 共享第三方子代理”并选择
+Provider 与模型，或运行下面的显式命令，才会注册或更新角色：
 
 ```bash
 codexc agents configure deepseek deepseek-v4-pro
-codexc agents configure opencode-go deepseek-v4-flash
+codexc agents configure ocg-<accountId> deepseek-v4-flash
 codexc agents status
 codexc agents disable
 ```
+
+修改 DeepSeek 的默认模型、OpenCode Go 默认账户或重新运行 Provider Setup 也不会自动刷新该角色；
+需要变更子代理 Provider 或模型时，应重新进入共享第三方子代理配置或再次运行
+`codexc agents configure ...`。
 
 角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型、默认思考等级和 `env_key`
 引用，不保存 API Key。App Server 服务启动时只为当前角色选择的 Provider 启动统计代理并刷新本机

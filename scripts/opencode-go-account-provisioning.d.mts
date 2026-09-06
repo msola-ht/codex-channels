@@ -70,11 +70,6 @@ export function applyOpencodeGoAccountConfiguration(
       catalog: { models: Array<Record<string, unknown>> };
       sha256: string;
     }>;
-    configureRole?: (
-      provider: ManagedModelProviderId,
-      model: string | undefined,
-      environment: NodeJS.ProcessEnv,
-    ) => unknown | Promise<unknown>;
   },
 ): Promise<{
   action: "configured";

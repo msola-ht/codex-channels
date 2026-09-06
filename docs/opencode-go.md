@@ -43,10 +43,13 @@ codexc service restart all
 再按模型设置默认思考等级；自动压缩百分比走“模型与提供商 → 第三方 Provider → 模型自动压缩”，按模型名统一设置，
 每个模型按自己的上下文窗口计算阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
-首次升级时仍选择旧默认 Flash 的账户和对应共享子代理会自动切换到 Flash Vision Exp，已主动选择
+首次升级时仍选择旧默认 Flash 的账户，以及已显式配置的对应共享子代理，会迁移到 Flash Vision Exp，已主动选择
 Pro 的账户保持不变；清单记录迁移完成后，用户再主动选回 Flash 也不会被后续更新覆盖。目录更新后
 的压缩阈值按原百分比和新上下文窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
 时自动重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
+
+设置默认账户不会自动修改 `agents.external`，共享子代理仍使用配置时明确选择的账户；如需切换账户，
+请运行 `codexc agents configure ocg-<accountId> <模型>`。
 
 聊天中使用 `/model` 选择带 `ocg-<邮箱或手机号>`（无联系方式时回退为 `ocg-<accountId>`）前缀的模型；同账户内切换模型不新建 Thread，
 跨账户切换会保留并解绑当前 Thread，下一条消息以目标账户默认模型新建 Thread（不复制历史），
@@ -60,7 +63,7 @@ codexc remote --profile sf-ocg-<账户>              # 任一已配置账户
 启动。服务启动时只登记配置，首次选择对应账户模型、恢复对应 Thread 或使用对应 Remote TUI 时，
 App Server 监管进程才启动该账户的隔离实例；账户 App Server 的 `base_url` 指向共享代理并带
 `/go/<账户>` 前缀，代理按前缀区分账户、转发时剥离前缀并按账户分开上报指标。当前被
-`agents.external` 选择的默认账户会预先启动共享统计代理，确保子代理随主 App Server 可用；未使用
+`agents.external` 选择的账户会预先启动共享统计代理，确保子代理随主 App Server 可用；未使用
 也未选作子代理的账户不增加进程。
 
 账户的隔离 App Server 在无 Conversation 绑定、Gateway 最近没有观察到 Turn 活动且没有受管

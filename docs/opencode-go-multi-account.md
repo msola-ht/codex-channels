@@ -69,8 +69,8 @@ codexc opencode-go account stop <id>
   都按删除前快照回滚；存在 Remote TUI
   租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；最后一个账户只能
   通过 Setup 的恢复配置流程移除；
-- `default` 原子更新注册表；`agents.external` 当前使用 OpenCode Go 时同步切换到新默认账户，
-  角色更新失败时回滚默认账户；当前角色使用 DeepSeek 时保持不变；
+- `default` 原子更新注册表，不修改 `agents.external`；需要切换共享子代理账户时，使用
+  `codexc agents configure ocg-<accountId> <模型>` 显式选择；
 - `stop` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户
   退出 TUI 后重试；
 - 删除账户后，该账户历史 Thread 因 Provider 不再存在而不可恢复，CLI 会要求明确确认。
@@ -122,8 +122,8 @@ OpenCode Go 账户实例，不适用于所有受管 Provider。
 - 完成卡片只展示当前 Thread 账户，不跨账户汇总；
 - WebUI 为所有已配置账户分别展示用量卡；
 - 额度耗尽时展示当前账户状态，但 Gateway 不主动切换账户或拦截请求；
-- `agents.external` 使用 OpenCode Go 时只指向注册表中的默认账户，修改默认账户时同步更新角色配置；
-  当前明确选择 DeepSeek 时不被 OpenCode Go 默认账户命令覆盖。
+- `agents.external` 使用 OpenCode Go 时只指向配置时明确选择的账户，不跟随注册表默认账户；
+  修改默认账户只影响新会话，需要在共享子代理配置中重新选择账户。
 
 ## 主要验证边界
 

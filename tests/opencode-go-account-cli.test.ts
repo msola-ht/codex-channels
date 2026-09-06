@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,21 +44,18 @@ describe("OpenCode Go account CLI", () => {
   it("adds the first account as default and a second account without changing the role", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    const configureRole = vi.fn(async () => undefined);
     const output = { write: vi.fn() };
 
     const result = await addOpencodeGoAccount("main", {
       environment,
       output,
       prompter: testPrompter(),
-      configureRole,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output,
       prompter: testPrompter(),
-      configureRole,
       downloadCatalog: successfulCatalog,
     });
 
@@ -70,12 +67,7 @@ describe("OpenCode Go account CLI", () => {
     expect(existsSync(join(codexHome(home), "sf-ocg-b.config.toml"))).toBe(true);
     expect(existsSync(opencodeGoAccountMarkerPath(environment, "main"))).toBe(true);
     expect(existsSync(opencodeGoAccountMarkerPath(environment, "b"))).toBe(true);
-    expect(configureRole).toHaveBeenCalledTimes(1);
-    expect(configureRole).toHaveBeenCalledWith(
-      "ocg-main",
-      "deepseek-v4-flash-vision-exp",
-      environment,
-    );
+    expect(existsSync(join(codexHome(home), "sf-agent.config.toml"))).toBe(false);
     expect(JSON.stringify(result)).not.toContain("sk-opencode-test");
   });
 
@@ -86,7 +78,6 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const output = { write: vi.fn() };
@@ -105,14 +96,12 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const profilePath = join(codexHome(home), "sf-ocg-b.config.toml");
@@ -147,14 +136,12 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const profilePath = join(codexHome(home), "sf-ocg-b.config.toml");
@@ -186,7 +173,6 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
 
@@ -208,14 +194,12 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
 
@@ -231,44 +215,29 @@ describe("OpenCode Go account CLI", () => {
     ]);
   });
 
-  it.skipIf(process.platform === "win32")("keeps the previous default account when the shared role update fails", async () => {
+  it.skipIf(process.platform === "win32")("sets default without invoking shared role configuration", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    const rolePath = join(codexHome(home), "sf-agent.config.toml");
     await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async (provider, model) => {
-        writeFileSync(
-          join(codexHome(home), "config.toml"),
-          `[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n`,
-          { mode: 0o600 },
-        );
-        writeFileSync(
-          rolePath,
-          `model = ${JSON.stringify(model)}\nmodel_provider = ${JSON.stringify(provider)}\nmodel_reasoning_effort = "high"\n`,
-          { mode: 0o600 },
-        );
-      },
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
 
-    await expect(setOpencodeGoDefaultAccount("b", {
+    await setOpencodeGoDefaultAccount("b", {
       environment,
-      configureRole: async () => { throw new Error("role update failed"); },
-    })).rejects.toThrow("role update failed");
+    });
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "main", default: true, email: "user@example.com" },
-      { id: "b", default: false, email: "user@example.com" },
+      { id: "main", default: false, email: "user@example.com" },
+      { id: "b", default: true, email: "user@example.com" },
     ]);
   });
 
@@ -279,14 +248,12 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const rolePath = join(codexHome(home), "sf-agent.config.toml");
@@ -300,32 +267,28 @@ describe("OpenCode Go account CLI", () => {
       'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
-    const configureRole = vi.fn(async () => undefined);
+    await setOpencodeGoDefaultAccount("b", { environment });
 
-    await setOpencodeGoDefaultAccount("b", { environment, configureRole });
-
-    expect(configureRole).not.toHaveBeenCalled();
     expect(loadOpencodeGoAccounts(environment)).toEqual([
       { id: "main", default: false, email: "user@example.com" },
       { id: "b", default: true, email: "user@example.com" },
     ]);
+    expect(readFileSync(rolePath, "utf8")).toContain('model_provider = "deepseek"');
   });
 
-  it("does not change the default when the shared role cannot be read safely", async () => {
+  it("sets the default even when the shared role cannot be read safely", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
     await addOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const rolePath = join(codexHome(home), "sf-agent.config.toml");
@@ -336,13 +299,13 @@ describe("OpenCode Go account CLI", () => {
     );
     writeFileSync(rolePath, "not valid [ toml", { mode: 0o600 });
 
-    await expect(setOpencodeGoDefaultAccount("b", { environment }))
-      .rejects.toThrow("第三方子代理角色配置无法安全读取");
+    await setOpencodeGoDefaultAccount("b", { environment });
 
     expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "main", default: true, email: "user@example.com" },
-      { id: "b", default: false, email: "user@example.com" },
+      { id: "main", default: false, email: "user@example.com" },
+      { id: "b", default: true, email: "user@example.com" },
     ]);
+    expect(readFileSync(rolePath, "utf8")).toBe("not valid [ toml");
   });
 
   it("runs the list subcommand through the CLI entry", async () => {
@@ -352,7 +315,6 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const output = { write: vi.fn() };
@@ -376,7 +338,6 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const configuredOutput = { write: vi.fn() };
@@ -411,14 +372,12 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const output = { write: vi.fn() };
@@ -441,7 +400,6 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const output = { write: vi.fn() };
@@ -461,14 +419,12 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const runtime = runtimeConfig(environment);
@@ -510,14 +466,12 @@ describe("OpenCode Go account CLI", () => {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     await addOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },
       prompter: testPrompter(),
-      configureRole: async () => undefined,
       downloadCatalog: successfulCatalog,
     });
     const runtime = runtimeConfig(environment);

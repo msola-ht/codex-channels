@@ -690,7 +690,7 @@ describe("webui server", () => {
       previewAccountSettings: async (input: unknown) => ({
         operation: (input as { operation: string }).operation,
         account: { id: "main", displayName: "ocg-main", email: "main@example.com", exists: true },
-        effects: { updatesExternalAgent: true },
+        effects: { updatesExternalAgent: false },
         activation: "restart-all",
       }),
       applyAccountSettings: async (input: unknown) => {

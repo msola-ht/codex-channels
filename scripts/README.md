@@ -286,8 +286,8 @@
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与全部受控模型后写入
   `~/.codex-connect/providers/deepseek/`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
   模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，模型目录与管理标记写入
-  `~/.codex-connect/providers/deepseek/`，并自动开启 `features.multi_agent_v2`、把共享
-  `agents.external` 子代理切换到 DeepSeek；
+  `~/.codex-connect/providers/deepseek/`，不自动创建或切换共享 `agents.external`；
+  共享角色只由 `codexc agents configure` 或设置菜单中的“共享第三方子代理”显式修改；
   首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
   生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改，并保留仍受支持的默认模型、
@@ -309,15 +309,15 @@
 - `opencode-go-account-files.mjs` / `opencode-go-account-files.d.mts`：集中 OpenCode Go 账户私有文件
   路径、受限读取、快照和并发保护回滚原语，供账户新增、删除、目录刷新与恢复事务复用。
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
-  默认账户切换、运行实例停止与账户删除的无终端预览和执行接口；默认切换同步更新正在使用 OpenCode Go
-  的共享子代理并保留失败回滚，停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚。
+  默认账户切换、运行实例停止与账户删除的无终端预览和执行接口；默认切换只更新注册表，不修改共享子代理，
+  停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
   账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、首次备份、Key 写入、切换/固定模式配置和多文件事务回滚。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
   （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   或通过脱敏预览、明确确认与无终端执行接口恢复首次配置前状态，从同一受审查来源
-  生成共享模型目录并复用共享子代理机制，
+  生成共享模型目录；共享子代理由显式 agents 配置入口管理，
   但不复用凭据、Provider 身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
   默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
   Pro 的账户保持不变。
