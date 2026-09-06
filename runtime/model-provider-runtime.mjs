@@ -221,6 +221,59 @@ export function loadManagedModelProviderSettings(environment = process.env) {
   });
 }
 
+// 按模型 slug 聚合所有已配置 Provider 的自动压缩设置。
+// 同名模型在多个 Provider（如 DeepSeek 与 OpenCode Go 各账户）中存在时，
+// 只保留一份权威值：任一 Provider 设置了非空 autoCompactPercent 即作为全局值，
+// 全部未设置时省略该字段（由调用方套用默认值）。
+export function loadManagedModelCompression(environment = process.env) {
+  const providers = loadManagedModelProviderSettings(environment);
+  const bySlug = new Map();
+  for (const provider of providers) {
+    for (const model of provider.models ?? []) {
+      const slug = model.model;
+      if (typeof slug !== "string" || slug === "") continue;
+      const percent = model.autoCompactPercent;
+      const existing = bySlug.get(slug);
+      if (existing === undefined) {
+        bySlug.set(slug, {
+          model: slug,
+          displayName: model.displayName ?? slug,
+          contextWindow: model.contextWindow,
+          reasoningEfforts: model.reasoningEfforts ?? [],
+          autoCompactPercent: percent,
+          providers: [provider.provider],
+          perProvider: { [provider.provider]: percent },
+          conflicts: false,
+          windowConflict: false,
+        });
+        continue;
+      }
+      if (
+        existing.autoCompactPercent === undefined
+        && percent !== undefined
+      ) {
+        existing.autoCompactPercent = percent;
+      }
+      if (!existing.providers.includes(provider.provider)) {
+        existing.providers.push(provider.provider);
+      }
+      existing.perProvider[provider.provider] = percent;
+      const committed = Object.values(existing.perProvider).filter(
+        (value) => value !== undefined,
+      );
+      if (
+        committed.some((value) => value !== committed[0])
+      ) {
+        existing.conflicts = true;
+      }
+      if (existing.contextWindow !== model.contextWindow) {
+        existing.windowConflict = true;
+      }
+    }
+  }
+  return [...bySlug.values()];
+}
+
 export function writeManagedModelProviderProfileDefault(
   provider,
   settings,
@@ -287,6 +340,70 @@ export function writeManagedModelProviderCatalogSettings(
     updateModelCatalogSettings(previousContent, definition, settings),
   );
   return previous;
+}
+
+// 按模型 slug 全局写入自动压缩设置：把同一 autoCompactLimit 广播到所有
+// 提供该模型且已配置的 Provider 目录，避免同名模型在不同 Provider 各存一份。
+export function writeManagedModelCompressionGlobal(
+  { model, autoCompactPercent, environment = process.env } = {},
+) {
+  validateAutoCompactPercent(autoCompactPercent);
+  const providers = loadManagedModelProviderSettings(environment);
+  const matches = providers.filter((provider) =>
+    (provider.models ?? []).some((candidate) => candidate.model === model));
+  if (matches.length === 0) {
+    throw new Error(`未找到已配置模型：${model}`);
+  }
+  const contextWindows = matches.map((provider) =>
+    provider.models.find((entry) => entry.model === model)?.contextWindow);
+  const firstContextWindow = contextWindows[0];
+  if (
+    !Number.isSafeInteger(firstContextWindow)
+    || firstContextWindow <= 0
+    || contextWindows.some((value) => value !== firstContextWindow)
+  ) {
+    throw new Error(`同名模型在不同 Provider 的上下文窗口不一致：${model}`);
+  }
+  const autoCompactLimit = Math.round(firstContextWindow * autoCompactPercent / 100);
+  const overridden = [];
+  for (const provider of matches) {
+    const modelEntry = provider.models.find((entry) => entry.model === model);
+    if (
+      modelEntry?.autoCompactPercent !== undefined
+      && modelEntry.autoCompactPercent !== autoCompactPercent
+    ) {
+      overridden.push({
+        provider: provider.provider,
+        previousPercent: modelEntry.autoCompactPercent,
+      });
+    }
+    writeManagedModelProviderCatalogSettings(
+      provider.provider,
+      {
+        model,
+        reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
+        autoCompactLimit,
+      },
+      environment,
+    );
+  }
+  return {
+    model,
+    autoCompactPercent,
+    autoCompactLimit,
+    providers: matches.map((provider) => provider.provider),
+    overridden,
+  };
+}
+
+function validateAutoCompactPercent(autoCompactPercent) {
+  if (
+    !Number.isInteger(autoCompactPercent)
+    || autoCompactPercent < 10
+    || autoCompactPercent > 90
+  ) {
+    throw new Error("模型自动压缩百分比无效");
+  }
 }
 
 export function withManagedModelCatalogSettings(catalog, definition, settings) {

@@ -589,6 +589,15 @@ export interface ManagementProviderSettingsResponse {
   externalAgent:
     | { status: "configured"; provider: string; model: string }
     | { status: "unavailable" | "not-configured" }
+  modelCompression: Array<{
+    id: string
+    displayName: string
+    contextWindow: number
+    providers: string[]
+    autoCompactPercent?: number
+    conflicts?: boolean
+    perProvider?: Record<string, number | undefined>
+  }>
 }
 
 export type ManagementProviderSettingsMutationInput =
@@ -615,11 +624,16 @@ export type ManagementProviderSettingsMutationInput =
       reasoningEffort: string
       autoCompactPercent: number
     }
+  | {
+      operation: "managed.compression"
+      model: string
+      autoCompactPercent: number
+    }
   | { operation: "external-agent"; action: "configure"; provider: string; model?: string }
   | { operation: "external-agent"; action: "disable" }
 
 export interface ManagementProviderSettingsPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "configure" | "disable"
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.compression" | "configure" | "disable"
   activation: string
   target?: {
     id: string
@@ -639,6 +653,10 @@ export interface ManagementProviderSettingsPreview {
     apiKeyChange?: boolean
   }
   model?: { id: string; displayName: string; contextWindow?: number }
+  providers?: string[]
+  conflicts?: boolean
+  windowConflict?: boolean
+  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   autoCompactPercent?: number
   autoCompactLimit?: number
@@ -666,6 +684,10 @@ export interface ManagementProviderSettingsMutationResponse {
   target?: ManagementProviderSettingsPreview["target"]
   provider?: ManagementProviderSettingsPreview["provider"]
   model?: ManagementProviderSettingsPreview["model"]
+  providers?: string[]
+  conflicts?: boolean
+  windowConflict?: boolean
+  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   autoCompactPercent?: number
   autoCompactLimit?: number

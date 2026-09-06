@@ -915,6 +915,7 @@ async function handleManagementProviders(environment, response, providerStateCac
 function providerSettingsAuditTarget(input) {
   if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
   if (input.operation === "managed.default") return String(input.provider ?? "unknown");
+  if (input.operation === "managed.compression") return String(input.model ?? "unknown");
   if (input.operation === "external-agent") return String(input.provider ?? input.action ?? "unknown");
   return String(input.providerId ?? "unknown");
 }

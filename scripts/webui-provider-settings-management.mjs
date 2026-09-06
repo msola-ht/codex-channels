@@ -18,6 +18,14 @@ import {
   previewThirdPartyAgentChange,
 } from "./agents.mjs";
 import { ManagementOperationError } from "./webui-management-operations.mjs";
+import {
+  applyModelCompressionChange,
+  previewModelCompressionChange,
+  projectModelCompression,
+} from "./model-compression-management.mjs";
+import {
+  loadManagedModelCompression,
+} from "../runtime/model-provider-runtime.mjs";
 
 export async function loadProviderSettingsResource(
   environment,
@@ -25,7 +33,12 @@ export async function loadProviderSettingsResource(
 ) {
   try {
     const state = await loadProviderState({ environment });
-    return projectProviderSettings(state);
+    return {
+      ...projectProviderSettings(state),
+      modelCompression: projectModelCompression(
+        loadManagedModelCompression(environment),
+      ),
+    };
   } catch {
     throw new ManagementOperationError(
       "provider_state_unavailable",
@@ -70,6 +83,12 @@ export function normalizeProviderSettingsMutation(input) {
         provider: input.provider,
         model: input.model,
         reasoningEffort: input.reasoningEffort,
+        autoCompactPercent: input.autoCompactPercent,
+      };
+    case "managed.compression":
+      return {
+        operation: input.operation,
+        model: input.model,
         autoCompactPercent: input.autoCompactPercent,
       };
     case "external-agent":
@@ -124,6 +143,17 @@ export async function previewProviderSettingsMutation(input, environment) {
           },
           { environment },
         );
+      case "managed.compression":
+        return {
+          operation: "managed.compression",
+          ...previewModelCompressionChange(
+            {
+              model: input.model,
+              autoCompactPercent: input.autoCompactPercent,
+            },
+            { environment },
+          ),
+        };
       default:
         throw new ManagementOperationError("invalid_provider_operation", "Provider 设置操作不受支持");
     }
@@ -166,6 +196,14 @@ export async function applyProviderSettingsMutation(input, environment, preview)
           },
           { environment },
         );
+      case "managed.compression":
+        return await applyModelCompressionChange(
+          {
+            model: input.model,
+            autoCompactPercent: input.autoCompactPercent,
+          },
+          { environment },
+        );
       default:
         throw new ManagementOperationError("invalid_provider_operation", "Provider 设置操作不受支持");
     }
@@ -182,6 +220,9 @@ export function redactProviderSettingsResult(result) {
     ...(result.target !== undefined ? { target: redactTarget(result.target) } : {}),
     ...(result.provider !== undefined ? { provider: redactProvider(result.provider) } : {}),
     ...(result.model !== undefined ? { model: redactModel(result.model) } : {}),
+    ...(Array.isArray(result.providers)
+      ? { providers: result.providers.filter((value) => typeof value === "string") }
+      : {}),
     ...(result.reasoningEffort !== undefined ? { reasoningEffort: result.reasoningEffort } : {}),
     ...(result.autoCompactPercent !== undefined ? { autoCompactPercent: result.autoCompactPercent } : {}),
     ...(result.autoCompactLimit !== undefined ? { autoCompactLimit: result.autoCompactLimit } : {}),

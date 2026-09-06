@@ -224,6 +224,11 @@
   模式与切换模式共用统一 Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读
   确认写入结果，仅在确认未生效时恢复模型目录，
   结果明确返回 App Server 重启动作。
+- `model-compression-management.mjs` / `model-compression-management.d.mts`：提供受管模型自动压缩的无终端
+  校验、预览与执行接口；按模型 slug 去重，同名模型跨 Provider 共享同一压缩百分比，写入经
+  `writeManagedModelCompressionGlobal` 广播到所有提供该模型的 Provider，并复用统一 Provider 管理事务；
+  同名模型在跨 Provider 压缩值或上下文窗口不一致时，预览暴露冲突与被覆盖值，窗口不一致失败关闭，
+  结果明确返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
   Provider、模型、思考等级和自动压缩交互与中文渲染，写入复用管理接口；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与

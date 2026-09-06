@@ -37,11 +37,14 @@ function ProviderSettingsCard({
   const [managedModel, setManagedModel] = useState(settings.managedProviders[0]?.model ?? "")
   const [managedReasoning, setManagedReasoning] = useState(settings.managedProviders[0]?.reasoningEffort ?? "")
   const [autoCompactPercent, setAutoCompactPercent] = useState("60")
+  const [compressionModel, setCompressionModel] = useState(settings.modelCompression[0]?.id ?? "")
+  const [compressionPercent, setCompressionPercent] = useState("60")
   const [agentProvider, setAgentProvider] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.provider : settings.managedProviders[0]?.id ?? settings.customProviders.switchingProviders[0]?.id ?? "")
   const [agentModel, setAgentModel] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.model : settings.managedProviders[0]?.models[0]?.id ?? settings.customProviders.switchingProviders[0]?.model ?? "")
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const managedModelEntry = managed?.models.find((candidate) => candidate.id === managedModel) ?? managed?.models[0]
+  const compressionEntry = settings.modelCompression.find((candidate) => candidate.id === compressionModel) ?? settings.modelCompression[0]
   const agentProviders = useMemo(() => {
     const providers = new Map<string, { id: string; displayName: string; models: Array<{ id: string; displayName: string }> }>()
     settings.managedProviders.forEach((provider) => {
@@ -87,6 +90,12 @@ function ProviderSettingsCard({
     const selected = managed.models.find((candidate) => candidate.id === managedModel)
     setAutoCompactPercent(String(selected?.autoCompactPercent ?? 60))
   }, [managed, managedModel])
+
+  useEffect(() => {
+    if (compressionEntry === undefined) return
+    setCompressionModel((current) => settings.modelCompression.some((candidate) => candidate.id === current) ? current : compressionEntry.id)
+    setCompressionPercent(String(compressionEntry.autoCompactPercent ?? 60))
+  }, [compressionEntry, settings.modelCompression])
 
   useEffect(() => {
     if (agentProviderEntry === undefined) return
@@ -160,6 +169,18 @@ function ProviderSettingsCard({
     })
   }
 
+  const updateCompression = async () => {
+    if (compressionEntry === undefined) return
+    const result = await management.mutate({
+      operation: "managed.compression",
+      model: compressionEntry.id,
+      autoCompactPercent: Number(compressionPercent),
+    })
+    if (result !== null) {
+      setCompressionPercent(String(result.autoCompactPercent ?? compressionPercent))
+    }
+  }
+
   const configureAgent = async () => {
     if (agentProviderEntry === undefined || agentModel === "") return
     await management.mutate({ operation: "external-agent", action: "configure", provider: agentProviderEntry.id, model: agentModel })
@@ -192,6 +213,19 @@ function ProviderSettingsCard({
           <ManagedSelect label="思考等级" value={managedReasoning} options={(managedModelEntry?.reasoningEfforts ?? []).map((candidate) => [candidate.effort, candidate.effort])} disabled={busy || pending !== null} onChange={setManagedReasoning} />
           <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">自动压缩百分比</span><Input className="w-[160px]" type="number" min={10} max={90} value={autoCompactPercent} disabled={busy || pending !== null} onChange={(event) => setAutoCompactPercent(event.target.value)} /></div>
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || managedModelEntry === undefined} onClick={() => void updateManagedDefault()}>保存托管 Provider 默认值</Button>
+        </>}
+      </section>
+      <section className="flex flex-col gap-3 border-t pt-5">
+        <div className="flex items-center justify-between gap-3">
+          <div><h3 className="font-medium">模型自动压缩</h3><p className="text-xs text-muted-foreground">按模型名统一自动压缩阈值；同名模型在所有 Provider 共享同一值。</p></div>
+          <Badge variant="outline">{settings.modelCompression.length} 个模型</Badge>
+        </div>
+        {compressionEntry === undefined ? <p className="text-muted-foreground">当前没有可设置的受管模型。</p> : <>
+          <ManagedSelect label="模型" value={compressionEntry.id} options={settings.modelCompression.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => { setCompressionModel(value); const next = settings.modelCompression.find((candidate) => candidate.id === value); if (next !== undefined) setCompressionPercent(String(next.autoCompactPercent ?? 60)) }} />
+          <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">自动压缩百分比</span><Input className="w-[160px]" type="number" min={10} max={90} value={compressionPercent} disabled={busy || pending !== null} onChange={(event) => setCompressionPercent(event.target.value)} /></div>
+          <p className="text-xs text-muted-foreground">应用 Provider：{compressionEntry.providers.join("、") || "无"} · 上下文窗口 {compressionEntry.contextWindow.toLocaleString()} tokens</p>
+          {compressionEntry.conflicts === true ? <p className="text-xs text-amber-600">当前不同 Provider 的压缩值不一致：{Object.entries(compressionEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join("；") || "部分未设置"}；保存后将以本次输入统一。</p> : null}
+          <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || compressionEntry === undefined} onClick={() => void updateCompression()}>保存模型自动压缩</Button>
         </>}
       </section>
       <section className="flex flex-col gap-3 border-t pt-5">
@@ -235,6 +269,10 @@ function ProviderSettingsConfirmationCard({
   if (pending.target !== undefined) lines.push(`目标：${pending.target.displayName}（${pending.target.id}）`)
   if (pending.selection !== undefined) lines.push(`选择：${pending.selection.providerDisplayName ?? pending.selection.provider} / ${pending.selection.modelDisplayName ?? pending.selection.model}`)
   if (pending.model !== undefined) lines.push(`模型：${pending.model.displayName}（${pending.model.id}）`)
+  if (pending.providers !== undefined && pending.providers.length > 0) lines.push(`应用 Provider：${pending.providers.join("、")}`)
+  if (pending.overridden !== undefined && pending.overridden.length > 0) lines.push(`将覆盖：${pending.overridden.map((entry) => `${entry.provider}（原 ${entry.previousPercent}%）`).join("、")}`)
+  if (pending.conflicts === true) lines.push(`提示：该模型在不同 Provider 的压缩值不一致，保存后统一为本次输入。`)
+  if (pending.windowConflict === true) lines.push(`提示：该模型在不同 Provider 的上下文窗口不一致，无法统一压缩设置。`)
   if (pending.reasoningEffort !== undefined) lines.push(`思考等级：${pending.reasoningEffort}`)
   if (pending.autoCompactPercent !== undefined) lines.push(`自动压缩：${pending.autoCompactPercent}%`)
   if (pending.credential?.action !== undefined) lines.push(`凭据：${pending.credential.action === "replace" ? "写入新 API Key" : "沿用已有 API Key"}`)
