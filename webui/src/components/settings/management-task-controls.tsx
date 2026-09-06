@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import type { ManagementTaskController } from "@/lib/settings-management"
 
 const maintenanceActions = [
@@ -16,7 +17,7 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
   const providerOptions = [...new Set(providerIds.filter((providerId) => providerId.length > 0))]
   const [pruneProvider, setPruneProvider] = useState(providerOptions[0] ?? "openai")
   const hasActiveTask = tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
-  const disabled = tasks.loading || hasActiveTask
+  const disabled = tasks.loading || tasks.saving || tasks.pendingPreview !== null || hasActiveTask
 
   return (
     <Card>
@@ -54,6 +55,22 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
           </Button>
         </div>
       </CardContent>
+      <ManagementTaskConfirmationDialog tasks={tasks} />
     </Card>
   )
+}
+
+export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementTaskController }) {
+  const pending = tasks.pendingPreview
+  if (pending === null) return null
+  const description = [
+    `操作：${pending.preview.operation} · ${pending.preview.action}`,
+    pending.preview.target ? `目标：${pending.preview.target}` : null,
+    ...pending.preview.effects,
+    ...pending.preview.preconditions.map((condition) => `前置条件：${condition}`),
+    pending.preview.recovery ? `失败处理：${pending.preview.recovery}` : null,
+  ].filter((item): item is string => item !== null)
+  return <ManagementConfirmationDialog open saving={tasks.saving} title="确认执行管理任务" description="确认后提交后台任务，任务将在服务端串行执行。" confirmLabel="确认执行" onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
+    <p className="whitespace-pre-line">{description.join("\n") || pending.input.operation}</p>
+  </ManagementConfirmationDialog>
 }

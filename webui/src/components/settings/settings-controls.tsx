@@ -1,9 +1,47 @@
+import type { ReactNode } from "react"
+
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { PendingSetting } from "@/lib/settings-management"
+
+export function ManagementConfirmationDialog({
+  open,
+  title,
+  description,
+  saving,
+  onConfirm,
+  onCancel,
+  confirmLabel = "确认写入",
+  children,
+}: {
+  open: boolean
+  title: string
+  description: string
+  saving: boolean
+  onConfirm: () => void
+  onCancel: () => void
+  confirmLabel?: string
+  children: ReactNode
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !saving) onCancel() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-1 text-sm">{children}</div>
+        <DialogFooter>
+          <Button variant="outline" disabled={saving} onClick={onCancel}>取消</Button>
+          <Button disabled={saving} onClick={onConfirm}>{confirmLabel}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 export function SettingsRow({ label, value, badge = false, code = false }: { label: string; value: string; badge?: boolean; code?: boolean }) {
   return <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">{label}</span>{badge ? <Badge variant="secondary">{value}</Badge> : code ? <code className="rounded bg-muted px-2 py-1 text-xs">{value}</code> : <span className="text-right">{value}</span>}</div>
@@ -15,22 +53,19 @@ export function ManagedInputRow({ label, defaultValue, placeholder, disabled, ty
 
 export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; onConfirm: () => void; onCancel: () => void }) {
   return (
-    <Dialog open={pending !== null} onOpenChange={(open) => { if (!open && !saving) onCancel() }}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>确认配置修改</DialogTitle>
-          <DialogDescription>确认后写入对应配置，不会自动执行生效目标。</DialogDescription>
-        </DialogHeader>
-        {pending !== null ? <div className="flex flex-col gap-1 text-sm">
+    <ManagementConfirmationDialog
+      open={pending !== null}
+      title="确认配置修改"
+      description="确认后写入对应配置，不会自动执行生效目标。"
+      saving={saving}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
+      {pending !== null ? <>
           <p>{pending.label}将从“{formatPreviewValue(pending.before)}”改为“{formatPreviewValue(pending.value)}”。</p>
           <p className="text-muted-foreground">生效目标：{pending.target}</p>
-        </div> : null}
-        <DialogFooter>
-          <Button variant="outline" disabled={saving} onClick={onCancel}>取消</Button>
-          <Button disabled={saving || pending === null} onClick={onConfirm}>确认写入</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </> : null}
+    </ManagementConfirmationDialog>
   )
 }
 

@@ -1526,6 +1526,24 @@ describe("webui server", () => {
     expect(preview.status).toBe(200);
   });
 
+  it("accepts a different local loopback port used by an SSH tunnel", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token" },
+    );
+    const { port } = new URL(origin);
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: `http://127.0.0.1:${Number(port) + 1}`,
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toHaveProperty("revision");
+  });
+
   it("rejects an https localhost Origin for management requests", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(

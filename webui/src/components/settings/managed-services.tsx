@@ -8,7 +8,7 @@ export function ManagedServices({ services, tasks }: { services: ManagementServi
   if (services.entries.length === 0) {
     return <span className="text-sm text-muted-foreground">当前平台没有可展示的受管服务。</span>
   }
-  const taskBusy = tasks.loading || tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
+  const taskBusy = tasks.loading || tasks.saving || tasks.pendingPreview !== null || tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
   return <>
     <div className="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" disabled={taskBusy || services.platform === null} onClick={() => void tasks.run({ operation: "service", action: "install" })}>安装全部服务</Button>

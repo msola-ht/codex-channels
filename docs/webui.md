@@ -45,9 +45,9 @@ token = "你的_访问令牌"
 - 只有直接绑定 `0.0.0.0`（局域网、公网、Tailscale IP 直连）才必须设置令牌；
 - 所有入口共用一个实例与端口，配置一次 `[webui]` 后各方式同时生效。
 
-设置管理的精确 Origin 白名单固定接受 `http://127.0.0.1:<端口>`、`http://localhost:<端口>`
-和 `http://[::1]:<端口>`（按监听地址取可用项），不会从 `Host`、`X-Forwarded-Host` 或其他
-转发头扩信任；SSH 隧道建议统一使用 `127.0.0.1`，不要用服务器公网 IP、Tailscale IP 直连管理接口。
+设置管理的 Origin 只接受 HTTP 回环主机 `127.0.0.1`、`localhost` 或 `[::1]`，SSH 隧道的本机
+转发端口可以与服务器监听端口不同；不会从 `Host`、`X-Forwarded-Host` 或其他转发头扩信任。
+SSH 隧道建议统一使用 `127.0.0.1`，不要用服务器公网 IP、Tailscale IP 直连管理接口。
 
 ## 后台服务
 
@@ -80,7 +80,7 @@ codexc service stop webui        # 停止
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
 指标接口只接受 GET；设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消，均要求同一
-WebUI Bearer 令牌和精确 Origin。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
+WebUI Bearer 令牌和回环 Origin。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 `range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
 `this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
 WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
@@ -181,4 +181,4 @@ Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，�
 （API，默认 `127.0.0.1:8787`）与 Vite dev server（热更新，默认 `5173`）。
 开发入口会读取 `[webui]` 配置并让 `/api` 代理跟随实际 API 端口；也可以手动先运行
 `codexc webui`，再 `cd webui && npm run dev`（手动启动时代理默认指向 `8787`）。
-开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套精确 Origin 约束。
+开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套回环 Origin 约束。

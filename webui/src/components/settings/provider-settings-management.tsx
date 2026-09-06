@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { ManagedSelect } from "@/components/settings/settings-controls"
+import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
@@ -245,13 +245,13 @@ function ProviderSettingsCard({
         {mode === "exclusive" ? <label className="flex items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} />确认固定模式需要时移除顶层 openai_base_url</label> : null}
         <div className="flex gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? "新增自定义 Provider" : "保存自定义 Provider"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>取消编辑</Button> : null}<Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>切回官方 OpenAI</Button></div>
       </section>
-      {pending !== null ? <ProviderSettingsConfirmationCard pending={pending.preview} saving={busy} onConfirm={() => void confirmPending()} onCancel={management.cancel} /> : null}
+      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={busy} onConfirm={() => void confirmPending()} onCancel={management.cancel} /> : null}
       {management.actionError !== null ? <p className="text-destructive" role="status">{management.actionError}</p> : null}
     </CardContent>
   </Card>
 }
 
-function ProviderSettingsConfirmationCard({
+function ProviderSettingsConfirmationDialog({
   pending,
   saving,
   onConfirm,
@@ -275,5 +275,8 @@ function ProviderSettingsConfirmationCard({
   if (pending.autoCompactPercent !== undefined) lines.push(`自动压缩：${pending.autoCompactPercent}%`)
   if (pending.credential?.action !== undefined) lines.push(`凭据：${pending.credential.action === "replace" ? "写入新 API Key" : "沿用已有 API Key"}`)
   if (pending.current !== undefined) lines.push(`当前：${pending.current.configured ? `${pending.current.provider ?? "未知"} / ${pending.current.model ?? "未知"}` : "未配置"}`)
-  return <Card className="border-primary/40"><CardHeader><CardTitle className="text-base">确认 Provider 配置修改</CardTitle><CardDescription>确认后写入对应配置，不会自动执行生效目标。</CardDescription></CardHeader><CardContent className="text-sm"><p className="whitespace-pre-line">{lines.join("\n")}</p><p className="mt-1 text-muted-foreground">生效目标：{pending.activation}</p><div className="mt-3 flex gap-2"><Button size="sm" disabled={saving} onClick={onConfirm}>确认写入</Button><Button variant="outline" size="sm" disabled={saving} onClick={onCancel}>取消</Button></div></CardContent></Card>
+  return <ManagementConfirmationDialog open saving={saving} title="确认 Provider 配置修改" description="确认后写入对应配置，不会自动执行生效目标。" onConfirm={onConfirm} onCancel={onCancel}>
+    <p className="whitespace-pre-line">{lines.join("\n")}</p>
+    <p className="text-muted-foreground">生效目标：{pending.activation}</p>
+  </ManagementConfirmationDialog>
 }

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { ManagedSelect } from "@/components/settings/settings-controls"
+import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { AccountSettingsController } from "@/lib/settings-management"
 
@@ -84,13 +84,13 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
         <div className="grid gap-2 md:grid-cols-3"><ManagedSelect label="运行模式" value={deepseekMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setDeepseekMode(value as "switching" | "exclusive")} /><Input type="number" min={10} max={90} value={autoCompactPercent} disabled={disabled} onChange={(event) => setAutoCompactPercent(event.target.value)} placeholder="自动压缩百分比" /><Input type="password" autoComplete="new-password" placeholder="DeepSeek API Key（仅写入）" value={deepseekKey} disabled={disabled} onChange={(event) => setDeepseekKey(event.target.value)} /></div>
         <div className="flex gap-2"><Button disabled={disabled || deepseekKey.trim() === ""} onClick={() => void configureDeepseek()}>{settings.deepseek.configured ? "重新配置 DeepSeek" : "配置 DeepSeek"}</Button>{settings.deepseek.restoreAvailable ? <Button variant="outline" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.restore" })}>恢复安装前配置</Button> : null}</div>
       </section>
-      {pending !== null ? <AccountSettingsConfirmationCard pending={pending} saving={management.busy} onConfirm={() => void confirmPending()} onCancel={management.cancel} /> : null}
+      {pending !== null ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} onConfirm={() => void confirmPending()} onCancel={management.cancel} /> : null}
       {management.actionError !== null ? <p className="text-destructive" role="status">{management.actionError}</p> : null}
     </CardContent>
   </Card>
 }
 
-function AccountSettingsConfirmationCard({
+function AccountSettingsConfirmationDialog({
   pending,
   saving,
   onConfirm,
@@ -114,5 +114,8 @@ function AccountSettingsConfirmationCard({
     const effects = Object.entries(preview.effects).filter(([, value]) => value !== false && value !== null && value !== undefined).map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : String(value)}`)
     if (effects.length > 0) lines.push(`影响：${effects.join("；")}`)
   }
-  return <Card className="border-primary/40"><CardHeader><CardTitle className="text-base">确认账户配置修改</CardTitle><CardDescription>确认后写入对应配置，不会自动执行生效目标。</CardDescription></CardHeader><CardContent className="text-sm"><p className="whitespace-pre-line">{lines.join("\n")}</p><p className="mt-1 text-muted-foreground">生效目标：{preview.activation ?? "按操作结果"}</p><div className="mt-3 flex gap-2"><Button size="sm" disabled={saving} onClick={onConfirm}>确认写入</Button><Button variant="outline" size="sm" disabled={saving} onClick={onCancel}>取消</Button></div></CardContent></Card>
+  return <ManagementConfirmationDialog open saving={saving} title="确认账户配置修改" description="确认后写入对应配置，不会自动执行生效目标。" onConfirm={onConfirm} onCancel={onCancel}>
+    <p className="whitespace-pre-line">{lines.join("\n")}</p>
+    <p className="text-muted-foreground">生效目标：{preview.activation ?? "按操作结果"}</p>
+  </ManagementConfirmationDialog>
 }

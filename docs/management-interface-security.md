@@ -26,8 +26,8 @@
 ## Origin 与浏览器边界
 
 - 管理请求不开放 CORS。同源 GET 读取仍受回环地址和 WebUI Bearer 令牌保护；修改状态的请求必须携带
-  固定白名单中与当前端口完全匹配的回环 `Origin`（`127.0.0.1`、`localhost`，`::1` 监听时另加
-  `[::1]`），不得从 `Host`、`X-Forwarded-Host` 或任意转发头自动扩展可信来源。
+  HTTP 回环 `Origin`（`127.0.0.1`、`localhost` 或 `[::1]`），SSH 隧道的本机转发端口可以与服务端
+  监听端口不同；不得从 `Host`、`X-Forwarded-Host` 或任意转发头自动扩展可信来源。
 - Bearer 令牌不通过 Cookie 自动附带，因此跨站请求无法获得管理权限；Origin 检查仍作为第二道边界。
 - 管理响应统一设置 `Cache-Control: no-store`、严格 CSP、`frame-ancestors 'none'`、
   `X-Content-Type-Options: nosniff` 和禁止 Referrer 泄露的策略。
@@ -78,7 +78,7 @@
 
 ## 当前实现映射
 
-- `management-access.mjs`：精确 Origin、分类限速、请求元数据上限和安全响应头；WebUI Bearer 认证在
+- `management-access.mjs`：回环 Origin、分类限速、请求元数据上限和安全响应头；WebUI Bearer 认证在
   `webui-server.mjs` 与普通 API 共用常数时间比较。
 - `management-confirmations.mjs`：稳定 JSON 指纹与绑定令牌主体、操作、输入、修订和预览的一次性确认令牌。
 - `management-audit.mjs`：固定事件版本、固定脱敏字段、`0600` 私有 JSONL 与有界轮转。
