@@ -798,7 +798,7 @@ function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, leg
           : "仅 OpenCode Go 固定模式（先输入账户 ID）" },
       );
       if (hasModelSettings) {
-        options.push({ value: "model-settings", label: "修改模型设置（思考等级、自动压缩）" });
+        options.push({ value: "model-settings", label: "修改模型设置（思考等级）" });
       }
       if (legacyBackup) {
         options.push({ value: "restore", label: "恢复配置前状态" });

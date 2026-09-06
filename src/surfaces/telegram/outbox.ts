@@ -115,6 +115,10 @@ export interface TelegramOutboxOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null;
   debugEnabled?: boolean;
   remainingUsage?: (
     model: string,
@@ -508,6 +512,7 @@ export class TelegramOutbox {
                   this.options.exchangeRate?.() ?? null,
                   this.options.debugEnabled ?? false,
                   remainingUsage,
+                  this.options.autoCompactPercent,
                 ),
               ),
               replyTo,

@@ -258,6 +258,43 @@ describe("Codex user settings setup", () => {
     expect(updateSetting).not.toHaveBeenCalled();
     expect(output.join("")).toContain("Permission Profile（:workspace）");
   });
+
+  it("writes official model context window and auto compact after confirmation", async () => {
+    const output: string[] = [];
+    const updateSetting = vi.fn(async () => ({
+      kind: "model-compact" as const,
+      previousVersion: "version-1",
+      value: { contextWindow: 100_000, autoCompactPercent: 40 },
+      activation: "restart-all" as const,
+    }));
+    const prompts = {
+      select: vi.fn(async () => "model-compact"),
+      text: vi.fn()
+        .mockResolvedValueOnce("100000")
+        .mockResolvedValueOnce("40"),
+      confirm: vi.fn(async () => true),
+      isCancel: () => false,
+    };
+
+    await runCodexUserSettingsSetup({
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      output: { write: (value: string) => output.push(value) },
+      prompts,
+      loadSettings: async () => settingsState(),
+      updateSetting,
+    });
+
+    expect(prompts.confirm).toHaveBeenCalledOnce();
+    expect(updateSetting).toHaveBeenCalledWith({
+      kind: "model-compact",
+      contextWindow: 100_000,
+      autoCompactPercent: 40,
+    }, {
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      expectedVersion: "version-1",
+    });
+    expect(output.join("")).toContain("Codex 模型上下文与自动压缩已更新");
+  });
 });
 
 function settingsState(): CodexUserSettingsState {
@@ -287,6 +324,10 @@ function settingsState(): CodexUserSettingsState {
       sandboxMode: null,
       approvalPolicy: null,
       networkAccess: null,
+    },
+    compact: {
+      contextWindow: null,
+      autoCompactPercent: null,
     },
   };
 }

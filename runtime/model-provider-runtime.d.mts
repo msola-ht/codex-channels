@@ -86,6 +86,25 @@ export function loadManagedModelProviderSettings(
   environment?: NodeJS.ProcessEnv,
 ): ManagedModelProviderSettings[];
 
+export interface ManagedModelCompressionEntry {
+  model: string;
+  displayName: string;
+  contextWindow: number;
+  autoCompactPercent?: number;
+  providers: string[];
+  perProvider?: Record<string, number | undefined>;
+  conflicts?: boolean;
+  windowConflict?: boolean;
+}
+
+export function loadManagedModelCompression(
+  environment?: NodeJS.ProcessEnv,
+): ManagedModelCompressionEntry[];
+
+export function readCodexConfigModelOverride(
+  environment?: NodeJS.ProcessEnv,
+): { contextWindow: number | null; autoCompactTokenLimit: number | null };
+
 export function managedProviderDirectory(
   environment: NodeJS.ProcessEnv | undefined,
   definition: import("./model-provider-definitions.mjs").ModelProviderDefinition,

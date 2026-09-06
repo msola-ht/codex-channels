@@ -17,6 +17,11 @@ export type CodexUserSettingInput =
   | { kind: "context-management"; enabled: boolean }
   | { kind: "auto-recap"; enabled: boolean }
   | {
+      kind: "model-compact";
+      contextWindow: number | null;
+      autoCompactPercent: number | null;
+    }
+  | {
       kind: "preferences";
       reasoningSummary: "auto" | "concise" | "detailed" | "none";
       planModeReasoningEffort: string;
@@ -64,6 +69,10 @@ export interface CodexUserSettingsState {
     sandboxMode: "read-only" | "workspace-write" | null;
     approvalPolicy: "on-request" | "never" | null;
     networkAccess: boolean | null;
+  };
+  compact: {
+    contextWindow: number | null;
+    autoCompactPercent: number | null;
   };
 }
 

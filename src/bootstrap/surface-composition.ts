@@ -168,6 +168,7 @@ function createWeixinModule(
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     exchangeRate: options.exchangeRate,
     priceCurrency: options.priceCurrency,
+    autoCompactPercent: options.autoCompactPercent,
     ...(options.remainingUsage === undefined
       ? {}
       : { remainingUsage: options.remainingUsage }),
@@ -230,6 +231,7 @@ function createFeishuModule(
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     exchangeRate: options.exchangeRate,
     priceCurrency: options.priceCurrency,
+    autoCompactPercent: options.autoCompactPercent,
     ...(options.remainingUsage === undefined
       ? {}
       : { remainingUsage: options.remainingUsage }),
@@ -345,6 +347,7 @@ function createTelegramModule(
     debugEnabled: isDebugLogLevel(config.logLevel),
     exchangeRate: options.exchangeRate,
     priceCurrency: options.priceCurrency,
+    autoCompactPercent: options.autoCompactPercent,
     ...(options.remainingUsage === undefined
       ? {}
       : { remainingUsage: options.remainingUsage }),

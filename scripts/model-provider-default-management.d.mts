@@ -5,7 +5,7 @@ export interface ManagedProviderDefaultChangeInput {
   provider: string;
   model: string;
   reasoningEffort: string;
-  autoCompactPercent: number;
+  autoCompactPercent?: number;
 }
 
 export interface ManagedProviderDefaultChangePreview {
@@ -16,8 +16,8 @@ export interface ManagedProviderDefaultChangePreview {
   };
   model: { id: string; displayName: string; contextWindow: number };
   reasoningEffort: string;
-  autoCompactPercent: number;
-  autoCompactLimit: number;
+  autoCompactPercent?: number;
+  autoCompactLimit?: number;
   willChange: boolean;
   activation: "restart-app-server";
 }

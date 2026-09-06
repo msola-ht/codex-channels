@@ -89,6 +89,10 @@ export interface WeixinSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null;
   remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
@@ -180,6 +184,9 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        ...(options.autoCompactPercent === undefined
+          ? {}
+          : { autoCompactPercent: options.autoCompactPercent }),
         ...(options.remainingUsage === undefined
           ? {}
           : { remainingUsage: options.remainingUsage }),
@@ -251,6 +258,9 @@ export class WeixinSurface implements SurfaceAdapter {
       ...(options.priceCurrency === undefined
         ? {}
         : { priceCurrency: options.priceCurrency }),
+      ...(options.autoCompactPercent === undefined
+        ? {}
+        : { autoCompactPercent: options.autoCompactPercent }),
       logger: options.logger,
       onRetry: (event) => {
         logUpdatesRetry(

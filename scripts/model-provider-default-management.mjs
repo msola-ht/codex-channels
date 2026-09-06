@@ -143,9 +143,10 @@ function buildPlan(input, configured) {
   }
   const autoCompactPercent = values.autoCompactPercent;
   if (
-    !Number.isInteger(autoCompactPercent)
-    || autoCompactPercent < 10
-    || autoCompactPercent > 90
+    autoCompactPercent !== undefined
+    && (!Number.isInteger(autoCompactPercent)
+      || autoCompactPercent < 10
+      || autoCompactPercent > 90)
   ) {
     throw invalid(
       "invalid-auto-compact-percent",
@@ -153,15 +154,18 @@ function buildPlan(input, configured) {
       `${provider.displayName} 模型自动压缩百分比无效`,
     );
   }
-  const autoCompactLimit = Math.round(model.contextWindow * autoCompactPercent / 100);
+  const autoCompactLimit = autoCompactPercent === undefined
+    ? undefined
+    : Math.round(model.contextWindow * autoCompactPercent / 100);
   return {
     provider,
     model,
-    settings: { model: model.model, reasoningEffort, autoCompactLimit },
+    settings: autoCompactLimit === undefined
+      ? { model: model.model, reasoningEffort }
+      : { model: model.model, reasoningEffort, autoCompactLimit },
     autoCompactPercent,
     willChange: provider.model !== model.model
-      || provider.reasoningEffort !== reasoningEffort
-      || model.autoCompactPercent !== autoCompactPercent,
+      || provider.reasoningEffort !== reasoningEffort,
   };
 }
 
@@ -178,8 +182,12 @@ function publicPreview(plan) {
       contextWindow: plan.model.contextWindow,
     },
     reasoningEffort: plan.settings.reasoningEffort,
-    autoCompactPercent: plan.autoCompactPercent,
-    autoCompactLimit: plan.settings.autoCompactLimit,
+    ...(plan.autoCompactPercent === undefined
+      ? {}
+      : { autoCompactPercent: plan.autoCompactPercent }),
+    ...(plan.settings.autoCompactLimit === undefined
+      ? {}
+      : { autoCompactLimit: plan.settings.autoCompactLimit }),
     willChange: plan.willChange,
     activation: "restart-app-server",
   };

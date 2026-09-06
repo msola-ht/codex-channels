@@ -571,5 +571,6 @@ function options(
     onFatal: vi.fn(),
     exchangeRate: () => null,
     priceCurrency: () => "usd" as const,
+    autoCompactPercent: () => null,
   };
 }

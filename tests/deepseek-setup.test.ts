@@ -553,7 +553,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
         { value: "1", label: "OpenAI + DeepSeek 切换模式" },
         { value: "2", label: "仅 DeepSeek 固定模式" },
         { value: "3", label: "删除 DeepSeek（恢复安装前配置）" },
-        { value: "4", label: "修改模型设置（思考等级、自动压缩）" },
+        { value: "4", label: "修改模型设置（思考等级）" },
         { value: "5", label: "返回上一级" },
       ],
     });
@@ -565,15 +565,13 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       .mockResolvedValueOnce("4")
       .mockResolvedValueOnce("deepseek-v4-pro")
       .mockResolvedValueOnce("max");
-    const text = vi.fn(async () => "60");
-
     const result = await runDeepseekSetup({
       allowBack: true,
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: vi.fn() },
       prompts: {
         select,
-        text,
+        text: vi.fn(),
         password: vi.fn(),
         confirm: vi.fn(),
         isCancel: () => false,
@@ -585,7 +583,6 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 60,
     });
     const catalog = JSON.parse(readFileSync(
       join(codexHome, ".codex-connect", "providers", "deepseek", "models.json"),

@@ -144,6 +144,10 @@ export interface FeishuOutboxOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null;
   debugEnabled?: boolean;
   remainingUsage?: (
     model: string,
@@ -361,6 +365,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         this.options.exchangeRate?.() ?? null,
         this.options.debugEnabled ?? false,
         remainingUsage,
+        this.options.autoCompactPercent,
       );
       if (
         completion !== null
@@ -382,6 +387,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
       this.options.priceCurrency,
       this.options.exchangeRate?.() ?? null,
       this.options.debugEnabled ?? false,
+      undefined,
+      this.options.autoCompactPercent,
     );
     if (rendered === null) {
       return;
@@ -432,6 +439,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
       this.options.priceCurrency,
       this.options.exchangeRate?.() ?? null,
       this.options.debugEnabled ?? false,
+      undefined,
+      this.options.autoCompactPercent,
     );
     if (rendered === null) {
       return;

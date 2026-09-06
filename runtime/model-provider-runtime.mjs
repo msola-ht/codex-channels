@@ -274,6 +274,28 @@ export function loadManagedModelCompression(environment = process.env) {
   return [...bySlug.values()];
 }
 
+// 读取官方主配置的上下文窗口与自动压缩覆盖值；未设置或读取失败返回 null。
+// 只用于展示与完成卡片，不参与 Provider 路由。
+export function readCodexConfigModelOverride(environment = process.env) {
+  const path = join(codexHomePath(environment), "config.toml");
+  let document;
+  try {
+    document = record(parse(readCodexConfigFile(path)));
+  } catch {
+    return { contextWindow: null, autoCompactTokenLimit: null };
+  }
+  return {
+    contextWindow: safeConfigInteger(document.model_context_window),
+    autoCompactTokenLimit: safeConfigInteger(document.model_auto_compact_token_limit),
+  };
+}
+
+function safeConfigInteger(value) {
+  if (value === null || value === undefined) return null;
+  const normalized = typeof value === "bigint" ? Number(value) : value;
+  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
 export function writeManagedModelProviderProfileDefault(
   provider,
   settings,
@@ -1697,10 +1719,13 @@ function updateModelCatalogSettings(content, definition, settings) {
   ) {
     throw new Error(`${definition.displayName} 模型自动压缩阈值无效`);
   }
+  const nextAutoCompactLimit = settings.autoCompactLimit === undefined
+    ? (current.autoCompactLimit ?? null)
+    : settings.autoCompactLimit;
   models[index] = {
     ...record(models[index]),
     default_reasoning_level: settings.reasoningEffort,
-    auto_compact_token_limit: settings.autoCompactLimit ?? null,
+    auto_compact_token_limit: nextAutoCompactLimit,
   };
   return `${JSON.stringify({ ...catalog, models }, null, 2)}\n`;
 }

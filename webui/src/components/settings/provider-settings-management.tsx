@@ -36,7 +36,6 @@ function ProviderSettingsCard({
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [managedModel, setManagedModel] = useState(settings.managedProviders[0]?.model ?? "")
   const [managedReasoning, setManagedReasoning] = useState(settings.managedProviders[0]?.reasoningEffort ?? "")
-  const [autoCompactPercent, setAutoCompactPercent] = useState("60")
   const [compressionModel, setCompressionModel] = useState(settings.modelCompression[0]?.id ?? "")
   const [compressionPercent, setCompressionPercent] = useState("60")
   const [agentProvider, setAgentProvider] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.provider : settings.managedProviders[0]?.id ?? settings.customProviders.switchingProviders[0]?.id ?? "")
@@ -87,9 +86,7 @@ function ProviderSettingsCard({
     if (managed === undefined) return
     setManagedModel((current) => managed.models.some((candidate) => candidate.id === current) ? current : managed.model)
     setManagedReasoning((current) => current || managed.reasoningEffort)
-    const selected = managed.models.find((candidate) => candidate.id === managedModel)
-    setAutoCompactPercent(String(selected?.autoCompactPercent ?? 60))
-  }, [managed, managedModel])
+  }, [managed])
 
   useEffect(() => {
     if (compressionEntry === undefined) return
@@ -165,7 +162,6 @@ function ProviderSettingsCard({
       provider: managed.id,
       model: managedModelEntry.id,
       reasoningEffort: managedReasoning,
-      autoCompactPercent: Number(autoCompactPercent),
     })
   }
 
@@ -204,14 +200,13 @@ function ProviderSettingsCard({
     <CardContent className="flex flex-col gap-6 text-sm">
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <div><h3 className="font-medium">托管 Provider 默认值</h3><p className="text-xs text-muted-foreground">修改模型目录中的默认模型、思考等级和自动压缩阈值。</p></div>
+          <div><h3 className="font-medium">托管 Provider 默认值</h3><p className="text-xs text-muted-foreground">修改模型目录中的默认模型与思考等级；自动压缩在下方「模型自动压缩」按模型名统一设置。</p></div>
           <Badge variant="outline">{settings.managedProviders.length} 个</Badge>
         </div>
         {managed === undefined ? <p className="text-muted-foreground">当前没有已配置的托管 Provider。</p> : <>
           <ManagedSelect label="Provider" value={managed.id} options={settings.managedProviders.map((provider) => [provider.id, provider.displayName])} disabled={busy || pending !== null} onChange={(value) => { setManagedProvider(value); const next = settings.managedProviders.find((candidate) => candidate.id === value); if (next !== undefined) { setManagedModel(next.model); setManagedReasoning(next.reasoningEffort) } }} />
           <ManagedSelect label="默认模型" value={managedModel} options={managed.models.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={setManagedModel} />
           <ManagedSelect label="思考等级" value={managedReasoning} options={(managedModelEntry?.reasoningEfforts ?? []).map((candidate) => [candidate.effort, candidate.effort])} disabled={busy || pending !== null} onChange={setManagedReasoning} />
-          <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">自动压缩百分比</span><Input className="w-[160px]" type="number" min={10} max={90} value={autoCompactPercent} disabled={busy || pending !== null} onChange={(event) => setAutoCompactPercent(event.target.value)} /></div>
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || managedModelEntry === undefined} onClick={() => void updateManagedDefault()}>保存托管 Provider 默认值</Button>
         </>}
       </section>

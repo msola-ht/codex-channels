@@ -445,6 +445,10 @@ export interface CodexUserSettingsResponse {
     approvalPolicy: "on-request" | "never" | null
     networkAccess: boolean | null
   }
+  compact: {
+    contextWindow: number | null
+    autoCompactPercent: number | null
+  }
 }
 
 export interface CodexUserSettingInput { kind: string; [key: string]: unknown }
@@ -622,7 +626,7 @@ export type ManagementProviderSettingsMutationInput =
       provider: string
       model: string
       reasoningEffort: string
-      autoCompactPercent: number
+      autoCompactPercent?: number
     }
   | {
       operation: "managed.compression"

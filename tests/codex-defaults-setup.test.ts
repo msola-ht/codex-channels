@@ -130,5 +130,9 @@ function settingsState(): CodexUserSettingsState {
       approvalPolicy: null,
       networkAccess: null,
     },
+    compact: {
+      contextWindow: null,
+      autoCompactPercent: null,
+    },
   };
 }

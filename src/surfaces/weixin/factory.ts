@@ -44,6 +44,10 @@ export interface CreateWeixinSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null;
   remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,

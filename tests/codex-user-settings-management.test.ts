@@ -55,6 +55,10 @@ describe("Codex user settings management", () => {
         approvalPolicy: "on-request",
         networkAccess: true,
       },
+      compact: {
+        contextWindow: null,
+        autoCompactPercent: null,
+      },
     });
     expect(client.close).toHaveBeenCalledOnce();
   });
@@ -420,6 +424,59 @@ describe("Codex user settings management", () => {
       createClient: async () => client,
       primaryProvider: () => "deepseek",
     })).rejects.toMatchObject({ code: "third-party-primary" });
+  });
+
+  it("writes official model context window and auto compact limit in one transaction", async () => {
+    const client = settingsClient({ model: "gpt-test" });
+
+    await expect(updateCodexUserSetting({
+      kind: "model-compact",
+      contextWindow: 100_000,
+      autoCompactPercent: 40,
+    }, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+      primaryProvider: () => "openai",
+    })).resolves.toMatchObject({
+      kind: "model-compact",
+      activation: "restart-all",
+      value: { contextWindow: 100_000, autoCompactPercent: 40 },
+    });
+
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "model_context_window", value: 100_000 },
+      { keyPath: "model_auto_compact_token_limit", value: 40_000 },
+    ], { expectedVersion: "version-1" });
+  });
+
+  it("rejects compression percent without a context window", async () => {
+    const client = settingsClient({ model: "gpt-test" });
+
+    await expect(updateCodexUserSetting({
+      kind: "model-compact",
+      contextWindow: null,
+      autoCompactPercent: 40,
+    }, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+      primaryProvider: () => "openai",
+    })).rejects.toMatchObject({ code: "window-required", field: "contextWindow" });
+  });
+
+  it("projects an existing model context window and auto compact percent", async () => {
+    const client = settingsClient({
+      model: "gpt-test",
+      model_context_window: 200_000,
+      model_auto_compact_token_limit: 80_000,
+    });
+
+    await expect(loadCodexUserSettings({
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      createClient: async () => client,
+      primaryProvider: () => "openai",
+    })).resolves.toMatchObject({
+      compact: { contextWindow: 200_000, autoCompactPercent: 40 },
+    });
   });
 });
 

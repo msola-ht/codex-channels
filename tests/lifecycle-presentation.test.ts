@@ -1638,6 +1638,27 @@ it("shows the session-aggregate cache hit rate in normal mode", () => {
   expect(rendered).toContain("缓存命中率：75.00%");
 });
 
+it("shows the resolved auto compact percentage on the completion card", () => {
+  const rendered = renderPlainLifecyclePresentation(
+    createTurnCompletedPresentation({
+      type: "turn.completed",
+      target: { surface: "telegram", accountId: "default", conversationId: "100" },
+      threadId: "thread-a",
+      turnId: "turn-a",
+      status: "completed",
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      tokenUsage: {
+        total: tokenBreakdown(0, 0, 0),
+        last: tokenBreakdown(0, 0, 0),
+        modelContextWindow: 1_048_576,
+      },
+    }, undefined, null, false, null, () => 40),
+  );
+
+  expect(rendered).toContain("自动压缩：40%");
+});
+
 function tokenBreakdown(
   totalTokens: number,
   inputTokens: number,

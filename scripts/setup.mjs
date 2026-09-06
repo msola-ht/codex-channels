@@ -13,6 +13,7 @@ import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
 import { runOpenCodeGoSetup } from "./opencode-go-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
+import { runModelCompressionSetup } from "./model-compression-setup.mjs";
 import { runCustomPrimaryProviderMenu } from "./primary-provider-cli.mjs";
 import { runOfficialLoginSetup } from "./official-login-setup.mjs";
 import { writeSetupConfigurationSummary } from "./setup-summary.mjs";
@@ -34,6 +35,7 @@ export async function runSetup({
   codexUserSettingsSetup = runCodexUserSettingsSetup,
   openCodeGoSetup = runOpenCodeGoSetup,
   modelProviderDefaultSetup = runModelProviderDefaultSetup,
+  modelCompressionSetup = runModelCompressionSetup,
   customPrimarySetup = runCustomPrimaryProviderMenu,
   officialLoginSetup = runOfficialLoginSetup,
   setupSummary = writeSetupConfigurationSummary,
@@ -125,6 +127,7 @@ export async function runSetup({
           apiProviderSetup,
           openCodeGoSetup,
           modelProviderDefaultSetup,
+          modelCompressionSetup,
           customPrimarySetup,
           officialLoginSetup,
           agentsSetup,
@@ -161,6 +164,7 @@ async function runModelSetup({
   apiProviderSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
+  modelCompressionSetup,
   customPrimarySetup,
   officialLoginSetup,
   agentsSetup,
@@ -203,6 +207,7 @@ async function runModelSetup({
         apiProviderSetup,
         openCodeGoSetup,
         modelProviderDefaultSetup,
+        modelCompressionSetup,
         customPrimarySetup,
         agentsSetup,
       });
@@ -252,6 +257,7 @@ async function runThirdPartyModelSetup({
   apiProviderSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
+  modelCompressionSetup,
   customPrimarySetup,
   agentsSetup,
 }) {
@@ -278,7 +284,12 @@ async function runThirdPartyModelSetup({
         {
           value: "provider_default",
           label: "受管 Provider 模型设置",
-          hint: "设置 DeepSeek 与 OpenCode Go 的模型、思考等级和自动压缩",
+          hint: "设置 DeepSeek 与 OpenCode Go 各 Provider 的默认模型与思考等级",
+        },
+        {
+          value: "model_compression",
+          label: "模型自动压缩",
+          hint: "按模型名统一设置 DeepSeek 与 OpenCode Go 的自动压缩阈值",
         },
         {
           value: "agents",
@@ -303,6 +314,8 @@ async function runThirdPartyModelSetup({
       result = await customPrimarySetup({ input, output, prompts, allowBack: true });
     } else if (module === "provider_default") {
       result = await modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
+    } else if (module === "model_compression") {
+      result = await modelCompressionSetup({ input, output, prompts, allowBack: true });
     } else if (module === "agents") {
       result = await agentsSetup({ input, output, prompts, allowBack: true });
     } else if (module === "api_provider") {

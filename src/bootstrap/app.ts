@@ -23,6 +23,8 @@ import {
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
+  loadManagedModelCompression,
+  readCodexConfigModelOverride,
   managedProviderDirectory,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
@@ -776,6 +778,7 @@ export class GatewayApplication {
       ),
       exchangeRate: () => this.exchangeRate.resolve(),
       priceCurrency: () => this.config.priceCurrency,
+      autoCompactPercent: (provider, model) => this.resolveAutoCompactPercent(provider, model),
       remainingUsage: createOpencodeGoRemainingUsageReader({
         fetchImpl: createProxyFetch(config.networkProxy),
         metricsDatabasePath: modelRequestMetricsDatabasePath(
@@ -1449,6 +1452,27 @@ export class GatewayApplication {
       return;
     }
     this.surfaceManager.reportFatal(surface, accountId, error);
+  }
+
+  private resolveAutoCompactPercent(
+    _provider: string | null | undefined,
+    model: string | null | undefined,
+  ): number | null {
+    if (!model) return null;
+    const entry = loadManagedModelCompression(process.env).find(
+      (candidate: { model: string; autoCompactPercent?: number }) => candidate.model === model,
+    );
+    if (entry !== undefined) return entry.autoCompactPercent ?? null;
+    const override = readCodexConfigModelOverride(process.env);
+    if (
+      override.contextWindow !== null
+      && override.autoCompactTokenLimit !== null
+      && override.contextWindow > 0
+    ) {
+      return Math.round(Math.min(100, override.autoCompactTokenLimit * 100 / override.contextWindow));
+    }
+    // 官方模型未在主配置覆盖时使用上游默认 95%。
+    return 95;
   }
 
   private async refreshRateLimits(): Promise<void> {

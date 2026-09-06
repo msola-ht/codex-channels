@@ -39,9 +39,9 @@ codexc service restart all
 ```
 
 初次配置默认使用 Flash Vision Exp。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
-修改模型设置（思考等级、自动压缩）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
-再按模型设置默认思考等级和自动压缩百分比；每个模型按自己的上下文窗口计算
-阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
+修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
+再按模型设置默认思考等级；自动压缩百分比走“模型与提供商 → 第三方 Provider → 模型自动压缩”，按模型名统一设置，
+每个模型按自己的上下文窗口计算阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
 首次升级时仍选择旧默认 Flash 的账户和对应共享子代理会自动切换到 Flash Vision Exp，已主动选择
 Pro 的账户保持不变；清单记录迁移完成后，用户再主动选回 Flash 也不会被后续更新覆盖。目录更新后

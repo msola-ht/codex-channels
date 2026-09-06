@@ -124,14 +124,13 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       .mockResolvedValueOnce("model-settings")
       .mockResolvedValueOnce("deepseek-v4-pro")
       .mockResolvedValueOnce("max");
-    const text = vi.fn(async () => "60");
 
     const result = await runOpenCodeGoSetup({
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: vi.fn() },
       prompts: {
         select,
-        text,
+        text: vi.fn(),
         password: vi.fn(),
         confirm: vi.fn(),
         isCancel: () => false,
@@ -143,7 +142,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       provider: "ocg-main",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 60,
     });
     const catalog = JSON.parse(readFileSync(
       join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"),

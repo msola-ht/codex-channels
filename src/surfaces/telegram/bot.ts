@@ -125,6 +125,10 @@ export interface TelegramSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null;
   remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
@@ -250,6 +254,9 @@ export class TelegramSurface {
       ...(options.priceCurrency === undefined
         ? {}
         : { priceCurrency: options.priceCurrency }),
+      ...(options.autoCompactPercent === undefined
+        ? {}
+        : { autoCompactPercent: options.autoCompactPercent }),
       ...(options.remainingUsage === undefined
         ? {}
         : { remainingUsage: options.remainingUsage }),

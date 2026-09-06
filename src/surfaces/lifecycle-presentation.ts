@@ -462,6 +462,10 @@ export function createTurnCompletedPresentation(
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
   remainingUsage?: ProviderModelUsageEstimate | null,
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null,
 ): LifecyclePresentation {
   const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const sessionFields: LifecyclePresentationField[] = [
@@ -550,6 +554,13 @@ export function createTurnCompletedPresentation(
       label: "提供商",
       value: formatCodexProviderLabel(event.modelProvider),
     });
+    const autoCompact = autoCompactPercent?.(event.modelProvider, event.model);
+    if (autoCompact !== null && autoCompact !== undefined) {
+      sessionFields.push({
+        label: "自动压缩",
+        value: `${autoCompact}%`,
+      });
+    }
   }
   if (event.contextCompactionCount !== undefined) {
     sessionFields.push({

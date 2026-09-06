@@ -120,6 +120,10 @@ export function renderWeixinTurnCompleted(
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
   remainingUsage?: ProviderModelUsageEstimate | null,
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null,
 ): string {
   return renderWeixinLifecyclePresentation(
     createTurnCompletedPresentation(
@@ -128,6 +132,7 @@ export function renderWeixinTurnCompleted(
       exchangeRate,
       debug,
       remainingUsage,
+      autoCompactPercent,
     ),
   );
 }

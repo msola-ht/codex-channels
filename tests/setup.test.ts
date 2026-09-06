@@ -456,7 +456,12 @@ describe("Codex Connect setup", () => {
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "provider_default",
       label: "受管 Provider 模型设置",
-      hint: "设置 DeepSeek 与 OpenCode Go 的模型、思考等级和自动压缩",
+      hint: "设置 DeepSeek 与 OpenCode Go 各 Provider 的默认模型与思考等级",
+    });
+    expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
+      value: "model_compression",
+      label: "模型自动压缩",
+      hint: "按模型名统一设置 DeepSeek 与 OpenCode Go 的自动压缩阈值",
     });
   });
 

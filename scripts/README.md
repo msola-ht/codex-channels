@@ -220,17 +220,21 @@
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
-  默认模型、思考等级和自动压缩阈值的无终端校验、预览与执行接口；切换模式更新私有 Profile，固定
-  模式与切换模式共用统一 Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读
-  确认写入结果，仅在确认未生效时恢复模型目录，
-  结果明确返回 App Server 重启动作。
+  默认模型与思考等级的无终端校验、预览与执行接口；写默认模型时保留模型目录中已有的自动压缩阈值，
+  压缩值由「模型自动压缩」按模型名统一管理；切换模式更新私有 Profile，固定模式与切换模式共用统一
+  Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读确认写入结果，仅在确认未生效
+  时恢复模型目录，结果明确返回 App Server 重启动作。
 - `model-compression-management.mjs` / `model-compression-management.d.mts`：提供受管模型自动压缩的无终端
   校验、预览与执行接口；按模型 slug 去重，同名模型跨 Provider 共享同一压缩百分比，写入经
   `writeManagedModelCompressionGlobal` 广播到所有提供该模型的 Provider，并复用统一 Provider 管理事务；
   同名模型在跨 Provider 压缩值或上下文窗口不一致时，预览暴露冲突与被覆盖值，窗口不一致失败关闭，
   结果明确返回 App Server 重启动作。
+- `model-compression-setup.mjs` / `model-compression-setup.d.mts`：`codexc setup` 的“模型自动压缩”入口；
+  按模型名选择受管模型并设置自动压缩百分比，写入复用 `model-compression-management.mjs` 的全局广播，
+  同名模型在所有 Provider 共用同一值，结果返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
-  Provider、模型、思考等级和自动压缩交互与中文渲染，写入复用管理接口；历史 Thread 仍保留创建时的模型。
+  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；自动压缩不在本流程，转到
+  `model-compression-setup.mjs`；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
   受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。

@@ -83,7 +83,9 @@ export function normalizeProviderSettingsMutation(input) {
         provider: input.provider,
         model: input.model,
         reasoningEffort: input.reasoningEffort,
-        autoCompactPercent: input.autoCompactPercent,
+        ...(input.autoCompactPercent === undefined
+          ? {}
+          : { autoCompactPercent: input.autoCompactPercent }),
       };
     case "managed.compression":
       return {

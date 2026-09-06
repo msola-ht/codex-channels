@@ -17,6 +17,14 @@ const verbosityHints = { low: "回复更简洁", medium: "在简洁和细节之�
 const personalityHints = { none: "使用 Codex 默认人格", friendly: "语气更友好自然", pragmatic: "更直接、注重执行" };
 const historyPersistenceHints = { "save-all": "保存会话历史，便于恢复和接续", none: "不保存新的会话历史" };
 
+function compactHint(compact) {
+  const contextWindow = compact?.contextWindow ?? null;
+  const autoCompactPercent = compact?.autoCompactPercent ?? null;
+  return contextWindow === null
+    ? "当前：模型默认窗口 · 自动压缩默认 95%"
+    : `当前：${contextWindow.toLocaleString()} tokens · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}`;
+}
+
 export async function runCodexUserSettingsSetup({
   environment = process.env,
   output = process.stdout,
@@ -71,6 +79,11 @@ export async function runCodexUserSettingsSetup({
         label: "空闲总结",
         hint: settings.defaults.autoRecapEnabled ? "当前：开启" : "当前：关闭（默认）",
       },
+      ...(settings.defaultsEditable ? [{
+        value: "model-compact",
+        label: "模型上下文与自动压缩",
+        hint: compactHint(settings.compact),
+      }] : []),
       ...(settings.defaultsEditable ? [{
         value: "preferences",
         label: "其他用户偏好",
@@ -138,6 +151,9 @@ export async function runCodexUserSettingsSetup({
   }
   if (section === "auto-recap") {
     return runAutoRecapSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
+  if (section === "model-compact") {
+    return runModelCompactSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
   if (section === "preferences") {
     return runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
@@ -372,6 +388,86 @@ async function runAutoRecapSetting({ environment, output, prompts, settings, upd
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 空闲总结已${value ? "开启" : "关闭"}。\n`);
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  return result;
+}
+
+async function runModelCompactSetting({
+  environment,
+  output,
+  prompts,
+  settings,
+  updateSetting,
+  createClient,
+  primaryProvider,
+}) {
+  let contextWindow = settings.compact?.contextWindow ?? null;
+  let autoCompactPercent = settings.compact?.autoCompactPercent ?? null;
+  for (;;) {
+    const windowValue = await prompts.text({
+      message: contextWindow === null
+        ? "模型上下文窗口（tokens，留空恢复模型默认；当前：模型默认）"
+        : `模型上下文窗口（当前：${contextWindow.toLocaleString()} tokens；留空恢复模型默认）`,
+      initialValue: contextWindow === null ? "" : String(contextWindow),
+      validate: (value) => {
+        const trimmed = value.trim();
+        if (trimmed === "") return undefined;
+        const parsed = Number(trimmed);
+        return Number.isSafeInteger(parsed) && parsed > 0
+          ? undefined
+          : "请输入正整数，或留空恢复模型默认";
+      },
+    });
+    if (prompts.isCancel(windowValue)) return { action: "back" };
+    const nextWindow = windowValue.trim() === "" ? null : Number(windowValue.trim());
+
+    const percentValue = await prompts.text({
+      message: autoCompactPercent === null
+        ? "自动压缩百分比（10-90，留空恢复 95% 默认；当前：默认 95%）"
+        : `自动压缩百分比（当前：${autoCompactPercent}%；10-90，留空恢复 95% 默认）`,
+      initialValue: autoCompactPercent === null ? "" : String(autoCompactPercent),
+      validate: (value) => {
+        const trimmed = value.trim();
+        if (trimmed === "") return undefined;
+        const parsed = Number(trimmed);
+        return Number.isInteger(parsed) && parsed >= 10 && parsed <= 90
+          ? undefined
+          : "请输入 10 到 90 的整数，或留空恢复默认";
+      },
+    });
+    if (prompts.isCancel(percentValue)) return { action: "back" };
+    const nextPercent = percentValue.trim() === "" ? null : Number(percentValue.trim());
+    if (nextPercent !== null && nextWindow === null) {
+      output.write("设置自动压缩百分比前必须先设置上下文窗口；请重新输入。\n");
+      contextWindow = nextWindow;
+      autoCompactPercent = nextPercent;
+      continue;
+    }
+    contextWindow = nextWindow;
+    autoCompactPercent = nextPercent;
+    break;
+  }
+  const confirmed = await prompts.confirm({
+    message: `保存模型上下文与自动压缩：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}？`,
+    initialValue: true,
+  });
+  if (prompts.isCancel(confirmed) || confirmed !== true) {
+    output.write("已取消，未修改模型上下文与自动压缩。\n");
+    return undefined;
+  }
+  const result = await updateSetting({
+    kind: "model-compact",
+    contextWindow,
+    autoCompactPercent,
+  }, {
+    environment,
+    expectedVersion: settings.version,
+    ...(createClient === undefined ? {} : { createClient }),
+    ...(primaryProvider === undefined ? {} : { primaryProvider }),
+  });
+  output.write(
+    `Codex 模型上下文与自动压缩已更新：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}。\n`,
+  );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;
 }

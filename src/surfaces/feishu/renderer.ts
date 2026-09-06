@@ -231,6 +231,10 @@ export function renderFeishuOutput(
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
   remainingUsage?: ProviderModelUsageEstimate | null,
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null,
 ): string | null {
   switch (event.type) {
     case "turn.started":
@@ -276,6 +280,7 @@ export function renderFeishuOutput(
         exchangeRate,
         debug,
         remainingUsage,
+        autoCompactPercent,
       );
     case "thread.status":
       return `Session 状态：${threadStatusLabel(event.status)}`;
@@ -325,6 +330,10 @@ function renderFeishuTurnCompleted(
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
   remainingUsage?: ProviderModelUsageEstimate | null,
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null,
 ): string {
   return renderFeishuLifecyclePresentation(
     createTurnCompletedPresentation(
@@ -333,6 +342,7 @@ function renderFeishuTurnCompleted(
       exchangeRate,
       debug,
       remainingUsage,
+      autoCompactPercent,
     ),
   );
 }
