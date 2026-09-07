@@ -45,6 +45,16 @@ describe("published README synchronization", () => {
     );
   });
 
+  it("synchronizes the current concise repository README", () => {
+    const repositoryReadme = readFileSync(resolve("README.md"), "utf8");
+    const rendered = renderPublishedReadme(repositoryReadme, "0.153.4");
+
+    expect(rendered).toContain("当前正式版：`0.153.4`");
+    expect(rendered).toContain("@openai/codex@0.153.4");
+    expect(rendered).toContain("@hegenai/codexc@0.153.4");
+    expect(rendered).not.toContain("@hegenai/codexc@0.150.1");
+  });
+
   it("validates a release tag without installed dependencies", () => {
     const fixture = mkdtempSync(join(tmpdir(), "codexc-release-tag-"));
     const scriptsDirectory = join(fixture, "scripts");

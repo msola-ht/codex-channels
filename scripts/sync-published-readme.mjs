@@ -39,15 +39,7 @@ export function renderPublishedReadme(readme, targetVersion) {
   const readmeWithoutRc = removeRcPreview(readme);
   const currentCodexVersion = baseVersion(currentVersion);
   const targetCodexVersion = baseVersion(targetVersion);
-  for (const expected of [
-    `codex-cli ${currentCodexVersion}`,
-    `@openai/codex@${currentCodexVersion}`,
-    `@hegenai/codexc@${currentVersion}`,
-  ]) {
-    if (!readmeWithoutRc.includes(expected)) {
-      throw new Error(`README 正式安装说明缺少受控版本：${expected}`);
-    }
-  }
+  assertPublishedInstallMarkers(readmeWithoutRc, currentCodexVersion, currentVersion);
   const rendered = readmeWithoutRc
     .replaceAll(`codex-cli ${currentCodexVersion}`, `codex-cli ${targetCodexVersion}`)
     .replaceAll(`Codex ${currentCodexVersion} 的 Plugin API`, `Codex ${targetCodexVersion} 的 Plugin API`)
@@ -81,15 +73,7 @@ function renderRcReadme(readme, targetVersion, developmentVersion, publishedVers
       `拒绝把 README rc 预发行版本降级：${currentVersion} -> ${targetVersion}`,
     );
   }
-  for (const expected of [
-    `codex-cli ${publishedVersion}`,
-    `@openai/codex@${publishedVersion}`,
-    `@hegenai/codexc@${publishedVersion}`,
-  ]) {
-    if (!readme.includes(expected)) {
-      throw new Error(`README 正式安装说明缺少受控版本：${expected}`);
-    }
-  }
+  assertPublishedInstallMarkers(readme, publishedVersion, publishedVersion);
 
   const targetCodexVersion = baseVersion(targetVersion);
   let rendered = currentVersion
@@ -152,15 +136,7 @@ function renderFixReadme(readme, targetVersion, developmentVersion, publishedVer
       `拒绝把 README 修复预览版本降级：${currentVersion} -> ${targetVersion}`,
     );
   }
-  for (const expected of [
-    `codex-cli ${publishedVersion}`,
-    `@openai/codex@${publishedVersion}`,
-    `@hegenai/codexc@${publishedVersion}`,
-  ]) {
-    if (!readme.includes(expected)) {
-      throw new Error(`README 正式安装说明缺少受控版本：${expected}`);
-    }
-  }
+  assertPublishedInstallMarkers(readme, publishedVersion, publishedVersion);
 
   let rendered = preview
     ? readme.replaceAll(currentVersion, targetVersion)
@@ -196,6 +172,27 @@ function removeRcPreview(readme) {
       /\n\n测试下一正式版预发行包：\n\n```bash\nnpm install -g @openai\/codex@\d+\.\d+\.\d+\nnpm install -g @hegenai\/codexc@\d+\.\d+\.\d+-rc\.[1-9]\d*\n```/u,
       "",
     );
+}
+
+function assertPublishedInstallMarkers(readme, codexVersion, gatewayVersion) {
+  const expected = [
+    `@openai/codex@${codexVersion}`,
+    `@hegenai/codexc@${gatewayVersion}`,
+  ];
+  const codexCliMarkers = [...readme.matchAll(/codex-cli \d+\.\d+\.\d+/gu)]
+    .map(([marker]) => marker);
+  if (codexCliMarkers.length > 0) {
+    const expectedCodexCli = `codex-cli ${codexVersion}`;
+    if (!codexCliMarkers.includes(expectedCodexCli)) {
+      throw new Error(`README 正式安装说明缺少受控版本：${expectedCodexCli}`);
+    }
+    expected.unshift(expectedCodexCli);
+  }
+  for (const marker of expected) {
+    if (!readme.includes(marker)) {
+      throw new Error(`README 正式安装说明缺少受控版本：${marker}`);
+    }
+  }
 }
 
 function compareStableVersions(left, right) {
