@@ -566,6 +566,24 @@ describe("SessionRouter", () => {
     expect(unsubscribed).toEqual(["new"]);
   });
 
+  it("persists the force-new marker until the next ordinary message creates a Thread", async () => {
+    const store = new MemoryBindingStore();
+    const client = threadPort({
+      listThreads: async () => [thread("old", { type: "idle" })],
+      startThread: async () => session(thread("new", { type: "idle" })),
+      resumeThread: async (threadId) => session(thread(threadId, { type: "idle" })),
+      unsubscribeThread: async () => undefined,
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await router.newSession(target);
+    expect(store.idleState(target)).toMatchObject({ forceNew: true });
+
+    const binding = await router.ensure(target);
+    expect(binding.threadId).toBe("new");
+    expect(store.idleState(target)).toMatchObject({ forceNew: false });
+  });
+
   it("keeps an active foreground subscription when switching it to the background", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "running", sessionId: "running" });

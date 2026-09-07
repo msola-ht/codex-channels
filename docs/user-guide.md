@@ -101,6 +101,25 @@ auto_recap = false
 
 关闭只影响自动回顾，手动 `/recap` 仍然可用；修改后运行 `codexc service restart all`。
 
+### 渠道会话空闲自动解除
+
+在 `codexc config → 系统设置 → 会话空闲自动解除` 中设置渠道会话自动解除 Thread 绑定的全局
+空闲阈值，默认 15 分钟：
+
+```toml
+[conversation]
+idle_release_minutes = 15
+```
+
+该值对 Telegram、飞书和微信统一生效，允许 0–1440 分钟，0 表示关闭。用户消息、平台本地命令、
+审批与输入交互和任何带目标会话的输出都会刷新活动时间；正在恢复的 Thread 不会被同时释放。
+Provider 断线期间也会跳过扫描。
+连续达到配置的空闲时间且没有任何输入和输出时，Gateway 才会在确认 Thread、原生 Queue、审批和子代理都已
+空闲后取消订阅并解除前台绑定。解除后会收到一次
+“自动解除占用”提示。此后直接发送消息只会开启新会话，不会接续旧 Thread；需要继续旧会话时
+直接使用提示中的 `/r <Thread ID>` 命令显式恢复；飞书显示为 CardKit 2.0 卡片，Telegram 为
+HTML 面板，微信为结构化文本。修改后需要重启 Gateway，不影响 App Server。
+
 ### 代理与权限
 
 无法直连 OpenAI 时，在 Gateway 配置中设置 HTTP(S) 代理：

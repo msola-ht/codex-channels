@@ -88,6 +88,22 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
+  it("delivers idle release with the exact resume command", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "conversation.idle.released",
+      target,
+      threadId: "thread-idle-123",
+      minutes: 15,
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText.mock.calls[0]?.[0].text).toContain("thread-idle-123");
+    expect(sendText.mock.calls[0]?.[0].text).toContain("/r thread-idle-123");
+  });
+
   it.skip("shows thinking immediately and only once per reasoning segment", async () => {
     const { outbox, sendText } = outboxFixture();
 

@@ -29,6 +29,7 @@ export interface GatewaySettings {
   };
   system: {
     approvalTimeoutSeconds: number;
+    idleReleaseMinutes: number;
     sandbox: "read-only" | "workspace-write";
     defaultWorkspace: string | null;
     defaultModel: string | null;
@@ -93,6 +94,7 @@ export type GatewaySettingInput =
   | { kind: "display.price-currency"; value: "cny" | "usd" }
   | { kind: "telegram.message-format"; value: "html" | "rich" }
   | { kind: "system.approval-timeout"; value: number }
+  | { kind: "system.idle-release-minutes"; value: number }
   | { kind: "system.sandbox"; value: "read-only" | "workspace-write" }
   | { kind: "system.default-workspace"; value: string }
   | { kind: "system.default-model"; value: string | null }

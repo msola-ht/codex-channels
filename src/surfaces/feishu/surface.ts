@@ -244,6 +244,7 @@ export class FeishuSurface implements SurfaceAdapter {
       options.actorRegistry,
       options.access,
       options.logger,
+      (target) => options.service.touchActivity?.(target),
     );
     this.oauth = dependencies.oauth ?? new FeishuOAuthController(
       options.appId,

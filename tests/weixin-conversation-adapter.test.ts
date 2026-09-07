@@ -41,6 +41,23 @@ afterAll(() => {
 });
 
 describe("WeixinConversationAdapter", () => {
+  it("touches activity before handling platform-local commands", async () => {
+    const touchActivity = vi.fn();
+    const notifyText = vi.fn(() => true);
+    const adapter = new WeixinConversationAdapter(
+      serviceFixture({ touchActivity }),
+      { notifyText },
+    );
+
+    await adapter.handle({ ...message, text: "/help" });
+
+    expect(touchActivity).toHaveBeenCalledWith(target);
+    expect(notifyText).toHaveBeenCalledWith(
+      target,
+      expect.stringContaining("Codex 命令"),
+    );
+  });
+
   it("keeps ordinary text on the shared conversation submission path", async () => {
     const submit = vi.fn(async () => ({
       threadId: "thread",

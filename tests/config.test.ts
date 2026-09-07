@@ -210,6 +210,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.reasoningEnabled).toBe(true);
     expect(runtime.config.pluginApiEnabled).toBe(false);
     expect(runtime.config.scheduledTasksEnabled).toBe(false);
+    expect(runtime.config.idleReleaseMinutes).toBe(15);
     expect(runtime.config.apiProviders).toEqual([]);
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
@@ -587,6 +588,16 @@ describe("Gateway config.toml", () => {
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     }).config.priceCurrency).toBe("cny");
+  });
+
+  it("preserves the explicit conversation idle release minutes", () => {
+    const fixture = createFixture({
+      conversation: { idle_release_minutes: 20 },
+    });
+
+    expect(loadRuntimeConfig({
+      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+    }).config.idleReleaseMinutes).toBe(20);
   });
 
   it("rejects the removed automatic price currency and per-provider overrides", () => {

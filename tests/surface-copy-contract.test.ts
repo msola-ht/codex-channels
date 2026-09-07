@@ -52,6 +52,7 @@ import {
 import {
   emptyCodexResponseText,
   formatCliInput,
+  formatConversationIdleReleased,
   formatThreadAvailability,
   missingFinalResponseText,
 } from "../src/surfaces/output-copy.js";
@@ -71,6 +72,17 @@ describe("shared surface copy contract", () => {
       .toBe("当前会话的占用已解除，Gateway 已自动恢复。");
     expect(formatThreadAvailability("occupied", "thread-1234567890", true))
       .toContain("后台会话 thread-12345");
+  });
+
+  it("formats the automatic conversation idle release notice", () => {
+    expect(formatConversationIdleReleased(15, "thread-idle-123")).toBe(
+      [
+        "会话已因 15 分钟无输入和输出自动解除占用。",
+        "Session ID：thread-idle-123",
+        "恢复会话：/r thread-idle-123",
+        "也可以直接发送消息开始新对话。",
+      ].join("\n"),
+    );
   });
 
   it("reports unsupported model audio before a Turn on every surface", () => {

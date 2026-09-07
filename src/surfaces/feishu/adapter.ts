@@ -156,6 +156,7 @@ export class FeishuConversationAdapter {
 
   async handle(message: FeishuInboxMessage): Promise<void> {
     try {
+      this.conversations.touchActivity?.(message.target);
       if (message.kind === "file") {
         await this.handleFile(message);
         return;
@@ -324,6 +325,7 @@ export class FeishuConversationAdapter {
     if (messages.length === 0) {
       return;
     }
+    this.conversations.touchActivity?.(messages[0]!.target);
     try {
       await this.submitImageBatch(messages);
     } catch (error) {
@@ -351,6 +353,7 @@ export class FeishuConversationAdapter {
     actorId: string,
     input = "",
   ): Promise<FeishuCommandCenterResponse | void> {
+    this.conversations.touchActivity?.(target);
     try {
       if (action === "help") {
         this.notifyMarkdown(target.conversationId, renderFeishuHelp());

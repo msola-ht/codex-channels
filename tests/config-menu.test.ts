@@ -556,6 +556,36 @@ describe("Codex Connect config menu", () => {
     });
   });
 
+  it("sets the conversation idle release minutes through the system settings", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("system")
+        .mockResolvedValueOnce("idle_release"),
+      text: vi.fn(async () => "20"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      idleReleaseMinutes: 20,
+      configPath: fixture.configPath,
+      activation: "restart-gateway",
+      activationResult: configActivationResult("restart-gateway"),
+    });
+    expect(readGatewayConfig(fixture.configPath).conversation).toEqual({
+      idle_release_minutes: 20,
+    });
+  });
+
   it("sets webui host and requires a token for non-loopback", async () => {
     const fixture = createFixture();
     const output: string[] = [];

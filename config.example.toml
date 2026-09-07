@@ -38,6 +38,11 @@ sandbox = "workspace-write"
 [approval]
 timeout_seconds = 900
 
+[conversation]
+# 渠道会话在连续无用户输入和会话输出时自动解除 Thread 绑定的分钟数；
+# 0 表示关闭。所有渠道统一使用该值。
+idle_release_minutes = 15
+
 [display]
 # full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
 operation_updates = "compact"

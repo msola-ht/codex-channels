@@ -35,6 +35,7 @@ import {
   emptyCodexResponseText,
   formatCliInput,
   formatCodexWarning,
+  formatConversationIdleReleased,
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
@@ -443,6 +444,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
         );
       case "warning":
         return formatCodexWarning(visibleUpstreamMessage(event.message));
+      case "conversation.idle.released":
+        return formatWeixinCommandText(
+          formatConversationIdleReleased(event.minutes, event.threadId),
+          { structuredFields: true },
+        );
       case "account.updated":
         return formatWeixinCommandText(
           formatRuntimeAccountUpdate(event.authMode, event.planType),
@@ -800,6 +806,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
 function isAllowedWeixinOutputEvent(event: OutputEvent): boolean {
   return event.type === "turn.started"
     || event.type === "turn.completed"
+    || event.type === "conversation.idle.released"
     || (event.type === "text.completed" && event.phase === "final_answer");
 }
 

@@ -128,6 +128,7 @@ export class WeixinConversationAdapter {
   }
 
   handle(message: WeixinConversationMessage): Promise<void> {
+    this.conversations.touchActivity?.(message.target);
     if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
       return this.handleOnce(message);
     }

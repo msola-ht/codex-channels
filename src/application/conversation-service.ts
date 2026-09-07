@@ -171,6 +171,11 @@ export interface ConversationResumeResult {
   queuePending?: boolean;
 }
 
+export type ConversationIdleReleaseResult =
+  | { status: "unbound" }
+  | { status: "busy"; threadId: string }
+  | { status: "released"; threadId: string };
+
 export type ConversationQueryPort =
   & AccountQueryPort
   & SkillQueryPort
@@ -220,6 +225,7 @@ export interface ConversationStatus {
 
 /** Stable application boundary consumed by commands and external Surfaces. */
 export interface ConversationUseCases {
+  touchActivity?(target: ConversationTarget): void;
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission>;
   invokeSkill(
     target: ConversationTarget,
@@ -327,6 +333,9 @@ export interface ConversationUseCases {
     target: ConversationTarget,
     force?: boolean,
   ): Promise<ThreadOccupancyReleaseResult>;
+  releaseIdle?(
+    target: ConversationTarget,
+  ): Promise<ConversationIdleReleaseResult>;
   status(
     target: ConversationTarget,
     options?: { includeGitBranch?: boolean },
@@ -339,6 +348,7 @@ export class ConversationService implements ConversationUseCases {
   private readonly revertUseCases: ThreadRevertService;
   private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
+  private idleReleaseEnabled = true;
   private readonly sessionDisplayCacheRefreshes = new Map<string, {
     promise: Promise<void>;
     rerun: boolean;
@@ -400,6 +410,62 @@ export class ConversationService implements ConversationUseCases {
       ));
     }
     return this.threadOccupancy.releaseThread(target, force);
+  }
+
+  touchActivity(target: ConversationTarget): void {
+    if (!this.idleReleaseEnabled) {
+      return;
+    }
+    this.router.touchActivity?.(target, Date.now());
+  }
+
+  setIdleReleaseEnabled(enabled: boolean): void {
+    this.idleReleaseEnabled = enabled;
+  }
+
+  releaseIdle(
+    target: ConversationTarget,
+  ): Promise<ConversationIdleReleaseResult> {
+    return this.locked(target, async () => {
+      const current = this.router.current(target);
+      if (!current) {
+        return { status: "unbound" };
+      }
+      if (this.core.activeTurn(target)) {
+        this.touchActivity(target);
+        return { status: "busy", threadId: current.threadId };
+      }
+      if (this.hasPendingSubagentRuns?.(current.threadId)) {
+        this.touchActivity(target);
+        return { status: "busy", threadId: current.threadId };
+      }
+      if (await this.probeNativeQueueItems(current.threadId)) {
+        this.touchActivity(target);
+        return { status: "busy", threadId: current.threadId };
+      }
+      if (this.transfers?.hasPendingInteraction(current.threadId)) {
+        this.touchActivity(target);
+        return { status: "busy", threadId: current.threadId };
+      }
+      const snapshot = await this.router.readThread(current.threadId);
+      if (
+        snapshot.status.type !== "idle"
+        && snapshot.status.type !== "notLoaded"
+      ) {
+        this.touchActivity(target);
+        return { status: "busy", threadId: current.threadId };
+      }
+      const modelPreference = this.models.capturePreference?.(target);
+      try {
+        await this.router.newSession(target);
+      } catch {
+        return { status: "busy", threadId: current.threadId };
+      }
+      this.invalidateRevertSnapshot(target);
+      this.invalidateQueueSnapshot(current.threadId);
+      this.restoreSelectionsAfterBindingChange(target, modelPreference);
+      return { status: "released", threadId: current.threadId };
+    });
   }
 
   requestMetrics(
@@ -596,6 +662,7 @@ export class ConversationService implements ConversationUseCases {
     input: TurnInput[],
     identity?: TurnStartIdentity,
   ): Promise<Submission> {
+    this.touchActivity(target);
     if (input.some((item) => item.type === "image")) {
       await this.models.requireInputModality(target, "image");
     }
@@ -1775,6 +1842,7 @@ export class ConversationService implements ConversationUseCases {
     clientUserMessageId: string,
     identity?: TurnStartIdentity,
   ): Promise<Submission> {
+    this.touchActivity(target);
     const threadStartOptions = this.models.threadStartOptions?.(target) ?? {};
     const binding = Object.keys(threadStartOptions).length > 0
       ? await this.router.ensure(target, threadStartOptions)

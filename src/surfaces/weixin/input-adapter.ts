@@ -219,6 +219,7 @@ export class WeixinInputAdapter {
       await this.options.removePersistedReplyContext?.(target);
       return;
     }
+    this.options.service.touchActivity?.(target);
     const quotedText = message.quotedText
       ?? (message.quotedMessageId === undefined
         ? undefined

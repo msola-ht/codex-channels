@@ -113,6 +113,12 @@
   断线不进入自动重连。扫描遇到正在执行的 Provider 请求时立即跳过，不排队等待；释放已经开始时，
   新请求等待 Client 关闭完成后再按需拉起。聚合只读操作只保护进程不被并发释放，不刷新空闲时间；
   关闭时停止新扫描并只等待已经进入释放阶段的扫描退出，释放失败只记录日志不阻塞请求。
+- `conversation-idle-releaser.ts`：按 `conversation.idle_release_minutes` 定期扫描前台 Thread
+  绑定；输入或输出刷新最近活动时间，超过阈值且 App Server 确认为空闲后由
+  `ConversationService.releaseIdle` 取消订阅并解绑，成功后通过共享结构化事件只通知一次
+  “自动解除占用”，并携带当前 Thread ID 供 `/r` 直接恢复。
+  正在恢复或 Provider 断线的绑定会跳过本轮，强制新建标记也会跳过扫描；关闭时停止定时器并限时等待已经在途的
+  扫描退出，避免释放 RPC 卡住 Gateway 关闭。
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存错误原文与分类；结构化 `misalignmentPolicyViolation` 使用独立分类并
   保留协议代码，不携带任何平台上下文或敏感凭据。

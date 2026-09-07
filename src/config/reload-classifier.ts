@@ -82,6 +82,11 @@ function restartRequiredReasons(
     [configChange("storage.database"), current.stateDatabasePath, next.stateDatabasePath],
     [configChange("approval.timeout"), current.approvalTimeoutMs, next.approvalTimeoutMs],
     [
+      configChange("conversation.idle-release-minutes"),
+      current.idleReleaseMinutes,
+      next.idleReleaseMinutes,
+    ],
+    [
       configChange("display.operation-updates"),
       current.operationUpdateDisplay,
       next.operationUpdateDisplay,

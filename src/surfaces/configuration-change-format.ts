@@ -125,6 +125,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "network.proxy": "网络代理",
     "storage.database": "State Database",
     "approval.timeout": "审批超时",
+    "conversation.idle-release-minutes": "会话空闲自动解除",
     "display.operation-updates": "操作过程显示",
     "display.plan-updates": "自动计划显示",
     "display.reasoning": "思考状态显示",

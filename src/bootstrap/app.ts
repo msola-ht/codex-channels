@@ -114,6 +114,7 @@ import {
   type SurfaceAdapter,
 } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
+import { ConversationIdleReleaser } from "./conversation-idle-releaser.js";
 import {
   createSurfaceModules,
 } from "./surface-composition.js";
@@ -184,6 +185,7 @@ export class GatewayApplication {
   private readonly exchangeRate: RemoteExchangeRate;
   private readonly metricsSync: MetricsSync;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
+  private readonly conversationIdleReleaser?: ConversationIdleReleaser;
   private readonly providerAccounts?: ProviderAccountService;
   private readonly bindings: SqliteBindingStore;
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
@@ -627,6 +629,33 @@ export class GatewayApplication {
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
       this.sessionDisplayCache,
     );
+    service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
+    if (config.idleReleaseMinutes > 0) {
+      this.conversationIdleReleaser = new ConversationIdleReleaser({
+        logger,
+        idleThresholdMs: config.idleReleaseMinutes * 60_000,
+        isBindingRestoring: (threadId) => this.isBindingRestoring(threadId),
+        listForegroundBindings: () =>
+          this.router.allBindings().filter(
+            (binding) => !this.router.isBackgroundThread(binding.threadId),
+          ),
+        idleState: (target) => this.router.idleState(target),
+        ensureIdleState: (target, atMs) =>
+          this.router.ensureIdleState(target, atMs),
+        releaseIdle: (target) => service.releaseIdle(target),
+        notifyReleased: (target, threadId) => {
+          this.output.publish({
+            type: "conversation.idle.released",
+            target,
+            threadId,
+            minutes: config.idleReleaseMinutes,
+          }, true);
+        },
+      });
+      this.output.subscribe("conversation-idle-activity", (event) => {
+        this.router.touchActivity(event.target, Date.now());
+      });
+    }
     this.output.subscribe("conversation-background-release", async (event) => {
       const threadId = event.type === "turn.completed"
         ? event.threadId
@@ -1133,6 +1162,7 @@ export class GatewayApplication {
       await this.channelImageSpool.start();
       this.scheduledTasks?.start();
       this.providerIdleReleaser?.start();
+      this.conversationIdleReleaser?.start();
       this.scheduleBindingRestore();
       this.requireRunning();
     } catch (error) {
@@ -1162,6 +1192,7 @@ export class GatewayApplication {
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
+      ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Metrics Sync", () => this.metricsSync.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
@@ -1502,6 +1533,13 @@ export class GatewayApplication {
       proxy: this.config.networkProxy,
       ...(openAiBaseUrl === undefined ? {} : { baseUrl: openAiBaseUrl }),
     });
+  }
+
+  private isBindingRestoring(threadId: string): boolean {
+    const provider = this.codex.knownProvider(threadId);
+    return this.pendingBindingRestores.has(threadId)
+      || this.restoringThreadIds.has(threadId)
+      || (provider !== undefined && this.disconnectedProviders.has(provider));
   }
 
   private async restoreBindings(

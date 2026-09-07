@@ -52,8 +52,9 @@
   切换到 Flash Vision Exp；目录清单记录迁移完成状态，避免以后覆盖用户主动选回 Flash 的决定；
   最后在私有备份后移除已废弃的 `[vision]` 配置段。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
-  升级到 v4，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口提供
-  只读版本检查；不自动迁移未知版本。运行时由 SqliteScheduledTaskStore 保持失败关闭。
+  或 v4 升级到 v5，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口
+  提供只读版本检查；不自动迁移未知版本。运行时由 SqliteBindingStore 和
+  SqliteScheduledTaskStore 保持失败关闭。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，

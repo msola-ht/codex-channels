@@ -16,8 +16,8 @@ import {
   resolveConfiguredPath,
 } from "./runtime-config.mjs";
 
-const currentSchemaVersion = 4;
-const supportedPreviousSchemaVersion = 3;
+const currentSchemaVersion = 5;
+const supportedPreviousSchemaVersions = new Set([3, 4]);
 const requiredStateColumns = Object.freeze({
   conversation_actors: ["surface", "account_id", "conversation_id", "actor_id", "created_at"],
   conversation_background_bindings: [
@@ -29,7 +29,20 @@ const requiredStateColumns = Object.freeze({
   conversation_workspaces: [
     "surface", "account_id", "conversation_id", "workspace_id", "updated_at",
   ],
+  conversation_idle_state: [
+    "surface", "account_id", "conversation_id", "last_activity_at", "force_new",
+  ],
 });
+const idleStateTableSql = `
+  CREATE TABLE conversation_idle_state (
+    surface TEXT NOT NULL CHECK (length(surface) > 0),
+    account_id TEXT NOT NULL CHECK (length(account_id) > 0),
+    conversation_id TEXT NOT NULL,
+    last_activity_at INTEGER NOT NULL,
+    force_new INTEGER NOT NULL CHECK (force_new IN (0, 1)),
+    PRIMARY KEY (surface, account_id, conversation_id)
+  ) STRICT;
+`;
 
 export function inspectStateDatabase(environment = process.env) {
   const { databasePath } = resolveStateDatabaseContext(environment);
@@ -51,13 +64,12 @@ export function inspectStateDatabase(environment = process.env) {
     const schemaVersion = Number(row?.user_version);
     if (schemaVersion === currentSchemaVersion) {
       validateStateTables(database, Object.keys(requiredStateColumns));
-    } else if (schemaVersion === supportedPreviousSchemaVersion) {
-      validateStateTables(
-        database,
-        Object.keys(requiredStateColumns).filter((table) =>
-          table !== "conversation_background_bindings"
-        ),
-      );
+    } else if (supportedPreviousSchemaVersions.has(schemaVersion)) {
+      const tables = Object.keys(requiredStateColumns).filter((table) => {
+        if (table === "conversation_idle_state") return false;
+        return schemaVersion === 4 || table !== "conversation_background_bindings";
+      });
+      validateStateTables(database, tables);
     }
     return {
       compatible: schemaVersion === currentSchemaVersion,
@@ -66,7 +78,7 @@ export function inspectStateDatabase(environment = process.env) {
       schemaVersion,
       targetSchemaVersion: currentSchemaVersion,
       updateable: schemaVersion === currentSchemaVersion
-        || schemaVersion === supportedPreviousSchemaVersion,
+        || supportedPreviousSchemaVersions.has(schemaVersion),
       scheduledTasks,
     };
   } finally {
@@ -126,9 +138,9 @@ function upgradeGatewayStateDatabase(environment = process.env, options = {}) {
     if (version === currentSchemaVersion) {
       return { changed: false, databasePath, version };
     }
-    if (version !== supportedPreviousSchemaVersion) {
+    if (!supportedPreviousSchemaVersions.has(version)) {
       throw new Error(
-        `状态数据库版本不支持升级：当前 ${version}，只支持 ${supportedPreviousSchemaVersion} → ${currentSchemaVersion}`,
+        `状态数据库版本不支持升级：当前 ${version}，只支持 3/4 → ${currentSchemaVersion}`,
       );
     }
 
@@ -137,19 +149,24 @@ function upgradeGatewayStateDatabase(environment = process.env, options = {}) {
     try {
       copyFileSync(databasePath, backupPath);
       securePrivateFileSync(backupPath);
-      database.exec(`
-        CREATE TABLE conversation_background_bindings (
-          surface TEXT NOT NULL CHECK (length(surface) > 0),
-          account_id TEXT NOT NULL CHECK (length(account_id) > 0),
-          conversation_id TEXT NOT NULL,
-          workspace_id TEXT NOT NULL,
-          thread_id TEXT NOT NULL PRIMARY KEY,
-          session_id TEXT NOT NULL,
-          updated_at INTEGER NOT NULL
-        ) STRICT;
-        PRAGMA user_version = ${currentSchemaVersion};
-        COMMIT;
-      `);
+      if (version === 3) {
+        database.exec(`
+          CREATE TABLE conversation_background_bindings (
+            surface TEXT NOT NULL CHECK (length(surface) > 0),
+            account_id TEXT NOT NULL CHECK (length(account_id) > 0),
+            conversation_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            thread_id TEXT NOT NULL PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+          ${idleStateTableSql}
+          PRAGMA user_version = ${currentSchemaVersion};
+          COMMIT;
+        `);
+      } else {
+        database.exec(`${idleStateTableSql} PRAGMA user_version = ${currentSchemaVersion}; COMMIT;`);
+      }
     } catch (error) {
       try {
         database.exec("ROLLBACK");

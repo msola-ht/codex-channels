@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   SessionRouter,
@@ -67,6 +67,58 @@ describe("SqliteBindingStore", () => {
     reopened.close();
   });
 
+  it("persists conversation idle state and force-new marker", () => {
+    const { path } = databasePath();
+    const first = new SqliteBindingStore(path);
+    first.ensureIdleState(target, 1_000);
+    first.touchActivity(target, 2_000);
+    first.setForceNew(target, 3_000, true);
+    first.close();
+
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.idleState(target)).toEqual({
+      lastActivityAt: 3_000,
+      forceNew: true,
+    });
+    reopened.close();
+  });
+
+  it("keeps the newest activity timestamp when force-new is written out of order", () => {
+    const { path } = databasePath();
+    const store = new SqliteBindingStore(path);
+    store.ensureIdleState(target, 1_000);
+    store.touchActivity(target, 2_000);
+    store.setForceNew(target, 1_500, true);
+
+    expect(store.idleState(target)).toEqual({
+      lastActivityAt: 2_000,
+      forceNew: true,
+    });
+    store.close();
+  });
+
+  it("keeps a newer idle timestamp when unbind is written with an older clock", () => {
+    const { path } = databasePath();
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_000);
+    try {
+      const store = new SqliteBindingStore(path);
+      store.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
+      store.ensureIdleState(target, 1_000);
+      store.touchActivity(target, 5_000);
+      store.unbind(target);
+      store.close();
+
+      const reopened = new SqliteBindingStore(path);
+      expect(reopened.idleState(target)).toMatchObject({
+        lastActivityAt: 5_000,
+        forceNew: true,
+      });
+      reopened.close();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("atomically transfers a Thread binding and persists the replaced destination", () => {
     const { path } = databasePath();
     const destination = {
@@ -104,6 +156,8 @@ describe("SqliteBindingStore", () => {
     expect(reopened.get(target)).toBeUndefined();
     expect(reopened.get(destination)?.threadId).toBe("thread-owned");
     expect(reopened.getByThread("thread-replaced")).toBeUndefined();
+    expect(reopened.idleState(target)).toMatchObject({ forceNew: true });
+    expect(reopened.idleState(destination)).toMatchObject({ forceNew: false });
     reopened.close();
   });
 
@@ -134,6 +188,7 @@ describe("SqliteBindingStore", () => {
 
     const third = new SqliteBindingStore(path);
     expect(third.list()).toEqual([]);
+    expect(third.idleState(target)).toMatchObject({ forceNew: true });
     third.close();
   });
 
@@ -192,6 +247,32 @@ describe("SqliteBindingStore", () => {
     reopened.close();
   });
 
+  it("persists force-new when an ordinary foreground binding is unbound", () => {
+    const { path } = databasePath();
+    const first = new SqliteBindingStore(path);
+    first.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
+    first.unbind(target);
+    first.close();
+
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.get(target)).toBeUndefined();
+    expect(reopened.idleState(target)).toMatchObject({ forceNew: true });
+    reopened.close();
+  });
+
+  it("persists force-new when a foreground Thread is removed", () => {
+    const { path } = databasePath();
+    const first = new SqliteBindingStore(path);
+    first.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
+    first.removeThread("thread-1");
+    first.close();
+
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.get(target)).toBeUndefined();
+    expect(reopened.idleState(target)).toMatchObject({ forceNew: true });
+    reopened.close();
+  });
+
   it("isolates identical conversation IDs across Surface accounts", () => {
     const { path } = databasePath();
     const store = new SqliteBindingStore(path);
@@ -238,7 +319,7 @@ describe("SqliteBindingStore", () => {
     database.close();
 
     expect(() => new SqliteBindingStore(path)).toThrow(
-      "状态数据库版本不兼容：当前 2，Gateway 需要 4",
+      "状态数据库版本不兼容：当前 2，Gateway 需要 5",
     );
   });
 
@@ -277,7 +358,7 @@ describe("SqliteBindingStore", () => {
         updated_at INTEGER NOT NULL
       ) STRICT;
 
-      PRAGMA user_version = 4;
+      PRAGMA user_version = 5;
     `);
     database.close();
 
@@ -336,6 +417,17 @@ describe("SqliteBindingStore", () => {
 });
 
 describe("MemoryBindingStore", () => {
+  it("marks force-new when a foreground binding is unbound or removed", () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
+    store.unbind(target);
+    expect(store.idleState(target)).toMatchObject({ forceNew: true });
+
+    store.bind({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" });
+    store.removeThread("thread-1");
+    expect(store.idleState(target)).toMatchObject({ forceNew: true });
+  });
+
   it("promotes one background binding while demoting the active foreground", () => {
     const store = new MemoryBindingStore();
     const first = { target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" };
@@ -377,6 +469,8 @@ describe("MemoryBindingStore", () => {
     expect(store.get(target)).toBeUndefined();
     expect(store.get(destination)?.threadId).toBe("thread-owned");
     expect(store.getByThread("thread-replaced")).toBeUndefined();
+    expect(store.idleState(target)).toMatchObject({ forceNew: true });
+    expect(store.idleState(destination)).toMatchObject({ forceNew: false });
   });
 
   it("tracks authorized Actors independently from Conversation identity", () => {

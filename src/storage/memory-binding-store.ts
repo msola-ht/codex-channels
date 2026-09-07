@@ -4,6 +4,7 @@ import type {
   BindingSwitch,
   BindingTransfer,
   ConversationBinding,
+  ConversationIdleState,
 } from "./binding-store.js";
 
 export class MemoryBindingStore implements BindingStore {
@@ -13,6 +14,7 @@ export class MemoryBindingStore implements BindingStore {
   private readonly backgroundByConversation = new Map<string, Map<string, ConversationBinding>>();
   private readonly byThread = new Map<string, ConversationBinding>();
   private readonly actorsByConversation = new Map<string, Set<string>>();
+  private readonly idleStateByConversation = new Map<string, ConversationIdleState>();
 
   conversations(): ConversationTarget[] {
     return [...this.targetsByConversation.values()];
@@ -53,6 +55,9 @@ export class MemoryBindingStore implements BindingStore {
       for (const binding of this.backgrounds(target)) {
         this.removeThread(binding.threadId);
         removed = true;
+      }
+      if (removed) {
+        this.setForceNew(target, Date.now(), true);
       }
       return removed;
     }
@@ -96,6 +101,41 @@ export class MemoryBindingStore implements BindingStore {
       ...this.byConversation.values(),
       ...[...this.backgroundByConversation.values()].flatMap((bindings) => [...bindings.values()]),
     ];
+  }
+
+  idleState(target: ConversationTarget): ConversationIdleState {
+    return this.idleStateByConversation.get(this.key(target)) ?? {
+      lastActivityAt: 0,
+      forceNew: false,
+    };
+  }
+
+  ensureIdleState(target: ConversationTarget, atMs: number): void {
+    const key = this.key(target);
+    if (!this.idleStateByConversation.has(key)) {
+      this.idleStateByConversation.set(key, {
+        lastActivityAt: atMs,
+        forceNew: false,
+      });
+    }
+  }
+
+  touchActivity(target: ConversationTarget, atMs: number): void {
+    const key = this.key(target);
+    const current = this.idleStateByConversation.get(key);
+    this.idleStateByConversation.set(key, {
+      lastActivityAt: Math.max(current?.lastActivityAt ?? 0, atMs),
+      forceNew: current?.forceNew ?? false,
+    });
+  }
+
+  setForceNew(target: ConversationTarget, atMs: number, forceNew: boolean): void {
+    const key = this.key(target);
+    const current = this.idleStateByConversation.get(key);
+    this.idleStateByConversation.set(key, {
+      lastActivityAt: Math.max(current?.lastActivityAt ?? 0, atMs),
+      forceNew,
+    });
   }
 
   bind(binding: ConversationBinding): void {
@@ -171,13 +211,17 @@ export class MemoryBindingStore implements BindingStore {
     const binding = this.byThread.get(threadId);
     if (!binding) return undefined;
     const key = this.key(binding.target);
-    if (this.byConversation.get(key)?.threadId === threadId) {
+    const foreground = this.byConversation.get(key)?.threadId === threadId;
+    if (foreground) {
       this.byConversation.delete(key);
     }
     const backgrounds = this.backgroundByConversation.get(key);
     backgrounds?.delete(threadId);
     if (backgrounds?.size === 0) this.backgroundByConversation.delete(key);
     this.byThread.delete(threadId);
+    if (foreground) {
+      this.setForceNew(binding.target, Date.now(), true);
+    }
     return binding;
   }
 
@@ -201,11 +245,14 @@ export class MemoryBindingStore implements BindingStore {
       threadId: previousOwner.threadId,
       sessionId: previousOwner.sessionId,
     };
+    const atMs = Date.now();
     this.unbind(previousOwner.target);
     if (replaced) {
       this.unbind(replaced.target);
     }
     this.bind(binding);
+    this.setForceNew(previousOwner.target, atMs, true);
+    this.setForceNew(target, atMs, false);
     return {
       binding,
       previousOwner,
@@ -219,6 +266,7 @@ export class MemoryBindingStore implements BindingStore {
     if (binding) {
       this.byConversation.delete(key);
       this.byThread.delete(binding.threadId);
+      this.setForceNew(binding.target, Date.now(), true);
     }
     return binding;
   }

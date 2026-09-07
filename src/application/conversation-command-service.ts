@@ -313,6 +313,7 @@ export class ConversationCommandService {
     input = "",
     actorId?: string,
   ): Promise<ConversationCommandResult> {
+    this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
     switch (command) {
       case "resume": {

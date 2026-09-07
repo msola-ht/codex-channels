@@ -20,6 +20,11 @@ export async function runSystemSettings({
       { value: "debug", label: "调试模式", hint: "控制全局脱敏调试日志与渠道技术字段" },
       { value: "approval_timeout", label: "审批超时", hint: "approval.timeout_seconds（30–3600 秒）" },
       {
+        value: "idle_release",
+        label: "会话空闲自动解除",
+        hint: "conversation.idle_release_minutes（默认 15 分钟，0 关闭）",
+      },
+      {
         value: "sandbox",
         label: "Gateway 渠道 Sandbox",
         hint: "外部渠道默认值；Codex 新会话默认值在 Setup 中管理",
@@ -37,6 +42,9 @@ export async function runSystemSettings({
   if (section === "debug") return debugSetup({ environment, input, output, prompts });
   if (section === "approval_timeout") {
     return runApprovalTimeout({ environment, output, prompts, writeConfig });
+  }
+  if (section === "idle_release") {
+    return runIdleRelease({ environment, output, prompts, writeConfig });
   }
   if (section === "sandbox") {
     return runSandbox({ environment, output, prompts, writeConfig });
@@ -74,6 +82,37 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
   output.write(`审批超时已设为 ${parsed} 秒：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { timeoutSeconds: parsed, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
+}
+
+async function runIdleRelease({ environment, output, prompts, writeConfig }) {
+  const settings = loadGatewaySettings(environment);
+  const value = await prompts.text({
+    message: "会话空闲自动解除（分钟；0 表示关闭）",
+    initialValue: String(settings.system.idleReleaseMinutes),
+    validate: (input) => {
+      const parsed = Number(input);
+      return Number.isInteger(parsed) && parsed >= 0 && parsed <= 1440
+        ? undefined
+        : "请输入 0–1440 之间的整数";
+    },
+  });
+  if (prompts.isCancel(value)) return { action: "back" };
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 1440) {
+    throw new Error("会话空闲自动解除必须为 0–1440 之间的整数");
+  }
+  const result = updateGatewaySetting({
+    kind: "system.idle-release-minutes",
+    value: parsed,
+  }, { environment, expectedRevision: settings.revision, writeConfig });
+  output.write(`会话空闲自动解除已设为 ${parsed} 分钟：${result.configPath}\n`);
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return {
+    idleReleaseMinutes: parsed,
+    configPath: result.configPath,
+    activation: result.activation,
+    activationResult: result.activationResult,
+  };
 }
 
 async function runSandbox({ environment, output, prompts, writeConfig }) {

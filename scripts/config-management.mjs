@@ -53,6 +53,7 @@ export function loadGatewaySettings(environment = process.env) {
   const display = table(document.display);
   const codex = table(document.codex);
   const approval = table(document.approval);
+  const conversation = table(document.conversation);
   const scheduledTasks = table(document.scheduled_tasks);
   const logging = table(document.logging);
   const experimental = table(document.experimental);
@@ -72,6 +73,11 @@ export function loadGatewaySettings(environment = process.env) {
     },
     system: {
       approvalTimeoutSeconds: integerInRange(approval.timeout_seconds, 30, 3_600) ?? 900,
+      idleReleaseMinutes: integerInRange(
+        conversation.idle_release_minutes,
+        0,
+        1_440,
+      ) ?? 15,
       sandbox: codex.sandbox === "read-only" ? "read-only" : "workspace-write",
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,
@@ -214,6 +220,14 @@ function applySetting(document, input) {
     case "system.approval-timeout": {
       const value = integerValue(input.value, 30, 3_600, "value", "审批超时");
       document.approval = { ...table(document.approval), timeout_seconds: value };
+      return changed(value, "restart-gateway");
+    }
+    case "system.idle-release-minutes": {
+      const value = integerValue(input.value, 0, 1_440, "value", "会话空闲自动解除");
+      document.conversation = {
+        ...table(document.conversation),
+        idle_release_minutes: value,
+      };
       return changed(value, "restart-gateway");
     }
     case "system.sandbox": {

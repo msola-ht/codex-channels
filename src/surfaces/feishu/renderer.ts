@@ -51,6 +51,7 @@ import {
   emptyCodexResponseText,
   formatCliInput,
   formatCodexWarning,
+  formatConversationIdleReleased,
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
@@ -306,6 +307,8 @@ export function renderFeishuOutput(
       return formatRuntimeMcpOAuthCompleted(event);
     case "warning":
       return formatCodexWarning(visibleUpstreamMessage(event.message));
+    case "conversation.idle.released":
+      return formatConversationIdleReleased(event.minutes, event.threadId);
   }
 }
 

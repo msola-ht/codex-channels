@@ -327,7 +327,13 @@ export type OutputEvent =
       success: boolean;
       error: string | null;
     }
-  | { type: "warning"; target: ConversationTarget; threadId?: string; message: string; background?: boolean };
+  | { type: "warning"; target: ConversationTarget; threadId?: string; message: string; background?: boolean }
+  | {
+      type: "conversation.idle.released";
+      target: ConversationTarget;
+      threadId: string;
+      minutes: number;
+    };
 
 export function isCriticalOutputEvent(event: OutputEvent): boolean {
   return event.type !== "text.delta" && event.type !== "turn.started" &&

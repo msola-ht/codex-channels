@@ -42,7 +42,7 @@ describe("state database upgrade", () => {
     );
   });
 
-  it("backs up and explicitly upgrades Schema 3 to Schema 4", () => {
+  it("backs up and explicitly upgrades Schema 3 to Schema 5", () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-state-upgrade-"));
     temporaryDirectories.push(home);
     const environment = {
@@ -87,14 +87,82 @@ describe("state database upgrade", () => {
 
     const result = upgradeStateDatabase(environment);
 
-    expect(result).toMatchObject({ changed: true, databasePath, version: 4 });
+    expect(result).toMatchObject({ changed: true, databasePath, version: 5 });
     expect(result.backupPath && existsSync(result.backupPath)).toBe(true);
     const upgraded = new DatabaseSync(databasePath);
-    expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({ user_version: 4 });
+    expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({ user_version: 5 });
     expect(upgraded.prepare(`
       SELECT name FROM sqlite_master
       WHERE type = 'table' AND name = 'conversation_background_bindings'
     `).get()).toEqual({ name: "conversation_background_bindings" });
+    expect(upgraded.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name = 'conversation_idle_state'
+    `).get()).toEqual({ name: "conversation_idle_state" });
+    upgraded.close();
+  });
+
+  it("backs up and explicitly upgrades Schema 4 to Schema 5", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-state-upgrade-"));
+    temporaryDirectories.push(home);
+    const environment = {
+      ...process.env,
+      CODEX_CONNECT_HOME: home,
+      CODEX_CONNECT_CONFIG_FILE: "",
+    };
+    initializeUserData({ environment, cwd: home });
+    const databasePath = join(home, "data", "gateway.sqlite3");
+    mkdirSync(join(home, "data"), { recursive: true });
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      CREATE TABLE conversation_workspaces (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (surface, account_id, conversation_id)
+      ) STRICT;
+      CREATE TABLE conversation_bindings (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (surface, account_id, conversation_id)
+      ) STRICT;
+      CREATE TABLE conversation_background_bindings (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+      CREATE TABLE conversation_actors (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (surface, account_id, conversation_id, actor_id)
+      ) STRICT;
+      PRAGMA user_version = 4;
+    `);
+    database.close();
+
+    const result = upgradeStateDatabase(environment);
+
+    expect(result).toMatchObject({ changed: true, databasePath, version: 5 });
+    const upgraded = new DatabaseSync(databasePath);
+    expect(upgraded.prepare("PRAGMA user_version").get()).toEqual({ user_version: 5 });
+    expect(upgraded.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name = 'conversation_idle_state'
+    `).get()).toEqual({ name: "conversation_idle_state" });
     upgraded.close();
   });
 
@@ -157,7 +225,7 @@ describe("state database upgrade", () => {
     });
 
     const result = upgradeStateDatabase(environment);
-    expect(result).toMatchObject({ changed: true, databasePath: statePath, version: 4 });
+    expect(result).toMatchObject({ changed: true, databasePath: statePath, version: 5 });
     expect(result.scheduledTasks).toMatchObject({
       changed: true,
       databasePath: scheduledPath,
@@ -166,7 +234,7 @@ describe("state database upgrade", () => {
     expect(result.scheduledTasks?.backupPath && existsSync(result.scheduledTasks.backupPath)).toBe(true);
 
     const upgradedState = new DatabaseSync(statePath);
-    expect(upgradedState.prepare("PRAGMA user_version").get()).toEqual({ user_version: 4 });
+    expect(upgradedState.prepare("PRAGMA user_version").get()).toEqual({ user_version: 5 });
     upgradedState.close();
 
     const upgradedTaskDb = new DatabaseSync(scheduledPath);
@@ -238,7 +306,15 @@ describe("state database upgrade", () => {
         session_id TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       ) STRICT;
-      PRAGMA user_version = 4;
+      CREATE TABLE conversation_idle_state (
+        surface TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        last_activity_at INTEGER NOT NULL,
+        force_new INTEGER NOT NULL,
+        PRIMARY KEY (surface, account_id, conversation_id)
+      ) STRICT;
+      PRAGMA user_version = 5;
     `);
     state.close();
 

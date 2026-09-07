@@ -847,7 +847,7 @@ TypeScript 构建；`codexc service install` 生成并启动 App Server、Gatewa
 `codexc service status` 显示 App Server/Gateway 运行中，`codexc service logs gateway` 显示 Windows
 UDS、飞书长连接和 Surface 已就绪且错误日志为空；`codexc setup` 成功写入 Codex 用户设置及其他用户偏好；
 `codexc service uninstall` 成功移除受管计划任务并保留用户数据；飞书普通消息真实往返、完成卡片、Token、
-费用、延迟和账户周限统计均正常；本地 `codexc update` 完成配置兼容性预检、状态库 Schema 4 和指标库
+费用、延迟和账户周限统计均正常；本地 `codexc update` 完成配置兼容性预检、状态库 Schema 4（当时）和指标库
 Schema 11 预检，成功停止并恢复 App Server/Gateway，更新后就绪检查通过。由于本地分支与远程 `main`
 存在差异，远程候选源码构建和发布安装更新仍未验收。
 
@@ -874,7 +874,7 @@ Windows 私有目录复核（2026-08-30）：对既有 `data/uploads` 媒体暂�
 无失败项。
 
 本地更新再次复核（2026-08-30）：`codexc update` 在当前 Windows 源码部署上通过本地更新预检，确认
-`config.toml` 参数兼容、状态数据库 Schema 4 和指标数据库 Schema 11 均兼容；核心服务成功停止，
+`config.toml` 参数兼容、状态数据库 Schema 4（当时）和指标数据库 Schema 11 均兼容；核心服务成功停止，
 更新流程完成后 App Server 与 Gateway 成功启动并通过就绪检查。该结果只证明当前本地版本的更新与恢复，
 不替代远程 `main` 候选源码更新和发布安装验收。
 

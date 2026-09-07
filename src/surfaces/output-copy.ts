@@ -37,6 +37,18 @@ export function formatThreadAvailability(
     : `${subject}的占用已解除，Gateway 已自动恢复。`;
 }
 
+export function formatConversationIdleReleased(
+  minutes: number,
+  threadId: string,
+): string {
+  return [
+    `会话已因 ${minutes} 分钟无输入和输出自动解除占用。`,
+    `Session ID：${threadId}`,
+    `恢复会话：/r ${threadId}`,
+    "也可以直接发送消息开始新对话。",
+  ].join("\n");
+}
+
 export function formatOperationFailure(detail: string): string {
   return `操作失败：${detail}。`;
 }

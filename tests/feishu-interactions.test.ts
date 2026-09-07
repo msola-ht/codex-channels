@@ -77,6 +77,96 @@ describe("Feishu interaction port", () => {
       .toContain("处理结果：已批准一次");
   });
 
+  it("touches activity after an accepted card interaction", async () => {
+    const touchActivity = vi.fn();
+    let sentCard: FeishuCardDocument | undefined;
+    const interactions = new FeishuInteractionPort(
+      {
+        deliverCard: async (_chatId, card) => {
+          sentCard = card;
+          return "om_card";
+        },
+        updateCard: async () => {},
+      },
+      {
+        actors: () => ["ou_actor"],
+        rememberActor: () => {},
+      },
+      {
+        isAllowed: () => true,
+      },
+      undefined,
+      touchActivity,
+    );
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+    const token = interactionToken(sentCard!, "approve-once");
+
+    expect(interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "approve-once",
+      },
+    })).toBe("accepted");
+
+    expect(touchActivity).toHaveBeenCalledWith(target);
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+    await interactions.close();
+  });
+
+  it("completes an accepted card decision when activity refresh fails", async () => {
+    let sentCard: FeishuCardDocument | undefined;
+    const interactions = new FeishuInteractionPort(
+      {
+        deliverCard: async (_chatId, card) => {
+          sentCard = card;
+          return "om_card";
+        },
+        updateCard: async () => {},
+      },
+      {
+        actors: () => ["ou_actor"],
+        rememberActor: () => {},
+      },
+      {
+        isAllowed: () => true,
+      },
+      undefined,
+      () => {
+        throw new Error("activity tracking failed");
+      },
+    );
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+    const token = interactionToken(sentCard!, "approve-once");
+
+    expect(interactions.handleCardAction({
+      messageId: "om_card",
+      chatId: target.conversationId,
+      actorOpenId: "ou_actor",
+      tag: "button",
+      value: {
+        interaction_token: token,
+        decision: "approve-once",
+      },
+    })).toBe("accepted");
+
+    await expect(decision).resolves.toEqual({
+      type: "approval",
+      approved: true,
+      scope: "once",
+    });
+    await interactions.close();
+  });
+
   it("logs a failed approval delivery without logging its content", async () => {
     const logger = {
       info: vi.fn(),

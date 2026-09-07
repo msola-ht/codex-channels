@@ -33,6 +33,7 @@ import {
   contentTruncatedText,
   emptyCodexResponseText,
   formatCodexWarning,
+  formatConversationIdleReleased,
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
@@ -531,6 +532,16 @@ export class TelegramOutbox {
           await this.send(
             chatId,
             formatCodexWarning(visibleUpstreamMessage(event.message)),
+            undefined,
+            true,
+          );
+        }, true);
+        return;
+      case "conversation.idle.released":
+        this.enqueue(chatId, async () => {
+          await this.sendPanel(
+            chatId,
+            formatConversationIdleReleased(event.minutes, event.threadId),
             undefined,
             true,
           );

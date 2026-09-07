@@ -223,6 +223,12 @@ export class TelegramSurface {
       return next();
     });
     this.bot.use((context, next) => this.authorize(context, next));
+    this.bot.use((context, next) => {
+      if (context.chat && context.from) {
+        this.service.touchActivity?.(target(context));
+      }
+      return next();
+    });
     this.actorRegistry = options.actorRegistry;
     this.now = options.now ?? Date.now;
     this.debugEnabled = options.debugEnabled ?? false;

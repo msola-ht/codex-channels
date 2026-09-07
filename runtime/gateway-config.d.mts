@@ -38,6 +38,7 @@ export interface GatewayConfigDocument {
     sandbox: "read-only" | "workspace-write";
   };
   approval: { timeout_seconds: number };
+  conversation: { idle_release_minutes: number };
   display: {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;

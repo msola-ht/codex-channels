@@ -84,6 +84,7 @@ export {
   type AgentRoleEntry,
   type AgentRolePort,
   type ConversationInput,
+  type ConversationIdleReleaseResult,
   type ConversationQueryPort,
   type ConversationResumeResult,
   type ConversationSession,

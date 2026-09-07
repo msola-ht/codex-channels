@@ -22,6 +22,9 @@
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
   扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile
   均使用稳定结果。
+  空闲释放通过 `releaseIdle` 核对活动 Turn、原生 Queue、待处理交互和待结算子代理，再取消
+  App Server 订阅并解绑；释放后按主动新建同一语义恢复模型偏好、清除待生效协作模式并失效
+  Revert/Queue 快照。普通输入、平台本地命令和审批交互刷新活动时间，输出事件也由组合根统一刷新。
 - `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁；Queue、Revert
   与主会话生命周期共用同一实例。
 - `thread-queue-service.ts`：维护原生 Thread Queue 的增删改查、启动、分页选择快照、错误映射和待生效设置冲突检查；

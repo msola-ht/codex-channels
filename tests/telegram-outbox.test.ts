@@ -1432,6 +1432,26 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions).toEqual([{ disable_notification: true }]);
   });
 
+  it("renders idle release as a Telegram panel with the resume command", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "conversation.idle.released",
+      target,
+      threadId: "thread-idle-123",
+      minutes: 15,
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("thread-idle-123");
+    expect(api.sent[0]).toContain("/r thread-idle-123");
+    expect(api.sendOptions[0]).toMatchObject({ disable_notification: true, parse_mode: "HTML" });
+  });
+
   it("sends MCP OAuth failures as critical status panels", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();

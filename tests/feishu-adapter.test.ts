@@ -141,8 +141,9 @@ describe("Feishu conversation adapter", () => {
   it("handles Feishu-local help and identity commands without starting a Turn", async () => {
     const fixture = createOutbox();
     const submit = vi.fn();
+    const touchActivity = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit, touchActivity } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -153,6 +154,8 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
+    expect(touchActivity).toHaveBeenCalledTimes(3);
+    expect(touchActivity).toHaveBeenCalledWith(message.target);
     expect(fixture.sent).toHaveLength(3);
     expect(fixture.sent[0]?.text).toContain("飞书 Codex 命令");
     expect(fixture.sent[0]?.text).toContain("/status");

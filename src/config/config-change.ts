@@ -6,6 +6,7 @@ export type GlobalConfigChangeCode =
   | "network.proxy"
   | "storage.database"
   | "approval.timeout"
+  | "conversation.idle-release-minutes"
   | "display.operation-updates"
   | "display.plan-updates"
   | "display.reasoning"

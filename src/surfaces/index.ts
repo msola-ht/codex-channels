@@ -37,6 +37,7 @@ export {
   type SurfaceErrorMetadata,
 } from "./error-metadata.js";
 export { formatQuotedInput } from "./quoted-input.js";
+export { formatConversationIdleReleased } from "./output-copy.js";
 export {
   formatConversationCommandOutcome,
   formatConversationScheduledConfirmation,

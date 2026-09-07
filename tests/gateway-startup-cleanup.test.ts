@@ -81,7 +81,7 @@ function createRestoreApplication(options: {
     overrides = {},
   } = options;
   return {
-    config: { codexSocketPath: "/tmp/codex.sock" },
+    config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
     logger: pino({ level: "silent" }),
     transport: { kind: "unix-websocket" },
     primaryProvider: "openai",
@@ -159,6 +159,32 @@ function createRestoreApplication(options: {
 }
 
 describe("GatewayApplication startup cleanup", () => {
+  it("skips idle release for a binding while its Provider is disconnected", () => {
+    const application = Object.create(
+      GatewayApplication.prototype,
+    ) as unknown as Record<string, unknown>;
+    Object.assign(application, {
+      codex: { knownProvider: () => "deepseek" },
+      disconnectedProviders: new Set(["deepseek"]),
+      pendingBindingRestores: new Map(),
+      restoringThreadIds: new Set(),
+    });
+    const isBindingRestoring = Reflect.get(
+      GatewayApplication.prototype,
+      "isBindingRestoring",
+    ) as (this: GatewayApplication, threadId: string) => boolean;
+
+    expect(isBindingRestoring.call(
+      application as unknown as GatewayApplication,
+      "thread-1",
+    )).toBe(true);
+    (application.disconnectedProviders as Set<string>).delete("deepseek");
+    expect(isBindingRestoring.call(
+      application as unknown as GatewayApplication,
+      "thread-1",
+    )).toBe(false);
+  });
+
   it("restores scheduled Threads with their frozen Provider before reconciling Runs", async () => {
     const target = {
       surface: "feishu" as const,
@@ -408,7 +434,7 @@ describe("GatewayApplication startup cleanup", () => {
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
         activeCostProviders: [],
-        config: { codexSocketPath: "/tmp/codex.sock" },
+        config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
         logger: pino({ level: "silent" }),
         transport: { kind: "unix-websocket" },
         providerMetrics: {
@@ -937,7 +963,7 @@ describe("GatewayApplication startup cleanup", () => {
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
       activeCostProviders: [],
-      config: { codexSocketPath: "/tmp/codex.sock" },
+      config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
       providerMetrics: {
@@ -1049,7 +1075,7 @@ describe("GatewayApplication startup cleanup", () => {
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
       activeCostProviders: [],
-      config: { codexSocketPath: "/tmp/codex.sock" },
+      config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
       providerMetrics: {
@@ -1181,7 +1207,7 @@ describe("GatewayApplication startup cleanup", () => {
       published: [],
       restoreSubscriptions: async () => [],
       overrides: {
-        config: { codexSocketPath: socketPath },
+        config: { codexSocketPath: socketPath, idleReleaseMinutes: 15 },
         codex: {
           onNotification: () => () => undefined,
           onDisconnect: (handler: (error: Error, provider: string) => void) => {
@@ -1239,7 +1265,7 @@ describe("GatewayApplication startup cleanup", () => {
     const application = Object.create(GatewayApplication.prototype);
     Object.assign(application, {
       activeCostProviders: [],
-      config: { codexSocketPath: "/tmp/codex.sock" },
+      config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
       providerMetrics: {

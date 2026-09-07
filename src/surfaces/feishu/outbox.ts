@@ -13,6 +13,7 @@ import type {
   ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
+import { formatConversationIdleReleased } from "../output-copy.js";
 import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
@@ -30,6 +31,7 @@ import type {
 import type { FeishuCardDocument } from "./approval-card.js";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
 import { FeishuMessageError } from "./client.js";
+import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js";
 import {
   formatFeishuOperation,
   formatFeishuOperationSummary,
@@ -378,6 +380,43 @@ export class FeishuOutbox implements SurfaceOutputPort {
       this.delivery.enqueue(
         event.target.conversationId,
         (signal) => this.deliverThreadStatus(event, signal),
+        true,
+      );
+      return;
+    }
+    if (event.type === "conversation.idle.released") {
+      const card = renderFeishuConversationIdleReleasedCard(
+        event.minutes,
+        event.threadId,
+      );
+      this.delivery.enqueue(
+        event.target.conversationId,
+        (signal) => this.messagePort
+          .sendCard(event.target.conversationId, card, signal)
+          .then(
+            () => undefined,
+            (error) => {
+              this.logger.warn(
+                {
+                  component: "Feishu",
+                  fallback: "markdown",
+                  errorType: error instanceof Error ? error.name : typeof error,
+                },
+                "飞书空闲解除 CardKit 创建失败，已降级为 Markdown",
+              );
+              return this.sendMarkdown(
+                event.target.conversationId,
+                formatConversationIdleReleased(
+                  event.minutes,
+                  event.threadId,
+                ),
+                maximumFeishuMessageChunks,
+                undefined,
+                undefined,
+                signal,
+              );
+            },
+          ),
         true,
       );
       return;
