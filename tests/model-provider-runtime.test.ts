@@ -59,6 +59,7 @@ import {
   loadManagedModelProviders,
   loadManagedProviderAppServer,
   loadManagedProviderAppServers,
+  readCodexConfigModelOverride,
   loadConfiguredCustomPrimaryModelProvider,
   loadConfiguredCustomSwitchingModelProviders,
   loadCustomModelProviderRoleCandidates,
@@ -92,6 +93,32 @@ import {
 } from "../runtime/opencode-go-accounts.mjs";
 
 describe("model provider runtime topology", () => {
+  it("reads the official model context window and auto compact override", async () => {
+    const codexHome = await mkdtemp(resolve(tmpdir(), "codexc-model-override-"));
+    await secureTestDirectory(codexHome);
+    await secureTestFile(join(codexHome, "config.toml"), [
+      'model_context_window = 200000',
+      'model_auto_compact_token_limit = 80000',
+      "",
+    ].join("\n"));
+
+    expect(readCodexConfigModelOverride({ CODEX_HOME: codexHome })).toEqual({
+      contextWindow: 200_000,
+      autoCompactTokenLimit: 80_000,
+    });
+  });
+
+  it("returns null when the official config has no model override", async () => {
+    const codexHome = await mkdtemp(resolve(tmpdir(), "codexc-model-override-empty-"));
+    await secureTestDirectory(codexHome);
+    await secureTestFile(join(codexHome, "config.toml"), 'model_provider = "openai"\n');
+
+    expect(readCodexConfigModelOverride({ CODEX_HOME: codexHome })).toEqual({
+      contextWindow: null,
+      autoCompactTokenLimit: null,
+    });
+  });
+
   it("rejects reserved Codex provider IDs as custom primary candidates", () => {
     const environment = testEnvironment(tmpdir());
     for (const id of [

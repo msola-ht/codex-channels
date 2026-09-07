@@ -42,11 +42,9 @@ import {
   formatConversationScheduledRuns,
   formatConversationScheduledTasks,
   formatConversationSkills,
-  formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
   formatConversationThreadRevertPreview,
-  formatConversationThreadSections,
   formatThreadQueueInputTypeLabel,
   formatConversationUsage,
   formatConversationWorkspacePermissions,
@@ -78,19 +76,6 @@ export async function renderTelegramCommandResult(
     }
     case "sessions":
       await replyTelegramPanel(context, formatConversationSessions(result));
-      return;
-    case "thread-sections":
-      await replyTelegramPanel(
-        context,
-        formatConversationThreadSections(result),
-        threadSectionKeyboard(result),
-      );
-      return;
-    case "thread-section-delete-preview":
-      await replyTelegramPanel(
-        context,
-        formatConversationThreadSectionDeletePreview(result),
-      );
       return;
     case "thread-queue":
       await replyTelegramPanel(
@@ -435,36 +420,6 @@ export function telegramPluginSelectionToken(pluginId: string): string {
   return createHash("sha256").update(pluginId).digest("base64url");
 }
 
-export function threadSectionKeyboard(
-  result: Extract<ConversationCommandResult, { kind: "thread-sections" }>,
-): InlineKeyboardMarkup | undefined {
-  if (result.page > result.pageCount) return undefined;
-  const rows = result.sections.flatMap((section) => {
-    if (section.builtIn === "pinned") {
-      return [[{
-        text: boundedButtonLabel(`${section.name} · 固定`),
-        callback_data: "section:pin",
-      }]];
-    }
-    return result.canManageCustomSections
-      ? [[{
-          text: boundedButtonLabel(section.name),
-          callback_data: `section:move:${telegramThreadSectionToken(section.id)}`,
-        }]]
-      : [];
-  });
-  const pages = [
-    ...(result.page > 1
-      ? [{ text: "上一页", callback_data: `section:page:${result.page - 1}` }]
-      : []),
-    ...(result.page < result.pageCount
-      ? [{ text: "下一页", callback_data: `section:page:${result.page + 1}` }]
-      : []),
-  ];
-  const inlineKeyboard = [...rows, ...(pages.length > 0 ? [pages] : [])];
-  return inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined;
-}
-
 export function threadQueueKeyboard(
   result: Extract<ConversationCommandResult, { kind: "thread-queue" }>,
 ): InlineKeyboardMarkup | undefined {
@@ -579,9 +534,6 @@ export function formatTelegramThreadQueueDeleteConfirmation(
   ].join("\n");
 }
 
-export function telegramThreadSectionToken(sectionId: string): string {
-  return createHash("sha256").update(sectionId).digest("base64url");
-}
 
 export function workspacePermissionFieldKeyboard(
   field: "sandbox" | "approval",

@@ -6,8 +6,6 @@ import pino from "pino";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import type { ConversationUseCases } from "../src/application/index.js";
-import type { ConversationTarget } from "../src/conversation-core/index.js";
-import { ThreadSectionAccessPolicy } from "../src/policy/index.js";
 import {
   feishuCardElements,
   FeishuEventConnection,
@@ -711,34 +709,6 @@ describe("Feishu Surface", () => {
       .toContain("飞书官方授权已完成");
   });
 
-  it("allows a configured Thread Section administrator to create a section", async () => {
-    const createThreadSection = vi.fn(async (_target: ConversationTarget, name: string) => ({
-      id: "section-acceptance",
-      name,
-      builtIn: null,
-      currentWorkspaceActiveCount: 0,
-      currentWorkspaceArchivedCount: 0,
-    }));
-    const fixture = createFixture(
-      { createThreadSection },
-      undefined,
-      undefined,
-      undefined,
-      new ThreadSectionAccessPolicy(new Set(["feishu:ou_actor"])),
-    );
-    const starting = fixture.surface.start();
-    fixture.ready();
-    await starting;
-
-    fixture.emitMessage(0, "/section create 验收测试");
-    await vi.waitFor(() => {
-      expect(createThreadSection).toHaveBeenCalledWith(
-        expect.objectContaining({ surface: "feishu" }),
-        "验收测试",
-      );
-    });
-    await fixture.surface.stop();
-  });
 });
 
 function createFixture(
@@ -766,7 +736,6 @@ function createFixture(
     botMenuDisplayStrategy: 3,
     botMenus: [],
   },
-  threadSectionAccess?: ThreadSectionAccessPolicy,
 ) {
   const conversationService = ({
     submit: async () => ({
@@ -845,7 +814,6 @@ function createFixture(
     uploadsDirectory: "/private/uploads/feishu",
     credentialsDirectory: "/private/credentials/feishu",
     onFatal: vi.fn(),
-    ...(threadSectionAccess === undefined ? {} : { threadSectionAccess }),
     ...(configurationRecipients ? { configurationRecipients } : {}),
     ...(startupNotification ? { startupNotification } : {}),
   }, {

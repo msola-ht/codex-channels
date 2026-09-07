@@ -261,50 +261,6 @@ describe("Codex Connect config menu", () => {
     });
   });
 
-  it("selects Thread Section administrators from enabled channel allowlists", async () => {
-    const fixture = createFixture();
-    const document = readGatewayConfig(fixture.configPath);
-    document.telegram = {
-      bot_token: "telegram-secret",
-      allowed_user_ids: [123, 456],
-      message_format: "html",
-    };
-    writeGatewayConfig(fixture.configPath, document);
-    const multiselect = vi.fn(async (options: {
-      options: Array<{ value: string; label: string }>;
-    }) => {
-      expect(options.options).toContainEqual({
-        value: "telegram:456",
-        label: "Telegram · 456",
-      });
-      return ["telegram:456"];
-    });
-
-    const result = await runConfig({
-      environment: fixture.environment,
-      output: { write: vi.fn(), isTTY: true },
-      prompts: {
-        intro: vi.fn(),
-        select: vi.fn()
-          .mockResolvedValueOnce("automation")
-          .mockResolvedValueOnce("thread_sections"),
-        multiselect,
-        isCancel: () => false,
-        cancel: vi.fn(),
-      },
-    });
-
-    expect(result).toEqual({
-      threadSectionAdministrators: ["telegram:456"],
-      configPath: fixture.configPath,
-      activation: "restart-gateway",
-      activationResult: configActivationResult("restart-gateway"),
-    });
-    expect(readGatewayConfig(fixture.configPath).thread_sections).toEqual({
-      administrators: ["telegram:456"],
-    });
-  });
-
   it("updates a proxy without echoing credentials and requires service reinstall", async () => {
     const fixture = createFixture();
     const output: string[] = [];
@@ -597,6 +553,36 @@ describe("Codex Connect config menu", () => {
     expect(result).toEqual({ timeoutSeconds: 120, configPath: fixture.configPath, activation: "restart-gateway", activationResult: configActivationResult("restart-gateway") });
     expect(readGatewayConfig(fixture.configPath).approval).toEqual({
       timeout_seconds: 120,
+    });
+  });
+
+  it("sets the conversation idle release minutes through the system settings", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("system")
+        .mockResolvedValueOnce("idle_release"),
+      text: vi.fn(async () => "20"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      idleReleaseMinutes: 20,
+      configPath: fixture.configPath,
+      activation: "restart-gateway",
+      activationResult: configActivationResult("restart-gateway"),
+    });
+    expect(readGatewayConfig(fixture.configPath).conversation).toEqual({
+      idle_release_minutes: 20,
     });
   });
 

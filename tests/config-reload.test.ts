@@ -111,15 +111,13 @@ describe("Gateway config reload", () => {
     ["surface.telegram.token", "telegram", { telegramBotToken: "new-token" }],
     ["surface.telegram.proxy", "telegram", { telegramProxyUrl: "http://127.0.0.1:7890/" }],
     ["surface.telegram.message-format", "telegram", { telegramMessageFormat: "rich" }],
+    ["conversation.idle-release-minutes", "global", { idleReleaseMinutes: 20 }],
     ["display.operation-updates", "global", { operationUpdateDisplay: "compact" }],
     ["display.plan-updates", "global", { planUpdatesEnabled: true }],
     ["display.reasoning", "global", { reasoningEnabled: false }],
     ["display.price-currency", "global", { priceCurrency: "usd" }],
     ["experimental.plugin-api", "global", { pluginApiEnabled: false }],
     ["scheduled-tasks.enabled", "global", { scheduledTasksEnabled: true }],
-    ["thread-sections.administrators", "global", {
-      threadSectionAdministrators: new Set(["telegram:123"]),
-    }],
     ["codex.default-model", "global", { codexModel: "other-model" }],
     ["metrics.sync", "global", {
       metricsSync: {
@@ -468,13 +466,13 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     reasoningEnabled: true,
     pluginApiEnabled: true,
     scheduledTasksEnabled: false,
-    threadSectionAdministrators: new Set(),
     priceCurrency: "cny",
     apiProviders: [],
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     metricsStorage: { retentionDays: 365, maxRows: 1_000_000 },
     approvalTimeoutMs: 300_000,
+    idleReleaseMinutes: 15,
     logLevel: "info",
     ...overrides,
   };

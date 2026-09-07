@@ -6,6 +6,7 @@ export function resolveSettingsLoadState(
   error: string | null,
 ): SettingsLoadState {
   if (error !== null) return "error"
+  if (settings !== null) return "ready"
   if (loading) return "loading"
-  return settings === null ? "empty" : "ready"
+  return "empty"
 }

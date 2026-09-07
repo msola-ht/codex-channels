@@ -42,12 +42,10 @@ export async function runModelProviderDefaultSetup({
       throw new Error(`${selected.displayName} 不支持模型：${model}`);
     }
     const reasoningEffort = await prompt.selectReasoningEffort(selected, selectedModel);
-    const autoCompactPercent = await prompt.selectAutoCompactPercent(selected, selectedModel);
     const result = await applyManagedProviderDefaultChange({
       provider: selected.provider,
       model,
       reasoningEffort,
-      autoCompactPercent,
     }, {
       environment,
       loadProviders: () => configured,
@@ -57,15 +55,14 @@ export async function runModelProviderDefaultSetup({
     output.write(`${selected.displayName} 默认模型已设为 ${model}。\n`);
     output.write(`模型上下文：${selectedModel.contextWindow} tokens。\n`);
     output.write(`默认思考等级：${reasoningEffort}。\n`);
-    output.write(`自动压缩阈值：${autoCompactPercent}%（约 ${result.autoCompactLimit} tokens）。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
+    output.write("自动压缩请在「模型自动压缩」中按模型名统一设置。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
     return {
       action: "configured",
       provider: selected.provider,
       model,
       reasoningEffort,
-      autoCompactPercent,
       mode: result.provider.mode,
       activation: "restart-app-server",
       activationResult: configActivationResult("restart-app-server"),
@@ -117,20 +114,6 @@ function createPrompter(prompts, configured, { allowBack }) {
         })),
       });
       return requirePromptValue(prompts, value);
-    },
-    selectAutoCompactPercent: async (_provider, model) => {
-      const current = model.autoCompactPercent ?? 90;
-      const value = await prompts.text({
-        message: `${model.displayName} 自动压缩百分比（10-90）`,
-        initialValue: String(current),
-        validate: (input) => {
-          const parsed = Number(input);
-          return Number.isInteger(parsed) && parsed >= 10 && parsed <= 90
-            ? undefined
-            : "请输入 10 到 90 的整数";
-        },
-      });
-      return Number(requirePromptValue(prompts, value));
     },
   };
 }

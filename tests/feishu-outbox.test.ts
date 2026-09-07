@@ -73,6 +73,69 @@ describe("Feishu outbox", () => {
     );
   });
 
+  it("sends idle release as a Feishu 2.0 card with the resume command", async () => {
+    const sent: FeishuCardDocument[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        sendCard: async (_chatId, card) => {
+          sent.push(card);
+          return "om_idle";
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "conversation.idle.released",
+      target,
+      threadId: "thread-idle-123",
+      minutes: 15,
+    });
+    await outbox.close();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.schema).toBe("2.0");
+    const texts = feishuCardElements(sent[0]!).map((element) => {
+      const value = element as {
+        content?: string;
+        text?: { content?: string };
+      };
+      return value.content ?? value.text?.content ?? "";
+    });
+    expect(texts.join("\n")).toContain("恢复会话：");
+    expect(texts.join("\n")).toContain("/r thread-idle-123");
+  });
+
+  it("delivers the global idle notice as a text warning", async () => {
+    const sent: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendPost: async () => {},
+        sendText: async (_chatId, text) => {
+          sent.push(text);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "warning",
+      target,
+      message: "所有模型连接已空闲，即将释放；下次消息或恢复会话时会自动重连。",
+      globalIdle: true,
+    });
+    await outbox.close();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("所有模型连接已空闲，即将释放");
+  });
+
   it("sends the Turn start confirmation as a reply and creates the Thread status card", async () => {
     const sent: FeishuCardDocument[] = [];
     const replies: Array<{ messageId: string; markdown: string }> = [];

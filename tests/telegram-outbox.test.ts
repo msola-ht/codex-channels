@@ -405,6 +405,23 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([]);
   });
 
+  it("delivers the global idle notice", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "warning",
+      target,
+      message: "所有模型连接已空闲，即将释放；下次消息或恢复会话时会自动重连。",
+      globalIdle: true,
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("所有模型连接已空闲，即将释放");
+  });
+
   it("sends completed generated images even when operation summaries are hidden", async () => {
     const api = new FakeTelegramApi();
     const image = Buffer.from("validated-image");
@@ -1430,6 +1447,26 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual(["Codex 警告：代理连接失败，TOKEN=[已隐藏]"]);
     expect(api.sendOptions).toEqual([{ disable_notification: true }]);
+  });
+
+  it("renders idle release as a Telegram panel with the resume command", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "conversation.idle.released",
+      target,
+      threadId: "thread-idle-123",
+      minutes: 15,
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("thread-idle-123");
+    expect(api.sent[0]).toContain("/r thread-idle-123");
+    expect(api.sendOptions[0]).toMatchObject({ disable_notification: true, parse_mode: "HTML" });
   });
 
   it("sends MCP OAuth failures as critical status panels", async () => {

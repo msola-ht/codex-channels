@@ -551,6 +551,7 @@ describe("SessionRouter", () => {
 
   it("unsubscribes before forcing a new thread", async () => {
     const unsubscribed: string[] = [];
+    const bindingsChanged = vi.fn();
     const client = threadPort({
       listThreads: async () => [],
       startThread: async () => session(thread("new", { type: "idle" })),
@@ -558,12 +559,37 @@ describe("SessionRouter", () => {
         unsubscribed.push(threadId);
       },
     });
-    const router = new SessionRouter(client, new MemoryBindingStore(), registry);
+    const router = new SessionRouter(
+      client,
+      new MemoryBindingStore(),
+      registry,
+      [],
+      bindingsChanged,
+    );
     await router.ensure(target);
     await router.newSession(target);
     await router.ensure(target);
 
     expect(unsubscribed).toEqual(["new"]);
+    expect(bindingsChanged).toHaveBeenCalledOnce();
+  });
+
+  it("persists the force-new marker until the next ordinary message creates a Thread", async () => {
+    const store = new MemoryBindingStore();
+    const client = threadPort({
+      listThreads: async () => [thread("old", { type: "idle" })],
+      startThread: async () => session(thread("new", { type: "idle" })),
+      resumeThread: async (threadId) => session(thread(threadId, { type: "idle" })),
+      unsubscribeThread: async () => undefined,
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    await router.newSession(target);
+    expect(store.idleState(target)).toMatchObject({ forceNew: true });
+
+    const binding = await router.ensure(target);
+    expect(binding.threadId).toBe("new");
+    expect(store.idleState(target)).toMatchObject({ forceNew: false });
   });
 
   it("keeps an active foreground subscription when switching it to the background", async () => {

@@ -23,6 +23,8 @@ import {
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
+  loadManagedModelCompression,
+  readCodexConfigModelOverride,
   managedProviderDirectory,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
@@ -34,12 +36,10 @@ import {
 import { terminateChildProcess } from "../../runtime/process-lifecycle.mjs";
 import {
   inspectAppServerSupervisor,
-  releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
 import {
   loadOpencodeGoProviderIdentities,
   opencodeGoAccountIdFromProvider,
-  opencodeGoProviderDisplayName,
 } from "../../runtime/opencode-go-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
@@ -108,10 +108,12 @@ import {
   type ConversationBinding,
 } from "../storage/index.js";
 import {
+  formatProviderIdleReleaseNotice,
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
+import { ConversationIdleReleaser } from "./conversation-idle-releaser.js";
 import {
   createSurfaceModules,
 } from "./surface-composition.js";
@@ -124,10 +126,7 @@ import {
   type OpenAiConnectivityStatus,
 } from "./openai-connectivity.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
-import {
-  ProviderIdleReleaser,
-  providerIdleReleaseMessage,
-} from "./provider-idle-releaser.js";
+import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
@@ -143,6 +142,7 @@ import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
 import { ScheduledTaskComposition } from "./scheduled-task-composition.js";
 import { RequestMetricsQueryAdapter } from "./request-metrics-query-adapter.js";
+import { readRemoteQuotaSummary } from "./quota-center.js";
 import {
   createManagedProviderAccountAdapters,
   createManagedProviderPricingResolvers,
@@ -181,6 +181,7 @@ export class GatewayApplication {
   private readonly exchangeRate: RemoteExchangeRate;
   private readonly metricsSync: MetricsSync;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
+  private readonly conversationIdleReleaser?: ConversationIdleReleaser;
   private readonly providerAccounts?: ProviderAccountService;
   private readonly bindings: SqliteBindingStore;
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
@@ -316,6 +317,14 @@ export class GatewayApplication {
       this.bindings,
       this.workspaces,
       config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
+      () => {
+        void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
+          this.logger.warn(
+            { err: error },
+            "会话绑定变化后的全局 Client 空闲检查失败",
+          );
+        });
+      },
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
@@ -624,6 +633,39 @@ export class GatewayApplication {
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
       this.sessionDisplayCache,
     );
+    service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
+    if (config.idleReleaseMinutes > 0) {
+      this.conversationIdleReleaser = new ConversationIdleReleaser({
+        logger,
+        idleThresholdMs: config.idleReleaseMinutes * 60_000,
+        isBindingRestoring: (threadId) => this.isBindingRestoring(threadId),
+        listForegroundBindings: () =>
+          this.router.allBindings().filter(
+            (binding) => !this.router.isBackgroundThread(binding.threadId),
+          ),
+        idleState: (target) => this.router.idleState(target),
+        ensureIdleState: (target, atMs) =>
+          this.router.ensureIdleState(target, atMs),
+        releaseIdle: (target) => service.releaseIdle(target),
+        notifyReleased: (target, threadId) => {
+          this.output.publish({
+            type: "conversation.idle.released",
+            target,
+            threadId,
+            minutes: config.idleReleaseMinutes,
+          }, true);
+          void this.providerIdleReleaser.closeIfIdle(true).catch((error) => {
+            this.logger.warn(
+              { err: error },
+              "渠道会话空闲解除后的全局 Client 空闲检查失败",
+            );
+          });
+        },
+      });
+      this.output.subscribe("conversation-idle-activity", (event) => {
+        this.router.touchActivity(event.target, Date.now());
+      });
+    }
     this.output.subscribe("conversation-background-release", async (event) => {
       const threadId = event.type === "turn.completed"
         ? event.threadId
@@ -641,6 +683,12 @@ export class GatewayApplication {
               dispatchQueued: event.status !== "interrupted",
             })
           : service.retryPendingBackgroundRelease(threadId));
+        void this.providerIdleReleaser.closeIfIdle().catch((error) => {
+          this.logger.warn(
+            { err: error },
+            "后台任务终态后的全局 Client 空闲检查失败",
+          );
+        });
       } catch (error) {
         this.logger.warn(
           { err: error, threadId },
@@ -668,43 +716,41 @@ export class GatewayApplication {
     });
     this.providerIdleReleaser = new ProviderIdleReleaser({
       logger,
-      isAccountProvider: (provider) =>
-        opencodeGoAccountIdFromProvider(provider) !== undefined,
-      listRunningProviders: async () =>
-        (await inspectAppServerSupervisor(config.codexSocketPath))?.runningProviders ?? [],
-      releaseProvider: async (provider) => {
-        const result = await releaseAppServerProvider(config.codexSocketPath, provider);
-        if (!result.released) return false;
-        await this.codex.closeProvider(provider).catch((error) => {
-          logger.warn(
-            { err: error, provider },
-            "空闲 Provider 路由 Client 关闭失败，已保留按需重连状态",
-          );
-        });
-        return true;
-      },
-      providerForThread: (threadId) =>
-        this.router.modelSettingsForThread(threadId)?.modelProvider,
+      listConnectedProviders: () => this.codex.connectedProviderIds(),
+      closeProvider: (provider) => this.codex.closeProvider(provider),
       listBindings: () => this.bindings.list(),
-      notify: (provider, targets) => {
-        const accountId = opencodeGoAccountIdFromProvider(provider);
-        const label = accountId === undefined
-          ? provider
-          : opencodeGoProviderDisplayName(provider);
-        const message = providerIdleReleaseMessage(label);
+      gracePeriodMs: 60_000,
+      notifyBeforeClose: (providers) => {
+        const seen = new Set<string>();
+        const targets: ConversationTarget[] = [];
+        for (const module of this.surfaceModules) {
+          for (const target of module.notificationTargets?.() ?? []) {
+            const key = `${target.surface}:${target.accountId}:${target.conversationId}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            targets.push(target);
+          }
+        }
         if (targets.length === 0) {
-          this.logger.info({ provider }, "OpenCode Go 账户已释放，无渠道会话需要通知");
+          this.logger.info(
+            { providers },
+            "全局空闲释放即将开始，但没有已知渠道会话需要通知",
+          );
           return;
         }
         for (const target of targets) {
-          this.output.publish({ type: "warning", target, message }, true);
+          this.output.publish({
+            type: "warning",
+            target,
+            message: formatProviderIdleReleaseNotice(),
+            globalIdle: true,
+          }, true);
         }
+        this.logger.info(
+          { providers, targetCount: targets.length },
+          "全局空闲释放通知已投递到已知渠道会话",
+        );
       },
-    });
-    this.output.subscribe("provider-idle-activity", (event) => {
-      if (event.type !== "turn.started" && event.type !== "turn.completed") return;
-      const provider = this.router.modelSettingsForThread(event.threadId)?.modelProvider;
-      this.providerIdleReleaser.touch(provider, event.target);
     });
     this.scheduledTasks = config.scheduledTasksEnabled
       ? new ScheduledTaskComposition({
@@ -776,6 +822,7 @@ export class GatewayApplication {
       ),
       exchangeRate: () => this.exchangeRate.resolve(),
       priceCurrency: () => this.config.priceCurrency,
+      autoCompactPercent: (provider, model) => this.resolveAutoCompactPercent(provider, model),
       remainingUsage: createOpencodeGoRemainingUsageReader({
         fetchImpl: createProxyFetch(config.networkProxy),
         metricsDatabasePath: modelRequestMetricsDatabasePath(
@@ -1128,8 +1175,14 @@ export class GatewayApplication {
       });
       await this.channelImageSpool.start();
       this.scheduledTasks?.start();
-      this.providerIdleReleaser?.start();
+      this.conversationIdleReleaser?.start();
       this.scheduleBindingRestore();
+      void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
+        this.logger.warn(
+          { err: error },
+          "启动完成后的全局 Client 空闲检查失败",
+        );
+      });
       this.requireRunning();
     } catch (error) {
       this.stopping = true;
@@ -1158,6 +1211,7 @@ export class GatewayApplication {
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
+      ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Metrics Sync", () => this.metricsSync.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
@@ -1451,6 +1505,27 @@ export class GatewayApplication {
     this.surfaceManager.reportFatal(surface, accountId, error);
   }
 
+  private resolveAutoCompactPercent(
+    _provider: string | null | undefined,
+    model: string | null | undefined,
+  ): number | null {
+    if (!model) return null;
+    const entry = loadManagedModelCompression(process.env).find(
+      (candidate: { model: string; autoCompactPercent?: number }) => candidate.model === model,
+    );
+    if (entry !== undefined) return entry.autoCompactPercent ?? null;
+    const override = readCodexConfigModelOverride(process.env);
+    if (
+      override.contextWindow !== null
+      && override.autoCompactTokenLimit !== null
+      && override.contextWindow > 0
+    ) {
+      return Math.round(Math.min(100, override.autoCompactTokenLimit * 100 / override.contextWindow));
+    }
+    // 官方模型未在主配置覆盖时使用上游默认 95%。
+    return 95;
+  }
+
   private async refreshRateLimits(): Promise<void> {
     let timeout: NodeJS.Timeout | undefined;
     try {
@@ -1477,6 +1552,13 @@ export class GatewayApplication {
       proxy: this.config.networkProxy,
       ...(openAiBaseUrl === undefined ? {} : { baseUrl: openAiBaseUrl }),
     });
+  }
+
+  private isBindingRestoring(threadId: string): boolean {
+    const provider = this.codex.knownProvider(threadId);
+    return this.pendingBindingRestores.has(threadId)
+      || this.restoringThreadIds.has(threadId)
+      || (provider !== undefined && this.disconnectedProviders.has(provider));
   }
 
   private async restoreBindings(
@@ -1749,105 +1831,6 @@ export class GatewayApplication {
       this.bindingRestoreTask = task;
     }, delayMs);
     this.bindingRestoreTimer.unref();
-  }
-}
-
-async function readRemoteQuotaSummary(
-  settings: GatewayConfig["metricsView"] | undefined,
-  provider: string | undefined,
-  resetsAt: number | null | undefined,
-  logger?: Pick<Logger, "warn">,
-): Promise<import("../conversation-core/index.js").RemoteQuotaSummary | undefined> {
-  if (!settings?.enabled || !settings.endpoint || !settings.token || !provider) {
-    return undefined;
-  }
-  const controller = new AbortController();
-  // The center may aggregate a year's worth of periods from SQLite. Keep the
-  // request bounded, but do not treat a normal local response (~1s) as a
-  // failure and silently fall back to the single-device estimate.
-  const timeout = setTimeout(() => controller.abort(), 2_500);
-  try {
-    const endpoint = new URL("/api/quota?days=365", settings.endpoint);
-    const response = await fetch(endpoint, {
-      headers: { authorization: `Bearer ${settings.token}` },
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      logger?.warn({ provider, resetsAt, status: response.status }, "指标中心额度查询失败");
-      return undefined;
-    }
-    const body = await response.json() as {
-      periods?: Array<{
-        provider?: string;
-        windowId?: string;
-        resetsAt?: number;
-        deviceCount?: number;
-        requestCount?: number;
-        totalTokens?: number;
-        totalCostNanos?: number;
-        latestUsedPercentMillionths?: number | null;
-        estimatedTotalTokens?: number | null;
-        estimatedTotalCostNanos?: number | null;
-        tokensPerPercent?: number | null;
-        costPerPercentNanos?: number | null;
-        lastObservedAtMs?: number;
-      }>;
-    };
-    const candidates = body.periods?.filter((candidate) => candidate.provider === provider) ?? [];
-    const exactPeriod = resetsAt === null || resetsAt === undefined
-      ? undefined
-      : candidates.find((candidate) =>
-          candidate.windowId === "codex"
-          && typeof candidate.resetsAt === "number"
-          && Math.abs(candidate.resetsAt - resetsAt) <= 5 * 60,
-        );
-    // A provider may refresh its reset timestamp between two snapshots. If an
-    // exact match is absent, only use the most recently observed future codex
-    // period; never fall back to an older completed period.
-    const period = exactPeriod ?? candidates
-      .filter((candidate) => candidate.windowId === "codex"
-        && typeof candidate.resetsAt === "number"
-        && candidate.resetsAt >= Math.floor(Date.now() / 1_000)
-        && typeof candidate.lastObservedAtMs === "number")
-      .sort((a, b) => (b.lastObservedAtMs ?? 0) - (a.lastObservedAtMs ?? 0))[0];
-    if (!period || typeof period.deviceCount !== "number" || typeof period.requestCount !== "number"
-      || typeof period.totalTokens !== "number" || typeof period.resetsAt !== "number"
-      || typeof period.lastObservedAtMs !== "number") {
-      logger?.warn({
-        provider,
-        resetsAt,
-        candidateResetsAt: candidates
-          .filter((candidate) => candidate.windowId === "codex")
-          .map((candidate) => candidate.resetsAt)
-          .filter((value): value is number => typeof value === "number")
-          .slice(0, 8),
-      }, "指标中心额度周期未命中");
-      return undefined;
-    }
-    return {
-      provider,
-      windowId: period.windowId ?? "codex",
-      deviceCount: period.deviceCount,
-      requestCount: period.requestCount,
-      totalTokens: period.totalTokens,
-      totalCostNanos: typeof period.totalCostNanos === "number" ? period.totalCostNanos : null,
-      latestUsedPercentMillionths: period.latestUsedPercentMillionths ?? null,
-      estimatedTotalTokens: period.estimatedTotalTokens ?? null,
-      estimatedTotalCostNanos: period.estimatedTotalCostNanos ?? null,
-      resetsAt: period.resetsAt,
-      tokensPerPercent: period.tokensPerPercent ?? null,
-      costPerPercentNanos: period.costPerPercentNanos ?? null,
-      observedAtMs: period.lastObservedAtMs,
-    };
-  } catch (error) {
-    logger?.warn({
-      err: error,
-      provider,
-      resetsAt,
-    }, "指标中心额度读取异常，回退本机估算");
-    return undefined;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

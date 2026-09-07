@@ -11,8 +11,6 @@ import {
   conversationCommandHelpLines,
   formatConversationSessions,
   formatConversationStatus,
-  formatConversationThreadSectionDeletePreview,
-  formatConversationThreadSections,
 } from "../src/surfaces/conversation-command-format.js";
 import {
   formatPercent,
@@ -54,6 +52,7 @@ import {
 import {
   emptyCodexResponseText,
   formatCliInput,
+  formatConversationIdleReleased,
   formatThreadAvailability,
   missingFinalResponseText,
 } from "../src/surfaces/output-copy.js";
@@ -73,6 +72,17 @@ describe("shared surface copy contract", () => {
       .toBe("当前会话的占用已解除，Gateway 已自动恢复。");
     expect(formatThreadAvailability("occupied", "thread-1234567890", true))
       .toContain("后台会话 thread-12345");
+  });
+
+  it("formats the automatic conversation idle release notice", () => {
+    expect(formatConversationIdleReleased(15, "thread-idle-123")).toBe(
+      [
+        "会话已因 15 分钟无输入和输出自动解除占用。",
+        "Session ID：thread-idle-123",
+        "恢复会话：/r thread-idle-123",
+        "也可以直接发送消息开始新对话。",
+      ].join("\n"),
+    );
   });
 
   it("reports unsupported model audio before a Turn on every surface", () => {
@@ -155,14 +165,11 @@ describe("shared surface copy contract", () => {
     }
   });
 
-  it("explains Thread Section administrator denial consistently on every surface", () => {
-    const error = new UserFacingError(
-      "thread-section.admin-required",
-      "opaque internal fallback",
-    );
+  it("explains removed Thread Section commands consistently on every surface", () => {
+    const error = new UserFacingError("thread-section.removed", "opaque internal fallback");
     for (const surface of ["Telegram", "飞书", "微信"] as const) {
       expect(formatSurfaceUserFacingError(error, surface)).toBe(
-        "当前用户没有会话分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway",
+        "会话分区功能已移除；请使用 /pin、/unpin 和 /rename",
       );
     }
   });
@@ -328,7 +335,7 @@ describe("shared surface copy contract", () => {
       page: 1,
       pageCount: 1,
       matchedSessionCount: 21,
-      view: { page: 1, filter: "all", provider: null, sectionSelector: null, searchTerm: null },
+      view: { page: 1, filter: "all", provider: null, searchTerm: null },
     };
     const expected = formatConversationSessions(result);
 
@@ -343,88 +350,6 @@ describe("shared surface copy contract", () => {
       "另有 1 条未显示，请使用 /sessions search <搜索词> 缩小范围。",
     );
     expect(expected).not.toContain("21. 会话 21");
-  });
-
-  it("keeps Thread Section lists and deletion warnings platform-independent", () => {
-    const section = {
-      id: "section-project",
-      name: "项目",
-      builtIn: null,
-      currentWorkspaceActiveCount: 2,
-      currentWorkspaceArchivedCount: 1,
-    } as const;
-    const list: Extract<ConversationCommandResult, { kind: "thread-sections" }> = {
-      kind: "thread-sections",
-      sections: [section],
-      selectors: ["2"],
-      page: 1,
-      pageCount: 1,
-      totalSectionCount: 2,
-      canManageCustomSections: true,
-    };
-    const preview: Extract<ConversationCommandResult, { kind: "thread-section-delete-preview" }> = {
-      kind: "thread-section-delete-preview",
-      preview: { section },
-    };
-
-    expect(renderFeishuCommandResult(list)).toBe(formatConversationThreadSections(list));
-    expect(renderWeixinCommandResult(list)).toBe(formatConversationThreadSections(list));
-    expect(renderFeishuCommandResult(preview))
-      .toBe(formatConversationThreadSectionDeletePreview(preview));
-    expect(renderWeixinCommandResult(preview))
-      .toBe(formatConversationThreadSectionDeletePreview(preview));
-    expect(formatConversationThreadSectionDeletePreview(preview))
-      .toContain("其他 Workspace 中的归属也会受影响");
-
-    const missingPage: Extract<
-      ConversationCommandResult,
-      { kind: "thread-sections" }
-    > = {
-      kind: "thread-sections",
-      sections: [],
-      selectors: [],
-      page: 3,
-      pageCount: 2,
-      totalSectionCount: 9,
-      canManageCustomSections: false,
-    };
-    const missingPageText = formatConversationThreadSections(missingPage);
-    expect(missingPageText).toContain("第 3 页不存在，共 2 页");
-    expect(missingPageText).toContain("返回第一页：/section list 1");
-    expect(missingPageText).not.toContain("/section list 2");
-    expect(renderFeishuCommandResult(missingPage)).toBe(missingPageText);
-    expect(renderWeixinCommandResult(missingPage)).toBe(missingPageText);
-  });
-
-  it("keeps Pinned convenient while hiding custom Thread Section writes from readers", () => {
-    const list: Extract<ConversationCommandResult, { kind: "thread-sections" }> = {
-      kind: "thread-sections",
-      sections: [{
-        id: "section-pinned",
-        name: "Pinned",
-        builtIn: "pinned",
-        currentWorkspaceActiveCount: 1,
-        currentWorkspaceArchivedCount: 0,
-      }, {
-        id: "section-project",
-        name: "项目",
-        builtIn: null,
-        currentWorkspaceActiveCount: 2,
-        currentWorkspaceArchivedCount: 1,
-      }],
-      selectors: ["1", "2"],
-      page: 1,
-      pageCount: 1,
-      totalSectionCount: 2,
-      canManageCustomSections: false,
-    };
-
-    const rendered = formatConversationThreadSections(list);
-    expect(rendered).toContain("固定：/pin · 取消固定：/unpin");
-    expect(rendered).toContain("自定义分区：当前用户仅可查看和筛选");
-    expect(rendered).not.toContain("/section move");
-    expect(rendered).not.toContain("/section create");
-    expect(rendered).not.toContain("/section delete");
   });
 
   it("leaves new extension task acknowledgement to the Turn lifecycle", () => {

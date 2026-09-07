@@ -101,25 +101,28 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
   窗口总额度（如 OpenCode Go 5 小时 $12、7 天 $30、月度 $60）随窗口展示，用于按已用
   百分比换算金额；总额由 Provider 定义或套餐常量提供，不来自官方用量接口。
 
-### 3.5 生命周期与空闲停止
+### 3.5 生命周期与空闲 Client 关闭
 
-- 受管 Provider 的统计代理与隔离 App Server 支持按需启动；当前只有 OpenCode Go 账户实例启用
-  空闲自动停止，避免使用过的账户无限常驻；
-- 自动停止条件（全部满足）：无 Conversation 绑定、Gateway 最近无 Turn 活动、没有受管 Remote
-  TUI 租约，且空闲超过固定阈值 5 分钟；`agents.external` 使用主 App Server 和统计代理，不锁定
-  同 Provider 的渠道隔离 App Server；
-- 停止只终止隔离 App Server 子进程与启动记录，保留 Profile、模型目录与 Thread
-  持久数据；再次选择模型、恢复 Thread 或使用对应 Remote TUI 时自动按需拉起；
-- `codexc remote` 必须在 TUI 生命周期内持有 Supervisor Provider 租约；租约存在时自动释放和
-  手动停止都必须失败关闭，连接退出或异常断开时自动撤销租约；
-- **释放通知**：每次成功自动释放后必须向渠道通知一次，明确只有渠道会话实例已空闲停止、
-  `agents.external` 不受影响，并说明自动恢复行为；同一次释放只通知一次。
+- 受管 Provider 的统计代理与隔离 App Server 支持按需启动；Gateway 全局空闲策略统一关闭已连接
+  Provider Client，不按 Provider 类型区分；
+- 关闭条件（全部满足）：没有任何前台或后台 Conversation 绑定、没有进行中的 Provider 操作或
+  启动任务，且该空闲状态持续 60 秒；宽限期内新消息、恢复 Thread、Provider 操作或启动任务会取消
+  本轮关闭。关闭只断开 Gateway Client，不终止 App Server 进程，也不删除 Thread 持久数据；再次
+  选择模型、恢复 Thread 或使用对应 Remote TUI 时自动按需重连；
+- `codexc remote` 必须在 TUI 生命周期内持有 Supervisor Provider 租约；租约存在时手动停止必须
+  失败关闭，连接退出或异常断开时自动撤销租约；
+- **释放通知**：渠道会话空闲自动解除后先向当前渠道发送一次自动解除提示；60 秒宽限期结束仍无任何
+  绑定或活动时，先向所有已知授权渠道发送一次“模型连接已空闲，即将释放”的通知，再关闭 Provider
+  Client。没有已知授权渠道时只记录日志，不向未知会话广播；手动新建、切换或后台任务结束导致的无
+  绑定关闭不发送这条全局提示。
 
 ### 3.6 Setup
 
 - GO 形态优先复用/参数化 `opencode-go-setup.mjs`；否则新建 `scripts/<id>-setup.mjs`；
 - 必须包含：API Key 校验、switching/exclusive 选择、模型目录下载与校验、Profile/
-  基础配置写入、管理标记、`agents.external` 切换、首次备份、失败回滚；
+  基础配置写入、管理标记、首次备份、失败回滚；
+- Provider Setup 不得自动创建或切换 `agents.external`；共享子代理只通过显式
+  `codexc agents configure` 或设置菜单中的“共享第三方子代理”入口修改；
 - 文件权限 `0600`，目录 `0700`，符号链接与越权读取失败关闭；
 - `codexc setup` 菜单同步加入入口。
 
@@ -131,8 +134,8 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - Profile 镜像校验与失败关闭（`model-provider-runtime.test.ts` 风格）；
 - 计价基线 schema、峰谷档位、生效时间与历史快照；
 - 账户适配器：余额或用量窗口、本地用量重算、窗口边界、窗口快照归属与缺失回退；
-- Setup：新增、更新、恢复、回滚、角色切换；
-- 生命周期：空闲停止判定、释放后自动拉起、释放通知一次；
+- Setup：新增、更新、恢复、回滚，以及确认不会自动创建或切换共享角色；
+- 生命周期：60 秒全局空闲宽限判定、自动解除后的关闭前通知、关闭后按需重连；
 - 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
 
 ### 3.8 文档

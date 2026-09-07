@@ -1,310 +1,277 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  ProviderIdleReleaser,
-  providerIdleReleaseMessage,
-} from "../src/bootstrap/provider-idle-releaser.js";
+import { ProviderIdleReleaser } from "../src/bootstrap/provider-idle-releaser.js";
 
-function conversationTarget(surface: string, conversationId: string) {
-  return { surface, accountId: "account", conversationId };
-}
+const binding = {
+  target: { surface: "telegram", accountId: "account", conversationId: "bound" },
+  workspaceId: "workspace",
+  threadId: "thread",
+  sessionId: "session",
+};
 
 describe("ProviderIdleReleaser", () => {
-  it("states that idle release only stops the channel session instance", () => {
-    expect(providerIdleReleaseMessage("OpenCode Go 账户 main")).toBe(
-      "OpenCode Go 账户 main 的渠道会话实例已空闲停止；第三方子代理不受影响。"
-      + "再次选择该账户、恢复 Thread 或使用对应 Remote TUI 时将自动启动。",
-    );
-  });
-
-  it("releases idle GO account App Servers even when one backs agents.external", async () => {
-    const released: string[] = [];
-    const notified: Array<{ provider: string; targets: unknown[] }> = [];
-    let nowMs = 1_000_000;
-    const now = () => nowMs;
+  it("closes every connected Provider Client when the Gateway has no bindings", async () => {
+    const closed: string[] = [];
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: async () => ["opencode-go-main", "opencode-go-b"],
-      releaseProvider: async (provider) => {
-        released.push(provider);
-        return true;
+      listConnectedProviders: () => ["openai", "deepseek"],
+      closeProvider: async (provider) => {
+        closed.push(provider);
       },
-      providerForThread: () => undefined,
       listBindings: () => [],
-      notify: (provider, targets) => notified.push({ provider, targets: [...targets] }),
-      idleThresholdMs: 60_000,
-      nowMs: now,
+      gracePeriodMs: 0,
     });
-    const target = conversationTarget("telegram", "c1");
-    releaser.touch("opencode-go-b", target);
-    nowMs += 120_000;
 
-    await releaser.scan();
+    await releaser.closeIfIdle();
 
-    expect(released).toEqual(["opencode-go-main", "opencode-go-b"]);
-    expect(notified).toEqual([{
-      provider: "opencode-go-main",
-      targets: [],
-    }, {
-      provider: "opencode-go-b",
-      targets: [target],
-    }]);
+    expect(closed).toEqual(["openai", "deepseek"]);
   });
 
-  it("skips launching, bound and recently active accounts", async () => {
-    const released: string[] = [];
-    let nowMs = 1_000_000;
-    const now = () => nowMs;
-    const binding = {
-      target: conversationTarget("telegram", "bound"),
-      workspaceId: "w",
-      threadId: "thread-bound",
-      sessionId: "session",
-    };
+  it("keeps all Provider Clients running while any foreground or background binding exists", async () => {
+    const closeProvider = vi.fn(async () => undefined);
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: async () => [
-        "opencode-go-launching",
-        "opencode-go-bound",
-        "opencode-go-recent",
-        "opencode-go-idle",
-      ],
-      releaseProvider: async (provider) => {
-        released.push(provider);
-        return true;
-      },
-      providerForThread: (threadId) =>
-        threadId === "thread-bound" ? "opencode-go-bound" : undefined,
+      listConnectedProviders: () => ["openai", "deepseek"],
+      closeProvider,
       listBindings: () => [binding],
-      notify: () => undefined,
-      idleThresholdMs: 60_000,
-      nowMs: now,
-    });
-    releaser.markLaunching("opencode-go-launching");
-    releaser.touch("opencode-go-idle", conversationTarget("telegram", "i"));
-    nowMs += 30_000;
-    releaser.touch("opencode-go-recent", conversationTarget("telegram", "r"));
-    nowMs += 31_000;
-
-    await releaser.scan();
-
-    expect(released).toEqual(["opencode-go-idle"]);
-  });
-
-  it("keeps the same account running while a binding exists even after threshold", async () => {
-    const released: string[] = [];
-    const binding = {
-      target: conversationTarget("feishu", "bound"),
-      workspaceId: "w",
-      threadId: "thread-bound",
-      sessionId: "session",
-    };
-    const releaser = new ProviderIdleReleaser({
-      logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: async () => ["opencode-go"],
-      releaseProvider: async (provider) => {
-        released.push(provider);
-        return true;
-      },
-      providerForThread: () => "opencode-go",
-      listBindings: () => [binding],
-      notify: () => undefined,
-      idleThresholdMs: 0,
-      nowMs: () => 1_000,
+      gracePeriodMs: 0,
     });
 
-    await releaser.scan();
+    await releaser.closeIfIdle();
 
-    expect(released).toEqual([]);
+    expect(closeProvider).not.toHaveBeenCalled();
   });
 
-  it("releases an account after its launch has finished and it becomes idle", async () => {
-    const released: string[] = [];
-    let nowMs = 1_000;
-    const releaser = new ProviderIdleReleaser({
-      logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: async () => ["opencode-go-b"],
-      releaseProvider: async (provider) => {
-        released.push(provider);
-        return true;
-      },
-      providerForThread: () => undefined,
-      listBindings: () => [],
-      notify: () => undefined,
-      idleThresholdMs: 60_000,
-      nowMs: () => nowMs,
-    });
-    releaser.markLaunching("opencode-go-b");
-    releaser.finishLaunching("opencode-go-b");
-    nowMs += 60_001;
-
-    await releaser.scan();
-
-    expect(released).toEqual(["opencode-go-b"]);
-  });
-
-  it("skips a busy Provider without making the idle scan wait for its activity", async () => {
+  it("does not close Clients while a Provider operation is active", async () => {
     let finishActivity!: () => void;
     const activityGate = new Promise<void>((resolve) => {
       finishActivity = resolve;
     });
-    const released: string[] = [];
+    const closeProvider = vi.fn(async () => undefined);
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: async () => ["opencode-go-b"],
-      releaseProvider: async (provider) => {
-        released.push(provider);
-        return true;
-      },
-      providerForThread: () => undefined,
+      listConnectedProviders: () => ["openai"],
+      closeProvider,
       listBindings: () => [],
-      notify: () => undefined,
-      idleThresholdMs: 60_000,
-      nowMs: () => 1_000_000,
+      gracePeriodMs: 0,
     });
 
-    const activity = releaser.runActivity("opencode-go-b", () => activityGate);
-    await Promise.resolve();
-    const scan = releaser.scan();
-    const scanSettled = vi.fn();
-    void scan.then(scanSettled);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(released).toEqual([]);
-    expect(scanSettled).toHaveBeenCalledOnce();
+    const activity = releaser.runActivity("openai", () => activityGate);
+    await releaser.closeIfIdle();
+    expect(closeProvider).not.toHaveBeenCalled();
 
     finishActivity();
-    await Promise.all([activity, scan]);
-    expect(released).toEqual([]);
+    await activity;
+    await releaser.closeIfIdle();
+    expect(closeProvider).toHaveBeenCalledWith("openai");
+    await releaser.stop();
   });
 
-  it("does not make shutdown wait for an unrelated Provider activity", async () => {
-    let finishActivity!: () => void;
-    const activityGate = new Promise<void>((resolve) => {
-      finishActivity = resolve;
-    });
-    const releaser = new ProviderIdleReleaser({
-      logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: async () => ["opencode-go-b"],
-      releaseProvider: async () => true,
-      providerForThread: () => undefined,
-      listBindings: () => [],
-      notify: () => undefined,
-      idleThresholdMs: 0,
-      nowMs: () => 1_000_000,
-    });
-
-    const activity = releaser.runActivity("opencode-go-b", () => activityGate);
-    await Promise.resolve();
-    const scan = releaser.scan();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const stop = releaser.stop();
-    const stopSettled = vi.fn();
-    void stop.then(stopSettled);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    expect(stopSettled).toHaveBeenCalledOnce();
-    finishActivity();
-    await Promise.all([activity, scan, stop]);
-  });
-
-  it("protects a read operation from release without refreshing its idle time", async () => {
-    const released: string[] = [];
-    let nowMs = 1_000;
-    const releaser = new ProviderIdleReleaser({
-      logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: async () => ["opencode-go-b"],
-      releaseProvider: async (provider) => {
-        released.push(provider);
-        return true;
-      },
-      providerForThread: () => undefined,
-      listBindings: () => [],
-      notify: () => undefined,
-      idleThresholdMs: 60_000,
-      nowMs: () => nowMs,
-    });
-    await releaser.runActivity("opencode-go-b", async () => undefined);
-    nowMs += 60_001;
-
-    await releaser.runOperation("opencode-go-b", async () => undefined);
-    await releaser.scan();
-
-    expect(released).toEqual(["opencode-go-b"]);
-  });
-
-  it("queues new Provider activity until an in-flight release has finished", async () => {
-    let reportReleaseStarted!: () => void;
-    let finishRelease!: () => void;
-    const releaseStarted = new Promise<void>((resolve) => {
-      reportReleaseStarted = resolve;
-    });
-    const releaseGate = new Promise<void>((resolve) => {
-      finishRelease = resolve;
+  it("queues new Provider activity until a global Client close finishes", async () => {
+    let finishClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => {
+      finishClose = resolve;
     });
     let activityStarted = false;
+    const closeProvider = vi.fn(async () => closeGate);
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: async () => ["opencode-go-b"],
-      releaseProvider: async () => {
-        reportReleaseStarted();
-        await releaseGate;
-        return true;
-      },
-      providerForThread: () => undefined,
+      listConnectedProviders: () => ["openai"],
+      closeProvider,
       listBindings: () => [],
-      notify: () => undefined,
-      idleThresholdMs: 0,
-      nowMs: () => 1_000_000,
+      gracePeriodMs: 0,
     });
 
-    const scan = releaser.scan();
-    await releaseStarted;
-    const activity = releaser.runActivity("opencode-go-b", async () => {
+    const closing = releaser.closeIfIdle();
+    await vi.waitFor(() => expect(closeProvider).toHaveBeenCalled());
+    const activity = releaser.runActivity("openai", async () => {
       activityStarted = true;
     });
     await Promise.resolve();
     expect(activityStarted).toBe(false);
 
-    finishRelease();
-    await Promise.all([scan, activity]);
+    finishClose();
+    await Promise.all([closing, activity]);
     expect(activityStarted).toBe(true);
+    await releaser.stop();
   });
 
-  it("waits for an in-flight scan and prevents releases after stop begins", async () => {
-    let resolveRunning!: (providers: readonly string[]) => void;
-    const running = new Promise<readonly string[]>((resolve) => {
-      resolveRunning = resolve;
+  it("does not start another close while a close is in flight", async () => {
+    let finishClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => {
+      finishClose = resolve;
     });
-    const released: string[] = [];
+    const closeProvider = vi.fn(async () => closeGate);
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider.startsWith("opencode-go"),
-      listRunningProviders: () => running,
-      releaseProvider: async (provider) => {
-        released.push(provider);
-        return true;
-      },
-      providerForThread: () => undefined,
+      listConnectedProviders: () => ["openai"],
+      closeProvider,
       listBindings: () => [],
-      notify: () => undefined,
-      idleThresholdMs: 0,
-      nowMs: () => 1_000,
+      gracePeriodMs: 0,
     });
 
-    const scan = releaser.scan();
-    const stop = releaser.stop();
-    resolveRunning(["opencode-go-b"]);
-    await Promise.all([scan, stop]);
+    const first = releaser.closeIfIdle();
+    await vi.waitFor(() => expect(closeProvider).toHaveBeenCalledTimes(1));
+    const second = releaser.closeIfIdle();
+    expect(closeProvider).toHaveBeenCalledTimes(1);
 
-    expect(released).toEqual([]);
+    finishClose();
+    await Promise.all([first, second]);
+    await releaser.stop();
+  });
+
+  it("retries a failed Client close on the next lifecycle check", async () => {
+    const closeProvider = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary close failure"))
+      .mockResolvedValueOnce(undefined);
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => ["openai"],
+      closeProvider,
+      listBindings: () => [],
+      gracePeriodMs: 0,
+    });
+
+    await releaser.closeIfIdle();
+    await releaser.closeIfIdle();
+
+    expect(closeProvider).toHaveBeenCalledTimes(2);
+    await releaser.stop();
+  });
+
+  it("waits for the grace window and notifies before closing Clients", async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => ["openai", "deepseek"],
+      closeProvider: async (provider) => {
+        events.push(`close:${provider}`);
+      },
+      listBindings: () => [],
+      gracePeriodMs: 60_000,
+      notifyBeforeClose: (providers) => {
+        events.push(`notify:${providers.join(",")}`);
+      },
+    });
+    try {
+      const closing = releaser.closeIfIdle(true);
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(events).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      await closing;
+      expect(events).toEqual([
+        "notify:openai,deepseek",
+        "close:openai",
+        "close:deepseek",
+      ]);
+    } finally {
+      await releaser.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not notify for an ordinary global idle check", async () => {
+    vi.useFakeTimers();
+    const closeProvider = vi.fn(async () => undefined);
+    const notifyBeforeClose = vi.fn();
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => ["openai"],
+      closeProvider,
+      listBindings: () => [],
+      gracePeriodMs: 60_000,
+      notifyBeforeClose,
+    });
+    try {
+      const closing = releaser.closeIfIdle();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await closing;
+      expect(notifyBeforeClose).not.toHaveBeenCalled();
+      expect(closeProvider).toHaveBeenCalledWith("openai");
+    } finally {
+      await releaser.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("upgrades an existing idle round when the automatic release arrives", async () => {
+    vi.useFakeTimers();
+    const notifyBeforeClose = vi.fn();
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => ["openai"],
+      closeProvider: async () => undefined,
+      listBindings: () => [],
+      gracePeriodMs: 60_000,
+      notifyBeforeClose,
+    });
+    try {
+      const closing = releaser.closeIfIdle();
+      void releaser.closeIfIdle(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await closing;
+      expect(notifyBeforeClose).toHaveBeenCalledWith(["openai"]);
+    } finally {
+      await releaser.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the grace window when a binding returns", async () => {
+    vi.useFakeTimers();
+    let bindings: Array<typeof binding> = [];
+    const closeProvider = vi.fn(async () => undefined);
+    const notifyBeforeClose = vi.fn();
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => ["openai"],
+      closeProvider,
+      listBindings: () => bindings,
+      gracePeriodMs: 60_000,
+      notifyBeforeClose,
+    });
+    try {
+      const closing = releaser.closeIfIdle();
+      bindings = [binding];
+      await vi.advanceTimersByTimeAsync(60_000);
+      await closing;
+      expect(closeProvider).not.toHaveBeenCalled();
+      expect(notifyBeforeClose).not.toHaveBeenCalled();
+    } finally {
+      await releaser.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the grace window when a new Provider operation starts", async () => {
+    vi.useFakeTimers();
+    let started = false;
+    const closeProvider = vi.fn(async () => undefined);
+    const notifyBeforeClose = vi.fn();
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => ["openai"],
+      closeProvider,
+      listBindings: () => [],
+      gracePeriodMs: 60_000,
+      notifyBeforeClose,
+    });
+    try {
+      const closing = releaser.closeIfIdle();
+      const activity = releaser.runActivity("openai", async () => {
+        started = true;
+      });
+      await activity;
+      expect(started).toBe(true);
+      expect(closeProvider).not.toHaveBeenCalled();
+      expect(notifyBeforeClose).not.toHaveBeenCalled();
+      await releaser.stop();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await closing;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

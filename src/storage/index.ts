@@ -3,6 +3,7 @@ export type {
   BindingSwitch,
   BindingTransfer,
   ConversationBinding,
+  ConversationIdleState,
 } from "./binding-store.js";
 export { MemoryBindingStore } from "./memory-binding-store.js";
 export { SqliteBindingStore } from "./sqlite-binding-store.js";

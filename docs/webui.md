@@ -45,6 +45,10 @@ token = "你的_访问令牌"
 - 只有直接绑定 `0.0.0.0`（局域网、公网、Tailscale IP 直连）才必须设置令牌；
 - 所有入口共用一个实例与端口，配置一次 `[webui]` 后各方式同时生效。
 
+设置管理的 Origin 只接受 HTTP 回环主机 `127.0.0.1`、`localhost` 或 `[::1]`，SSH 隧道的本机
+转发端口可以与服务器监听端口不同；不会从 `Host`、`X-Forwarded-Host` 或其他转发头扩信任。
+SSH 隧道建议统一使用 `127.0.0.1`，不要用服务器公网 IP、Tailscale IP 直连管理接口。
+
 ## 后台服务
 
 WebUI 是独立后台服务，不并入 `all`：`codexc service install` 只生成服务单元并启动 App Server
@@ -76,7 +80,7 @@ codexc service stop webui        # 停止
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
 指标接口只接受 GET；设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消，均要求同一
-WebUI Bearer 令牌和精确 Origin。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
+WebUI Bearer 令牌和回环 Origin。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 `range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
 `this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
 WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
@@ -137,7 +141,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 ## 边界与安全
 
 - 默认只监听回环地址；绑定非回环地址（`0.0.0.0`）时必须启用访问令牌，否则拒绝启动，
-  令牌比较使用常数时间算法，令牌只存浏览器 `sessionStorage`，关闭标签页失效；
+  令牌比较使用常数时间算法，令牌存浏览器 `localStorage`，重新打开浏览器仍可复用；
 - 指标数据库以只读模式打开；设置修改只经过 Config 结构化写入口，不直接写数据库；
 - 静态资源按白名单扩展名提供，路径限制在 `webui/dist` 内。
 
@@ -146,7 +150,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 - WebUI 不读取、不解析业务会话库；App Server 用户设置通过后端结构化 RPC 适配器访问，不把协议或凭据暴露给前端；
 - 指标 API 不提供写接口；设置管理仅允许计划内字段，并修改对应结构化入口；敏感 Provider 凭据只写入私有凭据目录；
 - 指标 API 只接受 GET，设置管理只接受明确的 JSON POST/PATCH/DELETE；未知 API 与非 `/api/v1` 前缀统一返回 JSON 404；
-- 令牌只用于 API 鉴权，不写入 `localStorage`，不进入日志或响应体。
+- 令牌只用于 API 鉴权；服务端不写入日志或响应体，浏览器端登录令牌按前述约定保存在 `localStorage`。
 
 ## 前端
 
@@ -160,7 +164,7 @@ webui/src/
   pages/       概览、Threads、Thread 详情、请求、错误、设置
 ```
 
-设置页按 App Server、Gateway、WebUI 与数据中心分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。App Server 用户默认值已经通过结构化 RPC 接入；直接 API Provider、托管 Provider 和账户设置使用一次性确认令牌写入，数据中心设备名称和中心端口可直接修改，渠道授权和服务维护任务仍保留独立任务边界。
+设置页按 App Server、Gateway、WebUI 与数据中心分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值已经通过结构化 RPC 接入；直接 API Provider、托管 Provider 和账户设置使用一次性确认令牌写入，数据中心设备名称和中心端口可直接修改，渠道授权和服务维护任务仍保留独立任务边界。
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与
@@ -177,4 +181,4 @@ Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，�
 （API，默认 `127.0.0.1:8787`）与 Vite dev server（热更新，默认 `5173`）。
 开发入口会读取 `[webui]` 配置并让 `/api` 代理跟随实际 API 端口；也可以手动先运行
 `codexc webui`，再 `cd webui && npm run dev`（手动启动时代理默认指向 `8787`）。
-开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套精确 Origin 约束。
+开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套回环 Origin 约束。

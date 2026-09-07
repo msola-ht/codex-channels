@@ -7,6 +7,7 @@ import type {
   ModelRequestPricingSnapshot,
 } from "../observability/index.js";
 import {
+  isLocalWeekend,
   isMinuteInLocalRanges,
   localMinuteOf,
   type LocalMinuteRange,
@@ -53,6 +54,7 @@ interface ModelPrice {
 export interface OpenCodeGoPricingBaseline {
   sourceUpdatedAtMs: number;
   timezone: "UTC";
+  weekendsOffPeak: boolean;
   peakRanges: readonly LocalMinuteRange[];
   models: ReadonlyMap<string, ModelPrice>;
   limitedFreeModels: ReadonlySet<string>;
@@ -113,6 +115,9 @@ export function isOpenCodeGoPeakMinute(
   date: Date,
   baseline = loadOpenCodeGoPricingBaseline(),
 ): boolean {
+  if (baseline.weekendsOffPeak && isLocalWeekend(date, "UTC")) {
+    return false;
+  }
   return isMinuteInLocalRanges(
     localMinuteOf(date, "UTC"),
     baseline.peakRanges,
@@ -129,11 +134,12 @@ export function loadOpenCodeGoPricingBaseline(
     throw new Error("OpenCode Go 官方价格基线不是有效 JSON");
   }
   if (!isRecord(value)
-    || value.schemaVersion !== 3
+    || value.schemaVersion !== 4
     || value.source !== source
     || value.currency !== "USD"
     || value.unit !== "per_million_tokens"
     || value.timezone !== "UTC"
+    || typeof value.weekendsOffPeak !== "boolean"
     || !Array.isArray(value.peakHours)
     || value.peakHours.length === 0
     || !value.peakHours.every(isValidLocalRange)
@@ -141,6 +147,7 @@ export function loadOpenCodeGoPricingBaseline(
     || Object.keys(value.models).length === 0) {
     throw new Error("OpenCode Go 官方价格基线格式无效");
   }
+  const weekendsOffPeak = value.weekendsOffPeak === true;
   const peakRanges = value.peakHours.map(parseLocalRange);
   const sourceUpdatedAtMs = Date.parse(String(value.sourceUpdatedAt));
   if (!Number.isFinite(sourceUpdatedAtMs)) {
@@ -188,7 +195,14 @@ export function loadOpenCodeGoPricingBaseline(
       includedUsageUsd,
     });
   }
-  return { sourceUpdatedAtMs, timezone: "UTC", peakRanges, models, limitedFreeModels };
+  return {
+    sourceUpdatedAtMs,
+    timezone: "UTC",
+    weekendsOffPeak,
+    peakRanges,
+    models,
+    limitedFreeModels,
+  };
 }
 
 function parseTier(value: unknown): PriceTier {

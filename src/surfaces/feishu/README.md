@@ -48,6 +48,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
+- `idle-release-card.ts`：把渠道会话空闲自动解除通知生成为直接携带 `Session ID` 和
+  `/r <Thread ID>` 命令的 CardKit 2.0 卡片。
 - `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
   请求去重、过期、取消和跨客户端失效。
@@ -163,9 +165,8 @@ Chat ID；`surface.ts` 只在 Actor 与当前 App 的一个已授权私聊绑定
 和 Goal 共用一个输入卡片；输入前缀只保存在服务端短期 UI 状态，提交后仍由共享命令语法解析。
 Skills 入口等价于无参数 `/skill`，只展示与其他渠道一致的编号列表；调用统一使用
 `/skill <名称或序号> <任务>`，卡片值不携带本机路径。
-Thread 分区入口先读取原生全局目录：内置 Pinned 选择复用 `/pin`，自定义分区移动只向已配置的
-分区管理员显示，翻页仍对所有已授权用户可用。新建、重命名、排序、移出和删除继续使用共享 `/section`
-文本语法，删除确认不得由卡片选择隐式跳过。
+Thread 列表只支持官方 Pinned 状态，固定与取消固定分别复用 `/pin` 和 `/unpin`；会话改名使用共享
+`/rename` 文本语法，不在渠道侧维护分区目录或权限。
 分类卡中的 Queue 入口读取 App Server 当前业务页（每页最多 25 条），再拆为每组最多 13 条的短期选择卡，
 因此不会静默漏掉第 19–25 条；卡片提供业务页/分组翻页、刷新、条目选择、启动和删除二次确认。
 新增继续使用现有文本输入卡，更新与排序继续使用 `/queue update|reorder` 文本命令。卡片动作只携带完整

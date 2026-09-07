@@ -94,8 +94,8 @@ export function inspectManagedSourceUpdatePlan(
             "inspect-candidate",
             "prepare-codex-cli",
             "validate-codex-contract",
-            "install-codex-cli",
             "stop-services",
+            "install-codex-cli",
             "switch-source",
             "refresh-command",
             "local-update",
@@ -291,6 +291,13 @@ export async function updateManagedSourceInstallation(
       ),
     );
     writeCodexPlanSettingNotice(writeMessage, preparedCodex.validationEnvironment);
+    if (inspection.services.installed) {
+      servicesMayNeedRestore = true;
+      await runStage(
+        "stop-services",
+        () => (options.stopServices ?? stopCoreServices)(checkout, environment, options),
+      );
+    }
     await runStage(
       "install-codex-cli",
       () => installPreparedCodexVersion(
@@ -303,14 +310,6 @@ export async function updateManagedSourceInstallation(
       ),
     );
     writeMessageSafely(writeMessage, "note", "候选源码已通过校验，准备切换。");
-    if (inspection.services.installed) {
-      servicesMayNeedRestore = true;
-      await runStage(
-        "stop-services",
-        () => (options.stopServices ?? stopCoreServices)(checkout, environment, options),
-      );
-    }
-
     const proposedBackupPath = `${checkout}.pre-update-${Date.now()}`;
     await runStage("switch-source", () => {
       renamePath(checkout, proposedBackupPath);

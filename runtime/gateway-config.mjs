@@ -98,18 +98,6 @@ const apiProviderSchema = z.strictObject({
 
 const priceCurrencySchema = z.enum(["cny", "usd"]).default("usd");
 
-const threadSectionPrincipalSchema = z.string().regex(
-  /^(?:telegram|feishu|weixin):\S+$/u,
-  "Thread 分区管理员必须使用 <渠道>:<用户 ID>",
-);
-
-const threadSectionsSchema = z.strictObject({
-  administrators: z.array(threadSectionPrincipalSchema).refine(
-    (values) => new Set(values).size === values.length,
-    "thread_sections.administrators 不能包含重复项",
-  ).default([]),
-}).default({ administrators: [] });
-
 const webuiSchema = z.strictObject({
   host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(8787),
@@ -267,8 +255,11 @@ const gatewayDocumentSchema = z.strictObject({
   }).optional(),
   codex: codexSchema,
   approval: z.strictObject({
-    timeout_seconds: z.number().int().min(30).max(3600).default(600),
-  }).default({ timeout_seconds: 600 }),
+    timeout_seconds: z.number().int().min(30).max(3600).default(900),
+  }).default({ timeout_seconds: 900 }),
+  conversation: z.strictObject({
+    idle_release_minutes: z.number().int().min(0).max(1440).default(15),
+  }).default({ idle_release_minutes: 15 }),
   display: z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
@@ -286,7 +277,6 @@ const gatewayDocumentSchema = z.strictObject({
   scheduled_tasks: z.strictObject({
     enabled: z.boolean().default(false),
   }).default({ enabled: false }),
-  thread_sections: threadSectionsSchema,
   api_providers: z.array(apiProviderSchema).refine(
     (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
     "api_providers 不能包含重复 ID",
@@ -332,26 +322,6 @@ const gatewayDocumentSchema = z.strictObject({
     });
   }
 
-  const allowedThreadSectionAdministrators = new Set([
-    ...(value.telegram?.bot_token?.trim()
-      ? (value.telegram.allowed_user_ids ?? []).map((actorId) => `telegram:${actorId}`)
-      : []),
-    ...(value.feishu?.enabled === true
-      ? (value.feishu.allowed_open_ids ?? []).map((actorId) => `feishu:${actorId}`)
-      : []),
-    ...(value.weixin?.enabled === true
-      ? value.weixin.allowed_user_ids.map((actorId) => `weixin:${actorId}`)
-      : []),
-  ]);
-  for (const [index, principal] of value.thread_sections.administrators.entries()) {
-    if (!allowedThreadSectionAdministrators.has(principal)) {
-      context.addIssue({
-        code: "custom",
-        path: ["thread_sections", "administrators", index],
-        message: "Thread 分区管理员必须属于对应已启用渠道的允许名单",
-      });
-    }
-  }
 });
 
 export function parseGatewayConfig(content, source = "config.toml") {

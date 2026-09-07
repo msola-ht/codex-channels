@@ -49,14 +49,22 @@ function ChartTooltipContent({
   className,
   valueFormatter = (value) => value?.toLocaleString("zh-CN") ?? "—",
   labelFormatter = (value) => value,
-}: Partial<RechartsPrimitive.TooltipContentProps<number, string>> & { className?: string; valueFormatter?: (value: number | undefined) => string; labelFormatter?: (value: React.ReactNode) => React.ReactNode }) {
+  sortByValue = false,
+}: Partial<RechartsPrimitive.TooltipContentProps<number, string>> & { className?: string; valueFormatter?: (value: number | undefined) => string; labelFormatter?: (value: React.ReactNode) => React.ReactNode; sortByValue?: boolean }) {
   const { config } = React.useContext(ChartContext)
   if (!active || !payload?.length) return null
+  const entries = sortByValue
+    ? payload.toSorted((a, b) => {
+      const aValue = typeof a.value === "number" ? a.value : Number.NEGATIVE_INFINITY
+      const bValue = typeof b.value === "number" ? b.value : Number.NEGATIVE_INFINITY
+      return bValue - aValue
+    })
+    : payload
   return (
     <div className={cn("grid min-w-[9rem] gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs text-card-foreground shadow-xl", className)}>
       <div className="font-medium">{labelFormatter(label)}</div>
       <div className="grid gap-1">
-        {payload.map((item) => {
+        {entries.map((item) => {
           const key = String(item.dataKey ?? item.name ?? "value")
           const entry = config[key]
           return (

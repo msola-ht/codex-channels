@@ -51,30 +51,16 @@ interface AccountManagementOptions {
 
 export function previewOpencodeGoDefaultAccountChange(
   accountId: string,
-  options?: AccountManagementOptions & {
-    loadRole?: (environment: NodeJS.ProcessEnv) =>
-      | { provider: ManagedModelProviderId; model: string }
-      | undefined;
-  },
+  options?: AccountManagementOptions,
 ): OpenCodeGoDefaultAccountPreview;
 
 export function applyOpencodeGoDefaultAccountChange(
   accountId: string,
   options?: AccountManagementOptions & {
-    loadRole?: (environment: NodeJS.ProcessEnv) =>
-      | { provider: ManagedModelProviderId; model: string }
-      | undefined;
-    loadProviders?: typeof import("../runtime/model-provider-runtime.mjs")
-      .loadManagedModelProviderSettings;
     writeAccounts?: (
       environment: NodeJS.ProcessEnv,
       accounts: Array<{ id: string; default: boolean; email?: string; phone?: string }>,
     ) => void;
-    configureRole?: (
-      provider: ManagedModelProviderId,
-      model: string | undefined,
-      environment: NodeJS.ProcessEnv,
-    ) => unknown | Promise<unknown>;
   },
 ): Promise<{ action: "default-set" } & OpenCodeGoDefaultAccountPreview>;
 

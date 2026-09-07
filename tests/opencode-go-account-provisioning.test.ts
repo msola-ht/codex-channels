@@ -50,7 +50,7 @@ describe("OpenCode Go account provisioning", () => {
         writesMainConfig: false,
         writesIsolatedProfile: true,
         downloadsCatalog: true,
-        updatesExternalAgent: true,
+        updatesExternalAgent: false,
       },
       confirmation: {
         required: false,

@@ -194,19 +194,14 @@ describe("ProviderRoutingClient", () => {
     const routedRef: { current?: ProviderRoutingClient } = {};
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider === "deepseek",
-      listRunningProviders: async () => ["deepseek"],
-      releaseProvider: async (provider) => {
+      listConnectedProviders: () => ["deepseek"],
+      closeProvider: async (provider) => {
         releaseStarted();
         await releaseGate;
         await routedRef.current!.closeProvider(provider);
-        return true;
       },
-      providerForThread: () => undefined,
       listBindings: () => [],
-      notify: () => undefined,
-      idleThresholdMs: 0,
-      nowMs: () => 1_000,
+      gracePeriodMs: 0,
     });
     const routed = new ProviderRoutingClient(
       "openai",
@@ -225,7 +220,7 @@ describe("ProviderRoutingClient", () => {
     await routed.connect();
     await routed.startThread(cwd, { modelProvider: "deepseek" });
 
-    const scan = releaser.scan();
+    const scan = releaser.closeIfIdle();
     await releaseDidStart;
     const restarted = routed.startThread(cwd, { modelProvider: "deepseek" });
     await Promise.resolve();
@@ -237,6 +232,45 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.connect).toHaveBeenCalledTimes(2);
     expect(ensureProvider).toHaveBeenCalledTimes(2);
     expect(deepseek.startThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a Provider marked connected when Client close fails so cleanup can retry", async () => {
+    const openai = client();
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]));
+    await routed.connect();
+    openai.close
+      .mockRejectedValueOnce(new Error("temporary close failure"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(routed.closeProvider("openai"))
+      .rejects.toThrow("temporary close failure");
+    expect(routed.connectedProviderIds()).toContain("openai");
+
+    await routed.closeProvider("openai");
+    expect(routed.connectedProviderIds()).not.toContain("openai");
+    expect(openai.close).toHaveBeenCalledTimes(2);
+  });
+
+  it("reconnects the primary Client before queries after global idle close", async () => {
+    const openai = client();
+    openai.listThreads.mockResolvedValue([]);
+    openai.listModels.mockResolvedValue([]);
+    openai.readThread.mockResolvedValue(snapshot("thread-openai", "openai", "idle"));
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]));
+
+    await routed.connect();
+    await routed.closeProvider("openai");
+
+    await expect(routed.listThreads(cwd)).resolves.toEqual([]);
+    expect(openai.connect).toHaveBeenCalledTimes(2);
+
+    await routed.closeProvider("openai");
+    await routed.listModels();
+    expect(openai.connect).toHaveBeenCalledTimes(3);
+
+    await routed.closeProvider("openai");
+    await routed.readThread("thread-openai");
+    expect(openai.connect).toHaveBeenCalledTimes(4);
   });
 
   it("releases an ephemeral Thread through its owning Provider and forgets the route", async () => {
@@ -655,34 +689,6 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.resolvePlugin).not.toHaveBeenCalled();
   });
 
-  it("keeps global Thread Section catalog operations on primary and routes moves by Thread", async () => {
-    const openai = client();
-    const deepseek = client();
-    const sections = [{ id: "section-1", name: "项目", builtIn: null }];
-    openai.listThreadSections.mockResolvedValue(sections);
-    openai.listThreads.mockResolvedValue([
-      snapshot("thread-deepseek", "deepseek", "idle"),
-    ]);
-    deepseek.listThreads.mockResolvedValue([]);
-    const routed = routing(openai, deepseek);
-
-    await expect(routed.listThreadSections()).resolves.toBe(sections);
-    await routed.createThreadSection("项目");
-    await routed.renameThreadSection("section-1", "项目二");
-    await routed.deleteThreadSection("section-1");
-    await routed.listThreads(cwd);
-    await routed.moveThreadToSection("thread-deepseek", "section-1");
-
-    expect(openai.createThreadSection).toHaveBeenCalledWith("项目");
-    expect(openai.renameThreadSection).toHaveBeenCalledWith("section-1", "项目二");
-    expect(openai.deleteThreadSection).toHaveBeenCalledWith("section-1");
-    expect(deepseek.moveThreadToSection).toHaveBeenCalledWith(
-      "thread-deepseek",
-      "section-1",
-    );
-    expect(openai.moveThreadToSection).not.toHaveBeenCalled();
-  });
-
   it("routes MCP detail, OAuth, and resource reads through the Thread Provider", async () => {
     const openai = client();
     const deepseek = client();
@@ -1023,11 +1029,6 @@ function client() {
     }),
     setServerRequestHandler: vi.fn((handler) => { result.serverRequestHandler = handler; }),
     listThreads: vi.fn(),
-    listThreadSections: vi.fn(),
-    createThreadSection: vi.fn(),
-    renameThreadSection: vi.fn(),
-    deleteThreadSection: vi.fn(),
-    moveThreadToSection: vi.fn(),
     listCollaborationModes: vi.fn(),
     readThread: vi.fn(),
     startThread: vi.fn(),

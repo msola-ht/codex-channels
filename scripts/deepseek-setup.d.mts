@@ -1,4 +1,3 @@
-import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
 import type { ManagedModelProviderRestorePreview } from "./managed-model-provider-setup.mjs";
 
 export const deepseekSetupScriptUrl: string;
@@ -25,11 +24,6 @@ export interface DeepseekSetupOptions {
   fetchImpl?: typeof fetch;
   prompter?: DeepseekSetupPrompter;
   prompts?: DeepseekSetupPrompts;
-  configureRole?: (
-    provider: ManagedModelProviderId,
-    model: string | undefined,
-    environment: NodeJS.ProcessEnv,
-  ) => unknown | Promise<unknown>;
 }
 
 export interface DeepseekSetupResult {
@@ -54,7 +48,7 @@ export interface DeepseekConfigurationPreview {
     writesMainConfig: boolean;
     writesIsolatedProfile: boolean;
     downloadsCatalog: true;
-    updatesExternalAgent: true;
+    updatesExternalAgent: false;
     preservesInitialConfig: true;
   };
   confirmation: {
@@ -83,11 +77,6 @@ export function applyDeepseekConfiguration(
       catalog: { models: Array<Record<string, unknown>> };
       sha256: string;
     }>;
-    configureRole?: (
-      provider: ManagedModelProviderId,
-      model: string | undefined,
-      environment: NodeJS.ProcessEnv,
-    ) => unknown | Promise<unknown>;
   },
 ): Promise<{
   action: "configured";

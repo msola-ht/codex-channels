@@ -7,12 +7,17 @@ import {
   securePrivateFileSync,
 } from "../../runtime/private-file.mjs";
 
-import type { ConversationTarget, SurfaceId } from "../conversation-core/index.js";
+import {
+  conversationTargetKey,
+  type ConversationTarget,
+  type SurfaceId,
+} from "../conversation-core/index.js";
 import type {
   BindingStore,
   BindingSwitch,
   BindingTransfer,
   ConversationBinding,
+  ConversationIdleState,
 } from "./binding-store.js";
 import { MemoryBindingStore } from "./memory-binding-store.js";
 
@@ -39,11 +44,21 @@ interface ActorRow {
   actor_id: string;
 }
 
-const schemaVersion = 4;
+interface IdleStateRow {
+  surface: string;
+  account_id: string;
+  conversation_id: string;
+  last_activity_at: number;
+  force_new: number;
+}
+
+const schemaVersion = 5;
+const idleStatePersistenceIntervalMs = 60_000;
 
 export class SqliteBindingStore implements BindingStore {
   private readonly database: DatabaseSync;
   private readonly memory = new MemoryBindingStore();
+  private readonly lastPersistedActivity = new Map<string, number>();
   private closed = false;
 
   constructor(readonly path: string) {
@@ -115,6 +130,7 @@ export class SqliteBindingStore implements BindingStore {
     const bindingRemoved = removeBindings && (
       this.memory.get(target) !== undefined || this.memory.backgrounds(target).length > 0
     );
+    let forceNewAtMs = 0;
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const removeActor = this.database.prepare(`
@@ -125,6 +141,10 @@ export class SqliteBindingStore implements BindingStore {
         removeActor.run(target.surface, target.accountId, target.conversationId, actorId);
       }
       if (removeBindings) {
+        forceNewAtMs = Math.max(
+          this.memory.idleState(target).lastActivityAt,
+          Date.now(),
+        );
         this.database
           .prepare(`
             DELETE FROM conversation_bindings
@@ -137,6 +157,21 @@ export class SqliteBindingStore implements BindingStore {
             WHERE surface = ? AND account_id = ? AND conversation_id = ?
           `)
           .run(target.surface, target.accountId, target.conversationId);
+        this.database
+          .prepare(`
+            INSERT INTO conversation_idle_state (
+              surface, account_id, conversation_id, last_activity_at, force_new
+            ) VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
+              last_activity_at = excluded.last_activity_at,
+              force_new = 1
+          `)
+          .run(
+            target.surface,
+            target.accountId,
+            target.conversationId,
+            forceNewAtMs,
+          );
       }
       this.database.exec("COMMIT");
     } catch (error) {
@@ -151,6 +186,11 @@ export class SqliteBindingStore implements BindingStore {
       for (const binding of this.memory.backgrounds(target)) {
         this.memory.removeThread(binding.threadId);
       }
+      this.memory.setForceNew(target, forceNewAtMs, true);
+      this.lastPersistedActivity.set(
+        conversationTargetKey(target),
+        forceNewAtMs,
+      );
     }
     return bindingRemoved;
   }
@@ -196,6 +236,67 @@ export class SqliteBindingStore implements BindingStore {
 
   list(): ConversationBinding[] {
     return this.memory.list();
+  }
+
+  idleState(target: ConversationTarget): ConversationIdleState {
+    return this.memory.idleState(target);
+  }
+
+  ensureIdleState(target: ConversationTarget, atMs: number): void {
+    this.requireOpen();
+    if (this.memory.idleState(target).lastActivityAt !== 0) {
+      return;
+    }
+    this.database
+      .prepare(`
+        INSERT OR IGNORE INTO conversation_idle_state (
+          surface, account_id, conversation_id, last_activity_at, force_new
+        ) VALUES (?, ?, ?, ?, 0)
+      `)
+      .run(target.surface, target.accountId, target.conversationId, atMs);
+    this.memory.ensureIdleState(target, atMs);
+    this.lastPersistedActivity.set(
+      conversationTargetKey(target),
+      atMs,
+    );
+  }
+
+  touchActivity(target: ConversationTarget, atMs: number): void {
+    this.requireOpen();
+    const current = this.memory.idleState(target);
+    const key = conversationTargetKey(target);
+    const lastPersisted = this.lastPersistedActivity.get(key) ?? 0;
+    const effectiveAtMs = Math.max(current.lastActivityAt, atMs);
+    const shouldPersist = current.lastActivityAt === 0
+      || atMs - lastPersisted >= idleStatePersistenceIntervalMs;
+    if (shouldPersist) {
+      this.database
+        .prepare(`
+          INSERT INTO conversation_idle_state (
+            surface, account_id, conversation_id, last_activity_at, force_new
+          ) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
+            last_activity_at = excluded.last_activity_at
+        `)
+        .run(
+          target.surface,
+          target.accountId,
+          target.conversationId,
+          effectiveAtMs,
+          current.forceNew ? 1 : 0,
+        );
+      this.lastPersistedActivity.set(key, effectiveAtMs);
+    }
+    this.memory.touchActivity(target, effectiveAtMs);
+  }
+
+  setForceNew(target: ConversationTarget, atMs: number, forceNew: boolean): void {
+    this.requireOpen();
+    const current = this.memory.idleState(target);
+    const effectiveAtMs = Math.max(current.lastActivityAt, atMs);
+    this.upsertIdleState(target, effectiveAtMs, forceNew);
+    this.memory.setForceNew(target, effectiveAtMs, forceNew);
+    this.lastPersistedActivity.set(conversationTargetKey(target), effectiveAtMs);
   }
 
   bind(binding: ConversationBinding): void {
@@ -313,18 +414,31 @@ export class SqliteBindingStore implements BindingStore {
     this.requireOpen();
     const binding = this.memory.getByThread(threadId);
     if (!binding) return undefined;
+    const foreground = this.memory.isBackground(threadId) !== true;
+    const atMs = Math.max(
+      this.memory.idleState(binding.target).lastActivityAt,
+      Date.now(),
+    );
     this.database.exec("BEGIN IMMEDIATE");
     try {
       this.database.prepare("DELETE FROM conversation_background_bindings WHERE thread_id = ?")
         .run(threadId);
       this.database.prepare("DELETE FROM conversation_bindings WHERE thread_id = ?")
         .run(threadId);
+      if (foreground) {
+        this.upsertIdleState(binding.target, atMs, true);
+      }
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
     }
-    return this.memory.removeThread(threadId);
+    const removed = this.memory.removeThread(threadId);
+    if (foreground) {
+      this.memory.setForceNew(binding.target, atMs, true);
+      this.lastPersistedActivity.set(conversationTargetKey(binding.target), atMs);
+    }
+    return removed;
   }
 
   transfer(threadId: string, target: ConversationTarget): BindingTransfer {
@@ -346,6 +460,14 @@ export class SqliteBindingStore implements BindingStore {
       threadId: previousOwner.threadId,
       sessionId: previousOwner.sessionId,
     };
+    const previousAtMs = Math.max(
+      this.memory.idleState(previousOwner.target).lastActivityAt,
+      Date.now(),
+    );
+    const targetAtMs = Math.max(
+      this.memory.idleState(target).lastActivityAt,
+      Date.now(),
+    );
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const removeBinding = this.database.prepare(`
@@ -364,6 +486,8 @@ export class SqliteBindingStore implements BindingStore {
         previousOwner.target.accountId,
         previousOwner.target.conversationId,
       );
+      this.upsertIdleState(previousOwner.target, previousAtMs, true);
+      this.upsertIdleState(target, targetAtMs, false);
       this.database
         .prepare(`
           INSERT INTO conversation_workspaces (
@@ -400,7 +524,12 @@ export class SqliteBindingStore implements BindingStore {
       this.database.exec("ROLLBACK");
       throw error;
     }
-    return this.memory.transfer(threadId, target);
+    const transfer = this.memory.transfer(threadId, target);
+    this.memory.setForceNew(previousOwner.target, previousAtMs, true);
+    this.memory.setForceNew(target, targetAtMs, false);
+    this.lastPersistedActivity.set(conversationTargetKey(previousOwner.target), previousAtMs);
+    this.lastPersistedActivity.set(conversationTargetKey(target), targetAtMs);
+    return transfer;
   }
 
   unbind(target: ConversationTarget): ConversationBinding | undefined {
@@ -409,13 +538,28 @@ export class SqliteBindingStore implements BindingStore {
     if (!binding) {
       return undefined;
     }
-    this.database
-      .prepare(`
-        DELETE FROM conversation_bindings
-        WHERE surface = ? AND account_id = ? AND conversation_id = ?
-      `)
-      .run(target.surface, target.accountId, target.conversationId);
-    return this.memory.unbind(target);
+    const atMs = Math.max(
+      this.memory.idleState(target).lastActivityAt,
+      Date.now(),
+    );
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database
+        .prepare(`
+          DELETE FROM conversation_bindings
+          WHERE surface = ? AND account_id = ? AND conversation_id = ?
+        `)
+        .run(target.surface, target.accountId, target.conversationId);
+      this.upsertIdleState(target, atMs, true);
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    const removed = this.memory.unbind(target);
+    this.memory.setForceNew(target, atMs, true);
+    this.lastPersistedActivity.set(conversationTargetKey(target), atMs);
+    return removed;
   }
 
   close(): void {
@@ -477,6 +621,15 @@ export class SqliteBindingStore implements BindingStore {
         thread_id TEXT NOT NULL PRIMARY KEY,
         session_id TEXT NOT NULL,
         updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE conversation_idle_state (
+        surface TEXT NOT NULL CHECK (length(surface) > 0),
+        account_id TEXT NOT NULL CHECK (length(account_id) > 0),
+        conversation_id TEXT NOT NULL,
+        last_activity_at INTEGER NOT NULL,
+        force_new INTEGER NOT NULL CHECK (force_new IN (0, 1)),
+        PRIMARY KEY (surface, account_id, conversation_id)
       ) STRICT;
     `);
     this.createActorSchema();
@@ -550,6 +703,29 @@ export class SqliteBindingStore implements BindingStore {
         this.memory.demote(binding.target);
       }
     }
+    const idleStateRows = this.database
+      .prepare(`
+        SELECT surface, account_id, conversation_id, last_activity_at, force_new
+        FROM conversation_idle_state
+      `)
+      .all() as unknown as IdleStateRow[];
+    for (const row of idleStateRows) {
+      const target = {
+        surface: parseSurfaceId(row.surface),
+        accountId: row.account_id,
+        conversationId: row.conversation_id,
+      };
+      this.memory.ensureIdleState(target, row.last_activity_at);
+      this.memory.setForceNew(
+        target,
+        row.last_activity_at,
+        row.force_new === 1,
+      );
+      this.lastPersistedActivity.set(
+        conversationTargetKey(target),
+        row.last_activity_at,
+      );
+    }
     const actors = this.database
       .prepare(`
         SELECT surface, account_id, conversation_id, actor_id
@@ -567,6 +743,29 @@ export class SqliteBindingStore implements BindingStore {
         row.actor_id,
       );
     }
+  }
+
+  private upsertIdleState(
+    target: ConversationTarget,
+    atMs: number,
+    forceNew: boolean,
+  ): void {
+    this.database
+      .prepare(`
+        INSERT INTO conversation_idle_state (
+          surface, account_id, conversation_id, last_activity_at, force_new
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
+          last_activity_at = excluded.last_activity_at,
+          force_new = excluded.force_new
+      `)
+      .run(
+        target.surface,
+        target.accountId,
+        target.conversationId,
+        atMs,
+        forceNew ? 1 : 0,
+      );
   }
 
   private requireOpen(): void {

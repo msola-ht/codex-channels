@@ -297,7 +297,7 @@ export interface SettingsSummaryResponse {
       defaultWorkspace: string | null
       defaultModel: string | null
     }
-    automation: { scheduledTasksEnabled: boolean; threadSectionAdministratorCount: number }
+    automation: { scheduledTasksEnabled: boolean }
     network: { configuredFields: string[] }
     advanced: {
       loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace"
@@ -388,7 +388,7 @@ export interface ManagementSettingsResponse {
   system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel"> & {
     workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null }>
   }
-  automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled" | "threadSectionAdministratorCount">
+  automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled">
   advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
   network: Pick<SettingsSummaryResponse["gateway"]["network"], "configuredFields">
   metrics: {
@@ -444,6 +444,10 @@ export interface CodexUserSettingsResponse {
     sandboxMode: "read-only" | "workspace-write" | null
     approvalPolicy: "on-request" | "never" | null
     networkAccess: boolean | null
+  }
+  compact: {
+    contextWindow: number | null
+    autoCompactPercent: number | null
   }
 }
 
@@ -589,6 +593,15 @@ export interface ManagementProviderSettingsResponse {
   externalAgent:
     | { status: "configured"; provider: string; model: string }
     | { status: "unavailable" | "not-configured" }
+  modelCompression: Array<{
+    id: string
+    displayName: string
+    contextWindow: number
+    providers: string[]
+    autoCompactPercent?: number
+    conflicts?: boolean
+    perProvider?: Record<string, number>
+  }>
 }
 
 export type ManagementProviderSettingsMutationInput =
@@ -613,13 +626,18 @@ export type ManagementProviderSettingsMutationInput =
       provider: string
       model: string
       reasoningEffort: string
+      autoCompactPercent?: number
+    }
+  | {
+      operation: "managed.compression"
+      model: string
       autoCompactPercent: number
     }
   | { operation: "external-agent"; action: "configure"; provider: string; model?: string }
   | { operation: "external-agent"; action: "disable" }
 
 export interface ManagementProviderSettingsPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "configure" | "disable"
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.compression" | "configure" | "disable"
   activation: string
   target?: {
     id: string
@@ -639,6 +657,10 @@ export interface ManagementProviderSettingsPreview {
     apiKeyChange?: boolean
   }
   model?: { id: string; displayName: string; contextWindow?: number }
+  providers?: string[]
+  conflicts?: boolean
+  windowConflict?: boolean
+  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   autoCompactPercent?: number
   autoCompactLimit?: number
@@ -666,6 +688,10 @@ export interface ManagementProviderSettingsMutationResponse {
   target?: ManagementProviderSettingsPreview["target"]
   provider?: ManagementProviderSettingsPreview["provider"]
   model?: ManagementProviderSettingsPreview["model"]
+  providers?: string[]
+  conflicts?: boolean
+  windowConflict?: boolean
+  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   autoCompactPercent?: number
   autoCompactLimit?: number

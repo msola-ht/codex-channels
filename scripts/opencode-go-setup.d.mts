@@ -1,4 +1,3 @@
-import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
 import type { ManagedModelProviderRestorePreview } from "./managed-model-provider-setup.mjs";
 
 export interface OpenCodeGoSetupPrompter {
@@ -38,11 +37,6 @@ export function runOpenCodeGoSetup(options?: {
     isCancel(value: unknown): boolean;
   };
   prompter?: OpenCodeGoSetupPrompter;
-  configureRole?: (
-    provider: ManagedModelProviderId,
-    model: string | undefined,
-    environment: NodeJS.ProcessEnv,
-  ) => unknown | Promise<unknown>;
 }): Promise<
   | { action: "back" }
   | { action: "restored" }
@@ -70,11 +64,6 @@ export function addOpencodeGoAccount(
     }>;
     prompts?: unknown;
     prompter?: OpenCodeGoSetupPrompter;
-    configureRole?: (
-      provider: ManagedModelProviderId,
-      model: string | undefined,
-      environment: NodeJS.ProcessEnv,
-    ) => unknown | Promise<unknown>;
   },
 ): Promise<{ action: string; mode?: string; accountId?: string }>;
 
@@ -97,11 +86,6 @@ export function setOpencodeGoDefaultAccount(
   accountId: string,
   options?: {
     environment?: NodeJS.ProcessEnv;
-    configureRole?: (
-      provider: ManagedModelProviderId,
-      model: string | undefined,
-      environment: NodeJS.ProcessEnv,
-    ) => unknown | Promise<unknown>;
   },
 ): Promise<{ action: string; accountId: string }>;
 
@@ -144,11 +128,6 @@ export function runOpencodeGoAccountCli(
     output?: { write(value: string): unknown };
     prompts?: unknown;
     prompter?: OpenCodeGoSetupPrompter;
-    configureRole?: (
-      provider: ManagedModelProviderId,
-      model: string | undefined,
-      environment: NodeJS.ProcessEnv,
-    ) => unknown | Promise<unknown>;
     downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{
       catalog: { models: Array<Record<string, unknown>> };
       sha256: string;

@@ -120,6 +120,7 @@ function settingsState(): CodexUserSettingsState {
       fastEnabled: false,
       webSearch: null,
       updatePlanEnabled: false,
+      contextManagementEnabled: false,
       autoRecapEnabled: false,
     },
     permissions: {
@@ -128,6 +129,10 @@ function settingsState(): CodexUserSettingsState {
       sandboxMode: null,
       approvalPolicy: null,
       networkAccess: null,
+    },
+    compact: {
+      contextWindow: null,
+      autoCompactPercent: null,
     },
   };
 }

@@ -34,9 +34,10 @@ DeepSeek Provider。
 ### 自动压缩阈值
 
 安装流程在填写 API Key 后会为初始 Flash Vision Exp 模型询问自动压缩阈值。后续有两种入口：`codexc setup`
-中选择“模型与提供商 → 第三方 Provider → DeepSeek 官方 → 修改模型设置（思考等级、自动压缩）”，或选择
-“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → DeepSeek”，按 Provider 和模型分别选择默认思考等级与自动压缩百分比
-（10–90%）；该百分比按模型自己的 `context_window` 换算为模型目录中的
+中选择“模型与提供商 → 第三方 Provider → DeepSeek 官方 → 修改模型设置（思考等级）”，或选择
+“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → DeepSeek”选择默认思考等级；如需按模型名
+统一设置自动压缩，使用“模型与提供商 → 第三方 Provider → 模型自动压缩”，按模型名选择百分比（10–90%），
+同名模型在所有 Provider 共用同一值。该百分比按模型自己的 `context_window` 换算为模型目录中的
 `auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖其他模型；切换模式 Profile 顶层只镜像
 所选模型的默认思考等级（校验必须与模型目录一致），上下文与自动压缩仍只由模型目录声明。
 选择模型默认值时使用 Codex 的 90% 上下文窗口阈值。修改后 Gateway 会自动检测设置文件变化，
@@ -67,14 +68,15 @@ OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或�
 镜像所选模型的默认思考等级；迁移不保留旧的 `body_after_prefix` 压缩作用域，升级后统一按
 `total` 作用域应用。迁移后同一命令会下载并校验最新官方模型目录，补入新受控模型，并保留现有
 模型的思考等级与自动压缩百分比。首次更新到 Flash Vision Exp 默认版本时，仍使用旧默认 Flash
-的受管 Profile 与同 Provider 共享子代理会一次性迁移到 Flash Vision Exp，并在
+的受管 Profile，以及已显式配置的同 Provider 共享子代理，会一次性迁移到 Flash Vision Exp，并在
 `models.manifest.json` 记录迁移；已经选择 Pro 等其他模型时只记录迁移已处理，不改变选择。
 记录完成后，后续 Update 与重复 Setup 都保留用户当前选择，包括主动切回 Flash。
 
 当前 DeepSeek 官方目录声明 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 和
 `deepseek-v4-pro` 均支持 Codex；三者都可通过
 `/model` 选择。初次配置默认使用 Flash Vision Exp；之后可在 `codexc setup` 的“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置”
-中按模型设置 DeepSeek 新会话的默认模型、思考等级和自动压缩阈值。历史 Thread 仍保留自身模型。
+中按模型设置 DeepSeek 新会话的默认模型与思考等级；自动压缩阈值走“模型自动压缩”按模型名统一设置。
+历史 Thread 仍保留自身模型。
 Setup 每次安装时下载最新官方目录；项目只开放人工审查并写入编译期定义的模型，不自动采用未知模型。
 
 `deepseek-v4-flash-vision-exp` 原生支持文字和图片；Gateway 从官方模型目录读取该输入能力，渠道图片
@@ -124,7 +126,7 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 跨 Provider 新建 Thread 使用目标模型目录的默认思考等级；当前 DeepSeek 默认是 `high`。
 
 任一 Provider 意外断开时，Gateway 只重连并恢复该侧绑定。任一受监管 App Server 子进程异常退出
-时，App Server 服务会共同重建受监管实例；OpenCode Go 账户的主动空闲释放不属于异常退出，
+时，App Server 服务会共同重建受监管实例；Gateway 全局空闲策略关闭 Client 不属于异常退出，
 不会触发共同重建。
 
 ## 用量与运行统计
@@ -175,15 +177,20 @@ Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此
 
 ## 共享第三方子代理
 
-DeepSeek 与 OpenCode Go 共用 `agents.external`，不按 Provider 注册重复角色。任一模式配置成功后，
-Setup 会把该角色切换到刚配置的 Provider 与默认模型；也可以手动选择已配置 Provider 和模型：
+DeepSeek 与 OpenCode Go 共用 `agents.external`，不按 Provider 注册重复角色。配置 Provider 不会
+自动创建或切换该角色；只有明确进入“模型与提供商 → 第三方 Provider → 共享第三方子代理”并选择
+Provider 与模型，或运行下面的显式命令，才会注册或更新角色：
 
 ```bash
 codexc agents configure deepseek deepseek-v4-pro
-codexc agents configure opencode-go deepseek-v4-flash
+codexc agents configure ocg-<accountId> deepseek-v4-flash
 codexc agents status
 codexc agents disable
 ```
+
+修改 DeepSeek 的默认模型、OpenCode Go 默认账户或重新运行 Provider Setup 也不会自动刷新该角色；
+需要变更子代理 Provider 或模型时，应重新进入共享第三方子代理配置或再次运行
+`codexc agents configure ...`。
 
 角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型、默认思考等级和 `env_key`
 引用，不保存 API Key。App Server 服务启动时只为当前角色选择的 Provider 启动统计代理并刷新本机

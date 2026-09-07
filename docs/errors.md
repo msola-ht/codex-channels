@@ -92,14 +92,7 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | `thread.takeover.busy` | 原渠道或当前渠道仍有任务，暂不能接管 | 接管运行中的 Thread |
 | `thread.takeover.workspace` | 只能接管当前 Workspace 中的 Thread | 跨 Workspace 接管 |
 | `thread.takeover.changed` | 会话绑定刚刚发生变化，请重新打开会话列表后再试 | 接管期间绑定变更 |
-| `thread-section.usage` | /section 用法提示 | 参数格式错误 |
-| `thread-section.name.invalid` | Thread 分区名称必须为 1–64 个字符，且不能包含控制字符 | 创建或重命名分区时名称非法 |
-| `thread-section.selector.ambiguous` | Thread 分区选择不唯一，请使用完整 ID | 分区选择器匹配多个 |
-| `thread-section.selector.not-found` | 找不到指定 Thread 分区 | 分区选择器无匹配 |
-| `thread-section.pinned.immutable` | 内置固定区不能重命名或删除；请使用 /pin 或 /unpin 管理固定状态 | 尝试重命名或删除内置固定区 |
-| `thread-section.before.invalid` | before 指定的会话必须已经位于目标分区 | move 的 before 目标不在目标分区 |
-| `thread-section.delete-confirmation.invalid` | 删除确认必须使用预览返回的完整 Thread 分区 ID | 删除确认文本不匹配 |
-| `thread-section.admin-required` | 当前用户没有 Thread 分区写权限；请在 thread_sections.administrators 中配置对应渠道用户 ID，并重启 Gateway | 未配置分区管理员时执行分区写操作 |
+| `thread-section.removed` | 会话分区功能已移除；请使用 /pin、/unpin 和 /rename | 使用已移除的 /section 命令 |
 | `workspace.missing` | Workspace 不存在或未获授权 | 配置的 Workspace 缺失 |
 | `workspace.selector.required` | /workspace 用法提示 | 未提供 Workspace 选择参数 |
 | `workspace.selector.ambiguous` | Workspace 选择不唯一 | 选择器匹配多个 Workspace |

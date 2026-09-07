@@ -37,11 +37,9 @@ import {
   formatConversationScheduledConfirmation,
   formatConversationScheduledRuns,
   formatConversationScheduledTasks,
-  formatConversationThreadSectionDeletePreview,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
   formatConversationThreadRevertPreview,
-  formatConversationThreadSections,
   formatConversationSkills,
   formatConversationStatus,
   formatConversationUsage,
@@ -53,6 +51,7 @@ import {
   emptyCodexResponseText,
   formatCliInput,
   formatCodexWarning,
+  formatConversationIdleReleased,
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
@@ -149,10 +148,6 @@ export function renderFeishuCommandResult(
       return formatConversationCommandOutcome(result.outcome);
     case "sessions":
       return formatConversationSessions(result);
-    case "thread-sections":
-      return formatConversationThreadSections(result);
-    case "thread-section-delete-preview":
-      return formatConversationThreadSectionDeletePreview(result);
     case "thread-queue":
       return formatConversationThreadQueue(result);
     case "thread-revert":
@@ -214,6 +209,7 @@ export function renderFeishuCommandResult(
     case "occupancy":
       return formatConversationOccupancy(result);
   }
+  return null;
 }
 
 export function renderFeishuConfigurationChange(
@@ -236,6 +232,10 @@ export function renderFeishuOutput(
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
   remainingUsage?: ProviderModelUsageEstimate | null,
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null,
 ): string | null {
   switch (event.type) {
     case "turn.started":
@@ -281,6 +281,7 @@ export function renderFeishuOutput(
         exchangeRate,
         debug,
         remainingUsage,
+        autoCompactPercent,
       );
     case "thread.status":
       return `Session 状态：${threadStatusLabel(event.status)}`;
@@ -306,6 +307,8 @@ export function renderFeishuOutput(
       return formatRuntimeMcpOAuthCompleted(event);
     case "warning":
       return formatCodexWarning(visibleUpstreamMessage(event.message));
+    case "conversation.idle.released":
+      return formatConversationIdleReleased(event.minutes, event.threadId);
   }
 }
 
@@ -330,6 +333,10 @@ function renderFeishuTurnCompleted(
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
   remainingUsage?: ProviderModelUsageEstimate | null,
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null,
 ): string {
   return renderFeishuLifecyclePresentation(
     createTurnCompletedPresentation(
@@ -338,6 +345,7 @@ function renderFeishuTurnCompleted(
       exchangeRate,
       debug,
       remainingUsage,
+      autoCompactPercent,
     ),
   );
 }

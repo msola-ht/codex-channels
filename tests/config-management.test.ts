@@ -71,10 +71,11 @@ describe("Gateway Config management", () => {
         operationUpdates: "compact",
         planUpdatesEnabled: true,
         reasoningEnabled: true,
-        priceCurrency: "cny",
+        priceCurrency: "usd",
       },
       system: {
-        approvalTimeoutSeconds: 300,
+        approvalTimeoutSeconds: 900,
+        idleReleaseMinutes: 15,
         sandbox: "workspace-write",
         defaultWorkspace: expect.any(String),
       },
@@ -122,6 +123,27 @@ describe("Gateway Config management", () => {
     expect(settings.display.operationUpdates).toBe("full");
     expect(settings.network.https_proxy).toEqual({ configured: true });
     expect(JSON.stringify(settings)).not.toContain("127.0.0.1:7890");
+  });
+
+  it("updates the global conversation idle release minutes", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+
+    const result = updateGatewaySetting({
+      kind: "system.idle-release-minutes",
+      value: 20,
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+
+    expect(result).toMatchObject({
+      value: 20,
+      activation: "restart-gateway",
+    });
+    expect(readGatewayConfig(fixture.configPath).conversation).toMatchObject({
+      idle_release_minutes: 20,
+    });
   });
 
   it("can validate a change without creating a backup artifact", () => {

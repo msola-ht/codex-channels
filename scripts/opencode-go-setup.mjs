@@ -49,7 +49,6 @@ import {
   readPrivateFileSync,
   writePrivateFileAtomic,
 } from "../runtime/private-file.mjs";
-import { configureThirdPartyRole } from "./agents.mjs";
 import {
   opencodeGoAccountPaths,
   opencodeGoProfileFileName,
@@ -138,7 +137,6 @@ export async function runOpenCodeGoSetup({
   downloadCatalog = downloadDeepseekCatalog,
   prompts = clackPrompts,
   prompter,
-  configureRole = configureThirdPartyRole,
 } = {}) {
   const accounts = loadOpencodeGoAccounts(environment);
   const defaultAccount = accounts.find((account) => account.default);
@@ -189,13 +187,12 @@ export async function runOpenCodeGoSetup({
         downloadCatalog,
         prompts,
         prompter: prompt,
-        configureRole,
       });
     }
     if (action === "account-default") {
       const accountId = await prompt.selectAccount(accounts);
       if (accountId === undefined) return { action: "back" };
-      await setOpencodeGoDefaultAccount(accountId, { environment, configureRole });
+      await setOpencodeGoDefaultAccount(accountId, { environment });
       output.write(`默认 OpenCode Go 账户已设置为 ${accountId}。\n`);
       writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
       return {
@@ -238,7 +235,6 @@ export async function runOpenCodeGoSetup({
         downloadCatalog,
         prompts,
         prompter: prompt,
-        configureRole,
       });
     }
     return { action: "back" };
@@ -260,7 +256,6 @@ export async function addOpencodeGoAccount(accountId, {
   downloadCatalog = downloadDeepseekCatalog,
   prompts = clackPrompts,
   prompter,
-  configureRole = configureThirdPartyRole,
 } = {}) {
   let resolvedContact = contact;
   if (resolvedContact === undefined && email === undefined && phone === undefined) {
@@ -302,15 +297,13 @@ export async function addOpencodeGoAccount(accountId, {
     reconfigure,
     apiKey,
     confirmExclusiveConfigChange: true,
-  }, { environment, fetchImpl, downloadCatalog, configureRole });
+  }, { environment, fetchImpl, downloadCatalog });
   const paths = result.paths;
   output.write(mode === "switching"
     ? `OpenCode Go 账户 Profile 已保存：${paths.profilePath}\n`
     : `OpenCode Go 账户固定配置已保存：${paths.configPath}\n`);
   output.write(`模型目录：${paths.catalogPath}\n`);
-  if (preview.effects.updatesExternalAgent && !preview.account.exists) {
-    output.write("共享第三方子代理（agents.external）已切换到默认账户。\n");
-  }
+  output.write("未自动配置共享第三方子代理（agents.external）；如需启用请运行 codexc agents configure ocg-<id> <模型>。\n");
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return {
     action: "configured",
@@ -382,11 +375,10 @@ export async function removeOpencodeGoAccount(accountId, {
 
 export async function setOpencodeGoDefaultAccount(accountId, {
   environment = process.env,
-  configureRole = configureThirdPartyRole,
 } = {}) {
   const result = await applyOpencodeGoDefaultAccountChange(
     accountId,
-    { environment, configureRole },
+    { environment },
   );
   return { action: result.action, accountId };
 }
@@ -798,7 +790,7 @@ function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, leg
           : "仅 OpenCode Go 固定模式（先输入账户 ID）" },
       );
       if (hasModelSettings) {
-        options.push({ value: "model-settings", label: "修改模型设置（思考等级、自动压缩）" });
+        options.push({ value: "model-settings", label: "修改模型设置（思考等级）" });
       }
       if (legacyBackup) {
         options.push({ value: "restore", label: "恢复配置前状态" });

@@ -68,7 +68,6 @@ export interface GatewayConfig {
   reasoningEnabled: boolean;
   pluginApiEnabled: boolean;
   scheduledTasksEnabled: boolean;
-  threadSectionAdministrators: ReadonlySet<string>;
   priceCurrency: "cny" | "usd";
   apiProviders: ReadonlyArray<{
     id: string;
@@ -79,6 +78,7 @@ export interface GatewayConfig {
   credentialsDirectory: string;
   stateDatabasePath: string;
   approvalTimeoutMs: number;
+  idleReleaseMinutes: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
   webui?: {
     host: "127.0.0.1" | "::1" | "0.0.0.0";
@@ -301,12 +301,12 @@ function loadValidatedConfigDocument(
     reasoningEnabled: raw.display.reasoning,
     pluginApiEnabled: raw.experimental.plugin_api,
     scheduledTasksEnabled: raw.scheduled_tasks.enabled,
-    threadSectionAdministrators: new Set(raw.thread_sections.administrators),
     priceCurrency: raw.display.price_currency,
     apiProviders: raw.api_providers.map(toApiProviderConfig),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
+    idleReleaseMinutes: raw.conversation.idle_release_minutes,
     logLevel: raw.logging.level,
     ...(raw.webui ? { webui: raw.webui } : {}),
     metricsStorage: {

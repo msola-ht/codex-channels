@@ -51,7 +51,7 @@ export async function updateCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = primaryProvider(environment);
-  if (["all", "defaults", "preferences"].includes(input?.kind)) {
+  if (["all", "defaults", "preferences", "model-compact"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
   const client = await createClient({ environment });
@@ -109,7 +109,7 @@ export async function previewCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = primaryProvider(environment);
-  if (["all", "defaults", "preferences"].includes(input?.kind)) {
+  if (["all", "defaults", "preferences", "model-compact"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
   const client = await createClient({ environment });
@@ -162,6 +162,16 @@ function projectSettings(snapshot, provider, rawModels) {
   const history = record(config.history);
   const tools = record(config.tools);
   const updatePlan = record(tools.update_plan);
+  const features = record(config.features);
+  const contextManagement = record(features.context_management);
+  const contextManagementEnabled = contextManagement.experimental_mode;
+  if (contextManagementEnabled !== undefined && typeof contextManagementEnabled !== "boolean") {
+    throw invalid(
+      "features.context_management.experimental_mode",
+      "invalid-boolean",
+      "实验性上下文管理状态必须是布尔值",
+    );
+  }
   const tui = record(config.tui);
   const configuredPlanEffort = optionalString(config.plan_mode_reasoning_effort);
   const planModeReasoningEffort = models.some((model) => model.reasoningEfforts
@@ -183,6 +193,7 @@ function projectSettings(snapshot, provider, rawModels) {
       fastEnabled: isFastServiceTier(serviceTier),
       webSearch,
       updatePlanEnabled: updatePlan.enabled === true,
+      contextManagementEnabled: contextManagementEnabled === true,
       autoRecapEnabled: tui.auto_recap === true,
       reasoningSummary,
       planModeReasoningEffort,
@@ -201,7 +212,25 @@ function projectSettings(snapshot, provider, rawModels) {
         ? workspaceSandbox.network_access
         : null,
     },
+    compact: {
+      contextWindow: optionalSafeInteger(config.model_context_window),
+      autoCompactPercent: compactPercent(config),
+    },
   };
+}
+
+function compactPercent(config) {
+  const contextWindow = optionalSafeInteger(config.model_context_window);
+  const autoCompactLimit = optionalSafeInteger(config.model_auto_compact_token_limit);
+  if (
+    contextWindow === null
+    || autoCompactLimit === null
+    || contextWindow <= 0
+    || autoCompactLimit <= 0
+  ) {
+    return null;
+  }
+  return Math.round(Math.min(100, autoCompactLimit * 100 / contextWindow));
 }
 
 function createEdits(input, { config, provider, models }) {
@@ -222,8 +251,12 @@ function createEdits(input, { config, provider, models }) {
       return webSearchEdits(input);
     case "update-plan":
       return updatePlanEdits(input);
+    case "context-management":
+      return contextManagementEdits(input);
     case "auto-recap":
       return autoRecapEdits(input);
+    case "model-compact":
+      return modelCompactEdits(input);
     case "preferences":
       return preferenceEdits(input, models);
     default:
@@ -299,6 +332,16 @@ function updatePlanEdits(input) {
   };
 }
 
+function contextManagementEdits(input) {
+  if (typeof input?.enabled !== "boolean") {
+    throw invalid("enabled", "invalid-boolean", "实验性上下文管理状态必须是布尔值");
+  }
+  return {
+    edits: [{ keyPath: "features.context_management.experimental_mode", value: input.enabled }],
+    value: { enabled: input.enabled },
+  };
+}
+
 function autoRecapEdits(input) {
   if (typeof input?.enabled !== "boolean") {
     throw invalid("enabled", "invalid-boolean", "空闲总结状态必须是布尔值");
@@ -345,6 +388,42 @@ function preferenceEdits(input, models) {
       checkForUpdateOnStartup: input.checkForUpdateOnStartup,
       historyPersistence: input.historyPersistence,
     },
+  };
+}
+
+function modelCompactEdits(input) {
+  const contextWindow = input?.contextWindow ?? null;
+  const autoCompactPercent = input?.autoCompactPercent ?? null;
+  if (
+    contextWindow !== null
+    && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)
+  ) {
+    throw invalid("contextWindow", "invalid-window", "模型上下文窗口必须是正整数");
+  }
+  if (
+    autoCompactPercent !== null
+    && (!Number.isInteger(autoCompactPercent)
+      || autoCompactPercent < 10
+      || autoCompactPercent > 90)
+  ) {
+    throw invalid("autoCompactPercent", "invalid-percent", "自动压缩百分比必须是 10 到 90 的整数");
+  }
+  if (autoCompactPercent !== null && contextWindow === null) {
+    throw invalid(
+      "contextWindow",
+      "window-required",
+      "设置自动压缩百分比前必须先设置模型上下文窗口",
+    );
+  }
+  const autoCompactLimit = contextWindow !== null && autoCompactPercent !== null
+    ? Math.round(contextWindow * autoCompactPercent / 100)
+    : null;
+  return {
+    edits: [
+      { keyPath: "model_context_window", value: contextWindow === null ? null : contextWindow },
+      { keyPath: "model_auto_compact_token_limit", value: autoCompactLimit },
+    ],
+    value: { contextWindow, autoCompactPercent },
   };
 }
 
@@ -435,6 +514,16 @@ function requiredString(value, field, label) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+function optionalSafeInteger(value) {
+  if (value === null || value === undefined) return null;
+  const normalized = typeof value === "bigint"
+    ? Number(value)
+    : typeof value === "string"
+      ? Number(value)
+      : value;
+  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
 }
 
 function record(value) {

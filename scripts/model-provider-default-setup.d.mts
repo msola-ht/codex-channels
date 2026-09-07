@@ -29,10 +29,6 @@ export interface ModelProviderDefaultSetupOptions {
       provider: Record<string, unknown>,
       model: Record<string, unknown>,
     ): Promise<string>;
-    selectAutoCompactPercent(
-      provider: Record<string, unknown>,
-      model: Record<string, unknown>,
-    ): Promise<number>;
   };
   readConfigSnapshot?: typeof import("./codex-user-config.mjs").readCodexUserConfigSnapshot;
   writeConfigEdits?: (
@@ -51,7 +47,6 @@ export function runModelProviderDefaultSetup(
       provider: ManagedModelProviderId;
       model: string;
       reasoningEffort: string;
-      autoCompactPercent: number;
       mode: "switching" | "exclusive";
     }
 >;

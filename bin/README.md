@@ -36,7 +36,7 @@
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于展示和指标中心身份快照；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
-  释放对应隔离实例。
+  释放对应隔离实例；设置默认账户不会自动修改 `agents.external`，需要时使用 `codexc agents configure`。
 - `update`：Git 源码安装先在临时仓库构建并预检官方 `main` 最新提交，切换后再统一审查并更新用户
   配置、状态数据库和指标数据库，然后恢复核心服务；npm 安装不修改程序包。
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令

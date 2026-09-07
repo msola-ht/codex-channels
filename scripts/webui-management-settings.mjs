@@ -15,7 +15,6 @@ export const managedSettingKinds = new Set([
   "webui.token",
   "telegram.message-format",
   "system.default-workspace",
-  "automation.thread-section-administrators",
   "advanced.plugin-api",
   "network.proxy",
   "network.proxy-batch",
@@ -46,7 +45,7 @@ export function isHighRiskManagedSetting(input) {
 
 export function normalizeManagedSetting(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input
-  if ((input.kind === "metrics.storage" || input.kind === "metrics.sync-params")
+  if ((input.kind === "metrics.storage" || input.kind === "metrics.sync-params" || input.kind === "webui.token")
     && input.value !== null && typeof input.value === "object" && !Array.isArray(input.value)) {
     return { ...input.value, kind: input.kind }
   }
@@ -66,7 +65,6 @@ export function redactManagedSettings(settings) {
     },
     automation: {
       scheduledTasksEnabled: settings.automation.scheduledTasksEnabled,
-      threadSectionAdministratorCount: settings.automation.threadSectionAdministrators.length,
     },
     advanced: {
       loggingLevel: settings.advanced.loggingLevel,

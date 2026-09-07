@@ -28,7 +28,6 @@ import {
   readPrivateFileSync,
   writePrivateFileAtomic,
 } from "../runtime/private-file.mjs";
-import { configureThirdPartyRole } from "./agents.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
   applyExclusiveProviderConfig,
@@ -106,7 +105,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     downloadCatalog = downloadDeepseekCatalog,
     loadAccounts = loadOpencodeGoAccounts,
     loadPrimaryProvider = loadPrimaryModelProvider,
-    configureRole = configureThirdPartyRole,
   } = {},
 ) {
   const plan = await buildPlan({ accountId, email, phone, contact, mode, reconfigure }, {
@@ -246,10 +244,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       guards,
       opencodeGoAccountsFilePath(environment),
     );
-    if (plan.updatesExternalAgent) {
-      await assertOpencodeGoFileSnapshots(guards);
-      await configureRole(plan.account.provider, selectedModel, environment);
-    }
   } catch (error) {
     try {
       await restoreOpencodeGoFileSnapshots(snapshots, guards);
@@ -345,13 +339,12 @@ async function buildPlan(
   } catch (error) {
     throw normalize("profile-conflict", "accountId", error);
   }
-  const updatesExternalAgent = accounts.length === 0 || existing?.default === true;
   return {
     account: {
       id: accountId,
       provider: opencodeGoProviderId(accountId),
-      email: normalizedEmail,
-      phone: normalizedPhone,
+      ...(normalizedEmail === undefined ? {} : { email: normalizedEmail }),
+      ...(normalizedPhone === undefined ? {} : { phone: normalizedPhone }),
       displayName: opencodeGoAccountDisplayName({
         id: accountId,
         email: normalizedEmail,
@@ -381,7 +374,7 @@ async function buildPlan(
     reconfigure,
     paths,
     downloadsCatalog: existing !== undefined || !existsSync(paths.catalogPath),
-    updatesExternalAgent,
+    updatesExternalAgent: false,
   };
 }
 

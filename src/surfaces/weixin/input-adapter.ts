@@ -73,7 +73,6 @@ export interface WeixinInputAdapterOptions {
   ): Promise<void>;
   removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
-  threadSectionAccess?: SurfaceAccessPolicy;
   scheduledTasks?: ScheduledTaskUseCases;
   interactions?: Pick<WeixinInteractionPort, "handleText">;
   images?: Pick<WeixinImagePort, "download">;
@@ -133,9 +132,6 @@ export class WeixinInputAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
-        ...(options.threadSectionAccess === undefined
-          ? {}
-          : { threadSectionAccess: options.threadSectionAccess }),
         ...(options.scheduledTasks === undefined
           ? {}
           : { scheduledTasks: options.scheduledTasks }),
@@ -223,6 +219,7 @@ export class WeixinInputAdapter {
       await this.options.removePersistedReplyContext?.(target);
       return;
     }
+    this.options.service.touchActivity?.(target);
     const quotedText = message.quotedText
       ?? (message.quotedMessageId === undefined
         ? undefined

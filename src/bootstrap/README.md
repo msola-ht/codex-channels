@@ -54,7 +54,7 @@
   快照，并把请求时段对应的峰谷档位写入快照；没有汇率、精确模型或有效计划时不回退通用目录。Provider 路由器保持该专属
   解析器优先，不改变历史价格。
 - `opencode-go-model-pricing.ts`：严格读取随包发布的 OpenCode Go 官方美元价格基线，按请求 Provider、
-  精确模型和输入 Token 选择普通或长上下文档位，支持 Peak/Off-Peak 的模型同时写入请求时段对应的
+  精确模型和输入 Token 选择普通或长上下文档位，支持 Peak/Off-Peak 的模型按工作日/周末规则写入请求时段对应的
   峰谷档位；不回退 DeepSeek 官方价格或通用远程目录。
 - `pricing-bucket.ts`：Provider 无关的峰谷档位判定工具，按时区把请求开始时间转换为本地分钟和
   周末状态，并在半开区间内选择 Peak/Off-Peak；DeepSeek 与 OpenCode Go 的价格解析、账户用量重算共用同一实现。
@@ -83,7 +83,7 @@
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
-  热加载钩子和故障上报装配。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
+  热加载钩子、故障上报装配和全局生命周期通知的安全收件人。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
   决定是否启用，飞书和微信使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
   解析收件人，不要求当时已有 Thread 绑定。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
@@ -102,14 +102,23 @@
   官方价格基线从本机指标库重算模型本地用量；DeepSeek 模型按请求时间拆分
   Off-Peak / Peak 两档、各自对照官方包含额度；重算优先使用请求保存的价格快照档位，缺失时才按
   当前基线判定；Key、响应正文和解析异常同样不进入日志或业务事件。
-- `provider-idle-releaser.ts`：定期扫描已启动的 OpenCode Go 账户隔离 App Server，无 Conversation
-  绑定、Gateway 最近无 Turn 活动且空闲超过 5 分钟时通过 supervisor `releaseProvider` 释放；
-  `agents.external` 复用主 App Server 和共享统计代理，不锁定同账户的隔离实例；Supervisor 还会
-  拒绝释放存在受管 Remote TUI 租约的账户。成功自动释放后
-  向最近使用过该账户的渠道会话通知一次；正在拉起的账户只跳过启动期间的扫描，主动释放造成的
-  断线不进入自动重连。扫描遇到正在执行的 Provider 请求时立即跳过，不排队等待；释放已经开始时，
-  新请求等待 Client 关闭完成后再按需拉起。聚合只读操作只保护进程不被并发释放，不刷新空闲时间；
-  关闭时停止新扫描并只等待已经进入释放阶段的扫描退出，释放失败只记录日志不阻塞请求。
+- `quota-center.ts`：读取已配置指标中心的 `/api/quota`，按 Provider 选择当前额度周期（OpenAI
+  `codex`，OpenCode Go 5小时/7天/30天三个窗口），返回完成卡片与启动卡片使用的多设备摘要；中心不可用时
+  保持原有本机/官方估算回退，不把中心命令或令牌暴露到 Surface。
+- `provider-idle-releaser.ts`：统一跟踪所有 Provider Client 的活动操作；当 Gateway 没有前台或后台
+  Conversation 绑定、没有正在进行的 Provider 操作或启动任务时，先等待 60 秒宽限期；宽限期内
+  新绑定、新操作或启动任务会取消本轮释放。宽限期结束仍空闲时，只有渠道会话空闲自动解除触发的
+  全局释放轮次会先通过注入回调通知所有已知授权渠道，再关闭全部已连接 Client；其他原因导致的
+  无绑定关闭不发送该通知。该组件不停止 App Server 进程，也不按 Provider 类型区分；后续请求通过
+  Provider 路由按需重连。Client 关闭和启动期间使用有界并发保护，关闭失败只记录日志并在后续全局
+  空闲检查重试；启动完成、会话解绑、后台任务终态和 Provider 操作结束都会触发检查；Gateway 关闭时
+  停止新的检查并等待已开始的 Client 关闭完成。
+- `conversation-idle-releaser.ts`：按 `conversation.idle_release_minutes` 定期扫描前台 Thread
+  绑定；输入或输出刷新最近活动时间，超过阈值且 App Server 确认为空闲后由
+  `ConversationService.releaseIdle` 取消订阅并解绑，成功后通过共享结构化事件只通知一次
+  “自动解除占用”，并携带当前 Thread ID 供 `/r` 直接恢复。
+  正在恢复或 Provider 断线的绑定会跳过本轮，强制新建标记也会跳过扫描；关闭时停止定时器并限时等待已经在途的
+  扫描退出，避免释放 RPC 卡住 Gateway 关闭。
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存错误原文与分类；结构化 `misalignmentPolicyViolation` 使用独立分类并
   保留协议代码，不携带任何平台上下文或敏感凭据。

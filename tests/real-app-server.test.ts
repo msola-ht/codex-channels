@@ -182,6 +182,20 @@ deepseekCatalogContractTest(
         { sandbox: "read-only" },
       );
       await client.connect();
+      const userConfig = await client.readUserConfigSnapshot();
+      await client.writeUserConfigEdits([{
+        keyPath: "features.context_management.experimental_mode",
+        value: true,
+      }], { expectedVersion: userConfig.version });
+      await expect(client.readUserConfigSnapshot()).resolves.toMatchObject({
+        config: {
+          features: {
+            context_management: {
+              experimental_mode: true,
+            },
+          },
+        },
+      });
       const started = await client.startThread(workdir, {
         model: "deepseek-v4-flash",
         modelProvider: "deepseek",

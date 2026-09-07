@@ -20,7 +20,7 @@
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
   已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
-- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned 与自定义分区、运行状态、更新时间/最近活跃时间、来源（含稳定的
+- `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
   缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
@@ -76,7 +76,7 @@
   `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
-- `client.ts`：Thread 搜索/归档/固定、全局分区 CRUD 与 Thread 分区移动、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill、账户与 Thread 用量及用户级配置
+- `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill、账户与 Thread 用量及用户级配置
   读取等 App Server 方法的类型化封装；按 Workspace 读取有效思考等级与服务层级，模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；MCP 概览按 Thread 使用
@@ -93,14 +93,16 @@
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
-- `provider-routing-client.ts` 把全局 `threadSection/list|create|update|delete` 固定交给主 App Server，
-  `thread/section/move` 则按 Thread 的官方 Provider 路由；所有分区写入都不自动重试。
+- `provider-routing-client.ts` 不暴露自定义 Thread 分区 RPC；固定状态仍通过官方 Pinned 分区移动实现。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
   第三方实例在首次选择对应模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
   Provider 不增加 App Server 子进程；MCP 配置刷新只尝试当前已连接实例并传播任一失败，单 Provider
-  重连只恢复该侧 Thread。组合根可为单 Provider 请求注入活动保护：Thread 操作和重连刷新空闲时间，
-  聚合 Thread 列表与 MCP 配置刷新只阻止并发释放；释放先发生时，已排队请求在 Client 关闭后按需重连。
+  重连只恢复该侧 Thread。组合根为所有 Provider 请求注入活动保护：统一空闲管理器在 Gateway 没有前后台
+  绑定、没有进行中操作且没有启动任务时等待 60 秒，宽限期内新请求会取消本轮释放；到期仍空闲时先通知
+  所有已知授权渠道，再关闭已连接 Client，但不停止 App Server 进程；该通知只在渠道会话空闲自动解除
+  触发的全局释放轮次发送。检查由绑定变化和任务终态事件触发。关闭先发生时，已排队请求在 Client
+  关闭后按需重连。
   第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
   无法关联 Thread 的 MCP 启动状态与 warning 全局通知携带 Provider 来源，只发送到对应 Provider
   会话；无法关联 Thread 的 OAuth 完成通知不进入渠道。

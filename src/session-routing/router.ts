@@ -9,6 +9,7 @@ import type {
   BindingStore,
   BindingTransfer,
   ConversationBinding,
+  ConversationIdleState,
 } from "../storage/index.js";
 import type {
   ThreadLifecyclePort,
@@ -58,6 +59,7 @@ export class SessionRouter {
     private readonly bindings: BindingStore,
     private readonly workspaces: WorkspaceRegistry,
     private readonly dynamicTools: readonly ThreadDynamicToolSpec[] = [],
+    private readonly onBindingsChanged?: () => void,
   ) {}
 
   private workspacePermissions(workspace: Workspace): ThreadStartOptions {
@@ -122,6 +124,18 @@ export class SessionRouter {
 
   foregroundThreadId(target: ConversationTarget): string | undefined {
     return this.bindings.get(target)?.threadId;
+  }
+
+  touchActivity(target: ConversationTarget, atMs: number): void {
+    this.bindings.touchActivity(target, atMs);
+  }
+
+  ensureIdleState(target: ConversationTarget, atMs: number): void {
+    this.bindings.ensureIdleState(target, atMs);
+  }
+
+  idleState(target: ConversationTarget): ConversationIdleState {
+    return this.bindings.idleState(target);
   }
 
   allBindings(): ConversationBinding[] {
@@ -284,10 +298,9 @@ export class SessionRouter {
     if (current) {
       return current;
     }
-    const targetKey = this.key(target);
     const workspace = this.workspace(target);
     this.bindings.selectWorkspace(target, workspace.id);
-    if (!this.forceNew.has(targetKey)) {
+    if (!this.shouldForceNew(target)) {
       const sessions = await this.list(target);
       const candidate = sessions.find(
         (thread) =>
@@ -312,6 +325,7 @@ export class SessionRouter {
         );
         const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
         this.bindings.bind(binding);
+        this.clearForceNew(target, Date.now());
         return binding;
       }
     }
@@ -331,7 +345,7 @@ export class SessionRouter {
     );
     const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
     this.bindings.bind(binding);
-    this.forceNew.delete(targetKey);
+    this.clearForceNew(target, Date.now());
     return binding;
   }
 
@@ -463,7 +477,7 @@ export class SessionRouter {
     );
     const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
     this.bindings.switchForeground(binding, preserveCurrent);
-    this.forceNew.delete(this.key(target));
+    this.clearForceNew(target, Date.now());
     return binding;
   }
 
@@ -534,8 +548,8 @@ export class SessionRouter {
     if (replaced && replaced.threadId !== threadId) {
       this.contextCompactionItemIdsByThread.delete(replaced.threadId);
     }
-    this.forceNew.add(this.key(owner.target));
-    this.forceNew.delete(this.key(target));
+    this.markForceNew(owner.target, Date.now());
+    this.clearForceNew(target, Date.now());
     return transfer;
   }
 
@@ -545,7 +559,7 @@ export class SessionRouter {
     } else {
       await this.detach(target);
     }
-    this.forceNew.add(this.key(target));
+    this.markForceNew(target, Date.now());
   }
 
   async releaseBackground(threadId: string): Promise<ConversationTarget | undefined> {
@@ -555,6 +569,7 @@ export class SessionRouter {
     await this.codex.unsubscribeThread(threadId);
     this.bindings.removeThread(threadId);
     this.contextCompactionItemIdsByThread.delete(threadId);
+    this.onBindingsChanged?.();
     return binding.target;
   }
 
@@ -568,7 +583,7 @@ export class SessionRouter {
     // Workspace changes start a fresh conversation.  Keep the marker until
     // ensure() creates the first Thread so it cannot auto-resume history from
     // the newly selected workspace.
-    this.forceNew.add(this.key(target));
+    this.markForceNew(target, Date.now());
     return workspace;
   }
 
@@ -600,6 +615,7 @@ export class SessionRouter {
       sessionId: forked.thread.sessionId,
     };
     this.bindings.bind(binding);
+    this.clearForceNew(target, Date.now());
     return binding;
   }
 
@@ -610,7 +626,7 @@ export class SessionRouter {
     }
     await this.codex.archiveThread(current.threadId);
     this.forgetThread(current.threadId);
-    this.forceNew.add(this.key(target));
+    this.markForceNew(target, Date.now());
     return current.threadId;
   }
 
@@ -630,6 +646,7 @@ export class SessionRouter {
     this.namesByThread.delete(threadId);
     if (binding) {
       this.bindings.removeThread(threadId);
+      this.onBindingsChanged?.();
       return binding.target;
     }
     return undefined;
@@ -646,7 +663,23 @@ export class SessionRouter {
       await this.codex.unsubscribeThread(current.threadId);
       this.contextCompactionItemIdsByThread.delete(current.threadId);
       this.bindings.unbind(target);
+      this.onBindingsChanged?.();
     }
+  }
+
+  private shouldForceNew(target: ConversationTarget): boolean {
+    return this.forceNew.has(this.key(target))
+      || this.bindings.idleState(target).forceNew;
+  }
+
+  private markForceNew(target: ConversationTarget, atMs: number): void {
+    this.forceNew.add(this.key(target));
+    this.bindings.setForceNew(target, atMs, true);
+  }
+
+  private clearForceNew(target: ConversationTarget, atMs: number): void {
+    this.forceNew.delete(this.key(target));
+    this.bindings.setForceNew(target, atMs, false);
   }
 
   private key(target: ConversationTarget): string {

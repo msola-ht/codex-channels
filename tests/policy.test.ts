@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   FeishuAccessPolicy,
   TelegramAccessPolicy,
-  ThreadSectionAccessPolicy,
   WeixinAccessPolicy,
   WorkspaceRegistry,
 } from "../src/policy/index.js";
@@ -74,27 +73,6 @@ describe("WorkspaceRegistry", () => {
 
     expect(() => registry.resolve("Shared")).toThrow("Workspace 选择不唯一");
     expect(registry.resolve("second").cwd).toBe("/second");
-  });
-});
-
-describe("ThreadSectionAccessPolicy", () => {
-  it("requires an exact configured Surface and Actor principal", () => {
-    const configured = new Set(["feishu:ou_admin"]);
-    const policy = new ThreadSectionAccessPolicy(configured);
-    configured.add("telegram:123");
-
-    expect(policy.isAllowed({
-      target: { surface: "feishu", accountId: "app", conversationId: "chat" },
-      actorId: "ou_admin",
-    })).toBe(true);
-    expect(policy.isAllowed({
-      target: { surface: "telegram", accountId: "default", conversationId: "123" },
-      actorId: "123",
-    })).toBe(false);
-    expect(policy.isAllowed({
-      target: { surface: "feishu", accountId: "app", conversationId: "chat" },
-      actorId: "ou_user",
-    })).toBe(false);
   });
 });
 

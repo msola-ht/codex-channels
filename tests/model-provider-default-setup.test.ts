@@ -23,14 +23,12 @@ describe("managed model provider default setup", () => {
         selectProvider: async () => "deepseek",
         selectModel: async () => "deepseek-v4-pro",
         selectReasoningEffort: async () => "max",
-        selectAutoCompactPercent: async () => 75,
       },
     })).resolves.toEqual({
       action: "configured",
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 75,
       mode: "switching",
       activation: "restart-app-server",
       activationResult: {
@@ -65,7 +63,7 @@ describe("managed model provider default setup", () => {
       expect.objectContaining({
         slug: "deepseek-v4-pro",
         default_reasoning_level: "max",
-        auto_compact_token_limit: 786_432,
+        auto_compact_token_limit: 629_146,
       }),
     ]));
     expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8")))
@@ -86,7 +84,6 @@ describe("managed model provider default setup", () => {
         selectProvider: async () => "deepseek",
         selectModel: async () => "deepseek-v4-pro",
         selectReasoningEffort: async () => "low",
-        selectAutoCompactPercent: async () => 40,
       },
       readConfigSnapshot: vi.fn(async () => ({
         config: { model: "deepseek-v4-flash" },
@@ -118,7 +115,6 @@ describe("managed model provider default setup", () => {
         selectProvider: vi.fn(),
         selectModel: vi.fn(),
         selectReasoningEffort: vi.fn(),
-        selectAutoCompactPercent: vi.fn(),
       },
     })).rejects.toThrow("尚未配置第三方 Provider");
   });
@@ -135,13 +131,11 @@ describe("managed model provider default setup", () => {
         selectProvider,
         selectModel: async () => "deepseek-v4-pro",
         selectReasoningEffort: async () => "max",
-        selectAutoCompactPercent: async () => 55,
       },
     })).resolves.toMatchObject({
       action: "configured",
       provider: "deepseek",
       model: "deepseek-v4-pro",
-      autoCompactPercent: 55,
     });
 
     expect(selectProvider).not.toHaveBeenCalled();
@@ -151,7 +145,7 @@ describe("managed model provider default setup", () => {
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
       slug: "deepseek-v4-pro",
-      auto_compact_token_limit: 576_717,
+      auto_compact_token_limit: 629_146,
     }));
   });
 });

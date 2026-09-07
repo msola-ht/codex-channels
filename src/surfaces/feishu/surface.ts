@@ -113,7 +113,6 @@ export interface FeishuSurfaceOptions {
   credentialsDirectory: string;
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
-  threadSectionAccess?: SurfaceAccessPolicy;
   scheduledTasks?: ScheduledTaskUseCases;
   openApiAgent?: unknown;
   accountsAgent?: unknown;
@@ -127,6 +126,10 @@ export interface FeishuSurfaceOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null;
   remainingUsage?: (
     model: string,
     requestStartedAtMs?: number,
@@ -227,12 +230,12 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
+        ...(options.autoCompactPercent === undefined
+          ? {}
+          : { autoCompactPercent: options.autoCompactPercent }),
         ...(options.remainingUsage === undefined
           ? {}
           : { remainingUsage: options.remainingUsage }),
-        ...(options.threadSectionAccess === undefined
-          ? {}
-          : { threadSectionAccess: options.threadSectionAccess }),
         debugEnabled: options.debugEnabled ?? false,
       },
     );
@@ -241,6 +244,7 @@ export class FeishuSurface implements SurfaceAdapter {
       options.actorRegistry,
       options.access,
       options.logger,
+      (target) => options.service.touchActivity?.(target),
     );
     this.oauth = dependencies.oauth ?? new FeishuOAuthController(
       options.appId,
@@ -301,9 +305,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.priceCurrency === undefined
           ? {}
           : { priceCurrency: options.priceCurrency }),
-        ...(options.threadSectionAccess === undefined
+        ...(options.autoCompactPercent === undefined
           ? {}
-          : { threadSectionAccess: options.threadSectionAccess }),
+          : { autoCompactPercent: options.autoCompactPercent }),
         ...(options.scheduledTasks === undefined
           ? {}
           : { scheduledTasks: options.scheduledTasks }),

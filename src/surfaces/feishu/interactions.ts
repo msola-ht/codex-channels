@@ -74,6 +74,7 @@ export class FeishuInteractionPort implements InteractionPort {
     private readonly actorRegistry?: ConversationActorRegistry,
     private readonly access?: SurfaceAccessPolicy,
     private readonly logger?: Logger,
+    private readonly activity?: (target: ConversationTarget) => void,
   ) {}
 
   async request(
@@ -181,6 +182,17 @@ export class FeishuInteractionPort implements InteractionPort {
       return "invalid";
     }
     this.finish(token, mapped.decision, mapped.outcome);
+    try {
+      this.activity?.(pending.target);
+    } catch (error) {
+      this.logger?.warn(
+        {
+          ...interactionLogMetadata(pending.target, pending.request),
+          errorType: error instanceof Error ? error.name : typeof error,
+        },
+        "飞书交互活动刷新失败",
+      );
+    }
     return "accepted";
   }
 

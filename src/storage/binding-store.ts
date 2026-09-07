@@ -7,6 +7,13 @@ export interface ConversationBinding {
   sessionId: string;
 }
 
+export interface ConversationIdleState {
+  /** Unix timestamp (milliseconds) of the last observed user input or output. */
+  lastActivityAt: number;
+  /** When true, the next ordinary message must create a new Thread. */
+  forceNew: boolean;
+}
+
 export interface BindingTransfer {
   binding: ConversationBinding;
   previousOwner: ConversationBinding;
@@ -33,6 +40,10 @@ export interface BindingStore {
   isBackground(threadId: string): boolean;
   getByThread(threadId: string): ConversationBinding | undefined;
   list(): ConversationBinding[];
+  idleState(target: ConversationTarget): ConversationIdleState;
+  ensureIdleState(target: ConversationTarget, atMs: number): void;
+  touchActivity(target: ConversationTarget, atMs: number): void;
+  setForceNew(target: ConversationTarget, atMs: number, forceNew: boolean): void;
   bind(binding: ConversationBinding): void;
   bindBackground(binding: ConversationBinding): void;
   switchForeground(binding: ConversationBinding, preserveCurrent: boolean): BindingSwitch;

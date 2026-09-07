@@ -82,6 +82,11 @@ function restartRequiredReasons(
     [configChange("storage.database"), current.stateDatabasePath, next.stateDatabasePath],
     [configChange("approval.timeout"), current.approvalTimeoutMs, next.approvalTimeoutMs],
     [
+      configChange("conversation.idle-release-minutes"),
+      current.idleReleaseMinutes,
+      next.idleReleaseMinutes,
+    ],
+    [
       configChange("display.operation-updates"),
       current.operationUpdateDisplay,
       next.operationUpdateDisplay,
@@ -110,11 +115,6 @@ function restartRequiredReasons(
       configChange("scheduled-tasks.enabled"),
       current.scheduledTasksEnabled,
       next.scheduledTasksEnabled,
-    ],
-    [
-      configChange("thread-sections.administrators"),
-      JSON.stringify([...current.threadSectionAdministrators].sort()),
-      JSON.stringify([...next.threadSectionAdministrators].sort()),
     ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [

@@ -21,14 +21,19 @@ export type UserFacingErrorCode =
   | "session.selector.not-found"
   | "sessions.usage"
   | "archived-sessions.usage"
-  | "thread-section.usage"
-  | "thread-section.name.invalid"
-  | "thread-section.selector.ambiguous"
-  | "thread-section.selector.not-found"
-  | "thread-section.pinned.immutable"
+  | "thread-section.removed"
+  /** @deprecated Only retained for unexposed legacy service methods. */
   | "thread-section.before.invalid"
+  /** @deprecated Only retained for unexposed legacy service methods. */
   | "thread-section.delete-confirmation.invalid"
-  | "thread-section.admin-required"
+  /** @deprecated Only retained for unexposed legacy service methods. */
+  | "thread-section.name.invalid"
+  /** @deprecated Only retained for unexposed legacy service methods. */
+  | "thread-section.selector.ambiguous"
+  /** @deprecated Only retained for unexposed legacy service methods. */
+  | "thread-section.selector.not-found"
+  /** @deprecated Only retained for unexposed legacy service methods. */
+  | "thread-section.pinned.immutable"
   | "thread.bound"
   | "thread.takeover.busy"
   | "thread.takeover.workspace"

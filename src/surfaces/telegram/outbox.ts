@@ -33,6 +33,7 @@ import {
   contentTruncatedText,
   emptyCodexResponseText,
   formatCodexWarning,
+  formatConversationIdleReleased,
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
@@ -115,6 +116,10 @@ export interface TelegramOutboxOptions {
   priceCurrency?: (
     provider: string | null | undefined,
   ) => DisplayPriceCurrency;
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null;
   debugEnabled?: boolean;
   remainingUsage?: (
     model: string,
@@ -508,6 +513,7 @@ export class TelegramOutbox {
                   this.options.exchangeRate?.() ?? null,
                   this.options.debugEnabled ?? false,
                   remainingUsage,
+                  this.options.autoCompactPercent,
                 ),
               ),
               replyTo,
@@ -526,6 +532,16 @@ export class TelegramOutbox {
           await this.send(
             chatId,
             formatCodexWarning(visibleUpstreamMessage(event.message)),
+            undefined,
+            true,
+          );
+        }, true);
+        return;
+      case "conversation.idle.released":
+        this.enqueue(chatId, async () => {
+          await this.sendPanel(
+            chatId,
+            formatConversationIdleReleased(event.minutes, event.threadId),
             undefined,
             true,
           );

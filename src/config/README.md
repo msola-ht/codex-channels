@@ -64,10 +64,18 @@ Gateway，不需要重启 App Server。
 `scheduled-tasks.sqlite3`、恢复既有 Run 并启动领取循环；关闭时不创建数据库，也不接管普通
 Thread 的 Server Request。变化需要重启 Gateway，不需要重装或重启 App Server。
 
-`thread_sections.administrators` 是全局 Thread 分区写操作的 Actor 允许名单，条目格式为
-`telegram:<用户 ID>`、`feishu:<open_id>` 或 `weixin:<用户 ID>`。默认空数组；未配置时
-`/section` 只允许列表和会话筛选，新建、重命名、移动、移出与删除失败关闭。每个管理员必须属于
-对应已启用渠道的用户允许名单，否则配置校验失败。变化需要重启 Gateway。
+`conversation.idle_release_minutes` 控制渠道会话自动解除 Thread 绑定的全局空闲阈值，默认
+15 分钟，允许范围为 0–1440，0 表示关闭。所有渠道统一使用该值；用户消息、渠道命令、
+平台本地命令、审批与输入交互、流式回复、完成卡片或其他带目标会话的输出都会刷新活动时间；
+正在后台恢复或 Provider 断线的 Thread 会被跳过，避免与订阅恢复竞态。Gateway 每 60 秒检查一次前台绑定，
+只有活动 Turn、原生 Queue、待处理交互或待结算子代理运行时才强行保留并刷新活动时间；释放前
+会取消 App Server 订阅、移除持久化前台绑定、清理旧的 Revert/Queue 选择并恢复模型偏好，
+随后持久化“下一条普通消息必须新建 Thread”标记。普通消息只能开启新会话，提示会直接显示
+`/r <Thread ID>`，显式执行该命令
+才能恢复旧 Thread。配置为 0 时不会创建定时器、活动订阅或记录活动状态；变化需要重启 Gateway，
+不需要重启 App Server。
+
+自定义 Thread 分区管理入口已移除。旧配置中的 `[thread_sections]` 段属于不支持字段，需手动删除后再启动 Gateway。
 
 `[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（
 `read-only` / `workspace-write` / `danger-full-access`）、`approval_policy`（

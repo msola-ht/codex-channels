@@ -679,7 +679,6 @@ function renderFeishuCategorizedCommandsCard(
       actionRow(token, [
         ["固定会话", "pin", "default"],
         ["取消固定", "unpin", "default"],
-        ["会话分区", "section", "default"],
         ["历史回退", "revert", "default"],
       ]),
       actionRow(token, [

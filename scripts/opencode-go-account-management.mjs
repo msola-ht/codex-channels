@@ -9,10 +9,8 @@ import {
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   loadManagedModelProviderRole,
-  loadManagedModelProviderSettings,
 } from "../runtime/model-provider-runtime.mjs";
 import {
-  isOpencodeGoProvider,
   loadOpencodeGoAccounts,
   opencodeGoAccountsFilePath,
   opencodeGoProviderId,
@@ -20,7 +18,6 @@ import {
   writeOpencodeGoAccounts,
 } from "../runtime/opencode-go-accounts.mjs";
 import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
-import { configureThirdPartyRole } from "./agents.mjs";
 import {
   assertOpencodeGoFileSnapshots,
   opencodeGoAccountPaths,
@@ -47,13 +44,11 @@ export function previewOpencodeGoDefaultAccountChange(
   {
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
-    loadRole = loadManagedModelProviderRole,
   } = {},
 ) {
   return publicDefaultPreview(buildDefaultPlan(accountId, {
     environment,
     loadAccounts,
-    loadRole,
   }));
 }
 
@@ -73,47 +68,12 @@ async function applyOpencodeGoDefaultAccountChangeUnlocked(
   {
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
-    loadRole = loadManagedModelProviderRole,
-    loadProviders = loadManagedModelProviderSettings,
     writeAccounts = writeOpencodeGoAccounts,
-    configureRole = configureThirdPartyRole,
   } = {},
 ) {
-  const plan = buildDefaultPlan(accountId, { environment, loadAccounts, loadRole });
+  const plan = buildDefaultPlan(accountId, { environment, loadAccounts });
   try {
-    const roleModel = plan.updatesExternalAgent
-      ? loadProviders(environment).find(
-          ({ provider }) => provider === opencodeGoProviderId(plan.account.id),
-        )?.model
-      : undefined;
-    if (plan.updatesExternalAgent && typeof roleModel !== "string") {
-      throw invalid(
-        "provider-state-unavailable",
-        "accountId",
-        `OpenCode Go 账户 ${plan.account.id} 的模型配置不可用`,
-      );
-    }
     writeAccounts(environment, plan.nextAccounts);
-    if (plan.updatesExternalAgent) {
-      try {
-        await configureRole(
-          opencodeGoProviderId(plan.account.id),
-          roleModel,
-          environment,
-        );
-      } catch (error) {
-        try {
-          writeAccounts(environment, plan.accounts);
-        } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            "共享第三方子代理更新失败，且默认账户回滚失败",
-            { cause: rollbackError },
-          );
-        }
-        throw error;
-      }
-    }
   } catch (error) {
     if (error instanceof OpenCodeGoAccountManagementError) throw error;
     throw invalid(
@@ -336,7 +296,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   };
 }
 
-function buildDefaultPlan(accountId, { environment, loadAccounts, loadRole }) {
+function buildDefaultPlan(accountId, { environment, loadAccounts }) {
   const normalizedId = validAccountId(accountId);
   const accounts = loadAccountsSafely(loadAccounts, environment);
   const account = accounts.find((candidate) => candidate.id === normalizedId);
@@ -347,18 +307,6 @@ function buildDefaultPlan(accountId, { environment, loadAccounts, loadRole }) {
       `OpenCode Go 账户不存在：${normalizedId}`,
     );
   }
-  let role;
-  try {
-    role = loadRole(environment);
-  } catch (error) {
-    throw invalid(
-      "provider-state-unavailable",
-      "accountId",
-      error instanceof Error ? error.message : String(error),
-      error,
-    );
-  }
-  const updatesExternalAgent = role !== undefined && isOpencodeGoProvider(role.provider);
   const currentDefault = accounts.find((candidate) => candidate.default);
   return {
     account,
@@ -369,9 +317,8 @@ function buildDefaultPlan(accountId, { environment, loadAccounts, loadRole }) {
       default: candidate.id === normalizedId,
     })),
     currentDefaultAccountId: currentDefault?.id ?? null,
-    updatesExternalAgent,
-    willChange: account.default !== true
-      || (updatesExternalAgent && role.provider !== opencodeGoProviderId(normalizedId)),
+    updatesExternalAgent: false,
+    willChange: account.default !== true,
   };
 }
 
@@ -450,7 +397,7 @@ async function buildRemovalPlan(
     throw invalid(
       "account-used-by-agent",
       "accountId",
-      `OpenCode Go 账户 ${normalizedId} 是 agents.external 当前账户；请先运行 codexc opencode-go account default <其他账户> 或 codexc agents disable`,
+      `OpenCode Go 账户 ${normalizedId} 是 agents.external 当前账户；请先运行 codexc agents configure ocg-<其他账户> <模型> 或 codexc agents disable`,
     );
   }
   const stop = await previewOpencodeGoAccountStop(normalizedId, {

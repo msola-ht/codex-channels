@@ -3,6 +3,8 @@ import type {
   CodexUserSettingsResponse,
   ManagementApiProvider,
   ManagementApiProviderMutationInput,
+  ManagementApiProviderPreview,
+  ManagementApiProviderMutationResponse,
   ManagementProviderSettingsMutationInput,
   ManagementProviderSettingsPreview,
   ManagementProviderSettingsResponse,
@@ -15,6 +17,7 @@ import type {
   ManagementSettingsResponse,
   ManagementTask,
   ManagementTaskInput,
+  ManagementTaskPreview,
 } from "@/lib/types"
 
 export type PendingSetting = {
@@ -34,7 +37,7 @@ export interface GatewaySettingsController {
   saving: boolean
   pendingSetting: PendingSetting | null
   previewSetting: (kind: string, value: unknown, label: string) => Promise<void>
-  confirmSetting: () => Promise<void>
+  confirmSetting: () => Promise<boolean>
   cancelSetting: () => void
   refetch: () => void
 }
@@ -47,7 +50,7 @@ export interface CodexSettingsController {
   saving: boolean
   pendingSetting: PendingSetting | null
   previewSetting: (setting: CodexUserSettingInput, label: string) => Promise<void>
-  confirmSetting: () => Promise<void>
+  confirmSetting: () => Promise<boolean>
   cancelSetting: () => void
   refetch: () => void
 }
@@ -57,7 +60,11 @@ export interface ManagementTaskController {
   loading: boolean
   error: string | null
   actionError: string | null
+  saving: boolean
+  pendingPreview: { input: ManagementTaskInput; preview: ManagementTaskPreview; confirmationToken: string } | null
   run: (input: ManagementTaskInput) => Promise<ManagementTask | null>
+  confirm: () => Promise<ManagementTask | null>
+  cancelPending: () => void
   cancel: (id: string) => Promise<ManagementTask | null>
   refetch: () => void
 }
@@ -67,8 +74,10 @@ export interface ApiProviderManagementController {
   busy: boolean
   error: string | null
   clearError: () => void
-  save: (input: Extract<ManagementApiProviderMutationInput, { operation: "save" }>) => Promise<boolean>
-  remove: (id: string) => Promise<boolean>
+  pendingPreview: { input: ManagementApiProviderMutationInput; preview: ManagementApiProviderPreview; confirmationToken: string } | null
+  mutate: (input: ManagementApiProviderMutationInput) => Promise<null>
+  confirm: () => Promise<ManagementApiProviderMutationResponse | null>
+  cancel: () => void
 }
 
 export interface ApiProviderListController {

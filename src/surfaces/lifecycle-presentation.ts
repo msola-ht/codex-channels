@@ -198,13 +198,15 @@ export function createStartupPresentation(
         ? [{
             title: remoteQuota ? "账户状态（额度中心）" : "账户状态",
             fields: remoteQuota
-              ? [
-                  { label: "设备与请求", value: `${remoteQuota.deviceCount} 台设备 · ${remoteQuota.requestCount} 次请求` },
-                  { label: "已使用 Token", value: formatTokenCount(remoteQuota.totalTokens) },
-                  ...(remoteQuota.resetsAt === null ? [] : [{ label: "重置时间", value: formatResetTime(remoteQuota.resetsAt) }]),
-                  ...(remoteQuota.latestUsedPercentMillionths === null ? [] : [{ label: "最新使用率", value: `${(remoteQuota.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%` }]),
-                  ...(remoteQuota.estimatedTotalTokens === null ? [] : [{ label: "推算容量", value: formatTokenCount(remoteQuota.estimatedTotalTokens) }]),
-                ]
+              ? remoteQuota.windows === undefined
+                ? [
+                    { label: "设备与请求", value: `${remoteQuota.deviceCount} 台设备 · ${remoteQuota.requestCount} 次请求` },
+                    { label: "已使用 Token", value: formatTokenCount(remoteQuota.totalTokens) },
+                    ...(remoteQuota.resetsAt === null ? [] : [{ label: "重置时间", value: formatResetTime(remoteQuota.resetsAt) }]),
+                    ...(remoteQuota.latestUsedPercentMillionths === null ? [] : [{ label: "最新使用率", value: `${(remoteQuota.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%` }]),
+                    ...(remoteQuota.estimatedTotalTokens === null ? [] : [{ label: "推算容量", value: formatTokenCount(remoteQuota.estimatedTotalTokens) }]),
+                  ]
+                : orderedRemoteQuotaWindows(remoteQuota).map(remoteQuotaMultiWindowSummaryField)
               : [{ label: "周限", value: formatWeeklyLimit(status.weeklyLimit!) }],
           }]
         : []),
@@ -444,6 +446,54 @@ function subagentTaskName(agentPath: string): string {
   return separator >= 0 ? normalized.slice(separator + 1) : normalized;
 }
 
+function remoteQuotaWindowLabel(windowId: string): string {
+  return {
+    codex: "周限",
+    monthly: "月度（30天）",
+    weekly: "7天",
+    rolling: "5小时",
+  }[windowId] ?? windowId;
+}
+
+function orderedRemoteQuotaWindows(
+  remoteQuota: RemoteQuotaSummary,
+): readonly RemoteQuotaSummary[] {
+  const order = ["rolling", "weekly", "monthly"];
+  return [...(remoteQuota.windows ?? [])].sort(
+    (left, right) => order.indexOf(left.windowId) - order.indexOf(right.windowId),
+  );
+}
+
+function remoteQuotaMultiWindowSummaryField(
+  window: RemoteQuotaSummary,
+): LifecyclePresentationField {
+  return {
+    title: remoteQuotaWindowLabel(window.windowId),
+    fields: [
+      {
+        label: "设备与请求",
+        value: `${window.deviceCount} 台设备 · ${window.requestCount} 次请求`,
+      },
+      { label: "已使用 Token", value: formatTokenCount(window.totalTokens) },
+      ...(window.resetsAt === null
+        ? []
+        : [{ label: "重置时间", value: formatResetTime(window.resetsAt) }]),
+      ...(window.latestUsedPercentMillionths === null
+        ? []
+        : [{
+            label: "最新使用率",
+            value: `${(window.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%`,
+          }]),
+      ...(window.estimatedTotalTokens === null
+        ? []
+        : [{
+            label: "推算容量",
+            value: formatTokenCount(window.estimatedTotalTokens),
+          }]),
+    ],
+  };
+}
+
 function formatTurnErrorMessage(
   value: string,
   errorCode?: "misalignmentPolicyViolation",
@@ -462,6 +512,10 @@ export function createTurnCompletedPresentation(
   exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
   remainingUsage?: ProviderModelUsageEstimate | null,
+  autoCompactPercent?: (
+    provider: string | null | undefined,
+    model: string | null | undefined,
+  ) => number | null,
 ): LifecyclePresentation {
   const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const sessionFields: LifecyclePresentationField[] = [
@@ -479,7 +533,22 @@ export function createTurnCompletedPresentation(
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
   let fallbackCacheField: LifecyclePresentationField | undefined;
-  if (debug && event.remoteQuota) {
+  const monthlyRemoteQuota = event.remoteQuota?.windows?.find(
+    (window) => window.windowId === "monthly",
+  );
+  const completionRemoteQuota = event.remoteQuota?.windows === undefined
+    ? event.remoteQuota
+    : monthlyRemoteQuota;
+  if (completionRemoteQuota !== undefined && !debug) {
+    accountFields.push({
+      label: "额度中心",
+      value: `${remoteQuotaWindowLabel(completionRemoteQuota.windowId)}：${completionRemoteQuota.deviceCount} 台设备 · ${completionRemoteQuota.requestCount} 次请求 · ${formatTokenCount(completionRemoteQuota.totalTokens)}${completionRemoteQuota.resetsAt === null ? "" : ` · 重置 ${formatResetTime(completionRemoteQuota.resetsAt)}`}`,
+    });
+  } else if (event.remoteQuota?.windows !== undefined) {
+    accountFields.push(
+      ...orderedRemoteQuotaWindows(event.remoteQuota).map(remoteQuotaMultiWindowSummaryField),
+    );
+  } else if (debug && event.remoteQuota) {
     accountFields.push({
       label: "额度中心",
       value: `${event.remoteQuota.deviceCount} 台设备 · ${event.remoteQuota.requestCount} 次请求`,
@@ -501,6 +570,11 @@ export function createTurnCompletedPresentation(
               value: formatTokenCount(event.remoteQuota.estimatedTotalTokens),
             }]),
       ],
+    });
+  } else if (!debug && event.remoteQuota !== undefined && !usesOpenAiAccount(event.modelProvider)) {
+    accountFields.push({
+      label: "额度中心",
+      value: `${remoteQuotaWindowLabel(event.remoteQuota.windowId)}：${event.remoteQuota.deviceCount} 台设备 · ${event.remoteQuota.requestCount} 次请求 · ${formatTokenCount(event.remoteQuota.totalTokens)}`,
     });
   }
   if (event.error) {
@@ -550,6 +624,13 @@ export function createTurnCompletedPresentation(
       label: "提供商",
       value: formatCodexProviderLabel(event.modelProvider),
     });
+    const autoCompact = autoCompactPercent?.(event.modelProvider, event.model);
+    if (autoCompact !== null && autoCompact !== undefined) {
+      sessionFields.push({
+        label: "自动压缩",
+        value: `${autoCompact}%`,
+      });
+    }
   }
   if (event.contextCompactionCount !== undefined) {
     sessionFields.push({
@@ -572,7 +653,7 @@ export function createTurnCompletedPresentation(
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
-  if (remainingUsage) {
+  if (remainingUsage && completionRemoteQuota === undefined) {
     accountFields.push({
       label: `剩余用量${remainingUsage.bucket === undefined
         ? ""

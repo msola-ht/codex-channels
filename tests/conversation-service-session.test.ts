@@ -28,11 +28,6 @@ function turnPort(overrides: Partial<TurnExecutionPort> = {}): TurnExecutionPort
     interruptTurn: unsupported,
     setThreadName: unsupported,
     setThreadPinned: unsupported,
-    listThreadSections: unsupported,
-    createThreadSection: unsupported,
-    renameThreadSection: unsupported,
-    deleteThreadSection: unsupported,
-    moveThreadToSection: unsupported,
     compactThread: unsupported,
     startReview: unsupported,
     getGoal: unsupported,
@@ -408,7 +403,7 @@ describe("ConversationService conversation service session", () => {
     expect(resume).toHaveBeenCalledWith(target, "selected", true);
   });
 
-  it("annotates sessions with the model the router knows", async () => {
+  it("annotates sessions with the model and effort the router knows", async () => {
     const service = new ConversationService(
       turnPort(),
       {
@@ -437,7 +432,7 @@ describe("ConversationService conversation service session", () => {
         }],
         modelSettingsForThread: (threadId: string) =>
           threadId === "known-model"
-            ? { model: "gpt-test", effort: null, serviceTier: null, collaborationMode: "default" }
+            ? { model: "gpt-test", effort: "high", serviceTier: null, collaborationMode: "default" }
             : undefined,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined } as unknown as ConversationCore,
@@ -446,7 +441,7 @@ describe("ConversationService conversation service session", () => {
     );
 
     await expect(service.listSessions(target)).resolves.toEqual([
-      { selector: "1", id: "known-model", preview: "已知模型", name: null, isPinned: false, modelProvider: "openai", status: { type: "idle" }, model: "gpt-test" },
+      { selector: "1", id: "known-model", preview: "已知模型", name: null, isPinned: false, modelProvider: "openai", status: { type: "idle" }, model: "gpt-test", reasoningEffort: "high" },
       { selector: "2", id: "unknown-model", preview: "未知模型", name: null, isPinned: false, modelProvider: "openai", status: { type: "idle" } },
     ]);
   });
@@ -521,15 +516,7 @@ describe("ConversationService conversation service session", () => {
   });
 
   it("filters sessions locally while preserving selectors from the full list", async () => {
-    const custom = { id: "section-project", name: "项目", builtIn: null } as const;
-    const listThreadSections = vi.fn(async () => [custom]);
-    const list = vi.fn(async (_target: typeof target, options?: {
-      fullScan?: boolean;
-      searchTerm?: string;
-      sectionId?: string;
-      sortKey?: string;
-      sortDirection?: string;
-    }) => {
+    const list = vi.fn(async () => {
       const threads = [{
         id: "other",
         sessionId: "session-other",
@@ -549,17 +536,16 @@ describe("ConversationService conversation service session", () => {
         preview: "处理项目故障",
         name: "项目修复",
         isPinned: false,
-        section: custom,
+        section: null,
         status: { type: "active" as const },
         cwd: main.cwd,
         source: "cli" as const,
         activeTurnId: "turn-1",
       }];
-      if (options?.sectionId) return [threads[1]!];
       return threads;
     });
     const service = new ConversationService(
-      turnPort({ listThreadSections }),
+      turnPort(),
       {
         list,
         modelSettingsForThread: () => undefined,
@@ -572,157 +558,21 @@ describe("ConversationService conversation service session", () => {
     await expect(service.listSessions(target, {
       filter: "running",
       provider: "deepseek",
-      sectionSelector: "项目",
       searchTerm: "修复",
     })).resolves.toEqual([expect.objectContaining({
       id: "matched",
       selector: "2",
-      section: custom,
       modelProvider: "deepseek",
     })]);
     expect(list).toHaveBeenCalledWith(target, { fullScan: true });
     expect(list).toHaveBeenCalledWith(target, {
       fullScan: true,
-      sectionId: custom.id,
-      sortKey: "section_position",
-      sortDirection: "asc",
       searchTerm: "修复",
     });
 
     list.mockClear();
     await service.listSessions(target, { provider: "deepseek" });
     expect(list).toHaveBeenCalledWith(target, { fullScan: true });
-  });
-
-  it("manages global Thread Sections with counts, ordering validation and immutable Pinned", async () => {
-    const pinned = {
-      id: "01984de2-8f74-7c91-a3b2-5c5e937cf318",
-      name: "Pinned",
-      builtIn: "pinned" as const,
-    };
-    const project = { id: "section-project", name: "项目", builtIn: null };
-    const listThreadSections = vi.fn(async () => [pinned, project]);
-    const createThreadSection = vi.fn(async (name: string) => ({
-      id: "section-new",
-      name,
-      builtIn: null,
-    }));
-    const renameThreadSection = vi.fn(async (sectionId: string, name: string) => ({
-      id: sectionId,
-      name,
-      builtIn: null,
-    }));
-    const deleteThreadSection = vi.fn(async () => undefined);
-    const moveThreadToSection = vi.fn(async () => undefined);
-    const active = [{
-      id: "thread-1",
-      sessionId: "session-1",
-      modelProvider: "openai",
-      preview: "当前",
-      name: null,
-      isPinned: false,
-      section: project,
-      status: { type: "idle" as const },
-      cwd: main.cwd,
-      source: "cli" as const,
-      activeTurnId: null,
-    }, {
-      id: "thread-before",
-      sessionId: "session-before",
-      modelProvider: "openai",
-      preview: "前置",
-      name: null,
-      isPinned: false,
-      section: project,
-      status: { type: "idle" as const },
-      cwd: main.cwd,
-      source: "cli" as const,
-      activeTurnId: null,
-    }];
-    const list = vi.fn(async (
-      _target: typeof target,
-      options?: { archived?: boolean; fullScan?: boolean },
-    ) => options?.archived ? [] : active);
-    const service = new ConversationService(
-      turnPort({
-        listThreadSections,
-        createThreadSection,
-        renameThreadSection,
-        deleteThreadSection,
-        moveThreadToSection,
-      }),
-      {
-        current: () => ({ target, workspaceId: "main", threadId: "thread-1", sessionId: "session-1" }),
-        list,
-      } as unknown as SessionRouter,
-      { activeTurn: () => undefined } as unknown as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-    );
-
-    await expect(service.listThreadSections(target)).resolves.toContainEqual({
-      ...project,
-      currentWorkspaceActiveCount: 2,
-      currentWorkspaceArchivedCount: 0,
-    });
-    expect(list).toHaveBeenCalledWith(target, { fullScan: true });
-    expect(list).toHaveBeenCalledWith(target, { archived: true, fullScan: true });
-    await expect(service.createThreadSection(target, "  新分区  ")).resolves
-      .toMatchObject({ name: "新分区" });
-    expect(createThreadSection).toHaveBeenCalledWith("新分区");
-    await expect(service.renameThreadSection(target, "1", "不能改"))
-      .rejects.toMatchObject({ code: "thread-section.pinned.immutable" });
-    await service.renameThreadSection(target, "项目", "项目二");
-    expect(renameThreadSection).toHaveBeenCalledWith(project.id, "项目二");
-    await service.moveCurrentThreadToSection(target, project.id, "thread-before");
-    expect(list).toHaveBeenCalledWith(target, { fullScan: true });
-    expect(moveThreadToSection).toHaveBeenCalledWith("thread-1", project.id, "thread-before");
-    await service.removeCurrentThreadSection(target);
-    expect(moveThreadToSection).toHaveBeenLastCalledWith("thread-1", null);
-    await expect(service.previewThreadSectionDelete(target, project.id)).resolves
-      .toMatchObject({ section: { id: project.id, currentWorkspaceActiveCount: 2 } });
-    await expect(service.deleteThreadSection(target, "2"))
-      .rejects.toMatchObject({ code: "thread-section.delete-confirmation.invalid" });
-    expect(deleteThreadSection).not.toHaveBeenCalled();
-    await service.deleteThreadSection(target, project.id);
-    expect(deleteThreadSection).toHaveBeenCalledWith(project.id);
-  });
-
-  it("serializes global Thread Section writes across conversations", async () => {
-    const secondTarget = { ...target, conversationId: "200" };
-    let releaseFirst!: () => void;
-    let signalFirstStarted!: () => void;
-    const firstStarted = new Promise<void>((resolve) => { signalFirstStarted = resolve; });
-    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
-    let activeWrites = 0;
-    let maximumActiveWrites = 0;
-    const createThreadSection = vi.fn(async (name: string) => {
-      activeWrites += 1;
-      maximumActiveWrites = Math.max(maximumActiveWrites, activeWrites);
-      if (name === "一") {
-        signalFirstStarted();
-        await firstBlocked;
-      }
-      activeWrites -= 1;
-      return { id: `section-${name}`, name, builtIn: null };
-    });
-    const service = new ConversationService(
-      turnPort({ createThreadSection }),
-      {} as SessionRouter,
-      {} as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-    );
-
-    const first = service.createThreadSection(target, "一");
-    await firstStarted;
-    const second = service.createThreadSection(secondTarget, "二");
-    await Promise.resolve();
-    expect(maximumActiveWrites).toBe(1);
-    releaseFirst();
-    await Promise.all([first, second]);
-    expect(maximumActiveWrites).toBe(1);
-    expect(createThreadSection.mock.calls.map(([name]) => name)).toEqual(["一", "二"]);
   });
 
   it("keeps pending settings when selecting the same workspace", async () => {

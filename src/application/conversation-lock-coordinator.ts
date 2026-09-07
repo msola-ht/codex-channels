@@ -5,23 +5,12 @@ import {
 
 export class ConversationLockCoordinator {
   private readonly locks = new Map<string, Promise<void>>();
-  private readonly threadSectionsLockKey = "global:thread-sections";
 
   forConversation<T>(
     target: ConversationTarget,
     action: () => Promise<T> | T,
   ): Promise<T> {
     return this.forKey(conversationTargetKey(target), action);
-  }
-
-  forThreadSections<T>(
-    target: ConversationTarget,
-    action: () => Promise<T>,
-  ): Promise<T> {
-    return this.forKey(
-      this.threadSectionsLockKey,
-      () => this.forConversation(target, action),
-    );
   }
 
   forConversations<T>(

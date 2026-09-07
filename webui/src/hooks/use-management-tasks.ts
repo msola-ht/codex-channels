@@ -7,44 +7,65 @@ import type { ManagementTaskInput } from "@/lib/types"
 
 export function useManagementTasks(): ManagementTaskController {
   const request = useApi(fetchManagementTasks, [])
+  const { data, refetch } = request
   const [actionError, setActionError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [pendingPreview, setPendingPreview] = useState<NonNullable<ManagementTaskController["pendingPreview"]> | null>(null)
   useEffect(() => {
-    if (!request.data?.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))) return undefined
-    const timer = window.setInterval(request.refetch, 2_000)
+    if (!data?.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))) return undefined
+    const timer = window.setInterval(refetch, 2_000)
     return () => window.clearInterval(timer)
-  }, [request.data, request.refetch])
+  }, [data, refetch])
   const run = useCallback(async (input: ManagementTaskInput) => {
+    if (pendingPreview !== null || saving) return null
+    setSaving(true)
     setActionError(null)
     try {
       const preview = await previewManagementTask(input)
-      const details = preview.preview !== null && typeof preview.preview === "object" && !Array.isArray(preview.preview)
-        ? preview.preview as { effects?: string[]; preconditions?: string[]; recovery?: string }
-        : {}
-      const description = [
-        ...(details.effects ?? []),
-        ...(details.preconditions ?? []).map((condition) => `前置条件：${condition}`),
-        details.recovery ? `失败处理：${details.recovery}` : null,
-      ].filter((item): item is string => item !== null)
-      const confirmed = window.confirm(`确认执行：${description.join("\n") || input.action}？`)
-      if (!confirmed) return null
-      const task = await startManagementTask({ ...input, confirmationToken: preview.confirmationToken })
-      request.refetch()
-      return task
+      setPendingPreview({ input, preview: preview.preview, confirmationToken: preview.confirmationToken })
+      return null
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error))
       return null
+    } finally {
+      setSaving(false)
     }
-  }, [request])
+  }, [pendingPreview, saving])
+
+  const confirm = useCallback(async () => {
+    const pending = pendingPreview
+    if (pending === null || saving) return null
+    setSaving(true)
+    setActionError(null)
+    try {
+      const task = await startManagementTask({ ...pending.input, confirmationToken: pending.confirmationToken })
+      setPendingPreview(null)
+      refetch()
+      return task
+    } catch (error) {
+      setPendingPreview(null)
+      setActionError(error instanceof Error ? error.message : String(error))
+      return null
+    } finally {
+      setSaving(false)
+    }
+  }, [pendingPreview, refetch, saving])
+
+  const cancelPending = useCallback(() => {
+    if (saving) return
+    setPendingPreview(null)
+    setActionError(null)
+  }, [saving])
   const cancel = useCallback(async (id: string) => {
     setActionError(null)
     try {
       const task = await cancelManagementTask(id)
-      request.refetch()
+      refetch()
       return task
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error))
       return null
     }
-  }, [request])
-  return { ...request, tasks: request.data?.tasks ?? [], run, cancel, actionError }
+  }, [refetch])
+  return { ...request, tasks: request.data?.tasks ?? [], run, confirm, cancelPending, cancel, actionError, saving, pendingPreview }
 }

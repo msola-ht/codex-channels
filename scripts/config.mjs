@@ -70,7 +70,7 @@ export async function runConfig({
           label: "系统设置",
           hint: "调试模式、审批超时、Sandbox、默认工作区与渠道模型覆盖",
         },
-        { value: "automation", label: "自动化", hint: "计划任务与 Thread 分区管理员" },
+        { value: "automation", label: "自动化", hint: "计划任务" },
         { value: "network", label: "网络代理", hint: "显式 HTTP、HTTPS、通用代理与直连规则" },
         { value: "advanced", label: "高级设置", hint: "日志等级与开发中功能" },
         { value: "webui", label: "WebUI 设置", hint: "监听地址、端口与访问令牌" },

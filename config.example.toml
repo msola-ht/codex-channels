@@ -36,7 +36,12 @@ default_model = ""
 sandbox = "workspace-write"
 
 [approval]
-timeout_seconds = 300
+timeout_seconds = 900
+
+[conversation]
+# 渠道会话在连续无用户输入和会话输出时自动解除 Thread 绑定的分钟数；
+# 0 表示关闭。所有渠道统一使用该值。
+idle_release_minutes = 15
 
 [display]
 # full：完整详情；compact：单行摘要；hidden：隐藏操作过程。
@@ -47,7 +52,7 @@ plan_updates = true
 reasoning = true
 # 模型价格显示币种：全局统一为 cny（人民币）或 usd（美元）；
 # 选择 cny 时 Gateway 会刷新并持久化汇率，拉取失败时继续使用最后一次缓存。
-price_currency = "cny"
+price_currency = "usd"
 
 [experimental]
 # Codex 0.148.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。
@@ -56,11 +61,6 @@ plugin_api = false
 [scheduled_tasks]
 # Gateway 计划任务默认关闭；启用后使用独立私有数据库并由 App Server 执行 Turn。
 enabled = false
-
-[thread_sections]
-# 自定义 Thread 分区是 App Server 全局状态；只有这里列出的 Actor 可以修改。
-# 格式：telegram:<用户 ID>、feishu:<open_id>、weixin:<用户 ID>。
-administrators = []
 
 # 预留给直接 API 功能的第三方 Responses 提供商：
 # [[api_providers]]

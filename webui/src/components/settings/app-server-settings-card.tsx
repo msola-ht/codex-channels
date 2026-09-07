@@ -1,17 +1,20 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ManagedSelect, PendingSettingCard, SettingsRow } from "@/components/settings/settings-controls"
+import { ManagedSelect, PendingSettingDialog, SettingsRow } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { CodexSettingsController } from "@/lib/settings-management"
 
-export function AppServerSettingsCard({ management }: { management: CodexSettingsController }) {
+export function AppServerSettingsCard({ management, onChanged }: { management: CodexSettingsController; onChanged?: () => void }) {
   const settings = management.codexSettings
-  if (management.loading) return <LoadingSettingsCard title="App Server 设置" />
+  if (management.loading && settings === null) return <LoadingSettingsCard title="App Server 设置" />
   if (settings === null) return <SettingsError message={management.error ?? "App Server 用户设置暂不可用"} retry={management.refetch} />
+  const confirmSetting = async () => {
+    if (await management.confirmSetting()) onChanged?.()
+  }
   const selected = settings.models.find((model) => model.model === settings.defaults.model) ?? settings.models[0]
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
-  const disabled = management.saving || management.pendingSetting !== null || !settings.defaultsEditable
+  const disabled = management.loading || management.saving || management.pendingSetting !== null || !settings.defaultsEditable
   return <>
-    {management.pendingSetting !== null ? <PendingSettingCard pending={management.pendingSetting} saving={management.saving} onConfirm={() => void management.confirmSetting()} onCancel={management.cancelSetting} /> : null}
+    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
     <Card>
       <CardHeader><CardTitle>App Server 设置</CardTitle><CardDescription>通过 App Server 用户配置 RPC 写入，修订冲突会要求重新读取；写入后需重启全部服务生效。</CardDescription></CardHeader>
       <CardContent className="grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">

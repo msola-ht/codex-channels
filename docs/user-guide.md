@@ -79,6 +79,17 @@ enabled = true
 
 上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改 Codex 用户设置后运行 `codexc service restart all`。
 
+### 实验性上下文管理
+
+在 `codexc setup → Codex 新会话默认值 → 实验性上下文管理` 中控制上游的实验性上下文管理，默认关闭：
+
+```toml
+[features.context_management]
+experimental_mode = true
+```
+
+该值写入 Codex 用户配置 `~/.codex/config.toml`，不属于 Gateway 的 `~/.codex-connect/config.toml`。保存后运行 `codexc service restart all`；它只对满足资格条件的官方 ChatGPT Codex 新会话生效，使用 API Key、自定义或第三方 Provider 的会话不会启用该能力。`codexc doctor` 只读显示当前开关状态和适用范围。
+
 ### TUI 空闲总结
 
 在 `codexc setup → Codex 新会话默认值 → 空闲总结` 中控制 TUI 失去焦点后的自动回顾，默认写入关闭：
@@ -89,6 +100,30 @@ auto_recap = false
 ```
 
 关闭只影响自动回顾，手动 `/recap` 仍然可用；修改后运行 `codexc service restart all`。
+
+### 渠道会话空闲自动解除
+
+在 `codexc config → 系统设置 → 会话空闲自动解除` 中设置渠道会话自动解除 Thread 绑定的全局
+空闲阈值，默认 15 分钟：
+
+```toml
+[conversation]
+idle_release_minutes = 15
+```
+
+该值对 Telegram、飞书和微信统一生效，允许 0–1440 分钟，0 表示关闭。用户消息、平台本地命令、
+审批与输入交互和任何带目标会话的输出都会刷新活动时间；正在恢复的 Thread 不会被同时释放。
+Provider 断线期间也会跳过扫描。
+连续达到配置的空闲时间且没有任何输入和输出时，Gateway 才会在确认 Thread、原生 Queue、审批和子代理都已
+空闲后取消订阅并解除前台绑定；如果此时 Gateway 已没有任何前台或后台绑定、进行中的 Provider 操作或
+启动任务，还会关闭全部 Provider Client，但不会停止 App Server 进程，后续请求会自动重连。解除后
+当前渠道会收到一次“自动解除占用”提示；若 60 秒内没有新消息、`/r` 恢复或新的 Provider 操作，
+Gateway 会在关闭 Client 前向所有已知授权渠道发送一次“所有模型连接已空闲，即将释放”的通知。
+该通知只属于渠道空闲自动解除后的全局释放轮次；手动 `/new`、切换 Workspace 或 Provider、
+后台任务结束等原因导致没有绑定并关闭 Client 时，不发送这条通知。
+此后直接发送消息只会开启新会话，不会接续旧 Thread；需要继续旧会话时直接使用提示中的
+`/r <Thread ID>` 命令显式恢复；飞书显示为 CardKit 2.0 卡片，Telegram 为 HTML 面板，微信为
+结构化文本。修改后需要重启 Gateway。
 
 ### 代理与权限
 
@@ -157,7 +192,7 @@ codexc update
 codexc doctor
 ```
 
-更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断该设置。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
+更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断计划清单工具与实验性上下文管理。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
 
 卸载但保留用户数据：
 
@@ -171,7 +206,7 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 
 在聊天中发送 `/help` 查看当前渠道完整命令。常用命令包括：
 
-- 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`、`/section`
+- 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue`、`/revert`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`

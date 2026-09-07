@@ -122,6 +122,7 @@ describe("Codex user settings setup", () => {
     expect(options.map((option: { value: string }) => option.value)).toEqual([
       "web-search",
       "update-plan",
+      "context-management",
       "auto-recap",
       "permissions",
       "back",
@@ -196,6 +197,40 @@ describe("Codex user settings setup", () => {
     expect(output.join("")).toContain("Codex 空闲总结已关闭");
   });
 
+  it("updates experimental context management with disabled as the default", async () => {
+    const output: string[] = [];
+    const updateSetting = vi.fn(async () => ({
+      kind: "context-management" as const,
+      previousVersion: "version-1",
+      value: { enabled: true },
+      activation: "restart-all" as const,
+    }));
+    const prompts = {
+      select: vi.fn()
+        .mockResolvedValueOnce("context-management")
+        .mockResolvedValueOnce("enabled"),
+      confirm: vi.fn(async () => true),
+      isCancel: () => false,
+    };
+
+    await runCodexUserSettingsSetup({
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      output: { write: (value: string) => output.push(value) },
+      prompts,
+      loadSettings: async () => settingsState(),
+      updateSetting,
+    });
+
+    expect(updateSetting).toHaveBeenCalledWith({
+      kind: "context-management",
+      enabled: true,
+    }, {
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      expectedVersion: "version-1",
+    });
+    expect(output.join("")).toContain("仅符合条件的官方 ChatGPT Codex 新会话生效");
+  });
+
   it("refuses to mix Permission Profiles with traditional sandbox fields", async () => {
     const output: string[] = [];
     const updateSetting = vi.fn();
@@ -223,6 +258,43 @@ describe("Codex user settings setup", () => {
     expect(updateSetting).not.toHaveBeenCalled();
     expect(output.join("")).toContain("Permission Profile（:workspace）");
   });
+
+  it("writes official model context window and auto compact after confirmation", async () => {
+    const output: string[] = [];
+    const updateSetting = vi.fn(async () => ({
+      kind: "model-compact" as const,
+      previousVersion: "version-1",
+      value: { contextWindow: 100_000, autoCompactPercent: 40 },
+      activation: "restart-all" as const,
+    }));
+    const prompts = {
+      select: vi.fn(async () => "model-compact"),
+      text: vi.fn()
+        .mockResolvedValueOnce("100000")
+        .mockResolvedValueOnce("40"),
+      confirm: vi.fn(async () => true),
+      isCancel: () => false,
+    };
+
+    await runCodexUserSettingsSetup({
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      output: { write: (value: string) => output.push(value) },
+      prompts,
+      loadSettings: async () => settingsState(),
+      updateSetting,
+    });
+
+    expect(prompts.confirm).toHaveBeenCalledOnce();
+    expect(updateSetting).toHaveBeenCalledWith({
+      kind: "model-compact",
+      contextWindow: 100_000,
+      autoCompactPercent: 40,
+    }, {
+      environment: { CODEX_HOME: "/tmp/codex-home" },
+      expectedVersion: "version-1",
+    });
+    expect(output.join("")).toContain("Codex 模型上下文与自动压缩已更新");
+  });
 });
 
 function settingsState(): CodexUserSettingsState {
@@ -243,6 +315,7 @@ function settingsState(): CodexUserSettingsState {
       fastEnabled: false,
       webSearch: null,
       updatePlanEnabled: false,
+      contextManagementEnabled: false,
       autoRecapEnabled: false,
     },
     permissions: {
@@ -251,6 +324,10 @@ function settingsState(): CodexUserSettingsState {
       sandboxMode: null,
       approvalPolicy: null,
       networkAccess: null,
+    },
+    compact: {
+      contextWindow: null,
+      autoCompactPercent: null,
     },
   };
 }

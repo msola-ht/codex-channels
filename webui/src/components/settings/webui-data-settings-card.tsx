@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ManagedInputRow, ManagedSelect, SettingsRow } from "@/components/settings/settings-controls"
 import type { GatewaySettingsController } from "@/lib/settings-management"
@@ -6,6 +6,15 @@ import type { GatewaySettingsController } from "@/lib/settings-management"
 export function WebuiDataSettingsCard({ management }: { management: GatewaySettingsController }) {
   const settings = management.managedSettings
   const [centerPortError, setCenterPortError] = useState<string | null>(null)
+  const [webuiToken, setWebuiToken] = useState("")
+  const tokenPreviewOpen = management.pendingSetting?.kind === "webui.token"
+  const tokenPreviewStarted = useRef(false)
+  useEffect(() => {
+    if (tokenPreviewStarted.current && !management.saving && !tokenPreviewOpen) {
+      setWebuiToken("")
+      tokenPreviewStarted.current = false
+    }
+  }, [management.saving, tokenPreviewOpen])
   if (settings === null) return null
   const disabled = management.saving || management.pendingSetting !== null
   const previewCenterPort = (raw: string) => {
@@ -32,7 +41,7 @@ export function WebuiDataSettingsCard({ management }: { management: GatewaySetti
         <ManagedSelect label="WebUI 端口" value={String(settings.webui.port)} options={[["8787", "8787"], ["8790", "8790"], ["8800", "8800"]]} disabled={disabled} onChange={(value) => void management.previewSetting("webui.port", Number(value), "WebUI 端口")} />
         <ManagedSelect label="WebUI 监听地址" value={settings.webui.host} options={[["127.0.0.1", "127.0.0.1"], ["::1", "::1"], ["0.0.0.0", "0.0.0.0"]]} disabled={disabled} onChange={(value) => void management.previewSetting("webui.host", value, "WebUI 监听地址")} />
         <div key={settings.revision}><ManagedInputRow label="中心端口" type="number" defaultValue={String(settings.metrics.center.port)} placeholder="1–65535，留空恢复默认" disabled={disabled} onBlur={previewCenterPort} />{centerPortError !== null ? <p className="mt-1 text-right text-xs text-destructive" role="status">{centerPortError}</p> : null}</div>
-        <ManagedInputRow label="WebUI 访问令牌" type="password" defaultValue="" placeholder={settings.webui.tokenConfigured ? "留空保持不变" : "输入新令牌"} disabled={disabled} onBlur={(value) => { if (value !== "") void management.previewSetting("webui.token", { action: "set", value }, "WebUI 访问令牌") }} />
+        <ManagedInputRow label="WebUI 访问令牌" type="password" defaultValue="" value={webuiToken} onChange={setWebuiToken} placeholder={settings.webui.tokenConfigured ? "留空保持不变" : "输入新令牌"} disabled={disabled} onBlur={(value) => { if (value !== "") { tokenPreviewStarted.current = true; void management.previewSetting("webui.token", { action: "set", value }, "WebUI 访问令牌") } }} />
         <SettingsRow label="WebUI 令牌" value={configuredLabel(settings.webui.tokenConfigured)} />
         <SettingsRow label="设备同步" value={enabledLabel(settings.metrics.sync.enabled)} />
         <SettingsRow label="设备上报令牌" value={configuredLabel(settings.metrics.sync.deviceTokenConfigured)} />

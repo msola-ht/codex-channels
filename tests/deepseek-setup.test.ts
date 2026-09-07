@@ -41,14 +41,6 @@ import {
   runDeepseekSetup as runDeepseekSetupImplementation,
   type DeepseekSetupOptions,
 } from "../scripts/deepseek-setup.mjs";
-import {
-  configureThirdPartyRole,
-} from "../scripts/agents.mjs";
-import type {
-  CodexUserConfigEdit,
-  CodexUserConfigValue,
-} from "../scripts/codex-user-config.mjs";
-import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { writeManagedModelProviderProfileDefault } from "../runtime/model-provider-runtime.mjs";
 
 const script = `#!/bin/sh
@@ -60,12 +52,6 @@ CODEX_MODELS_JSON
 function runDeepseekSetup(options: DeepseekSetupOptions = {}) {
   return runDeepseekSetupImplementation({
     ...options,
-    configureRole: (provider, model, environment) => configureThirdPartyRole(
-      provider,
-      model,
-      environment,
-      { updateConfig: applyConfigUpdate },
-    ),
   });
 }
 
@@ -95,7 +81,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
           writesMainConfig: false,
           writesIsolatedProfile: true,
           downloadsCatalog: true,
-          updatesExternalAgent: true,
+          updatesExternalAgent: false,
           preservesInitialConfig: true,
         },
         confirmation: {
@@ -166,12 +152,6 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     }, {
       environment,
       fetchImpl: successfulFetch,
-      configureRole: (provider, model, roleEnvironment) => configureThirdPartyRole(
-        provider,
-        model,
-        roleEnvironment,
-        { updateConfig: applyConfigUpdate },
-      ),
     });
 
     expect(result).toMatchObject({
@@ -206,7 +186,6 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     }, {
       environment,
       fetchImpl: successfulFetch,
-      configureRole: vi.fn(),
     })).rejects.toMatchObject({
       code: "operation-failed",
       field: "action",
@@ -553,7 +532,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
         { value: "1", label: "OpenAI + DeepSeek 切换模式" },
         { value: "2", label: "仅 DeepSeek 固定模式" },
         { value: "3", label: "删除 DeepSeek（恢复安装前配置）" },
-        { value: "4", label: "修改模型设置（思考等级、自动压缩）" },
+        { value: "4", label: "修改模型设置（思考等级）" },
         { value: "5", label: "返回上一级" },
       ],
     });
@@ -565,15 +544,13 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       .mockResolvedValueOnce("4")
       .mockResolvedValueOnce("deepseek-v4-pro")
       .mockResolvedValueOnce("max");
-    const text = vi.fn(async () => "60");
-
     const result = await runDeepseekSetup({
       allowBack: true,
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: vi.fn() },
       prompts: {
         select,
-        text,
+        text: vi.fn(),
         password: vi.fn(),
         confirm: vi.fn(),
         isCancel: () => false,
@@ -585,7 +562,6 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 60,
     });
     const catalog = JSON.parse(readFileSync(
       join(codexHome, ".codex-connect", "providers", "deepseek", "models.json"),
@@ -683,20 +659,9 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     expect(config.model_provider).toBe("openai");
     expect(record(config.profiles).deepseek).toBeUndefined();
     expect(record(config.model_providers).deepseek).toBeUndefined();
-    expect(config.features).toMatchObject({ multi_agent_v2: true });
-    expect(record(config.agents).external).toMatchObject({
-      description:
-        "第三方模型单次子代理；仅处理当前用户消息中的完整任务，必须使用 fork_turns=1，不能接收后续消息",
-      config_file: join(fixture.home, "sf-agent.config.toml"),
-      nickname_candidates: ["DeepSeek"],
-    });
-    const roleConfigPath = join(fixture.home, "sf-agent.config.toml");
-    expect(existsSync(roleConfigPath)).toBe(true);
-    expect(parse(readFileSync(roleConfigPath, "utf8"))).toMatchObject({
-      model: "deepseek-v4-flash-vision-exp",
-      model_provider: "deepseek",
-    });
-    expect(readFileSync(roleConfigPath, "utf8")).not.toContain("sk-secret");
+    expect(config.features).toBeUndefined();
+    expect(record(config.agents).external).toBeUndefined();
+    expect(existsSync(join(fixture.home, "sf-agent.config.toml"))).toBe(false);
     const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash-vision-exp");
     expect(profile.model_provider).toBe("deepseek");
@@ -765,9 +730,8 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     expect(updated).toMatchObject({
       model: "gpt-5.6-sol",
       custom_after: true,
-      features: { multi_agent_v2: true },
     });
-    expect(record(updated.agents).external).toBeDefined();
+    expect(record(updated.agents).external).toBeUndefined();
   });
 
   it("preserves the selected model and per-model settings when setup is repeated", async () => {
@@ -808,11 +772,10 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       default_reasoning_level: "max",
       auto_compact_token_limit: 786_432,
     });
-    expect(parse(readFileSync(join(fixture.home, "sf-agent.config.toml"), "utf8")))
-      .toMatchObject({ model: "deepseek-v4-pro", model_reasoning_effort: "max" });
+    expect(existsSync(join(fixture.home, "sf-agent.config.toml"))).toBe(false);
   });
 
-  it("rejects a custom external role without modifying DeepSeek files", async () => {
+  it("preserves a user-managed external role while installing DeepSeek", async () => {
     const original = [
       'model = "gpt-5.4"',
       "[agents.external]",
@@ -821,68 +784,31 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       "",
     ].join("\n");
     const fixture = setupFixture(original);
-    const fetchImpl = vi.fn(successfulFetch);
 
-    await expect(runDeepseekSetup({
-      environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
-      output: fixture.output,
-      fetchImpl,
-      prompter: prompter(["1", "2"], ["sk-secret"]),
-    })).rejects.toThrow("agents.external 已由用户配置");
-
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(fixture.home, "sf-deepseek.config.toml"))).toBe(false);
-  });
-
-  it("restores every installation target when the role config transaction fails", async () => {
-    const original = 'model = "gpt-5.4"\ncustom = true\n';
-    const fixture = setupFixture(original);
-
-    await expect(runDeepseekSetupImplementation({
+    const result = await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
-      configureRole: vi.fn(async () => {
-        throw new Error("config version conflict");
-      }),
-    })).rejects.toThrow("config version conflict");
+    });
 
+    expect(result?.mode).toBe("switching");
     expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(original);
-    for (const name of ["sf-deepseek.config.toml", "sf-agent.config.toml"]) {
-      expect(existsSync(join(fixture.home, name))).toBe(false);
-    }
-    for (const name of [
-      "managed.toml",
-      "models.json",
-      "models.manifest.json",
-    ]) {
-      expect(existsSync(join(
-        fixture.connectHome,
-        "providers",
-        "deepseek",
-        name,
-      ))).toBe(false);
-    }
+    expect(existsSync(join(fixture.home, "sf-deepseek.config.toml"))).toBe(true);
+    expect(existsSync(join(fixture.home, "sf-agent.config.toml"))).toBe(false);
   });
 
-  it("does not overwrite a concurrent config change while rolling back a failed install", async () => {
+  it("does not configure the shared role while installing a provider", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
-    const concurrent = 'model = "gpt-5.6-sol"\nconcurrent = true\n';
-
-    await expect(runDeepseekSetupImplementation({
+    const result = await runDeepseekSetupImplementation({
       environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
       output: fixture.output,
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-secret"]),
-      configureRole: vi.fn(async () => {
-        writeFileSync(join(fixture.home, "config.toml"), concurrent, { mode: 0o600 });
-        throw new Error("config version conflict");
-      }),
-    })).rejects.toThrow("未能完整恢复操作前文件");
+    });
 
-    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(concurrent);
+    expect(result?.mode).toBe("switching");
+    expect(existsSync(join(fixture.home, "sf-agent.config.toml"))).toBe(false);
   });
 
   it("installs exclusive mode and keeps the initial config backup", async () => {
@@ -899,8 +825,9 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     expect(config.model_provider).toBe("deepseek");
     expect(config.forced_login_method).toBeUndefined();
     expect(config.preferred_auth_method).toBeUndefined();
-    expect(config.features).toMatchObject({ multi_agent_v2: true });
-    expect(record(config.agents).external).toBeDefined();
+    expect(config.features).toBeUndefined();
+    expect(record(config.agents).external).toBeUndefined();
+    expect(existsSync(join(fixture.home, "sf-agent.config.toml"))).toBe(false);
     expect(existsSync(join(fixture.home, "sf-deepseek.config.toml"))).toBe(false);
     expect(parse(readFileSync(
       join(fixture.connectHome, "providers", "deepseek", "managed.toml"),
@@ -912,7 +839,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     )).toBe(original);
   });
 
-  it("keeps the shared third-party role on DeepSeek when switching to exclusive mode", async () => {
+  it("does not add the shared third-party role when switching to exclusive mode", async () => {
     const fixture = setupFixture('model = "gpt-5.4"\n');
     await runDeepseekSetup({
       environment: { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome },
@@ -929,8 +856,8 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     });
 
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
-    expect(record(config.agents).external).toBeDefined();
-    expect(config.features).toMatchObject({ multi_agent_v2: true });
+    expect(record(config.agents).external).toBeUndefined();
+    expect(config.features).toBeUndefined();
   });
 
   it("removes stale auto-compact fields when exclusive mode is reinstalled disabled", async () => {
@@ -980,9 +907,8 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-switching"]),
     });
-    const config = parse(readFileSync(join(home, "config.toml"), "utf8"));
-    expect(config.features).toMatchObject({ multi_agent_v2: true });
-    expect(record(config.agents).external).toBeDefined();
+    expect(existsSync(join(home, "config.toml"))).toBe(false);
+    expect(existsSync(join(home, "sf-agent.config.toml"))).toBe(false);
     const profile = parse(readFileSync(join(home, "sf-deepseek.config.toml"), "utf8"));
     expect(profile.model).toBe("deepseek-v4-flash-vision-exp");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
@@ -1084,10 +1010,9 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     expect(repaired).toMatchObject({
       model: "gpt-5.4",
       model_provider: "openai",
-      features: { multi_agent_v2: true },
     });
     expect(record(repaired.model_providers).deepseek).toBeUndefined();
-    expect(record(repaired.agents).external).toBeDefined();
+    expect(record(repaired.agents).external).toBeUndefined();
     const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
     expect(profile.forced_login_method).toBeUndefined();
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
@@ -1289,7 +1214,6 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     const configPath = join(fixture.home, "config.toml");
     const roleConfigPath = join(fixture.home, "sf-agent.config.toml");
     const configBeforeRestore = readFileSync(configPath, "utf8");
-    const roleBeforeRestore = readFileSync(roleConfigPath, "utf8");
     const backupStatePath = join(
       fixture.connectHome,
       "providers",
@@ -1309,7 +1233,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     })).rejects.toThrow("Codex 初始配置备份状态无效");
 
     expect(readFileSync(configPath, "utf8")).toBe(configBeforeRestore);
-    expect(readFileSync(roleConfigPath, "utf8")).toBe(roleBeforeRestore);
+    expect(existsSync(roleConfigPath)).toBe(false);
   });
 
 });
@@ -1404,44 +1328,4 @@ function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-}
-
-async function applyConfigUpdate(
-  environment: NodeJS.ProcessEnv,
-  createEdits: (
-    config: Record<string, CodexUserConfigValue | undefined>,
-  ) => CodexUserConfigEdit[],
-): Promise<void> {
-  const configPath = join(String(environment.CODEX_HOME), "config.toml");
-  const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
-  const comments = source
-    .split("\n")
-    .filter((line) => line.trimStart().startsWith("#"));
-  const document = source === "" ? {} : record(parse(source));
-  const edits = createEdits(document as Record<string, CodexUserConfigValue | undefined>);
-  for (const edit of edits) {
-    if (edit.keyPath === "features.multi_agent_v2") {
-      const features = record(document.features);
-      features.multi_agent_v2 = edit.value;
-      document.features = features;
-      continue;
-    }
-    if (edit.keyPath === "agents.external") {
-      const agents = record(document.agents);
-      if (edit.value === null) {
-        delete agents.external;
-      } else {
-        agents.external = edit.value;
-      }
-      if (Object.keys(agents).length === 0) {
-        delete document.agents;
-      } else {
-        document.agents = agents;
-      }
-      continue;
-    }
-    throw new Error(`测试配置事务不支持：${edit.keyPath}`);
-  }
-  const prefix = comments.length === 0 ? "" : `${comments.join("\n")}\n`;
-  writePrivateFileAtomicSync(configPath, `${prefix}${stringify(document)}`);
 }

@@ -25,7 +25,7 @@ export function loadDisplayContext(environment) {
     "data/gateway.sqlite3",
   );
   return {
-    priceCurrency: display.price_currency ?? "cny",
+    priceCurrency: display.price_currency ?? "usd",
     exchangeRate: loadExchangeRate(dirname(stateDatabasePath)),
   };
 }

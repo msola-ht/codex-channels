@@ -11,7 +11,6 @@ import {
   type ScheduledTaskConfirmation,
 } from "../src/application/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
-import { ThreadSectionAccessPolicy } from "../src/policy/index.js";
 import {
   FeishuConversationAdapter,
   FeishuOutbox,
@@ -142,8 +141,9 @@ describe("Feishu conversation adapter", () => {
   it("handles Feishu-local help and identity commands without starting a Turn", async () => {
     const fixture = createOutbox();
     const submit = vi.fn();
+    const touchActivity = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit, touchActivity } as unknown as ConversationUseCases,
       fixture.outbox,
       imagePort,
     );
@@ -154,6 +154,8 @@ describe("Feishu conversation adapter", () => {
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
+    expect(touchActivity).toHaveBeenCalledTimes(3);
+    expect(touchActivity).toHaveBeenCalledWith(message.target);
     expect(fixture.sent).toHaveLength(3);
     expect(fixture.sent[0]?.text).toContain("飞书 Codex 命令");
     expect(fixture.sent[0]?.text).toContain("/status");
@@ -965,128 +967,6 @@ describe("Feishu conversation adapter", () => {
           input: "thread-archived",
         },
       ],
-    });
-    await fixture.outbox.close();
-  });
-
-  it("uses /pin for Pinned and only exposes custom Thread Section moves to administrators", async () => {
-    const fixture = createOutbox();
-    const pinned = {
-      id: "section-pinned",
-      name: "Pinned",
-      builtIn: "pinned" as const,
-      currentWorkspaceActiveCount: 0,
-      currentWorkspaceArchivedCount: 0,
-    };
-    const custom = {
-      id: "section-project",
-      name: "项目",
-      builtIn: null,
-      currentWorkspaceActiveCount: 1,
-      currentWorkspaceArchivedCount: 0,
-    };
-    const adapter = new FeishuConversationAdapter(
-      {
-        listThreadSections: vi.fn(async () => [pinned, custom]),
-      } as unknown as ConversationUseCases,
-      fixture.outbox,
-      imagePort,
-    );
-
-    await expect(adapter.handleCommandCenterAction(
-      message.target,
-      "section",
-      message.actorId,
-    )).resolves.toMatchObject({
-      title: "查看分区或固定当前会话 · 第 1/1 页",
-      description: expect.stringContaining(
-        "2. 项目 · 当前 Workspace：活动 1 / 归档 0",
-      ),
-      choices: [{
-        label: "Pinned · 固定",
-        action: "pin",
-        input: "",
-      }],
-    });
-
-    const administrator = new FeishuConversationAdapter(
-      {
-        listThreadSections: vi.fn(async () => [pinned, custom]),
-      } as unknown as ConversationUseCases,
-      fixture.outbox,
-      imagePort,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        threadSectionAccess: new ThreadSectionAccessPolicy(
-          new Set(["feishu:ou_actor"]),
-        ),
-      },
-    );
-    await expect(administrator.handleCommandCenterAction(
-      message.target,
-      "section",
-      message.actorId,
-    )).resolves.toMatchObject({
-      choices: [{
-        label: "Pinned · 固定",
-        action: "pin",
-        input: "",
-      }, {
-        label: "项目",
-        action: "section",
-        input: "move section-project",
-      }],
-    });
-    await fixture.outbox.close();
-  });
-
-  it("keeps Thread Section pagination inside the Feishu choice card", async () => {
-    const fixture = createOutbox();
-    const sections = Array.from({ length: 9 }, (_, index) => ({
-      id: `section-${index + 1}`,
-      name: index === 0 ? "Pinned" : `分区 ${index + 1}`,
-      builtIn: index === 0 ? "pinned" as const : null,
-      currentWorkspaceActiveCount: 0,
-      currentWorkspaceArchivedCount: 0,
-    }));
-    const adapter = new FeishuConversationAdapter(
-      {
-        listThreadSections: vi.fn(async () => sections),
-      } as unknown as ConversationUseCases,
-      fixture.outbox,
-      imagePort,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        threadSectionAccess: new ThreadSectionAccessPolicy(
-          new Set(["feishu:ou_actor"]),
-        ),
-      },
-    );
-
-    await expect(adapter.handleCommandCenterAction(
-      message.target,
-      "section",
-      message.actorId,
-      "list 2",
-    )).resolves.toMatchObject({
-      title: "固定或移动当前会话 · 第 2/2 页",
-      choices: [{
-        label: "分区 9",
-        action: "section",
-        input: "move section-9",
-      }, {
-        label: "上一页",
-        action: "section",
-        input: "list 1",
-      }],
     });
     await fixture.outbox.close();
   });

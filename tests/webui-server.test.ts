@@ -325,7 +325,7 @@ describe("webui server", () => {
       currency: string;
       exchangeRate: { usdToCny: number; source: string } | null;
     };
-    expect(body.currency).toBe("cny");
+    expect(body.currency).toBe("usd");
     expect(body.exchangeRate).toMatchObject({
       usdToCny: 7.2,
       source: "cache",
@@ -350,7 +350,7 @@ describe("webui server", () => {
 
     const legacy = await fetch(`${origin}/api/v1/settings`);
     expect(await legacy.json()).toEqual({
-      currency: "cny",
+      currency: "usd",
       exchangeRate: expect.objectContaining({ source: "cache", usdToCny: 7.2 }),
     });
 
@@ -690,7 +690,7 @@ describe("webui server", () => {
       previewAccountSettings: async (input: unknown) => ({
         operation: (input as { operation: string }).operation,
         account: { id: "main", displayName: "ocg-main", email: "main@example.com", exists: true },
-        effects: { updatesExternalAgent: true },
+        effects: { updatesExternalAgent: false },
         activation: "restart-all",
       }),
       applyAccountSettings: async (input: unknown) => {
@@ -1147,6 +1147,15 @@ describe("webui server", () => {
       httpStatus: 429,
       errorType: "http_error",
     });
+    const configPath = join(fixture.home, "config.toml");
+    const configDocument = readGatewayConfig(configPath);
+    configDocument.display = {
+      operation_updates: "compact",
+      plan_updates: true,
+      reasoning: true,
+      price_currency: "cny",
+    };
+    writeGatewayConfig(configPath, configDocument);
     const { origin } = await startServer(fixture.environment);
 
     const threads = await fetch(`${origin}/api/v1/threads`);
@@ -1483,6 +1492,76 @@ describe("webui server", () => {
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toHaveProperty("revision");
+  });
+
+  it("accepts the localhost loopback Origin for management requests", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token" },
+    );
+    const { port } = new URL(origin);
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: `http://localhost:${port}`,
+      },
+    });
+    expect(response.status).toBe(200);
+    const settings = await response.json() as { revision: string };
+    expect(settings).toHaveProperty("revision");
+    const preview = await fetch(`${origin}/api/v1/management/settings/preview`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: `http://localhost:${port}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: settings.revision,
+        setting: { kind: "display.reasoning", value: false },
+      }),
+    });
+    expect(preview.status).toBe(200);
+  });
+
+  it("accepts a different local loopback port used by an SSH tunnel", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token" },
+    );
+    const { port } = new URL(origin);
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: `http://127.0.0.1:${Number(port) + 1}`,
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toHaveProperty("revision");
+  });
+
+  it("rejects an https localhost Origin for management requests", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { host: "0.0.0.0", token: "secret-token" },
+    );
+    const { port } = new URL(origin);
+    const response = await fetch(`${origin}/api/v1/management/settings`, {
+      headers: {
+        authorization: "Bearer secret-token",
+        origin: `https://localhost:${port}`,
+      },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "management.origin-invalid" },
+    });
   });
 });
 
