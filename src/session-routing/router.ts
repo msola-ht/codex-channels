@@ -59,6 +59,7 @@ export class SessionRouter {
     private readonly bindings: BindingStore,
     private readonly workspaces: WorkspaceRegistry,
     private readonly dynamicTools: readonly ThreadDynamicToolSpec[] = [],
+    private readonly onBindingsChanged?: () => void,
   ) {}
 
   private workspacePermissions(workspace: Workspace): ThreadStartOptions {
@@ -568,6 +569,7 @@ export class SessionRouter {
     await this.codex.unsubscribeThread(threadId);
     this.bindings.removeThread(threadId);
     this.contextCompactionItemIdsByThread.delete(threadId);
+    this.onBindingsChanged?.();
     return binding.target;
   }
 
@@ -644,6 +646,7 @@ export class SessionRouter {
     this.namesByThread.delete(threadId);
     if (binding) {
       this.bindings.removeThread(threadId);
+      this.onBindingsChanged?.();
       return binding.target;
     }
     return undefined;
@@ -660,6 +663,7 @@ export class SessionRouter {
       await this.codex.unsubscribeThread(current.threadId);
       this.contextCompactionItemIdsByThread.delete(current.threadId);
       this.bindings.unbind(target);
+      this.onBindingsChanged?.();
     }
   }
 

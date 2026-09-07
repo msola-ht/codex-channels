@@ -105,14 +105,12 @@
 - `quota-center.ts`：读取已配置指标中心的 `/api/quota`，按 Provider 选择当前额度周期（OpenAI
   `codex`，OpenCode Go 5小时/7天/30天三个窗口），返回完成卡片与启动卡片使用的多设备摘要；中心不可用时
   保持原有本机/官方估算回退，不把中心命令或令牌暴露到 Surface。
-- `provider-idle-releaser.ts`：定期扫描已启动的 OpenCode Go 账户隔离 App Server，无 Conversation
-  绑定、Gateway 最近无 Turn 活动且空闲超过 5 分钟时通过 supervisor `releaseProvider` 释放；
-  `agents.external` 复用主 App Server 和共享统计代理，不锁定同账户的隔离实例；Supervisor 还会
-  拒绝释放存在受管 Remote TUI 租约的账户。成功自动释放后
-  向最近使用过该账户的渠道会话通知一次；正在拉起的账户只跳过启动期间的扫描，主动释放造成的
-  断线不进入自动重连。扫描遇到正在执行的 Provider 请求时立即跳过，不排队等待；释放已经开始时，
-  新请求等待 Client 关闭完成后再按需拉起。聚合只读操作只保护进程不被并发释放，不刷新空闲时间；
-  关闭时停止新扫描并只等待已经进入释放阶段的扫描退出，释放失败只记录日志不阻塞请求。
+- `provider-idle-releaser.ts`：统一跟踪所有 Provider Client 的活动操作；当 Gateway 没有前台或后台
+  Conversation 绑定、没有正在进行的 Provider 操作或启动任务时，关闭全部已连接 Client。该组件
+  不停止 App Server 进程，也不按 Provider 类型区分；后续请求通过 Provider 路由按需重连。它不
+  自行运行空闲定时器，而是在会话解绑或后台任务终态后执行检查；Client 关闭和启动期间使用有界
+  并发保护，关闭失败只记录日志并在后续全局空闲检查重试；Gateway 关闭时停止新的检查并等待已
+  开始的 Client 关闭完成。
 - `conversation-idle-releaser.ts`：按 `conversation.idle_release_minutes` 定期扫描前台 Thread
   绑定；输入或输出刷新最近活动时间，超过阈值且 App Server 确认为空闲后由
   `ConversationService.releaseIdle` 取消订阅并解绑，成功后通过共享结构化事件只通知一次

@@ -115,10 +115,11 @@ idle_release_minutes = 15
 审批与输入交互和任何带目标会话的输出都会刷新活动时间；正在恢复的 Thread 不会被同时释放。
 Provider 断线期间也会跳过扫描。
 连续达到配置的空闲时间且没有任何输入和输出时，Gateway 才会在确认 Thread、原生 Queue、审批和子代理都已
-空闲后取消订阅并解除前台绑定。解除后会收到一次
+空闲后取消订阅并解除前台绑定；如果此时 Gateway 已没有任何前台或后台绑定、进行中的 Provider 操作或
+启动任务，还会关闭全部 Provider Client，但不会停止 App Server 进程，后续请求会自动重连。解除后会收到一次
 “自动解除占用”提示。此后直接发送消息只会开启新会话，不会接续旧 Thread；需要继续旧会话时
 直接使用提示中的 `/r <Thread ID>` 命令显式恢复；飞书显示为 CardKit 2.0 卡片，Telegram 为
-HTML 面板，微信为结构化文本。修改后需要重启 Gateway，不影响 App Server。
+HTML 面板，微信为结构化文本。修改后需要重启 Gateway。
 
 ### 代理与权限
 

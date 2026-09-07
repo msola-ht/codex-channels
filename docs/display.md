@@ -180,9 +180,8 @@ Remote TUI 之前尚未启动，其历史 Thread 不会出现在 `/resume` 会�
 
 App Server 意外断开时，受影响会话会收到“连接已中断，正在恢复”提示；重连成功后会收到
 “连接已恢复”提示。仅当断开时确实存在受影响会话才发送，多个 Provider 各自独立提示。
-OpenCode Go 账户的渠道隔离 App Server 因空闲策略主动释放时，提示“渠道会话实例已空闲停止，
-第三方子代理不受影响”，不进入意外断线重连流程；
-受管 Remote TUI 持有租约期间不会被自动释放。
+Gateway 全局空闲释放关闭 Provider Client 时不额外发送渠道警告；App Server 进程保持运行，后续请求
+会按需重连。该行为不进入意外断线重连流程，也不影响受管 Remote TUI 对 App Server 进程的使用。
 
 `/mcp login` 在当前会话已绑定 Thread 时返回安全授权地址；浏览器流程结束后，Gateway 只把带有
 该 Thread 的官方 OAuth 完成通知显示为“MCP OAuth”成功或失败状态，无法关联 Thread 的通知不向

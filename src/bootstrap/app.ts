@@ -36,12 +36,10 @@ import {
 import { terminateChildProcess } from "../../runtime/process-lifecycle.mjs";
 import {
   inspectAppServerSupervisor,
-  releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
 import {
   loadOpencodeGoProviderIdentities,
   opencodeGoAccountIdFromProvider,
-  opencodeGoProviderDisplayName,
 } from "../../runtime/opencode-go-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
@@ -127,10 +125,7 @@ import {
   type OpenAiConnectivityStatus,
 } from "./openai-connectivity.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
-import {
-  ProviderIdleReleaser,
-  providerIdleReleaseMessage,
-} from "./provider-idle-releaser.js";
+import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
 import { RemoteExchangeRate } from "./exchange-rate.js";
@@ -321,6 +316,14 @@ export class GatewayApplication {
       this.bindings,
       this.workspaces,
       config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
+      () => {
+        void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
+          this.logger.warn(
+            { err: error },
+            "会话绑定变化后的全局 Client 空闲检查失败",
+          );
+        });
+      },
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
@@ -650,6 +653,12 @@ export class GatewayApplication {
             threadId,
             minutes: config.idleReleaseMinutes,
           }, true);
+          void this.providerIdleReleaser.closeIfIdle().catch((error) => {
+            this.logger.warn(
+              { err: error },
+              "渠道会话空闲解除后的全局 Client 空闲检查失败",
+            );
+          });
         },
       });
       this.output.subscribe("conversation-idle-activity", (event) => {
@@ -673,6 +682,7 @@ export class GatewayApplication {
               dispatchQueued: event.status !== "interrupted",
             })
           : service.retryPendingBackgroundRelease(threadId));
+        await this.providerIdleReleaser.closeIfIdle();
       } catch (error) {
         this.logger.warn(
           { err: error, threadId },
@@ -700,43 +710,9 @@ export class GatewayApplication {
     });
     this.providerIdleReleaser = new ProviderIdleReleaser({
       logger,
-      isAccountProvider: (provider) =>
-        opencodeGoAccountIdFromProvider(provider) !== undefined,
-      listRunningProviders: async () =>
-        (await inspectAppServerSupervisor(config.codexSocketPath))?.runningProviders ?? [],
-      releaseProvider: async (provider) => {
-        const result = await releaseAppServerProvider(config.codexSocketPath, provider);
-        if (!result.released) return false;
-        await this.codex.closeProvider(provider).catch((error) => {
-          logger.warn(
-            { err: error, provider },
-            "空闲 Provider 路由 Client 关闭失败，已保留按需重连状态",
-          );
-        });
-        return true;
-      },
-      providerForThread: (threadId) =>
-        this.router.modelSettingsForThread(threadId)?.modelProvider,
+      listConnectedProviders: () => this.codex.connectedProviderIds(),
+      closeProvider: (provider) => this.codex.closeProvider(provider),
       listBindings: () => this.bindings.list(),
-      notify: (provider, targets) => {
-        const accountId = opencodeGoAccountIdFromProvider(provider);
-        const label = accountId === undefined
-          ? provider
-          : opencodeGoProviderDisplayName(provider);
-        const message = providerIdleReleaseMessage(label);
-        if (targets.length === 0) {
-          this.logger.info({ provider }, "OpenCode Go 账户已释放，无渠道会话需要通知");
-          return;
-        }
-        for (const target of targets) {
-          this.output.publish({ type: "warning", target, message }, true);
-        }
-      },
-    });
-    this.output.subscribe("provider-idle-activity", (event) => {
-      if (event.type !== "turn.started" && event.type !== "turn.completed") return;
-      const provider = this.router.modelSettingsForThread(event.threadId)?.modelProvider;
-      this.providerIdleReleaser.touch(provider, event.target);
     });
     this.scheduledTasks = config.scheduledTasksEnabled
       ? new ScheduledTaskComposition({
@@ -1161,7 +1137,6 @@ export class GatewayApplication {
       });
       await this.channelImageSpool.start();
       this.scheduledTasks?.start();
-      this.providerIdleReleaser?.start();
       this.conversationIdleReleaser?.start();
       this.scheduleBindingRestore();
       this.requireRunning();

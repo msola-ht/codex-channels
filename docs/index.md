@@ -157,11 +157,11 @@ OpenCode Go 和自定义第三方代理仍拒绝这些路径。真实合同使�
 `POST /alpha/search` 能穿过该白名单并完成工具结果往返。
 
 Provider 生命周期补充：私有 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 不是
-Codex App Server RPC。它负责受管实例的按需启动和主动释放；`codexc remote` 连接受管 Provider
-期间通过同一私有 Socket 持有生命周期租约，Supervisor 在租约存在时拒绝释放，并在连接正常退出
+Codex App Server RPC。它负责受管实例的按需启动和显式管理操作；`codexc remote` 连接受管 Provider
+期间通过同一私有 Socket 持有生命周期租约，Supervisor 在租约存在时拒绝显式释放，并在连接正常退出
 或异常断开后自动撤销租约。同一 Provider 的启动、释放与租约获取串行执行，释放响应区分已释放、
-租约占用与实例未运行；账户删除遇到旧版或无效监管响应时失败关闭。该边界避免 OpenCode Go 空闲
-回收终止共享 Remote TUI。
+租约占用与实例未运行；账户删除遇到旧版或无效监管响应时失败关闭。Gateway 全局空闲策略只关闭
+Provider Client，不调用 Supervisor 停止 App Server 进程。
 
 模型价格实现补充：DeepSeek 不使用上述通用远程目录，[`deepseek-model-pricing.ts`](../src/bootstrap/deepseek-model-pricing.ts)
 严格读取随包发布的官方人民币基线，按请求开始时的北京时间、生效计划、工作日与周末规则选择

@@ -92,28 +92,18 @@ App Server 从自己的进程环境注入。
 
 每个账户拥有一个按需启动的隔离 App Server。共享统计代理不随账户数量重复创建。
 
-Gateway 默认每 60 秒扫描一次已运行的 OpenCode Go 账户；同时满足以下条件并持续 5 分钟后，
-才请求 Supervisor 自动释放：
-
-1. 没有 Conversation 绑定该账户的 Thread；
-2. Gateway 最近没有观察到该账户的 Turn 活动；
-3. 没有通过 `codexc remote` 启动的受管 Remote TUI 持有该账户租约。
+Gateway 的全局空闲策略每 60 秒扫描一次；当没有任何前台或后台 Conversation 绑定、进行中的
+Provider 操作或启动任务时，关闭全部已连接的 Provider Client。该策略不区分 OpenCode Go 账户，
+也不会停止 App Server 进程。
 
 `agents.external` 通过主 App Server 直接复用该账户 Key 与共享统计代理，不依赖账户隔离 App
-Server，因此角色仍可连续或并发启动子 Thread，同时不阻止同账户的隔离实例按上述条件释放。
+Server，因此角色仍可连续或并发启动子 Thread。
 
 渠道 Turn 在运行期间保留 Conversation 绑定；`codexc remote` 在 TUI 整个生命周期内通过私有
-Supervisor Socket 持有租约，进程正常退出或异常断开时租约自动撤销。Supervisor 在存在租约时
-拒绝自动或手动释放；同一 Provider 的启动、释放与租约获取串行执行，释放期间到达的新租约会在
-实例恢复后才成功，从而避免终止 Remote TUI 正在使用的 App Server。
-
-释放只终止账户 App Server 子进程并更新监管状态；Profile、注册表、模型目录、指标与 Codex Thread
-数据保持不变。成功自动释放后，Gateway 向最近使用过该账户的渠道会话通知一次。再次选择账户、
-恢复 Thread 或启动 Remote TUI 时，Supervisor 会重新按需启动实例。释放失败只记录日志，不阻塞
-正常请求。
-
-空闲阈值当前固定为 5 分钟，扫描间隔固定为 60 秒，不是用户配置项。自动回收当前只适用于
-OpenCode Go 账户实例，不适用于所有受管 Provider。
+Supervisor Socket 持有租约，进程正常退出或异常断开时租约自动撤销。Supervisor 仍负责受管实例
+的按需启动和显式生命周期操作，同一 Provider 的启动、释放与租约获取串行执行；Gateway 关闭
+Provider Client 不会终止 Remote TUI 使用的 App Server 进程。再次选择账户、恢复 Thread 或启动
+Remote TUI 时，Client 会按需重连。关闭失败只记录日志，不阻塞正常请求。
 
 ## 账户能力与展示
 
@@ -128,8 +118,8 @@ OpenCode Go 账户实例，不适用于所有受管 Provider。
 ## 主要验证边界
 
 测试覆盖账户注册表与旧配置迁移、CLI 原子写入和回滚、共享代理路径与分账户指标、Provider 路由、
-账户用量适配、按需启动、空闲释放、Remote TUI 租约、主动释放通知，以及 Supervisor 的运行中、
-主动释放和租约状态。
+账户用量适配、按需启动、全局 Provider Client 空闲关闭、Remote TUI 租约，以及 Supervisor 的运行中、
+显式释放和租约状态。
 
 ## 关联文档
 

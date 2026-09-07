@@ -98,8 +98,9 @@
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
   第三方实例在首次选择对应模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
   Provider 不增加 App Server 子进程；MCP 配置刷新只尝试当前已连接实例并传播任一失败，单 Provider
-  重连只恢复该侧 Thread。组合根可为单 Provider 请求注入活动保护：Thread 操作和重连刷新空闲时间，
-  聚合 Thread 列表与 MCP 配置刷新只阻止并发释放；释放先发生时，已排队请求在 Client 关闭后按需重连。
+  重连只恢复该侧 Thread。组合根为所有 Provider 请求注入活动保护：统一空闲管理器在 Gateway 没有前后台
+  同时没有前后台绑定、没有进行中操作且没有启动任务时关闭已连接 Client，但不停止 App Server 进程；检查由绑定变化和任务
+  终态事件触发，关闭先发生时，已排队请求在 Client 关闭后按需重连。
   第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
   无法关联 Thread 的 MCP 启动状态与 warning 全局通知携带 Provider 来源，只发送到对应 Provider
   会话；无法关联 Thread 的 OAuth 完成通知不进入渠道。

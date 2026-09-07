@@ -146,17 +146,11 @@
   路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、账户新增/默认切换/运行实例停止/账户删除的无 prompts
   脱敏预览、稳定字段错误、固定模式与历史丢失确认、Key 输出隔离、共享子代理同步、未运行短路和 Remote TUI 占用结果、账户适配器按
   `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与 SDK 协议基线校验。
-- OpenCode Go 账户隔离 App Server 的空闲释放：无绑定、Gateway 最近无 Turn 活动且超过空闲阈值时
-  经 supervisor `releaseProvider` 释放；`agents.external` 复用主 App Server 和共享统计代理，不锁定
-  同账户隔离实例；受管 Remote TUI
-  通过私有连接持有 Provider 租约，租约存在时拒绝释放，退出时自动撤销。监管状态区分运行中、主动
-  释放与持有租约；测试还覆盖释放与租约并发时按 Provider 串行、租约有限关闭、释放结果区分实例
-  未运行、监管关闭等待已开始的 Provider 操作且拒绝排队操作、子进程温和终止超时后的强制终止和
-  终态确认、服务收到退出信号后再次收敛忽略首次信号的 App Server，以及账户删除遇到旧版监管
-  协议时失败关闭。
-  Gateway 不会把主动释放误判为意外断线，关闭会等待进行中的扫描且不再发起新释放；OpenCode Go
-  默认账户变更只同步当前 OpenCode Go 共享角色，不覆盖已选择的 DeepSeek 角色；
-  释放后按最近使用过的渠道会话通知一次，正在拉起的账户跳过本轮，失败只记录不阻塞。
+- 全局 Provider Client 空闲释放：无前台/后台绑定且无活动操作时关闭全部已连接 Client，操作期间
+  保护，关闭完成后按需重连；App Server 进程保持运行，不按 Provider 类型区分。受管 Remote TUI
+  通过私有连接持有 Provider 租约，仍可独立使用 App Server 进程；
+  Gateway 不会把 Client 主动关闭误判为意外断线，关闭会等待进行中的扫描且不再发起新关闭；OpenCode Go
+  默认账户变更只同步当前 OpenCode Go 共享角色，不覆盖已选择的 DeepSeek 角色。
 - 全 Provider 同一 Turn 多次模型响应的请求次数、实际产生推理输出的思考次数、聚合模型耗时、
   缓存与文本/函数/自定义工具参数
   不含推理的综合输出速度及时间窗覆盖率；DeepSeek 最后请求首事件延迟、全 Provider 首段回复延迟和

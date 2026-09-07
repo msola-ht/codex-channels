@@ -194,19 +194,13 @@ describe("ProviderRoutingClient", () => {
     const routedRef: { current?: ProviderRoutingClient } = {};
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
-      isAccountProvider: (provider) => provider === "deepseek",
-      listRunningProviders: async () => ["deepseek"],
-      releaseProvider: async (provider) => {
+      listConnectedProviders: () => ["deepseek"],
+      closeProvider: async (provider) => {
         releaseStarted();
         await releaseGate;
         await routedRef.current!.closeProvider(provider);
-        return true;
       },
-      providerForThread: () => undefined,
       listBindings: () => [],
-      notify: () => undefined,
-      idleThresholdMs: 0,
-      nowMs: () => 1_000,
     });
     const routed = new ProviderRoutingClient(
       "openai",
@@ -225,7 +219,7 @@ describe("ProviderRoutingClient", () => {
     await routed.connect();
     await routed.startThread(cwd, { modelProvider: "deepseek" });
 
-    const scan = releaser.scan();
+    const scan = releaser.closeIfIdle();
     await releaseDidStart;
     const restarted = routed.startThread(cwd, { modelProvider: "deepseek" });
     await Promise.resolve();
@@ -237,6 +231,23 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.connect).toHaveBeenCalledTimes(2);
     expect(ensureProvider).toHaveBeenCalledTimes(2);
     expect(deepseek.startThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a Provider marked connected when Client close fails so cleanup can retry", async () => {
+    const openai = client();
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]));
+    await routed.connect();
+    openai.close
+      .mockRejectedValueOnce(new Error("temporary close failure"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(routed.closeProvider("openai"))
+      .rejects.toThrow("temporary close failure");
+    expect(routed.connectedProviderIds()).toContain("openai");
+
+    await routed.closeProvider("openai");
+    expect(routed.connectedProviderIds()).not.toContain("openai");
+    expect(openai.close).toHaveBeenCalledTimes(2);
   });
 
   it("releases an ephemeral Thread through its owning Provider and forgets the route", async () => {

@@ -116,10 +116,16 @@ export class ProviderRoutingClient {
     });
   }
 
-  closeProvider(provider: string): ReturnType<ProviderClientInstance["close"]> {
+  async closeProvider(provider: string): Promise<void> {
     const canonical = this.canonicalProvider(provider);
+    const client = this.clientForProvider(canonical);
+    // 仅在关闭成功后移除连接标记，失败时允许全局空闲协调器重试。
+    await client.close();
     this.connectedProviders.delete(canonical);
-    return this.clientForProvider(canonical).close();
+  }
+
+  connectedProviderIds(): readonly string[] {
+    return [...this.connectedProviders];
   }
 
   async close(): Promise<void> {

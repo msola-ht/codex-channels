@@ -126,7 +126,7 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 跨 Provider 新建 Thread 使用目标模型目录的默认思考等级；当前 DeepSeek 默认是 `high`。
 
 任一 Provider 意外断开时，Gateway 只重连并恢复该侧绑定。任一受监管 App Server 子进程异常退出
-时，App Server 服务会共同重建受监管实例；OpenCode Go 账户的主动空闲释放不属于异常退出，
+时，App Server 服务会共同重建受监管实例；Gateway 全局空闲策略关闭 Client 不属于异常退出，
 不会触发共同重建。
 
 ## 用量与运行统计

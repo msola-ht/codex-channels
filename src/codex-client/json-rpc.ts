@@ -148,8 +148,12 @@ export class JsonRpcClient {
     this.removeMessageHandler = undefined;
     this.removeCloseHandler = undefined;
     this.failPending(new Error("Codex JSON-RPC Client 已关闭"));
-    await this.transport.close();
-    this.state = "idle";
+    try {
+      await this.transport.close();
+    } finally {
+      // 关闭失败也必须回到可重连状态，否则后续全局空闲检查无法重试。
+      this.state = "idle";
+    }
   }
 
   onNotification(handler: (notification: RpcNotification) => void): () => void {

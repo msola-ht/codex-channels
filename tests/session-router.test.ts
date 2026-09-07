@@ -551,6 +551,7 @@ describe("SessionRouter", () => {
 
   it("unsubscribes before forcing a new thread", async () => {
     const unsubscribed: string[] = [];
+    const bindingsChanged = vi.fn();
     const client = threadPort({
       listThreads: async () => [],
       startThread: async () => session(thread("new", { type: "idle" })),
@@ -558,12 +559,19 @@ describe("SessionRouter", () => {
         unsubscribed.push(threadId);
       },
     });
-    const router = new SessionRouter(client, new MemoryBindingStore(), registry);
+    const router = new SessionRouter(
+      client,
+      new MemoryBindingStore(),
+      registry,
+      [],
+      bindingsChanged,
+    );
     await router.ensure(target);
     await router.newSession(target);
     await router.ensure(target);
 
     expect(unsubscribed).toEqual(["new"]);
+    expect(bindingsChanged).toHaveBeenCalledOnce();
   });
 
   it("persists the force-new marker until the next ordinary message creates a Thread", async () => {
