@@ -106,12 +106,15 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 受管 Provider 的统计代理与隔离 App Server 支持按需启动；Gateway 全局空闲策略统一关闭已连接
   Provider Client，不按 Provider 类型区分；
 - 关闭条件（全部满足）：没有任何前台或后台 Conversation 绑定、没有进行中的 Provider 操作或
-  启动任务；关闭只断开 Gateway Client，不终止 App Server 进程，也不删除 Thread 持久数据；再次
+  启动任务，且该空闲状态持续 60 秒；宽限期内新消息、恢复 Thread、Provider 操作或启动任务会取消
+  本轮关闭。关闭只断开 Gateway Client，不终止 App Server 进程，也不删除 Thread 持久数据；再次
   选择模型、恢复 Thread 或使用对应 Remote TUI 时自动按需重连；
 - `codexc remote` 必须在 TUI 生命周期内持有 Supervisor Provider 租约；租约存在时手动停止必须
   失败关闭，连接退出或异常断开时自动撤销租约；
-- **释放通知**：Client 关闭不额外向渠道发送 Provider 警告；渠道会话解除仍按统一的
-  `conversation.idle_release_minutes` 规则发送一次自动解除提示。
+- **释放通知**：渠道会话空闲自动解除后先向当前渠道发送一次自动解除提示；60 秒宽限期结束仍无任何
+  绑定或活动时，先向所有已知授权渠道发送一次“模型连接已空闲，即将释放”的通知，再关闭 Provider
+  Client。没有已知授权渠道时只记录日志，不向未知会话广播；手动新建、切换或后台任务结束导致的无
+  绑定关闭不发送这条全局提示。
 
 ### 3.6 Setup
 
@@ -132,7 +135,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 计价基线 schema、峰谷档位、生效时间与历史快照；
 - 账户适配器：余额或用量窗口、本地用量重算、窗口边界、窗口快照归属与缺失回退；
 - Setup：新增、更新、恢复、回滚，以及确认不会自动创建或切换共享角色；
-- 生命周期：全局 Client 空闲关闭判定、关闭后按需重连；
+- 生命周期：60 秒全局空闲宽限判定、自动解除后的关闭前通知、关闭后按需重连；
 - 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
 
 ### 3.8 文档

@@ -161,7 +161,9 @@ Codex App Server RPC。它负责受管实例的按需启动和显式管理操作
 期间通过同一私有 Socket 持有生命周期租约，Supervisor 在租约存在时拒绝显式释放，并在连接正常退出
 或异常断开后自动撤销租约。同一 Provider 的启动、释放与租约获取串行执行，释放响应区分已释放、
 租约占用与实例未运行；账户删除遇到旧版或无效监管响应时失败关闭。Gateway 全局空闲策略只关闭
-Provider Client，不调用 Supervisor 停止 App Server 进程。
+Provider Client，不调用 Supervisor 停止 App Server 进程；会话解除后等待 60 秒，期间可恢复或创建
+新会话，宽限期结束仍无任何绑定和活动时，先向所有已知授权渠道通知，再关闭已连接 Client；该通知
+只针对渠道会话空闲自动解除触发的全局释放轮次，其他原因导致的无绑定关闭不广播。
 
 模型价格实现补充：DeepSeek 不使用上述通用远程目录，[`deepseek-model-pricing.ts`](../src/bootstrap/deepseek-model-pricing.ts)
 严格读取随包发布的官方人民币基线，按请求开始时的北京时间、生效计划、工作日与周末规则选择

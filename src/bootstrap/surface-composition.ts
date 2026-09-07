@@ -180,6 +180,7 @@ function createWeixinModule(
   return createWeixinRuntimeModule(
     adapter,
     access,
+    options.bindings,
   );
 }
 
@@ -371,6 +372,11 @@ export function createTelegramRuntimeModule(
   let notificationRecipients = new Set(initialNotificationRecipients);
   return {
     adapter,
+    notificationTargets: () => [...notificationRecipients].map((chatId) => ({
+      surface: "telegram",
+      accountId: telegramDefaultAccountId,
+      conversationId: String(chatId),
+    })),
     applyHotReload(next, changes) {
       if (changes.some((change) => change.code === "surface.telegram.allowed-users")) {
         access.replace(next.telegramAllowedUserIds);
@@ -396,6 +402,15 @@ export function createFeishuRuntimeModule(
 ): SurfaceRuntimeModule {
   return {
     adapter,
+    notificationTargets: () => authorizedFeishuConversations(
+      bindings,
+      access as unknown as FeishuAccessPolicy,
+      adapter.accountId,
+    ).map((conversationId) => ({
+      surface: "feishu",
+      accountId: adapter.accountId,
+      conversationId,
+    })),
     applyHotReload(next, changes) {
       if (!changes.some((change) => change.code === "surface.feishu.allowed-users")) {
         return;
@@ -422,9 +437,17 @@ export function createFeishuRuntimeModule(
 export function createWeixinRuntimeModule(
   adapter: WeixinRuntimeAdapter,
   access: ReloadableWeixinAccess,
+  bindings?: BindingStore,
 ): SurfaceRuntimeModule {
   return {
     adapter,
+    notificationTargets: () => bindings === undefined
+      ? []
+      : authorizedWeixinConversations(
+          bindings,
+          access as unknown as WeixinAccessPolicy,
+          adapter.accountId,
+        ),
     applyHotReload(next, changes) {
       if (!changes.some((change) => change.code === "surface.weixin.allowed-users")) {
         return;

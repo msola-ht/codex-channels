@@ -92,9 +92,10 @@ App Server 从自己的进程环境注入。
 
 每个账户拥有一个按需启动的隔离 App Server。共享统计代理不随账户数量重复创建。
 
-Gateway 的全局空闲策略每 60 秒扫描一次；当没有任何前台或后台 Conversation 绑定、进行中的
-Provider 操作或启动任务时，关闭全部已连接的 Provider Client。该策略不区分 OpenCode Go 账户，
-也不会停止 App Server 进程。
+Gateway 的全局空闲策略在会话解除后等待 60 秒；当确实没有任何前台或后台 Conversation 绑定、进行中的
+Provider 操作或启动任务时，只有自动解除触发的全局释放轮次会先向所有已知授权渠道发送释放通知，
+再关闭全部已连接的 Provider Client。该策略不区分 OpenCode Go 账户，也不会停止 App Server 进程；
+其他原因导致的无绑定关闭不发送这条通知。
 
 `agents.external` 通过主 App Server 直接复用该账户 Key 与共享统计代理，不依赖账户隔离 App
 Server，因此角色仍可连续或并发启动子 Thread。

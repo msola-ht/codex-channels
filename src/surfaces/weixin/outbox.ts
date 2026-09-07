@@ -807,6 +807,7 @@ function isAllowedWeixinOutputEvent(event: OutputEvent): boolean {
   return event.type === "turn.started"
     || event.type === "turn.completed"
     || event.type === "conversation.idle.released"
+    || (event.type === "warning" && event.globalIdle === true)
     || (event.type === "text.completed" && event.phase === "final_answer");
 }
 

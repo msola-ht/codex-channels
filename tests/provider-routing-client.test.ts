@@ -201,6 +201,7 @@ describe("ProviderRoutingClient", () => {
         await routedRef.current!.closeProvider(provider);
       },
       listBindings: () => [],
+      gracePeriodMs: 0,
     });
     const routed = new ProviderRoutingClient(
       "openai",

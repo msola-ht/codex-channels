@@ -405,6 +405,23 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([]);
   });
 
+  it("delivers the global idle notice", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "warning",
+      target,
+      message: "所有模型连接已空闲，即将释放；下次消息或恢复会话时会自动重连。",
+      globalIdle: true,
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toContain("所有模型连接已空闲，即将释放");
+  });
+
   it("sends completed generated images even when operation summaries are hidden", async () => {
     const api = new FakeTelegramApi();
     const image = Buffer.from("validated-image");

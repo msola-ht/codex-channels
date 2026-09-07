@@ -67,10 +67,12 @@ App Server 监管进程才启动该账户的隔离实例；账户 App Server 的
 也未选作子代理的账户不增加进程。
 
 Gateway 的全局空闲策略统一关闭已连接的 Provider Client：当没有任何前台或后台 Conversation 绑定、
-进行中的 Provider 操作或启动任务时执行。该操作不会停止账户隔离 App Server 进程，也不按账户类型
-区分；再次选择账户、恢复 Thread 或使用对应 Remote TUI 时，Client 会按需重连。`codexc remote`
-仍通过 Supervisor 租约保持其 App Server 进程可用；`codexc opencode-go account stop <id>` 继续用于
-手动停止账户隔离 App Server。统计代理始终共享一个。
+进行中的 Provider 操作或启动任务时，先等待 60 秒；期间新消息或恢复 Thread 会取消本轮释放。宽限期
+结束仍满足条件时，只有渠道会话自动解除触发的全局释放轮次会先向所有已知授权渠道发送一次释放通知，
+再关闭全部已连接 Provider Client；其他无绑定关闭不发送该通知。该操作不会停止账户隔离 App Server
+进程，也不按账户类型区分；再次选择账户、恢复 Thread 或使用对应 Remote TUI 时，Client 会按需重连。
+`codexc remote` 仍通过 Supervisor 租约保持其 App Server 进程可用；
+`codexc opencode-go account stop <id>` 继续用于手动停止账户隔离 App Server。统计代理始终共享一个。
 
 ## 协议与模型范围
 

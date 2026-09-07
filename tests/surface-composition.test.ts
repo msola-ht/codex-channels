@@ -103,6 +103,27 @@ describe("Telegram Surface runtime composition", () => {
     expect(replaceAccess).not.toHaveBeenCalled();
     expect(recipientSnapshots).toEqual([]);
   });
+
+  it("exposes configured recipients for global lifecycle notifications", () => {
+    const module = createTelegramRuntimeModule(
+      adapter([]),
+      { replace: vi.fn() },
+      new Set([123, 456]),
+    );
+
+    expect(module.notificationTargets?.()).toEqual([
+      {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "123",
+      },
+      {
+        surface: "telegram",
+        accountId: "default",
+        conversationId: "456",
+      },
+    ]);
+  });
 });
 
 describe("configured Surface composition", () => {
@@ -416,6 +437,25 @@ describe("Feishu Surface runtime composition", () => {
     expect(bindings.getByThread("thread-allowed")).toBeDefined();
     expect(bindings.getByThread("thread-revoked")).toBeUndefined();
   });
+
+  it("exposes authorized unbound conversations for global lifecycle notifications", () => {
+    const bindings = new MemoryBindingStore();
+    const target = {
+      surface: "feishu",
+      accountId: "cli_0123456789abcdef",
+      conversationId: "oc_allowed",
+    } as const;
+    bindings.selectWorkspace(target, "main");
+    bindings.rememberActor(target, "ou_actor");
+    const module = createFeishuRuntimeModule(
+      feishuAdapter(),
+      new FeishuAccessPolicy(new Set(["ou_actor"]), target.accountId),
+      bindings,
+      pino({ level: "silent" }),
+    );
+
+    expect(module.notificationTargets?.()).toEqual([target]);
+  });
 });
 
 describe("Weixin Surface runtime composition", () => {
@@ -459,6 +499,24 @@ describe("Weixin Surface runtime composition", () => {
     }]);
 
     expect(replaceAccess).toHaveBeenCalledWith(next.weixin?.allowedUserIds);
+  });
+
+  it("exposes authorized unbound conversations for global lifecycle notifications", () => {
+    const bindings = new MemoryBindingStore();
+    const target = {
+      surface: "weixin",
+      accountId: "bot-fixture@im.bot",
+      conversationId: "allowed@im.wechat",
+    } as const;
+    bindings.selectWorkspace(target, "main");
+    bindings.rememberActor(target, target.conversationId);
+    const module = createWeixinRuntimeModule(
+      weixinAdapter(),
+      new WeixinAccessPolicy(new Set([target.conversationId]), target.accountId),
+      bindings,
+    );
+
+    expect(module.notificationTargets?.()).toEqual([target]);
   });
 });
 

@@ -161,7 +161,8 @@ Surface 配置。
 5. Provider 组合：主 Provider、按需 Provider、OpenCode Go 共享代理与 `agents.external` 都接收同一值。
 6. 生命周期：重载分类要求重启 App Server；只重启 Gateway 后不得误报配置已生效。
 7. Setup/Config：编辑、单项恢复、全部恢复、取消和无 TTY 输出均不泄露完整 UA。
-8. 回归：请求指标、额度、压缩、第三方子代理和全局 Provider Client 空闲释放行为保持不变。
+8. 回归：请求指标、额度、压缩、第三方子代理，以及全局 Provider Client 空闲释放的 60 秒宽限、
+   自动解除轮次的关闭前通知和按需重连行为保持不变。
 
 锁定版本真实 App Server 合同只验证 `clientInfo` 与官方返回 UA 的关系；完整上游覆盖使用本地代理
 合同测试验证，不依赖外部模型服务。

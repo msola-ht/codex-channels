@@ -83,7 +83,7 @@
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
-  热加载钩子和故障上报装配。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
+  热加载钩子、故障上报装配和全局生命周期通知的安全收件人。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
   决定是否启用，飞书和微信使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
   解析收件人，不要求当时已有 Thread 绑定。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
@@ -106,11 +106,13 @@
   `codex`，OpenCode Go 5小时/7天/30天三个窗口），返回完成卡片与启动卡片使用的多设备摘要；中心不可用时
   保持原有本机/官方估算回退，不把中心命令或令牌暴露到 Surface。
 - `provider-idle-releaser.ts`：统一跟踪所有 Provider Client 的活动操作；当 Gateway 没有前台或后台
-  Conversation 绑定、没有正在进行的 Provider 操作或启动任务时，关闭全部已连接 Client。该组件
-  不停止 App Server 进程，也不按 Provider 类型区分；后续请求通过 Provider 路由按需重连。它不
-  自行运行空闲定时器，而是在会话解绑或后台任务终态后执行检查；Client 关闭和启动期间使用有界
-  并发保护，关闭失败只记录日志并在后续全局空闲检查重试；Gateway 关闭时停止新的检查并等待已
-  开始的 Client 关闭完成。
+  Conversation 绑定、没有正在进行的 Provider 操作或启动任务时，先等待 60 秒宽限期；宽限期内
+  新绑定、新操作或启动任务会取消本轮释放。宽限期结束仍空闲时，只有渠道会话空闲自动解除触发的
+  全局释放轮次会先通过注入回调通知所有已知授权渠道，再关闭全部已连接 Client；其他原因导致的
+  无绑定关闭不发送该通知。该组件不停止 App Server 进程，也不按 Provider 类型区分；后续请求通过
+  Provider 路由按需重连。Client 关闭和启动期间使用有界并发保护，关闭失败只记录日志并在后续全局
+  空闲检查重试；启动完成、会话解绑、后台任务终态和 Provider 操作结束都会触发检查；Gateway 关闭时
+  停止新的检查并等待已开始的 Client 关闭完成。
 - `conversation-idle-releaser.ts`：按 `conversation.idle_release_minutes` 定期扫描前台 Thread
   绑定；输入或输出刷新最近活动时间，超过阈值且 App Server 确认为空闲后由
   `ConversationService.releaseIdle` 取消订阅并解绑，成功后通过共享结构化事件只通知一次

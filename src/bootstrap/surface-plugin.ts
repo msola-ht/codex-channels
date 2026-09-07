@@ -8,6 +8,7 @@ import type {
   ScheduledTaskUseCases,
 } from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
+import type { ConversationTarget } from "../conversation-core/index.js";
 import type { BindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
 import type { RemoteQuotaSummary } from "../conversation-core/index.js";
@@ -16,6 +17,8 @@ import type { OpenAiConnectivityStatus } from "./openai-connectivity.js";
 
 export interface SurfaceRuntimeModule {
   readonly adapter: SurfaceAdapter;
+  /** Safe recipients for global lifecycle notifications, if the Surface has them. */
+  notificationTargets?(): readonly ConversationTarget[];
   applyHotReload(next: GatewayConfig, changes: readonly ConfigChange[]): void;
   prepareRestartNotification(next: GatewayConfig): () => void;
 }

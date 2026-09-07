@@ -108,6 +108,7 @@ import {
   type ConversationBinding,
 } from "../storage/index.js";
 import {
+  formatProviderIdleReleaseNotice,
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
@@ -653,7 +654,7 @@ export class GatewayApplication {
             threadId,
             minutes: config.idleReleaseMinutes,
           }, true);
-          void this.providerIdleReleaser.closeIfIdle().catch((error) => {
+          void this.providerIdleReleaser.closeIfIdle(true).catch((error) => {
             this.logger.warn(
               { err: error },
               "渠道会话空闲解除后的全局 Client 空闲检查失败",
@@ -682,7 +683,12 @@ export class GatewayApplication {
               dispatchQueued: event.status !== "interrupted",
             })
           : service.retryPendingBackgroundRelease(threadId));
-        await this.providerIdleReleaser.closeIfIdle();
+        void this.providerIdleReleaser.closeIfIdle().catch((error) => {
+          this.logger.warn(
+            { err: error },
+            "后台任务终态后的全局 Client 空闲检查失败",
+          );
+        });
       } catch (error) {
         this.logger.warn(
           { err: error, threadId },
@@ -713,6 +719,38 @@ export class GatewayApplication {
       listConnectedProviders: () => this.codex.connectedProviderIds(),
       closeProvider: (provider) => this.codex.closeProvider(provider),
       listBindings: () => this.bindings.list(),
+      gracePeriodMs: 60_000,
+      notifyBeforeClose: (providers) => {
+        const seen = new Set<string>();
+        const targets: ConversationTarget[] = [];
+        for (const module of this.surfaceModules) {
+          for (const target of module.notificationTargets?.() ?? []) {
+            const key = `${target.surface}:${target.accountId}:${target.conversationId}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            targets.push(target);
+          }
+        }
+        if (targets.length === 0) {
+          this.logger.info(
+            { providers },
+            "全局空闲释放即将开始，但没有已知渠道会话需要通知",
+          );
+          return;
+        }
+        for (const target of targets) {
+          this.output.publish({
+            type: "warning",
+            target,
+            message: formatProviderIdleReleaseNotice(),
+            globalIdle: true,
+          }, true);
+        }
+        this.logger.info(
+          { providers, targetCount: targets.length },
+          "全局空闲释放通知已投递到已知渠道会话",
+        );
+      },
     });
     this.scheduledTasks = config.scheduledTasksEnabled
       ? new ScheduledTaskComposition({
@@ -1139,6 +1177,12 @@ export class GatewayApplication {
       this.scheduledTasks?.start();
       this.conversationIdleReleaser?.start();
       this.scheduleBindingRestore();
+      void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
+        this.logger.warn(
+          { err: error },
+          "启动完成后的全局 Client 空闲检查失败",
+        );
+      });
       this.requireRunning();
     } catch (error) {
       this.stopping = true;

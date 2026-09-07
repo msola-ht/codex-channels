@@ -147,7 +147,8 @@
   脱敏预览、稳定字段错误、固定模式与历史丢失确认、Key 输出隔离、共享子代理同步、未运行短路和 Remote TUI 占用结果、账户适配器按
   `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与 SDK 协议基线校验。
 - 全局 Provider Client 空闲释放：无前台/后台绑定且无活动操作时关闭全部已连接 Client，操作期间
-  保护，关闭完成后按需重连；App Server 进程保持运行，不按 Provider 类型区分。受管 Remote TUI
+  保护，宽限期内新绑定/新操作会取消释放，自动解除轮次的关闭前会通知所有已知授权渠道，其他无绑定
+  关闭不通知，关闭完成后按需重连；App Server 进程保持运行，不按 Provider 类型区分。受管 Remote TUI
   通过私有连接持有 Provider 租约，仍可独立使用 App Server 进程；
   Gateway 不会把 Client 主动关闭误判为意外断线，关闭会等待进行中的扫描且不再发起新关闭；OpenCode Go
   默认账户变更只同步当前 OpenCode Go 共享角色，不覆盖已选择的 DeepSeek 角色。

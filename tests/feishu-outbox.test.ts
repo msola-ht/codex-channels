@@ -110,6 +110,32 @@ describe("Feishu outbox", () => {
     expect(texts.join("\n")).toContain("/r thread-idle-123");
   });
 
+  it("delivers the global idle notice as a text warning", async () => {
+    const sent: string[] = [];
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendPost: async () => {},
+        sendText: async (_chatId, text) => {
+          sent.push(text);
+        },
+      },
+      pino({ level: "silent" }),
+    );
+
+    outbox.handle({
+      type: "warning",
+      target,
+      message: "所有模型连接已空闲，即将释放；下次消息或恢复会话时会自动重连。",
+      globalIdle: true,
+    });
+    await outbox.close();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("所有模型连接已空闲，即将释放");
+  });
+
   it("sends the Turn start confirmation as a reply and creates the Thread status card", async () => {
     const sent: FeishuCardDocument[] = [];
     const replies: Array<{ messageId: string; markdown: string }> = [];

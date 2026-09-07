@@ -104,6 +104,28 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls[0]?.[0].text).toContain("/r thread-idle-123");
   });
 
+  it("delivers the global idle notice while ignoring ordinary warnings", async () => {
+    const { outbox, sendText } = outboxFixture();
+
+    outbox.handle({
+      type: "warning",
+      target,
+      message: "所有模型连接已空闲，即将释放。",
+      globalIdle: true,
+    });
+    outbox.handle({
+      type: "warning",
+      target,
+      message: "普通警告不应发送。",
+    });
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText.mock.calls[0]?.[0].text).toContain(
+      "所有模型连接已空闲，即将释放。",
+    );
+  });
+
   it.skip("shows thinking immediately and only once per reasoning segment", async () => {
     const { outbox, sendText } = outboxFixture();
 

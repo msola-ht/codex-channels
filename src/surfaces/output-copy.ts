@@ -49,6 +49,10 @@ export function formatConversationIdleReleased(
   ].join("\n");
 }
 
+export function formatProviderIdleReleaseNotice(): string {
+  return "所有模型连接已空闲，即将释放；下次消息或恢复会话时会自动重连。";
+}
+
 export function formatOperationFailure(detail: string): string {
   return `操作失败：${detail}。`;
 }
