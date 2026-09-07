@@ -27,8 +27,8 @@
   对本项目的收益、本次采用、本次不采用及风险与验证。Job 名 `Project benefits and tradeoffs`
   为兼容 main 的现有 Branch Protection 保留。
 - `publish.yml`：推送与 Codex CLI 协议基础版本一致的 `v*` Tag 后，先确认 Tag 所在提交已经把
-  README 发布版本与安装命令同步到同一版本，执行完整提交检查和干净源码全局安装冒烟，再使用 npm
-  Trusted Publishing 发布公开包，不保存长期 npm Token。正式版使用 npm `latest`，`-rc.N` 使用
+  README 发布版本与安装命令同步到同一版本，按当前包版本安装锁定的 `@openai/codex` CLI 后执行完整
+  提交检查和干净源码全局安装冒烟，再使用 npm Trusted Publishing 发布公开包，不保存长期 npm Token。正式版使用 npm `latest`，`-rc.N` 使用
   `next`，`-fixN` 使用 `fix`；README 未完成对应发布提交时失败关闭，合并升级 PR 或普通 push 不会发布。
 - README 的正式版本与安装命令在发布提交中直接更新并接受 PR/CI 审查；GitHub Release 不再触发
   自动写回 `main`。GitHub Release 创建、本机安装、服务重启和部署仍不由工作流执行。完整收尾步骤见
