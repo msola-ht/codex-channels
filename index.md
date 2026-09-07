@@ -20,6 +20,8 @@
 
 ## 发行记录
 
+- [`docs/releases/v0.153.4.md`](docs/releases/v0.153.4.md)：对应 `codex-cli 0.153.4` 的
+  `v0.153.4` 正式发行说明、用户可见改动、兼容边界与验证范围。
 - [`docs/releases/v0.150.1.md`](docs/releases/v0.150.1.md)：对应 `codex-cli 0.150.1` 的
   `v0.150.1` 正式发行说明、用户可见改动、兼容边界与验证状态。
 - [`docs/releases/v0.148.0-fix1.md`](docs/releases/v0.148.0-fix1.md)：`v0.148.0-fix1` npm 修复预览版
