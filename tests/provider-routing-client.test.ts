@@ -250,6 +250,28 @@ describe("ProviderRoutingClient", () => {
     expect(openai.close).toHaveBeenCalledTimes(2);
   });
 
+  it("reconnects the primary Client before queries after global idle close", async () => {
+    const openai = client();
+    openai.listThreads.mockResolvedValue([]);
+    openai.listModels.mockResolvedValue([]);
+    openai.readThread.mockResolvedValue(snapshot("thread-openai", "openai", "idle"));
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]));
+
+    await routed.connect();
+    await routed.closeProvider("openai");
+
+    await expect(routed.listThreads(cwd)).resolves.toEqual([]);
+    expect(openai.connect).toHaveBeenCalledTimes(2);
+
+    await routed.closeProvider("openai");
+    await routed.listModels();
+    expect(openai.connect).toHaveBeenCalledTimes(3);
+
+    await routed.closeProvider("openai");
+    await routed.readThread("thread-openai");
+    expect(openai.connect).toHaveBeenCalledTimes(4);
+  });
+
   it("releases an ephemeral Thread through its owning Provider and forgets the route", async () => {
     const openai = client();
     const deepseek = client();
