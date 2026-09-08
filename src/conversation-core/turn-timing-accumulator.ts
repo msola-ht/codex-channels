@@ -41,6 +41,8 @@ export class TurnTimingAccumulator {
   private pricingRateConflict = false;
   private pricingBuckets: Set<"peak" | "off-peak"> | undefined;
   private pricedRequestCount = 0;
+  private pricedInputTokens = 0;
+  private pricedOutputTokens = 0;
   private totalCostNanos = 0;
   private uncachedInputCostNanos = 0;
   private cachedInputCostNanos = 0;
@@ -223,6 +225,8 @@ export class TurnTimingAccumulator {
       event.cachedInputPricePerMillionNanos;
     this.outputPricePerMillionNanos ??= event.outputPricePerMillionNanos;
     this.pricedRequestCount += 1;
+    this.pricedInputTokens += event.inputTokens ?? 0;
+    this.pricedOutputTokens += event.outputTokens ?? 0;
     this.totalCostNanos += event.totalCostNanos;
     this.uncachedInputCostNanos += event.uncachedInputCostNanos ?? 0;
     this.cachedInputCostNanos += event.cachedInputCostNanos ?? 0;
@@ -363,6 +367,8 @@ export class TurnTimingAccumulator {
         ? null
         : this.outputCostNanos,
       pricedRequestCount: this.pricedRequestCount,
+      pricedInputTokens: this.pricedInputTokens,
+      pricedOutputTokens: this.pricedOutputTokens,
       requestCount: this.modelRequestCount,
       uncachedInputPricePerMillionNanos: this.pricingRateConflict
         ? null

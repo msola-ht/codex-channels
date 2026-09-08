@@ -96,7 +96,11 @@ export function formatConversationMetrics(
           ? {}
           : { pricingBuckets: turn.pricingBuckets }),
       }, currency, exchangeRate),
-      ...[formatAveragePriceValue(turn, currency, exchangeRate)]
+      ...[formatAveragePriceValue({
+        ...turn,
+        inputTokens: turn.pricedInputTokens ?? turn.inputTokens,
+        outputTokens: turn.pricedOutputTokens ?? turn.outputTokens,
+      }, currency, exchangeRate)]
         .filter((value): value is string => value !== null)
         .map((value) => `均价：${value}`),
       ...(turn.compact
@@ -134,7 +138,11 @@ export function formatConversationMetrics(
             aggregate.outputSpeedSampleCount,
           )}`]),
       ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
-      ...[formatAveragePriceValue(aggregate, currency, exchangeRate)]
+      ...[formatAveragePriceValue({
+        ...aggregate,
+        inputTokens: aggregate.pricedInputTokens ?? aggregate.inputTokens,
+        outputTokens: aggregate.pricedOutputTokens ?? aggregate.outputTokens,
+      }, currency, exchangeRate)]
         .filter((value): value is string => value !== null)
         .map((value) => `均价：${value}`),
       ...(aggregate.compact
@@ -490,6 +498,7 @@ export function formatAveragePriceValue(
     value.pricingCurrency !== "USD"
     || value.totalCostNanos === null
     || value.pricedRequestCount === 0
+    || value.pricedRequestCount !== value.requestCount
     || value.requestCount === 0
   ) {
     return null;

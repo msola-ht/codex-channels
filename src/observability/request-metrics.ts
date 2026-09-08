@@ -139,6 +139,8 @@ export interface ModelRequestMetricSample {
   quotaWindows?: ReadonlyArray<{
     windowId: string;
     resetsAt: number | null;
+    usedPercentMillionths?: number | null;
+    status?: string | null;
   }> | null;
 }
 

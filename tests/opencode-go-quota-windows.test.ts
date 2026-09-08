@@ -34,11 +34,23 @@ describe("OpenCode Go quota windows provider", () => {
       nowMs: () => nowMs,
     });
     const expected = [
-      { windowId: "rolling", resetsAt: Math.floor(Date.parse(rollingResetsAt) / 1_000) },
-      { windowId: "weekly", resetsAt: Math.floor(Date.parse(weeklyResetsAt) / 1_000) },
+      {
+        windowId: "rolling",
+        resetsAt: Math.floor(Date.parse(rollingResetsAt) / 1_000),
+        usedPercentMillionths: 45_000_000,
+        status: "ok",
+      },
+      {
+        windowId: "weekly",
+        resetsAt: Math.floor(Date.parse(weeklyResetsAt) / 1_000),
+        usedPercentMillionths: 18_000_000,
+        status: "ok",
+      },
       {
         windowId: "monthly",
         resetsAt: Math.floor(Date.parse("2026-09-15T10:22:00.000Z") / 1_000),
+        usedPercentMillionths: 15_000_000,
+        status: "ok",
       },
     ];
 
@@ -175,15 +187,15 @@ describe("OpenCode Go quota windows provider", () => {
     });
 
     await expect(provider()).resolves.toEqual([
-      { windowId: "rolling", resetsAt: null },
-      { windowId: "weekly", resetsAt: null },
-      { windowId: "monthly", resetsAt: null },
+      { windowId: "rolling", resetsAt: null, usedPercentMillionths: 45_000_000, status: "ok" },
+      { windowId: "weekly", resetsAt: null, usedPercentMillionths: 18_000_000, status: "ok" },
+      { windowId: "monthly", resetsAt: null, usedPercentMillionths: 15_000_000, status: "ok" },
     ]);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     await expect(provider()).resolves.toEqual([
-      { windowId: "rolling", resetsAt: null },
-      { windowId: "weekly", resetsAt: null },
-      { windowId: "monthly", resetsAt: null },
+      { windowId: "rolling", resetsAt: null, usedPercentMillionths: 45_000_000, status: "ok" },
+      { windowId: "weekly", resetsAt: null, usedPercentMillionths: 18_000_000, status: "ok" },
+      { windowId: "monthly", resetsAt: null, usedPercentMillionths: 15_000_000, status: "ok" },
     ]);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });

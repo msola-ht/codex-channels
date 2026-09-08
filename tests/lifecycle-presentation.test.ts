@@ -95,8 +95,10 @@ describe("shared Surface lifecycle presentation", () => {
     );
     const rendered = renderPlainLifecyclePresentation(presentation);
     expect(rendered).toContain("账户状态（额度中心）");
-    expect(rendered).toContain("3 台设备 · 12 次请求");
-    expect(rendered).toContain("最新使用率：35.00%");
+    expect(rendered).toContain("设备数：3 台");
+    expect(rendered).toContain("请求数：12 次");
+    expect(rendered).toContain("总 Token：123 M");
+    expect(rendered).toContain("周限：剩余 65%");
   });
 
   it("shows all OpenCode Go quota windows in the startup card", () => {
@@ -146,10 +148,10 @@ describe("shared Surface lifecycle presentation", () => {
     );
     const rendered = renderPlainLifecyclePresentation(presentation);
     expect(rendered).toContain("5小时");
-    expect(rendered).toContain("7天");
-    expect(rendered).toContain("月度（30天）");
-    expect(rendered.indexOf("5小时")).toBeLessThan(rendered.indexOf("7天"));
-    expect(rendered.indexOf("7天")).toBeLessThan(rendered.indexOf("月度（30天）"));
+    expect(rendered).toContain("周限");
+    expect(rendered).toContain("月限");
+    expect(rendered.indexOf("5小时")).toBeLessThan(rendered.indexOf("周限"));
+    expect(rendered.indexOf("周限")).toBeLessThan(rendered.indexOf("月限"));
   });
 
   it("does not warn when at least one official OpenAI route is reachable", () => {
@@ -750,9 +752,9 @@ describe("shared Surface lifecycle presentation", () => {
         },
       }, undefined, undefined, true),
     );
-    expect(rendered).toContain("额度中心：3 台设备 · 12 次请求");
-    expect(rendered).toContain("本周期 Token：1.2 M");
-    expect(rendered).toContain("重置时间：");
+    expect(rendered).toContain("设备数：3 台");
+    expect(rendered).toContain("请求数：12 次");
+    expect(rendered).toContain("总 Token：1.2 M");
     expect(rendered).toContain("账户状态（额度中心）：");
     expect(rendered).toContain("周限：剩余 63% · 重置");
   });
@@ -783,6 +785,7 @@ describe("shared Surface lifecycle presentation", () => {
     );
     expect(rendered).toContain("账户状态（额度中心）：");
     expect(rendered).toContain("周限：剩余 63% · 重置 ");
+    expect(rendered.match(/周限：/gu)).toHaveLength(1);
     expect(rendered).not.toContain("额度中心：3 台设备");
     expect(rendered).not.toContain("本周期 Token");
   });
@@ -849,9 +852,10 @@ describe("shared Surface lifecycle presentation", () => {
       ),
     );
     expect(rendered).toContain("账户状态（额度中心）：");
-    expect(rendered).toContain("额度中心：月度（30天）");
-    expect(rendered).toContain("3 台设备 · 12 次请求");
-    expect(rendered).toContain("1.2 M");
+    expect(rendered).toContain("设备数：3 台");
+    expect(rendered).toContain("请求数：12 次");
+    expect(rendered).toContain("总 Token：1.2 M");
+    expect(rendered).toContain("月限：未知");
     expect(rendered).not.toContain("剩余用量");
   });
 
@@ -910,8 +914,11 @@ describe("shared Surface lifecycle presentation", () => {
         },
       ),
     );
-    expect(rendered).toContain("剩余用量");
-    expect(rendered).not.toContain("额度中心：周");
+    expect(rendered).toContain("模型用量");
+    expect(rendered).toContain("账户状态：");
+    expect(rendered).not.toContain("账户状态（额度中心）：");
+    expect(rendered).not.toContain("7天");
+    expect(rendered).not.toContain("5小时");
   });
 
   it("keeps Thread metrics but hides OpenAI-only fields for DeepSeek", () => {
@@ -1006,8 +1013,8 @@ describe("shared Surface lifecycle presentation", () => {
       ),
     );
 
-    expect(rendered).toContain("剩余用量（Off-Peak）");
-    expect(rendered).toContain("剩余 $13.99 · 包含 $15.00 · 已用 6.7%");
+    expect(rendered).toContain("模型用量（Off-Peak）");
+    expect(rendered).toContain("已用 $1.01");
   });
 
   it("shows the remaining usage account state for any provider when data is injected", () => {
@@ -1044,8 +1051,8 @@ describe("shared Surface lifecycle presentation", () => {
       ),
     );
 
-    expect(rendered).toContain("剩余用量（Peak）");
-    expect(rendered).toContain("剩余 未知 · 包含 $0.00");
+    expect(rendered).toContain("模型用量（Peak）");
+    expect(rendered).toContain("已用 $0.10");
   });
 
   it("marks a single pricing bucket on the completion cost", () => {
@@ -1319,9 +1326,15 @@ describe("shared Surface lifecycle presentation", () => {
           incompleteModelRequestCount: 0,
           failedModelRequestCount: 1,
           retryableFailureModelRequestCount: 1,
+          requestInputTokens: 1_100,
+          requestOutputTokens: 100,
           referenceCost: {
             currency: "USD",
             totalCostNanos: 915_000,
+            inputTokens: 1_100,
+            pricedInputTokens: 500,
+            outputTokens: 100,
+            pricedOutputTokens: 100,
             inputCostNanos: 300_000,
             cachedInputCostNanos: 100_000,
             outputCostNanos: 515_000,
@@ -1340,6 +1353,7 @@ describe("shared Surface lifecycle presentation", () => {
       "模型请求：2 次（完成 1 · 自动重试 1，最终成功）",
     );
     expect(rendered).toContain("费用：$0.000915");
+    expect(rendered).not.toContain("均价：");
     expect(rendered).not.toContain("折合人民币");
   });
 

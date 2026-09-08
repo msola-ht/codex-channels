@@ -47,6 +47,8 @@ export interface ProviderWeeklyQuotaSnapshot {
 export interface ProviderQuotaWindowSnapshot {
   windowId: string;
   resetsAt: number | null;
+  usedPercentMillionths?: number | null;
+  status?: string | null;
 }
 
 export interface ProviderProxyMetrics {

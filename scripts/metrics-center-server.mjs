@@ -666,7 +666,7 @@ function handleQuota(url, database, response) {
       if (window?.resetsAt !== null && window?.resetsAt !== undefined) snapshots.push({
         windowId: window.windowId,
         resetsAt: window.resetsAt,
-        usedPercentMillionths: null,
+        usedPercentMillionths: window.usedPercentMillionths ?? null,
       });
     }
     for (const snapshot of snapshots) {

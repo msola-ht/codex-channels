@@ -502,7 +502,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       for (const window of metric.quotaWindows ?? []) snapshots.push({
         windowId: window.windowId,
         resetsAt: window.resetsAt,
-        usedPercentMillionths: null,
+        usedPercentMillionths: window.usedPercentMillionths ?? null,
         planType: null,
       });
       for (const snapshot of snapshots) {

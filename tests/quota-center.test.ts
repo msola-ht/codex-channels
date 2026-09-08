@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createRemoteQuotaSnapshotReader,
   readRemoteQuotaSummary,
   selectRemoteQuotaPeriod,
   selectRemoteQuotaPeriods,
@@ -106,4 +107,44 @@ describe("quota center remote quota", () => {
       nowMs,
     ).map((period) => period.windowId)).toEqual(["monthly", "weekly", "rolling"]);
   });
+
+  it("returns cached snapshots without waiting for a slow refresh", async () => {
+    let resolveRead!: (value: ReturnType<typeof makeQuotaSummary>) => void;
+    const read = vi.fn(() => new Promise<ReturnType<typeof makeQuotaSummary>>((resolve) => {
+      resolveRead = resolve;
+    }));
+    const reader = createRemoteQuotaSnapshotReader(read, {
+      ttlMs: 1_000,
+      retryDelayMs: 10,
+    });
+
+    expect(reader("ocg-lunare", undefined)).toBeUndefined();
+    await Promise.resolve();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(reader("ocg-lunare", undefined)).toBeUndefined();
+    expect(read).toHaveBeenCalledTimes(1);
+
+    const summary = makeQuotaSummary();
+    resolveRead(summary);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reader("ocg-lunare", undefined)).toEqual(summary);
+  });
 });
+
+function makeQuotaSummary() {
+  return {
+    provider: "ocg-lunare",
+    windowId: "monthly",
+    deviceCount: 1,
+    requestCount: 2,
+    totalTokens: 300,
+    totalCostNanos: null,
+    latestUsedPercentMillionths: null,
+    estimatedTotalTokens: null,
+    estimatedTotalCostNanos: null,
+    tokensPerPercent: null,
+    costPerPercentNanos: null,
+    resetsAt: 1_950_000_000,
+    observedAtMs: 1_900_000_000_000,
+  } as const;
+}

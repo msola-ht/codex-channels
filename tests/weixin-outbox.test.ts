@@ -309,7 +309,7 @@ describe("WeixinOutbox", () => {
     );
     const text = sendText.mock.calls.at(-1)?.[0].text ?? "";
     expect(text).toContain("**账户状态**");
-    expect(text).toContain("剩余用量（Peak）：剩余 $12.19 · 包含 $15.00 · 已用 18.8%");
+    expect(text).toContain("模型用量（Peak）：已用 $2.81");
   });
 
   it("does not ask for remaining usage on non-OpenCode Go completions", async () => {

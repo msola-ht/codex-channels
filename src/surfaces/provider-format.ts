@@ -18,10 +18,18 @@ export function formatProviderLabel(provider: string): string {
   if (provider === "openai") return "OpenAI";
   if (provider === "deepseek") return "DeepSeek";
   if (isOpencodeGoProvider(provider)) {
-    return opencodeGoProviderDisplayName(provider);
+    return boundProviderLabel(opencodeGoProviderDisplayName(provider));
   }
   const normalized = provider.replace(/\s+/gu, " ").trim();
   return normalized ? normalized.slice(0, 64) : "未知提供商";
+}
+
+function boundProviderLabel(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  const characters = Array.from(normalized);
+  return characters.length <= 64
+    ? normalized
+    : `${characters.slice(0, 61).join("")}...`;
 }
 
 export function formatCodexProviderLabel(provider?: string): string {

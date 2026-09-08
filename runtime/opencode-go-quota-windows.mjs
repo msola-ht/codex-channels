@@ -97,6 +97,15 @@ async function fetchQuotaWindows(environment, fetchImpl, provider) {
     windows.push({
       windowId,
       resetsAt: Number.isFinite(resetsAt) ? Math.floor(resetsAt / 1_000) : null,
+      usedPercentMillionths: typeof window.percent === "number"
+        && Number.isFinite(window.percent)
+        && window.percent >= 0
+        && window.percent <= 100
+        ? Math.round(window.percent * 1_000_000)
+        : null,
+      status: typeof window.status === "string" && window.status.length > 0
+        ? window.status
+        : null,
     });
   }
   return windows.length === 0 ? null : windows;

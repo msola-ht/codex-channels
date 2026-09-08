@@ -198,15 +198,7 @@ export function createStartupPresentation(
         ? [{
             title: remoteQuota ? "账户状态（额度中心）" : "账户状态",
             fields: remoteQuota
-              ? remoteQuota.windows === undefined
-                ? [
-                    { label: "设备与请求", value: `${remoteQuota.deviceCount} 台设备 · ${remoteQuota.requestCount} 次请求` },
-                    { label: "已使用 Token", value: formatTokenCount(remoteQuota.totalTokens) },
-                    ...(remoteQuota.resetsAt === null ? [] : [{ label: "重置时间", value: formatResetTime(remoteQuota.resetsAt) }]),
-                    ...(remoteQuota.latestUsedPercentMillionths === null ? [] : [{ label: "最新使用率", value: `${(remoteQuota.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%` }]),
-                    ...(remoteQuota.estimatedTotalTokens === null ? [] : [{ label: "推算容量", value: formatTokenCount(remoteQuota.estimatedTotalTokens) }]),
-                  ]
-                : orderedRemoteQuotaWindows(remoteQuota).map(remoteQuotaMultiWindowSummaryField)
+              ? remoteQuotaAccountFields(remoteQuota)
               : [{ label: "周限", value: formatWeeklyLimit(status.weeklyLimit!) }],
           }]
         : []),
@@ -449,8 +441,8 @@ function subagentTaskName(agentPath: string): string {
 function remoteQuotaWindowLabel(windowId: string): string {
   return {
     codex: "周限",
-    monthly: "月度（30天）",
-    weekly: "7天",
+    monthly: "月限",
+    weekly: "周限",
     rolling: "5小时",
   }[windowId] ?? windowId;
 }
@@ -464,34 +456,30 @@ function orderedRemoteQuotaWindows(
   );
 }
 
-function remoteQuotaMultiWindowSummaryField(
-  window: RemoteQuotaSummary,
-): LifecyclePresentationField {
-  return {
-    title: remoteQuotaWindowLabel(window.windowId),
-    fields: [
-      {
-        label: "设备与请求",
-        value: `${window.deviceCount} 台设备 · ${window.requestCount} 次请求`,
-      },
-      { label: "已使用 Token", value: formatTokenCount(window.totalTokens) },
-      ...(window.resetsAt === null
-        ? []
-        : [{ label: "重置时间", value: formatResetTime(window.resetsAt) }]),
-      ...(window.latestUsedPercentMillionths === null
-        ? []
-        : [{
-            label: "最新使用率",
-            value: `${(window.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%`,
-          }]),
-      ...(window.estimatedTotalTokens === null
-        ? []
-        : [{
-            label: "推算容量",
-            value: formatTokenCount(window.estimatedTotalTokens),
-          }]),
-    ],
-  };
+function remoteQuotaAccountFields(
+  remoteQuota: RemoteQuotaSummary,
+): LifecyclePresentationField[] {
+  const windows = remoteQuota.windows === undefined
+    ? [remoteQuota]
+    : orderedRemoteQuotaWindows(remoteQuota);
+  return [
+    { label: "设备数", value: `${remoteQuota.deviceCount} 台` },
+    { label: "请求数", value: `${remoteQuota.requestCount} 次` },
+    { label: "总 Token", value: formatTokenCount(remoteQuota.totalTokens) },
+    ...windows.map((window) => ({
+      label: remoteQuotaWindowLabel(window.windowId),
+      value: formatRemoteQuotaRemaining(window),
+    })),
+  ];
+}
+
+function formatRemoteQuotaRemaining(window: RemoteQuotaSummary): string {
+  const remaining = window.latestUsedPercentMillionths === null
+    ? "未知"
+    : `剩余 ${formatPercent(Math.max(0, 100 - window.latestUsedPercentMillionths / 1_000_000))}`;
+  return window.resetsAt === null
+    ? remaining
+    : `${remaining} · 重置 ${formatResetTime(window.resetsAt)}`;
 }
 
 function formatTurnErrorMessage(
@@ -532,6 +520,7 @@ export function createTurnCompletedPresentation(
   ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
+  let hasRemoteQuotaPresentation = false;
   let fallbackCacheField: LifecyclePresentationField | undefined;
   const monthlyRemoteQuota = event.remoteQuota?.windows?.find(
     (window) => window.windowId === "monthly",
@@ -540,42 +529,22 @@ export function createTurnCompletedPresentation(
     ? event.remoteQuota
     : monthlyRemoteQuota;
   if (completionRemoteQuota !== undefined && !debug) {
-    accountFields.push({
-      label: "额度中心",
-      value: `${remoteQuotaWindowLabel(completionRemoteQuota.windowId)}：${completionRemoteQuota.deviceCount} 台设备 · ${completionRemoteQuota.requestCount} 次请求 · ${formatTokenCount(completionRemoteQuota.totalTokens)}${completionRemoteQuota.resetsAt === null ? "" : ` · 重置 ${formatResetTime(completionRemoteQuota.resetsAt)}`}`,
-    });
-  } else if (event.remoteQuota?.windows !== undefined) {
-    accountFields.push(
-      ...orderedRemoteQuotaWindows(event.remoteQuota).map(remoteQuotaMultiWindowSummaryField),
-    );
+    hasRemoteQuotaPresentation = true;
+    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota!));
+  } else if (debug && event.remoteQuota?.windows !== undefined) {
+    hasRemoteQuotaPresentation = true;
+    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
   } else if (debug && event.remoteQuota) {
-    accountFields.push({
-      label: "额度中心",
-      value: `${event.remoteQuota.deviceCount} 台设备 · ${event.remoteQuota.requestCount} 次请求`,
-      subfields: [
-        { label: "本周期 Token", value: formatTokenCount(event.remoteQuota.totalTokens) },
-        ...(event.remoteQuota.resetsAt === null
-          ? []
-          : [{ label: "重置时间", value: formatResetTime(event.remoteQuota.resetsAt) }]),
-        ...(event.remoteQuota.latestUsedPercentMillionths === null
-          ? []
-          : [{
-              label: "最新使用",
-              value: `${(event.remoteQuota.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%`,
-            }]),
-        ...(event.remoteQuota.estimatedTotalTokens === null
-          ? []
-          : [{
-              label: "推算 100% Token",
-              value: formatTokenCount(event.remoteQuota.estimatedTotalTokens),
-            }]),
-      ],
-    });
-  } else if (!debug && event.remoteQuota !== undefined && !usesOpenAiAccount(event.modelProvider)) {
-    accountFields.push({
-      label: "额度中心",
-      value: `${remoteQuotaWindowLabel(event.remoteQuota.windowId)}：${event.remoteQuota.deviceCount} 台设备 · ${event.remoteQuota.requestCount} 次请求 · ${formatTokenCount(event.remoteQuota.totalTokens)}`,
-    });
+    hasRemoteQuotaPresentation = true;
+    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
+  } else if (
+    !debug
+    && event.remoteQuota !== undefined
+    && event.remoteQuota.windows === undefined
+    && !usesOpenAiAccount(event.modelProvider)
+  ) {
+    hasRemoteQuotaPresentation = true;
+    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
   }
   if (event.error) {
     runFields.push({
@@ -638,16 +607,11 @@ export function createTurnCompletedPresentation(
       value: `${event.contextCompactionCount} 次`,
     });
   }
-  const remoteUsedPercent = event.remoteQuota?.latestUsedPercentMillionths === null
-    || event.remoteQuota?.latestUsedPercentMillionths === undefined
-    ? null
-    : event.remoteQuota.latestUsedPercentMillionths / 1_000_000;
-  if (usesOpenAiAccount(event.modelProvider) && remoteUsedPercent !== null) {
-    accountFields.push({
-      label: "周限",
-      value: `剩余 ${formatPercent(Math.max(0, 100 - remoteUsedPercent))}${event.remoteQuota?.resetsAt === null || event.remoteQuota?.resetsAt === undefined ? "" : ` · 重置 ${formatResetTime(event.remoteQuota.resetsAt)}`}`,
-    });
-  } else if (usesOpenAiAccount(event.modelProvider) && event.weeklyLimit) {
+  if (
+    usesOpenAiAccount(event.modelProvider)
+    && event.remoteQuota === undefined
+    && event.weeklyLimit
+  ) {
     accountFields.push({
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
@@ -655,19 +619,13 @@ export function createTurnCompletedPresentation(
   }
   if (remainingUsage && completionRemoteQuota === undefined) {
     accountFields.push({
-      label: `剩余用量${remainingUsage.bucket === undefined
+      label: `模型用量${remainingUsage.bucket === undefined
         ? ""
         : `（${formatModelUsageBucket(remainingUsage.bucket)}）`}`,
       value: [
-        `剩余 ${remainingUsage.remainingUsdNanos === null
+        `已用 ${remainingUsage.usedUsdNanos === null
           ? "未知"
-          : formatUsdAmount(remainingUsage.remainingUsdNanos)}`,
-        `包含 ${formatUsdAmount(
-          Math.round(remainingUsage.includedUsageUsd * 1_000_000_000),
-        )}`,
-        ...(remainingUsage.usedPercent === null
-          ? []
-          : [`已用 ${formatPercent(remainingUsage.usedPercent)}`]),
+          : formatUsdAmount(remainingUsage.usedUsdNanos)}`,
       ].join(" · "),
     });
   }
@@ -805,16 +763,21 @@ export function createTurnCompletedPresentation(
     event.timing?.referenceCost
     && event.timing.requestInputTokens !== undefined
   ) {
-    const averagePrice = formatAveragePriceValue({
-      pricingCurrency: event.timing.referenceCost.currency,
-      totalCostNanos: event.timing.referenceCost.totalCostNanos,
-      pricedRequestCount: event.timing.referenceCost.pricedRequestCount,
-      requestCount: event.timing.referenceCost.requestCount,
-      inputTokens: event.timing.requestInputTokens,
-      outputTokens: event.timing.requestOutputTokens
-        ?? (event.timing.nonReasoningOutputTokens ?? 0)
-          + (event.timing.reasoningTokens ?? 0),
-    }, currency, currency === "cny" || debug ? exchangeRate : null);
+    const referenceCost = event.timing.referenceCost;
+    const averagePrice = referenceCost.pricedRequestCount === referenceCost.requestCount
+      ? formatAveragePriceValue({
+          pricingCurrency: referenceCost.currency,
+          totalCostNanos: referenceCost.totalCostNanos,
+          pricedRequestCount: referenceCost.pricedRequestCount,
+          requestCount: referenceCost.requestCount,
+          inputTokens: referenceCost.pricedInputTokens
+            ?? event.timing.requestInputTokens,
+          outputTokens: referenceCost.pricedOutputTokens
+            ?? (event.timing.requestOutputTokens
+              ?? (event.timing.nonReasoningOutputTokens ?? 0)
+                + (event.timing.reasoningTokens ?? 0)),
+        }, currency, currency === "cny" || debug ? exchangeRate : null)
+      : null;
     if (averagePrice !== null) {
       runFields.push({
         label: "均价",
@@ -1041,14 +1004,17 @@ export function createTurnCompletedPresentation(
     && event.sessionReferenceCost.inputTokens !== undefined
     && event.sessionReferenceCost.outputTokens !== undefined
   ) {
-    const averagePrice = formatAveragePriceValue({
-      pricingCurrency: event.sessionReferenceCost.currency,
-      totalCostNanos: event.sessionReferenceCost.totalCostNanos,
-      pricedRequestCount: event.sessionReferenceCost.pricedRequestCount,
-      requestCount: event.sessionReferenceCost.requestCount,
-      inputTokens: event.sessionReferenceCost.inputTokens,
-      outputTokens: event.sessionReferenceCost.outputTokens,
-    }, currency, currency === "cny" || debug ? exchangeRate : null);
+    const referenceCost = event.sessionReferenceCost;
+    const averagePrice = referenceCost.pricedRequestCount === referenceCost.requestCount
+      ? formatAveragePriceValue({
+          pricingCurrency: referenceCost.currency,
+          totalCostNanos: referenceCost.totalCostNanos,
+          pricedRequestCount: referenceCost.pricedRequestCount,
+          requestCount: referenceCost.requestCount,
+          inputTokens: referenceCost.pricedInputTokens ?? referenceCost.inputTokens ?? 0,
+          outputTokens: referenceCost.pricedOutputTokens ?? referenceCost.outputTokens ?? 0,
+        }, currency, currency === "cny" || debug ? exchangeRate : null)
+      : null;
     if (averagePrice !== null) {
       sessionFields.push({
         label: "均价",
@@ -1064,7 +1030,7 @@ export function createTurnCompletedPresentation(
       ? [{ title: "当前 Session 累计", fields: sessionFields }]
       : []),
     ...(accountFields.length > 0
-      ? [{ title: event.remoteQuota === undefined ? "账户状态" : "账户状态（额度中心）", fields: accountFields }]
+      ? [{ title: hasRemoteQuotaPresentation ? "账户状态（额度中心）" : "账户状态", fields: accountFields }]
       : []),
   ];
   return {
