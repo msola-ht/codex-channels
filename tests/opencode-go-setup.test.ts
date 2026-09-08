@@ -213,6 +213,35 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     },
   );
 
+  it("inherits model-name compression from existing DeepSeek when adding an OpenCode Go account", async () => {
+    const codexHome = deepseekFixture();
+    const environment = {
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+    };
+
+    await addOpencodeGoAccount("main", {
+      mode: "switching",
+      environment,
+      output: { write: vi.fn() },
+      prompter: prompt("switching"),
+      downloadCatalog: successfulCatalog,
+    });
+
+    const catalog = JSON.parse(readFileSync(
+      join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"),
+      "utf8",
+    ));
+    expect(catalog.models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4-flash",
+      auto_compact_token_limit: 400_000,
+    }));
+    expect(catalog.models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4-flash-vision-exp",
+      auto_compact_token_limit: 400_000,
+    }));
+  });
+
   it("moves from fixed mode back to switching without losing unrelated config", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-transition-"));
     writeFileSync(join(codexHome, "config.toml"), "custom = true\n", { mode: 0o600 });
@@ -653,6 +682,61 @@ function opencodeFixture(): string {
   writeFileSync(
     join(codexHome, "sf-ocg-main.config.toml"),
     providerLines,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(codexHome, "config.toml"),
+    'model = "gpt-5.6-sol"\nmodel_provider = "openai"\n',
+    { mode: 0o600 },
+  );
+  return codexHome;
+}
+
+function deepseekFixture(): string {
+  const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-deepseek-"));
+  const connectHome = join(codexHome, ".codex-connect");
+  const providerDirectory = join(connectHome, "providers", "deepseek");
+  mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  const catalogPath = join(providerDirectory, "models.json");
+  writeFileSync(
+    join(providerDirectory, "managed.toml"),
+    'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+    { mode: 0o600 },
+  );
+  writeFileSync(catalogPath, JSON.stringify({
+    models: [
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek-v4-pro",
+    ].map((slug) => ({
+      slug,
+      display_name: slug,
+      context_window: 1_000_000,
+      default_reasoning_level: "high",
+      supported_reasoning_levels: [
+        { effort: "high", description: "High" },
+        { effort: "max", description: "Max" },
+      ],
+      ...(slug === "deepseek-v4-pro"
+        ? {}
+        : { auto_compact_token_limit: 400_000 }),
+    })),
+  }), { mode: 0o600 });
+  writeFileSync(
+    join(codexHome, "sf-deepseek.config.toml"),
+    [
+      'model = "deepseek-v4-flash-vision-exp"',
+      'model_provider = "deepseek"',
+      'model_reasoning_effort = "high"',
+      `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+      "[model_providers.deepseek]",
+      'name = "deepseek"',
+      'base_url = "https://api.deepseek.com/"',
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      'experimental_bearer_token = "sk-test-secret"',
+      "",
+    ].join("\n"),
     { mode: 0o600 },
   );
   writeFileSync(

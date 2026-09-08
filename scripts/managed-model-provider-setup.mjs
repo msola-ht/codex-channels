@@ -63,6 +63,7 @@ export function createSwitchingProviderProfile(definition, {
 export function createManagedProviderCatalog(catalog, definition, {
   previousModels = [],
   autoCompactPercent = 60,
+  modelCompressionPercentByModel = {},
 } = {}) {
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
   for (const { slug, available } of definition.models) {
@@ -82,11 +83,44 @@ export function createManagedProviderCatalog(catalog, definition, {
       ? {}
       : { autoCompactLimit: Math.round(contextWindow * autoCompactPercent / 100) }),
   });
-  return withPreservedManagedModelCatalogSettings(
+  const preserved = withPreservedManagedModelCatalogSettings(
     defaultsApplied,
     definition,
     previousModels,
   );
+  return applyModelCompressionByModel(
+    preserved,
+    definition,
+    modelCompressionPercentByModel,
+  );
+}
+
+function applyModelCompressionByModel(catalog, definition, percents) {
+  let next = catalog;
+  const models = Array.isArray(catalog?.models) ? catalog.models : [];
+  for (const candidate of models) {
+    const slug = candidate?.slug;
+    const percent = typeof slug === "string" ? percents[slug] : undefined;
+    if (percent === undefined) continue;
+    if (!Number.isInteger(percent) || percent < 10 || percent > 90) {
+      throw new Error(`${definition.displayName} 模型自动压缩百分比无效：${slug}`);
+    }
+    const contextWindow = candidate?.context_window;
+    const reasoningEffort = candidate?.default_reasoning_level;
+    if (
+      !Number.isSafeInteger(contextWindow)
+      || contextWindow <= 0
+      || typeof reasoningEffort !== "string"
+    ) {
+      throw new Error(`${definition.displayName} 模型目录缺少压缩所需字段：${slug}`);
+    }
+    next = withManagedModelCatalogSettings(next, definition, {
+      model: slug,
+      reasoningEffort,
+      autoCompactLimit: Math.round(contextWindow * percent / 100),
+    });
+  }
+  return next;
 }
 
 export function applyExclusiveProviderConfig(current, definition, {

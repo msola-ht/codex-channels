@@ -647,6 +647,41 @@ describe("Codex Connect setup", () => {
     });
   });
 
+  it("marks OpenAI official as not logged in when the Codex auth file is absent", async () => {
+    const output: string[] = [];
+    const summary = await writeSetupConfigurationSummary({
+      environment: {},
+      output: { write: (value: string) => output.push(value) },
+      loadGatewayDocument: () => ({
+        configPath: "/private/config.toml",
+        document: {},
+      }),
+      loadProviderState: async () => ({
+        configVersion: "v1",
+        defaults: { model: "gpt-5.6-sol", reasoningEffort: "medium" },
+        primary: {
+          id: "openai",
+          displayName: "OpenAI 官方",
+          kind: "official",
+          mode: "official",
+        },
+        officialAuth: { authenticated: false },
+        managedProviders: [],
+        customProviders: {
+          fixedCandidates: [],
+          switchingProviders: [],
+          backupCandidates: [],
+        },
+        switchingProviders: [],
+        externalAgent: { status: "not-configured" },
+      }),
+      loadInstalledSkills: () => [],
+    });
+
+    expect(summary.officialAuth).toEqual({ authenticated: false });
+    expect(output.join("")).toContain("主 Provider：OpenAI 官方（未登录）");
+  });
+
   it("renders an unknown primary Provider state without calling it fixed mode", async () => {
     const output: string[] = [];
     await writeSetupConfigurationSummary({

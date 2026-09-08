@@ -14,6 +14,7 @@ import {
   loadOpencodeGoAccounts,
   opencodeGoAccountsFilePath,
   opencodeGoProviderId,
+  readOpencodeGoAccountMarker,
   validateOpencodeGoAccountId,
   writeOpencodeGoAccounts,
 } from "../runtime/opencode-go-accounts.mjs";
@@ -23,6 +24,7 @@ import {
   opencodeGoAccountPaths,
   opencodeGoProfileFileName,
   readOptionalOpencodeGoFile,
+  removeOptionalOpencodeGoFile,
   refreshOpencodeGoFileSnapshot,
   restoreOpencodeGoFileSnapshots,
   snapshotOpencodeGoFiles,
@@ -189,6 +191,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
     loadAccounts = loadOpencodeGoAccounts,
     loadRole = loadManagedModelProviderRole,
     writeAccounts = writeOpencodeGoAccounts,
+    removeAccounts = removeOptionalOpencodeGoFile,
     resolvePrimarySocket = defaultPrimarySocket,
     inspectSupervisor = inspectAppServerSupervisorState,
     releaseProvider = releaseAppServerProvider,
@@ -247,6 +250,13 @@ async function applyOpencodeGoAccountRemovalUnlocked(
     const marker = await readOptionalOpencodeGoFile(paths.markerPath);
     if (marker !== undefined) {
       await writePrivateFileAtomic(join(paths.backupDirectory, "managed.toml"), marker);
+    }
+    if (plan.removesLastAccount) {
+      return applyLastAccountRemovalFiles(plan, {
+        environment,
+        removeAccounts,
+        runtime: stopResult.action,
+      });
     }
     const transactionPaths = [
       opencodeGoAccountsFilePath(environment),
@@ -375,12 +385,41 @@ async function buildRemovalPlan(
       `OpenCode Go 账户不存在：${normalizedId}`,
     );
   }
-  if (accounts.length === 1) {
-    throw invalid(
-      "last-account",
-      "accountId",
-      "不能删除最后一个 OpenCode Go 账户；请在 Setup 中选择恢复配置",
-    );
+  const paths = opencodeGoAccountPaths(environment, normalizedId);
+  const removesLastAccount = accounts.length === 1;
+  let mode = null;
+  if (removesLastAccount) {
+    let marker;
+    try {
+      marker = readOpencodeGoAccountMarker(environment, normalizedId);
+    } catch (error) {
+      throw invalid(
+        "provider-state-unavailable",
+        "accountId",
+        error instanceof Error ? error.message : String(error),
+        error,
+      );
+    }
+    if (marker === undefined) {
+      throw invalid(
+        "provider-state-unavailable",
+        "accountId",
+        `OpenCode Go 账户 ${normalizedId} 的管理标记缺失，无法确认运行模式；请先运行 codexc doctor`,
+      );
+    }
+    mode = marker.mode;
+    if (mode === "exclusive") {
+      const initialConfig = await readOptionalOpencodeGoFile(
+        join(paths.providerDirectory, "backup", "config.toml"),
+      );
+      if (initialConfig === undefined) {
+        throw invalid(
+          "backup-unavailable",
+          "accountId",
+          "删除最后一个 OpenCode Go 固定账户需要安装前配置备份；未找到备份，无法安全恢复官方主配置",
+        );
+      }
+    }
   }
   let role;
   try {
@@ -397,7 +436,9 @@ async function buildRemovalPlan(
     throw invalid(
       "account-used-by-agent",
       "accountId",
-      `OpenCode Go 账户 ${normalizedId} 是 agents.external 当前账户；请先运行 codexc agents configure ocg-<其他账户> <模型> 或 codexc agents disable`,
+      removesLastAccount
+        ? `OpenCode Go 账户 ${normalizedId} 是 agents.external 当前账户；请先运行 codexc agents disable`
+        : `OpenCode Go 账户 ${normalizedId} 是 agents.external 当前账户；请先运行 codexc agents configure ocg-<其他账户> <模型> 或 codexc agents disable`,
     );
   }
   const stop = await previewOpencodeGoAccountStop(normalizedId, {
@@ -408,7 +449,7 @@ async function buildRemovalPlan(
   });
   const remainingAccounts = accounts.filter((candidate) => candidate.id !== normalizedId);
   let promotedDefaultAccountId = null;
-  if (account.default && remainingAccounts.length > 0) {
+  if (!removesLastAccount && account.default && remainingAccounts.length > 0) {
     remainingAccounts[0] = { ...remainingAccounts[0], default: true };
     promotedDefaultAccountId = remainingAccounts[0].id;
   }
@@ -417,8 +458,118 @@ async function buildRemovalPlan(
     accounts,
     remainingAccounts,
     promotedDefaultAccountId,
+    removesLastAccount,
+    mode,
+    restoresInitialConfig: removesLastAccount && mode === "exclusive",
+    removesManagedCatalog: removesLastAccount,
     stop,
-    paths: opencodeGoAccountPaths(environment, normalizedId),
+    paths,
+  };
+}
+
+async function applyLastAccountRemovalFiles(
+  plan,
+  { environment, removeAccounts, runtime },
+) {
+  const { paths } = plan;
+  const initialConfig = plan.restoresInitialConfig
+    ? await readOptionalOpencodeGoFile(
+      join(paths.providerDirectory, "backup", "config.toml"),
+    )
+    : undefined;
+  const initialRoleConfig = plan.restoresInitialConfig
+    ? await readOptionalOpencodeGoFile(
+      join(paths.providerDirectory, "backup", "sf-agent.config.toml"),
+    )
+    : undefined;
+  const initialCatalog = plan.restoresInitialConfig
+    ? await readOptionalOpencodeGoFile(
+      join(paths.providerDirectory, "backup", "models.json"),
+    )
+    : undefined;
+  const initialManifest = plan.restoresInitialConfig
+    ? await readOptionalOpencodeGoFile(
+      join(paths.providerDirectory, "backup", "models.manifest.json"),
+    )
+    : undefined;
+  if (plan.restoresInitialConfig && initialConfig === undefined) {
+    throw invalid(
+      "backup-unavailable",
+      "accountId",
+      "删除最后一个 OpenCode Go 固定账户需要安装前配置备份；未找到备份，无法安全恢复官方主配置",
+    );
+  }
+  const transactionPaths = [
+    opencodeGoAccountsFilePath(environment),
+    paths.profilePath,
+    paths.markerPath,
+  ];
+  if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
+  if (initialRoleConfig !== undefined) transactionPaths.push(paths.roleConfigPath);
+  if (plan.removesManagedCatalog) transactionPaths.push(paths.catalogPath, paths.manifestPath);
+  const snapshots = snapshotOpencodeGoFiles(transactionPaths);
+  let guards = snapshots;
+  try {
+    await assertOpencodeGoFileSnapshots(guards);
+    if (plan.restoresInitialConfig) {
+      await writePrivateFileAtomic(paths.configPath, initialConfig);
+      guards = refreshOpencodeGoFileSnapshot(guards, paths.configPath);
+      await assertOpencodeGoFileSnapshots(guards);
+    }
+    if (initialRoleConfig !== undefined) {
+      await writePrivateFileAtomic(paths.roleConfigPath, initialRoleConfig);
+      guards = refreshOpencodeGoFileSnapshot(guards, paths.roleConfigPath);
+      await assertOpencodeGoFileSnapshots(guards);
+    }
+    await removeAccounts(opencodeGoAccountsFilePath(environment));
+    guards = refreshOpencodeGoFileSnapshot(
+      guards,
+      opencodeGoAccountsFilePath(environment),
+    );
+    await assertOpencodeGoFileSnapshots(guards);
+    if (existsSync(paths.profilePath)) {
+      await removeOptionalOpencodeGoFile(paths.profilePath);
+    }
+    guards = refreshOpencodeGoFileSnapshot(guards, paths.profilePath);
+    await assertOpencodeGoFileSnapshots(guards);
+    if (existsSync(paths.markerPath)) {
+      await removeOptionalOpencodeGoFile(paths.markerPath);
+    }
+    guards = refreshOpencodeGoFileSnapshot(guards, paths.markerPath);
+    await assertOpencodeGoFileSnapshots(guards);
+    if (plan.removesManagedCatalog) {
+      if (initialCatalog !== undefined) {
+        await writePrivateFileAtomic(paths.catalogPath, initialCatalog);
+      } else if (existsSync(paths.catalogPath)) {
+        await removeOptionalOpencodeGoFile(paths.catalogPath);
+      }
+      guards = refreshOpencodeGoFileSnapshot(guards, paths.catalogPath);
+      await assertOpencodeGoFileSnapshots(guards);
+      if (initialManifest !== undefined) {
+        await writePrivateFileAtomic(paths.manifestPath, initialManifest);
+      } else if (existsSync(paths.manifestPath)) {
+        await removeOptionalOpencodeGoFile(paths.manifestPath);
+      }
+      guards = refreshOpencodeGoFileSnapshot(guards, paths.manifestPath);
+      await assertOpencodeGoFileSnapshots(guards);
+    }
+  } catch (error) {
+    try {
+      await restoreOpencodeGoFileSnapshots(snapshots, guards);
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "OpenCode Go 最后一个账户删除失败，且未能完整恢复操作前文件",
+        { cause: rollbackError },
+      );
+    }
+    throw error;
+  }
+  return {
+    action: "removed",
+    ...publicRemovalPreview(plan),
+    runtime,
+    backupDirectory: paths.backupDirectory,
   };
 }
 
@@ -452,6 +603,17 @@ function publicStopPreview(plan) {
 }
 
 function publicRemovalPreview(plan) {
+  const effects = {
+    stopsRunningAppServer: plan.stop.status === "running",
+    promotesDefaultAccountId: plan.promotedDefaultAccountId,
+    preservesPrivateBackup: true,
+    historyThreadsBecomeUnavailable: true,
+  };
+  if (plan.removesLastAccount) {
+    effects.removesLastAccount = true;
+    effects.removesManagedCatalog = true;
+    if (plan.restoresInitialConfig) effects.restoresInitialConfig = true;
+  }
   return {
     operation: "remove",
     account: {
@@ -461,12 +623,7 @@ function publicRemovalPreview(plan) {
       ...(plan.account.email === undefined ? {} : { email: plan.account.email }),
       ...(plan.account.phone === undefined ? {} : { phone: plan.account.phone }),
     },
-    effects: {
-      stopsRunningAppServer: plan.stop.status === "running",
-      promotesDefaultAccountId: plan.promotedDefaultAccountId,
-      preservesPrivateBackup: true,
-      historyThreadsBecomeUnavailable: true,
-    },
+    effects,
     confirmation: { required: true, field: "confirmHistoryLoss" },
     activation: "restart-all",
   };

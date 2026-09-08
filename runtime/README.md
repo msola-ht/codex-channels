@@ -108,7 +108,8 @@
   列表，供渠道 `/agents` 命令展示与调用；不含任何角色实现。
 - `agent-roles.d.mts`：声明共享子代理角色配置模块的 TypeScript 接口。
 - `codex-home.mjs` / `codex-home.d.mts`：统一解析 Codex 用户目录（`CODEX_HOME` 或
-  `~/.codex`），供 CLI、脚本、Runtime 与 Bootstrap 复用。
+  `~/.codex`），并检测 Codex 官方鉴权文件 `auth.json` 是否存在，供 CLI、脚本、Runtime 与
+  Bootstrap 复用。
 - `thread-writer-lock.mjs` / `thread-writer-lock.d.mts`：定位并安全结束持有 Codex 线程写锁
   （`~/.codex/thread-writer-locks/<thread>.lock`）的本地进程；Linux 通过 `/proc` 按打开描述符
   与命令行识别持锁方，Windows 通过 PowerShell 7 调用 Restart Manager 按文件句柄取得 PID 与进程

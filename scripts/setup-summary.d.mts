@@ -1,5 +1,6 @@
 export interface SetupConfigurationSummary {
   primary: import("./model-provider-management.mjs").ModelProviderManagementState["primary"];
+  officialAuth?: import("./model-provider-management.mjs").ModelProviderManagementState["officialAuth"];
   codexDefaults: { model?: string; effort?: string };
   switchingProviders: Array<{
     id: string;

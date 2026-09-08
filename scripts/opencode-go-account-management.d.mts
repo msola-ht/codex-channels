@@ -34,6 +34,9 @@ export interface OpenCodeGoAccountRemovalPreview {
     promotesDefaultAccountId: string | null;
     preservesPrivateBackup: true;
     historyThreadsBecomeUnavailable: true;
+    removesLastAccount?: true;
+    restoresInitialConfig?: true;
+    removesManagedCatalog?: true;
   };
   confirmation: { required: true; field: "confirmHistoryLoss" };
   activation: "restart-all";
@@ -112,6 +115,7 @@ export function applyOpencodeGoAccountRemoval(
       environment: NodeJS.ProcessEnv,
       accounts: Array<{ id: string; default: boolean; email?: string; phone?: string }>,
     ) => void;
+    removeAccounts?: (path: string) => Promise<void>;
     releaseProvider?: (
       socketPath: string,
       provider: string,

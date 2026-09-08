@@ -81,4 +81,32 @@ describe("model Provider management state", () => {
     expect(state.customProviders.backupCandidates[0]?.baseUrl).toBe("");
     expect(JSON.stringify(state)).not.toMatch(/fixed-secret|switch-secret|secret-content|user:password/u);
   });
+
+  it("reports OpenAI official as not logged in when the Codex auth file is absent", async () => {
+    const state = await loadModelProviderManagementState({
+      environment: {},
+      readUserConfig: async () => ({
+        version: "v1",
+        config: {
+          model: "gpt-5.6-sol",
+          model_provider: "openai",
+        },
+      }),
+      listCustomCandidates: () => [],
+      readBackup: () => ({}),
+      loadManagedProviders: () => [],
+      loadCustomSwitchingProviders: () => [],
+      loadAgentStatus: () => ({
+        externalRoleConfigured: false,
+      }),
+      checkOfficialAuth: () => false,
+    });
+
+    expect(state.primary).toMatchObject({
+      id: "openai",
+      kind: "official",
+      mode: "official",
+    });
+    expect(state.officialAuth).toEqual({ authenticated: false });
+  });
 });

@@ -93,6 +93,9 @@ export function projectProviderManagementState(state) {
       kind: state.primary.kind,
       mode: state.primary.mode,
     },
+    official: {
+      authenticated: state.officialAuth?.authenticated !== false,
+    },
     providers,
     externalAgent: state.externalAgent.status === "configured"
       ? {

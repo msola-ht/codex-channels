@@ -90,3 +90,7 @@ export function readOpencodeGoOptionalJson(
 export function readOpencodeGoDefaultModelMigration(
   manifest: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined;
+
+export function configuredCompressionByModel(
+  environment?: NodeJS.ProcessEnv,
+): Record<string, number>;

@@ -14,8 +14,17 @@ export function ProviderStatusCard({ state }: { state: ManagementProvidersRespon
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <div className="grid gap-3 text-sm md:grid-cols-2">
-          <StatusRow label="主 Provider" value={state.primary.displayName} badge />
-          <StatusRow label="主 Provider ID" value={state.primary.id} code />
+          {state.primary.kind === "official" && !state.official.authenticated ? (
+            <>
+              <StatusRow label="OpenAI 官方登录" value="未登录" badge />
+              <StatusRow label="官方鉴权文件" value="未检测到" />
+            </>
+          ) : (
+            <>
+              <StatusRow label="主 Provider" value={state.primary.displayName} badge />
+              <StatusRow label="主 Provider ID" value={state.primary.id} code />
+            </>
+          )}
           <StatusRow label="Codex 默认模型" value={state.defaults.model ?? "跟随 Provider 默认值"} />
           <StatusRow label="默认思考等级" value={state.defaults.reasoningEffort ?? "跟随模型默认值"} />
           <StatusRow label="配置版本" value={String(state.configVersion ?? "未知")} code />
@@ -28,7 +37,11 @@ export function ProviderStatusCard({ state }: { state: ManagementProvidersRespon
             <p className="text-xs text-muted-foreground">仅展示可用于当前 Setup 的非凭据摘要。</p>
           </div>
           {state.providers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">当前没有额外可切换的 Provider；主 Provider 见上方。</p>
+            <p className="text-sm text-muted-foreground">
+              {state.primary.kind === "official" && !state.official.authenticated
+                ? "当前没有可用的第三方 Provider；OpenAI 官方未登录。"
+                : "当前没有额外可切换的 Provider；主 Provider 见上方。"}
+            </p>
           ) : (
             <div className="flex flex-col gap-3">
               {state.providers.map((provider, index) => (

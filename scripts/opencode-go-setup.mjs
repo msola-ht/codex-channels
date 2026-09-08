@@ -18,6 +18,7 @@ import {
 } from "./opencode-go-account-management.mjs";
 import {
   applyOpencodeGoAccountConfiguration,
+  configuredCompressionByModel,
   previewOpencodeGoAccountConfiguration,
   readOpencodeGoDefaultModelMigration,
   readOpencodeGoOptionalJson,
@@ -353,7 +354,13 @@ export async function removeOpencodeGoAccount(accountId, {
   confirm = true,
 } = {}) {
   const preview = await previewOpencodeGoAccountRemoval(accountId, { environment });
-  if (confirm && !await confirmPrompt(prompts, `确认删除 OpenCode Go 账户 ${accountId}？历史 Thread 将不可恢复。`, false)) {
+  const removesLastAccount = preview.effects?.removesLastAccount === true;
+  const confirmationMessage = removesLastAccount
+    ? preview.effects?.restoresInitialConfig === true
+      ? `确认删除最后一个 OpenCode Go 账户 ${accountId}？将恢复安装前 Codex 主配置，历史 Thread 将不可恢复。`
+      : `确认删除最后一个 OpenCode Go 账户 ${accountId}？将删除 OpenCode Go 全部配置与共享模型目录，历史 Thread 将不可恢复。`
+    : `确认删除 OpenCode Go 账户 ${accountId}？历史 Thread 将不可恢复。`;
+  if (confirm && !await confirmPrompt(prompts, confirmationMessage, false)) {
     output.write("已取消，未修改任何文件。\n");
     return { action: "cancelled" };
   }
@@ -363,7 +370,14 @@ export async function removeOpencodeGoAccount(accountId, {
   }, {
     environment,
   });
-  output.write(`OpenCode Go 账户已删除：${accountId}（备份保留在 ${result.backupDirectory}）。\n`);
+  const cleanupSummary = removesLastAccount
+    ? result.effects?.restoresInitialConfig === true
+      ? "，主配置已恢复为安装前状态"
+      : "，OpenCode Go 配置与共享模型目录已清理"
+    : "";
+  output.write(
+    `OpenCode Go 账户已删除：${accountId}${cleanupSummary}（备份保留在 ${result.backupDirectory}）。\n`,
+  );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return {
     action: "removed",
@@ -399,6 +413,7 @@ export async function refreshOpencodeGoCatalogForUpdate(
   const managedCatalog = createManagedProviderCatalog(downloaded.catalog, definition, {
     previousModels: previousSettings[0]?.models,
     autoCompactPercent: defaultAutoCompactPercent,
+    modelCompressionPercentByModel: configuredCompressionByModel(environment),
   });
   const managedDefault = managedCatalog.models.find(
     (model) => model?.slug === definition.defaultModel,

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   OpenCodeGoAccountManagementError,
@@ -166,6 +169,59 @@ describe("OpenCode Go account management", () => {
       activation: "restart-all",
     });
     expect(JSON.stringify(preview)).not.toContain("apiKey");
+  });
+
+  it("previews removal of the final switching account without restoring main config", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-ocg-management-"));
+    const markerPath = join(
+      home,
+      ".codex-connect",
+      "providers",
+      "opencode-go",
+      "accounts",
+      "main",
+      "managed.toml",
+    );
+    mkdirSync(join(markerPath, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      markerPath,
+      'version = 1\nprovider = "ocg-main"\nmode = "switching"\n',
+      { mode: 0o600 },
+    );
+    try {
+      const preview = await previewOpencodeGoAccountRemoval("main", {
+        environment: {
+          CODEX_HOME: join(home, ".codex"),
+          CODEX_CONNECT_HOME: join(home, ".codex-connect"),
+        },
+        loadAccounts: () => [{ id: "main", default: true, email: "user@example.com" }],
+        loadRole: () => undefined,
+        resolvePrimarySocket: () => "/tmp/app-server.sock",
+        inspectSupervisor: async () => ({ status: "missing" as const }),
+      });
+
+      expect(preview).toEqual({
+        operation: "remove",
+        account: {
+          id: "main",
+          provider: "ocg-main",
+          email: "user@example.com",
+          default: true,
+        },
+        effects: {
+          stopsRunningAppServer: false,
+          promotesDefaultAccountId: null,
+          preservesPrivateBackup: true,
+          historyThreadsBecomeUnavailable: true,
+          removesLastAccount: true,
+          removesManagedCatalog: true,
+        },
+        confirmation: { required: true, field: "confirmHistoryLoss" },
+        activation: "restart-all",
+      });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("requires an explicit history-loss confirmation before account removal", async () => {

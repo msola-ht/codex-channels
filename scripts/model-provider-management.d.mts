@@ -7,6 +7,7 @@ export interface ModelProviderManagementState {
     kind: "official" | "managed" | "custom" | "unknown";
     mode: "official" | "exclusive" | "backup" | "unknown";
   };
+  officialAuth?: { authenticated: boolean };
   managedProviders: ManagedProviderManagementEntry[];
   customProviders: {
     fixedCandidates: CustomProviderCandidate[];
@@ -101,4 +102,5 @@ export function loadModelProviderManagementState(options?: {
     provider?: string;
     model?: string;
   };
+  checkOfficialAuth?: (environment: NodeJS.ProcessEnv) => boolean;
 }): Promise<ModelProviderManagementState>;

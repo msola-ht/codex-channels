@@ -58,7 +58,9 @@ export async function listPrimaryProviders({
   const activeLabel = switchingProviders.length > 0
     ? `OpenAI 官方 + ${switchingProviders.map(({ id }) => id).join("、")} · 自定义切换模式`
     : state.primary.mode === "official"
-      ? "OpenAI 官方"
+      ? state.officialAuth?.authenticated === false
+        ? "OpenAI 官方（未登录）"
+        : "OpenAI 官方"
       : state.primary.mode === "exclusive"
         ? `${state.primary.displayName} · ${state.primary.kind === "managed" ? "受管" : "自定义"}固定模式`
         : state.primary.mode === "backup"
