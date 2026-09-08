@@ -51,6 +51,7 @@ export class ModelSelectionService {
     private readonly supplementaryModels: readonly ModelOption[] = [],
     private readonly primaryProvider = "openai",
     private readonly officialCatalogProviders: readonly OfficialModelCatalogProvider[] = [],
+    private readonly openaiAuthenticated: () => boolean = () => true,
   ) {}
 
   async state(target: ConversationTarget): Promise<ModelSelectionState> {
@@ -430,7 +431,12 @@ export class ModelSelectionService {
       const providerModel = withoutProviderUpgrade(model);
       return { ...providerModel, provider: this.primaryProvider };
     });
-    const combined = new Map(primary.map((model) => [modelKey(model), model]));
+    const combined = new Map<string, ModelOption>();
+    if (this.primaryProvider !== "openai" || this.openaiAuthenticated()) {
+      for (const model of primary) {
+        combined.set(modelKey(model), model);
+      }
+    }
     for (const provider of this.officialCatalogProviders) {
       for (const model of primary) {
         const catalogModel = withoutProviderUpgrade(model);
@@ -445,6 +451,17 @@ export class ModelSelectionService {
     }
     for (const model of this.supplementaryModels) {
       combined.set(modelKey(model), model);
+    }
+    if (
+      combined.size === 0
+      && this.primaryProvider === "openai"
+      && !this.openaiAuthenticated()
+    ) {
+      throw new UserFacingError(
+        "model.official.not-logged-in",
+        "OpenAI 官方未登录，当前没有可用模型；请先运行 codex login",
+        { provider: "openai" },
+      );
     }
     return [...combined.values()];
   }

@@ -376,6 +376,7 @@ export interface ManagementProvidersResponse {
     kind: "official" | "managed" | "custom" | "unknown"
     mode: "official" | "exclusive" | "backup" | "unknown"
   }
+  official: { authenticated: boolean }
   providers: ManagementProviderEntry[]
   externalAgent:
     | { status: "configured"; provider: string | null; model: string | null }

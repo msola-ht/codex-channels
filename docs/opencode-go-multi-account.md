@@ -67,8 +67,8 @@ codexc opencode-go account stop <id>
 - `add` 下载或复用共享模型目录，写入账户 Profile、管理标记与注册表；失败时按写入前快照回滚；
 - `remove` 先停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
   都按删除前快照回滚；存在 Remote TUI
-  租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；最后一个账户只能
-  通过 Setup 的恢复配置流程移除；
+  租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；删除最后一个账户时
+  同时清理共享模型目录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
 - `default` 原子更新注册表，不修改 `agents.external`；需要切换共享子代理账户时，使用
   `codexc agents configure ocg-<accountId> <模型>` 显式选择；
 - `stop` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户

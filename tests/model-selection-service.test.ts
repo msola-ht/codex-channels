@@ -91,6 +91,96 @@ describe("ModelSelectionService", () => {
     expect(state.model).toBe("gpt-main");
   });
 
+  it("hides official OpenAI models when the Codex auth file is absent", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      newSession: async () => undefined,
+      current: () => undefined,
+      modelSettings: () => undefined,
+      workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    const thirdParty = {
+      ...model("deepseek-v4-flash", ["high", "max"], "high"),
+      provider: "deepseek",
+    };
+    const service = new ModelSelectionService(
+      codex,
+      router,
+      undefined,
+      [thirdParty],
+      "openai",
+      [],
+      () => false,
+    );
+
+    const state = await service.state(target);
+
+    expect(state.models.map((entry) => entry.provider ?? "openai")).not.toContain("openai");
+    expect(state.model).toBe("deepseek-v4-flash");
+    expect(state.modelProvider).toBe("deepseek");
+  });
+
+  it("rejects model state when official OpenAI is unauthenticated and no third-party model exists", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      newSession: async () => undefined,
+      current: () => undefined,
+      modelSettings: () => undefined,
+      workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(
+      codex,
+      router,
+      undefined,
+      [],
+      "openai",
+      [],
+      () => false,
+    );
+
+    await expect(service.state(target)).rejects.toThrow("OpenAI 官方未登录");
+  });
+
+  it("keeps custom switching Provider aliases when official OpenAI is unauthenticated", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      newSession: async () => undefined,
+      current: () => undefined,
+      modelSettings: () => undefined,
+      workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(
+      codex,
+      router,
+      undefined,
+      [],
+      "openai",
+      [{ provider: "OpenAI", displayName: "OpenAI", defaultModel: "gpt-main" }],
+      () => false,
+    );
+
+    const state = await service.state(target);
+
+    expect(state.models.map((entry) => entry.provider ?? "openai")).not.toContain("openai");
+    expect(state.models.map((entry) => entry.provider ?? "openai")).toContain("OpenAI");
+    expect(state.modelProvider).toBe("OpenAI");
+  });
+
   it("exposes the official catalog under a custom switching Provider alias", async () => {
     const newSession = vi.fn(async () => undefined);
     const codex = {

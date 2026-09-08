@@ -34,6 +34,7 @@ import {
 } from "../scripts/opencode-go-setup.mjs";
 import {
   loadOpencodeGoAccounts,
+  opencodeGoAccountsFilePath,
   opencodeGoAccountMarkerPath,
 } from "../runtime/opencode-go-accounts.mjs";
 import { initializeUserData, runtimeConfig } from "../scripts/runtime-config.mjs";
@@ -166,7 +167,7 @@ describe("OpenCode Go account CLI", () => {
     expect(existsSync(markerPath)).toBe(true);
   });
 
-  it("refuses to delete the final account before stopping its App Server", async () => {
+  it("deletes the final switching account and cleans the shared provider files", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
     await addOpencodeGoAccount("main", {
@@ -175,16 +176,64 @@ describe("OpenCode Go account CLI", () => {
       prompter: testPrompter(),
       downloadCatalog: successfulCatalog,
     });
+    const profilePath = join(codexHome(home), "sf-ocg-main.config.toml");
+    const markerPath = opencodeGoAccountMarkerPath(environment, "main");
+    const catalogPath = join(
+      home,
+      ".codex-connect",
+      "providers",
+      "opencode-go",
+      "models.json",
+    );
+    const manifestPath = join(
+      home,
+      ".codex-connect",
+      "providers",
+      "opencode-go",
+      "models.manifest.json",
+    );
 
-    await expect(removeOpencodeGoAccount("main", {
+    const result = await removeOpencodeGoAccount("main", {
       environment,
       output: { write: () => undefined },
       confirm: false,
-    })).rejects.toThrow("不能删除最后一个");
+    });
 
-    expect(loadOpencodeGoAccounts(environment)).toEqual([
-      { id: "main", default: true, email: "user@example.com" },
-    ]);
+    expect(result).toMatchObject({ action: "removed", accountId: "main" });
+    expect(loadOpencodeGoAccounts(environment)).toEqual([]);
+    expect(existsSync(profilePath)).toBe(false);
+    expect(existsSync(markerPath)).toBe(false);
+    expect(existsSync(opencodeGoAccountsFilePath(environment))).toBe(false);
+    expect(existsSync(catalogPath)).toBe(false);
+    expect(existsSync(manifestPath)).toBe(false);
+  });
+
+  it("deletes the final exclusive account and restores the Codex main config", async () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    const originalConfig = 'model = "gpt-5.6-sol"\nmodel_provider = "openai"\n';
+    writeFileSync(join(codexHome(home), "config.toml"), originalConfig, { mode: 0o600 });
+    await addOpencodeGoAccount("main", {
+      mode: "exclusive",
+      environment,
+      output: { write: () => undefined },
+      prompter: testPrompter(),
+      downloadCatalog: successfulCatalog,
+    });
+    const configPath = join(codexHome(home), "config.toml");
+    expect(readFileSync(configPath, "utf8")).toContain('model_provider = "ocg-main"');
+
+    const result = await removeOpencodeGoAccount("main", {
+      environment,
+      output: { write: () => undefined },
+      confirm: false,
+    });
+
+    expect(result).toMatchObject({ action: "removed", accountId: "main" });
+    expect(readFileSync(configPath, "utf8")).toBe(originalConfig);
+    expect(existsSync(join(codexHome(home), "sf-ocg-main.config.toml"))).toBe(false);
+    expect(existsSync(opencodeGoAccountMarkerPath(environment, "main"))).toBe(false);
+    expect(existsSync(opencodeGoAccountsFilePath(environment))).toBe(false);
   });
 
   it("promotes the remaining account when the default is removed", async () => {

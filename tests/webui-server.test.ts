@@ -473,9 +473,11 @@ describe("webui server", () => {
     const body = await response.json() as {
       providers: Array<Record<string, unknown>>;
       primary: { id: string; mode: string };
+      official: { authenticated: boolean };
       externalAgent: { status: string; provider?: string; model?: string };
     };
     expect(body.primary).toEqual({ id: "relay", displayName: "Relay", kind: "custom", mode: "exclusive" });
+    expect(body.official).toEqual({ authenticated: true });
     expect(body.providers).toHaveLength(3);
     expect(body.providers.find((provider) => provider.id === "relay")).toMatchObject({ selected: true, model: null });
     expect(body.externalAgent).toEqual({ status: "configured", provider: "deepseek", model: "deepseek-v4-flash" });

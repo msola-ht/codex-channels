@@ -219,6 +219,10 @@ stream_max_retries = 0
 `env_key`，或写入 `experimental_bearer_token` 直接使用 API Key（Key 明文保存在 0600 的
 `~/.codex/config.toml`，Codex 官方标注该字段用于程序化使用）。第三方主 API 使用自己的 Key 时
 设置 `requires_openai_auth = false`，完全不依赖官方 auth.json，官方登录状态不受切换影响。
+主配置选中官方 `openai` 时，管理状态会检查 `CODEX_HOME/auth.json`（默认
+`~/.codex/auth.json`）；未检测到该鉴权文件按 OpenAI 官方未登录处理，WebUI Provider 状态不把
+官方 OpenAI 作为主 Provider 展示，Setup 总览与 `codexc primary-provider list` 标注“未登录”，
+会话 `/model` 不列出官方 OpenAI 模型，只有第三方模型可继续选择。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
 `openai`、`ollama`、`lmstudio`、`amazon-bedrock`、OpenCode Go 保留命名空间

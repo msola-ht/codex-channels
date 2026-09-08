@@ -38,6 +38,7 @@ export async function loadSetupConfigurationSummary({
     : 0;
   return {
     primary: providerState.primary,
+    officialAuth: providerState.officialAuth,
     codexDefaults: {
       model: providerState.defaults.model ?? undefined,
       effort: providerState.defaults.reasoningEffort ?? undefined,
@@ -59,7 +60,7 @@ export async function writeSetupConfigurationSummary({
   const summary = await loadSetupConfigurationSummary(options);
   output.write([
     "Setup 配置总览",
-    `- 主 Provider：${primaryLabel(summary.primary)}`,
+    `- 主 Provider：${primaryLabel(summary.primary, summary.officialAuth)}`,
     `- Codex 全局默认值：${summary.codexDefaults.model ?? "跟随 Provider 默认模型"} · ${summary.codexDefaults.effort ?? "跟随模型默认思考等级"}`,
     `- 可切换 Provider：${summary.switchingProviders.map((provider) => provider.displayName).join("、") || "未配置"}`,
     `- 第三方模型默认值：${summary.modelDefaults.map(modelDefaultLabel).join("；") || "未配置"}`,
@@ -75,8 +76,12 @@ export async function writeSetupConfigurationSummary({
   return summary;
 }
 
-function primaryLabel(provider) {
-  if (provider.mode === "official") return provider.displayName;
+function primaryLabel(provider, officialAuth) {
+  if (provider.mode === "official") {
+    return officialAuth?.authenticated === false
+      ? `${provider.displayName}（未登录）`
+      : provider.displayName;
+  }
   if (provider.mode === "backup") return `${provider.displayName}（自定义备份状态）`;
   if (provider.mode === "unknown") return `${provider.displayName}（状态未知）`;
   return `${provider.displayName}（${provider.kind === "custom" ? "自定义" : ""}固定模式）`;

@@ -80,6 +80,7 @@ export type UserFacingErrorCode =
   | "workspace.permission.unavailable"
   | "model.current.missing"
   | "model.configured-default.missing"
+  | "model.official.not-logged-in"
   | "model.unavailable"
   | "model.provider.mismatch"
   | "model.selector.required"

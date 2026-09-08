@@ -1,3 +1,4 @@
+import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import {
   listCustomPrimaryProviderCandidates,
   loadConfiguredCustomSwitchingModelProviders,
@@ -15,6 +16,7 @@ export async function loadModelProviderManagementState({
   listCustomCandidates = listCustomPrimaryProviderCandidates,
   readBackup = readPrimaryProviderBackup,
   loadAgentStatus = agentsStatus,
+  checkOfficialAuth = hasCodexAuthFile,
 } = {}) {
   const snapshot = await readUserConfig(environment);
   const config = record(snapshot.config);
@@ -80,6 +82,9 @@ export async function loadModelProviderManagementState({
       reasoningEffort: optionalString(config.model_reasoning_effort) ?? null,
     },
     primary,
+    officialAuth: {
+      authenticated: checkOfficialAuth(environment),
+    },
     managedProviders,
     customProviders: {
       fixedCandidates,

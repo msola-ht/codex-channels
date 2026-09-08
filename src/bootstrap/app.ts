@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import { ensureAppServerProvider } from "../../runtime/app-server-supervisor.mjs";
+import { hasCodexAuthFile } from "../../runtime/codex-home.mjs";
 import {
   effectiveCodexBinary,
   executableInvocation,
@@ -524,6 +525,7 @@ export class GatewayApplication {
         displayName: provider.provider,
         defaultModel: provider.model,
       })),
+      () => hasCodexAuthFile(process.env),
     );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
