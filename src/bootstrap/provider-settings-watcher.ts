@@ -6,6 +6,7 @@ import type { Logger } from "pino";
 
 import { codexHomePath } from "../../runtime/codex-home.mjs";
 import {
+  loadManagedModelProviderDefinitions,
   loadManagedModelProviderWatcherDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
@@ -35,6 +36,7 @@ export type ProviderSettingsStateKind =
 
 export interface ProviderSettingsStateChange {
   kind: ProviderSettingsStateKind;
+  /** 用户可见的 Provider/账户；不包含仅用于监听共享目录的内部基础定义。 */
   providers: string[];
 }
 
@@ -61,6 +63,7 @@ export class ProviderSettingsWatcher {
   private readonly nowMs: () => number;
   private readonly validate: () => void;
   private readonly filesByProvider: ManagedProviderFiles[];
+  private readonly visibleProviderIds: ReadonlySet<string>;
   private fingerprints = new Map<string, string>();
   private lastReadFailureAt = Number.NEGATIVE_INFINITY;
   private lastValidationFailureAt = Number.NEGATIVE_INFINITY;
@@ -86,6 +89,10 @@ export class ProviderSettingsWatcher {
     this.validate = options.validate ?? (() => {
       validateConfiguredModelProviders(this.environment);
     });
+    const visibleProviderIds = new Set(
+      loadManagedModelProviderDefinitions(this.environment)
+        .map((definition) => definition.id),
+    );
     const codexHome = codexHomePath(this.environment);
     const definitions = loadManagedModelProviderWatcherDefinitions(this.environment);
     const filesByProvider = new Map<string, ManagedProviderFiles>();
@@ -108,6 +115,7 @@ export class ProviderSettingsWatcher {
       filesByProvider.set(definition.id, files);
     }
     this.filesByProvider = [...filesByProvider.values()];
+    this.visibleProviderIds = visibleProviderIds;
   }
 
   start(): void {
@@ -139,7 +147,8 @@ export class ProviderSettingsWatcher {
       const providers = this.filesByProvider
         .filter(({ paths }) => paths.some((path) =>
           this.fingerprints.get(path) !== nextFingerprints.get(path)))
-        .map(({ provider }) => provider);
+        .map(({ provider }) => provider)
+        .filter((provider) => this.visibleProviderIds.has(provider));
       if (!this.validateSettings(providers)) {
         return;
       }

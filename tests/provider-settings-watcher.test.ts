@@ -96,7 +96,7 @@ describe("ProviderSettingsWatcher", () => {
     expect(stateEvents).toEqual(["scheduled", "restarting", "applied"]);
   });
 
-  it("GO 多账户共享目录变化时合并默认账户定义并只重启一次", async () => {
+  it("GO 多账户共享目录变化时只向状态事件列出实际账户并只重启一次", async () => {
     const environment = {
       ...process.env,
       CODEX_HOME: codexHome,
@@ -119,7 +119,7 @@ describe("ProviderSettingsWatcher", () => {
 
     expect(restartCalls).toEqual(["restart"]);
     expect(scheduledProviders).toEqual([
-      ["ocg", "ocg-main", "ocg-lunare"],
+      ["ocg-main", "ocg-lunare"],
     ]);
   });
 
