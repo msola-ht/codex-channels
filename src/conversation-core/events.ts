@@ -127,8 +127,12 @@ export interface ReferenceCostSummary {
   currency: string | null;
   totalCostNanos: number | null;
   inputTokens?: number;
+  /** 仅包含存在价格快照的请求输入 Token。 */
+  pricedInputTokens?: number;
   cachedInputTokens?: number;
   outputTokens?: number;
+  /** 仅包含存在价格快照的请求输出 Token。 */
+  pricedOutputTokens?: number;
   inputCostNanos: number | null;
   cachedInputCostNanos: number | null;
   outputCostNanos: number | null;

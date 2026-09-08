@@ -306,6 +306,25 @@ function nullableQuotaWindows(value: unknown): boolean {
           && Number.isSafeInteger(window.resetsAt)
           && window.resetsAt >= 0
         )
+      )
+      && (
+        window.usedPercentMillionths === undefined
+        || window.usedPercentMillionths === null
+        || (
+          typeof window.usedPercentMillionths === "number"
+          && Number.isSafeInteger(window.usedPercentMillionths)
+          && window.usedPercentMillionths >= 0
+          && window.usedPercentMillionths <= 100_000_000
+        )
+      )
+      && (
+        window.status === undefined
+        || window.status === null
+        || (
+          typeof window.status === "string"
+          && window.status.length > 0
+          && window.status.length <= 64
+        )
       );
   });
 }

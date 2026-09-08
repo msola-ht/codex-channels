@@ -142,7 +142,9 @@ import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
 import { ScheduledTaskComposition } from "./scheduled-task-composition.js";
 import { RequestMetricsQueryAdapter } from "./request-metrics-query-adapter.js";
-import { readRemoteQuotaSummary } from "./quota-center.js";
+import {
+  readRemoteQuotaSummary,
+} from "./quota-center.js";
 import {
   createManagedProviderAccountAdapters,
   createManagedProviderPricingResolvers,
@@ -829,7 +831,13 @@ export class GatewayApplication {
           config.stateDatabasePath,
         ),
       }),
-      remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(config.metricsView, provider, resetsAt, logger),
+      remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(
+        config.metricsView,
+        provider,
+        resetsAt,
+        logger,
+        createProxyFetch(config.networkProxy),
+      ),
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
@@ -855,12 +863,13 @@ export class GatewayApplication {
             turnId,
             current,
           ),
-          remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(
-            this.config.metricsView,
-            provider,
-            resetsAt,
-            this.logger,
-          ),
+        remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(
+          this.config.metricsView,
+          provider,
+          resetsAt,
+          this.logger,
+          createProxyFetch(this.config.networkProxy),
+        ),
         completionTiming: async (threadId, turnId, current) => {
           await metricsWriter.waitForCurrentWrites(threadId);
           const summary = metricsStore.threadSummary(threadId);

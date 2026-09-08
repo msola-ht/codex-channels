@@ -1023,7 +1023,12 @@ function recordWindowSample(
   outputTokens: number,
   totalTokens: number | null,
   recordedAtMs?: number,
-  quotaWindows?: ReadonlyArray<{ windowId: string; resetsAt: number | null }> | null,
+  quotaWindows?: ReadonlyArray<{
+    windowId: string;
+    resetsAt: number | null;
+    usedPercentMillionths?: number | null;
+    status?: string | null;
+  }> | null,
 ): void {
   store.record({
     provider: "ocg-main",

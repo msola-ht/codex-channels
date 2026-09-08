@@ -519,6 +519,32 @@ describe("metrics center server", () => {
     });
   });
 
+  it("keeps OpenCode Go remote window percentages in the center", async () => {
+    const { origin } = await startServer();
+    const resetAt = 1_800_000_000;
+    await ingest(origin, payloadBody([{
+      ...requestRow(1),
+      provider: "ocg-heforges",
+      quotaWindows: [{
+        windowId: "weekly",
+        resetsAt: resetAt,
+        usedPercentMillionths: 22_000_000,
+        status: "ok",
+      }],
+    }], []));
+
+    const body = await fetchJson<{
+      periods: Array<{ provider: string; windowId: string; latestUsedPercentMillionths: number | null }>;
+    }>(`${origin}/api/quota?days=365`);
+    expect(body.periods).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "ocg-heforges",
+        windowId: "weekly",
+        latestUsedPercentMillionths: 22_000_000,
+      }),
+    ]));
+  });
+
   it("rejects invalid payloads and exposes public health", async () => {
     const { origin } = await startServer();
 

@@ -1423,10 +1423,10 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("模型本地用量");
     expect(rendered).toContain("月度窗口");
     expect(rendered).toContain(
-      "deepseek-v4-flash（Off-Peak）：已用 $1.01 / 包含 $15.00（6.7%）· 剩余 $13.99",
+      "deepseek-v4-flash（Off-Peak）：已用 $1.01",
     );
     expect(rendered).toContain(
-      "deepseek-v4-flash（Peak）：已用 $2.02 / 包含 $15.00（13.5%）· 剩余 $12.98",
+      "deepseek-v4-flash（Peak）：已用 $2.02",
     );
   });
 
@@ -1798,7 +1798,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("折合人民币");
   });
 
-  it("shows the DeepSeek average price per 100M tokens from actual usage", () => {
+  it("hides the DeepSeek average when pricing coverage is incomplete", () => {
     const rendered = formatConversationMetrics({
       kind: "metrics",
       summary: {
@@ -1836,9 +1836,7 @@ describe("provider-aware conversation command formatting", () => {
       source: "open-er-api",
     });
 
-    expect(rendered).toContain(
-      "均价：约 ¥3,600,000.00/100M（计价 2/3）",
-    );
+    expect(rendered).not.toContain("均价：");
   });
 
   it("shows the average price for OpenAI providers", () => {

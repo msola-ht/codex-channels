@@ -114,8 +114,10 @@ function assignOptionalMetric<K extends keyof TurnOutputTiming>(
 function toReferenceCost(value: {
   requestCount: number;
   inputTokens: number;
+  pricedInputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
+  pricedOutputTokens: number;
   pricingCurrency: string | null;
   pricedRequestCount: number;
   totalCostNanos: number | null;
@@ -132,10 +134,12 @@ function toReferenceCost(value: {
     currency: value.pricingCurrency,
     totalCostNanos: value.totalCostNanos,
     inputTokens: value.inputTokens,
+    pricedInputTokens: value.pricedInputTokens,
     ...(value.cachedInputTokens === null
       ? {}
       : { cachedInputTokens: value.cachedInputTokens }),
     outputTokens: value.outputTokens,
+    pricedOutputTokens: value.pricedOutputTokens,
     inputCostNanos: value.inputCostNanos,
     cachedInputCostNanos: value.cachedInputCostNanos,
     outputCostNanos: value.outputCostNanos,
@@ -200,6 +204,10 @@ function subtractReferenceCost(
       : null,
     totalCostNanos: pricedRequestCount > 0 ? totalCostNanos : null,
     inputTokens: Math.max(0, (aggregate.inputTokens ?? 0) - (currentStored.inputTokens ?? 0)),
+    pricedInputTokens: Math.max(
+      0,
+      (aggregate.pricedInputTokens ?? 0) - (currentStored.pricedInputTokens ?? 0),
+    ),
     ...(aggregate.cachedInputTokens !== undefined
       && currentStored.cachedInputTokens !== undefined
       ? {
@@ -210,6 +218,10 @@ function subtractReferenceCost(
         }
       : {}),
     outputTokens: Math.max(0, (aggregate.outputTokens ?? 0) - (currentStored.outputTokens ?? 0)),
+    pricedOutputTokens: Math.max(
+      0,
+      (aggregate.pricedOutputTokens ?? 0) - (currentStored.pricedOutputTokens ?? 0),
+    ),
     inputCostNanos: pricedRequestCount > 0 ? inputCostNanos : null,
     cachedInputCostNanos: pricedRequestCount > 0 ? cachedInputCostNanos : null,
     outputCostNanos: pricedRequestCount > 0 ? outputCostNanos : null,
@@ -240,11 +252,13 @@ function combineReferenceCosts(
     return {
       ...right,
       inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
+      pricedInputTokens: (left.pricedInputTokens ?? 0) + (right.pricedInputTokens ?? 0),
       ...(left.cachedInputTokens !== undefined
         && right.cachedInputTokens !== undefined
         ? { cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens }
         : {}),
       outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0),
+      pricedOutputTokens: (left.pricedOutputTokens ?? 0) + (right.pricedOutputTokens ?? 0),
       requestCount: left.requestCount + right.requestCount,
     };
   }
@@ -252,11 +266,13 @@ function combineReferenceCosts(
     return {
       ...left,
       inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
+      pricedInputTokens: (left.pricedInputTokens ?? 0) + (right.pricedInputTokens ?? 0),
       ...(left.cachedInputTokens !== undefined
         && right.cachedInputTokens !== undefined
         ? { cachedInputTokens: left.cachedInputTokens + right.cachedInputTokens }
         : {}),
       outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0),
+      pricedOutputTokens: (left.pricedOutputTokens ?? 0) + (right.pricedOutputTokens ?? 0),
       requestCount: left.requestCount + right.requestCount,
     };
   }
@@ -276,6 +292,7 @@ function combineReferenceCosts(
       ? left.totalCostNanos + right.totalCostNanos
       : null,
     inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
+    pricedInputTokens: (left.pricedInputTokens ?? 0) + (right.pricedInputTokens ?? 0),
     ...(left.cachedInputTokens !== undefined
       && right.cachedInputTokens !== undefined
       ? {
@@ -283,6 +300,7 @@ function combineReferenceCosts(
         }
       : {}),
     outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0),
+    pricedOutputTokens: (left.pricedOutputTokens ?? 0) + (right.pricedOutputTokens ?? 0),
     inputCostNanos: sameCurrency
       && left.inputCostNanos !== null
       && right.inputCostNanos !== null

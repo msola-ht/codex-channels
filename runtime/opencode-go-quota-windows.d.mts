@@ -1,6 +1,8 @@
 export interface OpenCodeGoQuotaWindowSnapshot {
   windowId: string;
   resetsAt: number | null;
+  usedPercentMillionths: number | null;
+  status: string | null;
 }
 
 export function createOpencodeGoQuotaWindowsProvider(options?: {

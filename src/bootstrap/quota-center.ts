@@ -4,6 +4,8 @@ import type { GatewayConfig } from "../config/index.js";
 import type { RemoteQuotaSummary } from "../conversation-core/index.js";
 
 const quotaResetToleranceSeconds = 5 * 60;
+const remoteQuotaCacheTtlMs = 30_000;
+const remoteQuotaRetryDelayMs = 5_000;
 
 export interface CenterQuotaPeriod {
   provider?: string;
@@ -149,6 +151,76 @@ export async function readRemoteQuotaSummary(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+interface RemoteQuotaCacheEntry {
+  value: RemoteQuotaSummary | undefined;
+  expiresAtMs: number;
+  nextAttemptAtMs: number;
+  refresh: Promise<void> | undefined;
+}
+
+/**
+ * 返回一个非阻塞的额度快照读取器。首次读取和过期刷新都在后台进行，
+ * 完成卡片只消费已经缓存的快照，不因额度中心网络而延迟主输出。
+ */
+export function createRemoteQuotaSnapshotReader(
+  read: (
+    provider: string,
+    resetsAt: number | null | undefined,
+  ) => Promise<RemoteQuotaSummary | undefined>,
+  options: {
+    nowMs?: () => number;
+    ttlMs?: number;
+    retryDelayMs?: number;
+  } = {},
+): (
+  provider: string | undefined,
+  resetsAt: number | null | undefined,
+) => RemoteQuotaSummary | undefined {
+  const nowMs = options.nowMs ?? Date.now;
+  const ttlMs = options.ttlMs ?? remoteQuotaCacheTtlMs;
+  const retryDelayMs = options.retryDelayMs ?? remoteQuotaRetryDelayMs;
+  const entries = new Map<string, RemoteQuotaCacheEntry>();
+  return (provider, resetsAt) => {
+    if (!provider) return undefined;
+    const key = `${provider}\u0000${resetsAt ?? ""}`;
+    const now = nowMs();
+    const entry = entries.get(key) ?? {
+      value: undefined,
+      expiresAtMs: 0,
+      nextAttemptAtMs: 0,
+      refresh: undefined,
+    };
+    entries.set(key, entry);
+    if (entry.value !== undefined && now < entry.expiresAtMs) {
+      return entry.value;
+    }
+    if (entry.refresh !== undefined || now < entry.nextAttemptAtMs) {
+      return undefined;
+    }
+    entry.nextAttemptAtMs = now + retryDelayMs;
+    entry.refresh = Promise.resolve()
+      .then(() => read(provider, resetsAt))
+      .then((value) => {
+        if (value === undefined) {
+          entry.value = undefined;
+          entry.expiresAtMs = 0;
+          return;
+        }
+        entry.value = value;
+        entry.expiresAtMs = nowMs() + ttlMs;
+        entry.nextAttemptAtMs = 0;
+      })
+      .catch(() => {
+        entry.value = undefined;
+        entry.expiresAtMs = 0;
+      })
+      .finally(() => {
+        entry.refresh = undefined;
+      });
+    return undefined;
+  };
 }
 
 function supportedWindowIds(provider: string): readonly string[] {

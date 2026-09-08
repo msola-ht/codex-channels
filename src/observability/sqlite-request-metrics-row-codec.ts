@@ -361,7 +361,12 @@ export function toStoredCompactSummary(
 
 function parseQuotaWindows(
   value: string | null,
-): ReadonlyArray<{ windowId: string; resetsAt: number | null }> | null {
+): ReadonlyArray<{
+  windowId: string;
+  resetsAt: number | null;
+  usedPercentMillionths: number | null;
+  status: string | null;
+}> | null {
   if (value === null) return null;
   let parsed: unknown;
   try {
@@ -390,6 +395,15 @@ function parseQuotaWindows(
     return [{
       windowId: window.windowId,
       resetsAt,
+      usedPercentMillionths: typeof window.usedPercentMillionths === "number"
+        && Number.isSafeInteger(window.usedPercentMillionths)
+        && window.usedPercentMillionths >= 0
+        && window.usedPercentMillionths <= 100_000_000
+        ? window.usedPercentMillionths
+        : null,
+      status: typeof window.status === "string" && window.status.length > 0
+        ? window.status
+        : null,
     }];
   });
 }

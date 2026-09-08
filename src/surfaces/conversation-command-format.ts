@@ -1741,19 +1741,10 @@ export function formatConversationUsage(
               const used = estimate.usedUsdNanos === null
                 ? "未知"
                 : formatUsdAmount(estimate.usedUsdNanos);
-              const included = formatUsdAmount(
-                Math.round(estimate.includedUsageUsd * 1_000_000_000),
-              );
-              const percent = estimate.usedPercent === null
-                ? "未知"
-                : formatPercent(estimate.usedPercent);
-              const remaining = estimate.remainingUsdNanos === null
-                ? "未知"
-                : formatUsdAmount(estimate.remainingUsdNanos);
               const bucket = estimate.bucket === undefined
                 ? ""
                 : `（${formatModelUsageBucket(estimate.bucket)}）`;
-              return `- ${estimate.model}${bucket}：已用 ${used} / 包含 ${included}（${percent}）· 剩余 ${remaining}`;
+              return `- ${estimate.model}${bucket}：已用 ${used}`;
             }),
           ]),
     ].join("\n"));
