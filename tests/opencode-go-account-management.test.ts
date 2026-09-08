@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import {
   previewOpencodeGoAccountStop,
   previewOpencodeGoDefaultAccountChange,
 } from "../scripts/opencode-go-account-management.mjs";
+import { opencodeGoAccountPaths } from "../scripts/opencode-go-account-files.mjs";
 
 const accounts = [
   { id: "main", default: true, email: "user@example.com" },
@@ -219,6 +220,51 @@ describe("OpenCode Go account management", () => {
         confirmation: { required: true, field: "confirmHistoryLoss" },
         activation: "restart-all",
       });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a managed role config when the final exclusive account had none initially", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-ocg-management-"));
+    const environment = {
+      CODEX_HOME: join(home, ".codex"),
+      CODEX_CONNECT_HOME: join(home, ".codex-connect"),
+    };
+    const paths = opencodeGoAccountPaths(environment, "main");
+    mkdirSync(join(paths.markerPath, ".."), { recursive: true, mode: 0o700 });
+    mkdirSync(join(paths.providerDirectory, "backup"), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      paths.markerPath,
+      'version = 1\nprovider = "ocg-main"\nmode = "exclusive"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(join(paths.providerDirectory, "backup", "config.toml"), "profile = \"openai\"\n", { mode: 0o600 });
+    mkdirSync(join(paths.roleConfigPath, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(paths.roleConfigPath, "[agents]\n", { mode: 0o600 });
+    try {
+      await expect(applyOpencodeGoAccountRemoval({
+        accountId: "main",
+        confirmHistoryLoss: true,
+      }, {
+        environment,
+        loadAccounts: () => [{ id: "main", default: true, email: "user@example.com" }],
+        loadRole: () => undefined,
+        resolvePrimarySocket: () => "/tmp/app-server.sock",
+        inspectSupervisor: async () => ({ status: "missing" as const }),
+        stopAccount: async () => ({ action: "not-running" as const }),
+        removeAccounts: async (path) => {
+          try {
+            unlinkSync(path);
+          } catch (error) {
+            const code = error && typeof error === "object" && "code" in error
+              ? error.code
+              : undefined;
+            if (code !== "ENOENT") throw error;
+          }
+        },
+      })).resolves.toMatchObject({ action: "removed" });
+      expect(existsSync(paths.roleConfigPath)).toBe(false);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
