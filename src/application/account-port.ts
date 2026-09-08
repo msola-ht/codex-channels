@@ -150,6 +150,8 @@ export interface ProviderModelUsageEstimate {
   bucket?: "off-peak" | "peak";
   includedUsageUsd: number;
   usedUsdNanos: number | null;
+  /** 本机指标库中该模型/档位合计 Token；仅本地模型用量估算提供。 */
+  usedTokens?: number;
   usedPercent: number | null;
   remainingUsdNanos: number | null;
   windowStartAtMs: number | null;

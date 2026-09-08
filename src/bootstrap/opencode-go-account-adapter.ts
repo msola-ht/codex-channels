@@ -381,6 +381,8 @@ function readModelUsageEstimates(
         model: string;
         bucket: ModelBucket | null;
         usedUsdNanos: number;
+        usedTokens: number;
+        hasPricedRequest: boolean;
       }>();
       const totalKey = (model: string, bucket: ModelBucket | null) =>
         bucket === null ? model : `${model}:${bucket}`;
@@ -419,6 +421,21 @@ function readModelUsageEstimates(
             cachedInputTokens: record.cachedInputTokens,
             outputTokens: record.outputTokens,
           };
+          const totalTokens = record.totalTokens !== null
+            && Number.isSafeInteger(record.totalTokens)
+            && record.totalTokens >= 0
+            ? record.totalTokens
+            : record.inputTokens !== null && record.outputTokens !== null
+              ? record.inputTokens + record.outputTokens
+              : 0;
+          const bucket = record.pricing?.bucket
+            ?? (baseline.models.get(record.model)?.peakOffPeak === undefined
+              ? null
+              : isOpenCodeGoPeakMinute(new Date(atMs), baseline)
+                ? "peak"
+                : "off-peak");
+          const key = totalKey(record.model, bucket);
+          const existing = totals.get(key);
           const cost = atMs >= priceEffectiveAtMs
             ? (() => {
                 const pricing = resolver.resolve({
@@ -435,19 +452,13 @@ function readModelUsageEstimates(
             : record.pricing === null
               ? null
               : calculateModelRequestCostComponents(usage, record.pricing);
-          if (cost === null) continue;
-          const bucket = record.pricing?.bucket
-            ?? (baseline.models.get(record.model)?.peakOffPeak === undefined
-              ? null
-              : isOpenCodeGoPeakMinute(new Date(atMs), baseline)
-                ? "peak"
-                : "off-peak");
-          const key = totalKey(record.model, bucket);
-          const existing = totals.get(key);
           totals.set(key, {
             model: record.model,
             bucket,
-            usedUsdNanos: (existing?.usedUsdNanos ?? 0) + cost.totalCostNanos,
+            usedUsdNanos: (existing?.usedUsdNanos ?? 0)
+              + (cost?.totalCostNanos ?? 0),
+            usedTokens: (existing?.usedTokens ?? 0) + totalTokens,
+            hasPricedRequest: (existing?.hasPricedRequest ?? false) || cost !== null,
           });
         }
         offset = page.nextOffset ?? -1;
@@ -456,7 +467,8 @@ function readModelUsageEstimates(
       const pushEstimate = (
         model: string,
         bucket: ModelBucket | null,
-        usedUsdNanos: number,
+        usedUsdNanos: number | null,
+        usedTokens: number,
       ): void => {
         const includedUsageUsd = baseline.models.get(model)?.includedUsageUsd;
         if (includedUsageUsd === undefined) return;
@@ -465,10 +477,11 @@ function readModelUsageEstimates(
           model,
           ...(bucket === null ? {} : { bucket }),
           includedUsageUsd,
+          usedTokens,
           windowStartAtMs,
           windowEndAtMs,
         };
-        if (includedUsdNanos <= 0) {
+        if (usedUsdNanos === null || includedUsdNanos <= 0) {
           estimates.push({
             ...common,
             usedUsdNanos,
@@ -486,14 +499,30 @@ function readModelUsageEstimates(
       };
       const emitted = new Set<string>();
       const modelsWithTotals = new Set<string>();
-      for (const { model, bucket, usedUsdNanos } of totals.values()) {
+      for (const {
+        model,
+        bucket,
+        usedUsdNanos,
+        usedTokens,
+        hasPricedRequest,
+      } of totals.values()) {
         modelsWithTotals.add(model);
         emitted.add(totalKey(model, bucket));
         if (bucket !== null) {
-          pushEstimate(model, bucket, usedUsdNanos);
+          pushEstimate(
+            model,
+            bucket,
+            hasPricedRequest ? usedUsdNanos : null,
+            usedTokens,
+          );
           continue;
         }
-        pushEstimate(model, null, usedUsdNanos);
+        pushEstimate(
+          model,
+          null,
+          hasPricedRequest ? usedUsdNanos : null,
+          usedTokens,
+        );
       }
       // 有本地请求的 DeepSeek 模型按官方表格展示 Off-Peak / Peak 两档，未使用的一档计 0。
       for (const model of modelsWithTotals) {
@@ -501,12 +530,12 @@ function readModelUsageEstimates(
         if (price?.peakOffPeak === undefined) continue;
         for (const bucket of pricingBucketOrder) {
           if (!emitted.has(totalKey(model, bucket))) {
-            pushEstimate(model, bucket, 0);
+            pushEstimate(model, bucket, 0, 0);
           }
         }
       }
       return estimates.sort((left, right) =>
-        right.usedUsdNanos! - left.usedUsdNanos!
+        (right.usedUsdNanos ?? -1) - (left.usedUsdNanos ?? -1)
         || left.model.localeCompare(right.model)
         || (left.bucket ?? "").localeCompare(right.bucket ?? ""));
     } finally {

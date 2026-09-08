@@ -40,6 +40,7 @@ import {
 } from "../../runtime/app-server-supervisor.mjs";
 import {
   loadOpencodeGoProviderIdentities,
+  isOpencodeGoProvider,
   opencodeGoAccountIdFromProvider,
 } from "../../runtime/opencode-go-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
@@ -76,6 +77,7 @@ import {
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
   priceDisplayNeedsExchangeRate,
+  type ProviderQuotaWindow,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
 } from "../application/index.js";
@@ -144,7 +146,9 @@ import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server
 import { ScheduledTaskComposition } from "./scheduled-task-composition.js";
 import { RequestMetricsQueryAdapter } from "./request-metrics-query-adapter.js";
 import {
+  mergeMissingRemoteQuotaWindows,
   readRemoteQuotaSummary,
+  selectFreshOfficialQuotaWindows,
 } from "./quota-center.js";
 import {
   createManagedProviderAccountAdapters,
@@ -563,6 +567,50 @@ export class GatewayApplication {
         });
       },
     });
+    const readRemoteQuota = async (
+      provider: string | undefined,
+      resetsAt: number | null | undefined,
+    ) => {
+      const summary = await readRemoteQuotaSummary(
+        this.config.metricsView,
+        provider,
+        resetsAt,
+        this.logger,
+        createProxyFetch(this.config.networkProxy),
+      );
+      if (
+        summary === undefined
+        || typeof provider !== "string"
+        || !isOpencodeGoProvider(provider)
+        || summary.windows === undefined
+        || summary.windows.some((window) => window.windowId === "rolling")
+      ) {
+        return summary;
+      }
+      const snapshot = metricsStore.latestAccountSnapshot?.(provider);
+      if (snapshot === null || snapshot === undefined) {
+        return summary;
+      }
+      const usage = snapshot.usage as {
+        kind?: unknown;
+        windows?: readonly ProviderQuotaWindow[];
+      } | undefined;
+      if (usage?.kind !== "quota-windows" || usage.windows === undefined) {
+        return summary;
+      }
+      const fallbackWindows = selectFreshOfficialQuotaWindows(
+        usage.windows,
+        snapshot.observedAtMs,
+      );
+      if (fallbackWindows.length === 0) {
+        return summary;
+      }
+      return mergeMissingRemoteQuotaWindows(
+        summary,
+        fallbackWindows,
+        snapshot.observedAtMs,
+      );
+    };
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -833,13 +881,7 @@ export class GatewayApplication {
           config.stateDatabasePath,
         ),
       }),
-      remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(
-        config.metricsView,
-        provider,
-        resetsAt,
-        logger,
-        createProxyFetch(config.networkProxy),
-      ),
+      remoteQuota: readRemoteQuota,
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
@@ -865,13 +907,7 @@ export class GatewayApplication {
             turnId,
             current,
           ),
-        remoteQuota: (provider, resetsAt) => readRemoteQuotaSummary(
-          this.config.metricsView,
-          provider,
-          resetsAt,
-          this.logger,
-          createProxyFetch(this.config.networkProxy),
-        ),
+        remoteQuota: readRemoteQuota,
         completionTiming: async (threadId, turnId, current) => {
           await metricsWriter.waitForCurrentWrites(threadId);
           const summary = metricsStore.threadSummary(threadId);

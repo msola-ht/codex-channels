@@ -430,18 +430,26 @@ export function formatConversationCommandOutcome(
               : []),
           ].join("\n"));
     case "session.new":
-      return outcome.backgroundedThreadId
-        ? toStructuredMarkdownList([
-            "新会话已准备，原任务继续在后台运行。",
-            `后台 Session ID：${outcome.backgroundedThreadId}`,
-            "发送下一条普通消息时才会创建新的 Codex Session。",
-            formatNextMessageModel(outcome.nextModel),
-          ].join("\n"))
-        : toStructuredMarkdownList([
-            "已退出当前会话。",
-            "发送下一条普通消息时才会创建新的 Codex Session。",
-            formatNextMessageModel(outcome.nextModel),
-          ].join("\n"));
+      {
+        const recoverableThreadId =
+          outcome.backgroundedThreadId ?? outcome.previousThreadId;
+        return toStructuredMarkdownList([
+          ...(outcome.backgroundedThreadId
+            ? [
+                "新会话已准备，原任务继续在后台运行。",
+                `后台 Session ID：${outcome.backgroundedThreadId}`,
+              ]
+            : ["已退出当前会话。"]),
+          ...(recoverableThreadId
+            ? [
+                ...(outcome.backgroundedThreadId ? [] : [`Session ID：${recoverableThreadId}`]),
+                `恢复会话：/r ${recoverableThreadId}`,
+              ]
+            : []),
+          "发送下一条普通消息时才会创建新的 Codex Session。",
+          formatNextMessageModel(outcome.nextModel),
+        ].join("\n"));
+      }
     case "thread.archived":
       return toStructuredMarkdownList([
         "已归档 Codex Session",
@@ -1736,11 +1744,12 @@ export function formatConversationUsage(
         ? []
         : [
             "",
-            `模型本地用量${windowRange}（按当前价格基线按请求时间重算，非官方账单）：`,
+            `模型本地用量${windowRange}（本机指标按请求时间分档，非官方账单）：`,
             ...modelUsage.map((estimate) => {
-              const used = estimate.usedUsdNanos === null
+              const used = estimate.usedTokens === undefined
+                || estimate.usedTokens === null
                 ? "未知"
-                : formatUsdAmount(estimate.usedUsdNanos);
+                : `Token ${formatTokenCount(estimate.usedTokens)}`;
               const bucket = estimate.bucket === undefined
                 ? ""
                 : `（${formatModelUsageBucket(estimate.bucket)}）`;
@@ -1853,13 +1862,6 @@ function formatMicros(value: AccountMetric): string {
   const whole = micros / 1_000_000n;
   const fraction = (micros % 1_000_000n).toString().padStart(6, "0").replace(/0+$/u, "");
   return fraction.length === 0 ? whole.toString() : `${whole}.${fraction}`;
-}
-
-function formatUsdAmount(nanos: number): string {
-  return `$${(nanos / 1_000_000_000).toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 }
 
 export function formatConversationLimits(

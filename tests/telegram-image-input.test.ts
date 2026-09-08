@@ -500,7 +500,7 @@ describe("Telegram image input", () => {
   it("maps Telegram commands through the shared application command service", async () => {
     const submit = vi.fn();
     const download = vi.fn();
-    const newSession = vi.fn().mockResolvedValue(undefined);
+    const newSession = vi.fn().mockResolvedValue({});
     const { surface, output, apiCalls } = createSurface(submit, download, { newSession });
 
     await surface.bot.handleUpdate({
