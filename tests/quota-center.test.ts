@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createRemoteQuotaSnapshotReader,
+  mergeMissingRemoteQuotaWindows,
   readRemoteQuotaSummary,
+  selectFreshOfficialQuotaWindows,
   selectRemoteQuotaPeriod,
   selectRemoteQuotaPeriods,
   type CenterQuotaPeriod,
@@ -106,6 +108,90 @@ describe("quota center remote quota", () => {
       undefined,
       nowMs,
     ).map((period) => period.windowId)).toEqual(["monthly", "weekly", "rolling"]);
+  });
+
+  it("fills a missing rolling window from the official account snapshot", () => {
+    const summary = {
+      provider: "ocg-lunare",
+      windowId: "monthly",
+      deviceCount: 3,
+      requestCount: 12,
+      totalTokens: 1_200_000,
+      totalCostNanos: 500_000_000,
+      latestUsedPercentMillionths: null,
+      estimatedTotalTokens: null,
+      estimatedTotalCostNanos: null,
+      resetsAt: 1_950_000_000,
+      observedAtMs: nowMs,
+      windows: [
+        {
+          provider: monthly.provider!,
+          windowId: monthly.windowId!,
+          deviceCount: monthly.deviceCount!,
+          requestCount: monthly.requestCount!,
+          totalTokens: monthly.totalTokens!,
+          totalCostNanos: monthly.totalCostNanos ?? null,
+          latestUsedPercentMillionths: monthly.latestUsedPercentMillionths ?? null,
+          estimatedTotalTokens: monthly.estimatedTotalTokens ?? null,
+          estimatedTotalCostNanos: monthly.estimatedTotalCostNanos ?? null,
+          resetsAt: monthly.resetsAt ?? null,
+          observedAtMs: nowMs,
+        },
+        {
+          provider: weekly.provider!,
+          windowId: weekly.windowId!,
+          deviceCount: weekly.deviceCount!,
+          requestCount: weekly.requestCount!,
+          totalTokens: weekly.totalTokens!,
+          totalCostNanos: weekly.totalCostNanos ?? null,
+          latestUsedPercentMillionths: weekly.latestUsedPercentMillionths ?? null,
+          estimatedTotalTokens: weekly.estimatedTotalTokens ?? null,
+          estimatedTotalCostNanos: weekly.estimatedTotalCostNanos ?? null,
+          resetsAt: weekly.resetsAt ?? null,
+          observedAtMs: nowMs,
+        },
+      ],
+    };
+    const merged = mergeMissingRemoteQuotaWindows(summary, [{
+      windowId: "rolling",
+      label: "5小时",
+      usedPercent: 2,
+      resetsAt: 1_920_000_000,
+      status: "ok",
+    }], nowMs + 1_000);
+    expect(merged.windows?.map((window) => window.windowId)).toEqual([
+      "monthly", "weekly", "rolling",
+    ]);
+    expect(merged.windows?.at(-1)).toMatchObject({
+      windowId: "rolling",
+      latestUsedPercentMillionths: 2_000_000,
+      resetsAt: 1_920_000_000,
+      observedAtMs: nowMs + 1_000,
+      totalCostNanos: null,
+    });
+    expect(merged.windows?.at(-1)?.windows).toBeUndefined();
+  });
+
+  it("rejects stale or expired official fallback windows", () => {
+    const windows = [{
+      windowId: "rolling",
+      label: "5小时",
+      usedPercent: 2,
+      resetsAt: 1_920_000_000,
+      status: "ok",
+    }, {
+      windowId: "weekly",
+      label: "7天",
+      usedPercent: 45,
+      resetsAt: 1_800_000_000,
+      status: "ok",
+    }] as const;
+    expect(selectFreshOfficialQuotaWindows(windows, nowMs - 60_000, nowMs))
+      .toEqual([windows[0]]);
+    expect(selectFreshOfficialQuotaWindows(windows, nowMs - (5 * 60_000 + 1), nowMs))
+      .toEqual([]);
+    expect(selectFreshOfficialQuotaWindows(windows, nowMs + 1, nowMs))
+      .toEqual([]);
   });
 
   it("returns cached snapshots without waiting for a slow refresh", async () => {

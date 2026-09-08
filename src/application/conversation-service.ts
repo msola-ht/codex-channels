@@ -274,7 +274,10 @@ export interface ConversationUseCases {
   ): Promise<ConversationSession[]>;
   backgroundThreadIds?(target: ConversationTarget): string[];
   resume(target: ConversationTarget, selector: string): Promise<ConversationResumeResult>;
-  newSession(target: ConversationTarget): Promise<string | undefined>;
+  newSession(target: ConversationTarget): Promise<{
+    previousThreadId?: string;
+    backgroundedThreadId?: string;
+  }>;
   archive(target: ConversationTarget): Promise<string>;
   /** Invalidate derived session display statistics after an external App Server event. */
   invalidateSessionDisplayCache?(threadId: string): void;
@@ -1003,7 +1006,10 @@ export class ConversationService implements ConversationUseCases {
     });
   }
 
-  newSession(target: ConversationTarget): Promise<string | undefined> {
+  newSession(target: ConversationTarget): Promise<{
+    previousThreadId?: string;
+    backgroundedThreadId?: string;
+  }> {
     return this.locked(target, async () => {
       const modelPreference = this.models.capturePreference?.(target);
       const current = this.router.current?.(target);
@@ -1026,7 +1032,14 @@ export class ConversationService implements ConversationUseCases {
       await this.router.newSession(target, active !== undefined);
       this.invalidateRevertSnapshot(target);
       this.restoreSelectionsAfterBindingChange(target, modelPreference);
-      return active?.threadId;
+      return {
+        ...(current?.threadId
+          ? { previousThreadId: current.threadId }
+          : {}),
+        ...(active?.threadId
+          ? { backgroundedThreadId: active.threadId }
+          : {}),
+      };
     });
   }
 

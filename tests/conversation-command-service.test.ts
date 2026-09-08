@@ -995,12 +995,15 @@ describe("ConversationCommandService", () => {
   it("reports the model that the next message will use after session and workspace switches", async () => {
     const status = vi.fn(() => ({
       workspaceId: "other",
+      threadId: "thread-previous",
       model: "gpt-5.6",
       modelProvider: "openai",
     }));
     const workspace = { id: "other", name: "Other", cwd: "/other" };
     const commands = new ConversationCommandService({
-      newSession: vi.fn(async () => undefined),
+      newSession: vi.fn(async () => ({
+        previousThreadId: "thread-previous",
+      })),
       selectWorkspace: vi.fn(async () => workspace),
       status,
     } as unknown as ConversationUseCases);
@@ -1009,6 +1012,7 @@ describe("ConversationCommandService", () => {
       kind: "outcome",
       outcome: {
         type: "session.new",
+        previousThreadId: "thread-previous",
         nextModel: { model: "gpt-5.6", modelProvider: "openai" },
       },
     });
@@ -1040,7 +1044,7 @@ describe("ConversationCommandService", () => {
         model: "gpt-test",
         modelProvider: "openai",
       })),
-      newSession: vi.fn(async () => undefined),
+      newSession: vi.fn(async () => ({})),
       archive: vi.fn(async () => "thread-archived"),
       unarchive: vi.fn(async () => "thread-unarchived"),
       setPinned: vi.fn(async () => true),

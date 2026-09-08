@@ -219,6 +219,7 @@ export type ConversationCommandOutcome =
     }
   | {
       type: "session.new";
+      previousThreadId?: string;
       backgroundedThreadId?: string;
       nextModel: ConversationModelSummary;
     }
@@ -375,13 +376,18 @@ export class ConversationCommandService {
         return sessionListResult(sessions, view, { archived: true });
       }
       case "new": {
-        const backgroundedThreadId = await this.conversations.newSession(target);
+        const sessionSwitch = await this.conversations.newSession(target);
         const nextModel = toConversationModelSummary(this.conversations.status(target));
         return {
           kind: "outcome",
           outcome: {
             type: "session.new",
-            ...(backgroundedThreadId ? { backgroundedThreadId } : {}),
+            ...(sessionSwitch.previousThreadId
+              ? { previousThreadId: sessionSwitch.previousThreadId }
+              : {}),
+            ...(sessionSwitch.backgroundedThreadId
+              ? { backgroundedThreadId: sessionSwitch.backgroundedThreadId }
+              : {}),
             nextModel,
           },
         };

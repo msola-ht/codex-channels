@@ -1658,7 +1658,7 @@ describe("Feishu conversation adapter", () => {
   });
 
   it("reports output queue rejection after a state-changing command without retrying it", async () => {
-    const newSession = vi.fn(async () => undefined);
+    const newSession = vi.fn(async () => ({}));
     const notifyText = vi.fn(() => false);
     const adapter = new FeishuConversationAdapter(
       { newSession } as unknown as ConversationUseCases,

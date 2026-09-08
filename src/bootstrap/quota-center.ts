@@ -1,11 +1,13 @@
 import type { Logger } from "pino";
 
+import type { ProviderQuotaWindow } from "../application/index.js";
 import type { GatewayConfig } from "../config/index.js";
 import type { RemoteQuotaSummary } from "../conversation-core/index.js";
 
 const quotaResetToleranceSeconds = 5 * 60;
 const remoteQuotaCacheTtlMs = 30_000;
 const remoteQuotaRetryDelayMs = 5_000;
+const officialQuotaSnapshotMaxAgeMs = 5 * 60_000;
 
 export interface CenterQuotaPeriod {
   provider?: string;
@@ -21,6 +23,65 @@ export interface CenterQuotaPeriod {
   tokensPerPercent?: number | null;
   costPerPercentNanos?: number | null;
   lastObservedAtMs?: number;
+}
+
+/**
+ * 补齐额度中心暂未同步的官方窗口。中心摘要仍是多设备统计的事实来源，
+ * 补入的窗口只使用官方账户窗口的百分比和重置时间。
+ */
+export function mergeMissingRemoteQuotaWindows(
+  summary: RemoteQuotaSummary,
+  fallbackWindows: readonly ProviderQuotaWindow[],
+  observedAtMs: number,
+): RemoteQuotaSummary {
+  if (summary.windows === undefined || fallbackWindows.length === 0) return summary;
+  const existing = new Set(summary.windows.map((window) => window.windowId));
+  const missing = fallbackWindows.flatMap((window) => {
+    if (existing.has(window.windowId)) return [];
+    existing.add(window.windowId);
+    return [{
+      provider: summary.provider,
+      windowId: window.windowId,
+      deviceCount: summary.deviceCount,
+      requestCount: summary.requestCount,
+      totalTokens: summary.totalTokens,
+      latestUsedPercentMillionths: Number.isFinite(window.usedPercent)
+        ? Math.round(window.usedPercent * 1_000_000)
+        : null,
+      resetsAt: window.resetsAt,
+      totalCostNanos: null,
+      estimatedTotalTokens: null,
+      estimatedTotalCostNanos: null,
+      observedAtMs,
+    } satisfies RemoteQuotaSummary];
+  });
+  return missing.length === 0
+    ? summary
+    : { ...summary, windows: [...summary.windows, ...missing] };
+}
+
+/**
+ * 只允许使用近期且仍处于有效周期的官方账户窗口，避免额度中心短暂缺数时
+ * 把启动时缓存的过期快照展示到完成卡片。
+ */
+export function selectFreshOfficialQuotaWindows(
+  windows: readonly ProviderQuotaWindow[],
+  observedAtMs: number | undefined,
+  nowMs = Date.now(),
+): readonly ProviderQuotaWindow[] {
+  if (
+    typeof observedAtMs !== "number"
+    || !Number.isFinite(observedAtMs)
+    || observedAtMs <= 0
+    || observedAtMs > nowMs
+    || nowMs - observedAtMs > officialQuotaSnapshotMaxAgeMs
+  ) {
+    return [];
+  }
+  return windows.filter((window) =>
+    window.resetsAt === null
+    || (Number.isFinite(window.resetsAt) && window.resetsAt * 1_000 > nowMs),
+  );
 }
 
 export function selectRemoteQuotaPeriod(

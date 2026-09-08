@@ -592,7 +592,9 @@ describe("WeixinConversationAdapter", () => {
       collaborationMode: "default",
       collaborationModePending: false,
     }));
-    const newSession = vi.fn(async () => {});
+    const newSession = vi.fn(async () => ({
+      previousThreadId: "thread",
+    }));
     const stop = vi.fn(async () => true);
     const notifyText = vi.fn(() => true);
     const adapter = new WeixinConversationAdapter(
@@ -621,7 +623,9 @@ describe("WeixinConversationAdapter", () => {
       target,
       [
         "**已退出当前会话。**",
-      "- 发送下一条普通消息时才会创建新的 Codex Session。",
+        "- Session ID：thread",
+        "- 恢复会话：/r thread",
+        "- 发送下一条普通消息时才会创建新的 Codex Session。",
         "- 下一条消息模型：gpt-test · Provider：openai",
       ].join("\n"),
     );

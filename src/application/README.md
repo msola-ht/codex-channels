@@ -6,8 +6,9 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；负责授权后的用例调用和结果分页，不包含平台文案或消息布局。
-  会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider，
-  供三个 Surface 统一提示。
+  会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
+  存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
+  展示可复制的 `恢复会话：/r <Thread ID>`。
 - `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。

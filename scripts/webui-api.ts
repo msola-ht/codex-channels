@@ -822,6 +822,7 @@ export interface ModelUsageEstimate {
   bucket?: "off-peak" | "peak"
   includedUsageUsd: number
   usedUsdNanos: number | null
+  usedTokens?: number
   usedPercent: number | null
   remainingUsdNanos: number | null
   windowStartAtMs: number | null

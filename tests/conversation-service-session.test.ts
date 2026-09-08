@@ -616,6 +616,57 @@ describe("ConversationService conversation service session", () => {
     expect(restorePreference).toHaveBeenCalledWith(target, preference);
   });
 
+  it("reports the detached Thread after /new for the recovery command", async () => {
+    const binding = {
+      target,
+      workspaceId: "main",
+      threadId: "thread-current",
+      sessionId: "session-current",
+    };
+    const idleNewSession = vi.fn(async () => undefined);
+    const idleService = new ConversationService(
+      turnPort(),
+      {
+        current: () => binding,
+        newSession: idleNewSession,
+        backgroundBindings: () => [],
+      } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(idleService.newSession(target)).resolves.toEqual({
+      previousThreadId: "thread-current",
+    });
+    expect(idleNewSession).toHaveBeenCalledWith(target, false);
+
+    const activeNewSession = vi.fn(async () => undefined);
+    const activeService = new ConversationService(
+      turnPort(),
+      {
+        current: () => binding,
+        newSession: activeNewSession,
+        backgroundBindings: () => [],
+      } as unknown as SessionRouter,
+      {
+        activeTurn: () => ({
+          target,
+          threadId: "thread-current",
+          turnId: "turn-active",
+        }),
+      } as unknown as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+
+    await expect(activeService.newSession(target)).resolves.toEqual({
+      previousThreadId: "thread-current",
+      backgroundedThreadId: "thread-current",
+    });
+    expect(activeNewSession).toHaveBeenCalledWith(target, true);
+  });
+
   it("restores the current channel model only after a workspace switch succeeds", async () => {
     const preference = {
       model: "gpt-deep",

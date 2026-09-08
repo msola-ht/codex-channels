@@ -344,6 +344,7 @@ describe("OpenCode Go account adapter", () => {
       model: "deepseek-v4-flash",
       bucket: "off-peak",
       includedUsageUsd: 30,
+      usedTokens: 810_000,
       windowEndAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
     });
     expect(offPeak.usedUsdNanos).toBeGreaterThan(0);
@@ -358,6 +359,7 @@ describe("OpenCode Go account adapter", () => {
       model: "deepseek-v4-flash",
       bucket: "peak",
       includedUsageUsd: 30,
+      usedTokens: 150_000,
       windowEndAtMs: Date.parse("2026-08-20T00:00:00.000Z"),
     });
     expect(peak.usedUsdNanos).toBeGreaterThan(0);
@@ -371,6 +373,55 @@ describe("OpenCode Go account adapter", () => {
     expect(offPeak!.windowStartAtMs).toBe(
       opencodeGoMonthlyWindowStartMs(Date.parse("2026-08-20T00:00:00.000Z") / 1_000),
     );
+  });
+
+  it("retains local tokens when a request has no usable pricing snapshot", async () => {
+    const codexHome = await createCodexHome();
+    const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-unpriced-tokens-"));
+    temporaryDirectories.push(directory);
+    const metricsPath = modelRequestMetricsDatabasePath(
+      join(directory, "gateway.sqlite3"),
+    );
+    const store = new SqliteModelRequestMetricsStore(metricsPath);
+    const requestAtMs = Date.parse("2026-08-19T12:00:00.000Z");
+    recordWindowSample(
+      store,
+      requestAtMs,
+      50_000,
+      40_000,
+      90_000,
+      requestAtMs,
+    );
+    store.close();
+
+    const nowMs = Date.parse("2026-08-20T12:00:00.000Z");
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: async () => new Response(JSON.stringify({
+        usage: {
+          monthly: {
+            status: "ok",
+            percent: 1,
+            resetsAt: "2026-08-27T00:00:00.000Z",
+          },
+        },
+      }), { status: 200 }),
+      metricsDatabasePath: metricsPath,
+      nowMs: () => nowMs,
+    });
+
+    const usage = await adapter.accountUsage();
+    if (usage.kind !== "quota-windows") {
+      throw new Error("unexpected usage kind");
+    }
+    const offPeak = usage.modelUsage?.find((estimate) => estimate.bucket === "off-peak");
+    expect(offPeak).toMatchObject({
+      model: "deepseek-v4-flash",
+      usedTokens: 90_000,
+      usedUsdNanos: null,
+      usedPercent: null,
+      remainingUsdNanos: null,
+    });
   });
 
   it("reports local token totals for each quota window from the metrics database", async () => {
@@ -740,11 +791,13 @@ describe("OpenCode Go account adapter", () => {
       model: "deepseek-v4-flash",
       bucket: "peak",
       usedUsdNanos: 110_000_000,
+      usedTokens: 150_000,
     });
     await expect(offPeakReader("deepseek-v4-flash")).resolves.toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "off-peak",
       usedUsdNanos: 28_600_000,
+      usedTokens: 110_000,
     });
     // 传入请求开始时间优先于当前时间：当前处于 Off-Peak，但请求开始于 Peak 时段。
     await expect(offPeakReader(
@@ -754,6 +807,7 @@ describe("OpenCode Go account adapter", () => {
       model: "deepseek-v4-flash",
       bucket: "peak",
       usedUsdNanos: 110_000_000,
+      usedTokens: 150_000,
     });
   });
 

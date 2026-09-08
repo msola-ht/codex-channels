@@ -1059,8 +1059,31 @@ describe("provider-aware conversation command formatting", () => {
     })).toContain("新会话已准备，原任务继续在后台运行");
     expect(formatConversationCommandOutcome({
       type: "session.new",
+      backgroundedThreadId: "thread-running",
+      nextModel,
+    })).toContain("恢复会话：/r thread-running");
+    expect(formatConversationCommandOutcome({
+      type: "session.new",
+      previousThreadId: "thread-idle",
+      nextModel,
+    })).toContain("Session ID：thread-idle");
+    expect(formatConversationCommandOutcome({
+      type: "session.new",
+      previousThreadId: "thread-idle",
+      nextModel,
+    })).toContain("恢复会话：/r thread-idle");
+    expect(formatConversationCommandOutcome({
+      type: "session.new",
       nextModel,
     })).toContain("下一条消息模型：gpt-5.6 · Provider：openai");
+    expect(formatConversationCommandOutcome({
+      type: "session.new",
+      nextModel,
+    })).not.toContain("Session ID：");
+    expect(formatConversationCommandOutcome({
+      type: "session.new",
+      nextModel,
+    })).not.toContain("恢复会话：");
     expect(formatConversationCommandOutcome({
       type: "workspace.selected",
       workspace: { id: "other", name: "Other", cwd: "/other" },
@@ -1403,6 +1426,7 @@ describe("provider-aware conversation command formatting", () => {
           bucket: "off-peak",
           includedUsageUsd: 15,
           usedUsdNanos: 1_010_000_000,
+          usedTokens: 123_400,
           usedPercent: 1_010_000_000 / 15_000_000_000 * 100,
           remainingUsdNanos: 13_990_000_000,
           windowStartAtMs: Date.parse("2026-08-15T14:22:07.934Z"),
@@ -1412,6 +1436,7 @@ describe("provider-aware conversation command formatting", () => {
           bucket: "peak",
           includedUsageUsd: 15,
           usedUsdNanos: 2_020_000_000,
+          usedTokens: 456_000,
           usedPercent: 2_020_000_000 / 15_000_000_000 * 100,
           remainingUsdNanos: 12_980_000_000,
           windowStartAtMs: Date.parse("2026-08-15T14:22:07.934Z"),
@@ -1423,10 +1448,10 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("模型本地用量");
     expect(rendered).toContain("月度窗口");
     expect(rendered).toContain(
-      "deepseek-v4-flash（Off-Peak）：已用 $1.01",
+      "deepseek-v4-flash（Off-Peak）：已用 Token 123.4 K",
     );
     expect(rendered).toContain(
-      "deepseek-v4-flash（Peak）：已用 $2.02",
+      "deepseek-v4-flash（Peak）：已用 Token 456 K",
     );
   });
 
