@@ -42,7 +42,8 @@ codexc service restart all
 修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
 再按模型设置默认思考等级；自动压缩百分比走“模型与提供商 → 第三方 Provider → 模型自动压缩”，按模型名统一设置，
 每个模型按自己的上下文窗口计算阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
-仍使用原模型。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
+仍使用原模型。新增或刷新 OCG 模型目录时会继承 DeepSeek 等已配置 Provider 的同名模型全局压缩值，
+不会重新回落到 OCG 默认 60%。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
 首次升级时仍选择旧默认 Flash 的账户，以及已显式配置的对应共享子代理，会迁移到 Flash Vision Exp，已主动选择
 Pro 的账户保持不变；清单记录迁移完成后，用户再主动选回 Flash 也不会被后续更新覆盖。目录更新后
 的压缩阈值按原百分比和新上下文窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn

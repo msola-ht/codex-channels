@@ -316,6 +316,7 @@
   删除最后一个账户会清理共享模型目录，固定模式账户还会恢复安装前 Codex 主配置。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
   账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、首次备份、Key 写入、切换/固定模式配置和多文件事务回滚。
+  生成模型目录时继承已配置 Provider 的同名模型全局自动压缩值，避免新账户回落到 OCG 默认 60%。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
   （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式

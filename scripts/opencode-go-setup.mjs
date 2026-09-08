@@ -18,6 +18,7 @@ import {
 } from "./opencode-go-account-management.mjs";
 import {
   applyOpencodeGoAccountConfiguration,
+  configuredCompressionByModel,
   previewOpencodeGoAccountConfiguration,
   readOpencodeGoDefaultModelMigration,
   readOpencodeGoOptionalJson,
@@ -412,6 +413,7 @@ export async function refreshOpencodeGoCatalogForUpdate(
   const managedCatalog = createManagedProviderCatalog(downloaded.catalog, definition, {
     previousModels: previousSettings[0]?.models,
     autoCompactPercent: defaultAutoCompactPercent,
+    modelCompressionPercentByModel: configuredCompressionByModel(environment),
   });
   const managedDefault = managedCatalog.models.find(
     (model) => model?.slug === definition.defaultModel,

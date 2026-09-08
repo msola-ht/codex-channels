@@ -8,6 +8,7 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import {
+  loadManagedModelCompression,
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
@@ -137,6 +138,12 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   } catch (error) {
     throw normalize("provider-state-unavailable", "accountId", error);
   }
+  let compressionByModel;
+  try {
+    compressionByModel = configuredCompressionByModel(environment);
+  } catch (error) {
+    throw normalize("provider-state-unavailable", "accountId", error);
+  }
   const selectedModel = previous?.model ?? definition.defaultModel;
   let managedCatalog;
   try {
@@ -146,6 +153,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       {
         previousModels: previous?.models,
         autoCompactPercent: defaultAutoCompactPercent,
+        modelCompressionPercentByModel: compressionByModel,
       },
     );
   } catch (error) {
@@ -540,6 +548,14 @@ function normalize(code, field, error) {
     field,
     error instanceof Error ? error.message : String(error),
     error,
+  );
+}
+
+export function configuredCompressionByModel(environment) {
+  return Object.fromEntries(
+    loadManagedModelCompression(environment)
+      .filter((entry) => entry.autoCompactPercent !== undefined)
+      .map((entry) => [entry.model, entry.autoCompactPercent]),
   );
 }
 
