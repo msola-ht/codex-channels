@@ -17,6 +17,7 @@
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
 - [`docs/cli-audit.md`](docs/cli-audit.md)：CLI 全链路逐命令审查记录与后续统一修复依据。
 - [`docs/config-unification-plan.md`](docs/config-unification-plan.md)：配置格式、交互文案、生命周期、数据中心和 WebUI 的分阶段统一改造计划。
+- [`docs/module-chain-audit.md`](docs/module-chain-audit.md)：按一级模块逐个记录的链路审查结果与待审查顺序。
 
 ## 发行记录
 

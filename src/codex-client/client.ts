@@ -716,8 +716,10 @@ export class CodexAppServerClient implements
       params: {
         threadId,
         cwd,
-        sandbox: this.defaults.sandbox,
-        approvalPolicy: "on-request",
+        approvalPolicy: options.approvalPolicy ?? "on-request",
+        ...(options.permissions !== undefined
+          ? { permissions: options.permissions }
+          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
         ...(options.model ? { model: options.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       },
