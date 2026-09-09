@@ -5,10 +5,8 @@ import {
   readFileSync,
   statSync,
 } from "node:fs";
-import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
 
-import WebSocket from "ws";
 import { parse } from "smol-toml";
 
 import {
@@ -25,6 +23,7 @@ import {
   inspectAppServerSupervisor,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
+import { readAppServerUserAgent } from "../runtime/app-server-read.mjs";
 import {
   assertAppServerSocketPathSupported,
   resolveAppServerRuntime,
@@ -50,7 +49,6 @@ import {
   assertPrivateFileAccessSync,
 } from "../runtime/private-file.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   protectForCurrentWindowsUserSync,
@@ -402,6 +400,19 @@ if (document) {
   } catch (error) {
     record("Codex CLI", false, errorMessage(error));
   }
+
+  const clientIdentity = table(codex.client_identity);
+  const clientIdentityConfigured = Object.keys(clientIdentity).length > 0;
+  note(
+    "App Server 客户端身份",
+    clientIdentityConfigured ? "已自定义" : "默认（codex_connect / Codex Connect Gateway）",
+    "运行 codexc config → 系统设置 → 一键设为官方 TUI 身份可修改，之后运行 codexc service restart all",
+  );
+  note(
+    "模型上游 User-Agent",
+    stringValue(codex.upstream_user_agent) ? "已自定义" : "默认（透传 App Server 生成的 UA）",
+    "运行 codexc config → 系统设置 → 一键设为官方 TUI 身份可修改，之后运行 codexc service restart all",
+  );
 
   const contextManagement = readCodexContextManagementSetting(process.env);
   if (contextManagement.error) {
@@ -884,165 +895,16 @@ function versionAtLeast(actual, minimum) {
   return true;
 }
 
-async function initializeUnixWebSocket(socketPath) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const socket = new WebSocket("ws://localhost/", {
-      perMessageDeflate: false,
-      handshakeTimeout: 2_000,
-      createConnection: () => createConnection(socketPath),
-    });
-    let settled = false;
-    const timeout = setTimeout(() => finish(new Error("initialize 握手超时")), 3_000);
-    timeout.unref();
-    const finish = (error, response) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      socket.terminate();
-      if (error) {
-        rejectPromise(error);
-      } else {
-        resolvePromise(response);
-      }
-    };
-    socket.once("open", () => {
-      socket.send(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: {
-            clientInfo: {
-              name: "codex_connect",
-              title: "Codex Connect Doctor",
-              version: packageMetadata.version,
-            },
-            capabilities: {
-              experimentalApi: false,
-              requestAttestation: false,
-              optOutNotificationMethods: null,
-            },
-          },
-        }),
-        (error) => error && finish(error),
-      );
-    });
-    socket.on("message", (data, isBinary) => {
-      if (isBinary) {
-        return;
-      }
-      let message;
-      try {
-        message = JSON.parse(data.toString("utf8"));
-      } catch {
-        return;
-      }
-      if (message.id !== 1) {
-        return;
-      }
-      if (message.error) {
-        finish(new Error(`initialize 被拒绝：${message.error.message || "未知错误"}`));
-        return;
-      }
-      socket.send(
-        JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }),
-        (error) => finish(
-          error,
-          typeof message.result?.userAgent === "string"
-            ? message.result.userAgent
-            : undefined,
-        ),
-      );
-    });
-    socket.once("error", finish);
-    socket.once("close", () => finish(new Error("WebSocket 在握手完成前关闭")));
-  });
-}
-
 async function initializeAppServer(socketPath, codexBinary) {
-  if (process.platform !== "win32") {
-    return initializeUnixWebSocket(socketPath);
-  }
-  const { createAppServerTransport } = await import(
-    "../dist/codex-client/index.js"
-  );
-  const transport = createAppServerTransport(
-    { kind: "local-app-server", socketPath },
-    {
-      codexBinary,
-      connectTimeoutMs: 3_000,
-      createCodexProcessInvocation: (args) => executableInvocation(codexBinary, args),
-      terminateCodexProcess: terminateChildProcess,
+  return readAppServerUserAgent({
+    socketPath,
+    codexBinary,
+    clientInfo: {
+      name: "codex_app_server_daemon",
+      title: "Codex Connect Doctor",
+      version: packageMetadata.version,
     },
-  );
-  await transport.connect();
-  try {
-    return await new Promise((resolvePromise, rejectPromise) => {
-      let settled = false;
-      const timeout = setTimeout(
-        () => finish(new Error("initialize 握手超时")),
-        3_000,
-      );
-      timeout.unref();
-      const removeMessage = transport.onMessage((raw) => {
-        let message;
-        try {
-          message = JSON.parse(raw);
-        } catch {
-          return;
-        }
-        if (message.id !== 1) return;
-        if (message.error) {
-          finish(new Error(`initialize 被拒绝：${message.error.message || "未知错误"}`));
-          return;
-        }
-        void transport.send(
-          JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }),
-        ).then(
-          () => finish(
-            undefined,
-            typeof message.result?.userAgent === "string"
-              ? message.result.userAgent
-              : undefined,
-          ),
-          finish,
-        );
-      });
-      const removeClose = transport.onClose((error) => {
-        finish(error ?? new Error("App Server Transport 在握手完成前关闭"));
-      });
-      const finish = (error, response) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        removeMessage();
-        removeClose();
-        if (error) rejectPromise(error);
-        else resolvePromise(response);
-      };
-      void transport.send(JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          clientInfo: {
-            name: "codex_connect",
-            title: "Codex Connect Doctor",
-            version: packageMetadata.version,
-          },
-          capabilities: {
-            experimentalApi: false,
-            requestAttestation: false,
-            optOutNotificationMethods: null,
-          },
-        },
-      })).catch(finish);
-    });
-  } finally {
-    await transport.close();
-  }
+  });
 }
 
 function codexPackageVersion(value) {

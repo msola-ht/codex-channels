@@ -249,7 +249,7 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
   配置文件中可安全编辑的参数：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
-  （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
+  （调试模式、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
   （本地保留策略、本机接入数据中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用本机接入）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
@@ -257,8 +257,9 @@
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
-  设置脱敏读取与明确修改接口；只接受受控的显示、系统、自动化、网络、高级、Telegram 格式、WebUI、
-  指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，凭据和网络读取只显示是否已配置；
+  设置脱敏读取与明确修改接口；只接受受控的显示、系统（含一键官方 TUI 身份）、自动化、网络、
+  高级、Telegram 格式、WebUI、指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，
+  凭据和网络读取只显示是否已配置；
   读取同时返回原始文件修订，修改必须携带并在应用前复核；最终提交复用 Gateway Config 的共享写锁
   和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置。
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、

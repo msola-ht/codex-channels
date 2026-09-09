@@ -79,6 +79,11 @@ function restartRequiredReasons(
     [configChange("surface.weixin.enabled", "weixin"), current.weixin !== undefined, next.weixin !== undefined],
     [configChange("codex.default-model"), current.codexModel, next.codexModel],
     [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
+    [
+      configChange("codex.client-identity"),
+      JSON.stringify(current.codexClientIdentity),
+      JSON.stringify(next.codexClientIdentity),
+    ],
     [configChange("storage.database"), current.stateDatabasePath, next.stateDatabasePath],
     [configChange("approval.timeout"), current.approvalTimeoutMs, next.approvalTimeoutMs],
     [

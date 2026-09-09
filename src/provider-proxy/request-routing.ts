@@ -159,9 +159,13 @@ export function forwardedRequestHeaders(
   headers: IncomingHttpHeaders,
   upstreamHost: string,
   upstreamPort: number | undefined,
+  userAgent?: string,
 ): IncomingHttpHeaders {
   const forwarded = endToEndHeaders(headers);
   delete forwarded["x-codex-turn-metadata"];
+  if (userAgent !== undefined) {
+    forwarded["user-agent"] = userAgent;
+  }
   forwarded.host = upstreamPort === undefined ? upstreamHost : `${upstreamHost}:${upstreamPort}`;
   return forwarded;
 }
@@ -170,6 +174,7 @@ export function forwardedWebSocketHeaders(
   headers: IncomingHttpHeaders,
   upstreamHost: string,
   upstreamPort: number | undefined,
+  userAgent?: string,
 ): IncomingHttpHeaders {
   const forwarded = endToEndHeaders(headers);
   for (const name of [
@@ -180,6 +185,9 @@ export function forwardedWebSocketHeaders(
     "sec-websocket-protocol",
     "x-codex-turn-metadata",
   ]) delete forwarded[name];
+  if (userAgent !== undefined) {
+    forwarded["user-agent"] = userAgent;
+  }
   forwarded.host = upstreamPort === undefined ? upstreamHost : `${upstreamHost}:${upstreamPort}`;
   return forwarded;
 }

@@ -107,6 +107,8 @@ export interface ProviderProxyOptions {
   defaultAccountId?: string;
   /** 私有 `/role/external` 路径对应的 agents.external 默认思考等级。 */
   externalRoleReasoningEffort?: string;
+  /** 覆盖发给模型上游的完整 User-Agent；缺省时原样转发 App Server 生成的 UA。 */
+  upstreamUserAgent?: string;
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
   timeoutMs?: number;
   quotaWindowsProvider?: (
@@ -140,6 +142,7 @@ export class ProviderProxy {
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
   private readonly externalRoleReasoningEffort: string | undefined;
+  private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
   private readonly quotaWindowsProvider:
     | ((accountId?: string) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
@@ -165,6 +168,7 @@ export class ProviderProxy {
     this.resolveUpstream = options.resolveUpstream;
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
+    this.upstreamUserAgent = options.upstreamUserAgent;
     const externalRoleReasoningEffort = boundedReasoningEffort(
       options.externalRoleReasoningEffort,
     );
@@ -273,6 +277,7 @@ export class ProviderProxy {
         request.headers,
         upstreamTarget.host,
         upstreamTarget.port,
+        this.upstreamUserAgent,
       ),
     }, (upstreamResponse) => {
       metrics.httpStatus = upstreamResponse.statusCode ?? null;
@@ -466,7 +471,12 @@ export class ProviderProxy {
       ...(target.agent ?? this.upstreamAgent
         ? { agent: target.agent ?? this.upstreamAgent }
         : {}),
-      headers: forwardedWebSocketHeaders(request.headers, target.host, target.port),
+      headers: forwardedWebSocketHeaders(
+        request.headers,
+        target.host,
+        target.port,
+        this.upstreamUserAgent,
+      ),
       handshakeTimeout: this.timeoutMs,
     });
     const pending: Array<{ data: RawData | string; isBinary: boolean }> = [];

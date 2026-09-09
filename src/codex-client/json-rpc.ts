@@ -57,6 +57,12 @@ export interface ProtocolLogger {
   debug?(fields: Record<string, unknown>, message: string): void;
 }
 
+export interface CodexClientInfo {
+  name?: string;
+  title?: string;
+  version?: string;
+}
+
 export class JsonRpcError extends Error {
   constructor(
     readonly code: number,
@@ -84,6 +90,7 @@ export class JsonRpcClient {
     private readonly requestTimeoutMs = 60_000,
     private readonly logger?: ProtocolLogger,
     private readonly maximumServerRequests = 64,
+    private readonly clientInfo?: CodexClientInfo,
   ) {}
 
   async connect(): Promise<InitializeResponse> {
@@ -100,9 +107,9 @@ export class JsonRpcClient {
         method: "initialize",
         params: {
           clientInfo: {
-            name: codexConnectIntegrationId,
-            title: "Codex Connect Gateway",
-            version: gatewayMetadata.version,
+            name: this.clientInfo?.name ?? codexConnectIntegrationId,
+            title: this.clientInfo?.title ?? "Codex Connect Gateway",
+            version: this.clientInfo?.version ?? gatewayMetadata.version,
           },
           capabilities: {
             experimentalApi: true,

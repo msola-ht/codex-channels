@@ -4,6 +4,7 @@ import { readFileSync, unlinkSync } from "node:fs";
 import {
   GatewayConfigConflictError,
   parseGatewayConfig,
+  validateCodexConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { resolveHttpProxyUrl } from "../runtime/network-proxy.mjs";
@@ -251,6 +252,56 @@ function applySetting(document, input) {
       document.codex = codex;
       return changed(value, "restart-gateway");
     }
+    case "system.official-tui-identity": {
+      const identity = table(input.value?.clientIdentity);
+      const name = optionalStrictString(
+        identity.name,
+        64,
+        "value.clientIdentity.name",
+        "客户端身份名称",
+      );
+      const title = optionalString(
+        identity.title,
+        128,
+        "value.clientIdentity.title",
+        "客户端身份标题",
+      );
+      const version = optionalStrictString(
+        identity.version,
+        64,
+        "value.clientIdentity.version",
+        "客户端身份版本",
+      );
+      const clientIdentity = name || title || version
+        ? {
+            ...(name ? { name } : {}),
+            ...(title ? { title } : {}),
+            ...(version ? { version } : {}),
+          }
+        : null;
+      const upstreamValue = input.value?.upstreamUserAgent;
+      const upstreamUserAgent =
+        upstreamValue === null || upstreamValue === undefined || upstreamValue === ""
+          ? null
+          : upstreamValue;
+      if (typeof upstreamUserAgent === "string" && upstreamUserAgent.length > 512) {
+        throw invalid(
+          "value.upstreamUserAgent",
+          "too-long",
+          "上游 User-Agent 长度不能超过 512 个字符",
+        );
+      }
+      const codex = { ...table(document.codex) };
+      if (clientIdentity === null) delete codex.client_identity;
+      else codex.client_identity = clientIdentity;
+      if (upstreamUserAgent === null) delete codex.upstream_user_agent;
+      else codex.upstream_user_agent = upstreamUserAgent;
+      document.codex = validateCodexConfigDocument(codex);
+      return changed(
+        { clientIdentity, upstreamUserAgent },
+        "restart-all",
+      );
+    }
     case "automation.scheduled-tasks": {
       const value = booleanValue(input.value, "value", "计划任务");
       document.scheduled_tasks = { ...table(document.scheduled_tasks), enabled: value };
@@ -413,6 +464,14 @@ function optionalString(value, maximum, field, label) {
     throw invalid(field, "too-long", `${label}长度不能超过 ${maximum} 个字符`);
   }
   return normalized;
+}
+
+function optionalStrictString(value, maximum, field, label) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string" && value.length > maximum) {
+    throw invalid(field, "too-long", `${label}长度不能超过 ${maximum} 个字符`);
+  }
+  return value;
 }
 
 function invalid(field, code, message) {
