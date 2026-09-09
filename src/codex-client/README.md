@@ -89,7 +89,8 @@
   `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用。
   新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
-  `dynamicTools`；Fork 只允许模型 Provider。
+  `dynamicTools`；Fork 由 Session Router 注入当前 Workspace 的权限参数，调用方只允许选择模型
+  Provider，不得跨 Provider 或自行扩大权限。
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。

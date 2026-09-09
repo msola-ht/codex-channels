@@ -599,7 +599,13 @@ export class SessionRouter {
     const forked = await this.codex.forkThread(
       current.threadId,
       workspace.cwd,
-      startOptions,
+      {
+        ...(startOptions.model === undefined ? {} : { model: startOptions.model }),
+        ...(startOptions.modelProvider === undefined
+          ? {}
+          : { modelProvider: startOptions.modelProvider }),
+        ...this.workspacePermissions(workspace),
+      },
     );
     this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
     this.namesByThread.set(forked.thread.id, forked.thread.name);
