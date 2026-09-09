@@ -1209,7 +1209,7 @@ describe("primary provider CLI", () => {
       isCancel: () => false,
       text: vi.fn(),
       password: vi.fn(),
-      confirm: vi.fn(),
+      confirm: vi.fn(async () => true),
       select: vi.fn()
         .mockResolvedValueOnce("switch")
         .mockResolvedValueOnce("thirdparty")
@@ -1265,7 +1265,7 @@ describe("primary provider CLI", () => {
     });
 
     expect(prompts.confirm).toHaveBeenCalledWith({
-      message: "Third Party（thirdparty）当前是独立切换 Provider。确认删除独立 Profile，并转换为固定主 Provider？",
+      message: "将把主实例切换到 Third Party（thirdparty），移除其独立切换 Profile，并改写 Codex 主配置的 model_provider / model。确认继续？",
       initialValue: false,
     });
     expect(writeUserConfigEdits).not.toHaveBeenCalled();
@@ -1304,7 +1304,7 @@ describe("primary provider CLI", () => {
       isCancel: () => false,
       text: vi.fn(),
       password: vi.fn(),
-      confirm: vi.fn(),
+      confirm: vi.fn(async () => true),
       select: vi.fn()
         .mockResolvedValueOnce("switch")
         .mockResolvedValueOnce("OpenAI")
@@ -1349,7 +1349,7 @@ describe("primary provider CLI", () => {
       isCancel: () => false,
       text: vi.fn(),
       password: vi.fn(),
-      confirm: vi.fn(),
+      confirm: vi.fn(async () => true),
       select: vi.fn()
         .mockResolvedValueOnce("official")
         .mockResolvedValueOnce("back"),
@@ -1904,5 +1904,163 @@ describe("primary provider CLI", () => {
       "thirdparty.experimental_bearer_token",
       "sk-backup-secret",
     );
+  });
+
+  it("switches via CLI with --yes without prompting for confirmation", async () => {
+    const { createClient, writeUserConfigEdits } = clientFixture({
+      config: {
+        model_provider: "openai",
+        model_providers: {
+          thirdparty: {
+            name: "Third Party",
+            base_url: "https://third.example.test/v1",
+            wire_api: "responses",
+          },
+        },
+      },
+      version: "v1",
+    });
+    const output = { write: vi.fn() };
+    const prompts = {
+      isCancel: () => false,
+      text: vi.fn(),
+      password: vi.fn(),
+      confirm: vi.fn(async () => true),
+      select: vi.fn(),
+    };
+
+    await runPrimaryProviderCli(["switch", "thirdparty", "--yes"], {
+      environment: isolatedEnvironment("codexc-primary-provider-cli-yes-"),
+      output,
+      prompts,
+      createClient,
+    });
+
+    expect(prompts.confirm).not.toHaveBeenCalled();
+    expect(writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "model_provider", value: "thirdparty" },
+    ], { expectedVersion: "v1" });
+  });
+
+  it("prompts for confirmation when the CLI switch omits --yes", async () => {
+    const { createClient, writeUserConfigEdits } = clientFixture({
+      config: {
+        model_provider: "openai",
+        model_providers: {
+          thirdparty: {
+            name: "Third Party",
+            base_url: "https://third.example.test/v1",
+            wire_api: "responses",
+          },
+        },
+      },
+      version: "v1",
+    });
+    const output = { write: vi.fn() };
+    const prompts = {
+      isCancel: () => false,
+      text: vi.fn(),
+      password: vi.fn(),
+      confirm: vi.fn(async () => false),
+      select: vi.fn(),
+    };
+
+    await runPrimaryProviderCli(["switch", "thirdparty"], {
+      environment: isolatedEnvironment("codexc-primary-provider-cli-confirm-"),
+      output,
+      prompts,
+      createClient,
+    });
+
+    expect(prompts.confirm).toHaveBeenCalledWith({
+      message: "将把主实例切换到 Third Party（thirdparty），并改写 Codex 主配置（model_provider / model）。确认继续？",
+      initialValue: false,
+    });
+    expect(writeUserConfigEdits).not.toHaveBeenCalled();
+  });
+
+  it("switches back to official via CLI with --yes without confirmation", async () => {
+    const { createClient, writeUserConfigEdits } = clientFixture({
+      config: {
+        model_provider: "thirdparty",
+        model: "model-a",
+        model_providers: {
+          thirdparty: {
+            name: "Third Party",
+            base_url: "https://third.example.test/v1",
+            wire_api: "responses",
+          },
+          OpenAI: {
+            name: "OpenAI",
+            base_url: "https://zzone.cc.cd/v1",
+            wire_api: "responses",
+          },
+        },
+      },
+      version: "v1",
+    });
+    const output = { write: vi.fn() };
+    const prompts = {
+      isCancel: () => false,
+      text: vi.fn(),
+      password: vi.fn(),
+      confirm: vi.fn(async () => true),
+      select: vi.fn(),
+    };
+
+    await runPrimaryProviderCli(["switch", "openai", "--yes"], {
+      environment: isolatedEnvironment("codexc-primary-provider-cli-official-yes-"),
+      output,
+      prompts,
+      createClient,
+    });
+
+    expect(prompts.confirm).not.toHaveBeenCalled();
+    expect(writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "model_provider", value: "openai" },
+      { keyPath: "model", value: null },
+      { keyPath: "model_providers.thirdparty", value: null },
+      { keyPath: "model_providers.OpenAI", value: null },
+    ], { expectedVersion: "v1" });
+  });
+
+  it("rejects switch with --yes but no Provider ID", async () => {
+    const { createClient } = clientFixture({
+      config: { model_provider: "openai", model_providers: {} },
+      version: "v1",
+    });
+
+    await expect(runPrimaryProviderCli(["switch", "--yes"], {
+      environment: isolatedEnvironment("codexc-primary-provider-cli-missing-yes-"),
+      output: { write: vi.fn() },
+      prompts: {
+        isCancel: () => false,
+        text: vi.fn(),
+        password: vi.fn(),
+        confirm: vi.fn(),
+        select: vi.fn(),
+      },
+      createClient,
+    })).rejects.toThrow("用法：codexc primary-provider switch <Provider ID> [模型] [--yes]");
+  });
+
+  it("rejects switch when --yes is not the last argument", async () => {
+    const { createClient } = clientFixture({
+      config: { model_provider: "openai", model_providers: {} },
+      version: "v1",
+    });
+
+    await expect(runPrimaryProviderCli(["switch", "thirdparty", "--yes", "model-a"], {
+      environment: isolatedEnvironment("codexc-primary-provider-cli-yes-position-"),
+      output: { write: vi.fn() },
+      prompts: {
+        isCancel: () => false,
+        text: vi.fn(),
+        password: vi.fn(),
+        confirm: vi.fn(),
+        select: vi.fn(),
+      },
+      createClient,
+    })).rejects.toThrow("用法：codexc primary-provider switch <Provider ID> [模型] [--yes]");
   });
 });

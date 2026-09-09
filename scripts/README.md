@@ -187,10 +187,13 @@
   只读确认和安全回滚，避免两条管理链路复制高风险事务逻辑。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
   list / add / switch / remove 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；
-  switch / remove 复用 Provider 管理接口并只负责中文确认与结果渲染，add 复用自定义 Responses Provider Setup 的交互流程，
+  switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；所有 switch（含恢复官方、从备份恢复、
+  切换 Provider 转固定）都会先经二次确认，并提示将改写主配置的 model_provider / model；命令行 switch
+  传 --yes 跳过确认（仅命令行，Setup 菜单仍确认）；
+  add 复用自定义 Responses Provider Setup 的交互流程，
   Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
-  Provider 时，交互菜单须经二次确认后移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
+  Provider 时会移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
   编辑备份候选并恢复、修改和激活，也可经二次确认删除备份候选。恢复、编辑或删除时先提交配置，
   成功后才消费同名备份；配置写入失败时保留原备份，配置已提交但清理失败时显示部分成功警告。备份
   不可安全读取时只允许编辑当前 config 候选，切换和删除失败关闭；注册表仍登记但 Profile 已缺失的

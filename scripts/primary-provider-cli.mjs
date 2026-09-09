@@ -20,6 +20,7 @@ import {
   applyPrimaryProviderRemoval,
   applyPrimaryProviderSwitch,
   previewPrimaryProviderRemoval,
+  previewPrimaryProviderSwitch,
 } from "./primary-provider-management.mjs";
 import { primaryProviderUsage } from "./primary-provider-usage.mjs";
 
@@ -135,9 +136,25 @@ export async function switchPrimaryProvider(
   {
     environment = process.env,
     output = process.stdout,
+    prompts = clackPrompts,
+    confirm = false,
     createClient = createCodexUserConfigClient,
   } = {},
 ) {
+  if (confirm) {
+    const preview = await previewPrimaryProviderSwitch(
+      { providerId, model },
+      { environment, createClient },
+    );
+    const confirmed = await prompts.confirm({
+      message: switchConfirmationMessage(preview.target),
+      initialValue: false,
+    });
+    if (prompts.isCancel(confirmed) || confirmed !== true) {
+      output.write("已取消，Provider 模式未改变。\n");
+      return { action: "cancelled" };
+    }
+  }
   const result = await applyPrimaryProviderSwitch(
     { providerId, model },
     { environment, createClient },
@@ -166,6 +183,20 @@ export async function switchPrimaryProvider(
     writeBackupCleanupWarning(output, result.target.id);
   }
   writeCliRemediationRestartAll();
+}
+
+function switchConfirmationMessage(target) {
+  if (target.id === "openai") {
+    return "将恢复 OpenAI 官方主 Provider，并改写 Codex 主配置（model_provider 设为 openai；未指定模型时 model 置空）。确认继续？";
+  }
+  const label = `${target.displayName}（${target.id}）`;
+  if (target.source === "switching") {
+    return `将把主实例切换到 ${label}，移除其独立切换 Profile，并改写 Codex 主配置的 model_provider / model。确认继续？`;
+  }
+  if (target.source === "backup") {
+    return `将把主实例切换到 ${label}，从备份恢复，并改写 Codex 主配置的 model_provider / model。确认继续？`;
+  }
+  return `将把主实例切换到 ${label}，并改写 Codex 主配置（model_provider / model）。确认继续？`;
 }
 
 export async function removePrimaryProvider(
@@ -308,7 +339,13 @@ export async function runCustomPrimaryProviderMenu({
       continue;
     }
     if (action === "official") {
-      await switchPrimaryProvider("openai", undefined, { environment, output, createClient });
+      await switchPrimaryProvider("openai", undefined, {
+        environment,
+        output,
+        prompts,
+        createClient,
+        confirm: true,
+      });
       continue;
     }
     if (action === "switch" || action === "remove") {
@@ -330,20 +367,13 @@ export async function runCustomPrimaryProviderMenu({
         continue;
       }
       if (action === "switch") {
-        const switchingProvider = loadConfiguredCustomSwitchingModelProviders(environment)
-          .find(({ id: providerId }) => providerId === id);
-        if (switchingProvider !== undefined) {
-          const confirmed = await prompts.confirm({
-            message: `${switchingProvider.name}（${id}）当前是独立切换 Provider。`
-              + "确认删除独立 Profile，并转换为固定主 Provider？",
-            initialValue: false,
-          });
-          if (prompts.isCancel(confirmed) || confirmed !== true) {
-            output.write("已取消，Provider 模式未改变。\n");
-            continue;
-          }
-        }
-        await switchPrimaryProvider(id, undefined, { environment, output, createClient });
+        await switchPrimaryProvider(id, undefined, {
+          environment,
+          output,
+          prompts,
+          createClient,
+          confirm: true,
+        });
       } else {
         await removePrimaryProvider(id, {
           environment,
@@ -465,10 +495,22 @@ export async function runPrimaryProviderCli(
     return;
   }
   if (subcommand === "switch") {
-    if (rest.length === 0 || rest.length > 2 || (rest[0] === "openai" && rest.length !== 1)) {
-      throw new Error("用法：codexc primary-provider switch <Provider ID> [模型]");
+    const yes = rest[rest.length - 1] === "--yes";
+    const positional = yes ? rest.slice(0, -1) : rest;
+    if (
+      positional.length === 0
+      || positional.length > 2
+      || (positional[0] === "openai" && positional.length !== 1)
+    ) {
+      throw new Error("用法：codexc primary-provider switch <Provider ID> [模型] [--yes]");
     }
-    await switchPrimaryProvider(rest[0], rest[1], { environment, output, createClient });
+    await switchPrimaryProvider(positional[0], positional[1], {
+      environment,
+      output,
+      prompts,
+      createClient,
+      confirm: !yes,
+    });
     return;
   }
   if (subcommand === "remove") {

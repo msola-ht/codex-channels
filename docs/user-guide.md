@@ -151,8 +151,12 @@ codexc work list [--json]
 ```bash
 codexc setup
 codexc primary-provider list [--json]
-codexc primary-provider switch <Provider ID> [模型]
+codexc primary-provider switch <Provider ID> [模型] [--yes]
 ```
+
+`primary-provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
+Codex 主配置的 `model_provider` / `model`；传 `--yes` 跳过确认（适合脚本化调用），
+仅命令行 switch 支持 `--yes`，交互式 Setup 菜单仍会确认。
 
 DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSeek 使用说明`](deepseek.md)、[`OpenCode Go 使用说明`](opencode-go.md)、[`Provider 接入指南`](provider-integration-guide.md) 和 [`OpenCode Go 多账户`](opencode-go-multi-account.md)。
 

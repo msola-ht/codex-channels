@@ -204,10 +204,12 @@ stream_max_retries = 0
 `codexc primary-provider` 的
 `list` / `add` / `switch` / `remove` 管理候选与激活状态。`list --json` 提供稳定的脚本输出，包含当前
 主实例、固定候选、切换 Provider 与备份候选摘要，不包含 API Key 或其他认证字段。
-`codexc primary-provider switch openai` 不运行
-登录直接切回官方 OpenAI，官方凭据保留；切回时自定义候选块移入
+`codexc primary-provider switch openai` 不运行登录直接切回官方 OpenAI（执行前会二次确认，并提示
+将把 `model_provider` 写回 `openai`；从自定义切回且未指定模型时会清空顶层 `model`），官方凭据保留；切回时自定义候选块移入
 `~/.codex-connect/private/primary-providers.json`（0600）并从 config 清理，之后
-`codexc primary-provider switch <ID>` 会从备份自动恢复。`codexc setup` 的“官方 → 登录并恢复官方”
+`codexc primary-provider switch <ID>` 会从备份自动恢复（同样先二次确认，并提示改写主配置的
+`model_provider` / `model`）。命令行 `switch` 传 `--yes` 可跳过该确认（仅命令行，Setup 菜单仍会确认）。
+`codexc setup` 的“官方 → 登录并恢复官方”
 会运行 `codex login --device-auth`（打开终端显示的链接并输入验证码）并执行相同的备份与清理。
 从自定义候选切回官方时同时清除该候选留下的顶层 `model`；当前已经是官方模式时保留官方模型。
 候选从备份恢复后会消费对应备份项；官方模式下可从 Setup 直接把备份候选编辑为固定或切换模式，或经二次确认删除
