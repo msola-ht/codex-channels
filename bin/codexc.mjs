@@ -31,8 +31,10 @@ import {
   loadThirdPartyModelProviderRole,
   loadThirdPartyProviderCredential,
   providerMetricsSocketPath,
+  withOfficialModelCatalog,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
+  writeCustomOfficialModelCatalog,
   writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -666,14 +668,37 @@ async function runServiceAppServer(args) {
     runtime.dataDir,
     runtime.environment,
   );
+  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
+  const customSwitchingProviderIds = new Set(
+    appServerRuntime.customSwitchingProviders.map((provider) => provider.provider),
+  );
+  const officialCatalogPath = customPrimaryProvider !== undefined
+    || customSwitchingProviderIds.size > 0
+    ? writeCustomOfficialModelCatalog(
+        runtime.environment,
+        runtime.environment.CODEX_BINARY,
+      )
+    : undefined;
+  const customSwitchingProviders = officialCatalogPath === undefined
+    ? appServerRuntime.customSwitchingProviders
+    : appServerRuntime.customSwitchingProviders.map((provider) => ({
+        ...provider,
+        arguments: withOfficialModelCatalog(provider.arguments, officialCatalogPath),
+      }));
+  const managedProviders = officialCatalogPath === undefined
+    ? appServerRuntime.managedProviders
+    : appServerRuntime.managedProviders.map((provider) =>
+        customSwitchingProviderIds.has(provider.provider)
+          ? {
+              ...provider,
+              arguments: withOfficialModelCatalog(provider.arguments, officialCatalogPath),
+            }
+          : provider);
   const {
     primarySocketPath: socketPath,
-    managedProviders,
-    customSwitchingProviders,
     managedSocketPaths,
     primaryProvider,
   } = appServerRuntime;
-  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
   const customSwitchingProvidersById = new Map(
     customSwitchingProviders.map((provider) => [provider.provider, provider]),
   );
@@ -981,6 +1006,7 @@ async function runServiceAppServer(args) {
         customPrimaryProvider.id,
         localBaseUrl,
       );
+      primaryArguments = withOfficialModelCatalog(primaryArguments, officialCatalogPath);
       refreshThirdPartyRoleConfig(
         customPrimaryProvider.id,
         externalRoleBaseUrl(localBaseUrl),

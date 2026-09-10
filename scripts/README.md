@@ -147,8 +147,9 @@
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
   新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
-  必须属于 App Server 返回的 Codex 官方目录；不调用第三方 `/models`，不生成 `models.json` 或
-  `model_catalog_json`，目录来源保留为可辨识的 `official` 接口。
+  必须属于 Codex 官方目录；不调用第三方 `/models`，不生成第三方 `models.json` 或自定义
+  `model_catalog_json`；目录来源保留为可辨识的 `official` 接口，服务启动时再用 Codex CLI
+  导出官方目录快照。
   `OpenAI` 选项固定写入同名 `name` 以允许 Codex 使用远程压缩，上游仍须兼容对应接口。新增默认推荐
   切换模式，编辑保持原模式；确认预览明确显示配置位置、API Key 明文存储、默认思考等级和服务层级。固定模式通过 Codex
   `config/batchWrite` 原子写入并激活 `~/.codex/config.toml` 的自定义主 Provider；切换模式保持主
