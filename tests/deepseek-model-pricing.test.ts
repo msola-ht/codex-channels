@@ -23,7 +23,7 @@ describe("DeepseekModelPricingResolver", () => {
       source: "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
       timezone: "Asia/Shanghai",
     });
-    expect(baseline.plans).toHaveLength(3);
+    expect(baseline.plans).toHaveLength(5);
   });
 
   it("uses the fixed price before the scheduled effective time", () => {
@@ -36,7 +36,7 @@ describe("DeepseekModelPricingResolver", () => {
         billingMode: "api",
         currency: "USD",
         source: "deepseek-official:open-er-api",
-        effectiveAtMs: Date.parse("2026-08-22T13:55:41.000Z"),
+        effectiveAtMs: Date.parse("2026-09-10T09:05:00.000Z"),
         bucket: null,
         cachedInputPricePerMillionNanos: 10_000_000,
         uncachedInputPricePerMillionNanos: 500_000_000,
@@ -164,6 +164,36 @@ describe("DeepseekModelPricingResolver", () => {
       outputPricePerMillionNanos: 4_500_000_000,
       bucket: "peak",
     });
+  });
+
+  it("applies the V4.1 Flash price cut and the scheduled Pro routing", () => {
+    const resolver = new DeepseekModelPricingResolver({
+      exchangeRate: () => exchangeRate,
+    });
+
+    expect(resolveAt(resolver, "2026-09-10T11:59:59+08:00", "deepseek-flash"))
+      .toBeNull();
+    expect(resolveAt(resolver, "2026-09-10T12:00:00+08:00", "deepseek-flash"))
+      .toMatchObject({
+        cachedInputPricePerMillionNanos: 10_000_000,
+        uncachedInputPricePerMillionNanos: 500_000_000,
+        outputPricePerMillionNanos: 2_000_000_000,
+        bucket: "off-peak",
+      });
+    expect(resolveAt(resolver, "2026-09-10T12:00:00+08:00", "deepseek-v4-pro"))
+      .toMatchObject({
+        uncachedInputPricePerMillionNanos: 2_250_000_000,
+        outputPricePerMillionNanos: 6_750_000_000,
+      });
+    expect(resolveAt(resolver, "2026-09-14T12:00:00+08:00", "deepseek-v4-pro"))
+      .toMatchObject({
+        cachedInputPricePerMillionNanos: 10_000_000,
+        uncachedInputPricePerMillionNanos: 500_000_000,
+        outputPricePerMillionNanos: 2_000_000_000,
+        bucket: "off-peak",
+      });
+    expect(resolveAt(resolver, "2026-09-14T12:00:00+08:00", "deepseek-v4-flash"))
+      .toMatchObject({ outputPricePerMillionNanos: 2_000_000_000 });
   });
 
   it("rejects baseline gaps, overlaps and divergent model sets within one plan", () => {

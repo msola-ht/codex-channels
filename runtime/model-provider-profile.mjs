@@ -8,8 +8,8 @@ export function createManagedProviderProfile(definition, {
   reasoningEffort = definition.defaultReasoningEffort,
 } = {}) {
   assertDefinition(definition);
-  if (!definition.models.some((candidate) => candidate.available && candidate.slug === model)) {
-    throw new Error(`模型不在 ${definition.displayName} 受控目录中：${String(model)}`);
+  if (typeof model !== "string" || model.length === 0) {
+    throw new Error(`${definition.displayName} 默认模型无效`);
   }
   if (typeof apiKey !== "string" || !/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
     throw new Error(`${definition.displayName} API Key 无效`);
@@ -121,7 +121,6 @@ function assertDefinition(definition) {
     || typeof definition.apiKeyEnvironmentKey !== "string"
     || typeof definition.defaultModel !== "string"
     || typeof definition.defaultReasoningEffort !== "string"
-    || !Array.isArray(definition.models)
   ) {
     throw new Error("模型 Provider 定义无效");
   }

@@ -70,8 +70,10 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间，以及需要跨版本执行一次的
   默认模型迁移记录；Profile（切换模式）与固定
   基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
-- 目录按 Provider 隔离；同名模型（如两个 Provider 都卖 `deepseek-v4-flash`）是独立选项，
-  模型 key 为 `provider + model`；
+- 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
+ 模型 key 为 `provider + model`；
+- 可选模型以各 Provider 下载的官方模型目录为准：目录里声明什么就开放什么，目录不再声明的
+  旧模型名不会出现在 `/model` 与 Setup 选项中；价格基线仍保留旧模型名用于历史用量折算；
 - 默认模型写入 Profile 后，Profile 顶层 `model_reasoning_effort` 必须镜像目录默认值，
   运行时校验不一致即失败关闭。
 
@@ -104,17 +106,17 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 ### 3.5 生命周期与空闲 Client 关闭
 
 - 受管 Provider 的统计代理与隔离 App Server 支持按需启动；Gateway 全局空闲策略统一关闭已连接
-  Provider Client，不按 Provider 类型区分；
+  Provider Client 并停止对应 App Server 进程（含主实例），不按 Provider 类型区分；
 - 关闭条件（全部满足）：没有任何前台或后台 Conversation 绑定、没有进行中的 Provider 操作或
   启动任务，且该空闲状态持续 60 秒；宽限期内新消息、恢复 Thread、Provider 操作或启动任务会取消
-  本轮关闭。关闭只断开 Gateway Client，不终止 App Server 进程，也不删除 Thread 持久数据；再次
-  选择模型、恢复 Thread 或使用对应 Remote TUI 时自动按需重连；
+  本轮关闭。关闭不删除 Thread 持久数据；服务进程保持运行，再次选择模型、恢复 Thread 或使用对应
+  Remote TUI 时自动按需启动并重连；
 - `codexc remote` 必须在 TUI 生命周期内持有 Supervisor Provider 租约；租约存在时手动停止必须
   失败关闭，连接退出或异常断开时自动撤销租约；
 - **释放通知**：渠道会话空闲自动解除后先向当前渠道发送一次自动解除提示；60 秒宽限期结束仍无任何
-  绑定或活动时，先向所有已知授权渠道发送一次“模型连接已空闲，即将释放”的通知，再关闭 Provider
-  Client。没有已知授权渠道时只记录日志，不向未知会话广播；手动新建、切换或后台任务结束导致的无
-  绑定关闭不发送这条全局提示。
+  绑定或活动时，先向所有已知授权渠道发送一次“所有模型连接已空闲，空闲的 App Server 即将停止”的通知，
+  再关闭 Provider Client 并停止未被租约占用的 App Server 进程。没有已知授权渠道时只记录日志，
+  不向未知会话广播；手动新建、切换或后台任务结束导致的无绑定关闭不发送这条全局提示。
 
 ### 3.6 Setup
 
@@ -146,7 +148,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 ## 4. 安全边界
 
-- Provider id 与模型名使用受控列表，未知模型不开放；
+- Provider id 使用受控列表；模型名来自下载的官方目录，目录缺少的模型不开放；
 - base URL 只允许 HTTP(S)，不得包含用户名、密码、查询或片段；
 - 编译期受管 Provider 的 API Key 只进入目标子进程环境或专用私有凭据文件；用户自定义 Provider
   可按第 6 节显式写入 `0600` Codex 私有配置。两类 Key 都不得进入命令行、Gateway 配置、日志或平台消息；

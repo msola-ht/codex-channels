@@ -35,6 +35,7 @@ import {
   createManagedProviderCatalog,
   createSwitchingProviderProfile,
   hasProviderBaseConfig,
+  resolveManagedCatalogModel,
   restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
@@ -52,7 +53,6 @@ import {
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
 const maximumPrivateConfigBytes = 2_097_152;
-const previousDefaultModel = "deepseek-v4-flash";
 
 export class OpenCodeGoAccountProvisioningError extends Error {
   constructor(code, field, message, options) {
@@ -144,7 +144,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   } catch (error) {
     throw normalize("provider-state-unavailable", "accountId", error);
   }
-  const selectedModel = previous?.model ?? definition.defaultModel;
   let managedCatalog;
   try {
     managedCatalog = createManagedProviderCatalog(
@@ -159,6 +158,11 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   } catch (error) {
     throw normalize("catalog-invalid", "catalog", error);
   }
+  const selectedModel = resolveManagedCatalogModel(
+    managedCatalog,
+    definition,
+    previous?.model,
+  );
   const transactionPaths = [
     plan.paths.configPath,
     plan.paths.profilePath,
@@ -532,8 +536,8 @@ export function readOpencodeGoDefaultModelMigration(manifest) {
   if (!migration
     || typeof migration !== "object"
     || Array.isArray(migration)
-    || migration.from !== previousDefaultModel
-    || migration.to !== definition.defaultModel
+    || typeof migration.from !== "string"
+    || typeof migration.to !== "string"
     || typeof migration.appliedAt !== "string"
     || !Number.isFinite(Date.parse(migration.appliedAt))) {
     throw new Error("OpenCode Go 默认模型迁移标记无效");

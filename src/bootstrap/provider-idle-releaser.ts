@@ -3,15 +3,23 @@ import type { Logger } from "pino";
 import type { ConversationBinding } from "../storage/index.js";
 
 const defaultGlobalIdleGraceMs = 60_000;
+const defaultCheckIntervalMs = 60_000;
+const defaultStopTimeoutMs = 5_000;
 
 export interface ProviderIdleReleaserOptions {
   logger: Logger;
   listConnectedProviders: () => readonly string[];
   closeProvider: (provider: string) => Promise<void>;
+  /** Stop the App Server process after its Client was closed. */
+  releaseProvider?: (provider: string) => Promise<void>;
+  /** Service-managed running instances that are not leased. */
+  listReleasableAppServers?: () => Promise<readonly string[]>;
   listBindings: () => readonly ConversationBinding[];
   /** Grace window before connected Provider Clients are closed. */
   gracePeriodMs?: number;
-  /** Called after the grace window and before the Clients are closed. */
+  /** Bound for waiting on an in-flight close when the Gateway stops. */
+  stopTimeoutMs?: number;
+  /** Called after the grace window and before Clients and App Servers are stopped. */
   notifyBeforeClose?: (providers: readonly string[]) => void;
 }
 
@@ -20,8 +28,13 @@ export class ProviderIdleReleaser {
   private readonly listConnectedProviders:
     ProviderIdleReleaserOptions["listConnectedProviders"];
   private readonly closeProvider: ProviderIdleReleaserOptions["closeProvider"];
+  private readonly releaseProvider:
+    ProviderIdleReleaserOptions["releaseProvider"];
+  private readonly listReleasableAppServers:
+    ProviderIdleReleaserOptions["listReleasableAppServers"];
   private readonly listBindings: () => readonly ConversationBinding[];
   private readonly gracePeriodMs: number;
+  private readonly stopTimeoutMs: number;
   private readonly notifyBeforeClose:
     ProviderIdleReleaserOptions["notifyBeforeClose"];
   private readonly launching = new Set<string>();
@@ -32,25 +45,51 @@ export class ProviderIdleReleaser {
   private graceNotify = false;
   private graceGeneration = 0;
   private closeTask: Promise<void> | undefined;
+  private checkTimer: NodeJS.Timeout | undefined;
   private stopped = false;
 
   constructor(options: ProviderIdleReleaserOptions) {
     this.logger = options.logger;
     this.listConnectedProviders = options.listConnectedProviders;
     this.closeProvider = options.closeProvider;
+    this.releaseProvider = options.releaseProvider;
+    this.listReleasableAppServers = options.listReleasableAppServers;
     this.listBindings = options.listBindings;
     this.gracePeriodMs = options.gracePeriodMs ?? defaultGlobalIdleGraceMs;
     if (!Number.isSafeInteger(this.gracePeriodMs) || this.gracePeriodMs < 0) {
       throw new RangeError("Provider Client 空闲释放宽限期必须是非负整数毫秒");
     }
+    this.stopTimeoutMs = options.stopTimeoutMs ?? defaultStopTimeoutMs;
+    if (!Number.isSafeInteger(this.stopTimeoutMs) || this.stopTimeoutMs < 0) {
+      throw new RangeError("Provider Client 空闲释放停止等待上限必须是非负整数毫秒");
+    }
     this.notifyBeforeClose = options.notifyBeforeClose;
+  }
+
+  start(): void {
+    if (this.stopped || this.checkTimer) return;
+    this.checkTimer = setInterval(() => {
+      void this.closeIfIdle().catch((error) => {
+        this.logger.warn({ err: error }, "全局空闲复检失败");
+      });
+    }, defaultCheckIntervalMs);
+    this.checkTimer.unref?.();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    if (this.checkTimer) {
+      clearInterval(this.checkTimer);
+      this.checkTimer = undefined;
+    }
     this.cancelGrace();
     const closeTask = this.closeTask;
-    if (closeTask) await closeTask;
+    if (closeTask && !(await waitAtMost(closeTask, this.stopTimeoutMs))) {
+      this.logger.warn(
+        { timeoutMs: this.stopTimeoutMs },
+        "Provider 空闲释放停止等待超时",
+      );
+    }
   }
 
   markLaunching(provider: string): void {
@@ -86,11 +125,6 @@ export class ProviderIdleReleaser {
     if (this.stopped) return this.closeTask ?? Promise.resolve();
     if (this.closeTask) return this.closeTask;
     if (!this.isGloballyIdle()) {
-      this.cancelGrace();
-      return Promise.resolve();
-    }
-    const providers = [...this.listConnectedProviders()];
-    if (providers.length === 0) {
       this.cancelGrace();
       return Promise.resolve();
     }
@@ -158,28 +192,48 @@ export class ProviderIdleReleaser {
 
   private async closeAfterGrace(notify: boolean): Promise<void> {
     if (this.stopped || !this.isGloballyIdle()) return;
-    const currentProviders = [...this.listConnectedProviders()];
-    if (currentProviders.length === 0) return;
-    if (notify && this.notifyBeforeClose) {
+    const connectedProviders = [...this.listConnectedProviders()];
+    const candidates = new Set(connectedProviders);
+    if (this.listReleasableAppServers) {
       try {
-        this.notifyBeforeClose(currentProviders);
+        for (const provider of await this.listReleasableAppServers()) {
+          candidates.add(provider);
+        }
       } catch (error) {
         this.logger.warn(
-          { err: error, providers: currentProviders },
-          "全局空闲释放通知失败，继续关闭 Provider Client",
+          { err: error },
+          "无法读取可释放 App Server 列表，仅处理已连接 Client",
+        );
+      }
+    }
+    if (candidates.size === 0) return;
+    const providers = [...candidates];
+    if (notify && this.notifyBeforeClose) {
+      try {
+        this.notifyBeforeClose(providers);
+      } catch (error) {
+        this.logger.warn(
+          { err: error, providers },
+          "全局空闲释放通知失败，继续关闭 Client 与 App Server",
         );
       }
     }
     this.logger.info(
-      { providers: currentProviders },
-      "Provider Client 将在全局空闲宽限期结束后关闭",
+      { providers },
+      "全局空闲释放轮次开始处理 App Server",
     );
-    await this.closeConnectedProviders(currentProviders);
+    const failedCloses = await this.closeConnectedProviders(connectedProviders);
+    await this.releaseAppServers(
+      providers.filter((provider) => !failedCloses.has(provider)),
+    );
   }
 
-  private async closeConnectedProviders(providers: readonly string[]): Promise<void> {
+  private async closeConnectedProviders(
+    providers: readonly string[],
+  ): Promise<Set<string>> {
+    const failed = new Set<string>();
     for (const provider of providers) {
-      if (this.stopped) return;
+      if (this.stopped) break;
       try {
         await this.closeProvider(provider);
         this.logger.info(
@@ -191,8 +245,25 @@ export class ProviderIdleReleaser {
           { err: error, provider },
           "Provider Client 空闲关闭失败，将在后续全局空闲检查重试",
         );
+        failed.add(provider);
       }
     }
+    return failed;
+  }
+
+  private async releaseAppServers(providers: readonly string[]): Promise<void> {
+    if (!this.releaseProvider) return;
+    await Promise.all(providers.map(async (provider) => {
+      if (this.stopped) return;
+      try {
+        await this.releaseProvider?.(provider);
+      } catch (error) {
+        this.logger.warn(
+          { err: error, provider },
+          "App Server 空闲停止失败，进程保持运行",
+        );
+      }
+    }));
   }
 
   private async runProviderOperation<T>(
@@ -224,5 +295,24 @@ export class ProviderIdleReleaser {
         });
       }
     }
+  }
+}
+
+async function waitAtMost(task: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([
+      task.then(
+        () => true,
+        () => true,
+      ),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

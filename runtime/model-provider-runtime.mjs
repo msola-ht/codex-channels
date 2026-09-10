@@ -45,6 +45,8 @@ const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
 export const customPrimaryProviderProfileName = "sf-custom";
 const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon-bedrock"]);
 const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
+// 与受管模型目录契约一致：模型 slug 只允许小写字母、数字、点、下划线和连字符。
+const managedCatalogModelPattern = /^[a-z0-9][a-z0-9._-]{0,119}$/u;
 const thirdPartyRoleReasoningEffortPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u;
 const customSwitchingRegistryMaximumBytes = 262_144;
 const customSwitchingDefaultReasoningEffort = "medium";
@@ -213,7 +215,9 @@ export function loadManagedModelProviderSettings(environment = process.env) {
   return managedProviderDefinitions(environment).flatMap((definition) => {
     const marker = readManagedMarker(environment, definition);
     if (!marker) return [];
-    const profile = loadConfiguredProviderProfile(environment, definition);
+    const profile = loadConfiguredProviderProfile(environment, definition, {
+      tolerateMissingModel: true,
+    });
     return [{
       provider: definition.id,
       displayName: definition.displayName,
@@ -324,6 +328,7 @@ export function writeManagedModelProviderProfileDefault(
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: "ignore",
+    tolerateMissingModel: true,
   });
   const previousCatalog = readPrivateFile(profile.catalogPath, maximumCatalogBytes);
   const nextCatalog = updateModelCatalogSettings(previousCatalog, definition, settings);
@@ -443,11 +448,10 @@ export function withPreservedManagedModelCatalogSettings(
   definition,
   previousModels = [],
 ) {
+  const presentModels = catalogSlugSet(catalog, definition);
   let next = catalog;
   for (const previous of previousModels) {
-    if (!definition.models.some(({ slug, available }) => available && slug === previous.model)) {
-      continue;
-    }
+    if (!presentModels.has(previous.model)) continue;
     const current = modelCatalogSetting(JSON.stringify(next), definition, previous.model);
     const reasoningEffort = current.reasoningEfforts.some(
       ({ effort }) => effort === previous.reasoningEffort,
@@ -1313,7 +1317,7 @@ export function writeManagedModelProviderRoleConfig(
   const profile = loadConfiguredProviderProfile(environment, definition);
   if (profile === undefined) throw new Error(`${definition.displayName} Provider 尚未配置`);
   const selectedModel = model ?? profile.model;
-  if (!definition.models.some((candidate) => candidate.slug === selectedModel && candidate.available)) {
+  if (!catalogHasModel(profile.catalogPath, definition, selectedModel)) {
     throw new Error(`${definition.displayName} 不支持模型：${selectedModel}`);
   }
   const selectedModelSettings = readModelCatalogSetting(
@@ -1544,7 +1548,11 @@ function loadManagedProviderProfiles(environment, { requireLaunchConfig = false 
   });
 }
 
-function loadConfiguredProviderProfile(environment, definition) {
+function loadConfiguredProviderProfile(
+  environment,
+  definition,
+  { tolerateMissingModel = false } = {},
+) {
   const codexHome = codexHomePath(environment);
   const marker = readManagedMarker(environment, definition);
   if (!marker) return undefined;
@@ -1559,8 +1567,11 @@ function loadConfiguredProviderProfile(environment, definition) {
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: marker.mode === "switching" ? "mirror" : "absent",
+    tolerateMissingModel,
   });
-  validateModelCatalog(profile.catalogPath, definition, profile.model);
+  if (!tolerateMissingModel) {
+    validateModelCatalog(profile.catalogPath, definition, profile.model);
+  }
   return { ...profile, mode: marker.mode };
 }
 
@@ -1571,6 +1582,7 @@ function readProviderProfile(
     requireSelection = true,
     expectedCatalogPath,
     reasoningEffortPolicy = "absent",
+    tolerateMissingModel = false,
   } = {},
 ) {
   let document;
@@ -1585,8 +1597,8 @@ function readProviderProfile(
   if (
     requireSelection
     && (
-      !descriptor.definition.models.some(({ slug, available }) =>
-        available && slug === document.model)
+      typeof document.model !== "string"
+      || document.model.length === 0
       || document.model_provider !== descriptor.id
     )
   ) {
@@ -1594,16 +1606,24 @@ function readProviderProfile(
   }
   const selectedModel = expectedCatalogPath === undefined
     ? undefined
-    : readModelCatalogSetting(
-        expectedCatalogPath,
-        descriptor.definition,
-        document.model,
-      );
+    : tolerateMissingModel
+      ? readOptionalModelCatalogSetting(
+          expectedCatalogPath,
+          descriptor.definition,
+          document.model,
+        )
+      : readModelCatalogSetting(
+          expectedCatalogPath,
+          descriptor.definition,
+          document.model,
+        );
   if (
     expectedCatalogPath !== undefined
     && (
       document.model_catalog_json !== expectedCatalogPath
-      || reasoningEffortMismatch(document, selectedModel, reasoningEffortPolicy)
+      || (selectedModel === undefined
+        ? !tolerateMissingModel
+        : reasoningEffortMismatch(document, selectedModel, reasoningEffortPolicy))
       || document.model_context_window !== undefined
       || document.model_auto_compact_token_limit !== undefined
       || document.model_auto_compact_token_limit_scope !== undefined
@@ -1697,13 +1717,35 @@ function validateModelCatalog(path, definition, model = definition.defaultModel)
 
 function loadModelCatalogSettings(path, definition) {
   const content = readPrivateFile(path, maximumCatalogBytes);
+  return [...readCatalogSlugSet(content, definition)]
+    .map((slug) => modelCatalogSetting(content, definition, slug));
+}
+
+function readCatalogSlugSet(content, definition) {
   let catalog;
   try {
     catalog = JSON.parse(content);
   } catch {
     throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
-  const presentModels = new Set(
+  return catalogSlugSet(catalog, definition);
+}
+
+function catalogHasModel(path, definition, model) {
+  return readCatalogSlugSet(
+    readPrivateFile(path, maximumCatalogBytes),
+    definition,
+  ).has(model);
+}
+
+function catalogSlugSet(catalog, definition) {
+  if (Array.isArray(catalog?.models)
+    && catalog.models.some((entry) =>
+      typeof record(entry).slug !== "string"
+      || !managedCatalogModelPattern.test(record(entry).slug))) {
+    throw new Error(`Codex ${definition.displayName} 模型目录包含无效模型名`);
+  }
+  return new Set(
     Array.isArray(catalog?.models)
       ? catalog.models.flatMap((entry) => {
           const slug = record(entry).slug;
@@ -1711,10 +1753,6 @@ function loadModelCatalogSettings(path, definition) {
         })
       : [],
   );
-  return definition.models.flatMap(({ slug, available }) => {
-    if (!available || !presentModels.has(slug)) return [];
-    return [modelCatalogSetting(content, definition, slug)];
-  });
 }
 
 function readModelCatalogSetting(path, definition, model) {
@@ -1727,6 +1765,19 @@ function readModelCatalogSetting(path, definition, model) {
   } catch {
     throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
   }
+}
+
+// 迁移路径允许选中模型已从官方目录消失；目录本身不可读或条目无效仍然失败关闭。
+function readOptionalModelCatalogSetting(path, definition, model) {
+  const content = readPrivateFile(path, maximumCatalogBytes);
+  let catalog;
+  try {
+    catalog = JSON.parse(content);
+  } catch {
+    throw new Error(`Codex ${definition.displayName} 模型目录无法安全读取`);
+  }
+  if (!catalogSlugSet(catalog, definition).has(model)) return undefined;
+  return modelCatalogSetting(content, definition, model);
 }
 
 function modelCatalogSetting(content, definition, model) {
@@ -1753,8 +1804,7 @@ function modelCatalogSetting(content, definition, model) {
   const reasoningEffort = document.default_reasoning_level;
   const autoCompactLimit = document.auto_compact_token_limit;
   if (
-    !definition.models.some(({ slug, available }) => available && slug === model)
-    || !Number.isSafeInteger(contextWindow)
+    !Number.isSafeInteger(contextWindow)
     || contextWindow <= 0
     || reasoningEfforts.length === 0
     || typeof reasoningEffort !== "string"
@@ -1819,9 +1869,6 @@ function validateManagedModelSettings(definition, settings) {
     !settings
     || typeof settings.model !== "string"
     || typeof settings.reasoningEffort !== "string"
-    || !definition.models.some(
-      ({ slug, available }) => available && slug === settings.model,
-    )
   ) {
     throw new Error(`${definition.displayName} 模型设置无效`);
   }

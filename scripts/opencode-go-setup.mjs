@@ -64,13 +64,13 @@ import {
   ManagedModelProviderSetupError,
   createManagedProviderCatalog,
   createManagedProviderRestorePreview,
+  resolveManagedCatalogModel,
 } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 const definition = opencodeGoProviderDefinition;
 const defaultAutoCompactPercent = 60;
 const maximumPrivateConfigBytes = 2_097_152;
-const previousDefaultModel = "deepseek-v4-flash";
 
 class OpenCodeGoSetupCancelled extends Error {}
 
@@ -415,8 +415,13 @@ export async function refreshOpencodeGoCatalogForUpdate(
     autoCompactPercent: defaultAutoCompactPercent,
     modelCompressionPercentByModel: configuredCompressionByModel(environment),
   });
+  const defaultModel = resolveManagedCatalogModel(managedCatalog, definition);
+  const catalogSlugs = new Set(
+    managedCatalog.models.flatMap((model) =>
+      typeof model?.slug === "string" ? [model.slug] : []),
+  );
   const managedDefault = managedCatalog.models.find(
-    (model) => model?.slug === definition.defaultModel,
+    (model) => model?.slug === defaultModel,
   );
   const reasoningEffort = managedDefault?.default_reasoning_level;
   if (typeof reasoningEffort !== "string") {
@@ -430,23 +435,24 @@ export async function refreshOpencodeGoCatalogForUpdate(
     "OpenCode Go 模型目录清单",
   );
   const previousMigration = readOpencodeGoDefaultModelMigration(previousManifest);
-  const migrationAlreadyApplied = previousMigration !== undefined;
   const settingsByProvider = new Map(
     previousSettings.map((settings) => [settings.provider, settings]),
   );
   const updates = [];
   const migratedProviders = [];
+  let migrationFrom;
   for (const account of accounts) {
     const provider = opencodeGoProviderId(account.id);
     const settings = settingsByProvider.get(provider);
-    if (migrationAlreadyApplied || !settings || settings.model !== previousDefaultModel) continue;
+    if (!settings || catalogSlugs.has(settings.model)) continue;
+    migrationFrom ??= settings.model;
     const paths = opencodeGoAccountPaths(environment, account.id);
     const documentPath = settings.mode === "switching" ? paths.profilePath : paths.configPath;
     const document = await readTomlFile(documentPath);
-    if (document.model !== previousDefaultModel || document.model_provider !== provider) {
+    if (document.model !== settings.model || document.model_provider !== provider) {
       throw new Error(`OpenCode Go 账户 ${account.id} 默认模型配置不一致`);
     }
-    document.model = definition.defaultModel;
+    document.model = defaultModel;
     if (settings.mode === "switching") {
       document.model_reasoning_effort = reasoningEffort;
     } else {
@@ -459,10 +465,13 @@ export async function refreshOpencodeGoCatalogForUpdate(
     migratedProviders.push(provider);
   }
   const role = loadManagedModelProviderRole(environment);
-  const migrateRole = !migrationAlreadyApplied
-    && role !== undefined
+  const roleModel = role !== undefined
     && isOpencodeGoProvider(role.provider)
-    && role.model === previousDefaultModel;
+    && !catalogSlugs.has(role.model)
+    ? role.model
+    : undefined;
+  const migrateRole = roleModel !== undefined;
+  migrationFrom ??= roleModel;
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
   const transactionPaths = [
     catalogPath,
@@ -480,13 +489,15 @@ export async function refreshOpencodeGoCatalogForUpdate(
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
       downloadedAt: updatedAt,
-      defaultModelMigration: migrationAlreadyApplied
-        ? previousMigration
-        : {
-            from: previousDefaultModel,
-            to: definition.defaultModel,
+      ...(migrationFrom === undefined
+        ? (previousMigration === undefined
+            ? {}
+            : { defaultModelMigration: previousMigration })
+        : { defaultModelMigration: {
+            from: migrationFrom,
+            to: defaultModel,
             appliedAt: updatedAt,
-          },
+          } }),
     }, null, 2)}\n`);
     guards = snapshotOpencodeGoFiles(transactionPaths);
     for (const update of updates) {
@@ -496,7 +507,7 @@ export async function refreshOpencodeGoCatalogForUpdate(
     if (migrateRole) {
       writeManagedModelProviderRoleConfig(environment, {
         provider: role.provider,
-        model: definition.defaultModel,
+        model: defaultModel,
       });
       guards = snapshotOpencodeGoFiles(transactionPaths);
     }
@@ -519,7 +530,7 @@ export async function refreshOpencodeGoCatalogForUpdate(
     modelCount: managedCatalog.models.length,
     migratedProviders,
     roleMigrated: migrateRole,
-    defaultModelMigrationApplied: !migrationAlreadyApplied,
+    defaultModelMigrationApplied: migrationFrom !== undefined,
   };
 }
 

@@ -1,9 +1,10 @@
 # OpenCode Go
 
 Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用，并支持在同一 Gateway 内配置多个
-OpenCode Go 账户（各自 Key、各自套餐额度）。当前受控模型为 `deepseek-v4-flash`、
-`deepseek-v4-flash-vision-exp` 和 `deepseek-v4-pro`；它们与 DeepSeek 官方 Provider 的同名模型仍是独立选项，分别使用各自的
-API Key、上游地址、Thread 路由和价格来源。
+OpenCode Go 账户（各自 Key、各自套餐额度）。当前官方目录中的模型为 `deepseek-flash` 和
+`deepseek-v4-pro`；它们与 DeepSeek 官方 Provider 的同名模型仍是独立选项，分别使用各自的
+API Key、上游地址、Thread 路由和价格来源。可选模型同样以下载的官方目录为准，DeepSeek 下线的
+旧模型名不会出现在 `/model` 与 Setup 选项中。
 
 ## 配置与使用
 
@@ -38,14 +39,14 @@ codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Serve
 codexc service restart all
 ```
 
-初次配置默认使用 Flash Vision Exp。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
+初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
 修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
 再按模型设置默认思考等级；自动压缩百分比走“模型与提供商 → 第三方 Provider → 模型自动压缩”，按模型名统一设置，
 每个模型按自己的上下文窗口计算阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。新增或刷新 OCG 模型目录时会继承 DeepSeek 等已配置 Provider 的同名模型全局压缩值，
 不会重新回落到 OCG 默认 60%。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
-首次升级时仍选择旧默认 Flash 的账户，以及已显式配置的对应共享子代理，会迁移到 Flash Vision Exp，已主动选择
-Pro 的账户保持不变；清单记录迁移完成后，用户再主动选回 Flash 也不会被后续更新覆盖。目录更新后
+所选模型已不在新目录中的账户，以及引用该模型的共享子代理，会切到目录默认模型 `deepseek-flash`，
+已选择仍在目录中的 Pro 的账户保持不变；仍存在于目录中的选择不会被后续更新覆盖。目录更新后
 的压缩阈值按原百分比和新上下文窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
 时自动重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
 
@@ -70,18 +71,19 @@ App Server 监管进程才启动该账户的隔离实例；账户 App Server 的
 Gateway 的全局空闲策略统一关闭已连接的 Provider Client：当没有任何前台或后台 Conversation 绑定、
 进行中的 Provider 操作或启动任务时，先等待 60 秒；期间新消息或恢复 Thread 会取消本轮释放。宽限期
 结束仍满足条件时，只有渠道会话自动解除触发的全局释放轮次会先向所有已知授权渠道发送一次释放通知，
-再关闭全部已连接 Provider Client；其他无绑定关闭不发送该通知。该操作不会停止账户隔离 App Server
-进程，也不按账户类型区分；再次选择账户、恢复 Thread 或使用对应 Remote TUI 时，Client 会按需重连。
+再关闭全部已连接 Provider Client，并停止未被租约占用的 App Server 进程（含主实例）；其他无绑定
+关闭不发送该通知。该操作不按账户类型区分；再次选择账户、恢复 Thread 或使用对应 Remote TUI 时，
+Supervisor 会按需重新启动实例。
 `codexc remote` 仍通过 Supervisor 租约保持其 App Server 进程可用；
 `codexc opencode-go account stop <id>` 继续用于手动停止账户隔离 App Server。统计代理始终共享一个。
 
 ## 协议与模型范围
 
 OpenCode Go 的基础地址为 `https://opencode.ai/zen/go/v1`。本项目使用 Codex App Server 的
-Responses Provider 配置；当前 Flash/Pro 已通过 `/responses` 流式文本和工具调用实测，Vision Exp
-复用同一 Chat Completions 兼容端点并声明文字和图片输入。官方 Go
-页面列出的其他模型使用多种端点协议，不能只因为出现在价格页或 `/models` 中就自动开放；每个新
-模型仍需确认 Codex Responses 兼容性、模型目录字段和真实工具合同后加入编译期受控列表。
+Responses Provider 配置；当前 V4.1 Flash 与 Pro 已通过 `/responses` 流式文本和工具调用实测，
+其中 `deepseek-flash` 声明文字和图片输入。官方 Go
+页面列出的其他模型使用多种端点协议，不能只因为出现在价格页或 `/models` 中就自动开放；可选模型
+仍以下载的官方目录为准：目录里声明什么就出现在选项中，官方页面新增但未写入该目录的模型不开放。
 
 OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go 时，`/usage` 会实时通过官方
 `GET /zen/go/v1/usage` 查询 5 小时（$12）、7 天（$30）和月度（$60）三个配额窗口的已用百分比与
@@ -111,8 +113,8 @@ Turn 完成通知展示额度中心已有的周期，5 小时窗口尚未同步�
 
 ### 能力边界
 
-- Vision Exp 声明文字和图片输入，图片按官方规则折算为输入 Token；Flash/Pro 只声明文字输入。
-  文字模型收到图片或音频时，Gateway 会在 Turn 前拒绝；音频目前没有受控模型支持。
+- `deepseek-flash` 声明文字和图片输入，图片按官方规则折算为输入 Token；`deepseek-v4-pro` 只声明
+  文字输入。文字模型收到图片或音频时，Gateway 会在 Turn 前拒绝；官方目录中的模型目前都不声明音频输入。
 - OpenCode Go 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 - 网页搜索已实测：OpenCode Go 与 DeepSeek 一样通过 `/responses` 提供搜索工具，Codex 侧统一
   以 `web_search` item 回传（`query`、`action` 和结构化 `results`），实测能返回带标题、URL、
@@ -136,15 +138,14 @@ Turn 完成通知展示额度中心已有的周期，5 小时窗口尚未同步�
 运行时价格来自随包发布的 `runtime/opencode-go-pricing-baseline.json`，与 DeepSeek 官方人民币峰谷
 价格完全隔离。基线（Schema v4）保存 OpenCode Go 官方页面列出的全部模型美元 Token 单价、
 Peak/Off-Peak 时段（UTC）与周末规则、长上下文档位、套餐包含用量、端点和 SDK 协议；官方限时免费且未给出
-Token 单价的模型记录为 `limited-free`，不伪造零价或套餐额度。只有当前受控模型会
-进入实际请求计价。DeepSeek V4 Pro/Flash/Flash Vision Exp 按官方时段（周一至周五的
-01:00–04:00 与 06:00–10:00 UTC；周末全天 Off-Peak）在请求开始时选择忙时价或闲时价，其中
-Vision Exp 的套餐包含用量为每月 $15；其余模型按单档或上下文
+Token 单价的模型记录为 `limited-free`，不伪造零价或套餐额度。只有官方目录中的模型会进入实际请求计价。DeepSeek V4.1 Flash、V4 Pro 与旧模型名 V4 Flash、V4 Flash Vision Exp 按官方
+时段（周一至周五的 01:00–04:00 与 06:00–10:00 UTC；周末全天 Off-Peak）在请求开始时选择忙时价
+或闲时价，其中 V4.1 Flash 与 V4 Pro 的套餐包含用量为每月 $15，V4 Flash 为 $30；其余模型按单档或上下文
 分档计价。维护基线时必须同时核对官方端点、协议、时段和周末规则，避免只更新价格而遗漏兼容性复核。
 套餐包含用量用于完成卡片在额度中心不可用时的剩余用量口径与人工复核，不参与单次请求的参考费用计算。
 
 价格变化由维护者人工对照官方页面更新基线并审查全部模型、时段与周末规则、长上下文档位、套餐包含用量、
-端点和 SDK 协议；新模型仍须加入编译期受控定义并通过测试后才能开放。只有官方整行 Token 单价与
+端点和 SDK 协议。只有官方整行 Token 单价与
 套餐额度均为 `-` 时才记录为限时免费状态。
 
 官方来源：[`OpenCode Go`](https://opencode.ai/docs/go/)。

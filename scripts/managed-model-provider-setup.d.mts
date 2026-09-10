@@ -43,6 +43,12 @@ export function createManagedProviderCatalog(
   },
 ): { models: Array<Record<string, unknown>> };
 
+export function resolveManagedCatalogModel(
+  catalog: { models?: Array<Record<string, unknown>> },
+  definition: ModelProviderDefinition,
+  preferred?: string,
+): string;
+
 export function applyExclusiveProviderConfig(
   current: Record<string, unknown>,
   definition: ModelProviderDefinition,

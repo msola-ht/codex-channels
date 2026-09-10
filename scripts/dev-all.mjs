@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import {
   appServerSocketAcceptsWebSocket,
+  ensureAppServerProvider,
   inspectAppServerSupervisor,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
@@ -158,6 +159,7 @@ async function ensureAppServerTopology({
         + "请先运行 codexc service stop all，再重试",
       );
     }
+    await ensureAppServerProvider(socketPath, existingSupervisor.primaryProvider);
     await waitForSocket(undefined, primaryPath, 10_000);
     console.log(`检测到现有主 App Server Socket，将直接复用：${primaryPath}`);
     return;

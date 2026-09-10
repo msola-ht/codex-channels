@@ -630,7 +630,7 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 
 ## 记录 16：`codexc agents`
 
-- 交互入口管理共享第三方 `agents.external` 角色，配置/停用前要求选择已配置 Provider 与受控模型并确认。
+- 交互入口管理共享第三方 `agents.external` 角色，配置/停用前要求选择已配置 Provider 与官方目录中的模型并确认。
 - 只写 Provider 私有配置中的角色字段，不复制 API Key 到消息、状态库或 Gateway 配置；变更后统一提示 `codexc service restart all`。
 - 不直接重启服务；运行中的 Gateway/App Server 在重启前继续使用旧角色。Provider/模型不存在、配置冲突或停用非本项目管理角色时失败或无操作。
 - 测试覆盖 Provider 选择、模型校验、启停和文案；未覆盖重启失败后的配置状态。结论：边界清楚，需纳入 Setup/Config 的统一激活文案。

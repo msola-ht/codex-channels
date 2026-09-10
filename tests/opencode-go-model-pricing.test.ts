@@ -72,9 +72,9 @@ describe("OpenCodeGoModelPricingResolver", () => {
       currency: "USD",
       source: "opencode-go-official",
       bucket: "off-peak",
-      uncachedInputPricePerMillionNanos: 220_000_000,
-      cachedInputPricePerMillionNanos: 7_000_000,
-      outputPricePerMillionNanos: 660_000_000,
+      uncachedInputPricePerMillionNanos: 150_000_000,
+      cachedInputPricePerMillionNanos: 3_000_000,
+      outputPricePerMillionNanos: 600_000_000,
     });
     expect(resolver.resolve({
       provider: "deepseek",
@@ -120,9 +120,9 @@ describe("OpenCodeGoModelPricingResolver", () => {
       atMs: Date.parse("2026-08-17T02:00:00.000Z"),
     })).toMatchObject({
       bucket: "peak",
-      uncachedInputPricePerMillionNanos: 440_000_000,
-      cachedInputPricePerMillionNanos: 14_000_000,
-      outputPricePerMillionNanos: 1_320_000_000,
+      uncachedInputPricePerMillionNanos: 300_000_000,
+      cachedInputPricePerMillionNanos: 6_000_000,
+      outputPricePerMillionNanos: 1_200_000_000,
     });
   });
 
@@ -150,6 +150,7 @@ describe("OpenCodeGoModelPricingResolver", () => {
 
     expect(baseline.models.get("deepseek-v4-flash-vision-exp")?.includedUsageUsd)
       .toBe(15);
+    expect(baseline.models.get("deepseek-flash")?.includedUsageUsd).toBe(15);
     expect(resolver.resolve({
       provider: "ocg-main",
       model: "deepseek-v4-flash-vision-exp",
@@ -158,9 +159,21 @@ describe("OpenCodeGoModelPricingResolver", () => {
       atMs: Date.parse("2026-08-21T02:00:00.000Z"),
     })).toMatchObject({
       bucket: "peak",
-      uncachedInputPricePerMillionNanos: 440_000_000,
-      cachedInputPricePerMillionNanos: 14_000_000,
-      outputPricePerMillionNanos: 1_320_000_000,
+      uncachedInputPricePerMillionNanos: 300_000_000,
+      cachedInputPricePerMillionNanos: 6_000_000,
+      outputPricePerMillionNanos: 1_200_000_000,
+    });
+    expect(resolver.resolve({
+      provider: "ocg-main",
+      model: "deepseek-flash",
+      serviceTier: null,
+      inputTokens: 1_000,
+      atMs: Date.parse("2026-08-21T02:00:00.000Z"),
+    })).toMatchObject({
+      bucket: "peak",
+      uncachedInputPricePerMillionNanos: 300_000_000,
+      cachedInputPricePerMillionNanos: 6_000_000,
+      outputPricePerMillionNanos: 1_200_000_000,
     });
   });
 

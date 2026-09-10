@@ -468,7 +468,7 @@ describe("codexc agents script", () => {
 
       expect(agentsStatus(fixture.environment)).toMatchObject({
         provider: "ocg-main",
-        model: "deepseek-v4-flash",
+        model: "deepseek-flash",
       });
     } finally {
       fixture.remove();
@@ -598,7 +598,7 @@ describe("codexc agents script", () => {
       await Promise.all([first, second]);
       expect(agentsStatus(fixture.environment)).toMatchObject({
         provider: "ocg-main",
-        model: "deepseek-v4-flash",
+        model: "deepseek-flash",
       });
       expect(readFileSync(fixture.rolePath, "utf8"))
         .toContain('model_provider = "ocg-main"');
@@ -686,7 +686,7 @@ function writeProviderFixture(
   writeFileSync(
     catalogPath,
     JSON.stringify({
-      models: definition.models.map(({ slug }: { slug: string }) => ({
+      models: ["deepseek-flash", "deepseek-v4-pro"].map((slug: string) => ({
         slug,
         display_name: slug,
         context_window: 1_048_576,
@@ -767,14 +767,10 @@ function opencodeGoMainDefinition(): ModelProviderDefinition {
     baseUrl: "https://opencode.ai/zen/go/v1",
     wireApi: "responses" as const,
     apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey("main"),
-    defaultModel: "deepseek-v4-flash",
+    defaultModel: "deepseek-flash",
     defaultReasoningEffort: "high",
     supportsWebsockets: false,
     capabilities: opencodeGoProviderDefinition.capabilities,
-    models: [
-      { slug: "deepseek-v4-flash", available: true },
-      { slug: "deepseek-v4-pro", available: true },
-    ],
   };
 }
 

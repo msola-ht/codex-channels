@@ -48,7 +48,8 @@ timeout_seconds = 900
 
 [conversation]
 # 渠道会话在连续无用户输入和会话输出时自动解除 Thread 绑定的分钟数；
-# 0 表示关闭。所有渠道统一使用该值。
+# 0 表示关闭渠道会话自动解除。无任何绑定时，Gateway 仍会执行全局空闲释放，
+# 停止未被租约占用的 App Server。所有渠道统一使用该值。
 idle_release_minutes = 15
 
 [display]

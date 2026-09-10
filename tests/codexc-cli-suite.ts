@@ -1932,7 +1932,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     );
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -2107,7 +2107,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const roleConfigPath = join(codexHome, "sf-agent.config.toml");
     writeFileSync(
       roleConfigPath,
-      'model = "deepseek-v4-flash"\nmodel_provider = "ocg-main"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "ocg-main"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -2203,7 +2203,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     );
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -3092,7 +3092,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -4498,10 +4498,10 @@ function writeManagedProviderFixture(
 
 function managedModelCatalog(definition: ModelProviderDefinition): string {
   return `${JSON.stringify({
-    models: definition.models.filter(({ available }) => available).map(({ slug }) => ({
+    models: [definition.defaultModel, "deepseek-v4-pro"].map((slug) => ({
       slug,
       display_name: slug,
-      input_modalities: slug.includes("vision") ? ["text", "image"] : ["text"],
+      input_modalities: slug === "deepseek-v4-pro" ? ["text"] : ["text", "image"],
       context_window: 1_048_576,
       default_reasoning_level: "high",
       supported_reasoning_levels: [

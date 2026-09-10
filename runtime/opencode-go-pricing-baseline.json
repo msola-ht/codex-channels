@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
   "source": "https://opencode.ai/docs/go/",
-  "sourceUpdatedAt": "2026-08-24T08:21:37.000Z",
+  "sourceUpdatedAt": "2026-09-10T09:05:00.000Z",
   "currency": "USD",
   "unit": "per_million_tokens",
   "timezone": "UTC",
@@ -11,20 +11,39 @@
     "06:00-10:00"
   ],
   "models": {
+    "deepseek-flash": {
+      "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+      "aiSdkPackage": "@ai-sdk/openai-compatible",
+      "peakOffPeak": {
+        "offPeak": {
+          "input": 0.15,
+          "output": 0.6,
+          "cachedRead": 0.003,
+          "cachedWrite": null
+        },
+        "peak": {
+          "input": 0.3,
+          "output": 1.2,
+          "cachedRead": 0.006,
+          "cachedWrite": null
+        }
+      },
+      "includedUsageUsd": 15
+    },
     "deepseek-v4-flash": {
       "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
       "aiSdkPackage": "@ai-sdk/openai-compatible",
       "peakOffPeak": {
         "offPeak": {
-          "input": 0.22,
-          "output": 0.66,
-          "cachedRead": 0.007,
+          "input": 0.15,
+          "output": 0.6,
+          "cachedRead": 0.003,
           "cachedWrite": null
         },
         "peak": {
-          "input": 0.44,
-          "output": 1.32,
-          "cachedRead": 0.014,
+          "input": 0.3,
+          "output": 1.2,
+          "cachedRead": 0.006,
           "cachedWrite": null
         }
       },
@@ -35,15 +54,15 @@
       "aiSdkPackage": "@ai-sdk/openai-compatible",
       "peakOffPeak": {
         "offPeak": {
-          "input": 0.22,
-          "output": 0.66,
-          "cachedRead": 0.007,
+          "input": 0.15,
+          "output": 0.6,
+          "cachedRead": 0.003,
           "cachedWrite": null
         },
         "peak": {
-          "input": 0.44,
-          "output": 1.32,
-          "cachedRead": 0.014,
+          "input": 0.3,
+          "output": 1.2,
+          "cachedRead": 0.006,
           "cachedWrite": null
         }
       },
