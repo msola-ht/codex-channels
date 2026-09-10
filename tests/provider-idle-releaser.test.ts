@@ -10,13 +10,16 @@ const binding = {
 };
 
 describe("ProviderIdleReleaser", () => {
-  it("closes every connected Provider Client when the Gateway has no bindings", async () => {
-    const closed: string[] = [];
+  it("closes every Client and stops its App Server when the Gateway has no bindings", async () => {
+    const events: string[] = [];
     const releaser = new ProviderIdleReleaser({
       logger: silentLogger(),
       listConnectedProviders: () => ["openai", "deepseek"],
       closeProvider: async (provider) => {
-        closed.push(provider);
+        events.push(`close:${provider}`);
+      },
+      releaseProvider: async (provider) => {
+        events.push(`release:${provider}`);
       },
       listBindings: () => [],
       gracePeriodMs: 0,
@@ -24,7 +27,78 @@ describe("ProviderIdleReleaser", () => {
 
     await releaser.closeIfIdle();
 
-    expect(closed).toEqual(["openai", "deepseek"]);
+    expect(events).toEqual([
+      "close:openai",
+      "close:deepseek",
+      "release:openai",
+      "release:deepseek",
+    ]);
+  });
+
+  it("stops a running App Server that has no connected Client", async () => {
+    const released: string[] = [];
+    const closeProvider = vi.fn(async () => undefined);
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => [],
+      closeProvider,
+      releaseProvider: async (provider) => {
+        released.push(provider);
+      },
+      listReleasableAppServers: async () => ["ocg-main"],
+      listBindings: () => [],
+      gracePeriodMs: 0,
+    });
+
+    await releaser.closeIfIdle();
+
+    expect(closeProvider).not.toHaveBeenCalled();
+    expect(released).toEqual(["ocg-main"]);
+  });
+
+  it("rechecks idle App Servers periodically", async () => {
+    vi.useFakeTimers();
+    const released: string[] = [];
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => [],
+      closeProvider: async () => undefined,
+      releaseProvider: async (provider) => {
+        released.push(provider);
+      },
+      listReleasableAppServers: async () => ["openai"],
+      listBindings: () => [],
+      gracePeriodMs: 0,
+    });
+    try {
+      releaser.start();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(released).toEqual(["openai"]);
+    } finally {
+      await releaser.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps releasing other App Servers when one stop fails", async () => {
+    const released: string[] = [];
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(),
+      listConnectedProviders: () => ["openai", "deepseek"],
+      closeProvider: async () => undefined,
+      releaseProvider: async (provider) => {
+        released.push(provider);
+        if (provider === "openai") throw new Error("stop failed");
+      },
+      listBindings: () => [],
+      gracePeriodMs: 0,
+    });
+
+    await releaser.closeIfIdle();
+
+    expect(released).toEqual(["openai", "deepseek"]);
   });
 
   it("keeps all Provider Clients running while any foreground or background binding exists", async () => {

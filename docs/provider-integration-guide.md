@@ -104,17 +104,17 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 ### 3.5 生命周期与空闲 Client 关闭
 
 - 受管 Provider 的统计代理与隔离 App Server 支持按需启动；Gateway 全局空闲策略统一关闭已连接
-  Provider Client，不按 Provider 类型区分；
+  Provider Client 并停止对应 App Server 进程（含主实例），不按 Provider 类型区分；
 - 关闭条件（全部满足）：没有任何前台或后台 Conversation 绑定、没有进行中的 Provider 操作或
   启动任务，且该空闲状态持续 60 秒；宽限期内新消息、恢复 Thread、Provider 操作或启动任务会取消
-  本轮关闭。关闭只断开 Gateway Client，不终止 App Server 进程，也不删除 Thread 持久数据；再次
-  选择模型、恢复 Thread 或使用对应 Remote TUI 时自动按需重连；
+  本轮关闭。关闭不删除 Thread 持久数据；服务进程保持运行，再次选择模型、恢复 Thread 或使用对应
+  Remote TUI 时自动按需启动并重连；
 - `codexc remote` 必须在 TUI 生命周期内持有 Supervisor Provider 租约；租约存在时手动停止必须
   失败关闭，连接退出或异常断开时自动撤销租约；
 - **释放通知**：渠道会话空闲自动解除后先向当前渠道发送一次自动解除提示；60 秒宽限期结束仍无任何
-  绑定或活动时，先向所有已知授权渠道发送一次“模型连接已空闲，即将释放”的通知，再关闭 Provider
-  Client。没有已知授权渠道时只记录日志，不向未知会话广播；手动新建、切换或后台任务结束导致的无
-  绑定关闭不发送这条全局提示。
+  绑定或活动时，先向所有已知授权渠道发送一次“所有模型连接已空闲，空闲的 App Server 即将停止”的通知，
+  再关闭 Provider Client 并停止未被租约占用的 App Server 进程。没有已知授权渠道时只记录日志，
+  不向未知会话广播；手动新建、切换或后台任务结束导致的无绑定关闭不发送这条全局提示。
 
 ### 3.6 Setup
 

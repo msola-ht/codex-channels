@@ -53,6 +53,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
   let cacheHits = 0;
   let historyReads = 0;
   try {
+    await ensureAppServerProvider(runtime.primarySocketPath, runtime.primaryProvider);
     for (const provider of runtime.managedProviders) {
       await ensureAppServerProvider(runtime.primarySocketPath, provider.provider);
     }

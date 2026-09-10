@@ -127,13 +127,13 @@ describe("Feishu outbox", () => {
     outbox.handle({
       type: "warning",
       target,
-      message: "所有模型连接已空闲，即将释放；下次消息或恢复会话时会自动重连。",
+      message: "所有模型连接已空闲，空闲的 App Server 即将停止；使用中的实例保持运行，下次消息或恢复会话时会自动启动。",
       globalIdle: true,
     });
     await outbox.close();
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain("所有模型连接已空闲，即将释放");
+    expect(sent[0]).toContain("所有模型连接已空闲，空闲的 App Server 即将停止");
   });
 
   it("sends the Turn start confirmation as a reply and creates the Thread status card", async () => {

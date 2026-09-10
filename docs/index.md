@@ -145,7 +145,7 @@ CLI 参数，未显式覆盖时失败关闭。
 | Skill、MCP 与 Plugin | `skills/list`、`turn/start` / `turn/steer` 的 `input.skill` 和 `mention`、`mcpServerStatus/list`、`config/mcpServer/reload`、`mcpServer/oauth/login`、`mcpServer/oauthLogin/completed`、`mcpServer/resource/read`、MCP 状态通知与 Tool Item `readOnlyHint`、开发中 `plugin/installed` | Skill、MCP 与 Plugin 分别由 [`skill-port.ts`](../src/application/skill-port.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`plugin-port.ts`](../src/application/plugin-port.ts) 及对应 Client 适配器隔离。MCP 按当前 Thread 提供有界详情、健康摘要、刷新、OAuth 与只读 Resource；工具目录和实际 Tool Item 的读写提示统一归约为只读、可能写入或未知，但不替代审批或执行结果，也不暴露直接 Tool Call。Plugin 只在默认关闭、显式开启的开发中开关下列出或查看当前 Workspace 已安装项，并可在 OpenAI Thread 中发送官方 `mention`；Application 对同一次 `plugin/installed` 响应提供每页 8 项的本地分页过滤和只含需处理项的健康摘要，保留全局序号且不调用实验 `plugin/search`；详情使用响应中的版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，能力与套餐各有界展示 8 项，不传播来源路径、URL、图标、截图、默认提示词或原始 Marketplace 错误。Marketplace 搜索、安装、卸载和分享仍禁止。三个 Surface 共用解析与输出；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`conversation-command-service.test.ts`](../tests/conversation-command-service.test.ts)、[`conversation-command-format.test.ts`](../tests/conversation-command-format.test.ts)、[`operation-adapter.test.ts`](../tests/operation-adapter.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`surface-copy-contract.test.ts`](../tests/surface-copy-contract.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | MCP 与扩展任务通知口径 | MCP 启动状态通知、`turn/started` | MCP 首次 `starting` / `ready` 状态保持静默，[`core.ts`](../src/conversation-core/core.ts) 只投递失败、取消和异常恢复，避免与主动查询或认证结果重复。Skill、Plugin 和子代理新建 Turn 时只由共享生命周期确认，并在该事件中保留具体类型和名称；追加到活动 Turn 时保留命令确认；[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`surface-copy-contract.test.ts`](../tests/surface-copy-contract.test.ts)、[`feishu-outbox.test.ts`](../tests/feishu-outbox.test.ts) |
 | 用量、额度与权限 | OpenAI：`account/usage/read`（账户摘要与可选 `threadId` 官方估算）、`account/rateLimits/read`、账户通知；DeepSeek：`GET /user/balance`；OpenCode Go：`GET /zen/go/v1/usage`；权限：`permissionProfile/list` | [`account-port.ts`](../src/application/account-port.ts) 与 [`provider-account-service.ts`](../src/application/provider-account-service.ts) 按当前 Thread 的 `modelProvider` 返回 Token 用量、精确 Thread 官方估算、额度、第三方余额、配额窗口或明确不支持；OpenAI [`account-adapter.ts`](../src/codex-client/account-adapter.ts) 接受固定版本完整 `PlanType`，其中 `ent26` 显示为 Enterprise，并严格校验官方 Thread ID、整数单位和分组字段；`/usage` 保留账户摘要为主结果，当前 OpenAI Thread 的估算查询并行且失败隔离，不缓存、轮询或聚合子代理；`/limits` 仅在官方响应包含 10,080 分钟窗口与有效重置时间，且本机统计代理在相同重置周期观测到额度正向变化时，用 [`request-metrics-port.ts`](../src/application/request-metrics-port.ts) 按相邻快照区间估算每 1% Token 与 API 参考费用；DeepSeek [`deepseek-account-adapter.ts`](../src/bootstrap/deepseek-account-adapter.ts) 通过共享 [`model-provider-runtime.mjs`](../runtime/model-provider-runtime.mjs) 从切换 Profile 或固定基础配置读取 Key、复用统一代理并裁剪官方余额；OpenCode Go [`opencode-go-account-adapter.ts`](../src/bootstrap/opencode-go-account-adapter.ts) 通过同一运行时读取凭据，把官方 `/usage` 的 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与重置时间），命令与 WebUI 按窗口展示，并按请求记录的官方窗口快照汇总模型本地 Token、按官方峰谷规则拆分 Off-Peak / Peak 两档（价格基线只用于完成卡片剩余额度口径）；Thread Token/上下文统计保持 Provider 通用，OpenAI 周限不附加到第三方 Thread；账户通知仍由 [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 映射，Permission Profile 由 [`permission-port.ts`](../src/application/permission-port.ts) 与 [`permission-adapter.ts`](../src/codex-client/permission-adapter.ts) 隔离；[`provider-account-service.test.ts`](../tests/provider-account-service.test.ts)、[`deepseek-account-adapter.test.ts`](../tests/deepseek-account-adapter.test.ts)、[`opencode-go-account-adapter.test.ts`](../tests/opencode-go-account-adapter.test.ts)、[`conversation-command-format.test.ts`](../tests/conversation-command-format.test.ts)、[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
-| 真实合同 | 模型、思考等级、Fast、`multi_agent_v2` 与 agents 用户设置、Skill/MCP/Plugin/Permission 稳定查询、Plugin 安全详情字段、结构化 Skill 与 Plugin mention Turn 输入、MCP 配置刷新、完整详情与工具读写属性、只读资源、OAuth PKCE 回调与完成通知、MCP 工具审批元数据与持久范围往返、Default/Plan 预设与 Plan Turn 设置通知、共享 Thread 设置通知、当前精确 Thread 官方用量估算、跨客户端 Thread 固定状态、Turn 启动结果、跨客户端 Goal 请求与通知、重连后 resume Goal 恢复、双客户端连接恢复、动态工具注册与 `item/tool/call` 完整往返，以及真实 `service-app-server` 的 Provider 租约拒绝释放 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 真实合同 | 模型、思考等级、Fast、`multi_agent_v2` 与 agents 用户设置、Skill/MCP/Plugin/Permission 稳定查询、Plugin 安全详情字段、结构化 Skill 与 Plugin mention Turn 输入、MCP 配置刷新、完整详情与工具读写属性、只读资源、OAuth PKCE 回调与完成通知、MCP 工具审批元数据与持久范围往返、Default/Plan 预设与 Plan Turn 设置通知、共享 Thread 设置通知、当前精确 Thread 官方用量估算、跨客户端 Thread 固定状态、Turn 启动结果、跨客户端 Goal 请求与通知、重连后 resume Goal 恢复、双客户端连接恢复、动态工具注册与 `item/tool/call` 完整往返，以及真实 `service-app-server` 的主实例启动、Provider 按需启动/释放与租约拒绝释放 | [`real-app-server.test.ts`](../tests/real-app-server.test.ts)、[`real-app-server-supervised-provider.test.ts`](../tests/real-app-server-supervised-provider.test.ts) |
 
 自定义 Responses Provider Setup 的官方模型目录复用、手工模型 ID、固定/切换双模式、直接 API Key、
 独立 Profile、候选编辑、共享 `agents.external` 的无凭据角色文件与统计代理接入，以及私有备份事务边界见
@@ -157,13 +157,18 @@ OpenCode Go 和自定义第三方代理仍拒绝这些路径。真实合同使�
 `POST /alpha/search` 能穿过该白名单并完成工具结果往返。
 
 Provider 生命周期补充：私有 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 不是
-Codex App Server RPC。它负责受管实例的按需启动和显式管理操作；`codexc remote` 连接受管 Provider
+Codex App Server RPC。它负责主实例与受管实例的按需启动和显式管理操作；`codexc remote` 连接实例
 期间通过同一私有 Socket 持有生命周期租约，Supervisor 在租约存在时拒绝显式释放，并在连接正常退出
-或异常断开后自动撤销租约。同一 Provider 的启动、释放与租约获取串行执行，释放响应区分已释放、
-租约占用与实例未运行；账户删除遇到旧版或无效监管响应时失败关闭。Gateway 全局空闲策略只关闭
-Provider Client，不调用 Supervisor 停止 App Server 进程；会话解除后等待 60 秒，期间可恢复或创建
-新会话，宽限期结束仍无任何绑定和活动时，先向所有已知授权渠道通知，再关闭已连接 Client；该通知
-只针对渠道会话空闲自动解除触发的全局释放轮次，其他原因导致的无绑定关闭不广播。
+或异常断开后自动撤销租约。同一实例的启动、释放与租约获取串行执行，释放响应区分已释放、
+租约占用与实例未运行；账户删除遇到旧版或无效监管响应时失败关闭。主 App Server 与受管 Provider
+实例共用同一套监管协议，`codexc remote` 连接主实例时同样持有生命周期租约。Gateway 全局空闲策略
+在关闭已连接 Client 后调用 Supervisor 停止 App Server 进程（含主实例）；会话解除后等待 60 秒，
+期间可恢复或创建新会话，之后每 60 秒复检一次。宽限期结束仍无任何绑定和活动时，先向所有已知授权
+渠道通知，再关闭 Client，并停止监管入口中全部未被租约占用的运行实例；服务进程保持运行，后续使用
+按需启动。不经 `codexc remote` 直连共享 Socket 的客户端不持有租约，空闲释放不会为其保留实例。
+该通知只针对渠道会话空闲自动解除触发的全局释放轮次，其他原因导致的无绑定关闭不广播。
+没有监管入口时，Gateway 仍可连接独立运行的 App Server，但不会按需启停该进程。确保与释放遇到旧版
+监管协议响应时失败关闭，并提示运行 `codexc service restart all`。
 
 模型价格实现补充：DeepSeek 不使用上述通用远程目录，[`deepseek-model-pricing.ts`](../src/bootstrap/deepseek-model-pricing.ts)
 严格读取随包发布的官方人民币基线，按请求开始时的北京时间、生效计划、工作日与周末规则选择

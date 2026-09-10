@@ -18,7 +18,7 @@ import {
 } from "./private-file.mjs";
 import { terminateChildProcess } from "./process-lifecycle.mjs";
 
-const protocolVersion = 4;
+const protocolVersion = 5;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 1_024;
 const connectionTimeoutMs = 1_000;
@@ -284,6 +284,11 @@ export class AppServerSupervisorOwner {
     }
   }
 
+  markRunning(provider) {
+    this.#releasedProviders.delete(provider);
+    this.#runningProviders.add(provider);
+  }
+
   close() {
     if (!this.#closePromise) {
       this.#closing = true;
@@ -336,17 +341,25 @@ export async function ensureAppServerProvider(primarySocketPath, provider) {
     action: "ensureProvider",
     provider,
   }, 15_000);
+  if (response === undefined) {
+    throw new Error(
+      `无法连接 App Server 监管入口：${socketPath}；`
+      + "请确认 codexc service app-server 正在运行",
+    );
+  }
   let value;
   try {
-    value = JSON.parse(response?.trim() ?? "");
+    value = JSON.parse(response.trim());
   } catch {
     throw new Error(`模型 Provider 启动请求没有有效响应：${provider}`);
   }
   if (value?.version !== protocolVersion || value.provider !== provider || value.ok !== true) {
     throw new Error(
-      typeof value?.error === "string" && value.error
-        ? value.error
-        : `模型 Provider 启动失败：${provider}`,
+      supervisorVersionMismatch(value)
+        ? supervisorVersionMismatchMessage(value)
+        : typeof value?.error === "string" && value.error
+          ? value.error
+          : `模型 Provider 启动失败：${provider}`,
     );
   }
 }
@@ -391,9 +404,11 @@ export async function acquireAppServerProviderLease(primarySocketPath, provider)
       }
       if (value?.version !== protocolVersion || value.provider !== provider || value.ok !== true) {
         fail(
-          typeof value?.error === "string" && value.error
-            ? value.error
-            : `模型 Provider 租约获取失败：${provider}`,
+          supervisorVersionMismatch(value)
+            ? supervisorVersionMismatchMessage(value)
+            : typeof value?.error === "string" && value.error
+              ? value.error
+              : `模型 Provider 租约获取失败：${provider}`,
         );
         return;
       }
@@ -428,17 +443,25 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
     action: "releaseProvider",
     provider,
   }, 15_000);
+  if (response === undefined) {
+    throw new Error(
+      `无法连接 App Server 监管入口：${socketPath}；`
+      + "请确认 codexc service app-server 正在运行",
+    );
+  }
   let value;
   try {
-    value = JSON.parse(response?.trim() ?? "");
+    value = JSON.parse(response.trim());
   } catch {
     throw new Error(`模型 Provider 释放请求没有有效响应：${provider}`);
   }
   if (value?.version !== protocolVersion || value.provider !== provider || value.ok !== true) {
     throw new Error(
-      typeof value?.error === "string" && value.error
-        ? value.error
-        : `模型 Provider 释放失败：${provider}`,
+      supervisorVersionMismatch(value)
+        ? supervisorVersionMismatchMessage(value)
+        : typeof value?.error === "string" && value.error
+          ? value.error
+          : `模型 Provider 释放失败：${provider}`,
     );
   }
   if (
@@ -448,6 +471,15 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
     throw new Error(`模型 Provider 释放响应无效：${provider}`);
   }
   return { released: value.released, reason: value.reason };
+}
+
+function supervisorVersionMismatch(value) {
+  return typeof value?.version === "number" && value.version !== protocolVersion;
+}
+
+function supervisorVersionMismatchMessage(value) {
+  return `App Server 监管协议版本不匹配（服务 ${value.version}，客户端 ${protocolVersion}）；`
+    + "请运行 codexc service restart all 后重试";
 }
 
 function assertSafeSupervisorSocket(socketPath) {
@@ -639,19 +671,23 @@ function parseTopology(response) {
     || !Array.isArray(value.socketPaths)
     || value.socketPaths.length < 1
     || value.socketPaths.some((path) => typeof path !== "string" || path.length === 0)
-    || !validProviderStateList(value.runningProviders, value.managedProviders)
-    || !validProviderStateList(value.releasedProviders, value.managedProviders)
-    || !validProviderStateList(value.leasedProviders, value.managedProviders)
+    || !validProviderStateList(value.runningProviders, providerIds(value))
+    || !validProviderStateList(value.releasedProviders, providerIds(value))
+    || !validProviderStateList(value.leasedProviders, providerIds(value))
   ) {
     return undefined;
   }
   return value;
 }
 
-function validProviderStateList(value, managedProviders) {
+function providerIds(value) {
+  return [value.primaryProvider, ...value.managedProviders];
+}
+
+function validProviderStateList(value, providerIds) {
   return Array.isArray(value)
     && value.every((provider) =>
-      providerIdPattern.test(provider) && managedProviders.includes(provider))
+      providerIdPattern.test(provider) && providerIds.includes(provider))
     && new Set(value).size === value.length;
 }
 

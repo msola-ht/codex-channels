@@ -475,7 +475,18 @@ if (document) {
   if (appServerTopology) {
     await checkAppServerSupervisor(socketPath, appServerTopology);
   }
-  await checkAppServer("Codex App Server", socketPath, codexBinary ?? codexCommand);
+  if (
+    appServerTopology
+    && await primaryAppServerReleased(socketPath, appServerTopology.primaryProvider)
+  ) {
+    record(
+      "Codex App Server",
+      true,
+      "已因空闲释放停止；下次消息或 TUI 使用时会按需启动（本次未执行 initialize 核验）",
+    );
+  } else {
+    await checkAppServer("Codex App Server", socketPath, codexBinary ?? codexCommand);
+  }
   for (let index = 0; index < managedProviders.length; index += 1) {
     const managedProvider = managedProviders[index];
     await checkOptionalAppServer(
@@ -495,6 +506,15 @@ async function checkOptionalAppServer(label, socketPath, codexBinary) {
     return;
   }
   await checkAppServer(label, socketPath, codexBinary);
+}
+
+async function primaryAppServerReleased(socketPath, primaryProvider) {
+  try {
+    const topology = await inspectAppServerSupervisor(socketPath);
+    return topology?.releasedProviders.includes(primaryProvider) === true;
+  } catch {
+    return false;
+  }
 }
 
 async function checkAppServerSupervisor(socketPath, expectedTopology) {

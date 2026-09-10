@@ -11,7 +11,10 @@ import {
   serviceDefinitions,
   serviceDefinitionsForTarget,
 } from "../runtime/service-targets.mjs";
-import { appServerSocketAcceptsWebSocket } from "../runtime/app-server-supervisor.mjs";
+import {
+  appServerSocketAcceptsWebSocket,
+  inspectAppServerSupervisor,
+} from "../runtime/app-server-supervisor.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -267,9 +270,18 @@ export async function inspectManagedServiceHealth(options = {}) {
         if (service.target === "gateway") {
           rpcReachable = await gatewayOwnerIsReady(paths.configPath);
         } else if (service.target === "app-server") {
-          rpcReachable = await appServerSocketAcceptsWebSocket(
-            resolvePrimaryAppServerSocketPath(configDocument, paths.dataDir),
+          const primarySocketPath = resolvePrimaryAppServerSocketPath(
+            configDocument,
+            paths.dataDir,
           );
+          if (await appServerSocketAcceptsWebSocket(primarySocketPath)) {
+            rpcReachable = true;
+          } else {
+            const topology = await inspectAppServerSupervisor(primarySocketPath);
+            rpcReachable = topology?.releasedProviders.includes(
+              topology.primaryProvider,
+            ) === true;
+          }
         }
       } catch {
         rpcReachable = false;

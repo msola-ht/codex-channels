@@ -4,7 +4,10 @@ import { dirname, join } from "node:path";
 import type { Logger } from "pino";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
-import { ensureAppServerProvider } from "../../runtime/app-server-supervisor.mjs";
+import {
+  ensureAppServerProvider,
+  releaseAppServerProvider,
+} from "../../runtime/app-server-supervisor.mjs";
 import { hasCodexAuthFile } from "../../runtime/codex-home.mjs";
 import {
   effectiveCodexBinary,
@@ -37,6 +40,7 @@ import {
 import { terminateChildProcess } from "../../runtime/process-lifecycle.mjs";
 import {
   inspectAppServerSupervisor,
+  inspectAppServerSupervisorState,
 } from "../../runtime/app-server-supervisor.mjs";
 import {
   loadOpencodeGoProviderIdentities,
@@ -296,6 +300,17 @@ export class GatewayApplication {
       async (provider) => {
         this.providerIdleReleaser?.markLaunching(provider);
         try {
+          if (provider === primaryProvider) {
+            const supervisor = await inspectAppServerSupervisorState(
+              config.codexSocketPath,
+            );
+            if (supervisor.status === "missing") return;
+            if (supervisor.status === "incompatible") {
+              throw new Error(
+                "App Server 监管协议版本不匹配；请运行 codexc service restart all 后重试",
+              );
+            }
+          }
           await ensureAppServerProvider(config.codexSocketPath, provider);
         } finally {
           this.providerIdleReleaser?.finishLaunching(provider);
@@ -770,6 +785,39 @@ export class GatewayApplication {
       logger,
       listConnectedProviders: () => this.codex.connectedProviderIds(),
       closeProvider: (provider) => this.codex.closeProvider(provider),
+      releaseProvider: async (provider) => {
+        const supervisor = await inspectAppServerSupervisorState(
+          config.codexSocketPath,
+        );
+        if (supervisor.status !== "ready") {
+          if (supervisor.status === "incompatible") {
+            this.logger.warn(
+              { provider },
+              "App Server 监管协议版本不匹配，跳过空闲停止；"
+              + "请运行 codexc service restart all 后重试",
+            );
+          }
+          return;
+        }
+        const result = await releaseAppServerProvider(
+          config.codexSocketPath,
+          provider,
+        );
+        this.logger.info(
+          { provider, ...result },
+          result.released
+            ? "App Server 已因 Gateway 全局空闲停止"
+            : "App Server 未因租约占用或未运行而停止",
+        );
+      },
+      listReleasableAppServers: async () => {
+        const state = await inspectAppServerSupervisorState(config.codexSocketPath);
+        if (state.status !== "ready") return [];
+        const leased = new Set(state.topology.leasedProviders);
+        return state.topology.runningProviders.filter(
+          (provider) => !leased.has(provider),
+        );
+      },
       listBindings: () => this.bindings.list(),
       gracePeriodMs: 60_000,
       notifyBeforeClose: (providers) => {
@@ -1223,6 +1271,7 @@ export class GatewayApplication {
       await this.channelImageSpool.start();
       this.scheduledTasks?.start();
       this.conversationIdleReleaser?.start();
+      this.providerIdleReleaser?.start();
       this.scheduleBindingRestore();
       void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
         this.logger.warn(

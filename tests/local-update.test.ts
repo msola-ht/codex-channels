@@ -752,7 +752,7 @@ describe("local update", () => {
         primaryProvider: descriptor.topology.primaryProvider,
         managedProviders: descriptor.topology.managedProviders,
         socketPaths: descriptor.topology.socketPaths,
-        version: 4,
+        version: 5,
         runningProviders: [],
         releasedProviders: [],
         leasedProviders: [],
@@ -767,6 +767,48 @@ describe("local update", () => {
       timeoutMs: 1_000,
     });
     expect(gatewayChecks).toBeGreaterThanOrEqual(4);
+
+    nowMs = 0;
+    gatewayChecks = 0;
+    await waitForCoreServices(environment, {
+      gatewayHealthy: () => ++gatewayChecks >= 2,
+      inspectSupervisorState: async () => ({
+        status: "ready" as const,
+        topology: {
+          pid: process.pid,
+          primaryProvider: descriptor.topology.primaryProvider,
+          managedProviders: descriptor.topology.managedProviders,
+          socketPaths: descriptor.topology.socketPaths,
+          version: 5,
+          runningProviders: [],
+          releasedProviders: [descriptor.topology.primaryProvider],
+          leasedProviders: [],
+        },
+      }),
+      intervalMs: 100,
+      now: () => nowMs,
+      sleep: async (milliseconds) => {
+        nowMs += milliseconds;
+      },
+      socketHealthy: () => false,
+      stableMs: 200,
+      timeoutMs: 1_000,
+    });
+    expect(gatewayChecks).toBeGreaterThanOrEqual(4);
+  });
+
+  it("fails fast when the supervisor protocol version does not match", async () => {
+    const { environment } = fixture();
+    await expect(waitForCoreServiceTarget("app-server", environment, {
+      gatewayHealthy: async () => true,
+      inspectSupervisorState: async () => ({ status: "incompatible" as const }),
+      intervalMs: 100,
+      now: () => 0,
+      sleep: async () => undefined,
+      socketHealthy: async () => true,
+      stableMs: 0,
+      timeoutMs: 1_000,
+    })).rejects.toThrow("codexc service restart all");
   });
 
   it("checks only the requested core service target", async () => {

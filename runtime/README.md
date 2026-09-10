@@ -69,11 +69,12 @@
   使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机
   认证令牌，连接首帧必须认证，关闭时只删除当前所有者发布的描述文件。
 - `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
-  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动、释放与
-  Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`）；拓扑同时区分
-  已配置、运行中、主动释放和持有租约的 Provider。租约由私有 Socket 连接持有，断开时自动撤销，
-  存在租约时拒绝释放；同一 Provider 的启动、释放与租约获取串行执行，释放结果明确区分已释放、
-  租约占用和实例未运行，旧版或无效监管响应对账户删除失败关闭。Gateway 还据此避免把主动释放
+  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
+  启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`）；
+  拓扑同时区分已配置、运行中、主动释放和持有租约的实例。租约由私有 Socket 连接持有，断开时自动撤销，
+  存在租约时拒绝释放；同一实例的启动、释放与租约获取串行执行，释放结果明确区分已释放、
+  租约占用和实例未运行，启动、释放与账户删除遇到旧版或无效监管响应时失败关闭并提示重启服务。
+  Gateway 还据此避免把主动释放
   误判为意外断线。入口集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server；Windows 通过官方 `app-server proxy` 检查 UDS 健康并把失效 rendezvous
   留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端

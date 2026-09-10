@@ -225,6 +225,19 @@ async function waitForAppServer(socketPath) {
       await waitForAppServerSupervisor(appServerSupervisorSocketPath(socketPath), deadline);
       return;
     }
+    try {
+      const state = await inspectAppServerSupervisorState(
+        appServerSupervisorSocketPath(socketPath),
+      );
+      if (
+        state.status === "ready"
+        && state.topology.releasedProviders.includes(state.topology.primaryProvider)
+      ) {
+        return;
+      }
+    } catch {
+      // The descriptor may be absent or mid-write while App Server finishes startup.
+    }
     await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
   }
   throw new Error(`等待 Codex App Server 就绪超时：${socketPath}`);
