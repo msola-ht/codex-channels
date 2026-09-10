@@ -505,7 +505,7 @@ async function applyLastAccountRemovalFiles(
     paths.markerPath,
   ];
   if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
-  if (initialRoleConfig !== undefined) transactionPaths.push(paths.roleConfigPath);
+  if (plan.restoresInitialConfig) transactionPaths.push(paths.roleConfigPath);
   if (plan.removesManagedCatalog) transactionPaths.push(paths.catalogPath, paths.manifestPath);
   const snapshots = snapshotOpencodeGoFiles(transactionPaths);
   let guards = snapshots;
@@ -516,8 +516,12 @@ async function applyLastAccountRemovalFiles(
       guards = refreshOpencodeGoFileSnapshot(guards, paths.configPath);
       await assertOpencodeGoFileSnapshots(guards);
     }
-    if (initialRoleConfig !== undefined) {
-      await writePrivateFileAtomic(paths.roleConfigPath, initialRoleConfig);
+    if (plan.restoresInitialConfig) {
+      if (initialRoleConfig !== undefined) {
+        await writePrivateFileAtomic(paths.roleConfigPath, initialRoleConfig);
+      } else if (existsSync(paths.roleConfigPath)) {
+        await removeOptionalOpencodeGoFile(paths.roleConfigPath);
+      }
       guards = refreshOpencodeGoFileSnapshot(guards, paths.roleConfigPath);
       await assertOpencodeGoFileSnapshots(guards);
     }
