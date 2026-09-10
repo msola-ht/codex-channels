@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -14,6 +15,7 @@ import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import { connectHomePath, providerStorageRoot } from "./connect-home.mjs";
+import { executableInvocation, resolveExecutable } from "./executable.mjs";
 import { withGatewayConfigLock } from "./gateway-config.mjs";
 import {
   deepseekProviderDefinition,
@@ -46,6 +48,8 @@ const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 const thirdPartyRoleReasoningEffortPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u;
 const customSwitchingRegistryMaximumBytes = 262_144;
 const customSwitchingDefaultReasoningEffort = "medium";
+const officialModelCatalogMaximumBytes = 8 * 1024 * 1024;
+const officialModelCatalogTimeoutMs = 30_000;
 
 const deepseekProvider = providerDescriptor(deepseekProviderDefinition);
 
@@ -551,6 +555,82 @@ export function customPrimaryProviderProfilePath(environment = process.env, prov
 
 export function customSwitchingProviderRegistryPath(environment = process.env) {
   return join(providerStorageRoot(environment), "custom", "providers.json");
+}
+
+export function customOfficialModelCatalogPath(environment = process.env) {
+  return join(providerStorageRoot(environment), "custom", "official-models.json");
+}
+
+export function withOfficialModelCatalog(argumentsList, catalogPath) {
+  if (typeof catalogPath !== "string" || catalogPath.trim() === "") {
+    throw new Error("Codex 官方模型目录路径无效");
+  }
+  const kept = [];
+  for (let index = 0; index < argumentsList.length; index += 1) {
+    const value = argumentsList[index];
+    if (value === "-c") {
+      const next = argumentsList[index + 1];
+      if (typeof next === "string" && next.startsWith("model_catalog_json=")) {
+        index += 1;
+        continue;
+      }
+    }
+    kept.push(value);
+  }
+  return [...kept, "-c", `model_catalog_json=${JSON.stringify(catalogPath)}`];
+}
+
+export function writeCustomOfficialModelCatalog(environment = process.env, codexBinary) {
+  if (typeof codexBinary !== "string" || codexBinary.trim() === "") {
+    throw new Error("Codex CLI 路径无效");
+  }
+  let invocation;
+  try {
+    invocation = executableInvocation(
+      resolveExecutable(codexBinary, environment),
+      ["debug", "models", "--bundled"],
+      environment,
+    );
+  } catch {
+    throw new Error("无法启动 Codex CLI 导出官方模型目录");
+  }
+  const result = spawnSync(invocation.file, invocation.args, {
+    encoding: "utf8",
+    env: environment,
+    maxBuffer: officialModelCatalogMaximumBytes,
+    timeout: officialModelCatalogTimeoutMs,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
+  if (result.error || result.status !== 0 || typeof result.stdout !== "string") {
+    throw new Error("Codex 官方模型目录导出失败；请运行 codexc doctor 检查 Codex CLI 安装");
+  }
+  const catalog = parseOfficialModelCatalog(result.stdout);
+  const path = customOfficialModelCatalogPath(environment);
+  writePrivateFileAtomicSync(path, `${JSON.stringify(catalog)}\n`);
+  return path;
+}
+
+function parseOfficialModelCatalog(content) {
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("Codex 官方模型目录不是有效 JSON");
+  }
+  const models = record(parsed).models;
+  if (!Array.isArray(models) || models.length === 0) {
+    throw new Error("Codex 官方模型目录缺少模型");
+  }
+  const slugs = new Set();
+  for (const value of models) {
+    const model = record(value);
+    const slug = model.slug;
+    if (typeof slug !== "string" || slug.trim() === "" || slugs.has(slug)) {
+      throw new Error("Codex 官方模型目录包含无效模型");
+    }
+    slugs.add(slug);
+  }
+  return parsed;
 }
 
 export function loadCustomSwitchingProviderIds(environment = process.env) {
@@ -1292,6 +1372,7 @@ export function writeThirdPartyModelProviderRoleConfig(
     throw new Error(`${candidate.displayName} 子代理当前只支持已配置模型：${candidate.model}`);
   }
   const url = validProviderBaseUrl(baseUrl ?? candidate.baseUrl, "第三方子代理 base_url");
+  const officialCatalogPath = customOfficialModelCatalogPath(environment);
   const lines = [
     `model = ${tomlString(selectedModel)}`,
     `model_provider = ${tomlString(candidate.provider)}`,
@@ -1299,6 +1380,9 @@ export function writeThirdPartyModelProviderRoleConfig(
     `developer_instructions = ${tomlString(
       "你是第三方模型单次子代理。此角色只用于 fork_turns=1 的一次性任务：把继承上下文中最后一条用户消息视为完整任务并直接执行；不要尝试解析 encrypted_content，不等待或请求后续消息，也不要调用子代理通信工具。若最后一条用户消息仍不足以确定任务，只返回一句明确错误。",
     )}`,
+    ...(existsSync(officialCatalogPath)
+      ? [`model_catalog_json = ${tomlString(officialCatalogPath)}`]
+      : []),
     "",
     `[model_providers.${candidate.provider}]`,
     `name = ${tomlString(candidate.displayName)}`,

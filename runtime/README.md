@@ -43,7 +43,10 @@
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
   凭据；自定义主 Provider 的私有候选备份按普通私有文件同样校验类型、属主、权限、大小和符号链接；
   自定义切换模式使用显式私有注册表和逐 Provider 的 `sf-custom-<id>` 私有 Profile，仅接受 Codex
-  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段；注册表与 Profile 的增删改
+  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段；服务启动时通过配置的
+  Codex CLI 执行 `debug models --bundled`，把官方目录原子写入
+  `~/.codex-connect/providers/custom/official-models.json`（0600），并以 `model_catalog_json`
+  注入固定/切换自定义实例和自定义子代理角色，第三方 `/models` 不参与目录刷新；注册表与 Profile 的增删改
   共用私有文件锁并支持执行前快照保护，Provider 块与 Key 不进入主配置；Remote TUI
   与原生 Codex 统一使用同一个 `sf-custom-<id>` Profile 名称；后台 App Server 则使用加载器生成的非敏感 `-c`
   覆盖（包括全部第三方 Provider 的统一有限重试边界），并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；

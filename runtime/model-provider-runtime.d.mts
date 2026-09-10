@@ -191,6 +191,12 @@ export function customPrimaryProviderProfilePath(
   provider: string,
 ): string;
 export function customSwitchingProviderRegistryPath(environment?: NodeJS.ProcessEnv): string;
+export function customOfficialModelCatalogPath(environment?: NodeJS.ProcessEnv): string;
+export function withOfficialModelCatalog(argumentsList: string[], catalogPath: string): string[];
+export function writeCustomOfficialModelCatalog(
+  environment: NodeJS.ProcessEnv | undefined,
+  codexBinary: string,
+): string;
 export function loadCustomSwitchingProviderIds(environment?: NodeJS.ProcessEnv): string[];
 
 export interface ConfiguredCustomSwitchingModelProvider {

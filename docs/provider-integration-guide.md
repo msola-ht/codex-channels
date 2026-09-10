@@ -256,10 +256,13 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，
 不进入命令行。多个切换模式 Provider 通过私有显式注册表同时保留，并使用独立 Socket 与统计代理。
 
-当前不支持自定义模型目录、`model_catalog_json`、`/usage` 账户适配或价格专用计价器。固定与切换
-模式的自定义 Provider 可以作为共享 `agents.external`，当前使用其 Setup 已确认的模型和 `medium`
-思考等级；角色文件只保存 `env_key`，App Server 服务仅把该 Provider 的 Key 注入主进程，并提前启动
-同一 Provider 的 `/role/external` 统计代理。正在被共享子代理使用的 Provider 必须先切换或停用角色，
+当前不支持用户自定义模型目录、第三方 `models.json` 或第三方 `/models` 刷新。服务启动时会用
+配置的 Codex CLI 执行 `debug models --bundled`，把 Codex 官方目录原子写入
+`~/.codex-connect/providers/custom/official-models.json`（0600），并通过 `model_catalog_json`
+注入固定/切换自定义 App Server 与自定义子代理角色；目录只随本机锁定的 Codex CLI 版本更新。
+固定与切换模式的自定义 Provider 可以作为共享 `agents.external`，当前使用其 Setup 已确认的模型和
+`medium` 思考等级；角色文件保存 `env_key` 和可用的官方目录快照路径，App Server 服务仅把该 Provider
+的 Key 注入主进程，并提前启动同一 Provider 的 `/role/external` 统计代理。正在被共享子代理使用的 Provider 必须先切换或停用角色，
 才能恢复官方模式或删除，避免留下不可启动的角色配置。自定义 Provider 切换模式可以与受管切换模式
 共存，但不能与任何受管固定模式同时启用。需要自定义目录或账户能力时，仍必须按本指南前述的编译期
 受管 Provider 流程接入。
@@ -267,8 +270,8 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 可以通过 `codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”新增或编辑固定、切换模式 Provider：填写上游
 `base_url`，从 URL 主机名派生的 Provider ID 与推荐的 `OpenAI` 中选择，只以直接写入 API Key
 （`experimental_bearer_token`）认证，再选择固定/切换模式、Responses WebSocket，并手工输入上游
-模型 ID。该 ID 必须存在于 App Server 返回的 Codex 官方模型目录；Setup 不请求第三方 `/models`，
-也不写入 `models.json` 或 `model_catalog_json`。新增拒绝覆盖
+模型 ID。该 ID 必须存在于 Codex 官方模型目录；Setup 不请求第三方 `/models`，也不生成第三方
+目录、`models.json` 或自定义 `model_catalog_json`；官方目录快照只在服务启动时生成。新增拒绝覆盖
 config 或私有备份中的已有 ID；编辑保持 ID 不变，同一 URL Origin 可留空保留 Key，Origin 变化时必须重新输入，旧 Key
 不会用于新上游；无效旧 URL 同样要求新 Key，但不阻止修复。远程上游强制 HTTPS，HTTP 仅允许本机回环地址。
 选择 `OpenAI` 时固定同名 `name`，允许 Codex 使用远程压缩；上游仍须兼容对应接口。小写 `openai` 是

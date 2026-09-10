@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -64,6 +65,7 @@ import {
   loadConfiguredCustomSwitchingModelProviders,
   loadCustomModelProviderRoleCandidates,
   loadCustomSwitchingProviderIds,
+  customOfficialModelCatalogPath,
   customSwitchingProviderRegistryPath,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
@@ -77,9 +79,11 @@ import {
   validateCustomPrimaryModelProviderId,
   validateConfiguredModelProvider,
   validateConfiguredModelProviders,
+  withOfficialModelCatalog,
   withProviderBaseUrl,
   withOpenAiBaseUrl,
   writeCustomPrimaryProviderSwitchingProfile,
+  writeCustomOfficialModelCatalog,
   writeManagedModelProviderProfileDefault,
   writeManagedModelProviderRoleConfig,
   writeThirdPartyModelProviderRoleConfig,
@@ -491,6 +495,57 @@ describe("model provider runtime topology", () => {
 
     expect(() => loadConfiguredCustomSwitchingModelProviders(environment))
       .toThrow("当前只支持 Codex 官方模型目录");
+  });
+
+  it("exports the bundled official catalog for custom Provider App Servers", async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-switching-catalog-export-"));
+    await secureTestDirectory(codexHome);
+    const fakeCodex = join(codexHome, "fake-codex.mjs");
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "const args = process.argv.slice(2);",
+      "if (args.join(' ') !== 'debug models --bundled') process.exit(2);",
+      "process.stdout.write(JSON.stringify({",
+      "  models: [{ slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra' }],",
+      "}));",
+    ].join("\n"), { mode: 0o700 });
+    chmodSync(fakeCodex, 0o700);
+    const environment = { ...process.env, ...testEnvironment(codexHome) };
+
+    const catalogPath = writeCustomOfficialModelCatalog(environment, fakeCodex);
+
+    expect(catalogPath).toBe(customOfficialModelCatalogPath(environment));
+    expect(JSON.parse(readFileSync(catalogPath, "utf8"))).toEqual({
+      models: [{ slug: "gpt-5.6-terra", display_name: "GPT-5.6-Terra" }],
+    });
+    if (process.platform !== "win32") {
+      expect(statSync(catalogPath).mode & 0o777).toBe(0o600);
+    }
+    expect(withOfficialModelCatalog(["-c", 'model_provider="thirdparty"'], catalogPath))
+      .toEqual([
+        "-c",
+        'model_provider="thirdparty"',
+        "-c",
+        `model_catalog_json=${JSON.stringify(catalogPath)}`,
+      ]);
+    expect(withOfficialModelCatalog([
+      "-c",
+      'model_catalog_json="/old/models.json"',
+      "-c",
+      'model_provider="thirdparty"',
+    ], catalogPath)).toEqual([
+      "-c",
+      'model_provider="thirdparty"',
+      "-c",
+      `model_catalog_json=${JSON.stringify(catalogPath)}`,
+    ]);
+
+    writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "process.stdout.write('{}');",
+    ].join("\n"), { mode: 0o700 });
+    expect(() => writeCustomOfficialModelCatalog(environment, fakeCodex))
+      .toThrow("Codex 官方模型目录缺少模型");
   });
 
   it("rejects unsupported fields in the reserved custom switching Profile", async () => {
