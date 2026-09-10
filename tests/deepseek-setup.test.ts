@@ -45,7 +45,7 @@ import { writeManagedModelProviderProfileDefault } from "../runtime/model-provid
 
 const script = `#!/bin/sh
 cat > "$TMP_MODELS" <<'CODEX_MODELS_JSON'
-{"models":[{"slug":"deepseek-v4-flash","display_name":"DeepSeek V4 Flash","input_modalities":["text"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-flash-vision-exp","display_name":"DeepSeek V4 Flash Vision","input_modalities":["text","image"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-pro","display_name":"DeepSeek V4 Pro","input_modalities":["text"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]}]}
+{"models":[{"slug":"deepseek-flash","display_name":"DeepSeek-Flash","input_modalities":["text","image"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-pro","display_name":"DeepSeek-V4-Pro","input_modalities":["text"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]}]}
 CODEX_MODELS_JSON
 `;
 
@@ -61,7 +61,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
   });
 
   it("extracts exactly one official model catalog heredoc", () => {
-    expect(extractDeepseekCatalog(script).models).toHaveLength(3);
+    expect(extractDeepseekCatalog(script).models).toHaveLength(2);
     expect(() => extractDeepseekCatalog("echo no-catalog")).toThrow("模型目录标记无效");
   });
 
@@ -158,7 +158,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       action: "configured",
       operation: "add",
       mode: "switching",
-      model: "deepseek-v4-flash-vision-exp",
+      model: "deepseek-flash",
       activation: "restart-all",
     });
     expect(JSON.stringify(result)).not.toContain("sk-structured-secret");
@@ -204,16 +204,13 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     }
   });
 
-  it("refreshes the catalog and migrates the previous default once during codexc update", async () => {
+  it("refreshes the catalog and migrates a model removed from the official catalog", async () => {
     const codexHome = deepseekFixture();
     const connectHome = join(codexHome, ".codex-connect");
     const catalogPath = join(connectHome, "providers", "deepseek", "models.json");
     const previous = JSON.parse(readFileSync(catalogPath, "utf8"));
-    previous.models = previous.models.filter((model: { slug?: string }) =>
-      model.slug !== "deepseek-v4-flash-vision-exp"
-    );
     const flash = previous.models.find((model: { slug?: string }) =>
-      model.slug === "deepseek-v4-flash"
+      model.slug === "deepseek-flash"
     );
     if (!flash) throw new Error("测试目录缺少 Flash");
     flash.default_reasoning_level = "max";
@@ -222,10 +219,12 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     const profilePath = join(codexHome, "sf-deepseek.config.toml");
     writeFileSync(
       profilePath,
-      readFileSync(profilePath, "utf8").replace(
-        'model_reasoning_effort = "high"',
-        'model_reasoning_effort = "max"',
-      ),
+      readFileSync(profilePath, "utf8")
+        .replace('model = "deepseek-flash"', 'model = "deepseek-v4-flash"')
+        .replace(
+          'model_reasoning_effort = "high"',
+          'model_reasoning_effort = "max"',
+        ),
       { mode: 0o600 },
     );
     const rolePath = join(codexHome, "sf-agent.config.toml");
@@ -254,8 +253,8 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
 
     expect(result).toMatchObject({
       status: "updated",
-      modelCount: 3,
-      selectedModel: "deepseek-v4-flash-vision-exp",
+      modelCount: 2,
+      selectedModel: "deepseek-flash",
       modelMigrated: true,
       roleMigrated: true,
       defaultModelMigrationApplied: true,
@@ -263,13 +262,14 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     const updated = JSON.parse(readFileSync(catalogPath, "utf8"));
     expect(updated.models).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        slug: "deepseek-v4-flash",
+        slug: "deepseek-flash",
+        input_modalities: ["text", "image"],
         default_reasoning_level: "max",
         auto_compact_token_limit: 838_861,
       }),
       expect.objectContaining({
-        slug: "deepseek-v4-flash-vision-exp",
-        input_modalities: ["text", "image"],
+        slug: "deepseek-v4-pro",
+        input_modalities: ["text"],
         default_reasoning_level: "high",
         auto_compact_token_limit: 629_146,
       }),
@@ -282,30 +282,31 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       downloadedAt: "2026-08-21T12:34:56.000Z",
       defaultModelMigration: {
         from: "deepseek-v4-flash",
-        to: "deepseek-v4-flash-vision-exp",
+        to: "deepseek-flash",
         appliedAt: "2026-08-21T12:34:56.000Z",
       },
     });
     expect(parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8")))
       .toMatchObject({
-        model: "deepseek-v4-flash-vision-exp",
-        model_reasoning_effort: "high",
+        model: "deepseek-flash",
+        model_reasoning_effort: "max",
       });
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
-      model: "deepseek-v4-flash-vision-exp",
+      model: "deepseek-flash",
       model_provider: "deepseek",
-      model_reasoning_effort: "high",
+      model_reasoning_effort: "max",
     });
 
-    writeManagedModelProviderProfileDefault("deepseek", {
-      model: "deepseek-v4-flash",
-      reasoningEffort: "max",
-      autoCompactLimit: 838_861,
-    }, {
-      ...process.env,
-      CODEX_HOME: codexHome,
-      CODEX_CONNECT_HOME: connectHome,
-    });
+    writeFileSync(
+      profilePath,
+      readFileSync(profilePath, "utf8")
+        .replace('model = "deepseek-flash"', 'model = "deepseek-v4-flash"')
+        .replace(
+          'model_reasoning_effort = "max"',
+          'model_reasoning_effort = "high"',
+        ),
+      { mode: 0o600 },
+    );
     writeFileSync(
       rolePath,
       'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "max"\n',
@@ -325,17 +326,17 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
 
     expect(repeated).toMatchObject({
       status: "updated",
-      selectedModel: "deepseek-v4-flash",
-      modelMigrated: false,
-      roleMigrated: false,
-      defaultModelMigrationApplied: false,
+      selectedModel: "deepseek-flash",
+      modelMigrated: true,
+      roleMigrated: true,
+      defaultModelMigrationApplied: true,
     });
     expect(parse(readFileSync(profilePath, "utf8"))).toMatchObject({
-      model: "deepseek-v4-flash",
+      model: "deepseek-flash",
       model_reasoning_effort: "max",
     });
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
-      model: "deepseek-v4-flash",
+      model: "deepseek-flash",
       model_provider: "deepseek",
       model_reasoning_effort: "max",
     });
@@ -345,13 +346,13 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     ))).toMatchObject({
       defaultModelMigration: {
         from: "deepseek-v4-flash",
-        to: "deepseek-v4-flash-vision-exp",
-        appliedAt: "2026-08-21T12:34:56.000Z",
+        to: "deepseek-flash",
+        appliedAt: "2026-08-22T12:34:56.000Z",
       },
     });
   });
 
-  it("preserves the completed default migration when setup keeps a user-selected model", async () => {
+  it("keeps the previous migration record when setup re-resolves a removed model", async () => {
     const fixture = setupFixture('model = "gpt-5.6-sol"\nmodel_provider = "openai"\n');
     const environment = {
       ...process.env,
@@ -364,11 +365,13 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       fetchImpl: successfulFetch,
       prompter: prompter(["1", "2"], ["sk-first"]),
     });
-    writeManagedModelProviderProfileDefault("deepseek", {
-      model: "deepseek-v4-flash",
-      reasoningEffort: "high",
-      autoCompactLimit: 629_146,
-    }, environment);
+    const profilePath = join(fixture.home, "sf-deepseek.config.toml");
+    writeFileSync(
+      profilePath,
+      readFileSync(profilePath, "utf8")
+        .replace('model = "deepseek-flash"', 'model = "deepseek-v4-flash"'),
+      { mode: 0o600 },
+    );
     const manifestPath = join(
       fixture.connectHome,
       "providers",
@@ -381,7 +384,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       downloadedAt: "2026-08-21T12:34:56.000Z",
       defaultModelMigration: {
         from: "deepseek-v4-flash",
-        to: "deepseek-v4-flash-vision-exp",
+        to: "deepseek-flash",
         appliedAt: "2026-08-21T12:34:56.000Z",
       },
     })}\n`, { mode: 0o600 });
@@ -393,18 +396,18 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       prompter: prompter(["1", "2"], ["sk-updated"]),
     });
 
-    expect(parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8")))
-      .toMatchObject({ model: "deepseek-v4-flash" });
+    expect(parse(readFileSync(profilePath, "utf8")))
+      .toMatchObject({ model: "deepseek-flash" });
     expect(JSON.parse(readFileSync(manifestPath, "utf8"))).toMatchObject({
       defaultModelMigration: {
         from: "deepseek-v4-flash",
-        to: "deepseek-v4-flash-vision-exp",
+        to: "deepseek-flash",
         appliedAt: "2026-08-21T12:34:56.000Z",
       },
     });
   });
 
-  it("records the default migration without changing an explicitly selected Pro model", async () => {
+  it("keeps an explicitly selected Pro model that is still in the official catalog", async () => {
     const codexHome = deepseekFixture();
     const connectHome = join(codexHome, ".codex-connect");
     const environment = {
@@ -431,7 +434,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       selectedModel: "deepseek-v4-pro",
       modelMigrated: false,
       roleMigrated: false,
-      defaultModelMigrationApplied: true,
+      defaultModelMigrationApplied: false,
     });
     expect(parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8")))
       .toMatchObject({
@@ -441,13 +444,63 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     expect(JSON.parse(readFileSync(
       join(connectHome, "providers", "deepseek", "models.manifest.json"),
       "utf8",
-    ))).toMatchObject({
-      defaultModelMigration: {
-        from: "deepseek-v4-flash",
-        to: "deepseek-v4-flash-vision-exp",
-        appliedAt: "2026-08-21T12:34:56.000Z",
-      },
+    )).defaultModelMigration).toBeUndefined();
+  });
+
+  it("falls back to the first usable catalog model when the preferred default is absent", async () => {
+    const codexHome = deepseekFixture();
+    const connectHome = join(codexHome, ".codex-connect");
+    const environment = {
+      ...process.env,
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: connectHome,
+    };
+
+    const result = await refreshDeepseekCatalogForUpdate(environment, {
+      downloadCatalog: async () => ({
+        catalog: {
+          models: [
+            {
+              slug: "deepseek-v4-pro",
+              display_name: "DeepSeek-V4-Pro",
+              input_modalities: ["text"],
+              context_window: 1_048_576,
+              default_reasoning_level: "high",
+              supported_reasoning_levels: [
+                { effort: "high", description: "High" },
+                { effort: "max", description: "Max" },
+              ],
+            },
+            {
+              slug: "deepseek-lite",
+              display_name: "DeepSeek-Lite",
+              input_modalities: ["text"],
+              context_window: 131_072,
+              default_reasoning_level: "high",
+              supported_reasoning_levels: [
+                { effort: "high", description: "High" },
+              ],
+            },
+          ],
+        },
+        sha256: "fallback-catalog",
+      }),
+      now: () => new Date("2026-09-10T12:00:00.000Z"),
     });
+
+    expect(result).toMatchObject({
+      status: "updated",
+      modelCount: 2,
+      selectedModel: "deepseek-v4-pro",
+      modelMigrated: true,
+      roleMigrated: false,
+      defaultModelMigrationApplied: true,
+    });
+    expect(parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8")))
+      .toMatchObject({
+        model: "deepseek-v4-pro",
+        model_reasoning_effort: "high",
+      });
   });
 
   it("migrates the previous default in exclusive mode without adding root model overrides", async () => {
@@ -478,13 +531,13 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
 
     expect(result).toMatchObject({
       status: "updated",
-      selectedModel: "deepseek-v4-flash-vision-exp",
+      selectedModel: "deepseek-flash",
       modelMigrated: true,
       defaultModelMigrationApplied: true,
     });
     const updated = parse(readFileSync(configPath, "utf8"));
     expect(updated).toMatchObject({
-      model: "deepseek-v4-flash-vision-exp",
+      model: "deepseek-flash",
       model_provider: "deepseek",
     });
     expect(updated.model_reasoning_effort).toBeUndefined();
@@ -663,7 +716,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     expect(record(config.agents).external).toBeUndefined();
     expect(existsSync(join(fixture.home, "sf-agent.config.toml"))).toBe(false);
     const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
-    expect(profile.model).toBe("deepseek-v4-flash-vision-exp");
+    expect(profile.model).toBe("deepseek-flash");
     expect(profile.model_provider).toBe("deepseek");
     expect(profile.model_reasoning_effort).toBe("high");
     expect(profile.model_auto_compact_token_limit).toBeUndefined();
@@ -673,9 +726,9 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       "utf8",
     ));
     expect(catalog.models.find((model: { slug?: string }) =>
-      model.slug === "deepseek-v4-flash-vision-exp"
+      model.slug === "deepseek-flash"
     )).toMatchObject({
-      slug: "deepseek-v4-flash-vision-exp",
+      slug: "deepseek-flash",
       default_reasoning_level: "high",
       auto_compact_token_limit: 629_146,
     });
@@ -821,7 +874,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
       prompter: prompter(["2", "2"], ["sk-fixed"], true),
     });
     const config = parse(readFileSync(join(fixture.home, "config.toml"), "utf8"));
-    expect(config.model).toBe("deepseek-v4-flash-vision-exp");
+    expect(config.model).toBe("deepseek-flash");
     expect(config.model_provider).toBe("deepseek");
     expect(config.forced_login_method).toBeUndefined();
     expect(config.preferred_auth_method).toBeUndefined();
@@ -910,7 +963,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     expect(existsSync(join(home, "config.toml"))).toBe(false);
     expect(existsSync(join(home, "sf-agent.config.toml"))).toBe(false);
     const profile = parse(readFileSync(join(home, "sf-deepseek.config.toml"), "utf8"));
-    expect(profile.model).toBe("deepseek-v4-flash-vision-exp");
+    expect(profile.model).toBe("deepseek-flash");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
       .toBe("sk-switching");
   });
@@ -972,7 +1025,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     expect(config.model_provider).toBe("openai");
     expect(record(config.model_providers).deepseek).toBeUndefined();
     const profile = parse(readFileSync(join(fixture.home, "sf-deepseek.config.toml"), "utf8"));
-    expect(profile.model).toBe("deepseek-v4-flash-vision-exp");
+    expect(profile.model).toBe("deepseek-flash");
     expect(record(record(profile.model_providers).deepseek).experimental_bearer_token)
       .toBe("sk-migrated");
   });
@@ -1251,7 +1304,7 @@ function deepseekFixture(): string {
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
   const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
-    'model = "deepseek-v4-flash"',
+    'model = "deepseek-flash"',
     'model_provider = "deepseek"',
     'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
@@ -1270,8 +1323,7 @@ function deepseekFixture(): string {
   );
   writeFileSync(catalogPath, JSON.stringify({
     models: [
-      "deepseek-v4-flash",
-      "deepseek-v4-flash-vision-exp",
+      "deepseek-flash",
       "deepseek-v4-pro",
     ].map((slug) => ({
       slug,

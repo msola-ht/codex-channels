@@ -48,8 +48,8 @@
   第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
   不安全权限时拒绝覆盖，迁移失败时恢复原有目录；随后遍历编译期 Provider 定义，按目录更新
   适配器执行，并按目录来源复用同一个下载 Promise。当前会刷新已配置 DeepSeek 与 OpenCode Go
-  的受控模型目录，保留逐模型设置，并一次性把仍使用 OpenCode Go 旧默认 Flash 的账户与共享子代理
-  切换到 Flash Vision Exp；目录清单记录迁移完成状态，避免以后覆盖用户主动选回 Flash 的决定；
+  的受管模型目录并保留逐模型设置；所选模型已不在新目录中时（例如旧默认 Flash Vision Exp），
+  把 OpenCode Go 账户与共享子代理切到目录默认模型，并把迁移记录写入目录清单；
   最后在私有备份后移除已废弃的 `[vision]` 配置段。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   或 v4 升级到 v5，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口
@@ -172,7 +172,7 @@
   同一文件锁内原子写入私有 Profile，并统一返回生效动作和备份清理警告；CLI
   继续负责字段询问、危险修改确认和中文渲染。
 - `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
-  Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受控模型目录和共享
+  Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受管模型目录和共享
   第三方子代理的脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
   Provider CLI 列表共同复用；同时按 `CODEX_HOME/auth.json` 是否存在返回 OpenAI 官方登录状态，
   未检测到鉴权文件时按未登录处理。
@@ -290,7 +290,7 @@
   直接 API 功能。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；安装与恢复均提供脱敏预览、明确确认和无终端事务接口，CLI 只负责询问与展示；只下载、不执行
-  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与全部受控模型后写入
+  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小与 JSON 结构后写入
   `~/.codex-connect/providers/deepseek/`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
   模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，模型目录与管理标记写入
   `~/.codex-connect/providers/deepseek/`，不自动创建或切换共享 `agents.external`；
@@ -303,12 +303,12 @@
   安装事务按写入阶段更新并发保护快照，失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
   安装时为初始模型设置自动压缩阈值；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
   模型设置”按模型维护 10–90% 阈值，写入模型目录的 `auto_compact_token_limit`，不再使用会覆盖
-  全部模型的 Profile 顶层阈值。`codexc update` 首次看到仍使用旧默认 Flash 的 Profile 与同
-  Provider 共享子代理时，事务迁移到 Flash Vision Exp，并把一次性迁移记录写入模型目录清单；
-  已选择其他模型或记录已存在时保留用户选择，重复 Setup 不删除该记录。
+  全部模型的 Profile 顶层阈值。`codexc update` 刷新官方目录后，若所选模型已不在目录中（例如
+  Flash Vision Exp），会把 Profile 与同 Provider 共享子代理切到目录默认模型，并把
+  `from`/`to`/`appliedAt` 迁移记录写入模型目录清单；仍在目录中的模型保留用户选择。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
-  上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；运行时仍只开放编译期定义明确
-  列出的模型。
+  上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；`digest` 是模型条目紧凑 JSON 的
+  SHA-256。该文件只作为审查留档，运行时开放哪些模型以 Setup 下载的官方目录为准。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；DeepSeek 与

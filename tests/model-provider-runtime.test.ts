@@ -57,6 +57,7 @@ import {
   customPrimaryProviderProfilePath,
   loadManagedModelProvider,
   loadManagedModelProviderRole,
+  loadManagedModelProviderSettings,
   loadManagedModelProviders,
   loadManagedProviderAppServer,
   loadManagedProviderAppServers,
@@ -1171,6 +1172,24 @@ describe("model provider runtime topology", () => {
       .toThrow("模型目录");
     expect(() => validateConfiguredModelProvider(testEnvironment(codexHome)))
       .toThrow("模型目录");
+  });
+
+  it("rejects a managed catalog that declares an invalid model name", async () => {
+    const codexHome = await configuredHome("switching");
+    const catalogPath = join(
+      connectHomeFor(codexHome),
+      "providers",
+      "deepseek",
+      "models.json",
+    );
+    const catalog = JSON.parse(readFileSync(catalogPath, "utf8")) as {
+      models: Array<Record<string, unknown>>;
+    };
+    catalog.models.push({ ...catalog.models[0], slug: "DeepSeek Flash" });
+    writeFileSync(catalogPath, `${JSON.stringify(catalog)}\n`, { mode: 0o600 });
+
+    expect(() => loadManagedModelProviderSettings(testEnvironment(codexHome)))
+      .toThrow("包含无效模型名");
   });
 
   it("rejects an exclusive configuration with a root reasoning override", async () => {

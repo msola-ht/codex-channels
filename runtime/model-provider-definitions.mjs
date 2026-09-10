@@ -47,14 +47,9 @@ export const deepseekProviderDefinition = Object.freeze({
   baseUrl: "https://api.deepseek.com/",
   wireApi: "responses",
   apiKeyEnvironmentKey: "CODEX_CONNECT_DEEPSEEK_API_KEY",
-  defaultModel: "deepseek-v4-flash-vision-exp",
+  defaultModel: "deepseek-flash",
   defaultReasoningEffort: "high",
   capabilities: deepseekProviderCapabilities,
-  models: Object.freeze([
-    Object.freeze({ slug: "deepseek-v4-flash", available: true }),
-    Object.freeze({ slug: "deepseek-v4-flash-vision-exp", available: true }),
-    Object.freeze({ slug: "deepseek-v4-pro", available: true }),
-  ]),
 });
 
 export const opencodeGoProviderDefinition = Object.freeze({
@@ -70,15 +65,10 @@ export const opencodeGoProviderDefinition = Object.freeze({
   baseUrl: "https://opencode.ai/zen/go/v1",
   wireApi: "responses",
   apiKeyEnvironmentKey: "CODEX_CONNECT_OPENCODE_GO_API_KEY",
-  defaultModel: "deepseek-v4-flash-vision-exp",
+  defaultModel: "deepseek-flash",
   defaultReasoningEffort: "high",
   supportsWebsockets: false,
   capabilities: opencodeGoProviderCapabilities,
-  models: Object.freeze([
-    Object.freeze({ slug: "deepseek-v4-flash", available: true }),
-    Object.freeze({ slug: "deepseek-v4-flash-vision-exp", available: true }),
-    Object.freeze({ slug: "deepseek-v4-pro", available: true }),
-  ]),
 });
 
 export const managedModelProviderDefinitions = Object.freeze([
@@ -162,7 +152,6 @@ export function opencodeGoAccountDefinition(accountId, email, phone) {
     defaultReasoningEffort: opencodeGoProviderDefinition.defaultReasoningEffort,
     supportsWebsockets: false,
     capabilities: opencodeGoProviderDefinition.capabilities,
-    models: opencodeGoProviderDefinition.models,
   });
 }
 

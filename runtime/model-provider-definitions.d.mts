@@ -44,15 +44,11 @@ export interface ModelProviderDefinition {
   readonly baseUrl: string;
   readonly wireApi: "responses";
   readonly apiKeyEnvironmentKey: string;
+  /** 写入新模型目录时使用的默认模型；可选模型以目录文件为准 */
   readonly defaultModel: string;
   readonly defaultReasoningEffort: string;
   readonly supportsWebsockets?: boolean;
   readonly capabilities: ModelProviderCapabilities;
-  readonly models: ReadonlyArray<{
-    readonly slug: string;
-    readonly available: boolean;
-    readonly unavailableReason?: string;
-  }>;
 }
 
 export const deepseekProviderDefinition: ModelProviderDefinition;

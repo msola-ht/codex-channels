@@ -70,8 +70,10 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间，以及需要跨版本执行一次的
   默认模型迁移记录；Profile（切换模式）与固定
   基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
-- 目录按 Provider 隔离；同名模型（如两个 Provider 都卖 `deepseek-v4-flash`）是独立选项，
-  模型 key 为 `provider + model`；
+- 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
+ 模型 key 为 `provider + model`；
+- 可选模型以各 Provider 下载的官方模型目录为准：目录里声明什么就开放什么，目录不再声明的
+  旧模型名不会出现在 `/model` 与 Setup 选项中；价格基线仍保留旧模型名用于历史用量折算；
 - 默认模型写入 Profile 后，Profile 顶层 `model_reasoning_effort` 必须镜像目录默认值，
   运行时校验不一致即失败关闭。
 
@@ -146,7 +148,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 ## 4. 安全边界
 
-- Provider id 与模型名使用受控列表，未知模型不开放；
+- Provider id 使用受控列表；模型名来自下载的官方目录，目录缺少的模型不开放；
 - base URL 只允许 HTTP(S)，不得包含用户名、密码、查询或片段；
 - 编译期受管 Provider 的 API Key 只进入目标子进程环境或专用私有凭据文件；用户自定义 Provider
   可按第 6 节显式写入 `0600` Codex 私有配置。两类 Key 都不得进入命令行、Gateway 配置、日志或平台消息；

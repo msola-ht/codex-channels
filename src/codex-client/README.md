@@ -39,8 +39,8 @@
   `text/image/audio` 输入能力、Codex 多代理运行时及结构化替代模型/退役时间，过滤不可见项；
   官方迁移 Markdown、链接和自由文案不越过 Client 边界，
   并在缺少模型选择必需字段时失败关闭。
-- `model-provider-catalog.ts`：按 Bootstrap 注入的编译期 Provider 定义，只读取 Setup 下载到用户
-  `CODEX_HOME` 的受控模型目录；相同模型 ID 仍按 Provider 独立映射，未列入对应定义的模型不会开放；
+- `model-provider-catalog.ts`：按 Bootstrap 注入的 Provider 定义读取 Setup 下载到用户
+  `CODEX_HOME` 的受管模型目录；目录里声明什么就开放什么，相同模型 ID 仍按 Provider 独立映射；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；接受当前 0.150.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，

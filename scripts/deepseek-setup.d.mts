@@ -28,6 +28,8 @@ export interface DeepseekSetupOptions {
 
 export interface DeepseekSetupResult {
   mode: "switching" | "exclusive" | "restored";
+  /** 安装完成后实际写入的默认模型；恢复操作不返回该字段 */
+  model?: string;
   configPath: string;
   profilePath: string;
   gatewayProfilePath: string;
