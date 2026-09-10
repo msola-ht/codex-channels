@@ -655,6 +655,7 @@ async function runServiceAppServer(args) {
     throw new Error("内部服务入口不接受参数");
   }
   const runtime = configuredEnvironment();
+  const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
   if (Object.hasOwn(runtime.document, "ds_proxy")) {
     throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
   }
@@ -697,11 +698,17 @@ async function runServiceAppServer(args) {
     return agent;
   };
   const startProviderProxy = async (provider, options) => {
+    const optionsWithUserAgent = {
+      ...options,
+      ...(validatedCodex.upstream_user_agent
+        ? { upstreamUserAgent: validatedCodex.upstream_user_agent }
+        : {}),
+    };
     if (provider === "ocg") {
       const existing = providerProxyRuntimes.get("ocg");
       if (existing) return { ...existing, created: false };
       const modelProxy = new ProviderProxy("127.0.0.1:0", {
-        ...options,
+        ...optionsWithUserAgent,
         accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
         ...(goDefaultAccountId === undefined
           ? {}
@@ -737,7 +744,7 @@ async function runServiceAppServer(args) {
     const existing = providerProxyRuntimes.get(provider);
     if (existing) return { ...existing, created: false };
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
-      ...options,
+      ...optionsWithUserAgent,
       onMetrics: (metrics) => sendProviderProxyMetrics(
         providerMetricsSocketPath(socketPath, provider),
         metrics,

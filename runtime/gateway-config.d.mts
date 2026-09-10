@@ -36,6 +36,12 @@ export interface GatewayConfigDocument {
     socket_path: string;
     default_model?: string;
     sandbox: "read-only" | "workspace-write";
+    client_identity?: {
+      name?: string;
+      title?: string;
+      version?: string;
+    };
+    upstream_user_agent?: string;
   };
   approval: { timeout_seconds: number };
   conversation: { idle_release_minutes: number };

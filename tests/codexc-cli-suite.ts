@@ -4199,7 +4199,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       expect(stdout).not.toContain(secret);
       expect(initializedReceived).toBe(true);
       expect(initializedClientNames.length).toBeGreaterThan(0);
-      expect(initializedClientNames.every((name) => name === "codex_connect")).toBe(true);
+      expect(initializedClientNames.every((name) => name === "codex_app_server_daemon")).toBe(true);
 
       appServerVersion = "0.0.0";
       const mismatched = await execFileAsync(

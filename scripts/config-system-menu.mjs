@@ -1,9 +1,15 @@
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { release as osRelease } from "node:os";
+import { join } from "node:path";
+
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import {
   loadGatewaySettings,
   updateGatewaySetting,
 } from "./config-management.mjs";
+import { packageDir } from "./runtime-config.mjs";
 
 export async function runSystemSettings({
   environment,
@@ -35,6 +41,11 @@ export async function runSystemSettings({
         label: "渠道新会话模型覆盖",
         hint: "仅覆盖 Gateway 新 Thread；Codex 全局模型与思考等级请用 codexc setup",
       },
+      {
+        value: "official_tui_identity",
+        label: "一键设为官方 TUI 身份",
+        hint: "同时设置 codex-tui 客户端身份与官方模型上游 UA",
+      },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
@@ -54,6 +65,9 @@ export async function runSystemSettings({
   }
   if (section === "default_model") {
     return runDefaultModel({ environment, output, prompts, writeConfig });
+  }
+  if (section === "official_tui_identity") {
+    return runOfficialTuiIdentity({ environment, output, prompts, writeConfig });
   }
   throw new Error(`未知系统设置：${String(section)}`);
 }
@@ -192,4 +206,87 @@ async function runDefaultModel({ environment, output, prompts, writeConfig }) {
   );
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { defaultModel: normalized || null, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
+}
+
+function buildOfficialCodexUserAgent(codexCliVersion) {
+  const name = "codex-tui";
+  const osInfo = currentOsInfo();
+  const terminal = terminalUserAgentToken();
+  return (
+    `${name}/${codexCliVersion} (${osInfo.osType} ${osInfo.version}; ${codexArchitecture()}) `
+    + `${terminal} (${name}; ${codexCliVersion})`
+  );
+}
+
+function codexArchitecture() {
+  return process.arch === "x64" ? "x86_64" : process.arch;
+}
+
+function currentOsInfo() {
+  if (process.platform === "darwin") {
+    let version = "unknown";
+    try {
+      const result = spawnSync("sw_vers", ["-productVersion"], { encoding: "utf8" });
+      if (result.status === 0 && result.stdout) {
+        version = result.stdout.trim() || "unknown";
+      }
+    } catch {
+      // 保持 unknown，交由用户手动修正
+    }
+    return { osType: "Mac OS", version };
+  }
+  if (process.platform === "win32") {
+    return { osType: "Windows", version: osRelease() };
+  }
+  return { osType: "Linux", version: osRelease() };
+}
+
+function terminalUserAgentToken() {
+  const program = process.env.TERM_PROGRAM;
+  const version = process.env.TERM_PROGRAM_VERSION;
+  if (program && program.trim()) {
+    return sanitizeUserAgentToken(version && version.trim()
+      ? `${program.trim()}/${version.trim()}`
+      : program.trim());
+  }
+  const term = process.env.TERM;
+  return sanitizeUserAgentToken(term && term.trim() ? term.trim() : "unknown");
+}
+
+function sanitizeUserAgentToken(value) {
+  return value.replace(/[^A-Za-z0-9._/-]/gu, "_");
+}
+
+async function runOfficialTuiIdentity({ environment, output, prompts, writeConfig }) {
+  const settings = loadGatewaySettings(environment);
+  const protocolMetadata = JSON.parse(
+    readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
+  );
+  const codexCliVersion = String(protocolMetadata.codexCli).replace(/^codex-cli\s+/u, "");
+  const identity = { name: "codex-tui", version: codexCliVersion };
+  const value = await prompts.text({
+    message: `官方 TUI 身份：客户端将设为 codex-tui / ${codexCliVersion}；请确认模型上游 User-Agent`
+      + "（留空则删除现有 upstream_user_agent，恢复 App Server 原生透传）",
+    initialValue: buildOfficialCodexUserAgent(codexCliVersion),
+    validate: (input) => input.length <= 512 ? undefined : "User-Agent 过长",
+  });
+  if (prompts.isCancel(value)) return { action: "back" };
+  const result = updateGatewaySetting({
+    kind: "system.official-tui-identity",
+    value: {
+      clientIdentity: identity,
+      upstreamUserAgent: value === "" ? null : value,
+    },
+  }, { environment, expectedRevision: settings.revision, writeConfig });
+  output.write(
+    `已设为官方 TUI 请求身份（codex-tui / ${codexCliVersion}）：${result.configPath}\n`,
+  );
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return {
+    clientIdentity: result.value.clientIdentity,
+    upstreamUserAgent: result.value.upstreamUserAgent,
+    configPath: result.configPath,
+    activation: result.activation,
+    activationResult: result.activationResult,
+  };
 }

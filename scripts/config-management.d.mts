@@ -98,6 +98,17 @@ export type GatewaySettingInput =
   | { kind: "system.sandbox"; value: "read-only" | "workspace-write" }
   | { kind: "system.default-workspace"; value: string }
   | { kind: "system.default-model"; value: string | null }
+  | {
+      kind: "system.official-tui-identity";
+      value: {
+        clientIdentity: {
+          name?: string;
+          title?: string;
+          version?: string;
+        } | null;
+        upstreamUserAgent: string | null;
+      };
+    }
   | { kind: "automation.scheduled-tasks"; value: boolean }
   | { kind: "advanced.logging-level"; value: GatewaySettings["advanced"]["loggingLevel"] }
   | { kind: "advanced.plugin-api"; value: boolean }

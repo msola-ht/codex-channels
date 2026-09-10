@@ -264,7 +264,7 @@ export class GatewayApplication {
     setConfiguredCustomPrimaryProviderId(customProviderIds);
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
-      new JsonRpcClient(this.transport, 60_000, logger),
+      new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),
       {
       sandbox: config.codexSandbox,
       ...(config.codexModel ? { model: config.codexModel } : {}),
@@ -275,7 +275,7 @@ export class GatewayApplication {
         providerAppServerSocketPath(config.codexSocketPath, managedProvider.provider),
       );
       clients.set(managedProvider.provider, new CodexAppServerClient(
-        new JsonRpcClient(providerTransport, 60_000, logger),
+        new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
         {
           sandbox: config.codexSandbox,
         },
@@ -286,7 +286,7 @@ export class GatewayApplication {
         providerAppServerSocketPath(config.codexSocketPath, customSwitchingProvider.provider),
       );
       clients.set(customSwitchingProvider.provider, new CodexAppServerClient(
-        new JsonRpcClient(providerTransport, 60_000, logger),
+        new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
         { sandbox: config.codexSandbox },
       ));
     }
