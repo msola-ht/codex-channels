@@ -603,7 +603,6 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     reasoningEnabled: true,
     pluginApiEnabled: true,
     scheduledTasksEnabled: false,
-    priceCurrency: "cny",
     apiProviders: [],
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
@@ -628,8 +627,6 @@ function options(
     codexUpstreamUserAgent: () => undefined,
     openAiConnectivity: () => "reachable" as const,
     onFatal: vi.fn(),
-    exchangeRate: () => null,
-    priceCurrency: () => "usd" as const,
     autoCompactPercent: () => null,
   };
 }

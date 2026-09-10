@@ -3,7 +3,6 @@ import type { ModelRequestMetricSample } from "../src/observability/index.js";
 export function sample(): ModelRequestMetricSample {
   return {
     provider: "deepseek",
-    pricing: null,
     transport: "http",
     responseFormat: "sse",
     operation: "response",

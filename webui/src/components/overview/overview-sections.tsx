@@ -16,18 +16,14 @@ import {
 } from "@/components/ui/table"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { CostTooltip } from "@/components/metrics/cost-tooltip"
 import {
   InputTokenTooltip,
   OutputTokenTooltip,
 } from "@/components/metrics/token-tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatCard } from "@/components/metrics/stat-card"
-import { useCurrency } from "@/hooks/currency-context"
 import { useLanguage } from "@/hooks/language-context"
 import {
-  formatAvgPer100M,
-  formatCost,
   formatDuration,
   formatErrorType,
   formatPlanType,
@@ -35,7 +31,6 @@ import {
   formatSuccessRate,
   formatTime,
   formatTokens,
-  type DisplayCurrency,
 } from "@/lib/format"
 import type {
   Aggregate,
@@ -45,13 +40,7 @@ import type {
   ProviderGroup,
 } from "@/lib/types"
 
-export function GlobalCards({
-  global,
-  currency,
-}: {
-  global: Aggregate | null
-  currency: DisplayCurrency | null
-}) {
+export function GlobalCards({ global }: { global: Aggregate | null }) {
   if (global === null) {
     return (
       <Alert>
@@ -61,7 +50,7 @@ export function GlobalCards({
     )
   }
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       <StatCard
         title="请求数"
         value={global.requestCount.toLocaleString("zh-CN")}
@@ -73,11 +62,6 @@ export function GlobalCards({
         description={`输入 ${formatTokens(global.inputTokens)} · 输出 ${formatTokens(global.outputTokens)}`}
       />
       <StatCard
-        title="费用"
-        value={formatCost(global, currency)}
-        description={`均价 ${formatAvgPer100M(global, currency)}`}
-      />
-      <StatCard
         title="响应"
         value={global.ttftAverageMs === null ? "—" : formatDuration(global.ttftAverageMs)}
         description={`P50 ${formatDuration(global.ttftP50Ms)} · P95 ${formatDuration(global.ttftP95Ms)}`}
@@ -87,12 +71,11 @@ export function GlobalCards({
 }
 
 export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
-  const { currency } = useCurrency()
   return (
     <Card>
       <CardHeader>
         <CardTitle>按 Provider</CardTitle>
-        <CardDescription>每组包含请求、Token、费用与均价（按当前币种 /100M）</CardDescription>
+        <CardDescription>每组包含请求、Token 与响应指标</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
@@ -102,8 +85,6 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
               <TableHead>请求</TableHead>
               <TableHead>输入 Token</TableHead>
               <TableHead>输出 Token</TableHead>
-              <TableHead>费用</TableHead>
-              <TableHead>均价</TableHead>
               <TableHead>TTFT</TableHead>
               <TableHead>输出速度</TableHead>
               <TableHead>压缩</TableHead>
@@ -126,12 +107,6 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
                     reasoningOutputTokens={group.aggregate.reasoningOutputTokens}
                   />
                 </TableCell>
-                <TableCell>
-                  <CostTooltip value={group.aggregate} currency={currency} />
-                </TableCell>
-                <TableCell className="tabular-nums">
-                  {formatAvgPer100M(group.aggregate, currency)}
-                </TableCell>
                 <TableCell className="tabular-nums">{formatDuration(group.aggregate.ttftAverageMs)}</TableCell>
                 <TableCell className="tabular-nums">{formatSpeed(group.aggregate.outputTokensPerSecond)}</TableCell>
                 <TableCell className="tabular-nums">
@@ -143,7 +118,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
             ))}
             {providers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-16 text-center text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -204,7 +179,7 @@ export function DeepseekBalanceCard({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>DS 剩余费用</CardTitle>
+          <CardTitle>DS 账户余额</CardTitle>
           <CardDescription>DeepSeek 账户余额暂不可用</CardDescription>
         </CardHeader>
       </Card>
@@ -214,7 +189,7 @@ export function DeepseekBalanceCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>DS 剩余费用</CardTitle>
+        <CardTitle>DS 账户余额</CardTitle>
         <CardDescription>DeepSeek 账户余额</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">

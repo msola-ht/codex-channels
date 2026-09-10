@@ -25,9 +25,6 @@ export interface MetricsCompactSummary {
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  totalCostNanos: number | null;
 }
 
 export interface MetricsReportDocument {
@@ -79,10 +76,6 @@ export interface MetricsThreadsDocument {
     requestCount: number;
     inputTokens: number;
     outputTokens: number;
-    pricingCurrency: string | null;
-    pricedRequestCount: number;
-    totalCostNanos: number | null;
-    totalCostCnyNanos: number | null;
     compact: MetricsCompactSummary | null;
     lastRecordedAtMs: number;
   }>;

@@ -5,11 +5,7 @@ import { modelRequestMetricsSchemaVersion } from "./request-metrics-database.js"
 const schemaVersion = modelRequestMetricsSchemaVersion;
 
 export const metricStorageColumnsSql = `
-  provider, billing_mode, pricing_currency, pricing_source, pricing_effective_at_ms,
-  pricing_bucket,
-  uncached_input_price_per_million_nanos,
-  cached_input_price_per_million_nanos, output_price_per_million_nanos,
-  transport, response_format, operation, thread_id, turn_id, model, service_tier,
+  provider, transport, response_format, operation, thread_id, turn_id, model, service_tier,
   reasoning_effort, status, http_status, error_type, error_code, error_message,
   incomplete_reason,
   input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,

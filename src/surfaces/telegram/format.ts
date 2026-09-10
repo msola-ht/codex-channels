@@ -3,8 +3,6 @@ import {
   type AccountUsage,
   type ConversationSession,
   type ConversationStatus,
-  type DisplayPriceCurrency,
-  type ExchangeRateSnapshot,
   type ModelSelectionState,
 } from "../../application/index.js";
 import type { OutputEvent, RemoteQuotaSummary } from "../../conversation-core/index.js";
@@ -140,14 +138,10 @@ export function renderTelegramLifecyclePresentation(
 
 export function renderTelegramSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
 ): string {
   return renderTelegramLifecyclePresentation(
-    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+    createSubagentCompletedPresentation(event, debug),
   );
 }
 

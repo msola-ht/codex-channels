@@ -78,7 +78,6 @@ const pageSortSql = {
   outputTokensPerSecond: "output_tokens_per_second",
   ttftMs: "ttft_ms",
   requestDurationMs: "request_duration_ms",
-  totalCostNanos: "total_cost_nanos",
 } as const;
 const observableCompletionSql = `
   status = 'completed'
@@ -89,53 +88,6 @@ const observableCompletionSql = `
     AND output_tokens IS NULL
     AND total_tokens IS NULL
   )
-`;
-const successfulCostAggregateSql = `
-  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
-    THEN pricing_currency END) AS pricing_currency,
-  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
-      AND total_cost_nanos IS NOT NULL
-    THEN pricing_currency END) AS pricing_currency_count,
-  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
-      AND total_cost_nanos IS NOT NULL
-    THEN COALESCE(pricing_bucket, '') END) AS pricing_bucket_count,
-  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
-    THEN pricing_bucket END) AS pricing_bucket,
-  COUNT(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
-    AS priced_request_count,
-  SUM(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
-    THEN input_tokens END) AS priced_input_tokens,
-  SUM(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
-    THEN output_tokens END) AS priced_output_tokens,
-  SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
-    AS total_cost_nanos,
-  SUM(CASE WHEN ${observableCompletionSql} THEN uncached_input_cost_nanos END)
-    AS uncached_input_cost_nanos,
-  SUM(CASE WHEN ${observableCompletionSql} THEN cached_input_cost_nanos END)
-    AS cached_input_cost_nanos,
-  SUM(CASE WHEN ${observableCompletionSql} THEN output_cost_nanos END)
-    AS output_cost_nanos,
-  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
-    THEN uncached_input_price_per_million_nanos END)
-    AS uncached_input_price_per_million_nanos,
-  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
-      AND total_cost_nanos IS NOT NULL
-    THEN COALESCE(uncached_input_price_per_million_nanos, -1) END)
-    AS uncached_input_price_count,
-  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
-    THEN cached_input_price_per_million_nanos END)
-    AS cached_input_price_per_million_nanos,
-  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
-      AND total_cost_nanos IS NOT NULL
-    THEN COALESCE(cached_input_price_per_million_nanos, -1) END)
-    AS cached_input_price_count,
-  MIN(CASE WHEN ${observableCompletionSql} AND total_cost_nanos IS NOT NULL
-    THEN output_price_per_million_nanos END)
-    AS output_price_per_million_nanos,
-  COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
-      AND total_cost_nanos IS NOT NULL
-    THEN COALESCE(output_price_per_million_nanos, -1) END)
-    AS output_price_count
 `;
 const compactAggregateSql = `
   COUNT(CASE WHEN operation = 'compact' THEN 1 END) AS compact_request_count,
@@ -153,17 +105,7 @@ const compactAggregateSql = `
   COUNT(CASE WHEN operation = 'compact' THEN cached_input_tokens END)
     AS compact_cached_input_token_count,
   SUM(CASE WHEN operation = 'compact' THEN output_tokens END)
-    AS compact_output_tokens,
-  MIN(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
-      AND total_cost_nanos IS NOT NULL THEN pricing_currency END)
-    AS compact_pricing_currency,
-  COUNT(DISTINCT CASE WHEN operation = 'compact' AND ${observableCompletionSql}
-      AND total_cost_nanos IS NOT NULL THEN pricing_currency END)
-    AS compact_pricing_currency_count,
-  COUNT(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
-    THEN total_cost_nanos END) AS compact_priced_request_count,
-  SUM(CASE WHEN operation = 'compact' AND ${observableCompletionSql}
-    THEN total_cost_nanos END) AS compact_total_cost_nanos
+    AS compact_output_tokens
 `;
 const normalizedStatusSql = `
   CASE
@@ -240,7 +182,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           ${metricStorageColumnsSql}
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
@@ -283,14 +225,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     const recordedAtMs = sample.recordedAtMs ?? Date.now();
     this.insert.run(
       sample.provider,
-      sample.pricing?.billingMode ?? null,
-      sample.pricing?.currency ?? null,
-      sample.pricing?.source ?? null,
-      sample.pricing?.effectiveAtMs ?? null,
-      sample.pricing?.bucket ?? null,
-      sample.pricing?.uncachedInputPricePerMillionNanos ?? null,
-      sample.pricing?.cachedInputPricePerMillionNanos ?? null,
-      sample.pricing?.outputPricePerMillionNanos ?? null,
       sample.transport,
       sample.responseFormat,
       sample.operation,
@@ -525,7 +459,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         const inputTokens = metric.inputTokens ?? 0;
         const outputTokens = metric.outputTokens ?? 0;
         const totalTokens = metric.totalTokens ?? inputTokens + outputTokens;
-        const cost = metric.totalCostNanos;
         if (!existing) {
           groups.set(key, {
             provider: metric.provider,
@@ -541,8 +474,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             inputTokens,
             outputTokens,
             totalTokens,
-            pricedRequestCount: cost === null ? 0 : 1,
-            totalCostNanos: cost,
             latestUsedPercentMillionths: snapshot.usedPercentMillionths,
             planType: snapshot.planType,
           });
@@ -554,11 +485,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           existing.inputTokens += inputTokens;
           existing.outputTokens += outputTokens;
           existing.totalTokens += totalTokens;
-          if (cost !== null) {
-            existing.pricedRequestCount += 1;
-            existing.totalCostNanos = existing.totalCostNanos === null
-              ? cost : existing.totalCostNanos + cost;
-          }
           if (snapshot.usedPercentMillionths !== null) {
             existing.latestUsedPercentMillionths = snapshot.usedPercentMillionths;
           }
@@ -879,7 +805,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
-        ${successfulCostAggregateSql},
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId) as unknown as TurnSummaryRow;
@@ -977,7 +902,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
-        ${successfulCostAggregateSql},
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
@@ -1062,7 +986,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
-        ${successfulCostAggregateSql},
         ${compactAggregateSql}
       FROM model_request_metrics_enriched
       WHERE thread_id = ? AND turn_id = ?
@@ -1132,7 +1055,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(CASE WHEN non_reasoning_output_tokens > 0
               AND output_duration_ms > 0 THEN 1 ELSE 0 END)
           AS output_speed_timed_count,
-        ${successfulCostAggregateSql},
         ${compactAggregateSql},
         MAX(recorded_at_ms) AS recorded_at_ms
       FROM model_request_metrics_enriched
@@ -1202,16 +1124,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(*) AS request_count,
         SUM(input_tokens) AS input_tokens,
         SUM(output_tokens) AS output_tokens,
-        MIN(CASE WHEN ${observableCompletionSql}
-            AND total_cost_nanos IS NOT NULL
-          THEN pricing_currency END) AS pricing_currency,
-        COUNT(DISTINCT CASE WHEN ${observableCompletionSql}
-            AND total_cost_nanos IS NOT NULL
-          THEN pricing_currency END) AS pricing_currency_count,
-        COUNT(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
-          AS priced_request_count,
-        SUM(CASE WHEN ${observableCompletionSql} THEN total_cost_nanos END)
-          AS total_cost_nanos,
         ${compactAggregateSql},
         MIN(request_started_at_ms) AS first_request_started_at_ms,
         MAX(model_request_metrics_enriched.recorded_at_ms) AS recorded_at_ms,
@@ -1234,10 +1146,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       request_count: number;
       input_tokens: number | null;
       output_tokens: number | null;
-      pricing_currency: string | null;
-      pricing_currency_count: number;
-      priced_request_count: number;
-      total_cost_nanos: number | null;
       first_request_started_at_ms: number;
       recorded_at_ms: number;
       agent_path: string | null;
@@ -1256,11 +1164,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
       outputTokens: row.output_tokens ?? 0,
-      pricingCurrency: row.pricing_currency_count === 1
-        ? row.pricing_currency
-        : null,
-      pricedRequestCount: row.priced_request_count,
-      totalCostNanos: row.total_cost_nanos ?? null,
       compact: toStoredCompactSummary(row),
       firstRequestStartedAtMs: row.first_request_started_at_ms,
       lastRecordedAtMs: row.recorded_at_ms,
@@ -1399,7 +1302,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           SUM(CASE WHEN non_reasoning_output_tokens > 0
                 AND output_duration_ms > 0 THEN 1 ELSE 0 END)
             AS output_speed_timed_count,
-          ${successfulCostAggregateSql},
           ${compactAggregateSql}
         FROM filtered
         GROUP BY group_provider, group_model
@@ -1585,7 +1487,6 @@ function estimateWeeklyQuotaRows(
   let intervalCount = 0;
   const total = emptyWeeklyInterval();
   const periodTotal = emptyWeeklyInterval();
-  const currencies = new Set<string>();
 
   for (const row of rows) {
     addWeeklyIntervalRow(periodTotal, row);
@@ -1623,7 +1524,6 @@ function estimateWeeklyQuotaRows(
     observedDeltaPercentMillionths += delta;
     intervalCount += 1;
     mergeWeeklyInterval(total, pending);
-    for (const currency of pending.currencies) currencies.add(currency);
     baseline = current;
     pending = emptyWeeklyInterval();
   }
@@ -1631,7 +1531,6 @@ function estimateWeeklyQuotaRows(
   // 周期内最后一个额度快照之后通常仍有请求；它们没有下一个快照
   // 可以闭合区间，但仍属于本周期样本，必须计入总量。
   mergeWeeklyInterval(total, pending);
-  for (const currency of pending.currencies) currencies.add(currency);
 
   if (
     observedDeltaPercentMillionths <= 0
@@ -1649,39 +1548,29 @@ function estimateWeeklyQuotaRows(
     intervalCount,
     requestCount: total.requestCount,
     unsuccessfulRequestCount: total.unsuccessfulRequestCount,
-    pricedRequestCount: total.pricedRequestCount,
     inputTokens: total.inputTokens,
     outputTokens: total.outputTokens,
     totalTokens: total.inputTokens + total.outputTokens,
-    pricingCurrency: currencies.size === 1 ? [...currencies][0]! : null,
-    totalCostNanos: currencies.size === 1 ? total.totalCostNanos : null,
     periodRequestCount: periodTotal.requestCount,
     periodInputTokens: periodTotal.inputTokens,
     periodOutputTokens: periodTotal.outputTokens,
     periodTotalTokens: periodTotal.inputTokens + periodTotal.outputTokens,
-    periodTotalCostNanos: periodTotal.currencies.size === 1 ? periodTotal.totalCostNanos : null,
   };
 }
 
 interface WeeklyIntervalAccumulator {
   requestCount: number;
   unsuccessfulRequestCount: number;
-  pricedRequestCount: number;
   inputTokens: number;
   outputTokens: number;
-  totalCostNanos: number;
-  currencies: Set<string>;
 }
 
 function emptyWeeklyInterval(): WeeklyIntervalAccumulator {
   return {
     requestCount: 0,
     unsuccessfulRequestCount: 0,
-    pricedRequestCount: 0,
     inputTokens: 0,
     outputTokens: 0,
-    totalCostNanos: 0,
-    currencies: new Set(),
   };
 }
 
@@ -1690,15 +1579,6 @@ function addWeeklyIntervalRow(target: WeeklyIntervalAccumulator, row: MetricRow)
   if (row.status !== "completed") target.unsuccessfulRequestCount += 1;
   target.inputTokens += row.input_tokens ?? 0;
   target.outputTokens += row.output_tokens ?? 0;
-  if (
-    row.status === "completed"
-    && row.total_cost_nanos !== null
-    && row.pricing_currency !== null
-  ) {
-    target.pricedRequestCount += 1;
-    target.totalCostNanos += row.total_cost_nanos;
-    target.currencies.add(row.pricing_currency);
-  }
 }
 
 function mergeWeeklyInterval(
@@ -1707,10 +1587,8 @@ function mergeWeeklyInterval(
 ): void {
   target.requestCount += source.requestCount;
   target.unsuccessfulRequestCount += source.unsuccessfulRequestCount;
-  target.pricedRequestCount += source.pricedRequestCount;
   target.inputTokens += source.inputTokens;
   target.outputTokens += source.outputTokens;
-  target.totalCostNanos += source.totalCostNanos;
 }
 
 function validateMetricsTimeRange(

@@ -12,10 +12,7 @@ import {
   SortableHeader,
   type DataTableColumn,
 } from "@/components/metrics/data-table"
-import { useCurrency } from "@/hooks/currency-context"
 import {
-  formatCost,
-  formatCostDetail,
   formatSpeed,
   formatTime,
   formatTokens,
@@ -33,15 +30,12 @@ const COLUMN_LABELS: Record<string, string> = {
   input: "输入 Token",
   output: "输出 Token",
   speed: "速度",
-  cost: "费用",
   compact: "压缩",
 }
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 export function TurnTable({ turns }: { turns: TurnSummary[] }) {
-  const { currency } = useCurrency()
-
   const columns = React.useMemo<DataTableColumn<TurnSummary>[]>(() => [
     {
       id: "select",
@@ -205,35 +199,6 @@ export function TurnTable({ turns }: { turns: TurnSummary[] }) {
       ),
     },
     {
-      id: "cost",
-      accessorFn: (turn) =>
-        turn.totalCostCnyNanos ?? turn.totalCostNanos ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>费用</SortableHeader>
-      ),
-      cell: ({ row }) => {
-        const turn = row.original
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
-                {formatCost(turn, currency)}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="right" align="start">
-              <ul className="flex flex-col gap-1">
-                {formatCostDetail(turn, currency).map((item) => (
-                  <li key={item.label} className="whitespace-nowrap">
-                    {item.label}：{item.value}
-                  </li>
-                ))}
-              </ul>
-            </TooltipContent>
-          </Tooltip>
-        )
-      },
-    },
-    {
       id: "compact",
       accessorFn: (turn) => turn.compact?.requestCount ?? 0,
       header: ({ column }) => (
@@ -247,7 +212,7 @@ export function TurnTable({ turns }: { turns: TurnSummary[] }) {
         </span>
       ),
     },
-  ], [currency])
+  ], [])
 
   return (
     <DataTable

@@ -1,11 +1,5 @@
 import pino from "pino";
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -22,8 +16,6 @@ import type {
 } from "../src/policy/index.js";
 import type { SurfaceAdapter } from "../src/surfaces/index.js";
 import {
-  createWeixinSurface,
-  type CreateWeixinSurfaceOptions,
   WeixinConfigurationDeliveryError,
   WeixinProtocolError,
   WeixinSurface,
@@ -50,59 +42,6 @@ afterEach(() => {
 });
 
 describe("WeixinSurface", () => {
-  it("passes the OpenCode Go usage lookup through the surface factory", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-weixin-opencode-"));
-    temporaryDirectories.push(directory);
-    for (const name of ["credentials", "reply", "cursor", "uploads"]) {
-      mkdirSync(join(directory, name), { recursive: true });
-    }
-    const requestStartedAtMs = Date.parse("2026-08-17T03:30:00.000Z");
-    const remainingUsage = vi.fn<NonNullable<CreateWeixinSurfaceOptions["remainingUsage"]>>(async () => ({
-      model: "deepseek-v4-flash",
-      bucket: "peak",
-      includedUsageUsd: 15,
-      usedUsdNanos: 2_813_173_642,
-      usedPercent: 2_813_173_642 / 15_000_000_000 * 100,
-      remainingUsdNanos: 12_186_826_358,
-      windowStartAtMs: 1_786_803_727_000,
-      windowEndAtMs: 1_789_482_127_000,
-    }));
-    const surface = createWeixinSurface({
-      accountId,
-      service: serviceFixture(),
-      access: accessFixture(true),
-      actorRegistry: actorRegistryFixture(),
-      credentialDirectory: join(directory, "credentials"),
-      replyContextDirectory: join(directory, "reply"),
-      cursorDirectory: join(directory, "cursor"),
-      uploadsDirectory: join(directory, "uploads"),
-      startupNotification: { targets: () => [], text: () => "" },
-      logger: pino({ level: "silent" }),
-      onFatal: vi.fn(),
-      remainingUsage,
-    });
-
-    await surface.output.handle({
-      type: "turn.completed",
-      target,
-      threadId: "thread",
-      turnId: "turn",
-      status: "completed",
-      model: "deepseek-v4-flash",
-      modelProvider: "opencode-go",
-      timing: {
-        modelRequestCount: 1,
-        modelRequestStartedAtMs: requestStartedAtMs,
-      },
-    });
-    expect(remainingUsage).toHaveBeenCalledWith(
-      "deepseek-v4-flash",
-      requestStartedAtMs,
-      "opencode-go",
-    );
-    await surface.stop();
-  });
-
   it("forms an authorized inbound-to-final-output text loop", async () => {
     const cursorStore = cursorStoreFixture();
     const service = serviceFixture();

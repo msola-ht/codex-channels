@@ -135,7 +135,7 @@
   API Key 输出隔离、下载失败不修改、Flash、Flash Vision Exp 与 Pro 可选、受控目录输入能力校验，以及跨 Provider 新建
   Thread、原 Thread 可恢复、精确 Provider 路由、设置通知不覆盖不可变 Provider，以及在文本模型
   上创建或追加 Turn 前拒绝图片输入。
-- DeepSeek 人工审查目录基线与现行价格基线的一致性、视觉模型原生图片能力和峰谷计价。
+- DeepSeek 人工审查目录基线、视觉模型原生图片能力与受控目录输入能力校验。
 - Provider 账户能力的编译期唯一注册、未知 Provider 不回退、OpenAI Token 用量与单桶/多桶额度
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
@@ -145,7 +145,7 @@
   Setup、同名模型按 Provider 独立选择、按需 App Server 启动、共享统计代理的 `/go/<账户>` 前缀
   路由与分账户指标、账户新增及删除中途失败的逐步快照回滚、账户新增/默认切换/运行实例停止/账户删除的无 prompts
   脱敏预览、稳定字段错误、固定模式与历史丢失确认、Key 输出隔离、共享子代理同步、未运行短路和 Remote TUI 占用结果、账户适配器按
-  `modelProvider` 读取凭据、官方美元价格、长上下文档位、端点与 SDK 协议基线校验。
+  `modelProvider` 读取凭据、官方配额窗口 schema 与端点协议校验。
 - 全局 Provider Client 空闲释放：无前台/后台绑定且无活动操作时关闭全部已连接 Client，操作期间
   保护，宽限期内新绑定/新操作会取消释放，自动解除轮次的关闭前会通知所有已知授权渠道，其他无绑定
   关闭不通知，关闭完成后按需重连；App Server 进程保持运行，不按 Provider 类型区分。受管 Remote TUI
@@ -163,24 +163,20 @@
   与只读 `/models` 路径，以及仅官方 OpenAI 主代理启用的搜索、记忆摘要、图片和 Realtime
   HTTP/WS 固定端点；第三方代理继续拒绝这些 OpenAI 专用路径，额外端点不计入 Responses 指标。
   覆盖 HTTP/SSE 与 WebSocket、旧版路径及 `request_kind=compaction` 标记的
-  remote compaction v2 操作分类，以及压缩 Usage、费用和额度进入会话与全局汇总的口径；上游
+  remote compaction v2 操作分类，以及压缩 Usage 和额度进入会话与全局汇总的口径；上游
   状态/Header、私有元数据剥离、流式转发、统一代理 Agent、OpenAI 自定义上游保留、App Server
   服务独立生命周期、响应完成前的指标确认、启动失败清理，以及 `0600` Unix Socket 指标投递和
   Gateway 缺席时无损模型请求。代理还覆盖完成/失败/不完整状态、HTTP 错误、超时、断线、真实
   模型/服务层级与完整 Usage 的脱敏采集，其中 WebSocket 客户端断开归为中断、上游断流归为可重试；
   Bootstrap 组合测试验证所有样本进入独立 Observability
-  Store、缺少 Turn 关联时不伪造 Core 事件，以及可选计价解析器只在组合边界附加价格快照；独立
-  价格目录测试覆盖 LiteLLM 主源、Sub2API 价格镜像回退、私有缓存重载、缓存输入、Priority 和
-  长上下文价格选择；DeepSeek 专属价格测试覆盖官方人民币基线、请求开始时间、北京时间生效与峰谷
-  边界、Pro/Flash 精确匹配、汇率缺失失败关闭和禁止通用目录回退；独立汇率测试覆盖 open.er-api
-  主源、ECB 回退、私有缓存重载和无效汇率拒绝；
-  `reference-cost-summary.test.ts` 覆盖当前 Turn 延迟写入时的 Thread 总价去重及
-  跨价格档位聚合；失败和未完整请求保留原始价格快照但不进入费用汇总，CSV 导出统一中和
+  Store、缺少 Turn 关联时不伪造 Core 事件；
+  `completion-timing.test.ts` 覆盖当前 Turn 延迟写入时的请求状态校正与可选 Token 字段回填；
+  失败和未完整请求保留原始指标但不进入成功汇总，CSV 导出统一中和
   电子表格公式前缀；独立 SQLite 指标库覆盖 `0600` 权限、严格 Schema、原子初始化、可配置保留策略与备份清理、
   Schema v10→v11 的运行级子代理关系备份迁移与结构异常事务回滚、同一子 Thread 多轮运行的精确父 Turn 归属、
   0.150.1 原生 `subAgentActivity.completed` 的父 Turn 归属、成功信号去重与真实 App Server 顺序合同、
   有界内部读取，以及
-  Schema v2 enriched View 的耗时、速度、缓存、费用计算和 `/M Token` 单价一致性。回归测试还覆盖 WebSocket 完成后立即
+  Schema v2 enriched View 的耗时、速度与缓存计算一致性。回归测试还覆盖 WebSocket 完成后立即
   关闭不重复、指标确认不等待延迟分片 SQLite 写入，以及 1 MiB 内非流式 JSON 响应的元数据裁剪
   与正文隔离；指标库运维测试覆盖在线只读状态、运行中拒绝重置、离线检查点、`0600` 备份和重复
   reset 无副作用，以及 systemd 异常状态、前台 Gateway Socket 和残缺锁的失败关闭与恢复。
@@ -205,8 +201,8 @@
   持久化、撤权强制新建、空闲释放器恢复/断线跳过与关闭超时、Surface 本地命令与交互卡片活动刷新、当前版本
   Schema 缺失失败关闭、配置文件类型/所有者/权限和父目录
   写权限失败关闭、配置热加载与自动重启分类、Setup
-  脱敏总览、分层返回、模块职责文案与通讯渠道菜单、全局调试模式的原子启停、`codexc config` 菜单（操作详情/计划更新/按提供商
-  的价格显示方式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖、Telegram 消息格式、非交互路径输出、
+  脱敏总览、分层返回、模块职责文案与通讯渠道菜单、全局调试模式的原子启停、`codexc config` 菜单（操作详情、计划更新、
+  审批超时、Sandbox、默认工作区与渠道新会话模型覆盖、Telegram 消息格式、非交互路径输出、
   Doctor 与指标库入口委派）、Telegram Setup、飞书手动输入与扫码注册的消息和 CardKit 最小权限、卡片动作回调
   声明、应用选择、Bot 身份验证、扫码后自动发布悬浮菜单、发布失败保留连接配置并安全提示 Doctor
   恢复、授权域名约束、允许名单确认、原子保存和错误脱敏、

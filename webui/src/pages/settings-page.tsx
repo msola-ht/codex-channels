@@ -13,7 +13,6 @@ import { ManagedServices } from "@/components/settings/managed-services"
 import { PendingSettingDialog } from "@/components/settings/settings-controls"
 import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings-card"
 import { SettingsError, SettingsSkeleton, LoadingSettingsCard } from "@/components/settings/settings-feedback"
-import { useCurrency } from "@/hooks/currency-context"
 import type { UseApiState } from "@/hooks/use-api"
 import { useApi } from "@/hooks/use-api"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
@@ -24,8 +23,7 @@ import { useApiProviderManagement } from "@/hooks/use-api-provider-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary } from "@/lib/api"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
-import type { DisplayCurrency } from "@/lib/format"
-import type { ManagementProvidersResponse, ManagementServicesResponse, SettingsResponse, SettingsSummaryResponse } from "@/lib/types"
+import type { ManagementProvidersResponse, ManagementServicesResponse, SettingsSummaryResponse } from "@/lib/types"
 import type { AccountSettingsController, ApiProviderManagementController, CodexSettingsController, GatewaySettingsController, ManagementTaskController, ProviderSettingsController } from "@/lib/settings-management"
 
 type SettingsRefreshSource = "gateway" | "codex" | "provider" | "account" | "api-provider"
@@ -33,7 +31,6 @@ type SettingsRefreshSource = "gateway" | "codex" | "provider" | "account" | "api
 const VISIBLE_REFRESH_MIN_INTERVAL_MS = 5_000
 
 export function SettingsPage() {
-  const { currency, settings, refetchSettings } = useCurrency()
   const summary = useApi(fetchSettingsSummary, [])
   const services = useApi(fetchManagementServices, [])
   const providers = useApi(fetchManagementProviders, [])
@@ -64,8 +61,7 @@ export function SettingsPage() {
     if (source !== "provider") refetchProviderSettings()
     if (source !== "account") refetchAccountSettings()
     if (source !== "api-provider") refetchApiProviders()
-    refetchSettings()
-  }, [refetchAccountSettings, refetchApiProviders, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSettings, refetchSummary])
+  }, [refetchAccountSettings, refetchApiProviders, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSummary])
 
   useEffect(() => {
     if (!tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))) return undefined
@@ -111,8 +107,6 @@ export function SettingsPage() {
     {loadState === "error" ? <SettingsError message={summary.error ?? "设置快照加载失败"} retry={summary.refetch} /> : null}
     {loadState === "empty" ? <SettingsError message="服务未返回可用的设置快照" retry={summary.refetch} /> : null}
     {loadState === "ready" && summary.data !== null ? <SettingsContent
-      currency={currency}
-      settings={settings}
       summary={summary.data}
       services={services}
       providers={providers}
@@ -131,8 +125,6 @@ export function SettingsPage() {
 }
 
 interface SettingsContentProps {
-  currency: DisplayCurrency | null
-  settings: SettingsResponse | null
   summary: SettingsSummaryResponse
   services: UseApiState<ManagementServicesResponse> & { refetch: () => void }
   providers: UseApiState<ManagementProvidersResponse> & { refetch: () => void }
@@ -148,7 +140,7 @@ interface SettingsContentProps {
   onCopy: (id: string, command: string) => Promise<void>
 }
 
-function SettingsContent({ currency, settings, summary, services, providers, apiProviders, management, codexManagement, tasks, providerSettings, accountSettings, onSettingsChanged, copiedCommand, copyError, onCopy }: SettingsContentProps) {
+function SettingsContent({ summary, services, providers, apiProviders, management, codexManagement, tasks, providerSettings, accountSettings, onSettingsChanged, copiedCommand, copyError, onCopy }: SettingsContentProps) {
   const confirmGatewaySetting = async () => {
     if (await management.confirmSetting()) onSettingsChanged("gateway")
   }
@@ -164,7 +156,7 @@ function SettingsContent({ currency, settings, summary, services, providers, api
     <ApiProviderManagement management={apiProviders} onChanged={() => onSettingsChanged("api-provider")} />
     <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmGatewaySetting()} onCancel={management.cancelSetting} />
     {management.actionError !== null ? <p className="text-sm text-destructive" role="status">{management.actionError}</p> : null}
-    <GatewaySettingsCard management={management} currency={currency} settings={settings} />
+    <GatewaySettingsCard management={management} />
     <WebuiDataSettingsCard management={management} />
     <ChannelStatusCard channels={summary.gateway.channels} />
     {tasks.actionError !== null ? <p className="text-sm text-destructive" role="status">{tasks.actionError}</p> : null}

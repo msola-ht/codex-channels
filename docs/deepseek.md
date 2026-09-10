@@ -77,7 +77,7 @@ Profile 与共享子代理角色切回目录默认模型 `deepseek-flash`，并�
 历史 Thread 仍保留自身模型。
 可选模型以下载的官方目录为准：目录里声明什么就显示什么，没有的模型不出现在 `/model` 与 Setup
 选项中。旧模型名 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 仍可由 DeepSeek 接受，
-但已不在目录中，只保留价格基线用于历史用量折算。
+但已不在目录中。
 
 `deepseek-flash` 原生支持文字和图片；Gateway 从官方模型目录读取该输入能力，渠道图片
 在统一提交边界转换为受限的 PNG/JPEG/WebP/非动画 GIF Base64 Data URL，并通过稳定 `image` Turn 输入交给 App Server，
@@ -97,8 +97,8 @@ DeepSeek（官方目录中的模型 + Codex 0.150.1）支持网页搜索，且�
   （DeepSeek 没有 `/alpha/search` 端点，也未声明 `supports_standalone_web_search`）。
 - 网关链路无需额外配置：搜索请求包含在 `/responses` 模型请求内，经本地 Provider 代理
   原样透传；会话事件里出现 `web_search` item 即表示模型真的调用了搜索。
-- 计费与统计：搜索是模型请求的一部分，按 DeepSeek API 用量计费，计入请求次数、Token
-  与费用统计；不消耗 OpenAI 额度。
+- 计费与统计：搜索是模型请求的一部分，按 DeepSeek API 用量计费，计入请求次数与 Token
+  统计；不消耗 OpenAI 额度。
 - 验证方式：直接让 DeepSeek 会话执行搜索任务，观察事件日志；或运行
   `codex exec -p sf-deepseek -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
 - 失效边界：若 DeepSeek API 对该模型关闭搜索、上游工具名称或响应结构变化，或网关代理
@@ -142,19 +142,8 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
 - `/metrics` 从独立指标库读取当前 Thread 最近 Turn 的请求累计和最近一次直接 API 请求；输入量是
   多次请求的累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d` 与
-  OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。新请求按当次
-  价格快照估算 API 参考费用。价格来自随版本审查的 DeepSeek 官方人民币基线；2026 年 8 月 17 日
-  00:00（北京时间）起，按请求开始时间在 09:00–12:00、14:00–18:00 使用高峰价，其余时间使用
-  空闲价，区间采用含开始、不含结束的项目规则。2026 年 8 月 23 日 00:00（北京时间）起，周六、
-  周日全天使用空闲价，工作日继续沿用上述峰谷区间。2026 年 9 月 10 日 12:00（北京时间）起使用
-  V4.1 Flash 下调后的价格；2026 年 9 月 14 日 12:00（北京时间）起，`deepseek-v4-pro` 的请求由
-  官方路由到 V4.1 Flash，价格计划同步按 Flash 单价计费，直到 V4.1 Pro 上线后再更新基线。
-  运行时按当前 USD/CNY 汇率固化为统一 USD 快照；
-  汇率、精确模型或有效计划缺失时不使用通用目录猜价。总价按 `display.price_currency` 全局统一展示（默认 `usd`
-  人民币），先出总计、再列出输入、缓存、输出三项价格明细，不显示目录静态单价，但会按本机
-  实际用量折算并展示均价（元/100M，人民币）；历史价格快照不按新价格回算，人民币展示仍按当前
-  汇率统一换算。模型目录与价格基线由人工对照官方文档审查更新，运行中的 Gateway 不抓取价格
-  HTML，也不自动发布。
+  OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。Gateway 不在
+  本地计算或估算 DeepSeek 价格与费用，`/metrics` 只展示请求、Token、速度、异常和官方账户数据。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
@@ -163,7 +152,7 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 `deepseek-flash` 原生接受当前渠道校验后的 PNG/JPEG/WebP/非动画 GIF 图片，并通过现有 App Server
 Turn 输入处理；项目仍采用更严格的最多四张、单张 10 MiB、整批 20 MiB 边界，不开放图片 URL、
 Files API 或其他图片入口。图片 Token 由 DeepSeek 按尺寸换算并随标准 Usage 返回，Gateway
-继续使用上游 Usage 和本模型现行价格计费，不自行按像素估算。
+继续使用上游 Usage 统计，不自行按像素估算。
 
 Pro 仍为文字模型，收到图片时会在 Turn 前明确拒绝；需要看图时使用 `/model` 切换到
 `deepseek-flash`。Gateway 不再把图片转交给另一套外部视觉 API。
@@ -219,11 +208,10 @@ Windows + 飞书真实验收（2026-08-30）确认：明确要求“只用 DS �
 Gateway 在收到以下官方终态信号之一后，向父会话推送带具体终态的子代理卡片：V2
 自动订阅子线程后收到的 `turn/completed`，官方 `subAgentActivity` 的 `interrupted`，以及兼容旧版
 父线程 `collabAgentToolCall.agentsStates` 的子代理终态。不再以最后模型请求后的静默时间推断完成。
-卡片基于指标库汇总展示任务名、模型、请求次数、Token、费用与全量计价时的每 100M Token 均价（跟随全局价格
-显示）。终态信号后约 5 秒只用于等待指标收敛；没有模型指标
+卡片基于指标库汇总展示任务名、模型、请求次数与 Token。终态信号后约 5 秒只用于等待指标收敛；没有模型指标
 时仍发送零统计终态卡片，指标写入或读取失败则显示“统计暂不可用”。收敛结束后会等待当前指标 Writer 水位
-落库，避免积压时读取部分汇总。缓存、推理、输入/缓存/输出费用分项和模型请求聚合耗时仅在调试
-模式展示。紧凑操作模式只保留子代理启动与失败，成功的等待和交互操作不再各自生成完成卡片。
+落库，避免积压时读取部分汇总。缓存、推理分项和模型请求聚合耗时仅在调试模式展示。紧凑操作模式
+只保留子代理启动与失败，成功的等待和交互操作不再各自生成完成卡片。
 
 ## 应用配置
 

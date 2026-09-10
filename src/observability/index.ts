@@ -1,8 +1,4 @@
 export {
-  calculateModelRequestCostComponents,
-  calculateModelRequestCostNanos,
-} from "./request-metrics.js";
-export {
   createLogger,
   safeErrorMetadata,
   type SafeErrorMetadata,
@@ -17,9 +13,6 @@ export type {
   ModelRequestMetricsStore,
   ModelRequestMetricsWriter,
   ModelBillingMode,
-  ModelPricingLookup,
-  ModelPricingResolver,
-  ModelRequestPricingSnapshot,
   ModelRequestOperation,
   ModelResponseFormat,
   ModelRequestStatus,

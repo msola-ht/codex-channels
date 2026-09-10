@@ -49,7 +49,6 @@ export interface GatewayConfigDocument {
     operation_updates: "full" | "compact" | "hidden";
     plan_updates: boolean;
     reasoning: boolean;
-    price_currency: "cny" | "usd";
   };
   experimental: { plugin_api: boolean };
   scheduled_tasks: { enabled: boolean };

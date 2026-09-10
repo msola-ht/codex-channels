@@ -43,7 +43,6 @@ import {
   WeeklyQuotaCard,
 } from "@/components/overview/overview-sections"
 import { useApi } from "@/hooks/use-api"
-import { useCurrency } from "@/hooks/currency-context"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
 import { useOverview } from "@/hooks/use-overview"
@@ -53,14 +52,11 @@ import {
   fetchGlobalOverview,
 } from "@/lib/api"
 import { formatTime, formatTokens } from "@/lib/format"
-import type { DisplayCurrency } from "@/lib/format"
 import { toStackedUsageTrend } from "@/lib/trend"
-import { resolveDisplayCost } from "@/lib/cost"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import type {
   DeepseekBalanceResponse,
-  GlobalCostRow,
   GlobalDailyRow,
   GlobalDeviceRow,
   GlobalOverviewResponse,
@@ -115,7 +111,6 @@ export function ConsolePage() {
   )
   const account = useOverview(scope.kind === "local" ? range : "24h")
   const officialAccounts = useOfficialAccountSources()
-  const { currency, settings } = useCurrency()
   const deviceLabel = (deviceId: string) =>
     devices.data?.devices.find((device) => device.device_id === deviceId)
       ?.display_name ?? deviceId
@@ -163,12 +158,11 @@ export function ConsolePage() {
 
       {scope.kind === "local"
         ? <LocalDashboard range={range} onRangeChange={setRange} data={account.data} loading={account.loading} error={account.error} />
-        : <GlobalDashboard scope={scope} devices={devices.data?.devices ?? []} currency={currency ?? settings?.currency ?? "usd"} exchangeRate={settings?.exchangeRate?.usdToCny ?? null} />}
+        : <GlobalDashboard scope={scope} devices={devices.data?.devices ?? []} />}
 
       {scope.kind === "local" ? (
         <AccountStatusCards
           overview={account.data}
-          settings={settings}
           balance={officialAccounts.data?.deepseek ?? null}
           opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
           freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
@@ -191,8 +185,6 @@ function LocalDashboard({
   loading: boolean
   error: string | null
 }) {
-  const { currency } = useCurrency()
-
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -209,7 +201,7 @@ function LocalDashboard({
         ? <PageSkeleton rows={4} />
         : (
           <>
-            <GlobalCards global={data.global} currency={currency} />
+            <GlobalCards global={data.global} />
             <ProviderTable providers={data.providers} />
             <ErrorsSummary errors={data.errors} />
           </>
@@ -220,27 +212,17 @@ function LocalDashboard({
 
 function AccountStatusCards({
   overview,
-  settings,
   balance,
   opencodeGoUsage,
   freshness,
 }: {
   overview: ReturnType<typeof useOverview>["data"]
-  settings: ReturnType<typeof useCurrency>["settings"]
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
   freshness: { deepseek: AccountSnapshotFreshness; opencodeGo: AccountSnapshotFreshness }
 }) {
   return (
     <div className="flex flex-col gap-6">
-      {settings?.exchangeRate === null && settings.currency === "cny" ? (
-        <Alert variant="destructive">
-          <AlertTitle>汇率不可用</AlertTitle>
-          <AlertDescription>
-            人民币显示需要汇率，当前没有可用汇率缓存，费用暂时按美元显示。
-          </AlertDescription>
-        </Alert>
-      ) : null}
       <div>
         <h2 className="text-lg font-semibold">本地账户与额度</h2>
         <p className="text-sm text-muted-foreground">数据来自本机 Gateway 的账户快照；全局模块不展示本机账户。</p>
@@ -291,13 +273,9 @@ function FreshnessNotice({
 function GlobalDashboard({
   scope,
   devices,
-  currency,
-  exchangeRate,
 }: {
   scope: Extract<Scope, { kind: "all" } | { kind: "device" }>
   devices: GlobalDeviceRow[]
-  currency: DisplayCurrency
-  exchangeRate: number | null
 }) {
   const deviceId = scope.kind === "device" ? scope.deviceId : null
   const overview = useApi(
@@ -313,7 +291,7 @@ function GlobalDashboard({
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold">全局模块</h2>
-        <p className="text-sm text-muted-foreground">数据中心累计视图：核心指标、用量走势、设备明细、费用和 Provider。</p>
+        <p className="text-sm text-muted-foreground">数据中心累计视图：核心指标、用量走势、设备明细和 Provider。</p>
       </div>
       <ErrorBanner error={overview.error} />
 
@@ -322,7 +300,7 @@ function GlobalDashboard({
         : (
           <>
             <DashboardSection title="核心指标" description="当前范围内所有设备的累计数据">
-              <GlobalTotalsCards totals={overview.data.totals} costs={overview.data.costsByCurrency} currency={currency} exchangeRate={exchangeRate} />
+              <GlobalTotalsCards totals={overview.data.totals} />
             </DashboardSection>
 
             <DashboardSection title="用量走势" description="从趋势和日历两个维度查看使用节奏">
@@ -338,11 +316,11 @@ function GlobalDashboard({
 
             {scope.kind === "all" ? (
               <DashboardSection title="设备明细" description="确认哪些设备正在贡献数据，以及最近上报时间">
-                <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} currency={currency} exchangeRate={exchangeRate} />
+                <GlobalDeviceTable rows={devices} loading={devices.length === 0 && overview.loading} />
               </DashboardSection>
             ) : null}
 
-            <DashboardSection title="费用与 Provider" description="计价费用和 Provider 分布分开查看">
+            <DashboardSection title="Provider" description="各 Provider 的请求与 Token 分布">
               <GlobalProviderTable rows={overview.data.providers} />
             </DashboardSection>
           </>
@@ -373,14 +351,8 @@ function DashboardSection({
 
 function GlobalTotalsCards({
   totals,
-  costs,
-  currency,
-  exchangeRate,
 }: {
   totals: GlobalOverviewResponse["totals"] | null
-  costs: GlobalCostRow[]
-  currency: DisplayCurrency
-  exchangeRate: number | null
 }) {
   if (totals === null) {
     return (
@@ -391,7 +363,7 @@ function GlobalTotalsCards({
     )
   }
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         title="设备数"
         value={totals.device_count.toLocaleString("zh-CN")}
@@ -407,37 +379,12 @@ function GlobalTotalsCards({
         value={formatTokens(totals.total_tokens)}
         description={`输入 ${formatTokens(totals.input_tokens)} · 输出 ${formatTokens(totals.output_tokens)}`}
       />
-      <CostStatCard costs={costs} currency={currency} exchangeRate={exchangeRate} />
       <StatCard
         title="最近上报"
         value={totals.last_recorded_at_ms === null ? "—" : formatTime(totals.last_recorded_at_ms)}
         description="中心最后一条记录"
       />
     </div>
-  )
-}
-
-function CostStatCard({
-  costs,
-  currency,
-  exchangeRate,
-}: {
-  costs: GlobalCostRow[]
-  currency: DisplayCurrency
-  exchangeRate: number | null
-}) {
-  const displayCost = resolveDisplayCost(costs, currency, exchangeRate)
-  const primary = displayCost ? formatNanos(displayCost.primaryNanos, displayCost.primaryCurrency, 2) : formatNanos(null, currency === "cny" ? "CNY" : "USD", 2)
-  const equivalent = displayCost?.equivalentNanos === null || displayCost?.equivalentNanos === undefined
-    ? "—"
-    : formatNanos(displayCost.equivalentNanos, displayCost.equivalentCurrency, 2)
-  const requestCount = displayCost?.requestCount ?? 0
-  return (
-    <StatCard
-      title="费用"
-      value={primary}
-      description={`${equivalent} · ${requestCount.toLocaleString("zh-CN")} 个已计价请求`}
-    />
   )
 }
 
@@ -658,7 +605,7 @@ function GlobalProviderTable({ rows }: { rows: GlobalProviderRow[] }) {
   )
 }
 
-function GlobalDeviceTable({ rows, loading, currency, exchangeRate }: { rows: GlobalDeviceRow[]; loading: boolean; currency: DisplayCurrency; exchangeRate: number | null }) {
+function GlobalDeviceTable({ rows, loading }: { rows: GlobalDeviceRow[]; loading: boolean }) {
   if (loading && rows.length === 0) return null
   return (
     <Card>
@@ -675,7 +622,6 @@ function GlobalDeviceTable({ rows, loading, currency, exchangeRate }: { rows: Gl
               <TableHead>最后上报</TableHead>
               <TableHead>请求数</TableHead>
               <TableHead>总 Token</TableHead>
-              <TableHead>费用</TableHead>
               <TableHead>子代理数</TableHead>
             </TableRow>
           </TableHeader>
@@ -687,7 +633,6 @@ function GlobalDeviceTable({ rows, loading, currency, exchangeRate }: { rows: Gl
                 <TableCell className="tabular-nums">{formatTime(row.last_seen_at_ms)}</TableCell>
                 <TableCell className="tabular-nums">{row.request_count.toLocaleString("zh-CN")}</TableCell>
                 <TableCell className="tabular-nums">{formatTokens(row.total_tokens)}</TableCell>
-                <TableCell className="tabular-nums">{formatDeviceCost(row.costs_by_currency, currency, exchangeRate)}</TableCell>
                 <TableCell className="tabular-nums">{row.subagent_count.toLocaleString("zh-CN")}</TableCell>
               </TableRow>
             ))}
@@ -696,25 +641,4 @@ function GlobalDeviceTable({ rows, loading, currency, exchangeRate }: { rows: Gl
       </CardContent>
     </Card>
   )
-}
-
-function formatDeviceCost(costs: GlobalCostRow[], currency: DisplayCurrency, exchangeRate: number | null): string {
-  const displayCost = resolveDisplayCost(costs, currency, exchangeRate)
-  if (!displayCost) return "—"
-  const primary = formatNanos(displayCost.primaryNanos, displayCost.primaryCurrency, 2)
-  const equivalent = displayCost.equivalentNanos === null
-    ? null
-    : formatNanos(displayCost.equivalentNanos, displayCost.equivalentCurrency, 2)
-  return equivalent ? `${primary} · ${equivalent}` : primary
-}
-
-function formatNanos(nanos: number | null, currency: string | null, fractionDigits = 4): string {
-  const amount = Number(nanos ?? 0) / 1e9
-  const formatted = amount.toLocaleString("zh-CN", {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  })
-  if (currency === "CNY") return `¥${formatted}`
-  if (currency === "USD") return `$${formatted}`
-  return `${formatted} ${currency ?? ""}`.trim()
 }

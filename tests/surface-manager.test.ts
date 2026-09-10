@@ -574,7 +574,7 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
-  it("reads session reference cost after an asynchronous task aggregate", async () => {
+  it("waits for an asynchronous task aggregate before delivery", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const order: string[] = [];
     let resolveTask!: () => void;
@@ -595,10 +595,6 @@ describe("SurfaceManager", () => {
     };
     const output = new EventBus<OutputEvent>(logger);
     const manager = createManager([feishu], output, {
-      sessionReferenceCost: () => {
-        order.push("session");
-        return undefined;
-      },
       taskAggregate: async () => {
         order.push("task-start");
         resolveTaskStarted();
@@ -628,7 +624,6 @@ describe("SurfaceManager", () => {
     expect(order).toEqual([
       "task-start",
       "task-finished",
-      "session",
       "output",
     ]);
 
@@ -668,26 +663,7 @@ describe("SurfaceManager", () => {
           modelRequestCount: 2,
           requestInputTokens: 1_000,
           requestOutputTokens: 100,
-          referenceCost: {
-            currency: "USD",
-            totalCostNanos: 12_000,
-            inputTokens: 1_000,
-            outputTokens: 100,
-            inputCostNanos: 8_000,
-            cachedInputCostNanos: 1_000,
-            outputCostNanos: 3_000,
-            pricedRequestCount: 2,
-            requestCount: 2,
-            uncachedInputPricePerMillionNanos: 10,
-            cachedInputPricePerMillionNanos: 1,
-            outputPricePerMillionNanos: 30,
-            hasMixedPrices: false,
-          },
         };
-      },
-      sessionReferenceCost: (_threadId, _turnId, current) => {
-        order.push(`session-${current?.requestCount ?? "missing"}`);
-        return current;
       },
     });
     await manager.start();
@@ -711,7 +687,6 @@ describe("SurfaceManager", () => {
     expect(order).toEqual([
       "timing-start",
       "timing-finished",
-      "session-2",
       "output",
     ]);
     expect(received).toEqual([
@@ -721,11 +696,6 @@ describe("SurfaceManager", () => {
           modelRequestCount: 2,
           requestInputTokens: 1_000,
           requestOutputTokens: 100,
-        }),
-        sessionReferenceCost: expect.objectContaining({
-          requestCount: 2,
-          inputTokens: 1_000,
-          outputTokens: 100,
         }),
       }),
     ]);

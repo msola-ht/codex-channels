@@ -40,9 +40,9 @@ const insertRequestMetricSql = `
   INSERT INTO request_metrics
     (device_id, local_id, recorded_at_ms, provider, model, status, operation,
      thread_id, turn_id, input_tokens, cached_input_tokens, output_tokens,
-     reasoning_output_tokens, total_tokens, cache_hit_rate, pricing_currency,
-     total_cost_nanos, payload, ingested_at_ms)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     reasoning_output_tokens, total_tokens, cache_hit_rate,
+     payload, ingested_at_ms)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(device_id, local_id) DO UPDATE SET
     recorded_at_ms = excluded.recorded_at_ms,
     provider = excluded.provider,
@@ -57,8 +57,6 @@ const insertRequestMetricSql = `
     reasoning_output_tokens = excluded.reasoning_output_tokens,
     total_tokens = excluded.total_tokens,
     cache_hit_rate = excluded.cache_hit_rate,
-    pricing_currency = excluded.pricing_currency,
-    total_cost_nanos = excluded.total_cost_nanos,
     payload = excluded.payload,
     ingested_at_ms = excluded.ingested_at_ms
 `;
@@ -411,8 +409,6 @@ async function handleIngest(request, database, response) {
         row.reasoningOutputTokens ?? null,
         row.totalTokens ?? null,
         row.cacheHitRate ?? null,
-        row.pricing?.currency ?? null,
-        row.totalCostNanos ?? null,
         JSON.stringify(row),
         nowMs,
       );
@@ -484,15 +480,6 @@ function handleOverview(url, database, response) {
     FROM request_metrics
     ${where}
   `).get(...(hasDevice ? [deviceId, deviceId, deviceId, deviceId] : []));
-  const costs = database.prepare(`
-    SELECT COALESCE(pricing_currency, 'unknown') AS currency,
-           COUNT(*) AS request_count,
-           COALESCE(SUM(total_cost_nanos), 0) AS total_cost_nanos
-    FROM request_metrics
-    ${where}
-    GROUP BY pricing_currency
-    ORDER BY request_count DESC
-  `).all(...params);
   const providers = database.prepare(`
     SELECT r.provider,
            i.display_name AS provider_display_name,
@@ -543,7 +530,6 @@ function handleOverview(url, database, response) {
   `).all(...(hasDevice ? [deviceId] : []));
   sendJson(response, 200, {
     totals,
-    costsByCurrency: costs,
     providers,
     providerIdentities,
   });
@@ -584,7 +570,7 @@ function handleRequests(url, database, response) {
            i.email AS provider_email,
            i.phone AS provider_phone,
            input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
-           total_tokens, cache_hit_rate, pricing_currency, total_cost_nanos
+           total_tokens, cache_hit_rate
     FROM request_metrics r
     LEFT JOIN provider_identities i
       ON i.device_id = r.device_id AND i.provider = r.provider
@@ -612,8 +598,7 @@ function handleDaily(url, database, response) {
            COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
            COALESCE(SUM(output_tokens), 0) AS output_tokens,
            COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens,
-           COALESCE(SUM(total_tokens), 0) AS total_tokens,
-           COALESCE(SUM(total_cost_nanos), 0) AS total_cost_nanos
+           COALESCE(SUM(total_tokens), 0) AS total_tokens
     FROM request_metrics
     WHERE ${clauses.join(" AND ")}
     GROUP BY day
@@ -629,11 +614,11 @@ function handleQuota(url, database, response) {
   const deviceClause = deviceId ? " WHERE device_id = ?" : "";
   const rows = database.prepare(days === "all" ? `
     SELECT device_id, recorded_at_ms, input_tokens, output_tokens, total_tokens,
-           total_cost_nanos, status, payload
+           status, payload
     FROM request_metrics${deviceClause} ORDER BY recorded_at_ms ASC
   ` : `
     SELECT device_id, recorded_at_ms, input_tokens, output_tokens, total_tokens,
-           total_cost_nanos, status, payload
+           status, payload
     FROM request_metrics WHERE recorded_at_ms >= ?${deviceId ? " AND device_id = ?" : ""}
     ORDER BY recorded_at_ms ASC
   `).all(...(days === "all"
@@ -692,8 +677,6 @@ function handleQuota(url, database, response) {
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,
-        totalCostNanos: 0,
-        pricedRequestCount: 0,
         latestUsedPercentMillionths: null,
         quotaSamples: [],
       };
@@ -704,10 +687,6 @@ function handleQuota(url, database, response) {
       period.inputTokens += row.input_tokens ?? 0;
       period.outputTokens += row.output_tokens ?? 0;
       period.totalTokens += row.total_tokens ?? (row.input_tokens ?? 0) + (row.output_tokens ?? 0);
-      if (row.total_cost_nanos !== null) {
-        period.totalCostNanos += row.total_cost_nanos;
-        period.pricedRequestCount += 1;
-      }
       if (snapshot.usedPercentMillionths !== null
         && Number.isSafeInteger(snapshot.usedPercentMillionths)) {
         period.latestUsedPercentMillionths = snapshot.usedPercentMillionths;
@@ -729,9 +708,6 @@ function handleQuota(url, database, response) {
     const tokensPerPercent = observedDeltaPercentMillionths > 0
       ? period.totalTokens * 1_000_000 / observedDeltaPercentMillionths
       : null;
-    const costPerPercentNanos = observedDeltaPercentMillionths > 0
-      ? period.totalCostNanos * 1_000_000 / observedDeltaPercentMillionths
-      : null;
     const publicPeriod = {
       provider: period.provider,
       providerDisplayName: providerDisplayNames.get(period.provider)?.size === 1
@@ -748,8 +724,6 @@ function handleQuota(url, database, response) {
       inputTokens: period.inputTokens,
       outputTokens: period.outputTokens,
       totalTokens: period.totalTokens,
-      totalCostNanos: period.totalCostNanos,
-      pricedRequestCount: period.pricedRequestCount,
       latestUsedPercentMillionths: period.latestUsedPercentMillionths,
     };
     return {
@@ -757,9 +731,7 @@ function handleQuota(url, database, response) {
       deviceCount: period.deviceIds.size,
       observedDeltaPercentMillionths,
       tokensPerPercent,
-      costPerPercentNanos: period.pricedRequestCount === 0 ? null : costPerPercentNanos,
       estimatedTotalTokens: tokensPerPercent === null ? null : tokensPerPercent * 100,
-      estimatedTotalCostNanos: costPerPercentNanos === null ? null : costPerPercentNanos * 100,
     };
   });
   applyObservedQuotaResetBoundaries(publicPeriods);
@@ -823,7 +795,6 @@ const requestSortColumns = {
   input: "input_tokens",
   cached: "cached_input_tokens",
   output: "output_tokens",
-  cost: "total_cost_nanos",
 };
 
 function handleSubagents(url, database, response) {
@@ -855,28 +826,6 @@ function handleDevices(database, response) {
     FROM devices d
     ORDER BY d.last_seen_at_ms DESC
   `).all();
-  const costs = database.prepare(`
-    SELECT device_id, COALESCE(pricing_currency, 'unknown') AS currency,
-           COUNT(*) AS request_count,
-           COALESCE(SUM(total_cost_nanos), 0) AS total_cost_nanos
-    FROM request_metrics
-    WHERE total_cost_nanos IS NOT NULL
-    GROUP BY device_id, pricing_currency
-    ORDER BY request_count DESC
-  `).all();
-  const costsByDevice = new Map();
-  for (const cost of costs) {
-    const deviceCosts = costsByDevice.get(cost.device_id) ?? [];
-    deviceCosts.push({
-      currency: cost.currency,
-      request_count: cost.request_count,
-      total_cost_nanos: cost.total_cost_nanos,
-    });
-    costsByDevice.set(cost.device_id, deviceCosts);
-  }
-  for (const row of rows) {
-    row.costs_by_currency = costsByDevice.get(row.device_id) ?? [];
-  }
   sendJson(response, 200, { devices: rows });
 }
 

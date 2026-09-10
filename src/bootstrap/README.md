@@ -31,37 +31,20 @@
 - `request-metrics-query-adapter.ts`：把 Observability 指标查询、时间范围和 Provider 显示名映射为
   Application 的 `/metrics` 窄端口；不改变 Store 查询模型，也不让 Application 依赖 SQLite 实现。
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
-  有界装配 DeepSeek、OpenCode Go 的计价与账户适配器；解析器以精确 Provider ID 登记，`none`
-  明确不提供价格或账户，`remote` 才使用通用价格目录；未知能力或适配器冲突启动时失败关闭，
-  不回退到 OpenAI 账户查询。
+  有界装配 DeepSeek、OpenCode Go 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
+  账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   既有计时端口。所有脱敏请求样本都会持久化；具备 Thread、Turn 与 Token 窗口的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
-  既有 Core 计时。可选 `ModelPricingResolver` 只在组合边界为新请求附加当次价格快照；优先使用
-  代理指标携带的 WebSocket `reasoning.effort` 或私有第三方角色路径标注，普通 Thread 仅在缺失时
+  既有 Core 计时。优先使用代理指标携带的 WebSocket `reasoning.effort` 或私有第三方角色路径标注，
+  普通 Thread 仅在缺失时
   由可选 `resolveModelSettings` 按 Thread 关联回填路由层维护的思考等级；代理、Core 和数据库
-  View 都不读取请求正文、设置文件或内置模型价格。
+  View 都不读取请求正文、设置文件或价格目录。
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
-- `model-pricing-catalog.ts`：实现组合根注入的远程价格目录。启动时先读取 Gateway 数据目录下的
-  `0600` 可丢弃缓存，再异步刷新；固定优先读取 LiteLLM 目录，失败时回退到 Sub2API 使用的
-  `Wei-Shaw/model-price-repo` 镜像，每 6 小时条件请求一次。该通用解析器只处理 DeepSeek 以外的
-  Provider，并为新请求生成不可变 USD API
-  参考价格快照，支持缓存输入、Priority 与已声明的长上下文价格，不把网络刷新放入请求路径；
-  有界响应读取复用 Bootstrap 基础设施，私有缓存替换复用共享 Runtime。
-- `deepseek-model-pricing.ts`：严格读取随包发布的 DeepSeek 官方人民币价格基线，按请求开始时间、
-  `Asia/Shanghai` 工作日/周末规则和半开峰谷区间选价，再用当前 USD/CNY 汇率生成统一 USD
-  快照，并把请求时段对应的峰谷档位写入快照；没有汇率、精确模型或有效计划时不回退通用目录。Provider 路由器保持该专属
-  解析器优先，不改变历史价格。
-- `opencode-go-model-pricing.ts`：严格读取随包发布的 OpenCode Go 官方美元价格基线，按请求 Provider、
-  精确模型和输入 Token 选择普通或长上下文档位，支持 Peak/Off-Peak 的模型按工作日/周末规则写入请求时段对应的
-  峰谷档位；不回退 DeepSeek 官方价格或通用远程目录。
-- `pricing-bucket.ts`：Provider 无关的峰谷档位判定工具，按时区把请求开始时间转换为本地分钟和
-  周末状态，并在半开区间内选择 Peak/Off-Peak；DeepSeek 与 OpenCode Go 的价格解析、账户用量重算共用同一实现。
-- `reference-cost-summary.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、速度、压缩与计价，
-  同时保留只能实时观测的响应延迟；再把 Thread 历史计价与当前 Turn 计价合并，并把历史与当前
-  出现的峰谷档位集合一并合并。若当前 Turn 已部分延迟写入，先扣除该部分再加入完整值，避免累计
-  总价重复或遗漏。
+- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、速度与压缩统计，
+  同时保留只能实时观测的响应延迟；若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
+  可选用量字段。
 - `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 发给发起父 Turn 的
   `subAgentActivity.completed` 作为成功终态，并以父 Thread、父 Turn、子 Thread 和代理路径精确
   匹配；子线程 `turn/completed` 不再重复宣布成功，失败/中断仍接受子线程终态、官方中断活动与
@@ -99,9 +82,7 @@
 - `opencode-go-account-adapter.ts`：通过同一共享 Provider 运行时按请求读取 OpenCode Go Key，调用官方
   `/zen/go/v1/usage` 接口，把 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与
   重置时间）；参数化工厂按 `modelProvider` 区分 `ocg-<账户>`，指标库按账户过滤，并汇总本机
-  指标库的模型本地 Token 用量；DeepSeek 模型按请求时间拆分 Off-Peak / Peak 两档展示，
-  档位优先使用请求保存的价格快照，缺失时才按当前基线判定，价格基线只用于完成卡片剩余额度
-  口径；Key、响应正文和解析异常同样不进入日志或业务事件。
+  指标库的模型本地 Token 用量；Key、响应正文和解析异常同样不进入日志或业务事件。
 - `quota-center.ts`：读取已配置指标中心的 `/api/quota`，按 Provider 选择当前额度周期（OpenAI
   `codex`，OpenCode Go 5小时/7天/30天三个窗口），返回完成卡片与启动卡片使用的多设备摘要；中心不可用时
   保持原有本机/官方估算回退，不把中心命令或令牌暴露到 Surface。
@@ -135,7 +116,7 @@
   与未来 CLI 单 Provider 重启复用同一入口，输出脱敏后写入日志。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
   `turn.completed` 等待当前 Thread 的指标写入水位，再注入可恢复的本轮统计、当前授权 Workspace
-  的 Git 分支、递归 Thread 累计总价及显式父 Turn 任务合计；并行完成各 Surface 的首次启动，
+  的 Git 分支及显式父 Turn 任务合计；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。

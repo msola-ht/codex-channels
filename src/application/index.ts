@@ -18,7 +18,6 @@ export {
   type OfficialAccountSnapshotWriter,
   type ProviderAccountUsage,
   type ProviderBalance,
-  type ProviderModelUsageEstimate,
   type ProviderQuotaWindow,
 } from "./account-port.js";
 export { createOfficialAccountSnapshot } from "./account-snapshot.js";
@@ -154,13 +153,6 @@ export {
   type PermissionProfileOption,
   type PermissionQueryPort,
 } from "./permission-port.js";
-export {
-  type DisplayPriceCurrency,
-  type ExchangeRatePort,
-  type ExchangeRateSnapshot,
-  priceDisplayNeedsExchangeRate,
-  resolvePriceCurrency,
-} from "./exchange-rate-port.js";
 export {
   estimateWeeklyLimit,
   type DirectApiRequestMetricsSummary,

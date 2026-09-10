@@ -107,11 +107,6 @@ function restartRequiredReasons(
       next.reasoningEnabled,
     ],
     [
-      configChange("display.price-currency"),
-      current.priceCurrency,
-      next.priceCurrency,
-    ],
-    [
       configChange("experimental.plugin-api"),
       current.pluginApiEnabled,
       next.pluginApiEnabled,

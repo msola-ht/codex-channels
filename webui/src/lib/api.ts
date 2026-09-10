@@ -13,7 +13,6 @@ import type {
   RequestSortDirection,
   RequestSortKey,
   RequestsResponse,
-  SettingsResponse,
   SettingsSummaryResponse,
   ManagementSettingsResponse,
   ManagementServicesResponse,
@@ -41,7 +40,6 @@ import type {
   ThreadsResponse,
   ThreadTurnsResponse,
 } from "@/lib/types"
-import type { DisplayCurrency } from "@/lib/format"
 import { getToken } from "@/lib/token-storage"
 
 export { getToken, setToken } from "@/lib/token-storage"
@@ -138,47 +136,36 @@ export function updateManagementSetting(
 
 export function fetchOverview(
   range: RangeName,
-  currency: DisplayCurrency | null,
   signal?: AbortSignal,
 ): Promise<OverviewResponse> {
-  const currencyQuery = currency === null ? "" : `&currency=${currency}`
   return getJson<OverviewResponse>(
-    `${API_PREFIX}/overview?range=${range}${currencyQuery}`,
+    `${API_PREFIX}/overview?range=${range}`,
     signal,
   )
 }
 
 export function fetchThreads(
-  currency: DisplayCurrency | null,
   signal?: AbortSignal,
 ): Promise<ThreadsResponse> {
-  const currencyQuery = currency === null ? "" : `?currency=${currency}`
-  return getJson<ThreadsResponse>(
-    `${API_PREFIX}/threads${currencyQuery}`,
-    signal,
-  )
+  return getJson<ThreadsResponse>(`${API_PREFIX}/threads`, signal)
 }
 
 export function fetchThreadRun(
   threadId: string,
-  currency: DisplayCurrency | null,
   signal?: AbortSignal,
 ): Promise<ThreadRunResponse> {
-  const currencyQuery = currency === null ? "" : `?currency=${currency}`
   return getJson<ThreadRunResponse>(
-    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/run${currencyQuery}`,
+    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/run`,
     signal,
   )
 }
 
 export function fetchThreadTurns(
   threadId: string,
-  currency: DisplayCurrency | null,
   signal?: AbortSignal,
 ): Promise<ThreadTurnsResponse> {
-  const currencyQuery = currency === null ? "" : `?currency=${currency}`
   return getJson<ThreadTurnsResponse>(
-    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns${currencyQuery}`,
+    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns`,
     signal,
   )
 }
@@ -190,7 +177,6 @@ export function fetchRequests(
   sort: RequestSortKey,
   direction: RequestSortDirection,
   filter: string,
-  currency: DisplayCurrency | null,
   signal?: AbortSignal,
 ): Promise<RequestsResponse> {
   const params = new URLSearchParams({
@@ -201,13 +187,11 @@ export function fetchRequests(
     direction,
   })
   if (filter.trim() !== "") params.set("filter", filter.trim())
-  if (currency !== null) params.set("currency", currency)
   return getJson<RequestsResponse>(`${API_PREFIX}/requests?${params.toString()}`, signal)
 }
 
 export function fetchErrors(
   range: RangeName,
-  currency: DisplayCurrency | null,
   offset: number,
   limit: number,
   signal?: AbortSignal,
@@ -217,17 +201,10 @@ export function fetchErrors(
     offset: String(offset),
     limit: String(limit),
   })
-  if (currency !== null) params.set("currency", currency)
   return getJson<ErrorsResponse>(
     `${API_PREFIX}/errors?${params.toString()}`,
     signal,
   )
-}
-
-export function fetchSettings(
-  signal?: AbortSignal,
-): Promise<SettingsResponse> {
-  return getJson<SettingsResponse>(`${API_PREFIX}/settings`, signal)
 }
 
 export function fetchSettingsSummary(signal?: AbortSignal): Promise<SettingsSummaryResponse> {

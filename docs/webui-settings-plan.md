@@ -15,7 +15,7 @@
 
 ## 现状与事实来源
 
-- `scripts/webui-server.mjs` 提供指标 GET API 与受保护的低风险设置 API；`GET /api/v1/settings` 返回全局显示币种与汇率，
+- `scripts/webui-server.mjs` 提供指标 GET API 与受保护的低风险设置 API；
   `GET /api/v1/settings/summary` 返回脱敏配置摘要（保留基础服务状态兼容字段），`GET /api/v1/management/services` 返回四类受管服务状态、版本和最近错误。
 - Config/Setup 的结构化管理接口和修订保护已在 `scripts/` 与 `runtime/` 完成，CLI 菜单只是交互适配器。
 - 管理接口的 Origin、请求限制、一次性确认、审计和任务安全原语已记录在

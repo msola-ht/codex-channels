@@ -21,7 +21,6 @@ import {
 } from "../conversation-core/index.js";
 
 import {
-  formatModelUsageBucket,
   formatPercent,
   formatPlanType,
   formatRateLimitState,
@@ -37,7 +36,6 @@ import {
   formatCodexProviderLabel,
   supportsFastMode,
 } from "./provider-format.js";
-import { formatCurrencyNanos } from "./reference-cost-format.js";
 import {
   formatCacheHitRate,
   formatTokenCount,
@@ -1696,7 +1694,7 @@ export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
   if (result.result.kind === "unsupported") {
-    return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户余额/额度查询。请求次数、Token 与费用可通过 /metrics 查看。`;
+    return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户余额/额度查询。请求次数与 Token 可通过 /metrics 查看。`;
   }
   if (result.result.kind === "balance") {
     return toStructuredMarkdownList([
@@ -1714,14 +1712,6 @@ export function formatConversationUsage(
     ].join("\n"));
   }
   if (result.result.kind === "quota-windows") {
-    const modelUsage = result.result.modelUsage ?? [];
-    const firstEstimate = modelUsage[0];
-    const windowRange = firstEstimate?.windowStartAtMs === null
-      || firstEstimate?.windowStartAtMs === undefined
-      || firstEstimate?.windowEndAtMs === null
-      || firstEstimate?.windowEndAtMs === undefined
-      ? ""
-      : `（月度窗口 ${formatResetTime(Math.floor(firstEstimate.windowStartAtMs / 1_000))} – ${formatResetTime(Math.floor(firstEstimate.windowEndAtMs / 1_000))}）`;
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
       `API 可用：${result.result.available ? "是" : "否"}`,
@@ -1740,22 +1730,6 @@ export function formatConversationUsage(
               : ` · 总额 $${window.totalUsd.toFixed(2)}`;
             return `- ${window.label}：已用 ${formatPercent(window.usedPercent)}${totalUsd}${localTokens} · 重置 ${reset}`;
           })),
-      ...(modelUsage.length === 0
-        ? []
-        : [
-            "",
-            `模型本地用量${windowRange}（本机指标按请求时间分档，非官方账单）：`,
-            ...modelUsage.map((estimate) => {
-              const used = estimate.usedTokens === undefined
-                || estimate.usedTokens === null
-                ? "未知"
-                : `Token ${formatTokenCount(estimate.usedTokens)}`;
-              const bucket = estimate.bucket === undefined
-                ? ""
-                : `（${formatModelUsageBucket(estimate.bucket)}）`;
-              return `- ${estimate.model}${bucket}：已用 ${used}`;
-            }),
-          ]),
     ].join("\n"));
   }
   const daily = [...result.result.usage.daily]
@@ -1917,47 +1891,30 @@ export function formatConversationLimits(
           ...(weeklyEstimates.length === 0
             ? ["正在采样；需要同一周窗口内至少出现一次可观测的额度增长。"]
             : weeklyEstimates.flatMap((estimate) => {
-                const pricedSuccesses = Math.max(
-                  0,
-                  estimate.requestCount - estimate.unsuccessfulRequestCount,
-                );
                 return [
                 estimate.source === "center"
                   ? `本周期指标中心汇总（${estimate.deviceCount ?? 0} 个设备）：`
                   : "本周期本机实际：",
                 `  - 请求：${estimate.periodRequestCount ?? estimate.requestCount} 次`,
                 `  - Token：${formatTokenCount(estimate.periodTotalTokens ?? estimate.totalTokensPerPercent)}`,
-                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.periodTotalCostNanos ?? null)}`,
                 `观测变化 ${formatPercent(estimate.observedDeltaPercent)}（${estimate.intervalCount} 个区间）`,
                 `每 1%：约 ${formatTokenCount(estimate.totalTokensPerPercent)} Token`,
                 `  - 输入：约 ${formatTokenCount(estimate.inputTokensPerPercent)}`,
                 `  - 输出：约 ${formatTokenCount(estimate.outputTokensPerPercent)}`,
-                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos)}${estimate.pricedRequestCount === pricedSuccesses ? "" : `（计价 ${estimate.pricedRequestCount}/${pricedSuccesses}）`}`,
                 "推算 100% 总额度：",
                 `  - Token：约 ${formatTokenCount(estimate.totalTokensPerPercent * 100)}`,
-                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.costPerPercentNanos === null ? null : estimate.costPerPercentNanos * 100)}`,
                 `剩余 ${formatPercent(estimate.remainingPercent)}：约 ${formatTokenCount(estimate.remainingTokens)} Token`,
-                `  - API 参考费用：${formatEstimatedLimitCost(estimate.pricingCurrency, estimate.remainingCostNanos)}`,
                 ...(estimate.observedDeltaPercent < 1
                   ? ["提示：观测到的额度变化不足 1%，估算波动可能较大。"]
                   : []),
                 ];
               })),
           weeklyEstimates.some((estimate) => estimate.source === "center")
-            ? "口径：请求、Token 和费用为指标中心汇总的已同步样本；额度总量按中心周期的额度变化估算，可能存在同步延迟，费用不是订阅实际扣款。"
-            : "口径：按统计代理相邻额度快照的增量折算；其他客户端在快照间的用量可能造成偏差，费用不是订阅实际扣款。",
+            ? "口径：请求与 Token 为指标中心汇总的已同步样本；额度总量按中心周期的额度变化估算，可能存在同步延迟。"
+            : "口径：按统计代理相邻额度快照的增量折算；其他客户端在快照间的用量可能造成偏差。",
         ]
       : []),
   ].join("\n"));
-}
-
-function formatEstimatedLimitCost(
-  currency: string | null,
-  nanos: number | null,
-): string {
-  return currency === null || nanos === null
-    ? "暂无完整价格样本"
-    : `约 ${formatCurrencyNanos(currency, nanos)}`;
 }
 
 export function formatConversationStatus(status: ConversationStatus): string {

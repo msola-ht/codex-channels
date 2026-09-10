@@ -47,9 +47,6 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `display.reasoning` 是“思考中”状态展示开关，默认开启；显式设为 `false` 时三渠道不再发送
 思考状态卡，其余输出保持不变。变化需要重启 Gateway，不需要重启 App Server。
 
-`display.price_currency` 统一控制渠道与指标输出使用人民币或美元。人民币显示依赖 Gateway 持有的
-汇率刷新组件，因此币种变化需要重启 Gateway，不需要重启 App Server。
-
 `logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、
 `error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果；
 消息正文、请求参数、上游响应、凭据和审批内容

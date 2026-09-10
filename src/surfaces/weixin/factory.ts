@@ -2,9 +2,6 @@ import type { Logger } from "pino";
 
 import type {
   ConversationUseCases,
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
-  ProviderModelUsageEstimate,
   ScheduledTaskUseCases,
 } from "../../application/index.js";
 import type {
@@ -40,19 +37,10 @@ export interface CreateWeixinSurfaceOptions {
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   debugEnabled?: boolean;
-  exchangeRate?: () => ExchangeRateSnapshot | null;
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  remainingUsage?: (
-    model: string,
-    requestStartedAtMs?: number,
-    modelProvider?: string,
-  ) => Promise<ProviderModelUsageEstimate | null>;
   fetchImpl?: typeof fetch;
   logger: Logger;
   onFatal(error: WeixinInputFatalError): void;
@@ -111,15 +99,6 @@ export function createWeixinSurface(
     ...(options.debugEnabled === undefined
       ? {}
       : { debugEnabled: options.debugEnabled }),
-    ...(options.exchangeRate === undefined
-      ? {}
-      : { exchangeRate: options.exchangeRate }),
-    ...(options.priceCurrency === undefined
-      ? {}
-      : { priceCurrency: options.priceCurrency }),
-    ...(options.remainingUsage === undefined
-      ? {}
-      : { remainingUsage: options.remainingUsage }),
     logger: options.logger,
     onFatal: (error) => options.onFatal(error),
   });

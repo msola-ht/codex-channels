@@ -18,10 +18,6 @@ export interface CompactSummary {
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
-  pricingCurrency: string | null
-  pricedRequestCount: number
-  totalCostNanos: number | null
-  totalCostCnyNanos?: number | null
 }
 
 export interface Aggregate {
@@ -38,18 +34,7 @@ export interface Aggregate {
   ttftAverageMs: number | null
   ttftP50Ms: number | null
   ttftP95Ms: number | null
-  pricingCurrency: string | null
-  pricedRequestCount: number
-  totalCostNanos: number | null
-  inputCostNanos: number | null
-  cachedInputCostNanos: number | null
-  outputCostNanos: number | null
-  hasMixedPrices: boolean
   compact: CompactSummary | null
-  totalCostCnyNanos?: number | null
-  inputCostCnyNanos?: number | null
-  cachedInputCostCnyNanos?: number | null
-  outputCostCnyNanos?: number | null
 }
 
 export interface ProviderGroup {
@@ -92,12 +77,9 @@ export interface WeeklyQuota {
     intervalCount: number
     requestCount: number
     unsuccessfulRequestCount: number
-    pricedRequestCount: number
     inputTokensPerPercent: number
     outputTokensPerPercent: number
     totalTokensPerPercent: number
-    pricingCurrency: string | null
-    costPerPercentNanos: number | null
   } | null
 }
 
@@ -122,13 +104,9 @@ export interface ThreadListItem {
   requestCount: number
   inputTokens: number
   outputTokens: number
-  pricingCurrency: string | null
-  pricedRequestCount: number
-  totalCostNanos: number | null
   compact: CompactSummary | null
   firstRequestStartedAtMs: number
   lastRecordedAtMs: number
-  totalCostCnyNanos?: number | null
 }
 
 export interface ThreadsResponse {
@@ -149,20 +127,6 @@ export interface TurnSummary {
   outputTokens: number
   reasoningOutputTokens: number
   outputTokensPerSecond: number | null
-  pricingCurrency: string | null
-  pricedRequestCount: number
-  totalCostNanos: number | null
-  inputCostNanos: number | null
-  cachedInputCostNanos: number | null
-  outputCostNanos: number | null
-  uncachedInputPricePerMillionNanos: number | null
-  cachedInputPricePerMillionNanos: number | null
-  outputPricePerMillionNanos: number | null
-  hasMixedPrices: boolean
-  totalCostCnyNanos?: number | null
-  inputCostCnyNanos?: number | null
-  cachedInputCostCnyNanos?: number | null
-  outputCostCnyNanos?: number | null
   compact: CompactSummary | null
   recordedAtMs?: number
 }
@@ -188,15 +152,6 @@ export interface RequestRecord {
   id: number
   provider: string | null
   model: string | null
-  pricing?: {
-    billingMode: string | null
-    currency: string | null
-    source: string | null
-    effectiveAtMs: number | null
-    uncachedInputPricePerMillionNanos: number | null
-    cachedInputPricePerMillionNanos: number | null
-    outputPricePerMillionNanos: number | null
-  } | null
   operation: "response" | "compact"
   status: string
   httpStatus: number | null
@@ -221,16 +176,6 @@ export interface RequestRecord {
   generationDurationMs: number | null
   cacheHitRate: number | null
   outputTokensPerSecond: number | null
-  pricingCurrency: string | null
-  pricedRequestCount?: number
-  totalCostNanos: number | null
-  totalCostCnyNanos?: number | null
-  uncachedInputCostNanos: number | null
-  cachedInputCostNanos: number | null
-  outputCostNanos: number | null
-  inputCostCnyNanos?: number | null
-  cachedInputCostCnyNanos?: number | null
-  outputCostCnyNanos?: number | null
   recordedAtMs: number
 }
 
@@ -248,7 +193,6 @@ export type RequestSortKey =
   | "speed"
   | "ttft"
   | "duration"
-  | "cost"
 
 export type RequestSortDirection = "asc" | "desc"
 
@@ -271,16 +215,6 @@ export interface ErrorsResponse {
   total: number
 }
 
-export interface SettingsResponse {
-  /** 当前全局显示币种（跟随 config.toml 的 display.price_currency） */
-  currency: "cny" | "usd"
-  exchangeRate: {
-    usdToCny: number
-    effectiveAtMs: number
-    source: "open-er-api" | "ecb" | "cache"
-  } | null
-}
-
 export interface SettingsSummaryResponse {
   observedAt: string
   revision: string
@@ -289,7 +223,6 @@ export interface SettingsSummaryResponse {
       operationUpdates: "full" | "compact" | "hidden"
       planUpdatesEnabled: boolean
       reasoningEnabled: boolean
-      priceCurrency: "cny" | "usd"
     }
     system: {
       approvalTimeoutSeconds: number
@@ -817,27 +750,12 @@ export interface OpencodeGoQuotaWindow {
   localTokens?: number | null
 }
 
-export interface ModelUsageEstimate {
-  model: string
-  bucket?: "off-peak" | "peak"
-  includedUsageUsd: number
-  usedUsdNanos: number | null
-  usedTokens?: number
-  usedPercent: number | null
-  remainingUsdNanos: number | null
-  windowStartAtMs: number | null
-  windowEndAtMs: number | null
-}
-
-export type OpencodeGoModelUsageEstimate = ModelUsageEstimate
-
 export interface OpencodeGoAccountUsage {
   account: string
   displayName: string
   default: boolean
   available: boolean
   windows: OpencodeGoQuotaWindow[]
-  modelUsage: ModelUsageEstimate[]
 }
 
 export interface OpencodeGoUsageResponse {
@@ -870,12 +788,6 @@ export interface GlobalTotals {
   last_recorded_at_ms: number | null
 }
 
-export interface GlobalCostRow {
-  currency: string
-  request_count: number
-  total_cost_nanos: number
-}
-
 export interface GlobalProviderRow {
   provider: string | null
   provider_display_name?: string | null
@@ -898,7 +810,6 @@ export interface GlobalProviderModelRow {
 
 export interface GlobalOverviewResponse {
   totals: GlobalTotals | null
-  costsByCurrency: GlobalCostRow[]
   providers: GlobalProviderRow[]
 }
 
@@ -910,7 +821,6 @@ export interface GlobalDeviceRow {
   last_ingested_at_ms: number | null
   request_count: number
   total_tokens: number
-  costs_by_currency: GlobalCostRow[]
   subagent_count: number
 }
 
@@ -926,7 +836,6 @@ export interface GlobalDailyRow {
   output_tokens: number
   reasoning_output_tokens: number
   total_tokens: number
-  total_cost_nanos: number
 }
 
 export interface GlobalDailyResponse {
@@ -952,15 +861,11 @@ export interface GlobalQuotaPeriod {
   inputTokens: number
   outputTokens: number
   totalTokens: number
-  totalCostNanos: number
-  pricedRequestCount: number
   latestUsedPercentMillionths: number | null
   observedDeltaPercentMillionths: number
   tokensPerPercent: number | null
-  costPerPercentNanos: number | null
   /** 按观测到的额度增量外推到 100% 的估算值。 */
   estimatedTotalTokens: number | null
-  estimatedTotalCostNanos: number | null
 }
 
 export interface GlobalQuotaResponse {
@@ -983,8 +888,6 @@ export interface GlobalRequestRow {
   reasoning_output_tokens: number | null
   total_tokens: number | null
   cache_hit_rate: number | null
-  pricing_currency: string | null
-  total_cost_nanos: number | null
 }
 
 export interface GlobalRequestsResponse {

@@ -16,7 +16,7 @@ export class TurnTimingAccumulator {
   private lastAnyDeltaAtMs: number | undefined;
   private modelOutputDurationMs: number | undefined;
   private modelTtftMs: number | undefined;
-  private modelRequestStartedAtMs: number | undefined;
+  private latestModelRequestStartedAtMs: number | undefined;
   private modelRequestCount = 0;
   private completedModelRequestCount = 0;
   private interruptedModelRequestCount = 0;
@@ -32,21 +32,6 @@ export class TurnTimingAccumulator {
   private modelCachedInputUsageCount = 0;
   private modelOutputTokens: number | undefined;
   private modelReasoningOutputTokens: number | undefined;
-  private pricingCurrency: string | undefined;
-  private pricingCurrencyConflict = false;
-  private uncachedInputPricePerMillionNanos: number | undefined;
-  private cachedInputPricePerMillionNanos: number | undefined;
-  private outputPricePerMillionNanos: number | undefined;
-  private pricingRateSignature: string | undefined;
-  private pricingRateConflict = false;
-  private pricingBuckets: Set<"peak" | "off-peak"> | undefined;
-  private pricedRequestCount = 0;
-  private pricedInputTokens = 0;
-  private pricedOutputTokens = 0;
-  private totalCostNanos = 0;
-  private uncachedInputCostNanos = 0;
-  private cachedInputCostNanos = 0;
-  private outputCostNanos = 0;
   private compactModel: string | undefined;
   private compactModelConflict = false;
   private compactRequestCount = 0;
@@ -56,10 +41,6 @@ export class TurnTimingAccumulator {
   private compactInputUsageCount = 0;
   private compactCachedInputUsageCount = 0;
   private compactOutputTokens = 0;
-  private compactPricingCurrency: string | undefined;
-  private compactPricingCurrencyConflict = false;
-  private compactPricedRequestCount = 0;
-  private compactTotalCostNanos = 0;
   private timedNonReasoningOutputTokens = 0;
   private timedOutputDurationMs = 0;
   private outputSpeedSampleCount = 0;
@@ -139,7 +120,6 @@ export class TurnTimingAccumulator {
         this.reasoningRequestCount += 1;
       }
     }
-    this.recordPricing(event);
     if (event.operation === "compact") {
       this.recordCompaction(event);
     }
@@ -149,10 +129,10 @@ export class TurnTimingAccumulator {
         (this.modelOutputDurationMs ?? 0) + event.outputDurationMs;
     }
     if (
-      this.modelRequestStartedAtMs === undefined
-      || event.requestStartedAtMs >= this.modelRequestStartedAtMs
+      this.latestModelRequestStartedAtMs === undefined
+      || event.requestStartedAtMs >= this.latestModelRequestStartedAtMs
     ) {
-      this.modelRequestStartedAtMs = event.requestStartedAtMs;
+      this.latestModelRequestStartedAtMs = event.requestStartedAtMs;
       this.modelTtftMs = event.ttftMs;
     }
   }
@@ -189,50 +169,6 @@ export class TurnTimingAccumulator {
     return result;
   }
 
-  private recordPricing(event: ModelTimingEvent): void {
-    if (
-      event.pricingCurrency === undefined
-      || event.totalCostNanos === undefined
-    ) {
-      return;
-    }
-    if (event.pricingBucket !== undefined) {
-      this.pricingBuckets ??= new Set();
-      this.pricingBuckets.add(event.pricingBucket);
-    }
-    const rateSignature = [
-      event.uncachedInputPricePerMillionNanos ?? "missing",
-      event.cachedInputPricePerMillionNanos ?? "missing",
-      event.outputPricePerMillionNanos ?? "missing",
-    ].join(":");
-    if (
-      this.pricingCurrency !== undefined
-      && this.pricingCurrency !== event.pricingCurrency
-    ) {
-      this.pricingCurrencyConflict = true;
-    }
-    this.pricingCurrency ??= event.pricingCurrency;
-    if (
-      this.pricingRateSignature !== undefined
-      && this.pricingRateSignature !== rateSignature
-    ) {
-      this.pricingRateConflict = true;
-    }
-    this.pricingRateSignature ??= rateSignature;
-    this.uncachedInputPricePerMillionNanos ??=
-      event.uncachedInputPricePerMillionNanos;
-    this.cachedInputPricePerMillionNanos ??=
-      event.cachedInputPricePerMillionNanos;
-    this.outputPricePerMillionNanos ??= event.outputPricePerMillionNanos;
-    this.pricedRequestCount += 1;
-    this.pricedInputTokens += event.inputTokens ?? 0;
-    this.pricedOutputTokens += event.outputTokens ?? 0;
-    this.totalCostNanos += event.totalCostNanos;
-    this.uncachedInputCostNanos += event.uncachedInputCostNanos ?? 0;
-    this.cachedInputCostNanos += event.cachedInputCostNanos ?? 0;
-    this.outputCostNanos += event.outputCostNanos ?? 0;
-  }
-
   private recordCompaction(event: ModelTimingEvent): void {
     this.compactRequestCount += 1;
     if ((event.outcome ?? "completed") !== "completed") {
@@ -255,21 +191,6 @@ export class TurnTimingAccumulator {
     if (event.outputTokens !== undefined) {
       this.compactOutputTokens += event.outputTokens;
     }
-    if (
-      event.pricingCurrency === undefined
-      || event.totalCostNanos === undefined
-    ) {
-      return;
-    }
-    if (
-      this.compactPricingCurrency !== undefined
-      && this.compactPricingCurrency !== event.pricingCurrency
-    ) {
-      this.compactPricingCurrencyConflict = true;
-    }
-    this.compactPricingCurrency ??= event.pricingCurrency;
-    this.compactPricedRequestCount += 1;
-    this.compactTotalCostNanos += event.totalCostNanos;
   }
 
   private recordSpeeds(event: ModelTimingEvent): void {
@@ -314,9 +235,6 @@ export class TurnTimingAccumulator {
   private appendModelRequestSummary(result: TurnOutputTiming): void {
     if (this.modelRequestCount === 0) return;
     result.modelRequestCount = this.modelRequestCount;
-    if (this.modelRequestStartedAtMs !== undefined) {
-      result.modelRequestStartedAtMs = this.modelRequestStartedAtMs;
-    }
     if (
       this.interruptedModelRequestCount > 0
       || this.incompleteModelRequestCount > 0
@@ -346,44 +264,6 @@ export class TurnTimingAccumulator {
     if (this.modelOutputTokens !== undefined) {
       result.requestOutputTokens = this.modelOutputTokens;
     }
-    result.referenceCost = {
-      currency: this.pricingCurrencyConflict
-        ? null
-        : this.pricingCurrency ?? null,
-      totalCostNanos: this.pricingCurrencyConflict
-        || this.pricedRequestCount === 0
-        ? null
-        : this.totalCostNanos,
-      inputCostNanos: this.pricingCurrencyConflict
-        || this.pricedRequestCount === 0
-        ? null
-        : this.uncachedInputCostNanos,
-      cachedInputCostNanos: this.pricingCurrencyConflict
-        || this.pricedRequestCount === 0
-        ? null
-        : this.cachedInputCostNanos,
-      outputCostNanos: this.pricingCurrencyConflict
-        || this.pricedRequestCount === 0
-        ? null
-        : this.outputCostNanos,
-      pricedRequestCount: this.pricedRequestCount,
-      pricedInputTokens: this.pricedInputTokens,
-      pricedOutputTokens: this.pricedOutputTokens,
-      requestCount: this.modelRequestCount,
-      uncachedInputPricePerMillionNanos: this.pricingRateConflict
-        ? null
-        : this.uncachedInputPricePerMillionNanos ?? null,
-      cachedInputPricePerMillionNanos: this.pricingRateConflict
-        ? null
-        : this.cachedInputPricePerMillionNanos ?? null,
-      outputPricePerMillionNanos: this.pricingRateConflict
-        ? null
-        : this.outputPricePerMillionNanos ?? null,
-      hasMixedPrices: this.pricingCurrencyConflict || this.pricingRateConflict,
-      ...(this.pricingBuckets !== undefined && this.pricingBuckets.size > 0
-        ? { pricingBuckets: sortedPricingBuckets(this.pricingBuckets) }
-        : {}),
-    };
     if (this.compactRequestCount > 0) {
       result.compact = {
         model: this.compactModelConflict ? null : this.compactModel ?? null,
@@ -396,14 +276,6 @@ export class TurnTimingAccumulator {
           ? this.compactCachedInputTokens
           : null,
         outputTokens: this.compactOutputTokens,
-        pricingCurrency: this.compactPricingCurrencyConflict
-          ? null
-          : this.compactPricingCurrency ?? null,
-        pricedRequestCount: this.compactPricedRequestCount,
-        totalCostNanos: this.compactPricingCurrencyConflict
-          || this.compactPricedRequestCount === 0
-          ? null
-          : this.compactTotalCostNanos,
       };
     }
   }
@@ -518,11 +390,4 @@ export class TurnTimingAccumulator {
       result.generationSpeedTimedCount = this.generationSpeedTimedCount;
     }
   }
-}
-
-function sortedPricingBuckets(
-  buckets: ReadonlySet<"peak" | "off-peak">,
-): Array<"peak" | "off-peak"> {
-  const order: ReadonlyArray<"peak" | "off-peak"> = ["off-peak", "peak"];
-  return order.filter((bucket) => buckets.has(bucket));
 }

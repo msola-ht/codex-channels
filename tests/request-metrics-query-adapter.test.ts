@@ -61,11 +61,6 @@ describe("RequestMetricsQueryAdapter", () => {
           outputTokens: 2,
           reasoningOutputTokens: 0,
           totalTokens: 3,
-          pricing: null,
-          totalCostNanos: null,
-          uncachedInputCostNanos: null,
-          cachedInputCostNanos: null,
-          outputCostNanos: null,
         },
       }),
       aggregate,
@@ -84,7 +79,6 @@ describe("RequestMetricsQueryAdapter", () => {
       latestDirectApi: {
         provider: "custom",
         providerName: "Custom API",
-        pricingCurrency: null,
       },
     });
     expect(adapter.aggregate("providers", "all").groups[0]).toMatchObject({

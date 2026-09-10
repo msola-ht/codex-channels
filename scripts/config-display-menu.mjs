@@ -18,7 +18,6 @@ export async function runDisplaySettings({
       { value: "operation_updates", label: "操作详情显示", hint: "full / compact / hidden" },
       { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
       { value: "reasoning", label: "思考状态显示", hint: "是否显示“思考中”状态卡" },
-      { value: "price_currency", label: "价格显示方式", hint: "全局统一人民币或美元" },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
@@ -31,9 +30,6 @@ export async function runDisplaySettings({
   }
   if (section === "reasoning") {
     return runReasoningToggle({ environment, output, prompts, writeConfig });
-  }
-  if (section === "price_currency") {
-    return runPriceCurrency({ environment, output, prompts, writeConfig });
   }
   throw new Error(`未知显示设置：${String(section)}`);
 }
@@ -144,29 +140,4 @@ async function runReasoningToggle({ environment, output, prompts, writeConfig })
   output.write(`思考状态显示已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { reasoningEnabled: enabled, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
-}
-
-async function runPriceCurrency({ environment, output, prompts, writeConfig }) {
-  const settings = loadGatewaySettings(environment);
-  const mode = await prompts.select({
-    message: "全局价格显示方式",
-    showInstructions: false,
-    initialValue: settings.display.priceCurrency,
-    options: [
-      { value: "cny", label: "人民币", hint: "全局统一人民币（需要汇率缓存）" },
-      { value: "usd", label: "美元", hint: "全局统一美元" },
-      { value: "back", label: "返回上一级" },
-    ],
-  });
-  if (prompts.isCancel(mode) || mode === "back") return { action: "back" };
-  if (mode !== "cny" && mode !== "usd") {
-    throw new Error(`未知价格显示方式：${String(mode)}`);
-  }
-  const result = updateGatewaySetting({
-    kind: "display.price-currency",
-    value: mode,
-  }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`全局价格显示方式已设为 ${mode}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { priceCurrency: mode, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }

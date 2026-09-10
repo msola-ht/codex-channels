@@ -73,8 +73,6 @@ async function handleIngest(request, env) {
       row.reasoningOutputTokens ?? null,
       row.totalTokens ?? null,
       row.cacheHitRate ?? null,
-      row.pricing?.currency ?? null,
-      row.totalCostNanos ?? null,
       JSON.stringify(row),
       nowMs,
     ));
@@ -118,14 +116,12 @@ async function handleIngest(request, env) {
 }
 
 async function handleOverview(env) {
-  const [totals, costs, providers] = await Promise.all([
+  const [totals, providers] = await Promise.all([
     env.DB.prepare(overviewSql).all(),
-    env.DB.prepare(costsByCurrencySql).all(),
     env.DB.prepare(providerTotalsSql).all(),
   ]);
   return jsonResponse({
     totals: totals.results[0] ?? null,
-    costsByCurrency: costs.results,
     providers: providers.results,
   });
 }
@@ -154,7 +150,7 @@ async function handleRequests(url, env) {
   const rows = await env.DB.prepare(
     `SELECT device_id, local_id, recorded_at_ms, provider, model, status, operation,
             input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
-            total_tokens, cache_hit_rate, pricing_currency, total_cost_nanos
+            total_tokens, cache_hit_rate
      FROM request_metrics
      ${where}
      ORDER BY recorded_at_ms DESC, device_id ASC, local_id DESC
@@ -196,9 +192,9 @@ const insertRequestMetricSql = `
   INSERT OR IGNORE INTO request_metrics
     (device_id, local_id, recorded_at_ms, provider, model, status, operation,
      thread_id, turn_id, input_tokens, cached_input_tokens, output_tokens,
-     reasoning_output_tokens, total_tokens, cache_hit_rate, pricing_currency,
-     total_cost_nanos, payload, ingested_at_ms)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     reasoning_output_tokens, total_tokens, cache_hit_rate,
+     payload, ingested_at_ms)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const insertSubagentThreadSql = `
@@ -236,15 +232,6 @@ const overviewSql = `
     COALESCE(SUM(total_tokens), 0) AS total_tokens,
     MAX(recorded_at_ms) AS last_recorded_at_ms
   FROM request_metrics
-`;
-
-const costsByCurrencySql = `
-  SELECT COALESCE(pricing_currency, 'unknown') AS currency,
-         COUNT(*) AS request_count,
-         COALESCE(SUM(total_cost_nanos), 0) AS total_cost_nanos
-  FROM request_metrics
-  GROUP BY pricing_currency
-  ORDER BY request_count DESC
 `;
 
 const providerTotalsSql = `

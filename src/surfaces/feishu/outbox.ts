@@ -8,9 +8,6 @@ import {
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type {
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
-  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
 import { formatConversationIdleReleased } from "../output-copy.js";
@@ -142,20 +139,11 @@ export interface FeishuOutboxOptions {
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
-  exchangeRate?: () => ExchangeRateSnapshot | null;
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
   debugEnabled?: boolean;
-  remainingUsage?: (
-    model: string,
-    requestStartedAtMs?: number,
-    modelProvider?: string,
-  ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
@@ -198,7 +186,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     });
   }
 
-  async handle(event: OutputEvent): Promise<void> {
+  handle(event: OutputEvent): void {
     if (
       this.closed
       || event.target.surface !== "feishu"
@@ -354,19 +342,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (event.type === "turn.completed") {
       this.planMessages.delete(turnKey(event.threadId, event.turnId));
       this.flushOperationUpdates(event.target.conversationId, event);
-      const remainingUsage = event.model && this.options.remainingUsage
-        ? (await this.options.remainingUsage?.(
-            event.model,
-            event.timing?.modelRequestStartedAtMs,
-            event.modelProvider,
-          )) ?? null
-        : null;
       const completion = renderFeishuOutput(
         event,
-        this.options.priceCurrency,
-        this.options.exchangeRate?.() ?? null,
         this.options.debugEnabled ?? false,
-        remainingUsage,
         this.options.autoCompactPercent,
       );
       if (
@@ -423,10 +401,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     const rendered = renderFeishuOutput(
       event,
-      this.options.priceCurrency,
-      this.options.exchangeRate?.() ?? null,
       this.options.debugEnabled ?? false,
-      undefined,
       this.options.autoCompactPercent,
     );
     if (rendered === null) {
@@ -475,10 +450,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): void {
     const rendered = renderFeishuOutput(
       event,
-      this.options.priceCurrency,
-      this.options.exchangeRate?.() ?? null,
       this.options.debugEnabled ?? false,
-      undefined,
       this.options.autoCompactPercent,
     );
     if (rendered === null) {

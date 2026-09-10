@@ -28,7 +28,6 @@ import { requireUserConfig } from "./runtime-config.mjs";
 
 const operationUpdateValues = ["full", "compact", "hidden"];
 const sandboxValues = ["read-only", "workspace-write"];
-const priceCurrencyValues = ["cny", "usd"];
 const messageFormatValues = ["html", "rich"];
 const loggingLevelValues = ["fatal", "error", "warn", "info", "debug", "trace"];
 const proxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
@@ -70,7 +69,6 @@ export function loadGatewaySettings(environment = process.env) {
         : "compact",
       planUpdatesEnabled: display.plan_updates !== false,
       reasoningEnabled: display.reasoning !== false,
-      priceCurrency: display.price_currency === "cny" ? "cny" : "usd",
     },
     system: {
       approvalTimeoutSeconds: integerInRange(approval.timeout_seconds, 30, 3_600) ?? 900,
@@ -204,13 +202,6 @@ function applySetting(document, input) {
     case "display.reasoning": {
       const value = booleanValue(input.value, "value", "思考状态显示");
       document.display = { ...table(document.display), reasoning: value };
-      return changed(value, "restart-gateway");
-    }
-    case "display.price-currency": {
-      const value = enumValue(input.value, priceCurrencyValues, "value", "价格显示方式");
-      const display = { ...table(document.display), price_currency: value };
-      delete display.price_currency_by_provider;
-      document.display = display;
       return changed(value, "restart-gateway");
     }
     case "telegram.message-format": {

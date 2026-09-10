@@ -74,7 +74,6 @@ describe("SqliteModelRequestMetricsStore", () => {
     expect(store.recent(1)[0]).toMatchObject({
       ...sample(),
       requestDurationMs: 650,
-      totalCostNanos: null,
     });
     store.close();
     const inspection = new DatabaseSync(path, { readOnly: true });
@@ -87,40 +86,17 @@ describe("SqliteModelRequestMetricsStore", () => {
     )).toEqual([]);
   });
 
-  it("exposes derived timing, throughput, cache and snapshotted cost metrics", () => {
+  it("exposes derived timing, throughput and cache metrics", () => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
     const store = new SqliteModelRequestMetricsStore(path);
-    store.record({
-      ...sample(),
-      pricing: {
-        billingMode: "api",
-        currency: "USD",
-        source: "test-catalog",
-        effectiveAtMs: 1_700_000_000_000,
-        uncachedInputPricePerMillionNanos: 2_000_000_000,
-        cachedInputPricePerMillionNanos: 1_000_000_000,
-        outputPricePerMillionNanos: 3_000_000_000,
-      },
-    });
+    store.record(sample());
     expect(store.threadSummary("thread-1")).toMatchObject({
       latestTurn: {
-        pricingCurrency: "USD",
-        pricedRequestCount: 1,
-        pricedInputTokens: 1_000,
-        pricedOutputTokens: 100,
-        totalCostNanos: 1_400_000,
-        uncachedInputPricePerMillionNanos: 2_000_000_000,
-        cachedInputPricePerMillionNanos: 1_000_000_000,
-        outputPricePerMillionNanos: 3_000_000_000,
-        hasMixedPrices: false,
+        requestCount: 1,
       },
       threadAggregate: {
-        pricingCurrency: "USD",
-        pricedRequestCount: 1,
-        pricedInputTokens: 1_000,
-        pricedOutputTokens: 100,
-        totalCostNanos: 1_400_000,
+        requestCount: 1,
       },
     });
     expect(store.aggregate({
@@ -128,13 +104,7 @@ describe("SqliteModelRequestMetricsStore", () => {
       startAtMs: 0,
       endAtMs: Date.now() + 1,
     }).aggregate).toMatchObject({
-      pricingCurrency: "USD",
-      pricedRequestCount: 1,
-      totalCostNanos: 1_400_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-      hasMixedPrices: false,
+      requestCount: 1,
     });
     store.close();
 
@@ -145,9 +115,6 @@ describe("SqliteModelRequestMetricsStore", () => {
     inspection.close();
 
     expect(derived).toMatchObject({
-      billing_mode: "api",
-      pricing_currency: "USD",
-      pricing_source: "test-catalog",
       request_duration_ms: 650,
       ttft_ms: 100,
       thinking_duration_ms: 200,
@@ -161,10 +128,6 @@ describe("SqliteModelRequestMetricsStore", () => {
       thinking_tokens_per_second: 200,
       output_tokens_per_second: 300,
       generation_tokens_per_second: 200,
-      uncached_input_cost_nanos: 200_000,
-      cached_input_cost_nanos: 900_000,
-      output_cost_nanos: 300_000,
-      total_cost_nanos: 1_400_000,
     });
   });
 
@@ -311,24 +274,14 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
-  it("keeps unsuccessful request prices in raw records but excludes them from cost summaries", () => {
+  it("keeps unsuccessful requests in raw records and summaries", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
       join(directory, "request-metrics.sqlite3"),
     );
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: 1_700_000_000_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
-    store.record({ ...sample(), pricing });
+    store.record(sample());
     store.record({
       ...sample(),
-      pricing,
       status: "failed",
       errorType: "http_error",
       requestStartedAtMs: 2_000,
@@ -336,31 +289,22 @@ describe("SqliteModelRequestMetricsStore", () => {
     });
     store.record({
       ...sample(),
-      pricing,
       status: "incomplete",
       incompleteReason: "max_output_tokens",
       requestStartedAtMs: 3_000,
       responseCompletedAtMs: 3_650,
     });
 
-    expect(store.recent(3).map((record) => record.totalCostNanos))
-      .toEqual([1_400_000, 1_400_000, 1_400_000]);
+    expect(store.recent(3).map((record) => record.status))
+      .toEqual(["incomplete", "failed", "completed"]);
     expect(store.threadSummary("thread-1")).toMatchObject({
       latestTurn: {
         requestCount: 3,
         unsuccessfulRequestCount: 2,
-        pricedRequestCount: 1,
-        pricedInputTokens: 1_000,
-        pricedOutputTokens: 100,
-        totalCostNanos: 1_400_000,
       },
       threadAggregate: {
         requestCount: 3,
         unsuccessfulRequestCount: 2,
-        pricedRequestCount: 1,
-        pricedInputTokens: 1_000,
-        pricedOutputTokens: 100,
-        totalCostNanos: 1_400_000,
       },
     });
     expect(store.aggregate({
@@ -370,88 +314,13 @@ describe("SqliteModelRequestMetricsStore", () => {
     }).aggregate).toMatchObject({
       requestCount: 3,
       unsuccessfulRequestCount: 2,
-      pricedRequestCount: 1,
-      totalCostNanos: 1_400_000,
     });
     expect(store.threadTurnSummaries("thread-1")[0]).toMatchObject({
       requestCount: 3,
       unsuccessfulRequestCount: 2,
-      pricedRequestCount: 1,
-      pricedInputTokens: 1_000,
-      pricedOutputTokens: 100,
-      totalCostNanos: 1_400_000,
     });
     expect(store.threadList()[0]).toMatchObject({
       requestCount: 3,
-      pricedRequestCount: 1,
-      totalCostNanos: 1_400_000,
-    });
-    store.close();
-  });
-
-  it("does not report one unit price for aggregates containing multiple rates", () => {
-    const directory = temporaryDirectory();
-    const store = new SqliteModelRequestMetricsStore(
-      join(directory, "request-metrics.sqlite3"),
-    );
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: 1_700_000_000_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
-    store.record({ ...sample(), pricing });
-    store.record({
-      ...sample(),
-      pricing: {
-        ...pricing,
-        effectiveAtMs: 1_700_000_001_000,
-        cachedInputPricePerMillionNanos: null,
-      },
-      cachedInputTokens: 0,
-      requestStartedAtMs: 2_000,
-      responseCompletedAtMs: 2_650,
-    });
-
-    expect(store.threadSummary("thread-1").latestTurn).toMatchObject({
-      pricedRequestCount: 2,
-      pricingCurrency: "USD",
-      hasMixedPrices: true,
-      uncachedInputPricePerMillionNanos: null,
-      cachedInputPricePerMillionNanos: null,
-      outputPricePerMillionNanos: null,
-    });
-    store.close();
-  });
-
-  it("marks an aggregate as mixed buckets when priced requests lack a stored bucket", () => {
-    const directory = temporaryDirectory();
-    const store = new SqliteModelRequestMetricsStore(
-      join(directory, "request-metrics.sqlite3"),
-    );
-    const base = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: 1_700_000_000_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
-    store.record({ ...sample(), pricing: { ...base, bucket: "off-peak" } });
-    store.record({
-      ...sample(),
-      pricing: base,
-      requestStartedAtMs: 2_000,
-      responseCompletedAtMs: 2_650,
-    });
-
-    expect(store.threadSummary("thread-1").latestTurn).toMatchObject({
-      pricedRequestCount: 2,
-      pricingBuckets: ["off-peak", "peak"],
     });
     store.close();
   });
@@ -794,27 +663,6 @@ describe("SqliteModelRequestMetricsStore", () => {
   });
 
 
-
-  it("rejects priced snapshots without a currency", () => {
-    const directory = temporaryDirectory();
-    const path = join(directory, "request-metrics.sqlite3");
-    const store = new SqliteModelRequestMetricsStore(path);
-
-    expect(() => store.record({
-      ...sample(),
-      pricing: {
-        billingMode: "api",
-        currency: null,
-        source: "test-catalog",
-        effectiveAtMs: 1_700_000_000_000,
-        uncachedInputPricePerMillionNanos: 2_000_000_000,
-        cachedInputPricePerMillionNanos: null,
-        outputPricePerMillionNanos: null,
-      },
-    })).toThrow(/constraint/iu);
-
-    store.close();
-  });
 
 });
 

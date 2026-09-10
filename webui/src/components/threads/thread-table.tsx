@@ -9,9 +9,7 @@ import {
 } from "@/components/metrics/data-table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { Badge } from "@/components/ui/badge"
-import { useCurrency } from "@/hooks/currency-context"
 import {
-  formatCost,
   formatTime,
   formatTokens,
   shortThreadId,
@@ -31,7 +29,6 @@ const COLUMN_LABELS: Record<string, string> = {
   requests: "请求",
   input: "输入 Token",
   output: "输出 Token",
-  cost: "费用",
   compact: "压缩",
   last: "最后记录",
 }
@@ -39,7 +36,6 @@ const COLUMN_LABELS: Record<string, string> = {
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200]
 
 export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
-  const { currency } = useCurrency()
   const mainCount = threads.filter((thread) => thread.agentPath === null).length
   const subagentCount = threads.length - mainCount
 
@@ -174,17 +170,6 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
       ),
     },
     {
-      id: "cost",
-      accessorFn: (thread) =>
-        thread.totalCostCnyNanos ?? thread.totalCostNanos ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>费用</SortableHeader>
-      ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">{formatCost(row.original, currency)}</span>
-      ),
-    },
-    {
       id: "compact",
       accessorFn: (thread) => thread.compact?.requestCount ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
@@ -207,7 +192,7 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
         </span>
       ),
     },
-  ], [currency])
+  ], [])
 
   return (
     <DataTable

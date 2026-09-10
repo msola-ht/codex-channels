@@ -229,7 +229,6 @@ describe("request metrics aggregate reports", () => {
     expect(store.threadSummary("thread-1").latestTurn).toMatchObject({
       requestCount: 1,
       unsuccessfulRequestCount: 1,
-      pricedRequestCount: 0,
     });
     expect(store.aggregate({
       dimension: "global",
@@ -238,7 +237,6 @@ describe("request metrics aggregate reports", () => {
     }).aggregate).toMatchObject({
       requestCount: 1,
       unsuccessfulRequestCount: 1,
-      pricedRequestCount: 0,
     });
     expect(store.errors({
       startAtMs: 0,
@@ -329,25 +327,15 @@ describe("request metrics aggregate reports", () => {
     store.close();
   });
 
-  it("includes compact usage and cost in request summaries", () => {
+  it("includes compact usage in request summaries", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
       join(directory, "request-metrics.sqlite3"),
     );
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: 1_700_000_000_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
-    store.record({ ...sample(), pricing });
+    store.record(sample());
     store.record({
       ...sample(),
       operation: "compact",
-      pricing,
       requestStartedAtMs: 2_000,
       responseCompletedAtMs: 2_650,
     });
@@ -357,8 +345,6 @@ describe("request metrics aggregate reports", () => {
         requestCount: 2,
         inputTokens: 2_000,
         outputTokens: 200,
-        pricedRequestCount: 2,
-        totalCostNanos: 2_800_000,
         compact: {
           model: "deepseek-v4-flash",
           hasMixedModels: false,
@@ -367,17 +353,12 @@ describe("request metrics aggregate reports", () => {
           inputTokens: 1_000,
           cachedInputTokens: 900,
           outputTokens: 100,
-          pricingCurrency: "USD",
-          pricedRequestCount: 1,
-          totalCostNanos: 1_400_000,
         },
       },
       threadAggregate: {
         requestCount: 2,
         inputTokens: 2_000,
         outputTokens: 200,
-        pricedRequestCount: 2,
-        totalCostNanos: 2_800_000,
         compact: {
           model: "deepseek-v4-flash",
           hasMixedModels: false,
@@ -386,9 +367,6 @@ describe("request metrics aggregate reports", () => {
           inputTokens: 1_000,
           cachedInputTokens: 900,
           outputTokens: 100,
-          pricingCurrency: "USD",
-          pricedRequestCount: 1,
-          totalCostNanos: 1_400_000,
         },
       },
     });
@@ -400,8 +378,6 @@ describe("request metrics aggregate reports", () => {
       requestCount: 2,
       inputTokens: 2_000,
       outputTokens: 200,
-      pricedRequestCount: 2,
-      totalCostNanos: 2_800_000,
       compact: {
         model: "deepseek-v4-flash",
         hasMixedModels: false,
@@ -410,9 +386,6 @@ describe("request metrics aggregate reports", () => {
         inputTokens: 1_000,
         cachedInputTokens: 900,
         outputTokens: 100,
-        pricingCurrency: "USD",
-        pricedRequestCount: 1,
-        totalCostNanos: 1_400_000,
       },
     });
     expect(store.errors({
@@ -426,8 +399,6 @@ describe("request metrics aggregate reports", () => {
       requestCount: 2,
       inputTokens: 2_000,
       outputTokens: 200,
-      pricedRequestCount: 2,
-      totalCostNanos: 2_800_000,
       compact: {
         model: "deepseek-v4-flash",
         hasMixedModels: false,
@@ -436,17 +407,12 @@ describe("request metrics aggregate reports", () => {
         inputTokens: 1_000,
         cachedInputTokens: 900,
         outputTokens: 100,
-        pricingCurrency: "USD",
-        pricedRequestCount: 1,
-        totalCostNanos: 1_400_000,
       },
     });
     expect(store.threadList()[0]).toMatchObject({
       requestCount: 2,
       inputTokens: 2_000,
       outputTokens: 200,
-      pricedRequestCount: 2,
-      totalCostNanos: 2_800_000,
       compact: {
         model: "deepseek-v4-flash",
         hasMixedModels: false,
@@ -455,9 +421,6 @@ describe("request metrics aggregate reports", () => {
         inputTokens: 1_000,
         cachedInputTokens: 900,
         outputTokens: 100,
-        pricingCurrency: "USD",
-        pricedRequestCount: 1,
-        totalCostNanos: 1_400_000,
       },
     });
     store.close();

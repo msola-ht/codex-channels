@@ -1,5 +1,4 @@
 import type {
-  ModelRequestPricingSnapshot,
   StoredCompactRequestMetricsSummary,
   StoredModelRequestMetric,
   StoredModelRequestMetricsAggregate,
@@ -11,14 +10,6 @@ import type {
 export interface MetricRow {
   id: number;
   provider: string;
-  billing_mode: "api" | "subscription" | "unknown" | null;
-  pricing_currency: string | null;
-  pricing_source: string | null;
-  pricing_effective_at_ms: number | null;
-  pricing_bucket: "peak" | "off-peak" | null;
-  uncached_input_price_per_million_nanos: number | null;
-  cached_input_price_per_million_nanos: number | null;
-  output_price_per_million_nanos: number | null;
   transport: "http" | "websocket";
   response_format: "sse" | "json" | "websocket" | "unknown";
   operation: "response" | "compact";
@@ -66,10 +57,6 @@ export interface MetricRow {
   thinking_tokens_per_second: number | null;
   output_tokens_per_second: number | null;
   generation_tokens_per_second: number | null;
-  uncached_input_cost_nanos: number | null;
-  cached_input_cost_nanos: number | null;
-  output_cost_nanos: number | null;
-  total_cost_nanos: number | null;
 }
 
 export interface CompactSummaryRow {
@@ -82,10 +69,6 @@ export interface CompactSummaryRow {
   compact_input_token_count: number;
   compact_cached_input_token_count: number;
   compact_output_tokens: number | null;
-  compact_pricing_currency: string | null;
-  compact_pricing_currency_count: number;
-  compact_priced_request_count: number;
-  compact_total_cost_nanos: number | null;
 }
 
 export interface TurnSummaryRow extends CompactSummaryRow {
@@ -107,23 +90,6 @@ export interface TurnSummaryRow extends CompactSummaryRow {
   output_duration_ms: number | null;
   output_speed_sample_count: number;
   output_speed_timed_count: number;
-  pricing_currency: string | null;
-  pricing_currency_count: number;
-  pricing_bucket: "peak" | "off-peak" | null;
-  pricing_bucket_count: number;
-  priced_request_count: number;
-  priced_input_tokens: number | null;
-  priced_output_tokens: number | null;
-  total_cost_nanos: number | null;
-  uncached_input_cost_nanos: number | null;
-  cached_input_cost_nanos: number | null;
-  output_cost_nanos: number | null;
-  uncached_input_price_per_million_nanos: number | null;
-  uncached_input_price_count: number;
-  cached_input_price_per_million_nanos: number | null;
-  cached_input_price_count: number;
-  output_price_per_million_nanos: number | null;
-  output_price_count: number;
 }
 
 export interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count"> {
@@ -164,7 +130,6 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
   return {
     id: row.id,
     provider: row.provider,
-    pricing: toPricingSnapshot(row),
     transport: row.transport,
     responseFormat: row.response_format,
     operation: row.operation,
@@ -220,17 +185,12 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     thinkingTokensPerSecond: row.thinking_tokens_per_second,
     outputTokensPerSecond: row.output_tokens_per_second,
     generationTokensPerSecond: row.generation_tokens_per_second,
-    uncachedInputCostNanos: row.uncached_input_cost_nanos,
-    cachedInputCostNanos: row.cached_input_cost_nanos,
-    outputCostNanos: row.output_cost_nanos,
-    totalCostNanos: row.total_cost_nanos,
   };
 }
 
 export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
   const outputDurationMs = row.output_duration_ms ?? 0;
   const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
-  const pricing = toStoredAggregatePricing(row);
   return {
     provider: row.provider ?? null,
     model: row.model ?? null,
@@ -251,9 +211,6 @@ export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetri
       : null,
     outputSpeedSampleCount: row.output_speed_sample_count,
     outputSpeedTimedCount: row.output_speed_timed_count,
-    pricedInputTokens: row.priced_input_tokens ?? 0,
-    pricedOutputTokens: row.priced_output_tokens ?? 0,
-    ...pricing,
     compact: toStoredCompactSummary(row),
   };
 }
@@ -278,21 +235,6 @@ export function toStoredThreadAggregate(
     outputTokensPerSecond: summary.outputTokensPerSecond,
     outputSpeedSampleCount: summary.outputSpeedSampleCount,
     outputSpeedTimedCount: summary.outputSpeedTimedCount,
-    pricingCurrency: summary.pricingCurrency,
-    pricedRequestCount: summary.pricedRequestCount,
-    pricedInputTokens: summary.pricedInputTokens,
-    pricedOutputTokens: summary.pricedOutputTokens,
-    totalCostNanos: summary.totalCostNanos,
-    inputCostNanos: summary.inputCostNanos,
-    cachedInputCostNanos: summary.cachedInputCostNanos,
-    outputCostNanos: summary.outputCostNanos,
-    uncachedInputPricePerMillionNanos:
-      summary.uncachedInputPricePerMillionNanos,
-    cachedInputPricePerMillionNanos:
-      summary.cachedInputPricePerMillionNanos,
-    outputPricePerMillionNanos: summary.outputPricePerMillionNanos,
-    hasMixedPrices: summary.hasMixedPrices,
-    pricingBuckets: summary.pricingBuckets,
     compact: summary.compact,
   };
 }
@@ -308,7 +250,6 @@ export function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetri
 export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
   const outputDurationMs = row.output_duration_ms ?? 0;
   const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
-  const pricing = toStoredAggregatePricing(row);
   return {
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
@@ -329,7 +270,6 @@ export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestM
     ttftP50Ms: row.ttft_p50_ms,
     ttftP95Ms: row.ttft_p95_ms,
     ttftSampleCount: row.ttft_sample_count,
-    ...pricing,
     compact: toStoredCompactSummary(row),
   };
 }
@@ -349,13 +289,6 @@ export function toStoredCompactSummary(
       ? row.compact_cached_input_tokens ?? 0
       : null,
     outputTokens: row.compact_output_tokens ?? 0,
-    pricingCurrency: row.compact_pricing_currency_count === 1
-      ? row.compact_pricing_currency
-      : null,
-    pricedRequestCount: row.compact_priced_request_count,
-    totalCostNanos: row.compact_pricing_currency_count === 1
-      ? row.compact_total_cost_nanos
-      : null,
   };
 }
 
@@ -406,79 +339,4 @@ function parseQuotaWindows(
         : null,
     }];
   });
-}
-
-function toStoredAggregatePricing(row: TurnSummaryRow | AggregateRow): Pick<
-  StoredModelRequestMetricsAggregate,
-  | "pricingCurrency"
-  | "pricedRequestCount"
-  | "totalCostNanos"
-  | "inputCostNanos"
-  | "cachedInputCostNanos"
-  | "outputCostNanos"
-  | "uncachedInputPricePerMillionNanos"
-  | "cachedInputPricePerMillionNanos"
-  | "outputPricePerMillionNanos"
-  | "hasMixedPrices"
-  | "pricingBuckets"
-> {
-  const hasMixedPrices = row.pricing_currency_count > 1
-    || row.uncached_input_price_count > 1
-    || row.cached_input_price_count > 1
-    || row.output_price_count > 1;
-  const hasSinglePrice = row.pricing_currency_count === 1 && !hasMixedPrices;
-  const pricingBuckets: Array<"peak" | "off-peak"> =
-    row.pricing_bucket_count >= 2
-      ? ["off-peak", "peak"]
-      : row.pricing_bucket_count === 1 && row.pricing_bucket !== null
-        ? [row.pricing_bucket]
-        : [];
-  return {
-    pricingCurrency: row.pricing_currency_count === 1
-      ? row.pricing_currency
-      : null,
-    pricedRequestCount: row.priced_request_count,
-    totalCostNanos: row.pricing_currency_count === 1
-      ? row.total_cost_nanos
-      : null,
-    inputCostNanos: row.pricing_currency_count === 1
-      ? row.uncached_input_cost_nanos
-      : null,
-    cachedInputCostNanos: row.pricing_currency_count === 1
-      ? row.cached_input_cost_nanos
-      : null,
-    outputCostNanos: row.pricing_currency_count === 1
-      ? row.output_cost_nanos
-      : null,
-    uncachedInputPricePerMillionNanos: hasSinglePrice
-      ? row.uncached_input_price_per_million_nanos
-      : null,
-    cachedInputPricePerMillionNanos: hasSinglePrice
-      ? row.cached_input_price_per_million_nanos
-      : null,
-    outputPricePerMillionNanos: hasSinglePrice
-      ? row.output_price_per_million_nanos
-      : null,
-    hasMixedPrices,
-    pricingBuckets,
-  };
-}
-
-function toPricingSnapshot(row: MetricRow): ModelRequestPricingSnapshot | null {
-  if (row.billing_mode === null) return null;
-  if (row.pricing_source === null || row.pricing_effective_at_ms === null) {
-    throw new Error(`模型请求指标 ${row.id} 的价格快照不完整`);
-  }
-  return {
-    billingMode: row.billing_mode,
-    currency: row.pricing_currency,
-    source: row.pricing_source,
-    effectiveAtMs: row.pricing_effective_at_ms,
-    bucket: row.pricing_bucket,
-    uncachedInputPricePerMillionNanos:
-      row.uncached_input_price_per_million_nanos,
-    cachedInputPricePerMillionNanos:
-      row.cached_input_price_per_million_nanos,
-    outputPricePerMillionNanos: row.output_price_per_million_nanos,
-  };
 }

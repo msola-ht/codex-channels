@@ -96,8 +96,6 @@ const apiProviderSchema = z.strictObject({
   endpoint: z.url(),
 });
 
-const priceCurrencySchema = z.enum(["cny", "usd"]).default("usd");
-
 const webuiSchema = z.strictObject({
   host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(8787),
@@ -294,12 +292,10 @@ const gatewayDocumentSchema = z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
     reasoning: z.boolean().default(true),
-    price_currency: priceCurrencySchema,
   }).default({
     operation_updates: "compact",
     plan_updates: true,
     reasoning: true,
-    price_currency: "usd",
   }),
   experimental: z.strictObject({
     plugin_api: z.boolean().default(false),

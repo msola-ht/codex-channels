@@ -153,7 +153,6 @@ describe("local update", () => {
       "display.operation_updates",
       "display.plan_updates",
       "display.reasoning",
-      "display.price_currency",
     ]));
     expect(result.backupPath).toContain(".pre-update.2026-08-13T12-34-56-789Z.bak");
     if (result.backupPath === null) throw new Error("缺少配置备份");
@@ -162,7 +161,6 @@ describe("local update", () => {
     expect(readGatewayConfig(configPath).display).toMatchObject({
       operation_updates: "compact",
       plan_updates: true,
-      price_currency: "usd",
     });
   });
 

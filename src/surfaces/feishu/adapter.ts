@@ -52,8 +52,6 @@ import {
 } from "./audio.js";
 import type { FeishuOutbox } from "./outbox.js";
 import type {
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
 } from "../../application/index.js";
 import type { FeishuOAuthControllerPort } from "./oauth.js";
 import {
@@ -122,10 +120,6 @@ export class FeishuConversationAdapter {
       onQuotedTextError?(error: unknown): void;
       now?: () => number;
       debugEnabled?: boolean;
-      exchangeRate?: () => ExchangeRateSnapshot | null;
-      priceCurrency?: (
-        provider: string | null | undefined,
-      ) => DisplayPriceCurrency;
       scheduledTasks?: ScheduledTaskUseCases;
     } = { quietWindowMs: 0 },
   ) {
@@ -247,8 +241,6 @@ export class FeishuConversationAdapter {
         }
         const rendered = renderFeishuCommandResult(
           result,
-          this.inputOptions.priceCurrency,
-          this.inputOptions.exchangeRate?.() ?? null,
         );
         if (rendered !== null) {
           this.notifyMarkdown(message.target.conversationId, rendered);
@@ -480,8 +472,6 @@ export class FeishuConversationAdapter {
       }
       const rendered = renderFeishuCommandResult(
         result,
-        this.inputOptions.priceCurrency,
-        this.inputOptions.exchangeRate?.() ?? null,
       );
       if (rendered !== null) {
         this.notifyMarkdown(target.conversationId, rendered);

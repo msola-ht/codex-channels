@@ -1,9 +1,6 @@
 import {
   type ConversationCommandResult,
   type ConversationStatus,
-  type DisplayPriceCurrency,
-  type ExchangeRateSnapshot,
-  type ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -114,12 +111,7 @@ export function renderWeixinIdentity(message: {
 
 export function renderWeixinTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
-  remainingUsage?: ProviderModelUsageEstimate | null,
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -128,10 +120,7 @@ export function renderWeixinTurnCompleted(
   return renderWeixinLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
-      priceCurrency,
-      exchangeRate,
       debug,
-      remainingUsage,
       autoCompactPercent,
     ),
   );
@@ -139,23 +128,15 @@ export function renderWeixinTurnCompleted(
 
 export function renderWeixinSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
 ): string {
   return renderWeixinLifecyclePresentation(
-    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+    createSubagentCompletedPresentation(event, debug),
   );
 }
 
 export function renderWeixinCommandResult(
   result: ConversationCommandResult,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): string | null {
   switch (result.kind) {
     case "outcome":
@@ -212,7 +193,7 @@ export function renderWeixinCommandResult(
     case "usage":
       return formatConversationUsage(result);
     case "metrics":
-      return formatConversationMetrics(result, priceCurrency, exchangeRate);
+      return formatConversationMetrics(result);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":

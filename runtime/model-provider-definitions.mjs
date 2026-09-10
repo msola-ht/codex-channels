@@ -7,7 +7,6 @@ import {
 
 const managedProviderCapabilityKinds = Object.freeze({
   catalogSources: new Set(["none", "deepseek-official"]),
-  pricingAdapters: new Set(["none", "remote", "deepseek", "opencode-go"]),
   accountAdapters: new Set(["none", "deepseek", "opencode-go"]),
   instanceAdapters: new Set(["single", "opencode-go-accounts"]),
   catalogUpdateAdapters: new Set(["none", "deepseek", "opencode-go"]),
@@ -15,20 +14,16 @@ const managedProviderCapabilityKinds = Object.freeze({
 
 const deepseekProviderCapabilities = Object.freeze({
   catalogSource: "deepseek-official",
-  pricingAdapter: "deepseek",
   accountAdapter: "deepseek",
   instanceAdapter: "single",
   catalogUpdateAdapter: "deepseek",
-  needsExchangeRate: true,
 });
 
 const opencodeGoProviderCapabilities = Object.freeze({
   catalogSource: "deepseek-official",
-  pricingAdapter: "opencode-go",
   accountAdapter: "opencode-go",
   instanceAdapter: "opencode-go-accounts",
   catalogUpdateAdapter: "opencode-go",
-  needsExchangeRate: false,
 });
 
 const deepseekProfileName = "sf-deepseek";
@@ -162,7 +157,6 @@ export function assertManagedModelProviderCapabilities(definition) {
     || typeof capabilities !== "object"
     || Array.isArray(capabilities)
     || !managedProviderCapabilityKinds.catalogSources.has(capabilities.catalogSource)
-    || !managedProviderCapabilityKinds.pricingAdapters.has(capabilities.pricingAdapter)
     || !managedProviderCapabilityKinds.accountAdapters.has(capabilities.accountAdapter)
     || !managedProviderCapabilityKinds.instanceAdapters.has(capabilities.instanceAdapter)
     || !managedProviderCapabilityKinds.catalogUpdateAdapters.has(
@@ -172,7 +166,6 @@ export function assertManagedModelProviderCapabilities(definition) {
       capabilities.catalogUpdateAdapter !== "none"
       && capabilities.catalogSource === "none"
     )
-    || typeof capabilities.needsExchangeRate !== "boolean"
   ) {
     const provider = typeof definition?.id === "string" ? definition.id : "unknown";
     throw new Error(`受管 Provider 能力定义无效：${provider}`);

@@ -5,8 +5,6 @@ import type { InlineKeyboardMarkup } from "grammy/types";
 
 import type {
   ConversationCommandResult,
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
 } from "../../application/index.js";
 import {
   fastServiceTierId,
@@ -56,10 +54,6 @@ import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-form
 export async function renderTelegramCommandResult(
   context: Context,
   result: ConversationCommandResult,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): Promise<void> {
   switch (result.kind) {
     case "outcome": {
@@ -193,7 +187,7 @@ export async function renderTelegramCommandResult(
     case "metrics":
       await replyTelegramPanel(
         context,
-        formatConversationMetrics(result, priceCurrency, exchangeRate),
+        formatConversationMetrics(result),
       );
       return;
     case "limits":

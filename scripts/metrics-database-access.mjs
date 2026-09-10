@@ -231,7 +231,6 @@ export function readWeeklyQuota(store, nowMs) {
       intervalCount: estimate.intervalCount,
       requestCount: estimate.requestCount,
       unsuccessfulRequestCount: estimate.unsuccessfulRequestCount,
-      pricedRequestCount: estimate.pricedRequestCount,
       inputTokensPerPercent: perQuotaPercent(
         estimate.inputTokens,
         estimate.observedDeltaPercentMillionths,
@@ -244,13 +243,6 @@ export function readWeeklyQuota(store, nowMs) {
         estimate.totalTokens,
         estimate.observedDeltaPercentMillionths,
       ),
-      pricingCurrency: estimate.pricingCurrency,
-      costPerPercentNanos: estimate.totalCostNanos === null
-        ? null
-        : perQuotaPercent(
-            estimate.totalCostNanos,
-            estimate.observedDeltaPercentMillionths,
-          ),
     },
   };
 }

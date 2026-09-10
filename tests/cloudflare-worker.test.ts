@@ -185,8 +185,6 @@ function requestRow(localId: number) {
     outputTokens: 100,
     totalTokens: 1_100,
     recordedAtMs: 1_785_640_800_000,
-    totalCostNanos: 6_000,
-    pricing: { currency: "USD" },
   };
 }
 

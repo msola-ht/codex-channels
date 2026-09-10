@@ -16,12 +16,9 @@ export interface CenterQuotaPeriod {
   deviceCount?: number;
   requestCount?: number;
   totalTokens?: number;
-  totalCostNanos?: number | null;
   latestUsedPercentMillionths?: number | null;
   estimatedTotalTokens?: number | null;
-  estimatedTotalCostNanos?: number | null;
   tokensPerPercent?: number | null;
-  costPerPercentNanos?: number | null;
   lastObservedAtMs?: number;
 }
 
@@ -49,9 +46,7 @@ export function mergeMissingRemoteQuotaWindows(
         ? Math.round(window.usedPercent * 1_000_000)
         : null,
       resetsAt: window.resetsAt,
-      totalCostNanos: null,
       estimatedTotalTokens: null,
-      estimatedTotalCostNanos: null,
       observedAtMs,
     } satisfies RemoteQuotaSummary];
   });
@@ -170,12 +165,9 @@ export async function readRemoteQuotaSummary(
         deviceCount: period.deviceCount,
         requestCount: period.requestCount,
         totalTokens: period.totalTokens,
-        totalCostNanos: typeof period.totalCostNanos === "number" ? period.totalCostNanos : null,
         latestUsedPercentMillionths: period.latestUsedPercentMillionths ?? null,
         estimatedTotalTokens: period.estimatedTotalTokens ?? null,
-        estimatedTotalCostNanos: period.estimatedTotalCostNanos ?? null,
         tokensPerPercent: period.tokensPerPercent ?? null,
-        costPerPercentNanos: period.costPerPercentNanos ?? null,
         resetsAt: period.resetsAt,
         observedAtMs: period.lastObservedAtMs,
       } satisfies RemoteQuotaSummary;

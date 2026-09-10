@@ -40,7 +40,6 @@ import {
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
 } from "../src/surfaces/conversation-command-format.js";
-import { formatCurrencyNanos } from "../src/surfaces/reference-cost-format.js";
 import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-format.js";
 
 describe("provider-aware conversation command formatting", () => {
@@ -1407,55 +1406,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("累计 Tokens");
   });
 
-  it("renders OpenCode Go model usage estimates from local reference costs", () => {
-    const rendered = formatConversationUsage({
-      kind: "usage",
-      result: {
-        kind: "quota-windows",
-        provider: "ocg-main",
-        available: true,
-        windows: [{
-          windowId: "monthly",
-          label: "月度",
-          usedPercent: 1,
-          resetsAt: null,
-          status: "ok",
-        }],
-        modelUsage: [{
-          model: "deepseek-v4-flash",
-          bucket: "off-peak",
-          includedUsageUsd: 15,
-          usedUsdNanos: 1_010_000_000,
-          usedTokens: 123_400,
-          usedPercent: 1_010_000_000 / 15_000_000_000 * 100,
-          remainingUsdNanos: 13_990_000_000,
-          windowStartAtMs: Date.parse("2026-08-15T14:22:07.934Z"),
-          windowEndAtMs: Date.parse("2026-09-15T14:22:07.934Z"),
-        }, {
-          model: "deepseek-v4-flash",
-          bucket: "peak",
-          includedUsageUsd: 15,
-          usedUsdNanos: 2_020_000_000,
-          usedTokens: 456_000,
-          usedPercent: 2_020_000_000 / 15_000_000_000 * 100,
-          remainingUsdNanos: 12_980_000_000,
-          windowStartAtMs: Date.parse("2026-08-15T14:22:07.934Z"),
-          windowEndAtMs: Date.parse("2026-09-15T14:22:07.934Z"),
-        }],
-      },
-    });
-
-    expect(rendered).toContain("模型本地用量");
-    expect(rendered).toContain("月度窗口");
-    expect(rendered).toContain(
-      "deepseek-v4-flash（Off-Peak）：已用 Token 123.4 K",
-    );
-    expect(rendered).toContain(
-      "deepseek-v4-flash（Peak）：已用 Token 456 K",
-    );
-  });
-
-  it("fails closed for unregistered Provider account capabilities", () => {
+    it("fails closed for unregistered Provider account capabilities", () => {
     expect(formatConversationUsage({
       kind: "usage",
       result: { kind: "unsupported", provider: "future-provider" },
@@ -1496,14 +1447,10 @@ describe("provider-aware conversation command formatting", () => {
           intervalCount: 2,
           requestCount: 40,
           unsuccessfulRequestCount: 2,
-          pricedRequestCount: 38,
           inputTokensPerPercent: 90_000,
           outputTokensPerPercent: 10_000,
           totalTokensPerPercent: 100_000,
           remainingTokens: 8_000_000,
-          pricingCurrency: "USD",
-          costPerPercentNanos: 200_000_000,
-          remainingCostNanos: 16_000_000_000,
         }],
       },
     });
@@ -1511,9 +1458,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("周限估算（本机代理样本）");
     expect(rendered).toContain("观测变化 2%（2 个区间）");
     expect(rendered).toContain("每 1%：约 100 K Token");
-    expect(rendered).toContain("API 参考费用：约 $0.200000");
     expect(rendered).toContain("剩余 80%：约 8 M Token");
-    expect(rendered).toContain("费用不是订阅实际扣款");
   });
 
   it("keeps Thread metrics and hides OpenAI-only state for DeepSeek", () => {
@@ -1594,16 +1539,6 @@ describe("provider-aware conversation command formatting", () => {
           outputTokensPerSecond: 60.25,
           outputSpeedSampleCount: 3,
           outputSpeedTimedCount: 2,
-          pricingCurrency: "USD",
-          pricedRequestCount: 2,
-          totalCostNanos: 1_234_567,
-          inputCostNanos: 400_000,
-          cachedInputCostNanos: 200_000,
-          outputCostNanos: 634_567,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
-          hasMixedPrices: false,
           compact: {
             model: "gpt-5.6-sol",
             hasMixedModels: false,
@@ -1612,9 +1547,6 @@ describe("provider-aware conversation command formatting", () => {
             inputTokens: 10_000,
             cachedInputTokens: 9_000,
             outputTokens: 500,
-            pricingCurrency: "USD",
-            pricedRequestCount: 1,
-            totalCostNanos: 142_102_000,
           },
         },
         threadAggregate: {
@@ -1629,16 +1561,6 @@ describe("provider-aware conversation command formatting", () => {
           outputTokensPerSecond: 58,
           outputSpeedSampleCount: 21,
           outputSpeedTimedCount: 20,
-          pricingCurrency: "USD",
-          pricedRequestCount: 20,
-          totalCostNanos: 12_345_678,
-          inputCostNanos: 4_000_000,
-          cachedInputCostNanos: 2_000_000,
-          outputCostNanos: 6_345_678,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
-          hasMixedPrices: false,
           compact: {
             model: "gpt-5.6-sol",
             hasMixedModels: false,
@@ -1647,9 +1569,6 @@ describe("provider-aware conversation command formatting", () => {
             inputTokens: 20_000,
             cachedInputTokens: 18_000,
             outputTokens: 1_000,
-            pricingCurrency: "USD",
-            pricedRequestCount: 2,
-            totalCostNanos: 284_204_000,
           },
         },
         latestDirectApi: {
@@ -1664,14 +1583,6 @@ describe("provider-aware conversation command formatting", () => {
           outputTokens: 343,
           reasoningOutputTokens: 55,
           totalTokens: 10_377,
-          pricingCurrency: "USD",
-          totalCostNanos: 987_654,
-          inputCostNanos: 300_000,
-          cachedInputCostNanos: 100_000,
-          outputCostNanos: 587_654,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
         },
       },
     });
@@ -1687,23 +1598,16 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("**Token**：30.9 K");
     expect(rendered).toContain("  - 输入命中缓存：24 K");
     expect(rendered).toContain("**Token**：184.2 K");
-    expect(rendered).toContain("**费用**：$0.001235（计价 2/3）");
-    expect(rendered).toContain("  - 输入价格：$0.000400");
     expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
-    expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token · $0.142102");
-    expect(rendered).toContain("**费用**：$0.001235（计价 2/3）");
-    expect(rendered).toContain("输入价格：$0.000400");
-    expect(rendered).toContain("缓存价格：$0.000200");
-    expect(rendered).toContain("输出价格：$0.000635");
+    expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token");
     expect(rendered).toContain("### 当前会话指标累计");
     expect(rendered).toContain("Turn：8 次");
-    expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
+    expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
     expect(rendered).toContain("综合输出速度：58 token/s（不含推理 · 覆盖 20/21 次请求）");
     expect(rendered).toContain("### 最近直接 API");
     expect(rendered).toContain("API 提供商：BLTCY");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
-    expect(rendered).toContain("**费用**：$0.000988");
   });
 
   it("shows reasoning token details for OpenAI official metrics", () => {
@@ -1724,16 +1628,6 @@ describe("provider-aware conversation command formatting", () => {
           outputTokensPerSecond: 60.25,
           outputSpeedSampleCount: 3,
           outputSpeedTimedCount: 2,
-          pricingCurrency: "USD",
-          pricedRequestCount: 2,
-          totalCostNanos: 1_234_567,
-          inputCostNanos: 400_000,
-          cachedInputCostNanos: 200_000,
-          outputCostNanos: 634_567,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
-          hasMixedPrices: false,
           compact: null,
         },
         threadAggregate: {
@@ -1748,16 +1642,6 @@ describe("provider-aware conversation command formatting", () => {
           outputTokensPerSecond: 58,
           outputSpeedSampleCount: 21,
           outputSpeedTimedCount: 20,
-          pricingCurrency: "USD",
-          pricedRequestCount: 20,
-          totalCostNanos: 12_345_678,
-          inputCostNanos: 4_000_000,
-          cachedInputCostNanos: 2_000_000,
-          outputCostNanos: 6_345_678,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
-          hasMixedPrices: false,
           compact: null,
         },
         latestDirectApi: null,
@@ -1768,144 +1652,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("其中推理输出：1.8 K");
   });
 
-  it("switches currency amounts to the 亿 unit at large values", () => {
-    expect(formatCurrencyNanos("CNY", 123_000_000 * 1_000_000_000)).toBe(
-      "¥1.23 亿",
-    );
-    expect(formatCurrencyNanos("CNY", 1_234_567_890)).toBe("¥1.234568");
-  });
-
-  it("shows a single provider-resolved currency with the exchange rate", () => {
-    const rendered = formatConversationMetrics({
-      kind: "metrics",
-      summary: {
-        threadId: "thread-1",
-        modelProvider: "deepseek",
-        latestTurn: {
-          turnId: "turn-1",
-          requestCount: 1,
-          unsuccessfulRequestCount: 0,
-          requestDurationMs: 1_000,
-          inputTokens: 100,
-          cachedInputTokens: 0,
-          outputTokens: 10,
-          reasoningOutputTokens: 0,
-          outputTokensPerSecond: null,
-          outputSpeedSampleCount: 0,
-          outputSpeedTimedCount: 0,
-          pricingCurrency: "USD",
-          pricedRequestCount: 1,
-          totalCostNanos: 1_000_000_000,
-          inputCostNanos: 600_000_000,
-          cachedInputCostNanos: 100_000_000,
-          outputCostNanos: 300_000_000,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
-          hasMixedPrices: false,
-        },
-        threadAggregate: null,
-        latestDirectApi: null,
-      },
-    }, (provider) => provider === "deepseek" ? "cny" : "usd", {
-      usdToCny: 7.2,
-      effectiveAtMs: 1_700_000_000_000,
-      source: "open-er-api",
-    });
-
-    expect(rendered).toContain("- 汇率：1 USD ≈ 7.2000 CNY");
-    expect(rendered).toContain("  - 来源：open-er-api");
-    expect(rendered).toContain("- **费用**：¥7.200000");
-    expect(rendered).toContain("输入价格：¥4.320000");
-    expect(rendered).toContain("缓存价格：¥0.720000");
-    expect(rendered).toContain("输出价格：¥2.160000");
-    expect(rendered).not.toContain("$1.00");
-    expect(rendered).not.toContain("折合人民币");
-  });
-
-  it("hides the DeepSeek average when pricing coverage is incomplete", () => {
-    const rendered = formatConversationMetrics({
-      kind: "metrics",
-      summary: {
-        threadId: "thread-1",
-        modelProvider: "deepseek",
-        latestTurn: {
-          turnId: "turn-1",
-          requestCount: 3,
-          unsuccessfulRequestCount: 1,
-          requestDurationMs: 1_000,
-          inputTokens: 150,
-          cachedInputTokens: 100,
-          outputTokens: 50,
-          reasoningOutputTokens: 0,
-          outputTokensPerSecond: null,
-          outputSpeedSampleCount: 0,
-          outputSpeedTimedCount: 0,
-          pricingCurrency: "USD",
-          pricedRequestCount: 2,
-          totalCostNanos: 1_000_000_000,
-          inputCostNanos: 600_000_000,
-          cachedInputCostNanos: 100_000_000,
-          outputCostNanos: 300_000_000,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
-          hasMixedPrices: false,
-        },
-        threadAggregate: null,
-        latestDirectApi: null,
-      },
-    }, (provider) => provider === "deepseek" ? "cny" : "usd", {
-      usdToCny: 7.2,
-      effectiveAtMs: 1_700_000_000_000,
-      source: "open-er-api",
-    });
-
-    expect(rendered).not.toContain("均价：");
-  });
-
-  it("shows the average price for OpenAI providers", () => {
-    const rendered = formatConversationMetrics({
-      kind: "metrics",
-      summary: {
-        threadId: "thread-1",
-        modelProvider: "openai",
-        latestTurn: {
-          turnId: "turn-1",
-          requestCount: 1,
-          unsuccessfulRequestCount: 0,
-          requestDurationMs: 1_000,
-          inputTokens: 150,
-          cachedInputTokens: 100,
-          outputTokens: 50,
-          reasoningOutputTokens: 0,
-          outputTokensPerSecond: null,
-          outputSpeedSampleCount: 0,
-          outputSpeedTimedCount: 0,
-          pricingCurrency: "USD",
-          pricedRequestCount: 1,
-          totalCostNanos: 1_000_000_000,
-          inputCostNanos: 600_000_000,
-          cachedInputCostNanos: 100_000_000,
-          outputCostNanos: 300_000_000,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
-          hasMixedPrices: false,
-        },
-        threadAggregate: null,
-        latestDirectApi: null,
-      },
-    }, (provider) => provider === "deepseek" ? "cny" : "usd", {
-      usdToCny: 7.2,
-      effectiveAtMs: 1_700_000_000_000,
-      source: "open-er-api",
-    });
-
-    expect(rendered).toContain("均价：约 $500,000.00/100M");
-  });
-
-  it("renders unified provider and model aggregates with latency coverage", () => {
+          it("renders unified provider and model aggregates with latency coverage", () => {
     const aggregate = {
       requestCount: 12,
       unsuccessfulRequestCount: 1,
@@ -1921,16 +1668,6 @@ describe("provider-aware conversation command formatting", () => {
       ttftP50Ms: 800,
       ttftP95Ms: 2_500,
       ttftSampleCount: 9,
-      pricingCurrency: "USD",
-      pricedRequestCount: 10,
-      totalCostNanos: 123_456_789,
-      inputCostNanos: 40_000_000,
-      cachedInputCostNanos: 20_000_000,
-      outputCostNanos: 63_456_789,
-      uncachedInputPricePerMillionNanos: 140_000_000,
-      cachedInputPricePerMillionNanos: 2_800_000,
-      outputPricePerMillionNanos: 280_000_000,
-      hasMixedPrices: false,
       compact: {
         model: "gpt-5.6-sol",
         hasMixedModels: false,
@@ -1939,9 +1676,6 @@ describe("provider-aware conversation command formatting", () => {
         inputTokens: 20_000,
         cachedInputTokens: 18_000,
         outputTokens: 1_000,
-        pricingCurrency: "USD",
-        pricedRequestCount: 2,
-        totalCostNanos: 284_204_000,
       },
     };
     const rendered = formatConversationMetrics({
@@ -1972,58 +1706,10 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("P50 800毫秒 · P95 3秒（覆盖 9/12 次请求）");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
-    expect(rendered).toContain("**费用**：$0.123457（计价 10/12）");
-    expect(rendered).toContain("输入价格：$0.040000");
-    expect(rendered).toContain("缓存价格：$0.020000");
-    expect(rendered).toContain("输出价格：$0.063457");
-    expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token · $0.284204");
+    expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
   });
 
-  it("does not invent one unit price when an aggregate spans multiple rates", () => {
-    const aggregate = {
-      requestCount: 2,
-      unsuccessfulRequestCount: 0,
-      requestDurationMs: 1_000,
-      inputTokens: 2_000,
-      cachedInputTokens: 1_000,
-      outputTokens: 100,
-      reasoningOutputTokens: 0,
-      outputTokensPerSecond: null,
-      outputSpeedSampleCount: 0,
-      outputSpeedTimedCount: 0,
-      ttftAverageMs: null,
-      ttftP50Ms: null,
-      ttftP95Ms: null,
-      ttftSampleCount: 0,
-      pricingCurrency: "USD",
-      pricedRequestCount: 2,
-      totalCostNanos: 500_000,
-      inputCostNanos: null,
-      cachedInputCostNanos: null,
-      outputCostNanos: null,
-      uncachedInputPricePerMillionNanos: null,
-      cachedInputPricePerMillionNanos: null,
-      outputPricePerMillionNanos: null,
-      hasMixedPrices: true,
-    };
-    const rendered = formatConversationMetrics({
-      kind: "metrics",
-      summary: {
-        view: "global",
-        range: "24h",
-        startAtMs: 1,
-        endAtMs: 2,
-        aggregate,
-        groups: [],
-        totalGroupCount: 0,
-      },
-    });
-
-    expect(rendered).toContain("**费用**：$0.000500");
-    expect(rendered).not.toContain("输入价格：");
-  });
-
-  it("renders unsuccessful request groups and failure rate", () => {
+    it("renders unsuccessful request groups and failure rate", () => {
     const rendered = formatConversationMetrics({
       kind: "metrics",
       summary: {

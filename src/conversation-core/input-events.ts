@@ -86,16 +86,6 @@ export type ConversationInputEvent =
       thinkingDurationMs?: number;
       outputDurationMs?: number;
       generationDurationMs?: number;
-      pricingCurrency?: string;
-      totalCostNanos?: number;
-      uncachedInputCostNanos?: number;
-      cachedInputCostNanos?: number;
-      outputCostNanos?: number;
-      uncachedInputPricePerMillionNanos?: number;
-      cachedInputPricePerMillionNanos?: number;
-      outputPricePerMillionNanos?: number;
-      /** 请求开始时段对应的峰谷档位（仅支持峰谷定价的 Provider 提供） */
-      pricingBucket?: "peak" | "off-peak";
     }
   | {
       type: "item.userMessage";

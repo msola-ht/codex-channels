@@ -24,9 +24,6 @@ import {
   createTurnStartedPresentation,
 } from "../lifecycle-presentation.js";
 import type {
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
-  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import {
   cliInputTitle,
@@ -112,20 +109,11 @@ export interface TelegramOutboxOptions {
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   readGeneratedImage?: typeof readGeneratedImage;
-  exchangeRate?: () => ExchangeRateSnapshot | null;
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
   debugEnabled?: boolean;
-  remainingUsage?: (
-    model: string,
-    requestStartedAtMs?: number,
-    modelProvider?: string,
-  ) => Promise<ProviderModelUsageEstimate | null>;
 }
 
 export class TelegramOutbox {
@@ -466,8 +454,6 @@ export class TelegramOutbox {
             chatId,
             renderTelegramSubagentCompleted(
               event,
-              this.options.priceCurrency,
-              this.options.exchangeRate?.() ?? null,
               this.options.debugEnabled ?? false,
             ),
             undefined,
@@ -491,13 +477,6 @@ export class TelegramOutbox {
           }
         }
         this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
-        const remainingUsage = event.model && this.options.remainingUsage
-          ? (await this.options.remainingUsage?.(
-              event.model,
-              event.timing?.modelRequestStartedAtMs,
-              event.modelProvider,
-            )) ?? null
-          : null;
         this.enqueue(chatId, async () => {
           for (const key of keys) {
             await this.flush(chatId, key, true);
@@ -509,10 +488,7 @@ export class TelegramOutbox {
               renderTelegramLifecyclePresentation(
                 createTurnCompletedPresentation(
                   event,
-                  this.options.priceCurrency,
-                  this.options.exchangeRate?.() ?? null,
                   this.options.debugEnabled ?? false,
-                  remainingUsage,
                   this.options.autoCompactPercent,
                 ),
               ),

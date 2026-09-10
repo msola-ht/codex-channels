@@ -167,7 +167,6 @@ describe("metrics center server", () => {
         display_name: "device-a",
         request_count: 2,
         total_tokens: 2_200,
-        costs_by_currency: [{ currency: "USD", request_count: 2, total_cost_nanos: 12_000 }],
         subagent_count: 1,
       }),
     ]);
@@ -357,9 +356,6 @@ describe("metrics center server", () => {
     });
     expect(filtered.providers).toEqual([
       expect.objectContaining({ provider: "deepseek", request_count: 1 }),
-    ]);
-    expect(filtered.costsByCurrency).toEqual([
-      expect.objectContaining({ currency: "USD", request_count: 1 }),
     ]);
   });
 
@@ -680,11 +676,6 @@ interface OverviewResponse {
   };
   providers: Array<{ provider: string; request_count: number }>;
   providerIdentities?: Array<Record<string, unknown>>;
-  costsByCurrency: Array<{
-    currency: string;
-    request_count: number;
-    total_cost_nanos: number;
-  }>;
 }
 
 interface DevicesResponse {
@@ -710,7 +701,6 @@ interface DailyResponse {
     output_tokens: number;
     reasoning_output_tokens: number;
     total_tokens: number;
-    total_cost_nanos: number;
   }>;
 }
 
@@ -743,7 +733,5 @@ function requestRow(localId: number) {
     outputTokens: 100,
     totalTokens: 1_100,
     recordedAtMs: 1_785_640_800_000,
-    totalCostNanos: 6_000,
-    pricing: { currency: "USD" },
   };
 }

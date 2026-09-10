@@ -1818,11 +1818,6 @@ describe("ConversationCore", () => {
       thinkingDurationMs: 600,
       outputDurationMs: 800,
       generationDurationMs: 1_400,
-      pricingCurrency: "USD",
-      totalCostNanos: 100_000,
-      uncachedInputPricePerMillionNanos: 140_000_000,
-      cachedInputPricePerMillionNanos: 2_800_000,
-      outputPricePerMillionNanos: 280_000_000,
     });
     core.handle({
       type: "turn.modelTiming.updated",
@@ -1840,11 +1835,6 @@ describe("ConversationCore", () => {
       thinkingDurationMs: 400,
       outputDurationMs: 500,
       generationDurationMs: 900,
-      pricingCurrency: "USD",
-      totalCostNanos: 200_000,
-      uncachedInputPricePerMillionNanos: 140_000_000,
-      cachedInputPricePerMillionNanos: 2_800_000,
-      outputPricePerMillionNanos: 280_000_000,
     });
     core.handle({
       type: "turn.modelTiming.updated",
@@ -1907,7 +1897,6 @@ describe("ConversationCore", () => {
     expect(completed).toMatchObject({
       timing: {
         modelRequestCount: 5,
-        modelRequestStartedAtMs: 1_500,
         completedModelRequestCount: 2,
         interruptedModelRequestCount: 1,
         incompleteModelRequestCount: 1,
@@ -1929,16 +1918,6 @@ describe("ConversationCore", () => {
         thinkingSpeedTimedCount: 2,
         generationSpeedSampleCount: 3,
         generationSpeedTimedCount: 2,
-        referenceCost: {
-          currency: "USD",
-          totalCostNanos: 300_000,
-          pricedRequestCount: 2,
-          requestCount: 5,
-          uncachedInputPricePerMillionNanos: 140_000_000,
-          cachedInputPricePerMillionNanos: 2_800_000,
-          outputPricePerMillionNanos: 280_000_000,
-          hasMixedPrices: false,
-        },
         compact: {
           model: "gpt-5.6-sol",
           hasMixedModels: false,
@@ -1947,9 +1926,6 @@ describe("ConversationCore", () => {
           inputTokens: 200,
           cachedInputTokens: 160,
           outputTokens: 60,
-          pricingCurrency: "USD",
-          pricedRequestCount: 1,
-          totalCostNanos: 200_000,
         },
       },
     });
@@ -2123,11 +2099,6 @@ describe("ConversationCore", () => {
       thinkingDurationMs: 400,
       outputDurationMs: 500,
       generationDurationMs: 900,
-      pricingCurrency: "USD",
-      totalCostNanos: 100_000,
-      uncachedInputPricePerMillionNanos: 140_000_000,
-      cachedInputPricePerMillionNanos: 2_800_000,
-      outputPricePerMillionNanos: 280_000_000,
     });
     handleNotification(core, {
       method: "turn/completed",
@@ -2158,64 +2129,6 @@ describe("ConversationCore", () => {
     });
   });
 
-  it("collects distinct pricing buckets across priced model requests", async () => {
-    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
-    const events: OutputEvent[] = [];
-    output.subscribe("test", (event) => {
-      events.push(event);
-    });
-    const target = {
-      surface: "telegram" as const,
-      accountId: "default",
-      conversationId: "100",
-    };
-    const core = new ConversationCore({
-      allBindings: () => [],
-      targetForThread: () => target,
-      modelSettingsForThread: () => undefined,
-      contextCompactionItemIdsForThread: () => undefined,
-    }, output);
-
-    core.handle({
-      type: "turn.started",
-      threadId: "thread-1",
-      turnId: "turn-1",
-    });
-    for (const pricingBucket of ["off-peak", "peak", "off-peak"] as const) {
-      core.handle({
-        type: "turn.modelTiming.updated",
-        threadId: "thread-1",
-        turnId: "turn-1",
-        requestStartedAtMs: 1_000,
-        requestDurationMs: 500,
-        pricingCurrency: "USD",
-        totalCostNanos: 10_000,
-        pricingBucket,
-        uncachedInputPricePerMillionNanos: 1_000_000_000,
-        cachedInputPricePerMillionNanos: 500_000_000,
-        outputPricePerMillionNanos: 2_000_000_000,
-      });
-    }
-    handleNotification(core, {
-      method: "turn/completed",
-      params: {
-        threadId: "thread-1",
-        turn: { id: "turn-1", status: "completed", error: null },
-      },
-    });
-    await output.close();
-
-    expect(events.find(
-      (event) => event.type === "turn.completed",
-    )).toMatchObject({
-      timing: {
-        referenceCost: {
-          pricedRequestCount: 3,
-          pricingBuckets: ["off-peak", "peak"],
-        },
-      },
-    });
-  });
 });
 
 function handleNotification(

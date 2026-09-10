@@ -8,9 +8,6 @@ import {
   listProviders,
   type ConversationCommandName,
   type ConversationUseCases,
-  type DisplayPriceCurrency,
-  type ExchangeRateSnapshot,
-  type ProviderModelUsageEstimate,
   type ScheduledTaskConfirmation,
   type ScheduledTaskUseCases,
 } from "../../application/index.js";
@@ -121,19 +118,10 @@ export interface TelegramSurfaceOptions {
   inputQuietWindowMs?: number;
   now?: () => number;
   debugEnabled?: boolean;
-  exchangeRate?: () => ExchangeRateSnapshot | null;
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  remainingUsage?: (
-    model: string,
-    requestStartedAtMs?: number,
-    modelProvider?: string,
-  ) => Promise<ProviderModelUsageEstimate | null>;
   remoteQuota?: (provider: string | undefined, resetsAt: number | null | undefined) => Promise<RemoteQuotaSummary | undefined>;
 }
 
@@ -181,10 +169,6 @@ export class TelegramSurface {
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
   private readonly debugEnabled: boolean;
-  private readonly exchangeRate: (() => ExchangeRateSnapshot | null) | undefined;
-  private readonly priceCurrency:
-    | ((provider: string | null | undefined) => DisplayPriceCurrency)
-    | undefined;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
 
@@ -232,8 +216,6 @@ export class TelegramSurface {
     this.actorRegistry = options.actorRegistry;
     this.now = options.now ?? Date.now;
     this.debugEnabled = options.debugEnabled ?? false;
-    this.exchangeRate = options.exchangeRate;
-    this.priceCurrency = options.priceCurrency;
     this.notificationRecipients = new Set(startupRecipients);
     this.commands = new ConversationCommandService(
       service,
@@ -254,18 +236,9 @@ export class TelegramSurface {
       ...(options.reasoningEnabled !== undefined
         ? { reasoningEnabled: options.reasoningEnabled }
         : {}),
-        ...(options.exchangeRate === undefined
-          ? {}
-          : { exchangeRate: options.exchangeRate }),
-      ...(options.priceCurrency === undefined
-        ? {}
-        : { priceCurrency: options.priceCurrency }),
       ...(options.autoCompactPercent === undefined
         ? {}
         : { autoCompactPercent: options.autoCompactPercent }),
-      ...(options.remainingUsage === undefined
-        ? {}
-        : { remainingUsage: options.remainingUsage }),
       debugEnabled: this.debugEnabled,
     });
     this.output = this.outbox;
@@ -444,8 +417,6 @@ export class TelegramSurface {
       await renderTelegramCommandResult(
         context,
         result,
-        this.priceCurrency,
-        this.exchangeRate?.() ?? null,
       );
     });
     this.bot.callbackQuery(
@@ -484,8 +455,6 @@ export class TelegramSurface {
         await renderTelegramCommandResult(
           context,
           result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
         );
       },
     );
@@ -524,8 +493,6 @@ export class TelegramSurface {
         await renderTelegramCommandResult(
           context,
           result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
         );
       },
     );
@@ -567,8 +534,6 @@ export class TelegramSurface {
         await renderTelegramCommandResult(
           context,
           result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
         );
       },
     );
@@ -605,8 +570,6 @@ export class TelegramSurface {
         await renderTelegramCommandResult(
           context,
           result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
         );
       },
     );
@@ -634,8 +597,6 @@ export class TelegramSurface {
         await renderTelegramCommandResult(
           context,
           result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
         );
       },
     );
@@ -656,8 +617,6 @@ export class TelegramSurface {
       await renderTelegramCommandResult(
         context,
         result,
-        this.priceCurrency,
-        this.exchangeRate?.() ?? null,
       );
     });
     this.bot.callbackQuery(
@@ -705,8 +664,6 @@ export class TelegramSurface {
       await renderTelegramCommandResult(
         context,
         result,
-        this.priceCurrency,
-        this.exchangeRate?.() ?? null,
       );
     });
     this.bot.callbackQuery(
@@ -754,8 +711,6 @@ export class TelegramSurface {
         await renderTelegramCommandResult(
           context,
           result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
         );
       },
     );
@@ -804,8 +759,6 @@ export class TelegramSurface {
         await renderTelegramCommandResult(
           context,
           result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
         );
       },
     );
@@ -851,8 +804,6 @@ export class TelegramSurface {
         await renderTelegramCommandResult(
           context,
           result,
-          this.priceCurrency,
-          this.exchangeRate?.() ?? null,
         );
         return;
       }
@@ -1187,8 +1138,6 @@ export class TelegramSurface {
     await renderTelegramCommandResult(
       context,
       result,
-      this.priceCurrency,
-      this.exchangeRate?.() ?? null,
     );
   }
 

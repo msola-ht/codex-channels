@@ -449,7 +449,6 @@ describe("Gateway config.toml", () => {
       operation_updates: "compact",
       plan_updates: true,
       reasoning: true,
-      price_currency: "usd",
     });
     expect(persisted.experimental).toEqual({ plugin_api: false });
     expect(persisted.scheduled_tasks).toEqual({ enabled: false });
@@ -576,20 +575,6 @@ describe("Gateway config.toml", () => {
     }).config.reasoningEnabled).toBe(false);
   });
 
-  it("preserves the explicit global price currency", () => {
-    const fixture = createFixture({
-      display: {
-        operation_updates: "compact",
-        plan_updates: true,
-        price_currency: "cny",
-      },
-    });
-
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.priceCurrency).toBe("cny");
-  });
-
   it("preserves the explicit conversation idle release minutes", () => {
     const fixture = createFixture({
       conversation: { idle_release_minutes: 20 },
@@ -600,23 +585,13 @@ describe("Gateway config.toml", () => {
     }).config.idleReleaseMinutes).toBe(20);
   });
 
-  it("rejects the removed automatic price currency and per-provider overrides", () => {
-    const automatic = createFixture({
-      display: { price_currency: "auto" },
+  it("rejects the removed price currency settings", () => {
+    const priceCurrency = createFixture({
+      display: { price_currency: "cny" },
     });
     expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: automatic.configPath,
+      CODEX_CONNECT_CONFIG_FILE: priceCurrency.configPath,
     })).toThrow(/price_currency/u);
-
-    const perProvider = createFixture({
-      display: {
-        price_currency: "cny",
-        price_currency_by_provider: { openai: "usd" },
-      },
-    });
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: perProvider.configPath,
-    })).toThrow(/price_currency_by_provider/u);
   });
 
   it("rejects the removed boolean operation update setting", () => {

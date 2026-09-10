@@ -2,11 +2,8 @@ import type { Logger } from "pino";
 
 import type { ConversationInputEvent } from "../conversation-core/index.js";
 import type {
-  ModelPricingResolver,
-  ModelRequestPricingSnapshot,
   ModelRequestMetricsWriter,
 } from "../observability/index.js";
-import { calculateModelRequestCostComponents } from "../observability/index.js";
 import type { ThreadModelSettings } from "../session-routing/index.js";
 import {
   ProviderProxyMetricsServer,
@@ -22,7 +19,6 @@ export interface ProviderMetricsCompositionOptions {
   providers: readonly string[];
   socketPath: (provider: string) => string;
   writer: ModelRequestMetricsWriter;
-  pricingResolver?: ModelPricingResolver;
   resolveModelSettings?: (threadId: string) => ThreadModelSettings | undefined;
   onModelTiming: (event: ModelTimingEvent) => void;
   logger: Logger;
@@ -70,19 +66,10 @@ export class ProviderMetricsComposition {
   }
 
   private handle(provider: string, metrics: ProviderProxyMetrics): void {
-    let pricing: ModelRequestPricingSnapshot | null = null;
     try {
-      pricing = this.options.pricingResolver?.resolve({
-        provider,
-        model: metrics.model,
-        serviceTier: metrics.serviceTier,
-        inputTokens: metrics.inputTokens,
-        atMs: metrics.requestStartedAtMs,
-      }) ?? null;
       this.options.writer.enqueue({
         provider,
         ...metrics,
-        pricing,
         reasoningEffort:
           metrics.reasoningEffort
           ?? (metrics.threadId === null
@@ -92,7 +79,7 @@ export class ProviderMetricsComposition {
     } catch (error) {
       this.options.logger.warn({ err: error, provider }, "模型请求指标持久化失败");
     }
-    const event = toModelTimingEvent(metrics, pricing);
+    const event = toModelTimingEvent(metrics);
     if (!event) {
       this.options.logger.debug(
         {
@@ -126,7 +113,6 @@ export class ProviderMetricsComposition {
 
 export function toModelTimingEvent(
   metrics: ProviderProxyMetrics,
-  pricing: ModelRequestPricingSnapshot | null = null,
 ): ModelTimingEvent | undefined {
   const firstTokenAtMs = metrics.firstTokenAtMs;
   if (
@@ -135,9 +121,6 @@ export function toModelTimingEvent(
   ) {
     return undefined;
   }
-  const costComponents = metrics.status === "completed"
-    ? calculateModelRequestCostComponents(metrics, pricing)
-    : null;
   const common = {
     type: "turn.modelTiming.updated" as const,
     threadId: metrics.threadId,
@@ -165,38 +148,6 @@ export function toModelTimingEvent(
     ...(metrics.reasoningOutputTokens === null
       ? {}
       : { reasoningOutputTokens: metrics.reasoningOutputTokens }),
-    ...(pricing?.currency === null
-      || pricing?.currency === undefined
-      || costComponents === null
-      ? {}
-      : {
-          pricingCurrency: pricing.currency,
-          totalCostNanos: costComponents.totalCostNanos,
-          uncachedInputCostNanos: costComponents.uncachedInputCostNanos,
-          cachedInputCostNanos: costComponents.cachedInputCostNanos,
-          outputCostNanos: costComponents.outputCostNanos,
-          ...(pricing.uncachedInputPricePerMillionNanos === null
-            ? {}
-            : {
-                uncachedInputPricePerMillionNanos:
-                  pricing.uncachedInputPricePerMillionNanos,
-              }),
-          ...(pricing.cachedInputPricePerMillionNanos === null
-            ? {}
-            : {
-                cachedInputPricePerMillionNanos:
-                  pricing.cachedInputPricePerMillionNanos,
-              }),
-          ...(pricing.outputPricePerMillionNanos === null
-            ? {}
-            : {
-                outputPricePerMillionNanos:
-                  pricing.outputPricePerMillionNanos,
-              }),
-          ...(pricing.bucket === undefined || pricing.bucket === null
-            ? {}
-            : { pricingBucket: pricing.bucket }),
-        }),
   };
   if (firstTokenAtMs === null) return common;
   const lastTokenAtMs = Math.max(

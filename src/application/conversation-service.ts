@@ -1731,9 +1731,7 @@ export class ConversationService implements ConversationUseCases {
             deviceCount: remote.deviceCount,
             periodRequestCount: remote.requestCount,
             periodTotalTokens: remote.totalTokens,
-            periodTotalCostNanos: remote.totalCostNanos,
             totalTokensPerPercent: remote.tokensPerPercent ?? estimate.totalTokensPerPercent,
-            costPerPercentNanos: remote.costPerPercentNanos ?? estimate.costPerPercentNanos,
           };
         }));
     return estimates.length === 0

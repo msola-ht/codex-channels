@@ -60,7 +60,7 @@
 
 审查链路：`GatewayApplication 构造与组合 → App Server/Provider Client、Core、Router、SurfaceManager、计划任务和指标组件 → start/stop/reconnect/config reload`。
 
-本轮阅读 `app.ts` 的组合、启动、关闭、重连和请求分发路径，以及 `surface-manager.ts`、`scheduled-task-composition.ts`、`scheduled-task-executor.ts` 的直接生命周期与执行路径。依赖装配、失败关闭、后台任务清理、Surface 独立重试和 Server Request 分流未发现可由当前代码确认的新缺陷。价格、指标和 Provider 辅助链路已在 `observability`、`provider-proxy`、`codex-client` 章节交叉阅读；未逐函数展开所有辅助实现。
+本轮阅读 `app.ts` 的组合、启动、关闭、重连和请求分发路径，以及 `surface-manager.ts`、`scheduled-task-composition.ts`、`scheduled-task-executor.ts` 的直接生命周期与执行路径。依赖装配、失败关闭、后台任务清理、Surface 独立重试和 Server Request 分流未发现可由当前代码确认的新缺陷。指标和 Provider 辅助链路已在 `observability`、`provider-proxy`、`codex-client` 章节交叉阅读；未逐函数展开所有辅助实现。
 
 ## codex-client
 

@@ -11,7 +11,6 @@ import {
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { enrichCosts, loadDisplayContext } from "./metrics-export-format.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
   assertWebuiHost,
@@ -117,7 +116,6 @@ const requestSortKeys = {
   speed: "outputTokensPerSecond",
   ttft: "ttftMs",
   duration: "requestDurationMs",
-  cost: "totalCostNanos",
 };
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGE_VERSION = readJsonMetadata(join(PACKAGE_DIR, "package.json"))?.version ?? null;
@@ -1031,10 +1029,6 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     handleErrors(environment, url, response);
     return;
   }
-  if (apiPath === "/settings") {
-    handleSettings(environment, response);
-    return;
-  }
   if (apiPath === "/settings/summary") {
     await handleSettingsSummary(environment, response, serviceStatusCache);
     return;
@@ -1191,7 +1185,6 @@ async function handleOpencodeGoUsage(environment, response) {
         status: window.status,
         localTokens: window.localTokens ?? null,
       })),
-      modelUsage: usage.modelUsage ?? [],
     };
   }));
   const accountUsages = accounts.map((account, index) => {
@@ -1204,7 +1197,6 @@ async function handleOpencodeGoUsage(environment, response) {
           default: account.default,
           available: false,
           windows: [],
-          modelUsage: [],
         };
   });
   if (accounts.length === 0) {
@@ -1239,10 +1231,6 @@ function openMetricsStore(environment, endAtMs = Date.now()) {
 
 function handleOverview(environment, url, response) {
   const range = parseRange(url);
-  const display = displayForCurrency(
-    loadDisplayContext(environment),
-    parseCurrency(url),
-  );
   const store = openMetricsStore(environment, range.endAtMs);
   try {
     const global = store.aggregate({
@@ -1262,13 +1250,9 @@ function handleOverview(environment, url, response) {
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      global: enrichGlobalCosts(
-        enrichCosts(global.aggregate, display),
-        display,
-      ),
+      global: global.aggregate,
       providers: providers.groups.map((group) => ({
         ...group,
-        aggregate: enrichCosts(group.aggregate, display, group.provider),
       })),
       errors,
       weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, range.endAtMs)),
@@ -1278,33 +1262,12 @@ function handleOverview(environment, url, response) {
   }
 }
 
-function enrichGlobalCosts(aggregate, display) {
-  if (
-    aggregate === null
-    || display.priceCurrency !== "cny"
-    || aggregate.totalCostNanos === null
-    || aggregate.pricingCurrency !== "USD"
-    || !display.exchangeRate
-  ) {
-    return aggregate;
-  }
-  const converted = Math.round(aggregate.totalCostNanos * display.exchangeRate.usdToCny);
-  return Number.isSafeInteger(converted)
-    ? { ...aggregate, totalCostCnyNanos: converted }
-    : aggregate;
-}
-
 function handleThreads(environment, url, response) {
-  const display = displayForCurrency(
-    loadDisplayContext(environment),
-    parseCurrency(url),
-  );
   const store = openMetricsStore(environment);
   try {
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
-      threads: store.threadList().map((thread) =>
-        enrichCosts(thread, display, thread.provider)),
+      threads: store.threadList(),
     });
   } finally {
     store.close();
@@ -1313,15 +1276,10 @@ function handleThreads(environment, url, response) {
 
 function handleThreadDetail(environment, rawThreadId, view, url, response) {
   const threadId = parseThreadId(rawThreadId);
-  const display = displayForCurrency(
-    loadDisplayContext(environment),
-    parseCurrency(url),
-  );
   const store = openMetricsStore(environment);
   try {
     if (view === "run") {
       const summary = store.threadSummary(threadId);
-      const provider = summary.latestTurn?.provider ?? null;
       const subagent = store.subagentThread(threadId);
       sendJson(response, 200, {
         generatedAt: new Date().toISOString(),
@@ -1329,21 +1287,16 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
         agentPath: subagent.agentPath,
         parentThreadId: subagent.parentThreadId,
         parentTurnId: subagent.parentTurnId,
-        latestTurn: enrichCosts(summary.latestTurn, display, provider),
-        threadAggregate: enrichCosts(summary.threadAggregate, display, provider),
-        latestDirectApi: enrichCosts(
-          summary.latestDirectApi,
-          display,
-          summary.latestDirectApi?.provider ?? null,
-        ),
+        latestTurn: summary.latestTurn,
+        threadAggregate: summary.threadAggregate,
+        latestDirectApi: summary.latestDirectApi,
       });
       return;
     }
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
       threadId,
-      turns: store.threadTurnSummaries(threadId).map((turn) =>
-        enrichCosts(turn, display, turn.provider)),
+      turns: store.threadTurnSummaries(threadId),
     });
   } finally {
     store.close();
@@ -1359,10 +1312,6 @@ function handleRequests(environment, url, response) {
     );
   }
   const range = parseRange(url);
-  const display = displayForCurrency(
-    loadDisplayContext(environment),
-    parseCurrency(url),
-  );
   const offset = parseBoundedInt(url.searchParams.get("offset"), "offset", 0, null, 0);
   const sort = parseRequestSort(url);
   const limit = parseBoundedInt(
@@ -1387,8 +1336,7 @@ function handleRequests(environment, url, response) {
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      records: page.records.map((record) =>
-        enrichCosts(record, display, record.provider)),
+      records: page.records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
     });
@@ -1399,10 +1347,6 @@ function handleRequests(environment, url, response) {
 
 function handleErrors(environment, url, response) {
   const range = parseRange(url);
-  const display = displayForCurrency(
-    loadDisplayContext(environment),
-    parseCurrency(url),
-  );
   const offset = parseBoundedInt(url.searchParams.get("offset"), "offset", 0, null, 0);
   const limit = parseBoundedInt(
     url.searchParams.get("limit"),
@@ -1429,21 +1373,13 @@ function handleErrors(environment, url, response) {
         startAtMs: range.startAtMs,
         endAtMs: range.endAtMs,
       }),
-      records: page.records.map((record) => enrichCosts(record, display, record.provider)),
+      records: page.records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
     });
   } finally {
     store.close();
   }
-}
-
-function handleSettings(environment, response) {
-  const display = loadDisplayContext(environment);
-  sendJson(response, 200, {
-    currency: display.priceCurrency,
-    exchangeRate: display.exchangeRate,
-  });
 }
 
 async function handleSettingsSummary(environment, response, serviceStatusCache) {
@@ -1522,23 +1458,6 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
       { id: "service-restart", label: "重启核心服务", command: "codexc service restart all", detail: "重启 Gateway 与 App Server" },
     ],
   });
-}
-
-function parseCurrency(url) {
-  const value = url.searchParams.get("currency");
-  if (value === null) return null;
-  if (value !== "cny" && value !== "usd") {
-    throw new ApiError(400, "invalid_currency", "currency 只支持 cny 或 usd");
-  }
-  return value;
-}
-
-function displayForCurrency(display, currency) {
-  if (currency === null) return display;
-  return {
-    ...display,
-    priceCurrency: currency,
-  };
 }
 
 function toWebuiWeeklyQuota(quota) {

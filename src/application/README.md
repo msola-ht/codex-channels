@@ -60,12 +60,10 @@
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
   查询结果可通过快照写入端口落入统一读模型。
-- `exchange-rate-port.ts`：定义稳定汇率快照与全局价格显示币种（`cny` / `usd`），并在全局币种为
-  人民币时决定启动 USD/CNY 汇率刷新；Application 不执行网络请求或读取汇率缓存。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
   指标累计、最近直接 API 请求，以及自然日/周/月、24 小时至 365 天滚动窗口或全部保留历史的全局/提供商/模型聚合和异常请求
-  只读摘要；聚合中的上下文压缩摘要单列实际请求模型、请求数、Token 与参考费用；
-  直接 API 保留稳定提供商 ID，并可携带配置中的显示名称；不向 Application 暴露 SQLite、价格快照
+  只读摘要；聚合中的上下文压缩摘要单列实际请求模型、请求数与 Token；
+  直接 API 保留稳定提供商 ID，并可携带配置中的显示名称；不向 Application 暴露 SQLite
   或请求正文。
 - `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
@@ -148,7 +146,7 @@ Application 和 Surface 不解析 `account/usage/read`、`account/rateLimits/rea
 `providers`、`models` 和 `errors` 使用严格的 `24h`、`7d`、`30d` 时间范围；`errors` 只展示
 脱敏后的状态、HTTP 状态、错误类型、次数和最近发生时间。Bootstrap 把独立指标库映射为稳定摘要，
 Application 不读取数据库。OpenAI `/limits` 还通过该端口按周窗口查询统计代理已经按相邻额度
-快照归约的增量样本，估算每 1% 的 Token 与 API 参考费用；没有完整周窗口、有效重置时间或正向
+快照归约的增量样本，估算每 1% 的 Token；没有完整周窗口、有效重置时间或正向
 额度变化区间时不产生估算。该请求流水
 不能替代 App Server 提供的 Thread 上下文、账户额度或累计 Token 状态。
 Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安装项的筛选、调用名称与绝对路径
