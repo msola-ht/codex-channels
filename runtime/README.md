@@ -43,7 +43,10 @@
   判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
   凭据；自定义主 Provider 的私有候选备份按普通私有文件同样校验类型、属主、权限、大小和符号链接；
   自定义切换模式使用显式私有注册表和逐 Provider 的 `sf-custom-<id>` 私有 Profile，仅接受 Codex
-  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段；注册表与 Profile 的增删改
+  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段；服务启动时通过配置的
+  Codex CLI 执行 `debug models --bundled`，把官方目录原子写入
+  `~/.codex-connect/providers/custom/official-models.json`（0600），并以 `model_catalog_json`
+  注入固定/切换自定义实例和自定义子代理角色，第三方 `/models` 不参与目录刷新；注册表与 Profile 的增删改
   共用私有文件锁并支持执行前快照保护，Provider 块与 Key 不进入主配置；Remote TUI
   与原生 Codex 统一使用同一个 `sf-custom-<id>` Profile 名称；后台 App Server 则使用加载器生成的非敏感 `-c`
   覆盖（包括全部第三方 Provider 的统一有限重试边界），并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；
@@ -54,6 +57,10 @@
   思考等级，校验必须与模型目录一致；Profile 与共享角色使用 `~/.codex` 下的 `sf-` 前缀文件，
   模型目录、清单与管理标记存放在 `~/.codex-connect/providers/<id>/`。
 - `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
+- `app-server-read.mjs`：连接本机 Codex App Server 并完成 `initialize` 握手，返回 App Server
+  生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
+  传输，其余平台走私有 Unix WebSocket，不承担会话业务。Doctor 以官方非全局客户端身份
+  `codex_app_server_daemon` 握手，不改变 App Server 进程级 originator 或 UA 后缀。
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用，避免各入口独立解释运行拓扑。
@@ -62,11 +69,12 @@
   使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机
   认证令牌，连接首帧必须认证，关闭时只删除当前所有者发布的描述文件。
 - `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
-  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供受控 Provider 按需启动、释放与
-  Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`）；拓扑同时区分
-  已配置、运行中、主动释放和持有租约的 Provider。租约由私有 Socket 连接持有，断开时自动撤销，
-  存在租约时拒绝释放；同一 Provider 的启动、释放与租约获取串行执行，释放结果明确区分已释放、
-  租约占用和实例未运行，旧版或无效监管响应对账户删除失败关闭。Gateway 还据此避免把主动释放
+  对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
+  启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`）；
+  拓扑同时区分已配置、运行中、主动释放和持有租约的实例。租约由私有 Socket 连接持有，断开时自动撤销，
+  存在租约时拒绝释放；同一实例的启动、释放与租约获取串行执行，释放结果明确区分已释放、
+  租约占用和实例未运行，启动、释放与账户删除遇到旧版或无效监管响应时失败关闭并提示重启服务。
+  Gateway 还据此避免把主动释放
   误判为意外断线。入口集中检查真实 WebSocket 健康状态，拒绝
   未受监管的活动 App Server；Windows 通过官方 `app-server proxy` 检查 UDS 健康并把失效 rendezvous
   留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端

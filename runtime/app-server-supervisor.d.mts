@@ -5,7 +5,7 @@ export interface AppServerTopology {
 }
 
 export interface InspectedAppServerTopology {
-  version: 4;
+  version: 5;
   pid: number;
   primaryProvider: string;
   managedProviders: string[];
@@ -38,6 +38,7 @@ export class AppServerSupervisorOwner {
     },
   );
   start(): Promise<void>;
+  markRunning(provider: string): void;
   close(): Promise<void>;
 }
 

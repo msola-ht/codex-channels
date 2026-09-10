@@ -63,6 +63,11 @@ export interface GatewayConfig {
   codexSocketPath: string;
   codexModel?: string;
   codexSandbox: "read-only" | "workspace-write";
+  codexClientIdentity?: {
+    name?: string;
+    title?: string;
+    version?: string;
+  };
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
   reasoningEnabled: boolean;
@@ -296,6 +301,9 @@ function loadValidatedConfigDocument(
     codexSocketPath: resolveConfiguredPath(raw.codex.socket_path, baseDirectory),
     ...(raw.codex.default_model ? { codexModel: raw.codex.default_model } : {}),
     codexSandbox: raw.codex.sandbox,
+    ...(raw.codex.client_identity
+      ? { codexClientIdentity: raw.codex.client_identity }
+      : {}),
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
     reasoningEnabled: raw.display.reasoning,

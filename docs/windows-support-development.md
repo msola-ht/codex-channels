@@ -32,7 +32,8 @@ Windows 支持不需要重写 Application、Conversation Core、Session Routing�
 支持，不能在未经独立决策和真实合同验证时成为项目的正式 Windows 基线。
 
 首选验证方向是保留上游 Windows UDS，并使用 Codex 提供的 `codex app-server proxy --sock <PATH>` 为 Gateway
-提供单连接字节桥接；原生 TUI 继续直接使用 `codex --remote unix://<PATH>`。如果固定版本的 Windows
+提供单连接字节桥接；原生 TUI 继续通过 `codexc remote` 启动 `codex --remote unix://<PATH>`，并由其
+持有生命周期租约。如果固定版本的 Windows
 Proxy 真实合同不成立，再评估受认证的回环 WebSocket。不能为了快速跑通而启动无认证 TCP App Server，
 也不能退回每个渠道单独启动 stdio App Server，因为这会破坏共享 Thread、Provider 隔离实例和 Remote
 TUI 的既有架构。

@@ -34,13 +34,22 @@ socket_path = "runtime/codex-app-server.sock"
 # 仅覆盖当前主 Provider；模型必须存在于该 Provider 的目录中。
 default_model = ""
 sandbox = "workspace-write"
+# 模型上游 User-Agent 与 App Server 客户端身份请用
+# codexc config → 系统设置 → 一键设为官方 TUI 身份 生成并原子写入；
+# 自定义值也可直接编辑：
+# upstream_user_agent = "Mozilla/5.0 MyClient/1.0"
+# [codex.client_identity]
+# name = "my_client"
+# title = "My Codex Client"
+# version = "1.0.0"
 
 [approval]
 timeout_seconds = 900
 
 [conversation]
 # 渠道会话在连续无用户输入和会话输出时自动解除 Thread 绑定的分钟数；
-# 0 表示关闭。所有渠道统一使用该值。
+# 0 表示关闭渠道会话自动解除。无任何绑定时，Gateway 仍会执行全局空闲释放，
+# 停止未被租约占用的 App Server。所有渠道统一使用该值。
 idle_release_minutes = 15
 
 [display]

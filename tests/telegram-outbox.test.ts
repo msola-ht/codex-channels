@@ -412,14 +412,14 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       type: "warning",
       target,
-      message: "所有模型连接已空闲，即将释放；下次消息或恢复会话时会自动重连。",
+      message: "所有模型连接已空闲，空闲的 App Server 即将停止；使用中的实例保持运行，下次消息或恢复会话时会自动启动。",
       globalIdle: true,
     });
     await settle();
     await outbox.close();
 
     expect(api.sent).toHaveLength(1);
-    expect(api.sent[0]).toContain("所有模型连接已空闲，即将释放");
+    expect(api.sent[0]).toContain("所有模型连接已空闲，空闲的 App Server 即将停止");
   });
 
   it("sends completed generated images even when operation summaries are hidden", async () => {

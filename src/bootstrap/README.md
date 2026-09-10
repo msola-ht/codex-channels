@@ -109,10 +109,12 @@
   Conversation 绑定、没有正在进行的 Provider 操作或启动任务时，先等待 60 秒宽限期；宽限期内
   新绑定、新操作或启动任务会取消本轮释放。宽限期结束仍空闲时，只有渠道会话空闲自动解除触发的
   全局释放轮次会先通过注入回调通知所有已知授权渠道，再关闭全部已连接 Client；其他原因导致的
-  无绑定关闭不发送该通知。该组件不停止 App Server 进程，也不按 Provider 类型区分；后续请求通过
-  Provider 路由按需重连。Client 关闭和启动期间使用有界并发保护，关闭失败只记录日志并在后续全局
-  空闲检查重试；启动完成、会话解绑、后台任务终态和 Provider 操作结束都会触发检查；Gateway 关闭时
-  停止新的检查并等待已开始的 Client 关闭完成。
+  无绑定关闭不发送该通知。该组件在关闭 Client 后通过监管入口停止对应 App Server 进程（含主实例），
+  不按 Provider 类型区分；每 60 秒复检一次，并停止监管入口中全部未被租约占用的运行实例，因此也
+  覆盖仅由 `codexc remote` 启动、Gateway 从未连接的实例。租约占用或未运行的实例保持现状，后续
+  请求通过 Provider 路由按需启动并重连。Client 关闭和启动期间使用有界并发保护，关闭失败只记录
+  日志并在后续全局空闲检查重试；启动完成、会话解绑、后台任务终态和 Provider 操作结束都会触发
+  检查；Gateway 关闭时停止新的检查，并在有界时间内等待已开始的关闭完成。
 - `conversation-idle-releaser.ts`：按 `conversation.idle_release_minutes` 定期扫描前台 Thread
   绑定；输入或输出刷新最近活动时间，超过阈值且 App Server 确认为空闲后由
   `ConversationService.releaseIdle` 取消订阅并解绑，成功后通过共享结构化事件只通知一次

@@ -174,7 +174,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       const target = mode === "switching" ? "sf-ocg-work.config.toml" : "config.toml";
       const config = parse(readFileSync(join(codexHome, target), "utf8"));
       expect(config).toMatchObject({
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
         model_provider: "ocg-work",
         model_providers: {
           "ocg-work": {
@@ -195,9 +195,9 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
         "utf8",
       ));
       expect(catalog.models.find((model: { slug?: string }) =>
-        model.slug === "deepseek-v4-flash-vision-exp"
+        model.slug === "deepseek-flash"
       )).toMatchObject({
-        slug: "deepseek-v4-flash-vision-exp",
+        slug: "deepseek-flash",
         input_modalities: ["text", "image"],
         default_reasoning_level: "high",
         auto_compact_token_limit: 600_000,
@@ -233,11 +233,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       "utf8",
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
-      slug: "deepseek-v4-flash",
-      auto_compact_token_limit: 400_000,
-    }));
-    expect(catalog.models).toContainEqual(expect.objectContaining({
-      slug: "deepseek-v4-flash-vision-exp",
+      slug: "deepseek-flash",
       auto_compact_token_limit: 400_000,
     }));
   });
@@ -452,18 +448,18 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
 
     expect(result).toMatchObject({
       status: "updated",
-      modelCount: 3,
+      modelCount: 2,
       migratedProviders: ["ocg-main"],
       roleMigrated: true,
       defaultModelMigrationApplied: true,
     });
     expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
       .toMatchObject({
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
         model_reasoning_effort: "high",
       });
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
-      model: "deepseek-v4-flash-vision-exp",
+      model: "deepseek-flash",
       model_provider: "ocg-main",
       model_reasoning_effort: "high",
     });
@@ -475,7 +471,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       downloadedAt: "2026-08-21T16:00:00.000Z",
       defaultModelMigration: {
         from: "deepseek-v4-flash",
-        to: "deepseek-v4-flash-vision-exp",
+        to: "deepseek-flash",
         appliedAt: "2026-08-21T16:00:00.000Z",
       },
     });
@@ -492,28 +488,32 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     ))).toMatchObject({
       defaultModelMigration: {
         from: "deepseek-v4-flash",
-        to: "deepseek-v4-flash-vision-exp",
+        to: "deepseek-flash",
         appliedAt: "2026-08-21T16:00:00.000Z",
       },
     });
 
-    writeManagedModelProviderProfileDefault("ocg-main", {
-      model: "deepseek-v4-flash",
-      reasoningEffort: "high",
-      autoCompactLimit: 1_200_000,
-    }, environment);
+    const profilePath = join(codexHome, "sf-ocg-main.config.toml");
+    writeFileSync(
+      profilePath,
+      readFileSync(profilePath, "utf8").replace(
+        'model = "deepseek-flash"',
+        'model = "deepseek-v4-flash"',
+      ),
+      { mode: 0o600 },
+    );
     const repeated = await refreshOpencodeGoCatalogForUpdate(environment, {
       downloadCatalog: async () => updatedCatalog(2_000_000),
       now: () => new Date("2026-08-22T16:00:00.000Z"),
     });
     expect(repeated).toMatchObject({
       status: "updated",
-      migratedProviders: [],
+      migratedProviders: ["ocg-main"],
       roleMigrated: false,
-      defaultModelMigrationApplied: false,
+      defaultModelMigrationApplied: true,
     });
-    expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
-      .toMatchObject({ model: "deepseek-v4-flash" });
+    expect(parse(readFileSync(profilePath, "utf8")))
+      .toMatchObject({ model: "deepseek-flash" });
   });
 
   it("preserves an explicitly selected OpenCode Go Pro model during codexc update", async () => {
@@ -663,8 +663,7 @@ function opencodeFixture(): string {
   );
   writeFileSync(catalogPath, JSON.stringify({
     models: [
-      "deepseek-v4-flash",
-      "deepseek-v4-flash-vision-exp",
+      "deepseek-flash",
       "deepseek-v4-pro",
     ].map((slug) => ({
       slug,
@@ -705,8 +704,7 @@ function deepseekFixture(): string {
   );
   writeFileSync(catalogPath, JSON.stringify({
     models: [
-      "deepseek-v4-flash",
-      "deepseek-v4-flash-vision-exp",
+      "deepseek-flash",
       "deepseek-v4-pro",
     ].map((slug) => ({
       slug,
@@ -725,7 +723,7 @@ function deepseekFixture(): string {
   writeFileSync(
     join(codexHome, "sf-deepseek.config.toml"),
     [
-      'model = "deepseek-v4-flash-vision-exp"',
+      'model = "deepseek-flash"',
       'model_provider = "deepseek"',
       'model_reasoning_effort = "high"',
       `model_catalog_json = ${JSON.stringify(catalogPath)}`,
@@ -755,12 +753,11 @@ function updatedCatalog(contextWindow: number) {
   return {
     catalog: {
       models: [
-        "deepseek-v4-flash",
-        "deepseek-v4-flash-vision-exp",
+        "deepseek-flash",
         "deepseek-v4-pro",
       ].map((slug) => ({
         slug,
-        input_modalities: slug === "deepseek-v4-flash-vision-exp"
+        input_modalities: slug === "deepseek-flash"
           ? ["text", "image"]
           : ["text"],
         context_window: contextWindow,

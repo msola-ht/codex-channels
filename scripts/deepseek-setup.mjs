@@ -35,6 +35,7 @@ import {
   createManagedProviderRestorePreview,
   createSwitchingProviderProfile,
   hasProviderBaseConfig,
+  resolveManagedCatalogModel,
   restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
@@ -42,14 +43,12 @@ import { withModelProviderManagementTransaction } from "./model-provider-managem
 export const deepseekSetupScriptUrl =
   "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
 const providerId = deepseekProviderDefinition.id;
-const supportedModel = deepseekProviderDefinition.defaultModel;
 const maximumScriptBytes = 2 * 1024 * 1024;
 const defaultDownloadAttempts = 3;
 const defaultDownloadTimeoutMs = 30_000;
 const defaultAutoCompactPercent = 60;
 const minimumAutoCompactPercent = 10;
 const maximumAutoCompactPercent = 90;
-const previousDefaultModel = "deepseek-v4-flash";
 
 class DeepseekSetupCancelled extends Error {}
 
@@ -298,7 +297,7 @@ export async function runDeepseekSetup({
     }
     const apiKey = await askApiKey(prompt);
     const autoCompactPercent = await askAutoCompact(prompt);
-    await applyDeepseekConfiguration({
+    const result = await applyDeepseekConfiguration({
       mode,
       apiKey,
       autoCompactPercent,
@@ -317,9 +316,9 @@ export async function runDeepseekSetup({
     output.write(`模型目录已从官方脚本下载：${catalogPath}\n`);
     output.write(mode === "switching"
       ? `原生 Codex 使用 OpenAI：codex；使用 DeepSeek：codex --profile ${deepseekProviderDefinition.profileName}\n共享 TUI：codexc remote；DeepSeek 共享 TUI：codexc remote --profile ${deepseekProviderDefinition.profileName}\n`
-      : `原生 Codex 和 Gateway 将默认使用 ${supportedModel}。\n`);
+      : `原生 Codex 和 Gateway 将默认使用 ${result.model}。\n`);
     writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
-    return deepseekSetupResult(paths, mode);
+    return { ...deepseekSetupResult(paths, mode), model: result.model };
   } catch (error) {
     if (allowBack && error instanceof DeepseekSetupCancelled) {
       return { action: "back" };
@@ -393,11 +392,15 @@ async function configureDeepseekInstallation({
       gatewayProfileBackupPath,
       backupStatePath,
     });
-    const selectedModel = previous?.model ?? supportedModel;
     const managedCatalog = createManagedDeepseekCatalog(
       downloaded.catalog,
       previous?.models,
       autoCompactPercent ?? null,
+    );
+    const selectedModel = resolveManagedCatalogModel(
+      managedCatalog,
+      deepseekProviderDefinition,
+      previous?.model,
     );
     const selectedModelEntry = managedCatalog.models?.find(
       (entry) => entry?.slug === selectedModel,
@@ -576,10 +579,6 @@ export function extractDeepseekCatalog(script) {
   if (!catalog || !Array.isArray(catalog.models)) {
     throw new Error("DeepSeek 官方模型目录缺少 models");
   }
-  const defaultModel = catalog.models.find((model) => model?.slug === supportedModel);
-  if (!defaultModel || typeof defaultModel !== "object") {
-    throw new Error(`DeepSeek 官方模型目录缺少 ${supportedModel}`);
-  }
   return catalog;
 }
 
@@ -634,10 +633,12 @@ export async function refreshDeepseekCatalogForUpdate(
     "DeepSeek 模型目录清单",
   );
   const previousMigration = readDefaultModelMigration(previousManifest);
-  const migrationAlreadyApplied = previousMigration !== undefined;
-  const modelMigrated = !migrationAlreadyApplied
-    && previous.model === previousDefaultModel;
-  const selectedModel = modelMigrated ? supportedModel : previous.model;
+  const selectedModel = resolveManagedCatalogModel(
+    managedCatalog,
+    deepseekProviderDefinition,
+    previous.model,
+  );
+  const modelMigrated = selectedModel !== previous.model;
   const selectedModelEntry = managedCatalog.models.find(
     (model) => model?.slug === selectedModel,
   );
@@ -652,12 +653,12 @@ export async function refreshDeepseekCatalogForUpdate(
   if (modelMigrated) {
     const document = readPrivateToml(documentPath, "DeepSeek 默认模型配置");
     if (
-      document.model !== previousDefaultModel
+      document.model !== previous.model
       || document.model_provider !== providerId
     ) {
       throw new Error("DeepSeek 默认模型配置不一致");
     }
-    document.model = supportedModel;
+    document.model = selectedModel;
     if (previous.mode === "switching") {
       document.model_reasoning_effort = reasoningEffort;
     } else {
@@ -669,9 +670,9 @@ export async function refreshDeepseekCatalogForUpdate(
     documentUpdate = stringify(document);
   }
   const role = loadManagedModelProviderRole(environment);
-  const roleMigrated = !migrationAlreadyApplied
+  const roleMigrated = modelMigrated
     && role?.provider === providerId
-    && role.model === previousDefaultModel;
+    && role.model === previous.model;
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
   const paths = [
     catalogPath,
@@ -692,13 +693,15 @@ export async function refreshDeepseekCatalogForUpdate(
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
       downloadedAt: updatedAt,
-      defaultModelMigration: migrationAlreadyApplied
-        ? previousMigration
-        : {
-            from: previousDefaultModel,
-            to: supportedModel,
+      ...(modelMigrated
+        ? { defaultModelMigration: {
+            from: previous.model,
+            to: selectedModel,
             appliedAt: updatedAt,
-          },
+          } }
+        : (previousMigration === undefined
+            ? {}
+            : { defaultModelMigration: previousMigration })),
     }, null, 2)}\n`);
     guards = await snapshotFiles(paths);
     if (documentUpdate !== undefined) {
@@ -708,7 +711,7 @@ export async function refreshDeepseekCatalogForUpdate(
     if (roleMigrated) {
       writeManagedModelProviderRoleConfig(environment, {
         provider: role.provider,
-        model: supportedModel,
+        model: selectedModel,
       });
       guards = await snapshotFiles(paths);
     }
@@ -732,7 +735,7 @@ export async function refreshDeepseekCatalogForUpdate(
     selectedModel,
     modelMigrated,
     roleMigrated,
-    defaultModelMigrationApplied: !migrationAlreadyApplied,
+    defaultModelMigrationApplied: modelMigrated,
   };
 }
 
@@ -742,8 +745,8 @@ function readDefaultModelMigration(manifest) {
   if (!migration
     || typeof migration !== "object"
     || Array.isArray(migration)
-    || migration.from !== previousDefaultModel
-    || migration.to !== supportedModel
+    || typeof migration.from !== "string"
+    || typeof migration.to !== "string"
     || typeof migration.appliedAt !== "string"
     || !Number.isFinite(Date.parse(migration.appliedAt))) {
     throw new Error("DeepSeek 默认模型迁移标记无效");

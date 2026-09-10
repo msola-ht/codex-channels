@@ -4,10 +4,14 @@ import { isAbsolute, relative, sep } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
-import { acquireAppServerProviderLease } from "../runtime/app-server-supervisor.mjs";
+import {
+  acquireAppServerProviderLease,
+  inspectAppServerSupervisor,
+} from "../runtime/app-server-supervisor.mjs";
 import {
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
+  loadPrimaryModelProvider,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -66,6 +70,7 @@ async function runRemoteCli() {
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, runtime.dataDir);
   let socketPath = primarySocketPath;
   let providerLease;
+  let leaseProvider = loadPrimaryModelProvider();
   const customSwitchingProvider = customSwitchingProviders.find(
     ({ profileName }) => profileName === selectedProfile,
   );
@@ -91,13 +96,15 @@ async function runRemoteCli() {
       throw new Error(`${selectedDefinition.displayName} 尚未配置，请先运行 codexc setup`);
     }
     socketPath = providerAppServerSocketPath(primarySocketPath, managedProvider.provider);
-    providerLease = await acquireAppServerProviderLease(
-      primarySocketPath,
-      managedProvider.provider,
-    );
+    leaseProvider = managedProvider.provider;
   }
   const configuredBinary = stringValue(codex.binary) || "codex";
+  const supervisorActive = selectedDefinition !== undefined
+    || await inspectAppServerSupervisor(primarySocketPath) !== undefined;
   try {
+    if (supervisorActive) {
+      providerLease = await acquireAppServerProviderLease(primarySocketPath, leaseProvider);
+    }
     const invocation = resolveExecutableInvocation(configuredBinary, [
       "--remote",
       `unix://${socketPath}`,

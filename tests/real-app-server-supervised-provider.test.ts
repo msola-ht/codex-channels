@@ -658,6 +658,29 @@ contractSuite("real supervised App Server provider", () => {
         }
         const models = await openCodeClient.listModels();
         expect(models.some(({ model }) => model === "deepseek-v4-flash")).toBe(true);
+
+        const primaryLease = await acquireAppServerProviderLease(socketPath, "openai");
+        try {
+          await expect(releaseAppServerProvider(socketPath, "openai"))
+            .resolves.toEqual({ released: false, reason: "leased" });
+        } finally {
+          await primaryLease.close();
+        }
+        await client.close().catch(() => undefined);
+        client = undefined;
+        await expect(releaseAppServerProvider(socketPath, "openai"))
+          .resolves.toEqual({ released: true, reason: "released" });
+        expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
+          releasedProviders: ["openai"],
+        });
+        await expect(ensureAppServerProvider(socketPath, "openai")).resolves.toBeUndefined();
+        client = new CodexAppServerClient(
+          new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+          { sandbox: "read-only" },
+        );
+        await expect(client.connect()).resolves.toMatchObject({
+          userAgent: expect.stringContaining("codex_connect/"),
+        });
       } finally {
         try {
           await openCodeClient?.close().catch(() => undefined);

@@ -89,7 +89,7 @@ describe("OpenCode Go account management", () => {
       inspectSupervisor: async () => ({
         status: "ready" as const,
         topology: {
-          version: 4 as const,
+          version: 5 as const,
           pid: 123,
           primaryProvider: "openai",
           managedProviders: ["ocg-main", "ocg-b"],

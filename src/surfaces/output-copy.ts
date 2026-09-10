@@ -50,7 +50,8 @@ export function formatConversationIdleReleased(
 }
 
 export function formatProviderIdleReleaseNotice(): string {
-  return "所有模型连接已空闲，即将释放；下次消息或恢复会话时会自动重连。";
+  return "所有模型连接已空闲，空闲的 App Server 即将停止；使用中的实例保持运行，"
+    + "下次消息或恢复会话时会自动启动。";
 }
 
 export function formatOperationFailure(detail: string): string {

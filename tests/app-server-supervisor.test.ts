@@ -1,5 +1,5 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createConnection } from "node:net";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import {
   appServerSupervisorSocketPath,
   ensureAppServerProvider,
   inspectAppServerSupervisor,
+  inspectAppServerSupervisorState,
   releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
 
@@ -59,7 +60,7 @@ describe("App Server supervisor", () => {
 
     expect(ensured).toEqual(["opencode-go"]);
     await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
-      version: 4,
+      version: 5,
       managedProviders: ["deepseek", "opencode-go"],
     });
     await owner.close();
@@ -89,6 +90,35 @@ describe("App Server supervisor", () => {
       managedProviders: ["OpenAI"],
     });
     await owner.close();
+  });
+
+  unixIt("reports a supervisor protocol version mismatch with a restart hint", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-version-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
+    const supervisorSocketPath = appServerSupervisorSocketPath(primarySocketPath);
+    const server = createServer((socket) => {
+      socket.once("data", () => {
+        socket.end(`${JSON.stringify({ version: 4, provider: "openai", ok: true })}\n`);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(supervisorSocketPath, () => resolve()));
+    chmodSync(supervisorSocketPath, 0o600);
+    try {
+      await expect(ensureAppServerProvider(primarySocketPath, "openai"))
+        .rejects.toThrow("请运行 codexc service restart all");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  unixIt("reports a missing supervisor for the standalone App Server path", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-missing-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
+
+    await expect(inspectAppServerSupervisorState(primarySocketPath))
+      .resolves.toEqual({ status: "missing" });
   });
 
   unixIt("rejects a supervisor socket path that exceeds the platform length limit", async () => {

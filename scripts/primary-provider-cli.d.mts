@@ -19,6 +19,7 @@ export interface PrimaryProviderCliOptions {
   output?: { write(value: string): unknown };
   prompts?: PrimaryProviderCliPrompts;
   confirmRemoval?: boolean;
+  confirm?: boolean;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexUserConfigTransactionClient>;
@@ -41,7 +42,7 @@ export function switchPrimaryProvider(
   providerId: string,
   model?: string,
   options?: PrimaryProviderCliOptions,
-): Promise<void>;
+): Promise<void | { action: "cancelled" }>;
 export function removePrimaryProvider(
   providerId: string,
   options?: PrimaryProviderCliOptions,

@@ -48,8 +48,8 @@
   第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
   不安全权限时拒绝覆盖，迁移失败时恢复原有目录；随后遍历编译期 Provider 定义，按目录更新
   适配器执行，并按目录来源复用同一个下载 Promise。当前会刷新已配置 DeepSeek 与 OpenCode Go
-  的受控模型目录，保留逐模型设置，并一次性把仍使用 OpenCode Go 旧默认 Flash 的账户与共享子代理
-  切换到 Flash Vision Exp；目录清单记录迁移完成状态，避免以后覆盖用户主动选回 Flash 的决定；
+  的受管模型目录并保留逐模型设置；所选模型已不在新目录中时（例如旧默认 Flash Vision Exp），
+  把 OpenCode Go 账户与共享子代理切到目录默认模型，并把迁移记录写入目录清单；
   最后在私有备份后移除已废弃的 `[vision]` 配置段。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   或 v4 升级到 v5，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口
@@ -147,8 +147,9 @@
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
   新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
-  必须属于 App Server 返回的 Codex 官方目录；不调用第三方 `/models`，不生成 `models.json` 或
-  `model_catalog_json`，目录来源保留为可辨识的 `official` 接口。
+  必须属于 Codex 官方目录；不调用第三方 `/models`，不生成第三方 `models.json` 或自定义
+  `model_catalog_json`；目录来源保留为可辨识的 `official` 接口，服务启动时再用 Codex CLI
+  导出官方目录快照。
   `OpenAI` 选项固定写入同名 `name` 以允许 Codex 使用远程压缩，上游仍须兼容对应接口。新增默认推荐
   切换模式，编辑保持原模式；确认预览明确显示配置位置、API Key 明文存储、默认思考等级和服务层级。固定模式通过 Codex
   `config/batchWrite` 原子写入并激活 `~/.codex/config.toml` 的自定义主 Provider；切换模式保持主
@@ -171,7 +172,7 @@
   同一文件锁内原子写入私有 Profile，并统一返回生效动作和备份清理警告；CLI
   继续负责字段询问、危险修改确认和中文渲染。
 - `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
-  Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受控模型目录和共享
+  Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受管模型目录和共享
   第三方子代理的脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
   Provider CLI 列表共同复用；同时按 `CODEX_HOME/auth.json` 是否存在返回 OpenAI 官方登录状态，
   未检测到鉴权文件时按未登录处理。
@@ -187,10 +188,13 @@
   只读确认和安全回滚，避免两条管理链路复制高风险事务逻辑。
 - `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
   list / add / switch / remove 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；
-  switch / remove 复用 Provider 管理接口并只负责中文确认与结果渲染，add 复用自定义 Responses Provider Setup 的交互流程，
+  switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；所有 switch（含恢复官方、从备份恢复、
+  切换 Provider 转固定）都会先经二次确认，并提示将改写主配置的 model_provider / model；命令行 switch
+  传 --yes 跳过确认（仅命令行，Setup 菜单仍确认）；
+  add 复用自定义 Responses Provider Setup 的交互流程，
   Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
-  Provider 时，交互菜单须经二次确认后移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
+  Provider 时会移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接
   编辑备份候选并恢复、修改和激活，也可经二次确认删除备份候选。恢复、编辑或删除时先提交配置，
   成功后才消费同名备份；配置写入失败时保留原备份，配置已提交但清理失败时显示部分成功警告。备份
   不可安全读取时只允许编辑当前 config 候选，切换和删除失败关闭；注册表仍登记但 Profile 已缺失的
@@ -246,7 +250,7 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
   配置文件中可安全编辑的参数：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
-  （调试模式、审批超时、Sandbox、默认工作区与渠道新会话模型覆盖）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
+  （调试模式、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
   （本地保留策略、本机接入数据中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用本机接入）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
@@ -254,8 +258,9 @@
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
-  设置脱敏读取与明确修改接口；只接受受控的显示、系统、自动化、网络、高级、Telegram 格式、WebUI、
-  指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，凭据和网络读取只显示是否已配置；
+  设置脱敏读取与明确修改接口；只接受受控的显示、系统（含一键官方 TUI 身份）、自动化、网络、
+  高级、Telegram 格式、WebUI、指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，
+  凭据和网络读取只显示是否已配置；
   读取同时返回原始文件修订，修改必须携带并在应用前复核；最终提交复用 Gateway Config 的共享写锁
   和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置。
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
@@ -285,7 +290,7 @@
   直接 API 功能。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；安装与恢复均提供脱敏预览、明确确认和无终端事务接口，CLI 只负责询问与展示；只下载、不执行
-  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小、JSON 与全部受控模型后写入
+  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小与 JSON 结构后写入
   `~/.codex-connect/providers/deepseek/`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
   模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，模型目录与管理标记写入
   `~/.codex-connect/providers/deepseek/`，不自动创建或切换共享 `agents.external`；
@@ -298,12 +303,12 @@
   安装事务按写入阶段更新并发保护快照，失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
   安装时为初始模型设置自动压缩阈值；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
   模型设置”按模型维护 10–90% 阈值，写入模型目录的 `auto_compact_token_limit`，不再使用会覆盖
-  全部模型的 Profile 顶层阈值。`codexc update` 首次看到仍使用旧默认 Flash 的 Profile 与同
-  Provider 共享子代理时，事务迁移到 Flash Vision Exp，并把一次性迁移记录写入模型目录清单；
-  已选择其他模型或记录已存在时保留用户选择，重复 Setup 不删除该记录。
+  全部模型的 Profile 顶层阈值。`codexc update` 刷新官方目录后，若所选模型已不在目录中（例如
+  Flash Vision Exp），会把 Profile 与同 Provider 共享子代理切到目录默认模型，并把
+  `from`/`to`/`appliedAt` 迁移记录写入模型目录清单；仍在目录中的模型保留用户选择。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
-  上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；运行时仍只开放编译期定义明确
-  列出的模型。
+  上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；`digest` 是模型条目紧凑 JSON 的
+  SHA-256。该文件只作为审查留档，运行时开放哪些模型以 Setup 下载的官方目录为准。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；DeepSeek 与

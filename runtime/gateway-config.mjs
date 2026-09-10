@@ -112,6 +112,34 @@ const webuiSchema = z.strictObject({
   }
 });
 
+const clientIdentitySchema = z.strictObject({
+  name: z.string().regex(
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u,
+    "client_identity.name 必须是 1–64 个 HTTP token 字符，且首字符为字母或数字",
+  ).optional(),
+  title: z.string().trim().min(1).max(128).refine(
+    (value) => !containsControlCharacter(value),
+    "client_identity.title 不能包含换行或其他控制字符",
+  ).optional(),
+  version: z.string().regex(
+    /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u,
+    "client_identity.version 必须是 1–64 个 ASCII 字符，且首字符为字母或数字",
+  ).optional(),
+});
+
+const upstreamUserAgentSchema = z.string().min(1).max(512).refine(
+  (value) => /^[\x20-\x7e]+$/u.test(value) && value === value.trim(),
+  "upstream_user_agent 必须是 1–512 个可显示 ASCII 字符，且不允许首尾空白或其他控制字符",
+);
+
+function containsControlCharacter(value) {
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
 const metricsSyncSchema = z.strictObject({
   enabled: z.boolean().default(false),
   endpoint: z.url().optional(),
@@ -239,6 +267,8 @@ const codexSchema = z.strictObject({
   socket_path: z.string().min(1).default("runtime/codex-app-server.sock"),
   default_model: z.string().optional(),
   sandbox: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
+  client_identity: clientIdentitySchema.optional(),
+  upstream_user_agent: upstreamUserAgentSchema.optional(),
 });
 
 const gatewayDocumentSchema = z.strictObject({

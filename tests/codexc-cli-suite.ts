@@ -26,6 +26,7 @@ import {
   type ModelProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import {
+  customOfficialModelCatalogPath,
   writeCustomPrimaryProviderSwitchingProfile,
   writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
@@ -1820,8 +1821,15 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeFileSync(fakeCodex, [
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
+      "const args = process.argv.slice(2);",
+      "if (args.join(' ') === 'debug models --bundled') {",
+      "  process.stdout.write(JSON.stringify({",
+      "    models: [{ slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra' }],",
+      "  }));",
+      "  process.exit(0);",
+      "}",
       "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
-      "  args: process.argv.slice(2),",
+      "  args,",
       "  customKeys: Object.keys(process.env).filter((key) => key.startsWith('CODEX_CONNECT_CUSTOM_')),",
       "}));",
     ].join("\n"));
@@ -1871,6 +1879,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
         "model_providers.thirdparty.request_max_retries=1",
         "-c",
         "model_providers.thirdparty.stream_max_retries=0",
+        "-c",
+        `model_catalog_json=${JSON.stringify(customOfficialModelCatalogPath(environment))}`,
         "app-server",
         "--listen",
         `unix://${join(home, "runtime", "codex-app-server.sock")}`,
@@ -1879,6 +1889,9 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     });
     const roleContent = readFileSync(roleConfigPath, "utf8");
     expect(roleContent).toMatch(/base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u);
+    expect(roleContent).toContain(
+      `model_catalog_json = ${JSON.stringify(customOfficialModelCatalogPath(environment))}`,
+    );
     expect(roleContent).not.toContain("custom-fixed-secret");
   });
 
@@ -1919,7 +1932,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     );
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -1990,8 +2003,15 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeFileSync(fakeCodex, [
       "#!/usr/bin/env node",
       "import { writeFileSync } from 'node:fs';",
+      "const args = process.argv.slice(2);",
+      "if (args.join(' ') === 'debug models --bundled') {",
+      "  process.stdout.write(JSON.stringify({",
+      "    models: [{ slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol' }],",
+      "  }));",
+      "  process.exit(0);",
+      "}",
       "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
-      "  args: process.argv.slice(2),",
+      "  args,",
       "  customKeys: Object.keys(process.env).filter((key) => key.startsWith('CODEX_CONNECT_CUSTOM_')),",
       "}));",
     ].join("\n"));
@@ -2044,6 +2064,9 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     ]);
     const roleContent = readFileSync(roleConfigPath, "utf8");
     expect(roleContent).toMatch(/base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u);
+    expect(roleContent).toContain(
+      `model_catalog_json = ${JSON.stringify(customOfficialModelCatalogPath(environment))}`,
+    );
     expect(roleContent).not.toContain("custom-agent-secret");
   });
 
@@ -2084,7 +2107,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const roleConfigPath = join(codexHome, "sf-agent.config.toml");
     writeFileSync(
       roleConfigPath,
-      'model = "deepseek-v4-flash"\nmodel_provider = "ocg-main"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "ocg-main"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -2180,7 +2203,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     );
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -3069,7 +3092,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -4199,7 +4222,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       expect(stdout).not.toContain(secret);
       expect(initializedReceived).toBe(true);
       expect(initializedClientNames.length).toBeGreaterThan(0);
-      expect(initializedClientNames.every((name) => name === "codex_connect")).toBe(true);
+      expect(initializedClientNames.every((name) => name === "codex_app_server_daemon")).toBe(true);
 
       appServerVersion = "0.0.0";
       const mismatched = await execFileAsync(
@@ -4475,10 +4498,10 @@ function writeManagedProviderFixture(
 
 function managedModelCatalog(definition: ModelProviderDefinition): string {
   return `${JSON.stringify({
-    models: definition.models.filter(({ available }) => available).map(({ slug }) => ({
+    models: [definition.defaultModel, "deepseek-v4-pro"].map((slug) => ({
       slug,
       display_name: slug,
-      input_modalities: slug.includes("vision") ? ["text", "image"] : ["text"],
+      input_modalities: slug === "deepseek-v4-pro" ? ["text"] : ["text", "image"],
       context_window: 1_048_576,
       default_reasoning_level: "high",
       supported_reasoning_levels: [

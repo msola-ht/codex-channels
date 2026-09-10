@@ -31,8 +31,10 @@ import {
   loadThirdPartyModelProviderRole,
   loadThirdPartyProviderCredential,
   providerMetricsSocketPath,
+  withOfficialModelCatalog,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
+  writeCustomOfficialModelCatalog,
   writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -655,6 +657,7 @@ async function runServiceAppServer(args) {
     throw new Error("内部服务入口不接受参数");
   }
   const runtime = configuredEnvironment();
+  const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
   if (Object.hasOwn(runtime.document, "ds_proxy")) {
     throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
   }
@@ -665,14 +668,37 @@ async function runServiceAppServer(args) {
     runtime.dataDir,
     runtime.environment,
   );
+  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
+  const customSwitchingProviderIds = new Set(
+    appServerRuntime.customSwitchingProviders.map((provider) => provider.provider),
+  );
+  const officialCatalogPath = customPrimaryProvider !== undefined
+    || customSwitchingProviderIds.size > 0
+    ? writeCustomOfficialModelCatalog(
+        runtime.environment,
+        runtime.environment.CODEX_BINARY,
+      )
+    : undefined;
+  const customSwitchingProviders = officialCatalogPath === undefined
+    ? appServerRuntime.customSwitchingProviders
+    : appServerRuntime.customSwitchingProviders.map((provider) => ({
+        ...provider,
+        arguments: withOfficialModelCatalog(provider.arguments, officialCatalogPath),
+      }));
+  const managedProviders = officialCatalogPath === undefined
+    ? appServerRuntime.managedProviders
+    : appServerRuntime.managedProviders.map((provider) =>
+        customSwitchingProviderIds.has(provider.provider)
+          ? {
+              ...provider,
+              arguments: withOfficialModelCatalog(provider.arguments, officialCatalogPath),
+            }
+          : provider);
   const {
     primarySocketPath: socketPath,
-    managedProviders,
-    customSwitchingProviders,
     managedSocketPaths,
     primaryProvider,
   } = appServerRuntime;
-  const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
   const customSwitchingProvidersById = new Map(
     customSwitchingProviders.map((provider) => [provider.provider, provider]),
   );
@@ -697,11 +723,17 @@ async function runServiceAppServer(args) {
     return agent;
   };
   const startProviderProxy = async (provider, options) => {
+    const optionsWithUserAgent = {
+      ...options,
+      ...(validatedCodex.upstream_user_agent
+        ? { upstreamUserAgent: validatedCodex.upstream_user_agent }
+        : {}),
+    };
     if (provider === "ocg") {
       const existing = providerProxyRuntimes.get("ocg");
       if (existing) return { ...existing, created: false };
       const modelProxy = new ProviderProxy("127.0.0.1:0", {
-        ...options,
+        ...optionsWithUserAgent,
         accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
         ...(goDefaultAccountId === undefined
           ? {}
@@ -737,7 +769,7 @@ async function runServiceAppServer(args) {
     const existing = providerProxyRuntimes.get(provider);
     if (existing) return { ...existing, created: false };
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
-      ...options,
+      ...optionsWithUserAgent,
       onMetrics: (metrics) => sendProviderProxyMetrics(
         providerMetricsSocketPath(socketPath, provider),
         metrics,
@@ -833,7 +865,7 @@ async function runServiceAppServer(args) {
     provider.provider,
     { runtime: provider, socketPath: managedSocketPaths[index] },
   ]));
-  const providerLaunches = new Map();
+  const instanceLaunches = new Map();
   const children = [];
   const childrenByProvider = new Map();
   let watchChild;
@@ -841,12 +873,68 @@ async function runServiceAppServer(args) {
   const primaryChildCredential = thirdPartyRole
     ? loadThirdPartyProviderCredential(thirdPartyRole.provider, runtime.environment)
     : undefined;
-  const launchProvider = (provider) => {
-    const existing = providerLaunches.get(provider);
+  const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
+  if (primaryChildCredential) {
+    primaryChildEnvironment[primaryChildCredential.environmentKey] =
+      primaryChildCredential.apiKey;
+  }
+  const ensureInstance = (provider, { waitForReady = true } = {}) => {
+    const existing = instanceLaunches.get(provider);
     if (existing) return existing;
     const launch = (async () => {
-      if (!watchChild) {
-        throw new Error("主 App Server 尚未完成启动，请稍后重试");
+      if (provider === primaryProvider) {
+        const runningChild = childrenByProvider.get(provider);
+        if (runningChild) {
+          await waitForAppServer(socketPath, runningChild, provider);
+          return;
+        }
+        if (await appServerSocketAcceptsWebSocket(socketPath)) return;
+        await prepareAppServerSocketPaths([socketPath]);
+        const child = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
+          ...primaryArguments,
+          "app-server",
+          "--listen",
+          `unix://${socketPath}`,
+        ], {
+          stdio: "inherit",
+          env: primaryChildEnvironment,
+          cwd: defaultWorkspace.cwd,
+        }, runtime.environment);
+        children.push(child);
+        childrenByProvider.set(provider, child);
+        if (!waitForReady) {
+          watchChild(child);
+          return;
+        }
+        try {
+          await waitForAppServer(socketPath, child, provider);
+          watchChild(child);
+          console.log(`${provider} App Server 已按需启动：${socketPath}`);
+        } catch (error) {
+          let cleanupError;
+          childrenByProvider.delete(provider);
+          if (childProcessIsRunning(child) && child.pid !== undefined) {
+            try {
+              await terminateChildProcess(child);
+            } catch (terminationError) {
+              cleanupError = terminationError;
+            }
+          }
+          if (childProcessIsRunning(child)) {
+            watchChild(child);
+          } else {
+            const childIndex = children.indexOf(child);
+            if (childIndex >= 0) children.splice(childIndex, 1);
+          }
+          if (cleanupError) {
+            throw new Error(
+              `App Server 启动失败且资源未能完全清理：${provider}`,
+              { cause: error },
+            );
+          }
+          throw error;
+        }
+        return;
       }
       const managed = managedByProvider.get(provider);
       const definition = providerDefinitions.get(provider);
@@ -889,7 +977,12 @@ async function runServiceAppServer(args) {
         }, runtime.environment);
         children.push(child);
         childrenByProvider.set(provider, child);
-        await waitForProviderAppServer(managed.socketPath, child, provider);
+        await waitForAppServer(
+          managed.socketPath,
+          child,
+          provider,
+          "模型 Provider App Server",
+        );
         watchChild(child);
         console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
       } catch (error) {
@@ -926,15 +1019,15 @@ async function runServiceAppServer(args) {
         throw error;
       }
     })();
-    providerLaunches.set(provider, launch);
-    launch.finally(() => providerLaunches.delete(provider)).catch(() => undefined);
+    instanceLaunches.set(provider, launch);
+    launch.finally(() => instanceLaunches.delete(provider)).catch(() => undefined);
     return launch;
   };
-  const releaseProvider = async (provider) => {
-    if (providerLaunches.get(provider)) {
-      throw new Error(`模型 Provider 正在启动，稍后重试：${provider}`);
+  const releaseInstance = async (provider) => {
+    if (instanceLaunches.get(provider)) {
+      throw new Error(`App Server 正在启动，稍后重试：${provider}`);
     }
-    if (!managedByProvider.has(provider)) {
+    if (provider !== primaryProvider && !managedByProvider.has(provider)) {
       throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
     }
     const child = childrenByProvider.get(provider);
@@ -948,7 +1041,7 @@ async function runServiceAppServer(args) {
       throw error;
     }
     childrenByProvider.delete(provider);
-    if (isGoProvider(provider)) {
+    if (provider !== primaryProvider && isGoProvider(provider)) {
       const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
       const roleUsesGoProxy = thirdPartyRole && isGoProvider(thirdPartyRole.provider);
       if (!remainingGoChild && !roleUsesGoProxy) {
@@ -956,7 +1049,11 @@ async function runServiceAppServer(args) {
         if (goProxy) await closeProviderProxy(goProxy);
       }
     }
-    console.log(`${provider} App Server 已释放：${managedByProvider.get(provider).socketPath}`);
+    console.log(`${provider} App Server 已释放：${
+      provider === primaryProvider
+        ? socketPath
+        : managedByProvider.get(provider).socketPath
+    }`);
     return true;
   };
   try {
@@ -974,6 +1071,7 @@ async function runServiceAppServer(args) {
         customPrimaryProvider.id,
         localBaseUrl,
       );
+      primaryArguments = withOfficialModelCatalog(primaryArguments, officialCatalogPath);
       refreshThirdPartyRoleConfig(
         customPrimaryProvider.id,
         externalRoleBaseUrl(localBaseUrl),
@@ -1046,41 +1144,27 @@ async function runServiceAppServer(args) {
       );
       refreshThirdPartyRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
     }
+    const lifecycle = forwardChildrenLifecycle(children, async () => {
+      await supervisorOwner?.close();
+      await Promise.all(providerProxies.map((proxy) => proxy.close()));
+      for (const agent of upstreamAgents) agent.destroy();
+    });
+    watchChild = lifecycle.watchChild;
+    detachChild = lifecycle.detachChild;
     supervisorOwner = new AppServerSupervisorOwner(
       socketPath,
       appServerRuntime.topology,
-      { ensureProvider: launchProvider, releaseProvider },
+      { ensureProvider: ensureInstance, releaseProvider: releaseInstance },
     );
     await supervisorOwner.start();
+    await ensureInstance(primaryProvider, { waitForReady: false });
+    supervisorOwner.markRunning(primaryProvider);
   } catch (error) {
+    await supervisorOwner?.close();
     await Promise.all(providerProxies.map((proxy) => proxy.close()));
     for (const agent of upstreamAgents) agent.destroy();
-    await supervisorOwner?.close();
     throw error;
   }
-  const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
-  if (primaryChildCredential) {
-    primaryChildEnvironment[primaryChildCredential.environmentKey] =
-      primaryChildCredential.apiKey;
-  }
-  const primaryChild = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
-    ...primaryArguments,
-    "app-server",
-    "--listen",
-    `unix://${socketPath}`,
-  ], {
-    stdio: "inherit",
-    env: primaryChildEnvironment,
-    cwd: defaultWorkspace.cwd,
-  }, runtime.environment);
-  children.push(primaryChild);
-  const lifecycle = forwardChildrenLifecycle(children, async () => {
-    await supervisorOwner?.close();
-    await Promise.all(providerProxies.map((proxy) => proxy.close()));
-    for (const agent of upstreamAgents) agent.destroy();
-  });
-  watchChild = lifecycle.watchChild;
-  detachChild = lifecycle.detachChild;
 }
 
 function withoutManagedProviderApiKeys(environment) {
@@ -1117,7 +1201,13 @@ function spawnCodexProcess(codexBinary, args, options, environment) {
   });
 }
 
-function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_000) {
+function waitForAppServer(
+  socketPath,
+  child,
+  provider,
+  label = "App Server",
+  timeoutMs = 10_000,
+) {
   return new Promise((resolveWait, rejectWait) => {
     const startedAt = Date.now();
     let timer;
@@ -1140,11 +1230,11 @@ function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_00
       rejectWait(error);
     };
     const onError = (error) => fail(new Error(
-      `模型 Provider App Server 启动失败：${provider}（${error instanceof Error ? error.message : String(error)}）`,
+      `${label} 启动失败：${provider}（${error instanceof Error ? error.message : String(error)}）`,
       { cause: error },
     ));
     const onExit = (code, signal) => fail(new Error(
-      `模型 Provider App Server 启动失败：${provider}（${signal ? `signal=${signal}` : `exit=${code ?? 1}`}）；请查看 App Server 服务日志`,
+      `${label} 启动失败：${provider}（${signal ? `signal=${signal}` : `exit=${code ?? 1}`}）；请查看 App Server 服务日志`,
     ));
     const check = async () => {
       try {
@@ -1153,7 +1243,7 @@ function waitForProviderAppServer(socketPath, child, provider, timeoutMs = 10_00
           return;
         }
         if (Date.now() - startedAt >= timeoutMs) {
-          fail(new Error(`等待模型 Provider App Server 就绪超时：${provider}`));
+          fail(new Error(`等待 ${label} 就绪超时：${provider}`));
           return;
         }
         timer = setTimeout(() => void check(), 100);

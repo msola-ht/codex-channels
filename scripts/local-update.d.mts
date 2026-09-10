@@ -3,6 +3,9 @@ import type {
   ManagedModelProviderCatalogUpdateAdapter,
   ModelProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
+import type {
+  AppServerSupervisorInspection,
+} from "../runtime/app-server-supervisor.mjs";
 
 export interface DatabaseInspection {
   compatible?: boolean;
@@ -30,6 +33,8 @@ export interface LocalUpdateEnvironment {
 export interface CoreServiceReadinessOptions {
   gatewayHealthy?: (configPath: string) => boolean | Promise<boolean>;
   inspectSupervisor?: (socketPath: string) => unknown | Promise<unknown>;
+  inspectSupervisorState?: (socketPath: string) =>
+    AppServerSupervisorInspection | Promise<AppServerSupervisorInspection>;
   intervalMs?: number;
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;

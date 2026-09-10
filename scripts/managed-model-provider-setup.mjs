@@ -66,18 +66,10 @@ export function createManagedProviderCatalog(catalog, definition, {
   modelCompressionPercentByModel = {},
 } = {}) {
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
-  for (const { slug, available } of definition.models) {
-    if (available && !models.some((model) => model?.slug === slug)) {
-      throw new Error(`${definition.displayName} 模型目录缺少 ${slug}`);
-    }
-  }
-  const defaultEntry = models.find((model) => model?.slug === definition.defaultModel);
-  const contextWindow = defaultEntry?.context_window;
-  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
-    throw new Error(`${definition.displayName} 模型目录缺少上下文窗口`);
-  }
+  const defaultEntry = selectCatalogDefaultModel(models, definition);
+  const contextWindow = defaultEntry.context_window;
   const defaultsApplied = withManagedModelCatalogSettings(catalog, definition, {
-    model: definition.defaultModel,
+    model: defaultEntry.slug,
     reasoningEffort: definition.defaultReasoningEffort,
     ...(autoCompactPercent === null
       ? {}
@@ -93,6 +85,28 @@ export function createManagedProviderCatalog(catalog, definition, {
     definition,
     modelCompressionPercentByModel,
   );
+}
+
+function selectCatalogDefaultModel(models, definition) {
+  const candidates = models.filter((model) =>
+    typeof model?.slug === "string"
+    && Number.isSafeInteger(model.context_window)
+    && model.context_window > 0);
+  const selected = candidates.find((model) => model.slug === definition.defaultModel)
+    ?? candidates[0];
+  if (!selected) {
+    throw new Error(`${definition.displayName} 模型目录缺少可用模型`);
+  }
+  return selected;
+}
+
+export function resolveManagedCatalogModel(catalog, definition, preferred) {
+  const models = Array.isArray(catalog?.models) ? catalog.models : [];
+  if (typeof preferred === "string"
+    && models.some((model) => model?.slug === preferred)) {
+    return preferred;
+  }
+  return selectCatalogDefaultModel(models, definition).slug;
 }
 
 function applyModelCompressionByModel(catalog, definition, percents) {

@@ -19,6 +19,8 @@
 - `stdio-transport.ts`：用于受控开发和测试场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
+  通过组合根注入 `clientInfo`，`[codex].client_identity` 可自定义 name/title/version，缺省保持
+  `codex_connect`；
   已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
@@ -37,8 +39,8 @@
   `text/image/audio` 输入能力、Codex 多代理运行时及结构化替代模型/退役时间，过滤不可见项；
   官方迁移 Markdown、链接和自由文案不越过 Client 边界，
   并在缺少模型选择必需字段时失败关闭。
-- `model-provider-catalog.ts`：按 Bootstrap 注入的编译期 Provider 定义，只读取 Setup 下载到用户
-  `CODEX_HOME` 的受控模型目录；相同模型 ID 仍按 Provider 独立映射，未列入对应定义的模型不会开放；
+- `model-provider-catalog.ts`：按 Bootstrap 注入的 Provider 定义读取 Setup 下载到用户
+  `CODEX_HOME` 的受管模型目录；目录里声明什么就开放什么，相同模型 ID 仍按 Provider 独立映射；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
   稳定摘要；接受当前 0.150.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
@@ -89,7 +91,8 @@
   `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用。
   新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
-  `dynamicTools`；Fork 只允许模型 Provider。
+  `dynamicTools`；Fork 由 Session Router 注入当前 Workspace 的权限参数，调用方只允许选择模型
+  Provider，不得跨 Provider 或自行扩大权限。
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
@@ -99,10 +102,11 @@
   第三方实例在首次选择对应模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
   Provider 不增加 App Server 子进程；MCP 配置刷新只尝试当前已连接实例并传播任一失败，单 Provider
   重连只恢复该侧 Thread。组合根为所有 Provider 请求注入活动保护：统一空闲管理器在 Gateway 没有前后台
-  绑定、没有进行中操作且没有启动任务时等待 60 秒，宽限期内新请求会取消本轮释放；到期仍空闲时先通知
-  所有已知授权渠道，再关闭已连接 Client，但不停止 App Server 进程；该通知只在渠道会话空闲自动解除
-  触发的全局释放轮次发送。检查由绑定变化和任务终态事件触发。关闭先发生时，已排队请求在 Client
-  关闭后按需重连。
+  绑定、没有进行中操作且没有启动任务时等待 60 秒并每 60 秒复检，宽限期内新请求会取消本轮释放；
+  到期仍空闲时先通知所有已知授权渠道，再关闭已连接 Client，并停止监管入口中全部未被租约占用的
+  运行实例（含主实例与仅由 `codexc remote` 启动的实例）；该通知只在渠道会话空闲自动解除触发的
+  全局释放轮次发送。检查由绑定变化、任务终态事件和周期复检触发。关闭先发生时，已排队请求在
+  Client 关闭后按需启动并重连。
   第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
   无法关联 Thread 的 MCP 启动状态与 warning 全局通知携带 Provider 来源，只发送到对应 Provider
   会话；无法关联 Thread 的 OAuth 完成通知不进入渠道。

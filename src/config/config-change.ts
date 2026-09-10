@@ -3,6 +3,7 @@ export type GlobalConfigChangeCode =
   | "codex.socket"
   | "codex.default-model"
   | "codex.sandbox"
+  | "codex.client-identity"
   | "network.proxy"
   | "storage.database"
   | "approval.timeout"

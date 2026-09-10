@@ -110,7 +110,7 @@ describe("WeixinOutbox", () => {
     outbox.handle({
       type: "warning",
       target,
-      message: "所有模型连接已空闲，即将释放。",
+      message: "所有模型连接已空闲，空闲的 App Server 即将停止。",
       globalIdle: true,
     });
     outbox.handle({
@@ -122,7 +122,7 @@ describe("WeixinOutbox", () => {
 
     expect(sendText).toHaveBeenCalledTimes(1);
     expect(sendText.mock.calls[0]?.[0].text).toContain(
-      "所有模型连接已空闲，即将释放。",
+      "所有模型连接已空闲，空闲的 App Server 即将停止。",
     );
   });
 

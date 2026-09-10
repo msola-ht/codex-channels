@@ -116,11 +116,17 @@ idle_release_minutes = 15
 Provider 断线期间也会跳过扫描。
 连续达到配置的空闲时间且没有任何输入和输出时，Gateway 才会在确认 Thread、原生 Queue、审批和子代理都已
 空闲后取消订阅并解除前台绑定；如果此时 Gateway 已没有任何前台或后台绑定、进行中的 Provider 操作或
-启动任务，还会关闭全部 Provider Client，但不会停止 App Server 进程，后续请求会自动重连。解除后
+启动任务，还会关闭全部 Provider Client，并在每 60 秒一次的空闲复检中停止全部未被租约占用的
+App Server 进程（包括主实例），后续请求会自动启动并重连；`codexc remote` 持有租约期间对应实例
+不会被停止。解除后
 当前渠道会收到一次“自动解除占用”提示；若 60 秒内没有新消息、`/r` 恢复或新的 Provider 操作，
-Gateway 会在关闭 Client 前向所有已知授权渠道发送一次“所有模型连接已空闲，即将释放”的通知。
+Gateway 会在关闭 Client 和停止 App Server 前向所有已知授权渠道发送一次
+“所有模型连接已空闲，空闲的 App Server 即将停止”的通知。
 该通知只属于渠道空闲自动解除后的全局释放轮次；手动 `/new`、切换 Workspace 或 Provider、
 后台任务结束等原因导致没有绑定并关闭 Client 时，不发送这条通知。
+`idle_release_minutes = 0` 只关闭渠道会话自动解除；无任何绑定时的全局空闲停止仍会执行，其他
+非自动解除触发的全局空闲轮次只记录日志，不发送渠道通知。共享 App Server 的原生 TUI 必须通过
+`codexc remote` 启动；直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，可能被停止。
 此后直接发送消息只会开启新会话，不会接续旧 Thread；需要继续旧会话时直接使用提示中的
 `/r <Thread ID>` 命令显式恢复；飞书显示为 CardKit 2.0 卡片，Telegram 为 HTML 面板，微信为
 结构化文本。修改后需要重启 Gateway。
@@ -151,8 +157,12 @@ codexc work list [--json]
 ```bash
 codexc setup
 codexc primary-provider list [--json]
-codexc primary-provider switch <Provider ID> [模型]
+codexc primary-provider switch <Provider ID> [模型] [--yes]
 ```
+
+`primary-provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
+Codex 主配置的 `model_provider` / `model`；传 `--yes` 跳过确认（适合脚本化调用），
+仅命令行 switch 支持 `--yes`，交互式 Setup 菜单仍会确认。
 
 DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSeek 使用说明`](deepseek.md)、[`OpenCode Go 使用说明`](opencode-go.md)、[`Provider 接入指南`](provider-integration-guide.md) 和 [`OpenCode Go 多账户`](opencode-go-multi-account.md)。
 
@@ -165,6 +175,8 @@ codexc remote --profile sf-deepseek resume
 ```
 
 直接运行 `codex` 会创建独立 TUI，不共享 Gateway Thread；需要共享会话时使用 `codexc remote`。跨 Provider 切换会创建目标 Provider 的新 Thread，不复制原 Provider 历史。
+直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
+共享 App Server 的 TUI 请统一使用 `codexc remote`。
 
 ## 5. 后台服务与更新
 

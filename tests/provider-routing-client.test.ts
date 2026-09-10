@@ -35,6 +35,7 @@ describe("ProviderRoutingClient", () => {
     ]), ensureProvider);
 
     await routed.connect();
+    expect(ensureProvider).toHaveBeenCalledWith("openai");
     expect(openai.connect).toHaveBeenCalledOnce();
     expect(deepseek.connect).not.toHaveBeenCalled();
 
@@ -146,7 +147,10 @@ describe("ProviderRoutingClient", () => {
     deepseek.listThreads.mockResolvedValue([]);
     openai.reloadMcpServers.mockResolvedValue(undefined);
     deepseek.reloadMcpServers.mockResolvedValue(undefined);
-    deepseek.reconnect.mockResolvedValue({ userAgent: "codex-cli/0.148.0" });
+    deepseek.reconnect.mockResolvedValue({
+      ...initializeResponse(),
+      userAgent: "codex-cli/0.148.0",
+    });
     const operations: string[] = [];
     const routed = new ProviderRoutingClient(
       "openai",
@@ -230,7 +234,7 @@ describe("ProviderRoutingClient", () => {
     await Promise.all([scan, restarted]);
     expect(deepseek.close).toHaveBeenCalledOnce();
     expect(deepseek.connect).toHaveBeenCalledTimes(2);
-    expect(ensureProvider).toHaveBeenCalledTimes(2);
+    expect(ensureProvider).toHaveBeenCalledTimes(3);
     expect(deepseek.startThread).toHaveBeenCalledTimes(2);
   });
 
@@ -248,6 +252,9 @@ describe("ProviderRoutingClient", () => {
 
     await routed.closeProvider("openai");
     expect(routed.connectedProviderIds()).not.toContain("openai");
+    expect(openai.close).toHaveBeenCalledTimes(2);
+
+    await routed.closeProvider("openai");
     expect(openai.close).toHaveBeenCalledTimes(2);
   });
 
@@ -608,7 +615,10 @@ describe("ProviderRoutingClient", () => {
     const routed = routing(openai, deepseek);
     const disconnected: string[] = [];
     routed.onDisconnect((_error, provider) => disconnected.push(provider));
-    deepseek.reconnect.mockResolvedValue({ userAgent: "codex-cli/0.146.0" });
+    deepseek.reconnect.mockResolvedValue({
+      ...initializeResponse(),
+      userAgent: "codex-cli/0.146.0",
+    });
 
     deepseek.emitDisconnect(new Error("offline"));
     await routed.reconnectProvider("deepseek");
@@ -623,7 +633,10 @@ describe("ProviderRoutingClient", () => {
     const deepseek = client();
     const ensureProvider = vi.fn(async () => undefined);
     deepseek.startThread.mockResolvedValue(session("thread-deepseek", "deepseek", "idle"));
-    deepseek.reconnect.mockResolvedValue({ userAgent: "codex-cli/0.147.0" });
+    deepseek.reconnect.mockResolvedValue({
+      ...initializeResponse(),
+      userAgent: "codex-cli/0.147.0",
+    });
     const routed = new ProviderRoutingClient("openai", new Map([
       ["openai", openai],
       ["deepseek", deepseek],
@@ -636,8 +649,9 @@ describe("ProviderRoutingClient", () => {
     });
     await routed.reconnectProvider("deepseek");
 
-    expect(ensureProvider).toHaveBeenNthCalledWith(1, "deepseek");
+    expect(ensureProvider).toHaveBeenNthCalledWith(1, "openai");
     expect(ensureProvider).toHaveBeenNthCalledWith(2, "deepseek");
+    expect(ensureProvider).toHaveBeenNthCalledWith(3, "deepseek");
     expect(deepseek.reconnect).toHaveBeenCalledOnce();
   });
 
@@ -817,7 +831,7 @@ describe("ProviderRoutingClient", () => {
     expect(routed.knownProvider("thread-custom")).toBe("openai");
   });
 
-  it("reconnects an alias custom-primary without launching a separate App Server", async () => {
+  it("starts the primary App Server for an alias custom-primary reconnect", async () => {
     const openai = client();
     const ensureProvider = vi.fn(async () => undefined);
     const routed = new ProviderRoutingClient(
@@ -829,8 +843,9 @@ describe("ProviderRoutingClient", () => {
 
     await routed.reconnectProvider("OpenAI");
 
-    expect(ensureProvider).not.toHaveBeenCalled();
-    expect(openai.reconnect).toHaveBeenCalledOnce();
+    expect(ensureProvider).toHaveBeenCalledWith("openai");
+    expect(openai.connect).toHaveBeenCalledOnce();
+    expect(openai.reconnect).not.toHaveBeenCalled();
   });
 
   it("rewrites the primary routing key to the custom primary Thread Provider", async () => {
@@ -1011,13 +1026,22 @@ function session(
 
 type MockClient = ReturnType<typeof client>;
 
+function initializeResponse() {
+  return {
+    userAgent: "codex-cli/0.150.1",
+    codexHome: "/codex-home",
+    platformFamily: "unix",
+    platformOs: "macos",
+  };
+}
+
 function client() {
   let notificationHandler: ((notification: { method: string; params: unknown }) => void)
     | undefined;
   let disconnectHandler: ((error: Error) => void) | undefined;
   const result = {
-    connect: vi.fn(),
-    reconnect: vi.fn(),
+    connect: vi.fn(async () => initializeResponse()),
+    reconnect: vi.fn(async () => initializeResponse()),
     close: vi.fn(),
     onNotification: vi.fn((handler) => {
       notificationHandler = handler;

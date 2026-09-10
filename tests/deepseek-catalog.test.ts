@@ -8,7 +8,7 @@ import { deepseekProviderDefinition } from "../runtime/model-provider-definition
 import { loadManagedModelOptions } from "../src/codex-client/model-provider-catalog.js";
 
 describe("DeepSeek model catalog", () => {
-  it("keeps every selectable provider model in the reviewed API catalog baseline", () => {
+  it("records the reviewed official catalog baseline with model capabilities", () => {
     const baseline = JSON.parse(readFileSync(
       join(process.cwd(), "scripts/deepseek-catalog-baseline.json"),
       "utf8",
@@ -21,21 +21,18 @@ describe("DeepSeek model catalog", () => {
       }>;
     };
 
-    for (const definition of deepseekProviderDefinition.models) {
-      if (!definition.available) continue;
-      expect(baseline.models).toContainEqual(expect.objectContaining({
-        slug: definition.slug,
-        supportedInApi: true,
-        visibility: "list",
-      }));
-    }
     expect(baseline.models).toContainEqual(expect.objectContaining({
-      slug: "deepseek-v4-flash-vision-exp",
+      slug: "deepseek-flash",
       inputModalities: ["text", "image"],
+    }));
+    expect(baseline.models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4-pro",
+      supportedInApi: true,
+      visibility: "list",
     }));
   });
 
-  it("makes the reviewed official models selectable with their input capabilities", () => {
+  it("makes every model in the downloaded catalog selectable with its input capabilities", () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-deepseek-catalog-"));
     const providerDirectory = join(
       codexHome,
@@ -46,13 +43,9 @@ describe("DeepSeek model catalog", () => {
     mkdirSync(providerDirectory, { recursive: true });
     writeFileSync(join(providerDirectory, "models.json"), JSON.stringify({
       models: [
-        model("deepseek-v4-flash", "DeepSeek-V4-Flash", ["text"]),
-        model(
-          "deepseek-v4-flash-vision-exp",
-          "DeepSeek-V4-Flash-Vision",
-          ["text", "image"],
-        ),
+        model("deepseek-flash", "DeepSeek-Flash", ["text", "image"]),
         model("deepseek-v4-pro", "DeepSeek-V4-Pro", ["text"]),
+        model("deepseek-v4-flash", "DeepSeek-V4-Flash", ["text"]),
       ],
     }));
 
@@ -63,13 +56,13 @@ describe("DeepSeek model catalog", () => {
     );
 
     expect(models).toMatchObject([
-      { model: "deepseek-v4-flash", available: true, inputModalities: ["text"] },
       {
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
         available: true,
         inputModalities: ["text", "image"],
       },
       { model: "deepseek-v4-pro", available: true, inputModalities: ["text"] },
+      { model: "deepseek-v4-flash", available: true, inputModalities: ["text"] },
     ]);
   });
 
@@ -102,6 +95,19 @@ describe("DeepSeek model catalog", () => {
       true,
       deepseekProviderDefinition,
     )).toThrow("DeepSeek 模型目录包含未知输入能力");
+  });
+
+  it("fails closed when a catalog model name is invalid", () => {
+    const providerDirectory = mkdtempSync(join(tmpdir(), "codexc-deepseek-slug-"));
+    writeFileSync(join(providerDirectory, "models.json"), JSON.stringify({
+      models: [model("DeepSeek Flash", "DeepSeek Flash", ["text"])],
+    }));
+
+    expect(() => loadManagedModelOptions(
+      providerDirectory,
+      true,
+      deepseekProviderDefinition,
+    )).toThrow("DeepSeek 模型目录包含无效模型名");
   });
 });
 

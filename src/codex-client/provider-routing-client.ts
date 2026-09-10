@@ -1,4 +1,5 @@
 import type { CodexAppServerClient } from "./client.js";
+import type { InitializeResponse } from "../codex-protocol/index.js";
 import type {
   RpcNotification,
   RpcServerRequest,
@@ -74,6 +75,7 @@ export class ProviderRoutingClient {
   private readonly threadProviders = new Map<string, string>();
   private readonly connectedProviders: Set<string>;
   private readonly providerConnections = new Map<string, Promise<void>>();
+  private readonly initializationResponses = new Map<string, InitializeResponse>();
 
   constructor(
     private readonly primaryProvider: string,
@@ -86,12 +88,26 @@ export class ProviderRoutingClient {
     if (!clients.has(primaryProvider)) {
       throw new Error(`缺少主模型 Provider App Server：${primaryProvider}`);
     }
-    this.connectedProviders = new Set(
-      ensureProvider ? [primaryProvider] : clients.keys(),
-    );
+    this.connectedProviders = new Set(ensureProvider ? [] : clients.keys());
   }
 
   async connect(): ReturnType<ProviderClientInstance["connect"]> {
+    if (this.ensureProvider) {
+      try {
+        await this.ensureClient(this.primaryProvider);
+      } catch (error) {
+        await Promise.allSettled(
+          [...this.connectedProviders].map((provider) =>
+            this.clientForProvider(provider).close()),
+        );
+        throw error;
+      }
+      const initialized = this.initializationResponses.get(this.primaryProvider);
+      if (!initialized) {
+        throw new Error(`主模型 Provider App Server 未完成初始化：${this.primaryProvider}`);
+      }
+      return initialized;
+    }
     const entries = [...this.clients.entries()].filter(([provider]) =>
       this.connectedProviders.has(provider));
     try {
@@ -108,20 +124,29 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["reconnect"]> {
     const canonical = this.canonicalProvider(provider);
     return this.withProviderActivity(canonical, async () => {
-      if (canonical !== this.primaryProvider) {
-        await this.ensureProvider?.(canonical);
+      if (!this.connectedProviders.has(canonical)) {
+        await this.ensureClient(canonical);
+        const initialized = this.initializationResponses.get(canonical);
+        if (!initialized) {
+          throw new Error(`模型 Provider App Server 未完成初始化：${canonical}`);
+        }
+        return initialized;
       }
-      await this.ensureClient(canonical);
-      return this.clientForProvider(canonical).reconnect();
+      await this.ensureProvider?.(canonical);
+      const initialized = await this.clientForProvider(canonical).reconnect();
+      this.initializationResponses.set(canonical, initialized);
+      return initialized;
     });
   }
 
   async closeProvider(provider: string): Promise<void> {
     const canonical = this.canonicalProvider(provider);
+    if (!this.connectedProviders.has(canonical)) return;
     const client = this.clientForProvider(canonical);
     // 仅在关闭成功后移除连接标记，失败时允许全局空闲协调器重试。
     await client.close();
     this.connectedProviders.delete(canonical);
+    this.initializationResponses.delete(canonical);
   }
 
   connectedProviderIds(): readonly string[] {
@@ -138,6 +163,8 @@ export class ProviderRoutingClient {
     if (failure?.status === "rejected") {
       throw failure.reason;
     }
+    this.connectedProviders.clear();
+    this.initializationResponses.clear();
   }
 
   onNotification(handler: (notification: RpcNotification) => void): () => void {
@@ -652,10 +679,9 @@ export class ProviderRoutingClient {
     let connection = this.providerConnections.get(canonical);
     if (!connection) {
       connection = (async () => {
-        if (canonical !== this.primaryProvider) {
-          await this.ensureProvider?.(canonical);
-        }
-        await client.connect();
+        await this.ensureProvider?.(canonical);
+        const initialized = await client.connect();
+        this.initializationResponses.set(canonical, initialized);
         this.connectedProviders.add(canonical);
       })();
       this.providerConnections.set(canonical, connection);

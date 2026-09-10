@@ -715,11 +715,11 @@ describe("OpenCode Go account adapter", () => {
     const store = new SqliteModelRequestMetricsStore(metricsPath);
     recordWindowSample(
       store,
-      Date.parse("2026-08-25T04:59:59.000Z"),
+      Date.parse("2026-09-11T04:59:59.000Z"),
       100_000,
       10_000,
       110_000,
-      Date.parse("2026-08-25T05:00:00.000Z"),
+      Date.parse("2026-09-11T05:00:00.000Z"),
     );
     store.record({
       provider: "ocg-main",
@@ -753,8 +753,8 @@ describe("OpenCode Go account adapter", () => {
       totalTokens: 150_000,
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
-      requestStartedAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
-      recordedAtMs: Date.parse("2026-08-25T07:00:00.000Z"),
+      requestStartedAtMs: Date.parse("2026-09-11T08:00:00.000Z"),
+      recordedAtMs: Date.parse("2026-09-11T07:00:00.000Z"),
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
       lastReasoningDeltaAtMs: null,
@@ -770,7 +770,7 @@ describe("OpenCode Go account adapter", () => {
         monthly: {
           status: "ok",
           percent: 1,
-          resetsAt: "2026-08-27T00:00:00.000Z",
+          resetsAt: "2026-09-27T00:00:00.000Z",
         },
       },
     }), { status: 200 });
@@ -778,35 +778,35 @@ describe("OpenCode Go account adapter", () => {
       environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
-      nowMs: () => Date.parse("2026-08-25T08:30:00.000Z"),
+      nowMs: () => Date.parse("2026-09-11T08:30:00.000Z"),
     });
     const offPeakReader = createOpencodeGoRemainingUsageReader({
       environment: testEnvironment(codexHome),
       fetchImpl: fetchImpl as typeof fetch,
       metricsDatabasePath: metricsPath,
-      nowMs: () => Date.parse("2026-08-25T11:00:00.000Z"),
+      nowMs: () => Date.parse("2026-09-11T11:00:00.000Z"),
     });
 
     await expect(peakReader("deepseek-v4-flash")).resolves.toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "peak",
-      usedUsdNanos: 110_000_000,
+      usedUsdNanos: 90_000_000,
       usedTokens: 150_000,
     });
     await expect(offPeakReader("deepseek-v4-flash")).resolves.toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "off-peak",
-      usedUsdNanos: 28_600_000,
+      usedUsdNanos: 21_000_000,
       usedTokens: 110_000,
     });
     // 传入请求开始时间优先于当前时间：当前处于 Off-Peak，但请求开始于 Peak 时段。
     await expect(offPeakReader(
       "deepseek-v4-flash",
-      Date.parse("2026-08-25T08:30:00.000Z"),
+      Date.parse("2026-09-11T08:30:00.000Z"),
     )).resolves.toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "peak",
-      usedUsdNanos: 110_000_000,
+      usedUsdNanos: 90_000_000,
       usedTokens: 150_000,
     });
   });
@@ -852,8 +852,8 @@ describe("OpenCode Go account adapter", () => {
       totalTokens: 110_000,
       upstreamCreatedAt: 1_785_640_800,
       upstreamCompletedAt: 1_785_640_801,
-      requestStartedAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
-      recordedAtMs: Date.parse("2026-08-25T09:00:00.000Z"),
+      requestStartedAtMs: Date.parse("2026-09-11T08:00:00.000Z"),
+      recordedAtMs: Date.parse("2026-09-11T09:00:00.000Z"),
       firstTokenAtMs: 1_100,
       firstReasoningDeltaAtMs: null,
       lastReasoningDeltaAtMs: null,
@@ -864,13 +864,13 @@ describe("OpenCode Go account adapter", () => {
     });
     store.close();
 
-    const nowMs = Date.parse("2026-08-25T09:30:00.000Z");
+    const nowMs = Date.parse("2026-09-11T09:30:00.000Z");
     const fetchImpl = async () => new Response(JSON.stringify({
       usage: {
         monthly: {
           status: "ok",
           percent: 1,
-          resetsAt: "2026-08-27T00:00:00.000Z",
+          resetsAt: "2026-09-27T00:00:00.000Z",
         },
       },
     }), { status: 200 });
@@ -897,7 +897,7 @@ describe("OpenCode Go account adapter", () => {
     expect(offPeak).toMatchObject({
       model: "deepseek-v4-flash",
       bucket: "off-peak",
-      usedUsdNanos: 28_600_000,
+      usedUsdNanos: 21_000_000,
     });
     expect(peak).toMatchObject({
       model: "deepseek-v4-flash",

@@ -10,14 +10,11 @@ interface ManagedCatalogDefinition {
   id: string;
   displayName: string;
   catalogFileName: string;
-  defaultModel: string;
   defaultReasoningEffort: string;
-  models: ReadonlyArray<{
-    slug: string;
-    available: boolean;
-    unavailableReason?: string;
-  }>;
 }
+
+// 与 runtime/model-provider-runtime.mjs 的受管模型目录契约一致。
+const modelSlugPattern = /^[a-z0-9][a-z0-9._-]{0,119}$/u;
 
 export function loadManagedModelOptions(
   providerDirectory: string,
@@ -25,7 +22,6 @@ export function loadManagedModelOptions(
   definition: ManagedCatalogDefinition,
 ): ModelOption[] {
   if (!enabled) return [];
-  const knownModels = new Map(definition.models.map((model) => [model.slug, model]));
   const catalogPath = join(providerDirectory, definition.catalogFileName);
   if (!existsSync(catalogPath)) return [];
   let parsed: unknown;
@@ -43,9 +39,9 @@ export function loadManagedModelOptions(
   }
   return models.flatMap((candidate) => {
     const model = record(candidate);
-    if (typeof model.slug !== "string") return [];
-    const knownModel = knownModels.get(model.slug);
-    if (!knownModel) return [];
+    if (typeof model.slug !== "string" || !modelSlugPattern.test(model.slug)) {
+      throw new Error(`${definition.displayName} 模型目录包含无效模型名：${catalogPath}`);
+    }
     const levels = Array.isArray(model.supported_reasoning_levels)
       ? model.supported_reasoning_levels
       : [];
@@ -58,6 +54,7 @@ export function loadManagedModelOptions(
     if (efforts.length === 0) {
       throw new Error(`${definition.displayName} 模型目录缺少思考等级：${catalogPath}`);
     }
+    const slug = model.slug;
     const inputModalities = parseInputModalities(
       model.input_modalities,
       definition.displayName,
@@ -65,15 +62,12 @@ export function loadManagedModelOptions(
     );
     return [{
       provider: definition.id,
-      available: knownModel.available,
-      ...(knownModel.unavailableReason
-        ? { unavailableReason: knownModel.unavailableReason }
-        : {}),
-      id: model.slug,
-      model: model.slug,
+      available: true,
+      id: slug,
+      model: slug,
       displayName: `${definition.displayName} · ${typeof model.display_name === "string"
         ? model.display_name
-        : model.slug}`,
+        : slug}`,
       supportedReasoningEfforts: efforts,
       defaultReasoningEffort: typeof model.default_reasoning_level === "string"
         ? model.default_reasoning_level

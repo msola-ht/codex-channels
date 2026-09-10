@@ -19,7 +19,7 @@ import {
 } from "../runtime/gateway-config.mjs";
 import {
   appServerSocketAcceptsWebSocket,
-  inspectAppServerSupervisor,
+  inspectAppServerSupervisorState,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
@@ -604,7 +604,9 @@ export async function waitForCoreServiceTarget(
   const now = options.now ?? Date.now;
   const sleep = options.sleep
     ?? ((milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)));
-  const inspectSupervisor = options.inspectSupervisor ?? inspectAppServerSupervisor;
+  const inspectSupervisor = options.inspectSupervisor;
+  const inspectSupervisorState = options.inspectSupervisorState
+    ?? inspectAppServerSupervisorState;
   const socketHealthy = options.socketHealthy ?? appServerSocketAcceptsWebSocket;
   const gatewayHealthy = options.gatewayHealthy ?? gatewayOwnerIsReady;
   const deadline = now() + timeoutMs;
@@ -614,14 +616,30 @@ export async function waitForCoreServiceTarget(
     if (requiresAppServer) {
       let supervisor;
       let primarySocketHealthy = false;
+      let protocolMismatch = false;
       try {
-        supervisor = await inspectSupervisor(descriptor.primarySocketPath);
+        if (inspectSupervisor) {
+          supervisor = await inspectSupervisor(descriptor.primarySocketPath);
+        } else {
+          const state = await inspectSupervisorState(descriptor.primarySocketPath);
+          protocolMismatch = state.status === "incompatible";
+          supervisor = state.status === "ready" ? state.topology : undefined;
+        }
         primarySocketHealthy = await socketHealthy(descriptor.primarySocketPath);
       } catch {
         // Windows IPC descriptors can be briefly absent or mid-write while the service starts.
       }
-      appServerReady = sameAppServerTopology(supervisor, descriptor.topology)
-        && primarySocketHealthy;
+      if (protocolMismatch) {
+        throw new Error(
+          "App Server 监管协议版本不匹配；请运行 codexc service restart all 后重试",
+        );
+      }
+      const topologyMatches = sameAppServerTopology(supervisor, descriptor.topology);
+      // 空闲释放后的主 App Server 是合法状态，服务仍视为就绪；首次使用会按需启动。
+      const primaryReleased = supervisor?.releasedProviders.includes(
+        descriptor.topology.primaryProvider,
+      ) === true;
+      appServerReady = topologyMatches && (primarySocketHealthy || primaryReleased);
     }
     let gatewayReady = !requiresGateway;
     if (requiresGateway) {

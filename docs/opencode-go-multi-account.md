@@ -94,17 +94,17 @@ App Server 从自己的进程环境注入。
 
 Gateway 的全局空闲策略在会话解除后等待 60 秒；当确实没有任何前台或后台 Conversation 绑定、进行中的
 Provider 操作或启动任务时，只有自动解除触发的全局释放轮次会先向所有已知授权渠道发送释放通知，
-再关闭全部已连接的 Provider Client。该策略不区分 OpenCode Go 账户，也不会停止 App Server 进程；
-其他原因导致的无绑定关闭不发送这条通知。
+再关闭全部已连接的 Provider Client，并停止未被租约占用的 App Server 进程（含主实例）。该策略不
+区分 OpenCode Go 账户；服务进程保持运行，后续使用按需启动。其他原因导致的无绑定关闭不发送这条通知。
 
 `agents.external` 通过主 App Server 直接复用该账户 Key 与共享统计代理，不依赖账户隔离 App
 Server，因此角色仍可连续或并发启动子 Thread。
 
 渠道 Turn 在运行期间保留 Conversation 绑定；`codexc remote` 在 TUI 整个生命周期内通过私有
 Supervisor Socket 持有租约，进程正常退出或异常断开时租约自动撤销。Supervisor 仍负责受管实例
-的按需启动和显式生命周期操作，同一 Provider 的启动、释放与租约获取串行执行；Gateway 关闭
-Provider Client 不会终止 Remote TUI 使用的 App Server 进程。再次选择账户、恢复 Thread 或启动
-Remote TUI 时，Client 会按需重连。关闭失败只记录日志，不阻塞正常请求。
+的按需启动和显式生命周期操作，同一实例的启动、释放与租约获取串行执行；持有租约的实例不会被
+Gateway 空闲释放终止。再次选择账户、恢复 Thread 或启动 Remote TUI 时，Client 会按需启动并重连。
+关闭失败只记录日志，不阻塞正常请求。
 
 ## 账户能力与展示
 
