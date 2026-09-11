@@ -95,7 +95,7 @@ retention_days = 365
 max_rows = 1000000
 
 [metrics.sync]
-# 多设备指标汇总：启用后本机把脱敏用量/费用增量上报到中心端点。
+# 多设备指标汇总：启用后本机把脱敏用量增量上报到中心端点。
 # 启用时必须配置 endpoint 和 device_token；endpoint 使用 HTTPS，
 # 或指向回环/私网地址的 HTTP（公网地址必须 HTTPS）。
 # enabled = false
