@@ -47,6 +47,9 @@ export interface SurfaceManagerOptions {
     threadId: string,
     turnId: string,
   ): TurnTaskMetricsSummary | undefined | Promise<TurnTaskMetricsSummary | undefined>;
+  sessionAggregate?(
+    threadId: string,
+  ): TurnTaskMetricsSummary | undefined | Promise<TurnTaskMetricsSummary | undefined>;
 }
 
 export class SurfaceManager {
@@ -318,6 +321,12 @@ export class SurfaceManager {
       const taskAggregate = taskAggregateResult instanceof Promise
         ? await taskAggregateResult
         : taskAggregateResult;
+      const sessionAggregateResult = this.options.sessionAggregate?.(
+        event.threadId,
+      );
+      const sessionAggregate = sessionAggregateResult instanceof Promise
+        ? await sessionAggregateResult
+        : sessionAggregateResult;
       const remoteQuotaResult = this.options.remoteQuota?.(
         event.modelProvider,
         event.weeklyLimit?.resetsAt,
@@ -331,6 +340,7 @@ export class SurfaceManager {
         ...(timing === undefined ? {} : { timing }),
         ...(remoteQuota === undefined ? {} : { remoteQuota }),
         ...(taskAggregate === undefined ? {} : { taskAggregate }),
+        ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
       };
     }
     if (!this.active.has(surface)) {

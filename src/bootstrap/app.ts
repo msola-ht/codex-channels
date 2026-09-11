@@ -922,6 +922,19 @@ export class GatewayApplication {
             reasoningOutputTokens: summary.reasoningOutputTokens,
           };
         },
+        sessionAggregate: async (threadId): Promise<TurnTaskMetricsSummary | undefined> => {
+          await metricsWriter.waitForCurrentWrites(threadId);
+          const aggregate = metricsStore.threadSummary(threadId).threadAggregate;
+          if (aggregate === null) return undefined;
+          return {
+            requestCount: aggregate.requestCount,
+            unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
+            inputTokens: aggregate.inputTokens,
+            cachedInputTokens: aggregate.cachedInputTokens,
+            outputTokens: aggregate.outputTokens,
+            reasoningOutputTokens: aggregate.reasoningOutputTokens,
+          };
+        },
       },
     );
     this.channelImageSpool = new ChannelImageSpool({

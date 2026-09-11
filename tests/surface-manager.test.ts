@@ -595,6 +595,10 @@ describe("SurfaceManager", () => {
     };
     const output = new EventBus<OutputEvent>(logger);
     const manager = createManager([feishu], output, {
+      sessionAggregate: () => {
+        order.push("session");
+        return undefined;
+      },
       taskAggregate: async () => {
         order.push("task-start");
         resolveTaskStarted();
@@ -624,6 +628,7 @@ describe("SurfaceManager", () => {
     expect(order).toEqual([
       "task-start",
       "task-finished",
+      "session",
       "output",
     ]);
 
@@ -665,6 +670,17 @@ describe("SurfaceManager", () => {
           requestOutputTokens: 100,
         };
       },
+      sessionAggregate: (threadId) => {
+        order.push(`session-${threadId}`);
+        return {
+          requestCount: 2,
+          unsuccessfulRequestCount: 0,
+          inputTokens: 1_000,
+          cachedInputTokens: 800,
+          outputTokens: 100,
+          reasoningOutputTokens: 0,
+        };
+      },
     });
     await manager.start();
 
@@ -687,6 +703,7 @@ describe("SurfaceManager", () => {
     expect(order).toEqual([
       "timing-start",
       "timing-finished",
+      "session-thread-1",
       "output",
     ]);
     expect(received).toEqual([
@@ -696,6 +713,12 @@ describe("SurfaceManager", () => {
           modelRequestCount: 2,
           requestInputTokens: 1_000,
           requestOutputTokens: 100,
+        }),
+        sessionAggregate: expect.objectContaining({
+          requestCount: 2,
+          inputTokens: 1_000,
+          cachedInputTokens: 800,
+          outputTokens: 100,
         }),
       }),
     ]);
