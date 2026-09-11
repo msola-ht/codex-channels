@@ -751,6 +751,23 @@ export function createTurnCompletedPresentation(
       value: event.gitBranch ?? "未检测到",
     });
   }
+  if (event.sessionAggregate) {
+    const session = event.sessionAggregate;
+    sessionFields.push({
+      label: "模型请求",
+      value: `${session.requestCount} 次`,
+    });
+    sessionFields.push({
+      title: "Token",
+      value: formatTokenCount(session.inputTokens + session.outputTokens),
+      fields: session.cachedInputTokens === null
+        ? []
+        : [{
+            label: "缓存命中率",
+            value: formatCacheHitRate(session.inputTokens, session.cachedInputTokens),
+          }],
+    });
+  }
   const sections = [
     ...(runFields.length > 0
       ? [{ title: "本次运行", fields: runFields }]

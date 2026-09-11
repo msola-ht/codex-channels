@@ -789,6 +789,42 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("综合输出速度：42 token/s");
   });
 
+  it("shows the recursive session token total in formal mode", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-session",
+        turnId: "turn-session",
+        status: "completed",
+        modelProvider: "openai",
+        timing: {
+          modelRequestCount: 1,
+          completedModelRequestCount: 1,
+          requestInputTokens: 1_000,
+          requestOutputTokens: 100,
+        },
+        sessionAggregate: {
+          requestCount: 9,
+          unsuccessfulRequestCount: 1,
+          inputTokens: 90_000,
+          cachedInputTokens: 60_000,
+          outputTokens: 2_000,
+          reasoningOutputTokens: 500,
+        },
+      }),
+    );
+
+    expect(rendered).toContain("当前 Session 累计：");
+    expect(rendered).toContain("模型请求：9 次");
+    expect(rendered).toContain("Token：92 K");
+    expect(rendered).toContain("缓存命中率：66.67%");
+  });
+
   it("separates completed, interrupted and unobservable model attempts", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({

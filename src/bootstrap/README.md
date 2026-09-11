@@ -116,7 +116,7 @@
   与未来 CLI 单 Provider 重启复用同一入口，输出脱敏后写入日志。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
   `turn.completed` 等待当前 Thread 的指标写入水位，再注入可恢复的本轮统计、当前授权 Workspace
-  的 Git 分支及显式父 Turn 任务合计；并行完成各 Surface 的首次启动，
+  的 Git 分支、递归包含子代理后代的 Session 累计统计及显式父 Turn 任务合计；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
