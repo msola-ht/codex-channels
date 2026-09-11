@@ -1140,6 +1140,11 @@ describe("webui server", () => {
     expect(secondBody.records.map((record) => record.outputTokens)).toEqual([100]);
     expect(secondBody.nextOffset).toBeNull();
 
+    const timingSort = await fetch(
+      `${origin}/api/v1/requests?range=24h&limit=2&sort=duration&direction=desc`,
+    );
+    expect(timingSort.status).toBe(200);
+
     const filtered = await fetch(
       `${origin}/api/v1/requests?range=24h&limit=10&filter=http_error`,
     );

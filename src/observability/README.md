@@ -9,11 +9,12 @@
   字段进行脱敏；`err` 和进程边界复用 `safeErrorMetadata`，只保留受约束的异常类型和机器错误码，
   不保留 message、stack 或附加响应对象。
 - `request-metrics.ts`：定义与 Provider 实现无关的单次模型请求指标、存储端口和内部查询结果；
-  指标只记录可观测的请求、Token、计时、错误与额度快照，不包含价格快照。
+  新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照、响应正文
+  或流式阶段时间。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
-  每 10 ms 最多同步写入 1 条，关闭时排空，避免 SQLite 位于模型响应确认路径并限制单轮事件循环阻塞；
-  公开持久化水位只等待调用时已经入队的记录，不被后续新记录无限延长，并按 Thread 返回该水位内
-  的实际写入结果。
+  每 10 ms 最多取 32 条并优先在一个 SQLite 事务中写入，关闭时排空，减少逐请求事务开销；公开
+  持久化水位只等待调用时该 Thread 或 Turn 已经入队的最后一条记录，不被后续无关请求延长，并
+  返回该范围内的实际写入结果。
 - `metrics-sync.ts`：把本地指标库的请求记录与子代理标注增量上报到中心服务。读取
   `MetricsSyncConfig`，自动生成或复用设备标识，持久化 Unix `0600` / Windows 当前 SID 私有水位文件，按间隔与指数退避
   定时上报，429/5xx 且服务端返回 `Retry-After` 时优先按服务端要求延后；只有收到
@@ -26,21 +27,22 @@
   旧锁继续失败关闭。
 - `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
   Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v11 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v12 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 继续持有初始化事务，停机升级继续由指标脚本管理。
-- `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、上游
-  时间戳与本机流式阶段时间戳
-  写入独立 `request-metrics.sqlite3`。当前 Thread 的独立 API 查询只选择调用适配器产生的
+- `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage 和
+  额度快照写入独立 `request-metrics.sqlite3`。新采集请求不再解析上游时间戳或流式阶段时间戳；
+  现有计时列与派生 View 暂时保留，用于读取历史数据并避免本次精简引入 Schema 迁移。当前 Thread
+  的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v11、Unix `0600` / Windows 当前 SID 私有文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
+  严格 Schema v12、Unix `0600` / Windows 当前 SID 私有文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录默认保留
   365 天、以 1,000,000 条为清理目标，可由 `[metrics.storage]` 收窄或扩大；每 100 次写入分批清理，两个清理周期之间
   最多短暂超出 99 条。每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
-  `model_request_metrics_enriched` View 统一派生总耗时、TTFT、推理/输出/生成
-  阶段耗时、收尾间隔、缓存与不含推理的 Token、缓存命中率与三类生成速度。内部读取限制为每次
+  `model_request_metrics_enriched` View 继续为历史记录派生旧计时字段，并统一派生缓存与不含推理的
+  Token、缓存命中率；人类可读 CLI、渠道卡片和 WebUI 页面不再展示总耗时、首段回复延迟或生成速度。内部读取限制为每次
   最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计和最近一条无 Turn 的直接 API 请求分开返回，由
   Bootstrap 映射到 Application 的 `/metrics` 只读端口；会话归纳（模型、思考等级与 Token）
@@ -60,11 +62,9 @@
   旧版 `/responses/compact` 与普通 `/responses` 上由受控元数据标记的 remote compaction v2
   都以 `operation = 'compact'` 独立分类，但其请求、Usage 与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或
-  复制持久化数据。当前锁定 Codex 0.150.1 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
+  复制持久化数据。当前锁定 Codex 0.153.4 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
   连接预热而非模型推理，Provider Proxy 不将其写入本指标库，因此不会扩大请求、Token 或
-  错误率分母。综合输出速度只使用同时具有非推理输出 Token 与输出时间窗的请求；
-  首段回复延迟只使用有效 TTFT 样本，并返回平均、P50、P95 和覆盖计数。所有合计仍在 SQLite 内完成，
-  不把缺失计时或缓存字段当成零。
+  错误率分母。所有合计仍在 SQLite 内完成，不把缺失缓存字段当成零。
   查询时还会把旧库中 HTTP 200、响应格式未知且没有模型或 Usage 的普通响应历史“完成”记录归一为
   `incomplete/response_not_observed`；客户端提前断开仍保持独立失败类型。异常查询以同一时间范围内全部模型请求作为失败率分母，只把
   非完成状态按提供商、模型、状态、HTTP 状态和错误类型分组，返回出现次数、最近发生时间及总分组数，
@@ -83,9 +83,9 @@
 `report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
 HTTP API 复用相同查询，不向本模块写入状态。Schema v3/v4/v5/v6/v7/v8/v9/v10 可在停止 Gateway 后用
-`codexc update` 统一预检，并先创建 `0600` 备份再逐版本事务升级到 v11 并保留原记录；v8 升级
+`codexc update` 统一预检，并先创建 `0600` 备份再逐版本事务升级到 v12 并保留原记录；v8 升级
 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为 `subagent_threads` 新增可空
-`parent_turn_id`，v10 升级 v11 新增运行级 `subagent_turns`。历史 NULL 和 v10 以前不存在的运行关系
+`parent_turn_id`，v10 升级 v11 新增运行级 `subagent_turns`，v11 升级 v12 新增账户源与账户快照表。历史 NULL 和 v10 以前不存在的运行关系
 均不按时间推断；递归会话累计继续使用显式父 Thread 关系，父 Turn 任务合计只使用 v11 起记录的
 精确父子 Turn 关系。单库排障可用
 `codexc metrics upgrade`。未知版本继续失败关闭，

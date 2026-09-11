@@ -735,9 +735,9 @@ async function runServiceAppServer(args) {
         ...(goDefaultAccountId === undefined
           ? {}
           : { defaultAccountId: goDefaultAccountId }),
-        quotaWindowsProvider: (accountId) => {
+        quotaWindowsProvider: (accountId, signal) => {
           const quota = opencodeGoQuotaWindows.get(accountId ?? goDefaultAccountId);
-          return quota ? quota() : Promise.resolve(null);
+          return quota ? quota(signal) : Promise.resolve(null);
         },
         onMetrics: (metrics, accountId) => {
           const targetAccountId = accountId ?? goDefaultAccountId;

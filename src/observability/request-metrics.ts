@@ -312,6 +312,7 @@ export interface StoredModelRequestMetricsErrorReport {
 
 export interface ModelRequestMetricsStore {
   record(sample: ModelRequestMetricSample): void;
+  recordBatch?(samples: readonly ModelRequestMetricSample[]): void;
   recordSubagentThread(details: {
     agentThreadId: string;
     parentThreadId: string;

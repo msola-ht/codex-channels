@@ -87,7 +87,7 @@ Profile 与共享子代理角色切回目录默认模型 `deepseek-flash`，并�
 
 ## 网页搜索
 
-DeepSeek（官方目录中的模型 + Codex 0.150.1）支持网页搜索，且不依赖 OpenAI：
+DeepSeek（官方目录中的模型 + Codex 0.153.4）支持网页搜索，且不依赖 OpenAI：
 
 - DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
   回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的
@@ -132,12 +132,9 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 ## 用量与运行统计
 
 - `/status` 的 Token、有效上下文窗口、缓存和压缩次数来自当前 Thread，不代表账户余额。
-- Turn 完成摘要按同一 Turn 的全部模型请求聚合请求次数、累计模型耗时、缓存命中与不含推理的输出
-  速度；DeepSeek 额外展示最后一次请求的可观测首字延时，以及整轮综合思考速度和含推理生成速度。
-  文本、函数调用参数和自定义工具参数增量都计入不含推理的输出时间窗。
-- OpenAI 的隐藏推理没有可靠计时流，因此不展示首字延时、思考速度或含推理生成速度等需要
-  计时流的字段，也不会通过推理摘要时间估算；官方返回的推理 Token 计数仍与所有 Provider
-  一样展示。
+- Turn 完成摘要按同一 Turn 的全部模型请求聚合请求结果、Token、缓存命中与压缩摘要；不展示总耗时、
+  首段回复延迟或生成速度，也不再为这些输出追踪文本、函数调用参数和自定义工具参数增量时间。
+- 官方返回的推理 Token 计数仍与所有 Provider 一样展示；Gateway 不读取或保存推理内容。
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
 - `/metrics` 从独立指标库读取当前 Thread 最近 Turn 的请求累计和最近一次直接 API 请求；输入量是
@@ -200,7 +197,7 @@ Windows + 飞书真实验收（2026-08-30）确认：明确要求“只用 DS �
 子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
 线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
 页面显示“子代理 · <代理路径>”。子代理线程标注自指标库 Schema v7 起可用；Schema v10
-以可空 `parent_turn_id` 保存线程级父 Turn 关系，当前 Schema v11 另以 `subagent_turns` 保存每次
+以可空 `parent_turn_id` 保存线程级父 Turn 关系，当前 Schema v12 另以 `subagent_turns` 保存每次
 子代理运行的精确子 Turn 与父 Turn；v7–v10 历史运行关系不按时间推断。从本机终端
 运行 `codexc update` 会统一预检、自动备份升级并恢复 App Server 与 Gateway，也可单独运行
 `codexc metrics upgrade`。
@@ -210,7 +207,7 @@ Gateway 在收到以下官方终态信号之一后，向父会话推送带具体
 父线程 `collabAgentToolCall.agentsStates` 的子代理终态。不再以最后模型请求后的静默时间推断完成。
 卡片基于指标库汇总展示任务名、模型、请求次数与 Token。终态信号后约 5 秒只用于等待指标收敛；没有模型指标
 时仍发送零统计终态卡片，指标写入或读取失败则显示“统计暂不可用”。收敛结束后会等待当前指标 Writer 水位
-落库，避免积压时读取部分汇总。缓存、推理分项和模型请求聚合耗时仅在调试模式展示。紧凑操作模式
+落库，避免积压时读取部分汇总。缓存和推理分项仅在调试模式展示。紧凑操作模式
 只保留子代理启动与失败，成功的等待和交互操作不再各自生成完成卡片。
 
 ## 应用配置

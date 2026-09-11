@@ -36,6 +36,7 @@ const maximumJsonMetadataBytes = 1_048_576;
 const maximumSseMetadataLineCharacters = 1_048_576;
 const weeklyWindowMinutes = 7 * 24 * 60;
 const percentScale = 1_000_000;
+const quotaRefreshCloseTimeoutMs = 1_000;
 
 export interface ProviderWeeklyQuotaSnapshot {
   limitId: "codex";
@@ -99,7 +100,7 @@ export interface ProviderProxyOptions {
   upstreamPort?: number;
   upstreamProtocol?: "http" | "https";
   upstreamBasePath?: string;
-  /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.150.1 API 路径。 */
+  /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.153.4 API 路径。 */
   allowOpenAiApiPaths?: boolean;
   /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
   accountIds?: readonly string[];
@@ -113,6 +114,7 @@ export interface ProviderProxyOptions {
   timeoutMs?: number;
   quotaWindowsProvider?: (
     accountId?: string,
+    signal?: AbortSignal,
   ) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>;
   onMetrics?: (
     metrics: ProviderProxyMetrics,
@@ -145,13 +147,24 @@ export class ProviderProxy {
   private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
   private readonly quotaWindowsProvider:
-    | ((accountId?: string) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
+    | ((
+        accountId?: string,
+        signal?: AbortSignal,
+      ) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
     | undefined;
   private readonly timeoutMs: number;
   private readonly onMetrics:
     | ((metrics: ProviderProxyMetrics, accountId?: string) => void | Promise<void>)
     | undefined;
   private readonly onError: ((error: Error) => void) | undefined;
+  private readonly quotaWindowsByAccount = new Map<
+    string,
+    readonly ProviderQuotaWindowSnapshot[] | null
+  >();
+  private readonly quotaRefreshByAccount = new Map<string, {
+    controller: AbortController;
+    promise: Promise<void>;
+  }>();
   private started = false;
   private stopped = false;
 
@@ -209,6 +222,12 @@ export class ProviderProxy {
       this.server.listen(port, host);
     });
     this.started = true;
+    if (this.quotaWindowsProvider) {
+      const accounts = this.accountIds?.length
+        ? this.accountIds
+        : [this.defaultAccountId];
+      for (const accountId of accounts) this.refreshQuotaWindows(accountId);
+    }
   }
 
   address(): string {
@@ -220,11 +239,19 @@ export class ProviderProxy {
   async close(): Promise<void> {
     if (!this.started || this.stopped) return;
     this.stopped = true;
+    const quotaRefreshes = [...this.quotaRefreshByAccount.values()];
+    for (const refresh of quotaRefreshes) refresh.controller.abort();
     for (const client of this.websocketServer.clients) client.terminate();
     this.server.closeAllConnections?.();
-    await new Promise<void>((resolveClose) => {
-      this.server.close(() => resolveClose());
-    });
+    await Promise.all([
+      new Promise<void>((resolveClose) => {
+        this.server.close(() => resolveClose());
+      }),
+      settleWithin(
+        quotaRefreshes.map((refresh) => refresh.promise),
+        quotaRefreshCloseTimeoutMs,
+      ),
+    ]);
   }
 
   private handleHttpRequest(request: IncomingMessage, response: ServerResponse): void {
@@ -293,6 +320,10 @@ export class ProviderProxy {
       const jsonChunks: Buffer[] = [];
       let forwarding = Promise.resolve();
       const processLine = (line: string, receivedAtMs: number): boolean => {
+        if (line === "") {
+          currentEvent = "";
+          return false;
+        }
         if (line.startsWith("event:")) {
           currentEvent = line.slice(6).trim();
           return false;
@@ -300,12 +331,17 @@ export class ProviderProxy {
         if (!line.startsWith("data:")) return false;
         const payload = line.slice(5).trim();
         if (!payload || payload === "[DONE]") return false;
-        const parsed = parseJsonPayload(payload);
-        const type = typeof parsed?.type === "string" ? parsed.type : currentEvent;
+        const observed = inspectResponseEvent(payload, currentEvent);
+        const type = observed.type;
         if (metrics.responseFormat === "unknown" && type.startsWith("response.")) {
           metrics.responseFormat = "sse";
         }
-        return observeResponseEvent(metrics, type, parsed, receivedAtMs);
+        return observeResponseEvent(
+          metrics,
+          type,
+          observed.event,
+          receivedAtMs,
+        );
       };
       const processText = (text: string, receivedAtMs: number): boolean => {
         if (sseMetadataOverflow) return false;
@@ -336,9 +372,16 @@ export class ProviderProxy {
             jsonChunks.length = 0;
           }
         }
+        if (!completed) {
+          if (!response.write(chunk)) {
+            upstreamResponse.pause();
+            response.once("drain", () => upstreamResponse.resume());
+          }
+          return;
+        }
         upstreamResponse.pause();
         forwarding = forwarding.then(async () => {
-          if (completed) await emitMetrics();
+          await emitMetrics();
           await writeResponseChunk(response, chunk);
           upstreamResponse.resume();
         }).catch((error) => {
@@ -481,7 +524,18 @@ export class ProviderProxy {
     });
     const pending: Array<{ data: RawData | string; isBinary: boolean }> = [];
     let activeMetrics: MetricsState | undefined;
-    let forwarding = Promise.resolve();
+    let forwarding: Promise<void> | undefined;
+    const failForwarding = (error: unknown): void => {
+      this.onError?.(asError(error));
+      client.terminate();
+      upstream.terminate();
+    };
+    const forwardImmediately = (data: RawData, isBinary: boolean): void => {
+      if (client.readyState !== WebSocket.OPEN) return;
+      client.send(data, { binary: isBinary }, (error) => {
+        if (error) failForwarding(error);
+      });
+    };
 
     client.on("message", (data, isBinary) => {
       const sanitized = recordsResponseMetrics
@@ -552,26 +606,33 @@ export class ProviderProxy {
     });
     upstream.on("message", (data, isBinary) => {
       const receivedAtMs = Date.now();
-      forwarding = forwarding.then(async () => {
-        if (!isBinary && activeMetrics) {
-          const currentMetrics = activeMetrics;
-          const parsed = parseJsonPayload(rawDataText(data));
-          const type = typeof parsed?.type === "string" ? parsed.type : "";
-          if (type === "codex.rate_limits") {
-            currentMetrics.weeklyQuota = weeklyQuotaFromEvent(parsed);
-          }
-          if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs)) {
-            activeMetrics = undefined;
-            await this.deliverMetrics(currentMetrics, accountId);
-          }
+      let completedMetrics: MetricsState | undefined;
+      if (!isBinary && activeMetrics) {
+        const currentMetrics = activeMetrics;
+        const text = rawDataText(data);
+        const observed = inspectResponseEvent(text);
+        const { type, event: parsed } = observed;
+        if (type === "codex.rate_limits") {
+          currentMetrics.weeklyQuota = weeklyQuotaFromEvent(parsed);
         }
+        if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs)) {
+          activeMetrics = undefined;
+          completedMetrics = currentMetrics;
+        }
+      }
+      if (!completedMetrics && !forwarding) {
+        forwardImmediately(data, isBinary);
+        return;
+      }
+      const queued = (forwarding ?? Promise.resolve()).then(async () => {
+        if (completedMetrics) await this.deliverMetrics(completedMetrics, accountId);
         if (client.readyState === WebSocket.OPEN) {
           await sendWebSocket(client, data, isBinary);
         }
-      }).catch((error) => {
-        this.onError?.(asError(error));
-        client.terminate();
-        upstream.terminate();
+      }).catch(failForwarding);
+      forwarding = queued;
+      void queued.finally(() => {
+        if (forwarding === queued) forwarding = undefined;
       });
     });
     const closePeer = (peer: WebSocket, code: number, reason: Buffer): void => {
@@ -626,19 +687,56 @@ export class ProviderProxy {
     metrics: MetricsState,
     accountId?: string,
   ): Promise<void> {
-    let quotaWindows: readonly ProviderQuotaWindowSnapshot[] | null = null;
-    if (this.quotaWindowsProvider) {
-      try {
-        quotaWindows = await this.quotaWindowsProvider(accountId);
-      } catch (error) {
-        this.onError?.(asError(error));
-      }
-    }
+    const quotaWindows = this.quotaWindowsByAccount.get(
+      quotaAccountKey(accountId),
+    ) ?? null;
+    this.refreshQuotaWindows(accountId);
     try {
       await this.onMetrics?.({ ...metrics, quotaWindows }, accountId);
     } catch (error) {
       this.onError?.(asError(error));
     }
+  }
+
+  private refreshQuotaWindows(accountId?: string): void {
+    if (!this.quotaWindowsProvider || this.stopped) return;
+    const key = quotaAccountKey(accountId);
+    if (this.quotaRefreshByAccount.has(key)) return;
+    const controller = new AbortController();
+    const refresh = Promise.resolve()
+      .then(() => this.quotaWindowsProvider!(accountId, controller.signal))
+      .then((windows) => {
+        if (!this.stopped) this.quotaWindowsByAccount.set(key, windows);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) this.onError?.(asError(error));
+      })
+      .finally(() => {
+        this.quotaRefreshByAccount.delete(key);
+      });
+    this.quotaRefreshByAccount.set(key, { controller, promise: refresh });
+  }
+}
+
+function quotaAccountKey(accountId?: string): string {
+  return accountId ?? "";
+}
+
+async function settleWithin(
+  promises: readonly Promise<unknown>[],
+  timeoutMs: number,
+): Promise<void> {
+  if (promises.length === 0) return;
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      Promise.allSettled(promises),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -761,19 +859,6 @@ function observeResponseEvent(
   event: Record<string, unknown> | undefined,
   receivedAtMs: number,
 ): boolean {
-  const isReasoningDelta = type.includes("reasoning") && type.includes(".delta");
-  const isOutputDelta = type === "response.output_text.delta"
-    || type === "response.function_call_arguments.delta"
-    || type === "response.custom_tool_call_input.delta";
-  if (isReasoningDelta || isOutputDelta) metrics.firstTokenAtMs ??= receivedAtMs;
-  if (isReasoningDelta) {
-    metrics.firstReasoningDeltaAtMs ??= receivedAtMs;
-    metrics.lastReasoningDeltaAtMs = receivedAtMs;
-  }
-  if (isOutputDelta) {
-    metrics.firstOutputDeltaAtMs ??= receivedAtMs;
-    metrics.lastOutputDeltaAtMs = receivedAtMs;
-  }
   if (
     type === "response.completed"
     || type === "response.failed"
@@ -833,8 +918,6 @@ function observeResponseFields(
   metrics.outputTokens = tokenCount(usage?.output_tokens);
   metrics.reasoningOutputTokens = tokenCount(outputDetails?.reasoning_tokens);
   metrics.totalTokens = tokenCount(usage?.total_tokens);
-  metrics.upstreamCreatedAt = upstreamTimestamp(response?.created_at);
-  metrics.upstreamCompletedAt = upstreamTimestamp(response?.completed_at);
   const error = asRecord(response?.error) ?? asRecord(event?.error);
   metrics.errorType = boundedString(error?.type);
   metrics.errorCode = boundedString(error?.code);
@@ -909,12 +992,6 @@ function tokenCount(value: unknown): number | null {
     : null;
 }
 
-function upstreamTimestamp(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? value
-    : null;
-}
-
 function httpResponseFormat(
   contentType: string | string[] | undefined,
 ): ProviderProxyMetrics["responseFormat"] {
@@ -942,6 +1019,47 @@ function boundedMessage(value: unknown): string | null {
     .trim();
   if (message.length === 0) return null;
   return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
+}
+
+function responseEventType(payload: string): string {
+  const match = /"type"\s*:\s*"([a-zA-Z0-9._:/-]{1,128})"/u.exec(payload);
+  return match?.[1] ?? "";
+}
+
+function inspectResponseEvent(
+  payload: string,
+  fallbackType = "",
+): { type: string; event: Record<string, unknown> | undefined } {
+  const scannedType = responseEventType(payload);
+  const candidateType = fallbackType || scannedType;
+  if (
+    !requiresResponseEventBody(candidateType)
+    && !responseEventBodyTypeNames.some((type) => payload.includes(`"${type}"`))
+  ) {
+    return { type: candidateType, event: undefined };
+  }
+  const event = parseJsonPayload(payload);
+  const type = boundedString(event?.type) ?? candidateType;
+  return {
+    type,
+    event: requiresResponseEventBody(type) ? event : undefined,
+  };
+}
+
+const responseEventBodyTypeNames = [
+  "response.completed",
+  "response.failed",
+  "response.incomplete",
+  "codex.rate_limits",
+  "error",
+] as const;
+
+function requiresResponseEventBody(type: string): boolean {
+  return type === "response.completed"
+    || type === "response.failed"
+    || type === "response.incomplete"
+    || type === "codex.rate_limits"
+    || type === "error";
 }
 
 function sanitizeClientWebSocketMessage(

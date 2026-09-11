@@ -68,9 +68,14 @@ function sample(): ModelRequestMetricSample {
   };
 }
 
-function createWriter(record: ModelRequestMetricsStore["record"], close: () => void = () => undefined) {
+function createWriter(
+  record: ModelRequestMetricsStore["record"],
+  close: () => void = () => undefined,
+  recordBatch?: ModelRequestMetricsStore["recordBatch"],
+) {
   return new BufferedModelRequestMetricsWriter({
     record,
+    ...(recordBatch === undefined ? {} : { recordBatch }),
     recordSubagentThread: () => undefined,
     recordSubagentTurn: () => undefined,
     requestRowsAfter: () => [],
@@ -85,21 +90,22 @@ function createWriter(record: ModelRequestMetricsStore["record"], close: () => v
 }
 
 describe("BufferedModelRequestMetricsWriter", () => {
-  it("writes at most one synchronous SQLite record per scheduled turn", async () => {
+  it("writes one bounded batch per scheduled turn", async () => {
     vi.useFakeTimers();
     const record = vi.fn<ModelRequestMetricsStore["record"]>();
-    const writer = createWriter(record);
+    const recordBatch = vi.fn<NonNullable<ModelRequestMetricsStore["recordBatch"]>>();
+    const writer = createWriter(record, undefined, recordBatch);
     writer.enqueue(sample());
     writer.enqueue(sample());
     writer.enqueue(sample());
 
     await vi.advanceTimersByTimeAsync(10);
-    expect(record).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(10);
-    expect(record).toHaveBeenCalledTimes(2);
+    expect(record).not.toHaveBeenCalled();
+    expect(recordBatch).toHaveBeenCalledOnce();
+    expect(recordBatch).toHaveBeenCalledWith([sample(), sample(), sample()]);
 
     await writer.close();
-    expect(record).toHaveBeenCalledTimes(3);
+    expect(recordBatch).toHaveBeenCalledOnce();
   });
 
   it("drains pending metrics before closing the independent store", async () => {
@@ -129,13 +135,11 @@ describe("BufferedModelRequestMetricsWriter", () => {
     });
     writer.enqueue(sample());
 
-    await vi.advanceTimersByTimeAsync(20);
-    expect(checkpointResolved).toBe(false);
     await vi.advanceTimersByTimeAsync(10);
     await expect(persistenceCheckpoint).resolves.toBe(true);
     await checkpoint;
     expect(checkpointResolved).toBe(true);
-    expect(record).toHaveBeenCalledTimes(3);
+    expect(record).toHaveBeenCalledTimes(4);
     await writer.close();
     expect(record).toHaveBeenCalledTimes(4);
   });

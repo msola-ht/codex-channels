@@ -25,6 +25,23 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("persists a bounded request batch", () => {
+    const store = new SqliteModelRequestMetricsStore(
+      join(temporaryDirectory(), "request-metrics.sqlite3"),
+    );
+    store.recordBatch([
+      sample(),
+      { ...sample(), threadId: "thread-2", turnId: "turn-2" },
+    ]);
+
+    expect(store.count()).toBe(2);
+    expect(store.recent(2)).toEqual([
+      expect.objectContaining({ threadId: "thread-2", turnId: "turn-2" }),
+      expect.objectContaining({ threadId: "thread-1", turnId: "turn-1" }),
+    ]);
+    store.close();
+  });
+
   it("幂等保存并读取最新官方账户快照", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"));

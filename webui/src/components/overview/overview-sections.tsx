@@ -24,10 +24,8 @@ import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatCard } from "@/components/metrics/stat-card"
 import { useLanguage } from "@/hooks/language-context"
 import {
-  formatDuration,
   formatErrorType,
   formatPlanType,
-  formatSpeed,
   formatSuccessRate,
   formatTime,
   formatTokens,
@@ -50,7 +48,7 @@ export function GlobalCards({ global }: { global: Aggregate | null }) {
     )
   }
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2">
       <StatCard
         title="请求数"
         value={global.requestCount.toLocaleString("zh-CN")}
@@ -61,11 +59,6 @@ export function GlobalCards({ global }: { global: Aggregate | null }) {
         value={formatTokens(global.inputTokens + global.outputTokens)}
         description={`输入 ${formatTokens(global.inputTokens)} · 输出 ${formatTokens(global.outputTokens)}`}
       />
-      <StatCard
-        title="响应"
-        value={global.ttftAverageMs === null ? "—" : formatDuration(global.ttftAverageMs)}
-        description={`P50 ${formatDuration(global.ttftP50Ms)} · P95 ${formatDuration(global.ttftP95Ms)}`}
-      />
     </div>
   )
 }
@@ -75,7 +68,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
     <Card>
       <CardHeader>
         <CardTitle>按 Provider</CardTitle>
-        <CardDescription>每组包含请求、Token 与响应指标</CardDescription>
+        <CardDescription>每组包含请求、Token 与压缩统计</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
@@ -85,8 +78,6 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
               <TableHead>请求</TableHead>
               <TableHead>输入 Token</TableHead>
               <TableHead>输出 Token</TableHead>
-              <TableHead>TTFT</TableHead>
-              <TableHead>输出速度</TableHead>
               <TableHead>压缩</TableHead>
             </TableRow>
           </TableHeader>
@@ -107,8 +98,6 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
                     reasoningOutputTokens={group.aggregate.reasoningOutputTokens}
                   />
                 </TableCell>
-                <TableCell className="tabular-nums">{formatDuration(group.aggregate.ttftAverageMs)}</TableCell>
-                <TableCell className="tabular-nums">{formatSpeed(group.aggregate.outputTokensPerSecond)}</TableCell>
                 <TableCell className="tabular-nums">
                   {group.aggregate.compact === null
                     ? "无"
@@ -118,7 +107,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
             ))}
             {providers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-16 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="h-16 text-center text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>

@@ -431,8 +431,6 @@ describe("Feishu output renderer", () => {
       "- 模型：gpt-test · medium · Fast 开启",
       "- 提供商：OpenAI 官方",
       "- 最近请求缓存命中率：50.00%",
-      "- **性能**",
-      "  - 总耗时：1分5秒",
       "",
       "### 当前 Session 累计",
       "- 当前工作区：Main (main)",

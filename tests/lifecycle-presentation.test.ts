@@ -361,9 +361,8 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("deepseek-v4-flash");
     expect(rendered).toContain("思考等级：medium");
     expect(rendered).toContain("模型请求：1 次");
-    expect(rendered).toContain("耗时：12秒");
-    expect(rendered).toContain("综合输出速度：10 token/s（不含推理 · 覆盖 1/1 次请求）");
-    expect(rendered).not.toContain("耗时：6秒");
+    expect(rendered).not.toContain("耗时");
+    expect(rendered).not.toContain("速度");
   });
 
   it("hides unreliable output speed and unknown reasoning effort", () => {
@@ -433,7 +432,7 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(rendered).toContain("统计：暂不可用");
-    expect(rendered).toContain("耗时：4秒");
+    expect(rendered).not.toContain("耗时");
     expect(rendered).not.toContain("模型请求：0 次");
     expect(rendered).not.toContain("Token：0");
   });
@@ -502,8 +501,6 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
-      "性能",
-      "  总耗时：1分5秒",
       "",
       "当前 Session 累计：",
       "当前工作区：Main (main)",
@@ -690,7 +687,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
   });
 
-          it("shows output, thinking and combined generation speeds", () => {
+          it("keeps request and Token facts while omitting performance metrics", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
         type: "turn.completed",
@@ -737,16 +734,11 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("模型请求：2 次");
     expect(rendered).toContain("思考次数：2 次");
-    expect(rendered).toContain("模型请求聚合耗时：12秒");
     expect(rendered).toContain("Token：20.12 K");
     expect(rendered).toContain("缓存命中率：75.00%");
-    expect(rendered).toContain("最后请求首事件延迟：640毫秒");
-    expect(rendered).toContain("首段回复延迟：920毫秒");
-    expect(rendered).toContain("综合输出速度：2.1 token/s（不含推理 · 覆盖 2/2 次请求）");
-    expect(rendered).toContain("综合思考速度：20 token/s（推理 · 覆盖 2/2 次请求）");
-    expect(rendered).toContain("综合生成速度：120 token/s（含推理 · 覆盖 2/2 次请求）");
-    expect(rendered).not.toContain("思考时长");
-    expect(rendered).not.toContain("输出时长");
+    expect(rendered).not.toContain("耗时");
+    expect(rendered).not.toContain("延迟");
+    expect(rendered).not.toContain("速度");
   });
 
   it("shows parent Turn task totals separately from the parent run", () => {
@@ -786,7 +778,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("任务合计（含子代理）");
     expect(rendered).toContain("模型请求：3 次");
     expect(rendered).toContain("Token：3.3 K");
-    expect(rendered).toContain("综合输出速度：42 token/s");
+    expect(rendered).not.toContain("速度");
   });
 
   it("shows the recursive session token total in formal mode", () => {
@@ -956,7 +948,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("自动重试");
   });
 
-  it("shows the reasoning token count in debug but omits unavailable timing fields for OpenAI", () => {
+  it("shows the reasoning token count in debug but omits performance fields", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
         type: "turn.completed",
@@ -979,10 +971,9 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(rendered).toContain("其中推理输出：40");
-    expect(rendered).toContain("输出速度：96 token/s（不含推理）");
-    expect(rendered).not.toContain("首字延时");
-    expect(rendered).not.toContain("思考速度");
-    expect(rendered).not.toContain("生成速度");
+    expect(rendered).not.toContain("延时");
+    expect(rendered).not.toContain("延迟");
+    expect(rendered).not.toContain("速度");
   });
 });
 

@@ -222,8 +222,35 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   record(sample: ModelRequestMetricSample): void {
     this.requireOpen();
     if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
+    const recordedAtMs = this.insertSample(sample);
+    this.finishRecords(1, recordedAtMs);
+  }
+
+  recordBatch(samples: readonly ModelRequestMetricSample[]): void {
+    this.requireOpen();
+    if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
+    if (samples.length === 0) return;
+    if (samples.length === 1) {
+      this.record(samples[0]!);
+      return;
+    }
+    let latestRecordedAtMs = 0;
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const sample of samples) {
+        latestRecordedAtMs = Math.max(latestRecordedAtMs, this.insertSample(sample));
+      }
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    this.finishRecords(samples.length, latestRecordedAtMs);
+  }
+
+  private insertSample(sample: ModelRequestMetricSample): number {
     const recordedAtMs = sample.recordedAtMs ?? Date.now();
-    this.insert.run(
+    this.insert!.run(
       sample.provider,
       sample.transport,
       sample.responseFormat,
@@ -262,8 +289,12 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ? null
         : JSON.stringify(sample.quotaWindows),
     );
-    this.rowCount += 1;
-    this.recordsSinceCleanup += 1;
+    return recordedAtMs;
+  }
+
+  private finishRecords(count: number, recordedAtMs: number): void {
+    this.rowCount += count;
+    this.recordsSinceCleanup += count;
     if (this.recordsSinceCleanup >= cleanupInterval) {
       this.cleanup(recordedAtMs);
     }

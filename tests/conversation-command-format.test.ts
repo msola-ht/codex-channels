@@ -1588,8 +1588,6 @@ describe("provider-aware conversation command formatting", () => {
     });
 
     expect(rendered).toContain("模型请求：3 次（异常 1 次）");
-    expect(rendered).toContain("模型请求聚合耗时：1分5秒");
-    expect(rendered).toContain("模型请求累计耗时：2分22秒");
     expect(rendered).toContain("缓存命中率：80.00%");
     expect(rendered).toContain("其中推理输出：300");
     expect(rendered).toContain("其中推理输出：1.8 K");
@@ -1598,16 +1596,17 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("**Token**：30.9 K");
     expect(rendered).toContain("  - 输入命中缓存：24 K");
     expect(rendered).toContain("**Token**：184.2 K");
-    expect(rendered).toContain("综合输出速度：60 token/s（不含推理 · 覆盖 2/3 次请求）");
     expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token");
     expect(rendered).toContain("### 当前会话指标累计");
     expect(rendered).toContain("Turn：8 次");
     expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
-    expect(rendered).toContain("综合输出速度：58 token/s（不含推理 · 覆盖 20/21 次请求）");
     expect(rendered).toContain("### 最近直接 API");
     expect(rendered).toContain("API 提供商：BLTCY");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
+    expect(rendered).not.toContain("耗时");
+    expect(rendered).not.toContain("延迟");
+    expect(rendered).not.toContain("速度");
   });
 
   it("shows reasoning token details for OpenAI official metrics", () => {
@@ -1652,7 +1651,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("其中推理输出：1.8 K");
   });
 
-          it("renders unified provider and model aggregates with latency coverage", () => {
+          it("renders unified provider and model request aggregates", () => {
     const aggregate = {
       requestCount: 12,
       unsuccessfulRequestCount: 1,
@@ -1702,11 +1701,12 @@ describe("provider-aware conversation command formatting", () => {
 
     expect(rendered).toContain("请求指标 · 按模型");
     expect(rendered).toContain("范围：最近 7 天");
-    expect(rendered).toContain("首段回复延迟：平均 1秒");
-    expect(rendered).toContain("P50 800毫秒 · P95 3秒（覆盖 9/12 次请求）");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
     expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
+    expect(rendered).not.toContain("耗时");
+    expect(rendered).not.toContain("延迟");
+    expect(rendered).not.toContain("速度");
   });
 
     it("renders unsuccessful request groups and failure rate", () => {

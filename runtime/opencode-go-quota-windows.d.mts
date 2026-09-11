@@ -10,4 +10,4 @@ export function createOpencodeGoQuotaWindowsProvider(options?: {
   fetchImpl?: typeof fetch;
   provider?: string;
   nowMs?: () => number;
-}): () => Promise<readonly OpenCodeGoQuotaWindowSnapshot[] | null>;
+}): (signal?: AbortSignal) => Promise<readonly OpenCodeGoQuotaWindowSnapshot[] | null>;

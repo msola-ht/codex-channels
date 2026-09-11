@@ -86,7 +86,8 @@ WebUI Bearer 令牌和回环 Origin。服务状态只读取平台服务管理器
 WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`、
-`speed`、`ttft`、`duration`，默认按 `time desc` 查询整个时间范围后再分页。请求接口
+`speed`、`ttft`、`duration`；后三项只为兼容现有 API 调用保留，不在 WebUI 页面显示。
+默认按 `time desc` 查询整个时间范围后再分页。请求接口
 还支持 `filter` 关键字（最多 128 字符），在 Provider、模型、操作、状态、错误类型、错误码与
 错误消息中全库匹配后再分页，响应 `total` 为筛选后的匹配总数。
 错误统计同时包含代理观测到的失败模型请求和未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限），
@@ -145,7 +146,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 
 ```text
 webui/src/
-  lib/         API 客户端、共享类型转出与格式化（Token/耗时）
+  lib/         API 客户端、共享类型转出与格式化（Token/时间）
   hooks/       资源数据 hook（统一 loading/error/refetch）
   components/  Sidebar 布局、指标区块与共享数据表格组件
   pages/       概览、Threads、Thread 详情、请求、错误、设置
