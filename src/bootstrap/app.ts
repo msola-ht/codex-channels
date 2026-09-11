@@ -43,8 +43,6 @@ import {
   inspectAppServerSupervisorState,
 } from "../../runtime/app-server-supervisor.mjs";
 import {
-  loadOpencodeGoProviderIdentities,
-  isOpencodeGoProvider,
   opencodeGoAccountIdFromProvider,
 } from "../../runtime/opencode-go-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
@@ -80,7 +78,6 @@ import {
   ProviderAccountService,
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
-  type ProviderQuotaWindow,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
 } from "../application/index.js";
@@ -97,7 +94,6 @@ import {
 import { EventBus } from "../event-bus/index.js";
 import {
   BufferedModelRequestMetricsWriter,
-  MetricsSync,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
@@ -139,11 +135,6 @@ import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server
 import { ScheduledTaskComposition } from "./scheduled-task-composition.js";
 import { RequestMetricsQueryAdapter } from "./request-metrics-query-adapter.js";
 import {
-  mergeMissingRemoteQuotaWindows,
-  readRemoteQuotaSummary,
-  selectFreshOfficialQuotaWindows,
-} from "./quota-center.js";
-import {
   createManagedProviderAccountAdapters,
 } from "./managed-provider-capabilities.js";
 
@@ -173,7 +164,6 @@ export class GatewayApplication {
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
   private readonly providerMetrics: ProviderMetricsComposition;
-  private readonly metricsSync: MetricsSync;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
   private readonly providerAccounts?: ProviderAccountService;
@@ -345,18 +335,6 @@ export class GatewayApplication {
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
     );
-    this.metricsSync = new MetricsSync({
-      config: config.metricsSync ?? {
-        enabled: false,
-        batchSize: 200,
-        intervalSeconds: 60,
-      },
-      store: metricsStore,
-      statePath: join(dirname(config.stateDatabasePath), "metrics-sync-state.json"),
-      fetchImpl: createProxyFetch(config.networkProxy),
-      logger,
-      providerIdentities: () => loadOpencodeGoProviderIdentities(),
-    });
     const recordTurnErrorMetric = (
       provider: string,
       model: string | null,
@@ -539,50 +517,6 @@ export class GatewayApplication {
         });
       },
     });
-    const readRemoteQuota = async (
-      provider: string | undefined,
-      resetsAt: number | null | undefined,
-    ) => {
-      const summary = await readRemoteQuotaSummary(
-        this.config.metricsView,
-        provider,
-        resetsAt,
-        this.logger,
-        createProxyFetch(this.config.networkProxy),
-      );
-      if (
-        summary === undefined
-        || typeof provider !== "string"
-        || !isOpencodeGoProvider(provider)
-        || summary.windows === undefined
-        || summary.windows.some((window) => window.windowId === "rolling")
-      ) {
-        return summary;
-      }
-      const snapshot = metricsStore.latestAccountSnapshot?.(provider);
-      if (snapshot === null || snapshot === undefined) {
-        return summary;
-      }
-      const usage = snapshot.usage as {
-        kind?: unknown;
-        windows?: readonly ProviderQuotaWindow[];
-      } | undefined;
-      if (usage?.kind !== "quota-windows" || usage.windows === undefined) {
-        return summary;
-      }
-      const fallbackWindows = selectFreshOfficialQuotaWindows(
-        usage.windows,
-        snapshot.observedAtMs,
-      );
-      if (fallbackWindows.length === 0) {
-        return summary;
-      }
-      return mergeMissingRemoteQuotaWindows(
-        summary,
-        fallbackWindows,
-        snapshot.observedAtMs,
-      );
-    };
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -647,12 +581,6 @@ export class GatewayApplication {
       },
       this.codex,
       this.codex,
-      (provider, resetsAt) => readRemoteQuotaSummary(
-        this.config.metricsView,
-        provider,
-        resetsAt,
-        this.logger,
-      ),
       (parentThreadId) =>
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
       this.sessionDisplayCache,
@@ -878,7 +806,6 @@ export class GatewayApplication {
         error,
       ),
       autoCompactPercent: (provider, model) => this.resolveAutoCompactPercent(provider, model),
-      remoteQuota: readRemoteQuota,
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
@@ -898,7 +825,6 @@ export class GatewayApplication {
           available,
           outcome,
         ),
-        remoteQuota: readRemoteQuota,
         completionTiming: async (threadId, turnId, current) => {
           await metricsWriter.waitForCurrentWrites(threadId);
           const summary = metricsStore.threadSummary(threadId);
@@ -1155,9 +1081,6 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
-      if (this.config.metricsSync?.enabled) {
-        this.metricsSync.start();
-      }
       await this.providerMetrics.start();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
@@ -1246,7 +1169,6 @@ export class GatewayApplication {
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
       ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
       ["Surface", () => this.surfaceManager.stop()],
-      ["Metrics Sync", () => this.metricsSync.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],

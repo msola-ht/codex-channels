@@ -9,7 +9,6 @@ import type { ManagementTaskController } from "@/lib/settings-management"
 
 const maintenanceActions = [
   ["upgrade", "升级指标库"],
-  ["sync-reset", "重置同步水位"],
   ["cleanup", "清理指标库"],
   ["reset", "重建指标库"],
 ] as const

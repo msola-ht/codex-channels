@@ -15,11 +15,6 @@
   每 10 ms 最多取 32 条并优先在一个 SQLite 事务中写入，关闭时排空，减少逐请求事务开销；公开
   持久化水位只等待调用时该 Thread 或 Turn 已经入队的最后一条记录，不被后续无关请求延长，并
   返回该范围内的实际写入结果。
-- `metrics-sync.ts`：把本地指标库的请求记录与子代理标注增量上报到中心服务。读取
-  `MetricsSyncConfig`，自动生成或复用设备标识，持久化 Unix `0600` / Windows 当前 SID 私有水位文件，按间隔与指数退避
-  定时上报，429/5xx 且服务端返回 `Retry-After` 时优先按服务端要求延后；只有收到
-  HTTP 2xx 才推进水位。载荷只含脱敏指标，不上传 `errorMessage`，不包含消息正文、提示词
-  或审批内容；本模块不依赖代理、Surface 或业务 Storage，网络与状态路径由 Bootstrap 注入。
 - `request-metrics-database.ts`：集中保存指标 Schema 版本、固定路径和进程级独占锁；Gateway 与 reset
   共用独立 SQLite 锁库中的排他事务，由操作系统在进程退出时释放，不依赖 PID 或失效锁删除；真实
   运行中持有者与并发重建均失败关闭。升级时会检查旧 JSON 锁：失效 PID、Linux 跨系统重启遗留锁

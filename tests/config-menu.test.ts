@@ -13,7 +13,7 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { runCenterSettings, runConfig } from "../scripts/config.mjs";
+import { runConfig } from "../scripts/config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { configActivationResult } from "../scripts/config-activation-result.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
@@ -869,150 +869,13 @@ describe("Codex Connect config menu", () => {
     expect(values).not.toContain("doctor");
   });
 
-  it("connects the local machine to a metrics center through the menu", async () => {
-    const fixture = createFixture();
-    const output: string[] = [];
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("metrics")
-        .mockResolvedValueOnce("connect"),
-      text: vi.fn()
-        .mockResolvedValueOnce("http://127.0.0.1:8790")
-        .mockResolvedValueOnce(""),
-      password: vi.fn()
-        .mockResolvedValueOnce("device-token")
-        .mockResolvedValueOnce("view-token"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    const result = await runConfig({
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-    });
-
-    expect(result).toEqual({
-      endpoint: "http://127.0.0.1:8790",
-      deviceId: null,
-      configPath: fixture.configPath,
-      activation: "restart-gateway-webui",
-      activationResult: configActivationResult("restart-gateway-webui"),
-      activationState: "pending",
-    });
-    const metrics = readGatewayConfig(fixture.configPath).metrics as unknown as {
-      sync: { enabled: boolean; endpoint?: string; device_token?: string };
-      view?: { enabled: boolean; endpoint?: string; token?: string };
-    };
-    expect(metrics.sync).toMatchObject({
-      enabled: true,
-      endpoint: "http://127.0.0.1:8790/api/ingest",
-      device_token: "device-token",
-    });
-    expect(metrics.view).toEqual({
-      enabled: true,
-      endpoint: "http://127.0.0.1:8790",
-      token: "view-token",
-    });
-    expect(output.join("")).toContain("已接入中心");
-    expect(output.join("")).toContain("Gateway 与 WebUI 将分别重启以应用新配置");
-    expect(output.join("")).toContain(
-      "Gateway 与 WebUI 将分别重启以应用新配置：codexc service restart gateway；codexc service restart webui",
-    );
-  });
-
-  it("prints the metrics connection status through the menu", async () => {
-    const fixture = createFixture();
-    const document = readGatewayConfig(fixture.configPath);
-    document.metrics = {
-      sync: {
-        enabled: true,
-        endpoint: "http://127.0.0.1:8790/api/ingest",
-        device_token: "device-token",
-        device_id: "device-a",
-        batch_size: 200,
-        interval_seconds: 60,
-      },
-      view: {
-        enabled: true,
-        endpoint: "http://127.0.0.1:8790",
-        token: "view-token",
-      },
-    };
-    writeGatewayConfig(fixture.configPath, document);
-    const output: string[] = [];
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("metrics")
-        .mockResolvedValueOnce("status")
-        .mockResolvedValueOnce("back")
-        .mockResolvedValueOnce("cancel"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    await runConfig({
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-    });
-
-    const printed = output.join("");
-    expect(printed).toContain("上报：已启用");
-    expect(printed).toContain("上报端点：http://127.0.0.1:8790/api/ingest");
-    expect(printed).toContain("设备 ID：device-a");
-    expect(printed).toContain("WebUI 全局视图：已启用");
-    expect(printed).toContain("设备上报令牌：已配置");
-    expect(printed).toContain("全局查看令牌：已配置");
-    expect(printed).not.toContain("device-token");
-    expect(printed).not.toContain("view-token");
-  });
-
-  it("updates the metrics upload interval through the menu", async () => {
-    const fixture = createFixture();
-    const output: string[] = [];
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("metrics")
-        .mockResolvedValueOnce("sync_params")
-        .mockResolvedValueOnce("interval_seconds"),
-      text: vi.fn(async () => "120"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    const result = await runConfig({
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-    });
-
-    expect(result).toEqual({
-      sync: { interval_seconds: 120 },
-      configPath: fixture.configPath,
-      activation: "restart-gateway",
-      activationResult: configActivationResult("restart-gateway"),
-    });
-    const metrics = readGatewayConfig(fixture.configPath).metrics as unknown as {
-      sync?: { interval_seconds: number; batch_size: number };
-    };
-    expect(metrics.sync).toMatchObject({
-      interval_seconds: 120,
-    });
-    expect(output.join("")).toContain("上报参数已更新");
-  });
-
   it("updates the local metrics retention policy through the menu", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
-        .mockResolvedValueOnce("metrics")
-        .mockResolvedValueOnce("storage"),
+        .mockResolvedValueOnce("metrics"),
       text: vi.fn()
         .mockResolvedValueOnce("90")
         .mockResolvedValueOnce("250000"),
@@ -1038,117 +901,6 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("本地指标保留策略已更新");
   });
 
-  it("disables the metrics connection through the menu", async () => {
-    const fixture = createFixture();
-    const document = readGatewayConfig(fixture.configPath);
-    document.metrics = {
-      sync: {
-        enabled: true,
-        endpoint: "http://127.0.0.1:8790/api/ingest",
-        device_token: "center-token",
-        batch_size: 200,
-        interval_seconds: 60,
-      },
-      view: {
-        enabled: true,
-        endpoint: "http://127.0.0.1:8790",
-        token: "center-token",
-      },
-    };
-    writeGatewayConfig(fixture.configPath, document);
-    const output: string[] = [];
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("metrics")
-        .mockResolvedValueOnce("disable"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    await runConfig({
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-    });
-
-    const metrics = readGatewayConfig(fixture.configPath).metrics as unknown as {
-      sync: { enabled: boolean };
-      view?: { enabled: boolean };
-    };
-    expect(metrics.sync.enabled).toBe(false);
-    expect(metrics.view?.enabled).toBe(false);
-    expect(output.join("")).toContain("已停用中心接入");
-  });
-
-  it("configures the metrics center service through the shared settings function", async () => {
-    const fixture = createFixture();
-    const output: string[] = [];
-    const prompts = {
-      select: vi.fn()
-        .mockResolvedValueOnce("host")
-        .mockResolvedValueOnce("127.0.0.1"),
-      isCancel: () => false,
-    };
-
-    const result = await runCenterSettings({
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-      writeConfig: writeGatewayConfig,
-    });
-
-    expect(result).toEqual({
-      center: {
-        enabled: false,
-        host: "127.0.0.1",
-        port: 8790,
-        tokenConfigured: false,
-        deviceTokenConfigured: false,
-        databasePath: "data/central-metrics.sqlite3",
-      },
-      configPath: fixture.configPath,
-      activation: "restart-center",
-      activationResult: configActivationResult("restart-center"),
-      activationState: "pending",
-    });
-    const center = readGatewayConfig(fixture.configPath).metrics as unknown as {
-      center?: { enabled: boolean };
-    };
-    expect(center.center).toEqual({
-      host: "127.0.0.1",
-    });
-    expect(output.join("")).toContain("中心服务设置已更新");
-  });
-
-  it("configures separate metrics center view and device tokens", async () => {
-    const fixture = createFixture();
-    const output: string[] = [];
-    const writeToken = async (section: "token" | "device_token", value: string) =>
-      runCenterSettings({
-        environment: fixture.environment,
-        output: { write: (message: string) => output.push(message), isTTY: true },
-        prompts: {
-          select: vi.fn()
-            .mockResolvedValueOnce(section)
-            .mockResolvedValueOnce("set"),
-          password: vi.fn().mockResolvedValueOnce(value),
-          isCancel: () => false,
-        },
-        writeConfig: writeGatewayConfig,
-      });
-
-    await writeToken("token", "view-token");
-    await writeToken("device_token", "device-token");
-
-    const center = (readGatewayConfig(fixture.configPath).metrics as unknown as {
-      center?: { token?: string; device_token?: string };
-    }).center;
-    expect(center).toMatchObject({
-      token: "view-token",
-      device_token: "device-token",
-    });
-  });
 });
 
 function createFixture(): {

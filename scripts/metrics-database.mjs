@@ -2,20 +2,14 @@ import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
-  mkdirSync,
-  readFileSync,
   renameSync,
-  writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import {
-  securePrivateDirectorySync,
-  securePrivateFileSync,
-} from "../runtime/private-file.mjs";
+import { securePrivateFileSync } from "../runtime/private-file.mjs";
 import {
   providerMetricsSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
@@ -29,7 +23,6 @@ import {
   acquireRequestMetricsDatabaseLock,
   modelRequestMetricsSchemaVersion,
 } from "../dist/observability/index.js";
-import { resolveMetricsCenterSettings } from "./metrics-center-settings.mjs";
 import {
   inspectMetricsDatabase,
   metricsDatabaseCanUpgrade,
@@ -344,130 +337,14 @@ export function upgradeMetricsDatabaseWithGatewayRestart(
   return result;
 }
 
-export function resetMetricsSyncState(environment = process.env, options = {}) {
-  const runtime = resolveMetricsRuntime(environment);
-  const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
-  if (
-    gatewayRunning()
-    || runtime.metricsSocketPaths.some(metricsSocketIsActive)
-  ) {
-    throw new Error(
-      "Gateway 仍在运行；请先执行 codexc service stop gateway，或使用 --restart-gateway 自动停止并重启",
-    );
-  }
-  const statePath = metricsSyncStatePath(environment);
-  if (!existsSync(statePath)) {
-    return { backupPath: null, changed: false, statePath };
-  }
-  let deviceId;
-  try {
-    const parsed = JSON.parse(readFileSync(statePath, "utf8"));
-    deviceId = parsed.deviceId;
-  } catch {
-    deviceId = undefined;
-  }
-  if (typeof deviceId !== "string" || deviceId.length === 0) {
-    throw new Error(`指标同步状态文件缺少有效 deviceId：${statePath}`);
-  }
-  const backupPath = `${statePath}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-  copyFileSync(statePath, backupPath);
-  securePrivateFileSync(backupPath);
-  const next = {
-    version: 1,
-    deviceId,
-    lastRequestLocalId: 0,
-    lastSubagentRecordedAtMs: 0,
-    lastSubagentThreadId: null,
-  };
-  const temporaryPath = `${statePath}.tmp`;
-  try {
-    mkdirSync(dirname(statePath), { recursive: true });
-    securePrivateDirectorySync(dirname(statePath));
-    writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, {
-      mode: 0o600,
-      flag: "wx",
-    });
-    securePrivateFileSync(temporaryPath);
-    renameSync(temporaryPath, statePath);
-  } catch (error) {
-    try {
-      renameSync(temporaryPath, `${temporaryPath}.failed-${Date.now()}`);
-    } catch {
-      // 保留原始异常
-    }
-    throw error;
-  }
-  return { backupPath, changed: true, statePath, deviceId };
-}
-
-export function resetMetricsSyncStateWithGatewayRestart(
-  environment = process.env,
-  options = {},
-) {
-  const stopGateway = options.stopGateway
-    ?? (() => runGatewayServiceAction("stop", environment));
-  const startGateway = options.startGateway
-    ?? (() => runGatewayServiceAction("start", environment));
-  const reset = options.reset
-    ?? (() => resetMetricsSyncState(environment));
-  let stopError;
-  try {
-    stopGateway();
-  } catch (error) {
-    stopError = error;
-  }
-  let result;
-  let resetError;
-  try {
-    result = reset();
-  } catch (error) {
-    resetError = error;
-  }
-  let startError;
-  try {
-    startGateway();
-  } catch (error) {
-    startError = error;
-  }
-  if (stopError && startError) {
-    throw new AggregateError(
-      [stopError, startError],
-      "重置同步水位前停止 Gateway 失败，且 Gateway 未能重新启动",
-    );
-  }
-  if (stopError) throw stopError;
-  if (resetError && startError) {
-    throw new AggregateError(
-      [resetError, startError],
-      "重置同步水位失败，且 Gateway 未能重新启动",
-    );
-  }
-  if (resetError) throw resetError;
-  if (startError) throw startError;
-  return result;
-}
-
 export function pruneProviderMetrics(provider, environment = process.env, options = {}) {
   assertPruneProvider(provider);
   const localDatabasePath = options.localDatabasePath
     ?? resolveMetricsRuntime(environment).databasePath;
-  const centerSettings = options.centerSettings
-    ?? resolveMetricsCenterSettings({ environment });
-  const configuredCenterPath = options.centerDatabasePath
-    ?? centerSettings.databasePath;
-  const centerDatabasePath = typeof configuredCenterPath === "string"
-    && existsSync(configuredCenterPath)
-    ? configuredCenterPath
-    : null;
-  const centerConfigured = centerDatabasePath !== null;
   const stopGateway = options.stopGateway
     ?? (() => runServiceAction("gateway", "stop", environment));
   const startGateway = options.startGateway
     ?? (() => runServiceAction("gateway", "start", environment));
-  const stopCenter = options.stopCenter
-    ?? (() => runServiceAction("center", "stop", environment));
-  const startCenter = options.startCenter
-    ?? (() => runServiceAction("center", "start", environment));
 
   // Maintenance must restore the state that existed before the operation.
   // Test/in-process callers can provide explicit state; the CLI queries the
@@ -476,14 +353,8 @@ export function pruneProviderMetrics(provider, environment = process.env, option
     ?? (options.stopGateway !== undefined || options.startGateway !== undefined
       ? true
       : isManagedServiceRunning("gateway", environment));
-  const centerWasRunning = options.centerRunning
-    ?? (options.stopCenter !== undefined || options.startCenter !== undefined
-      ? true
-      : isManagedServiceRunning("center", environment));
-
   const warnings = [];
   let gatewayStopped = false;
-  let centerStopped = false;
   const stopErrors = [];
   if (gatewayWasRunning) {
     try {
@@ -493,15 +364,6 @@ export function pruneProviderMetrics(provider, environment = process.env, option
       stopErrors.push(error);
     }
   }
-  if (centerConfigured && centerWasRunning) {
-    try {
-      stopCenter();
-      centerStopped = true;
-    } catch (error) {
-      stopErrors.push(error);
-    }
-  }
-
   let result;
   let operationError;
   if (stopErrors.length > 0) {
@@ -510,12 +372,10 @@ export function pruneProviderMetrics(provider, environment = process.env, option
       : new AggregateError(stopErrors, "停止指标服务失败");
   } else {
     try {
-      result = pruneProviderDatabases({
+      result = pruneProviderDatabase({
         provider,
         localDatabasePath,
-        centerDatabasePath,
         allowVacuumLocal: gatewayStopped,
-        allowVacuumCenter: centerStopped,
       });
     } catch (error) {
       operationError = error;
@@ -523,13 +383,6 @@ export function pruneProviderMetrics(provider, environment = process.env, option
   }
 
   const startFailures = [];
-  if (centerConfigured && centerWasRunning) {
-    try {
-      startCenter();
-    } catch (error) {
-      startFailures.push(`中心服务启动失败：${errorMessage(error)}`);
-    }
-  }
   if (gatewayWasRunning) {
     try {
       startGateway();
@@ -551,7 +404,6 @@ export function pruneProviderMetrics(provider, environment = process.env, option
   return {
     ...result,
     gatewayWasRunning,
-    centerWasRunning: centerConfigured && centerWasRunning,
     warnings,
   };
 }
@@ -644,39 +496,17 @@ function resolveCleanupPolicy(environment, options) {
   return { runtime, keepDays, maxRows, beforeMs };
 }
 
-function pruneProviderDatabases({
+function pruneProviderDatabase({
   provider,
   localDatabasePath,
-  centerDatabasePath,
   allowVacuumLocal,
-  allowVacuumCenter,
 }) {
   const localBackupPath = backupMetricsDatabase(localDatabasePath, provider);
-  const centerBackupPath = centerDatabasePath === null
-    ? null
-    : backupMetricsDatabase(centerDatabasePath, provider);
   const localDeleted = deleteProviderRows(
     localDatabasePath,
     "model_request_metrics",
     provider,
     allowVacuumLocal,
-  );
-  if (centerDatabasePath === null) {
-    return {
-      provider,
-      local: {
-        databasePath: localDatabasePath,
-        backupPath: localBackupPath,
-        deleted: localDeleted,
-      },
-      center: { skipped: true },
-    };
-  }
-  const centerDeleted = deleteProviderRows(
-    centerDatabasePath,
-    "request_metrics",
-    provider,
-    allowVacuumCenter,
   );
   return {
     provider,
@@ -684,12 +514,6 @@ function pruneProviderDatabases({
       databasePath: localDatabasePath,
       backupPath: localBackupPath,
       deleted: localDeleted,
-    },
-    center: {
-      databasePath: centerDatabasePath,
-      backupPath: centerBackupPath,
-      deleted: centerDeleted,
-      skipped: false,
     },
   };
 }
@@ -780,11 +604,6 @@ function resolveMetricsRuntime(environment) {
       providerMetricsSocketPath(appServerSocketPath, provider)
     ),
   };
-}
-
-function metricsSyncStatePath(environment) {
-  const runtime = resolveMetricsRuntime(environment);
-  return join(dirname(runtime.databasePath), "metrics-sync-state.json");
 }
 
 function checkpoint(databasePath) {
@@ -985,51 +804,18 @@ if (
         console.log(`升级前备份：${result.backupPath}`);
       }
       writeCliMessage("success", "Gateway 已重新启动。");
-    } else if (command === "sync-reset" && process.argv.length === 3) {
-      const result = resetMetricsSyncState();
-      if (!result.changed) {
-        writeCliMessage("note", "指标同步状态尚未创建，无需重置。");
-        console.log(`同步状态：${result.statePath}`);
-      } else {
-        writeCliMessage("success", `已重置指标同步水位（保留设备 ${result.deviceId}）。`);
-        console.log(`同步状态：${result.statePath}`);
-        console.log(`重置前备份：${result.backupPath}`);
-        writeCliMessage("remediation", "重启 Gateway 后将从第一条记录重新上报（中心按主键覆盖修复历史）。");
-      }
-    } else if (command === "sync-reset-restart" && process.argv.length === 3) {
-      const result = resetMetricsSyncStateWithGatewayRestart();
-      if (!result.changed) {
-        writeCliMessage("note", "指标同步状态尚未创建，无需重置。");
-        console.log(`同步状态：${result.statePath}`);
-      } else {
-        writeCliMessage("success", `已重置指标同步水位（保留设备 ${result.deviceId}）。`);
-        console.log(`同步状态：${result.statePath}`);
-        console.log(`重置前备份：${result.backupPath}`);
-      }
-      writeCliMessage("success", "Gateway 已重新启动，将从第一条记录重新上报。");
     } else if (command === "prune" && process.argv.length === 4) {
       const provider = process.argv[3];
       const result = pruneProviderMetrics(provider);
       writeCliMessage("success", `已清理 ${result.provider} 请求指标：本地删除 ${result.local.deleted} 条。`);
-      if (result.center.skipped) {
-        writeCliMessage("note", "中心库未配置或不存在，已跳过。");
-      } else {
-        console.log(`中心删除 ${result.center.deleted} 条`);
-      }
       if (result.local.backupPath !== null) {
         console.log(`本地备份：${result.local.backupPath}`);
-      }
-      if (!result.center.skipped && result.center.backupPath !== null) {
-        console.log(`中心备份：${result.center.backupPath}`);
       }
       for (const warning of result.warnings) {
         writeCliMessage("note", `警告：${warning}`, { destination: "stderr" });
       }
       const restored = [];
       restored.push(result.gatewayWasRunning ? "Gateway 已恢复运行" : "Gateway 原为停止，保持停止");
-      if (!result.center.skipped) {
-        restored.push(result.centerWasRunning ? "中心服务已恢复运行" : "中心服务原为停止，保持停止");
-      }
       writeCliMessage("success", restored.join("；") + "。");
     } else if (command === "cleanup" || command === "cleanup-restart") {
       const options = parseCleanupOptions(process.argv.slice(3));
@@ -1080,7 +866,7 @@ if (
       printMetricsTurns(readMetricsTurns(process.env, options.threadId), options.format);
     } else {
       throw new Error(
-        "用法：codexc metrics <status|run|threads|turns|report|export|quota|upgrade|reset|sync-reset|cleanup|prune>",
+        "用法：codexc metrics <status|run|threads|turns|report|export|quota|upgrade|reset|cleanup|prune>",
       );
     }
   } catch (error) {

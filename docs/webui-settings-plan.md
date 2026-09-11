@@ -16,20 +16,19 @@
 ## 现状与事实来源
 
 - `scripts/webui-server.mjs` 提供指标 GET API 与受保护的低风险设置 API；
-  `GET /api/v1/settings/summary` 返回脱敏配置摘要（保留基础服务状态兼容字段），`GET /api/v1/management/services` 返回四类受管服务状态、版本和最近错误。
+  `GET /api/v1/settings/summary` 返回脱敏配置摘要（保留基础服务状态兼容字段），`GET /api/v1/management/services` 返回三类受管服务状态、版本和最近错误。
 - Config/Setup 的结构化管理接口和修订保护已在 `scripts/` 与 `runtime/` 完成，CLI 菜单只是交互适配器。
 - 管理接口的 Origin、请求限制、一次性确认、审计和任务安全原语已记录在
   `docs/management-interface-security.md`；WebUI 设置接口直接复用 WebUI Bearer Token，不建立第二套登录。
-- 配置事实来源分为 `~/.codex-connect/config.toml`（Gateway、渠道、WebUI、数据中心）和
+- 配置事实来源分为 `~/.codex-connect/config.toml`（Gateway、渠道、WebUI、本机指标）和
   `~/.codex/config.toml`（Codex 用户设置、Provider、Profile）；WebUI 不直接读取或改写这些文件。
 
 ## 边界
 
 ### 首期允许
 
-- 脱敏配置总览：货币、WebUI、Gateway 显示、日志、代理状态、数据中心状态、服务状态。
-- 低风险、可逆设置的读取、预览和修改：显示偏好、日志等级、指标保留期、数据中心设备名称及已定义的
-  非凭据连接参数。
+- 脱敏配置总览：WebUI、Gateway 显示、日志、代理状态、本机指标存储和服务状态。
+- 低风险、可逆设置的读取、预览和修改：显示偏好、日志等级与本机指标保留期。
 - 返回结构化修订值、字段错误、变更摘要和明确生效动作（无需重启、reload、重启 Gateway、重启 WebUI
   或重启全部服务）。
 
@@ -63,7 +62,7 @@
 
 ### 阶段三：服务与执行型操作只读集成
 
-- [x] 展示 Gateway、App Server、WebUI、指标中心服务状态、版本和最近错误。
+- [x] 展示 Gateway、App Server 与 WebUI 服务状态、版本和最近错误。
 - [x] 对未接入的高风险 CLI 保留“复制命令”提示。
 - [x] 已接入的服务/指标维护任务具备预览、一次性确认、状态、取消、串行和审计契约。
 
@@ -74,7 +73,7 @@
 - [x] 凭据、扫码、OAuth 和服务中断操作维持独立任务边界，未满足安全门槛不得接入页面。
 
 当前批次结果：Provider 概览继续只返回安全摘要；App Server 用户设置、直接 API Provider、托管 Provider 设置及
-OpenCode Go/DeepSeek 账户设置已开放结构化写入。渠道 OAuth/扫码、需要凭据的数据中心连接和其他 Provider 专属变更
+OpenCode Go/DeepSeek 账户设置已开放结构化写入。渠道 OAuth/扫码和其他 Provider 专属变更
 仍需独立授权任务与明确审批契约。
 
 ## 页面结构
@@ -84,7 +83,7 @@ OpenCode Go/DeepSeek 账户设置已开放结构化写入。渠道 OAuth/扫码�
 ├── App Server 设置（当前值 + 修改）
 ├── Provider 状态与直接 API Provider（当前值 + 修改）
 ├── Gateway 设置（当前值 + 修改）
-├── WebUI 与数据中心设置（当前值 + 修改）
+├── WebUI 与指标存储设置（当前值 + 修改）
 ├── 通讯渠道状态（只读）
 ├── 服务状态
 └── CLI 操作提示
@@ -154,8 +153,7 @@ DELETE /api/v1/management/tasks/:id    取消排队或运行中的任务
 - [x] 共享第三方子代理 Provider/模型选择与停用接入同一结构化预览、确认和审计边界。
 - [x] OpenCode Go 多账户新增、重新配置、默认切换、停止和删除，以及 DeepSeek 配置/恢复接入同一账户设置资源、确认和审计边界。
 - [ ] 其他 Provider 专属目录能力接入结构化表单。
-- [x] 数据中心设备名称和中心端口接入结构化表单；涉及令牌、中心监听地址和凭据的连接参数仍保留独立边界。
-- [ ] 渠道配置和需要凭据的数据中心连接参数接入结构化表单。
+- [ ] 渠道配置接入结构化表单。
 - [x] 已接入的账户和 Provider 凭据字段只允许写入，不允许读取、回显、持久化缓存或进入日志；配置操作携带修订保护和脱敏审计。
 
 ### 阶段六：账户与授权任务
@@ -171,7 +169,7 @@ DELETE /api/v1/management/tasks/:id    取消排队或运行中的任务
 状态：进行中；服务、指标维护和源码更新已接入白名单异步任务，Provider 清理和完整恢复细节仍待补齐
 
 - [x] 服务安装、卸载、启动、停止、重载、重启接入白名单异步任务，并展示任务状态、失败和取消。
-- [x] 指标库升级、清理、重置、同步重置和 Provider 清理接入预览与一次性确认任务入口。
+- [x] 指标库升级、清理、重置和 Provider 清理接入预览与一次性确认任务入口。
 - [ ] 数据库备份恢复细节和 Provider 清理接入完整阶段进度。
 - [x] 本地源码更新接入独立子进程任务，不由 WebUI 进程直接替换自身；版本切换和服务恢复仍按 CLI 更新流程执行。
 - [ ] 所有高风险任务统一使用一次性确认、任务串行、审计和客户端断开不自动批准语义。

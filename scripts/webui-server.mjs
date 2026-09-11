@@ -18,7 +18,6 @@ import {
 } from "./webui-command-options.mjs";
 import {
   readGatewayConfig,
-  validateMetricsViewConfigDocument,
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
@@ -1049,26 +1048,6 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     handleAccountSnapshots(environment, response);
     return;
   }
-  if (apiPath === "/global/overview") {
-    await proxyGlobalCenter(environment, url, response, "/api/overview");
-    return;
-  }
-  if (apiPath === "/global/requests") {
-    await proxyGlobalCenter(environment, url, response, "/api/requests");
-    return;
-  }
-  if (apiPath === "/global/devices") {
-    await proxyGlobalCenter(environment, url, response, "/api/devices");
-    return;
-  }
-  if (apiPath === "/global/daily") {
-    await proxyGlobalCenter(environment, url, response, "/api/daily");
-    return;
-  }
-  if (apiPath === "/global/quota") {
-    await proxyGlobalCenter(environment, url, response, "/api/quota");
-    return;
-  }
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
 }
 
@@ -1085,54 +1064,6 @@ function handleAccountSnapshots(environment, response) {
   } finally {
     store.close();
   }
-}
-
-async function proxyGlobalCenter(environment, url, response, upstreamPath) {
-  const settings = loadMetricsViewSettings(environment);
-  if (!settings.enabled) {
-    throw new ApiError(
-      503,
-      "metrics_view_unavailable",
-      "全局视图未启用：请通过 codexc config 配置 [metrics.view] 的中心地址与令牌",
-    );
-  }
-  const base = (settings.endpoint ?? "").replace(/\/+$/u, "");
-  const target = `${base}${upstreamPath}${url.search}`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  try {
-    const upstream = await fetch(target, {
-      headers: settings.token === undefined
-        ? {}
-        : { authorization: `Bearer ${settings.token}` },
-      signal: controller.signal,
-    });
-    const body = await upstream.text();
-    response.writeHead(upstream.status, {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    });
-    response.end(body);
-  } catch {
-    throw new ApiError(
-      502,
-      "metrics_view_unreachable",
-      `中心服务不可达：${settings.endpoint ?? "未配置"}`,
-    );
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function loadMetricsViewSettings(environment) {
-  const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
-  const configPath = explicitConfigFile
-    ? resolve(explicitConfigFile)
-    : join(userDataDir(environment), "config.toml");
-  if (!existsSync(configPath)) {
-    return { enabled: false };
-  }
-  return validateMetricsViewConfigDocument(readGatewayConfig(configPath));
 }
 
 async function handleDeepseekBalance(environment, response) {
@@ -1425,24 +1356,6 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
       webui: gateway.webui,
       metrics: {
         storage: gateway.metrics.storage,
-        sync: {
-          enabled: gateway.metrics.sync.enabled,
-          endpointConfigured: gateway.metrics.sync.endpoint !== null,
-          deviceName: gateway.metrics.sync.deviceName,
-          deviceTokenConfigured: gateway.metrics.sync.deviceTokenConfigured,
-        },
-        view: {
-          enabled: gateway.metrics.view.enabled,
-          endpointConfigured: gateway.metrics.view.endpoint !== null,
-          tokenConfigured: gateway.metrics.view.tokenConfigured,
-        },
-        center: {
-          enabled: gateway.metrics.center.enabled,
-          host: gateway.metrics.center.host,
-          port: gateway.metrics.center.port,
-          tokenConfigured: gateway.metrics.center.tokenConfigured,
-          deviceTokenConfigured: gateway.metrics.center.deviceTokenConfigured,
-        },
       },
       channels: gateway.channels,
     },
@@ -1451,10 +1364,9 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
       { id: "gateway-config", label: "Gateway 与显示", command: "codexc config", detail: "进入 Gateway、显示和 WebUI 设置" },
       { id: "codex-setup", label: "Codex 默认值与 Provider", command: "codexc setup", detail: "进入 Codex 与 Provider 设置" },
       { id: "channels", label: "通讯渠道", command: "codexc setup", detail: "菜单路径：通讯渠道" },
-      { id: "metrics-center", label: "数据中心", command: "codexc config", detail: "菜单路径：数据中心" },
+      { id: "metrics-storage", label: "指标存储", command: "codexc config", detail: "菜单路径：指标存储" },
       { id: "service-status", label: "查看核心服务状态", command: "codexc service status all", detail: "查看 Gateway 与 App Server 状态" },
       { id: "service-webui", label: "查看 WebUI 状态", command: "codexc service status webui", detail: "查看 WebUI 服务状态" },
-      { id: "service-center", label: "查看指标中心状态", command: "codexc service status center", detail: "查看指标中心服务状态" },
       { id: "service-restart", label: "重启核心服务", command: "codexc service restart all", detail: "重启 Gateway 与 App Server" },
     ],
   });

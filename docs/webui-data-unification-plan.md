@@ -93,7 +93,7 @@ account_snapshots
 - 余额、额度窗口和模型用量分别保留，避免把不同 Provider 的字段强行合并。
 - 额度窗口当前作为规范化 `usage_json` 的 Provider 结构保存；拆分为 `account_quota_windows` 前先补齐跨 Provider 查询契约。
 - 计算结果继续由查询层按快照生成；只有确认查询热点后才增加派生表。
-- 新表进入指标库前必须升级 Schema 版本、提供备份/回滚路径，并补齐本地与中心库测试。
+- 新表进入指标库前必须升级 Schema 版本、提供备份/回滚路径，并补齐本地指标库测试。
 
 ## 完成标准
 
@@ -106,7 +106,7 @@ account_snapshots
 
 ## 当前第一批改造范围
 
-先处理 WebUI 控制台：统一 OpenAI、DeepSeek、OpenCode Go 三类账户源，统一本机/全局指标查询，消除 `settings` 和本地 `overview` 的重复获取；完成后再接入渠道卡片。
+先处理 WebUI 控制台：统一 OpenAI、DeepSeek、OpenCode Go 三类账户源和本机指标查询，消除 `settings` 与 `overview` 的重复获取；完成后再接入渠道卡片。
 
 ## 实施进度
 

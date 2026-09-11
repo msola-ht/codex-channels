@@ -6,7 +6,7 @@ export function windowsServiceDefinitionsDirectory(
 
 export function controlWindowsServices(options: {
   action: "preflight" | "install" | "uninstall" | "start" | "stop" | "reload" | "restart" | "status" | "logs";
-  target?: "gateway" | "app-server" | "webui" | "center" | "all";
+  target?: "gateway" | "app-server" | "webui" | "all";
   definitionsDirectory?: string;
   environment?: NodeJS.ProcessEnv;
   follow?: boolean;
@@ -15,7 +15,7 @@ export function controlWindowsServices(options: {
 }): Promise<ManagedServiceStatus | void>;
 
 export function inspectWindowsServiceStatus(options?: {
-  target?: "gateway" | "app-server" | "webui" | "center" | "all";
+  target?: "gateway" | "app-server" | "webui" | "all";
   definitionsDirectory?: string;
   environment?: NodeJS.ProcessEnv;
 }): Promise<ManagedServiceStatus>;

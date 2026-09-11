@@ -82,9 +82,6 @@
   `/zen/go/v1/usage` 接口，把 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与
   重置时间）；参数化工厂按 `modelProvider` 区分 `ocg-<账户>`，指标库按账户过滤，并汇总本机
   指标库的模型本地 Token 用量；Key、响应正文和解析异常同样不进入日志或业务事件。
-- `quota-center.ts`：读取已配置指标中心的 `/api/quota`，按 Provider 选择当前额度周期（OpenAI
-  `codex`，OpenCode Go 5小时/7天/30天三个窗口），返回完成卡片与启动卡片使用的多设备摘要；中心不可用时
-  保持原有本机/官方估算回退，不把中心命令或令牌暴露到 Surface。
 - `provider-idle-releaser.ts`：统一跟踪所有 Provider Client 的活动操作；当 Gateway 没有前台或后台
   Conversation 绑定、没有正在进行的 Provider 操作或启动任务时，先等待 60 秒宽限期；宽限期内
   新绑定、新操作或启动任务会取消本轮释放。宽限期结束仍空闲时，只有渠道会话空闲自动解除触发的

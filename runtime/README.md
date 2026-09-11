@@ -25,7 +25,7 @@
   合并并去重文件路径。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
   （`accounts.json`）、账户目录与管理标记，以及已注册旧账户到 `ocg-<账户>` 与
-  `sf-ocg-<账户>` 的迁移；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于展示和数据中心身份快照。
+  `sf-ocg-<账户>` 的迁移；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
   config 编辑映射；DeepSeek、OpenCode Go 与自定义 Provider 共用一次 HTTP 重试、零次流重连的

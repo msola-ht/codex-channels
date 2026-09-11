@@ -64,7 +64,7 @@ export async function controlWindowsServices({
     }
     await startDefinitions("all", definitionsDirectory, environment);
     writeCliMessage("note", "Codex App Server 与 Gateway Windows 计划任务已安装并启动，正在确认就绪状态。");
-    writeCliMessage("note", "WebUI 与指标中心计划任务已生成，可按需单独启动。");
+    writeCliMessage("note", "WebUI 计划任务已生成，可按需单独启动。");
     return;
   }
   if (action === "uninstall") {
@@ -83,7 +83,7 @@ export async function controlWindowsServices({
         unlinkSync(file);
       }
     }
-    writeCliMessage("success", "Codex App Server、Gateway、WebUI 与指标中心 Windows 计划任务已卸载。");
+    writeCliMessage("success", "Codex App Server、Gateway 与 WebUI Windows 计划任务已卸载。");
     writeCliMessage("note", "用户配置与运行数据保留在 CODEX_CONNECT_HOME。");
     return;
   }

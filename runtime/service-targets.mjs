@@ -32,17 +32,6 @@ export const serviceDefinitions = Object.freeze([
     startOrder: 0,
     stopOrder: 0,
   }),
-  Object.freeze({
-    target: "center",
-    displayName: "指标中心",
-    systemd: "codex-connect-center.service",
-    launchd: "com.hegenai.codex-center",
-    windows: "Codex Connect Metrics Center",
-    core: false,
-    helpOrder: 3,
-    startOrder: 0,
-    stopOrder: 0,
-  }),
 ]);
 
 export const serviceTargetUsage = [

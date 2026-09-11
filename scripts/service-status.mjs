@@ -124,7 +124,7 @@ export function readManagedServiceError({
   target,
   now = Date.now(),
 } = {}) {
-  if (target !== "gateway" && target !== "app-server" && target !== "webui" && target !== "center") {
+  if (target !== "gateway" && target !== "app-server" && target !== "webui") {
     return null;
   }
   let dataDir;
@@ -448,7 +448,7 @@ function safeProcessError(result) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3) {
-      throw new Error("用法：codexc service status [gateway|app-server|webui|center|all] [--json]");
+      throw new Error("用法：codexc service status [gateway|app-server|webui|all] [--json]");
     }
     const result = await inspectManagedServiceHealth({ target: process.argv[2] });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

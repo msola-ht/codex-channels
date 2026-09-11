@@ -553,7 +553,7 @@ AST、`npm run build` 和类型检查均通过。另一普通 Windows 用户的 
 
 本轮完成 Windows 私有存储生产写入点审计，并把仍只依赖 POSIX `0600/0700` 的路径接入共享
 `private-file` SID/ACL 合同。状态 SQLite、计划任务 SQLite 及其备份、指标 SQLite、锁库、WAL 父目录、
-指标同步水位、管理/WebUI Token、Gateway 配置、渠道图片 spool、Surface 媒体临时文件、Provider
+管理/WebUI Token、Gateway 配置、渠道图片 spool、Surface 媒体临时文件、Provider
 迁移备份和更新数据库/配置备份现在都会关闭 ACL 继承，并只允许当前 SID、SYSTEM 与 Administrators
 完全控制。SQLite Schema、备份格式和 macOS/Linux 行为未改变。
 
@@ -566,7 +566,7 @@ Windows 11 代表性探针用实际编译产物依次创建状态库、计划任
 
 本轮把 `codexc doctor` 的私有权限检查改为平台合同：Unix 继续核对 `0700/0600`，Windows 调用共享
 SID/ACL 校验，不再把 NTFS 上无意义的 POSIX mode 当作结论。Doctor 只读检查配置、状态目录与数据库、
-指标数据库、凭据目录、媒体暂存目录和渠道输出目录；WebUI、指标中心查看 Token 与设备 Token 只报告
+指标数据库、凭据目录、媒体暂存目录和渠道输出目录；WebUI Token 只报告
 是否配置，不输出内容。Windows 还执行一次不落盘的 DPAPI `CurrentUser` 保护/恢复探针；已配置的微信、
 回复上下文和第三方 API 凭据仍通过现有严格 Store 读取验证格式与损坏状态，错误只显示脱敏结论。
 
@@ -584,18 +584,17 @@ ESLint 通过。阶段三实现项现已完成，只剩使用另一普通 Window
 
 真实 Windows App Server 探针中，Doctor 的 initialize 握手和 `0.150.1` 精确版本检查均通过，且没有
 遗留 App Server 或 Proxy 进程。`init`、`setup`、`start`、`remote`、`work`、`config`、`doctor`、
-`metrics`、`webui`、`center` 十个公开入口的 `-h` 全部退出 0；隔离配置下 `config --json`、
-`work list --json`、`metrics status --json` 和 `center info --json` 全部返回有效 JSON。该结果只完成
+`metrics`、`webui` 九个公开入口的 `-h` 全部退出 0；隔离配置下 `config --json`、
+`work list --json` 和 `metrics status --json` 全部返回有效 JSON。该结果只完成
 命令入口与只读前台主路径，不替代交互式 Setup、Remote TUI、WebUI 启动和三个渠道业务闭环。
 
 #### 第二十一轮实机记录：2026-08-30
 
-本轮在隔离的当前 SID 私有配置与数据目录中，通过公开 `codexc` 前台入口分别启动 WebUI 和指标中心。
-WebUI 使用动态空闲回环端口，根页面返回 `200 text/html`；指标中心使用另一动态回环端口和临时私有
-SQLite，`/api/health` 返回 `200 application/json`。随后使用共享 Windows 精确进程树终止端口关闭两者，
-两个监听端口均不可再连接、两个子进程均已退出，探针数据按验证后的精确临时路径清理。
+本轮在隔离的当前 SID 私有配置与数据目录中，通过公开 `codexc` 前台入口启动 WebUI。
+WebUI 使用动态空闲回环端口，根页面返回 `200 text/html`。随后使用共享 Windows 精确进程树终止端口关闭服务，
+监听端口不可再连接、子进程已退出，探针数据按验证后的精确临时路径清理。
 
-该探针确认 WebUI 与指标中心的前台启动、HTTP 响应、SQLite 初始化和关闭清理主路径，不代表非回环
+该探针确认 WebUI 的前台启动、HTTP 响应、SQLite 读取和关闭清理主路径，不代表非回环
 令牌访问、浏览器完整页面交互或后台服务已验收。Remote TUI 的基础交互已在下一轮验证；Setup 业务
 写入与三个渠道仍需要真实配置或平台凭据，因此保留为后续人工/真实合同门槛。
 
@@ -664,9 +663,9 @@ Provider 租约，也不隐式搬移端点，而是报告当前字节数、必�
 #### 第二十六轮实机记录：2026-08-30
 
 本轮在独立的 Windows 临时配置目录内通过公开 CLI 完成 `codexc init`、`config --json`、交互式
-`config` 写入、`work add/list --json`、`metrics status --json`、`center info --json` 和只读
+`config` 写入、`work add/list --json`、`metrics status --json` 和只读
 `doctor --json`。Doctor 只因占位配置未提供有效渠道而以结构化失败退出；配置文件与 Workspace 写入、
-当前 SID 私有 ACL、指标和中心路径均正常。此前已经完成的 WebUI、指标中心和 Setup 安全取消不重复运行。
+当前 SID 私有 ACL 和指标路径均正常。此前已经完成的 WebUI 和 Setup 安全取消不重复运行。
 
 随后使用不可外发的占位 Telegram Token 与本机拒绝代理启动公开 `codexc start`，Gateway 通过
 `windows-uds-proxy` 连接固定版 App Server；另一原生 PowerShell PTY 以
@@ -718,15 +717,15 @@ CLI 成功通过参数与配置解析并进入 TUI；随后只因探针刻意指
 
 #### 第二十九轮实机记录：2026-08-30
 
-本轮选定 Windows 当前用户计划任务作为首期后台方案：四个固定任务在用户登录后以 Limited 权限启动，
+本轮选定 Windows 当前用户计划任务作为首期后台方案：三个固定任务在用户登录后以 Limited 权限启动，
 不要求管理员权限，也不隐式退回启动文件夹。计划任务通过 `wscript.exe //B //NoLogo` 调用受管 VBS，
 由 VBS 隐藏启动 PowerShell 7 启动器运行独立 Node 服务宿主；服务宿主
 通过当前 SID 私有 IPC 提供状态、Gateway 热加载和正常停止，超时才终止其精确子进程树。App Server、
-Gateway、WebUI 与指标中心继续使用既有目标、核心范围和启停顺序，任务定义与日志位于用户数据目录。
+Gateway 与 WebUI 继续使用既有目标、核心范围和启停顺序，任务定义与日志位于用户数据目录。
 
 短路径隔离配置的真实公开 CLI 冒烟完成 `service install`、核心状态、正常停止、重新启动、Gateway
-`reload`、WebUI/指标中心按需启停及 `service uninstall`。安装后 App Server 与 Gateway 均返回统一
-Windows 健康状态；停止后旧进程退出，再启动获得新 PID 并再次就绪。卸载后四个任务均不存在、探针
+`reload`、WebUI 按需启停及 `service uninstall`。安装后 App Server 与 Gateway 均返回统一
+Windows 健康状态；停止后旧进程退出，再启动获得新 PID 并再次就绪。卸载后三个任务均不存在、探针
 进程为 0、服务定义文件为 0，用户数据按合同保留，随后隔离目录按验证过的 `%TEMP%` 精确路径删除。
 
 实机过程中修复了两个 Windows 专属边界：服务 PATH 必须包含已经解析的 PowerShell 7 目录，Host IPC
@@ -816,15 +815,15 @@ Windows 环境变量键、真实 `PATH` npm/Codex shim 和生产调用入口均�
 
 ### 阶段四：前台 Windows 功能闭环
 
-状态：命令入口、配置初始化与交互写入、Workspace 注册、只读 CLI、Doctor/App Server、WebUI、指标中心
+状态：命令入口、配置初始化与交互写入、Workspace 注册、只读 CLI、Doctor/App Server 与 WebUI
 和显式 Workspace Remote TUI 基础前台主路径已通过；`codexc start` 的 App Server/统计代理/Gateway
 前台启动、父子 IPC 正常关闭和中断清理、Setup 主菜单与无修改取消已通过；真实 OpenAI Turn、同一
 Thread 跨 Remote 进程恢复、原生 `on-request` 一次性审批、Turn 中断和 `untrusted` Remote 参数映射
 已通过。Remote Provider Profile、`untrusted` 的真实命令审批、完整 Sandbox/网络权限组合与渠道/
 Provider 业务闭环仍待验收。
 
-- [ ] `codexc init`、`setup`、`config`、`work`、`start`、`remote`、`doctor`、`metrics`、`webui` 和
-  `center` 在前台运行方式下闭环。
+- [ ] `codexc init`、`setup`、`config`、`work`、`start`、`remote`、`doctor`、`metrics` 和 `webui`
+  在前台运行方式下闭环。
 - [ ] Telegram、飞书、微信分别完成授权、普通消息、图片、审批、追加输入、STOP、完成卡片和重启恢复。
 - [ ] OpenAI、DeepSeek、OpenCode Go、自定义第三方 Provider 和第三方子代理完成模型切换、思考等级、
   Provider 隔离、指标统计和上游失败退出。
@@ -844,7 +843,7 @@ PowerShell 源码安装器的“按分支克隆未提交改动”场景仍需提
 组合仍待验收。系统重启、计划任务延迟、核心任务自动启动、私有媒体目录 ACL 已完成实机验收。
 
 本轮实机记录（2026-08-30）：`node scripts/prepare-package.mjs` 在 Windows 下完成依赖检查与
-TypeScript 构建；`codexc service install` 生成并启动 App Server、Gateway、WebUI 和指标中心计划任务，
+TypeScript 构建；`codexc service install` 生成并启动 App Server、Gateway 和 WebUI 计划任务，
 `codexc service status` 显示 App Server/Gateway 运行中，`codexc service logs gateway` 显示 Windows
 UDS、飞书长连接和 Surface 已就绪且错误日志为空；`codexc setup` 成功写入 Codex 用户设置及其他用户偏好；
 `codexc service uninstall` 成功移除受管计划任务并保留用户数据；飞书普通消息真实往返、完成卡片、Token、
@@ -860,13 +859,13 @@ Schema 11 预检，成功停止并恢复 App Server/Gateway，更新后就绪检
   核心服务。
 
 开机自启动实测（2026-08-30）：重启并登录后，`codexc service status --json` 显示 App Server 与
-Gateway 均为 `running` 且 `healthy: true`；WebUI 与指标中心未自动启动。进程树中的
+Gateway 均为 `running` 且 `healthy: true`；WebUI 未自动启动。进程树中的
 `windows-service-host.mjs`、`bin/codexc.mjs gateway` 和 `dist/main.js` 是 Gateway 的正常宿主、
 入口与子进程链，不表示重复 Gateway；当前重启后仅出现两个核心服务窗口。
 
 计划任务 XML 复核（2026-08-30）：App Server 与 Gateway 的 `LogonTrigger` 分别写入
 `<Delay>PT1M</Delay>` 与 `<Delay>PT2M</Delay>`，动作统一使用 `wscript.exe //B //NoLogo` 调用
-受管 VBS 隐藏启动器；VBS 再以隐藏窗口启动 PowerShell 服务启动器。WebUI 与指标中心状态为
+受管 VBS 隐藏启动器；VBS 再以隐藏窗口启动 PowerShell 服务启动器。WebUI 状态为
 `Ready`、触发方式为 `On demand only`。重启后的实机观察与 XML 配置一致；任务动作已改为后台
 `wscript.exe //B //NoLogo`，不再为服务启动显示 PowerShell 或 CMD 窗口。
 

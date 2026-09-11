@@ -4,7 +4,6 @@ import {
 } from "../application/index.js";
 import type {
   OutputEvent,
-  RemoteQuotaSummary,
   ThreadGoal,
   TurnStartIdentity,
 } from "../conversation-core/index.js";
@@ -14,7 +13,6 @@ import {
   formatOpenAiErrorMessage,
   formatPercent,
   formatRemainingRateLimitWindow,
-  formatResetTime,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./conversation-command-format.js";
 import {
@@ -97,7 +95,6 @@ export function createStartupPresentation(
   workspaces: ReadonlyArray<{ id: string; name: string; cwd: string }>,
   status: StartupStatus,
   runtime: StartupRuntimeInfo,
-  remoteQuota?: RemoteQuotaSummary,
 ): LifecyclePresentation {
   const workspace = workspaces.find(({ id }) => id === status.workspaceId);
   if (!workspace) {
@@ -182,12 +179,10 @@ export function createStartupPresentation(
           },
         ],
       },
-      ...((remoteQuota !== undefined || usesOpenAiAccount(status.modelProvider)) && (status.weeklyLimit || remoteQuota)
+      ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
         ? [{
-            title: remoteQuota ? "账户状态（额度中心）" : "账户状态",
-            fields: remoteQuota
-              ? remoteQuotaAccountFields(remoteQuota)
-              : [{ label: "周限", value: formatWeeklyLimit(status.weeklyLimit!) }],
+            title: "账户状态",
+            fields: [{ label: "周限", value: formatWeeklyLimit(status.weeklyLimit) }],
           }]
         : []),
     ],
@@ -345,50 +340,6 @@ function subagentTaskName(agentPath: string): string {
   return separator >= 0 ? normalized.slice(separator + 1) : normalized;
 }
 
-function remoteQuotaWindowLabel(windowId: string): string {
-  return {
-    codex: "周限",
-    monthly: "月限",
-    weekly: "周限",
-    rolling: "5小时",
-  }[windowId] ?? windowId;
-}
-
-function orderedRemoteQuotaWindows(
-  remoteQuota: RemoteQuotaSummary,
-): readonly RemoteQuotaSummary[] {
-  const order = ["rolling", "weekly", "monthly"];
-  return [...(remoteQuota.windows ?? [])].sort(
-    (left, right) => order.indexOf(left.windowId) - order.indexOf(right.windowId),
-  );
-}
-
-function remoteQuotaAccountFields(
-  remoteQuota: RemoteQuotaSummary,
-): LifecyclePresentationField[] {
-  const windows = remoteQuota.windows === undefined
-    ? [remoteQuota]
-    : orderedRemoteQuotaWindows(remoteQuota);
-  return [
-    { label: "设备数", value: `${remoteQuota.deviceCount} 台` },
-    { label: "请求数", value: `${remoteQuota.requestCount} 次` },
-    { label: "总 Token", value: formatTokenCount(remoteQuota.totalTokens) },
-    ...windows.map((window) => ({
-      label: remoteQuotaWindowLabel(window.windowId),
-      value: formatRemoteQuotaRemaining(window),
-    })),
-  ];
-}
-
-function formatRemoteQuotaRemaining(window: RemoteQuotaSummary): string {
-  const remaining = window.latestUsedPercentMillionths === null
-    ? "未知"
-    : `剩余 ${formatPercent(Math.max(0, 100 - window.latestUsedPercentMillionths / 1_000_000))}`;
-  return window.resetsAt === null
-    ? remaining
-    : `${remaining} · 重置 ${formatResetTime(window.resetsAt)}`;
-}
-
 function formatTurnErrorMessage(
   value: string,
   errorCode?: "misalignmentPolicyViolation",
@@ -421,32 +372,7 @@ export function createTurnCompletedPresentation(
   ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
-  let hasRemoteQuotaPresentation = false;
   let fallbackCacheField: LifecyclePresentationField | undefined;
-  const monthlyRemoteQuota = event.remoteQuota?.windows?.find(
-    (window) => window.windowId === "monthly",
-  );
-  const completionRemoteQuota = event.remoteQuota?.windows === undefined
-    ? event.remoteQuota
-    : monthlyRemoteQuota;
-  if (completionRemoteQuota !== undefined && !debug) {
-    hasRemoteQuotaPresentation = true;
-    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota!));
-  } else if (debug && event.remoteQuota?.windows !== undefined) {
-    hasRemoteQuotaPresentation = true;
-    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
-  } else if (debug && event.remoteQuota) {
-    hasRemoteQuotaPresentation = true;
-    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
-  } else if (
-    !debug
-    && event.remoteQuota !== undefined
-    && event.remoteQuota.windows === undefined
-    && !usesOpenAiAccount(event.modelProvider)
-  ) {
-    hasRemoteQuotaPresentation = true;
-    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
-  }
   if (event.error) {
     runFields.push({
       label: "错误",
@@ -510,7 +436,6 @@ export function createTurnCompletedPresentation(
   }
   if (
     usesOpenAiAccount(event.modelProvider)
-    && event.remoteQuota === undefined
     && event.weeklyLimit
   ) {
     accountFields.push({
@@ -693,7 +618,7 @@ export function createTurnCompletedPresentation(
       ? [{ title: "当前 Session 累计", fields: sessionFields }]
       : []),
     ...(accountFields.length > 0
-      ? [{ title: hasRemoteQuotaPresentation ? "账户状态（额度中心）" : "账户状态", fields: accountFields }]
+      ? [{ title: "账户状态", fields: accountFields }]
       : []),
   ];
   return {

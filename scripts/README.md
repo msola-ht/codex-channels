@@ -68,12 +68,10 @@
   `subagent_turns`，v11 升级 v12 新增官方账户快照表；历史运行归属不猜测），
   reset 要求 Gateway 停止、检查点回写、`0600` 备份后移除旧库，不迁移或覆盖原指标记录。
   服务状态无法确认、处于非停止状态或前台 Gateway
-  指标 Socket 仍可连接时均拒绝 reset；`sync-reset` 备份并清零多端上报水位文件（保留
-  设备 ID），默认同样要求 Gateway 已停止，`--restart-gateway` 时自动停止并重新启动
-  Gateway，用于重放修复中心历史数据。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
+  指标 Socket 仍可连接时均拒绝 reset。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
   备份后清理最旧请求记录，可选 `--vacuum` 立即回收 SQLite 文件空间。
-  `prune <provider>` 备份后删除本地与中心库中指定提供商（openai、deepseek、`ocg-<账户>` 或当前配置/私有备份中的自定义主 Provider）的全部请求
-  行，并自动停止、重启 Gateway 与中心服务；任一步骤失败也会尝试把服务重新拉起，额度重置
+  `prune <provider>` 备份后删除本地指标库中指定提供商（openai、deepseek、`ocg-<账户>` 或当前配置/私有备份中的自定义主 Provider）的全部请求
+  行，并自动停止、重启 Gateway；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
   时间范围、分组、格式及维护命令参数，并向顶层帮助导出规范用法行；不访问配置、数据库或服务，
@@ -109,31 +107,15 @@
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按 WebUI 令牌隔离，输出不回传且支持取消。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
-  `/api/v1/global/*` 按 `[metrics.view]` 配置由服务端代理到中心服务（前端不接触令牌）；
   Threads 返回指标库首个请求开始时间，请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
   配置 `token`，API 以 `Authorization: Bearer` 校验并采用常数时间比较；令牌不通过命令行传入。
-- `metrics-center-server.mjs`：`codexc center` 的多设备指标中心 HTTP 服务。
-  接收各设备 Gateway 的增量上报（独立 Bearer 上报令牌校验、载荷校验、按 `device_id + local_id`
-  upsert 覆盖写入），写入中心 SQLite（复用 `metrics-center-schema.sql` 表结构，
-  WAL、`0600`），并提供 `/api/overview`、`/api/requests`、`/api/subagents`、
-  `/api/quota?days=365`（也支持 `days=all`，按提供商、额度窗口、重置时间聚合多设备实际请求与估算）、`/api/devices`、`/api/health`；查询使用独立只读令牌，WebUI 通过 `/api/v1/global/*` 服务端代理读取，令牌不进入前端；
-  `center info --json` 返回运行状态、端点和双令牌配置布尔值，不返回令牌或掩码片段。
-  子命令 `codexc center config` 交互设置 `[metrics.center]`、`codexc center info` 输出
-  中心地址（含设备上报端点）、双令牌状态与运行状态；监听参数优先命令行，其次
-  `config.toml` 的 `[metrics.center]` 段，默认回环 `127.0.0.1:8790`。
-- `metrics-center-settings.mjs`：中心服务与指标脚本共用的轻量配置解析（命令行参数、
-  `config.toml` 的 `[metrics.center]` 段与默认值），不依赖 Cloudflare 部署文件。
-- `metrics-config-menu.mjs`：数据中心与中心服务设置的交互用例；集中管理本地保留策略、中心接入、
-  上报参数、接入状态和中心监听配置，返回统一 `activationResult` 及自动激活状态
+- `metrics-config-menu.mjs`：本地指标存储设置的交互用例；集中管理保留天数和最大记录数，
+  返回统一 `activationResult` 及自动激活状态
   （`pending`/`applied`），`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
 - `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责收集查询、导出、清理和重置参数，
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
-- `metrics-center-payload.mjs` / `metrics-center-payload.d.mts`：中心服务与历史 Cloudflare
-  Worker 共用的上报载荷校验及类型声明。
-- `metrics-center-schema.sql`：npm 发布包内中心 SQLite 的规范初始化 Schema，子代理标注包含可空
-  `parent_turn_id`；历史 Cloudflare D1 migration 保留部署参考，不作为生产中心运行时依赖。
 - `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“Codex 新会话默认值”
   “模型与提供商”“通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
   登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级；配置写入后的激活结果由
@@ -249,9 +231,8 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
   配置文件中可安全编辑的参数：显示设置（操作详情、计划更新）、系统设置
-  （调试模式、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
-  （本地保留策略、本机接入数据中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
-  `interval_seconds` / `batch_size`、停用本机接入）、
+  （调试模式、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
+  （本地保留天数与最大记录数）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
   配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
@@ -522,10 +503,10 @@
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用，不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
   Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
-  WebUI 与指标中心的专属重启要求继续单独提示。
-- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 launchd 服务；启停、
-  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`center`、`all` 目标，
-  WebUI 与指标中心独立不并入 `all`，
+  WebUI 的专属重启要求继续单独提示。
+- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个当前 launchd 服务；启停、
+  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`all` 目标，
+  WebUI 独立不并入 `all`，
   日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
@@ -536,13 +517,14 @@
   并返回非零状态，查询器故障则失败关闭。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
-- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载四个 systemd 用户服务；
+- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个当前 systemd 用户服务；
   安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
-  与指标中心独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
+  独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
 - `windows-service-control.mjs` / `windows-service-control.d.mts`：读取用户级 Windows 服务定义，
-  通过计划任务控制脚本执行 App Server、Gateway、WebUI 和指标中心的安装、启停、重启、状态、日志
-  与卸载；核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
+  通过计划任务控制脚本执行 App Server、Gateway 和 WebUI 的安装、启停、重启、状态、日志
+  与卸载；
+  核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
 - `windows-service-host.mjs`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
   Node 服务进程，转发控制请求并把标准输出、错误输出写入用户级运行日志。
 - `windows-service-launcher.ps1`：Windows 计划任务调用的 PowerShell 启动器，设置受控环境后

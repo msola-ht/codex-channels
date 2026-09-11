@@ -13,13 +13,6 @@ export function configActivationResult(activation) {
       return result("restart", "gateway", ["codexc service restart gateway"]);
     case "restart-webui":
       return result("restart", "webui", ["codexc service restart webui"]);
-    case "restart-center":
-      return result("restart", "center", ["codexc service restart center"]);
-    case "restart-gateway-webui":
-      return result("restart", "gateway+webui", [
-        "codexc service restart gateway",
-        "codexc service restart webui",
-      ]);
     case "restart-app-server":
       return result("restart", "app-server", ["codexc service restart app-server"]);
     case "restart-all":

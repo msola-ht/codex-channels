@@ -18,8 +18,6 @@ describe("service target query", () => {
       .toBe("codex-connect-gateway.service");
     expect(query("launchd", "webui"))
       .toBe("com.hegenai.codex-webui");
-    expect(query("launchd", "center"))
-      .toBe("com.hegenai.codex-center");
   });
 
   it("rejects an unsupported ordering value", () => {

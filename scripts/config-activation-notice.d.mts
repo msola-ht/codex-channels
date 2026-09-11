@@ -10,8 +10,6 @@ export function writeGatewayConfigActivationNotice(
     | "none"
     | "restart"
     | "restart-webui"
-    | "restart-center"
-    | "restart-gateway-webui"
     | "reinstall"
     | "reinstall-services"
     | ConfigActivationResult,

@@ -6,7 +6,6 @@ import {
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
-  type RemoteQuotaSummary,
   type TurnOutputTiming,
   type TurnTaskMetricsSummary,
 } from "../conversation-core/index.js";
@@ -34,10 +33,6 @@ export interface SurfaceManagerOptions {
     available: boolean,
     outcome?: string,
   ): void;
-  remoteQuota?(
-    provider: string | undefined,
-    resetsAt: number | null | undefined,
-  ): RemoteQuotaSummary | undefined | Promise<RemoteQuotaSummary | undefined>;
   completionTiming?(
     threadId: string,
     turnId: string,
@@ -327,18 +322,10 @@ export class SurfaceManager {
       const sessionAggregate = sessionAggregateResult instanceof Promise
         ? await sessionAggregateResult
         : sessionAggregateResult;
-      const remoteQuotaResult = this.options.remoteQuota?.(
-        event.modelProvider,
-        event.weeklyLimit?.resetsAt,
-      );
-      const remoteQuota = remoteQuotaResult instanceof Promise
-        ? await remoteQuotaResult
-        : remoteQuotaResult;
       routedEvent = {
         ...event,
         gitBranch: this.currentGitBranch?.(event.target),
         ...(timing === undefined ? {} : { timing }),
-        ...(remoteQuota === undefined ? {} : { remoteQuota }),
         ...(taskAggregate === undefined ? {} : { taskAggregate }),
         ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
       };

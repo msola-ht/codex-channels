@@ -9,8 +9,6 @@ export type ConfigActivationTarget =
   | "none"
   | "gateway"
   | "webui"
-  | "center"
-  | "gateway+webui"
   | "app-server"
   | "all"
   | "services"

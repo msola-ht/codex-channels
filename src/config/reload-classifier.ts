@@ -123,11 +123,6 @@ function restartRequiredReasons(
       JSON.stringify(next.apiProviders),
     ],
     [
-      configChange("metrics.sync"),
-      JSON.stringify(current.metricsSync),
-      JSON.stringify(next.metricsSync),
-    ],
-    [
       configChange("metrics.storage"),
       JSON.stringify(current.metricsStorage),
       JSON.stringify(next.metricsStorage),

@@ -214,7 +214,6 @@ function serviceWithQueue(
     undefined,
     queue,
     undefined,
-    undefined,
     options.hasPendingSubagentRuns,
   );
 }

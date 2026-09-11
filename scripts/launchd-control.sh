@@ -28,7 +28,7 @@ show_logs() {
   fi
   runtime_dir="${socket_path:h}"
 
-  if (( $# > 0 )) && [[ "$1" == "gateway" || "$1" == "app-server" || "$1" == "webui" || "$1" == "center" || "$1" == "all" ]]; then
+  if (( $# > 0 )) && [[ "$1" == "gateway" || "$1" == "app-server" || "$1" == "webui" || "$1" == "all" ]]; then
     service="$1"
     shift
   fi
@@ -70,12 +70,6 @@ show_logs() {
     [[ -f "$runtime_dir/webui.log" ]] && log_files+=("$runtime_dir/webui.log")
     if [[ ! -f "$runtime_dir/webui.log" || "$runtime_dir/webui.error.log" -nt "$runtime_dir/webui.log" ]]; then
       [[ -f "$runtime_dir/webui.error.log" ]] && log_files+=("$runtime_dir/webui.error.log")
-    fi
-  fi
-  if [[ "$service" == "center" ]]; then
-    [[ -f "$runtime_dir/center.log" ]] && log_files+=("$runtime_dir/center.log")
-    if [[ ! -f "$runtime_dir/center.log" || "$runtime_dir/center.error.log" -nt "$runtime_dir/center.log" ]]; then
-      [[ -f "$runtime_dir/center.error.log" ]] && log_files+=("$runtime_dir/center.error.log")
     fi
   fi
   if (( ${#log_files[@]} == 0 )); then
@@ -155,10 +149,10 @@ start_job() {
 
 require_target() {
   case "$1" in
-    gateway|app-server|webui|center|all)
+    gateway|app-server|webui|all)
       ;;
     *)
-      print_status failure "服务目标必须是 gateway、app-server、webui、center 或 all：$1"
+      print_status failure "服务目标必须是 gateway、app-server、webui 或 all：$1"
       return 2
       ;;
   esac
@@ -178,7 +172,6 @@ case "$action" in
     done
     print_status note "Codex App Server 与 Gateway 已安装，启动操作已完成，正在确认就绪状态。"
     print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
-    print_status note "指标中心服务已生成，可执行 codexc service start center 启动。"
     ;;
   start)
     reject_unsupported_jobs
@@ -201,7 +194,6 @@ case "$action" in
       gateway) print_status note "Gateway 启动操作已完成，正在确认就绪状态。" ;;
       app-server) print_status note "Codex App Server 启动操作已完成，正在确认就绪状态。" ;;
       webui) print_status success "WebUI 已启动。" ;;
-      center) print_status success "指标中心已启动。" ;;
       all) print_status note "Codex App Server 与 Gateway 启动操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
@@ -225,19 +217,17 @@ case "$action" in
       gateway) print_status success "Gateway 已停止。" ;;
       app-server) print_status success "Codex App Server 已停止。" ;;
       webui) print_status success "WebUI 已停止。" ;;
-      center) print_status success "指标中心已停止。" ;;
       all) print_status success "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
   uninstall)
     core_labels=$(service_ids all stop)
     webui_label=$(service_ids webui stop)
-    center_label=$(service_ids center stop)
-    for label in ${(f)core_labels} "$webui_label" "$center_label"; do
+    for label in ${(f)core_labels} "$webui_label"; do
       stop_job "$label"
       /bin/rm -f "$agents_dir/$label.plist"
     done
-    print_status success "Codex App Server、Gateway、WebUI 与指标中心 launchd 服务已卸载。"
+    print_status success "Codex App Server、Gateway 与 WebUI launchd 服务已卸载。"
     print_status note "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   restart)
@@ -261,7 +251,6 @@ case "$action" in
       gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
       app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
       webui) print_status success "WebUI 已重启。" ;;
-      center) print_status success "指标中心已重启。" ;;
       all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
@@ -298,7 +287,7 @@ case "$action" in
     show_logs "$@"
     ;;
   *)
-    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|center|all]"
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|all]"
     exit 2
     ;;
 esac

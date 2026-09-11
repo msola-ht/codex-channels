@@ -8,7 +8,6 @@ export const managedSettingKinds = new Set([
   "automation.scheduled-tasks",
   "advanced.logging-level",
   "metrics.storage",
-  "metrics.sync-params",
   "webui.port",
   "webui.host",
   "webui.token",
@@ -17,12 +16,6 @@ export const managedSettingKinds = new Set([
   "advanced.plugin-api",
   "network.proxy",
   "network.proxy-batch",
-  "metrics.connect",
-  "metrics.disconnect",
-  "metrics.center.host",
-  "metrics.center.port",
-  "metrics.center.token",
-  "metrics.center.generate-tokens",
   "workspace.permissions",
 ])
 
@@ -31,10 +24,6 @@ export const highRiskManagedSettingKinds = new Set([
   "webui.token",
   "network.proxy",
   "network.proxy-batch",
-  "metrics.connect",
-  "metrics.disconnect",
-  "metrics.center.token",
-  "metrics.center.generate-tokens",
   "workspace.permissions",
 ])
 
@@ -44,7 +33,7 @@ export function isHighRiskManagedSetting(input) {
 
 export function normalizeManagedSetting(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input
-  if ((input.kind === "metrics.storage" || input.kind === "metrics.sync-params" || input.kind === "webui.token")
+  if ((input.kind === "metrics.storage" || input.kind === "webui.token")
     && input.value !== null && typeof input.value === "object" && !Array.isArray(input.value)) {
     return { ...input.value, kind: input.kind }
   }
@@ -76,26 +65,6 @@ export function redactManagedSettings(settings) {
     },
     metrics: {
       storage: settings.metrics.storage,
-      sync: {
-        enabled: settings.metrics.sync.enabled,
-        endpointConfigured: settings.metrics.sync.endpoint !== null,
-        deviceName: settings.metrics.sync.deviceName,
-        deviceTokenConfigured: settings.metrics.sync.deviceTokenConfigured,
-        intervalSeconds: settings.metrics.sync.intervalSeconds,
-        batchSize: settings.metrics.sync.batchSize,
-      },
-      view: {
-        enabled: settings.metrics.view.enabled,
-        endpointConfigured: settings.metrics.view.endpoint !== null,
-        tokenConfigured: settings.metrics.view.tokenConfigured,
-      },
-      center: {
-        enabled: settings.metrics.center.enabled,
-        host: settings.metrics.center.host,
-        port: settings.metrics.center.port,
-        tokenConfigured: settings.metrics.center.tokenConfigured,
-        deviceTokenConfigured: settings.metrics.center.deviceTokenConfigured,
-      },
     },
     webui: {
       host: settings.webui.host,

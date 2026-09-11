@@ -164,7 +164,7 @@ export function validateMetricsCommandArgs(subcommand, args) {
     }
     return;
   }
-  if (subcommand === "upgrade" || subcommand === "sync-reset") {
+  if (subcommand === "upgrade") {
     if (args.length > 1 || (args.length === 1 && args[0] !== "--restart-gateway")) {
       throw new Error(`用法：codexc metrics ${subcommand} [--restart-gateway]`);
     }

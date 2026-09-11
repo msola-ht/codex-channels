@@ -53,13 +53,6 @@ try {
     environment,
     true,
   ).stdout;
-  const centerHelp = run(
-    command,
-    ["center", "-h"],
-    temporaryDirectory,
-    environment,
-    true,
-  ).stdout;
   if (version !== packageReport.version) {
     throw new Error(`CLI 版本不匹配：实际 ${version}，期望 ${packageReport.version}`);
   }
@@ -75,7 +68,6 @@ try {
     "metrics",
     "channel",
     "webui",
-    "center",
     "start",
     "service",
     "update",
@@ -93,8 +85,7 @@ try {
     || !serviceHelp.includes("install")
     || !serviceHelp.includes("reload")
     || !serviceHelp.includes("logs")
-    || !serviceTargetHelp.includes("gateway|app-server|webui|center|all")
-    || !centerHelp.includes("用法：codexc center")
+    || !serviceTargetHelp.includes("gateway|app-server|webui|all")
   ) {
     throw new Error("CLI 分级帮助不完整");
   }
@@ -153,17 +144,13 @@ try {
     "systemd/codex-connect-app-server.service.template",
     "systemd/codex-connect-gateway.service.template",
     "systemd/codex-connect-webui.service.template",
-    "systemd/codex-connect-center.service.template",
     "launchd/com.hegenai.codex-webui.plist.template",
-    "launchd/com.hegenai.codex-center.plist.template",
     "webui/dist/index.html",
     "scripts/install-systemd.mjs",
     "scripts/metrics-database-access.mjs",
     "scripts/metrics-database.mjs",
     "scripts/metrics-menu.d.mts",
     "scripts/metrics-menu.mjs",
-    "scripts/metrics-center-payload.mjs",
-    "scripts/metrics-center-schema.sql",
     "scripts/systemd-control.sh",
     ".codex/skills/channel-image/SKILL.md",
   ]) {

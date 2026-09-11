@@ -20,9 +20,9 @@
 
 ### 状态变化
 
-- 为 App Server、Gateway、WebUI、指标中心生成服务定义。
+- 为 App Server、Gateway 与 WebUI 生成服务定义。
 - 自动停止并重新激活核心服务；安装完成后等待 App Server 和 Gateway 的就绪状态。
-- WebUI 与指标中心只生成定义，不自动启动。
+- WebUI 只生成定义，不自动启动。
 - 不修改用户配置、数据库、凭据或指标记录。
 
 ### 热重载与热重启影响
@@ -32,7 +32,7 @@
 | Gateway 热重载 | 不执行 |
 | Gateway 热重启 | 可能在平台激活阶段发生 |
 | App Server 重启 | 会发生 |
-| WebUI/指标中心 | 仅写入定义，不启动 |
+| WebUI | 仅写入定义，不启动 |
 
 因此该命令不是“重新读取配置”，也不是单纯 Gateway 热重启，而是“服务定义重建 + 核心服务重新启动”。
 
@@ -50,7 +50,7 @@
 
 ### 结论
 
-主流程和“保留用户数据”的边界清楚；安装失败现在会尝试恢复定义和核心运行态，但恢复失败仍需人工处理。该命令明确归类为“安装并启动核心服务”，WebUI/指标中心只生成定义、不随安装启动。
+主流程和“保留用户数据”的边界清楚；安装失败现在会尝试恢复定义和核心运行态，但恢复失败仍需人工处理。该命令明确归类为“安装并启动核心服务”，WebUI 只生成定义、不随安装启动。
 
 ## 记录 02：`codexc service uninstall`
 
@@ -62,7 +62,7 @@
 
 ### 状态变化
 
-- 解析并停止 App Server、Gateway、WebUI、指标中心的受管服务。
+- 解析并停止 App Server、Gateway 与 WebUI 的受管服务。
 - 删除对应服务管理器定义：macOS 删除 LaunchAgent plist，Linux 删除 systemd 用户 unit，Windows 注销计划任务并删除定义文件及生成的 VBS 启动器。
 - 保留 `~/.codex-connect` / `CODEX_CONNECT_HOME` 中的配置、数据库、凭据、日志和其他运行数据。
 - 不删除源码目录、npm 全局命令或旧 Shell PATH；这些属于另一个 `codexc uninstall` 入口的职责。
@@ -74,7 +74,7 @@
 | Gateway 热重载 | 不执行 |
 | Gateway 热重启 | 不执行；会停止 Gateway |
 | App Server 重启 | 不执行；会停止 App Server |
-| WebUI/指标中心 | 停止并移除其服务定义 |
+| WebUI | 停止并移除其服务定义 |
 
 这是不可继续由服务管理器监管的停服操作，不应描述为热重启或配置重载。
 
@@ -101,16 +101,16 @@
 
 ### 入口与参数
 
-- 公开入口：`codexc service start [gateway|app-server|webui|center|all]`，默认目标为 `all`。
+- 公开入口：`codexc service start [gateway|app-server|webui|all]`，默认目标为 `all`。
 - 顶层 CLI 对除卸载、停止、重载、状态和日志外的动作先完成有效 Gateway 配置加载；配置错误会在服务控制前失败关闭。
-- `all` 通过统一服务目标表只解析 App Server 与 Gateway，不包含 WebUI 和指标中心。
+- `all` 通过统一服务目标表只解析 App Server 与 Gateway，不包含 WebUI。
 
 ### 状态变化
 
 - launchd：必要时 bootstrap 未加载的 Job，再 kickstart 目标；核心目标按 App Server → Gateway 的顺序启动。
 - systemd：按目标调用 `systemctl --user start`；核心 `all` 同样只启动 App Server 与 Gateway。
 - Windows：读取受管 JSON 定义，必要时启动计划任务和宿主进程，并按 App Server Socket/监管状态等待。
-- 核心目标启动后，顶层额外等待目标达到稳定就绪；已配置的 WebUI 与启用的指标中心会额外进行有界 HTTP 健康确认。
+- 核心目标启动后，顶层额外等待目标达到稳定就绪；已配置的 WebUI 会额外进行有界 HTTP 健康确认。
 
 ### 热重载与热重启影响
 
@@ -119,7 +119,7 @@
 | `gateway` | 启动 Gateway；App Server 保持原状态；不是热重载 |
 | `app-server` | 启动 App Server；Gateway 不自动启动；不是热重载 |
 | `all` | 启动 App Server 与 Gateway，并等待二者稳定就绪 |
-| `webui` / `center` | 启动独立服务；对已配置/启用的服务等待有界 HTTP 健康状态 |
+| `webui` | 启动独立服务，并等待有界 HTTP 健康状态 |
 
 如果目标已运行，平台行为通常是保持运行（launchd 的 `kickstart -k` 可能重新拉起进程），因此不能把 `start` 解释为纯幂等的“确保运行”或配置重载。
 
@@ -128,26 +128,26 @@
 - 未安装或服务定义缺失时，各平台控制器返回失败；Windows 会明确提示重新执行 `codexc service install`。
 - 核心服务启动后在就绪等待超时，命令返回失败并带状态/日志排查建议；已启动的进程不会由顶层自动回滚或停止。
 - App Server 与 Gateway 分步启动时，前者成功、后者失败会留下部分启动状态；没有统一的部分成功结果对象。
-- WebUI/指标中心启动命令返回成功但进程随后立即退出时，当前命令不会感知，需另行执行 status/logs。
+- WebUI 启动命令返回成功但进程随后立即退出时，当前命令不会感知，需另行执行 status/logs。
 
 ### 测试覆盖
 
 - `tests/launchd-install.test.ts`、`tests/systemd-install.test.ts` 覆盖核心与独立目标的启动调用、目标筛选和基础文案。
 - `tests/local-update.test.ts` 覆盖核心 App Server/Gateway 就绪检查、稳定窗口和超时排查文案。
 - Windows 控制器测试覆盖定义读取和核心启动路径（受平台执行条件限制）。
-- 未覆盖：核心部分成功后的统一结构化结果、WebUI/指标中心真实平台启动后的健康确认、已运行目标重复 start 的跨平台一致语义。
+- 未覆盖：核心部分成功后的统一结构化结果、WebUI 真实平台启动后的健康确认、已运行目标重复 start 的跨平台一致语义。
 
 ### 结论
 
-核心启动路径有较完整的配置校验和稳定就绪等待；目标语义也明确，`all` 不包含独立 WebUI/指标中心属于既有设计。独立服务现在对已配置/启用目标做健康等待；Linux/macOS 已在多目标动作失败时收集失败目标并输出部分失败摘要，Windows 启动也会收集失败目标，但跨平台仍未形成统一 JSON 动作结果和回滚契约。
+核心启动路径有较完整的配置校验和稳定就绪等待；目标语义也明确，`all` 不包含独立 WebUI 属于既有设计。独立服务现在对已配置目标做健康等待；Linux/macOS 已在多目标动作失败时收集失败目标并输出部分失败摘要，Windows 启动也会收集失败目标，但跨平台仍未形成统一 JSON 动作结果和回滚契约。
 
 ## 记录 04：`codexc service stop`
 
 ### 入口与参数
 
-- 公开入口：`codexc service stop [gateway|app-server|webui|center|all]`，默认目标为 `all`。
+- 公开入口：`codexc service stop [gateway|app-server|webui|all]`，默认目标为 `all`。
 - 允许在 Gateway 配置无效或缺失时执行，以便故障状态下仍可停服。
-- `all` 通过服务目标表只解析核心 App Server 与 Gateway，不包含 WebUI/指标中心；独立服务需要显式指定目标。
+- `all` 通过服务目标表只解析核心 App Server 与 Gateway，不包含 WebUI；独立服务需要显式指定目标。
 
 ### 状态变化
 
@@ -163,7 +163,7 @@
 | `gateway` | 停止 Gateway，App Server 保持运行 |
 | `app-server` | 停止 App Server，Gateway 可能失去后端连接 |
 | `all` | 停止 Gateway 与 App Server |
-| `webui` / `center` | 停止对应独立服务 |
+| `webui` | 停止独立服务 |
 
 该命令是明确停服，不属于热重载或热重启；Gateway 停止不应主动终止共享 App Server，只有显式目标包含 App Server 时才停止它。
 
@@ -234,9 +234,9 @@
 
 ### 入口与参数
 
-- 公开入口：`codexc service restart [gateway|app-server|webui|center|all]`，默认目标为 `gateway`。
+- 公开入口：`codexc service restart [gateway|app-server|webui|all]`，默认目标为 `gateway`。
 - 核心目标需要有效 Gateway 配置；服务角色为 `app-server` 时禁止重启 App Server 或包含 App Server 的 `all`，避免渠道内自断连接。
-- 顶层对核心目标（Gateway、App Server、all）执行稳定就绪等待；已配置的 WebUI 与启用的指标中心额外执行有界 HTTP 健康检查。
+- 顶层对核心目标（Gateway、App Server、all）执行稳定就绪等待；已配置的 WebUI 额外执行有界 HTTP 健康检查。
 
 ### 状态变化
 
@@ -252,7 +252,7 @@
 | `gateway` | Gateway 热重启级别的进程替换，App Server 不动 |
 | `app-server` | App Server 重启，Gateway 保持运行并等待重连 |
 | `all` | App Server 与 Gateway 都重启 |
-| `webui` / `center` | 独立服务重启，不属于 Gateway 热重载 |
+| `webui` | 独立服务重启，不属于 Gateway 热重载 |
 
 这是明确的重启命令，不发送配置 HUP，也不重新生成服务定义。
 
@@ -279,7 +279,7 @@
 
 ### 入口与参数
 
-- 公开入口：`codexc service status [gateway|app-server|webui|center|all]`，默认目标为 `all`。
+- 公开入口：`codexc service status [gateway|app-server|webui|all]`，默认目标为 `all`。
 - 支持 `--json`；顶层 JSON 入口改走统一的 `scripts/service-status.mjs`，普通文本输出则直接委派平台控制脚本。
 - 状态查询允许配置缺失或无效，以便诊断服务定义和进程状态。
 
@@ -288,7 +288,7 @@
 - 只读查询，不启动、停止、重启、重载或修改服务定义/用户数据。
 - JSON 结果统一包含 `platform`、`target`、`healthy`、`services[]`，每项包含目标、名称、标识符、`loaded`、`running`、`state` 和 PID。
 - Windows JSON 额外检查宿主控制入口和 App Server Socket；Linux JSON 读取 systemd 的 Load/Active/Sub/MainPID；macOS JSON 读取 launchd Job 状态。
-- 默认 `all` 仍只检查核心 App Server 与 Gateway；WebUI/指标中心必须显式指定。
+- 默认 `all` 仍只检查核心 App Server 与 Gateway；WebUI 必须显式指定。
 
 ### 热重载与热重启影响
 
@@ -300,7 +300,7 @@
 - JSON 模式下，服务缺失通常返回结构化 `loaded=false/running=false/healthy=false`；平台查询工具本身异常才返回错误。
 - 普通文本模式存在平台差异：macOS `launchctl print` 成功即视为已加载，不区分 Job 已加载但进程已停止；Linux `systemctl status` 反映 unit 状态；Windows 文本模式显示任务/宿主状态。
 - 因此 macOS 普通 `status` 可能在进程不运行时返回成功，和 JSON 的 `healthy=false` 不一致。
-- `all` 不含独立服务，用户可能看到核心健康但 WebUI/指标中心未安装或已停止；需要分别查询才能发现。
+- `all` 不含独立 WebUI，用户可能看到核心健康但 WebUI 未安装或已停止；需要单独查询才能发现。
 - 状态查询失败只报告当前平台错误，不提供统一的 `start`/`logs` 操作建议（JSON 消费者也需自行解释）。
 
 ### 测试覆盖
@@ -312,20 +312,20 @@
 
 ### 结论
 
-JSON 状态模型是目前最完整、最适合后续自动化的事实接口；普通文本仍受平台脚本历史行为影响，尤其 macOS 只判断 Job 是否加载，可能把未运行服务显示为正常。多目标动作现在会报告失败目标，但文本和 JSON 仍不是同一动作结果模型；后续应让文本输出复用同一健康模型，并明确 `all` 是核心服务集合还是全部受管服务，避免与用户对 WebUI/指标中心的预期冲突。
+JSON 状态模型是目前最完整、最适合后续自动化的事实接口；普通文本仍受平台脚本历史行为影响，尤其 macOS 只判断 Job 是否加载，可能把未运行服务显示为正常。多目标动作现在会报告失败目标，但文本和 JSON 仍不是同一动作结果模型；后续应让文本输出复用同一健康模型，并明确 `all` 是核心服务集合还是全部受管服务，避免与用户对 WebUI 的预期冲突。
 
 ## 记录 08：`codexc service logs`
 
 ### 入口与参数
 
-- 公开入口：`codexc service logs [gateway|app-server|webui|center|all] [--follow|-f] [--lines|-n <1..10000>]`，默认目标为 `gateway`。
+- 公开入口：`codexc service logs [gateway|app-server|webui|all] [--follow|-f] [--lines|-n <1..10000>]`，默认目标为 `gateway`。
 - 参数在顶层先解析；未知参数、非法行数和多余目标会在读取配置前失败。
-- `all` 通过服务目标表只解析核心 App Server 与 Gateway，不包含 WebUI/指标中心。
+- `all` 通过服务目标表只解析核心 App Server 与 Gateway，不包含 WebUI。
 
 ### 状态变化
 
 - 只读日志，不启动、停止、重启或重载服务。
-- macOS 读取运行目录下 Gateway/App Server/WebUI/指标中心的 stdout 与 error 日志文件；`--follow` 使用 `tail -F`。
+- macOS 读取运行目录下 Gateway/App Server/WebUI 的 stdout 与 error 日志文件；`--follow` 使用 `tail -F`。
 - Linux 读取 systemd 用户 Journal；`--follow` 交给 `journalctl --follow`。
 - Windows 从服务定义中的 stdout/stderr 日志路径读取；跟随模式使用 PowerShell 日志脚本。
 - 默认显示最近 100 行，范围限制为 1–10000 行。
@@ -378,7 +378,7 @@ JSON 状态模型是目前最完整、最适合后续自动化的事实接口；
 
 ### 热重载与热重启影响
 
-- Setup 菜单本身不触发通用热重载或热重启；数据中心 Config 是显式注入服务回调的例外。
+- Setup 菜单本身不触发通用热重载或热重启。
 - 配置写入提示已统一复用 `activationResult`：渠道配置区分 Gateway 重建，Codex 默认值/第三方 Provider 指向 `restart all` 或 `restart app-server`，涉及服务环境的设置要求重新安装服务。
 - 运行中的 Gateway 可能自动重载配置并自行退出，由监管器重启；前台进程需要用户手动重启。Setup 不等待最终生效状态；`--json` 会逐项输出脱敏的结构化激活结果。
 
@@ -404,45 +404,39 @@ Setup 的职责拆分和返回路径清楚，脱敏总览与确认机制符合�
 ### 入口与参数
 
 - 公开入口：`codexc config` 进入日常设置交互菜单；`codexc config --json` 仅输出用户目录、配置路径和文件是否存在。
-- 交互菜单包含配置总览、显示、系统、自动化、网络、高级、WebUI、数据中心、Telegram 格式和路径查看。
+- 交互菜单包含配置总览、显示、系统、自动化、网络、高级、WebUI、指标存储、Telegram 格式和路径查看。
 - 非 TTY 环境不进入交互，直接输出路径并返回；不隐式修改配置。
 
 ### 状态变化
 
 - 各设置子菜单通过 `updateGatewaySetting` 按配置修订号写回 TOML，并由具体模块决定激活方式。
-- “数据中心”同时管理本机上报/查看接入、上报参数、本机保留策略、中心监听、双令牌生成与停用。
-- 中心令牌生成会原子写入新的设备上报令牌和全局查看令牌，并按“先上报、后查看”的顺序输出；旧令牌立即失效。
-- 配置菜单不直接执行通用重启；仅在注入的回调存在时，对中心、Gateway、WebUI 执行对应服务重启。
+- “指标存储”管理本机保留策略。
+- 配置菜单不直接执行通用重启；仅在注入的回调存在时，对 Gateway、WebUI 执行对应服务重启。
 
 ### 热重载与热重启影响
 
 | 设置类别 | 当前激活行为 |
 | --- | --- |
 | Gateway 可热加载项 | 由运行中 Gateway 自动读取 |
-| 本机上报/查看、指标存储、WebUI 相关 | 通常重启 Gateway 和/或 WebUI |
-| 中心监听、中心双令牌、中心数据库 | 重启指标中心 |
+| 指标存储、WebUI 相关 | 通常重启 Gateway 和/或 WebUI |
 | App Server 用户默认值/第三方 Provider | 子菜单提示另行重启 App Server 或全部核心服务 |
-
-中心设置改动在正式 CLI 中会自动调用 `codexc service restart center`；本机接入改动会自动重启 Gateway 与 WebUI。若自动重启失败，配置保留并抛错提示手动命令。
 
 ### 错误路径与恢复
 
-- 配置修订冲突、非法端口/令牌/地址、令牌相同或空值会在写入前拒绝。
-- 中心监听 `0.0.0.0` 时强制要求查看令牌和设备上报令牌；清除令牌前要求先改回回环监听。
-- 自动重启失败不会回滚已写入配置；中心与本机接入菜单返回 `activationState: pending/applied`，失败仍抛出可操作错误并保留手动命令。
+- 配置修订冲突、非法端口、地址或输入值会在写入前拒绝。
 - `config --json` 不是脱敏完整配置导出，只能用于定位路径；Setup 的 `--json` 是交互结果流，不应被误解为配置导出。
 - Config 和 Setup 仍能修改部分相同设置，但底层写入器与激活结果已复用；跨入口确认流程和服务动作结果仍未完全统一。
 
 ### 测试覆盖
 
 - `tests/config-menu.test.ts` 覆盖菜单选择、路径输出和部分设置委派。
-- `tests/metrics-config-menu.test.ts`（及相关指标配置测试）覆盖中心连接、双令牌、生成顺序、校验和自动重启回调。
+- 相关指标配置测试覆盖本地保留参数、校验和激活结果。
 - 各显示、系统、网络、WebUI 子菜单有独立输入与配置写入测试。
 - 未覆盖：自动重启失败后的跨模块统一摘要、Config 与 Setup 的重复入口契约、跨多个设置连续修改的部分成功摘要。
 
 ### 结论
 
-Config 更适合日常运维，数据中心配置已具备双令牌生成、自动重启和有界健康确认；配置菜单现在与写入器共享激活结果，失败时保留配置并返回待生效状态。Setup 已支持 `--json` 结果流，但服务生命周期结果仍需继续统一；不应再复制一套激活语义。
+Config 更适合日常运维；配置菜单现在与写入器共享激活结果。Setup 已支持 `--json` 结果流，但服务生命周期结果仍需继续统一；不应再复制一套激活语义。
 
 ## Setup + Config 联合审查
 
@@ -451,9 +445,8 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 | 配置领域 | Setup | Config | 当前状态 |
 | --- | --- | --- | --- |
 | Gateway 基础/显示/权限 | 首次或跨领域设置 | 日常修改 | 底层激活结果和主要文案已统一；`codexc setup --json` 输出脱敏结构化结果 |
-| 模型与 Provider | OpenAI、第三方 Provider、共享子代理 | 部分运行参数/数据中心关联项 | 主要 Setup 子模块和 `codexc setup --json` 已返回 `activation`/`activationResult`；服务动作仍未统一结构化 |
+| 模型与 Provider | OpenAI、第三方 Provider、共享子代理 | 部分运行参数 | 主要 Setup 子模块和 `codexc setup --json` 已返回 `activation`/`activationResult`；服务动作仍未统一结构化 |
 | 通讯渠道 | 首次配置和恢复 | 日常渠道参数/格式 | Gateway 内部热加载分类已有测试；平台服务最终状态仍未统一返回 |
-| 数据中心 | 由 Setup 进入 Provider/子代理流程 | 本机上报、查看令牌、中心服务、WebUI | 正式 Config 可自动重启并确认；独立 `center config` 仍是保存与重启两个命令 |
 | 项目技能/Workspace | Setup 负责入口 | Config 不负责 | 边界清楚，不应互相复制 |
 
 ### 统一交互结论
@@ -461,12 +454,11 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 1. Setup 应定位为首次安装、跨领域配置和能力发现；Config 应定位为已运行系统的日常调整与状态查看。
 2. 两个入口可以共享底层设置模块和修订校验，但不应各自复制写入、验证、重启判断逻辑。
 3. 每次写入都应返回统一激活结果：`无需处理`、`Gateway 热加载`、`Gateway 重启`、`App Server 重启`、`服务重装`、`下次启动生效`。当前 Config 写入器与 Setup 子模块已返回该对象；公开 Setup 通过 `--json` 以 JSON Lines 暴露，默认交互模式仍只显示中文文本。
-4. 自动重启成功时显示“配置已保存并已生效”；自动重启失败时显示“配置已保存但尚未生效”，同时给出精确恢复命令。当前数据中心菜单已实现，通用多目标服务动作仍缺少统一部分成功摘要。
-5. Setup 和 Config 的文案应统一使用“数据中心”“设备上报令牌”“全局查看令牌”“中心服务”，避免“指标中心/中心/本机接入”在同一流程中交替造成误解。
+4. 自动重启成功时显示“配置已保存并已生效”；自动重启失败时显示“配置已保存但尚未生效”，同时给出精确恢复命令。通用多目标服务动作仍缺少统一部分成功摘要。
 
 ### 暂缓范围
 
-本轮已完成激活结果、重启文案、健康确认和 Setup JSONL 输出收口；跨平台服务动作的统一结构化结果、跨入口事务摘要及数据中心 Schema/历史迁移暂不实施，保留在对应审查记录中作为后续边界。
+本轮已完成激活结果、重启文案、健康确认和 Setup JSONL 输出收口；跨平台服务动作的统一结构化结果与跨入口事务摘要暂不实施，保留在对应审查记录中作为后续边界。
 
 ## 记录 11：`codexc init`
 
@@ -519,7 +511,7 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 ### 热重载与热重启影响
 
 - 不执行热重载；启动后的 Gateway 处于 supervised 模式，配置要求重建连接时由前台编排器自动重启 Gateway。
-- 不会自动安装后台服务，也不会影响已存在的独立 WebUI/指标中心服务。
+- 不会自动安装后台服务，也不会影响已存在的独立 WebUI 服务。
 
 ### 错误路径与恢复
 
@@ -673,7 +665,7 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 ## 记录 22：`codexc metrics` 顶层入口
 
 - 无参数时进入交互菜单，非 TTY 输出帮助；有子命令时先做集中参数校验，再委派只读查询或维护脚本。
-- 查询类：`run`、`turns`、`threads`、`report`、`export`、`quota`；维护类：`status`、`upgrade`、`reset`、`sync-reset`、`cleanup`、`prune`。
+- 查询类：`run`、`turns`、`threads`、`report`、`export`、`quota`；维护类：`status`、`upgrade`、`reset`、`cleanup`、`prune`。
 - 查询不加载服务控制；维护命令按子命令要求停服/备份，`--restart-gateway` 通过专用包装显式改变生命周期。
 - 顶层统一支持 Markdown/JSON/CSV（按子命令约束）和本地日期范围；参数错误在读库前失败。
 - 主要风险：交互菜单的 `cleanup` 默认走 `cleanup-restart`，与命令行默认要求 Gateway 停止的文案不完全一致；维护子命令的服务重启/恢复语义需逐条核对。后续记录 23 起按子命令审查。
@@ -683,25 +675,19 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 - 只读检查指标库路径、是否存在、Schema、兼容性和记录数量；支持稳定 JSON。
 - 不启动/停止 Gateway，不获取写锁以外的维护锁，不修改数据库。
 - 数据库不存在时返回可创建/兼容状态；Schema 不支持或结构缺失时失败关闭。
-- 测试覆盖 JSON、缺失库和错误去重。结论：边界清楚，风险低；后续只需统一状态字段与 WebUI/中心状态文案。
+- 测试覆盖 JSON、缺失库和错误去重。结论：边界清楚，风险低；后续只需统一状态字段与 WebUI 文案。
 
 ## 记录 24：`codexc metrics upgrade`
 
 - 默认要求 Gateway 已停止；逐版本事务升级指标库并创建 `0600` 备份，未知 Schema 失败关闭。
 - `--restart-gateway` 显式停止、升级、再启动 Gateway；启动失败会尝试恢复但不回滚已升级数据库。
-- 不重启 App Server/中心服务。测试覆盖版本链和备份；风险是恢复阶段与 service 生命周期结果未统一。
+- 不重启 App Server。测试覆盖版本链和备份；风险是恢复阶段与 service 生命周期结果未统一。
 
 ## 记录 25：`codexc metrics reset`
 
 - 要求 Gateway 停止且指标 Socket 不可连接；检查点后把旧库重命名为带版本/时间备份，保留数据，下一次启动创建新库。
 - 不自动重启服务；无库时幂等成功。数据库归档成功但后续启动失败不会恢复旧库，需人工回滚。
 - 测试覆盖停止检查、备份和空库；风险低但需统一维护失败提示。
-
-## 记录 26：`codexc metrics sync-reset`
-
-- 备份并清零多端上报水位文件，保留设备 ID；默认要求 Gateway 停止，`--restart-gateway` 才自动停启并重放上报。
-- 不删除本地/中心指标；中心按 `(device_id, local_id)` 覆盖。失败时水位与服务恢复未形成统一事务结果。
-- 测试覆盖水位保留和重启包装；需与 prune/cleanup 共享服务状态契约。
 
 ## 记录 27：`codexc metrics cleanup`
 
@@ -711,7 +697,7 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 
 ## 记录 28：`codexc metrics prune <provider>`
 
-- 严格校验 Provider ID，备份后删除本地与中心库该 Provider 请求；执行前读取 Gateway/中心服务状态，仅对原本运行的服务执行停止与恢复。
+- 严格校验 Provider ID，备份后删除本地指标库中该 Provider 请求；执行前读取 Gateway 状态，仅在原本运行时执行停止与恢复。
 - 原本未运行的服务保持停止，不再因维护命令隐式启动；服务状态无法确认时失败关闭。
 - 失败路径仍尝试恢复原本运行的服务，但不恢复已删除数据；测试覆盖 Provider 校验、备份和“停止状态保持停止”。后续可再统一显式重启选项与生命周期结果。
 
@@ -748,7 +734,6 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 
 - 只读查询 OpenAI/OpenCode Go 历史额度窗口，按真实重置时间归并，支持日期范围和导出格式。
 - 估算使用本地观测请求与额度快照，不触发服务、不改库；缺少额度信息时返回未提供而非猜测。
-- 多设备/多渠道聚合依赖中心上报的 Provider、窗口、设备标识；标识不一致会造成重复卡片。后续需和中心 Schema/设备命名审查一起处理。
 
 ## 记录 35：`codexc channel send-image`
 
@@ -760,15 +745,9 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 ## 记录 36：`codexc webui`
 
 - 启动只读指标 HTTP 服务，监听参数优先命令行/配置，非回环地址必须配置访问令牌；不提供写 API。
-- 读取本地指标库并代理中心全局 API，前端不接触令牌；前台退出清理 HTTP 资源。
+- 只读查询本地指标库；前台退出清理 HTTP 资源。
 - 不触发 Gateway/App Server 重启；作为后台服务时由 `service start/restart webui` 管理。
-- 测试覆盖参数、令牌、API 只读和错误中文化；主要风险是 WebUI 与中心数据时间/设备标识口径需统一。
-
-## 记录 37：`codexc center`
-
-- 启动/配置多设备指标中心；接收 Bearer 上报、按 `(device_id, local_id)` upsert，查询接口使用独立查看令牌。
-- `info/config/upgrade` 分别只读、写配置、升级数据库；配置变更不会由顶层自动重启，`codexc config` 注入回调时才自动重启 center。
-- 非回环监听强制双令牌；错误失败关闭，令牌不输出到 info JSON。主要风险是中心配置写入与服务重启不是统一事务。
+- 测试覆盖参数、令牌、API 只读和错误中文化。
 
 ## 记录 38：`codexc doctor`
 
@@ -791,15 +770,14 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 
 ### 交互
 
-- Setup、Config、`primary-provider`、`opencode-go`、`center config` 存在重复入口，但确认、返回、取消和生效方式不一致。
+- Setup、Config、`primary-provider` 与 `opencode-go` 存在重复入口，但确认、返回、取消和生效方式不一致。
 - 保存后有的模块自动重启，有的只提示命令，有的要求重新安装服务；用户无法在确认前知道会影响哪些进程。
 - 建议统一为“取消不写入；保存显示配置结果；随后显示激活结果；激活失败保留配置并给出恢复命令”。
 - Setup 定位首次和跨领域配置，Config 定位日常修改，独立 CLI 定位脚本化操作；三者共享底层设置，不复制入口语义。
 
 ### 文案
 
-- “指标中心/数据中心/中心服务”“设备名/显示名称/上报名”“查看令牌/全局查看令牌”“已保存/已生效/已就绪”存在混用。
-- 统一使用：数据中心、中心服务、设备名称、设备 ID、设备上报令牌、全局查看令牌、配置已保存、配置已生效、服务已就绪。
+- “已保存/已生效/已就绪”存在混用；应统一使用“配置已保存”“配置已生效”和“服务已就绪”。
 - 所有配置修改统一输出：`配置`、`生效`、`操作` 三行；不再混用“请重启”“启动操作已完成”等无法判断健康状态的文案。
 - “已启动”只代表进程启动，“已就绪”必须代表健康检查通过；“配置已保存”不代表“配置已生效”。
 
@@ -811,13 +789,13 @@ Config 更适合日常运维，数据中心配置已具备双令牌生成、自�
 
 ### 耦合
 
-- Config 菜单直接持有 Gateway/WebUI/Center 重启回调，配置交互层耦合服务生命周期；菜单应只返回配置变更与激活需求。
-- metrics 维护脚本直接控制 Gateway/Center，导致 `prune` 无条件启动原本未运行的服务；服务停启应移到应用层并恢复原状态。
+- Config 菜单直接持有 Gateway/WebUI 重启回调，配置交互层耦合服务生命周期；菜单应只返回配置变更与激活需求。
+- metrics 维护脚本直接控制 Gateway；服务停启应移到应用层并恢复原状态。
 - 顶层 CLI、平台脚本和 Windows 状态检查重复判断 running/healthy；应由服务生命周期端口返回统一状态。
-- WebUI、中心 API、CLI 各自解释 Provider、设备、窗口和周期；应由查询层生成统一 DTO，展示层只负责渲染。
+- WebUI 与 CLI 各自解释 Provider、账户、窗口和周期；应由查询层生成统一 DTO，展示层只负责渲染。
 
 ### 收敛方案
 
-只新增三个共享边界：`activation-result`（配置激活结果）、`service-lifecycle`（服务状态/原状态恢复/健康确认）、`metrics-dimension`（Provider/账户/窗口/设备/周期）。不引入大型框架，不改变现有公开命令名称。
+只新增三个共享边界：`activation-result`（配置激活结果）、`service-lifecycle`（服务状态/原状态恢复/健康确认）、`metrics-dimension`（Provider/账户/窗口/周期）。不引入大型框架，不改变现有公开命令名称。
 
 修复顺序固定为：先解除服务生命周期耦合，再统一 Setup/Config 激活结果和文案，然后规范指标维度和额度聚合，最后收敛入口帮助与文档。这样可避免先改 UI 后因状态模型变化返工。

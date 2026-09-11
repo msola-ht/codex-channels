@@ -239,15 +239,6 @@ export interface SettingsSummaryResponse {
     webui: { host: string; port: number; tokenConfigured: boolean }
     metrics: {
       storage: { retentionDays: number; maxRows: number }
-      sync: { enabled: boolean; endpointConfigured: boolean; deviceName: string | null; deviceTokenConfigured: boolean }
-      view: { enabled: boolean; endpointConfigured: boolean; tokenConfigured: boolean }
-      center: {
-        enabled: boolean
-        host: string
-        port: number
-        tokenConfigured: boolean
-        deviceTokenConfigured: boolean
-      }
     }
     channels: Array<{ id: "telegram" | "feishu" | "weixin"; displayName: string; configured: true; enabled: boolean }>
   }
@@ -268,7 +259,7 @@ export interface SettingsSummaryResponse {
 }
 
 export interface ManagementServiceEntry {
-  target: "gateway" | "app-server" | "webui" | "center"
+  target: "gateway" | "app-server" | "webui"
   name: string
   identifier: string | null
   loaded: boolean
@@ -327,9 +318,6 @@ export interface ManagementSettingsResponse {
   network: Pick<SettingsSummaryResponse["gateway"]["network"], "configuredFields">
   metrics: {
     storage: SettingsSummaryResponse["gateway"]["metrics"]["storage"]
-    sync: Pick<SettingsSummaryResponse["gateway"]["metrics"]["sync"], "enabled" | "endpointConfigured" | "deviceName" | "deviceTokenConfigured"> & { intervalSeconds: number; batchSize: number }
-    view: Pick<SettingsSummaryResponse["gateway"]["metrics"]["view"], "enabled" | "endpointConfigured" | "tokenConfigured">
-    center: Pick<SettingsSummaryResponse["gateway"]["metrics"]["center"], "enabled" | "host" | "port" | "tokenConfigured" | "deviceTokenConfigured">
   }
   webui: Pick<SettingsSummaryResponse["gateway"]["webui"], "host" | "port" | "tokenConfigured">
   channels: SettingsSummaryResponse["gateway"]["channels"]
@@ -404,8 +392,8 @@ export type ManagementTaskInput =
   | { operation: "update"; action?: "source" }
   | { operation: "service"; action: "install" | "uninstall" }
   | { operation: "service"; action: "reload" }
-  | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "center" | "all" }
-  | { operation: "metrics"; action: "upgrade" | "sync-reset" | "cleanup" | "reset" }
+  | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "all" }
+  | { operation: "metrics"; action: "upgrade" | "cleanup" | "reset" }
   | { operation: "metrics"; action: "prune"; target: string }
 
 export interface ManagementTaskPreview {
@@ -774,123 +762,4 @@ export interface OfficialAccountSnapshot {
 export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
-}
-
-export interface GlobalTotals {
-  device_count: number
-  request_count: number
-  subagent_count: number
-  input_tokens: number
-  cached_input_tokens: number
-  output_tokens: number
-  reasoning_output_tokens: number
-  total_tokens: number
-  last_recorded_at_ms: number | null
-}
-
-export interface GlobalProviderRow {
-  provider: string | null
-  provider_display_name?: string | null
-  provider_email?: string | null
-  provider_phone?: string | null
-  request_count: number
-  input_tokens: number
-  output_tokens: number
-  total_tokens: number
-  models?: GlobalProviderModelRow[]
-}
-
-export interface GlobalProviderModelRow {
-  model: string | null
-  request_count: number
-  input_tokens: number
-  output_tokens: number
-  total_tokens: number
-}
-
-export interface GlobalOverviewResponse {
-  totals: GlobalTotals | null
-  providers: GlobalProviderRow[]
-}
-
-export interface GlobalDeviceRow {
-  device_id: string
-  display_name: string
-  first_seen_at_ms: number
-  last_seen_at_ms: number
-  last_ingested_at_ms: number | null
-  request_count: number
-  total_tokens: number
-  subagent_count: number
-}
-
-export interface GlobalDevicesResponse {
-  devices: GlobalDeviceRow[]
-}
-
-export interface GlobalDailyRow {
-  day: string
-  request_count: number
-  input_tokens: number
-  cached_input_tokens: number
-  output_tokens: number
-  reasoning_output_tokens: number
-  total_tokens: number
-}
-
-export interface GlobalDailyResponse {
-  daily: GlobalDailyRow[]
-}
-
-export interface GlobalQuotaPeriod {
-  provider: string
-  providerDisplayName?: string | null
-  windowId: string
-  resetsAt: number
-  /** 根据额度窗口推导的周期起点；无法识别窗口长度时为 null。 */
-  periodStartAtMs: number | null
-  /** 当前周期为计划重置时刻；历史周期提前重置时为下一周期的真实起点。 */
-  periodEndAtMs: number
-  /** 本地指标首次观测到该周期的时刻，不参与周期边界展示。 */
-  firstObservedAtMs: number
-  /** 本地指标最后观测到该周期的时刻。 */
-  lastObservedAtMs: number
-  deviceCount: number
-  requestCount: number
-  unsuccessfulRequestCount: number
-  inputTokens: number
-  outputTokens: number
-  totalTokens: number
-  latestUsedPercentMillionths: number | null
-  observedDeltaPercentMillionths: number
-  tokensPerPercent: number | null
-  /** 按观测到的额度增量外推到 100% 的估算值。 */
-  estimatedTotalTokens: number | null
-}
-
-export interface GlobalQuotaResponse {
-  days: number | "all"
-  generatedAt: string
-  periods: GlobalQuotaPeriod[]
-}
-
-export interface GlobalRequestRow {
-  device_id: string
-  local_id: number
-  recorded_at_ms: number
-  provider: string | null
-  model: string | null
-  status: string | null
-  operation: string | null
-  input_tokens: number | null
-  cached_input_tokens: number | null
-  output_tokens: number | null
-  reasoning_output_tokens: number | null
-  total_tokens: number | null
-  cache_hit_rate: number | null
-}
-
-export interface GlobalRequestsResponse {
-  requests: GlobalRequestRow[]
-  total: number
 }

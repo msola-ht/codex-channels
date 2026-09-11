@@ -8,7 +8,7 @@ if (
   || target === undefined
 ) {
   throw new Error(
-    "用法：service-target-query.mjs <systemd|launchd> <gateway|app-server|webui|center|all> [start|stop]",
+    "用法：service-target-query.mjs <systemd|launchd> <gateway|app-server|webui|all> [start|stop]",
   );
 }
 const identifiers = serviceIdentifiers(platform, target, order);

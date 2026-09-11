@@ -23,7 +23,7 @@ codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Serve
 默认账户）都拥有独立的 0600 私有 Profile
 `~/.codex/sf-ocg-<accountId>.config.toml`。默认账户只由注册表的 `default: true` 标记决定，不使用
 固定的 `main` ID；Key 只进入该 Profile 与对应 App Server 子进程环境，
-不进入注册表、配置或日志。添加账户时必须输入邮箱或手机号码（二选一）；联系方式只用于展示和上传数据中心，不参与 CLI Provider 路由。模型目录与管理标记共享
+不进入注册表、配置或日志。添加账户时必须输入邮箱或手机号码（二选一）；联系方式只用于本机展示，不参与 CLI Provider 路由。模型目录与管理标记共享
 `~/.codex-connect/providers/opencode-go/`。首个账户也可通过 Setup 选择保留 OpenAI 默认的
 切换模式，或让原生 Codex 和 Gateway 默认使用 OpenCode Go 的固定模式；固定模式会先备份再修改
 `~/.codex/config.toml`。如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
@@ -102,9 +102,7 @@ OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go
 响应无效时明确显示查询失败，不回退或缓存；本地 Token 只按本机指标库重算，不是官方
 账单，指标库不可用或没有本地请求时该段不展示。Thread Token、请求速度和本机请求指标仍正常记录；
 WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口（每个已配置账户一张卡），不展示
-本地 Token 明细。OpenCode Go 启动卡片会把指标中心当前周期的 5小时、7天、30天三个窗口分块展示；
-Turn 完成通知展示额度中心已有的周期，5 小时窗口尚未同步时使用最近官方账户快照补齐；
-官方用量接口或本地指标不可用时自动省略。
+本地 Token 明细。官方用量接口或本地指标不可用时，对应信息自动省略。
 
 ### 能力边界
 

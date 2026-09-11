@@ -156,13 +156,10 @@ if (document) {
     join(dirname(stateDatabasePath), "channel-outbox"),
   );
   const webui = table(document.webui);
-  const metricsCenter = table(table(document.metrics).center);
   note(
     "配置内访问令牌",
     [
       `WebUI ${stringValue(webui.token) ? "已配置" : "未配置"}`,
-      `指标中心查看令牌 ${stringValue(metricsCenter.token) ? "已配置" : "未配置"}`,
-      `设备令牌 ${stringValue(metricsCenter.device_token) ? "已配置" : "未配置"}`,
       "内容已隐藏并由配置文件私有权限保护",
     ].join("；"),
   );

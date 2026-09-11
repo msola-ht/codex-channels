@@ -8,8 +8,6 @@ import { afterEach, describe, expect, it } from "vitest";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createWebuiServer, resolveWebuiSettings } from "../scripts/webui-server.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
-// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { createMetricsCenterServer } from "../scripts/metrics-center-server.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
 import { loadGatewaySettings } from "../scripts/config-management.mjs";
@@ -69,113 +67,6 @@ describe("webui server", () => {
     });
     expect(authorized.status).toBe(200);
     expect(await authorized.json()).toEqual({ ok: true, service: "webui" });
-  });
-
-  it("returns 503 for global APIs when the center service is disabled", async () => {
-    const fixture = createFixture();
-    const { origin } = await startServer(fixture.environment);
-
-    const response = await fetch(`${origin}/api/v1/global/overview`);
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({
-      error: { code: "metrics_view_unavailable" },
-    });
-  });
-
-  it("proxies global metrics from the center service", async () => {
-    const fixture = createFixture();
-    const center = createMetricsCenterServer({
-      host: "127.0.0.1",
-      token: "center-token",
-      deviceToken: "device-token",
-      databasePath: join(fixture.home, "data", "central-metrics.sqlite3"),
-    });
-    await new Promise<void>((resolve) => {
-      center.server.listen(0, "127.0.0.1", resolve);
-    });
-    servers.push(center);
-    const { port } = center.server.address() as AddressInfo;
-
-    const configPath = join(fixture.home, "config.toml");
-    const document = readGatewayConfig(configPath);
-    document.metrics = {
-      sync: { enabled: false, batch_size: 200, interval_seconds: 60 },
-      view: {
-        enabled: true,
-        endpoint: `http://127.0.0.1:${port}`,
-        token: "center-token",
-      },
-    };
-    writeGatewayConfig(configPath, document);
-
-    const ingest = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer device-token",
-      },
-      body: JSON.stringify({
-        deviceId: "device-a",
-        requestMetrics: [{
-          localId: 1,
-          provider: "ocg-main",
-          model: "deepseek-v4-flash",
-          status: "completed",
-          inputTokens: 1_000,
-          outputTokens: 100,
-          totalTokens: 1_100,
-          weeklyQuota: {
-            limitId: "codex",
-            usedPercentMillionths: 10_000_000,
-            resetsAt: 1_800_000_000,
-          },
-          // Keep the fixture inside the requested 30-day window regardless
-          // of when the test suite is executed.
-          recordedAtMs: Date.now() - 86_400_000,
-        }],
-        subagentThreads: [],
-        providerIdentities: [{
-          provider: "ocg-main",
-          displayName: "ocg-user@example.com",
-          email: "user@example.com",
-        }],
-      }),
-    });
-    expect(ingest.status).toBe(200);
-
-    const { origin } = await startServer(fixture.environment);
-    const overview = await fetch(`${origin}/api/v1/global/overview`);
-
-    expect(overview.status).toBe(200);
-    const body = await overview.json() as {
-      totals: { request_count: number };
-      providers: Array<{ provider: string; provider_display_name: string }>;
-    };
-    expect(body.totals.request_count).toBe(1);
-    expect(body.providers).toEqual([
-      expect.objectContaining({
-        provider: "ocg-main",
-        provider_display_name: "ocg-user@example.com",
-      }),
-    ]);
-
-    const daily = await fetch(`${origin}/api/v1/global/daily?days=30`);
-    expect(daily.status).toBe(200);
-    const dailyBody = await daily.json() as {
-      daily: Array<{ request_count: number }>;
-    };
-    expect(dailyBody.daily.reduce((sum, row) => sum + row.request_count, 0)).toBe(1);
-
-    const quota = await fetch(`${origin}/api/v1/global/quota?days=365`);
-    expect(quota.status).toBe(200);
-    expect(await quota.json()).toMatchObject({
-      periods: [expect.objectContaining({
-        provider: "ocg-main",
-        providerDisplayName: "ocg-user@example.com",
-        windowId: "codex",
-      })],
-    });
   });
 
   it("serves the static page and rejects unknown paths", async () => {
@@ -268,13 +159,6 @@ describe("webui server", () => {
     const document = readGatewayConfig(configPath);
     document.webui = { token: "webui-secret" };
     document.network = { https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" };
-    document.metrics = {
-      view: {
-        enabled: true,
-        endpoint: "https://metrics.example.com/private-path",
-        token: "metrics-secret",
-      },
-    };
     writeGatewayConfig(configPath, document);
     const { origin } = await startServer(fixture.environment);
 
@@ -285,7 +169,7 @@ describe("webui server", () => {
       gateway: {
         webui: { tokenConfigured: boolean };
         network: { configuredFields: string[] };
-        metrics: { view: { endpointConfigured: boolean; tokenConfigured: boolean } };
+        metrics: { storage: { retentionDays: number; maxRows: number } };
       };
       services: { available: boolean; entries: Array<{ target: string }> };
       cli: Array<{ command: string }>;
@@ -294,23 +178,19 @@ describe("webui server", () => {
     expect(body.gateway).toMatchObject({
       webui: { tokenConfigured: true },
       network: { configuredFields: ["https_proxy"] },
-      metrics: { view: { endpointConfigured: true, tokenConfigured: true } },
+      metrics: { storage: { retentionDays: 365, maxRows: 1_000_000 } },
     });
     expect(body.services.entries).toBeInstanceOf(Array);
     expect(new Set(body.services.entries.map((entry) => entry.target))).toEqual(new Set([
       "app-server",
       "gateway",
       "webui",
-      "center",
     ]));
     expect(body.cli.map((entry) => entry.command)).toContain("codexc service status all");
     expect(body.cli.map((entry) => entry.command)).toContain("codexc service status webui");
-    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status center");
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("webui-secret");
     expect(serialized).not.toContain("proxy-secret");
-    expect(serialized).not.toContain("metrics-secret");
-    expect(serialized).not.toContain("private-path");
     expect(serialized).not.toContain(configPath);
   });
 
@@ -330,9 +210,9 @@ describe("webui server", () => {
       available: boolean;
       entries: Array<{ target: string; version: string | null; recentError: { message: string } | null }>;
     };
-    expect(body.entries).toHaveLength(4);
+    expect(body.entries).toHaveLength(3);
     expect(body.entries.map((entry) => entry.target)).toEqual([
-      "app-server", "gateway", "webui", "center",
+      "app-server", "gateway", "webui",
     ]);
     expect(body.entries.every((entry) => entry.version !== null)).toBe(true);
     expect(body.entries.find((entry) => entry.target === "gateway")?.version).toBe("0.153.4");
@@ -762,7 +642,7 @@ describe("webui server", () => {
     const response = await fetch(`${origin}/api/v1/management/settings/preview`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ revision: current.revision, setting: { kind: "metrics.center.database-path", value: "/tmp/redirected.sqlite3" } }),
+      body: JSON.stringify({ revision: current.revision, setting: { kind: "metrics.storage.database-path", value: "/tmp/redirected.sqlite3" } }),
     });
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "setting_not_allowed" } });
@@ -815,9 +695,7 @@ describe("webui server", () => {
       network: { configuredFields: string[] };
       webui: { host: string; port: number; tokenConfigured: boolean };
       metrics: {
-        sync: { intervalSeconds: number; batchSize: number; deviceTokenConfigured: boolean };
-        view: { tokenConfigured: boolean };
-        center: { tokenConfigured: boolean; deviceTokenConfigured: boolean };
+        storage: { retentionDays: number; maxRows: number };
       };
       channels: unknown[];
     };
@@ -826,9 +704,7 @@ describe("webui server", () => {
       network: { configuredFields: ["https_proxy"] },
       webui: { host: "127.0.0.1", port: 8787, tokenConfigured: true },
       metrics: {
-        sync: { intervalSeconds: 60, batchSize: 200, deviceTokenConfigured: false },
-        view: { tokenConfigured: false },
-        center: { tokenConfigured: false, deviceTokenConfigured: false },
+        storage: { retentionDays: 365, maxRows: 1_000_000 },
       },
       channels: expect.any(Array),
     });
@@ -848,7 +724,6 @@ describe("webui server", () => {
       revision: string;
       metrics: {
         storage: { retentionDays: number; maxRows: number };
-        sync: { intervalSeconds: number; batchSize: number };
       };
     };
     const retentionDays = current.metrics.storage.retentionDays === 30 ? 90 : 30;
@@ -870,53 +745,6 @@ describe("webui server", () => {
     expect(preview.status).toBe(200);
     expect(await preview.json()).toMatchObject({ value: { storage: { retentionDays } } });
 
-    const intervalSeconds = current.metrics.sync.intervalSeconds === 60 ? 300 : 60;
-    const update = await fetch(`${origin}/api/v1/management/settings`, {
-      method: "PATCH",
-      headers: {
-        origin: managementOrigin,
-        authorization: "Bearer webui-token",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        revision: current.revision,
-        setting: {
-          kind: "metrics.sync-params",
-          value: { intervalSeconds, batchSize: current.metrics.sync.batchSize, deviceName: "build-server" },
-        },
-      }),
-    });
-    expect(update.status).toBe(200);
-    expect(loadGatewaySettings(fixture.environment).metrics.sync.intervalSeconds).toBe(intervalSeconds);
-    expect(loadGatewaySettings(fixture.environment).metrics.sync.deviceName).toBe("build-server");
-  });
-
-  it("writes the metrics center port through the WebUI settings endpoint", async () => {
-    const fixture = createFixture();
-    const managementOrigin = "http://127.0.0.1:0";
-    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
-    const settings = await fetch(`${origin}/api/v1/management/settings`, {
-      headers: { origin: managementOrigin, authorization: "Bearer webui-token" },
-    });
-    const current = await settings.json() as {
-      revision: string;
-      metrics: { center: { port: number } };
-    };
-    const nextPort = current.metrics.center.port === 9_001 ? 9_002 : 9_001;
-    const update = await fetch(`${origin}/api/v1/management/settings`, {
-      method: "PATCH",
-      headers: {
-        origin: managementOrigin,
-        authorization: "Bearer webui-token",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        revision: current.revision,
-        setting: { kind: "metrics.center.port", value: nextPort },
-      }),
-    });
-    expect(update.status).toBe(200);
-    expect(loadGatewaySettings(fixture.environment).metrics.center.port).toBe(nextPort);
   });
 
   it("does not expose a second management login and reports missing WebUI auth", async () => {

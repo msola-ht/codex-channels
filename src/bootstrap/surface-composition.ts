@@ -142,24 +142,23 @@ function createWeixinModule(
         access,
         config.accountId,
       ),
-      text: async (target) => {
+      text: (target) => {
         const status = options.service.status(target, { includeGitBranch: true });
-        return renderWeixinStartupNotification(
+        return Promise.resolve(renderWeixinStartupNotification(
           options.config.workspaces,
           status,
           {
-          platform: process.platform,
-          architecture: process.arch,
-          gatewayVersion: options.gatewayVersion,
-          nodeVersion: process.version,
-          transport: "Unix WebSocket",
-          codexUpstreamUserAgent:
-            options.codexUpstreamUserAgent() ?? null,
-          openAiConnectivity: options.openAiConnectivity(),
+            platform: process.platform,
+            architecture: process.arch,
+            gatewayVersion: options.gatewayVersion,
+            nodeVersion: process.version,
+            transport: "Unix WebSocket",
+            codexUpstreamUserAgent:
+              options.codexUpstreamUserAgent() ?? null,
+            openAiConnectivity: options.openAiConnectivity(),
             debugEnabled: isDebugLogLevel(options.config.logLevel),
           },
-          await options.remoteQuota?.(status.modelProvider, status.weeklyLimit?.resetsAt),
-        );
+        ));
       },
     },
     operationUpdateDisplay: options.config.operationUpdateDisplay,
@@ -167,7 +166,6 @@ function createWeixinModule(
     reasoningEnabled: options.config.reasoningEnabled,
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     autoCompactPercent: options.autoCompactPercent,
-    ...(options.remoteQuota === undefined ? {} : { remoteQuota: options.remoteQuota }),
     fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
@@ -241,11 +239,11 @@ function createFeishuModule(
       config.appId,
     ),
     startupNotification: {
-      messages: async () => Promise.all(authorizedFeishuConversations(
+      messages: () => Promise.resolve(authorizedFeishuConversations(
         options.bindings,
         access,
         config.appId,
-      ).map(async (chatId) => {
+      ).map((chatId) => {
         const status = options.service.status(
           {
             surface: "feishu",
@@ -270,7 +268,6 @@ function createFeishuModule(
               openAiConnectivity: options.openAiConnectivity(),
               debugEnabled: isDebugLogLevel(options.config.logLevel),
             },
-            await options.remoteQuota?.(status.modelProvider, status.weeklyLimit?.resetsAt),
           ),
         };
       })),
@@ -338,7 +335,6 @@ function createTelegramModule(
     debugEnabled: isDebugLogLevel(config.logLevel),
     autoCompactPercent: options.autoCompactPercent,
     gatewayVersion: options.gatewayVersion,
-    ...(options.remoteQuota === undefined ? {} : { remoteQuota: options.remoteQuota }),
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
     openAiConnectivity: options.openAiConnectivity,
   });
