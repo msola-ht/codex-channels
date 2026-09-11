@@ -10,6 +10,7 @@ import {
   readConfigEvents,
   type WorkspaceAddedConfigEvent,
 } from "../../runtime/config-event-queue.mjs";
+import { GatewayAccountRefreshServer } from "../../runtime/gateway-account-refresh.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { createLogger } from "../observability/index.js";
@@ -52,6 +53,10 @@ export async function runGatewayProcess(): Promise<void> {
     await gatewayOwner.close();
     throw error;
   }
+  const accountRefresh = new GatewayAccountRefreshServer(
+    runtime.configPath,
+    (provider) => application.refreshAccountSnapshot(provider),
+  );
   let stopping = false;
   let started = false;
   let reloading = false;
@@ -89,8 +94,10 @@ export async function runGatewayProcess(): Promise<void> {
     stopping = true;
     gatewayOwner.markNotReady();
     stopWatching();
-    void application
-      .stop()
+    void accountRefresh
+      .close()
+      .catch((error) => logger.error({ err: error }, "Gateway 账户刷新 IPC 关闭失败"))
+      .then(() => application.stop())
       .catch((error) => logger.error({ err: error }, "Gateway 停止失败"))
       .finally(async () => {
         try {
@@ -203,8 +210,11 @@ export async function runGatewayProcess(): Promise<void> {
 
   try {
     await application.start();
+    await accountRefresh.start();
   } catch (error) {
     stopWatching();
+    await accountRefresh.close().catch(() => undefined);
+    await application.stop().catch(() => undefined);
     await gatewayOwner.close();
     throw error;
   }

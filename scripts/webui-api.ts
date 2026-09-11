@@ -725,6 +725,7 @@ export interface DeepseekBalance {
 
 export interface DeepseekBalanceResponse {
   available: boolean
+  observedAtMs: number
   balances: DeepseekBalance[]
 }
 
@@ -739,10 +740,12 @@ export interface OpencodeGoQuotaWindow {
 }
 
 export interface OpencodeGoAccountUsage {
+  provider: string
   account: string
   displayName: string
   default: boolean
   available: boolean
+  observedAtMs: number
   windows: OpencodeGoQuotaWindow[]
 }
 
@@ -753,6 +756,8 @@ export interface OpencodeGoUsageResponse {
 export interface OfficialAccountSnapshot {
   provider: string
   accountId: string | null
+  displayName: string
+  default: boolean
   observedAtMs: number
   available: boolean
   usage: unknown
@@ -762,4 +767,9 @@ export interface OfficialAccountSnapshot {
 export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
+  warnings: Array<{
+    source: "opencode-go"
+    code: "registry_unavailable"
+    message: string
+  }>
 }

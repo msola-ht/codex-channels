@@ -139,7 +139,8 @@
 - Provider 账户能力的编译期唯一注册、未知 Provider 不回退、OpenAI Token 用量与单桶/多桶额度
   到稳定 Application 摘要的映射、重置券数量，以及 DeepSeek 私有配置读取、统一代理、官方余额
   Schema 裁剪、响应上限和错误脱敏；Thread Token/上下文对 Provider 通用，OpenAI Fast 与周限
-  不进入 DeepSeek 状态或完成卡片；OpenCode Go 配额窗口快照按未来最早重置缓存，上游返回已过期
+  不进入 DeepSeek 状态或完成卡片；WebUI 通过私有 Gateway IPC 按 Provider 刷新统一快照，失败
+  保留最后一次有效值且不暴露旧的 WebUI 直连入口；OpenCode Go 配额窗口快照按未来最早重置缓存，上游返回已过期
   重置时间时短时退避，避免逐请求查询 usage 接口。
 - OpenCode Go 的账户注册表与旧版单账户迁移、账户 CLI（add/list/remove/default/stop）及不含凭据的 JSON 列表、切换/固定
   Setup、同名模型按 Provider 独立选择、按需 App Server 启动、共享统计代理的 `/go/<账户>` 前缀

@@ -39,6 +39,9 @@ export function ConsolePage() {
         balance={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
         freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
+        refreshingProvider={officialAccounts.refreshingProvider}
+        accountError={officialAccounts.refreshError ?? officialAccounts.error ?? officialAccounts.data?.warning ?? null}
+        onRefresh={(provider) => void officialAccounts.refresh(provider)}
       />
     </div>
   )
@@ -79,11 +82,17 @@ function AccountStatusCards({
   balance,
   opencodeGoUsage,
   freshness,
+  refreshingProvider,
+  accountError,
+  onRefresh,
 }: {
   overview: ReturnType<typeof useOverview>["data"]
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
   freshness: { deepseek: AccountSnapshotFreshness; opencodeGo: AccountSnapshotFreshness }
+  refreshingProvider: string | null
+  accountError: string | null
+  onRefresh: (provider: string) => void
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -99,13 +108,28 @@ function AccountStatusCards({
         />
         <div className="flex flex-col gap-2">
           <FreshnessNotice provider="DS" status={freshness.deepseek} />
-          <DeepseekBalanceCard available={balance?.available ?? false} balances={balance?.balances ?? []} />
+          <DeepseekBalanceCard
+            available={balance?.available ?? false}
+            observedAtMs={balance?.observedAtMs ?? 0}
+            balances={balance?.balances ?? []}
+            refreshing={refreshingProvider === "deepseek"}
+            refreshDisabled={refreshingProvider !== null}
+            onRefresh={() => onRefresh("deepseek")}
+          />
         </div>
         <div className="flex flex-col gap-2">
-          <FreshnessNotice provider="OCG" status={freshness.opencodeGo} />
-          <OpencodeGoUsageCard accounts={opencodeGoUsage?.accounts ?? []} />
+          {opencodeGoUsage !== null && opencodeGoUsage.accounts.length > 0
+            ? <FreshnessNotice provider="OCG" status={freshness.opencodeGo} />
+            : null}
+          <OpencodeGoUsageCard
+            accounts={opencodeGoUsage?.accounts ?? []}
+            refreshingProvider={refreshingProvider}
+            refreshDisabled={refreshingProvider !== null}
+            onRefresh={onRefresh}
+          />
         </div>
       </div>
+      <ErrorBanner error={accountError} />
     </div>
   )
 }
@@ -123,7 +147,7 @@ function FreshnessNotice({
       <AlertTitle>{provider} 账户快照需要刷新</AlertTitle>
       <AlertDescription>
         {status === "missing" ? "尚未获取到账户快照。" : "本地快照已超过 15 分钟。"}
-        请在对应渠道执行 /usage 或 /limits 后刷新本页面。
+        可使用账户卡片上的刷新按钮实时查询。
       </AlertDescription>
     </Alert>
   )

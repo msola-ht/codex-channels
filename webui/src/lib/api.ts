@@ -1,7 +1,5 @@
 import type {
-  DeepseekBalanceResponse,
   ErrorsResponse,
-  OpencodeGoUsageResponse,
   OfficialAccountSnapshotsResponse,
   OverviewResponse,
   RangeName,
@@ -316,26 +314,18 @@ export function applyManagementAccountSettings(
   }, signal)
 }
 
-export function fetchDeepseekBalance(
-  signal?: AbortSignal,
-): Promise<DeepseekBalanceResponse> {
-  return getJson<DeepseekBalanceResponse>(
-    `${API_PREFIX}/deepseek-balance`,
-    signal,
-  )
-}
-
-export function fetchOpencodeGoUsage(
-  signal?: AbortSignal,
-): Promise<OpencodeGoUsageResponse> {
-  return getJson<OpencodeGoUsageResponse>(
-    `${API_PREFIX}/opencode-go-usage`,
-    signal,
-  )
-}
-
 export function fetchOfficialAccountSnapshots(
   signal?: AbortSignal,
 ): Promise<OfficialAccountSnapshotsResponse> {
   return getJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
+}
+
+export function refreshOfficialAccountSnapshot(
+  provider: string,
+  signal?: AbortSignal,
+): Promise<OfficialAccountSnapshotsResponse> {
+  return requestJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/management/accounts/refresh`, {
+    method: "POST",
+    body: JSON.stringify({ provider }),
+  }, signal)
 }

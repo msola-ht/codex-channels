@@ -38,29 +38,16 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     }
     const accountUsage = adapter.accountUsage();
     if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
-      let result: ProviderAccountUsage;
-      try {
-        result = await accountUsage;
-      } catch (error) {
-        this.persist({ kind: "unsupported", provider: modelProvider }, { kind: "unsupported", provider: modelProvider });
-        throw error;
-      }
+      const result = await accountUsage;
       this.persist(result, { kind: "unsupported", provider: modelProvider });
       return result;
     }
-    let usage: ProviderAccountUsage;
-    let threadUsage: AccountThreadUsage;
-    try {
-      [usage, threadUsage] = await Promise.all([
-        accountUsage,
-        adapter.accountThreadUsage(threadId).catch((): AccountThreadUsage => ({
-          kind: "failed",
-        })),
-      ]);
-    } catch (error) {
-      this.persist({ kind: "unsupported", provider: modelProvider }, { kind: "unsupported", provider: modelProvider });
-      throw error;
-    }
+    const [usage, threadUsage]: [ProviderAccountUsage, AccountThreadUsage] = await Promise.all([
+      accountUsage,
+      adapter.accountThreadUsage(threadId).catch((): AccountThreadUsage => ({
+        kind: "failed",
+      })),
+    ]);
     const result = usage.kind === "token-usage" ? { ...usage, threadUsage } : usage;
     this.persist(result, { kind: "unsupported", provider: modelProvider });
     return result;
@@ -68,18 +55,9 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
 
   async accountLimits(modelProvider: string): Promise<ProviderAccountLimits> {
     const adapter = this.adapters.get(modelProvider);
-    let result: ProviderAccountLimits;
-    try {
-      result = adapter?.accountLimits
-        ? await adapter.accountLimits()
-        : { kind: "unsupported", provider: modelProvider };
-    } catch (error) {
-      this.persist(
-        this.snapshotUsage.get(modelProvider) ?? { kind: "unsupported", provider: modelProvider },
-        { kind: "unsupported", provider: modelProvider },
-      );
-      throw error;
-    }
+    const result: ProviderAccountLimits = adapter?.accountLimits
+      ? await adapter.accountLimits()
+      : { kind: "unsupported", provider: modelProvider };
     this.persist(
       this.snapshotUsage.get(modelProvider)
         ?? { kind: "unsupported", provider: modelProvider },
@@ -90,10 +68,17 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
 
   /** 按需预热所有已注册账户；调用方应异步触发，不阻塞主服务启动。 */
   async refreshSnapshots(): Promise<void> {
-    await Promise.allSettled([...this.adapters.keys()].flatMap((provider) => [
-      this.accountUsage(provider),
-      this.accountLimits(provider),
+    await Promise.allSettled([...this.adapters.values()].flatMap((adapter) => [
+      this.accountUsage(adapter.provider),
+      ...(adapter.accountLimits ? [this.accountLimits(adapter.provider)] : []),
     ]));
+  }
+
+  /** 刷新单个已注册账户；未知 Provider 不创建无效快照。 */
+  async refreshAccountSnapshot(modelProvider: string): Promise<boolean> {
+    if (!this.adapters.has(modelProvider)) return false;
+    await this.accountUsage(modelProvider);
+    return true;
   }
 
   private persist(usage: ProviderAccountUsage, limits: ProviderAccountLimits): void {

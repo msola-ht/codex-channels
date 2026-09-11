@@ -9,7 +9,7 @@ export interface UseApiState<T> {
 export function useApi<T>(
   loader: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],
-): UseApiState<T> & { refetch: () => void } {
+): UseApiState<T> & { refetch: () => void; replaceData: (data: T) => void } {
   const [state, setState] = useState<UseApiState<T>>({
     data: null,
     loading: true,
@@ -41,5 +41,8 @@ export function useApi<T>(
   }, [...deps, reloadKey])
 
   const refetch = useCallback(() => setReloadKey((key) => key + 1), [])
-  return { ...state, refetch }
+  const replaceData = useCallback((data: T) => {
+    setState({ data, loading: false, error: null })
+  }, [])
+  return { ...state, refetch, replaceData }
 }

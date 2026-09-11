@@ -77,7 +77,7 @@ codexc service stop webui        # 停止
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/api-providers`（直接 API Provider 预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
-| 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
+| 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 `range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
@@ -97,7 +97,11 @@ WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开�
 已知 OpenAI 用量上限/额度类错误消息默认以中文展示。
 全局深色/浅色主题默认深色，顶部导航右侧按钮切换，选择持久化，刷新后保持。
 
-控制台显示本机指标、错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；OCG 与 DS 快照超过 15 分钟或尚未采集时，账户卡片会提示在对应渠道执行 `/usage` 或 `/limits` 后刷新页面；WebUI 本身不主动刷新官方账户。
+控制台显示本机指标、错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；OCG 与 DS
+快照超过 15 分钟或尚未采集时，账户卡片会提示刷新。DS 按余额刷新，OCG 按账户刷新额度窗口；
+WebUI 通过私有 Gateway IPC 发起查询，不读取凭据、不直接调用官方接口，也不定时轮询。查询失败时
+保留最后一次有效快照并显示本次错误；OpenCode Go 账户元数据无法读取时只提示该来源异常，不影响
+其他 Provider 的有效快照。
 
 API 响应类型由 `scripts/webui-api.ts` 声明，前端从该共享类型导入，不再单独手写镜像。
 

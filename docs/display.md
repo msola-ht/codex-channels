@@ -32,7 +32,8 @@
   保存价格快照或刷新价格目录。账户与额度仍展示官方来源的数据：OpenAI 周限、
   DeepSeek 账户余额、OpenCode Go 官方配额窗口；这些数据不是本地价格估算。
 - 完成卡片正式模式在本次运行和当前 Session 累计之外，保留精简的“账户状态”：OpenAI 优先显示
-  OpenAI 官方周限；OpenCode Go 与 DeepSeek 的完整账户信息通过 `/limits` 或 `/usage` 查看。
+  OpenAI 官方周限；OpenCode Go 与 DeepSeek 的完整账户信息可通过 `/usage` 查看，也可在本机
+  WebUI 账户卡片中按需刷新。
   官方用量接口或本地指标不可用时，对应字段不显示。
 
 ## /usage 命令

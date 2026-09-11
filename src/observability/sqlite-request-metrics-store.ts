@@ -13,6 +13,7 @@ import {
   type RequestMetricsDatabaseLock,
 } from "./request-metrics-database.js";
 import {
+  parseQuotaWindows,
   toStoredCompactSummary,
   toStoredMetric,
   toStoredMetricsAggregate,
@@ -549,6 +550,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         usage_json=excluded.usage_json, limits_json=excluded.limits_json
     `).run(snapshot.sourceId, snapshot.observedAtMs, snapshot.available ? 1 : 0,
       JSON.stringify(snapshot.usage), JSON.stringify(snapshot.limits));
+    this.database.prepare(`
+      DELETE FROM account_snapshots WHERE observed_at_ms < ?
+    `).run(Math.max(0, snapshot.observedAtMs - this.retentionMs));
   }
 
   latestAccountSnapshot(provider: string, accountId?: string) {
@@ -595,6 +599,55 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       usage: JSON.parse(row.usage_json) as unknown,
       limits: JSON.parse(row.limits_json) as unknown,
     }));
+  }
+
+  forEachProviderTokenMetric(
+    query: { provider: string; startAtMs: number; endAtMs: number },
+    visit: (metric: {
+      requestStartedAtMs: number;
+      recordedAtMs: number;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+      quotaWindows: ReturnType<typeof parseQuotaWindows>;
+    }) => void,
+  ): void {
+    this.requireOpen();
+    validateMetricsTimeRange(query);
+    if (!query.provider || query.provider.length > 128) {
+      throw new Error("模型请求指标 Provider 无效");
+    }
+    const statement = this.database.prepare(`
+      SELECT request_started_at_ms, recorded_at_ms, input_tokens,
+        output_tokens, total_tokens, quota_windows
+      FROM model_request_metrics
+      WHERE provider = ?
+        AND recorded_at_ms >= ?
+        AND recorded_at_ms < ?
+      ORDER BY recorded_at_ms ASC, id ASC
+    `);
+    for (const rawRow of statement.iterate(
+      query.provider,
+      query.startAtMs,
+      query.endAtMs,
+    )) {
+      const row = rawRow as {
+        request_started_at_ms: number;
+        recorded_at_ms: number;
+        input_tokens: number | null;
+        output_tokens: number | null;
+        total_tokens: number | null;
+        quota_windows: string | null;
+      };
+      visit({
+        requestStartedAtMs: row.request_started_at_ms,
+        recordedAtMs: row.recorded_at_ms,
+        inputTokens: row.input_tokens,
+        outputTokens: row.output_tokens,
+        totalTokens: row.total_tokens,
+        quotaWindows: parseQuotaWindows(row.quota_windows),
+      });
+    }
   }
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
@@ -1410,6 +1463,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       `).run(Math.max(0, nowMs - this.retentionMs));
       this.database.prepare(`
         DELETE FROM subagent_turns WHERE recorded_at_ms < ?
+      `).run(Math.max(0, nowMs - this.retentionMs));
+      this.database.prepare(`
+        DELETE FROM account_snapshots WHERE observed_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
       this.database.prepare(`
         DELETE FROM model_request_metrics

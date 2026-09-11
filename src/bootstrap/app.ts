@@ -501,14 +501,23 @@ export class GatewayApplication {
     ];
     this.providerAccounts = new ProviderAccountService(accountAdapters, {
       writeOfficialAccountSnapshot: (snapshot) => {
+        const definition = providerDefinitions.find(
+          (candidate) => candidate.id === snapshot.provider,
+        );
+        const definitionAccountId = definition
+          && "accountId" in definition
+          && typeof definition.accountId === "string"
+          ? definition.accountId
+          : undefined;
         const accountId = snapshot.accountId
+          ?? definitionAccountId
           ?? opencodeGoAccountIdFromProvider(snapshot.provider)
           ?? null;
         metricsStore.upsertAccountSnapshot?.({
           sourceId: `${snapshot.provider}:${accountId ?? "default"}`,
           provider: snapshot.provider,
           accountId,
-          displayName: snapshot.provider,
+          displayName: definition?.displayName ?? snapshot.provider,
           enabled: true,
           observedAtMs: snapshot.observedAtMs,
           available: snapshot.available,
@@ -1003,6 +1012,13 @@ export class GatewayApplication {
 
   hasActiveTurns(): boolean {
     return this.core.hasActiveTurns();
+  }
+
+  refreshAccountSnapshot(provider: string): Promise<boolean> {
+    this.requireRunning();
+    if (provider === "openai") return Promise.resolve(false);
+    return this.providerAccounts?.refreshAccountSnapshot(provider)
+      ?? Promise.resolve(false);
   }
 
   notifyProviderSettingsChange(

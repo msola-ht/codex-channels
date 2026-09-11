@@ -1,10 +1,14 @@
+import { RefreshCwIcon } from "lucide-react"
+
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import {
   Table,
@@ -159,54 +163,67 @@ export function WeeklyQuotaCard({
 
 export function DeepseekBalanceCard({
   available,
+  observedAtMs,
   balances,
+  refreshing,
+  refreshDisabled,
+  onRefresh,
 }: {
   available: boolean
+  observedAtMs: number
   balances: DeepseekBalance[]
+  refreshing: boolean
+  refreshDisabled: boolean
+  onRefresh: () => void
 }) {
-  if (!available || balances.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>DS 账户余额</CardTitle>
-          <CardDescription>DeepSeek 账户余额暂不可用</CardDescription>
-        </CardHeader>
-      </Card>
-    )
-  }
-  const primary = balances[0]!
+  const primary = balances[0]
   return (
     <Card>
       <CardHeader>
         <CardTitle>DS 账户余额</CardTitle>
-        <CardDescription>DeepSeek 账户余额</CardDescription>
+        <CardDescription>
+          {!available || primary === undefined
+            ? "DeepSeek 账户余额暂不可用"
+            : `更新于 ${formatTime(observedAtMs)}`}
+        </CardDescription>
+        <CardAction>
+          <Button variant="outline" size="sm" disabled={refreshDisabled} onClick={onRefresh}>
+            <RefreshCwIcon data-icon="inline-start" />
+            {refreshing ? "刷新中" : "刷新余额"}
+          </Button>
+        </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-baseline gap-2">
-          <span className="text-2xl font-semibold tabular-nums">
-            {formatDeepseekAmount(primary.totalBalance, primary.currency)}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            赠金 {formatDeepseekAmount(primary.grantedBalance, primary.currency)}
-            {" · "}
-            充值 {formatDeepseekAmount(primary.toppedUpBalance, primary.currency)}
-          </span>
-        </div>
-        {balances.length > 1 ? (
-          <p className="text-xs text-muted-foreground">
-            {balances.slice(1)
-              .map((balance) =>
-                formatDeepseekAmount(balance.totalBalance, balance.currency))
-              .join(" · ")}
-          </p>
-        ) : null}
-      </CardContent>
+      {available && primary !== undefined ? (
+        <CardContent className="flex flex-col gap-1">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className="text-2xl font-semibold tabular-nums">
+              {formatDeepseekAmount(primary.totalBalance, primary.currency)}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              赠金 {formatDeepseekAmount(primary.grantedBalance, primary.currency)}
+              {" · "}
+              充值 {formatDeepseekAmount(primary.toppedUpBalance, primary.currency)}
+            </span>
+          </div>
+          {balances.length > 1 ? (
+            <p className="text-xs text-muted-foreground">
+              {balances.slice(1)
+                .map((balance) =>
+                  formatDeepseekAmount(balance.totalBalance, balance.currency))
+                .join(" · ")}
+            </p>
+          ) : null}
+        </CardContent>
+      ) : null}
     </Card>
   )
 }
 
 export function OpencodeGoUsageCard({
   accounts,
+  refreshingProvider,
+  refreshDisabled,
+  onRefresh,
 }: {
   accounts: Array<{
     account: string
@@ -214,7 +231,12 @@ export function OpencodeGoUsageCard({
     default: boolean
     available: boolean
     windows: OpencodeGoQuotaWindow[]
+    provider: string
+    observedAtMs: number
   }>
+  refreshingProvider: string | null
+  refreshDisabled: boolean
+  onRefresh: (provider: string) => void
 }) {
   if (accounts.length === 0) {
     return (
@@ -229,7 +251,13 @@ export function OpencodeGoUsageCard({
   return (
     <div className="flex flex-col gap-4">
       {accounts.map((account) => (
-        <OpencodeGoAccountCard key={account.account} {...account} />
+        <OpencodeGoAccountCard
+          key={account.account}
+          {...account}
+          refreshing={refreshingProvider === account.provider}
+          refreshDisabled={refreshDisabled}
+          onRefresh={() => onRefresh(account.provider)}
+        />
       ))}
     </div>
   )
@@ -240,31 +268,39 @@ function OpencodeGoAccountCard({
   default: isDefault,
   available,
   windows,
+  observedAtMs,
+  refreshing,
+  refreshDisabled,
+  onRefresh,
 }: {
+  provider: string
   displayName: string
   default: boolean
   available: boolean
   windows: OpencodeGoQuotaWindow[]
+  observedAtMs: number
+  refreshing: boolean
+  refreshDisabled: boolean
+  onRefresh: () => void
 }) {
-  if (!available || windows.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{displayName}</CardTitle>
-          <CardDescription>
-            {isDefault ? "默认账户 · " : ""}账户用量暂不可用
-          </CardDescription>
-        </CardHeader>
-      </Card>
-    )
-  }
   return (
     <Card>
       <CardHeader>
         <CardTitle>{displayName}</CardTitle>
-        <CardDescription>{isDefault ? "默认账户 · " : ""}账户配额</CardDescription>
+        <CardDescription>
+          {isDefault ? "默认账户 · " : ""}
+          {!available || windows.length === 0
+            ? "账户用量暂不可用"
+            : `账户配额 · 更新于 ${formatTime(observedAtMs)}`}
+        </CardDescription>
+        <CardAction>
+          <Button variant="outline" size="sm" disabled={refreshDisabled} onClick={onRefresh}>
+            <RefreshCwIcon data-icon="inline-start" />
+            {refreshing ? "刷新中" : "刷新额度"}
+          </Button>
+        </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      {available && windows.length > 0 ? <CardContent className="flex flex-col gap-3">
         {windows.map((window) => (
           <div key={window.windowId} className="flex flex-col gap-1">
             <div className="flex items-center justify-between text-sm">
@@ -291,7 +327,7 @@ function OpencodeGoAccountCard({
             ) : null}
           </div>
         ))}
-      </CardContent>
+      </CardContent> : null}
     </Card>
   )
 }

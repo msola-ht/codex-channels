@@ -93,7 +93,9 @@
   复用 Config 脱敏投影与跨平台服务状态查询，只返回配置修订、非凭据字段和 Secret 配置状态；
   `/api/v1/management/services` 在回环访问约束和可选 WebUI Bearer 鉴权下提供受管服务状态、版本和受限的最近错误摘要；
   `/api/v1/management/providers` 提供不含 URL、Profile 或凭据的 Provider 安全概览。
-  管理设置接口始终保留真实回环连接、精确 Origin、JSON 请求约束、限速和审计；WebUI 配置令牌时复用 `Authorization: Bearer` 鉴权。
+  `POST /api/v1/management/accounts/refresh` 通过私有 Gateway IPC 按需刷新单个 DeepSeek 或
+  OpenCode Go 账户并返回统一快照，不由 WebUI 读取 Provider 凭据或直接请求官方接口；管理设置接口
+  始终保留真实回环连接、精确 Origin、JSON 请求约束、限速和审计；WebUI 配置令牌时复用 `Authorization: Bearer` 鉴权。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-management-providers.mjs`：Provider 管理结果脱敏、资源修订快照和 Provider 状态投影；不读取或返回凭据正文。

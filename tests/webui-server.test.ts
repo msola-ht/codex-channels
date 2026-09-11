@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createWebuiServer, resolveWebuiSettings } from "../scripts/webui-server.mjs";
@@ -49,6 +49,41 @@ describe("webui server", () => {
     expect(await response.json()).toMatchObject({
       observedAtMs: 1_800_000_000_000,
       snapshots: [{ provider: "deepseek", available: true }],
+      warnings: [],
+    });
+  });
+
+  it("keeps other account snapshots available when the OCG registry is invalid", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.upsertAccountSnapshot!({
+      sourceId: "deepseek:default",
+      provider: "deepseek",
+      accountId: null,
+      displayName: "DeepSeek",
+      enabled: true,
+      observedAtMs: 1_800_000_000_000,
+      available: true,
+      usage: { kind: "balance", provider: "deepseek", available: true, balances: [] },
+      limits: { kind: "unsupported", provider: "deepseek" },
+    });
+    store.close();
+    const registryDirectory = join(fixture.home, "providers", "opencode-go");
+    mkdirSync(registryDirectory, { recursive: true, mode: 0o700 });
+    const registryPath = join(registryDirectory, "accounts.json");
+    writeFileSync(registryPath, "invalid\n", { mode: 0o600 });
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/accounts`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      snapshots: [{ provider: "deepseek", available: true }],
+      warnings: [{
+        source: "opencode-go",
+        code: "registry_unavailable",
+        message: "OpenCode Go 账户元数据暂不可用",
+      }],
     });
   });
 
@@ -848,34 +883,12 @@ describe("webui server", () => {
     });
   });
 
-  it("reports deepseek balance as unavailable without credentials", async () => {
+  it("does not expose the removed direct provider account endpoints", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);
 
-    const response = await fetch(`${origin}/api/v1/deepseek-balance`);
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      available: boolean;
-      balances: unknown[];
-    };
-    expect(body.available).toBe(false);
-    expect(body.balances).toEqual([]);
-  });
-
-  it("reports opencode go usage as unavailable without credentials", async () => {
-    const fixture = createFixture();
-    const { origin } = await startServer(fixture.environment);
-
-    const response = await fetch(`${origin}/api/v1/opencode-go-usage`);
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      accounts: Array<{
-        account: string;
-        available: boolean;
-        windows: unknown[];
-      }>;
-    };
-    expect(body.accounts).toEqual([]);
+    expect((await fetch(`${origin}/api/v1/deepseek-balance`)).status).toBe(404);
+    expect((await fetch(`${origin}/api/v1/opencode-go-usage`)).status).toBe(404);
   });
 
   it("returns the configured OCG contact display name for usage cards", async () => {
@@ -885,17 +898,58 @@ describe("webui server", () => {
       default: true,
       email: "User@Example.com",
     }]);
+    new SqliteModelRequestMetricsStore(fixture.databasePath).close();
     const { origin } = await startServer(fixture.environment);
 
-    const response = await fetch(`${origin}/api/v1/opencode-go-usage`);
+    const response = await fetch(`${origin}/api/v1/accounts`);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      accounts: [{
-        account: "main",
+      snapshots: [{
+        accountId: "main",
         displayName: "ocg-user@example.com",
+        default: true,
         available: false,
       }],
+    });
+  });
+
+  it("refreshes one account through Gateway and returns the updated snapshot", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const refreshGatewayAccount = vi.fn(async (_configPath: string, provider: string) => {
+      const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+      store.upsertAccountSnapshot!({
+        sourceId: `${provider}:default`,
+        provider,
+        accountId: null,
+        displayName: "DeepSeek",
+        enabled: true,
+        observedAtMs: 1_800_000_000_001,
+        available: true,
+        usage: { kind: "balance", provider, available: true, balances: [] },
+        limits: { kind: "unsupported", provider },
+      });
+      store.close();
+    });
+    const { origin } = await startServer(fixture.environment, undefined, {
+      managementOrigin,
+      refreshGatewayAccount,
+    });
+
+    const response = await fetch(`${origin}/api/v1/management/accounts/refresh`, {
+      method: "POST",
+      headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ provider: "deepseek" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(refreshGatewayAccount).toHaveBeenCalledWith(
+      join(fixture.home, "config.toml"),
+      "deepseek",
+    );
+    expect(await response.json()).toMatchObject({
+      snapshots: [{ provider: "deepseek", observedAtMs: 1_800_000_000_001 }],
     });
   });
 
@@ -1377,6 +1431,7 @@ async function startServer(
     loadAccountSettings?: (environment: NodeJS.ProcessEnv) => Promise<unknown>
     previewAccountSettings?: (input: unknown, environment: NodeJS.ProcessEnv) => Promise<unknown>
     applyAccountSettings?: (input: unknown, environment: NodeJS.ProcessEnv, preview: unknown) => Promise<unknown>
+    refreshGatewayAccount?: (configPath: string, provider: string) => Promise<unknown>
   } = {},
 ) {
   const { server } = createWebuiServer({
@@ -1394,6 +1449,7 @@ async function startServer(
     ...(options.loadAccountSettings === undefined ? {} : { loadAccountSettings: options.loadAccountSettings }),
     ...(options.previewAccountSettings === undefined ? {} : { previewAccountSettings: options.previewAccountSettings }),
     ...(options.applyAccountSettings === undefined ? {} : { applyAccountSettings: options.applyAccountSettings }),
+    ...(options.refreshGatewayAccount === undefined ? {} : { refreshGatewayAccount: options.refreshGatewayAccount }),
   });
   await new Promise<void>((resolve) => {
     server.listen(0, options.host ?? "127.0.0.1", resolve);

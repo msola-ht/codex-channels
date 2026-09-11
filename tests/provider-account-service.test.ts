@@ -60,6 +60,48 @@ describe("ProviderAccountService", () => {
     expect(limits).toHaveBeenCalledOnce();
   });
 
+  it("does not request limits from an account adapter that only provides usage", async () => {
+    const usage = vi.fn(async () => ({
+      kind: "balance" as const,
+      provider: "deepseek",
+      available: true,
+      balances: [],
+    }));
+    const writeOfficialAccountSnapshot = vi.fn();
+    const service = new ProviderAccountService(
+      [{ provider: "deepseek", accountUsage: usage }],
+      { writeOfficialAccountSnapshot },
+    );
+
+    await service.refreshSnapshots();
+
+    expect(usage).toHaveBeenCalledOnce();
+    expect(writeOfficialAccountSnapshot).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the last successful snapshot when a refresh fails", async () => {
+    const refreshFailure = new Error("refresh failed");
+    const usage = vi.fn()
+      .mockResolvedValueOnce({
+        kind: "balance" as const,
+        provider: "deepseek",
+        available: true,
+        balances: [],
+      })
+      .mockRejectedValueOnce(refreshFailure);
+    const writeOfficialAccountSnapshot = vi.fn();
+    const service = new ProviderAccountService(
+      [{ provider: "deepseek", accountUsage: usage }],
+      { writeOfficialAccountSnapshot },
+    );
+
+    await expect(service.refreshAccountSnapshot("deepseek")).resolves.toBe(true);
+    await expect(service.refreshAccountSnapshot("deepseek")).rejects.toBe(refreshFailure);
+    await expect(service.refreshAccountSnapshot("missing")).resolves.toBe(false);
+
+    expect(writeOfficialAccountSnapshot).toHaveBeenCalledOnce();
+  });
+
   it("rejects duplicate provider registrations", () => {
     const adapter = {
       provider: "duplicate",

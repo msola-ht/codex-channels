@@ -82,6 +82,9 @@
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
   建立与应用就绪使用不同状态，应用开始停止时立即撤销就绪；公开同源健康探针供本地更新确认
   Gateway 已完成应用启动且尚未进入关闭流程。
+- `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供独立的私有账户刷新 IPC；
+  WebUI 只提交精确 Provider ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
+  关闭时停止接收新连接并等待已开始的刷新收尾。
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
   label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
   复用。

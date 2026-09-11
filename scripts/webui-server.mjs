@@ -7,7 +7,6 @@ import {
   inspectMetricsDatabase,
   metricsDatabaseCanUpgrade,
   metricsRange,
-  requireCompatibleMetricsDatabase,
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -20,6 +19,10 @@ import {
   readGatewayConfig,
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
+import {
+  GatewayAccountRefreshError,
+  requestGatewayAccountRefresh,
+} from "../runtime/gateway-account-refresh.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
 import {
   ConfigManagementError,
@@ -90,8 +93,6 @@ import {
   redactAccountSettingsResult,
 } from "./webui-account-settings-management.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
-import { createDeepseekAccountAdapter } from "../dist/bootstrap/deepseek-account-adapter.js";
-import { createOpencodeGoAccountAdapter } from "../dist/bootstrap/opencode-go-account-adapter.js";
 import {
   loadOpencodeGoAccounts,
   opencodeGoAccountDisplayName,
@@ -149,6 +150,7 @@ export function createWebuiServer({
   previewAccountSettings = previewAccountSettingsMutation,
   applyAccountSettings = applyAccountSettingsMutation,
   loadAccountSettings = loadAccountSettingsResource,
+  refreshGatewayAccount = requestGatewayAccountRefresh,
 } = {}) {
   assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
@@ -174,6 +176,7 @@ export function createWebuiServer({
     previewAccountSettings,
     applyAccountSettings,
     loadAccountSettings,
+    refreshGatewayAccount,
   );
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
@@ -186,10 +189,7 @@ export function resolveWebuiSettings({
   environment = process.env,
 } = {}) {
   const cli = parseWebuiCliArgs(args);
-  const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
-  const configPath = explicitConfigFile
-    ? resolve(explicitConfigFile)
-    : join(userDataDir(environment), "config.toml");
+  const configPath = resolveGatewayConfigPath(environment);
   let configured = {};
   if (existsSync(configPath)) {
     configured = validateWebuiConfigDocument(readGatewayConfig(configPath));
@@ -281,6 +281,7 @@ function createManagementState(
   previewAccountSettings,
   applyAccountSettings,
   loadAccountSettings,
+  refreshGatewayAccount,
 ) {
   const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const dataDir = explicitConfig ? dirname(resolve(explicitConfig)) : userDataDir(environment);
@@ -313,6 +314,7 @@ function createManagementState(
     previewAccountSettings,
     applyAccountSettings,
     loadAccountSettings,
+    refreshGatewayAccount,
     confirmations: new ManagementConfirmationStore(),
     tasks,
     limiter: new ManagementRateLimiter(),
@@ -377,6 +379,37 @@ async function routeManagement(environment, url, request, response, state, token
     } catch {
       throw new ApiError(503, "codex_settings_unavailable", "App Server 用户设置暂不可用，请检查 App Server 状态");
     }
+    return;
+  }
+  if (path === "/accounts/refresh" && request.method === "POST") {
+    const body = await readJsonBody(request, validation.maximumBodyBytes);
+    if (
+      !body
+      || typeof body !== "object"
+      || Array.isArray(body)
+      || typeof body.provider !== "string"
+      || Object.keys(body).some((key) => key !== "provider")
+    ) {
+      throw new ApiError(400, "invalid_account_refresh", "账户刷新请求必须包含唯一的 provider 字段");
+    }
+    try {
+      await state.refreshGatewayAccount(
+        resolveGatewayConfigPath(environment),
+        body.provider,
+      );
+    } catch (error) {
+      if (error instanceof GatewayAccountRefreshError) {
+        if (error.code === "provider_not_found") throw new ApiError(404, error.code, error.message);
+        if (error.code === "invalid_request") throw new ApiError(400, error.code, error.message);
+        throw new ApiError(
+          error.code === "refresh_failed" ? 502 : 503,
+          error.code,
+          error.message,
+        );
+      }
+      throw new ApiError(503, "gateway_unavailable", "Gateway 账户刷新接口不可用");
+    }
+    handleAccountSnapshots(environment, response);
     return;
   }
   if (path === "/codex/settings/preview" && request.method === "POST") {
@@ -1033,14 +1066,6 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     sendJson(response, 200, { ok: true, service: "webui" });
     return;
   }
-  if (apiPath === "/deepseek-balance") {
-    await handleDeepseekBalance(environment, response);
-    return;
-  }
-  if (apiPath === "/opencode-go-usage") {
-    await handleOpencodeGoUsage(environment, response);
-    return;
-  }
   if (apiPath === "/accounts") {
     handleAccountSnapshots(environment, response);
     return;
@@ -1051,87 +1076,64 @@ async function routeApi(environment, url, response, serviceStatusCache) {
 function handleAccountSnapshots(environment, response) {
   const store = openMetricsStore(environment);
   try {
-    const snapshots = typeof store.latestAccountSnapshots === "function"
+    const storedSnapshots = typeof store.latestAccountSnapshots === "function"
       ? store.latestAccountSnapshots()
       : [];
+    let accounts = null;
+    const warnings = [];
+    try {
+      accounts = loadOpencodeGoAccounts(environment);
+    } catch {
+      warnings.push({
+        source: "opencode-go",
+        code: "registry_unavailable",
+        message: "OpenCode Go 账户元数据暂不可用",
+      });
+    }
+    const configuredAccounts = accounts ?? [];
+    const accountById = new Map(configuredAccounts.map((account) => [account.id, account]));
+    const snapshots = storedSnapshots
+      .filter((snapshot) => {
+        if (accounts === null) return true;
+        const opencodeGo = snapshot.provider === "ocg"
+          || snapshot.provider.startsWith("ocg-");
+        return !opencodeGo
+          || (snapshot.accountId !== null && accountById.has(snapshot.accountId));
+      })
+      .map((snapshot) => {
+        const account = snapshot.accountId === null
+          ? undefined
+          : accountById.get(snapshot.accountId);
+        return {
+          ...snapshot,
+          displayName: account === undefined
+            ? snapshot.provider === "deepseek" ? "DeepSeek" : snapshot.provider
+            : opencodeGoAccountDisplayName(account),
+          default: account?.default ?? false,
+        };
+      });
+    for (const account of configuredAccounts) {
+      const provider = opencodeGoProviderId(account.id);
+      if (snapshots.some((snapshot) => snapshot.provider === provider)) continue;
+      snapshots.push({
+        provider,
+        accountId: account.id,
+        observedAtMs: 0,
+        available: false,
+        usage: { kind: "unsupported", provider },
+        limits: { kind: "unsupported", provider },
+        displayName: opencodeGoAccountDisplayName(account),
+        default: account.default,
+      });
+    }
     sendJson(response, 200, {
       observedAtMs: snapshots.reduce((latest, item) => Math.max(latest, item.observedAtMs), 0),
       snapshots,
+      warnings,
     });
   } finally {
     store.close();
   }
-}
-
-async function handleDeepseekBalance(environment, response) {
-  const adapter = createDeepseekAccountAdapter({ environment });
-  try {
-    const usage = await adapter.accountUsage();
-    sendJson(response, 200, {
-      available: usage.available,
-      balances: usage.balances.map((balance) => ({
-        currency: balance.currency,
-        totalBalance: balance.totalBalance,
-        grantedBalance: balance.grantedBalance,
-        toppedUpBalance: balance.toppedUpBalance,
-      })),
-    });
-  } catch {
-    sendJson(response, 200, {
-      available: false,
-      balances: [],
-    });
-  }
-}
-
-async function handleOpencodeGoUsage(environment, response) {
-  let metricsDatabasePath;
-  try {
-    metricsDatabasePath = requireCompatibleMetricsDatabase(environment);
-  } catch {
-    metricsDatabasePath = undefined;
-  }
-  const accounts = loadOpencodeGoAccounts(environment);
-  const results = await Promise.allSettled(accounts.map(async (account) => {
-    const adapter = createOpencodeGoAccountAdapter({
-      provider: opencodeGoProviderId(account.id),
-      environment,
-      metricsDatabasePath,
-    });
-    const usage = await adapter.accountUsage();
-    return {
-      account: account.id,
-      displayName: opencodeGoAccountDisplayName(account),
-      default: account.default,
-      available: usage.available,
-      windows: usage.windows.map((window) => ({
-        windowId: window.windowId,
-        label: window.label,
-        usedPercent: window.usedPercent,
-        // 指标/账户接口统一使用秒级重置时间，WebUI 前端使用毫秒时间戳。
-        resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
-        status: window.status,
-        localTokens: window.localTokens ?? null,
-      })),
-    };
-  }));
-  const accountUsages = accounts.map((account, index) => {
-    const result = results[index];
-    return result?.status === "fulfilled"
-      ? result.value
-      : {
-          account: account.id,
-          displayName: opencodeGoAccountDisplayName(account),
-          default: account.default,
-          available: false,
-          windows: [],
-        };
-  });
-  if (accounts.length === 0) {
-    sendJson(response, 200, { accounts: [] });
-    return;
-  }
-  sendJson(response, 200, { accounts: accountUsages });
 }
 
 function openMetricsStore(environment, endAtMs = Date.now()) {
@@ -1155,6 +1157,13 @@ function openMetricsStore(environment, endAtMs = Date.now()) {
   return new SqliteModelRequestMetricsStore(status.databasePath, endAtMs, {
     readOnly: true,
   });
+}
+
+function resolveGatewayConfigPath(environment) {
+  const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
+  return explicitConfigFile
+    ? resolve(explicitConfigFile)
+    : join(userDataDir(environment), "config.toml");
 }
 
 function handleOverview(environment, url, response) {

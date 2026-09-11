@@ -96,6 +96,8 @@ try {
     "runtime/cli-presentation.mjs",
     "runtime/connect-home.mjs",
     "runtime/connect-home.d.mts",
+    "runtime/gateway-account-refresh.mjs",
+    "runtime/gateway-account-refresh.d.mts",
     "runtime/gateway-owner.mjs",
     "runtime/network-proxy.mjs",
     "runtime/process-lifecycle.mjs",
