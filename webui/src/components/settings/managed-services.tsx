@@ -34,7 +34,7 @@ export function ManagedServices({ services, tasks }: { services: ManagementServi
               {service.running ? <Button variant="outline" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: "stop", target: service.target })}>停止</Button> : null}
             </div>
           </div>
-          {service.recentError !== null ? <p className="text-xs text-destructive">最近错误：{service.recentError.message}</p> : null}
+          {!service.running && service.recentError !== null ? <p className="text-xs text-destructive">最近错误：{service.recentError.message}</p> : null}
         </div>
       </div>
     ))}

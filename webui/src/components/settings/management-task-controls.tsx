@@ -23,7 +23,7 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
     <Card>
       <CardHeader>
         <CardTitle>维护任务</CardTitle>
-        <CardDescription>通过当前 WebUI 令牌预览并确认服务、指标库和源码维护操作；任务在后台串行执行。</CardDescription>
+        <CardDescription>通过当前管理会话预览并确认服务、指标库和源码维护操作；任务在后台串行执行。</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
         <div className="flex flex-wrap gap-2">

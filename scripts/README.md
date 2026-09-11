@@ -91,9 +91,9 @@
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务与共享 API 类型；设置摘要接口
   复用 Config 脱敏投影与跨平台服务状态查询，只返回配置修订、非凭据字段和 Secret 配置状态；
-  `/api/v1/management/services` 在同一 WebUI Bearer 鉴权下提供受管服务状态、版本和受限的最近错误摘要；
+  `/api/v1/management/services` 在回环访问约束和可选 WebUI Bearer 鉴权下提供受管服务状态、版本和受限的最近错误摘要；
   `/api/v1/management/providers` 提供不含 URL、Profile 或凭据的 Provider 安全概览。
-  管理设置接口复用 WebUI `Authorization: Bearer` 令牌，并保留精确 Origin、JSON 请求约束、限速和审计。
+  管理设置接口始终保留真实回环连接、精确 Origin、JSON 请求约束、限速和审计；WebUI 配置令牌时复用 `Authorization: Bearer` 鉴权。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-management-providers.mjs`：Provider 管理结果脱敏、资源修订快照和 Provider 状态投影；不读取或返回凭据正文。
@@ -104,7 +104,7 @@
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置与 Provider 的输入校验、预览投影、缓存查询，以及
   WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务只负责路由和领域处理。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标维护和源码更新异步任务；
-  只接受固定动作，任务由独立 `codexc` 子进程执行，状态按 WebUI 令牌隔离，输出不回传且支持取消。
+  只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
   Threads 返回指标库首个请求开始时间，请求明细按受控字段在整个时间范围排序后偏移分页；
@@ -259,7 +259,7 @@
 - `management-access.mjs`、`management-confirmations.mjs`、`management-audit.mjs`、
   `management-security.mjs` / `management-security.d.mts`：本机管理适配器复用的无 HTTP 安全基础，
   覆盖高风险确认、Origin、限速、请求上限、安全响应头和脱敏审计；WebUI 管理路由复用其中的请求约束、
-  限速和审计原语，认证直接使用 WebUI Bearer 令牌。
+  限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
   Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
 - `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API

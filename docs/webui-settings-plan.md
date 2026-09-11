@@ -4,22 +4,22 @@
 
 在现有指标 WebUI 中增加受控的本机设置页，让用户能够查看 CLI `codexc config`、`codexc setup` 和
 `codexc service` 的可视化状态，并逐步开放低风险配置修改。设置页不执行任意 Shell，不解析终端文案，
-设置读取和低风险修改复用同一个 WebUI Bearer 令牌；Provider 凭据不写入浏览器，登录令牌按管理接口安全设计保存。
+设置读取和低风险修改沿用回环访问边界，并在配置后复用同一个 WebUI Bearer 令牌；Provider 凭据不写入浏览器，访问令牌按管理接口安全设计保存。
 
 ## 不可回退约束
 
-- WebUI 的指标读取和设置读写始终使用同一个 `webui.token`；不恢复独立管理凭据、管理登录、登出接口、
+- WebUI 配置 `webui.token` 后，指标读取和设置读写使用同一个令牌；不恢复独立管理凭据、管理登录、登出接口、
   管理 Cookie 或第二套浏览器会话。
-- 高风险操作即使接入 WebUI，也只能在同一 Bearer 鉴权上叠加操作级预览、确认、任务和审计；当前白名单任务已接入，
+- 高风险操作即使接入 WebUI，也只能在回环访问边界和配置后的同一 Bearer 鉴权上叠加操作级预览、确认、任务和审计；当前白名单任务已接入，
   不得重新引入另一套管理认证。
 
 ## 现状与事实来源
 
 - `scripts/webui-server.mjs` 提供指标 GET API 与受保护的低风险设置 API；
-  `GET /api/v1/settings/summary` 返回脱敏配置摘要（保留基础服务状态兼容字段），`GET /api/v1/management/services` 返回三类受管服务状态、版本和最近错误。
+  `GET /api/v1/settings/summary` 返回脱敏配置摘要（保留基础服务状态兼容字段），`GET /api/v1/management/services` 返回三类受管服务状态、版本和最近错误；页面只在服务未运行时展示错误。
 - Config/Setup 的结构化管理接口和修订保护已在 `scripts/` 与 `runtime/` 完成，CLI 菜单只是交互适配器。
 - 管理接口的 Origin、请求限制、一次性确认、审计和任务安全原语已记录在
-  `docs/management-interface-security.md`；WebUI 设置接口直接复用 WebUI Bearer Token，不建立第二套登录。
+  `docs/management-interface-security.md`；WebUI 设置接口配置 Token 后直接复用 Bearer 鉴权，不建立第二套登录。
 - 配置事实来源分为 `~/.codex-connect/config.toml`（Gateway、渠道、WebUI、本机指标）和
   `~/.codex/config.toml`（Codex 用户设置、Provider、Profile）；WebUI 不直接读取或改写这些文件。
 
@@ -55,14 +55,14 @@
 ### 阶段二：低风险配置管理
 
 - [x] 复用现有 Config 结构化接口，增加明确输入、修订检查和原子写入适配。
-- [x] 复用 WebUI Bearer 认证，并接入 Origin、限速、请求上限和审计共享层。
+- [x] 接入回环访问边界、可选 WebUI Bearer 认证、Origin、限速、请求上限和审计共享层。
 - [x] 写入接口只接受 JSON，拒绝缺失/过期修订，不自动合并并发修改。
 - [x] 页面展示预览差异、生效动作和重启提示；写入不自动重启服务。
 - [x] 增加冲突、字段错误、未授权、跨源和审计失败关闭测试。
 
 ### 阶段三：服务与执行型操作只读集成
 
-- [x] 展示 Gateway、App Server 与 WebUI 服务状态、版本和最近错误。
+- [x] 展示 Gateway、App Server 与 WebUI 服务状态、版本，并在服务未运行时展示最近错误。
 - [x] 对未接入的高风险 CLI 保留“复制命令”提示。
 - [x] 已接入的服务/指标维护任务具备预览、一次性确认、状态、取消、串行和审计契约。
 
@@ -96,18 +96,18 @@ OpenCode Go/DeepSeek 账户设置已开放结构化写入。渠道 OAuth/扫码�
 ## API 草案
 
 ```text
-GET  /api/v1/management/settings       读取可编辑设置与 revision（复用 WebUI Bearer 令牌）
+GET  /api/v1/management/settings       读取可编辑设置与 revision（配置后复用 WebUI Bearer 令牌）
 POST /api/v1/management/settings/preview 预览低风险设置变更
 PATCH /api/v1/management/settings      写入低风险设置（JSON + revision）
-GET  /api/v1/management/codex/settings 读取 App Server 用户设置（同一 Bearer 令牌）
+GET  /api/v1/management/codex/settings 读取 App Server 用户设置（配置后的同一 Bearer 令牌）
 POST /api/v1/management/codex/settings/preview 预览 App Server 用户设置变更
 PATCH /api/v1/management/codex/settings 写入 App Server 用户设置（JSON + revision）
-GET  /api/v1/management/services       服务状态、版本和最近错误（只读；复用 WebUI Bearer 令牌）
-GET  /api/v1/management/providers      Provider 安全概览（只读；复用 WebUI Bearer 令牌）
-GET  /api/v1/management/provider-settings 读取 Provider 设置资源与修订（同一 Bearer 令牌）
+GET  /api/v1/management/services       服务状态、版本和最近错误（只读；配置后复用 WebUI Bearer 令牌）
+GET  /api/v1/management/providers      Provider 安全概览（只读；配置后复用 WebUI Bearer 令牌）
+GET  /api/v1/management/provider-settings 读取 Provider 设置资源与修订（配置后的同一 Bearer 令牌）
 POST /api/v1/management/provider-settings/preview 预览主 Provider、托管 Provider 默认值和共享子代理变更并生成一次性确认令牌
 POST /api/v1/management/provider-settings 消费确认令牌并写入 Provider 设置
-GET  /api/v1/management/account-settings 读取 OpenCode Go 多账户与 DeepSeek 配置资源（同一 Bearer 令牌）
+GET  /api/v1/management/account-settings 读取 OpenCode Go 多账户与 DeepSeek 配置资源（配置后的同一 Bearer 令牌）
 POST /api/v1/management/account-settings/preview 预览账户配置、默认切换、停止、删除和 DeepSeek 配置/恢复
 POST /api/v1/management/account-settings 消费确认令牌并写入账户配置
 GET  /api/v1/management/api-providers  直接 API Provider 脱敏列表
@@ -115,12 +115,12 @@ POST /api/v1/management/api-providers/preview 生成 Provider 变更预览和一
 POST /api/v1/management/api-providers  消费确认令牌并写入 Provider/凭据事务
 POST /api/v1/management/tasks/preview  预览白名单服务/指标维护任务并生成一次性确认令牌
 POST /api/v1/management/tasks          消费确认令牌并异步启动任务
-GET  /api/v1/management/tasks          查询当前令牌所属任务
+GET  /api/v1/management/tasks          查询当前管理主体所属任务
 DELETE /api/v1/management/tasks/:id    取消排队或运行中的任务
 ```
 
-`/api/v1/settings/summary` 和 `/api/v1/management/*` 均使用同一个 WebUI Bearer Token。未配置 WebUI 令牌时，
-管理接口失败关闭并返回 `management_requires_webui_token`；页面登录一次后即可读取和修改低风险设置。
+`/api/v1/settings/summary` 和 `/api/v1/management/*` 在配置 WebUI Token 后均使用同一个 Bearer Token。
+回环监听未配置 Token 时，管理接口以真实回环连接和回环 Origin 为访问边界；页面不提供第二套管理登录。
 已有 `/api/v1/settings` 保持只读兼容，不改变其响应语义。
 
 ## 验收标准
@@ -140,8 +140,8 @@ DELETE /api/v1/management/tasks/:id    取消排队或运行中的任务
 
 ## 后续全功能可视化管理
 
-用户已确认继续接入全部管理能力。以下阶段属于当前计划的扩展范围，仍必须沿用同一 WebUI Bearer 鉴权，不能
-把浏览器变成任意文件或命令执行器。
+用户已确认继续接入全部管理能力。以下阶段属于当前计划的扩展范围，仍必须沿用回环访问边界和配置后的同一
+WebUI Bearer 鉴权，不能把浏览器变成任意文件或命令执行器。
 
 ### 阶段五：全部配置可视化写入
 

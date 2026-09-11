@@ -346,13 +346,10 @@ async function routeManagement(environment, url, request, response, state, token
     requestLineBytes,
     headerBytes,
   });
-  if (token === null) {
-    throw new ApiError(503, "management_requires_webui_token", "设置管理需要先配置 WebUI 访问令牌");
-  }
-  if (!authorized(request, token)) {
+  if (token !== null && !authorized(request, token)) {
     throw new ApiError(401, "unauthorized", "需要有效的访问令牌");
   }
-  const principalId = fingerprintManagementValue(token);
+  const principalId = fingerprintManagementValue(token ?? normalizedOrigin);
   const path = url.pathname.slice(`${API_PREFIX}/management`.length) || "/";
   if (!managementLockHeld
     && request.method === "POST"
@@ -920,8 +917,8 @@ function normalizeLoopbackOrigin(value, expectedOrigin) {
       || candidate.hostname === "localhost"
       || candidate.hostname === "[::1]"
       || candidate.hostname === "::1";
-    // SSH 本机转发端口可以与服务器监听端口不同；回环 socket 和 Bearer
-    // 令牌仍分别限制连接来源与访问主体。
+    // SSH 本机转发端口可以与服务器监听端口不同；回环 socket 始终限制
+    // 连接来源，配置 Bearer 令牌时再限制访问主体。
     const sameOrigin = candidate.protocol === expected.protocol;
     return loopback && sameOrigin ? expectedOrigin : value;
   } catch {

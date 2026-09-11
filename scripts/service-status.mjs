@@ -20,6 +20,8 @@ import { runtimeConfig } from "./runtime-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
 
+const ANSI_SGR_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu");
+
 export function inspectManagedServiceStatus({
   environment = process.env,
   platform = process.platform,
@@ -205,6 +207,7 @@ export async function readManagedServiceErrorAsync({
 
 function sanitizeServiceError(value) {
   return String(value)
+    .replace(ANSI_SGR_PATTERN, "")
     .replace(/authorization\s*[:=]\s*bearer\s+[^\s,;]+/giu, "authorization: Bearer [已隐藏]")
     .replace(/(["']?)(access[-_ ]?token|refresh[-_ ]?token|api[-_ ]?key|client[-_ ]?secret|auth[-_ ]?token|token|secret|cookie|password)\1\s*([:=])\s*(["']?)[^"'\s,;}]+\4/giu, "$1$2$1$3$4[已隐藏]$4")
     .replace(/https?:\/\/[^\s/@:]+:[^\s/@]+@/giu, "https://[已隐藏]@")

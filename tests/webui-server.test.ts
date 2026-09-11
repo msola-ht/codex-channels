@@ -592,6 +592,30 @@ describe("webui server", () => {
     expect(update.status).toBe(200);
   });
 
+  it("allows loopback settings management without a configured WebUI token", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+
+    const settings = await fetch(`${origin}/api/v1/management/settings`);
+    expect(settings.status).toBe(200);
+    const body = await settings.json() as { revision: string };
+
+    const update = await fetch(`${origin}/api/v1/management/settings`, {
+      method: "PATCH",
+      headers: {
+        origin: managementOrigin,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        revision: body.revision,
+        setting: { kind: "display.reasoning", value: false },
+      }),
+    });
+    expect(update.status).toBe(200);
+    expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(false);
+  });
+
   it("protects low-risk management writes with the same WebUI token", async () => {
     const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";
@@ -747,13 +771,17 @@ describe("webui server", () => {
 
   });
 
-  it("does not expose a second management login and reports missing WebUI auth", async () => {
+  it("does not expose a second management login when loopback management is tokenless", async () => {
     const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";
     const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
-    const response = await fetch(`${origin}/api/v1/management/settings`, { headers: { origin: managementOrigin } });
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: { code: "management_requires_webui_token" } });
+    const response = await fetch(`${origin}/api/v1/management/login`, {
+      method: "POST",
+      headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
   });
 
   it("rejects management writes with stale revision and cross-origin requests", async () => {

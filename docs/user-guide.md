@@ -252,7 +252,7 @@ codexc metrics export --range 30d --format json
 codexc webui
 ```
 
-WebUI 默认只读展示本机脱敏指标；设置页可在同一 WebUI 令牌下修改已开放的低风险 Gateway 设置，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
+WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
 
 从本机向绑定渠道发送图片：
 

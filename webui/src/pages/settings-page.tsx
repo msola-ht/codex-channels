@@ -161,7 +161,7 @@ function SettingsContent({ summary, services, providers, apiProviders, managemen
     <ChannelStatusCard channels={summary.gateway.channels} />
     {tasks.actionError !== null ? <p className="text-sm text-destructive" role="status">{tasks.actionError}</p> : null}
     <Card>
-      <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态、版本和最近错误由当前平台服务管理器查询；启停、重载和安装操作需要确认</CardDescription></CardHeader>
+      <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态和版本由当前平台服务管理器查询，未运行时显示最近错误；启停、重载和安装操作需要确认</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-3">
         {services.loading ? <p className="text-sm text-muted-foreground">正在读取服务状态…</p> : null}
         {services.error ? <SettingsError message={services.error} retry={services.refetch} /> : null}
