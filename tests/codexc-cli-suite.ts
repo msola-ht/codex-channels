@@ -384,7 +384,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     );
   }, 20_000);
 
-  it.skipIf(process.platform === "win32")("preserves provider, errors, and CNY costs in machine-readable reports", () => {
+  it.skipIf(process.platform === "win32")("preserves provider and errors in machine-readable reports", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-report-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -399,38 +399,18 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       cwd: workspace,
       env: environment,
     });
-    updateGatewayConfig(join(home, "config.toml"), (document) => {
-      table(document.display).price_currency = "cny";
-    });
-    writeFileSync(join(home, "data", "exchange-rate.json"), JSON.stringify({
-      version: 1,
-      source: "open-er-api",
-      effectiveAtMs: Date.now(),
-      usdToCny: 7,
-    }));
     const store = new SqliteModelRequestMetricsStore(
       requestMetricsDatabasePath(join(home, "data", "gateway.sqlite3")),
     );
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: Date.now(),
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
     store.record({
       ...metricsSample(1),
       provider: "openai",
       model: "shared-model",
-      pricing,
     });
     store.record({
       ...metricsSample(2),
       provider: "deepseek",
       model: "shared-model",
-      pricing,
     });
     store.record({
       ...metricsSample(3),
@@ -439,7 +419,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       status: "failed",
       httpStatus: 429,
       errorType: "rate_limit",
-      pricing,
     });
     store.close();
 
@@ -456,17 +435,16 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "--stdout",
     ], { cwd: workspace, env: environment, encoding: "utf8" });
     const report = JSON.parse(jsonOutput);
-    expect(report.report.aggregate.totalCostCnyNanos).toBeGreaterThan(0);
     expect(report.report.groups).toEqual(expect.arrayContaining([
       expect.objectContaining({
         provider: "deepseek",
         model: "shared-model",
-        aggregate: expect.objectContaining({ totalCostCnyNanos: expect.any(Number) }),
+        aggregate: expect.objectContaining({ requestCount: expect.any(Number) }),
       }),
       expect.objectContaining({
         provider: "openai",
         model: "shared-model",
-        aggregate: expect.objectContaining({ totalCostCnyNanos: expect.any(Number) }),
+        aggregate: expect.objectContaining({ requestCount: expect.any(Number) }),
       }),
     ]));
     expect(report.errors.groups).toEqual([
@@ -487,7 +465,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     ], { cwd: workspace, env: environment, encoding: "utf8" });
     const [header, ...rows] = csvOutput.trim().split("\n");
     expect(header).toContain("type,provider,model");
-    expect(header).toContain("totalCostCnyNanos");
     expect(header).toContain("errorType");
     expect(header).toContain("lastOccurredAtMs");
     expect(rows).toEqual(expect.arrayContaining([
@@ -512,44 +489,23 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       cwd: workspace,
       env: environment,
     });
-    updateGatewayConfig(join(home, "config.toml"), (document) => {
-      table(document.display).price_currency = "cny";
-    });
-    writeFileSync(join(home, "data", "exchange-rate.json"), JSON.stringify({
-      version: 1,
-      source: "open-er-api",
-      effectiveAtMs: Date.now(),
-      usdToCny: 7,
-    }));
     const store = new SqliteModelRequestMetricsStore(
       requestMetricsDatabasePath(join(home, "data", "gateway.sqlite3")),
     );
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: Date.now(),
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
     for (let model = 0; model < 20; model += 1) {
       store.record({
         ...metricsSample(model * 2),
         model: `deepseek-model-${model}`,
-        pricing,
       });
       store.record({
         ...metricsSample((model * 2) + 1),
         model: `deepseek-model-${model}`,
-        pricing,
       });
     }
     store.record({
       ...metricsSample(100),
       provider: "openai",
       model: "openai-hidden-model",
-      pricing,
     });
     store.close();
 
@@ -572,7 +528,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(report.groups.every((group: { provider: string }) =>
       group.provider === "deepseek"
     )).toBe(true);
-    expect(report.aggregate.totalCostCnyNanos).not.toBeNull();
   });
 
   it("generates conservative Codex rules for the current project", () => {
@@ -4613,7 +4568,6 @@ function metricsSample(index: number): ModelRequestMetricSample {
   const now = Date.now();
   return {
     provider: "deepseek",
-    pricing: null,
     transport: "http",
     responseFormat: "sse",
     operation: "response",

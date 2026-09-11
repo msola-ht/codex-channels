@@ -34,18 +34,10 @@ interface SubagentMetricsSummary {
   threadAggregate: {
     requestCount: number;
     unsuccessfulRequestCount: number;
-    pricedRequestCount: number;
     inputTokens: number;
-    pricedInputTokens: number;
     cachedInputTokens: number | null;
     outputTokens: number;
-    pricedOutputTokens: number;
     reasoningOutputTokens: number;
-    totalCostNanos: number | null;
-    inputCostNanos: number | null;
-    cachedInputCostNanos: number | null;
-    outputCostNanos: number | null;
-    pricingCurrency: string | null;
     requestDurationMs: number;
     outputTokensPerSecond: number | null;
     outputSpeedSampleCount: number;
@@ -644,18 +636,10 @@ export class SubagentCompletionTracker {
       status: entry.terminalStatus ?? "errored",
       requestCount: aggregate?.requestCount ?? 0,
       unsuccessfulRequestCount: aggregate?.unsuccessfulRequestCount ?? 0,
-      pricedRequestCount: aggregate?.pricedRequestCount ?? 0,
       inputTokens: aggregate?.inputTokens ?? 0,
-      pricedInputTokens: aggregate?.pricedInputTokens ?? 0,
       cachedInputTokens: aggregate?.cachedInputTokens ?? null,
       outputTokens: aggregate?.outputTokens ?? 0,
-      pricedOutputTokens: aggregate?.pricedOutputTokens ?? 0,
       reasoningOutputTokens: aggregate?.reasoningOutputTokens ?? 0,
-      totalCostNanos: aggregate?.totalCostNanos ?? null,
-      inputCostNanos: aggregate?.inputCostNanos ?? null,
-      cachedInputCostNanos: aggregate?.cachedInputCostNanos ?? null,
-      outputCostNanos: aggregate?.outputCostNanos ?? null,
-      pricingCurrency: aggregate?.pricingCurrency ?? null,
       outputTokensPerSecond: aggregate?.outputTokensPerSecond ?? null,
       outputSpeedSampleCount: aggregate?.outputSpeedSampleCount ?? 0,
       outputSpeedTimedCount: aggregate?.outputSpeedTimedCount ?? 0,

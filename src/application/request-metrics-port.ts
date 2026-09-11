@@ -11,11 +11,6 @@ export interface CompactRequestMetricsSummary {
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  pricedInputTokens?: number;
-  pricedOutputTokens?: number;
-  totalCostNanos: number | null;
 }
 
 export interface TurnRequestMetricsSummary {
@@ -30,19 +25,6 @@ export interface TurnRequestMetricsSummary {
   outputTokensPerSecond: number | null;
   outputSpeedSampleCount: number;
   outputSpeedTimedCount: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  pricedInputTokens?: number;
-  pricedOutputTokens?: number;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  hasMixedPrices: boolean;
-  pricingBuckets?: Array<"peak" | "off-peak">;
   compact?: CompactRequestMetricsSummary | null;
 }
 
@@ -58,19 +40,6 @@ export interface ThreadRequestMetricsAggregate {
   outputTokensPerSecond: number | null;
   outputSpeedSampleCount: number;
   outputSpeedTimedCount: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  pricedInputTokens?: number;
-  pricedOutputTokens?: number;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  hasMixedPrices: boolean;
-  pricingBuckets?: Array<"peak" | "off-peak">;
   compact?: CompactRequestMetricsSummary | null;
 }
 
@@ -86,15 +55,6 @@ export interface DirectApiRequestMetricsSummary {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   totalTokens: number | null;
-  pricingCurrency: string | null;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  pricingBucket?: "peak" | "off-peak";
 }
 
 export interface ThreadRequestMetricsSummary {
@@ -150,17 +110,6 @@ export interface RequestMetricsAggregate {
   ttftP50Ms: number | null;
   ttftP95Ms: number | null;
   ttftSampleCount: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  hasMixedPrices: boolean;
-  pricingBuckets?: Array<"peak" | "off-peak">;
   compact?: CompactRequestMetricsSummary | null;
 }
 
@@ -244,17 +193,13 @@ export interface WeeklyQuotaMetricsObservation {
   intervalCount: number;
   requestCount: number;
   unsuccessfulRequestCount: number;
-  pricedRequestCount: number;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  pricingCurrency: string | null;
-  totalCostNanos: number | null;
   periodRequestCount?: number;
   periodInputTokens?: number;
   periodOutputTokens?: number;
   periodTotalTokens?: number;
-  periodTotalCostNanos?: number | null;
 }
 
 export function estimateWeeklyLimit(
@@ -282,7 +227,6 @@ export function estimateWeeklyLimit(
     value / deltaPercent * remainingPercent,
   );
   const periodTotalTokens = observation.periodTotalTokens ?? observation.totalTokens;
-  const periodTotalCostNanos = observation.periodTotalCostNanos ?? observation.totalCostNanos;
   return {
     limitId: limit.limitId,
     startAtMs: window.resetsAt * 1_000 - weeklyWindowDurationMins * 60 * 1_000,
@@ -293,22 +237,13 @@ export function estimateWeeklyLimit(
     intervalCount: observation.intervalCount,
     requestCount: observation.requestCount,
     unsuccessfulRequestCount: observation.unsuccessfulRequestCount,
-    pricedRequestCount: observation.pricedRequestCount,
     inputTokensPerPercent: perPercent(observation.inputTokens),
     outputTokensPerPercent: perPercent(observation.outputTokens),
     totalTokensPerPercent: perPercent(observation.totalTokens),
     remainingTokens: remaining(observation.totalTokens),
-    pricingCurrency: observation.pricingCurrency,
-    costPerPercentNanos: observation.totalCostNanos === null
-      ? null
-      : perPercent(observation.totalCostNanos),
-    remainingCostNanos: observation.totalCostNanos === null
-      ? null
-      : remaining(observation.totalCostNanos),
     periodRequestCount: observation.periodRequestCount ?? observation.requestCount,
     periodInputTokens: observation.periodInputTokens ?? observation.inputTokens,
     periodOutputTokens: observation.periodOutputTokens ?? observation.outputTokens,
     periodTotalTokens,
-    periodTotalCostNanos,
   };
 }

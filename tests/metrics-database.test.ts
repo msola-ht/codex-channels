@@ -675,20 +675,11 @@ describe("model request metrics database operations", () => {
     ]);
   });
 
-  it("shows compact model, tokens, and reference cost in reports and exports", () => {
+  it("shows compact model and tokens in reports and exports", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: 1_700_000_000_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
-    store.record({ ...metricSample(), pricing });
-    store.record({ ...metricSample(), operation: "compact", pricing });
+    store.record(metricSample());
+    store.record({ ...metricSample(), operation: "compact" });
     store.close();
 
     expect(readMetricsReport(environment, {
@@ -701,8 +692,6 @@ describe("model request metrics database operations", () => {
         requestCount: 1,
         inputTokens: 1_000,
         outputTokens: 100,
-        pricingCurrency: "USD",
-        totalCostNanos: 1_400_000,
       },
     });
 
@@ -722,7 +711,7 @@ describe("model request metrics database operations", () => {
     );
     expect(reportMarkdown.status, reportMarkdown.stderr).toBe(0);
     expect(reportMarkdown.stdout).toContain(
-      "上下文压缩：1 次 · deepseek-v4-flash · 1.1 K Token · $0.0014",
+      "上下文压缩：1 次 · deepseek-v4-flash · 1.1 K Token",
     );
     expect(reportMarkdown.stdout).toContain("推理输出 Token：");
 
@@ -758,7 +747,6 @@ describe("model request metrics database operations", () => {
     );
     expect(reportCsv.status, reportCsv.stderr).toBe(0);
     expect(reportCsv.stdout).toContain("compactRequestCount");
-    expect(reportCsv.stdout).toContain("compactTotalCostNanos");
   });
 
   it("refuses to reset while Gateway is running", () => {
@@ -1719,7 +1707,6 @@ function createLegacyV6Database(path: string, count: number) {
 function metricSample(): ModelRequestMetricSample {
   return {
     provider: "deepseek",
-    pricing: null,
     transport: "http",
     responseFormat: "sse",
     operation: "response",

@@ -8,9 +8,8 @@
 - `logger.ts`：根据配置创建 Pino Logger，并对 Token、App Secret、Authorization、Cookie、密码等
   字段进行脱敏；`err` 和进程边界复用 `safeErrorMetadata`，只保留受约束的异常类型和机器错误码，
   不保留 message、stack 或附加响应对象。
-- `request-metrics.ts`：定义与 Provider 实现无关的单次模型请求指标、存储端口、内部查询结果，以及
-  窄 `ModelPricingResolver` 端口。计价解析器按 Provider、模型、服务层级、输入规模和请求开始
-  时间返回当次价格快照；远程目录与缓存实现留在 Bootstrap，未匹配价格时计价字段保持 `NULL`。
+- `request-metrics.ts`：定义与 Provider 实现无关的单次模型请求指标、存储端口和内部查询结果；
+  指标只记录可观测的请求、Token、计时、错误与额度快照，不包含价格快照。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
   每 10 ms 最多同步写入 1 条，关闭时排空，避免 SQLite 位于模型响应确认路径并限制单轮事件循环阻塞；
   公开持久化水位只等待调用时已经入队的记录，不被后续新记录无限延长，并按 Thread 返回该水位内
@@ -26,7 +25,7 @@
   和超过保护期的残缺锁可清理；近期残缺锁、仍在运行的旧 Gateway，以及非 Linux 上 PID 仍存活的
   旧锁继续失败关闭。
 - `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
-  Row 类型和纯领域映射，包括历史未观测响应归一化、额度窗口解析与价格快照映射。
+  Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
 - `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v11 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 继续持有初始化事务，停机升级继续由指标脚本管理。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、上游
@@ -41,11 +40,10 @@
   最多短暂超出 99 条。每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
   `model_request_metrics_enriched` View 统一派生总耗时、TTFT、推理/输出/生成
-  阶段耗时、收尾间隔、缓存与不含推理的 Token、缓存命中率、三类生成速度，以及按当次价格快照计算的
-  输入/缓存/输出和总费用。价格以每百万 Token 的十亿分之一币种单位保存，费用同样使用十亿分之一
-  币种单位，避免浮点金额落库和历史价格回算。内部读取限制为每次最多 500 条；精确 Thread 查询把
+  阶段耗时、收尾间隔、缓存与不含推理的 Token、缓存命中率与三类生成速度。内部读取限制为每次
+  最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计和最近一条无 Turn 的直接 API 请求分开返回，由
-  Bootstrap 映射到 Application 的 `/metrics` 只读端口；会话归纳（模型、思考等级、Token 与费用）
+  Bootstrap 映射到 Application 的 `/metrics` 只读端口；会话归纳（模型、思考等级与 Token）
   递归纳入显式父 Thread 的子代理后代；Schema v11 的 `subagent_turns` 按子 Thread 与子 Turn
   保存运行级父 Turn 关系，父 Turn 任务合计只纳入这些精确运行关系；
   与每次对话明细查询由 `threadList()`、`threadTurnSummaries()` 提供，父 Turn 任务窄查询由
@@ -58,16 +56,15 @@
   从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。
   WebSocket 上游握手失败、WS 内包装错误事件（如 429 usage_limit_reached）与 Gateway 层未发起
   上游请求的 Turn 级失败（如用量上限）也以 failed 记录落库：前者保留 HTTP 状态，后者无 Token
-  与费用；失败记录还保存提供商、模型与受限长度的错误消息，供 WebUI 与导出展示详情。
+  失败记录还保存提供商、模型与受限长度的错误消息，供 WebUI 与导出展示详情。
   旧版 `/responses/compact` 与普通 `/responses` 上由受控元数据标记的 remote compaction v2
-  都以 `operation = 'compact'` 独立分类，但其请求、Usage、费用与额度快照仍参与汇总、异常报告、
+  都以 `operation = 'compact'` 独立分类，但其请求、Usage 与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或
   复制持久化数据。当前锁定 Codex 0.150.1 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
-  连接预热而非模型推理，Provider Proxy 不将其写入本指标库，因此不会扩大请求、Token、费用或
+  连接预热而非模型推理，Provider Proxy 不将其写入本指标库，因此不会扩大请求、Token 或
   错误率分母。综合输出速度只使用同时具有非推理输出 Token 与输出时间窗的请求；
   首段回复延迟只使用有效 TTFT 样本，并返回平均、P50、P95 和覆盖计数。所有合计仍在 SQLite 内完成，
-  费用也按同币种快照求和并返回计价请求数；只有聚合范围内三类每百万 Token 单价分别一致时才
-  返回统一单价，否则标记为多档价格，不把缺失价格、计时或缓存字段当成零；不同币种不强行合计。
+  不把缺失计时或缓存字段当成零。
   查询时还会把旧库中 HTTP 200、响应格式未知且没有模型或 Usage 的普通响应历史“完成”记录归一为
   `incomplete/response_not_observed`；客户端提前断开仍保持独立失败类型。异常查询以同一时间范围内全部模型请求作为失败率分母，只把
   非完成状态按提供商、模型、状态、HTTP 状态和错误类型分组，返回出现次数、最近发生时间及总分组数，

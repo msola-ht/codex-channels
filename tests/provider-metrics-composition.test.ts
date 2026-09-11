@@ -61,7 +61,6 @@ describe("ProviderMetricsComposition", () => {
       expect(record).toHaveBeenCalledWith({
         provider: "deepseek",
         ...metrics(),
-        pricing: null,
         reasoningEffort: null,
       });
     });
@@ -114,7 +113,6 @@ describe("ProviderMetricsComposition", () => {
       expect(record).toHaveBeenCalledWith({
         provider: "openai",
         ...unassociated,
-        pricing: null,
         reasoningEffort: null,
       });
     });
@@ -122,90 +120,13 @@ describe("ProviderMetricsComposition", () => {
     await composition.close();
   });
 
-  it("attaches an injected pricing snapshot without coupling the proxy to prices", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-pricing-"));
-    temporaryDirectories.push(directory);
-    const socketPath = join(directory, "deepseek.sock");
-    const record = vi.fn<ModelRequestMetricsStore["record"]>();
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "future-setup",
-      effectiveAtMs: 1_700_000_000_000,
-      bucket: "peak" as const,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
-    const resolve = vi.fn(() => pricing);
-    const onModelTiming = vi.fn();
-    const composition = new ProviderMetricsComposition({
-      providers: ["deepseek"],
-      socketPath: () => socketPath,
-      writer: new BufferedModelRequestMetricsWriter({
-        record,
-        close: () => undefined,
-        recordSubagentThread: () => undefined,
-        recordSubagentTurn: () => undefined,
-        requestRowsAfter: () => [],
-        subagentThreadsAfter: () => [],
-        count: () => 0,
-        recent: () => [],
-        aggregate: () => emptyMetricsReport(),
-        threadTurnTaskSummary: () => null,
-        errors: () => emptyErrorReport(),
-      }),
-      pricingResolver: { resolve },
-      onModelTiming,
-      logger: pino({ level: "silent" }),
-    });
-    await composition.start();
-
-    await sendProviderProxyMetrics(socketPath, metrics());
-
-    await vi.waitFor(() => {
-      expect(record).toHaveBeenCalledWith({
-        provider: "deepseek",
-        ...metrics(),
-        pricing,
-        reasoningEffort: null,
-      });
-    });
-    expect(resolve).toHaveBeenCalledWith({
-      provider: "deepseek",
-      model: "deepseek-v4-flash",
-      serviceTier: "default",
-      inputTokens: 100,
-      atMs: 1_000,
-    });
-    expect(onModelTiming).toHaveBeenCalledWith(expect.objectContaining({
-      pricingCurrency: "USD",
-      totalCostNanos: 180_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-      pricingBucket: "peak",
-    }));
-    await composition.close();
-  });
-
-  it("keeps failed request usage without adding it to reference cost", () => {
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: 1_700_000_000_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
-
+  it("keeps failed request usage", () => {
     const event = toModelTimingEvent({
       ...metrics(),
       status: "failed",
       httpStatus: 503,
       errorType: "http_error",
-    }, pricing);
+    });
 
     expect(event).toMatchObject({
       outcome: "failed",
@@ -213,25 +134,13 @@ describe("ProviderMetricsComposition", () => {
       cachedInputTokens: 80,
       outputTokens: 20,
     });
-    expect(event).not.toHaveProperty("pricingCurrency");
-    expect(event).not.toHaveProperty("totalCostNanos");
   });
 
-  it("includes compact usage and reference cost in the bound Turn", () => {
-    const pricing = {
-      billingMode: "api" as const,
-      currency: "USD",
-      source: "test-catalog",
-      effectiveAtMs: 1_700_000_000_000,
-      uncachedInputPricePerMillionNanos: 2_000_000_000,
-      cachedInputPricePerMillionNanos: 1_000_000_000,
-      outputPricePerMillionNanos: 3_000_000_000,
-    };
-
+  it("includes compact usage in the bound Turn", () => {
     expect(toModelTimingEvent({
       ...metrics(),
       operation: "compact",
-    }, pricing)).toMatchObject({
+    })).toMatchObject({
       threadId: "thread-1",
       turnId: "turn-1",
       operation: "compact",
@@ -239,8 +148,6 @@ describe("ProviderMetricsComposition", () => {
       inputTokens: 100,
       cachedInputTokens: 80,
       outputTokens: 20,
-      pricingCurrency: "USD",
-      totalCostNanos: 180_000,
     });
   });
 

@@ -3,7 +3,6 @@ const apiBase = new URLSearchParams(window.location.search).get("api") ?? defaul
 
 const status = document.getElementById("status");
 const overviewCards = document.getElementById("overview-cards");
-const overviewCosts = document.getElementById("overview-costs");
 const providers = document.getElementById("providers");
 const devices = document.getElementById("devices");
 const requests = document.getElementById("requests");
@@ -20,7 +19,7 @@ async function main() {
       overview.providers.map((row) => [row.provider ?? "未知", row.request_count, row.input_tokens, row.output_tokens, row.total_tokens]));
     renderTable(devices, ["设备", "首次上报", "最后上报", "请求数", "子代理数"],
       deviceRows.devices.map((row) => [row.device_id, time(row.first_seen_at_ms), time(row.last_seen_at_ms), row.request_count, row.subagent_count]));
-    renderTable(requests, ["设备", "时间", "提供商", "模型", "状态", "输入", "缓存", "输出", "费用"],
+    renderTable(requests, ["设备", "时间", "提供商", "模型", "状态", "输入", "缓存", "输出"],
       requestRows.requests.map((row) => [
         row.device_id,
         time(row.recorded_at_ms),
@@ -30,7 +29,6 @@ async function main() {
         row.input_tokens ?? 0,
         row.cached_input_tokens ?? 0,
         row.output_tokens ?? 0,
-        cost(row.total_cost_nanos, row.pricing_currency),
       ]));
   } catch (error) {
     status.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
@@ -62,10 +60,6 @@ function renderOverview(overview) {
     card.append(labelNode, valueNode);
     return card;
   }));
-  if (overview.costsByCurrency.length > 0) {
-    renderTable(overviewCosts, ["币种", "已计价请求", "费用"],
-      overview.costsByCurrency.map((row) => [row.currency, row.request_count, cost(row.total_cost_nanos, row.currency)]));
-  }
 }
 
 function renderTable(container, headers, rows) {
@@ -115,13 +109,6 @@ function number(value) {
 function time(value) {
   if (!value) return "未知";
   return new Date(value).toLocaleString();
-}
-
-function cost(nanos, currency) {
-  const amount = Number(nanos ?? 0) / 1e9;
-  if (currency === "CNY") return `¥${amount.toFixed(4)}`;
-  if (currency === "USD") return `$${amount.toFixed(4)}`;
-  return `${amount.toFixed(4)} ${currency ?? ""}`.trim();
 }
 
 main();

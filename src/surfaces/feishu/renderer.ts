@@ -1,9 +1,6 @@
 import type {
   ConversationCommandResult,
   ConversationStatus,
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
-  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import type {
   OutputEvent,
@@ -135,10 +132,6 @@ export function renderFeishuIdentity(
 
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): string | null {
   switch (result.kind) {
     case "outcome":
@@ -195,7 +188,7 @@ export function renderFeishuCommandResult(
     case "usage":
       return formatConversationUsage(result);
     case "metrics":
-      return formatConversationMetrics(result, priceCurrency, exchangeRate);
+      return formatConversationMetrics(result);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":
@@ -226,12 +219,7 @@ export function renderFeishuUserFacingError(
 
 export function renderFeishuOutput(
   event: OutputEvent,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
-  remainingUsage?: ProviderModelUsageEstimate | null,
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -273,14 +261,11 @@ export function renderFeishuOutput(
         createSubagentContactedPresentation(event),
       );
     case "subagent.completed":
-      return renderFeishuSubagentCompleted(event, priceCurrency, exchangeRate, debug);
+      return renderFeishuSubagentCompleted(event, debug);
     case "turn.completed":
       return renderFeishuTurnCompleted(
         event,
-        priceCurrency,
-        exchangeRate,
         debug,
-        remainingUsage,
         autoCompactPercent,
       );
     case "thread.status":
@@ -314,25 +299,16 @@ export function renderFeishuOutput(
 
 function renderFeishuSubagentCompleted(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
 ): string {
   return renderFeishuLifecyclePresentation(
-    createSubagentCompletedPresentation(event, priceCurrency, exchangeRate, debug),
+    createSubagentCompletedPresentation(event, debug),
   );
 }
 
 function renderFeishuTurnCompleted(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
-  remainingUsage?: ProviderModelUsageEstimate | null,
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -341,10 +317,7 @@ function renderFeishuTurnCompleted(
   return renderFeishuLifecyclePresentation(
     createTurnCompletedPresentation(
       event,
-      priceCurrency,
-      exchangeRate,
       debug,
-      remainingUsage,
       autoCompactPercent,
     ),
   );

@@ -25,7 +25,6 @@ export interface GatewaySettings {
     operationUpdates: "full" | "compact" | "hidden";
     planUpdatesEnabled: boolean;
     reasoningEnabled: boolean;
-    priceCurrency: "cny" | "usd";
   };
   system: {
     approvalTimeoutSeconds: number;
@@ -91,7 +90,6 @@ export type GatewaySettingInput =
   | { kind: "display.operation-updates"; value: "full" | "compact" | "hidden" }
   | { kind: "display.plan-updates"; value: boolean }
   | { kind: "display.reasoning"; value: boolean }
-  | { kind: "display.price-currency"; value: "cny" | "usd" }
   | { kind: "telegram.message-format"; value: "html" | "rich" }
   | { kind: "system.approval-timeout"; value: number }
   | { kind: "system.idle-release-minutes"; value: number }

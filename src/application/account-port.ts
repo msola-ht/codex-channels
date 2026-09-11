@@ -103,19 +103,14 @@ export interface AccountWeeklyLimitEstimate {
   intervalCount: number;
   requestCount: number;
   unsuccessfulRequestCount: number;
-  pricedRequestCount: number;
   inputTokensPerPercent: number;
   outputTokensPerPercent: number;
   totalTokensPerPercent: number;
   remainingTokens: number;
-  pricingCurrency: string | null;
-  costPerPercentNanos: number | null;
-  remainingCostNanos: number | null;
   periodRequestCount?: number;
   periodInputTokens?: number;
   periodOutputTokens?: number;
   periodTotalTokens?: number;
-  periodTotalCostNanos?: number | null;
   source?: "local" | "center";
   deviceCount?: number;
 }
@@ -144,20 +139,6 @@ export interface ProviderQuotaWindow {
   localTokens?: number | null;
 }
 
-export interface ProviderModelUsageEstimate {
-  model: string;
-  /** 模型用量按官方口径拆分的峰谷档位 */
-  bucket?: "off-peak" | "peak";
-  includedUsageUsd: number;
-  usedUsdNanos: number | null;
-  /** 本机指标库中该模型/档位合计 Token；仅本地模型用量估算提供。 */
-  usedTokens?: number;
-  usedPercent: number | null;
-  remainingUsdNanos: number | null;
-  windowStartAtMs: number | null;
-  windowEndAtMs: number | null;
-}
-
 export type ProviderAccountUsage =
   | {
       kind: "token-usage";
@@ -171,7 +152,6 @@ export type ProviderAccountUsage =
       provider: string;
       available: boolean;
       windows: ProviderQuotaWindow[];
-      modelUsage?: ProviderModelUsageEstimate[];
     }
   | { kind: "unsupported"; provider: string };
 

@@ -1,9 +1,6 @@
 import {
   isFastServiceTier,
   type ConversationStatus,
-  type DisplayPriceCurrency,
-  type ExchangeRateSnapshot,
-  type ProviderModelUsageEstimate,
 } from "../application/index.js";
 import type {
   OutputEvent,
@@ -14,7 +11,6 @@ import type {
 import { usesOpenAiAccount } from "../conversation-core/index.js";
 
 import {
-  formatModelUsageBucket,
   formatOpenAiErrorMessage,
   formatPercent,
   formatRemainingRateLimitWindow,
@@ -30,13 +26,6 @@ import {
   supportsFastMode,
 } from "./provider-format.js";
 import {
-  formatCurrencyNanos,
-  formatCnyEquivalent,
-  formatReferenceCostTotal,
-  toDisplayReferenceCost,
-} from "./reference-cost-format.js";
-import {
-  formatAveragePriceValue,
   formatCompactMetricsValue,
 } from "./metrics-format.js";
 import { missingFinalResponseText } from "./output-copy.js";
@@ -275,36 +264,9 @@ export function createSubagentContactedPresentation(
 
 export function createSubagentCompletedPresentation(
   event: Extract<OutputEvent, { type: "subagent.completed" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
 ): LifecyclePresentation {
-  const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const fields: LifecyclePresentationField[] = [];
-  const successfulRequestCount = Math.max(
-    0,
-    event.requestCount - event.unsuccessfulRequestCount,
-  );
-  const displayCost = successfulRequestCount === 0
-    ? null
-    : toDisplayReferenceCost({
-        currency: event.pricingCurrency,
-        totalCostNanos: event.totalCostNanos,
-        inputCostNanos: event.inputCostNanos,
-        cachedInputCostNanos: event.cachedInputCostNanos,
-        outputCostNanos: event.outputCostNanos,
-        pricedRequestCount: event.pricedRequestCount,
-        requestCount: successfulRequestCount,
-        uncachedInputPricePerMillionNanos: null,
-        cachedInputPricePerMillionNanos: null,
-        outputPricePerMillionNanos: null,
-        hasMixedPrices: false,
-      },
-    currency,
-    exchangeRate ?? null,
-  );
   if (event.model) {
     fields.push({ label: "模型", value: event.model });
   }
@@ -377,42 +339,6 @@ export function createSubagentCompletedPresentation(
   );
   if (outputSpeed !== null) {
     fields.push({ label: "综合输出速度", value: outputSpeed });
-  }
-  if (displayCost !== null) {
-    fields.push({
-      title: "费用",
-      value: formatReferenceCostTotal(
-        displayCost,
-        debug ? exchangeRate ?? null : null,
-      ),
-      fields: !debug || displayCost.currency === null
-        ? []
-        : ([
-            ["输入价格", displayCost.inputCostNanos],
-            ["缓存价格", displayCost.cachedInputCostNanos],
-            ["输出价格", displayCost.outputCostNanos],
-          ] as const).flatMap(([label, costNanos]) =>
-            costNanos === null
-              ? []
-              : [{
-                  label,
-                  value: formatCostFieldValue(displayCost, costNanos, exchangeRate),
-                }]
-          ),
-    });
-  }
-  const averagePrice = event.pricedRequestCount === successfulRequestCount
-    ? formatAveragePriceValue({
-        pricingCurrency: event.pricingCurrency,
-        totalCostNanos: event.totalCostNanos,
-        pricedRequestCount: event.pricedRequestCount,
-        requestCount: successfulRequestCount,
-        inputTokens: event.pricedInputTokens,
-        outputTokens: event.pricedOutputTokens,
-      }, currency, currency === "cny" || debug ? exchangeRate ?? null : null)
-    : null;
-  if (averagePrice !== null) {
-    fields.push({ label: "均价", value: averagePrice });
   }
   return {
     title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`,
@@ -494,18 +420,12 @@ function formatTurnErrorMessage(
 
 export function createTurnCompletedPresentation(
   event: Extract<OutputEvent, { type: "turn.completed" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
   debug = false,
-  remainingUsage?: ProviderModelUsageEstimate | null,
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null,
 ): LifecyclePresentation {
-  const currency = priceCurrency?.(event.modelProvider) ?? "usd";
   const sessionFields: LifecyclePresentationField[] = [
     ...(event.workspaceId
       ? [{
@@ -617,18 +537,6 @@ export function createTurnCompletedPresentation(
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
-  if (remainingUsage && completionRemoteQuota === undefined) {
-    accountFields.push({
-      label: `模型用量${remainingUsage.bucket === undefined
-        ? ""
-        : `（${formatModelUsageBucket(remainingUsage.bucket)}）`}`,
-      value: [
-        `已用 ${remainingUsage.usedUsdNanos === null
-          ? "未知"
-          : formatUsdAmount(remainingUsage.usedUsdNanos)}`,
-      ].join(" · "),
-    });
-  }
   if (event.goal) {
     sessionFields.push({
       label: "Goal",
@@ -725,82 +633,16 @@ export function createTurnCompletedPresentation(
       }],
     });
   }
-  if (event.timing?.referenceCost) {
-    const successfulRequestCount = event.timing.completedModelRequestCount;
-    const displayCost = toDisplayReferenceCost(
-      event.timing.referenceCost,
-      currency,
-      exchangeRate ?? null,
-    );
-    runFields.push({
-      title: "费用",
-      value: successfulRequestCount !== undefined && successfulRequestCount > 0
-        ? formatReferenceCostTotal({
-            ...displayCost,
-            requestCount: successfulRequestCount,
-          }, debug ? exchangeRate ?? null : null)
-        : formatReferenceCostTotal(
-            displayCost,
-            debug ? exchangeRate ?? null : null,
-          ),
-      fields: !debug || displayCost.currency === null
-        ? []
-        : ([
-            ["输入价格", displayCost.inputCostNanos],
-            ["缓存价格", displayCost.cachedInputCostNanos],
-            ["输出价格", displayCost.outputCostNanos],
-          ] as const).flatMap(([label, costNanos]) =>
-            costNanos === null
-              ? []
-              : [{
-                  label,
-                  value: formatCostFieldValue(displayCost, costNanos, exchangeRate),
-                }],
-          ),
-    });
-  }
-  if (
-    event.timing?.referenceCost
-    && event.timing.requestInputTokens !== undefined
-  ) {
-    const referenceCost = event.timing.referenceCost;
-    const averagePrice = referenceCost.pricedRequestCount === referenceCost.requestCount
-      ? formatAveragePriceValue({
-          pricingCurrency: referenceCost.currency,
-          totalCostNanos: referenceCost.totalCostNanos,
-          pricedRequestCount: referenceCost.pricedRequestCount,
-          requestCount: referenceCost.requestCount,
-          inputTokens: referenceCost.pricedInputTokens
-            ?? event.timing.requestInputTokens,
-          outputTokens: referenceCost.pricedOutputTokens
-            ?? (event.timing.requestOutputTokens
-              ?? (event.timing.nonReasoningOutputTokens ?? 0)
-                + (event.timing.reasoningTokens ?? 0)),
-        }, currency, currency === "cny" || debug ? exchangeRate : null)
-      : null;
-    if (averagePrice !== null) {
-      runFields.push({
-        label: "均价",
-        value: averagePrice,
-      });
-    }
-  }
   if (event.timing?.compact) {
     runFields.push({
       label: "上下文压缩",
       value: formatCompactMetricsValue(
         event.timing.compact,
-        currency,
-        exchangeRate,
       ),
     });
   }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
-    const successfulTaskRequestCount = Math.max(
-      0,
-      task.requestCount - task.unsuccessfulRequestCount,
-    );
     const taskFields: LifecyclePresentationField[] = [
       {
         label: "模型请求",
@@ -843,58 +685,6 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
-    if (successfulTaskRequestCount > 0) {
-      const taskCost = toDisplayReferenceCost({
-        currency: task.pricingCurrency,
-        totalCostNanos: task.totalCostNanos,
-        inputCostNanos: task.inputCostNanos,
-        cachedInputCostNanos: task.cachedInputCostNanos,
-        outputCostNanos: task.outputCostNanos,
-        pricedRequestCount: task.pricedRequestCount,
-        requestCount: successfulTaskRequestCount,
-        uncachedInputPricePerMillionNanos: task.uncachedInputPricePerMillionNanos,
-        cachedInputPricePerMillionNanos: task.cachedInputPricePerMillionNanos,
-        outputPricePerMillionNanos: task.outputPricePerMillionNanos,
-        hasMixedPrices: task.hasMixedPrices,
-        ...(task.pricingBuckets === undefined
-          ? {}
-          : { pricingBuckets: task.pricingBuckets }),
-      }, currency, exchangeRate ?? null);
-      taskFields.push({
-        title: "费用",
-        value: formatReferenceCostTotal(
-          taskCost,
-          debug ? exchangeRate ?? null : null,
-        ),
-        fields: !debug || taskCost.currency === null
-          ? []
-          : ([
-              ["输入价格", taskCost.inputCostNanos],
-              ["缓存价格", taskCost.cachedInputCostNanos],
-              ["输出价格", taskCost.outputCostNanos],
-            ] as const).flatMap(([label, costNanos]) =>
-              costNanos === null
-                ? []
-                : [{
-                    label,
-                    value: formatCostFieldValue(taskCost, costNanos, exchangeRate),
-                  }]
-            ),
-      });
-      if (task.pricedRequestCount === successfulTaskRequestCount) {
-        const averagePrice = formatAveragePriceValue({
-          pricingCurrency: task.pricingCurrency,
-          totalCostNanos: task.totalCostNanos,
-          pricedRequestCount: task.pricedRequestCount,
-          requestCount: successfulTaskRequestCount,
-          inputTokens: task.pricedInputTokens,
-          outputTokens: task.pricedOutputTokens,
-        }, currency, currency === "cny" || debug ? exchangeRate ?? null : null);
-        if (averagePrice !== null) {
-          taskFields.push({ label: "均价", value: averagePrice });
-        }
-      }
-    }
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
   const performanceFields: LifecyclePresentationField[] = [];
@@ -960,67 +750,6 @@ export function createTurnCompletedPresentation(
       label: "Git 分支",
       value: event.gitBranch ?? "未检测到",
     });
-  }
-  if (event.sessionReferenceCost) {
-    sessionFields.push({
-      label: "模型请求",
-      value: `${event.sessionReferenceCost.requestCount} 次`,
-    });
-    if (
-      event.sessionReferenceCost.inputTokens !== undefined
-      && event.sessionReferenceCost.outputTokens !== undefined
-    ) {
-      sessionFields.push({
-        title: "Token",
-        value: formatTokenCount(
-          event.sessionReferenceCost.inputTokens
-            + event.sessionReferenceCost.outputTokens,
-        ),
-        fields: event.sessionReferenceCost.cachedInputTokens === undefined
-          ? []
-          : [{
-              label: "缓存命中率",
-              value: formatCacheHitRate(
-                event.sessionReferenceCost.inputTokens,
-                event.sessionReferenceCost.cachedInputTokens,
-              ),
-            }],
-      });
-    }
-    sessionFields.push({
-      label: "总价",
-      value: formatReferenceCostTotal(
-        toDisplayReferenceCost(
-          event.sessionReferenceCost,
-          currency,
-          exchangeRate ?? null,
-        ),
-        debug ? exchangeRate ?? null : null,
-      ),
-    });
-  }
-  if (
-    event.sessionReferenceCost
-    && event.sessionReferenceCost.inputTokens !== undefined
-    && event.sessionReferenceCost.outputTokens !== undefined
-  ) {
-    const referenceCost = event.sessionReferenceCost;
-    const averagePrice = referenceCost.pricedRequestCount === referenceCost.requestCount
-      ? formatAveragePriceValue({
-          pricingCurrency: referenceCost.currency,
-          totalCostNanos: referenceCost.totalCostNanos,
-          pricedRequestCount: referenceCost.pricedRequestCount,
-          requestCount: referenceCost.requestCount,
-          inputTokens: referenceCost.pricedInputTokens ?? referenceCost.inputTokens ?? 0,
-          outputTokens: referenceCost.pricedOutputTokens ?? referenceCost.outputTokens ?? 0,
-        }, currency, currency === "cny" || debug ? exchangeRate : null)
-      : null;
-    if (averagePrice !== null) {
-      sessionFields.push({
-        label: "均价",
-        value: averagePrice,
-      });
-    }
   }
   const sections = [
     ...(runFields.length > 0
@@ -1157,13 +886,6 @@ function formatUpstreamUserAgent(userAgent: string | null): string {
   );
 }
 
-function formatUsdAmount(nanos: number): string {
-  return `$${(nanos / 1_000_000_000).toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
 function formatWeeklyLimit(
   window: NonNullable<StartupStatus["weeklyLimit"]>,
 ): string {
@@ -1198,16 +920,4 @@ function turnStatusLabel(
     inProgress: "运行中",
   } as const;
   return labels[status];
-}
-
-function formatCostFieldValue(
-  displayCost: { currency: string | null },
-  costNanos: number,
-  exchangeRate?: ExchangeRateSnapshot | null,
-): string {
-  const formatted = formatCurrencyNanos(displayCost.currency!, costNanos);
-  const equivalent = displayCost.currency === "USD" && exchangeRate
-    ? formatCnyEquivalent(costNanos, exchangeRate)
-    : null;
-  return equivalent === null ? formatted : `${formatted}（${equivalent}）`;
 }

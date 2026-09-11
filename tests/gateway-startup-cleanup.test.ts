@@ -90,15 +90,6 @@ function createRestoreApplication(options: {
       start: async () => undefined,
       close: async () => undefined,
     },
-    modelPricing: {
-      start: () => undefined,
-      close: () => undefined,
-    },
-    modelPricingNeedsExchangeRate: false,
-    exchangeRate: {
-      start: () => undefined,
-      close: () => undefined,
-    },
     metricsSync: {
       close: async () => undefined,
     },
@@ -433,21 +424,12 @@ describe("GatewayApplication startup cleanup", () => {
       GatewayApplication.prototype,
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
-        activeCostProviders: [],
         config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
         logger: pino({ level: "silent" }),
         transport: { kind: "unix-websocket" },
         providerMetrics: {
           start: async () => undefined,
           close: async () => undefined,
-        },
-        modelPricing: {
-          start: () => calls.push("start:model-pricing"),
-          close: () => calls.push("close:model-pricing"),
-        },
-        exchangeRate: {
-          start: () => undefined,
-          close: () => undefined,
         },
         metricsSync: {
           close: async () => undefined,
@@ -529,7 +511,6 @@ describe("GatewayApplication startup cleanup", () => {
     ).rejects.toThrow("surface start failed");
 
     expect(calls).toEqual([
-      "start:model-pricing",
       "listen:notification",
       "listen:disconnect",
       "connect:codex",
@@ -538,7 +519,6 @@ describe("GatewayApplication startup cleanup", () => {
       "remove:disconnect",
       "close:channel-image-spool",
       "close:surface",
-      "close:model-pricing",
       "close:inbound",
       "close:output",
       "close:codex",
@@ -962,21 +942,12 @@ describe("GatewayApplication startup cleanup", () => {
       GatewayApplication.prototype,
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
-      activeCostProviders: [],
       config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
       providerMetrics: {
         start: async () => undefined,
         close: async () => undefined,
-      },
-      modelPricing: {
-        start: () => undefined,
-        close: () => undefined,
-      },
-      exchangeRate: {
-        start: () => undefined,
-        close: () => undefined,
       },
       metricsSync: {
         close: async () => undefined,
@@ -1074,21 +1045,12 @@ describe("GatewayApplication startup cleanup", () => {
       GatewayApplication.prototype,
     ) as unknown as Record<string, unknown>;
     Object.assign(application, {
-      activeCostProviders: [],
       config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
       providerMetrics: {
         start: async () => undefined,
         close: async () => undefined,
-      },
-      modelPricing: {
-        start: () => undefined,
-        close: () => undefined,
-      },
-      exchangeRate: {
-        start: () => undefined,
-        close: () => undefined,
       },
       metricsSync: {
         close: async () => undefined,
@@ -1264,21 +1226,12 @@ describe("GatewayApplication startup cleanup", () => {
     }> = [];
     const application = Object.create(GatewayApplication.prototype);
     Object.assign(application, {
-      activeCostProviders: [],
       config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
       providerMetrics: {
         start: async () => undefined,
         close: async () => undefined,
-      },
-      modelPricing: {
-        start: () => undefined,
-        close: () => undefined,
-      },
-      exchangeRate: {
-        start: () => undefined,
-        close: () => undefined,
       },
       metricsSync: {
         close: async () => undefined,

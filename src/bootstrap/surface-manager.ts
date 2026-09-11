@@ -6,7 +6,6 @@ import {
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
-  type ReferenceCostSummary,
   type RemoteQuotaSummary,
   type TurnOutputTiming,
   type TurnTaskMetricsSummary,
@@ -35,11 +34,6 @@ export interface SurfaceManagerOptions {
     available: boolean,
     outcome?: string,
   ): void;
-  sessionReferenceCost?(
-    threadId: string,
-    turnId: string,
-    current: ReferenceCostSummary | undefined,
-  ): ReferenceCostSummary | undefined;
   remoteQuota?(
     provider: string | undefined,
     resetsAt: number | null | undefined,
@@ -324,11 +318,6 @@ export class SurfaceManager {
       const taskAggregate = taskAggregateResult instanceof Promise
         ? await taskAggregateResult
         : taskAggregateResult;
-      const sessionReferenceCost = this.options.sessionReferenceCost?.(
-        event.threadId,
-        event.turnId,
-        timing?.referenceCost,
-      );
       const remoteQuotaResult = this.options.remoteQuota?.(
         event.modelProvider,
         event.weeklyLimit?.resetsAt,
@@ -340,7 +329,6 @@ export class SurfaceManager {
         ...event,
         gitBranch: this.currentGitBranch?.(event.target),
         ...(timing === undefined ? {} : { timing }),
-        ...(sessionReferenceCost === undefined ? {} : { sessionReferenceCost }),
         ...(remoteQuota === undefined ? {} : { remoteQuota }),
         ...(taskAggregate === undefined ? {} : { taskAggregate }),
       };

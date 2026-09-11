@@ -76,7 +76,7 @@ codexc service stop webui        # 停止
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | `#/settings` | `GET /api/v1/settings`（币种与汇率）、`GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近错误）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/api-providers`（直接 API Provider 预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
+| 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和最近错误）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/api-providers`（直接 API Provider 预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照；包含 DeepSeek 与 OpenCode Go，未配置或查询失败时保留不可用状态） |
 
 指标接口只接受 GET；设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消，均要求同一
@@ -86,23 +86,18 @@ WebUI Bearer 令牌和回环 Origin。服务状态只读取平台服务管理器
 WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`、
-`speed`、`ttft`、`duration`、`cost`，默认按 `time desc` 查询整个时间范围后再分页。请求接口
+`speed`、`ttft`、`duration`，默认按 `time desc` 查询整个时间范围后再分页。请求接口
 还支持 `filter` 关键字（最多 128 字符），在 Provider、模型、操作、状态、错误类型、错误码与
 错误消息中全库匹配后再分页，响应 `total` 为筛选后的匹配总数。
 错误统计同时包含代理观测到的失败模型请求和未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限），
-后者显示为无 Token/费用的 failed 记录；失败记录保存受限长度的错误消息。错误页以发生时间倒序分页
+后者显示为无 Token 的 failed 记录；失败记录保存受限长度的错误消息。错误页以发生时间倒序分页
 展示每一条失败请求，响应同时保留错误汇总供概览页展示。
-所有费用接口支持 `currency=cny|usd`（缺省跟随 `config.toml` 的 `display.price_currency`），
-服务端按请求币种统一换算，OpenAI 与 DeepSeek 不再混合显示。
-全局费用支持人民币/美元切换（顶部导航右侧，作用于所有页面），Threads、Thread 详情、
-请求明细等所有金额显示统一跟随，选择保存在浏览器 `localStorage`
-（键 `codex-webui:currency`）；未选择时跟随服务端配置。
 全局显示语言支持中文/English 切换（顶部导航右侧，默认中文，选择保存在浏览器
 `localStorage` 键 `codex-webui:language`），错误类型等英文原始值会按语言显示；聊天卡片中的
 已知 OpenAI 用量上限/额度类错误消息默认以中文展示。
 全局深色/浅色主题默认深色，顶部导航右侧按钮切换，选择持久化，刷新后保持。
 
-控制台分为两个互不混用的模块：选择“本机”时显示本地指标、错误和官方账户额度；选择“全部设备”或具体设备时只显示数据中心的核心指标、用量走势、设备明细、费用和 Provider。渠道额度估算不在 WebUI 展示；OCG 与 DS 快照超过 15 分钟或尚未采集时，账户卡片会提示在对应渠道执行 `/usage` 或 `/limits` 后刷新页面；WebUI 本身不主动刷新官方账户。
+控制台分为两个互不混用的模块：选择“本机”时显示本地指标、错误和官方账户额度；选择“全部设备”或具体设备时只显示数据中心的核心指标、用量走势、设备明细和 Provider。官方配额窗口不在 WebUI 展示费用估算；OCG 与 DS 快照超过 15 分钟或尚未采集时，账户卡片会提示在对应渠道执行 `/usage` 或 `/limits` 后刷新页面；WebUI 本身不主动刷新官方账户。
 
 API 响应类型由 `scripts/webui-api.ts` 声明，前端从该共享类型导入，不再单独手写镜像。
 
@@ -130,14 +125,6 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 - API 响应类型单一来源是 `scripts/webui-api.ts`，前端只做转出；
 - 前端构建产物随 npm 包发布，`codexc webui` 不依赖源码目录即可托管。
 
-## 价格口径
-
-- 全局费用按 `price_currency` 统一币种：`cny` 时所有 Provider 按统一汇率换算为人民币，
-  `usd` 时全部保持美元，不再按 Provider 混合显示；
-- 人民币显示使用持久化汇率（`data/exchange-rate.json`，每 6 小时刷新，拉取失败沿用最后一次
-  成功缓存），无任何可用汇率时回退显示美元并在概览页提示；
-- 均价按“总费用 ÷ 总 Token（输入 + 输出，含压缩）× 1 亿”展示为 `/100M`。
-
 ## 边界与安全
 
 - 默认只监听回环地址；绑定非回环地址（`0.0.0.0`）时必须启用访问令牌，否则拒绝启动，
@@ -158,8 +145,8 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 
 ```text
 webui/src/
-  lib/         API 客户端、共享类型转出与格式化（价格/Token/耗时）
-  hooks/       资源数据 hook（统一 loading/error/refetch）与全局货币上下文
+  lib/         API 客户端、共享类型转出与格式化（Token/耗时）
+  hooks/       资源数据 hook（统一 loading/error/refetch）
   components/  Sidebar 布局、指标区块与共享数据表格组件
   pages/       概览、Threads、Thread 详情、请求、错误、设置
 ```
@@ -171,11 +158,11 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与
-费用列悬浮显示明细；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
+缓存列悬浮显示明细；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
 分页，每页条数支持 10–500。Threads 的“开始时间”表示指标库中该 Thread 首个请求的
 开始时间，不等同于 App Server 中 Thread 对象的创建时间；Threads 的“类型”列把已由
 Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，其余显示“主会话”，
-子代理标记与请求和费用统计一同持久化在指标库中。
+子代理标记与请求统计一同持久化在指标库中。
 
 部署：仓库根目录 `npm run install:global` 会自动安装 webui 依赖并构建
 `webui/dist/`，产物随 npm 包发布，由 `codexc webui` 托管。

@@ -2,9 +2,6 @@ import type { Logger } from "pino";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
 
 import type {
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
-  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import {
   isCriticalOutputEvent,
@@ -102,20 +99,11 @@ export interface WeixinOutboxOptions {
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
-  exchangeRate?: () => ExchangeRateSnapshot | null;
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
   debugEnabled?: boolean;
-  remainingUsage?: (
-    model: string,
-    requestStartedAtMs?: number,
-    modelProvider?: string,
-  ) => Promise<ProviderModelUsageEstimate | null>;
   onReplyContextInvalidated?: (
     target: ConversationTarget,
     expectedContextToken?: string,
@@ -159,7 +147,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     });
   }
 
-  async handle(event: OutputEvent): Promise<void> {
+  handle(event: OutputEvent): void {
     if (
       this.closed
       || event.target.surface !== "weixin"
@@ -291,7 +279,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       }
       this.flushOperationUpdates(event.target, event);
     }
-    const rendered = await this.render(event);
+    const rendered = this.render(event);
     if (rendered === null) {
       return;
     }
@@ -394,7 +382,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.enqueueText(target, text, true);
   }
 
-  private async render(event: OutputEvent): Promise<string | null> {
+  private render(event: OutputEvent): string | null {
     switch (event.type) {
       case "user.message":
         return formatCliInput(event.text);
@@ -408,20 +396,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
               `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
             );
       case "turn.completed": {
-        const remainingUsage = event.model && this.options.remainingUsage
-          ? (await this.options.remainingUsage?.(
-              event.model,
-              event.timing?.modelRequestStartedAtMs,
-              event.modelProvider,
-            )) ?? null
-          : null;
         return formatWeixinCommandText(
           renderWeixinTurnCompleted(
             event,
-            this.options.priceCurrency,
-            this.options.exchangeRate?.() ?? null,
             this.options.debugEnabled ?? false,
-            remainingUsage,
             this.options.autoCompactPercent,
           ),
           { structuredFields: true },
@@ -489,8 +467,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
         return formatWeixinCommandText(
           renderWeixinSubagentCompleted(
             event,
-            this.options.priceCurrency,
-            this.options.exchangeRate?.() ?? null,
             this.options.debugEnabled ?? false,
           ),
           { structuredFields: true },

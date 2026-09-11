@@ -25,7 +25,6 @@ export function enqueueTurnErrorMetric(
   const recordedAtMs = Date.now();
   writer.enqueue({
     provider,
-    pricing: null,
     transport: "http",
     responseFormat: "unknown",
     operation: "response",

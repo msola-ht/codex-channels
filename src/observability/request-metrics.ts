@@ -3,102 +3,9 @@ export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
 export type ModelBillingMode = "api" | "subscription" | "unknown";
-export type ModelPricingBucket = "peak" | "off-peak";
-
-export interface ModelRequestPricingSnapshot {
-  billingMode: ModelBillingMode;
-  currency: string | null;
-  source: string;
-  effectiveAtMs: number;
-  /** 请求开始时段对应的峰谷档位；无峰谷定价或全时段定价为 null，旧快照可为 undefined */
-  bucket?: ModelPricingBucket | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-}
-
-export interface ModelPricingLookup {
-  provider: string;
-  model: string | null;
-  serviceTier: string | null;
-  inputTokens: number | null;
-  atMs: number;
-}
-
-export interface ModelPricingResolver {
-  resolve(lookup: ModelPricingLookup): ModelRequestPricingSnapshot | null;
-}
-
-export function calculateModelRequestCostNanos(
-  usage: Pick<
-    ModelRequestMetricSample,
-    "inputTokens" | "cachedInputTokens" | "outputTokens"
-  >,
-  pricing: ModelRequestPricingSnapshot | null,
-): number | null {
-  return calculateModelRequestCostComponents(usage, pricing)?.totalCostNanos ?? null;
-}
-
-export function calculateModelRequestCostComponents(
-  usage: Pick<
-    ModelRequestMetricSample,
-    "inputTokens" | "cachedInputTokens" | "outputTokens"
-  >,
-  pricing: ModelRequestPricingSnapshot | null,
-): {
-  uncachedInputCostNanos: number;
-  cachedInputCostNanos: number;
-  outputCostNanos: number;
-  totalCostNanos: number;
-} | null {
-  if (!pricing || pricing.currency === null) return null;
-  const uncachedInputTokens = usage.inputTokens !== null
-    && usage.cachedInputTokens !== null
-    && usage.inputTokens >= usage.cachedInputTokens
-    ? usage.inputTokens - usage.cachedInputTokens
-    : null;
-  const uncachedInputCost = componentCost(
-    uncachedInputTokens,
-    pricing.uncachedInputPricePerMillionNanos,
-  );
-  const cachedInputCost = componentCost(
-    usage.cachedInputTokens,
-    pricing.cachedInputPricePerMillionNanos,
-  );
-  const outputCost = componentCost(
-    usage.outputTokens,
-    pricing.outputPricePerMillionNanos,
-  );
-  if (
-    uncachedInputCost === null
-    || cachedInputCost === null
-    || outputCost === null
-  ) {
-    return null;
-  }
-  const total = uncachedInputCost + cachedInputCost + outputCost;
-  if (!Number.isSafeInteger(total)) return null;
-  return {
-    uncachedInputCostNanos: uncachedInputCost,
-    cachedInputCostNanos: cachedInputCost,
-    outputCostNanos: outputCost,
-    totalCostNanos: total,
-  };
-}
-
-function componentCost(
-  tokens: number | null,
-  pricePerMillionNanos: number | null,
-): number | null {
-  if (tokens === 0) return 0;
-  if (tokens === null || pricePerMillionNanos === null) return null;
-  const cost = Math.round(tokens * pricePerMillionNanos / 1_000_000);
-  return Number.isSafeInteger(cost) ? cost : null;
-}
 
 export interface ModelRequestMetricSample {
   provider: string;
-  pricing: ModelRequestPricingSnapshot | null;
   transport: ModelRequestTransport;
   responseFormat: ModelResponseFormat;
   operation: ModelRequestOperation;
@@ -161,17 +68,13 @@ export interface StoredWeeklyQuotaEstimate {
   intervalCount: number;
   requestCount: number;
   unsuccessfulRequestCount: number;
-  pricedRequestCount: number;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  pricingCurrency: string | null;
-  totalCostNanos: number | null;
   periodRequestCount?: number;
   periodInputTokens?: number;
   periodOutputTokens?: number;
   periodTotalTokens?: number;
-  periodTotalCostNanos?: number | null;
 }
 
 export interface StoredWeeklyQuotaWindow {
@@ -201,8 +104,6 @@ export interface StoredQuotaPeriod {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  pricedRequestCount: number;
-  totalCostNanos: number | null;
   latestUsedPercentMillionths: number | null;
   planType: string | null;
 }
@@ -223,10 +124,6 @@ export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   thinkingTokensPerSecond: number | null;
   outputTokensPerSecond: number | null;
   generationTokensPerSecond: number | null;
-  uncachedInputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  totalCostNanos: number | null;
 }
 
 export interface StoredCompactRequestMetricsSummary {
@@ -237,9 +134,6 @@ export interface StoredCompactRequestMetricsSummary {
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  totalCostNanos: number | null;
 }
 
 export interface StoredTurnRequestMetricsSummary {
@@ -257,19 +151,6 @@ export interface StoredTurnRequestMetricsSummary {
   outputTokensPerSecond: number | null;
   outputSpeedSampleCount: number;
   outputSpeedTimedCount: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  pricedInputTokens: number;
-  pricedOutputTokens: number;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  hasMixedPrices: boolean;
-  pricingBuckets: ModelPricingBucket[];
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
@@ -286,19 +167,6 @@ export interface StoredThreadRequestMetricsAggregate {
   outputTokensPerSecond: number | null;
   outputSpeedSampleCount: number;
   outputSpeedTimedCount: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  pricedInputTokens: number;
-  pricedOutputTokens: number;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  hasMixedPrices: boolean;
-  pricingBuckets: ModelPricingBucket[];
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
@@ -325,9 +193,6 @@ export interface StoredThreadListItem {
   requestCount: number;
   inputTokens: number;
   outputTokens: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  totalCostNanos: number | null;
   compact: StoredCompactRequestMetricsSummary | null;
   firstRequestStartedAtMs: number;
   lastRecordedAtMs: number;
@@ -367,17 +232,6 @@ export interface StoredModelRequestMetricsAggregate {
   ttftP50Ms: number | null;
   ttftP95Ms: number | null;
   ttftSampleCount: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  hasMixedPrices: boolean;
-  pricingBuckets: ModelPricingBucket[];
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
@@ -426,8 +280,7 @@ export type ModelRequestMetricsSortKey =
   | "reasoningOutputTokens"
   | "outputTokensPerSecond"
   | "ttftMs"
-  | "requestDurationMs"
-  | "totalCostNanos";
+  | "requestDurationMs";
 
 export interface StoredModelRequestMetricsPage {
   startAtMs: number;

@@ -29,7 +29,6 @@ function currentValue(settings: ManagementSettingsResponse, setting: { kind: str
   if (setting.kind === "display.operation-updates") return settings.display.operationUpdates
   if (setting.kind === "display.plan-updates") return settings.display.planUpdatesEnabled
   if (setting.kind === "display.reasoning") return settings.display.reasoningEnabled
-  if (setting.kind === "display.price-currency") return settings.display.priceCurrency
   if (setting.kind === "system.sandbox") return settings.system.sandbox
   if (setting.kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
   if (setting.kind === "automation.scheduled-tasks") return settings.automation.scheduledTasksEnabled

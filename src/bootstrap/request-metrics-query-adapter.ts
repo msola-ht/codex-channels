@@ -48,20 +48,6 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
             outputTokens: direct.outputTokens,
             reasoningOutputTokens: direct.reasoningOutputTokens,
             totalTokens: direct.totalTokens,
-            pricingCurrency: direct.pricing?.currency ?? null,
-            totalCostNanos: direct.totalCostNanos,
-            inputCostNanos: direct.uncachedInputCostNanos,
-            cachedInputCostNanos: direct.cachedInputCostNanos,
-            outputCostNanos: direct.outputCostNanos,
-            uncachedInputPricePerMillionNanos:
-              direct.pricing?.uncachedInputPricePerMillionNanos ?? null,
-            cachedInputPricePerMillionNanos:
-              direct.pricing?.cachedInputPricePerMillionNanos ?? null,
-            outputPricePerMillionNanos:
-              direct.pricing?.outputPricePerMillionNanos ?? null,
-            ...(direct.pricing?.bucket === undefined || direct.pricing.bucket === null
-              ? {}
-              : { pricingBucket: direct.pricing.bucket }),
           },
     };
   }

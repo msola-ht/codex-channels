@@ -61,11 +61,11 @@
   组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
   `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
-  派生上下文压缩模型、请求数、Token 和费用摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v10 备份后
-  逐版本事务升级到 v11（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
+  派生上下文压缩模型、请求数与 Token 摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v11 备份后
+  逐版本事务升级到 v12（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
   `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
-  `subagent_turns`；历史运行归属不猜测），
+  `subagent_turns`，v11 升级 v12 新增官方账户快照表；历史运行归属不猜测），
   reset 要求 Gateway 停止、检查点回写、`0600` 备份后移除旧库，不迁移或覆盖原指标记录。
   服务状态无法确认、处于非停止状态或前台 Gateway
   指标 Socket 仍可连接时均拒绝 reset；`sync-reset` 备份并清零多端上报水位文件（保留
@@ -86,9 +86,8 @@
   App Server 枚举多 Provider/Workspace，会话元数据过滤后按 Turn 上限和可选空闲天数预览、确认归档。
 - `session-menu.mjs` / `session-menu.d.mts`：`codexc sessions` 无子命令时的交互菜单；收集 Turn 上限和空闲天数后调用
   会话清理 CLI，并保留清理命令自身的候选预览与最终确认。
-- `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的显示上下文（配置与
-  汇率缓存）、币种换算、Token/费用/时间格式化与 Markdown/CSV 转义；币种模式解析与 Token
-  格式复用 Application/Surface 导出，换算逻辑集中在 `convertCostToCny`。
+- `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token/时间格式化与
+  Markdown/CSV 转义；Token 格式复用 Application/Surface 导出。
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
@@ -249,7 +248,7 @@
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
-  配置文件中可安全编辑的参数：显示设置（操作详情、计划更新、全局价格显示方式）、系统设置
+  配置文件中可安全编辑的参数：显示设置（操作详情、计划更新）、系统设置
   （调试模式、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、数据中心
   （本地保留策略、本机接入数据中心并同时写入 `[metrics.sync]` 与 `[metrics.view]`、接入状态、上报参数
   `interval_seconds` / `batch_size`、停用本机接入）、
@@ -268,7 +267,7 @@
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
   开发中的 Plugin API；复用 Config 管理接口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
-- `config-display-menu.mjs`：独立管理操作详情、计划更新、全局价格币种和 Telegram 消息格式；
+- `config-display-menu.mjs`：独立管理操作详情、计划更新和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理调试入口、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace 和
   Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`，两者复用同一 Config 管理接口。
@@ -327,7 +326,7 @@
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   或通过脱敏预览、明确确认与无终端执行接口恢复首次配置前状态，从同一受审查来源
   生成共享模型目录；共享子代理由显式 agents 配置入口管理，
-  但不复用凭据、Provider 身份或价格；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
+  但不复用凭据或 Provider 身份；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
   默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
   Pro 的账户保持不变。
 - `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一

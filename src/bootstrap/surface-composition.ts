@@ -166,12 +166,7 @@ function createWeixinModule(
     planUpdatesEnabled: options.config.planUpdatesEnabled,
     reasoningEnabled: options.config.reasoningEnabled,
     debugEnabled: isDebugLogLevel(options.config.logLevel),
-    exchangeRate: options.exchangeRate,
-    priceCurrency: options.priceCurrency,
     autoCompactPercent: options.autoCompactPercent,
-    ...(options.remainingUsage === undefined
-      ? {}
-      : { remainingUsage: options.remainingUsage }),
     ...(options.remoteQuota === undefined ? {} : { remoteQuota: options.remoteQuota }),
     fetchImpl: createProxyFetch(options.config.networkProxy),
     logger: options.logger,
@@ -230,12 +225,7 @@ function createFeishuModule(
     planUpdatesEnabled: options.config.planUpdatesEnabled,
     reasoningEnabled: options.config.reasoningEnabled,
     debugEnabled: isDebugLogLevel(options.config.logLevel),
-    exchangeRate: options.exchangeRate,
-    priceCurrency: options.priceCurrency,
     autoCompactPercent: options.autoCompactPercent,
-    ...(options.remainingUsage === undefined
-      ? {}
-      : { remainingUsage: options.remainingUsage }),
     ...(openApiAgent
       ? {
           openApiAgent,
@@ -346,12 +336,7 @@ function createTelegramModule(
     planUpdatesEnabled: config.planUpdatesEnabled,
     reasoningEnabled: config.reasoningEnabled,
     debugEnabled: isDebugLogLevel(config.logLevel),
-    exchangeRate: options.exchangeRate,
-    priceCurrency: options.priceCurrency,
     autoCompactPercent: options.autoCompactPercent,
-    ...(options.remainingUsage === undefined
-      ? {}
-      : { remainingUsage: options.remainingUsage }),
     gatewayVersion: options.gatewayVersion,
     ...(options.remoteQuota === undefined ? {} : { remoteQuota: options.remoteQuota }),
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,

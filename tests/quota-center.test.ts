@@ -19,10 +19,8 @@ describe("quota center remote quota", () => {
     deviceCount: 3,
     requestCount: 12,
     totalTokens: 1_200_000,
-    totalCostNanos: 500_000_000,
     latestUsedPercentMillionths: null,
     estimatedTotalTokens: null,
-    estimatedTotalCostNanos: null,
     lastObservedAtMs: nowMs - 60_000,
   };
   const weekly: CenterQuotaPeriod = {
@@ -117,10 +115,8 @@ describe("quota center remote quota", () => {
       deviceCount: 3,
       requestCount: 12,
       totalTokens: 1_200_000,
-      totalCostNanos: 500_000_000,
       latestUsedPercentMillionths: null,
       estimatedTotalTokens: null,
-      estimatedTotalCostNanos: null,
       resetsAt: 1_950_000_000,
       observedAtMs: nowMs,
       windows: [
@@ -130,10 +126,8 @@ describe("quota center remote quota", () => {
           deviceCount: monthly.deviceCount!,
           requestCount: monthly.requestCount!,
           totalTokens: monthly.totalTokens!,
-          totalCostNanos: monthly.totalCostNanos ?? null,
           latestUsedPercentMillionths: monthly.latestUsedPercentMillionths ?? null,
           estimatedTotalTokens: monthly.estimatedTotalTokens ?? null,
-          estimatedTotalCostNanos: monthly.estimatedTotalCostNanos ?? null,
           resetsAt: monthly.resetsAt ?? null,
           observedAtMs: nowMs,
         },
@@ -143,10 +137,8 @@ describe("quota center remote quota", () => {
           deviceCount: weekly.deviceCount!,
           requestCount: weekly.requestCount!,
           totalTokens: weekly.totalTokens!,
-          totalCostNanos: weekly.totalCostNanos ?? null,
           latestUsedPercentMillionths: weekly.latestUsedPercentMillionths ?? null,
           estimatedTotalTokens: weekly.estimatedTotalTokens ?? null,
-          estimatedTotalCostNanos: weekly.estimatedTotalCostNanos ?? null,
           resetsAt: weekly.resetsAt ?? null,
           observedAtMs: nowMs,
         },
@@ -167,7 +159,6 @@ describe("quota center remote quota", () => {
       latestUsedPercentMillionths: 2_000_000,
       resetsAt: 1_920_000_000,
       observedAtMs: nowMs + 1_000,
-      totalCostNanos: null,
     });
     expect(merged.windows?.at(-1)?.windows).toBeUndefined();
   });
@@ -224,12 +215,9 @@ function makeQuotaSummary() {
     deviceCount: 1,
     requestCount: 2,
     totalTokens: 300,
-    totalCostNanos: null,
     latestUsedPercentMillionths: null,
     estimatedTotalTokens: null,
-    estimatedTotalCostNanos: null,
     tokensPerPercent: null,
-    costPerPercentNanos: null,
     resetsAt: 1_950_000_000,
     observedAtMs: 1_900_000_000_000,
   } as const;

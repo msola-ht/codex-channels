@@ -1,6 +1,6 @@
 import { useApi } from "@/hooks/use-api"
 import { fetchOfficialAccountSnapshots } from "@/lib/api"
-import type { DeepseekBalance, OpencodeGoAccountUsage, OpencodeGoQuotaWindow, OpencodeGoModelUsageEstimate } from "@/lib/types"
+import type { DeepseekBalance, OpencodeGoAccountUsage, OpencodeGoQuotaWindow } from "@/lib/types"
 
 const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000
 
@@ -44,7 +44,7 @@ function isDeepseekUsage(value: unknown): value is { balances: DeepseekBalance[]
 }
 
 function toOpencodeAccounts(snapshot: { accountId: string | null; available: boolean; usage: unknown }): OpencodeGoAccountUsage[] {
-  const usage = snapshot.usage as { windows?: OpencodeGoQuotaWindow[]; modelUsage?: OpencodeGoModelUsageEstimate[] }
+  const usage = snapshot.usage as { windows?: OpencodeGoQuotaWindow[] }
   return [{
     account: snapshot.accountId ?? "default",
     displayName: snapshot.accountId ?? "OpenCode Go",
@@ -57,6 +57,5 @@ function toOpencodeAccounts(snapshot: { accountId: string | null; available: boo
         resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
       }))
       : [],
-    modelUsage: Array.isArray(usage.modelUsage) ? usage.modelUsage : [],
   }]
 }

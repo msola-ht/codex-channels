@@ -7,7 +7,7 @@
 - [`config.example.toml`](config.example.toml)：Gateway 配置示例。
 - [`docs/display.md`](docs/display.md)：渠道展示口径、`/metrics` 命令与调试模式说明。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。
-- [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行、官方目录模型与价格维护。
+- [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
 - [`docs/webui-settings-plan.md`](docs/webui-settings-plan.md)：WebUI 设置页、CLI 可视化边界、管理接口阶段与验收计划。

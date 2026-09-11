@@ -13,10 +13,10 @@ describe("WebUI 设置加载状态", () => {
 
   it("distinguishes an empty response from a successful settings response", () => {
     expect(resolveSettingsLoadState(null, false, null)).toBe("empty");
-    expect(resolveSettingsLoadState({ currency: "usd", exchangeRate: null }, false, null)).toBe("ready");
+    expect(resolveSettingsLoadState({ revision: "r1" }, false, null)).toBe("ready");
   });
 
   it("keeps the current settings visible during a background refresh", () => {
-    expect(resolveSettingsLoadState({ currency: "usd", exchangeRate: null }, true, null)).toBe("ready");
+    expect(resolveSettingsLoadState({ revision: "r1" }, true, null)).toBe("ready");
   });
 });

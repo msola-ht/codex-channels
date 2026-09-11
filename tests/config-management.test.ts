@@ -71,7 +71,6 @@ describe("Gateway Config management", () => {
         operationUpdates: "compact",
         planUpdatesEnabled: true,
         reasoningEnabled: true,
-        priceCurrency: "usd",
       },
       system: {
         approvalTimeoutSeconds: 900,

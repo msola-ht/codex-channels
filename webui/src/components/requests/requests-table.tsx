@@ -14,11 +14,8 @@ import {
   SortableHeader,
   type DataTableColumn,
 } from "@/components/metrics/data-table"
-import { useCurrency } from "@/hooks/currency-context"
 import { useLanguage } from "@/hooks/language-context"
 import {
-  formatCost,
-  formatCostDetail,
   formatDuration,
   formatErrorMessage,
   formatErrorType,
@@ -44,7 +41,6 @@ const COLUMN_LABELS: Record<string, string> = {
   speed: "输出速度",
   ttft: "TTFT",
   duration: "耗时",
-  cost: "费用",
 }
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
@@ -86,7 +82,6 @@ export function RequestsTable({
   filter: string
   total: number
 }) {
-  const { currency } = useCurrency()
   const { language } = useLanguage()
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
@@ -324,36 +319,7 @@ export function RequestsTable({
         </span>
       ),
     },
-    {
-      id: "cost",
-      accessorFn: (record) =>
-        record.totalCostCnyNanos ?? record.totalCostNanos ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>费用</SortableHeader>
-      ),
-      cell: ({ row }) => {
-        const record = row.original
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
-                {formatCost(record, currency)}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="right" align="start">
-              <ul className="flex flex-col gap-1">
-                {formatCostDetail(record, currency).map((item) => (
-                  <li key={item.label} className="whitespace-nowrap">
-                    {item.label}：{item.value}
-                  </li>
-                ))}
-              </ul>
-            </TooltipContent>
-          </Tooltip>
-        )
-      },
-    },
-  ], [currency, language])
+  ], [language])
 
   return (
     <DataTable

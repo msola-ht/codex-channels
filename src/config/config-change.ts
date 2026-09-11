@@ -11,7 +11,6 @@ export type GlobalConfigChangeCode =
   | "display.operation-updates"
   | "display.plan-updates"
   | "display.reasoning"
-  | "display.price-currency"
   | "experimental.plugin-api"
   | "scheduled-tasks.enabled"
   | "api.providers"

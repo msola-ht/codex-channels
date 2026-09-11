@@ -12,7 +12,6 @@ export type {
   RateLimitReachedType,
   RateLimitSnapshot,
   RateLimitWindow,
-  ReferenceCostSummary,
   RemoteQuotaSummary,
   TurnTaskMetricsSummary,
   ThreadGoal,

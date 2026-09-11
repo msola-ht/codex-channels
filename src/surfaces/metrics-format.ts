@@ -1,7 +1,5 @@
 import type {
   ConversationCommandResult,
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
   RequestMetricsTimeRange,
 } from "../application/index.js";
 
@@ -18,23 +16,11 @@ import {
   formatProviderLabel,
 } from "./provider-format.js";
 import {
-  formatCurrencyNanos,
-  formatExchangeRateLine,
-  formatReferenceCostBreakdown,
-  formatReferenceCostTotal,
-  toDisplayReferenceCost,
-  type ReferenceCostDisplay,
-} from "./reference-cost-format.js";
-import {
   formatCacheHitRate,
   formatTokenCount,
 } from "./token-format.js";
 export function formatConversationMetrics(
   result: Extract<ConversationCommandResult, { kind: "metrics" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   const summary = result.summary;
   if (summary === null) {
@@ -44,13 +30,11 @@ export function formatConversationMetrics(
     if (summary.view === "errors") {
       return formatErrorMetricsReport(summary);
     }
-    return formatAggregateMetricsReport(summary, priceCurrency, exchangeRate);
+    return formatAggregateMetricsReport(summary);
   }
-  const currency = priceCurrency?.(summary.modelProvider) ?? "usd";
   const lines = [
     "## 请求指标",
     `Session ID：${formatThreadId(summary.threadId)}`,
-    ...(exchangeRate ? formatExchangeRateLine(exchangeRate) : []),
   ];
   if (summary.latestTurn) {
     const turn = summary.latestTurn;
@@ -78,33 +62,8 @@ export function formatConversationMetrics(
             turn.outputSpeedTimedCount,
             turn.outputSpeedSampleCount,
           )}`]),
-      ...formatReferenceCost({
-        currency: turn.pricingCurrency,
-        totalCostNanos: turn.totalCostNanos,
-        inputCostNanos: turn.inputCostNanos,
-        cachedInputCostNanos: turn.cachedInputCostNanos,
-        outputCostNanos: turn.outputCostNanos,
-        pricedRequestCount: turn.pricedRequestCount,
-        requestCount: turn.requestCount,
-        uncachedInputPricePerMillionNanos:
-          turn.uncachedInputPricePerMillionNanos,
-        cachedInputPricePerMillionNanos:
-          turn.cachedInputPricePerMillionNanos,
-        outputPricePerMillionNanos: turn.outputPricePerMillionNanos,
-        hasMixedPrices: turn.hasMixedPrices,
-        ...(turn.pricingBuckets === undefined
-          ? {}
-          : { pricingBuckets: turn.pricingBuckets }),
-      }, currency, exchangeRate),
-      ...[formatAveragePriceValue({
-        ...turn,
-        inputTokens: turn.pricedInputTokens ?? turn.inputTokens,
-        outputTokens: turn.pricedOutputTokens ?? turn.outputTokens,
-      }, currency, exchangeRate)]
-        .filter((value): value is string => value !== null)
-        .map((value) => `均价：${value}`),
       ...(turn.compact
-        ? [formatCompactMetrics(turn.compact, currency, exchangeRate)]
+        ? [formatCompactMetrics(turn.compact)]
         : []),
     );
   } else {
@@ -137,16 +96,8 @@ export function formatConversationMetrics(
             aggregate.outputSpeedTimedCount,
             aggregate.outputSpeedSampleCount,
           )}`]),
-      ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
-      ...[formatAveragePriceValue({
-        ...aggregate,
-        inputTokens: aggregate.pricedInputTokens ?? aggregate.inputTokens,
-        outputTokens: aggregate.pricedOutputTokens ?? aggregate.outputTokens,
-      }, currency, exchangeRate)]
-        .filter((value): value is string => value !== null)
-        .map((value) => `均价：${value}`),
       ...(aggregate.compact
-        ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
+        ? [formatCompactMetrics(aggregate.compact)]
         : []),
     );
   }
@@ -181,28 +132,6 @@ export function formatConversationMetrics(
             ...(direct.reasoningOutputTokens === null || direct.reasoningOutputTokens === 0
               ? []
               : [`  - 其中推理输出：${formatTokenCount(direct.reasoningOutputTokens)}`]),
-          ]),
-      ...(direct.totalCostNanos === null
-        ? []
-        : [
-            ...formatReferenceCost({
-              currency: direct.pricingCurrency,
-              totalCostNanos: direct.totalCostNanos,
-              inputCostNanos: direct.inputCostNanos,
-              cachedInputCostNanos: direct.cachedInputCostNanos,
-              outputCostNanos: direct.outputCostNanos,
-              pricedRequestCount: 1,
-              requestCount: 1,
-              uncachedInputPricePerMillionNanos:
-                direct.uncachedInputPricePerMillionNanos,
-              cachedInputPricePerMillionNanos:
-                direct.cachedInputPricePerMillionNanos,
-              outputPricePerMillionNanos: direct.outputPricePerMillionNanos,
-              hasMixedPrices: false,
-              pricingBuckets: direct.pricingBucket === undefined
-                ? []
-                : [direct.pricingBucket],
-            }, currency, exchangeRate),
           ]),
     );
   }
@@ -297,10 +226,6 @@ function formatAggregateMetricsReport(
     ConversationCommandResult,
     { kind: "metrics" }
   >["summary"]>, { view: "global" | "providers" | "models" }>,
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   const viewName = {
     global: "全局",
@@ -310,7 +235,6 @@ function formatAggregateMetricsReport(
   const lines = [
     `## 请求指标 · ${viewName}`,
     `范围：${formatMetricsRange(report.range)}`,
-    ...(exchangeRate ? formatExchangeRateLine(exchangeRate) : []),
   ];
   if (report.aggregate === null) {
     lines.push("", "本时间范围暂无已记录请求。");
@@ -319,11 +243,7 @@ function formatAggregateMetricsReport(
   lines.push(
     "",
     "### 本时间范围累计",
-    ...formatMetricsAggregate(
-      report.aggregate,
-      priceCurrency?.(null) ?? "usd",
-      exchangeRate,
-    ),
+    ...formatMetricsAggregate(report.aggregate),
   );
   if (report.view !== "global" && report.groups.length > 0) {
     const groupView = report.view === "providers" ? "providers" : "models";
@@ -334,8 +254,6 @@ function formatAggregateMetricsReport(
         group,
         index,
         groupView,
-        priceCurrency?.(group.provider) ?? "usd",
-        exchangeRate,
       )),
     );
     const hidden = report.totalGroupCount - report.groups.length;
@@ -362,21 +280,8 @@ function formatMetricsAggregate(
   ttftP50Ms: number | null;
   ttftP95Ms: number | null;
   ttftSampleCount: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  hasMixedPrices: boolean;
-  pricingBuckets?: Array<"peak" | "off-peak">;
   compact?: Parameters<typeof formatCompactMetricsValue>[0] | null;
   },
-  currency: DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): string[] {
   return [
     `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
@@ -405,9 +310,8 @@ function formatMetricsAggregate(
       : [
           `  - 首段回复延迟：平均 ${formatMetricLatency(aggregate.ttftAverageMs)} · P50 ${formatMetricLatency(aggregate.ttftP50Ms)} · P95 ${formatMetricLatency(aggregate.ttftP95Ms)}（覆盖 ${aggregate.ttftSampleCount}/${aggregate.requestCount} 次请求）`,
         ]),
-    ...formatReferenceCost(toReferenceCostDisplay(aggregate), currency, exchangeRate),
     ...(aggregate.compact
-      ? [formatCompactMetrics(aggregate.compact, currency, exchangeRate)]
+      ? [formatCompactMetrics(aggregate.compact)]
       : []),
   ];
 }
@@ -421,8 +325,6 @@ function formatMetricsGroup(
   },
   index: number,
   view: "providers" | "models",
-  currency: DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   const provider = group.providerName
     ? formatProviderLabel(group.providerName)
@@ -442,16 +344,6 @@ function formatMetricsGroup(
   const reasoning = aggregate.reasoningOutputTokens > 0
     ? `  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`
     : "";
-  const referenceCost = toReferenceCostDisplay(aggregate);
-  const referenceCostDisplay = toDisplayReferenceCost(
-    referenceCost,
-    currency,
-    exchangeRate ?? null,
-  );
-  const costBreakdown = formatReferenceCostBreakdown(referenceCostDisplay);
-  const cost = aggregate.pricedRequestCount === 0
-    ? "  - **费用**：总价未知"
-    : `  - **费用**：${formatReferenceCostTotal(referenceCostDisplay, exchangeRate ?? null)}${costBreakdown.length === 0 ? "" : `（${costBreakdown.join(" · ")}）`}`;
   return [
     `${index + 1}. ${label}`,
     `  - 请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
@@ -467,90 +359,16 @@ function formatMetricsGroup(
     `  - 合计：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
     `  - 速度：${speed}`,
     `  - ${latency}`,
-    cost,
     ...(aggregate.compact
-      ? [`  - ${formatCompactMetrics(aggregate.compact, currency, exchangeRate)}`]
+      ? [`  - ${formatCompactMetrics(aggregate.compact)}`]
       : []),
   ].join("\n");
 }
 
 function formatCompactMetrics(
   compact: Parameters<typeof formatCompactMetricsValue>[0],
-  currency: DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
-  return `上下文压缩：${formatCompactMetricsValue(compact, currency, exchangeRate)}`;
-}
-
-export function formatAveragePriceValue(
-  value: {
-    pricingCurrency: string | null;
-    totalCostNanos: number | null;
-    pricedRequestCount: number;
-    requestCount: number;
-    inputTokens: number;
-    outputTokens: number;
-  },
-  currency: DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
-): string | null {
-  if (
-    value.pricingCurrency !== "USD"
-    || value.totalCostNanos === null
-    || value.pricedRequestCount === 0
-    || value.pricedRequestCount !== value.requestCount
-    || value.requestCount === 0
-  ) {
-    return null;
-  }
-  const totalTokens = value.inputTokens + value.outputTokens;
-  if (totalTokens <= 0) return null;
-  const usdNanosPerHundredMillion =
-    value.totalCostNanos / totalTokens * 100_000_000;
-  let nanos = usdNanosPerHundredMillion;
-  let displayCurrency = "USD";
-  if (currency === "cny" && exchangeRate) {
-    const converted = Math.round(usdNanosPerHundredMillion * exchangeRate.usdToCny);
-    if (Number.isSafeInteger(converted)) {
-      nanos = converted;
-      displayCurrency = "CNY";
-    }
-  }
-  const coverage = value.pricedRequestCount === value.requestCount
-    ? ""
-    : `（计价 ${value.pricedRequestCount}/${value.requestCount}）`;
-  const amount = new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: displayCurrency,
-    currencyDisplay: "narrowSymbol",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(nanos / 1_000_000_000);
-  const cnyEquivalent = displayCurrency === "USD" && exchangeRate
-    ? formatCnyEquivalentPerHundredMillion(
-        usdNanosPerHundredMillion,
-        exchangeRate,
-      )
-    : null;
-  return `约 ${amount}/100M`
-    + `${cnyEquivalent === null ? "" : `（${cnyEquivalent}/100M）`}${coverage}`;
-}
-
-function formatCnyEquivalentPerHundredMillion(
-  usdNanosPerHundredMillion: number,
-  exchangeRate: ExchangeRateSnapshot,
-): string | null {
-  const converted = Math.round(
-    usdNanosPerHundredMillion * exchangeRate.usdToCny,
-  );
-  if (!Number.isSafeInteger(converted)) return null;
-  return `≈ ${new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: "CNY",
-    currencyDisplay: "narrowSymbol",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(converted / 1_000_000_000)}`;
+  return `上下文压缩：${formatCompactMetricsValue(compact)}`;
 }
 
 export function formatCompactMetricsValue(
@@ -561,86 +379,15 @@ export function formatCompactMetricsValue(
     unsuccessfulRequestCount: number;
     inputTokens: number;
     outputTokens: number;
-    pricingCurrency: string | null;
-    pricedRequestCount: number;
-    totalCostNanos: number | null;
   },
-  currency: DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
 ): string {
   const model = compact.hasMixedModels
     ? "混合模型"
     : compact.model ?? "模型未知";
-  const display = toDisplayReferenceCost({
-    currency: compact.pricingCurrency,
-    totalCostNanos: compact.totalCostNanos,
-    inputCostNanos: null,
-    cachedInputCostNanos: null,
-    outputCostNanos: null,
-    pricedRequestCount: compact.pricedRequestCount,
-    requestCount: compact.requestCount,
-    uncachedInputPricePerMillionNanos: null,
-    cachedInputPricePerMillionNanos: null,
-    outputPricePerMillionNanos: null,
-    hasMixedPrices: false,
-  }, currency, exchangeRate ?? null);
-  const cost = display.currency === null || display.totalCostNanos === null
-    ? compact.pricedRequestCount === 0 ? "参考费用未知" : "参考费用无法合计"
-    : formatCurrencyNanos(display.currency, display.totalCostNanos);
-  const coverage = compact.pricedRequestCount === compact.requestCount
-    ? ""
-    : `（计价 ${compact.pricedRequestCount}/${compact.requestCount}）`;
   const failures = compact.unsuccessfulRequestCount === 0
     ? ""
     : `（异常 ${compact.unsuccessfulRequestCount} 次）`;
-  return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token · ${cost}${coverage}`;
-}
-
-function formatReferenceCost(
-  value: ReferenceCostDisplay,
-  currency: DisplayPriceCurrency,
-  exchangeRate?: ExchangeRateSnapshot | null,
-): string[] {
-  const display = toDisplayReferenceCost(value, currency, exchangeRate ?? null);
-  return [
-    `- **费用**：${formatReferenceCostTotal(display, exchangeRate ?? null)}`,
-    ...formatReferenceCostBreakdown(display, exchangeRate ?? null)
-      .map((line) => `  - ${line}`),
-  ];
-}
-
-function toReferenceCostDisplay(value: {
-  requestCount: number;
-  pricingCurrency: string | null;
-  pricedRequestCount: number;
-  totalCostNanos: number | null;
-  inputCostNanos: number | null;
-  cachedInputCostNanos: number | null;
-  outputCostNanos: number | null;
-  uncachedInputPricePerMillionNanos: number | null;
-  cachedInputPricePerMillionNanos: number | null;
-  outputPricePerMillionNanos: number | null;
-  hasMixedPrices: boolean;
-  pricingBuckets?: Array<"peak" | "off-peak">;
-}): ReferenceCostDisplay {
-  const display: ReferenceCostDisplay = {
-    currency: value.pricingCurrency,
-    totalCostNanos: value.totalCostNanos,
-    inputCostNanos: value.inputCostNanos,
-    cachedInputCostNanos: value.cachedInputCostNanos,
-    outputCostNanos: value.outputCostNanos,
-    pricedRequestCount: value.pricedRequestCount,
-    requestCount: value.requestCount,
-    uncachedInputPricePerMillionNanos:
-      value.uncachedInputPricePerMillionNanos,
-    cachedInputPricePerMillionNanos:
-      value.cachedInputPricePerMillionNanos,
-    outputPricePerMillionNanos: value.outputPricePerMillionNanos,
-    hasMixedPrices: value.hasMixedPrices,
-  };
-  return value.pricingBuckets === undefined
-    ? display
-    : { ...display, pricingBuckets: value.pricingBuckets };
+  return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`;
 }
 
 function formatMetricsRange(range: RequestMetricsTimeRange): string {

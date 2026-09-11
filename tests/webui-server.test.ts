@@ -199,7 +199,6 @@ describe("webui server", () => {
     recordSample(fixture.databasePath, {
       ...metricSample(),
       provider: "openai",
-      pricing: pricingSnapshot(),
       status: "incomplete",
       incompleteReason: "response_not_observed",
       inputTokens: null,
@@ -217,21 +216,19 @@ describe("webui server", () => {
     });
     recordSample(fixture.databasePath, {
       ...metricSample(),
-      pricing: pricingSnapshot(),
     });
     const { origin } = await startServer(fixture.environment);
 
-    const response = await fetch(`${origin}/api/v1/overview?range=24h&currency=cny`);
+    const response = await fetch(`${origin}/api/v1/overview?range=24h`);
     expect(response.status).toBe(200);
     const body = await response.json() as {
       global: {
         requestCount: number;
         unsuccessfulRequestCount: number;
-        totalCostCnyNanos: number | null;
       };
       providers: Array<{
         provider: string;
-        aggregate: { requestCount: number; totalCostCnyNanos: number | null };
+        aggregate: { requestCount: number };
       }>;
       errors: { requestCount: number; unsuccessfulRequestCount: number };
       weeklyQuota: {
@@ -243,14 +240,11 @@ describe("webui server", () => {
     };
     expect(body.global.requestCount).toBe(2);
     expect(body.global.unsuccessfulRequestCount).toBe(1);
-    expect(body.global.totalCostCnyNanos).toBe(3_205_440);
     expect(body.providers).toHaveLength(2);
     const deepseek = body.providers.find((group) => group.provider === "deepseek");
     const openai = body.providers.find((group) => group.provider === "openai");
     expect(deepseek?.aggregate.requestCount).toBe(1);
-    expect(deepseek?.aggregate.totalCostCnyNanos).toBe(3_205_440);
     expect(openai?.aggregate.requestCount).toBe(1);
-    expect(openai?.aggregate.totalCostCnyNanos).toBeNull();
     expect(body.errors).toMatchObject({
       requestCount: 2,
       unsuccessfulRequestCount: 1,
@@ -268,71 +262,7 @@ describe("webui server", () => {
     expect(body.weeklyQuota.resetsAt).toBeGreaterThan(1_000_000_000_000);
   });
 
-  it("converts every provider to the requested currency", async () => {
-    const fixture = createFixture();
-    recordSample(fixture.databasePath, {
-      ...metricSample(),
-      provider: "openai",
-      pricing: pricingSnapshot(),
-    });
-    recordSample(fixture.databasePath, {
-      ...metricSample(),
-      pricing: pricingSnapshot(),
-    });
-    const { origin } = await startServer(fixture.environment);
-
-    const cnyResponse = await fetch(`${origin}/api/v1/overview?range=24h&currency=cny`);
-    const cnyBody = await cnyResponse.json() as {
-      providers: Array<{
-        provider: string;
-        aggregate: { totalCostCnyNanos: number | null };
-      }>;
-    };
-    for (const group of cnyBody.providers) {
-      expect(group.aggregate.totalCostCnyNanos).not.toBeNull();
-    }
-
-    const usdResponse = await fetch(`${origin}/api/v1/overview?range=24h&currency=usd`);
-    const usdBody = await usdResponse.json() as {
-      providers: Array<{
-        provider: string;
-        aggregate: { totalCostCnyNanos: number | null };
-      }>;
-    };
-    for (const group of usdBody.providers) {
-      expect(group.aggregate.totalCostCnyNanos).toBeNull();
-    }
-  });
-
-  it("rejects invalid currency values", async () => {
-    const fixture = createFixture();
-    const { origin } = await startServer(fixture.environment);
-
-    const response = await fetch(`${origin}/api/v1/overview?range=24h&currency=eur`);
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({
-      error: { code: "invalid_currency" },
-    });
-  });
-
-  it("returns the configured global currency and persisted exchange rate", async () => {
-    const fixture = createFixture();
-    const { origin } = await startServer(fixture.environment);
-
-    const response = await fetch(`${origin}/api/v1/settings`);
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      currency: string;
-      exchangeRate: { usdToCny: number; source: string } | null;
-    };
-    expect(body.currency).toBe("usd");
-    expect(body.exchangeRate).toMatchObject({
-      usdToCny: 7.2,
-      source: "cache",
-    });
-  });
-
-  it("returns a redacted settings summary without changing the legacy response", async () => {
+  it("returns a redacted settings summary", async () => {
     const fixture = createFixture();
     const configPath = join(fixture.home, "config.toml");
     const document = readGatewayConfig(configPath);
@@ -347,12 +277,6 @@ describe("webui server", () => {
     };
     writeGatewayConfig(configPath, document);
     const { origin } = await startServer(fixture.environment);
-
-    const legacy = await fetch(`${origin}/api/v1/settings`);
-    expect(await legacy.json()).toEqual({
-      currency: "usd",
-      exchangeRate: expect.objectContaining({ source: "cache", usdToCny: 7.2 }),
-    });
 
     const response = await fetch(`${origin}/api/v1/settings/summary`);
     expect(response.status).toBe(200);
@@ -1124,7 +1048,6 @@ describe("webui server", () => {
     recordSample(fixture.databasePath, {
       ...metricSample(),
       provider: "deepseek",
-      pricing: pricingSnapshot(),
       threadId: "thread-1",
       turnId: "turn-1",
       operation: "compact",
@@ -1133,7 +1056,6 @@ describe("webui server", () => {
     recordSample(fixture.databasePath, {
       ...metricSample(),
       provider: "deepseek",
-      pricing: pricingSnapshot(),
       threadId: "thread-1",
       turnId: "turn-1",
       requestStartedAtMs: 2_000,
@@ -1141,7 +1063,6 @@ describe("webui server", () => {
     recordSample(fixture.databasePath, {
       ...metricSample(),
       provider: "deepseek",
-      pricing: pricingSnapshot(),
       threadId: "thread-1",
       turnId: "turn-2",
       requestStartedAtMs: 3_000,
@@ -1149,15 +1070,6 @@ describe("webui server", () => {
       httpStatus: 429,
       errorType: "http_error",
     });
-    const configPath = join(fixture.home, "config.toml");
-    const configDocument = readGatewayConfig(configPath);
-    configDocument.display = {
-      operation_updates: "compact",
-      plan_updates: true,
-      reasoning: true,
-      price_currency: "cny",
-    };
-    writeGatewayConfig(configPath, configDocument);
     const { origin } = await startServer(fixture.environment);
 
     const threads = await fetch(`${origin}/api/v1/threads`);
@@ -1168,7 +1080,6 @@ describe("webui server", () => {
         turnCount: number;
         compact: { requestCount: number };
         firstRequestStartedAtMs: number;
-        totalCostCnyNanos: number | null;
       }>;
     };
     expect(threadsBody.threads).toHaveLength(1);
@@ -1178,8 +1089,6 @@ describe("webui server", () => {
       compact: { requestCount: 1 },
       firstRequestStartedAtMs: 1_000,
     });
-    expect(threadsBody.threads[0]!.totalCostCnyNanos).toBeGreaterThan(0);
-
     const run = await fetch(`${origin}/api/v1/threads/thread-1/run`);
     expect(run.status).toBe(200);
     const runBody = await run.json() as {
@@ -1577,31 +1486,10 @@ function createFixture() {
     CODEX_CONNECT_CONFIG_FILE: "",
   };
   initializeUserData({ environment, cwd: home });
-  writeFileSync(
-    join(home, "data", "exchange-rate.json"),
-    JSON.stringify({
-      version: 1,
-      source: "cache",
-      effectiveAtMs: Date.now(),
-      usdToCny: 7.2,
-    }),
-  );
   return {
     databasePath: requestMetricsDatabasePath(join(home, "data", "gateway.sqlite3")),
     environment,
     home,
-  };
-}
-
-function pricingSnapshot() {
-  return {
-    billingMode: "api" as const,
-    currency: "USD",
-    source: "test",
-    effectiveAtMs: Date.now(),
-    uncachedInputPricePerMillionNanos: 1_400_000_000,
-    cachedInputPricePerMillionNanos: 28_000_000,
-    outputPricePerMillionNanos: 2_800_000_000,
   };
 }
 
@@ -1669,7 +1557,6 @@ function recordSample(databasePath: string, sample: ModelRequestMetricSample) {
 function metricSample(): ModelRequestMetricSample {
   return {
     provider: "deepseek",
-    pricing: null,
     transport: "http",
     responseFormat: "sse",
     operation: "response",

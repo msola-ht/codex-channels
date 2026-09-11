@@ -2,9 +2,6 @@ import type { Logger } from "pino";
 
 import type {
   ConversationUseCases,
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
-  ProviderModelUsageEstimate,
   ScheduledTaskConfirmation,
   ScheduledTaskUseCases,
 } from "../../application/index.js";
@@ -122,19 +119,10 @@ export interface FeishuSurfaceOptions {
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   debugEnabled?: boolean;
-  exchangeRate?: () => ExchangeRateSnapshot | null;
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  remainingUsage?: (
-    model: string,
-    requestStartedAtMs?: number,
-    modelProvider?: string,
-  ) => Promise<ProviderModelUsageEstimate | null>;
   configurationRecipients?: () => readonly string[];
   startupNotification?: FeishuStartupNotification;
 }
@@ -224,18 +212,9 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.reasoningEnabled !== undefined
           ? { reasoningEnabled: options.reasoningEnabled }
           : {}),
-        ...(options.exchangeRate === undefined
-          ? {}
-          : { exchangeRate: options.exchangeRate }),
-        ...(options.priceCurrency === undefined
-          ? {}
-          : { priceCurrency: options.priceCurrency }),
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),
-        ...(options.remainingUsage === undefined
-          ? {}
-          : { remainingUsage: options.remainingUsage }),
         debugEnabled: options.debugEnabled ?? false,
       },
     );
@@ -299,12 +278,6 @@ export class FeishuSurface implements SurfaceAdapter {
       {
         quietWindowMs: 0,
         debugEnabled: options.debugEnabled ?? false,
-        ...(options.exchangeRate === undefined
-          ? {}
-          : { exchangeRate: options.exchangeRate }),
-        ...(options.priceCurrency === undefined
-          ? {}
-          : { priceCurrency: options.priceCurrency }),
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),

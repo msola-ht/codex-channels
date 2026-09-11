@@ -329,11 +329,11 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 只读显示指标数据库路径、Schema 兼容性和记录数量；--json 输出稳定 JSON。`,
   "metrics.run": `${metricsCommandUsage.run}
 
-导出指定 Thread 的本次运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度、费用与耗时，
+导出指定 Thread 的本次运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度与耗时，
 以及当前会话累计；默认输出 Markdown 并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
   "metrics.turns": `${metricsCommandUsage.turns}
 
-导出指定会话每一次对话的汇总（请求次数、Token、费用、速度、耗时）；默认写入
+导出指定会话每一次对话的汇总（请求次数、Token、速度、耗时）；默认写入
 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
   "metrics.threads": `${metricsCommandUsage.threads}
 
@@ -342,9 +342,6 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
-  "metrics.normalize_currency": `用法：codexc metrics normalize-currency
-
-要求 Gateway 已停止；备份现有指标库，并清除历史非 USD 费用字段，保留请求、Token 和错误指标。`,
   "metrics.upgrade": `用法：codexc metrics upgrade [--restart-gateway]
 
 默认要求 Gateway 已停止；加 --restart-gateway 时自动停止 Gateway、备份升级并重新启动。`,
@@ -1824,8 +1821,7 @@ async function metrics(args) {
     showSubcommandHelp(args, "prune", "metrics.prune") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
     showSubcommandHelp(args, "export", "metrics.export") ||
-    showSubcommandHelp(args, "quota", "metrics.quota") ||
-    showSubcommandHelp(args, "normalize-currency", "metrics.normalize_currency")) {
+    showSubcommandHelp(args, "quota", "metrics.quota")) {
     return;
   }
   if (args.some(isHelpArgument)) {
@@ -1842,7 +1838,6 @@ async function metrics(args) {
       report: "metrics.report",
       export: "metrics.export",
       quota: "metrics.quota",
-      "normalize-currency": "metrics.normalize_currency",
     }[args[0]];
     throw new Error(key === undefined ? helpText.metrics : helpText[key]);
   }
@@ -1871,10 +1866,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export", "quota", "normalize-currency"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export", "quota"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export|quota|normalize-currency>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export|quota>");
   }
   validateMetricsCommandArgs(subcommand, rest);
   if (
@@ -1911,7 +1906,7 @@ async function metrics(args) {
   if (subcommand === "prune" && rest.length !== 1) {
     throw new Error("用法：codexc metrics prune <provider>");
   }
-  if (new Set(["upgrade", "reset", "sync-reset", "normalize-currency"]).has(subcommand) && rest.length > 0) {
+  if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
   if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {

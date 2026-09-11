@@ -4,7 +4,6 @@ import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 import { AuthGate } from "@/components/layout/auth-gate"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
-import { CurrencyToggle } from "@/components/metrics/currency-toggle"
 import { LanguageToggle } from "@/components/metrics/language-toggle"
 import {
   Breadcrumb,
@@ -16,8 +15,6 @@ import {
 } from "@/components/ui/breadcrumb"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { CurrencyProvider } from "@/hooks/currency-provider"
-import { useCurrency } from "@/hooks/currency-context"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useLanguage } from "@/hooks/language-context"
 
@@ -71,7 +68,6 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
 
 function Layout() {
   const { pathname } = useLocation()
-  const { currency, setCurrency } = useCurrency()
   const { language, setLanguage } = useLanguage()
 
   return (
@@ -93,7 +89,6 @@ function Layout() {
           </Breadcrumb>
           <div className="ml-auto flex items-center gap-1">
             <LanguageToggle value={language} onChange={setLanguage} />
-            <CurrencyToggle value={currency} onChange={setCurrency} />
             <ModeToggle />
           </div>
         </header>
@@ -119,11 +114,9 @@ export default function App() {
     <TooltipProvider>
       <LanguageProvider>
         <AuthGate>
-          <CurrencyProvider>
-            <HashRouter>
-              <Layout />
-            </HashRouter>
-          </CurrencyProvider>
+          <HashRouter>
+            <Layout />
+          </HashRouter>
         </AuthGate>
       </LanguageProvider>
     </TooltipProvider>

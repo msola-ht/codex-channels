@@ -439,6 +439,15 @@ function removeObsoleteGatewayConfig(document) {
     delete document.vision;
     removedPaths.push("vision");
   }
+  const display = document.display;
+  if (display !== null && typeof display === "object" && !Array.isArray(display)) {
+    for (const key of ["price_currency", "price_currency_by_provider"]) {
+      if (Object.hasOwn(display, key)) {
+        delete display[key];
+        removedPaths.push(`display.${key}`);
+      }
+    }
+  }
   return removedPaths;
 }
 

@@ -5,7 +5,7 @@
 微信）不适用本指南，走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
 当前受管第三方 Provider 是编译期注册的：DeepSeek 与 OpenCode Go 共用同一套受管管道，
-Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目录更新、计价、账户和 Setup。
+Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目录更新、账户和 Setup。
 新增 Provider 时优先复用管道，不得动态加载代码，也不得把未知 Provider 回退到 OpenAI 账户查询。
 
 ## 1. 接入前决策清单
@@ -20,10 +20,9 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
 | 认证 | `sk-` API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |
-| 计价形态 | 无 / 通用远程目录 / 固定 USD / GO 式 USD 峰谷 + 包含额度 / DS 式 CNY 计划 + 汇率 | 决定计价器实现与是否需要汇率 |
-| 账户形态 | 无 / 余额 / GO 式用量窗口（5h/7d/月 + 本地重算 + 请求窗口快照） | 决定账户适配器实现与 `/usage` 展示 |
+| 账户形态 | 无 / 余额 / GO 式用量窗口（5h/7d/月 + 本机 Token + 请求窗口快照） | 决定账户适配器实现与 `/usage` 展示 |
 | 运行模式 | switching / exclusive | 必须同时支持；marker `mode` 区分 |
-| 能力边界 | 文字 / 图片 / 音频 / 网页搜索 / 上下文压缩 | 按真实工具合同声明，不能只看价格页或 `/models` |
+| 能力边界 | 文字 / 图片 / 音频 / 网页搜索 / 上下文压缩 | 按真实工具合同声明，不能只看官方页面或 `/models` |
 
 ## 2. 上游资料清单
 
@@ -33,7 +32,6 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 - wire API 的请求/响应/流式事件文档，以及 `/responses/compact` 等压缩接口是否可用；
 - 模型目录来源（`/models` 响应或官方目录 JSON），包含模型名、显示名、上下文窗口、
   支持思考等级、默认思考等级、输入能力、压缩阈值字段；
-- 价格来源（官方价格页或 JSON），包含币种、单价、峰谷时段、长上下文档位、套餐包含额度；
 - 账户接口文档：余额或用量窗口（窗口周期、重置时间、已用百分比）；
 - 限流与错误语义（429/5xx/重试），以及是否有 Key 预检接口。
 
@@ -48,17 +46,16 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
   `catalogManifestFileName`、`managedMarkerFileName`、`backupDirectoryName`；
 - `baseUrl`、`wireApi`、`apiKeyEnvironmentKey`、`supportsWebsockets`；
 - `defaultModel`、`defaultReasoningEffort`、受控 `models` 列表。
-- `capabilities`：只允许声明已实现的实例展开、模型目录来源与更新适配器、计价适配器、
-  账户适配器和 `needsExchangeRate`；无自动目录更新、无计价或无账户能力时显式使用 `none`，
-  静态或人工审查目录可把来源也设为 `none`；通用远程价格目录使用 `remote`，不得把任意 URL、
-  脚本或动态插件放入定义。启用目录更新适配器时必须声明非空受控来源。
+- `capabilities`：只允许声明已实现的实例展开、模型目录来源与更新适配器、账户适配器；
+  无自动目录更新或无账户能力时显式使用 `none`，静态或人工审查目录可把来源也设为 `none`，
+  不得把任意 URL、脚本或动态插件放入定义。启用目录更新适配器时必须声明非空受控来源。
 
 `profileName` 必须使用项目受管的 `sf-` 前缀，`profileFileName` 必须由
 `${profileName}.config.toml` 派生；`codexc remote`、原生 `codex --profile` 和磁盘文件不得再定义别名。
 注册后自动获得：watcher 目录路径、`codexc remote --profile <profileName>` 规范名称、
 `agents.external` 角色、文件迁移、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
-按计价适配器创建解析器并以精确 Provider ID 登记，按账户适配器创建账户窄适配器。未知能力和
+按账户适配器创建账户窄适配器，并以精确 Provider ID 登记。未知能力和
 重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 多账户实例继承基础定义的能力
 元数据；watcher 另保留未配置的共享模型目录，并按 Provider 合并重复定义与路径。
 
@@ -73,25 +70,19 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
  模型 key 为 `provider + model`；
 - 可选模型以各 Provider 下载的官方模型目录为准：目录里声明什么就开放什么，目录不再声明的
-  旧模型名不会出现在 `/model` 与 Setup 选项中；价格基线仍保留旧模型名用于历史用量折算；
+  旧模型名不会出现在 `/model` 与 Setup 选项中；
 - 默认模型写入 Profile 后，Profile 顶层 `model_reasoning_effort` 必须镜像目录默认值，
   运行时校验不一致即失败关闭。
 
-### 3.3 计价
+### 3.3 本地价格
 
-- GO 形态（USD 峰谷 + 包含额度）：由 `managed-provider-capabilities.ts` 按能力元数据创建
-  `opencode-go-model-pricing.ts` 解析器，并按账户 Provider ID 有界匹配；
-- DS 形态（CNY 计划 + 汇率）：由同一工厂创建 `deepseek-model-pricing.ts`，并由定义中的
-  `needsExchangeRate` 决定是否装配汇率；
-- 其他形态：使用通用远程价格目录或按实际合同新建 resolver；
-- 无专用价格时使用 `none`，明确返回无价格；只有经审查允许使用通用远程目录时才使用 `remote`；
-- 价格按请求开始时间判定：生效时间前的请求使用保存的价格快照，生效时间后按当前基线重算；
-  峰谷档位优先沿用快照 `pricing_bucket`，缺失时才按当前基线判定。
+本项目不在本地计算或估算模型价格与费用，不抓取价格目录、不刷新汇率，也不保存价格快照；
+新增 Provider 不实现计价器。官方账户接口返回的余额、配额窗口与用量百分比可进入账户适配器。
 
 ### 3.4 账户
 
 - GO 形态：通过 `opencode-go-account-adapter.ts` 工厂按账户 Provider ID 创建适配器，复用
-  usage URL、凭据读取、计价器和指标库 Provider 过滤；
+  usage URL、凭据读取和指标库 Provider 过滤；
 - 余额形态：通过 `deepseek-account-adapter.ts` 受控创建；该适配器只接受 DeepSeek Provider，
   不会把未知 Provider 当作余额账户。
 - 无账户：`/usage` 明确显示不支持，不回退 OpenAI；
@@ -134,8 +125,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 - 定义与文件布局（`model-provider-file-layout.test.ts` 风格）；
 - Profile 镜像校验与失败关闭（`model-provider-runtime.test.ts` 风格）；
-- 计价基线 schema、峰谷档位、生效时间与历史快照；
-- 账户适配器：余额或用量窗口、本地用量重算、窗口边界、窗口快照归属与缺失回退；
+- 账户适配器：余额或用量窗口、本机 Token 统计、窗口边界、窗口快照归属与缺失回退；
 - Setup：新增、更新、恢复、回滚，以及确认不会自动创建或切换共享角色；
 - 生命周期：60 秒全局空闲宽限判定、自动解除后的关闭前通知、关闭后按需重连；
 - 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
@@ -153,7 +143,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 编译期受管 Provider 的 API Key 只进入目标子进程环境或专用私有凭据文件；用户自定义 Provider
   可按第 6 节显式写入 `0600` Codex 私有配置。两类 Key 都不得进入命令行、Gateway 配置、日志或平台消息；
 - 受管文件必须 `0600`，读取使用 `O_NOFOLLOW` 与属主校验；
-- 配置、目录、基线校验失败时保留旧基线并等待修复，不允许部分启动或隐式回退；
+- 配置或目录校验失败时等待修复，不允许部分启动或隐式回退；
 - 新增 Provider 不得动态加载 npm 包或执行任意代码。
 
 ## 5. 验收流程
@@ -170,9 +160,8 @@ codexc doctor
 - `/model` 能看到带新 Provider 前缀的模型，并可按序号选择；
 - 新会话、同 Provider 历史 Thread、跨 Provider 新建 Thread 的模型与思考等级符合预期；
 - `codexc remote --profile sf-<Provider ID>` 能拉起隔离 App Server 并共享会话；
-- `/usage` 按账户形态展示余额或配额窗口与模型本地用量；
+- `/usage` 按账户形态展示余额或配额窗口与本机 Token 用量；
 - 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启；
-- 峰谷价格按请求开始时间验证：生效时间前后、快照存在与缺失、窗口重置边界；
 - `agents.configure <id> <model>` 能切换共享第三方子代理并保持 Key 隔离。
 
 ## 6. 用户配置的主 Provider

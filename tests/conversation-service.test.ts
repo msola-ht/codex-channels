@@ -214,9 +214,6 @@ describe("ConversationService model selection", () => {
       inputTokens: 180_000,
       outputTokens: 20_000,
       totalTokens: 200_000,
-      pricingCurrency: "USD",
-      pricedRequestCount: 38,
-      totalCostNanos: 400_000_000,
     });
 
     expect(estimate).toMatchObject({
@@ -227,9 +224,6 @@ describe("ConversationService model selection", () => {
       outputTokensPerPercent: 10_000,
       totalTokensPerPercent: 100_000,
       remainingTokens: 8_000_000,
-      pricingCurrency: "USD",
-      costPerPercentNanos: 200_000_000,
-      remainingCostNanos: 16_000_000_000,
     });
   });
 
@@ -264,9 +258,6 @@ describe("ConversationService model selection", () => {
       inputTokens: 18_000,
       outputTokens: 2_000,
       totalTokens: 20_000,
-      pricingCurrency: "USD",
-      pricedRequestCount: 2,
-      totalCostNanos: 40_000_000,
     }));
     const service = new ConversationService(
       turnPort(),
@@ -330,7 +321,6 @@ describe("ConversationService model selection", () => {
         weeklyEstimates: [{
           limitId: "codex",
           totalTokensPerPercent: 2_000,
-          costPerPercentNanos: 4_000_000,
         }],
       });
       expect(weeklyQuotaEstimate).toHaveBeenCalledWith(

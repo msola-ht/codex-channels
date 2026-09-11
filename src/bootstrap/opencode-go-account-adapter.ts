@@ -2,25 +2,16 @@ import {
   loadOpencodeGoAccountCredentialFor,
 } from "../../runtime/model-provider-runtime.mjs";
 import {
-  isOpencodeGoProvider,
   loadOpencodeGoDefaultAccount,
   opencodeGoProviderId,
 } from "../../runtime/opencode-go-accounts.mjs";
 import {
-  calculateModelRequestCostComponents,
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
 import { readBoundedFetchBody } from "./bounded-fetch-body.js";
-import {
-  loadOpenCodeGoPricingBaseline,
-  OpenCodeGoModelPricingResolver,
-  isOpenCodeGoPeakMinute,
-} from "./opencode-go-model-pricing.js";
-import { pricingBucketOrder } from "./pricing-bucket.js";
 
 import type {
   ProviderAccountAdapter,
-  ProviderModelUsageEstimate,
   ProviderAccountUsage,
   ProviderQuotaWindow,
 } from "../application/index.js";
@@ -94,15 +85,6 @@ export function createOpencodeGoAccountAdapter(
           windowStartAtMs = calendarMonthStart(nowMs);
           windowEndAtMs = null;
         }
-        const modelUsage = options.metricsDatabasePath === undefined
-          ? undefined
-          : readModelUsageEstimates(
-              options.metricsDatabasePath,
-              nowMs,
-              windowStartAtMs,
-              windowEndAtMs,
-              provider,
-            );
         const localTokens = options.metricsDatabasePath === undefined
           ? null
           : readWindowLocalTokens(
@@ -119,10 +101,7 @@ export function createOpencodeGoAccountAdapter(
               ...window,
               localTokens: localTokens.get(window.windowId) ?? null,
             }));
-        const resolved = modelUsage === undefined
-          ? { ...usage, windows }
-          : { ...usage, windows, modelUsage };
-        return { ...resolved, provider };
+        return { ...usage, windows, provider };
       } catch {
         throw new UserFacingError(
           "provider.account.unavailable",
@@ -140,43 +119,6 @@ export interface OpencodeGoAccountAdapterOptions {
   metricsDatabasePath?: string;
   nowMs?: () => number;
   provider?: string;
-}
-
-export function createOpencodeGoRemainingUsageReader(
-  options: OpencodeGoAccountAdapterOptions = {},
-): (
-  model: string,
-  requestStartedAtMs?: number,
-  modelProvider?: string,
-) => Promise<ProviderModelUsageEstimate | null> {
-  return async (model, requestStartedAtMs, modelProvider) => {
-    const resolvedProvider = modelProvider !== undefined && isOpencodeGoProvider(modelProvider)
-      ? modelProvider
-      : options.provider ?? defaultOpencodeGoProvider(options.environment ?? process.env);
-    if (modelProvider !== undefined && !isOpencodeGoProvider(modelProvider)) {
-      return null;
-    }
-    try {
-      const usage = await createOpencodeGoAccountAdapter({
-        ...options,
-        provider: resolvedProvider,
-      }).accountUsage();
-      if (usage.kind !== "quota-windows") return null;
-      const baseline = loadOpenCodeGoPricingBaseline();
-      const bucket = baseline.models.get(model)?.peakOffPeak === undefined
-        ? undefined
-        : isOpenCodeGoPeakMinute(
-            new Date(requestStartedAtMs ?? options.nowMs?.() ?? Date.now()),
-            baseline,
-          )
-          ? "peak"
-          : "off-peak";
-      return usage.modelUsage?.find((estimate) =>
-        estimate.model === model && estimate.bucket === bucket) ?? null;
-    } catch {
-      return null;
-    }
-  };
 }
 
 function defaultOpencodeGoProvider(environment: NodeJS.ProcessEnv): string {
@@ -359,192 +301,6 @@ function requestInQuotaWindow(
   return requestStartsInWindow(record, startAtMs, endAtMs);
 }
 
-function readModelUsageEstimates(
-  metricsDatabasePath: string,
-  endAtMs: number,
-  windowStartAtMs: number,
-  windowEndAtMs: number | null,
-  provider: string,
-): ProviderModelUsageEstimate[] {
-  try {
-    const store = new SqliteModelRequestMetricsStore(
-      metricsDatabasePath,
-      endAtMs,
-      { readOnly: true },
-    );
-    try {
-      const resolver = new OpenCodeGoModelPricingResolver();
-      const baseline = loadOpenCodeGoPricingBaseline();
-      const priceEffectiveAtMs = baseline.sourceUpdatedAtMs;
-      type ModelBucket = "off-peak" | "peak";
-      const totals = new Map<string, {
-        model: string;
-        bucket: ModelBucket | null;
-        usedUsdNanos: number;
-        usedTokens: number;
-        hasPricedRequest: boolean;
-      }>();
-      const totalKey = (model: string, bucket: ModelBucket | null) =>
-        bucket === null ? model : `${model}:${bucket}`;
-      let offset = 0;
-      do {
-        const page = store.page({
-          startAtMs: windowStartAtMs,
-          endAtMs,
-          offset,
-          limit: 500,
-          sortKey: "recordedAtMs",
-          sortDirection: "asc",
-          filter: provider,
-        });
-        for (const record of page.records) {
-          if (record.provider !== provider || record.model === null) {
-            continue;
-          }
-          const monthlyResetsAt = windowEndAtMs === null
-            ? null
-            : Math.floor(windowEndAtMs / 1_000);
-          if (
-            !requestInQuotaWindow(
-              record,
-              "monthly",
-              monthlyResetsAt,
-              windowStartAtMs,
-              windowEndAtMs ?? endAtMs,
-            )
-          ) {
-            continue;
-          }
-          const atMs = record.requestStartedAtMs ?? record.recordedAtMs;
-          const usage = {
-            inputTokens: record.inputTokens,
-            cachedInputTokens: record.cachedInputTokens,
-            outputTokens: record.outputTokens,
-          };
-          const totalTokens = record.totalTokens !== null
-            && Number.isSafeInteger(record.totalTokens)
-            && record.totalTokens >= 0
-            ? record.totalTokens
-            : record.inputTokens !== null && record.outputTokens !== null
-              ? record.inputTokens + record.outputTokens
-              : 0;
-          const bucket = record.pricing?.bucket
-            ?? (baseline.models.get(record.model)?.peakOffPeak === undefined
-              ? null
-              : isOpenCodeGoPeakMinute(new Date(atMs), baseline)
-                ? "peak"
-                : "off-peak");
-          const key = totalKey(record.model, bucket);
-          const existing = totals.get(key);
-          const cost = atMs >= priceEffectiveAtMs
-            ? (() => {
-                const pricing = resolver.resolve({
-                  provider,
-                  model: record.model,
-                  serviceTier: record.serviceTier,
-                  inputTokens: record.inputTokens,
-                  atMs,
-                }, record.pricing?.bucket ?? undefined);
-                return pricing === null
-                  ? null
-                  : calculateModelRequestCostComponents(usage, pricing);
-              })()
-            : record.pricing === null
-              ? null
-              : calculateModelRequestCostComponents(usage, record.pricing);
-          totals.set(key, {
-            model: record.model,
-            bucket,
-            usedUsdNanos: (existing?.usedUsdNanos ?? 0)
-              + (cost?.totalCostNanos ?? 0),
-            usedTokens: (existing?.usedTokens ?? 0) + totalTokens,
-            hasPricedRequest: (existing?.hasPricedRequest ?? false) || cost !== null,
-          });
-        }
-        offset = page.nextOffset ?? -1;
-      } while (offset >= 0);
-      const estimates: ProviderModelUsageEstimate[] = [];
-      const pushEstimate = (
-        model: string,
-        bucket: ModelBucket | null,
-        usedUsdNanos: number | null,
-        usedTokens: number,
-      ): void => {
-        const includedUsageUsd = baseline.models.get(model)?.includedUsageUsd;
-        if (includedUsageUsd === undefined) return;
-        const includedUsdNanos = Math.round(includedUsageUsd * 1_000_000_000);
-        const common = {
-          model,
-          ...(bucket === null ? {} : { bucket }),
-          includedUsageUsd,
-          usedTokens,
-          windowStartAtMs,
-          windowEndAtMs,
-        };
-        if (usedUsdNanos === null || includedUsdNanos <= 0) {
-          estimates.push({
-            ...common,
-            usedUsdNanos,
-            usedPercent: null,
-            remainingUsdNanos: null,
-          });
-          return;
-        }
-        estimates.push({
-          ...common,
-          usedUsdNanos,
-          usedPercent: usedUsdNanos / includedUsdNanos * 100,
-          remainingUsdNanos: includedUsdNanos - usedUsdNanos,
-        });
-      };
-      const emitted = new Set<string>();
-      const modelsWithTotals = new Set<string>();
-      for (const {
-        model,
-        bucket,
-        usedUsdNanos,
-        usedTokens,
-        hasPricedRequest,
-      } of totals.values()) {
-        modelsWithTotals.add(model);
-        emitted.add(totalKey(model, bucket));
-        if (bucket !== null) {
-          pushEstimate(
-            model,
-            bucket,
-            hasPricedRequest ? usedUsdNanos : null,
-            usedTokens,
-          );
-          continue;
-        }
-        pushEstimate(
-          model,
-          null,
-          hasPricedRequest ? usedUsdNanos : null,
-          usedTokens,
-        );
-      }
-      // 有本地请求的 DeepSeek 模型按官方表格展示 Off-Peak / Peak 两档，未使用的一档计 0。
-      for (const model of modelsWithTotals) {
-        const price = baseline.models.get(model);
-        if (price?.peakOffPeak === undefined) continue;
-        for (const bucket of pricingBucketOrder) {
-          if (!emitted.has(totalKey(model, bucket))) {
-            pushEstimate(model, bucket, 0, 0);
-          }
-        }
-      }
-      return estimates.sort((left, right) =>
-        (right.usedUsdNanos ?? -1) - (left.usedUsdNanos ?? -1)
-        || left.model.localeCompare(right.model)
-        || (left.bucket ?? "").localeCompare(right.bucket ?? ""));
-    } finally {
-      store.close();
-    }
-  } catch {
-    return [];
-  }
-}
 
 function requestStartsInWindow(
   record: { requestStartedAtMs: number | null; recordedAtMs: number },

@@ -378,7 +378,6 @@ function storedRow(id: number): StoredModelRequestMetric {
   return {
     id,
     provider: "deepseek",
-    pricing: null,
     transport: "http",
     responseFormat: "sse",
     operation: "response",
@@ -421,10 +420,6 @@ function storedRow(id: number): StoredModelRequestMetric {
     thinkingTokensPerSecond: 200,
     outputTokensPerSecond: 300,
     generationTokensPerSecond: 240,
-    uncachedInputCostNanos: 1,
-    cachedInputCostNanos: 2,
-    outputCostNanos: 3,
-    totalCostNanos: 6,
     weeklyQuota: null,
   };
 }

@@ -80,7 +80,6 @@ import {
   ProviderAccountService,
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
-  priceDisplayNeedsExchangeRate,
   type ProviderQuotaWindow,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
@@ -101,7 +100,6 @@ import {
   MetricsSync,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
-  type ModelPricingResolver,
 } from "../observability/index.js";
 import { WorkspaceRegistry } from "../policy/index.js";
 import {
@@ -126,7 +124,6 @@ import {
 } from "./surface-composition.js";
 import type { SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
-import { createOpencodeGoRemainingUsageReader } from "./opencode-go-account-adapter.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import {
   checkOpenAiConnectivity,
@@ -135,15 +132,7 @@ import {
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
-import { RemoteModelPricingCatalog } from "./model-pricing-catalog.js";
-import { RemoteExchangeRate } from "./exchange-rate.js";
-import {
-  ProviderModelPricingResolver,
-} from "./deepseek-model-pricing.js";
-import {
-  mergeCompletionTiming,
-  mergeSessionReferenceCost,
-} from "./reference-cost-summary.js";
+import { mergeCompletionTiming } from "./completion-timing.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
@@ -156,8 +145,6 @@ import {
 } from "./quota-center.js";
 import {
   createManagedProviderAccountAdapters,
-  createManagedProviderPricingResolvers,
-  managedProviderNeedsExchangeRate,
 } from "./managed-provider-capabilities.js";
 
 const bindingRestoreRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
@@ -186,10 +173,6 @@ export class GatewayApplication {
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
   private readonly providerMetrics: ProviderMetricsComposition;
-  private readonly modelPricing: RemoteModelPricingCatalog;
-  private readonly pricingResolver: ModelPricingResolver;
-  private readonly modelPricingNeedsExchangeRate: boolean;
-  private readonly exchangeRate: RemoteExchangeRate;
   private readonly metricsSync: MetricsSync;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
@@ -398,31 +381,6 @@ export class GatewayApplication {
         logger.warn({ err: cause }, "Turn 级错误指标写入失败");
       }
     };
-    this.modelPricing = new RemoteModelPricingCatalog({
-      cachePath: join(dirname(config.stateDatabasePath), "model-pricing.json"),
-      fetchImpl: createProxyFetch(config.networkProxy),
-      logger,
-    });
-    this.exchangeRate = new RemoteExchangeRate({
-      cachePath: join(dirname(config.stateDatabasePath), "exchange-rate.json"),
-      fetchImpl: createProxyFetch(config.networkProxy),
-      logger,
-    });
-    const pricingResolvers = createManagedProviderPricingResolvers(
-      providerDefinitions,
-      { exchangeRate: () => this.exchangeRate.resolve() },
-    );
-    this.pricingResolver = new ProviderModelPricingResolver(
-      this.modelPricing,
-      pricingResolvers,
-    );
-    this.modelPricingNeedsExchangeRate = managedProviderNeedsExchangeRate(
-      providerDefinitions,
-      new Set([
-        primaryProvider,
-        ...managedProviders.map(({ provider }) => provider),
-      ]),
-    );
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
         customPrimaryProvider?.id ?? primaryProvider,
@@ -446,7 +404,6 @@ export class GatewayApplication {
         },
         close: () => metricsWriter.close(),
       },
-      pricingResolver: this.pricingResolver,
       resolveModelSettings: (threadId) =>
         this.router.modelSettingsForThread(threadId),
       onModelTiming: (event) => this.core.handle(event),
@@ -920,15 +877,7 @@ export class GatewayApplication {
         accountId,
         error,
       ),
-      exchangeRate: () => this.exchangeRate.resolve(),
-      priceCurrency: () => this.config.priceCurrency,
       autoCompactPercent: (provider, model) => this.resolveAutoCompactPercent(provider, model),
-      remainingUsage: createOpencodeGoRemainingUsageReader({
-        fetchImpl: createProxyFetch(config.networkProxy),
-        metricsDatabasePath: modelRequestMetricsDatabasePath(
-          config.stateDatabasePath,
-        ),
-      }),
       remoteQuota: readRemoteQuota,
     });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
@@ -949,12 +898,6 @@ export class GatewayApplication {
           available,
           outcome,
         ),
-        sessionReferenceCost: (threadId, turnId, current) =>
-          mergeSessionReferenceCost(
-            metricsStore.threadSummary(threadId),
-            turnId,
-            current,
-          ),
         remoteQuota: readRemoteQuota,
         completionTiming: async (threadId, turnId, current) => {
           await metricsWriter.waitForCurrentWrites(threadId);
@@ -977,21 +920,6 @@ export class GatewayApplication {
             cachedInputTokens: summary.cachedInputTokens,
             outputTokens: summary.outputTokens,
             reasoningOutputTokens: summary.reasoningOutputTokens,
-            pricedRequestCount: summary.pricedRequestCount,
-            pricedInputTokens: summary.pricedInputTokens,
-            pricedOutputTokens: summary.pricedOutputTokens,
-            totalCostNanos: summary.totalCostNanos,
-            inputCostNanos: summary.inputCostNanos,
-            cachedInputCostNanos: summary.cachedInputCostNanos,
-            outputCostNanos: summary.outputCostNanos,
-            pricingCurrency: summary.pricingCurrency,
-            uncachedInputPricePerMillionNanos:
-              summary.uncachedInputPricePerMillionNanos,
-            cachedInputPricePerMillionNanos:
-              summary.cachedInputPricePerMillionNanos,
-            outputPricePerMillionNanos: summary.outputPricePerMillionNanos,
-            hasMixedPrices: summary.hasMixedPrices,
-            pricingBuckets: summary.pricingBuckets,
           };
         },
       },
@@ -1214,10 +1142,6 @@ export class GatewayApplication {
   private async startInternal(): Promise<void> {
     try {
       this.requireRunning();
-      this.modelPricing.start();
-      if (this.modelPricingNeedsExchangeRate || priceDisplayNeedsExchangeRate(this.config)) {
-        this.exchangeRate.start();
-      }
       if (this.config.metricsSync?.enabled) {
         this.metricsSync.start();
       }
@@ -1311,8 +1235,6 @@ export class GatewayApplication {
       ["Surface", () => this.surfaceManager.stop()],
       ["Metrics Sync", () => this.metricsSync.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
-      ["Model Pricing", () => this.modelPricing.close()],
-      ["Exchange Rate", () => this.exchangeRate.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],

@@ -88,41 +88,7 @@ describe("Codex Connect config menu", () => {
     });
   });
 
-  it("sets the global price currency display through the menu", async () => {
-    const fixture = createFixture();
-    const output: string[] = [];
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("display")
-        .mockResolvedValueOnce("price_currency")
-        .mockResolvedValueOnce("cny"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    const result = await runConfig({
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-    });
-
-    expect(result).toEqual({
-      priceCurrency: "cny",
-      configPath: fixture.configPath,
-      activation: "restart-gateway",
-      activationResult: configActivationResult("restart-gateway"),
-    });
-    expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
-      price_currency: "cny",
-    });
-    expect(output.join("")).toContain("全局价格显示方式已设为 cny");
-    expect(output.join("")).toContain(
-      "该设置需要重建 Gateway 连接；后台服务运行时会自动重启，前台进程需重新启动；未运行时将在下次启动生效；现有 Thread 不会被修改",
-    );
-  });
-
-  it("prints a redacted Gateway configuration summary and keeps the menu open", async () => {
+    it("prints a redacted Gateway configuration summary and keeps the menu open", async () => {
     const fixture = createFixture();
     const document = readGatewayConfig(fixture.configPath);
     document.telegram = {
@@ -405,31 +371,7 @@ describe("Codex Connect config menu", () => {
     });
   });
 
-  it("sets the global price currency to USD through the menu", async () => {
-    const fixture = createFixture();
-    const output: string[] = [];
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("display")
-        .mockResolvedValueOnce("price_currency")
-        .mockResolvedValueOnce("usd"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    await runConfig({
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-    });
-
-    expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
-      price_currency: "usd",
-    });
-  });
-
-  it("delegates the debug mode entry under system settings", async () => {
+    it("delegates the debug mode entry under system settings", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const debugSetup = vi.fn(async () => "debug-configured");

@@ -1,9 +1,5 @@
 import {
   csvCell,
-  enrichCosts,
-  exchangeRateLine,
-  formatCost,
-  formatCurrencyNanos,
   formatDuration,
   formatLocalTime,
   formatTokenCount,
@@ -37,14 +33,13 @@ export function printStatus(result, { json = false, output = process.stdout } = 
   }
 }
 
-export function printQuotaHistory(result, format = "markdown", display = null) {
-  void display;
+export function printQuotaHistory(result, format = "markdown") {
   if (format === "json") {
     console.log(JSON.stringify(result, null, 2));
     return;
   }
   if (format === "csv") {
-    const columns = ["provider", "windowId", "periodStartAtMs", "periodEndAtMs", "resetsAt", "firstObservedAtMs", "lastObservedAtMs", "snapshotCount", "requestCount", "unsuccessfulRequestCount", "inputTokens", "outputTokens", "totalTokens", "pricedRequestCount", "totalCostNanos", "latestUsedPercentMillionths", "planType"];
+    const columns = ["provider", "windowId", "periodStartAtMs", "periodEndAtMs", "resetsAt", "firstObservedAtMs", "lastObservedAtMs", "snapshotCount", "requestCount", "unsuccessfulRequestCount", "inputTokens", "outputTokens", "totalTokens", "latestUsedPercentMillionths", "planType"];
     console.log(columns.join(","));
     for (const period of result.periods) console.log(columns.map((column) => csvCell(period[column])).join(","));
     return;
@@ -64,18 +59,13 @@ export function printQuotaHistory(result, format = "markdown", display = null) {
   }
 }
 
-export function printMetricsReport(result, format, display = null) {
+export function printMetricsReport(result, format) {
   const aggregateProvider = singleReportProvider(result.report);
   if (format === "json") {
     console.log(JSON.stringify({
       ...result,
       report: {
         ...result.report,
-        aggregate: enrichSummaryCosts(result.report.aggregate, display, aggregateProvider),
-        groups: result.report.groups.map((group) => ({
-          ...group,
-          aggregate: enrichSummaryCosts(group.aggregate, display, group.provider ?? null),
-        })),
       },
     }, null, 2));
     return;
@@ -99,16 +89,6 @@ export function printMetricsReport(result, format, display = null) {
       ["outputTokens", (row) => row.outputTokens],
       ["reasoningOutputTokens", (row) => row.reasoningOutputTokens],
       ["outputTokensPerSecond", (row) => row.outputTokensPerSecond],
-      ["pricingCurrency", (row) => row.pricingCurrency],
-      ["pricedRequestCount", (row) => row.pricedRequestCount],
-      ["totalCostNanos", (row) => row.totalCostNanos],
-      ["inputCostNanos", (row) => row.inputCostNanos],
-      ["cachedInputCostNanos", (row) => row.cachedInputCostNanos],
-      ["outputCostNanos", (row) => row.outputCostNanos],
-      ["totalCostCnyNanos", (row) => row.totalCostCnyNanos],
-      ["inputCostCnyNanos", (row) => row.inputCostCnyNanos],
-      ["cachedInputCostCnyNanos", (row) => row.cachedInputCostCnyNanos],
-      ["outputCostCnyNanos", (row) => row.outputCostCnyNanos],
       ...compactCsvColumns(),
       ["ttftP50Ms", (row) => row.ttftP50Ms],
       ["ttftP95Ms", (row) => row.ttftP95Ms],
@@ -123,14 +103,14 @@ export function printMetricsReport(result, format, display = null) {
             provider: aggregateProvider,
             model: null,
             group: "global",
-            ...enrichSummaryCosts(result.report.aggregate, display, aggregateProvider),
+            ...result.report.aggregate,
           }]),
       ...result.report.groups.map((group) => ({
         type: "group",
         provider: group.provider,
         model: group.model,
         group: group.model ?? group.provider ?? "全部",
-        ...enrichSummaryCosts(group.aggregate, display, group.provider ?? null),
+        ...group.aggregate,
       })),
       {
         type: "error_summary",
@@ -165,8 +145,6 @@ export function printMetricsReport(result, format, display = null) {
   const aggregate = result.report.aggregate;
   console.log("# Codex Connect 请求指标报告");
   console.log("");
-  const rateLine = exchangeRateLine(display);
-  if (rateLine) console.log(`- ${rateLine}`);
   console.log(`- 生成时间：${result.generatedAt}`);
   console.log(`- 时间范围：${result.range.name}`);
   console.log(`- 起始时间：${new Date(result.range.startAtMs).toISOString()}`);
@@ -185,22 +163,17 @@ export function printMetricsReport(result, format, display = null) {
   console.log(`- 缓存输入 Token：${aggregate.cachedInputTokens ?? "未知"}`);
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
   console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
-  console.log(`- 计价覆盖：${aggregate.pricedRequestCount}/${aggregate.requestCount}`);
-  console.log(`- 总价：${formatCost(
-    { ...aggregate, provider: aggregateProvider },
-    display,
-  )}`);
-  printCompactSummary(aggregate.compact, display, aggregateProvider);
+  printCompactSummary(aggregate.compact);
   console.log(`- 首段延迟 P50/P95：${formatDuration(aggregate.ttftP50Ms)}/${formatDuration(aggregate.ttftP95Ms)}`);
   if (result.report.groups.length > 0) {
     console.log("");
     console.log("## 明细");
     console.log("");
-    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 总价 | 上下文压缩 |");
-    console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
+    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 上下文压缩 |");
+    console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
-      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${value.unsuccessfulRequestCount} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${formatCost({ ...value, provider: group.provider ?? null }, display)} | ${markdownCell(formatCompactSummary(value.compact, display, group.provider ?? null) ?? "无")} |`);
+      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${value.unsuccessfulRequestCount} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${markdownCell(formatCompactSummary(value.compact) ?? "无")} |`);
     }
     const hidden = result.report.totalGroupCount - result.report.groups.length;
     if (hidden > 0) console.log(`\n仅显示请求量最高的 ${result.report.groups.length} 组，另有 ${hidden} 组。`);
@@ -229,19 +202,14 @@ function singleReportProvider(report) {
   return providers.size === 1 ? providers.values().next().value : null;
 }
 
-export function printMetricsExport(result, format, display = null) {
+export function printMetricsExport(result, format) {
   if (format === "json") {
-    console.log(JSON.stringify({
-      ...result,
-      records: result.records.map((record) => enrichCosts(record, display)),
-    }, null, 2));
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
   if (format === "markdown") {
     console.log("# Codex Connect 请求明细");
     console.log("");
-    const rateLine = exchangeRateLine(display);
-    if (rateLine) console.log(`- ${rateLine}`);
     console.log(`- 生成时间：${result.generatedAt}`);
     console.log(`- 时间范围：${result.range.name}`);
     printWeeklyQuotaMarkdown(result.weeklyQuota);
@@ -250,13 +218,9 @@ export function printMetricsExport(result, format, display = null) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 耗时 | 输入 | 缓存输入 | 输出 | 参考价 |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 耗时 | 输入 | 缓存输入 | 输出 |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
-      const pricingCurrency = record.pricing?.currency ?? null;
-      const cost = record.totalCostNanos === null || pricingCurrency === null
-        ? "未知"
-        : formatCost({ ...record, pricingCurrency }, display);
       console.log(
         [
           markdownCell(formatLocalTime(record.recordedAtMs)),
@@ -269,7 +233,6 @@ export function printMetricsExport(result, format, display = null) {
           markdownCell(formatTokenCount(record.inputTokens ?? 0)),
           markdownCell(formatTokenCount(record.cachedInputTokens ?? 0)),
           markdownCell(formatTokenCount(record.outputTokens ?? 0)),
-          markdownCell(cost),
         ].join(" | "),
       );
     }
@@ -283,7 +246,7 @@ export function printMetricsExport(result, format, display = null) {
   const rows = [
     ...result.records.map((record) => ({
       type: "request",
-      ...enrichCosts(record, display),
+      ...record,
       ...flattenRecordedWeeklyQuota(record),
     })),
     ...(result.weeklyQuota === null
@@ -317,15 +280,6 @@ function printWeeklyQuotaMarkdown(quota) {
   }
   console.log(`- 观测变化：${quota.estimate.observedDeltaPercent}%（${quota.estimate.intervalCount} 个区间）`);
   console.log(`- 每 1%：约 ${quota.estimate.totalTokensPerPercent} Token`);
-  console.log(`- 每 1% API 参考费用：${quota.estimate.costPerPercentNanos === null
-    || quota.estimate.pricingCurrency === null
-    ? "暂无完整价格样本"
-    : formatCurrencyNanos(
-        quota.estimate.costPerPercentNanos,
-        quota.estimate.pricingCurrency,
-        null,
-        "openai",
-      )}`);
 }
 
 function flattenWeeklyQuota(quota) {
@@ -341,8 +295,6 @@ function flattenWeeklyQuota(quota) {
     weeklyQuotaIntervalCount: quota.estimate?.intervalCount,
     weeklyQuotaRequestCount: quota.estimate?.requestCount,
     weeklyQuotaTotalTokensPerPercent: quota.estimate?.totalTokensPerPercent,
-    weeklyQuotaPricingCurrency: quota.estimate?.pricingCurrency,
-    weeklyQuotaCostPerPercentNanos: quota.estimate?.costPerPercentNanos,
   };
 }
 
@@ -372,8 +324,6 @@ function weeklyQuotaCsvColumns() {
     ["weeklyQuotaIntervalCount", (row) => row.weeklyQuotaIntervalCount],
     ["weeklyQuotaRequestCount", (row) => row.weeklyQuotaRequestCount],
     ["weeklyQuotaTotalTokensPerPercent", (row) => row.weeklyQuotaTotalTokensPerPercent],
-    ["weeklyQuotaPricingCurrency", (row) => row.weeklyQuotaPricingCurrency],
-    ["weeklyQuotaCostPerPercentNanos", (row) => row.weeklyQuotaCostPerPercentNanos],
   ];
 }
 
@@ -387,35 +337,16 @@ function compactCsvColumns() {
     ["compactInputTokens", (row) => row.compact?.inputTokens],
     ["compactCachedInputTokens", (row) => row.compact?.cachedInputTokens],
     ["compactOutputTokens", (row) => row.compact?.outputTokens],
-    ["compactPricingCurrency", (row) => row.compact?.pricingCurrency],
-    ["compactPricedRequestCount", (row) => row.compact?.pricedRequestCount],
-    ["compactTotalCostNanos", (row) => row.compact?.totalCostNanos],
-    ["compactTotalCostCnyNanos", (row) => row.compact?.totalCostCnyNanos],
   ];
 }
 
-function enrichSummaryCosts(value, display, provider = null) {
-  const enriched = enrichCosts(value, display, provider);
-  if (enriched === null || enriched === undefined || value.compact == null) {
-    return enriched;
-  }
-  const compactCost = enrichCosts(value.compact, display, provider);
-  return {
-    ...enriched,
-    compact: {
-      ...value.compact,
-      totalCostCnyNanos: compactCost.totalCostCnyNanos,
-    },
-  };
-}
-
-function printCompactSummary(compact, display, provider = null) {
-  const summary = formatCompactSummary(compact, display, provider);
+function printCompactSummary(compact) {
+  const summary = formatCompactSummary(compact);
   if (summary === null) return;
   console.log(`- 上下文压缩：${summary}`);
 }
 
-function formatCompactSummary(compact, display, provider = null) {
+function formatCompactSummary(compact) {
   if (compact == null) return null;
   const model = compact.hasMixedModels
     ? "混合模型"
@@ -423,30 +354,22 @@ function formatCompactSummary(compact, display, provider = null) {
   const failures = compact.unsuccessfulRequestCount > 0
     ? `（异常 ${compact.unsuccessfulRequestCount} 次）`
     : "";
-  const cost = formatCost({ ...compact, provider }, display);
-  const coverage = compact.pricedRequestCount === compact.requestCount
-    ? ""
-    : `（计价 ${compact.pricedRequestCount}/${compact.requestCount}）`;
-  return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token · ${cost}${coverage}`;
+  return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`;
 }
 
-export function printMetricsRun(result, format, display = null) {
+export function printMetricsRun(result, format) {
   if (format === "json") {
-    console.log(JSON.stringify({
-      ...result,
-      latestTurn: enrichSummaryCosts(result.latestTurn, display),
-      threadAggregate: enrichSummaryCosts(result.threadAggregate, display),
-    }, null, 2));
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
   if (format === "csv") {
     const rows = [
       ...(result.latestTurn === null
         ? []
-        : [{ type: "latest", ...enrichSummaryCosts(result.latestTurn, display) }]),
+        : [{ type: "latest", ...result.latestTurn }]),
       ...(result.threadAggregate === null
         ? []
-        : [{ type: "thread", ...enrichSummaryCosts(result.threadAggregate, display) }]),
+        : [{ type: "thread", ...result.threadAggregate }]),
     ];
     printTurnSummaryCsv(rows);
     return;
@@ -454,8 +377,6 @@ export function printMetricsRun(result, format, display = null) {
   const { latestTurn, threadAggregate } = result;
   console.log("# Codex Connect 本次运行统计");
   console.log("");
-  const rateLine = exchangeRateLine(display);
-  if (rateLine) console.log(`- ${rateLine}`);
   console.log(`- Thread：${result.threadId}`);
   console.log(`- 生成时间：${result.generatedAt}`);
   console.log("");
@@ -464,7 +385,7 @@ export function printMetricsRun(result, format, display = null) {
   if (latestTurn === null) {
     console.log("该 Thread 暂无已记录请求。");
   } else {
-    printTurnSummary(latestTurn, false, display);
+    printTurnSummary(latestTurn, false);
   }
   console.log("");
   console.log("## 当前会话指标累计");
@@ -472,7 +393,7 @@ export function printMetricsRun(result, format, display = null) {
   if (threadAggregate === null) {
     console.log("该 Thread 暂无累计记录。");
   } else {
-    printTurnSummary(threadAggregate, true, display);
+    printTurnSummary(threadAggregate, true);
   }
 }
 
@@ -492,16 +413,6 @@ function printTurnSummaryCsv(rows) {
     ["outputTokens", (row) => row.outputTokens],
     ["reasoningOutputTokens", (row) => row.reasoningOutputTokens],
     ["outputTokensPerSecond", (row) => row.outputTokensPerSecond],
-    ["pricingCurrency", (row) => row.pricingCurrency],
-    ["pricedRequestCount", (row) => row.pricedRequestCount],
-    ["totalCostNanos", (row) => row.totalCostNanos],
-    ["inputCostNanos", (row) => row.inputCostNanos],
-    ["cachedInputCostNanos", (row) => row.cachedInputCostNanos],
-    ["outputCostNanos", (row) => row.outputCostNanos],
-    ["totalCostCnyNanos", (row) => row.totalCostCnyNanos],
-    ["inputCostCnyNanos", (row) => row.inputCostCnyNanos],
-    ["cachedInputCostCnyNanos", (row) => row.cachedInputCostCnyNanos],
-    ["outputCostCnyNanos", (row) => row.outputCostCnyNanos],
     ...compactCsvColumns(),
   ];
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
@@ -510,31 +421,26 @@ function printTurnSummaryCsv(rows) {
   }
 }
 
-export function printMetricsTurns(result, format, display = null) {
+export function printMetricsTurns(result, format) {
   if (format === "json") {
-    console.log(JSON.stringify({
-      ...result,
-      turns: result.turns.map((turn) => enrichSummaryCosts(turn, display)),
-    }, null, 2));
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
   if (format === "csv") {
     printTurnSummaryCsv(result.turns.map((turn) => ({
       type: "turn",
-      ...enrichSummaryCosts(turn, display),
+      ...turn,
     })));
     return;
   }
   console.log(`# 会话对话明细 · ${result.threadId}`);
   console.log("");
-  const rateLine = exchangeRateLine(display);
-  if (rateLine) console.log(`- ${rateLine}`);
   if (result.turns.length === 0) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 总价 | 上下文压缩 |");
-  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 上下文压缩 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [index, turn] of result.turns.entries()) {
     const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
       ? "未知"
@@ -542,9 +448,6 @@ export function printMetricsTurns(result, format, display = null) {
     const speed = turn.outputTokensPerSecond === null
       ? "未知"
       : `${turn.outputTokensPerSecond.toFixed(0)} t/s`;
-    const cost = turn.totalCostNanos === null || turn.pricingCurrency === null
-      ? "未知"
-      : formatCost(turn, display);
     console.log(
       [
         String(result.turns.length - index),
@@ -558,19 +461,15 @@ export function printMetricsTurns(result, format, display = null) {
         formatTokenCount(turn.inputTokens + turn.outputTokens),
         cacheRate,
         speed,
-        cost,
-        markdownCell(formatCompactSummary(turn.compact, display, turn.provider) ?? "无"),
+        markdownCell(formatCompactSummary(turn.compact) ?? "无"),
       ].join(" | "),
     );
   }
 }
 
-export function printMetricsThreads(result, format, display = null) {
+export function printMetricsThreads(result, format) {
   if (format === "json") {
-    console.log(JSON.stringify({
-      ...result,
-      threads: result.threads.map((thread) => enrichSummaryCosts(thread, display)),
-    }, null, 2));
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
   if (format === "csv") {
@@ -584,16 +483,11 @@ export function printMetricsThreads(result, format, display = null) {
       ["requestCount", (thread) => thread.requestCount],
       ["inputTokens", (thread) => thread.inputTokens],
       ["outputTokens", (thread) => thread.outputTokens],
-      ["pricingCurrency", (thread) => thread.pricingCurrency],
-      ["pricedRequestCount", (thread) => thread.pricedRequestCount],
-      ["totalCostNanos", (thread) => thread.totalCostNanos],
-      ["totalCostCnyNanos", (thread) => thread.totalCostCnyNanos],
       ...compactCsvColumns(),
       ["lastRecordedAtMs", (thread) => thread.lastRecordedAtMs],
     ];
     console.log(columns.map(([heading]) => csvCell(heading)).join(","));
-    for (const thread of result.threads.map((item) =>
-      enrichSummaryCosts(item, display))) {
+    for (const thread of result.threads) {
       console.log(columns.map(([, read]) => csvCell(read(thread))).join(","));
     }
     return;
@@ -604,14 +498,9 @@ export function printMetricsThreads(result, format, display = null) {
   }
   console.log(`# 指标会话列表（${result.threads.length}）`);
   console.log("");
-  const rateLine = exchangeRateLine(display);
-  if (rateLine) console.log(`- ${rateLine}`);
-  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 总价 | 上下文压缩 | 最近记录 |");
-  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
+  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 上下文压缩 | 最近记录 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
-    const cost = thread.totalCostNanos === null || thread.pricingCurrency === null
-      ? "未知"
-      : formatCost(thread, display);
     console.log(
       [
         String(index + 1),
@@ -624,8 +513,7 @@ export function printMetricsThreads(result, format, display = null) {
         String(thread.turnCount),
         String(thread.requestCount),
         formatTokenCount(thread.inputTokens + thread.outputTokens),
-        cost,
-        markdownCell(formatCompactSummary(thread.compact, display, thread.provider) ?? "无"),
+        markdownCell(formatCompactSummary(thread.compact) ?? "无"),
         markdownCell(formatLocalTime(thread.lastRecordedAtMs)),
       ].join(" | "),
     );
@@ -634,7 +522,7 @@ export function printMetricsThreads(result, format, display = null) {
   console.log("导出某会话每次对话：codexc metrics turns <Thread ID>");
 }
 
-function printTurnSummary(summary, aggregate = false, display = null) {
+function printTurnSummary(summary, aggregate = false) {
   const totalTokens = summary.inputTokens + summary.outputTokens;
   if (summary.model !== undefined && summary.model !== null) {
     console.log(`- 模型：${summary.model}`);
@@ -672,24 +560,7 @@ function printTurnSummary(summary, aggregate = false, display = null) {
       `  - 综合输出速度：${summary.outputTokensPerSecond.toFixed(0)} token/s（覆盖 ${summary.outputSpeedTimedCount}/${summary.outputSpeedSampleCount} 次请求）`,
     );
   }
-  if (summary.totalCostNanos !== null && summary.pricingCurrency !== null) {
-    const coverage = summary.pricedRequestCount === summary.requestCount
-      ? ""
-      : `（计价 ${summary.pricedRequestCount}/${summary.requestCount}）`;
-    console.log(
-      `- 总价：${formatCost(summary, display)}${coverage}`,
-    );
-    if (summary.inputCostNanos !== null) {
-      console.log(`  - 输入价格：${formatCurrencyNanos(summary.inputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
-    }
-    if (summary.cachedInputCostNanos !== null) {
-      console.log(`  - 缓存价格：${formatCurrencyNanos(summary.cachedInputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
-    }
-    if (summary.outputCostNanos !== null) {
-      console.log(`  - 输出价格：${formatCurrencyNanos(summary.outputCostNanos, summary.pricingCurrency, display, summary.provider)}`);
-    }
-  }
-  printCompactSummary(summary.compact, display, summary.provider ?? null);
+  printCompactSummary(summary.compact);
 }
 
 function csvColumns() {
@@ -720,10 +591,5 @@ function csvColumns() {
     ["outputTokens", (record) => record.outputTokens],
     ["reasoningOutputTokens", (record) => record.reasoningOutputTokens],
     ["outputTokensPerSecond", (record) => record.outputTokensPerSecond],
-    ["pricingCurrency", (record) => record.pricing?.currency],
-    ["uncachedInputPricePerMillionNanos", (record) => record.pricing?.uncachedInputPricePerMillionNanos],
-    ["cachedInputPricePerMillionNanos", (record) => record.pricing?.cachedInputPricePerMillionNanos],
-    ["outputPricePerMillionNanos", (record) => record.pricing?.outputPricePerMillionNanos],
-    ["totalCostNanos", (record) => record.totalCostNanos],
   ];
 }

@@ -362,7 +362,7 @@ describe("Weixin command renderer", () => {
       serviceTier: "priority",
       contextCompactionCount: 2,
       gitBranch: "feature/weixin-surface",
-    }, undefined, undefined, true);
+    }, true);
 
     expect(rendered).toContain("本次运行 · 已完成");
     expect(rendered).toContain("- 上下文：10 K / 100 K（10%）");

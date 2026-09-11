@@ -64,7 +64,7 @@ export async function runConfig({
       showInstructions: false,
       options: [
         { value: "summary", label: "配置总览", hint: "脱敏显示当前 Gateway 设置、来源与作用范围" },
-        { value: "display", label: "显示设置", hint: "操作详情、计划更新、思考状态、参考价人民币换算" },
+        { value: "display", label: "显示设置", hint: "操作详情、计划更新、思考状态" },
         {
           value: "system",
           label: "系统设置",

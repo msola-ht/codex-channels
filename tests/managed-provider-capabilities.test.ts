@@ -16,8 +16,6 @@ import {
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
 import {
   createManagedProviderAccountAdapters,
-  createManagedProviderPricingResolvers,
-  managedProviderNeedsExchangeRate,
 } from "../src/bootstrap/managed-provider-capabilities.js";
 
 describe("managed Provider capability registry", () => {
@@ -49,11 +47,9 @@ describe("managed Provider capability registry", () => {
   it("declares the reviewed capability kinds and preserves them for Go accounts", () => {
     expect(deepseekProviderDefinition.capabilities).toEqual({
       catalogSource: "deepseek-official",
-      pricingAdapter: "deepseek",
       accountAdapter: "deepseek",
       instanceAdapter: "single",
       catalogUpdateAdapter: "deepseek",
-      needsExchangeRate: true,
     });
     expect(opencodeGoAccountDefinition("lunare").capabilities)
       .toBe(opencodeGoProviderDefinition.capabilities);
@@ -75,14 +71,13 @@ describe("managed Provider capability registry", () => {
     ).map(({ id }) => id)).toEqual(["deepseek", "future-provider"]);
   });
 
-  it("supports a managed Provider without pricing, account, or catalog update adapters", () => {
+  it("supports a managed Provider without account or catalog update adapters", () => {
     const futureProvider = {
       ...deepseekProviderDefinition,
       id: "future-provider",
       capabilities: {
         ...deepseekProviderDefinition.capabilities,
         catalogSource: "none",
-        pricingAdapter: "none",
         accountAdapter: "none",
         catalogUpdateAdapter: "none",
       },
@@ -90,20 +85,9 @@ describe("managed Provider capability registry", () => {
 
     expect(assertManagedModelProviderCapabilities(futureProvider)).toMatchObject({
       catalogSource: "none",
-      pricingAdapter: "none",
       accountAdapter: "none",
       catalogUpdateAdapter: "none",
     });
-    const pricing = createManagedProviderPricingResolvers([futureProvider], {
-      exchangeRate: () => null,
-    });
-    expect(pricing.get("future-provider")?.resolve({
-      provider: "future-provider",
-      model: "future-model",
-      serviceTier: null,
-      inputTokens: 1,
-      atMs: 1,
-    })).toBeNull();
     expect(createManagedProviderAccountAdapters([futureProvider], {
       metricsDatabasePath: join(tmpdir(), "codexc-future-provider.sqlite3"),
     })).toEqual([]);
@@ -131,41 +115,11 @@ describe("managed Provider capability registry", () => {
     }
   });
 
-  it("selects pricing and account adapters by capability without merging provider keys", () => {
+  it("selects account adapters by capability without merging provider keys", () => {
     const definitions = [
       deepseekProviderDefinition,
       opencodeGoAccountDefinition("lunare"),
     ];
-    const pricing = createManagedProviderPricingResolvers(definitions, {
-      exchangeRate: () => ({
-        usdToCny: 2,
-        effectiveAtMs: 1_700_000_000_000,
-        source: "cache",
-      }),
-    });
-    expect([...pricing.keys()]).toEqual(["deepseek", "ocg-lunare"]);
-    expect(pricing.get("deepseek")?.resolve({
-      provider: "deepseek",
-      model: "deepseek-v4-flash",
-      serviceTier: null,
-      inputTokens: 1,
-      atMs: Date.parse("2026-08-21T09:00:00.000Z"),
-    })).not.toBeNull();
-    expect(pricing.get("ocg-lunare")?.resolve({
-      provider: "ocg-lunare",
-      model: "deepseek-v4-flash",
-      serviceTier: null,
-      inputTokens: 1,
-      atMs: Date.parse("2026-08-21T09:00:00.000Z"),
-    })).not.toBeNull();
-    expect(pricing.get("ocg-lunare")?.resolve({
-      provider: "ocg-unknown",
-      model: "deepseek-v4-flash",
-      serviceTier: null,
-      inputTokens: 1,
-      atMs: Date.parse("2026-08-21T09:00:00.000Z"),
-    })).toBeNull();
-
     const accounts = createManagedProviderAccountAdapters(definitions, {
       environment: process.env,
       fetchImpl: fetch,
@@ -175,9 +129,6 @@ describe("managed Provider capability registry", () => {
       "deepseek",
       "ocg-lunare",
     ]);
-    expect(managedProviderNeedsExchangeRate(definitions, new Set(["deepseek"]))).toBe(true);
-    expect(managedProviderNeedsExchangeRate(definitions, new Set(["ocg-lunare"])))
-      .toBe(false);
   });
 
   it("fails closed for unknown capability kinds", () => {
@@ -185,13 +136,10 @@ describe("managed Provider capability registry", () => {
       ...deepseekProviderDefinition,
       capabilities: {
         ...deepseekProviderDefinition.capabilities,
-        pricingAdapter: "unknown",
+        accountAdapter: "unknown",
       },
     } as unknown as typeof deepseekProviderDefinition;
     expect(() => assertManagedModelProviderCapabilities(invalid))
       .toThrow("受管 Provider 能力定义无效");
-    expect(() => createManagedProviderPricingResolvers([invalid], {
-      exchangeRate: () => null,
-    })).toThrow("受管 Provider 能力定义无效");
   });
 });

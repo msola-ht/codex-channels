@@ -2,9 +2,6 @@ import type { Logger } from "pino";
 
 import type {
   ConversationUseCases,
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
-  ProviderModelUsageEstimate,
   ScheduledTaskUseCases,
 } from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
@@ -33,19 +30,10 @@ export interface SurfacePluginContext {
   codexUpstreamUserAgent: () => string | undefined;
   openAiConnectivity: () => OpenAiConnectivityStatus;
   onFatal(surface: string, accountId: string, error: Error): void;
-  exchangeRate: () => ExchangeRateSnapshot | null;
-  priceCurrency: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency;
   autoCompactPercent: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  remainingUsage?: (
-    model: string,
-    requestStartedAtMs?: number,
-    modelProvider?: string,
-  ) => Promise<ProviderModelUsageEstimate | null>;
   remoteQuota?: (provider: string | undefined, resetsAt: number | null | undefined) => Promise<RemoteQuotaSummary | undefined>;
 }
 

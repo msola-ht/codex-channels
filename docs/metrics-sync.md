@@ -155,7 +155,6 @@ codexc service start center          # 启动指标中心后台服务
       "inputTokens": 1000,
       "cachedInputTokens": 900,
       "outputTokens": 100,
-      "totalCostNanos": 6000
     }
   ],
   "subagentThreads": [

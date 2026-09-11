@@ -73,7 +73,7 @@ Metrics Store 的 Row Projection Codec 也已提取，明细、Turn、Thread、�
 
 ### Conversation Core 计时聚合
 
-模型请求计时、Token、费用、压缩、峰谷档位与速度累加已提取为独立的
+模型请求计时、Token、压缩与速度累加已提取为独立的
 `TurnTimingAccumulator`；Core 只把对应输入交给该组件，并保留 Thread/Turn/Item 事件路由和输出发布。
 
 ### 高风险边界

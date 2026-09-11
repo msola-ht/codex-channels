@@ -35,7 +35,6 @@ function emptyErrorReport() {
 function sample(): ModelRequestMetricSample {
   return {
     provider: "deepseek",
-    pricing: null,
     transport: "http",
     responseFormat: "sse",
     operation: "response",

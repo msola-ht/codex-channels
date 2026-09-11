@@ -1,5 +1,4 @@
 import { useApi } from "@/hooks/use-api"
-import { useCurrency } from "@/hooks/currency-context"
 import { fetchRequests } from "@/lib/api"
 import type {
   RangeName,
@@ -15,7 +14,6 @@ export function useRequests(
   direction: RequestSortDirection,
   filter: string,
 ) {
-  const { currency } = useCurrency()
   return useApi(
     (signal) => fetchRequests(
       range,
@@ -24,9 +22,8 @@ export function useRequests(
       sort,
       direction,
       filter,
-      currency,
       signal,
     ),
-    [range, offset, limit, sort, direction, filter, currency],
+    [range, offset, limit, sort, direction, filter],
   )
 }

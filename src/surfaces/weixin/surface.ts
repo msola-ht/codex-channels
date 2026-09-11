@@ -6,9 +6,6 @@ import type {
   ScheduledTaskUseCases,
 } from "../../application/index.js";
 import type {
-  DisplayPriceCurrency,
-  ExchangeRateSnapshot,
-  ProviderModelUsageEstimate,
 } from "../../application/index.js";
 import type {
   ConversationTarget,
@@ -85,19 +82,10 @@ export interface WeixinSurfaceOptions {
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   debugEnabled?: boolean;
-  exchangeRate?: () => ExchangeRateSnapshot | null;
-  priceCurrency?: (
-    provider: string | null | undefined,
-  ) => DisplayPriceCurrency;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  remainingUsage?: (
-    model: string,
-    requestStartedAtMs?: number,
-    modelProvider?: string,
-  ) => Promise<ProviderModelUsageEstimate | null>;
   inputCloseTimeoutMs?: number;
   outbox?: WeixinOutboxOptions;
 }
@@ -178,18 +166,9 @@ export class WeixinSurface implements SurfaceAdapter {
           : {
               reasoningEnabled: options.reasoningEnabled,
             }),
-        ...(options.exchangeRate === undefined
-          ? {}
-          : { exchangeRate: options.exchangeRate }),
-        ...(options.priceCurrency === undefined
-          ? {}
-          : { priceCurrency: options.priceCurrency }),
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),
-        ...(options.remainingUsage === undefined
-          ? {}
-          : { remainingUsage: options.remainingUsage }),
         debugEnabled: options.debugEnabled ?? false,
         ...(options.replyContextPersistence === undefined
           ? {}
@@ -252,12 +231,6 @@ export class WeixinSurface implements SurfaceAdapter {
         : { actorRegistry: options.actorRegistry }),
       onFatal: options.onFatal,
       debugEnabled: options.debugEnabled ?? false,
-      ...(options.exchangeRate === undefined
-        ? {}
-        : { exchangeRate: options.exchangeRate }),
-      ...(options.priceCurrency === undefined
-        ? {}
-        : { priceCurrency: options.priceCurrency }),
       ...(options.autoCompactPercent === undefined
         ? {}
         : { autoCompactPercent: options.autoCompactPercent }),

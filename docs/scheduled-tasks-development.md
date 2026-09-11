@@ -301,7 +301,7 @@ Actor 在同一 Conversation 最多保留 100 个未删除任务，创建预览�
 终态并停止产生新 Run。任何 Schedule 完成的都是某次 Run，而不是任务定义：终态
 Run 保留在 `/schedule runs` 历史中，循环任务继续计算下次运行，不自动删除，一次性任务保留为
 `finished` 供列表与历史核查。完成卡片沿用普通后台
-Thread 的模型、Token、费用、耗时和操作统计，并继续标记后台 Thread；任务名、Run ID、计划时间和
+Thread 的模型、Token、耗时和操作统计，并继续标记后台 Thread；任务名、Run ID、计划时间和
 终态以 `/schedule runs` 为事实入口。计划任务数据库不重复保存模型指标；后续若
 WebUI 接入 Run 与指标关联，只能根据 Run 的 Thread ID 查询现有指标，关联失败时显示“指标不可用”，
 不得回算或复制模型请求。
