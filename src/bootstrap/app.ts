@@ -835,7 +835,8 @@ export class GatewayApplication {
           outcome,
         ),
         completionTiming: async (threadId, turnId, current) => {
-          await metricsWriter.waitForCurrentWrites(threadId);
+          const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
+          if (!persisted) return current;
           const summary = metricsStore.threadSummary(threadId);
           return mergeCompletionTiming(summary.latestTurn, turnId, current);
         },
@@ -845,7 +846,8 @@ export class GatewayApplication {
           // The completion event can outrun the buffered request writer. Once
           // a child is known, wait for the current queue watermark so the
           // parent task total includes the root Turn's just-finished samples.
-          await metricsWriter.waitForCurrentWrites(threadId);
+          const persisted = await metricsWriter.waitForCurrentWrites(threadId);
+          if (!persisted) return undefined;
           summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
           return {
@@ -858,7 +860,8 @@ export class GatewayApplication {
           };
         },
         sessionAggregate: async (threadId): Promise<TurnTaskMetricsSummary | undefined> => {
-          await metricsWriter.waitForCurrentWrites(threadId);
+          const persisted = await metricsWriter.waitForCurrentWrites(threadId);
+          if (!persisted) return undefined;
           const aggregate = metricsStore.threadSummary(threadId).threadAggregate;
           if (aggregate === null) return undefined;
           return {
