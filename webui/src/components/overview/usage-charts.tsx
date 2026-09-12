@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTheme } from "next-themes"
 import { ActivityCalendar } from "react-activity-calendar"
 import "react-activity-calendar/tooltips.css"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
@@ -159,6 +160,8 @@ function ActivityHeatmapCard({
   generatedAt: string | null
   loading: boolean
 }) {
+  const { resolvedTheme } = useTheme()
+  const colorScheme = resolvedTheme === "light" ? "light" : "dark"
   const byDay = new Map(rows.map((row) => [row.day, row.inputTokens + row.outputTokens]))
   const reference = generatedAt === null ? new Date() : new Date(generatedAt)
   const today = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()))
@@ -204,6 +207,7 @@ function ActivityHeatmapCard({
             <div className="flex justify-center overflow-x-auto pb-1">
               <ActivityCalendar
                 data={cells}
+                colorScheme={colorScheme}
                 blockSize={18}
                 blockMargin={5}
                 blockRadius={3}
