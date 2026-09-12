@@ -265,10 +265,13 @@ function requestInQuotaWindow(
   endAtMs: number,
 ): boolean {
   const snapshot = record.quotaWindows?.find((window) => window.windowId === windowId);
+  const requestAtMs = record.requestStartedAtMs ?? record.recordedAtMs;
+  // 后台刷新前的缓存可能已过期；仅在请求开始时仍有效的快照可决定窗口归属。
   if (
     snapshot?.resetsAt !== null
     && snapshot?.resetsAt !== undefined
     && currentResetsAt !== null
+    && snapshot.resetsAt * 1_000 > requestAtMs
   ) {
     return snapshot.resetsAt === currentResetsAt;
   }
