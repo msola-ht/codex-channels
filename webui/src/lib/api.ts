@@ -17,10 +17,6 @@ import type {
   ManagementTask,
   ManagementTaskInput,
   ManagementTaskPreview,
-  ManagementApiProviderMutationInput,
-  ManagementApiProviderPreviewResponse,
-  ManagementApiProviderMutationResponse,
-  ManagementApiProvider,
   ManagementProviderSettingsResponse,
   ManagementProviderSettingsMutationInput,
   ManagementProviderSettingsPreviewResponse,
@@ -229,10 +225,11 @@ export function previewCodexUserSetting(
 export function updateCodexUserSetting(
   revision: string,
   setting: CodexUserSettingInput,
+  confirmationToken?: string,
   signal?: AbortSignal,
 ): Promise<ManagementSettingMutationResponse> {
   return requestJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/codex/settings`, {
-    method: "PATCH", body: JSON.stringify({ revision, setting }),
+    method: "PATCH", body: JSON.stringify({ revision, setting, ...(confirmationToken === undefined ? {} : { confirmationToken }) }),
   }, signal)
 }
 
@@ -250,18 +247,6 @@ export function startManagementTask(input: ManagementTaskInput & { confirmationT
 
 export function cancelManagementTask(id: string, signal?: AbortSignal): Promise<ManagementTask> {
   return requestJson<ManagementTask>(`${API_PREFIX}/management/tasks/${encodeURIComponent(id)}`, { method: "DELETE" }, signal)
-}
-
-export function fetchManagementApiProviders(signal?: AbortSignal): Promise<{ providers: ManagementApiProvider[] }> {
-  return getJson<{ providers: ManagementApiProvider[] }>(`${API_PREFIX}/management/api-providers`, signal)
-}
-
-export function previewManagementApiProvider(input: ManagementApiProviderMutationInput, signal?: AbortSignal): Promise<ManagementApiProviderPreviewResponse> {
-  return requestJson<ManagementApiProviderPreviewResponse>(`${API_PREFIX}/management/api-providers/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
-}
-
-export function applyManagementApiProvider(input: ManagementApiProviderMutationInput, confirmationToken: string, signal?: AbortSignal): Promise<ManagementApiProviderMutationResponse> {
-  return requestJson<ManagementApiProviderMutationResponse>(`${API_PREFIX}/management/api-providers`, { method: "POST", body: JSON.stringify({ ...input as object, confirmationToken }) }, signal)
 }
 
 export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<ManagementProviderSettingsResponse> {

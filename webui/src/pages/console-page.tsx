@@ -23,7 +23,7 @@ import type {
 } from "@/lib/types"
 
 export function ConsolePage() {
-  const [range, setRange] = useState<RangeName>("24h")
+  const [range, setRange] = useState<RangeName>("90d")
   const account = useOverview(range)
   const officialAccounts = useOfficialAccountSources()
 

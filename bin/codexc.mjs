@@ -165,7 +165,9 @@ const helpText = {
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
   codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
-  codexc setup → 项目技能（安装或卸载项目技能）`,
+  codexc setup → 项目技能（安装或卸载项目技能）
+
+DeepSeek 与 OpenCode Go 子菜单中的“修改模型设置”会打开同一受管 Provider 设置，并预选当前 Provider。`,
   start: `用法：codexc start
 
 在前台启动 Codex App Server 与 Gateway。`,

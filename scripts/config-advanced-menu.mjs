@@ -7,6 +7,7 @@ import {
   updateGatewaySetting,
   validateNetworkProxyValue,
 } from "./config-management.mjs";
+import { loggingLevels, writeLoggingLevel } from "./debug-setup.mjs";
 
 const proxyFields = [
   ["http_proxy", "HTTP 代理"],
@@ -161,25 +162,24 @@ async function runScheduledTasks({ environment, output, prompts, writeConfig = w
 
 async function runLoggingLevel({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
   const settings = loadGatewaySettings(environment);
-  const levels = ["fatal", "error", "warn", "info", "debug", "trace"];
   const selected = await prompts.select({
     message: "日志等级",
     showInstructions: false,
     initialValue: settings.advanced.loggingLevel,
-    options: levels.map((value) => ({
+    options: loggingLevels.map((value) => ({
       value,
       label: value,
       hint: value === "debug" || value === "trace" ? "启用脱敏调试模式" : undefined,
     })),
   });
   if (prompts.isCancel(selected)) return { action: "back" };
-  if (!levels.includes(selected)) throw new Error(`未知日志等级：${String(selected)}`);
-  const result = updateGatewaySetting({
-    kind: "advanced.logging-level",
-    value: selected,
-  }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`日志等级已设为 ${selected}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  const result = writeLoggingLevel({
+    environment,
+    expectedRevision: settings.revision,
+    output,
+    writeConfig,
+    level: selected,
+  });
   return { logLevel: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 

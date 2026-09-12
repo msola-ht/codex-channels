@@ -1,4 +1,4 @@
-import { useId } from "react"
+import { useEffect, useId, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { PendingSetting } from "@/lib/settings-management"
 
 export function ManagementConfirmationDialog({
@@ -52,7 +52,11 @@ export function SettingsRow({ label, value, badge = false, code = false }: { lab
 export function ManagedInputRow({ id, label, defaultValue, value, placeholder, disabled, type = "text", onChange, onBlur }: { id?: string; label: string; defaultValue: string; value?: string; placeholder: string; disabled: boolean; type?: "text" | "password" | "number"; onChange?: (value: string) => void; onBlur: (value: string) => void }) {
   const generatedId = useId()
   const inputId = id ?? generatedId
-  return <div className="flex items-center justify-between gap-3"><Label className="text-muted-foreground" htmlFor={inputId}>{label}</Label><Input id={inputId} className="w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} defaultValue={value === undefined ? defaultValue : undefined} value={value} placeholder={placeholder} disabled={disabled} onChange={onChange === undefined ? undefined : (event) => onChange(event.target.value)} onBlur={(event) => onBlur(event.target.value.trim())} /></div>
+  const [draft, setDraft] = useState(defaultValue)
+  useEffect(() => {
+    if (!disabled && value === undefined) setDraft(defaultValue)
+  }, [defaultValue, disabled, value])
+  return <div className="flex items-center justify-between gap-3"><Label className="text-muted-foreground" htmlFor={inputId}>{label}</Label><Input id={inputId} className="w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} value={value ?? draft} placeholder={placeholder} disabled={disabled} onChange={(event) => { if (value === undefined) setDraft(event.target.value); onChange?.(event.target.value) }} onBlur={(event) => onBlur(event.target.value.trim())} /></div>
 }
 
 export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; onConfirm: () => void; onCancel: () => void }) {
@@ -76,7 +80,7 @@ export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: {
 export function ManagedSelect({ label, value, options, disabled, onChange }: { label: string; value: string; options: string[][]; disabled: boolean; onChange: (value: string) => void }) {
   const nonEmptyOptions = options.filter(([option]) => option !== "")
   const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
-  return <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">{label}</span><Select value={value === "" ? undefined : value} disabled={disabled} onValueChange={onChange}><SelectTrigger size="sm" className="w-[160px]" aria-label={label}><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>{effectiveOptions.length > 0 ? <SelectContent>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectContent> : null}</Select></div>
+  return <div className="flex items-center justify-between gap-3"><span className="text-muted-foreground">{label}</span><Select value={value === "" ? undefined : value} disabled={disabled} onValueChange={onChange}><SelectTrigger size="sm" className="w-[160px]" aria-label={label}><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>{effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}</Select></div>
 }
 
 function formatPreviewValue(value: unknown): string {

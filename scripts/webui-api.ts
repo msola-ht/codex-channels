@@ -311,11 +311,17 @@ export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
   system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel"> & {
+    idleReleaseMinutes: number
+    officialTuiIdentity: {
+      clientIdentity: { name: string | null; title: string | null; version: string | null }
+      upstreamUserAgent: string | null
+    }
     workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null }>
   }
   automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled">
   advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
   network: Pick<SettingsSummaryResponse["gateway"]["network"], "configuredFields">
+  telegram: { configured: boolean; messageFormat: "html" | "rich" }
   metrics: {
     storage: SettingsSummaryResponse["gateway"]["metrics"]["storage"]
   }
@@ -323,7 +329,7 @@ export interface ManagementSettingsResponse {
   channels: SettingsSummaryResponse["gateway"]["channels"]
 }
 
-export interface ManagementSettingInput { kind: string; value: unknown }
+export interface ManagementSettingInput { kind: string; value: unknown; [key: string]: unknown }
 export interface ManagementSettingMutationResponse {
   revision: string | null
   value: unknown
@@ -352,6 +358,7 @@ export interface CodexUserSettingsResponse {
     fastEnabled: boolean
     webSearch: "live" | "indexed" | "cached" | "disabled" | null
     updatePlanEnabled: boolean
+    contextManagementEnabled: boolean
     autoRecapEnabled: boolean
     reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null
     planModeReasoningEffort?: string | null

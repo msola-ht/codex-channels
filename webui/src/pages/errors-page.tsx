@@ -35,7 +35,7 @@ import type { RangeName } from "@/lib/types"
 const PAGE_SIZE = 50
 
 export function ErrorsPage() {
-  const [range, setRange] = useState<RangeName>("24h")
+  const [range, setRange] = useState<RangeName>("90d")
   const [offset, setOffset] = useState(0)
   const [pageNumber, setPageNumber] = useState(1)
   const { data, loading, error } = useErrors(range, offset, PAGE_SIZE)

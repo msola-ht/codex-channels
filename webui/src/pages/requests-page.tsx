@@ -9,7 +9,7 @@ import { useRequestSorting } from "@/hooks/use-request-sorting"
 import type { RangeName } from "@/lib/types"
 
 export function RequestsPage() {
-  const [range, setRange] = useState<RangeName>("24h")
+  const [range, setRange] = useState<RangeName>("90d")
   const [offset, setOffset] = useState(0)
   const [pageSize, setPageSize] = useState(50)
   const [pageNumber, setPageNumber] = useState(1)

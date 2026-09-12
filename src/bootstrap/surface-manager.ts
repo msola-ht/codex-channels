@@ -301,23 +301,31 @@ export class SurfaceManager {
     }
     let routedEvent = event;
     if (event.type === "turn.completed") {
-      const timingResult = this.options.completionTiming?.(
-        event.threadId,
-        event.turnId,
+      const timingResult = this.resolveCompletionMetrics(
+        event,
+        "turn",
+        () => this.options.completionTiming?.(
+          event.threadId,
+          event.turnId,
+          event.timing,
+        ),
         event.timing,
       );
       const timing = timingResult instanceof Promise
-        ? await timingResult ?? event.timing
-        : timingResult ?? event.timing;
-      const taskAggregateResult = this.options.taskAggregate?.(
-        event.threadId,
-        event.turnId,
+        ? await timingResult
+        : timingResult;
+      const taskAggregateResult = this.resolveCompletionMetrics(
+        event,
+        "task",
+        () => this.options.taskAggregate?.(event.threadId, event.turnId),
       );
       const taskAggregate = taskAggregateResult instanceof Promise
         ? await taskAggregateResult
         : taskAggregateResult;
-      const sessionAggregateResult = this.options.sessionAggregate?.(
-        event.threadId,
+      const sessionAggregateResult = this.resolveCompletionMetrics(
+        event,
+        "session",
+        () => this.options.sessionAggregate?.(event.threadId),
       );
       const sessionAggregate = sessionAggregateResult instanceof Promise
         ? await sessionAggregateResult
@@ -358,6 +366,34 @@ export class SurfaceManager {
       return;
     }
     await this.deliverOutput(surface, routedEvent);
+  }
+
+  private resolveCompletionMetrics<T>(
+    event: Extract<OutputEvent, { type: "turn.completed" }>,
+    scope: "turn" | "task" | "session",
+    read: () => T | undefined | Promise<T | undefined>,
+    fallback?: T,
+  ): T | undefined | Promise<T | undefined> {
+    const recover = (error: unknown): T | undefined => {
+      this.logger.warn(
+        {
+          err: error,
+          threadId: event.threadId,
+          turnId: event.turnId,
+          scope,
+        },
+        "Turn 完成统计读取失败",
+      );
+      return fallback;
+    };
+    try {
+      const result = read();
+      return result instanceof Promise
+        ? result.then((value) => value ?? fallback, recover)
+        : result ?? fallback;
+    } catch (error) {
+      return recover(error);
+    }
   }
 
   private async startSurface(surface: SurfaceAdapter): Promise<void> {
