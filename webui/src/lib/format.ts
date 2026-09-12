@@ -1,16 +1,13 @@
 export type DisplayLanguage = "zh" | "en"
 
+const compactTokenFormatter = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+  maximumFractionDigits: 1,
+})
+
 export function formatTokens(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—"
-  if (value >= 100_000_000) {
-    const n = value / 100_000_000
-    return `${Number.isInteger(n) ? n : n.toFixed(2)}亿`
-  }
-  if (value >= 10_000) {
-    const n = value / 10_000
-    return `${Number.isInteger(n) ? n : n.toFixed(1)}万`
-  }
-  return value.toLocaleString("zh-CN")
+  return value === null || value === undefined ? "—" : compactTokenFormatter.format(value)
 }
 
 export function formatTime(value: number | null | undefined): string {

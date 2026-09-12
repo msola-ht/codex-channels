@@ -51,17 +51,26 @@ export function GlobalCards({ global }: { global: Aggregate | null }) {
       </Alert>
     )
   }
+  const cacheHitRate = global.inputTokens > 0 && global.cachedInputTokens !== null
+    ? `${(global.cachedInputTokens / global.inputTokens * 100).toFixed(1)}%`
+    : "—"
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
-        title="请求数"
-        value={global.requestCount.toLocaleString("zh-CN")}
-        description={`成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
+        value={formatTokens(global.inputTokens + global.outputTokens)}
+        description={`总计 Token · 请求 ${global.requestCount.toLocaleString("zh-CN")} 次 · 成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
       />
       <StatCard
-        title="Token"
-        value={formatTokens(global.inputTokens + global.outputTokens)}
-        description={`输入 ${formatTokens(global.inputTokens)} · 输出 ${formatTokens(global.outputTokens)}`}
+        value={formatTokens(global.inputTokens)}
+        description="输入 Token"
+      />
+      <StatCard
+        value={formatTokens(global.cachedInputTokens)}
+        description={`缓存 Token · 命中率 ${cacheHitRate}`}
+      />
+      <StatCard
+        value={formatTokens(global.outputTokens)}
+        description="输出 Token"
       />
     </div>
   )

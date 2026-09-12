@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
+import { formatTokens } from "@/lib/format"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 
@@ -235,7 +236,7 @@ function ProviderSettingsCard({
           <ManagedSelect label="模型" value={compressionEntry.id} options={settings.modelCompression.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => { setCompressionModel(value); const next = settings.modelCompression.find((candidate) => candidate.id === value); if (next !== undefined) setCompressionPercent(String(next.autoCompactPercent ?? 60)) }} />
           <div className="flex items-center justify-between gap-3"><Label className="text-muted-foreground" htmlFor="provider-compression-percent">自动压缩百分比</Label><Input id="provider-compression-percent" aria-invalid={compressionError !== null} aria-describedby={compressionError === null ? undefined : "provider-compression-percent-error"} className="w-[160px]" type="number" min={10} max={90} value={compressionPercent} disabled={busy || pending !== null} onChange={(event) => { setCompressionPercent(event.target.value); setCompressionError(null) }} /></div>
           {compressionError !== null ? <p id="provider-compression-percent-error" className="text-right text-xs text-destructive" role="status">{compressionError}</p> : null}
-          <p className="text-xs text-muted-foreground">应用 Provider：{compressionEntry.providers.join("、") || "无"} · 上下文窗口 {compressionEntry.contextWindow.toLocaleString()} tokens</p>
+          <p className="text-xs text-muted-foreground">应用 Provider：{compressionEntry.providers.join("、") || "无"} · 上下文窗口 {formatTokens(compressionEntry.contextWindow)} tokens</p>
           {compressionEntry.conflicts === true ? <p className="text-xs text-amber-600">当前不同 Provider 的压缩值不一致：{Object.entries(compressionEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join("；") || "部分未设置"}；保存后将以本次输入统一。</p> : null}
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || compressionEntry === undefined} onClick={() => void updateCompression()}>保存模型自动压缩</Button>
         </>}
