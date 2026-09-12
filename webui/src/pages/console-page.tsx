@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { ErrorBanner } from "@/components/metrics/error-banner"
@@ -26,10 +26,21 @@ import type {
 } from "@/lib/types"
 
 export function ConsolePage() {
-  const [range, setRange] = useState<RangeName>("90d")
+  const [range, setRange] = useState<RangeName>("30d")
   const account = useOverview(range)
-  const daily = useDailyUsage()
+  const trend = useDailyUsage(range)
+  const heatmap = useDailyUsage("90d")
+  const [dashboard, setDashboard] = useState<{
+    overview: OverviewResponse
+    trend: DailyUsageResponse
+  } | null>(null)
   const officialAccounts = useOfficialAccountSources()
+
+  useEffect(() => {
+    if (account.data?.range.name === range && trend.data?.range.name === range) {
+      setDashboard({ overview: account.data, trend: trend.data })
+    }
+  }, [account.data, range, trend.data])
 
   return (
     <div className="flex flex-col gap-6">
@@ -38,14 +49,16 @@ export function ConsolePage() {
         <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
       </div>
       <LocalDashboard
-        range={range}
+        range={dashboard?.overview.range.name ?? range}
         onRangeChange={setRange}
-        data={account.data}
-        loading={account.loading}
+        data={dashboard?.overview ?? null}
+        loading={account.loading || trend.loading}
         error={account.error}
-        daily={daily.data}
-        dailyLoading={daily.loading}
-        dailyError={daily.error}
+        trend={dashboard?.trend ?? null}
+        trendError={trend.error}
+        heatmap={heatmap.data}
+        heatmapLoading={heatmap.loading}
+        heatmapError={heatmap.error}
       />
       <AccountStatusCards
         overview={account.data}
@@ -66,34 +79,41 @@ function LocalDashboard({
   data,
   loading,
   error,
-  daily,
-  dailyLoading,
-  dailyError,
+  trend,
+  trendError,
+  heatmap,
+  heatmapLoading,
+  heatmapError,
 }: {
   range: RangeName
   onRangeChange: (range: RangeName) => void
   data: OverviewResponse | null
   loading: boolean
   error: string | null
-  daily: DailyUsageResponse | null
-  dailyLoading: boolean
-  dailyError: string | null
+  trend: DailyUsageResponse | null
+  trendError: string | null
+  heatmap: DailyUsageResponse | null
+  heatmapLoading: boolean
+  heatmapError: string | null
 }) {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" aria-busy={loading || heatmapLoading}>
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <RangeSelector value={range} onChange={onRangeChange} />
+        <span className="text-sm text-muted-foreground">汇总范围</span>
+        <RangeSelector value={range} onChange={onRangeChange} ariaLabel="汇总时间范围" />
       </div>
       <ErrorBanner error={error} />
-      {loading || data === null
+      {data === null
         ? <PageSkeleton rows={4} />
         : <>
             <GlobalCards global={data.global} />
             <UsageCharts
-              rows={daily?.daily ?? []}
-              generatedAt={daily?.generatedAt ?? null}
-              loading={dailyLoading}
-              error={dailyError}
+              trendRows={trend?.daily ?? []}
+              trendRange={trend?.range ?? data.range}
+              heatmapRows={heatmap?.daily ?? []}
+              heatmapEndAtMs={heatmap?.range.endAtMs ?? data.range.endAtMs}
+              heatmapLoading={heatmapLoading}
+              error={trendError ?? heatmapError}
             />
             <ProviderTable providers={data.providers} />
             <ErrorsSummary errors={data.errors} />

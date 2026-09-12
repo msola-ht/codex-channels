@@ -101,7 +101,7 @@ export interface DailyUsageRow {
 }
 
 export interface DailyUsageResponse {
-  days: 90
+  range: Range
   generatedAt: string
   daily: DailyUsageRow[]
 }

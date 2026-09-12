@@ -41,6 +41,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -352,7 +353,7 @@ export function DataTable<TData extends RowData>({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
-              <div className="grid grid-cols-2 gap-0.5">
+              <DropdownMenuGroup className="grid grid-cols-2 gap-0.5">
                 {table
                   .getAllLeafColumns()
                   .filter((column) => column.getCanHide())
@@ -365,7 +366,7 @@ export function DataTable<TData extends RowData>({
                       {columnLabels[column.id] ?? column.id}
                     </DropdownMenuCheckboxItem>
                   ))}
-              </div>
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -35,25 +36,26 @@ export function LanguageToggle({
           aria-label="切换显示语言"
         >
           {current.label}
-          <ChevronsUpDown className="size-3.5 opacity-50" />
+          <ChevronsUpDown className="opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-28">
-        {options.map((option) => (
-          <DropdownMenuItem
-            key={option.value}
-            onClick={() => onChange(option.value)}
-            className="gap-2"
-          >
-            <Check
-              className={cn(
-                "size-4",
-                option.value === value ? "opacity-100" : "opacity-0",
-              )}
-            />
-            {option.label}
-          </DropdownMenuItem>
-        ))}
+        <DropdownMenuGroup>
+          {options.map((option) => (
+            <DropdownMenuItem
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              className="gap-2"
+            >
+              <Check
+                className={cn(
+                  option.value === value ? "opacity-100" : "opacity-0",
+                )}
+              />
+              {option.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )

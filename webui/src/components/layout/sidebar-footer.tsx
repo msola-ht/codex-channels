@@ -36,14 +36,14 @@ export function SidebarFooterNav() {
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <Avatar className="h-8 w-8 rounded-lg">
+              <Avatar className="size-8 rounded-lg">
                 <AvatarFallback className="rounded-lg">CX</AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">本地只读</span>
+                <span className="truncate font-medium">本地服务</span>
                 <span className="truncate text-xs">/api/v1</span>
               </div>
-              <ChevronsUpDownIcon className="ml-auto size-4" />
+              <ChevronsUpDownIcon className="ml-auto" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -54,12 +54,12 @@ export function SidebarFooterNav() {
           >
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <Avatar className="h-8 w-8 rounded-lg">
+                <Avatar className="size-8 rounded-lg">
                   <AvatarFallback className="rounded-lg">CX</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">Codex WebUI</span>
-                  <span className="truncate text-xs">本地只读指标</span>
+                  <span className="truncate text-xs">本地指标与设置</span>
                 </div>
               </div>
             </DropdownMenuLabel>

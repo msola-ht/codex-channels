@@ -1,14 +1,13 @@
 import type { DailyUsageRow } from "@/lib/types"
 
-export interface StackedUsageTrendRow {
+export interface UsageTrendRow {
   day: string
-  uncachedInputTokens: number | null
+  inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
-  totalTokens: number
 }
 
-export function toStackedUsageTrend(rows: DailyUsageRow[]): StackedUsageTrendRow[] {
+export function toUsageTrend(rows: DailyUsageRow[]): UsageTrendRow[] {
   return rows.map((row) => {
     const inputTokens = Math.max(0, row.inputTokens)
     const cachedInputTokens = row.cachedInputTokens === null
@@ -17,12 +16,9 @@ export function toStackedUsageTrend(rows: DailyUsageRow[]): StackedUsageTrendRow
     const outputTokens = Math.max(0, row.outputTokens)
     return {
       day: row.day,
-      uncachedInputTokens: cachedInputTokens === null
-        ? null
-        : inputTokens - cachedInputTokens,
+      inputTokens,
       cachedInputTokens,
       outputTokens,
-      totalTokens: inputTokens + outputTokens,
     }
   })
 }

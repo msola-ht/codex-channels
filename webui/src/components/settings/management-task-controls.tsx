@@ -29,7 +29,7 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "update" })}>更新源码</Button>
           {maintenanceActions.map(([action, label]) => (
-            <Button key={action} variant="outline" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "metrics", action })}>{label}</Button>
+            <Button key={action} variant={action === "upgrade" ? "outline" : "destructive"} size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "metrics", action })}>{label}</Button>
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -47,7 +47,7 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
             {providerOptions.map((providerId) => <option key={providerId} value={providerId} />)}
           </datalist>
           <Button
-            variant="outline"
+            variant="destructive"
             size="sm"
             disabled={disabled || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(pruneProvider)}
             onClick={() => void tasks.run({ operation: "metrics", action: "prune", target: pruneProvider })}
@@ -70,7 +70,9 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
     ...pending.preview.preconditions.map((condition) => `前置条件：${condition}`),
     pending.preview.recovery ? `失败处理：${pending.preview.recovery}` : null,
   ].filter((item): item is string => item !== null)
-  return <ManagementConfirmationDialog open saving={tasks.saving} title="确认执行管理任务" description="确认后提交后台任务，任务将在服务端串行执行。" confirmLabel="确认执行" onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
+  const destructive = (pending.input.operation === "metrics" && pending.input.action !== "upgrade")
+    || (pending.input.operation === "service" && (pending.input.action === "uninstall" || pending.input.action === "stop"))
+  return <ManagementConfirmationDialog open saving={tasks.saving} title="确认执行管理任务" description="确认后提交后台任务，任务将在服务端串行执行。" confirmLabel="确认执行" confirmVariant={destructive ? "destructive" : "default"} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
     <p className="whitespace-pre-line">{description.join("\n") || pending.input.operation}</p>
   </ManagementConfirmationDialog>
 }

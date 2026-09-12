@@ -1072,7 +1072,7 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     return;
   }
   if (apiPath === "/daily") {
-    handleDaily(environment, response);
+    handleDaily(environment, url, response);
     return;
   }
   if (apiPath === "/threads") {
@@ -1239,25 +1239,18 @@ function handleOverview(environment, url, response) {
   }
 }
 
-function handleDaily(environment, response) {
-  const days = 90;
-  const generatedAtMs = Date.now();
-  const generatedAt = new Date(generatedAtMs);
-  const currentUtcDayStartMs = Date.UTC(
-    generatedAt.getUTCFullYear(),
-    generatedAt.getUTCMonth(),
-    generatedAt.getUTCDate(),
-  );
-  const startAtMs = currentUtcDayStartMs - (days - 1) * 86_400_000;
-  const store = openMetricsStore(environment, generatedAtMs);
+function handleDaily(environment, url, response) {
+  const range = parseRange(url);
+  const store = openMetricsStore(environment, range.endAtMs);
   try {
+    const daily = store.daily({
+      startAtMs: range.startAtMs,
+      endAtMs: range.endAtMs,
+    });
     sendJson(response, 200, {
-      days,
-      generatedAt: generatedAt.toISOString(),
-      daily: store.daily({
-        startAtMs,
-        endAtMs: generatedAtMs,
-      }),
+      range,
+      generatedAt: new Date(range.endAtMs).toISOString(),
+      daily,
     });
   } finally {
     store.close();

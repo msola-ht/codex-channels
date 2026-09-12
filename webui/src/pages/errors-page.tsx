@@ -108,7 +108,7 @@ export function ErrorsPage() {
                           <TableCell className="max-w-md">
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <span className="block truncate text-xs text-muted-foreground">{message}</span>
+                                <span className="block truncate text-xs text-muted-foreground" tabIndex={0}>{message}</span>
                               </TooltipTrigger>
                               <TooltipContent side="right" className="max-w-md">
                                 <p className="break-words text-xs">{message}</p>

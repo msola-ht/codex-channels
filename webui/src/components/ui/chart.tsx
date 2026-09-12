@@ -125,7 +125,6 @@ function ChartTooltipContent({
   labelClassName,
   formatter,
   valueFormatter,
-  sortByValue = false,
   color,
   nameKey,
   labelKey,
@@ -137,7 +136,6 @@ function ChartTooltipContent({
     nameKey?: string
     labelKey?: string
     valueFormatter?: (value: number | undefined) => string
-    sortByValue?: boolean
   } & Omit<
     RechartsPrimitive.DefaultTooltipContentProps<
       TooltipValueType,
@@ -188,13 +186,6 @@ function ChartTooltipContent({
   }
 
   const nestLabel = payload.length === 1 && indicator !== "dot"
-  const items = sortByValue
-    ? payload.toSorted((left, right) => {
-        const leftValue = typeof left.value === "number" ? left.value : Number.NEGATIVE_INFINITY
-        const rightValue = typeof right.value === "number" ? right.value : Number.NEGATIVE_INFINITY
-        return rightValue - leftValue
-      })
-    : payload
 
   return (
     <div
@@ -205,7 +196,7 @@ function ChartTooltipContent({
     >
       {!nestLabel ? tooltipLabel : null}
       <div className="grid gap-1.5">
-        {items
+        {payload
           .filter((item) => item.type !== "none")
           .map((item, index) => {
             const key = `${nameKey ?? item.name ?? item.dataKey ?? "value"}`

@@ -134,8 +134,11 @@ export function fetchOverview(
   )
 }
 
-export function fetchDailyUsage(signal?: AbortSignal): Promise<DailyUsageResponse> {
-  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily`, signal)
+export function fetchDailyUsage(
+  range: RangeName,
+  signal?: AbortSignal,
+): Promise<DailyUsageResponse> {
+  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily?range=${range}`, signal)
 }
 
 export function fetchThreads(

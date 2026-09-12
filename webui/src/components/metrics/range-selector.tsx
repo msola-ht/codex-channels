@@ -20,13 +20,15 @@ const ranges: Array<{ value: RangeName; label: string }> = [
 export function RangeSelector({
   value,
   onChange,
+  ariaLabel = "时间范围",
 }: {
   value: RangeName
   onChange: (value: RangeName) => void
+  ariaLabel?: string
 }) {
   return (
     <Select value={value} onValueChange={(next) => onChange(next as RangeName)}>
-      <SelectTrigger size="sm" aria-label="时间范围">
+      <SelectTrigger size="sm" aria-label={ariaLabel}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

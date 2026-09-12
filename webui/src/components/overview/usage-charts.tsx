@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { useTheme } from "next-themes"
 import { ActivityCalendar } from "react-activity-calendar"
 import "react-activity-calendar/tooltips.css"
@@ -19,115 +18,90 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { formatTokens } from "@/lib/format"
-import { toStackedUsageTrend } from "@/lib/trend"
-import type { DailyUsageRow } from "@/lib/types"
+import { toUsageTrend } from "@/lib/trend"
+import type { DailyUsageRow, Range, RangeName } from "@/lib/types"
 
 const dayMs = 86_400_000
+const rangeLabels: Record<RangeName, string> = {
+  today: "今天",
+  yesterday: "昨天",
+  "this-week": "本周",
+  "last-week": "上周",
+  "this-month": "本月",
+  "last-month": "上月",
+  "24h": "最近 24 小时",
+  "7d": "最近 7 天",
+  "30d": "最近 30 天",
+  "90d": "最近 90 天",
+  "365d": "最近 365 天",
+  all: "全部历史",
+}
 
 export function UsageCharts({
-  rows,
-  generatedAt,
-  loading,
+  trendRows,
+  trendRange,
+  heatmapRows,
+  heatmapEndAtMs,
+  heatmapLoading,
   error,
 }: {
-  rows: DailyUsageRow[]
-  generatedAt: string | null
-  loading: boolean
+  trendRows: DailyUsageRow[]
+  trendRange: Range
+  heatmapRows: DailyUsageRow[]
+  heatmapEndAtMs: number
+  heatmapLoading: boolean
   error: string | null
 }) {
-  const unavailable = error !== null && rows.length === 0
+  const filledTrendRows = fillDailyRange(trendRows, trendRange)
+  const filledHeatmapRows = heatmapLoading && heatmapRows.length === 0
+    ? []
+    : fillRecentDays(heatmapRows, heatmapEndAtMs, 90)
+  const rangeLabel = rangeLabels[trendRange.name]
   return (
     <div className="flex flex-col gap-3">
       <ErrorBanner error={error} />
-      {unavailable ? null : (
-        <div className="grid items-start gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-          <ActivityHeatmapCard rows={rows} generatedAt={generatedAt} loading={loading} />
-          <UsageTrendCard rows={rows} generatedAt={generatedAt} loading={loading} />
-        </div>
-      )}
+      <div className="grid items-start gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <ActivityHeatmapCard rows={filledHeatmapRows} loading={heatmapLoading} />
+        <UsageTrendCard rows={filledTrendRows} rangeLabel={rangeLabel} />
+      </div>
     </div>
   )
 }
 
 function UsageTrendCard({
   rows,
-  generatedAt,
-  loading,
+  rangeLabel,
 }: {
   rows: DailyUsageRow[]
-  generatedAt: string | null
-  loading: boolean
+  rangeLabel: string
 }) {
-  const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d">("90d")
-  const days = timeRange === "7d" ? 7 : timeRange === "90d" ? 90 : 30
-  const reference = generatedAt === null ? new Date() : new Date(generatedAt)
-  const today = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()))
-  const rowsByDay = new Map(rows.map((row) => [row.day, row]))
-  const rangeRows: DailyUsageRow[] = []
-  for (let index = days - 1; index >= 0; index -= 1) {
-    const day = toUtcDay(new Date(today.getTime() - index * dayMs))
-    rangeRows.push(rowsByDay.get(day) ?? {
-      day,
-      requestCount: 0,
-      inputTokens: 0,
-      cachedInputTokens: 0,
-      outputTokens: 0,
-    })
-  }
-  const data = toStackedUsageTrend(rangeRows)
-  const hasData = rangeRows.some((row) => row.requestCount > 0)
+  const data = toUsageTrend(rows)
+  const hasData = rows.some((row) => row.requestCount > 0)
   const chartConfig: ChartConfig = {
-    totalTokens: { label: "日总计", color: "var(--chart-1)" },
-    uncachedInputTokens: { label: "未缓存输入", color: "var(--chart-2)" },
-    cachedInputTokens: { label: "缓存输入", color: "var(--chart-3)" },
-    outputTokens: { label: "输出", color: "var(--chart-4)" },
+    inputTokens: { label: "输入", color: "var(--chart-1)" },
+    cachedInputTokens: { label: "缓存", color: "var(--chart-2)" },
+    outputTokens: { label: "输出", color: "var(--chart-3)" },
   }
 
   return (
     <Card className="h-[340px]">
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <div className="grid flex-1 gap-1">
-            <CardTitle>用量趋势</CardTitle>
-            <CardDescription>最近 {days} 天，输入按缓存拆分</CardDescription>
-          </div>
-          <Select value={timeRange} onValueChange={(value) => setTimeRange(value as "7d" | "30d" | "90d")}>
-            <SelectTrigger className="w-[132px] rounded-lg sm:w-[140px]" aria-label="选择趋势时间范围">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl">
-              <SelectGroup>
-                <SelectItem value="90d" className="rounded-lg">最近 90 天</SelectItem>
-                <SelectItem value="30d" className="rounded-lg">最近 30 天</SelectItem>
-                <SelectItem value="7d" className="rounded-lg">最近 7 天</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
+        <CardTitle>用量趋势</CardTitle>
+        <CardDescription>{rangeLabel} Token 变化</CardDescription>
       </CardHeader>
       <CardContent>
-        {loading && !hasData ? (
-          <PageSkeleton rows={3} />
-        ) : !hasData ? (
-          <p className="text-sm text-muted-foreground">最近 {days} 天没有记录</p>
+        {!hasData ? (
+          <p className="text-sm text-muted-foreground">{rangeLabel}没有记录</p>
         ) : (
           <ChartContainer config={chartConfig} className="h-[230px] w-full">
             <AreaChart accessibilityLayer data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
               <defs>
-                <linearGradient id="fillUncachedInput" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-uncachedInputTokens)" stopOpacity={0.5} />
-                  <stop offset="95%" stopColor="var(--color-uncachedInputTokens)" stopOpacity={0.05} />
+                <linearGradient id="fillInput" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--color-inputTokens)" stopOpacity={0.5} />
+                  <stop offset="95%" stopColor="var(--color-inputTokens)" stopOpacity={0.05} />
                 </linearGradient>
                 <linearGradient id="fillCachedInput" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="var(--color-cachedInputTokens)" stopOpacity={0.5} />
@@ -137,10 +111,9 @@ function UsageTrendCard({
               <CartesianGrid vertical={false} />
               <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tickFormatter={(day) => String(day).slice(5)} />
               <YAxis tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
-              <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} sortByValue />} />
-              <Area dataKey="uncachedInputTokens" type="monotone" stackId="input" stroke="var(--color-uncachedInputTokens)" fill="url(#fillUncachedInput)" />
-              <Area dataKey="cachedInputTokens" type="monotone" stackId="input" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
-              <Area dataKey="totalTokens" type="monotone" stroke="var(--color-totalTokens)" fill="none" strokeWidth={2} />
+              <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
+              <Area dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" />
+              <Area dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
               <Area dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
               <ChartLegend content={<ChartLegendContent />} />
             </AreaChart>
@@ -153,24 +126,14 @@ function UsageTrendCard({
 
 function ActivityHeatmapCard({
   rows,
-  generatedAt,
   loading,
 }: {
   rows: DailyUsageRow[]
-  generatedAt: string | null
   loading: boolean
 }) {
   const { resolvedTheme } = useTheme()
   const colorScheme = resolvedTheme === "light" ? "light" : "dark"
-  const byDay = new Map(rows.map((row) => [row.day, row.inputTokens + row.outputTokens]))
-  const reference = generatedAt === null ? new Date() : new Date(generatedAt)
-  const today = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()))
-  const cells: Array<{ date: string; count: number; level: number }> = []
-  for (let index = 89; index >= 0; index -= 1) {
-    const date = new Date(today.getTime() - index * dayMs)
-    const key = toUtcDay(date)
-    cells.push({ date: key, count: byDay.get(key) ?? 0, level: 0 })
-  }
+  const cells = rows.map((row) => ({ date: row.day, count: row.inputTokens + row.outputTokens, level: 0 }))
   const positive = cells.map((cell) => cell.count).filter((count) => count > 0).sort((left, right) => left - right)
   const thresholds = positive.length === 0
     ? [0, 0, 0]
@@ -237,6 +200,44 @@ function ActivityHeatmapCard({
       </CardContent>
     </Card>
   )
+}
+
+function fillRecentDays(rows: DailyUsageRow[], endAtMs: number, days: number): DailyUsageRow[] {
+  const endDay = utcDayStart(Math.max(0, endAtMs - 1))
+  return fillDays(rows, endDay - (days - 1) * dayMs, days)
+}
+
+function fillDailyRange(rows: DailyUsageRow[], range: Range): DailyUsageRow[] {
+  const endDay = utcDayStart(Math.max(range.startAtMs, range.endAtMs - 1))
+  const firstRecordedDay = rows[0]?.day
+  const startDay = range.name === "all"
+    ? firstRecordedDay === undefined
+      ? endDay
+      : Date.parse(`${firstRecordedDay}T00:00:00.000Z`)
+    : utcDayStart(range.startAtMs)
+  const days = Math.max(1, Math.floor((endDay - startDay) / dayMs) + 1)
+  return fillDays(rows, startDay, days)
+}
+
+function fillDays(rows: DailyUsageRow[], startDay: number, days: number): DailyUsageRow[] {
+  const rowsByDay = new Map(rows.map((row) => [row.day, row]))
+  const result: DailyUsageRow[] = []
+  for (let index = 0; index < days; index += 1) {
+    const day = toUtcDay(new Date(startDay + index * dayMs))
+    result.push(rowsByDay.get(day) ?? {
+      day,
+      requestCount: 0,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+    })
+  }
+  return result
+}
+
+function utcDayStart(timestamp: number): number {
+  const date = new Date(timestamp)
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
 }
 
 function toUtcDay(date: Date): string {
