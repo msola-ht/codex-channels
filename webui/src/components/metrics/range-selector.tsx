@@ -9,17 +9,11 @@ import {
 import type { RangeName } from "@/lib/types"
 
 const ranges: Array<{ value: RangeName; label: string }> = [
-  { value: "today", label: "今天" },
-  { value: "yesterday", label: "昨天" },
-  { value: "this-week", label: "本周" },
-  { value: "last-week", label: "上周" },
-  { value: "this-month", label: "本月" },
-  { value: "last-month", label: "上月" },
-  { value: "24h", label: "24小时" },
-  { value: "7d", label: "7天" },
-  { value: "30d", label: "30天" },
-  { value: "90d", label: "90天" },
-  { value: "365d", label: "365天" },
+  { value: "24h", label: "最近 24 小时" },
+  { value: "7d", label: "最近 7 天" },
+  { value: "30d", label: "最近 30 天" },
+  { value: "90d", label: "最近 90 天" },
+  { value: "365d", label: "最近 365 天" },
   { value: "all", label: "全部历史" },
 ]
 

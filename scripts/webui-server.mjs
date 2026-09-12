@@ -1424,7 +1424,7 @@ function toWebuiWeeklyQuota(quota) {
 }
 
 function parseRange(url) {
-  const name = url.searchParams.get("range") ?? "24h";
+  const name = url.searchParams.get("range") ?? "90d";
   try {
     return metricsRange(name, Date.now());
   } catch {
