@@ -96,7 +96,8 @@ Workspace 上配置。
 
 `api_providers` 保存多个直接 API 调用使用的 Responses 提供商 ID、名称和精确 HTTPS Endpoint；
 API Key 由 Setup 按提供商保存到独立私有凭据文件。它们不属于 Codex `modelProvider`，不接入
-App Server 或 `/model`，当前也没有运行时调用方；保留该注册表只为后续明确设计的直接 API 功能。
+App Server 或 `/model`，当前也没有运行时调用方；保留该注册表只为后续明确设计的直接 API 功能，
+WebUI 设置页不展示该预留注册表。
 提供商变化需要重启 Gateway，不需要重启 App Server；配置文件不保存 API Key。
 
 `codexc config` 只编辑以上严格 Schema 已支持且适合日常操作的 Gateway 设置，并提供不显示凭据、

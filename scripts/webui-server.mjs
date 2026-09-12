@@ -123,6 +123,7 @@ const SOURCE_GATEWAY_VERSION = readJsonMetadata(join(PACKAGE_DIR, "src", "versio
 const GATEWAY_VERSION = PACKAGE_VERSION ?? SOURCE_GATEWAY_VERSION;
 const CODEX_CLI_VERSION = (readJsonMetadata(join(PACKAGE_DIR, "src", "codex-protocol", "version.json"))?.codexCli ?? null)
   ?.replace(/^codex-cli\s+/u, "") ?? null;
+const highRiskCodexSettingKinds = new Set(["permissions"]);
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -422,12 +423,27 @@ async function routeManagement(environment, url, request, response, state, token
         environment,
         expectedVersion: body.revision,
       });
-      sendManagementJson(response, 200, {
+      const payload = {
         revision: result.previousVersion,
         value: result.value,
         activation: configActivationResult(result.activation),
-      });
+      };
+      if (highRiskCodexSettingKinds.has(body.setting?.kind)) {
+        state.limiter.consume({ principalId, category: "high-risk" });
+        const issued = state.confirmations.issue({
+          sessionId: principalId,
+          operation: "codex.settings.write",
+          inputFingerprint: fingerprintManagementValue(body.setting),
+          resourceRevision: body.revision,
+          previewFingerprint: fingerprintManagementValue(payload),
+        });
+        payload.confirmationRequired = true;
+        payload.confirmationToken = issued.token;
+        payload.confirmationExpiresAt = issued.expiresAt;
+      }
+      sendManagementJson(response, 200, payload);
     } catch (error) {
+      if (error instanceof ManagementSecurityError) throw error;
       throw codexManagementError(error);
     }
     return;
@@ -439,12 +455,32 @@ async function routeManagement(environment, url, request, response, state, token
     }
     let result;
     try {
+      if (highRiskCodexSettingKinds.has(body.setting?.kind)) {
+        state.limiter.consume({ principalId, category: "high-risk" });
+        const previewResult = await state.previewCodexSetting(body.setting, {
+          environment,
+          expectedVersion: body.revision,
+        });
+        const preview = {
+          revision: previewResult.previousVersion,
+          value: previewResult.value,
+          activation: configActivationResult(previewResult.activation),
+        };
+        state.confirmations.consume(body.confirmationToken, {
+          sessionId: principalId,
+          operation: "codex.settings.write",
+          inputFingerprint: fingerprintManagementValue(body.setting),
+          resourceRevision: body.revision,
+          previewFingerprint: fingerprintManagementValue(preview),
+        });
+      }
       state.audit.assertWritable();
       result = await state.updateCodexSetting(body.setting, {
         environment,
         expectedVersion: body.revision,
       });
     } catch (error) {
+      if (error instanceof ManagementSecurityError) throw error;
       throw codexManagementError(error);
     }
     invalidateProviderManagementSummary(state.providerStateCache);

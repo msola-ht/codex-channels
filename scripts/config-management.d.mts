@@ -30,6 +30,14 @@ export interface GatewaySettings {
     sandbox: "read-only" | "workspace-write";
     defaultWorkspace: string | null;
     defaultModel: string | null;
+    officialTuiIdentity: {
+      clientIdentity: {
+        name: string | null;
+        title: string | null;
+        version: string | null;
+      };
+      upstreamUserAgent: string | null;
+    };
     workspaces: Array<{ id: string; name: string }>;
   };
   automation: {

@@ -3,8 +3,10 @@ export const managedSettingKinds = new Set([
   "display.plan-updates",
   "display.reasoning",
   "system.approval-timeout",
+  "system.idle-release-minutes",
   "system.sandbox",
   "system.default-model",
+  "system.official-tui-identity",
   "automation.scheduled-tasks",
   "advanced.logging-level",
   "metrics.storage",
@@ -20,6 +22,10 @@ export const managedSettingKinds = new Set([
 ])
 
 export const highRiskManagedSettingKinds = new Set([
+  "system.sandbox",
+  "system.official-tui-identity",
+  "automation.scheduled-tasks",
+  "advanced.plugin-api",
   "webui.host",
   "webui.token",
   "network.proxy",
@@ -33,7 +39,11 @@ export function isHighRiskManagedSetting(input) {
 
 export function normalizeManagedSetting(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input
-  if ((input.kind === "metrics.storage" || input.kind === "webui.token")
+  if ((input.kind === "metrics.storage"
+    || input.kind === "webui.token"
+    || input.kind === "network.proxy"
+    || input.kind === "network.proxy-batch"
+    || input.kind === "workspace.permissions")
     && input.value !== null && typeof input.value === "object" && !Array.isArray(input.value)) {
     return { ...input.value, kind: input.kind }
   }
@@ -46,10 +56,12 @@ export function redactManagedSettings(settings) {
     display: settings.display,
     system: {
       approvalTimeoutSeconds: settings.system.approvalTimeoutSeconds,
+      idleReleaseMinutes: settings.system.idleReleaseMinutes,
       sandbox: settings.system.sandbox,
       defaultWorkspace: settings.system.defaultWorkspace,
       defaultModel: settings.system.defaultModel,
-      workspaces: settings.system.workspaces,
+      officialTuiIdentity: settings.system.officialTuiIdentity,
+      workspaces: settings.workspaces,
     },
     automation: {
       scheduledTasksEnabled: settings.automation.scheduledTasksEnabled,
@@ -63,6 +75,7 @@ export function redactManagedSettings(settings) {
         .filter(([, value]) => value.configured)
         .map(([field]) => field),
     },
+    telegram: settings.telegram,
     metrics: {
       storage: settings.metrics.storage,
     },

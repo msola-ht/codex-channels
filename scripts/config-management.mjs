@@ -52,6 +52,7 @@ export function loadGatewaySettings(environment = process.env) {
   const document = snapshot.document;
   const display = table(document.display);
   const codex = table(document.codex);
+  const clientIdentity = table(codex.client_identity);
   const approval = table(document.approval);
   const conversation = table(document.conversation);
   const scheduledTasks = table(document.scheduled_tasks);
@@ -80,6 +81,16 @@ export function loadGatewaySettings(environment = process.env) {
       sandbox: codex.sandbox === "read-only" ? "read-only" : "workspace-write",
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,
+      officialTuiIdentity: {
+        clientIdentity: {
+          name: stringValue(clientIdentity.name) || null,
+          title: stringValue(clientIdentity.title) || null,
+          version: stringValue(clientIdentity.version) || null,
+        },
+        upstreamUserAgent: typeof codex.upstream_user_agent === "string"
+          ? codex.upstream_user_agent
+          : null,
+      },
       workspaces,
     },
     automation: {

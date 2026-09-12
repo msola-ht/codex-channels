@@ -155,7 +155,7 @@ webui/src/
   pages/       概览、Threads、Thread 详情、请求、错误、设置
 ```
 
-设置页按 App Server、Gateway 与 WebUI 分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值已经通过结构化 RPC 接入；直接 API Provider、托管 Provider 和账户设置使用一次性确认令牌写入，渠道授权和服务维护任务仍保留独立任务边界。
+设置页按 App Server、Provider、Gateway、Workspace 与 WebUI 分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值、Fast、联网搜索、计划工具、上下文管理、空闲总结、模型压缩、其他偏好和权限已经通过结构化 RPC 接入；Gateway 显示、系统、自动化、Telegram 消息格式、代理、Workspace 权限、WebUI 和本地指标存储设置均复用 Config 管理接口。高风险设置使用服务端一次性确认令牌。没有运行时调用方的直接 API Provider 不在页面展示；渠道授权和服务维护任务仍保留独立任务边界。
 
 Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOME/auth.json`；未检测到鉴权文件
 时按官方未登录处理，不把“OpenAI 官方”作为主 Provider 展示，而是显示“未登录”状态。

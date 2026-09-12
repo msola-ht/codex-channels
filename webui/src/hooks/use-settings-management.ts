@@ -1,7 +1,7 @@
 import { fetchManagementSettings, previewManagementSetting, updateManagementSetting } from "@/lib/api"
 import { useVersionedSettingsManagement } from "@/hooks/use-versioned-settings-management"
 import type { GatewaySettingsController } from "@/lib/settings-management"
-import type { ManagementSettingsResponse } from "@/lib/types"
+import type { ManagementSettingInput, ManagementSettingsResponse } from "@/lib/types"
 
 export function useSettingsManagement(): GatewaySettingsController {
   const management = useVersionedSettingsManagement({
@@ -25,19 +25,32 @@ export function useSettingsManagement(): GatewaySettingsController {
   }
 }
 
-function currentValue(settings: ManagementSettingsResponse, setting: { kind: string }): unknown {
+function currentValue(settings: ManagementSettingsResponse, setting: ManagementSettingInput): unknown {
   if (setting.kind === "display.operation-updates") return settings.display.operationUpdates
   if (setting.kind === "display.plan-updates") return settings.display.planUpdatesEnabled
   if (setting.kind === "display.reasoning") return settings.display.reasoningEnabled
   if (setting.kind === "system.sandbox") return settings.system.sandbox
   if (setting.kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
+  if (setting.kind === "system.idle-release-minutes") return settings.system.idleReleaseMinutes
   if (setting.kind === "automation.scheduled-tasks") return settings.automation.scheduledTasksEnabled
   if (setting.kind === "advanced.logging-level") return settings.advanced.loggingLevel
-  if (setting.kind === "metrics.storage") return settings.metrics.storage
-  if (setting.kind === "webui.port") return settings.webui.port
-  if (setting.kind === "webui.host") return settings.webui.host
-  if (setting.kind === "webui.token") return settings.webui.tokenConfigured ? "已配置" : "未配置"
+  if (setting.kind === "metrics.storage") return { storage: settings.metrics.storage }
+  if (setting.kind === "webui.port" || setting.kind === "webui.host" || setting.kind === "webui.token") return settings.webui
   if (setting.kind === "advanced.plugin-api") return settings.advanced.pluginApiEnabled
   if (setting.kind === "system.default-model") return settings.system.defaultModel
+  if (setting.kind === "system.default-workspace") return settings.system.defaultWorkspace
+  if (setting.kind === "system.official-tui-identity") return settings.system.officialTuiIdentity
+  if (setting.kind === "telegram.message-format") return settings.telegram.messageFormat
+  if (setting.kind === "network.proxy" && setting.value !== null && typeof setting.value === "object") {
+    const field = "field" in setting.value && typeof setting.value.field === "string" ? setting.value.field : ""
+    return { field, configured: settings.network.configuredFields.includes(field) }
+  }
+  if (setting.kind === "network.proxy-batch") return settings.network.configuredFields
+  if (setting.kind === "workspace.permissions" && setting.value !== null && typeof setting.value === "object") {
+    const workspaceId = "workspaceId" in setting.value && typeof setting.value.workspaceId === "string"
+      ? setting.value.workspaceId
+      : ""
+    return settings.system.workspaces.find((workspace) => workspace.id === workspaceId) ?? null
+  }
   return null
 }

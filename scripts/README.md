@@ -266,7 +266,7 @@
   高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
 - `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API
   Provider 脱敏列表、输入校验、增改和删除事务；返回值只包含 `hasApiKey`，不返回凭据，供 Setup
-  与后续受保护的管理界面复用。
+  与受保护的管理 API 复用；当前 WebUI 设置页不展示这个没有运行时调用方的预留注册表。
 - `api-provider-setup.mjs` / `api-provider-setup.d.mts`：编排多个 Responses 兼容直接 API Provider
   的新增、编辑、删除 prompts，并调用共享管理用例；当前没有运行时调用方，保留给后续明确设计的
   直接 API 功能。

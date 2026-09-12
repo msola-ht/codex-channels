@@ -68,22 +68,22 @@
 
 ### 阶段四：Provider/渠道可视化评估
 
-- 状态：阶段四只读概览完成；Provider 和渠道写操作仍未开放。
+- 状态：阶段四评估完成；可运行 Provider 的结构化写入已由阶段五接入，渠道授权仍归阶段六。
 - [x] 根据管理接口成熟度逐项评估 Provider 和渠道 Setup 是否具备可视化条件。
 - [x] 凭据、扫码、OAuth 和服务中断操作维持独立任务边界，未满足安全门槛不得接入页面。
 
-当前批次结果：Provider 概览继续只返回安全摘要；App Server 用户设置、直接 API Provider、托管 Provider 设置及
-OpenCode Go/DeepSeek 账户设置已开放结构化写入。渠道 OAuth/扫码和其他 Provider 专属变更
-仍需独立授权任务与明确审批契约。
+当前批次结果：Provider 概览继续只返回安全摘要；App Server 用户设置、托管 Provider 设置及
+OpenCode Go/DeepSeek 账户设置已开放结构化写入。直接 API Provider 当前没有运行时调用方，
+不再作为可用能力展示在设置页。渠道 OAuth/扫码仍需独立授权任务与明确审批契约。
 
 ## 页面结构
 
 ```text
 设置
 ├── App Server 设置（当前值 + 修改）
-├── Provider 状态与直接 API Provider（当前值 + 修改）
+├── Provider 状态与可运行 Provider（当前值 + 修改）
 ├── Gateway 设置（当前值 + 修改）
-├── WebUI 与指标存储设置（当前值 + 修改）
+├── WebUI、代理与指标存储设置（当前值 + 修改）
 ├── 通讯渠道状态（只读）
 ├── 服务状态
 └── CLI 操作提示
@@ -110,9 +110,9 @@ POST /api/v1/management/provider-settings 消费确认令牌并写入 Provider �
 GET  /api/v1/management/account-settings 读取 OpenCode Go 多账户与 DeepSeek 配置资源（配置后的同一 Bearer 令牌）
 POST /api/v1/management/account-settings/preview 预览账户配置、默认切换、停止、删除和 DeepSeek 配置/恢复
 POST /api/v1/management/account-settings 消费确认令牌并写入账户配置
-GET  /api/v1/management/api-providers  直接 API Provider 脱敏列表
-POST /api/v1/management/api-providers/preview 生成 Provider 变更预览和一次性确认令牌
-POST /api/v1/management/api-providers  消费确认令牌并写入 Provider/凭据事务
+GET  /api/v1/management/api-providers  预留直接 API Provider 脱敏列表（设置页不展示）
+POST /api/v1/management/api-providers/preview 预留注册表变更预览和一次性确认令牌
+POST /api/v1/management/api-providers  消费确认令牌并写入预留注册表/凭据事务
 POST /api/v1/management/tasks/preview  预览白名单服务/指标维护任务并生成一次性确认令牌
 POST /api/v1/management/tasks          消费确认令牌并异步启动任务
 GET  /api/v1/management/tasks          查询当前管理主体所属任务
@@ -145,15 +145,18 @@ WebUI Bearer 鉴权，不能把浏览器变成任意文件或命令执行器。
 
 ### 阶段五：全部配置可视化写入
 
-状态：进行中；App Server 用户设置、直接 API Provider、Provider 设置和 OpenCode Go/DeepSeek 账户配置基础写入已接入，渠道/OAuth/任务细节仍在后续闭环
+状态：已完成；`codexc config` 和 Codex 用户设置的同步结构化能力已经全部可视化。OAuth、扫码和
+等待消息属于阶段六的异步授权任务，不作为普通设置写入。
 
-- [x] App Server 用户默认值、模型、思考等级、Fast、Sandbox、审批和网络权限接入同一设置页；通过 App Server RPC 使用版本修订保护。
-- [x] 直接 API Provider 新增、编辑、删除接入结构化预览与一次性确认；API Key 只写入凭据目录，不返回页面。
+- [x] App Server 用户默认值、Fast、联网搜索、计划工具、上下文管理、空闲总结、模型压缩、其他偏好、Sandbox、审批和网络权限全部接入同一设置页；通过 App Server RPC 使用版本修订保护。
+- [x] Gateway 显示、系统、自动化、Telegram 消息格式、代理、Workspace 权限、WebUI 与本地指标存储的全部结构化设置接入页面；完整保留后端允许范围，不用少量预设值缩窄公开能力。
+- [x] WebUI Token 支持设置、替换和清除；修改后明确提示重启与重新认证，不回显现有令牌。
+- [x] 直接 API Provider 因没有运行时调用方而不在设置页展示，避免把预留注册表呈现为可运行 Provider。
 - [x] 托管 Provider 默认模型与思考等级，以及自定义 Provider 切换、删除、新增和编辑接入结构化预览与一次性确认；自动压缩改为按模型名统一的“模型自动压缩”卡片，不随默认模型按 Provider 写入；模型目录使用现有官方目录。
 - [x] 共享第三方子代理 Provider/模型选择与停用接入同一结构化预览、确认和审计边界。
 - [x] OpenCode Go 多账户新增、重新配置、默认切换、停止和删除，以及 DeepSeek 配置/恢复接入同一账户设置资源、确认和审计边界。
-- [ ] 其他 Provider 专属目录能力接入结构化表单。
-- [ ] 渠道配置接入结构化表单。
+- [x] 当前可运行 Provider 的模型目录、默认模型、思考等级与自动压缩能力接入结构化表单。
+- [x] 渠道中已有同步结构化设置的 Telegram 消息格式接入表单；OAuth、扫码、配对码或等待消息的授权过程归入阶段六。
 - [x] 已接入的账户和 Provider 凭据字段只允许写入，不允许读取、回显、持久化缓存或进入日志；配置操作携带修订保护和脱敏审计。
 
 ### 阶段六：账户与授权任务
