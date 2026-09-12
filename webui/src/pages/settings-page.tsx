@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
@@ -149,12 +150,12 @@ function SettingsContent({ summary, services, providers, management, codexManage
     <ProviderSettingsManagement management={providerSettings} onChanged={() => onSettingsChanged("provider")} />
     <AccountSettingsManagement management={accountSettings} onChanged={() => onSettingsChanged("account")} />
     <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmGatewaySetting()} onCancel={management.cancelSetting} />
-    {management.actionError !== null ? <p className="text-sm text-destructive" role="status">{management.actionError}</p> : null}
+    {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
     <GatewaySettingsCard management={management} />
     <WorkspaceSettingsCard management={management} />
     <WebuiDataSettingsCard management={management} />
     <ChannelStatusCard channels={summary.gateway.channels} />
-    {tasks.actionError !== null ? <p className="text-sm text-destructive" role="status">{tasks.actionError}</p> : null}
+    {tasks.actionError !== null ? <Alert variant="destructive"><AlertDescription>{tasks.actionError}</AlertDescription></Alert> : null}
     <Card>
       <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态和版本由当前平台服务管理器查询，未运行时显示最近错误；启停、重载和安装操作需要确认</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -168,7 +169,7 @@ function SettingsContent({ summary, services, providers, management, codexManage
       <CardHeader><CardTitle>CLI 与独立授权入口</CardTitle><CardDescription>需要终端身份流的官方登录、渠道 OAuth/扫码和项目技能仍通过对应 CLI 流程管理</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-3">
         {summary.cli.map((entry, index) => <Fragment key={entry.id}>{index > 0 ? <Separator /> : null}<CliCommandRow entry={entry} copied={copiedCommand === entry.id} onCopy={() => onCopy(entry.id, entry.command)} /></Fragment>)}
-        {copyError ? <p className="text-xs text-destructive" role="status">浏览器未允许访问剪贴板，请手动选择并复制命令。</p> : null}
+        {copyError ? <Alert variant="destructive"><AlertDescription>浏览器未允许访问剪贴板，请手动选择并复制命令。</AlertDescription></Alert> : null}
       </CardContent>
     </Card>
   </>

@@ -36,7 +36,7 @@ export function LanguageToggle({
           aria-label="切换显示语言"
         >
           {current.label}
-          <ChevronsUpDown className="opacity-50" />
+          <ChevronsUpDown data-icon="inline-end" className="opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-28">

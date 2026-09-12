@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, PendingSettingDialog, SettingsRow } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
@@ -87,7 +88,7 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
     <Card>
       <CardHeader><CardTitle>App Server 设置</CardTitle><CardDescription>通过 App Server 用户配置 RPC 写入，修订冲突会要求重新读取；写入后需重启全部服务生效。</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-5 text-sm">
-        <div className="grid gap-x-8 gap-y-3 md:grid-cols-2">
+        <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <SettingsRow label="当前 Provider" value={settings.provider} badge />
           <ManagedSelect label="默认模型" value={settings.defaults.model ?? ""} options={settings.models.map((model) => [model.model, model.displayName])} disabled={officialDisabled} onChange={(value) => { const model = settings.models.find((candidate) => candidate.model === value); void management.previewSetting({ kind: "defaults", model: value, reasoningEffort: model?.defaultReasoningEffort ?? "medium" }, "默认模型") }} />
           <ManagedSelect label="思考等级" value={settings.defaults.reasoningEffort ?? ""} options={effortOptions} disabled={officialDisabled || selected === undefined} onChange={(value) => void management.previewSetting({ kind: "defaults", model: selected?.model ?? "", reasoningEffort: value }, "思考等级")} />
@@ -100,34 +101,34 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
           <ManagedSelect label="审批策略" value={settings.permissions.approvalPolicy ?? "on-request"} options={[["on-request", "按需"], ["never", "从不"]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: settings.permissions.sandboxMode ?? "read-only", approvalPolicy: value, networkAccess: settings.permissions.networkAccess ?? false }, "审批策略")} />
           <ManagedSelect label="网络访问" value={String(settings.permissions.networkAccess ?? false)} options={[["true", "已允许"], ["false", "已禁止"]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: settings.permissions.sandboxMode ?? "read-only", approvalPolicy: settings.permissions.approvalPolicy ?? "on-request", networkAccess: value === "true" }, "网络访问")} />
           <SettingsRow label="Permission Profile" value={settings.permissions.defaultPermissions ?? "未配置"} code />
-        </div>
+        </FieldGroup>
 
         <Separator />
         <section className="flex flex-col gap-3">
           <div><h3 className="font-medium">模型上下文与自动压缩</h3><p className="text-xs text-muted-foreground">留空恢复模型默认；自动压缩百分比要求同时设置上下文窗口。</p></div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="grid gap-1.5"><Label htmlFor="codex-context-window">上下文窗口（tokens）</Label><Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} onChange={(event) => setContextWindow(event.target.value)} placeholder="模型默认" /></div>
-            <div className="grid gap-1.5"><Label htmlFor="codex-compact-percent">自动压缩百分比</Label><Input id="codex-compact-percent" type="number" min={10} max={90} value={compactPercent} disabled={officialDisabled} onChange={(event) => setCompactPercent(event.target.value)} placeholder="默认 95%" /></div>
-          </div>
+          <FieldGroup className="grid gap-3 md:grid-cols-2">
+            <Field data-disabled={officialDisabled}><FieldLabel htmlFor="codex-context-window">上下文窗口（tokens）</FieldLabel><Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} onChange={(event) => setContextWindow(event.target.value)} placeholder="模型默认" /></Field>
+            <Field data-disabled={officialDisabled}><FieldLabel htmlFor="codex-compact-percent">自动压缩百分比</FieldLabel><Input id="codex-compact-percent" type="number" min={10} max={90} value={compactPercent} disabled={officialDisabled} onChange={(event) => setCompactPercent(event.target.value)} placeholder="默认 95%" /></Field>
+          </FieldGroup>
           <Button className="self-start" variant="outline" disabled={officialDisabled} onClick={saveCompact}>保存压缩设置</Button>
         </section>
 
         <Separator />
         <section className="flex flex-col gap-3">
           <div><h3 className="font-medium">其他用户偏好</h3><p className="text-xs text-muted-foreground">这些字段作为一组写入 Codex 用户配置。</p></div>
-          <div className="grid gap-x-8 gap-y-3 md:grid-cols-2">
+          <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
             <ManagedSelect label="Plan 思考等级" value={planEffort} options={effortOptions} disabled={officialDisabled} onChange={setPlanEffort} />
             <ManagedSelect label="推理摘要" value={reasoningSummary} options={[["auto", "自动"], ["concise", "简洁"], ["detailed", "详细"], ["none", "关闭"]]} disabled={officialDisabled} onChange={setReasoningSummary} />
             <ManagedSelect label="输出详细程度" value={verbosity} options={[["low", "低"], ["medium", "中"], ["high", "高"]]} disabled={officialDisabled} onChange={setVerbosity} />
             <ManagedSelect label="模型人格" value={personality} options={[["none", "无"], ["friendly", "友好"], ["pragmatic", "务实"]]} disabled={officialDisabled} onChange={setPersonality} />
             <ManagedSelect label="启动时检查更新" value={startupUpdate} options={[["true", "开启"], ["false", "关闭"]]} disabled={officialDisabled} onChange={setStartupUpdate} />
             <ManagedSelect label="历史记录保存" value={historyPersistence} options={[["save-all", "保存"], ["none", "不保存"]]} disabled={officialDisabled} onChange={setHistoryPersistence} />
-          </div>
+          </FieldGroup>
           <Button className="self-start" variant="outline" disabled={officialDisabled || planEffort === ""} onClick={savePreferences}>保存用户偏好</Button>
         </section>
 
-        {localError !== null ? <p className="text-sm text-destructive" role="status">{localError}</p> : null}
-        {management.actionError !== null ? <p className="text-sm text-destructive" role="status">{management.actionError}</p> : null}
+        {localError !== null ? <Alert variant="destructive"><AlertDescription>{localError}</AlertDescription></Alert> : null}
+        {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       </CardContent>
     </Card>
   </>

@@ -1,6 +1,9 @@
+import type { ReactNode } from "react"
+
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RefreshCwIcon } from "lucide-react"
 
@@ -14,4 +17,8 @@ export function SettingsError({ message, retry }: { message: string; retry: () =
 
 export function LoadingSettingsCard({ title }: { title: string }) {
   return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent><Skeleton className="h-28 w-full" /></CardContent></Card>
+}
+
+export function SettingsEmpty({ children }: { children: ReactNode }) {
+  return <Empty className="min-h-20 items-start p-3 text-left"><EmptyHeader className="items-start"><EmptyTitle>{children}</EmptyTitle></EmptyHeader></Empty>
 }

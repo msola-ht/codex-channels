@@ -1,12 +1,14 @@
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
+import { SettingsEmpty } from "@/components/settings/settings-feedback"
 import type { ManagementTaskController } from "@/lib/settings-management"
 import type { ManagementServicesResponse } from "@/lib/types"
 
 export function ManagedServices({ services, tasks }: { services: ManagementServicesResponse; tasks: ManagementTaskController }) {
   if (services.entries.length === 0) {
-    return <span className="text-sm text-muted-foreground">当前平台没有可展示的受管服务。</span>
+    return <SettingsEmpty>当前平台没有可展示的受管服务。</SettingsEmpty>
   }
   const taskBusy = tasks.loading || tasks.saving || tasks.pendingPreview !== null || tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
   return <>
@@ -34,12 +36,12 @@ export function ManagedServices({ services, tasks }: { services: ManagementServi
               {service.running ? <Button variant="destructive" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: "stop", target: service.target })}>停止</Button> : null}
             </div>
           </div>
-          {!service.running && service.recentError !== null ? <p className="text-xs text-destructive">最近错误：{service.recentError.message}</p> : null}
+          {!service.running && service.recentError !== null ? <Alert variant="destructive"><AlertDescription>最近错误：{service.recentError.message}</AlertDescription></Alert> : null}
         </div>
       </div>
     ))}
     {services.platform === null ? <p className="text-xs text-muted-foreground">当前平台服务状态不可用，请使用 CLI 查看详细信息。</p> : null}
-    {tasks.error !== null ? <p className="mt-2 text-xs text-destructive" role="status">任务状态读取失败：{tasks.error}</p> : null}
+    {tasks.error !== null ? <Alert className="mt-2" variant="destructive"><AlertDescription>任务状态读取失败：{tasks.error}</AlertDescription></Alert> : null}
     {tasks.tasks.length > 0 ? <RecentManagementTasks tasks={tasks} /> : null}
   </>
 }

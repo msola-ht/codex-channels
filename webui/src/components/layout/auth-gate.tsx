@@ -10,7 +10,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { API_PREFIX, onUnauthorized, setToken } from "@/lib/api"
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -39,18 +41,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
               服务器开启了访问令牌保护，验证通过后才能查看指标。
             </AlertDescription>
           </Alert>
-          <Input
-            type="password"
-            aria-label="访问令牌"
-            value={token}
-            onChange={(event) => setTokenValue(event.target.value)}
-            placeholder="访问令牌"
-          />
-          {error === null ? null : (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+          <Field data-invalid={error !== null} data-disabled={submitting}>
+            <FieldLabel htmlFor="auth-token">访问令牌</FieldLabel>
+            <Input
+              id="auth-token"
+              type="password"
+              aria-invalid={error !== null}
+              aria-describedby={error === null ? undefined : "auth-token-error"}
+              value={token}
+              disabled={submitting}
+              onChange={(event) => {
+                setTokenValue(event.target.value)
+                setError(null)
+              }}
+              placeholder="访问令牌"
+            />
+            <FieldError id="auth-token-error">{error}</FieldError>
+          </Field>
           <Button
             disabled={token.trim() === "" || submitting}
             onClick={async () => {
@@ -74,6 +81,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               }
             }}
           >
+            {submitting ? <Spinner data-icon="inline-start" /> : null}
             {submitting ? "验证中…" : "进入"}
           </Button>
         </CardContent>

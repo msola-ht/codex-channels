@@ -44,7 +44,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -330,14 +330,17 @@ export function DataTable<TData extends RowData>({
               <Label htmlFor={`${storageKey}-search`} className="sr-only">
                 筛选
               </Label>
-              <Input
-                id={`${storageKey}-search`}
-                value={queryValue}
-                onChange={(event) => handleFilterChange(event.target.value)}
-                placeholder={filterPlaceholder}
-                className="w-72"
-              />
-              <SearchIcon className="size-4 text-muted-foreground" />
+              <InputGroup className="w-72">
+                <InputGroupInput
+                  id={`${storageKey}-search`}
+                  value={queryValue}
+                  onChange={(event) => handleFilterChange(event.target.value)}
+                  placeholder={filterPlaceholder}
+                />
+                <InputGroupAddon align="inline-end">
+                  <SearchIcon />
+                </InputGroupAddon>
+              </InputGroup>
               {filterHint === undefined ? null : (
                 <span className="text-xs text-muted-foreground">
                   {filterHint}

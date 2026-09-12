@@ -9,7 +9,9 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Progress } from "@/components/ui/progress"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Table,
   TableBody,
@@ -156,7 +158,7 @@ export function WeeklyQuotaCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {usedPercent === null
-          ? <p className="text-sm text-muted-foreground">当前时间范围没有 OpenAI 额度记录</p>
+          ? <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>当前时间范围没有 OpenAI 额度记录</EmptyTitle></EmptyHeader></Empty>
           : (
             <>
               <Progress value={Math.min(100, usedPercent)} />
@@ -197,7 +199,7 @@ export function DeepseekBalanceCard({
         </CardDescription>
         <CardAction>
           <Button variant="outline" size="sm" disabled={refreshDisabled} onClick={onRefresh}>
-            <RefreshCwIcon data-icon="inline-start" />
+            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
             {refreshing ? "刷新中" : "刷新余额"}
           </Button>
         </CardAction>
@@ -304,7 +306,7 @@ function OpencodeGoAccountCard({
         </CardDescription>
         <CardAction>
           <Button variant="outline" size="sm" disabled={refreshDisabled} onClick={onRefresh}>
-            <RefreshCwIcon data-icon="inline-start" />
+            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
             {refreshing ? "刷新中" : "刷新额度"}
           </Button>
         </CardAction>
@@ -365,7 +367,7 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
       </CardHeader>
       <CardContent>
         {errors.groups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">没有异常请求</p>
+          <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>没有异常请求</EmptyTitle></EmptyHeader></Empty>
         ) : (
           <ul className="flex flex-col gap-2">
             {errors.groups.slice(0, 5).map((group) => (

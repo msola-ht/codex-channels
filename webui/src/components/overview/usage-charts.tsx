@@ -18,6 +18,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { formatTokens } from "@/lib/format"
@@ -94,7 +95,7 @@ function UsageTrendCard({
       </CardHeader>
       <CardContent>
         {!hasData ? (
-          <p className="text-sm text-muted-foreground">{rangeLabel}没有记录</p>
+          <Empty className="h-[230px] p-4"><EmptyHeader><EmptyTitle>{rangeLabel}没有记录</EmptyTitle></EmptyHeader></Empty>
         ) : (
           <ChartContainer config={chartConfig} className="h-[230px] w-full">
             <AreaChart accessibilityLayer data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>

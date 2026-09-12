@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { SettingsEmpty } from "@/components/settings/settings-feedback"
 import type { ManagementProvidersResponse, SettingsSummaryResponse } from "@/lib/types"
 
 type Channel = SettingsSummaryResponse["gateway"]["channels"][number]
@@ -37,11 +38,11 @@ export function ProviderStatusCard({ state }: { state: ManagementProvidersRespon
             <p className="text-xs text-muted-foreground">仅展示可用于当前 Setup 的非凭据摘要。</p>
           </div>
           {state.providers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
+            <SettingsEmpty>
               {state.primary.kind === "official" && !state.official.authenticated
                 ? "当前没有可用的第三方 Provider；OpenAI 官方未登录。"
                 : "当前没有额外可切换的 Provider；主 Provider 见上方。"}
-            </p>
+            </SettingsEmpty>
           ) : (
             <div className="flex flex-col gap-3">
               {state.providers.map((provider, index) => (
@@ -79,7 +80,7 @@ export function ChannelStatusCard({ channels }: { channels: Channel[] }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {channels.length === 0 ? (
-          <p className="text-sm text-muted-foreground">当前没有已配置的通讯渠道。</p>
+          <SettingsEmpty>当前没有已配置的通讯渠道。</SettingsEmpty>
         ) : channels.map((channel, index) => (
           <div key={channel.id}>
             {index > 0 ? <Separator className="mb-3" /> : null}

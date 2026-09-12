@@ -1,12 +1,22 @@
 import { useEffect, useId, useState } from "react"
 import type { ComponentProps, ReactNode } from "react"
 
-import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Spinner } from "@/components/ui/spinner"
 import type { PendingSetting } from "@/lib/settings-management"
 
 export function ManagementConfirmationDialog({
@@ -31,19 +41,29 @@ export function ManagementConfirmationDialog({
   children: ReactNode
 }) {
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !saving) onCancel() }}>
-      <DialogContent showCloseButton={!saving}>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
+    <AlertDialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !saving) onCancel() }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
         <div className="flex flex-col gap-1 text-sm">{children}</div>
-        <DialogFooter>
-          <Button variant="outline" disabled={saving} onClick={onCancel}>取消</Button>
-          <Button variant={confirmVariant} disabled={saving} onClick={onConfirm}>{saving ? "处理中…" : confirmLabel}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={saving}>取消</AlertDialogCancel>
+          <AlertDialogAction
+            variant={confirmVariant}
+            disabled={saving}
+            onClick={(event) => {
+              event.preventDefault()
+              onConfirm()
+            }}
+          >
+            {saving ? <Spinner data-icon="inline-start" /> : null}
+            {saving ? "处理中…" : confirmLabel}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -58,7 +78,7 @@ export function ManagedInputRow({ id, label, defaultValue, value, placeholder, d
   useEffect(() => {
     if (!disabled && value === undefined) setDraft(defaultValue)
   }, [defaultValue, disabled, value])
-  return <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3"><Label className="text-muted-foreground" htmlFor={inputId}>{label}</Label><Input id={inputId} className="w-full sm:w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} value={value ?? draft} placeholder={placeholder} disabled={disabled} onChange={(event) => { if (value === undefined) setDraft(event.target.value); onChange?.(event.target.value) }} onBlur={(event) => onBlur(event.target.value.trim())} /></div>
+  return <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor={inputId}>{label}</FieldLabel><Input id={inputId} className="w-full sm:w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} value={value ?? draft} placeholder={placeholder} disabled={disabled} onChange={(event) => { if (value === undefined) setDraft(event.target.value); onChange?.(event.target.value) }} onBlur={(event) => onBlur(event.target.value.trim())} /></Field>
 }
 
 export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; onConfirm: () => void; onCancel: () => void }) {
@@ -89,7 +109,7 @@ export function ManagedSelect({ label, value, options, disabled, onChange }: { l
   const selectId = useId()
   const nonEmptyOptions = options.filter(([option]) => option !== "")
   const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
-  return <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3"><Label className="text-muted-foreground" htmlFor={selectId}>{label}</Label><Select value={value} disabled={disabled} onValueChange={onChange}><SelectTrigger id={selectId} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>{effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}</Select></div>
+  return <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor={selectId}>{label}</FieldLabel><Select value={value} disabled={disabled} onValueChange={onChange}><SelectTrigger id={selectId} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>{effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}</Select></Field>
 }
 
 function formatPreviewValue(value: unknown): string {
