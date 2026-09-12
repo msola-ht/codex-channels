@@ -20,6 +20,8 @@ import { runtimeConfig } from "./runtime-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
 
+const ANSI_SGR_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu");
+
 export function inspectManagedServiceStatus({
   environment = process.env,
   platform = process.platform,
@@ -124,7 +126,7 @@ export function readManagedServiceError({
   target,
   now = Date.now(),
 } = {}) {
-  if (target !== "gateway" && target !== "app-server" && target !== "webui" && target !== "center") {
+  if (target !== "gateway" && target !== "app-server" && target !== "webui") {
     return null;
   }
   let dataDir;
@@ -205,6 +207,7 @@ export async function readManagedServiceErrorAsync({
 
 function sanitizeServiceError(value) {
   return String(value)
+    .replace(ANSI_SGR_PATTERN, "")
     .replace(/authorization\s*[:=]\s*bearer\s+[^\s,;]+/giu, "authorization: Bearer [已隐藏]")
     .replace(/(["']?)(access[-_ ]?token|refresh[-_ ]?token|api[-_ ]?key|client[-_ ]?secret|auth[-_ ]?token|token|secret|cookie|password)\1\s*([:=])\s*(["']?)[^"'\s,;}]+\4/giu, "$1$2$1$3$4[已隐藏]$4")
     .replace(/https?:\/\/[^\s/@:]+:[^\s/@]+@/giu, "https://[已隐藏]@")
@@ -448,7 +451,7 @@ function safeProcessError(result) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3) {
-      throw new Error("用法：codexc service status [gateway|app-server|webui|center|all] [--json]");
+      throw new Error("用法：codexc service status [gateway|app-server|webui|all] [--json]");
     }
     const result = await inspectManagedServiceHealth({ target: process.argv[2] });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

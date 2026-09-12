@@ -70,84 +70,6 @@ describe("shared Surface lifecycle presentation", () => {
     )).toBe("思考完成\n\n耗时：500毫秒");
   });
 
-  it("includes metrics center quota details in the startup card", () => {
-    const presentation = createStartupPresentation(
-      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
-      {
-        workspaceId: "main", model: "gpt-test", modelProvider: "openai", effort: null,
-        serviceTier: null, modelPending: false, effortPending: false, fastModePending: false,
-        collaborationMode: "default", collaborationModePending: false,
-      },
-      {
-        platform: "linux", architecture: "x64", gatewayVersion: "0.150.1", nodeVersion: "v24.0.0",
-        transport: "Unix WebSocket", codexUpstreamUserAgent: null,
-      },
-      {
-        provider: "openai", windowId: "codex", deviceCount: 3, requestCount: 12,
-        totalTokens: 123_000_000, latestUsedPercentMillionths: 35_000_000,
-        estimatedTotalTokens: 351_000_000, resetsAt: 1_756_650_000_000,
-        observedAtMs: 1_756_000_000_000,
-      },
-    );
-    const rendered = renderPlainLifecyclePresentation(presentation);
-    expect(rendered).toContain("账户状态（额度中心）");
-    expect(rendered).toContain("设备数：3 台");
-    expect(rendered).toContain("请求数：12 次");
-    expect(rendered).toContain("总 Token：123 M");
-    expect(rendered).toContain("周限：剩余 65%");
-  });
-
-  it("shows all OpenCode Go quota windows in the startup card", () => {
-    const monthlyWindow = {
-      provider: "ocg-lunare",
-      windowId: "monthly",
-      deviceCount: 1,
-      requestCount: 456,
-      totalTokens: 109_733_718,
-      latestUsedPercentMillionths: null,
-      estimatedTotalTokens: null,
-      resetsAt: 1_789_482_127,
-      observedAtMs: 1_788_683_501_836,
-    };
-    const presentation = createStartupPresentation(
-      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
-      {
-        workspaceId: "main",
-        model: "deepseek-v4-flash",
-        modelProvider: "ocg-lunare",
-        effort: null,
-        serviceTier: null,
-        modelPending: false,
-        effortPending: false,
-        fastModePending: false,
-        collaborationMode: "default",
-        collaborationModePending: false,
-      },
-      {
-        platform: "linux",
-        architecture: "x64",
-        gatewayVersion: "0.150.1",
-        nodeVersion: "v24.0.0",
-        transport: "Unix WebSocket",
-        codexUpstreamUserAgent: null,
-      },
-      {
-        ...monthlyWindow,
-        windows: [
-          monthlyWindow,
-          { ...monthlyWindow, windowId: "weekly", resetsAt: 1_788_739_200 },
-          { ...monthlyWindow, windowId: "rolling", resetsAt: 1_788_683_809 },
-        ],
-      },
-    );
-    const rendered = renderPlainLifecyclePresentation(presentation);
-    expect(rendered).toContain("5小时");
-    expect(rendered).toContain("周限");
-    expect(rendered).toContain("月限");
-    expect(rendered.indexOf("5小时")).toBeLessThan(rendered.indexOf("周限"));
-    expect(rendered.indexOf("周限")).toBeLessThan(rendered.indexOf("月限"));
-  });
-
   it("does not warn when at least one official OpenAI route is reachable", () => {
     const presentation = createStartupPresentation(
       [{ id: "main", name: "Main", cwd: "/workspace/main" }],
@@ -349,11 +271,6 @@ describe("shared Surface lifecycle presentation", () => {
       cachedInputTokens: null,
       outputTokens: 3_000,
       reasoningOutputTokens: 0,
-      outputTokensPerSecond: 10,
-      outputSpeedSampleCount: 1,
-      outputSpeedTimedCount: 1,
-      elapsedMs: 12_345,
-      durationMs: 5_558,
     });
     const rendered = renderPlainLifecyclePresentation(presentation);
 
@@ -361,12 +278,11 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("deepseek-v4-flash");
     expect(rendered).toContain("思考等级：medium");
     expect(rendered).toContain("模型请求：1 次");
-    expect(rendered).toContain("耗时：12秒");
-    expect(rendered).toContain("综合输出速度：10 token/s（不含推理 · 覆盖 1/1 次请求）");
-    expect(rendered).not.toContain("耗时：6秒");
+    expect(rendered).not.toContain("耗时");
+    expect(rendered).not.toContain("速度");
   });
 
-  it("hides unreliable output speed and unknown reasoning effort", () => {
+  it("hides unknown reasoning effort", () => {
     const rendered = renderPlainLifecyclePresentation(
       createSubagentCompletedPresentation({
         type: "subagent.completed",
@@ -389,11 +305,6 @@ describe("shared Surface lifecycle presentation", () => {
         cachedInputTokens: null,
         outputTokens: 3_000,
         reasoningOutputTokens: 0,
-        outputTokensPerSecond: 10,
-        outputSpeedSampleCount: 1,
-        outputSpeedTimedCount: 0,
-        elapsedMs: 500,
-        durationMs: 0,
       }),
     );
 
@@ -424,16 +335,11 @@ describe("shared Surface lifecycle presentation", () => {
         cachedInputTokens: null,
         outputTokens: 0,
         reasoningOutputTokens: 0,
-        outputTokensPerSecond: null,
-        outputSpeedSampleCount: 0,
-        outputSpeedTimedCount: 0,
-        elapsedMs: 4_000,
-        durationMs: 0,
       }),
     );
 
     expect(rendered).toContain("统计：暂不可用");
-    expect(rendered).toContain("耗时：4秒");
+    expect(rendered).not.toContain("耗时");
     expect(rendered).not.toContain("模型请求：0 次");
     expect(rendered).not.toContain("Token：0");
   });
@@ -502,8 +408,6 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
-      "性能",
-      "  总耗时：1分5秒",
       "",
       "当前 Session 累计：",
       "当前工作区：Main (main)",
@@ -517,119 +421,6 @@ describe("shared Surface lifecycle presentation", () => {
       "账户状态：",
       "周限：剩余 63%",
     ].join("\n"));
-  });
-
-  it("uses the remote quota section instead of the local OpenAI weekly line", () => {
-    const rendered = renderPlainLifecyclePresentation(
-      createTurnCompletedPresentation({
-        type: "turn.completed",
-        target: { surface: "telegram", accountId: "default", conversationId: "100" },
-        threadId: "thread-remote",
-        turnId: "turn-remote",
-        status: "completed",
-        model: "gpt-test",
-        modelProvider: "openai",
-        weeklyLimit: { usedPercent: 37, windowDurationMins: 10_080, resetsAt: 1_800_000_000 },
-        remoteQuota: {
-          provider: "openai",
-          windowId: "codex",
-          deviceCount: 3,
-          requestCount: 12,
-          totalTokens: 1_200_000,
-          latestUsedPercentMillionths: 37_000_000,
-          estimatedTotalTokens: 3_200_000,
-          resetsAt: 1_800_000_000,
-          observedAtMs: 1_800_000_000_000,
-        },
-      }, true),
-    );
-    expect(rendered).toContain("设备数：3 台");
-    expect(rendered).toContain("请求数：12 次");
-    expect(rendered).toContain("总 Token：1.2 M");
-    expect(rendered).toContain("账户状态（额度中心）：");
-    expect(rendered).toContain("周限：剩余 63% · 重置");
-  });
-
-  it("keeps only the remote remaining quota summary in formal mode", () => {
-    const rendered = renderPlainLifecyclePresentation(
-      createTurnCompletedPresentation({
-        type: "turn.completed",
-        target: { surface: "telegram", accountId: "default", conversationId: "100" },
-        threadId: "thread-remote",
-        turnId: "turn-remote",
-        status: "completed",
-        modelProvider: "openai",
-        remoteQuota: {
-          provider: "openai",
-          windowId: "codex",
-          deviceCount: 3,
-          requestCount: 12,
-          totalTokens: 1_200_000,
-          latestUsedPercentMillionths: 37_000_000,
-          estimatedTotalTokens: 3_200_000,
-          resetsAt: 1_800_000_000,
-          observedAtMs: 1_800_000_000_000,
-        },
-      }),
-    );
-    expect(rendered).toContain("账户状态（额度中心）：");
-    expect(rendered).toContain("周限：剩余 63% · 重置 ");
-    expect(rendered.match(/周限：/gu)).toHaveLength(1);
-    expect(rendered).not.toContain("额度中心：3 台设备");
-    expect(rendered).not.toContain("本周期 Token");
-  });
-
-  it("uses the metrics center summary instead of local OpenCode Go usage", () => {
-    const monthlyWindow = {
-      provider: "ocg-lunare",
-      windowId: "monthly",
-      deviceCount: 3,
-      requestCount: 12,
-      totalTokens: 1_200_000,
-      latestUsedPercentMillionths: null,
-      estimatedTotalTokens: null,
-      resetsAt: 1_800_000_000,
-      observedAtMs: 1_800_000_000_000,
-    };
-    const weeklyWindow = {
-      ...monthlyWindow,
-      windowId: "weekly",
-      deviceCount: 2,
-      requestCount: 7,
-      totalTokens: 700_000,
-      resetsAt: 1_790_000_000,
-    };
-    const rollingWindow = {
-      ...monthlyWindow,
-      windowId: "rolling",
-      deviceCount: 1,
-      requestCount: 1,
-      totalTokens: 11_000,
-      resetsAt: 1_780_000_000,
-    };
-    const rendered = renderPlainLifecyclePresentation(
-      createTurnCompletedPresentation(
-        {
-          type: "turn.completed",
-          target: { surface: "telegram", accountId: "default", conversationId: "100" },
-          threadId: "thread-ocg-center",
-          turnId: "turn-ocg-center",
-          status: "completed",
-          model: "deepseek-v4-flash",
-          modelProvider: "ocg-lunare",
-          remoteQuota: {
-            ...monthlyWindow,
-            windows: [monthlyWindow, weeklyWindow, rollingWindow],
-          },
-        },
-      ),
-    );
-    expect(rendered).toContain("账户状态（额度中心）：");
-    expect(rendered).toContain("设备数：3 台");
-    expect(rendered).toContain("请求数：12 次");
-    expect(rendered).toContain("总 Token：1.2 M");
-    expect(rendered).toContain("月限：未知");
-    expect(rendered).not.toContain("剩余用量");
   });
 
     it("keeps Thread metrics but hides OpenAI-only fields for DeepSeek", () => {
@@ -690,7 +481,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
   });
 
-          it("shows output, thinking and combined generation speeds", () => {
+          it("keeps request and Token facts while omitting performance metrics", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
         type: "turn.completed",
@@ -706,22 +497,10 @@ describe("shared Surface lifecycle presentation", () => {
         timing: {
           modelRequestCount: 2,
           reasoningRequestCount: 2,
-          modelRequestDurationMs: 12_400,
           requestInputTokens: 20_000,
           requestCachedInputTokens: 15_000,
-          ttftMs: 640,
-          firstResponseLatencyMs: 920,
           nonReasoningOutputTokens: 42,
-          outputTokensPerSecond: 2.1,
-          outputSpeedSampleCount: 2,
-          outputSpeedTimedCount: 2,
           reasoningTokens: 80,
-          thinkingTokensPerSecond: 20,
-          thinkingSpeedSampleCount: 2,
-          thinkingSpeedTimedCount: 2,
-          generationTokensPerSecond: 120,
-          generationSpeedSampleCount: 2,
-          generationSpeedTimedCount: 2,
           compact: {
             model: "gpt-5.6-sol",
             hasMixedModels: false,
@@ -737,16 +516,11 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("模型请求：2 次");
     expect(rendered).toContain("思考次数：2 次");
-    expect(rendered).toContain("模型请求聚合耗时：12秒");
     expect(rendered).toContain("Token：20.12 K");
     expect(rendered).toContain("缓存命中率：75.00%");
-    expect(rendered).toContain("最后请求首事件延迟：640毫秒");
-    expect(rendered).toContain("首段回复延迟：920毫秒");
-    expect(rendered).toContain("综合输出速度：2.1 token/s（不含推理 · 覆盖 2/2 次请求）");
-    expect(rendered).toContain("综合思考速度：20 token/s（推理 · 覆盖 2/2 次请求）");
-    expect(rendered).toContain("综合生成速度：120 token/s（含推理 · 覆盖 2/2 次请求）");
-    expect(rendered).not.toContain("思考时长");
-    expect(rendered).not.toContain("输出时长");
+    expect(rendered).not.toContain("耗时");
+    expect(rendered).not.toContain("延迟");
+    expect(rendered).not.toContain("速度");
   });
 
   it("shows parent Turn task totals separately from the parent run", () => {
@@ -767,9 +541,6 @@ describe("shared Surface lifecycle presentation", () => {
           completedModelRequestCount: 1,
           requestInputTokens: 100,
           requestOutputTokens: 20,
-          outputTokensPerSecond: 42,
-          outputSpeedSampleCount: 1,
-          outputSpeedTimedCount: 1,
         },
         taskAggregate: {
           requestCount: 3,
@@ -786,7 +557,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("任务合计（含子代理）");
     expect(rendered).toContain("模型请求：3 次");
     expect(rendered).toContain("Token：3.3 K");
-    expect(rendered).toContain("综合输出速度：42 token/s");
+    expect(rendered).not.toContain("速度");
   });
 
   it("shows the recursive session token total in formal mode", () => {
@@ -956,7 +727,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("自动重试");
   });
 
-  it("shows the reasoning token count in debug but omits unavailable timing fields for OpenAI", () => {
+  it("shows the reasoning token count in debug but omits performance fields", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
         type: "turn.completed",
@@ -973,16 +744,14 @@ describe("shared Surface lifecycle presentation", () => {
           requestInputTokens: 1_000,
           requestCachedInputTokens: 800,
           reasoningTokens: 40,
-          outputTokensPerSecond: 96,
         },
       }, true),
     );
 
     expect(rendered).toContain("其中推理输出：40");
-    expect(rendered).toContain("输出速度：96 token/s（不含推理）");
-    expect(rendered).not.toContain("首字延时");
-    expect(rendered).not.toContain("思考速度");
-    expect(rendered).not.toContain("生成速度");
+    expect(rendered).not.toContain("延时");
+    expect(rendered).not.toContain("延迟");
+    expect(rendered).not.toContain("速度");
   });
 });
 

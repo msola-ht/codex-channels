@@ -843,7 +843,7 @@ function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, leg
     },
     contact: async () => {
       const value = await prompts.text({
-        message: "OpenCode Go 账户邮箱或手机号码（用于展示和指标中心，二选一）",
+        message: "OpenCode Go 账户邮箱或手机号码（仅用于本机展示，二选一）",
         validate: (candidate) => {
           try {
             validateOpencodeGoContact(candidate);
@@ -888,7 +888,7 @@ async function secretPrompt(prompts) {
 
 async function contactPrompt(prompts) {
   const value = await prompts.text({
-    message: "OpenCode Go 账户邮箱或手机号码（用于展示和指标中心，二选一）",
+    message: "OpenCode Go 账户邮箱或手机号码（仅用于本机展示，二选一）",
     validate: (candidate) => {
       try {
         validateOpencodeGoContact(candidate);

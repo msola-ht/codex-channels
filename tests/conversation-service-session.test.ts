@@ -718,7 +718,7 @@ describe("ConversationService conversation service session", () => {
       turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
       {} as ModelSelectionService, queryPort(),
       undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, undefined, history, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, history, undefined,
       sessionDisplayCache as unknown as import("../src/conversation-core/index.js").SessionDisplayCachePort,
     );
 
@@ -781,7 +781,7 @@ describe("ConversationService conversation service session", () => {
       {} as ModelSelectionService, queryPort(),
       undefined, undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined,
-      { listThreadTurns } as unknown as ThreadHistoryPort, undefined, undefined,
+      { listThreadTurns } as unknown as ThreadHistoryPort, undefined,
       sessionDisplayCache,
     );
 

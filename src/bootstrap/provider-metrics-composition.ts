@@ -82,30 +82,14 @@ export class ProviderMetricsComposition {
     const event = toModelTimingEvent(metrics);
     if (!event) {
       this.options.logger.debug(
-        {
-          provider,
-          hasTurnMetadata: metrics.threadId !== null && metrics.turnId !== null,
-          hasTokenWindow: metrics.firstTokenAtMs !== null,
-        },
-        "模型统计代理指标缺少 Turn 关联或 Token 窗口，未归约完成卡片计时",
+        { provider },
+        "模型统计代理指标缺少 Thread 或 Turn 关联，未归约完成卡片统计",
       );
       return;
     }
     this.options.onModelTiming(event);
     this.options.logger.debug(
-      {
-        provider,
-        ttftMs: event.ttftMs,
-        ...(event.thinkingDurationMs === undefined
-          ? {}
-          : { thinkingDurationMs: event.thinkingDurationMs }),
-        ...(event.outputDurationMs === undefined
-          ? {}
-          : { outputDurationMs: event.outputDurationMs }),
-        ...(event.generationDurationMs === undefined
-          ? {}
-          : { generationDurationMs: event.generationDurationMs }),
-      },
+      { provider },
       "模型统计代理指标已关联到 Turn",
     );
   }
@@ -114,24 +98,18 @@ export class ProviderMetricsComposition {
 export function toModelTimingEvent(
   metrics: ProviderProxyMetrics,
 ): ModelTimingEvent | undefined {
-  const firstTokenAtMs = metrics.firstTokenAtMs;
   if (
     metrics.threadId === null
     || metrics.turnId === null
   ) {
     return undefined;
   }
-  const common = {
+  return {
     type: "turn.modelTiming.updated" as const,
     threadId: metrics.threadId,
     turnId: metrics.turnId,
     operation: metrics.operation,
     ...(metrics.model === null ? {} : { model: metrics.model }),
-    requestStartedAtMs: metrics.requestStartedAtMs,
-    requestDurationMs: Math.max(
-      0,
-      metrics.responseCompletedAtMs - metrics.requestStartedAtMs,
-    ),
     outcome: metrics.status === "completed"
       ? "completed" as const
       : metrics.errorType === "client_disconnected"
@@ -149,31 +127,6 @@ export function toModelTimingEvent(
       ? {}
       : { reasoningOutputTokens: metrics.reasoningOutputTokens }),
   };
-  if (firstTokenAtMs === null) return common;
-  const lastTokenAtMs = Math.max(
-    metrics.lastReasoningDeltaAtMs ?? firstTokenAtMs,
-    metrics.lastOutputDeltaAtMs ?? firstTokenAtMs,
-  );
-  const thinkingDurationMs = durationBetween(
-    metrics.firstReasoningDeltaAtMs,
-    metrics.lastReasoningDeltaAtMs,
-  );
-  const outputDurationMs = durationBetween(
-    metrics.firstOutputDeltaAtMs,
-    metrics.lastOutputDeltaAtMs,
-  );
-  const generationDurationMs = lastTokenAtMs - firstTokenAtMs;
-  return {
-    ...common,
-    ttftMs: Math.max(0, firstTokenAtMs - metrics.requestStartedAtMs),
-    ...(thinkingDurationMs !== undefined && thinkingDurationMs > 0
-      ? { thinkingDurationMs }
-      : {}),
-    ...(outputDurationMs !== undefined && outputDurationMs > 0
-      ? { outputDurationMs }
-      : {}),
-    ...(generationDurationMs > 0 ? { generationDurationMs } : {}),
-  };
 }
 
 function isRetryableFailure(metrics: ProviderProxyMetrics): boolean {
@@ -188,8 +141,4 @@ function isRetryableFailure(metrics: ProviderProxyMetrics): boolean {
       )
       || metrics.errorType === "websocket_closed"
     );
-}
-
-function durationBetween(start: number | null, end: number | null): number | undefined {
-  return start === null || end === null ? undefined : end - start;
 }

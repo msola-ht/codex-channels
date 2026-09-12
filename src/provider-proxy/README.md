@@ -1,23 +1,23 @@
 # Provider Proxy
 
 本目录提供模型 Provider 的本地回环转发代理及私有指标通道。模型数据通路由 App Server 服务
-持有，Gateway 只接收可丢失的计时指标，因此 Gateway 停止或重启不会中断模型请求。
+持有，Gateway 只接收可丢失的脱敏请求指标，因此 Gateway 停止或重启不会中断模型请求。
 
 ## 文件
 
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发和指标观测实现。监听自动分配的回环地址，把精确
   `/responses`、HTTP `/responses/compact` 与只读 `/models` 路径转发到上游；官方 OpenAI
-  主代理还按当前锁定 Codex 0.150.1 的固定端点清单接受 POST `/alpha/search`、
+  主代理还按当前锁定 Codex 0.153.4 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
   Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
   OpenCode Go 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
-  转发 SSE 或 WebSocket 响应时按事件类型记录首 Token、推理、文本与函数/自定义工具参数输出的
-  首尾时间；WebSocket 从出站 `response.create` 提前记录有界的模型、服务层级与
-  `reasoning.effort`，完成事件再刷新最终模型、服务层级、状态、上游时间戳及输入/缓存/输出/推理
-  Token Usage，因此提前断线的失败
+  转发 SSE 或 WebSocket 响应时，普通增量只扫描事件类型并立即透传，不解析事件 JSON、记录首尾
+  时间或等待指标处理；只对完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
+  出站 `response.create` 提前记录有界的模型、服务层级与 `reasoning.effort`，完成事件再刷新最终
+  模型、服务层级、状态及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
   状态、超时、上游错误、完成事件前的客户端断开和 WebSocket 提前关闭同样产生受控失败指标，
   不保留错误正文；HTTP/SSE 已收到完成事件后的正常收尾断开不重复改写为失败或输出误报警；
@@ -30,22 +30,24 @@
   或成功率。旧版 HTTP `/responses/compact` 以及 Codex 0.146 默认通过普通 HTTP/WebSocket
   `/responses` 发送、由私有元数据 `request_kind=compaction` 标记的 remote compaction v2 都归为
   压缩操作；压缩操作以自身成功状态为准，不要求模型 Usage，但观测到的 Token 和额度快照
-  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.150.1 的 WebSocket 首轮
+  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.153.4 的 WebSocket 首轮
   `request_kind=prewarm` 使用 `generate=false` 建立并复用连接，不是模型推理请求；代理照常透明
   转发并移除私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
   OpenAI HTTP/SSE 只从明确的 `x-codex-primary/secondary-*` 白名单响应头提取 10,080 分钟周窗口，
   Responses WebSocket 只从 `codex.rate_limits` 事件提取同一窗口；百分比转换为定点整数并随当前
   请求指标投递，不保存完整 Header、事件正文或其他额度桶。
-  指标在响应完成事件前完成投递确认；从
+  普通增量不经过指标确认链；终态指标仍在对应完成事件转发前完成投递确认。从
   `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联，并只识别精确的
   `request_kind=compaction` 操作标记和不计指标的 `request_kind=prewarm`；其他值保持普通响应语义。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，
   正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，普通 Thread 由组合层按
   Thread 设置回退，`agents.external` 则只通过本地私有 `/role/external` 路径附加角色配置中的
   默认思考等级；
-  超限或畸形响应只保留基础 HTTP 状态与本机耗时。上游模型、服务层级及错误标识符只接受受限字符，
+  超限或畸形响应只保留基础 HTTP 状态与错误分类。上游模型、服务层级及错误标识符只接受受限字符，
   不能把控制字符带入指标展示。WebSocket 在完成事件投递前先解除活动指标引用，
   避免紧随其后的关闭事件重复写入。
+  外部额度窗口通过按账户缓存的后台刷新读取；请求完成只使用当时已有的快照，不等待额度接口；
+  代理关闭时取消在途刷新并执行有上限的等待。
   其他路径、OpenAI 额外端点的非 POST 请求以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
   `network.proxy` 选择传入上游 Agent。OpenCode Go 共享代理额外接受
@@ -59,14 +61,14 @@
   不影响私有元数据或指标载荷。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的当前用户私有 IPC；Unix 使用
   `0600` Socket，Windows 使用共享运行时提供的认证命名管道。接收端归约后返回确认，保证短回复的
-  Turn 完成事件不会抢先清理计时状态；Gateway 不在线时指标直接丢弃并继续模型响应。接收端拒绝
+  Turn 完成事件不会抢先清理请求统计状态；Gateway 不在线时指标直接丢弃并继续模型响应。接收端拒绝
   不安全、无认证或已被活动进程占用的端点，并只清理自己创建的端点；指标按换行完成单帧并在归约后
   确认，不依赖 Windows named pipe 不具备的半关闭时序。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
 
 模块只依赖 Node 内置 HTTP/HTTPS 与共享私有 IPC 能力，不接触平台 SDK、数据库或协议生成类型；
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
-`observability` 独立指标库和 `conversation-core` 的稳定计时输入事件。
+`observability` 独立指标库和 `conversation-core` 的稳定请求统计输入事件。
 App Server 服务立即为主 Provider 创建独立代理，并在可选切换 Provider 首次使用时按需创建对应
 代理；所有 OpenCode Go 账户共享同一个代理（内存 HTTP Server，不随账户增长），账户隔离 App
 Server 的 `base_url` 带 `/go/<账户>` 前缀。不暴露手工监听配置。

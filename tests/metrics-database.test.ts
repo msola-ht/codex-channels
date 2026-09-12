@@ -3,7 +3,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -28,8 +27,6 @@ import {
   readMetricsThreads,
   readMetricsTurns,
   resetMetricsDatabase,
-  resetMetricsSyncState,
-  resetMetricsSyncStateWithGatewayRestart,
   upgradeMetricsDatabase,
   upgradeMetricsDatabaseWithGatewayRestart,
   validateMetricsDatabaseStructure,
@@ -132,7 +129,7 @@ describe("model request metrics database operations", () => {
     expect(calls).toEqual([]);
   });
 
-  it("prunes OpenAI rows from local and center databases and restarts services", () => {
+  it("prunes OpenAI rows from the local database and restarts Gateway", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
     store.record({ ...metricSample(), provider: "deepseek" });
@@ -140,38 +137,15 @@ describe("model request metrics database operations", () => {
     store.record({ ...metricSample(), provider: "openai" });
     store.close();
 
-    const centerPath = join(dirname(databasePath), "center.sqlite3");
-    const center = new DatabaseSync(centerPath);
-    center.exec(`
-      CREATE TABLE request_metrics (
-        id INTEGER PRIMARY KEY,
-        provider TEXT NOT NULL
-      )
-    `);
-    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)")
-      .run("deepseek");
-    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)")
-      .run("openai");
-    center.close();
-
     const calls: string[] = [];
     const result = pruneProviderMetrics("openai", environment, {
       localDatabasePath: databasePath,
-      centerDatabasePath: centerPath,
       stopGateway: () => calls.push("stop:gateway"),
       startGateway: () => calls.push("start:gateway"),
-      stopCenter: () => calls.push("stop:center"),
-      startCenter: () => calls.push("start:center"),
     });
 
-    expect(calls).toEqual([
-      "stop:gateway",
-      "stop:center",
-      "start:center",
-      "start:gateway",
-    ]);
+    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
     expect(result.local.deleted).toBe(1);
-    expect(result.center).toMatchObject({ skipped: false, deleted: 1 });
     expect(result.warnings).toEqual([]);
 
     const local = new DatabaseSync(databasePath, { readOnly: true });
@@ -183,17 +157,10 @@ describe("model request metrics database operations", () => {
     `).get()).toMatchObject({ c: 0 });
     local.close();
 
-    const centerAfter = new DatabaseSync(centerPath, { readOnly: true });
-    expect(centerAfter.prepare(`
-      SELECT COUNT(*) AS c FROM request_metrics WHERE provider = 'openai'
-    `).get()).toMatchObject({ c: 0 });
-    centerAfter.close();
-
     expect(existsSync(result.local.backupPath ?? "")).toBe(true);
-    expect(existsSync(result.center.backupPath ?? "")).toBe(true);
   });
 
-  it("skips the center database when it is not configured", () => {
+  it("preserves a stopped Gateway during pruning", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
     store.record({ ...metricSample(), provider: "openai" });
@@ -202,44 +169,13 @@ describe("model request metrics database operations", () => {
 
     const result = pruneProviderMetrics("openai", environment, {
       localDatabasePath: databasePath,
-      centerDatabasePath: null,
-      stopGateway: () => calls.push("stop:gateway"),
-      startGateway: () => calls.push("start:gateway"),
-      stopCenter: () => calls.push("stop:center"),
-      startCenter: () => calls.push("start:center"),
-    });
-
-    expect(result.center.skipped).toBe(true);
-    expect(result.local.deleted).toBe(1);
-    expect(calls).toEqual(["stop:gateway", "start:gateway"]);
-  });
-
-  it("preserves stopped Gateway and center services during pruning", () => {
-    const { environment, databasePath } = fixture();
-    const store = new SqliteModelRequestMetricsStore(databasePath);
-    store.record({ ...metricSample(), provider: "openai" });
-    store.close();
-    const centerPath = join(dirname(databasePath), "center.sqlite3");
-    const center = new DatabaseSync(centerPath);
-    center.exec(`CREATE TABLE request_metrics (id INTEGER PRIMARY KEY, provider TEXT NOT NULL)`);
-    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)").run("openai");
-    center.close();
-    const calls: string[] = [];
-
-    const result = pruneProviderMetrics("openai", environment, {
-      localDatabasePath: databasePath,
-      centerDatabasePath: centerPath,
       gatewayRunning: false,
-      centerRunning: false,
       stopGateway: () => calls.push("stop:gateway"),
       startGateway: () => calls.push("start:gateway"),
-      stopCenter: () => calls.push("stop:center"),
-      startCenter: () => calls.push("start:center"),
     });
 
     expect(result.local.deleted).toBe(1);
-    expect(result.center.deleted).toBe(1);
-    expect(result).toMatchObject({ gatewayWasRunning: false, centerWasRunning: false });
+    expect(result).toMatchObject({ gatewayWasRunning: false });
     expect(calls).toEqual([]);
   });
 
@@ -248,11 +184,8 @@ describe("model request metrics database operations", () => {
 
     const result = pruneProviderMetrics("openai", environment, {
       localDatabasePath: databasePath,
-      centerDatabasePath: null,
       stopGateway: () => undefined,
       startGateway: () => undefined,
-      stopCenter: () => undefined,
-      startCenter: () => undefined,
     });
 
     expect(result.local).toMatchObject({ backupPath: null, deleted: 0 });
@@ -268,14 +201,11 @@ describe("model request metrics database operations", () => {
 
     expect(() => pruneProviderMetrics("openai", environment, {
       localDatabasePath: databasePath,
-      centerDatabasePath: null,
       stopGateway: () => {
         calls.push("stop:gateway");
         throw new Error("stop failed");
       },
       startGateway: () => calls.push("start:gateway"),
-      stopCenter: () => calls.push("stop:center"),
-      startCenter: () => calls.push("start:center"),
     })).toThrow("stop failed");
 
     expect(calls).toEqual(["stop:gateway", "start:gateway"]);
@@ -296,11 +226,8 @@ describe("model request metrics database operations", () => {
 
     expect(() => pruneProviderMetrics("openai", environment, {
       localDatabasePath: badPath,
-      centerDatabasePath: null,
       stopGateway: () => calls.push("stop:gateway"),
       startGateway: () => calls.push("start:gateway"),
-      stopCenter: () => calls.push("stop:center"),
-      startCenter: () => calls.push("start:center"),
     })).toThrow();
     expect(calls).toEqual(["stop:gateway", "start:gateway"]);
   });
@@ -317,11 +244,8 @@ describe("model request metrics database operations", () => {
     try {
       expect(() => pruneProviderMetrics("openai", environment, {
         localDatabasePath: databasePath,
-        centerDatabasePath: null,
         stopGateway: () => calls.push("stop:gateway"),
         startGateway: () => calls.push("start:gateway"),
-        stopCenter: () => calls.push("stop:center"),
-        startCenter: () => calls.push("start:center"),
       })).toThrow("备份指标数据库失败");
     } finally {
       lock.exec("ROLLBACK");
@@ -329,43 +253,6 @@ describe("model request metrics database operations", () => {
     }
 
     expect(calls).toEqual(["stop:gateway", "start:gateway"]);
-    const local = new DatabaseSync(databasePath, { readOnly: true });
-    expect(local.prepare(`
-      SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
-    `).get()).toMatchObject({ c: 1 });
-    local.close();
-  });
-
-  it("backs up every configured database before deleting from either one", () => {
-    const { environment, databasePath } = fixture();
-    const store = new SqliteModelRequestMetricsStore(databasePath);
-    store.record({ ...metricSample(), provider: "openai" });
-    store.close();
-    const centerPath = join(dirname(databasePath), "center-locked.sqlite3");
-    const center = new DatabaseSync(centerPath);
-    center.exec(`
-      CREATE TABLE request_metrics (
-        id INTEGER PRIMARY KEY,
-        provider TEXT NOT NULL
-      )
-    `);
-    center.prepare("INSERT INTO request_metrics (provider) VALUES (?)").run("openai");
-    center.exec("BEGIN EXCLUSIVE");
-
-    try {
-      expect(() => pruneProviderMetrics("openai", environment, {
-        localDatabasePath: databasePath,
-        centerDatabasePath: centerPath,
-        stopGateway: () => undefined,
-        startGateway: () => undefined,
-        stopCenter: () => undefined,
-        startCenter: () => undefined,
-      })).toThrow("备份指标数据库失败");
-    } finally {
-      center.exec("ROLLBACK");
-      center.close();
-    }
-
     const local = new DatabaseSync(databasePath, { readOnly: true });
     expect(local.prepare(`
       SELECT COUNT(*) AS c FROM model_request_metrics WHERE provider = 'openai'
@@ -384,11 +271,8 @@ describe("model request metrics database operations", () => {
 
     const result = pruneProviderMetrics("opencode-go", environment, {
       localDatabasePath: databasePath,
-      centerDatabasePath: null,
       stopGateway: () => calls.push("stop:gateway"),
       startGateway: () => calls.push("start:gateway"),
-      stopCenter: () => calls.push("stop:center"),
-      startCenter: () => calls.push("start:center"),
     });
 
     expect(result.provider).toBe("opencode-go");
@@ -427,11 +311,8 @@ describe("model request metrics database operations", () => {
 
     const result = pruneProviderMetrics("OpenAI", environmentWithCustomPrimary, {
       localDatabasePath: databasePath,
-      centerDatabasePath: null,
       stopGateway: () => calls.push("stop:gateway"),
       startGateway: () => calls.push("start:gateway"),
-      stopCenter: () => calls.push("stop:center"),
-      startCenter: () => calls.push("start:center"),
     });
 
     expect(result.provider).toBe("OpenAI");
@@ -460,11 +341,8 @@ describe("model request metrics database operations", () => {
 
     const result = pruneProviderMetrics("OpenAI", environment, {
       localDatabasePath: databasePath,
-      centerDatabasePath: null,
       stopGateway: () => undefined,
       startGateway: () => undefined,
-      stopCenter: () => undefined,
-      startCenter: () => undefined,
     });
 
     expect(result.provider).toBe("OpenAI");
@@ -480,11 +358,8 @@ describe("model request metrics database operations", () => {
     const { environment, databasePath } = fixture();
     expect(() => pruneProviderMetrics("provider with spaces", environment, {
       localDatabasePath: databasePath,
-      centerDatabasePath: null,
       stopGateway: () => undefined,
       startGateway: () => undefined,
-      stopCenter: () => undefined,
-      startCenter: () => undefined,
     })).toThrow("codexc metrics prune <provider>");
   });
 
@@ -1415,97 +1290,6 @@ describe("model request metrics database operations", () => {
         throw new Error("start failed");
       },
     })).toThrow(AggregateError);
-  });
-
-  it("resets the metrics sync watermark while keeping the device id", () => {
-    const { environment, home } = fixture();
-    const statePath = join(home, "data", "metrics-sync-state.json");
-    mkdirSync(dirname(statePath), { recursive: true });
-    writeFileSync(statePath, JSON.stringify({
-      version: 1,
-      deviceId: "main-server",
-      lastRequestLocalId: 42,
-      lastSubagentRecordedAtMs: 1_000,
-      lastSubagentThreadId: "sub-1",
-    }, null, 2) + "\n", { mode: 0o600 });
-
-    const result = resetMetricsSyncState(environment, {
-      gatewayRunning: () => false,
-    });
-
-    expect(result).toMatchObject({
-      changed: true,
-      statePath,
-      deviceId: "main-server",
-    });
-    expect(existsSync(result.backupPath ?? "")).toBe(true);
-    const next = JSON.parse(readFileSync(statePath, "utf8")) as {
-      version: number;
-      deviceId: string;
-      lastRequestLocalId: number;
-      lastSubagentRecordedAtMs: number;
-      lastSubagentThreadId: string | null;
-    };
-    expect(next).toEqual({
-      version: 1,
-      deviceId: "main-server",
-      lastRequestLocalId: 0,
-      lastSubagentRecordedAtMs: 0,
-      lastSubagentThreadId: null,
-    });
-    if (process.platform !== "win32") expect(statSync(statePath).mode & 0o777).toBe(0o600);
-  });
-
-  it("does nothing when the metrics sync state does not exist", () => {
-    const { environment, home } = fixture();
-
-    expect(resetMetricsSyncState(environment, {
-      gatewayRunning: () => false,
-    })).toEqual({
-      backupPath: null,
-      changed: false,
-      statePath: join(home, "data", "metrics-sync-state.json"),
-    });
-  });
-
-  it("refuses to reset the sync watermark while Gateway is running", () => {
-    const { environment, home } = fixture();
-    const statePath = join(home, "data", "metrics-sync-state.json");
-    mkdirSync(dirname(statePath), { recursive: true });
-    writeFileSync(statePath, JSON.stringify({
-      version: 1,
-      deviceId: "main-server",
-      lastRequestLocalId: 42,
-      lastSubagentRecordedAtMs: 0,
-      lastSubagentThreadId: null,
-    }), { mode: 0o600 });
-
-    expect(() => resetMetricsSyncState(environment, {
-      gatewayRunning: () => true,
-    })).toThrow(/Gateway 仍在运行/u);
-    expect(JSON.parse(readFileSync(statePath, "utf8"))).toMatchObject({
-      lastRequestLocalId: 42,
-    });
-  });
-
-  it("stops, resets and restarts Gateway in order", () => {
-    const calls: string[] = [];
-
-    resetMetricsSyncStateWithGatewayRestart(process.env, {
-      stopGateway: () => calls.push("stop"),
-      reset: () => {
-        calls.push("reset");
-        return {
-          backupPath: "/tmp/sync.bak",
-          changed: true,
-          statePath: "/tmp/sync-state.json",
-          deviceId: "main-server",
-        };
-      },
-      startGateway: () => calls.push("start"),
-    });
-
-    expect(calls).toEqual(["stop", "reset", "start"]);
   });
 
   it("refuses to reset when an unmanaged Gateway still owns the metrics database", () => {

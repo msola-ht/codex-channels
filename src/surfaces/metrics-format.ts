@@ -6,10 +6,6 @@ import type {
 import {
   formatPercent,
 } from "./account-format.js";
-import {
-  formatElapsedDuration,
-  formatTokensPerSecond,
-} from "./elapsed-duration.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import {
   formatCodexProviderLabel,
@@ -42,7 +38,6 @@ export function formatConversationMetrics(
       "",
       "### 最近运行聚合",
       `模型请求：${turn.requestCount} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${turn.unsuccessfulRequestCount} 次）` : ""}`,
-      `模型请求聚合耗时：${formatElapsedDuration(turn.requestDurationMs)}`,
       `- **Token**：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
       ...(turn.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
@@ -55,13 +50,6 @@ export function formatConversationMetrics(
       ...(turn.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(turn.reasoningOutputTokens)}`]
         : []),
-      ...(turn.outputTokensPerSecond === null
-        ? []
-        : [`  - ${formatAggregateOutputSpeed(
-            turn.outputTokensPerSecond,
-            turn.outputSpeedTimedCount,
-            turn.outputSpeedSampleCount,
-          )}`]),
       ...(turn.compact
         ? [formatCompactMetrics(turn.compact)]
         : []),
@@ -76,7 +64,6 @@ export function formatConversationMetrics(
       "### 当前会话指标累计",
       `Turn：${aggregate.turnCount} 次`,
       `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
-      `模型请求累计耗时：${formatElapsedDuration(aggregate.requestDurationMs)}`,
       `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
       ...(aggregate.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
@@ -89,13 +76,6 @@ export function formatConversationMetrics(
       ...(aggregate.reasoningOutputTokens > 0
         ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
         : []),
-      ...(aggregate.outputTokensPerSecond === null
-        ? []
-        : [`  - ${formatAggregateOutputSpeed(
-            aggregate.outputTokensPerSecond,
-            aggregate.outputSpeedTimedCount,
-            aggregate.outputSpeedSampleCount,
-          )}`]),
       ...(aggregate.compact
         ? [formatCompactMetrics(aggregate.compact)]
         : []),
@@ -109,9 +89,6 @@ export function formatConversationMetrics(
       `API 提供商：${formatProviderLabel(direct.providerName ?? direct.provider)}`,
       `调用模型：${direct.model ?? "未知"}`,
       `状态：${formatRequestStatus(direct.status)}${direct.httpStatus === null ? "" : ` · HTTP ${direct.httpStatus}`}`,
-      ...(direct.requestDurationMs === null
-        ? []
-        : [`耗时：${formatElapsedDuration(direct.requestDurationMs)}`]),
       ...(direct.inputTokens === null && direct.outputTokens === null
         ? []
         : [
@@ -285,7 +262,6 @@ function formatMetricsAggregate(
 ): string[] {
   return [
     `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
-    `模型请求累计耗时：${formatElapsedDuration(aggregate.requestDurationMs)}`,
     `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
     ...(aggregate.cachedInputTokens === null
       ? ["  - 缓存：上游未提供完整数据"]
@@ -298,18 +274,6 @@ function formatMetricsAggregate(
     ...(aggregate.reasoningOutputTokens > 0
       ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
       : []),
-    ...(aggregate.outputTokensPerSecond === null
-      ? []
-      : [`  - ${formatAggregateOutputSpeed(
-          aggregate.outputTokensPerSecond,
-          aggregate.outputSpeedTimedCount,
-          aggregate.outputSpeedSampleCount,
-        )}`]),
-    ...(aggregate.ttftAverageMs === null || aggregate.ttftP50Ms === null || aggregate.ttftP95Ms === null
-      ? []
-      : [
-          `  - 首段回复延迟：平均 ${formatMetricLatency(aggregate.ttftAverageMs)} · P50 ${formatMetricLatency(aggregate.ttftP50Ms)} · P95 ${formatMetricLatency(aggregate.ttftP95Ms)}（覆盖 ${aggregate.ttftSampleCount}/${aggregate.requestCount} 次请求）`,
-        ]),
     ...(aggregate.compact
       ? [formatCompactMetrics(aggregate.compact)]
       : []),
@@ -335,12 +299,6 @@ function formatMetricsGroup(
     ? `${provider} / ${group.model ?? "未知模型"}`
     : provider;
   const aggregate = group.aggregate;
-  const speed = aggregate.outputTokensPerSecond === null
-    ? "速度未知"
-    : `${formatTokensPerSecond(aggregate.outputTokensPerSecond)}`;
-  const latency = aggregate.ttftP50Ms === null || aggregate.ttftP95Ms === null
-    ? "首段延迟未知"
-    : `首段 P50/P95 ${formatMetricLatency(aggregate.ttftP50Ms)}/${formatMetricLatency(aggregate.ttftP95Ms)}`;
   const reasoning = aggregate.reasoningOutputTokens > 0
     ? `  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`
     : "";
@@ -357,8 +315,6 @@ function formatMetricsGroup(
     `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
     ...(reasoning === "" ? [] : [reasoning]),
     `  - 合计：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
-    `  - 速度：${speed}`,
-    `  - ${latency}`,
     ...(aggregate.compact
       ? [`  - ${formatCompactMetrics(aggregate.compact)}`]
       : []),
@@ -405,21 +361,6 @@ function formatMetricsRange(range: RequestMetricsTimeRange): string {
     "365d": "最近 365 天",
     all: "全部历史",
   }[range];
-}
-
-function formatMetricLatency(value: number): string {
-  const rounded = Math.round(value);
-  return rounded < 1_000
-    ? `${rounded}毫秒`
-    : formatElapsedDuration(rounded);
-}
-
-function formatAggregateOutputSpeed(
-  outputTokensPerSecond: number,
-  timedCount: number,
-  sampleCount: number,
-): string {
-  return `综合输出速度：${formatTokensPerSecond(outputTokensPerSecond)}（不含推理 · 覆盖 ${timedCount}/${sampleCount} 次请求）`;
 }
 
 function formatRequestStatus(

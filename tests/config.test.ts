@@ -461,11 +461,6 @@ describe("Gateway config.toml", () => {
         retention_days: 365,
         max_rows: 1_000_000,
       },
-      sync: {
-        enabled: false,
-        batch_size: 200,
-        interval_seconds: 60,
-      },
     });
     expect(persisted.feishu).toBeUndefined();
     expect(persisted.weixin).toBeUndefined();
@@ -663,25 +658,15 @@ describe("Gateway config.toml", () => {
     })).toThrow(/绑定非回环地址时必须设置 token/u);
   });
 
-  it("loads metrics sync defaults when the section is absent", () => {
+  it("loads metrics storage defaults when the section is absent", () => {
     const fixture = createFixture();
 
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.metricsSync).toEqual({
-      enabled: false,
-      batchSize: 200,
-      intervalSeconds: 60,
-    });
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
     }).config.metricsStorage).toEqual({
       retentionDays: 365,
       maxRows: 1_000_000,
     });
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.metricsCenter).toBeUndefined();
   });
 
   it("loads a configurable metrics retention policy", () => {
@@ -699,165 +684,17 @@ describe("Gateway config.toml", () => {
     });
   });
 
-  it("loads an enabled metrics sync section", () => {
-    const fixture = createFixture({
-      metrics: {
-        sync: {
-          enabled: true,
-          endpoint: "https://worker.example.com/api/ingest",
-          device_token: "device-token",
-          device_id: "node-a",
-          batch_size: 100,
-          interval_seconds: 120,
-        },
-      },
-    });
-
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.metricsSync).toEqual({
-      enabled: true,
-      endpoint: "https://worker.example.com/api/ingest",
-      deviceToken: "device-token",
-      deviceId: "node-a",
-      batchSize: 100,
-      intervalSeconds: 120,
-    });
-  });
-
-  it("rejects enabled metrics sync without endpoint or token", () => {
-    const noEndpoint = createFixture({
-      metrics: { sync: { enabled: true, device_token: "token" } },
-    });
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: noEndpoint.configPath,
-    })).toThrow(/metrics\.sync/u);
-
-    const noToken = createFixture({
-      metrics: { sync: { enabled: true, endpoint: "https://worker.example.com/api/ingest" } },
-    });
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: noToken.configPath,
-    })).toThrow(/metrics\.sync/u);
-  });
-
-  it("rejects non-https metrics sync endpoint", () => {
-    const fixture = createFixture({
-      metrics: {
-        sync: {
-          enabled: true,
-          endpoint: "http://worker.example.com/api/ingest",
-          device_token: "token",
-        },
-      },
-    });
-
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toThrow(/HTTPS/u);
-  });
-
-  it("allows loopback and private http metrics sync endpoints", () => {
-    for (const endpoint of [
-      "http://127.0.0.1:8790/api/ingest",
-      "http://192.168.1.10:8790/api/ingest",
-      "http://[::1]:8790/api/ingest",
+  it("rejects removed remote metrics configuration", () => {
+    for (const metrics of [
+      { sync: { enabled: false } },
+      { center: { enabled: false } },
+      { view: { enabled: false } },
     ]) {
-      const fixture = createFixture({
-        metrics: {
-          sync: {
-            enabled: true,
-            endpoint,
-            device_token: "token",
-          },
-        },
-      });
-      expect(loadRuntimeConfig({
+      const fixture = createFixture({ metrics });
+      expect(() => loadRuntimeConfig({
         CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-      }).config.metricsSync).toMatchObject({ endpoint });
+      })).toThrow(/metrics/u);
     }
-  });
-
-  it("loads an enabled metrics center section", () => {
-    const fixture = createFixture({
-      metrics: {
-        center: {
-          enabled: true,
-          host: "127.0.0.1",
-          port: 8790,
-          token: "center-token",
-          device_token: "device-token",
-          database_path: "data/central-metrics.sqlite3",
-        },
-      },
-    });
-
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.metricsCenter).toEqual({
-      enabled: true,
-      host: "127.0.0.1",
-      port: 8790,
-      token: "center-token",
-      deviceToken: "device-token",
-      databasePath: "data/central-metrics.sqlite3",
-    });
-  });
-
-  it("rejects non-loopback metrics center without a token", () => {
-    const fixture = createFixture({
-      metrics: {
-        center: {
-          enabled: true,
-          host: "0.0.0.0",
-          port: 8790,
-          token: "center-token",
-        },
-      },
-    });
-
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toThrow(/metrics\.center/u);
-  });
-
-  it("rejects identical metrics center ingest and view tokens", () => {
-    const fixture = createFixture({
-      metrics: {
-        center: {
-          enabled: true,
-          host: "127.0.0.1",
-          port: 8790,
-          token: "shared-token",
-          device_token: "shared-token",
-        },
-      },
-    });
-
-    expect(() => loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toThrow(/必须不同/u);
-  });
-
-  it("accepts identical local metrics ingest and view tokens", () => {
-    const fixture = createFixture({
-      metrics: {
-        sync: {
-          enabled: true,
-          endpoint: "http://127.0.0.1:8790/api/ingest",
-          device_token: "shared-token",
-        },
-        view: {
-          enabled: true,
-          endpoint: "http://127.0.0.1:8790",
-          token: "shared-token",
-        },
-      },
-    });
-
-    expect(loadRuntimeConfig({
-      CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toBeDefined();
   });
 
   it("loads an explicitly enabled Feishu account", () => {

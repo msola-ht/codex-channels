@@ -14,7 +14,6 @@ export type GlobalConfigChangeCode =
   | "experimental.plugin-api"
   | "scheduled-tasks.enabled"
   | "api.providers"
-  | "metrics.sync"
   | "metrics.storage"
   | "observability.log-level"
   | "workspace.default"

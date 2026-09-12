@@ -59,7 +59,8 @@
 - `account-snapshot-service.ts`：提供跨 WebUI 与渠道复用的最新官方账户快照查询入口。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
-  查询结果可通过快照写入端口落入统一读模型。
+  查询结果可通过快照写入端口落入统一读模型；按需刷新只接受已注册 Provider，查询失败保留最后
+  一次成功快照，不以 `unsupported` 覆盖有效余额或额度。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
   指标累计、最近直接 API 请求，以及自然日/周/月、24 小时至 365 天滚动窗口或全部保留历史的全局/提供商/模型聚合和异常请求
   只读摘要；聚合中的上下文压缩摘要单列实际请求模型、请求数与 Token；

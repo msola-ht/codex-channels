@@ -175,7 +175,7 @@ function readDefinition(path) {
   }
   if (
     definition?.version !== 1
-    || !["gateway", "app-server", "webui", "center"].includes(definition.target)
+    || !["gateway", "app-server", "webui"].includes(definition.target)
     || typeof definition.displayName !== "string"
     || typeof definition.nodeBinary !== "string"
     || !Array.isArray(definition.arguments)

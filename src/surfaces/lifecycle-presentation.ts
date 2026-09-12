@@ -4,7 +4,6 @@ import {
 } from "../application/index.js";
 import type {
   OutputEvent,
-  RemoteQuotaSummary,
   ThreadGoal,
   TurnStartIdentity,
 } from "../conversation-core/index.js";
@@ -14,12 +13,10 @@ import {
   formatOpenAiErrorMessage,
   formatPercent,
   formatRemainingRateLimitWindow,
-  formatResetTime,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./conversation-command-format.js";
 import {
   formatElapsedDuration,
-  formatTokensPerSecond,
 } from "./elapsed-duration.js";
 import {
   formatCodexProviderLabel,
@@ -98,7 +95,6 @@ export function createStartupPresentation(
   workspaces: ReadonlyArray<{ id: string; name: string; cwd: string }>,
   status: StartupStatus,
   runtime: StartupRuntimeInfo,
-  remoteQuota?: RemoteQuotaSummary,
 ): LifecyclePresentation {
   const workspace = workspaces.find(({ id }) => id === status.workspaceId);
   if (!workspace) {
@@ -183,12 +179,10 @@ export function createStartupPresentation(
           },
         ],
       },
-      ...((remoteQuota !== undefined || usesOpenAiAccount(status.modelProvider)) && (status.weeklyLimit || remoteQuota)
+      ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
         ? [{
-            title: remoteQuota ? "账户状态（额度中心）" : "账户状态",
-            fields: remoteQuota
-              ? remoteQuotaAccountFields(remoteQuota)
-              : [{ label: "周限", value: formatWeeklyLimit(status.weeklyLimit!) }],
+            title: "账户状态",
+            fields: [{ label: "周限", value: formatWeeklyLimit(status.weeklyLimit) }],
           }]
         : []),
     ],
@@ -279,10 +273,6 @@ export function createSubagentCompletedPresentation(
   if (event.reasoningEffort) {
     fields.push({ label: "思考等级", value: event.reasoningEffort });
   }
-  fields.push({
-    label: "耗时",
-    value: formatElapsedDuration(event.elapsedMs),
-  });
   if (event.metricsStatus === "unavailable") {
     fields.push({ label: "统计", value: "暂不可用" });
     return {
@@ -326,20 +316,6 @@ export function createSubagentCompletedPresentation(
       value: formatCacheHitRate(event.inputTokens, cachedInputTokens),
     }],
   });
-  if (debug && event.durationMs > 0) {
-    fields.push({
-      label: "模型请求聚合耗时",
-      value: formatElapsedDuration(event.durationMs),
-    });
-  }
-  const outputSpeed = formatReliableOutputSpeed(
-    event.outputTokensPerSecond,
-    event.outputSpeedTimedCount,
-    event.outputSpeedSampleCount,
-  );
-  if (outputSpeed !== null) {
-    fields.push({ label: "综合输出速度", value: outputSpeed });
-  }
   return {
     title: `${subagentStatusLabel(event.status)} · ${subagentTaskName(event.agentPath)}`,
     fields,
@@ -362,50 +338,6 @@ function subagentTaskName(agentPath: string): string {
   const normalized = agentPath.replace(/\/+$/u, "");
   const separator = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
   return separator >= 0 ? normalized.slice(separator + 1) : normalized;
-}
-
-function remoteQuotaWindowLabel(windowId: string): string {
-  return {
-    codex: "周限",
-    monthly: "月限",
-    weekly: "周限",
-    rolling: "5小时",
-  }[windowId] ?? windowId;
-}
-
-function orderedRemoteQuotaWindows(
-  remoteQuota: RemoteQuotaSummary,
-): readonly RemoteQuotaSummary[] {
-  const order = ["rolling", "weekly", "monthly"];
-  return [...(remoteQuota.windows ?? [])].sort(
-    (left, right) => order.indexOf(left.windowId) - order.indexOf(right.windowId),
-  );
-}
-
-function remoteQuotaAccountFields(
-  remoteQuota: RemoteQuotaSummary,
-): LifecyclePresentationField[] {
-  const windows = remoteQuota.windows === undefined
-    ? [remoteQuota]
-    : orderedRemoteQuotaWindows(remoteQuota);
-  return [
-    { label: "设备数", value: `${remoteQuota.deviceCount} 台` },
-    { label: "请求数", value: `${remoteQuota.requestCount} 次` },
-    { label: "总 Token", value: formatTokenCount(remoteQuota.totalTokens) },
-    ...windows.map((window) => ({
-      label: remoteQuotaWindowLabel(window.windowId),
-      value: formatRemoteQuotaRemaining(window),
-    })),
-  ];
-}
-
-function formatRemoteQuotaRemaining(window: RemoteQuotaSummary): string {
-  const remaining = window.latestUsedPercentMillionths === null
-    ? "未知"
-    : `剩余 ${formatPercent(Math.max(0, 100 - window.latestUsedPercentMillionths / 1_000_000))}`;
-  return window.resetsAt === null
-    ? remaining
-    : `${remaining} · 重置 ${formatResetTime(window.resetsAt)}`;
 }
 
 function formatTurnErrorMessage(
@@ -440,32 +372,7 @@ export function createTurnCompletedPresentation(
   ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
-  let hasRemoteQuotaPresentation = false;
   let fallbackCacheField: LifecyclePresentationField | undefined;
-  const monthlyRemoteQuota = event.remoteQuota?.windows?.find(
-    (window) => window.windowId === "monthly",
-  );
-  const completionRemoteQuota = event.remoteQuota?.windows === undefined
-    ? event.remoteQuota
-    : monthlyRemoteQuota;
-  if (completionRemoteQuota !== undefined && !debug) {
-    hasRemoteQuotaPresentation = true;
-    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota!));
-  } else if (debug && event.remoteQuota?.windows !== undefined) {
-    hasRemoteQuotaPresentation = true;
-    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
-  } else if (debug && event.remoteQuota) {
-    hasRemoteQuotaPresentation = true;
-    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
-  } else if (
-    !debug
-    && event.remoteQuota !== undefined
-    && event.remoteQuota.windows === undefined
-    && !usesOpenAiAccount(event.modelProvider)
-  ) {
-    hasRemoteQuotaPresentation = true;
-    accountFields.push(...remoteQuotaAccountFields(event.remoteQuota));
-  }
   if (event.error) {
     runFields.push({
       label: "错误",
@@ -529,7 +436,6 @@ export function createTurnCompletedPresentation(
   }
   if (
     usesOpenAiAccount(event.modelProvider)
-    && event.remoteQuota === undefined
     && event.weeklyLimit
   ) {
     accountFields.push({
@@ -576,12 +482,6 @@ export function createTurnCompletedPresentation(
     runFields.push({
       label: "思考次数",
       value: `${event.timing.reasoningRequestCount} 次`,
-    });
-  }
-  if (debug && event.timing?.modelRequestDurationMs !== undefined) {
-    runFields.push({
-      label: "模型请求聚合耗时",
-      value: formatElapsedDuration(event.timing.modelRequestDurationMs),
     });
   }
   if (fallbackCacheField) {
@@ -687,64 +587,6 @@ export function createTurnCompletedPresentation(
     ];
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
-  const performanceFields: LifecyclePresentationField[] = [];
-  if (debug && event.timing?.ttftMs !== undefined) {
-    performanceFields.push({
-      label: "最后请求首事件延迟",
-      value: formatElapsedDuration(event.timing.ttftMs),
-    });
-  }
-  if (event.timing?.firstResponseLatencyMs !== undefined) {
-    performanceFields.push({
-      label: "首段回复延迟",
-      value: formatElapsedDuration(event.timing.firstResponseLatencyMs),
-    });
-  }
-  if (event.timing?.outputTokensPerSecond !== undefined) {
-    const speedCoverage = formatSpeedCoverage(
-      event.timing.outputSpeedTimedCount,
-      event.timing.outputSpeedSampleCount,
-    );
-    performanceFields.push({
-      label: event.timing.modelRequestCount === undefined
-        ? "输出速度"
-        : "综合输出速度",
-      value: `${formatTokensPerSecond(event.timing.outputTokensPerSecond)}（不含推理${speedCoverage}）`,
-    });
-  }
-  if (event.timing?.thinkingTokensPerSecond !== undefined) {
-    const speedCoverage = formatSpeedCoverage(
-      event.timing.thinkingSpeedTimedCount,
-      event.timing.thinkingSpeedSampleCount,
-    );
-    performanceFields.push({
-      label: event.timing.modelRequestCount === undefined
-        ? "思考速度"
-        : "综合思考速度",
-      value: `${formatTokensPerSecond(event.timing.thinkingTokensPerSecond)}（推理${speedCoverage}）`,
-    });
-  }
-  if (event.timing?.generationTokensPerSecond !== undefined) {
-    const speedCoverage = formatSpeedCoverage(
-      event.timing.generationSpeedTimedCount,
-      event.timing.generationSpeedSampleCount,
-    );
-    performanceFields.push({
-      label: event.timing.modelRequestCount === undefined
-        ? "生成速度"
-        : "综合生成速度",
-      value: `${formatTokensPerSecond(event.timing.generationTokensPerSecond)}（含推理${speedCoverage}）`,
-    });
-  }
-  if (event.durationMs !== undefined) {
-    performanceFields.push({
-      label: "总耗时",
-      value: formatElapsedDuration(event.durationMs),
-    });
-  }
-  if (performanceFields.length > 0) {
-    runFields.push({ title: "性能", fields: performanceFields });
-  }
   if (Object.hasOwn(event, "gitBranch")) {
     sessionFields.push({
       label: "Git 分支",
@@ -776,7 +618,7 @@ export function createTurnCompletedPresentation(
       ? [{ title: "当前 Session 累计", fields: sessionFields }]
       : []),
     ...(accountFields.length > 0
-      ? [{ title: hasRemoteQuotaPresentation ? "账户状态（额度中心）" : "账户状态", fields: accountFields }]
+      ? [{ title: "账户状态", fields: accountFields }]
       : []),
   ];
   return {
@@ -849,35 +691,6 @@ function formatField(field: LifecyclePresentationField): string {
     ...(field.subfields ?? []).map((subfield) =>
       `  ${subfield.label}：${subfield.value}`),
   ].join("\n");
-}
-
-function formatSpeedCoverage(
-  timedCount: number | undefined,
-  sampleCount: number | undefined,
-): string {
-  return timedCount === undefined || sampleCount === undefined
-    ? ""
-    : ` · 覆盖 ${timedCount}/${sampleCount} 次请求`;
-}
-
-function formatReliableOutputSpeed(
-  outputTokensPerSecond: number | null,
-  timedCount: number,
-  sampleCount: number,
-): string | null {
-  if (
-    outputTokensPerSecond === null
-    || !Number.isFinite(outputTokensPerSecond)
-    || outputTokensPerSecond <= 0
-    || !Number.isSafeInteger(timedCount)
-    || !Number.isSafeInteger(sampleCount)
-    || timedCount <= 0
-    || sampleCount <= 0
-    || timedCount > sampleCount
-  ) {
-    return null;
-  }
-  return `${formatTokensPerSecond(outputTokensPerSecond)}（不含推理 · 覆盖 ${timedCount}/${sampleCount} 次请求）`;
 }
 
 function pendingSuffix(pending: boolean): string {

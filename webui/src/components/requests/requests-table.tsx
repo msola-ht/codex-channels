@@ -16,16 +16,14 @@ import {
 } from "@/components/metrics/data-table"
 import { useLanguage } from "@/hooks/language-context"
 import {
-  formatDuration,
   formatErrorMessage,
   formatErrorType,
-  formatSpeed,
   formatTime,
   formatTokens,
 } from "@/lib/format"
 import type { RequestRecord } from "@/lib/types"
 
-const TABLE_STATE_KEY = "codex-webui:requests-table-state-v3"
+const TABLE_STATE_KEY = "codex-webui:requests-table-state-v4"
 
 const COLUMN_LABELS: Record<string, string> = {
   time: "时间",
@@ -38,17 +36,12 @@ const COLUMN_LABELS: Record<string, string> = {
   input: "输入 Token",
   output: "输出 Token",
   reasoningOutput: "推理输出",
-  speed: "输出速度",
-  ttft: "TTFT",
-  duration: "耗时",
 }
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   operation: false,
   http: false,
   reasoningOutput: false,
-  ttft: false,
-  duration: false,
 }
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200, 500]
@@ -278,44 +271,6 @@ export function RequestsTable({
       cell: ({ row }) => (
         <span className="tabular-nums">
           {formatTokens(row.original.reasoningOutputTokens)}
-        </span>
-      ),
-    },
-    {
-      id: "speed",
-      accessorFn: (record) =>
-        record.outputTokensPerSecond ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>输出速度</SortableHeader>
-      ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {formatSpeed(row.original.outputTokensPerSecond)}
-        </span>
-      ),
-    },
-    {
-      id: "ttft",
-      accessorFn: (record) => record.ttftMs ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>TTFT</SortableHeader>
-      ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {formatDuration(row.original.ttftMs)}
-        </span>
-      ),
-    },
-    {
-      id: "duration",
-      accessorFn: (record) =>
-        record.requestDurationMs ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>耗时</SortableHeader>
-      ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {formatDuration(row.original.requestDurationMs)}
         </span>
       ),
     },

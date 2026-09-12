@@ -98,7 +98,6 @@ import {
   parseCodexRemoteOptions,
 } from "../scripts/codex-remote-options.mjs";
 import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options.mjs";
-import { parseMetricsCenterCliArgs } from "../scripts/metrics-center-settings.mjs";
 import {
   metricsCommandUsage,
   validateMetricsCommandArgs,
@@ -140,7 +139,6 @@ const helpText = {
   sessions                     管理会话（包括按 Turn 清理旧会话）
   channel                      发送渠道图片
   webui                        启动指标 WebUI
-  center                       启动或配置多设备指标中心
 
 服务与维护：
   start                        前台启动核心服务
@@ -180,15 +178,15 @@ sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profi
 
   install                      生成全部后台服务定义，并启动 App Server 与 Gateway
   uninstall                    卸载全部后台服务并保留用户数据
-  start [目标]                 启动 gateway、app-server、webui、center 或 all
-  stop [目标]                  停止 gateway、app-server、webui、center 或 all
+  start [目标]                 启动 gateway、app-server、webui 或 all
+  stop [目标]                  停止 gateway、app-server、webui 或 all
   reload                       通知 Gateway 重新读取配置
-  restart [目标]               重启 gateway、app-server、webui、center 或 all
-  status [目标] [--json]       查看 gateway、app-server、webui、center 或 all
+  restart [目标]               重启 gateway、app-server、webui 或 all
+  status [目标] [--json]       查看 gateway、app-server、webui 或 all
   logs [目标] [-f] [-n 行数]   查看后台日志
 
 目标默认值：start/stop/status 为 all，restart/logs 为 gateway。
-all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
+all 只包含 App Server 与 Gateway；WebUI 需单独指定。`,
   "service.install": "用法：codexc service install",
   "service.uninstall": "用法：codexc service uninstall",
   "service.start": `用法：codexc service start [${serviceTargetUsage}]`,
@@ -201,7 +199,7 @@ all 只包含 App Server 与 Gateway；WebUI 和指标中心需单独指定。`,
 
 打开日常 Gateway 配置菜单：脱敏配置总览、显示设置、系统设置、自动化（计划任务）、
 网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
-数据中心、Telegram 消息格式与配置路径查看。
+指标存储、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
   doctor: `用法：codexc doctor [--json]
 
@@ -259,8 +257,7 @@ App Server 与 Gateway，在停机窗口内更新程序、配置和数据库，�
 先在临时候选目录准备目标 CLI，核对公开合同及 CODEX_HOME/config.toml 的根级和 Profile 用户设置；
 通过后才全局安装并继续更新。合同或设置不兼容、非交互终端或拒绝安装时不修改全局 CLI、当前源码
 和服务，并显示原因或手动安装命令；审批策略不会被静默改写。
-npm 安装不会修改程序包。多设备指标中心使用独立数据库，需停止中心后另行执行
-codexc center upgrade。更新失败也会尝试恢复已停止的核心服务。必须从本机终端执行。`,
+npm 安装不会修改程序包。更新失败也会尝试恢复已停止的核心服务。必须从本机终端执行。`,
   uninstall: `用法：codexc uninstall
 
 卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令，并清理旧安装写入的 Shell PATH 配置；保留
@@ -284,7 +281,6 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   codexc metrics status [--json]   指标数据库状态
   codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
-  codexc metrics sync-reset   备份并清零多端上报水位，重放修复中心历史
   codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
   channel: `用法：codexc channel <send-image>
@@ -304,26 +300,6 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 --port 指定监听端口，范围 1-65535；
 访问令牌请使用 codexc config 的 WebUI 设置，或手工编辑 [webui] 段。
 指标 JSON API 来自指标数据库；设置管理只允许白名单字段并复用 Config 修订保护。`,
-  center: `用法：codexc center [--host 地址] [--port 端口] [--database 路径]
-      codexc center info [--json]      查看中心地址、双令牌状态与运行状态
-      codexc center config    交互配置 [metrics.center]
-      codexc center upgrade   升级中心数据库并保留备份
-
-启动多设备指标中心服务：接收各设备 Gateway 的增量上报，写入中心 SQLite，
-并提供全局查询 API。默认 http://127.0.0.1:8790/。
-参数优先级：命令行 > config.toml 的 [metrics.center] 段 > 默认值。
---host 指定监听地址（127.0.0.1、::1 或 0.0.0.0），默认回环；
---port 指定监听端口，范围 1-65535，默认 8790；
-查看令牌和设备上报令牌请使用 codexc config 的数据中心设置；绑定非回环地址（0.0.0.0）时两者必须提供且不同；
---database 指定中心 SQLite 路径，默认 <配置目录>/data/central-metrics.sqlite3。
-上报接口：POST /api/ingest（Bearer 上报令牌）；查询接口使用 Bearer 查看令牌：/api/overview、/api/requests、
-/api/subagents、/api/devices、/api/health。`,
-  "center.info": `用法：codexc center info [--json]
-
-查看中心服务地址、双令牌配置状态、数据库路径与当前运行状态；--json 不输出令牌内容。`,
-  "center.config": `用法：codexc center config
-
-交互配置中心服务端的 [metrics.center]；设备接入中心仍通过 codexc config 配置。`,
   "metrics.status": `用法：codexc metrics status [--json]
 
 只读显示指标数据库路径、Schema 兼容性和记录数量；--json 输出稳定 JSON。`,
@@ -345,16 +321,10 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   "metrics.upgrade": `用法：codexc metrics upgrade [--restart-gateway]
 
 默认要求 Gateway 已停止；加 --restart-gateway 时自动停止 Gateway、备份升级并重新启动。`,
-  "metrics.sync_reset": `用法：codexc metrics sync-reset [--restart-gateway]
-
-默认要求 Gateway 已停止；备份 ~/.codex-connect/data/metrics-sync-state.json 后清零
-上报水位（保留设备 ID），重启 Gateway 后从第一条记录重新上报；中心按
-(device_id, local_id) 覆盖写入，可修复云端历史数据。加 --restart-gateway 时自动
-停止并重新启动 Gateway。`,
   "metrics.prune": `用法：codexc metrics prune <provider>
 
-provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以及当前或已备份的自定义主 Provider ID。备份并删除本地与中心库中该提供商全部请求行，随后
-自动重启 Gateway 与中心服务（即使任一步骤失败也会尝试把服务拉起来）。OpenAI 额度重置
+provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以及当前或已备份的自定义主 Provider ID。备份并删除本地指标库中该提供商全部请求行，随后
+按原状态恢复 Gateway。OpenAI 额度重置
 后可用 openai 从零重新统计用量；备份保留在指标库同目录的 *.<provider>-prune-*.bak。`,
   "metrics.cleanup": `用法：codexc metrics cleanup [--before YYYY-MM-DD | --keep-days 天数] [--max-rows 行数] [--vacuum] [--restart-gateway]
 
@@ -544,34 +514,6 @@ try {
       parseWebuiCliArgs(args);
       runScript("scripts/webui-server.mjs", args, { failureReportedByChild: true });
       break;
-    case "center":
-      if (showRequestedHelp(args, "center")
-        || showSubcommandHelp(args, "info", "center.info")
-        || showSubcommandHelp(args, "config", "center.config")) {
-        break;
-      }
-      if (
-        args[0] === "info"
-        && !(args.length === 1 || (args.length === 2 && args[1] === "--json"))
-      ) {
-        throw new Error(helpText["center.info"]);
-      }
-      if (args[0] === "config" && args.length !== 1) {
-        throw new Error(helpText["center.config"]);
-      }
-      if (args[0] === "upgrade" && args.length !== 1) {
-        throw new Error(helpText.center);
-      }
-      if (args[0] === "info" || args[0] === "config" || args[0] === "upgrade") {
-        runScript("scripts/metrics-center-server.mjs", args, { failureReportedByChild: true });
-        break;
-      }
-      if (args.some(isHelpArgument)) {
-        throw new Error(helpText.center);
-      }
-      parseMetricsCenterCliArgs(args);
-      runScript("scripts/metrics-center-server.mjs", args, { failureReportedByChild: true });
-      break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
   }
@@ -735,9 +677,9 @@ async function runServiceAppServer(args) {
         ...(goDefaultAccountId === undefined
           ? {}
           : { defaultAccountId: goDefaultAccountId }),
-        quotaWindowsProvider: (accountId) => {
+        quotaWindowsProvider: (accountId, signal) => {
           const quota = opencodeGoQuotaWindows.get(accountId ?? goDefaultAccountId);
-          return quota ? quota() : Promise.resolve(null);
+          return quota ? quota(signal) : Promise.resolve(null);
         },
         onMetrics: (metrics, accountId) => {
           const targetAccountId = accountId ?? goDefaultAccountId;
@@ -1359,12 +1301,10 @@ async function service(args) {
     await waitForManagedServiceReadiness(readinessTarget);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));
   } else if (action === "start" || action === "restart") {
-    const httpTarget = serviceArgs[0] === "webui" || serviceArgs[0] === "center"
-      ? serviceArgs[0]
-      : undefined;
+    const httpTarget = serviceArgs[0] === "webui" ? "webui" : undefined;
     if (httpTarget !== undefined) {
       await waitForHttpServiceReadiness(httpTarget, controlEnvironment);
-      printCliMessage("success", `${httpTarget === "webui" ? "WebUI" : "指标中心"} 已就绪。`);
+      printCliMessage("success", "WebUI 已就绪。");
     }
   }
 }
@@ -1399,16 +1339,14 @@ async function waitForHttpServiceReadiness(target, environment) {
   const configPath = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   if (!configPath) throw new Error("缺少 Gateway 配置路径，无法确认服务就绪");
   const document = readGatewayConfig(configPath);
-  const section = target === "webui"
-    ? document.webui
-    : document.metrics?.center;
-  if (target === "webui" ? section === undefined : section?.enabled !== true) return;
+  const section = document.webui;
+  if (section === undefined) return;
   const host = section?.host === "0.0.0.0" ? "127.0.0.1" : section?.host;
   const port = section?.port;
   if (typeof host !== "string" || !Number.isInteger(port)) {
-    throw new Error(`${target === "webui" ? "WebUI" : "指标中心"} 配置无效，无法确认服务就绪`);
+    throw new Error("WebUI 配置无效，无法确认服务就绪");
   }
-  const healthPath = target === "webui" ? "/api/v1/health" : "/api/health";
+  const healthPath = "/api/v1/health";
   const url = `http://${host.includes(":") ? `[${host}]` : host}:${port}${healthPath}`;
   const deadline = Date.now() + 5_000;
   let lastError;
@@ -1418,7 +1356,7 @@ async function waitForHttpServiceReadiness(target, environment) {
     try {
       const response = await fetch(url, {
         signal: controller.signal,
-        ...(target === "webui" && typeof section?.token === "string"
+        ...(typeof section?.token === "string"
           ? { headers: { authorization: `Bearer ${section.token}` } }
           : {}),
       });
@@ -1432,7 +1370,7 @@ async function waitForHttpServiceReadiness(target, environment) {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   throw new Error(
-    `${target === "webui" ? "WebUI" : "指标中心"} 启动后未就绪：${lastError instanceof Error ? lastError.message : "健康检查超时"}`,
+    `WebUI 启动后未就绪：${lastError instanceof Error ? lastError.message : "健康检查超时"}`,
   );
 }
 
@@ -1460,7 +1398,7 @@ function rejectUnsafeAppServerServiceAction(action, serviceArgs, environment) {
     const invocation = ["codexc", "service", action, ...serviceArgs].join(" ");
     throw new Error(
       "不能在 Codex App Server 内执行会中断当前渠道的服务操作；"
-      + `请在本机终端运行 ${invocation}。渠道内只允许重启 Gateway 或管理独立的 WebUI、指标中心服务。`,
+      + `请在本机终端运行 ${invocation}。渠道内只允许重启 Gateway 或管理独立的 WebUI 服务。`,
     );
   }
 }
@@ -1816,7 +1754,6 @@ async function metrics(args) {
     showSubcommandHelp(args, "status", "metrics.status") ||
     showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
-    showSubcommandHelp(args, "sync-reset", "metrics.sync_reset") ||
     showSubcommandHelp(args, "cleanup", "metrics.cleanup") ||
     showSubcommandHelp(args, "prune", "metrics.prune") ||
     showSubcommandHelp(args, "report", "metrics.report") ||
@@ -1832,7 +1769,6 @@ async function metrics(args) {
       status: "metrics.status",
       upgrade: "metrics.upgrade",
       reset: "metrics.reset",
-      "sync-reset": "metrics.sync_reset",
       cleanup: "metrics.cleanup",
       prune: "metrics.prune",
       report: "metrics.report",
@@ -1866,10 +1802,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "sync-reset", "cleanup", "prune", "report", "export", "quota"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "cleanup", "prune", "report", "export", "quota"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|sync-reset|cleanup|prune|report|export|quota>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|cleanup|prune|report|export|quota>");
   }
   validateMetricsCommandArgs(subcommand, rest);
   if (
@@ -1889,10 +1825,6 @@ async function metrics(args) {
     runScript("scripts/metrics-database.mjs", ["upgrade-restart"], { failureReportedByChild: true });
     return;
   }
-  if (subcommand === "sync-reset" && rest.length === 1 && rest[0] === "--restart-gateway") {
-    runScript("scripts/metrics-database.mjs", ["sync-reset-restart"], { failureReportedByChild: true });
-    return;
-  }
   if (subcommand === "cleanup") {
     const restart = rest.includes("--restart-gateway");
     const cleanupArgs = rest.filter((argument) => argument !== "--restart-gateway");
@@ -1906,7 +1838,7 @@ async function metrics(args) {
   if (subcommand === "prune" && rest.length !== 1) {
     throw new Error("用法：codexc metrics prune <provider>");
   }
-  if (new Set(["upgrade", "reset", "sync-reset"]).has(subcommand) && rest.length > 0) {
+  if (new Set(["upgrade", "reset"]).has(subcommand) && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
   if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {

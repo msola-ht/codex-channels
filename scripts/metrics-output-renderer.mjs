@@ -1,6 +1,5 @@
 import {
   csvCell,
-  formatDuration,
   formatLocalTime,
   formatTokenCount,
   markdownCell,
@@ -83,15 +82,11 @@ export function printMetricsReport(result, format) {
       ["lastOccurredAtMs", (row) => row.lastOccurredAtMs],
       ["requestCount", (row) => row.requestCount],
       ["unsuccessfulRequestCount", (row) => row.unsuccessfulRequestCount],
-      ["requestDurationMs", (row) => row.requestDurationMs],
       ["inputTokens", (row) => row.inputTokens],
       ["cachedInputTokens", (row) => row.cachedInputTokens],
       ["outputTokens", (row) => row.outputTokens],
       ["reasoningOutputTokens", (row) => row.reasoningOutputTokens],
-      ["outputTokensPerSecond", (row) => row.outputTokensPerSecond],
       ...compactCsvColumns(),
-      ["ttftP50Ms", (row) => row.ttftP50Ms],
-      ["ttftP95Ms", (row) => row.ttftP95Ms],
       ...weeklyQuotaCsvColumns(),
     ];
     console.log(columns.map(([heading]) => csvCell(heading)).join(","));
@@ -164,7 +159,6 @@ export function printMetricsReport(result, format) {
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
   console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
   printCompactSummary(aggregate.compact);
-  console.log(`- 首段延迟 P50/P95：${formatDuration(aggregate.ttftP50Ms)}/${formatDuration(aggregate.ttftP95Ms)}`);
   if (result.report.groups.length > 0) {
     console.log("");
     console.log("## 明细");
@@ -218,8 +212,8 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 耗时 | 输入 | 缓存输入 | 输出 |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(
         [
@@ -229,7 +223,6 @@ export function printMetricsExport(result, format) {
           markdownCell(record.operation),
           markdownCell(record.reasoningEffort ?? "模型默认"),
           markdownCell(record.status ?? ""),
-          markdownCell(formatDuration(record.requestDurationMs)),
           markdownCell(formatTokenCount(record.inputTokens ?? 0)),
           markdownCell(formatTokenCount(record.cachedInputTokens ?? 0)),
           markdownCell(formatTokenCount(record.outputTokens ?? 0)),
@@ -385,7 +378,7 @@ export function printMetricsRun(result, format) {
   if (latestTurn === null) {
     console.log("该 Thread 暂无已记录请求。");
   } else {
-    printTurnSummary(latestTurn, false);
+    printTurnSummary(latestTurn);
   }
   console.log("");
   console.log("## 当前会话指标累计");
@@ -393,7 +386,7 @@ export function printMetricsRun(result, format) {
   if (threadAggregate === null) {
     console.log("该 Thread 暂无累计记录。");
   } else {
-    printTurnSummary(threadAggregate, true);
+    printTurnSummary(threadAggregate);
   }
 }
 
@@ -407,12 +400,10 @@ function printTurnSummaryCsv(rows) {
     ["turnId", (row) => row.turnId],
     ["requestCount", (row) => row.requestCount],
     ["unsuccessfulRequestCount", (row) => row.unsuccessfulRequestCount],
-    ["requestDurationMs", (row) => row.requestDurationMs],
     ["inputTokens", (row) => row.inputTokens],
     ["cachedInputTokens", (row) => row.cachedInputTokens],
     ["outputTokens", (row) => row.outputTokens],
     ["reasoningOutputTokens", (row) => row.reasoningOutputTokens],
-    ["outputTokensPerSecond", (row) => row.outputTokensPerSecond],
     ...compactCsvColumns(),
   ];
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
@@ -439,15 +430,12 @@ export function printMetricsTurns(result, format) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 耗时 | 总 Token | 缓存率 | 速度 | 上下文压缩 |");
-  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 总 Token | 缓存率 | 上下文压缩 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |");
   for (const [index, turn] of result.turns.entries()) {
     const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
       ? "未知"
       : `${((turn.cachedInputTokens / turn.inputTokens) * 100).toFixed(2)}%`;
-    const speed = turn.outputTokensPerSecond === null
-      ? "未知"
-      : `${turn.outputTokensPerSecond.toFixed(0)} t/s`;
     console.log(
       [
         String(result.turns.length - index),
@@ -457,10 +445,8 @@ export function printMetricsTurns(result, format) {
         markdownCell(turn.reasoningEffort ?? "模型默认"),
         String(turn.requestCount),
         String(turn.unsuccessfulRequestCount),
-        markdownCell(formatDuration(turn.requestDurationMs)),
         formatTokenCount(turn.inputTokens + turn.outputTokens),
         cacheRate,
-        speed,
         markdownCell(formatCompactSummary(turn.compact) ?? "无"),
       ].join(" | "),
     );
@@ -522,7 +508,7 @@ export function printMetricsThreads(result, format) {
   console.log("导出某会话每次对话：codexc metrics turns <Thread ID>");
 }
 
-function printTurnSummary(summary, aggregate = false) {
+function printTurnSummary(summary) {
   const totalTokens = summary.inputTokens + summary.outputTokens;
   if (summary.model !== undefined && summary.model !== null) {
     console.log(`- 模型：${summary.model}`);
@@ -532,9 +518,6 @@ function printTurnSummary(summary, aggregate = false) {
   }
   console.log(
     `- 模型请求：${summary.requestCount} 次${summary.unsuccessfulRequestCount > 0 ? `（异常 ${summary.unsuccessfulRequestCount} 次）` : ""}`,
-  );
-  console.log(
-    `- ${aggregate ? "模型请求累计耗时" : "模型请求聚合耗时"}：${formatDuration(summary.requestDurationMs)}`,
   );
   console.log(`- 总 Token：${formatTokenCount(totalTokens)}`);
   if (summary.cachedInputTokens === null) {
@@ -551,14 +534,6 @@ function printTurnSummary(summary, aggregate = false) {
   console.log(`  - 输出：${formatTokenCount(summary.outputTokens)}`);
   if (summary.reasoningOutputTokens > 0) {
     console.log(`    - 其中推理输出：${formatTokenCount(summary.reasoningOutputTokens)}`);
-  }
-  if (
-    summary.outputTokensPerSecond !== null
-    && summary.outputSpeedTimedCount > 0
-  ) {
-    console.log(
-      `  - 综合输出速度：${summary.outputTokensPerSecond.toFixed(0)} token/s（覆盖 ${summary.outputSpeedTimedCount}/${summary.outputSpeedSampleCount} 次请求）`,
-    );
   }
   printCompactSummary(summary.compact);
 }
@@ -583,13 +558,10 @@ function csvColumns() {
     ["operation", (record) => record.operation],
     ["threadId", (record) => record.threadId],
     ["turnId", (record) => record.turnId],
-    ["requestDurationMs", (record) => record.requestDurationMs],
-    ["ttftMs", (record) => record.ttftMs],
     ["inputTokens", (record) => record.inputTokens],
     ["cachedInputTokens", (record) => record.cachedInputTokens],
     ["uncachedInputTokens", (record) => record.uncachedInputTokens],
     ["outputTokens", (record) => record.outputTokens],
     ["reasoningOutputTokens", (record) => record.reasoningOutputTokens],
-    ["outputTokensPerSecond", (record) => record.outputTokensPerSecond],
   ];
 }

@@ -8,7 +8,6 @@ import type { ConfigChange, GatewayConfig } from "../config/index.js";
 import type { ConversationTarget } from "../conversation-core/index.js";
 import type { BindingStore } from "../storage/index.js";
 import type { SurfaceAdapter } from "../surfaces/index.js";
-import type { RemoteQuotaSummary } from "../conversation-core/index.js";
 
 import type { OpenAiConnectivityStatus } from "./openai-connectivity.js";
 
@@ -34,7 +33,6 @@ export interface SurfacePluginContext {
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  remoteQuota?: (provider: string | undefined, resetsAt: number | null | undefined) => Promise<RemoteQuotaSummary | undefined>;
 }
 
 export interface BuiltInSurfacePlugin {

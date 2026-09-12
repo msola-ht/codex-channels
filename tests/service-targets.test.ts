@@ -25,7 +25,7 @@ describe("service target catalog", () => {
   });
 
   it("owns public defaults and App Server inclusion semantics", () => {
-    expect(serviceTargetUsage).toBe("gateway|app-server|webui|center|all");
+    expect(serviceTargetUsage).toBe("gateway|app-server|webui|all");
     expect(defaultServiceTarget("restart")).toBe("gateway");
     expect(defaultServiceTarget("start")).toBe("all");
     expect(serviceTargetIncludes("all", "app-server")).toBe(true);

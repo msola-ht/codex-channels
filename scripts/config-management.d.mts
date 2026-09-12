@@ -1,9 +1,7 @@
 export type GatewaySettingActivation =
   | "none"
   | "restart-gateway"
-  | "restart-gateway-webui"
   | "restart-webui"
-  | "restart-center"
   | "restart-all"
   | "reinstall-services";
 
@@ -52,24 +50,6 @@ export interface GatewaySettings {
   };
   metrics: {
     storage: { retentionDays: number; maxRows: number };
-    sync: {
-      enabled: boolean;
-      endpoint: string | null;
-      deviceId: string | null;
-      deviceName: string | null;
-      deviceTokenConfigured: boolean;
-      intervalSeconds: number;
-      batchSize: number;
-    };
-    view: { enabled: boolean; endpoint: string | null; tokenConfigured: boolean };
-    center: {
-      enabled: boolean;
-      host: "127.0.0.1" | "::1" | "0.0.0.0";
-      port: number;
-      tokenConfigured: boolean;
-      deviceTokenConfigured: boolean;
-      databasePath: string;
-    };
   };
   workspaces: Array<{
     id: string;
@@ -128,31 +108,6 @@ export type GatewaySettingInput =
   | { kind: "webui.port"; value: number | null }
   | { kind: "webui.token"; action: "set" | "clear"; value?: string }
   | { kind: "metrics.storage"; retentionDays: number; maxRows: number }
-  | { kind: "metrics.sync-params"; intervalSeconds?: number; batchSize?: number; deviceName?: string | null }
-  | {
-      kind: "metrics.connect";
-      endpoint: string;
-      deviceToken: string;
-      viewToken: string;
-      deviceId?: string | null;
-      deviceName?: string | null;
-    }
-  | { kind: "metrics.disconnect" }
-  | {
-      kind: "metrics.center.host";
-      value: "127.0.0.1" | "::1" | "0.0.0.0" | null;
-      token?: string;
-      deviceToken?: string;
-    }
-  | { kind: "metrics.center.port"; value: number | null }
-  | {
-      kind: "metrics.center.token";
-      field: "token" | "device_token";
-      action: "set" | "clear";
-      value?: string;
-    }
-  | { kind: "metrics.center.generate-tokens" }
-  | { kind: "metrics.center.database-path"; value: string | null }
   | {
       kind: "workspace.permissions";
       workspaceId: string;
@@ -186,5 +141,4 @@ export function updateGatewaySetting(
   value: unknown;
   activation: GatewaySettingActivation;
   activationResult: ConfigActivationResult;
-  generatedTokens?: { viewToken: string; deviceToken: string };
 };

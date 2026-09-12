@@ -1,4 +1,4 @@
-export type ServiceTarget = "gateway" | "app-server" | "webui" | "center" | "all";
+export type ServiceTarget = "gateway" | "app-server" | "webui" | "all";
 export type ServicePlatform = "systemd" | "launchd" | "windows";
 
 export interface ServiceDefinition {

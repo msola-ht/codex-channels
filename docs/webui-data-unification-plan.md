@@ -93,7 +93,7 @@ account_snapshots
 - 余额、额度窗口和模型用量分别保留，避免把不同 Provider 的字段强行合并。
 - 额度窗口当前作为规范化 `usage_json` 的 Provider 结构保存；拆分为 `account_quota_windows` 前先补齐跨 Provider 查询契约。
 - 计算结果继续由查询层按快照生成；只有确认查询热点后才增加派生表。
-- 新表进入指标库前必须升级 Schema 版本、提供备份/回滚路径，并补齐本地与中心库测试。
+- 新表进入指标库前必须升级 Schema 版本、提供备份/回滚路径，并补齐本地指标库测试。
 
 ## 完成标准
 
@@ -106,11 +106,9 @@ account_snapshots
 
 ## 当前第一批改造范围
 
-先处理 WebUI 控制台：统一 OpenAI、DeepSeek、OpenCode Go 三类账户源，统一本机/全局指标查询，消除 `settings` 和本地 `overview` 的重复获取；完成后再接入渠道卡片。
+先处理 WebUI 控制台：统一 OpenAI、DeepSeek、OpenCode Go 三类账户源和本机指标查询，消除 `settings` 与 `overview` 的重复获取；完成后再接入渠道卡片。
 
 ## 实施进度
-
-> 当前工作区状态：`105a7f8` 之后存在未提交改动，内容为“账户服务接入快照写入”。切换对话后应从该工作区继续，不要重复创建 Schema v12 或 WebUI 第一批改造。
 
 - [x] 建立数据链路与分层步骤文档。
 - [x] `settings` 收拢到 `CurrencyProvider`，页面内复用同一份设置数据。
@@ -134,16 +132,6 @@ account_snapshots
 全局范围页面只在需要中心设备选择或设备明细时读取 `/global/devices`；本机范围不请求中心设备列表。
 渠道卡片不再建立独立的全局设备读取链路，额度中心信息只由 Gateway 的统一远端额度查询在需要时附加。
 
-账户刷新策略暂定为按需刷新：渠道执行 `/usage` 或 `/limits` 时由 Gateway 实时查询并写入快照，
-WebUI 只读快照；暂不增加定时采集或 WebUI↔Gateway IPC，避免重复的跨进程凭据访问和刷新协议。
-
-## 下一批一次性完成范围
-
-下一轮不要再拆成单个小步骤，按一个完整批次推进：
-
-1. 将快照写入服务接入所有官方账户读取路径，并补齐成功、失败、不可用三种状态测试。
-2. 增加 Application 统一账户快照查询服务，WebUI 账户卡片改为读取该服务。
-3. 盘点并迁移飞书、微信、Telegram 卡片中的账户/额度读取，禁止卡片直接调用官方适配器或 WebUI HTTP API。
-4. 统一 WebUI 与渠道卡片的字段名、单位、时间戳和缺失值语义。
-5. 补齐接口字段审查：重点检查 `GlobalOverviewResponse`、`GlobalRequestRow`、`ThreadRunResponse.threadAggregate` 与额度重置时间单位。
-6. 为渠道卡片和 WebUI 增加共享查询契约测试，最后统一运行完整门禁；确认无误后再提交一个完整批次。
+账户刷新保持按需策略：渠道执行 `/usage` 时由 Gateway 实时查询并写入快照；WebUI 通过独立私有 IPC
+请求 Gateway 刷新精确账户，仍由 Gateway 读取凭据、应用统一网络代理并作为指标库唯一写入者。
+WebUI 不定时采集，也不直接请求第三方官方接口。

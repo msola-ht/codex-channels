@@ -16,7 +16,7 @@ export function writeGatewayConfigSummary(output, document, configPath) {
     `- 日志等级：${summary.logLevel}`,
     `- 显式网络代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
     `- WebUI：${summary.webui}`,
-    `- 指标中心接入：${enabledLabel(summary.metricsSync)}`,
+    `- 本地指标保留：${summary.metricsRetentionDays} 天 / ${summary.metricsMaxRows} 行`,
     "- 作用范围：以上均为 Gateway 配置；Codex 官方与第三方 Provider 配置由 codexc setup 管理。",
     "",
   ].join("\n"));
@@ -32,7 +32,7 @@ export function gatewayConfigSummary(document, configPath) {
   const logging = table(document.logging);
   const network = table(document.network);
   const metrics = table(document.metrics);
-  const metricsSync = table(metrics.sync);
+  const metricsStorage = table(metrics.storage);
   const webui = table(document.webui);
   const workspaces = Array.isArray(document.workspaces) ? document.workspaces : [];
   const defaultWorkspaceId = stringValue(document.default_workspace);
@@ -65,7 +65,8 @@ export function gatewayConfigSummary(document, configPath) {
           stringValue(webui.host) || "127.0.0.1",
           numberValue(webui.port) || 8787,
         ),
-    metricsSync: metricsSync.enabled === true,
+    metricsRetentionDays: numberValue(metricsStorage.retention_days) ?? 365,
+    metricsMaxRows: numberValue(metricsStorage.max_rows) ?? 1_000_000,
   };
 }
 

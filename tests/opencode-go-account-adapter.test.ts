@@ -323,7 +323,7 @@ describe("OpenCode Go account adapter", () => {
       baseMs,
       currentWindows,
     );
-    // 请求时间在当前滚动窗口范围内，但快照属于上一个窗口：按快照排除。
+    // 请求开始时快照已经过期：按请求时间计入当前滚动窗口。
     recordWindowSample(
       store,
       baseMs - 1 * hourMs,
@@ -351,7 +351,7 @@ describe("OpenCode Go account adapter", () => {
         { windowId: "monthly", resetsAt: monthlyResetsAt },
       ],
     );
-    // 请求时间在当前周窗口范围内，但快照属于上一周：按快照排除。
+    // 请求开始时周快照已经过期：按请求时间计入当前周窗口。
     recordWindowSample(
       store,
       baseMs - 6 * dayMs,
@@ -415,9 +415,47 @@ describe("OpenCode Go account adapter", () => {
     const byWindow = new Map(
       usage.windows.map((window) => [window.windowId, window.localTokens]),
     );
-    expect(byWindow.get("rolling")).toBe(100_000);
-    expect(byWindow.get("weekly")).toBe(220_000);
+    expect(byWindow.get("rolling")).toBe(200_000);
+    expect(byWindow.get("weekly")).toBe(240_000);
     expect(byWindow.get("monthly")).toBe(250_000);
+  });
+
+  it.each([
+    ["rolling", "2026-08-17T05:00:00.000Z"],
+    ["weekly", "2026-08-24T00:00:00.000Z"],
+    ["monthly", "2026-09-17T00:00:00.000Z"],
+  ])("counts %s tokens after reset without moving requests from a valid previous window", async (windowId, resetsAt) => {
+    const codexHome = await createCodexHome();
+    const metricsPath = modelRequestMetricsDatabasePath(join(codexHome, "gateway.sqlite3"));
+    const boundaryMs = Date.parse("2026-08-17T00:00:00.000Z");
+    const store = new SqliteModelRequestMetricsStore(metricsPath, boundaryMs);
+    const previousWindow = [{ windowId, resetsAt: boundaryMs / 1_000 }];
+    try {
+      // 跨重置点完成的旧请求仍属于旧窗口，不能按入库时间计入新窗口。
+      recordWindowSample(store, boundaryMs - 1, 400, 600, 1_000, boundaryMs + 5_000, previousWindow);
+      // 重置点及之后开始的请求携带旧缓存，应按开始时间计入新窗口。
+      recordWindowSample(store, boundaryMs, 40, 60, 100, boundaryMs + 5_000, previousWindow);
+      recordWindowSample(store, boundaryMs + 1, 80, 120, 200, boundaryMs + 5_000, previousWindow);
+      // 与当前窗口不同但在请求开始时仍有效的快照继续优先，不能一律按时间回退。
+      recordWindowSample(store, boundaryMs, 4_000, 6_000, 10_000, boundaryMs + 5_000, [
+        { windowId, resetsAt: boundaryMs / 1_000 + 1 },
+      ]);
+    } finally {
+      store.close();
+    }
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: testEnvironment(codexHome),
+      metricsDatabasePath: metricsPath,
+      nowMs: () => boundaryMs + 10_000,
+      fetchImpl: async () => new Response(JSON.stringify({
+        usage: { [windowId]: { status: "ok", percent: 1, resetsAt } },
+      }), { status: 200 }),
+    });
+
+    await expect(adapter.accountUsage()).resolves.toMatchObject({
+      kind: "quota-windows",
+      windows: [expect.objectContaining({ windowId, localTokens: 300 })],
+    });
   });
 
   it("back-calculates the monthly window start from the reset time", () => {

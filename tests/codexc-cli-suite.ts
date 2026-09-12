@@ -186,7 +186,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
       [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
       [["metrics", "reset", "-h"], "用法：codexc metrics reset"],
-      [["metrics", "sync-reset", "--help"], "用法：codexc metrics sync-reset"],
       [["metrics", "cleanup", "--help"], "用法：codexc metrics cleanup"],
       [["metrics", "prune", "--help"], "用法：codexc metrics prune"],
       [["metrics", "report", "-h"], "用法：codexc metrics report"],
@@ -195,9 +194,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["channel", "-h"], "用法：codexc channel"],
       [["channel", "send-image", "--help"], "用法：codexc channel send-image"],
       [["webui", "-h"], "用法：codexc webui"],
-      [["center", "-h"], "用法：codexc center"],
-      [["center", "info", "--help"], "用法：codexc center info"],
-      [["center", "config", "-h"], "用法：codexc center config"],
       [["version", "-h"], "用法：codexc version"],
     ] as const;
 
@@ -254,10 +250,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       { args: ["doctor", "--help"], includes: ["codexc doctor [--json]"] },
       {
         args: ["--help"],
-        includes: [
-          "version, -v, --version",
-          "center                       启动或配置多设备指标中心",
-        ],
+        includes: ["version, -v, --version"],
       },
     ];
     await forEachWithConcurrency(detailedCases, 8, async ({ args, includes, excludes = [] }) => {
@@ -286,7 +279,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "metrics",
       "channel",
       "webui",
-      "center",
       "start",
       "service",
       "update",
@@ -2839,17 +2831,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["doctor", "--json", "unexpected"], "用法：codexc doctor [--json]"],
       [["service", "status", "--json", "gateway"], "用法：codexc service status"],
       [["service", "status", "gateway", "--json", "unexpected"], "用法：codexc service status"],
-      [["center", "--help", "unexpected"], "用法：codexc center"],
-      [["center", "info", "--help", "unexpected"], "用法：codexc center info"],
-      [["center", "info", "--json", "unexpected"], "用法：codexc center info"],
       [["metrics", "status", "--json", "unexpected"], "用法：codexc metrics status"],
-      [["center", "--unknown"], "未知参数：--unknown"],
-      [["center", "--host", "invalid"], "center host 只允许"],
-      [["center", "--token", "--unknown"], "不得通过命令行传入"],
-      [["center", "--device-token", "--unknown"], "不得通过命令行传入"],
-      [["center", "--database", "--unknown"], "用法：codexc center"],
-      [["center", "--token", "-token", "--host", "invalid"], "不得通过命令行传入"],
-      [["center", "--database", "-metrics.sqlite3", "--host", "invalid"], "center host 只允许"],
       [["webui", "--unknown"], "未知参数：--unknown"],
       [["webui", "--help", "unexpected"], "用法：codexc webui"],
       [["webui", "--host", "invalid"], "WebUI host 只允许"],
@@ -2904,8 +2886,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["agents", "status", "unexpected"], "用法：codexc agents"],
       [["agents", "configure"], "用法：codexc agents"],
       [["agents", "disable", "unexpected"], "用法：codexc agents"],
-      [["center", "info", "unexpected"], "用法：codexc center info"],
-      [["center", "config", "unexpected"], "用法：codexc center config"],
     ] as const) {
       const result = spawnSync(process.execPath, [cli, ...args], {
         cwd: root,
@@ -3389,92 +3369,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(start.status).toBe(1);
     expect(start.stderr).toContain("ENOENT");
     expect(readFileSync(systemctlLog, "utf8")).toBe(systemctlCallsBeforeStart);
-  });
-
-  it.skipIf(process.platform === "win32")("runs the metrics center info and non-interactive config subcommands", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-center-subcommands-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const workspace = join(root, "Workspace");
-    mkdirSync(workspace);
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-    };
-    execFileSync(process.execPath, [cli, "init"], {
-      cwd: workspace,
-      env: environment,
-    });
-
-    const info = spawnSync(process.execPath, [cli, "center", "info"], {
-      cwd: root,
-      env: environment,
-      encoding: "utf8",
-    });
-    expect(info.status, info.stderr).toBe(0);
-    expect(info.stdout).toContain("中心服务：");
-    expect(info.stdout).toContain("中心数据库：");
-
-    const jsonInfo = spawnSync(process.execPath, [cli, "center", "info", "--json"], {
-      cwd: root,
-      env: environment,
-      encoding: "utf8",
-    });
-    expect(jsonInfo.status, jsonInfo.stderr).toBe(0);
-    expect(JSON.parse(jsonInfo.stdout)).toMatchObject({
-      running: expect.any(Boolean),
-      host: "127.0.0.1",
-      port: 8790,
-      ingestEndpoints: ["http://127.0.0.1:8790/api/ingest"],
-      viewEndpoint: "http://127.0.0.1:8790",
-      viewTokenConfigured: false,
-      deviceTokenConfigured: false,
-      databasePath: expect.any(String),
-      configPath: expect.any(String),
-    });
-    expect(jsonInfo.stderr).toBe("");
-
-    const config = spawnSync(process.execPath, [cli, "center", "config"], {
-      cwd: root,
-      env: environment,
-      encoding: "utf8",
-    });
-    expect(config.status, config.stderr).toBe(0);
-    expect(config.stdout).toContain("中心服务设置保存在 [metrics.center] 段");
-  });
-
-  it("formats a metrics center info failure exactly once", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-center-info-error-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const workspace = join(root, "Workspace");
-    mkdirSync(workspace);
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-    };
-    execFileSync(process.execPath, [cli, "init"], {
-      cwd: workspace,
-      env: environment,
-    });
-    const configPath = join(home, "config.toml");
-    writeFileSync(
-      configPath,
-      `${readFileSync(configPath, "utf8")}\n[metrics.center]\nhost = "invalid"\n`,
-    );
-
-    const result = spawnSync(process.execPath, [cli, "center", "info"], {
-      cwd: root,
-      env: environment,
-      encoding: "utf8",
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("[metrics.center] 配置无效");
-    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
-    expect(result.stderr).not.toContain("子命令执行失败");
   });
 
   it("documents service maintenance commands in scoped help", () => {

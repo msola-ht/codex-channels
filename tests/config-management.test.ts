@@ -1,12 +1,10 @@
 import {
-  existsSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -30,24 +28,14 @@ afterEach(() => {
 });
 
 describe("Gateway Config management", () => {
-  it("normalizes legacy activation scopes for machine consumers", () => {
+  it("normalizes activation scopes for machine consumers", () => {
     expect(normalizeGatewayActivation("none")).toBe("none");
-    expect(normalizeGatewayActivation("restart-gateway-webui")).toBe("restart");
-    expect(normalizeGatewayActivation("restart-center")).toBe("restart");
     expect(normalizeGatewayActivation("reinstall-services")).toBe("reinstall-required");
     expect(normalizeGatewayActivation("reload")).toBe("reload");
     expect(normalizeGatewayActivation("unexpected")).toBe("failed");
   });
 
   it("projects activation scopes to stable targets and commands", () => {
-    expect(configActivationResult("restart-gateway-webui")).toEqual({
-      status: "restart",
-      target: "gateway+webui",
-      commands: [
-        "codexc service restart gateway",
-        "codexc service restart webui",
-      ],
-    });
     expect(configActivationResult("reload")).toEqual({
       status: "reload",
       target: "gateway",
@@ -143,25 +131,6 @@ describe("Gateway Config management", () => {
     expect(readGatewayConfig(fixture.configPath).conversation).toMatchObject({
       idle_release_minutes: 20,
     });
-  });
-
-  it("can validate a change without creating a backup artifact", () => {
-    const fixture = createFixture();
-    const settings = loadGatewaySettings(fixture.environment);
-    const before = readdirSync(dirname(fixture.configPath)).filter((entry) => entry.startsWith("config.toml.bak-"));
-    const result = updateGatewaySetting({
-      kind: "metrics.connect",
-      endpoint: "https://metrics.example",
-      deviceToken: "device-token",
-      viewToken: "view-token",
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-      writeConfig: () => undefined,
-      skipBackup: true,
-    });
-    expect(result.backupPath).toBeUndefined();
-    expect(readdirSync(dirname(fixture.configPath)).filter((entry) => entry.startsWith("config.toml.bak-"))).toEqual(before);
   });
 
   it("writes three proxy endpoints atomically", () => {
@@ -281,22 +250,6 @@ describe("Gateway Config management", () => {
     }));
   });
 
-  it("removes a metrics backup when the config write conflicts", () => {
-    const fixture = createFixture();
-    const settings = loadGatewaySettings(fixture.environment);
-
-    expect(() => updateGatewaySetting({
-      kind: "metrics.disconnect",
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-      writeConfig: () => {
-        throw new GatewayConfigConflictError();
-      },
-    })).toThrow(expect.objectContaining({ code: "stale-revision" }));
-    expect(readdirSync(dirname(fixture.configPath)).filter((name) => name.includes(".bak-"))).toEqual([]);
-  });
-
   it("manages WebUI settings without returning the access token", () => {
     const fixture = createFixture();
     const settings = loadGatewaySettings(fixture.environment);
@@ -314,87 +267,6 @@ describe("Gateway Config management", () => {
     const updated = loadGatewaySettings(fixture.environment);
     expect(updated.webui).toEqual({ host: "0.0.0.0", port: 8787, tokenConfigured: true });
     expect(JSON.stringify(updated)).not.toContain("private-webui-token");
-  });
-
-  it("connects metrics with a private backup and credential-free status", () => {
-    const fixture = createFixture();
-    const settings = loadGatewaySettings(fixture.environment);
-
-    const result = updateGatewaySetting({
-      kind: "metrics.connect",
-      endpoint: "http://127.0.0.1:8790",
-      deviceToken: "private-device-token",
-      viewToken: "private-view-token",
-      deviceId: "device-a",
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    });
-
-    expect(result.backupPath).toEqual(expect.any(String));
-    expect(result.activation).toBe("restart-gateway-webui");
-    expect(existsSync(result.backupPath!)).toBe(true);
-    const updated = loadGatewaySettings(fixture.environment);
-    expect(updated.metrics.sync).toMatchObject({
-      enabled: true,
-      endpoint: "http://127.0.0.1:8790/api/ingest",
-      deviceId: "device-a",
-      deviceTokenConfigured: true,
-    });
-    expect(updated.metrics.view).toMatchObject({
-      enabled: true,
-      endpoint: "http://127.0.0.1:8790",
-      tokenConfigured: true,
-    });
-    expect(JSON.stringify(updated)).not.toContain("private-device-token");
-    expect(JSON.stringify(updated)).not.toContain("private-view-token");
-  });
-
-  it("updates and clears the metrics device name without credentials", () => {
-    const fixture = createFixture();
-    let settings = loadGatewaySettings(fixture.environment);
-
-    const result = updateGatewaySetting({
-      kind: "metrics.sync-params",
-      deviceName: "  build-server  ",
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    });
-    expect(result).toMatchObject({
-      value: { sync: { deviceName: "build-server" } },
-      activation: "restart-gateway",
-    });
-    settings = loadGatewaySettings(fixture.environment);
-    expect(settings.metrics.sync.deviceName).toBe("build-server");
-
-    updateGatewaySetting({
-      kind: "metrics.sync-params",
-      deviceName: null,
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    });
-    expect(loadGatewaySettings(fixture.environment).metrics.sync.deviceName).toBeNull();
-
-    settings = loadGatewaySettings(fixture.environment);
-    expect(() => updateGatewaySetting({
-      kind: "metrics.sync-params",
-      deviceName: "x".repeat(129),
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    })).toThrow(expect.objectContaining({ code: "invalid-device-name", field: "deviceName" }));
-
-    const portResult = updateGatewaySetting({
-      kind: "metrics.center.port",
-      value: 9_001,
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    });
-    expect(portResult).toMatchObject({ value: { center: { port: 9_001 } }, activation: "restart-center" });
-    expect(loadGatewaySettings(fixture.environment).metrics.center.port).toBe(9_001);
   });
 
   it("updates Workspace permissions and returns a stable conflict", () => {
@@ -426,55 +298,6 @@ describe("Gateway Config management", () => {
     }));
   });
 
-  it("keeps metrics center tokens distinct", () => {
-    const fixture = createFixture();
-    let settings = loadGatewaySettings(fixture.environment);
-    updateGatewaySetting({
-      kind: "metrics.center.token",
-      field: "token",
-      action: "set",
-      value: "shared-token",
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    });
-    settings = loadGatewaySettings(fixture.environment);
-
-    expect(() => updateGatewaySetting({
-      kind: "metrics.center.token",
-      field: "device_token",
-      action: "set",
-      value: "shared-token",
-    }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    })).toThrow(expect.objectContaining({ code: "token-conflict" }));
-  });
-
-  it("generates two distinct center tokens", () => {
-    const fixture = createFixture();
-    const settings = loadGatewaySettings(fixture.environment);
-    updateGatewaySetting({ kind: "metrics.center.generate-tokens" }, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    });
-    const center = loadGatewaySettings(fixture.environment).metrics.center;
-    expect(center.tokenConfigured).toBe(true);
-    expect(center.deviceTokenConfigured).toBe(true);
-  });
-
-  it("rejects the removed center enable switch", () => {
-    const fixture = createFixture();
-    const settings = loadGatewaySettings(fixture.environment);
-
-    expect(() => updateGatewaySetting({
-      kind: "metrics.center.enabled",
-      value: true,
-    } as never, {
-      environment: fixture.environment,
-      expectedRevision: settings.revision,
-    })).toThrow(expect.objectContaining({ code: "unknown-setting" }));
-  });
 });
 
 function createFixture() {

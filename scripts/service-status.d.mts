@@ -1,5 +1,5 @@
 export interface ManagedServiceStatusEntry {
-  target: "gateway" | "app-server" | "webui" | "center";
+  target: "gateway" | "app-server" | "webui";
   name: string;
   identifier: string;
   loaded: boolean;
@@ -10,7 +10,7 @@ export interface ManagedServiceStatusEntry {
 
 export interface ManagedServiceStatus {
   platform: "systemd" | "launchd" | "windows";
-  target: "gateway" | "app-server" | "webui" | "center" | "all";
+  target: "gateway" | "app-server" | "webui" | "all";
   healthy: boolean;
   services: ManagedServiceStatusEntry[];
 }

@@ -15,7 +15,7 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
   const provider = options.provider;
   let cached = null;
   let inflight = null;
-  return async () => {
+  return async (signal) => {
     const nowMs = options.nowMs?.() ?? Date.now();
     if (cached !== null && nowMs < cached.expiresAtMs) {
       return cached.windows;
@@ -23,8 +23,14 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
     if (inflight === null) {
       inflight = (async () => {
         try {
-          const windows = await fetchQuotaWindows(environment, fetchImpl, provider);
+          const windows = await fetchQuotaWindows(
+            environment,
+            fetchImpl,
+            provider,
+            signal,
+          );
           if (windows === null) {
+            if (signal?.aborted) return null;
             cached = { windows: null, expiresAtMs: nowMs + fallbackCacheMs };
             return null;
           }
@@ -49,7 +55,7 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
   };
 }
 
-async function fetchQuotaWindows(environment, fetchImpl, provider) {
+async function fetchQuotaWindows(environment, fetchImpl, provider, signal) {
   let apiKey;
   try {
     apiKey = provider === undefined
@@ -66,7 +72,12 @@ async function fetchQuotaWindows(environment, fetchImpl, provider) {
         accept: "application/json",
         authorization: `Bearer ${apiKey}`,
       },
-      signal: globalThis.AbortSignal.timeout(requestTimeoutMs),
+      signal: signal === undefined
+        ? globalThis.AbortSignal.timeout(requestTimeoutMs)
+        : globalThis.AbortSignal.any([
+            signal,
+            globalThis.AbortSignal.timeout(requestTimeoutMs),
+          ]),
     });
   } catch {
     return null;

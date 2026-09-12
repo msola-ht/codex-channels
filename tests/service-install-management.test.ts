@@ -67,7 +67,6 @@ describe("service install management", () => {
       ["app-server", true],
       ["gateway", true],
       ["webui", false],
-      ["center", false],
     ]);
     expect(preview.services[0]?.destination).toBe(join(
       fixture.root,
@@ -111,7 +110,7 @@ describe("service install management", () => {
       fixture.environment,
       undefined,
     );
-    expect(writeDefinition).toHaveBeenCalledTimes(4);
+    expect(writeDefinition).toHaveBeenCalledTimes(3);
     for (const [, content] of writeDefinition.mock.calls) {
       expect(content).not.toMatch(/__[A-Z_]+__/u);
     }
@@ -204,7 +203,7 @@ describe("service install management", () => {
       fixture.root,
       "Library/LaunchAgents/com.hegenai.codex-app-server.plist",
     ));
-    expect(written).toHaveLength(4);
+    expect(written).toHaveLength(3);
     for (const file of written) {
       expect(file.path).toMatch(/\.plist$/u);
       expect(file.content).not.toMatch(/__[A-Z_]+__/u);
@@ -228,11 +227,11 @@ describe("service install management", () => {
       fixture.root,
       ".codex-connect/services/app-server.json",
     ));
-    expect(windowsWritten).toHaveLength(8);
+    expect(windowsWritten).toHaveLength(6);
     const definitions = windowsWritten.filter((file) => file.path.endsWith(".json"));
     const launchers = windowsWritten.filter((file) => file.path.endsWith(".vbs"));
-    expect(definitions).toHaveLength(4);
-    expect(launchers).toHaveLength(4);
+    expect(definitions).toHaveLength(3);
+    expect(launchers).toHaveLength(3);
     for (const file of definitions) {
       expect(file.content).not.toContain("must-not-leak");
       expect(JSON.parse(file.content)).toMatchObject({

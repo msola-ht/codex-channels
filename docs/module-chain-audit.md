@@ -74,11 +74,11 @@
 
 ## observability
 
-审查链路：`Provider Proxy/Turn 失败输入 → BufferedModelRequestMetricsWriter → SQLite 指标库 → 查询/聚合/Surface 展示`，以及 `MetricsSync → 脱敏批量上报 → 水位文件`。
+审查链路：`Provider Proxy/Turn 失败输入 → BufferedModelRequestMetricsWriter → SQLite 指标库 → 查询/聚合/Surface 展示`。
 
-本轮阅读 `logger.ts`、`request-metrics.ts`、`request-metrics-writer.ts`、SQLite Schema/Row Codec/Store、数据库锁、`metrics-sync.ts` 和公开导出。日志错误只保留受约束类型与机器码；指标写入队列有 10,000 条上限、关闭排空、检查点只等待当前水位；SQLite 使用独立锁、严格 Schema 和事务；同步载荷移除 `errorMessage`，仅在 2xx 后推进水位，并处理超时、429/5xx 和 `Retry-After`。未发现可由当前代码确认的新缺陷。
+本轮阅读 `logger.ts`、`request-metrics.ts`、`request-metrics-writer.ts`、SQLite Schema/Row Codec/Store、数据库锁和公开导出。日志错误只保留受约束类型与机器码；指标写入队列有 10,000 条上限、关闭排空、检查点只等待当前水位；SQLite 使用独立锁、严格 Schema 和事务。未发现可由当前代码确认的新缺陷。
 
-定向验证：`observability.test.ts`、`request-metrics-store.test.ts`、`request-metrics-writer.test.ts`、`metrics-sync.test.ts` 已通过。
+定向验证：`observability.test.ts`、`request-metrics-store.test.ts`、`request-metrics-writer.test.ts` 已通过。
 
 ## approval
 

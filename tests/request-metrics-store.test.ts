@@ -25,6 +25,23 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("persists a bounded request batch", () => {
+    const store = new SqliteModelRequestMetricsStore(
+      join(temporaryDirectory(), "request-metrics.sqlite3"),
+    );
+    store.recordBatch([
+      sample(),
+      { ...sample(), threadId: "thread-2", turnId: "turn-2" },
+    ]);
+
+    expect(store.count()).toBe(2);
+    expect(store.recent(2)).toEqual([
+      expect.objectContaining({ threadId: "thread-2", turnId: "turn-2" }),
+      expect.objectContaining({ threadId: "thread-1", turnId: "turn-1" }),
+    ]);
+    store.close();
+  });
+
   it("幂等保存并读取最新官方账户快照", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"));
@@ -56,6 +73,31 @@ describe("SqliteModelRequestMetricsStore", () => {
     });
     expect(store.latestAccountSnapshots!()).toHaveLength(1);
     store.close();
+  });
+
+  it("cleans expired account snapshots when a source is refreshed", () => {
+    const path = join(temporaryDirectory(), "request-metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path, Date.now(), { retentionDays: 1 });
+    const writeSnapshot = (observedAtMs: number) => store.upsertAccountSnapshot!({
+      sourceId: "deepseek:default",
+      provider: "deepseek",
+      accountId: null,
+      displayName: "DeepSeek",
+      enabled: true,
+      observedAtMs,
+      available: true,
+      usage: { kind: "balance", provider: "deepseek", available: true, balances: [] },
+      limits: { kind: "unsupported", provider: "deepseek" },
+    });
+    writeSnapshot(1_700_000_000_000);
+    writeSnapshot(1_700_172_800_000);
+    store.close();
+
+    const database = new DatabaseSync(path, { readOnly: true });
+    const row = database.prepare("SELECT COUNT(*) AS count FROM account_snapshots")
+      .get() as { count: number };
+    database.close();
+    expect(row.count).toBe(1);
   });
 
   it("persists complete sanitized request metrics in a private standalone database", () => {

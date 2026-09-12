@@ -448,16 +448,103 @@ describe("ProviderProxy", () => {
     });
   });
 
+  it("does not wait for quota refresh before forwarding a completed response", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(sse("response.completed", {
+          type: "response.completed",
+          response: { model: "deepseek-v4-flash", status: "completed", usage: null },
+        }));
+      });
+    });
+    await new Promise<void>((resolveListen) => {
+      upstream.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => {
+        upstream.close(() => resolveClose());
+      }),
+    });
+
+    let resolveQuota: (
+      windows: readonly { windowId: string; resetsAt: number | null }[] | null,
+    ) => void = () => undefined;
+    const quota = new Promise<
+      readonly { windowId: string; resetsAt: number | null }[] | null
+    >((resolve) => {
+      resolveQuota = resolve;
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      quotaWindowsProvider: () => quota,
+      onMetrics: (metric) => {
+        metrics.push(metric);
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    await new Promise<void>((resolveResponse, rejectResponse) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: Number(proxy.address().split(":")[1]),
+        path: "/responses",
+        method: "POST",
+      }, (response) => {
+        response.resume();
+        response.on("end", resolveResponse);
+        response.on("error", rejectResponse);
+      });
+      request.on("error", rejectResponse);
+      request.end("{}");
+    });
+
+    expect(metrics).toEqual([expect.objectContaining({
+      status: "completed",
+      quotaWindows: null,
+    })]);
+    resolveQuota(null);
+  });
+
+  it("cancels an active quota refresh when the proxy closes", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: 1,
+      upstreamProtocol: "http",
+      quotaWindowsProvider: (_accountId, signal) => {
+        observedSignal = signal;
+        if (!signal) return Promise.resolve(null);
+        return new Promise((resolve) => {
+          signal.addEventListener("abort", () => resolve(null), { once: true });
+        });
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal?.aborted).toBe(false);
+    await proxy.close();
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
   it("recognizes SSE metadata when the upstream omits Content-Type", async () => {
     const upstream = createServer((request, response) => {
       request.resume();
       request.on("end", () => {
         response.writeHead(200);
         response.end(sse("response.completed", {
-          type: "response.completed",
           response: {
             model: "gpt-5.6-sol",
             status: "completed",
+            output: [{ type: "message" }],
             usage: {
               input_tokens: 120,
               input_tokens_details: { cached_tokens: 100 },
@@ -648,7 +735,7 @@ describe("ProviderProxy", () => {
     })]);
   });
 
-  it("forwards requests with a rewritten host and records reasoning/output timing", async () => {
+  it("forwards requests with a rewritten host and records terminal usage", async () => {
     const received: Array<{
       host: string;
       authorization: string;
@@ -772,25 +859,14 @@ describe("ProviderProxy", () => {
       outputTokens: 30,
       reasoningOutputTokens: 10,
       totalTokens: 150,
-      upstreamCreatedAt: 1_785_640_800,
-      upstreamCompletedAt: 1_785_640_801,
+      upstreamCreatedAt: null,
+      upstreamCompletedAt: null,
+      firstTokenAtMs: null,
+      firstReasoningDeltaAtMs: null,
+      lastReasoningDeltaAtMs: null,
+      firstOutputDeltaAtMs: null,
+      lastOutputDeltaAtMs: null,
     });
-    if (
-      metric.firstTokenAtMs === null
-      || metric.firstReasoningDeltaAtMs === null
-      || metric.lastReasoningDeltaAtMs === null
-      || metric.firstOutputDeltaAtMs === null
-      || metric.lastOutputDeltaAtMs === null
-    ) {
-      throw new Error("缺少模型流时间戳");
-    }
-    expect(metric.firstTokenAtMs).toBe(metric.firstReasoningDeltaAtMs);
-    expect(metric.lastReasoningDeltaAtMs - metric.firstReasoningDeltaAtMs)
-      .toBeGreaterThan(0);
-    expect(metric.lastOutputDeltaAtMs).toBe(metric.firstOutputDeltaAtMs);
-    expect(metric.responseCompletedAtMs).toBeGreaterThanOrEqual(
-      metric.lastOutputDeltaAtMs,
-    );
     expect(received).toHaveLength(1);
     expect(received[0]?.host).toBe(`127.0.0.1:${upstreamAddress.port}`);
     expect(received[0]?.authorization).toBe("Bearer sk-test1234");
@@ -866,8 +942,8 @@ describe("ProviderProxy", () => {
       outputTokens: 50,
       reasoningOutputTokens: 20,
       totalTokens: 550,
-      upstreamCreatedAt: 1_785_640_800,
-      upstreamCompletedAt: 1_785_640_802,
+      upstreamCreatedAt: null,
+      upstreamCompletedAt: null,
     })]);
     expect(JSON.stringify(metrics)).not.toContain("不得进入指标");
     expect(JSON.stringify(metrics)).not.toContain("response-private-id");
@@ -935,7 +1011,7 @@ describe("ProviderProxy", () => {
     })]);
   });
 
-  it("records function call argument deltas as model output timing", async () => {
+  it("forwards function call argument deltas without timing them", async () => {
     const upstream = createServer((request, response) => {
       request.resume();
       request.on("end", () => {
@@ -1005,17 +1081,17 @@ describe("ProviderProxy", () => {
       threadId: "thread-function",
       turnId: "turn-function",
     });
-    expect(metrics[0]?.firstTokenAtMs).not.toBeNull();
-    expect(metrics[0]?.firstOutputDeltaAtMs).not.toBeNull();
-    expect(metrics[0]?.lastOutputDeltaAtMs).not.toBeNull();
+    expect(metrics[0]?.firstTokenAtMs).toBeNull();
+    expect(metrics[0]?.firstOutputDeltaAtMs).toBeNull();
+    expect(metrics[0]?.lastOutputDeltaAtMs).toBeNull();
   });
 
-  it("waits for reasoning metrics before forwarding the first visible output", async () => {
+  it("forwards ordinary deltas before waiting for terminal metrics", async () => {
     const upstream = createServer((request, response) => {
       request.resume();
       request.on("end", () => {
         response.writeHead(200, { "content-type": "text/event-stream" });
-        response.end([
+        response.write([
           sse("response.reasoning_text.delta", {
             type: "response.reasoning_text.delta",
             delta: "思考",
@@ -1024,11 +1100,13 @@ describe("ProviderProxy", () => {
             type: "response.output_text.delta",
             delta: "OK",
           }),
+        ].join(""));
+        setTimeout(() => response.end(
           sse("response.completed", {
             type: "response.completed",
             response: { id: "r1", usage: null },
           }),
-        ].join(""));
+        ), 20);
       });
     });
     await new Promise<void>((resolveListen) => {
@@ -1062,6 +1140,10 @@ describe("ProviderProxy", () => {
     openServers.push(proxy);
 
     let responseBody = "";
+    let resolveVisibleOutput: () => void = () => undefined;
+    const visibleOutput = new Promise<void>((resolve) => {
+      resolveVisibleOutput = resolve;
+    });
     const proxyPort = Number(proxy.address().split(":")[1]);
     const completed = new Promise<void>((resolveResponse, rejectResponse) => {
       const request = httpRequest({
@@ -1078,6 +1160,7 @@ describe("ProviderProxy", () => {
       }, (response) => {
         response.on("data", (chunk: Buffer) => {
           responseBody += chunk.toString("utf8");
+          if (responseBody.includes("OK")) resolveVisibleOutput();
         });
         response.on("end", resolveResponse);
         response.on("error", rejectResponse);
@@ -1086,17 +1169,18 @@ describe("ProviderProxy", () => {
       request.end("{}");
     });
 
+    await visibleOutput;
+    expect(responseBody).toContain("OK");
     await metricsStarted;
     let responseCompleted = false;
     void completed.then(() => {
       responseCompleted = true;
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
-    expect(responseBody).toBe("");
     expect(responseCompleted).toBe(false);
     acknowledgeMetrics();
     await completed;
-    expect(responseBody).toContain("OK");
+    expect(responseBody).toContain("response.completed");
   });
 
   it("waits for reasoning metrics before forwarding a completion without visible text", async () => {
@@ -1260,7 +1344,20 @@ describe("ProviderProxy", () => {
           delta: "thinking",
         }));
         socket.send(JSON.stringify({ type: "response.output_text.delta", delta: "OK" }));
-        socket.send(JSON.stringify({ type: "response.completed", response: { id: "r1" } }));
+        socket.send(JSON.stringify({
+          response: {
+            id: "r1",
+            output: [{ type: "message" }],
+            usage: {
+              input_tokens: 120,
+              input_tokens_details: { cached_tokens: 80 },
+              output_tokens: 30,
+              output_tokens_details: { reasoning_tokens: 10 },
+              total_tokens: 150,
+            },
+          },
+          type: "response.completed",
+        }));
       });
     });
     await new Promise<void>((resolveListen) => {
@@ -1337,10 +1434,16 @@ describe("ProviderProxy", () => {
         resetsAt: 1_786_233_600,
         planType: "plus",
       },
+      status: "completed",
+      inputTokens: 120,
+      cachedInputTokens: 80,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
+      totalTokens: 150,
     });
-    expect(metrics[0]?.firstTokenAtMs).not.toBeNull();
-    expect(metrics[0]?.firstReasoningDeltaAtMs).not.toBeNull();
-    expect(metrics[0]?.firstOutputDeltaAtMs).not.toBeNull();
+    expect(metrics[0]?.firstTokenAtMs).toBeNull();
+    expect(metrics[0]?.firstReasoningDeltaAtMs).toBeNull();
+    expect(metrics[0]?.firstOutputDeltaAtMs).toBeNull();
   });
 
   it("does not record WebSocket startup prewarm as a model request", async () => {

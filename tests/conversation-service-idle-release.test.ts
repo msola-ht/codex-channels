@@ -102,7 +102,6 @@ function createService({
       }),
     } as never,
     undefined,
-    undefined,
     pendingSubagent ? () => true : undefined,
   );
 }

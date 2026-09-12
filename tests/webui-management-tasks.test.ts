@@ -33,11 +33,11 @@ describe("WebUI management tasks", () => {
       target: "deepseek",
       effects: ["执行 codexc metrics prune deepseek"],
       preconditions: [],
-      activation: "按操作前状态恢复 Gateway 和指标中心",
+      activation: "按操作前状态恢复 Gateway",
     });
     expect(runner.preview({ operation: "metrics", action: "cleanup" })).toMatchObject({
       preconditions: ["Gateway 必须已停止，且指标 Socket 不可用"],
-      recovery: expect.stringContaining("同步水位备份"),
+      recovery: expect.stringContaining("指标数据库备份"),
     });
   });
 

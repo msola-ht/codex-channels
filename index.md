@@ -12,11 +12,10 @@
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
 - [`docs/webui-settings-plan.md`](docs/webui-settings-plan.md)：WebUI 设置页、CLI 可视化边界、管理接口阶段与验收计划。
 - [`docs/webui-data-unification-plan.md`](docs/webui-data-unification-plan.md)：官方账户数据、Gateway 统计、计算结果、WebUI 与渠道卡片的统一数据链路和分阶段改造步骤。
-- [`docs/metrics-sync.md`](docs/metrics-sync.md)：多设备指标增量同步的本地配置、载荷与边界。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
 - [`docs/cli-audit.md`](docs/cli-audit.md)：CLI 全链路逐命令审查记录与后续统一修复依据。
-- [`docs/config-unification-plan.md`](docs/config-unification-plan.md)：配置格式、交互文案、生命周期、数据中心和 WebUI 的分阶段统一改造计划。
+- [`docs/config-unification-plan.md`](docs/config-unification-plan.md)：配置格式、交互文案、生命周期和 WebUI 的分阶段统一改造计划。
 - [`docs/module-chain-audit.md`](docs/module-chain-audit.md)：按一级模块逐个记录的链路审查结果与待审查顺序。
 
 ## 发行记录
@@ -66,7 +65,6 @@
 - [`src/surfaces/README.md`](src/surfaces/README.md)：通讯渠道公共边界。
 - [`bin/README.md`](bin/README.md)：npm CLI 入口。
 - [`runtime/README.md`](runtime/README.md)：CLI 与 Gateway 共享运行时。
-- [`cloudflare/README.md`](cloudflare/README.md)：曾用的 Cloudflare Worker + D1 + Pages 中心方案（已停用，保留参考）。
 - [`scripts/README.md`](scripts/README.md)：配置、构建、验证和服务脚本。
 - [`tests/README.md`](tests/README.md)：测试范围与集成验证。
 - [`launchd/README.md`](launchd/README.md)：macOS 服务模板与控制。

@@ -20,7 +20,7 @@ show_logs() {
   follow=0
   lines=100
   service=gateway
-  if [ "$#" -gt 0 ] && { [ "$1" = "gateway" ] || [ "$1" = "app-server" ] || [ "$1" = "webui" ] || [ "$1" = "center" ] || [ "$1" = "all" ]; }; then
+  if [ "$#" -gt 0 ] && { [ "$1" = "gateway" ] || [ "$1" = "app-server" ] || [ "$1" = "webui" ] || [ "$1" = "all" ]; }; then
     service=$1
     shift
   fi
@@ -98,10 +98,10 @@ ensure_linger() {
 
 require_target() {
   case "$1" in
-    gateway|app-server|webui|center|all)
+    gateway|app-server|webui|all)
       ;;
     *)
-      print_status failure "服务目标必须是 gateway、app-server、webui、center 或 all：$1"
+      print_status failure "服务目标必须是 gateway、app-server、webui 或 all：$1"
       return 2
       ;;
   esac
@@ -118,7 +118,6 @@ case "$action" in
     print_status note "Codex App Server 与 Gateway systemd 用户服务已安装，启动操作已完成，正在确认就绪状态。"
     print_status note "systemd linger 已启用，未登录时也会随系统启动。"
     print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
-    print_status note "指标中心服务已生成，可执行 codexc service start center 启动。"
     ;;
   start)
     target=${2:-all}
@@ -140,7 +139,6 @@ case "$action" in
       gateway) print_status note "Gateway 启动操作已完成，正在确认就绪状态。" ;;
       app-server) print_status note "Codex App Server 启动操作已完成，正在确认就绪状态。" ;;
       webui) print_status success "WebUI 已启动。" ;;
-      center) print_status success "指标中心已启动。" ;;
       all) print_status note "Codex App Server 与 Gateway 启动操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
@@ -164,7 +162,6 @@ case "$action" in
       gateway) print_status success "Gateway 已停止。" ;;
       app-server) print_status success "Codex App Server 已停止。" ;;
       webui) print_status success "WebUI 已停止。" ;;
-      center) print_status success "指标中心已停止。" ;;
       all) print_status success "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
@@ -188,7 +185,6 @@ case "$action" in
       gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
       app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
       webui) print_status success "WebUI 已重启。" ;;
-      center) print_status success "指标中心已重启。" ;;
       all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
@@ -222,8 +218,7 @@ case "$action" in
   uninstall)
     resolved_units=$(service_ids all stop)
     webui_unit=$(service_ids webui stop)
-    center_unit=$(service_ids center stop)
-    set -- $resolved_units "$webui_unit" "$center_unit"
+    set -- $resolved_units "$webui_unit"
     if ! systemctl_user disable --now "$@"; then
       print_status failure "systemd 服务未能停止或禁用，已保留服务定义以便排查。"
       exit 1
@@ -231,11 +226,11 @@ case "$action" in
     for unit in "$@"; do rm -f "$units_dir/$unit"; done
     systemctl_user daemon-reload
     systemctl_user reset-failed "$@" 2>/dev/null || true
-    print_status success "Codex App Server、Gateway、WebUI 与指标中心 systemd 用户服务已卸载。"
+    print_status success "Codex App Server、Gateway 与 WebUI systemd 用户服务已卸载。"
     print_status note "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   *)
-    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|center|all]"
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|all]"
     exit 2
     ;;
 esac

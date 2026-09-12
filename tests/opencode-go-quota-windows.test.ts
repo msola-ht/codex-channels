@@ -146,6 +146,55 @@ describe("OpenCode Go quota windows provider", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it("does not cache an actively cancelled usage request", async () => {
+    const codexHome = await createCodexHome();
+    let requestSignal: AbortSignal | undefined;
+    let requestCount = 0;
+    const fetchImpl = vi.fn((_input: URL | RequestInfo, init?: RequestInit) => {
+      requestCount += 1;
+      if (requestCount > 1) {
+        return Promise.resolve(new Response(JSON.stringify({
+          usage: {
+            rolling: {
+              status: "ok",
+              percent: 45,
+              resetsAt: "2026-09-15T10:22:00.000Z",
+            },
+          },
+        }), { status: 200 }));
+      }
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener(
+          "abort",
+          () => reject(requestSignal?.reason),
+          { once: true },
+        );
+      });
+    });
+    const provider = createOpencodeGoQuotaWindowsProvider({
+      environment: testEnvironment(codexHome),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const controller = new AbortController();
+
+    const pending = provider(controller.signal);
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    controller.abort();
+
+    await expect(pending).resolves.toBeNull();
+    expect(requestSignal?.aborted).toBe(true);
+    await expect(provider()).resolves.toEqual([
+      {
+        windowId: "rolling",
+        resetsAt: Math.floor(Date.parse("2026-09-15T10:22:00.000Z") / 1_000),
+        usedPercentMillionths: 45_000_000,
+        status: "ok",
+      },
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("backs off when the usage response has no usable windows", async () => {
     const codexHome = await createCodexHome();
     let nowMs = Date.parse("2026-08-17T14:00:00.000Z");

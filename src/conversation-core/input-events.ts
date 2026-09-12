@@ -12,7 +12,7 @@ import type {
 } from "./events.js";
 
 export type ConversationInputEvent =
-  | { type: "turn.started"; threadId: string; turnId: string; receivedAtMs?: number }
+  | { type: "turn.started"; threadId: string; turnId: string }
   | {
       type: "thread.tokenUsage.updated";
       threadId: string;
@@ -43,7 +43,6 @@ export type ConversationInputEvent =
       turnId: string;
       itemId: string;
       text: string;
-      receivedAtMs?: number;
     }
   | {
       type: "item.agentMessage.completed";
@@ -74,18 +73,12 @@ export type ConversationInputEvent =
       turnId: string;
       operation?: "response" | "compact";
       model?: string;
-      requestStartedAtMs: number;
-      requestDurationMs: number;
       outcome?: "completed" | "interrupted" | "incomplete" | "failed";
       retryableFailure?: boolean;
       inputTokens?: number;
       cachedInputTokens?: number;
       outputTokens?: number;
       reasoningOutputTokens?: number;
-      ttftMs?: number;
-      thinkingDurationMs?: number;
-      outputDurationMs?: number;
-      generationDurationMs?: number;
     }
   | {
       type: "item.userMessage";

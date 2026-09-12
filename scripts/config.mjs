@@ -27,8 +27,6 @@ import {
   runNetworkSettings,
 } from "./config-advanced-menu.mjs";
 
-export { runCenterSettings } from "./metrics-config-menu.mjs";
-
 export async function runConfig({
   environment = process.env,
   input = process.stdin,
@@ -37,7 +35,6 @@ export async function runConfig({
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
   debugSetup = runDebugSetup,
-  restartCenter,
   restartGateway,
   restartWebui,
   stayOnMenu = false,
@@ -74,7 +71,7 @@ export async function runConfig({
         { value: "network", label: "网络代理", hint: "显式 HTTP、HTTPS、通用代理与直连规则" },
         { value: "advanced", label: "高级设置", hint: "日志等级与开发中功能" },
         { value: "webui", label: "WebUI 设置", hint: "监听地址、端口与访问令牌" },
-        { value: "metrics", label: "数据中心", hint: "本机上报、全局查询与中心服务" },
+        { value: "metrics", label: "指标存储", hint: "本地保留天数与最大记录数" },
         ...(telegramConfigured
           ? [{ value: "message_format", label: "Telegram 消息格式", hint: "html 或 rich" }]
           : []),
@@ -91,7 +88,6 @@ export async function runConfig({
       output,
       prompts,
       writeConfig,
-      restartCenter,
       restartGateway,
       restartWebui,
     };
@@ -156,10 +152,6 @@ export async function runConfig({
   }
 }
 
-export function restartMetricsCenter(environment = process.env) {
-  return restartServiceTarget("center", environment);
-}
-
 export function restartServiceTarget(target, environment = process.env) {
   return new Promise((resolve, reject) => {
     const invocation = resolveExecutableInvocation(
@@ -220,7 +212,6 @@ if (
   } else {
     runConfig({
       json,
-      restartCenter: () => restartMetricsCenter(process.env),
       restartGateway: () => restartServiceTarget("gateway", process.env),
       restartWebui: () => restartServiceTarget("webui", process.env),
       stayOnMenu: true,

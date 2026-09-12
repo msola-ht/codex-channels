@@ -12,7 +12,7 @@ export interface ServiceInstallPreview {
   serviceManager: "systemd" | "launchd" | "windows";
   configPath: string;
   services: Array<{
-    target: "gateway" | "app-server" | "webui" | "center";
+    target: "gateway" | "app-server" | "webui";
     displayName: string;
     identifier: string;
     destination: string;

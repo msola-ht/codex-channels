@@ -18,7 +18,8 @@
   Client 时只终止对应 Proxy，不终止独立 App Server。
 - `stdio-transport.ts`：用于受控开发和测试场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
-  initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；初始化期间
+  initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；通知不附加本地接收时间戳。
+  初始化期间
   通过组合根注入 `clientInfo`，`[codex].client_identity` 可自定义 name/title/version，缺省保持
   `codex_connect`；
   已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。

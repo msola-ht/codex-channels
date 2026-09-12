@@ -1,12 +1,5 @@
 import type {
-  DeepseekBalanceResponse,
   ErrorsResponse,
-  GlobalDailyResponse,
-  GlobalDevicesResponse,
-  GlobalOverviewResponse,
-  GlobalQuotaResponse,
-  GlobalRequestsResponse,
-  OpencodeGoUsageResponse,
   OfficialAccountSnapshotsResponse,
   OverviewResponse,
   RangeName,
@@ -321,95 +314,18 @@ export function applyManagementAccountSettings(
   }, signal)
 }
 
-export function fetchDeepseekBalance(
-  signal?: AbortSignal,
-): Promise<DeepseekBalanceResponse> {
-  return getJson<DeepseekBalanceResponse>(
-    `${API_PREFIX}/deepseek-balance`,
-    signal,
-  )
-}
-
-export function fetchOpencodeGoUsage(
-  signal?: AbortSignal,
-): Promise<OpencodeGoUsageResponse> {
-  return getJson<OpencodeGoUsageResponse>(
-    `${API_PREFIX}/opencode-go-usage`,
-    signal,
-  )
-}
-
 export function fetchOfficialAccountSnapshots(
   signal?: AbortSignal,
 ): Promise<OfficialAccountSnapshotsResponse> {
   return getJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
 }
 
-export function fetchGlobalOverview(
-  device: string | null,
+export function refreshOfficialAccountSnapshot(
+  provider: string,
   signal?: AbortSignal,
-): Promise<GlobalOverviewResponse> {
-  const query = device === null ? "" : `?device=${encodeURIComponent(device)}`
-  return getJson<GlobalOverviewResponse>(
-    `${API_PREFIX}/global/overview${query}`,
-    signal,
-  )
-}
-
-export function fetchGlobalDevices(
-  signal?: AbortSignal,
-): Promise<GlobalDevicesResponse> {
-  return getJson<GlobalDevicesResponse>(
-    `${API_PREFIX}/global/devices`,
-    signal,
-  )
-}
-
-export function fetchGlobalDaily(
-  device: string | null,
-  days: number,
-  signal?: AbortSignal,
-): Promise<GlobalDailyResponse> {
-  const query = [
-    `days=${days}`,
-    device === null ? null : `device=${encodeURIComponent(device)}`,
-  ].filter(Boolean).join("&")
-  return getJson<GlobalDailyResponse>(
-    `${API_PREFIX}/global/daily?${query}`,
-    signal,
-  )
-}
-
-export function fetchGlobalQuota(
-  days: number,
-  device: string | null = null,
-  signal?: AbortSignal,
-): Promise<GlobalQuotaResponse> {
-  const query = new URLSearchParams({ days: String(days) })
-  if (device !== null) query.set("device", device)
-  return getJson<GlobalQuotaResponse>(
-    `${API_PREFIX}/global/quota?${query.toString()}`,
-    signal,
-  )
-}
-
-export function fetchGlobalRequests(
-  limit: number,
-  device: string | null,
-  offset: number,
-  sort: string,
-  direction: string,
-  signal?: AbortSignal,
-): Promise<GlobalRequestsResponse> {
-  const query = [
-    `limit=${limit}`,
-    device === null ? null : `device=${encodeURIComponent(device)}`,
-    offset > 0 ? `offset=${offset}` : null,
-    `sort=${encodeURIComponent(sort)}`,
-    `direction=${encodeURIComponent(direction)}`,
-  ].filter(Boolean).join("&")
-  return getJson<GlobalRequestsResponse>(
-    `${API_PREFIX}/global/requests?${query}`,
-    signal,
-  )
+): Promise<OfficialAccountSnapshotsResponse> {
+  return requestJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/management/accounts/refresh`, {
+    method: "POST",
+    body: JSON.stringify({ provider }),
+  }, signal)
 }

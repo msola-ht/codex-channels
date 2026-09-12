@@ -169,25 +169,13 @@ function readWindowLocalTokens(
           monthlyWindowEndAtMs ?? nowMs,
         ],
       ];
-      for (const [windowId, currentResetsAt, startAtMs, endAtMs] of ranges) {
-        if (
-          Number.isFinite(startAtMs)
-          && Number.isFinite(endAtMs)
-          && endAtMs > startAtMs
-        ) {
-          tokens.set(
-            windowId,
-            readOpencodeGoTokens(
-              store,
-              windowId,
-              currentResetsAt,
-              startAtMs,
-              endAtMs,
-              provider,
-            ),
-          );
-        }
-      }
+      const validRanges = ranges.filter(([, , startAtMs, endAtMs]) =>
+        Number.isFinite(startAtMs)
+        && Number.isFinite(endAtMs)
+        && endAtMs > startAtMs);
+      const refreshed = new Map(validRanges.map(([windowId]) => [windowId, 0]));
+      readOpencodeGoTokens(store, validRanges, provider, refreshed);
+      for (const [windowId, total] of refreshed) tokens.set(windowId, total);
     } finally {
       store.close();
     }
@@ -220,51 +208,37 @@ function quotaWindowRange(
 
 function readOpencodeGoTokens(
   store: SqliteModelRequestMetricsStore,
-  windowId: string,
-  currentResetsAt: number | null,
-  startAtMs: number,
-  endAtMs: number,
+  ranges: ReadonlyArray<readonly [string, number | null, number, number]>,
   provider: string,
-): number {
-  let total = 0;
-  let offset = 0;
-  do {
-    const page = store.page({
-      startAtMs,
-      endAtMs,
-      offset,
-      limit: 500,
-      sortKey: "recordedAtMs",
-      sortDirection: "asc",
-      filter: provider,
-    });
-    for (const record of page.records) {
-      if (record.provider !== provider) continue;
-      if (!requestInQuotaWindow(
+  totals: Map<string, number>,
+): void {
+  if (ranges.length === 0) return;
+  const startAtMs = Math.min(...ranges.map(([, , start]) => start));
+  const endAtMs = Math.max(...ranges.map(([, , , end]) => end));
+  store.forEachProviderTokenMetric({ provider, startAtMs, endAtMs }, (record) => {
+    const totalTokens = record.totalTokens;
+    const tokens = (
+      totalTokens !== null
+      && Number.isSafeInteger(totalTokens)
+      && totalTokens >= 0
+    )
+      ? totalTokens
+      : record.inputTokens !== null && record.outputTokens !== null
+        ? record.inputTokens + record.outputTokens
+        : null;
+    if (tokens === null) return;
+    for (const [windowId, currentResetsAt, windowStartAtMs, windowEndAtMs] of ranges) {
+      if (requestInQuotaWindow(
         record,
         windowId,
         currentResetsAt,
-        startAtMs,
-        endAtMs,
+        windowStartAtMs,
+        windowEndAtMs,
       )) {
-        continue;
-      }
-      const totalTokens = record.totalTokens;
-      if (
-        totalTokens !== null
-        && Number.isSafeInteger(totalTokens)
-        && totalTokens >= 0
-      ) {
-        total += totalTokens;
-        continue;
-      }
-      if (record.inputTokens !== null && record.outputTokens !== null) {
-        total += record.inputTokens + record.outputTokens;
+        totals.set(windowId, (totals.get(windowId) ?? 0) + tokens);
       }
     }
-    offset = page.nextOffset ?? -1;
-  } while (offset >= 0);
-  return total;
+  });
 }
 
 function windowResetsAt(
@@ -291,10 +265,13 @@ function requestInQuotaWindow(
   endAtMs: number,
 ): boolean {
   const snapshot = record.quotaWindows?.find((window) => window.windowId === windowId);
+  const requestAtMs = record.requestStartedAtMs ?? record.recordedAtMs;
+  // 后台刷新前的缓存可能已过期；仅在请求开始时仍有效的快照可决定窗口归属。
   if (
     snapshot?.resetsAt !== null
     && snapshot?.resetsAt !== undefined
     && currentResetsAt !== null
+    && snapshot.resetsAt * 1_000 > requestAtMs
   ) {
     return snapshot.resetsAt === currentResetsAt;
   }

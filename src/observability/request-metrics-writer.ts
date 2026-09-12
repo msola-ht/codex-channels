@@ -5,7 +5,7 @@ import type {
 } from "./request-metrics.js";
 
 const maximumPendingRecords = 10_000;
-const maximumBatchSize = 1;
+const maximumBatchSize = 32;
 const flushDelayMs = 10;
 
 interface WriteCheckpoint {
@@ -40,7 +40,7 @@ export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWri
   }
 
   waitForCurrentWrites(threadId?: string, turnId?: string): Promise<boolean> {
-    const target = this.enqueuedCount;
+    const target = this.currentTarget(threadId, turnId);
     if (this.processedCount >= target) return Promise.resolve(true);
     return new Promise((resolve) => {
       this.checkpoints.push({ target, threadId, turnId, succeeded: true, resolve });
@@ -69,26 +69,61 @@ export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWri
     this.flushTimer.unref?.();
   }
 
-  private flushBatch(): void {
-    for (const sample of this.pending.splice(0, maximumBatchSize)) {
-      const sequence = this.processedCount + 1;
-      try {
-        this.store.record(sample);
-      } catch (error) {
-        for (const checkpoint of this.checkpoints) {
-          if (
-            sequence <= checkpoint.target
-            && (checkpoint.threadId === undefined
-              || checkpoint.threadId === sample.threadId)
-            && (checkpoint.turnId === undefined
-              || checkpoint.turnId === sample.turnId)
-          ) checkpoint.succeeded = false;
-        }
-        this.onError?.(asError(error));
-      } finally {
-        this.processedCount += 1;
-        this.resolveCheckpoints();
+  private currentTarget(threadId?: string, turnId?: string): number {
+    if (threadId === undefined) return this.enqueuedCount;
+    for (let index = this.pending.length - 1; index >= 0; index -= 1) {
+      const sample = this.pending[index]!;
+      if (
+        sample.threadId === threadId
+        && (turnId === undefined || sample.turnId === turnId)
+      ) {
+        return this.processedCount + index + 1;
       }
+    }
+    return this.processedCount;
+  }
+
+  private flushBatch(): void {
+    const samples = this.pending.splice(0, maximumBatchSize);
+    if (samples.length === 0) return;
+    const firstSequence = this.processedCount + 1;
+    try {
+      if (this.store.recordBatch) {
+        try {
+          this.store.recordBatch(samples);
+        } catch (error) {
+          this.markFailedSamples(samples, firstSequence);
+          this.onError?.(asError(error));
+        }
+      } else {
+        for (const [index, sample] of samples.entries()) {
+          try {
+            this.store.record(sample);
+          } catch (error) {
+            this.markFailedSamples([sample], firstSequence + index);
+            this.onError?.(asError(error));
+          }
+        }
+      }
+    } finally {
+      this.processedCount += samples.length;
+      this.resolveCheckpoints();
+    }
+  }
+
+  private markFailedSamples(
+    samples: readonly ModelRequestMetricSample[],
+    firstSequence: number,
+  ): void {
+    for (const checkpoint of this.checkpoints) {
+      if (firstSequence > checkpoint.target) continue;
+      const relevant = samples.some((sample, index) =>
+        firstSequence + index <= checkpoint.target
+        && (checkpoint.threadId === undefined
+          || checkpoint.threadId === sample.threadId)
+        && (checkpoint.turnId === undefined
+          || checkpoint.turnId === sample.turnId));
+      if (relevant) checkpoint.succeeded = false;
     }
   }
 

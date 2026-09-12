@@ -38,15 +38,6 @@ export type {
 } from "./request-metrics.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
 export {
-  MetricsSync,
-  MetricsSyncHttpError,
-  type MetricsSyncConfig,
-  type MetricsSyncOptions,
-  type MetricsSyncPayload,
-  type MetricsProviderIdentity,
-  type SyncedRequestMetric,
-} from "./metrics-sync.js";
-export {
   acquireRequestMetricsDatabaseLock,
   modelRequestMetricsSchemaVersion,
   ModelRequestMetricsDatabaseLockedError,

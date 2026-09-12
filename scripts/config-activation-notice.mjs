@@ -33,12 +33,6 @@ function activationNotice(activation) {
   if (activation.target === "webui") {
     return "配置已保存。WebUI 配置将在重启服务后生效：codexc service restart webui；CLI 参数优先于本配置。";
   }
-  if (activation.target === "center") {
-    return "配置已保存。数据中心配置将在重启中心服务后生效：codexc service restart center；未运行时将在下次启动生效。";
-  }
-  if (activation.target === "gateway+webui") {
-    return "配置已保存。Gateway 与 WebUI 将分别重启以应用新配置：codexc service restart gateway；codexc service restart webui；未运行的服务保持停止。";
-  }
   if (activation.target === "all") {
     return "配置已保存。请重启 Gateway 与 App Server：codexc service restart all";
   }

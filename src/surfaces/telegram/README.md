@@ -31,7 +31,8 @@
   使用独立的可编辑过程消息，不把整个 Turn 的操作堆到同一条消息；
   活动非终态流最多保留 100 个，单流正文最多保留 1,000,000 个 Unicode 字符并明确标记截断；
   每个 Turn 开始时发送共享确认；每轮状态卡复用共享生命周期字段，显示当前 Workspace Git
-  分支、官方 Turn 对话耗时、按 Token/性能分组的统计、当前 Goal、上下文压缩总次数和用量；最终回复默认使用兼容 HTML，也可选择
+  分支、模型请求与 Token 统计、当前 Goal、上下文压缩总次数和用量，不显示总耗时、首段回复延迟
+  或生成速度；最终回复默认使用兼容 HTML，也可选择
   Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本；完成的原生 `imageGeneration`
   PNG/JPEG 经过共享安全读取边界后使用 `sendPhoto` 静默发送，且不受操作过程显示档位影响。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。

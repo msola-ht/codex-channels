@@ -13,7 +13,6 @@ import {
   type DataTableColumn,
 } from "@/components/metrics/data-table"
 import {
-  formatSpeed,
   formatTime,
   formatTokens,
 } from "@/lib/format"
@@ -29,7 +28,6 @@ const COLUMN_LABELS: Record<string, string> = {
   failures: "失败",
   input: "输入 Token",
   output: "输出 Token",
-  speed: "速度",
   compact: "压缩",
 }
 
@@ -184,19 +182,6 @@ export function TurnTable({ turns }: { turns: TurnSummary[] }) {
           </Tooltip>
         )
       },
-    },
-    {
-      id: "speed",
-      accessorFn: (turn) =>
-        turn.outputTokensPerSecond ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>速度</SortableHeader>
-      ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">
-          {formatSpeed(row.original.outputTokensPerSecond)}
-        </span>
-      ),
     },
     {
       id: "compact",

@@ -206,7 +206,7 @@ export class ConversationCore {
         this.disposeReasoning(event.threadId);
         this.timingByThread.set(
           event.threadId,
-          new TurnTimingAccumulator(event.turnId, event.receivedAtMs),
+          new TurnTimingAccumulator(event.turnId),
         );
         const target = this.router.targetForThread(event.threadId);
         if (target) {
@@ -277,14 +277,6 @@ export class ConversationCore {
         this.clearReasoning(event.threadId, event.turnId);
         const key = this.itemKey(event.threadId, event.turnId, event.itemId);
         const phase = this.phaseByItem.get(key);
-        if (event.receivedAtMs !== undefined) {
-          this.timingByThread.get(event.threadId)?.recordAgentMessageDelta(
-            event.turnId,
-            key,
-            event.receivedAtMs,
-            phase === "final_answer",
-          );
-        }
         this.publishForThread(event.threadId, {
           type: "text.delta",
           threadId: event.threadId,
@@ -434,7 +426,6 @@ export class ConversationCore {
         const contextCompactionCount = this.contextCompactionCount(event.threadId);
         const timing = this.timingByThread.get(event.threadId)?.output(
           event.turnId,
-          supportsDetailedModelTiming(modelSettings?.modelProvider),
           tokenUsage?.last,
         );
         this.timingByThread.delete(event.threadId);
@@ -784,11 +775,6 @@ export class ConversationCore {
   private key(target: ConversationTarget): string {
     return conversationTargetKey(target);
   }
-}
-
-function supportsDetailedModelTiming(modelProvider: string | undefined): boolean {
-  return modelProvider === "deepseek"
-    || (typeof modelProvider === "string" && modelProvider.startsWith("ocg-"));
 }
 
 function rateLimitNoticeFingerprint(snapshot: RateLimitSnapshot): string | undefined {

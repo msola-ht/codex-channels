@@ -292,7 +292,7 @@ export function toStoredCompactSummary(
   };
 }
 
-function parseQuotaWindows(
+export function parseQuotaWindows(
   value: string | null,
 ): ReadonlyArray<{
   windowId: string;

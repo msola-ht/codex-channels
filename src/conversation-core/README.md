@@ -10,23 +10,18 @@
   `durationMs` 与 Router 已确认的 Workspace、`modelProvider`；普通前台用户 Turn 在官方成功终态前
   未产生非空最终回复时附加稳定诊断标记，手动压缩和后台 Turn 不参与该判断；结构化
   `misalignmentPolicyViolation` 只以窄分类
-  传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定计时输入交给
-  `turn-timing-accumulator.ts`，不读取 SQLite；
-  三类综合速度只聚合同时具有对应
-  Token 和流式时间窗的请求，并携带已计时请求数与可计速请求数，避免缺失时间窗时虚高。OpenAI 不展示
-  隐藏推理计时，DeepSeek 才提供最后请求首事件延迟（渠道在调试模式开启时展示）以及整轮综合思考与生成速度；所有 Provider 使用
-  App Server 增量展示首段回复延迟。代理缺席时仍由 Client
-  通知边界时间戳和 App Server 最近 Usage 提供有限回退；
+  传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定请求统计输入
+  交给 `turn-timing-accumulator.ts`，不读取 SQLite。完成卡片只消费请求结果、Token 与压缩摘要，
+  统计摘要不计算或携带总耗时、首段回复延迟或生成速度；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
   不污染最终完成状态，Thread 与全局 warning 分开路由；MCP OAuth 完成结果按 Thread 精确投递，
   无 Thread 的结果只广播给相同 Provider 的会话。
-- `turn-timing-accumulator.ts`：按单个 Turn 累加模型请求结果、Token、压缩与流式时间窗，
-  生成稳定 `TurnOutputTiming`；不路由 Thread、不发布事件、不读取数据库或 Provider 配置。
+- `turn-timing-accumulator.ts`：按单个 Turn 累加模型请求结果、Token 与压缩摘要；不追踪文本增量时间，
+  不路由 Thread、不发布事件、不读取数据库或 Provider 配置。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型；其中 `turn.modelTiming.updated` 由 Bootstrap 把模型代理的
-  模型流与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求，并单独保留请求时间
-  最新一次的首事件延迟；上下文压缩还按操作类型归约模型与 Token 摘要，供完成卡片单列；
-  根据 Provider 能力计算通用或详细聚合计时。
+  终态与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求；上下文压缩还按操作
+  类型归约模型与 Token 摘要，供完成卡片单列。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP OAuth 类型，以及
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；`turn.reasoning`
   输出只携带“思考中…”状态、每段独立耗时与最终标记，不携带摘要或原始思维链内容；同一 Thread

@@ -13,18 +13,6 @@ export function formatTokens(value: number | null | undefined): string {
   return value.toLocaleString("zh-CN")
 }
 
-export function formatDuration(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—"
-  if (value >= 60_000) return `${(value / 60_000).toFixed(1)}分`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}秒`
-  return `${Math.round(value)}毫秒`
-}
-
-export function formatSpeed(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—"
-  return `${value.toFixed(1)} tok/s`
-}
-
 export function formatTime(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—"
   const date = new Date(value)

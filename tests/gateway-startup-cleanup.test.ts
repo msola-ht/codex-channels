@@ -90,9 +90,6 @@ function createRestoreApplication(options: {
       start: async () => undefined,
       close: async () => undefined,
     },
-    metricsSync: {
-      close: async () => undefined,
-    },
     stopping: false,
     queueLifecycleTasks: new Set<Promise<void>>(),
     disconnectedProviders: new Set<string>(),
@@ -429,9 +426,6 @@ describe("GatewayApplication startup cleanup", () => {
         transport: { kind: "unix-websocket" },
         providerMetrics: {
           start: async () => undefined,
-          close: async () => undefined,
-        },
-        metricsSync: {
           close: async () => undefined,
         },
         stopping: false,
@@ -949,9 +943,6 @@ describe("GatewayApplication startup cleanup", () => {
         start: async () => undefined,
         close: async () => undefined,
       },
-      metricsSync: {
-        close: async () => undefined,
-      },
       stopping: false,
       queueLifecycleTasks: new Set<Promise<void>>(),
       disconnectedProviders: new Set<string>(),
@@ -1050,9 +1041,6 @@ describe("GatewayApplication startup cleanup", () => {
       transport: { kind: "unix-websocket" },
       providerMetrics: {
         start: async () => undefined,
-        close: async () => undefined,
-      },
-      metricsSync: {
         close: async () => undefined,
       },
       stopping: false,
@@ -1231,9 +1219,6 @@ describe("GatewayApplication startup cleanup", () => {
       transport: { kind: "unix-websocket" },
       providerMetrics: {
         start: async () => undefined,
-        close: async () => undefined,
-      },
-      metricsSync: {
         close: async () => undefined,
       },
       stopping: false,

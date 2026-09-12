@@ -14,11 +14,9 @@ interface ActiveSubagent {
   parentTurnId: string;
   agentThreadId: string;
   agentPath: string;
-  startedAtMs: number;
   activeTurnId: string | undefined;
   terminalStatus?: SubagentCompletedEvent["status"];
   terminalTurnId: string | undefined;
-  terminalAtMs?: number;
   metricsCheckpoint?: Promise<boolean>;
   waitObservedAfterTerminal: boolean;
   timer: NodeJS.Timeout | undefined;
@@ -38,17 +36,12 @@ interface SubagentMetricsSummary {
     cachedInputTokens: number | null;
     outputTokens: number;
     reasoningOutputTokens: number;
-    requestDurationMs: number;
-    outputTokensPerSecond: number | null;
-    outputSpeedSampleCount: number;
-    outputSpeedTimedCount: number;
   } | null;
 }
 
 interface PendingTerminal {
   status: SubagentTerminalStatus;
   terminalTurnId: string | undefined;
-  terminalAtMs: number;
   expiresAtMs: number;
 }
 
@@ -64,7 +57,6 @@ interface PendingActivity {
 
 interface PendingCompletion {
   event: Extract<ConversationInputEvent, { type: "item.subagentActivity" }>;
-  completedAtMs: number;
   expiresAtMs: number;
 }
 
@@ -290,7 +282,6 @@ export class SubagentCompletionTracker {
       }
       entry.terminalStatus = status;
       entry.terminalTurnId = resolvedTerminalTurnId;
-      entry.terminalAtMs = Date.now();
       this.forgetParentRun(entry);
       this.schedule(agentThreadId, entry);
       this.promotePendingFollowup(agentThreadId);
@@ -311,7 +302,6 @@ export class SubagentCompletionTracker {
     this.pendingTerminals.set(key, {
       status,
       terminalTurnId,
-      terminalAtMs: Date.now(),
       expiresAtMs: Date.now() + pendingTerminalTtlMs,
     });
     while (this.pendingTerminals.size > maxPendingTerminals) {
@@ -354,7 +344,6 @@ export class SubagentCompletionTracker {
       parentTurnId: event.turnId,
       agentThreadId: event.agentThreadId,
       agentPath: event.agentPath,
-      startedAtMs: Date.now(),
       activeTurnId: undefined,
       terminalTurnId: undefined,
       waitObservedAfterTerminal: false,
@@ -376,7 +365,6 @@ export class SubagentCompletionTracker {
       }
       entry.terminalStatus = pending.status;
       entry.terminalTurnId = pending.terminalTurnId ?? entry.activeTurnId;
-      entry.terminalAtMs = pending.terminalAtMs;
       this.forgetParentRun(entry);
       this.schedule(event.agentThreadId, entry);
     }
@@ -384,7 +372,6 @@ export class SubagentCompletionTracker {
     if (completion && matchesParentRun(entry, completion.event)) {
       entry.terminalStatus = "completed";
       entry.terminalTurnId = entry.activeTurnId;
-      entry.terminalAtMs = completion.completedAtMs;
       this.forgetParentRun(entry);
       this.schedule(event.agentThreadId, entry);
     }
@@ -526,7 +513,6 @@ export class SubagentCompletionTracker {
     this.pendingCompletions.delete(event.agentThreadId);
     this.pendingCompletions.set(event.agentThreadId, {
       event,
-      completedAtMs: Date.now(),
       expiresAtMs: Date.now() + pendingTerminalTtlMs,
     });
     while (this.pendingCompletions.size > maxPendingTerminals) {
@@ -640,14 +626,6 @@ export class SubagentCompletionTracker {
       cachedInputTokens: aggregate?.cachedInputTokens ?? null,
       outputTokens: aggregate?.outputTokens ?? 0,
       reasoningOutputTokens: aggregate?.reasoningOutputTokens ?? 0,
-      outputTokensPerSecond: aggregate?.outputTokensPerSecond ?? null,
-      outputSpeedSampleCount: aggregate?.outputSpeedSampleCount ?? 0,
-      outputSpeedTimedCount: aggregate?.outputSpeedTimedCount ?? 0,
-      elapsedMs: Math.max(
-        0,
-        (entry.terminalAtMs ?? Date.now()) - entry.startedAtMs,
-      ),
-      durationMs: aggregate?.requestDurationMs ?? 0,
     };
     if (!detached) this.active.delete(agentThreadId);
     this.options.publish(event);

@@ -17,7 +17,6 @@ import type {
   ProviderAccountQueryPort,
   ProviderAccountUsage,
 } from "./account-port.js";
-import type { RemoteQuotaSummary } from "../conversation-core/index.js";
 import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
 import type {
   McpLoginResult,
@@ -380,10 +379,6 @@ export class ConversationService implements ConversationUseCases {
     private readonly threadOccupancy?: ThreadOccupancyPort,
     private readonly threadQueue?: ThreadQueuePort,
     private readonly threadHistory?: ThreadHistoryPort,
-    private readonly remoteQuotaReader?: (
-      provider: string,
-      resetsAt: number,
-    ) => Promise<RemoteQuotaSummary | undefined>,
     private readonly hasPendingSubagentRuns?: (parentThreadId: string) => boolean,
     private readonly sessionDisplayCache?: SessionDisplayCachePort,
   ) {
@@ -1720,23 +1715,9 @@ export class ConversationService implements ConversationUseCases {
       const estimate = estimateWeeklyLimit(limit, observation);
       return estimate === null ? [] : [estimate];
     });
-    const estimates = this.remoteQuotaReader === undefined
-      ? weeklyEstimates
-      : await Promise.all(weeklyEstimates.map(async (estimate) => {
-          const remote = await this.remoteQuotaReader!("openai", estimate.endAtMs / 1_000);
-          if (!remote) return estimate;
-          return {
-            ...estimate,
-            source: "center" as const,
-            deviceCount: remote.deviceCount,
-            periodRequestCount: remote.requestCount,
-            periodTotalTokens: remote.totalTokens,
-            totalTokensPerPercent: remote.tokensPerPercent ?? estimate.totalTokensPerPercent,
-          };
-        }));
-    return estimates.length === 0
+    return weeklyEstimates.length === 0
       ? resolved
-      : { ...resolved, weeklyEstimates: estimates };
+      : { ...resolved, weeklyEstimates };
   }
 
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]> {

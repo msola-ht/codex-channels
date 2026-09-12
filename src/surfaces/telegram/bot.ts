@@ -14,7 +14,6 @@ import {
 import {
   UserFacingError,
   type ConversationTarget,
-  type RemoteQuotaSummary,
 } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -122,7 +121,6 @@ export interface TelegramSurfaceOptions {
     provider: string | null | undefined,
     model: string | null | undefined,
   ) => number | null;
-  remoteQuota?: (provider: string | undefined, resetsAt: number | null | undefined) => Promise<RemoteQuotaSummary | undefined>;
 }
 
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
@@ -258,7 +256,7 @@ export class TelegramSurface {
       this.bot,
       logger,
       {
-        messages: async () => Promise.all([...startupRecipients].map(async (chatId) => {
+        messages: () => Promise.resolve([...startupRecipients].map((chatId) => {
           const status = this.service.status(
             {
               surface: "telegram",
@@ -280,7 +278,7 @@ export class TelegramSurface {
                 ? { openAiConnectivity: options.openAiConnectivity() }
                 : {}),
               debugEnabled: this.debugEnabled,
-            }, await options.remoteQuota?.(status.modelProvider, status.weeklyLimit?.resetsAt)),
+            }),
           };
         })),
       },

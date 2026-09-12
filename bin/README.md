@@ -35,7 +35,7 @@
 - `agents`：从已配置的受管或自定义 Provider 中选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
   `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化，`--json` 返回稳定状态对象。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
-- `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于展示和指标中心身份快照；Key 只写入
+- `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例；设置默认账户不会自动修改 `agents.external`，需要时使用 `codexc agents configure`。
 - `update`：Git 源码安装先在临时仓库构建并预检官方 `main` 最新提交，切换后再统一审查并更新用户
@@ -47,11 +47,10 @@
   兼容性与记录数，日常兼容升级使用 `update`。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
-- `webui`、`center`：分别启动本机只读指标界面和多设备指标中心；监听参数在读取用户配置前完成校验，
-  `center info --json` 只输出令牌是否已配置，不输出令牌内容。
+- `webui`：启动本机只读指标与设置界面；监听参数在读取用户配置前完成校验。
 - `service`：安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
   与 Gateway；启停、重启、状态和日志命令使用
-  `gateway`、`app-server`、`webui`、`center` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
+  `gateway`、`app-server`、`webui` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
   `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务；`status --json`

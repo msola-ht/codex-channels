@@ -56,7 +56,7 @@ Gateway 配置位于：
 ~/.codex-connect/config.toml
 ```
 
-`codexc setup` 管理 Codex 用户设置、模型 Provider、渠道和项目技能；`codexc config` 管理 Gateway 显示、服务、代理、Workspace、WebUI 和指标中心。配置示例见 [`config.example.toml`](../config.example.toml)。
+`codexc setup` 管理 Codex 用户设置、模型 Provider、渠道和项目技能；`codexc config` 管理 Gateway 显示、服务、代理、Workspace、WebUI 和本地指标存储。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 Telegram、飞书和微信至少启用一个。Telegram 需要 Bot Token 和允许用户；飞书需要应用凭据和允许的 `open_id`；微信需要扫码凭据、账号和允许用户，并将 `weixin.enabled` 设为 `true`。
 
@@ -206,6 +206,15 @@ codexc doctor
 
 更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断计划清单工具与实验性上下文管理。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
 
+从仍包含远程指标中心的旧源码切换到当前版本前，先用旧版执行 `codexc service uninstall`，再从
+`config.toml` 删除 `[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]` 后更新并重新执行
+`codexc service install`。当前配置 Schema 不接受这些旧段；卸载服务和更新源码都不会删除旧的中心
+SQLite 或同步水位文件，如不再需要，可在确认备份后自行处理。
+
+仓库源码删除不会自动删除已经部署到外部平台的旧指标中心。曾使用项目历史 Cloudflare 示例时，
+还需在对应 Cloudflare 账户中分别退役 Worker `codex-metrics-sync`、Pages 项目
+`codex-metrics-viewer`，并在确认历史数据不再需要或已导出后删除 D1 数据库 `codex-metrics`。
+
 卸载但保留用户数据：
 
 ```bash
@@ -243,7 +252,7 @@ codexc metrics export --range 30d --format json
 codexc webui
 ```
 
-WebUI 默认只读展示脱敏指标；设置页可在同一 WebUI 令牌下修改已开放的低风险 Gateway 设置，非回环监听必须配置令牌。多设备指标中心使用 `codexc config` 配置，详情见 [`WebUI`](webui.md) 和 [`指标同步`](metrics-sync.md)。
+WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
 
 从本机向绑定渠道发送图片：
 

@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe("ProviderMetricsComposition", () => {
-  it("composes the proxy channel, durable store and existing Core timing port", async () => {
+  it("persists proxy samples but forwards only request and Token facts to Core", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-composition-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "deepseek.sock");
@@ -64,22 +64,24 @@ describe("ProviderMetricsComposition", () => {
         reasoningEffort: null,
       });
     });
-    expect(timings).toEqual([expect.objectContaining({
+    expect(timings).toEqual([{
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
+      operation: "response",
+      model: "deepseek-v4-flash",
       outcome: "completed",
-      ttftMs: 200,
-      thinkingDurationMs: 300,
-      outputDurationMs: 200,
-      generationDurationMs: 600,
-    })]);
+      inputTokens: 100,
+      cachedInputTokens: 80,
+      outputTokens: 20,
+      reasoningOutputTokens: 5,
+    }]);
     await composition.close();
     expect(close).toHaveBeenCalledOnce();
     expect(existsSync(socketPath)).toBe(false);
   });
 
-  it("persists unassociated requests without fabricating Core timing", async () => {
+  it("persists unassociated requests without fabricating Core statistics", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-unassociated-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "openai.sock");

@@ -57,6 +57,7 @@ describe("request metrics maintenance and query boundaries", () => {
     writer.record(sample());
     writer.record({ ...sample(), requestStartedAtMs: 2_000, responseCompletedAtMs: 2_650 });
     const reader = new SqliteModelRequestMetricsStore(path, Date.now(), { readOnly: true });
+    expect(reader.count()).toBe(2);
     const first = reader.page({ startAtMs: 0, endAtMs: Date.now() + 1, limit: 1, sortDirection: "asc" });
     expect(first.records).toHaveLength(1);
     expect(first.nextOffset).toBe(1);
@@ -65,6 +66,8 @@ describe("request metrics maintenance and query boundaries", () => {
     expect(second.records[0]?.id).not.toBe(first.records[0]?.id);
     expect(second.nextOffset).toBeNull();
     expect(() => reader.record(sample())).toThrow(/只读/u);
+    writer.record(sample());
+    expect(reader.count()).toBe(3);
     reader.close();
     writer.close();
   });

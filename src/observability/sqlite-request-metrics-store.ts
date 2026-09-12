@@ -13,6 +13,7 @@ import {
   type RequestMetricsDatabaseLock,
 } from "./request-metrics-database.js";
 import {
+  parseQuotaWindows,
   toStoredCompactSummary,
   toStoredMetric,
   toStoredMetricsAggregate,
@@ -127,7 +128,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   private readonly insertSubagentTurn?: StatementSync;
   private readonly lock?: RequestMetricsDatabaseLock;
   private closed = false;
-  private rowCount = 0;
   private recordsSinceCleanup = 0;
   private readonly retentionMs: number;
   private readonly maximumRows: number;
@@ -155,7 +155,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       try {
         this.database.exec("PRAGMA busy_timeout = 1000; PRAGMA query_only = ON;");
         requireCurrentModelRequestMetricsSchema(this.database);
-        this.rowCount = this.currentCount();
       } catch (error) {
         database.close();
         throw error;
@@ -222,8 +221,35 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   record(sample: ModelRequestMetricSample): void {
     this.requireOpen();
     if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
+    const recordedAtMs = this.insertSample(sample);
+    this.finishRecords(1, recordedAtMs);
+  }
+
+  recordBatch(samples: readonly ModelRequestMetricSample[]): void {
+    this.requireOpen();
+    if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
+    if (samples.length === 0) return;
+    if (samples.length === 1) {
+      this.record(samples[0]!);
+      return;
+    }
+    let latestRecordedAtMs = 0;
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const sample of samples) {
+        latestRecordedAtMs = Math.max(latestRecordedAtMs, this.insertSample(sample));
+      }
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    this.finishRecords(samples.length, latestRecordedAtMs);
+  }
+
+  private insertSample(sample: ModelRequestMetricSample): number {
     const recordedAtMs = sample.recordedAtMs ?? Date.now();
-    this.insert.run(
+    this.insert!.run(
       sample.provider,
       sample.transport,
       sample.responseFormat,
@@ -262,8 +288,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ? null
         : JSON.stringify(sample.quotaWindows),
     );
-    this.rowCount += 1;
-    this.recordsSinceCleanup += 1;
+    return recordedAtMs;
+  }
+
+  private finishRecords(count: number, recordedAtMs: number): void {
+    this.recordsSinceCleanup += count;
     if (this.recordsSinceCleanup >= cleanupInterval) {
       this.cleanup(recordedAtMs);
     }
@@ -518,6 +547,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         usage_json=excluded.usage_json, limits_json=excluded.limits_json
     `).run(snapshot.sourceId, snapshot.observedAtMs, snapshot.available ? 1 : 0,
       JSON.stringify(snapshot.usage), JSON.stringify(snapshot.limits));
+    this.database.prepare(`
+      DELETE FROM account_snapshots WHERE observed_at_ms < ?
+    `).run(Math.max(0, snapshot.observedAtMs - this.retentionMs));
   }
 
   latestAccountSnapshot(provider: string, accountId?: string) {
@@ -564,6 +596,55 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       usage: JSON.parse(row.usage_json) as unknown,
       limits: JSON.parse(row.limits_json) as unknown,
     }));
+  }
+
+  forEachProviderTokenMetric(
+    query: { provider: string; startAtMs: number; endAtMs: number },
+    visit: (metric: {
+      requestStartedAtMs: number;
+      recordedAtMs: number;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+      quotaWindows: ReturnType<typeof parseQuotaWindows>;
+    }) => void,
+  ): void {
+    this.requireOpen();
+    validateMetricsTimeRange(query);
+    if (!query.provider || query.provider.length > 128) {
+      throw new Error("模型请求指标 Provider 无效");
+    }
+    const statement = this.database.prepare(`
+      SELECT request_started_at_ms, recorded_at_ms, input_tokens,
+        output_tokens, total_tokens, quota_windows
+      FROM model_request_metrics
+      WHERE provider = ?
+        AND recorded_at_ms >= ?
+        AND recorded_at_ms < ?
+      ORDER BY recorded_at_ms ASC, id ASC
+    `);
+    for (const rawRow of statement.iterate(
+      query.provider,
+      query.startAtMs,
+      query.endAtMs,
+    )) {
+      const row = rawRow as {
+        request_started_at_ms: number;
+        recorded_at_ms: number;
+        input_tokens: number | null;
+        output_tokens: number | null;
+        total_tokens: number | null;
+        quota_windows: string | null;
+      };
+      visit({
+        requestStartedAtMs: row.request_started_at_ms,
+        recordedAtMs: row.recorded_at_ms,
+        inputTokens: row.input_tokens,
+        outputTokens: row.output_tokens,
+        totalTokens: row.total_tokens,
+        quotaWindows: parseQuotaWindows(row.quota_windows),
+      });
+    }
   }
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
@@ -1250,10 +1331,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
 
   count(): number {
     this.requireOpen();
-    return this.currentCount();
-  }
-
-  private currentCount(): number {
     const row = this.database.prepare(`
       SELECT COUNT(*) AS count FROM model_request_metrics
     `).get() as { count: number };
@@ -1381,13 +1458,15 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         DELETE FROM subagent_turns WHERE recorded_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
       this.database.prepare(`
+        DELETE FROM account_snapshots WHERE observed_at_ms < ?
+      `).run(Math.max(0, nowMs - this.retentionMs));
+      this.database.prepare(`
         DELETE FROM model_request_metrics
         WHERE id <= COALESCE((
           SELECT id FROM model_request_metrics ORDER BY id DESC LIMIT 1 OFFSET ?
         ), 0)
       `).run(this.maximumRows);
       this.database.exec("COMMIT");
-      this.rowCount = this.currentCount();
       this.recordsSinceCleanup = 0;
     } catch (error) {
       this.database.exec("ROLLBACK");

@@ -4,10 +4,10 @@ import { spawn } from "node:child_process";
 import { isPrunableMetricsProviderId } from "./metrics-command-options.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
-const targets = new Set(["gateway", "app-server", "webui", "center", "all"]);
+const targets = new Set(["gateway", "app-server", "webui", "all"]);
 const serviceActions = new Set(["install", "uninstall", "start", "stop", "reload", "restart"]);
-const maintenanceActions = new Set(["upgrade", "sync-reset", "cleanup", "prune", "reset"]);
-const metricsRequireStoppedGateway = new Set(["upgrade", "sync-reset", "cleanup", "reset"]);
+const maintenanceActions = new Set(["upgrade", "cleanup", "prune", "reset"]);
+const metricsRequireStoppedGateway = new Set(["upgrade", "cleanup", "reset"]);
 const maximumTaskHistory = 32;
 const defaultCancellationGraceMs = 10_000;
 
@@ -44,13 +44,13 @@ export class WebuiManagementTaskRunner {
         : [],
       recovery: metrics
         ? normalized.action === "prune"
-          ? "操作前备份本地/中心指标库；失败时保留备份并尝试恢复原服务状态"
-          : "操作前保留指标数据库或同步水位备份；失败时保留备份并重试"
+          ? "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态"
+          : "操作前保留指标数据库备份；失败时保留备份并重试"
         : service
           ? "服务管理器失败时任务标记失败，不自动扩大操作范围"
           : "更新子进程负责备份、版本切换和服务恢复；失败时保留恢复信息",
       activation: metrics && normalized.action === "prune"
-        ? "按操作前状态恢复 Gateway 和指标中心"
+        ? "按操作前状态恢复 Gateway"
         : metrics
           ? "不会自动启动已停止的 Gateway"
           : service

@@ -28,7 +28,7 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
 
 ## 账户文件
 
-账户注册表和共享模型目录位于 Gateway 数据目录，不保存 Key；注册表中的联系方式只用于展示和数据中心身份快照：
+账户注册表和共享模型目录位于 Gateway 数据目录，不保存 Key；注册表中的联系方式只用于本机展示：
 
 ```text
 ~/.codex-connect/providers/opencode-go/
@@ -77,7 +77,7 @@ codexc opencode-go account stop <id>
 
 已注册的旧账户升级时会改为 `sf-ocg-<accountId>.config.toml`，并把配置和角色中的 Provider
 引用迁移到 `ocg-<accountId>`。没有账户 ID 的旧单账户配置不会被擅自命名为 `main`，需使用明确 ID
-重新添加。迁移无法获得联系方式，因此身份快照会在补充联系方式前省略该账户；旧会话若仍引用已不存在的旧 Provider，则不保证可恢复。
+重新添加。迁移无法获得联系方式，但不影响账户路由；旧会话若仍引用已不存在的旧 Provider，则不保证可恢复。
 
 ## 共享统计代理
 
@@ -86,7 +86,7 @@ App Server 从自己的进程环境注入。
 
 账户 App Server 的 `base_url` 指向共享代理并带 `/go/<accountId>` 前缀。代理转发时剥离前缀，
 按账户选择指标 Socket，使指标库中的 `provider` 保持为对应账户 Provider id。因此现有 Provider
-过滤、指标中心同步和 `codexc metrics prune ocg-<accountId>` 无需新增请求指标表；身份快照单独存放在中心 `provider_identities` 表。
+过滤和 `codexc metrics prune ocg-<accountId>` 无需新增请求指标表；账户快照保存在本机指标库中。
 
 ## App Server 生命周期
 

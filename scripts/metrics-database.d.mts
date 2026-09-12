@@ -128,43 +128,13 @@ export function upgradeMetricsDatabaseWithGatewayRestart(
   },
 ): MetricsDatabaseUpgradeResult;
 
-export interface MetricsSyncResetResult {
-  backupPath: string | null;
-  changed: boolean;
-  statePath: string;
-  deviceId?: string;
-}
-
-export function resetMetricsSyncState(
-  environment?: NodeJS.ProcessEnv,
-  options?: {
-    gatewayRunning?: () => boolean;
-  },
-): MetricsSyncResetResult;
-
-export function resetMetricsSyncStateWithGatewayRestart(
-  environment?: NodeJS.ProcessEnv,
-  options?: {
-    stopGateway?: () => void;
-    startGateway?: () => void;
-    reset?: () => MetricsSyncResetResult;
-  },
-): MetricsSyncResetResult;
-
 export interface MetricsProviderPruneResult {
   provider: string;
   gatewayWasRunning: boolean;
-  centerWasRunning: boolean;
   local: {
     databasePath: string;
     backupPath: string | null;
     deleted: number;
-  };
-  center: {
-    skipped: boolean;
-    databasePath?: string | null;
-    backupPath?: string | null;
-    deleted?: number;
   };
   warnings: string[];
 }
@@ -174,16 +144,9 @@ export function pruneProviderMetrics(
   environment?: NodeJS.ProcessEnv,
   options?: {
     localDatabasePath?: string;
-    centerDatabasePath?: string | null;
     gatewayRunning?: boolean;
-    centerRunning?: boolean;
-    centerSettings?: {
-      databasePath?: string;
-    };
     stopGateway?: () => void;
     startGateway?: () => void;
-    stopCenter?: () => void;
-    startCenter?: () => void;
   },
 ): MetricsProviderPruneResult;
 

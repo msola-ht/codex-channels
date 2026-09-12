@@ -203,7 +203,7 @@ describe("managed service JSON status", () => {
       mkdirSync(join(home, "runtime"));
       writeFileSync(
         join(home, "runtime", "gateway.error.log"),
-        "Error: authorization: Bearer very-secret\nToken=another-secret\n\"access_token\":\"json-secret\"\n",
+        "\u001b[31mError:\u001b[0m authorization: Bearer very-secret\nToken=another-secret\n\"access_token\":\"json-secret\"\n",
       );
       const error = readManagedServiceError({
         environment: { CODEX_CONNECT_HOME: home },
@@ -211,6 +211,7 @@ describe("managed service JSON status", () => {
         now: Date.now() + 1_000,
       });
       expect(error).toMatchObject({ message: "Error: authorization: Bearer [已隐藏]；Token=[已隐藏]；\"access_token\":\"[已隐藏]\"" });
+      expect(error?.message).not.toContain("\u001b[");
       expect(error?.message).not.toContain("very-secret");
       expect(error?.message).not.toContain("another-secret");
       expect(error?.message).not.toContain("json-secret");
