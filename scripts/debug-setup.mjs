@@ -5,6 +5,15 @@ import {
   updateGatewaySetting,
 } from "./config-management.mjs";
 
+export const loggingLevels = Object.freeze([
+  "fatal",
+  "error",
+  "warn",
+  "info",
+  "debug",
+  "trace",
+]);
+
 export async function runDebugSetup({
   environment = process.env,
   output = process.stdout,
@@ -14,7 +23,7 @@ export async function runDebugSetup({
   if (!prompts) throw new Error("调试模式 Setup 缺少交互实现");
   const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
-    message: "选择全局调试模式",
+    message: "选择全局调试模式（快捷切换 info / debug）",
     showInstructions: false,
     initialValue: settings.advanced.loggingLevel === "debug"
       || settings.advanced.loggingLevel === "trace"
@@ -65,7 +74,7 @@ export function writeLoggingLevel({
   level,
   message = `日志等级已设为 ${level}`,
 }) {
-  if (!["fatal", "error", "warn", "info", "debug", "trace"].includes(level)) {
+  if (!loggingLevels.includes(level)) {
     throw new Error(`未知日志等级：${String(level)}`);
   }
   const result = updateGatewaySetting({

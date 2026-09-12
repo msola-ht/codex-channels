@@ -222,7 +222,7 @@
   按模型名选择受管模型并设置自动压缩百分比，写入复用 `model-compression-management.mjs` 的全局广播，
   同名模型在所有 Provider 共用同一值，结果返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
-  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；自动压缩不在本流程，转到
+  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。自动压缩不在本流程，转到
   `model-compression-setup.mjs`；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
@@ -233,7 +233,7 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
   配置文件中可安全编辑的参数：显示设置（操作详情、计划更新）、系统设置
-  （调试模式、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
+  （调试快捷开关、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
   （本地保留天数与最大记录数）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
   配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
@@ -249,11 +249,11 @@
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
-  开发中的 Plugin API；复用 Config 管理接口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
+  开发中的 Plugin API；完整日志等级与系统设置中的调试快捷开关共用 `debug-setup.mjs` 的唯一写入入口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
-- `config-system-menu.mjs`：独立管理调试入口、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace 和
-  Gateway 新 Thread 模型覆盖；调试实现仍委派给 `debug-setup.mjs`，两者复用同一 Config 管理接口。
+- `config-system-menu.mjs`：独立管理调试快捷开关、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace 和
+  Gateway 新 Thread 模型覆盖；快捷开关只在 `info` / `debug` 间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
@@ -262,8 +262,8 @@
   `management-security.mjs` / `management-security.d.mts`：本机管理适配器复用的无 HTTP 安全基础，
   覆盖高风险确认、Origin、限速、请求上限、安全响应头和脱敏审计；WebUI 管理路由复用其中的请求约束、
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
-- `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Setup 的调试开关使用 `debug` / `info`，
-  Config 的高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
+- `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 系统设置中的调试快捷开关使用 `debug` / `info`，
+  高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
 - `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API
   Provider 脱敏列表、输入校验、增改和删除事务；返回值只包含 `hasApiKey`，不返回凭据，供 Setup
   与后续受保护的管理界面复用。

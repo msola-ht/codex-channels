@@ -23,7 +23,11 @@ export async function runSystemSettings({
     message: "选择系统设置",
     showInstructions: false,
     options: [
-      { value: "debug", label: "调试模式", hint: "控制全局脱敏调试日志与渠道技术字段" },
+      {
+        value: "debug",
+        label: "调试模式（快捷开关）",
+        hint: "在 info / debug 间切换；其他等级在高级设置中选择",
+      },
       { value: "approval_timeout", label: "审批超时", hint: "approval.timeout_seconds（30–3600 秒）" },
       {
         value: "idle_release",
