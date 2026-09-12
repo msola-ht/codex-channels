@@ -92,6 +92,20 @@ export interface OverviewResponse {
   weeklyQuota: WeeklyQuota | null
 }
 
+export interface DailyUsageRow {
+  day: string
+  requestCount: number
+  inputTokens: number
+  cachedInputTokens: number | null
+  outputTokens: number
+}
+
+export interface DailyUsageResponse {
+  days: 90
+  generatedAt: string
+  daily: DailyUsageRow[]
+}
+
 export interface ThreadListItem {
   threadId: string
   provider: string | null

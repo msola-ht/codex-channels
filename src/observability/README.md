@@ -78,6 +78,7 @@
 历史直接 API 样本，但当前没有新的直接 API 调用方。本模块不依赖代理、App Server
 协议、Surface 或业务 Storage。本模块不直接暴露 HTTP API；`codexc metrics` 的
 `report`、`export`、`run`、`turns`、`threads` 只通过本地只读连接输出 Markdown、JSON 或 CSV；
+WebUI 还通过同一只读 Store 按 UTC 日聚合最近 90 天请求，供本地热力图和趋势图展示；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
 HTTP API 复用相同查询，不向本模块写入状态。Schema v3/v4/v5/v6/v7/v8/v9/v10 可在停止 Gateway 后用
 `codexc update` 统一预检，并先创建 `0600` 备份再逐版本事务升级到 v12 并保留原记录；v8 升级

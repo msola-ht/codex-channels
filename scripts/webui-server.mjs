@@ -1071,6 +1071,10 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     handleOverview(environment, url, response);
     return;
   }
+  if (apiPath === "/daily") {
+    handleDaily(environment, response);
+    return;
+  }
   if (apiPath === "/threads") {
     handleThreads(environment, url, response);
     return;
@@ -1229,6 +1233,31 @@ function handleOverview(environment, url, response) {
       })),
       errors,
       weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, range.endAtMs)),
+    });
+  } finally {
+    store.close();
+  }
+}
+
+function handleDaily(environment, response) {
+  const days = 90;
+  const generatedAtMs = Date.now();
+  const generatedAt = new Date(generatedAtMs);
+  const currentUtcDayStartMs = Date.UTC(
+    generatedAt.getUTCFullYear(),
+    generatedAt.getUTCMonth(),
+    generatedAt.getUTCDate(),
+  );
+  const startAtMs = currentUtcDayStartMs - (days - 1) * 86_400_000;
+  const store = openMetricsStore(environment, generatedAtMs);
+  try {
+    sendJson(response, 200, {
+      days,
+      generatedAt: generatedAt.toISOString(),
+      daily: store.daily({
+        startAtMs,
+        endAtMs: generatedAtMs,
+      }),
     });
   } finally {
     store.close();

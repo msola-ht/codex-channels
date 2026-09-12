@@ -250,6 +250,14 @@ export interface StoredModelRequestMetricsReport {
   totalGroupCount: number;
 }
 
+export interface StoredModelRequestMetricsDailyRow {
+  day: string;
+  requestCount: number;
+  inputTokens: number;
+  cachedInputTokens: number | null;
+  outputTokens: number;
+}
+
 export interface ModelRequestMetricsErrorQuery {
   startAtMs: number;
   endAtMs: number;

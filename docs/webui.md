@@ -71,7 +71,7 @@ codexc service stop webui        # 停止
 
 | 页面 | 路由 | API |
 | --- | --- | --- |
-| 概览 | `#/` | `GET /api/v1/overview?range=<范围>` |
+| 概览 | `#/` | `GET /api/v1/overview?range=<范围>`、`GET /api/v1/daily`（最近 90 个 UTC 日） |
 | Threads | `#/threads` | `GET /api/v1/threads`（包含指标库首个请求开始时间） |
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
@@ -79,7 +79,7 @@ codexc service stop webui        # 停止
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/api-providers`（直接 API Provider 预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
-指标接口只接受 GET；设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
+指标接口只接受 GET；`/api/v1/daily` 固定返回本地指标库最近 90 天的 UTC 日聚合，供控制台热力图和趋势图使用。设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 `range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
 `this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
 WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
@@ -99,6 +99,7 @@ WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开�
 
 控制台顶部使用无标题四卡网格显示 Token 总计、输入、缓存和输出；总计卡附带请求次数与成功率，
 缓存卡附带命中率。WebUI 中的 Token 数值统一使用 `K`、`M`、`B` 英文紧凑单位，最多保留一位小数。
+四卡片下方显示最近 90 天活动热力图和用量趋势图；趋势图可在最近 7、30、90 天之间切换。
 控制台同时显示本机错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；OCG 与 DS
 快照超过 15 分钟或尚未采集时，账户卡片会提示刷新。DS 按余额刷新，OCG 按账户刷新额度窗口；
 WebUI 通过私有 Gateway IPC 发起查询，不读取凭据、不直接调用官方接口，也不定时轮询。查询失败时

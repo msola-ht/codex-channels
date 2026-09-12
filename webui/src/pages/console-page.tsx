@@ -12,11 +12,14 @@ import {
   ProviderTable,
   WeeklyQuotaCard,
 } from "@/components/overview/overview-sections"
+import { UsageCharts } from "@/components/overview/usage-charts"
+import { useDailyUsage } from "@/hooks/use-daily-usage"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
 import { useOverview } from "@/hooks/use-overview"
 import type {
   DeepseekBalanceResponse,
+  DailyUsageResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
   RangeName,
@@ -25,6 +28,7 @@ import type {
 export function ConsolePage() {
   const [range, setRange] = useState<RangeName>("90d")
   const account = useOverview(range)
+  const daily = useDailyUsage()
   const officialAccounts = useOfficialAccountSources()
 
   return (
@@ -33,7 +37,16 @@ export function ConsolePage() {
         <h1 className="text-xl font-semibold">控制台</h1>
         <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
       </div>
-      <LocalDashboard range={range} onRangeChange={setRange} data={account.data} loading={account.loading} error={account.error} />
+      <LocalDashboard
+        range={range}
+        onRangeChange={setRange}
+        data={account.data}
+        loading={account.loading}
+        error={account.error}
+        daily={daily.data}
+        dailyLoading={daily.loading}
+        dailyError={daily.error}
+      />
       <AccountStatusCards
         overview={account.data}
         balance={officialAccounts.data?.deepseek ?? null}
@@ -53,12 +66,18 @@ function LocalDashboard({
   data,
   loading,
   error,
+  daily,
+  dailyLoading,
+  dailyError,
 }: {
   range: RangeName
   onRangeChange: (range: RangeName) => void
   data: OverviewResponse | null
   loading: boolean
   error: string | null
+  daily: DailyUsageResponse | null
+  dailyLoading: boolean
+  dailyError: string | null
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -70,6 +89,12 @@ function LocalDashboard({
         ? <PageSkeleton rows={4} />
         : <>
             <GlobalCards global={data.global} />
+            <UsageCharts
+              rows={daily?.daily ?? []}
+              generatedAt={daily?.generatedAt ?? null}
+              loading={dailyLoading}
+              error={dailyError}
+            />
             <ProviderTable providers={data.providers} />
             <ErrorsSummary errors={data.errors} />
           </>}

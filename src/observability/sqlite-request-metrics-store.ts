@@ -41,6 +41,7 @@ import type {
   ModelRequestMetricsPageQuery,
   ModelRequestMetricsStore,
   StoredModelRequestMetric,
+  StoredModelRequestMetricsDailyRow,
   StoredModelRequestMetricsErrorReport,
   StoredModelRequestMetricsPage,
   StoredModelRequestMetricsReport,
@@ -746,6 +747,46 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       groups: rows.map(toStoredMetricsGroup),
       totalGroupCount: rows[0]?.total_group_count ?? 0,
     };
+  }
+
+  daily(
+    query: { startAtMs: number; endAtMs: number },
+  ): StoredModelRequestMetricsDailyRow[] {
+    this.requireOpen();
+    validateMetricsTimeRange(query);
+    const rows = this.database.prepare(`
+      SELECT
+        date(recorded_at_ms / 1000, 'unixepoch') AS day,
+        COUNT(*) AS request_count,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        COUNT(input_tokens) AS input_token_count,
+        COUNT(cached_input_tokens) AS cached_input_token_count,
+        SUM(output_tokens) AS output_tokens
+      FROM model_request_metrics_enriched
+      WHERE recorded_at_ms >= ?
+        AND recorded_at_ms < ?
+      GROUP BY day
+      ORDER BY day ASC
+    `).all(query.startAtMs, query.endAtMs) as Array<{
+      day: string;
+      request_count: number;
+      input_tokens: number | null;
+      cached_input_tokens: number | null;
+      input_token_count: number;
+      cached_input_token_count: number;
+      output_tokens: number | null;
+    }>;
+    return rows.map((row) => ({
+      day: row.day,
+      requestCount: row.request_count,
+      inputTokens: row.input_tokens ?? 0,
+      cachedInputTokens: row.input_token_count > 0
+        && row.cached_input_token_count === row.input_token_count
+        ? row.cached_input_tokens ?? 0
+        : null,
+      outputTokens: row.output_tokens ?? 0,
+    }));
   }
 
   errors(
