@@ -49,10 +49,12 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 ```bash
 codexc setup                 # Codex 用户设置、Provider、渠道和项目技能
-codexc config                # Gateway 显示、系统、服务、代理、WebUI 和指标设置
+codexc config                # Gateway 显示、系统、自动化、代理、WebUI 和本地指标存储
 codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server
 codexc doctor                # 只读诊断
+codexc metrics               # 查询、导出和维护本机模型请求指标
+codexc webui                 # 启动本地指标与设置 WebUI
 codexc sessions              # 交互式会话清理菜单
 codexc sessions cleanup 3    # 预览 Turn 数较少的旧会话（交互终端加 --confirm 再确认）
 codexc update                # 源码安装更新
@@ -60,6 +62,8 @@ codexc remote                # 连接 Gateway 共享的原生 TUI
 ```
 
 计划清单工具在 `codexc setup → Codex 新会话默认值 → 计划清单工具` 中管理，默认关闭。它与 Gateway 的 `display.plan_updates` 渠道展示开关和 `/plan` 协作模式相互独立，具体说明见[使用指导](docs/user-guide.md#计划相关设置)。
+
+模型请求指标保存在本机 `request-metrics.sqlite3`，由 `codexc metrics` 和本地 WebUI 读取；当前部署不包含远程指标中心或云端同步服务。
 
 ## 配置位置
 
@@ -81,9 +85,9 @@ Codex 用户配置：
 
 - [完整使用指导](docs/user-guide.md)
 - [源码安装与更新](docs/source-install.md)
-- [渠道展示与统计](docs/display.md)
+- [渠道展示与本地指标](docs/display.md)
 - [错误字典](docs/errors.md)
-- [WebUI](docs/webui.md)
+- [本地指标 WebUI](docs/webui.md)
 - [DeepSeek](docs/deepseek.md)
 - [OpenCode Go](docs/opencode-go.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
