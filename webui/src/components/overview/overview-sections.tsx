@@ -1,17 +1,12 @@
-import { RefreshCwIcon } from "lucide-react"
-
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Progress } from "@/components/ui/progress"
-import { Spinner } from "@/components/ui/spinner"
 import {
   Table,
   TableBody,
@@ -176,16 +171,10 @@ export function DeepseekBalanceCard({
   available,
   observedAtMs,
   balances,
-  refreshing,
-  refreshDisabled,
-  onRefresh,
 }: {
   available: boolean
   observedAtMs: number
   balances: DeepseekBalance[]
-  refreshing: boolean
-  refreshDisabled: boolean
-  onRefresh: () => void
 }) {
   const primary = balances[0]
   return (
@@ -197,12 +186,6 @@ export function DeepseekBalanceCard({
             ? "DeepSeek 账户余额暂不可用"
             : `更新于 ${formatTime(observedAtMs)}`}
         </CardDescription>
-        <CardAction>
-          <Button variant="outline" size="sm" disabled={refreshDisabled} onClick={onRefresh}>
-            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-            {refreshing ? "刷新中" : "刷新余额"}
-          </Button>
-        </CardAction>
       </CardHeader>
       {available && primary !== undefined ? (
         <CardContent className="flex flex-col gap-1">
@@ -232,9 +215,6 @@ export function DeepseekBalanceCard({
 
 export function OpencodeGoUsageCard({
   accounts,
-  refreshingProvider,
-  refreshDisabled,
-  onRefresh,
 }: {
   accounts: Array<{
     account: string
@@ -245,9 +225,6 @@ export function OpencodeGoUsageCard({
     provider: string
     observedAtMs: number
   }>
-  refreshingProvider: string | null
-  refreshDisabled: boolean
-  onRefresh: (provider: string) => void
 }) {
   if (accounts.length === 0) {
     return (
@@ -265,9 +242,6 @@ export function OpencodeGoUsageCard({
         <OpencodeGoAccountCard
           key={account.account}
           {...account}
-          refreshing={refreshingProvider === account.provider}
-          refreshDisabled={refreshDisabled}
-          onRefresh={() => onRefresh(account.provider)}
         />
       ))}
     </div>
@@ -280,9 +254,6 @@ function OpencodeGoAccountCard({
   available,
   windows,
   observedAtMs,
-  refreshing,
-  refreshDisabled,
-  onRefresh,
 }: {
   provider: string
   displayName: string
@@ -290,9 +261,6 @@ function OpencodeGoAccountCard({
   available: boolean
   windows: OpencodeGoQuotaWindow[]
   observedAtMs: number
-  refreshing: boolean
-  refreshDisabled: boolean
-  onRefresh: () => void
 }) {
   return (
     <Card>
@@ -304,12 +272,6 @@ function OpencodeGoAccountCard({
             ? "账户用量暂不可用"
             : `账户配额 · 更新于 ${formatTime(observedAtMs)}`}
         </CardDescription>
-        <CardAction>
-          <Button variant="outline" size="sm" disabled={refreshDisabled} onClick={onRefresh}>
-            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-            {refreshing ? "刷新中" : "刷新额度"}
-          </Button>
-        </CardAction>
       </CardHeader>
       {available && windows.length > 0 ? <CardContent className="flex flex-col gap-3">
         {windows.map((window) => (
