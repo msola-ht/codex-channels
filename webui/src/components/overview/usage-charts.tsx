@@ -45,13 +45,16 @@ export function UsageCharts({
   loading: boolean
   error: string | null
 }) {
+  const unavailable = error !== null && rows.length === 0
   return (
     <div className="flex flex-col gap-3">
       <ErrorBanner error={error} />
-      <div className="grid items-start gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <ActivityHeatmapCard rows={rows} generatedAt={generatedAt} loading={loading} />
-        <UsageTrendCard rows={rows} generatedAt={generatedAt} loading={loading} />
-      </div>
+      {unavailable ? null : (
+        <div className="grid items-start gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+          <ActivityHeatmapCard rows={rows} generatedAt={generatedAt} loading={loading} />
+          <UsageTrendCard rows={rows} generatedAt={generatedAt} loading={loading} />
+        </div>
+      )}
     </div>
   )
 }
