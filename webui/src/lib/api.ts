@@ -225,10 +225,11 @@ export function previewCodexUserSetting(
 export function updateCodexUserSetting(
   revision: string,
   setting: CodexUserSettingInput,
+  confirmationToken?: string,
   signal?: AbortSignal,
 ): Promise<ManagementSettingMutationResponse> {
   return requestJson<ManagementSettingMutationResponse>(`${API_PREFIX}/management/codex/settings`, {
-    method: "PATCH", body: JSON.stringify({ revision, setting }),
+    method: "PATCH", body: JSON.stringify({ revision, setting, ...(confirmationToken === undefined ? {} : { confirmationToken }) }),
   }, signal)
 }
 

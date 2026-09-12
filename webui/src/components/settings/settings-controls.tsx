@@ -1,4 +1,4 @@
-import { useId } from "react"
+import { useEffect, useId, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -52,7 +52,11 @@ export function SettingsRow({ label, value, badge = false, code = false }: { lab
 export function ManagedInputRow({ id, label, defaultValue, value, placeholder, disabled, type = "text", onChange, onBlur }: { id?: string; label: string; defaultValue: string; value?: string; placeholder: string; disabled: boolean; type?: "text" | "password" | "number"; onChange?: (value: string) => void; onBlur: (value: string) => void }) {
   const generatedId = useId()
   const inputId = id ?? generatedId
-  return <div className="flex items-center justify-between gap-3"><Label className="text-muted-foreground" htmlFor={inputId}>{label}</Label><Input id={inputId} className="w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} defaultValue={value === undefined ? defaultValue : undefined} value={value} placeholder={placeholder} disabled={disabled} onChange={onChange === undefined ? undefined : (event) => onChange(event.target.value)} onBlur={(event) => onBlur(event.target.value.trim())} /></div>
+  const [draft, setDraft] = useState(defaultValue)
+  useEffect(() => {
+    if (!disabled && value === undefined) setDraft(defaultValue)
+  }, [defaultValue, disabled, value])
+  return <div className="flex items-center justify-between gap-3"><Label className="text-muted-foreground" htmlFor={inputId}>{label}</Label><Input id={inputId} className="w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} value={value ?? draft} placeholder={placeholder} disabled={disabled} onChange={(event) => { if (value === undefined) setDraft(event.target.value); onChange?.(event.target.value) }} onBlur={(event) => onBlur(event.target.value.trim())} /></div>
 }
 
 export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; onConfirm: () => void; onCancel: () => void }) {
