@@ -1,5 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { FieldGroup } from "@/components/ui/field"
 import { ManagedInputRow, ManagedSelect } from "@/components/settings/settings-controls"
+import { SettingsEmpty } from "@/components/settings/settings-feedback"
 import type { GatewaySettingsController } from "@/lib/settings-management"
 
 export function WorkspaceSettingsCard({ management }: { management: GatewaySettingsController }) {
@@ -12,9 +14,9 @@ export function WorkspaceSettingsCard({ management }: { management: GatewaySetti
       <CardDescription>逐个 Workspace 管理 Sandbox、审批策略或 Permission Profile；Profile 与 Sandbox 互斥。</CardDescription>
     </CardHeader>
     <CardContent className="flex flex-col gap-4 text-sm">
-      {settings.system.workspaces.length === 0 ? <p className="text-muted-foreground">尚未配置 Workspace。</p> : settings.system.workspaces.map((workspace) => <section key={workspace.id} className="flex flex-col gap-3 rounded-md border p-3">
+      {settings.system.workspaces.length === 0 ? <SettingsEmpty>尚未配置 Workspace。</SettingsEmpty> : settings.system.workspaces.map((workspace) => <section key={workspace.id} className="flex flex-col gap-3 rounded-md border p-3">
         <div><h3 className="font-medium">{workspace.name}</h3><p className="font-mono text-xs text-muted-foreground">{workspace.id}</p></div>
-        <div className="grid gap-x-8 gap-y-3 md:grid-cols-2">
+        <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <ManagedSelect
             label="Sandbox"
             value={workspace.sandbox ?? ""}
@@ -46,7 +48,7 @@ export function WorkspaceSettingsCard({ management }: { management: GatewaySetti
               update: { kind: "permissions", value: value || null },
             }, workspace.name + " Permission Profile")}
           />
-        </div>
+        </FieldGroup>
       </section>)}
     </CardContent>
   </Card>

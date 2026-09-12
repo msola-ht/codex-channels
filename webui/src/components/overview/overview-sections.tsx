@@ -1,14 +1,11 @@
-import { RefreshCwIcon } from "lucide-react"
-
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Progress } from "@/components/ui/progress"
 import {
   Table,
@@ -51,17 +48,26 @@ export function GlobalCards({ global }: { global: Aggregate | null }) {
       </Alert>
     )
   }
+  const cacheHitRate = global.inputTokens > 0 && global.cachedInputTokens !== null
+    ? `${(global.cachedInputTokens / global.inputTokens * 100).toFixed(1)}%`
+    : "—"
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
-        title="请求数"
-        value={global.requestCount.toLocaleString("zh-CN")}
-        description={`成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
+        value={formatTokens(global.inputTokens + global.outputTokens)}
+        description={`总计 Token · 请求 ${global.requestCount.toLocaleString("zh-CN")} 次 · 成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
       />
       <StatCard
-        title="Token"
-        value={formatTokens(global.inputTokens + global.outputTokens)}
-        description={`输入 ${formatTokens(global.inputTokens)} · 输出 ${formatTokens(global.outputTokens)}`}
+        value={formatTokens(global.inputTokens)}
+        description="输入 Token"
+      />
+      <StatCard
+        value={formatTokens(global.cachedInputTokens)}
+        description={`缓存 Token · 命中率 ${cacheHitRate}`}
+      />
+      <StatCard
+        value={formatTokens(global.outputTokens)}
+        description="输出 Token"
       />
     </div>
   )
@@ -147,7 +153,7 @@ export function WeeklyQuotaCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {usedPercent === null
-          ? <p className="text-sm text-muted-foreground">当前时间范围没有 OpenAI 额度记录</p>
+          ? <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>当前时间范围没有 OpenAI 额度记录</EmptyTitle></EmptyHeader></Empty>
           : (
             <>
               <Progress value={Math.min(100, usedPercent)} />
@@ -165,16 +171,10 @@ export function DeepseekBalanceCard({
   available,
   observedAtMs,
   balances,
-  refreshing,
-  refreshDisabled,
-  onRefresh,
 }: {
   available: boolean
   observedAtMs: number
   balances: DeepseekBalance[]
-  refreshing: boolean
-  refreshDisabled: boolean
-  onRefresh: () => void
 }) {
   const primary = balances[0]
   return (
@@ -186,12 +186,6 @@ export function DeepseekBalanceCard({
             ? "DeepSeek 账户余额暂不可用"
             : `更新于 ${formatTime(observedAtMs)}`}
         </CardDescription>
-        <CardAction>
-          <Button variant="outline" size="sm" disabled={refreshDisabled} onClick={onRefresh}>
-            <RefreshCwIcon data-icon="inline-start" />
-            {refreshing ? "刷新中" : "刷新余额"}
-          </Button>
-        </CardAction>
       </CardHeader>
       {available && primary !== undefined ? (
         <CardContent className="flex flex-col gap-1">
@@ -221,9 +215,6 @@ export function DeepseekBalanceCard({
 
 export function OpencodeGoUsageCard({
   accounts,
-  refreshingProvider,
-  refreshDisabled,
-  onRefresh,
 }: {
   accounts: Array<{
     account: string
@@ -234,9 +225,6 @@ export function OpencodeGoUsageCard({
     provider: string
     observedAtMs: number
   }>
-  refreshingProvider: string | null
-  refreshDisabled: boolean
-  onRefresh: (provider: string) => void
 }) {
   if (accounts.length === 0) {
     return (
@@ -254,9 +242,6 @@ export function OpencodeGoUsageCard({
         <OpencodeGoAccountCard
           key={account.account}
           {...account}
-          refreshing={refreshingProvider === account.provider}
-          refreshDisabled={refreshDisabled}
-          onRefresh={() => onRefresh(account.provider)}
         />
       ))}
     </div>
@@ -269,9 +254,6 @@ function OpencodeGoAccountCard({
   available,
   windows,
   observedAtMs,
-  refreshing,
-  refreshDisabled,
-  onRefresh,
 }: {
   provider: string
   displayName: string
@@ -279,9 +261,6 @@ function OpencodeGoAccountCard({
   available: boolean
   windows: OpencodeGoQuotaWindow[]
   observedAtMs: number
-  refreshing: boolean
-  refreshDisabled: boolean
-  onRefresh: () => void
 }) {
   return (
     <Card>
@@ -293,12 +272,6 @@ function OpencodeGoAccountCard({
             ? "账户用量暂不可用"
             : `账户配额 · 更新于 ${formatTime(observedAtMs)}`}
         </CardDescription>
-        <CardAction>
-          <Button variant="outline" size="sm" disabled={refreshDisabled} onClick={onRefresh}>
-            <RefreshCwIcon data-icon="inline-start" />
-            {refreshing ? "刷新中" : "刷新额度"}
-          </Button>
-        </CardAction>
       </CardHeader>
       {available && windows.length > 0 ? <CardContent className="flex flex-col gap-3">
         {windows.map((window) => (
@@ -356,7 +329,7 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
       </CardHeader>
       <CardContent>
         {errors.groups.length === 0 ? (
-          <p className="text-sm text-muted-foreground">没有异常请求</p>
+          <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>没有异常请求</EmptyTitle></EmptyHeader></Empty>
         ) : (
           <ul className="flex flex-col gap-2">
             {errors.groups.slice(0, 5).map((group) => (

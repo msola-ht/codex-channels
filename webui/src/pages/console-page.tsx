@@ -1,6 +1,9 @@
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { RefreshCwIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { RangeSelector } from "@/components/metrics/range-selector"
@@ -12,20 +15,46 @@ import {
   ProviderTable,
   WeeklyQuotaCard,
 } from "@/components/overview/overview-sections"
+import { UsageCharts } from "@/components/overview/usage-charts"
+import { useDailyUsage } from "@/hooks/use-daily-usage"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
 import { useOverview } from "@/hooks/use-overview"
 import type {
   DeepseekBalanceResponse,
+  DailyUsageResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
   RangeName,
 } from "@/lib/types"
 
 export function ConsolePage() {
-  const [range, setRange] = useState<RangeName>("90d")
+  const [range, setRange] = useState<RangeName>("30d")
   const account = useOverview(range)
+  const trend = useDailyUsage(range)
+  const heatmap = useDailyUsage("90d")
+  const [dashboard, setDashboard] = useState<{
+    overview: OverviewResponse
+    trend: DailyUsageResponse
+  } | null>(null)
   const officialAccounts = useOfficialAccountSources()
+  const refetchOverview = account.refetch
+  const refetchTrend = trend.refetch
+  const refetchHeatmap = heatmap.refetch
+  const refreshAccounts = officialAccounts.refresh
+
+  const refreshDashboard = useCallback(() => {
+    refetchOverview()
+    refetchTrend()
+    refetchHeatmap()
+    void refreshAccounts()
+  }, [refetchHeatmap, refetchOverview, refetchTrend, refreshAccounts])
+
+  useEffect(() => {
+    if (account.data?.range.name === range && trend.data?.range.name === range) {
+      setDashboard({ overview: account.data, trend: trend.data })
+    }
+  }, [account.data, range, trend.data])
 
   return (
     <div className="flex flex-col gap-6">
@@ -33,15 +62,26 @@ export function ConsolePage() {
         <h1 className="text-xl font-semibold">控制台</h1>
         <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
       </div>
-      <LocalDashboard range={range} onRangeChange={setRange} data={account.data} loading={account.loading} error={account.error} />
+      <LocalDashboard
+        range={dashboard?.overview.range.name ?? range}
+        onRangeChange={setRange}
+        onRefresh={refreshDashboard}
+        data={dashboard?.overview ?? null}
+        loading={account.loading || trend.loading}
+        refreshing={account.loading || trend.loading || heatmap.loading || officialAccounts.refreshing}
+        error={account.error}
+        trend={dashboard?.trend ?? null}
+        trendError={trend.error}
+        heatmap={heatmap.data}
+        heatmapLoading={heatmap.loading}
+        heatmapError={heatmap.error}
+      />
       <AccountStatusCards
         overview={account.data}
         balance={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
         freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
-        refreshingProvider={officialAccounts.refreshingProvider}
         accountError={officialAccounts.refreshError ?? officialAccounts.error ?? officialAccounts.data?.warning ?? null}
-        onRefresh={(provider) => void officialAccounts.refresh(provider)}
       />
     </div>
   )
@@ -50,26 +90,53 @@ export function ConsolePage() {
 function LocalDashboard({
   range,
   onRangeChange,
+  onRefresh,
   data,
   loading,
+  refreshing,
   error,
+  trend,
+  trendError,
+  heatmap,
+  heatmapLoading,
+  heatmapError,
 }: {
   range: RangeName
   onRangeChange: (range: RangeName) => void
+  onRefresh: () => void
   data: OverviewResponse | null
   loading: boolean
+  refreshing: boolean
   error: string | null
+  trend: DailyUsageResponse | null
+  trendError: string | null
+  heatmap: DailyUsageResponse | null
+  heatmapLoading: boolean
+  heatmapError: string | null
 }) {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" aria-busy={loading || heatmapLoading}>
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <RangeSelector value={range} onChange={onRangeChange} />
+        <span className="text-sm text-muted-foreground">汇总范围</span>
+        <RangeSelector value={range} onChange={onRangeChange} ariaLabel="汇总时间范围" />
+        <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
+          {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
+          {refreshing ? "刷新中" : "刷新"}
+        </Button>
       </div>
       <ErrorBanner error={error} />
-      {loading || data === null
+      {data === null
         ? <PageSkeleton rows={4} />
         : <>
             <GlobalCards global={data.global} />
+            <UsageCharts
+              trendRows={trend?.daily ?? []}
+              trendRange={trend?.range ?? data.range}
+              heatmapRows={heatmap?.daily ?? []}
+              heatmapEndAtMs={heatmap?.range.endAtMs ?? data.range.endAtMs}
+              heatmapLoading={heatmapLoading}
+              error={trendError ?? heatmapError}
+            />
             <ProviderTable providers={data.providers} />
             <ErrorsSummary errors={data.errors} />
           </>}
@@ -82,17 +149,13 @@ function AccountStatusCards({
   balance,
   opencodeGoUsage,
   freshness,
-  refreshingProvider,
   accountError,
-  onRefresh,
 }: {
   overview: ReturnType<typeof useOverview>["data"]
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
   freshness: { deepseek: AccountSnapshotFreshness; opencodeGo: AccountSnapshotFreshness }
-  refreshingProvider: string | null
   accountError: string | null
-  onRefresh: (provider: string) => void
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -112,9 +175,6 @@ function AccountStatusCards({
             available={balance?.available ?? false}
             observedAtMs={balance?.observedAtMs ?? 0}
             balances={balance?.balances ?? []}
-            refreshing={refreshingProvider === "deepseek"}
-            refreshDisabled={refreshingProvider !== null}
-            onRefresh={() => onRefresh("deepseek")}
           />
         </div>
         <div className="flex flex-col gap-2">
@@ -123,9 +183,6 @@ function AccountStatusCards({
             : null}
           <OpencodeGoUsageCard
             accounts={opencodeGoUsage?.accounts ?? []}
-            refreshingProvider={refreshingProvider}
-            refreshDisabled={refreshingProvider !== null}
-            onRefresh={onRefresh}
           />
         </div>
       </div>
@@ -147,7 +204,7 @@ function FreshnessNotice({
       <AlertTitle>{provider} 账户快照需要刷新</AlertTitle>
       <AlertDescription>
         {status === "missing" ? "尚未获取到账户快照。" : "本地快照已超过 15 分钟。"}
-        可使用账户卡片上的刷新按钮实时查询。
+        可使用汇总范围旁的刷新按钮实时查询。
       </AlertDescription>
     </Alert>
   )

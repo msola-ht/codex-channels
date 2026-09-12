@@ -1,4 +1,5 @@
 import type {
+  DailyUsageResponse,
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OverviewResponse,
@@ -131,6 +132,13 @@ export function fetchOverview(
     `${API_PREFIX}/overview?range=${range}`,
     signal,
   )
+}
+
+export function fetchDailyUsage(
+  range: RangeName,
+  signal?: AbortSignal,
+): Promise<DailyUsageResponse> {
+  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily?range=${range}`, signal)
 }
 
 export function fetchThreads(

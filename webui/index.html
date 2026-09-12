@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        let theme = "dark"
+        try {
+          if (localStorage.getItem("theme") === "light") theme = "light"
+        } catch {}
+        document.documentElement.classList.add(theme)
+        document.documentElement.style.colorScheme = theme
+      })()
+    </script>
     <title>Codex WebUI</title>
   </head>
   <body>

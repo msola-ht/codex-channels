@@ -76,8 +76,8 @@ function Layout() {
       <SidebarInset className="min-w-0">
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3">
           <SidebarTrigger className="-ml-1" />
-          <Breadcrumb>
-            <BreadcrumbList>
+          <Breadcrumb className="min-w-0 flex-1">
+            <BreadcrumbList className="flex-nowrap">
               <BreadcrumbItem className="hidden md:block">
                 <BreadcrumbLink asChild>
                   <Link to="/">Codex WebUI</Link>
@@ -87,7 +87,7 @@ function Layout() {
               <BreadcrumbTrail pathname={pathname} />
             </BreadcrumbList>
           </Breadcrumb>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <LanguageToggle value={language} onChange={setLanguage} />
             <ModeToggle />
           </div>

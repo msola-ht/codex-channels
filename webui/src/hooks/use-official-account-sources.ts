@@ -1,7 +1,11 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { useApi } from "@/hooks/use-api"
-import { fetchOfficialAccountSnapshots, refreshOfficialAccountSnapshot } from "@/lib/api"
+import {
+  fetchManagementProviders,
+  fetchOfficialAccountSnapshots,
+  refreshOfficialAccountSnapshot,
+} from "@/lib/api"
 import type { DeepseekBalance, OpencodeGoAccountUsage, OpencodeGoQuotaWindow } from "@/lib/types"
 
 const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000
@@ -13,22 +17,64 @@ export function useOfficialAccountSources() {
     const result = await fetchOfficialAccountSnapshots(signal)
     return accountSources(result)
   }, [])
-  const [refreshingProvider, setRefreshingProvider] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
+  const initialRefreshStarted = useRef(false)
+  const refreshOperation = useRef<Promise<void> | null>(null)
+  const refreshController = useRef<AbortController | null>(null)
   const replaceData = snapshots.replaceData
-  const refresh = useCallback(async (provider: string) => {
-    setRefreshingProvider(provider)
-    setRefreshError(null)
-    try {
-      const result = await refreshOfficialAccountSnapshot(provider)
-      replaceData(accountSources(result))
-    } catch (error) {
-      setRefreshError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setRefreshingProvider(null)
-    }
+  const refresh = useCallback(() => {
+    if (refreshOperation.current !== null) return refreshOperation.current
+    const controller = new AbortController()
+    refreshController.current = controller
+    const operation = (async () => {
+      setRefreshing(true)
+      setRefreshError(null)
+      try {
+        const providers = await fetchManagementProviders(controller.signal)
+        const refreshableProviders = providers.providers
+          .filter((provider) =>
+            provider.kind === "managed" && isRefreshableAccountProvider(provider.id))
+          .map((provider) => provider.id)
+        const results = await Promise.allSettled(
+          refreshableProviders.map((provider) =>
+            refreshOfficialAccountSnapshot(provider, controller.signal)),
+        )
+        const result = await fetchOfficialAccountSnapshots(controller.signal)
+        replaceData(accountSources(result))
+        const failed = results.find((item) => item.status === "rejected")
+        if (failed?.status === "rejected") {
+          setRefreshError(failed.reason instanceof Error ? failed.reason.message : String(failed.reason))
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setRefreshError(error instanceof Error ? error.message : String(error))
+        }
+      } finally {
+        if (refreshController.current === controller) {
+          refreshController.current = null
+          refreshOperation.current = null
+          setRefreshing(false)
+        }
+      }
+    })()
+    refreshOperation.current = operation
+    return operation
   }, [replaceData])
-  return { ...snapshots, refreshingProvider, refreshError, refresh }
+
+  useEffect(() => {
+    if (snapshots.data === null || initialRefreshStarted.current) return
+    initialRefreshStarted.current = true
+    void refresh()
+  }, [refresh, snapshots.data])
+
+  useEffect(() => () => refreshController.current?.abort(), [])
+
+  return { ...snapshots, refreshing, refreshError, refresh }
+}
+
+function isRefreshableAccountProvider(provider: string): boolean {
+  return provider === "deepseek" || provider === "ocg" || provider.startsWith("ocg-")
 }
 
 function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSnapshots>>) {

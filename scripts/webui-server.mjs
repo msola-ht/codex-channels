@@ -1071,6 +1071,10 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     handleOverview(environment, url, response);
     return;
   }
+  if (apiPath === "/daily") {
+    handleDaily(environment, url, response);
+    return;
+  }
   if (apiPath === "/threads") {
     handleThreads(environment, url, response);
     return;
@@ -1229,6 +1233,24 @@ function handleOverview(environment, url, response) {
       })),
       errors,
       weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, range.endAtMs)),
+    });
+  } finally {
+    store.close();
+  }
+}
+
+function handleDaily(environment, url, response) {
+  const range = parseRange(url);
+  const store = openMetricsStore(environment, range.endAtMs);
+  try {
+    const daily = store.daily({
+      startAtMs: range.startAtMs,
+      endAtMs: range.endAtMs,
+    });
+    sendJson(response, 200, {
+      range,
+      generatedAt: new Date(range.endAtMs).toISOString(),
+      daily,
     });
   } finally {
     store.close();

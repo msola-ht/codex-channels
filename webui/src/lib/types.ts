@@ -3,6 +3,8 @@ export type {
   CompactSummary,
   DeepseekBalance,
   DeepseekBalanceResponse,
+  DailyUsageResponse,
+  DailyUsageRow,
   ErrorGroup,
   ErrorsReport,
   ErrorsResponse,

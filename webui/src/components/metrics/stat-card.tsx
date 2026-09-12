@@ -13,15 +13,17 @@ export function StatCard({
   value,
   description,
 }: {
-  title: string
+  title?: string
   value: ReactNode
   description?: string
 }) {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
+      {title === undefined ? null : (
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+        </CardHeader>
+      )}
       <CardContent>
         <div className="text-2xl font-semibold tabular-nums">{value}</div>
         {description === undefined ? null : (
