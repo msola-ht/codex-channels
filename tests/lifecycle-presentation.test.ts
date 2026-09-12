@@ -271,11 +271,6 @@ describe("shared Surface lifecycle presentation", () => {
       cachedInputTokens: null,
       outputTokens: 3_000,
       reasoningOutputTokens: 0,
-      outputTokensPerSecond: 10,
-      outputSpeedSampleCount: 1,
-      outputSpeedTimedCount: 1,
-      elapsedMs: 12_345,
-      durationMs: 5_558,
     });
     const rendered = renderPlainLifecyclePresentation(presentation);
 
@@ -287,7 +282,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("速度");
   });
 
-  it("hides unreliable output speed and unknown reasoning effort", () => {
+  it("hides unknown reasoning effort", () => {
     const rendered = renderPlainLifecyclePresentation(
       createSubagentCompletedPresentation({
         type: "subagent.completed",
@@ -310,11 +305,6 @@ describe("shared Surface lifecycle presentation", () => {
         cachedInputTokens: null,
         outputTokens: 3_000,
         reasoningOutputTokens: 0,
-        outputTokensPerSecond: 10,
-        outputSpeedSampleCount: 1,
-        outputSpeedTimedCount: 0,
-        elapsedMs: 500,
-        durationMs: 0,
       }),
     );
 
@@ -345,11 +335,6 @@ describe("shared Surface lifecycle presentation", () => {
         cachedInputTokens: null,
         outputTokens: 0,
         reasoningOutputTokens: 0,
-        outputTokensPerSecond: null,
-        outputSpeedSampleCount: 0,
-        outputSpeedTimedCount: 0,
-        elapsedMs: 4_000,
-        durationMs: 0,
       }),
     );
 
@@ -512,22 +497,10 @@ describe("shared Surface lifecycle presentation", () => {
         timing: {
           modelRequestCount: 2,
           reasoningRequestCount: 2,
-          modelRequestDurationMs: 12_400,
           requestInputTokens: 20_000,
           requestCachedInputTokens: 15_000,
-          ttftMs: 640,
-          firstResponseLatencyMs: 920,
           nonReasoningOutputTokens: 42,
-          outputTokensPerSecond: 2.1,
-          outputSpeedSampleCount: 2,
-          outputSpeedTimedCount: 2,
           reasoningTokens: 80,
-          thinkingTokensPerSecond: 20,
-          thinkingSpeedSampleCount: 2,
-          thinkingSpeedTimedCount: 2,
-          generationTokensPerSecond: 120,
-          generationSpeedSampleCount: 2,
-          generationSpeedTimedCount: 2,
           compact: {
             model: "gpt-5.6-sol",
             hasMixedModels: false,
@@ -568,9 +541,6 @@ describe("shared Surface lifecycle presentation", () => {
           completedModelRequestCount: 1,
           requestInputTokens: 100,
           requestOutputTokens: 20,
-          outputTokensPerSecond: 42,
-          outputSpeedSampleCount: 1,
-          outputSpeedTimedCount: 1,
         },
         taskAggregate: {
           requestCount: 3,
@@ -774,7 +744,6 @@ describe("shared Surface lifecycle presentation", () => {
           requestInputTokens: 1_000,
           requestCachedInputTokens: 800,
           reasoningTokens: 40,
-          outputTokensPerSecond: 96,
         },
       }, true),
     );

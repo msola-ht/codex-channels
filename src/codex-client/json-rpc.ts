@@ -38,7 +38,6 @@ export interface RpcNotification {
   method: string;
   params: unknown;
   provider?: string;
-  receivedAtMs?: number;
 }
 
 export interface RpcServerRequest {
@@ -289,7 +288,6 @@ export class JsonRpcClient {
       const notification = {
         method: message.method,
         params: message.params ?? {},
-        receivedAtMs: Date.now(),
       };
       for (const handler of this.notificationHandlers) {
         handler(notification);

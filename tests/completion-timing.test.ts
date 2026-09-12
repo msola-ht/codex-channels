@@ -28,14 +28,10 @@ describe("mergeCompletionTiming", () => {
 
     expect(mergeCompletionTiming(latestTurn, "turn-1", undefined)).toEqual({
       modelRequestCount: 2,
-      modelRequestDurationMs: 12_000,
       requestInputTokens: 1_000,
       requestCachedInputTokens: 800,
       requestOutputTokens: 100,
       reasoningTokens: 40,
-      outputTokensPerSecond: 25,
-      outputSpeedSampleCount: 2,
-      outputSpeedTimedCount: 2,
       compact: {
         model: "gpt-5.6-sol",
         hasMixedModels: false,
@@ -48,7 +44,7 @@ describe("mergeCompletionTiming", () => {
     });
   });
 
-  it("clears incomplete persisted fields without dropping live response latency", () => {
+  it("clears incomplete persisted fields without dropping live request facts", () => {
     const latestTurn = turnSummary({
       requestCount: 2,
       cachedInputTokens: null,
@@ -60,10 +56,9 @@ describe("mergeCompletionTiming", () => {
     });
 
     const timing = mergeCompletionTiming(latestTurn, "turn-1", {
-      firstResponseLatencyMs: 500,
+      reasoningRequestCount: 2,
       requestCachedInputTokens: 400,
       reasoningTokens: 20,
-      outputTokensPerSecond: 50,
       compact: {
         model: "stale-model",
         hasMixedModels: false,
@@ -76,10 +71,8 @@ describe("mergeCompletionTiming", () => {
     });
 
     expect(timing).toMatchObject({
-      firstResponseLatencyMs: 500,
+      reasoningRequestCount: 2,
       modelRequestCount: 2,
-      outputSpeedSampleCount: 2,
-      outputSpeedTimedCount: 1,
     });
     expect(timing).not.toHaveProperty("requestCachedInputTokens");
     expect(timing).not.toHaveProperty("reasoningTokens");

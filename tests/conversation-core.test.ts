@@ -1662,7 +1662,7 @@ describe("ConversationCore", () => {
     await output.close();
   });
 
-  it("computes per-turn first-token time, output duration and visible tokens/s", async () => {
+  it("aggregates request outcomes, Token usage and compaction without delta timing", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
     output.subscribe("test", (event) => {
@@ -1699,7 +1699,6 @@ describe("ConversationCore", () => {
     });
     handleNotification(core, {
       method: "turn/started",
-      receivedAtMs: 1_000,
       params: { threadId: "thread-1", turn: { id: "turn-1" } },
     });
     handleNotification(core, {
@@ -1717,7 +1716,6 @@ describe("ConversationCore", () => {
     });
     handleNotification(core, {
       method: "item/agentMessage/delta",
-      receivedAtMs: 1_500,
       params: {
         threadId: "thread-1",
         turnId: "turn-1",
@@ -1740,7 +1738,6 @@ describe("ConversationCore", () => {
     });
     handleNotification(core, {
       method: "item/agentMessage/delta",
-      receivedAtMs: 2_000,
       params: {
         threadId: "thread-1",
         turnId: "turn-1",
@@ -1750,7 +1747,6 @@ describe("ConversationCore", () => {
     });
     handleNotification(core, {
       method: "item/agentMessage/delta",
-      receivedAtMs: 3_000,
       params: {
         threadId: "thread-1",
         turnId: "turn-1",
@@ -1773,7 +1769,6 @@ describe("ConversationCore", () => {
     });
     handleNotification(core, {
       method: "item/agentMessage/delta",
-      receivedAtMs: 4_000,
       params: {
         threadId: "thread-1",
         turnId: "turn-1",
@@ -1783,7 +1778,6 @@ describe("ConversationCore", () => {
     });
     handleNotification(core, {
       method: "item/agentMessage/delta",
-      receivedAtMs: 4_500,
       params: {
         threadId: "thread-1",
         turnId: "turn-1",
@@ -1808,16 +1802,10 @@ describe("ConversationCore", () => {
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
-      requestStartedAtMs: 1_100,
-      requestDurationMs: 2_000,
       inputTokens: 100,
       cachedInputTokens: 80,
       outputTokens: 30,
       reasoningOutputTokens: 10,
-      ttftMs: 300,
-      thinkingDurationMs: 600,
-      outputDurationMs: 800,
-      generationDurationMs: 1_400,
     });
     core.handle({
       type: "turn.modelTiming.updated",
@@ -1825,23 +1813,15 @@ describe("ConversationCore", () => {
       turnId: "turn-1",
       operation: "compact",
       model: "gpt-5.6-sol",
-      requestStartedAtMs: 1_200,
-      requestDurationMs: 1_000,
       inputTokens: 200,
       cachedInputTokens: 160,
       outputTokens: 60,
       reasoningOutputTokens: 40,
-      ttftMs: 250,
-      thinkingDurationMs: 400,
-      outputDurationMs: 500,
-      generationDurationMs: 900,
     });
     core.handle({
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
-      requestStartedAtMs: 1_300,
-      requestDurationMs: 500,
       outcome: "interrupted",
       outputTokens: 50,
       reasoningOutputTokens: 0,
@@ -1850,18 +1830,12 @@ describe("ConversationCore", () => {
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
-      requestStartedAtMs: 1_400,
-      requestDurationMs: 500,
       outcome: "incomplete",
-      thinkingDurationMs: 800,
-      generationDurationMs: 900,
     });
     core.handle({
       type: "turn.modelTiming.updated",
       threadId: "thread-1",
       turnId: "turn-1",
-      requestStartedAtMs: 1_500,
-      requestDurationMs: 500,
       outcome: "failed",
       retryableFailure: true,
     });
@@ -1895,43 +1869,31 @@ describe("ConversationCore", () => {
       (event) => event.type === "turn.completed",
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
     expect(completed).toMatchObject({
-      timing: {
-        modelRequestCount: 5,
-        completedModelRequestCount: 2,
-        interruptedModelRequestCount: 1,
-        incompleteModelRequestCount: 1,
-        failedModelRequestCount: 1,
-        retryableFailureModelRequestCount: 1,
-        reasoningRequestCount: 2,
-        modelRequestDurationMs: 4_500,
-        requestInputTokens: 300,
-        requestCachedInputTokens: 240,
-        requestOutputTokens: 140,
-        firstResponseLatencyMs: 500,
-        outputDurationMs: 1_300,
-        thinkingDurationMs: 1_000,
-        nonReasoningOutputTokens: 90,
-        reasoningTokens: 50,
-        outputSpeedSampleCount: 3,
-        outputSpeedTimedCount: 2,
-        thinkingSpeedSampleCount: 2,
-        thinkingSpeedTimedCount: 2,
-        generationSpeedSampleCount: 3,
-        generationSpeedTimedCount: 2,
-        compact: {
-          model: "gpt-5.6-sol",
-          hasMixedModels: false,
-          requestCount: 1,
-          unsuccessfulRequestCount: 0,
-          inputTokens: 200,
-          cachedInputTokens: 160,
-          outputTokens: 60,
-        },
+      durationMs: 5_000,
+    });
+    expect(completed?.timing).toEqual({
+      modelRequestCount: 5,
+      completedModelRequestCount: 2,
+      interruptedModelRequestCount: 1,
+      incompleteModelRequestCount: 1,
+      failedModelRequestCount: 1,
+      retryableFailureModelRequestCount: 1,
+      reasoningRequestCount: 2,
+      requestInputTokens: 300,
+      requestCachedInputTokens: 240,
+      requestOutputTokens: 140,
+      nonReasoningOutputTokens: 90,
+      reasoningTokens: 50,
+      compact: {
+        model: "gpt-5.6-sol",
+        hasMixedModels: false,
+        requestCount: 1,
+        unsuccessfulRequestCount: 0,
+        inputTokens: 200,
+        cachedInputTokens: 160,
+        outputTokens: 60,
       },
     });
-    expect(completed?.timing?.outputTokensPerSecond).toBeCloseTo(40 / 1.3);
-    expect(completed?.timing?.thinkingTokensPerSecond).toBeCloseTo(50);
-    expect(completed?.timing?.generationTokensPerSecond).toBeCloseTo(90 / 2.3);
   });
 
   it("keeps the reasoning token count but omits timing-stream fields for OpenAI", async () => {
@@ -1959,7 +1921,6 @@ describe("ConversationCore", () => {
 
     handleNotification(core, {
       method: "turn/started",
-      receivedAtMs: 1_000,
       params: { threadId: "thread-openai", turn: { id: "turn-openai" } },
     });
     handleNotification(core, {
@@ -1975,10 +1936,9 @@ describe("ConversationCore", () => {
         },
       },
     });
-    for (const [receivedAtMs, delta] of [[2_000, "A"], [3_000, "B"]] as const) {
+    for (const delta of ["A", "B"]) {
       handleNotification(core, {
         method: "item/agentMessage/delta",
-        receivedAtMs,
         params: {
           threadId: "thread-openai",
           turnId: "turn-openai",
@@ -1991,27 +1951,15 @@ describe("ConversationCore", () => {
       type: "turn.modelTiming.updated",
       threadId: "thread-openai",
       turnId: "turn-openai",
-      requestStartedAtMs: 1_100,
-      requestDurationMs: 2_000,
       outputTokens: 30,
       reasoningOutputTokens: 10,
-      ttftMs: 200,
-      thinkingDurationMs: 500,
-      outputDurationMs: 1_000,
-      generationDurationMs: 1_500,
     });
     core.handle({
       type: "turn.modelTiming.updated",
       threadId: "thread-openai",
       turnId: "turn-openai",
-      requestStartedAtMs: 1_200,
-      requestDurationMs: 1_500,
       outputTokens: 60,
       reasoningOutputTokens: 40,
-      ttftMs: 300,
-      thinkingDurationMs: 400,
-      outputDurationMs: 1_000,
-      generationDurationMs: 1_400,
     });
     handleNotification(core, {
       method: "thread/tokenUsage/updated",
@@ -2041,23 +1989,16 @@ describe("ConversationCore", () => {
     const completed = events.find(
       (event) => event.type === "turn.completed",
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
-    expect(completed?.timing).toMatchObject({
+    expect(completed?.timing).toEqual({
       modelRequestCount: 2,
-      modelRequestDurationMs: 3_500,
+      reasoningRequestCount: 2,
       requestOutputTokens: 90,
       nonReasoningOutputTokens: 40,
-      outputTokensPerSecond: 20,
-      outputSpeedSampleCount: 2,
-      outputSpeedTimedCount: 2,
-      firstResponseLatencyMs: 1_000,
+      reasoningTokens: 50,
     });
-    expect(completed?.timing?.ttftMs).toBeUndefined();
-    expect(completed?.timing?.reasoningTokens).toBe(50);
-    expect(completed?.timing?.thinkingTokensPerSecond).toBeUndefined();
-    expect(completed?.timing?.generationTokensPerSecond).toBeUndefined();
   });
 
-  it("includes timing-stream fields for OpenCode Go completions", async () => {
+  it("keeps request and Token facts for OpenCode Go completions", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
     output.subscribe("test", (event) => {
@@ -2082,23 +2023,16 @@ describe("ConversationCore", () => {
 
     handleNotification(core, {
       method: "turn/started",
-      receivedAtMs: 1_000,
       params: { threadId: "thread-og", turn: { id: "turn-og" } },
     });
     core.handle({
       type: "turn.modelTiming.updated",
       threadId: "thread-og",
       turnId: "turn-og",
-      requestStartedAtMs: 1_200,
-      requestDurationMs: 1_000,
       inputTokens: 100,
       cachedInputTokens: 80,
       outputTokens: 40,
       reasoningOutputTokens: 20,
-      ttftMs: 200,
-      thinkingDurationMs: 400,
-      outputDurationMs: 500,
-      generationDurationMs: 900,
     });
     handleNotification(core, {
       method: "turn/completed",
@@ -2117,17 +2051,61 @@ describe("ConversationCore", () => {
     const completed = events.find(
       (event) => event.type === "turn.completed",
     ) as Extract<OutputEvent, { type: "turn.completed" }> | undefined;
-    expect(completed).toMatchObject({
-      timing: {
-        modelRequestCount: 1,
-        thinkingDurationMs: 400,
-        thinkingSpeedSampleCount: 1,
-        thinkingSpeedTimedCount: 1,
-        generationSpeedSampleCount: 1,
-        generationSpeedTimedCount: 1,
-      },
+    expect(completed?.timing).toEqual({
+      modelRequestCount: 1,
+      reasoningRequestCount: 1,
+      requestInputTokens: 100,
+      requestCachedInputTokens: 80,
+      requestOutputTokens: 40,
+      nonReasoningOutputTokens: 20,
+      reasoningTokens: 20,
     });
   });
+
+  it.each(["turn-1", "previous-turn"])(
+    "uses only current Turn token usage without proxy requests or text timing (%s)",
+    async (usageTurnId) => {
+      const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+      const events: OutputEvent[] = [];
+      output.subscribe("test", (event) => { events.push(event); });
+      const target = {
+        surface: "telegram" as const,
+        accountId: "default",
+        conversationId: "100",
+      };
+      const core = new ConversationCore({
+        allBindings: () => [],
+        targetForThread: () => target,
+        modelSettingsForThread: () => undefined,
+        contextCompactionItemIdsForThread: () => undefined,
+      }, output);
+
+      core.handle({ type: "turn.started", threadId: "thread-1", turnId: "turn-1" });
+      core.handle({
+        type: "thread.tokenUsage.updated",
+        threadId: "thread-1",
+        turnId: usageTurnId,
+        tokenUsage: {
+          total: usageBreakdown(320, 200),
+          last: usageBreakdown(60, 40),
+          modelContextWindow: 200_000,
+        },
+      });
+      core.handle({
+        type: "turn.completed",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "completed",
+        error: null,
+      });
+
+      await output.close();
+      const completed = events.find((event) => event.type === "turn.completed");
+      expect(completed?.timing).toEqual(usageTurnId === "turn-1"
+        ? { nonReasoningOutputTokens: 20, reasoningTokens: 40 }
+        : undefined);
+    },
+  );
 
 });
 

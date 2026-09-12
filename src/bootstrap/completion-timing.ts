@@ -10,11 +10,8 @@ export function mergeCompletionTiming(
   const timing: TurnOutputTiming = {
     ...current,
     modelRequestCount: latestTurn.requestCount,
-    modelRequestDurationMs: latestTurn.requestDurationMs,
     requestInputTokens: latestTurn.inputTokens,
     requestOutputTokens: latestTurn.outputTokens,
-    outputSpeedSampleCount: latestTurn.outputSpeedSampleCount,
-    outputSpeedTimedCount: latestTurn.outputSpeedTimedCount,
   };
   reconcileModelRequestStatuses(timing, latestTurn);
   assignOptionalMetric(
@@ -28,11 +25,6 @@ export function mergeCompletionTiming(
     latestTurn.reasoningOutputTokens > 0
       ? latestTurn.reasoningOutputTokens
       : null,
-  );
-  assignOptionalMetric(
-    timing,
-    "outputTokensPerSecond",
-    latestTurn.outputTokensPerSecond,
   );
   assignOptionalMetric(timing, "compact", latestTurn.compact);
   return timing;

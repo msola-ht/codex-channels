@@ -153,7 +153,7 @@ export function toConversationInputEvent(
 ): ConversationInputEvent | undefined {
   switch (notification.method) {
     case coreMethods.turnStarted:
-      return toTurnStartedEvent(notification.params, notification.receivedAtMs);
+      return toTurnStartedEvent(notification.params);
     case coreMethods.goalUpdated:
       return toGoalUpdatedEvent(notification.params);
     case coreMethods.goalCleared:
@@ -167,7 +167,7 @@ export function toConversationInputEvent(
     case coreMethods.turnPlanUpdated:
       return toTurnPlanEvent(notification.params);
     case coreMethods.agentMessageDelta:
-      return toAgentMessageDeltaEvent(notification.params, notification.receivedAtMs);
+      return toAgentMessageDeltaEvent(notification.params);
     case coreMethods.reasoningSummaryTextDelta:
     case coreMethods.reasoningSummaryPartAdded:
     case coreMethods.reasoningTextDelta:
@@ -288,7 +288,6 @@ function toThreadLifecycleEvent(
 
 function toTurnStartedEvent(
   value: unknown,
-  receivedAtMs: number | undefined,
 ): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = nonEmptyString(params?.threadId);
@@ -298,7 +297,6 @@ function toTurnStartedEvent(
         type: "turn.started",
         threadId,
         turnId,
-        ...(receivedAtMs === undefined ? {} : { receivedAtMs }),
       }
     : undefined;
 }
@@ -342,7 +340,6 @@ function toTurnPlanEvent(value: unknown): ConversationInputEvent | undefined {
 
 function toAgentMessageDeltaEvent(
   value: unknown,
-  receivedAtMs: number | undefined,
 ): ConversationInputEvent | undefined {
   const params = asRecord(value);
   const threadId = nonEmptyString(params?.threadId);
@@ -356,7 +353,6 @@ function toAgentMessageDeltaEvent(
         turnId,
         itemId,
         text,
-        ...(receivedAtMs === undefined ? {} : { receivedAtMs }),
       }
     : undefined;
 }

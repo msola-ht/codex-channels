@@ -128,7 +128,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   private readonly insertSubagentTurn?: StatementSync;
   private readonly lock?: RequestMetricsDatabaseLock;
   private closed = false;
-  private rowCount = 0;
   private recordsSinceCleanup = 0;
   private readonly retentionMs: number;
   private readonly maximumRows: number;
@@ -156,7 +155,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       try {
         this.database.exec("PRAGMA busy_timeout = 1000; PRAGMA query_only = ON;");
         requireCurrentModelRequestMetricsSchema(this.database);
-        this.rowCount = this.currentCount();
       } catch (error) {
         database.close();
         throw error;
@@ -294,7 +292,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   }
 
   private finishRecords(count: number, recordedAtMs: number): void {
-    this.rowCount += count;
     this.recordsSinceCleanup += count;
     if (this.recordsSinceCleanup >= cleanupInterval) {
       this.cleanup(recordedAtMs);
@@ -1334,10 +1331,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
 
   count(): number {
     this.requireOpen();
-    return this.currentCount();
-  }
-
-  private currentCount(): number {
     const row = this.database.prepare(`
       SELECT COUNT(*) AS count FROM model_request_metrics
     `).get() as { count: number };
@@ -1474,7 +1467,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ), 0)
       `).run(this.maximumRows);
       this.database.exec("COMMIT");
-      this.rowCount = this.currentCount();
       this.recordsSinceCleanup = 0;
     } catch (error) {
       this.database.exec("ROLLBACK");

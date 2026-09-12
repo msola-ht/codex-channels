@@ -12,11 +12,6 @@ type FallbackUsage = Pick<
 >;
 
 export class TurnTimingAccumulator {
-  private firstAnyDeltaAtMs: number | undefined;
-  private lastAnyDeltaAtMs: number | undefined;
-  private modelOutputDurationMs: number | undefined;
-  private modelTtftMs: number | undefined;
-  private latestModelRequestStartedAtMs: number | undefined;
   private modelRequestCount = 0;
   private completedModelRequestCount = 0;
   private interruptedModelRequestCount = 0;
@@ -25,7 +20,6 @@ export class TurnTimingAccumulator {
   private retryableFailureModelRequestCount = 0;
   private reasoningRequestCount = 0;
   private reasoningUsageCount = 0;
-  private modelRequestDurationMs = 0;
   private modelInputTokens: number | undefined;
   private modelCachedInputTokens: number | undefined;
   private modelInputUsageCount = 0;
@@ -41,43 +35,8 @@ export class TurnTimingAccumulator {
   private compactInputUsageCount = 0;
   private compactCachedInputUsageCount = 0;
   private compactOutputTokens = 0;
-  private timedNonReasoningOutputTokens = 0;
-  private timedOutputDurationMs = 0;
-  private outputSpeedSampleCount = 0;
-  private outputSpeedTimedCount = 0;
-  private timedReasoningOutputTokens = 0;
-  private timedThinkingDurationMs = 0;
-  private thinkingSpeedSampleCount = 0;
-  private thinkingSpeedTimedCount = 0;
-  private timedGenerationOutputTokens = 0;
-  private timedGenerationDurationMs = 0;
-  private generationSpeedSampleCount = 0;
-  private generationSpeedTimedCount = 0;
-  private readonly finalItemDeltas = new Map<
-    string,
-    { firstAtMs: number; lastAtMs: number }
-  >();
 
-  constructor(
-    readonly turnId: string,
-    private readonly turnStartedAtMs?: number,
-  ) {}
-
-  recordAgentMessageDelta(
-    turnId: string,
-    itemKey: string,
-    receivedAtMs: number,
-    finalAnswer: boolean,
-  ): void {
-    if (turnId !== this.turnId) return;
-    this.firstAnyDeltaAtMs ??= receivedAtMs;
-    this.lastAnyDeltaAtMs = receivedAtMs;
-    if (!finalAnswer) return;
-    const itemTiming = this.finalItemDeltas.get(itemKey)
-      ?? { firstAtMs: receivedAtMs, lastAtMs: receivedAtMs };
-    itemTiming.lastAtMs = receivedAtMs;
-    this.finalItemDeltas.set(itemKey, itemTiming);
-  }
+  constructor(readonly turnId: string) {}
 
   recordModelTiming(event: ModelTimingEvent): void {
     if (event.turnId !== this.turnId) return;
@@ -99,7 +58,6 @@ export class TurnTimingAccumulator {
         }
         break;
     }
-    this.modelRequestDurationMs += event.requestDurationMs;
     if (event.inputTokens !== undefined) {
       this.modelInputTokens = (this.modelInputTokens ?? 0) + event.inputTokens;
       this.modelInputUsageCount += 1;
@@ -123,46 +81,29 @@ export class TurnTimingAccumulator {
     if (event.operation === "compact") {
       this.recordCompaction(event);
     }
-    this.recordSpeeds(event);
-    if (event.outputDurationMs !== undefined) {
-      this.modelOutputDurationMs =
-        (this.modelOutputDurationMs ?? 0) + event.outputDurationMs;
-    }
-    if (
-      this.latestModelRequestStartedAtMs === undefined
-      || event.requestStartedAtMs >= this.latestModelRequestStartedAtMs
-    ) {
-      this.latestModelRequestStartedAtMs = event.requestStartedAtMs;
-      this.modelTtftMs = event.ttftMs;
-    }
   }
 
   output(
     turnId: string,
-    detailedTiming: boolean,
     fallbackUsage?: FallbackUsage,
   ): TurnOutputTiming | undefined {
     if (turnId !== this.turnId) return undefined;
     const result: TurnOutputTiming = {};
     this.appendModelRequestSummary(result);
-    if (detailedTiming && this.modelTtftMs !== undefined) {
-      result.ttftMs = this.modelTtftMs;
-    }
-    if (
-      this.turnStartedAtMs !== undefined
-      && this.firstAnyDeltaAtMs !== undefined
-      && this.firstAnyDeltaAtMs >= this.turnStartedAtMs
-    ) {
-      result.firstResponseLatencyMs = this.firstAnyDeltaAtMs - this.turnStartedAtMs;
-    }
-    this.appendOutputDuration(result);
     const tokenCounts = this.outputTokenCounts(fallbackUsage);
-    this.appendSpeeds(result, tokenCounts, detailedTiming);
+    if (
+      tokenCounts.nonReasoningOutputTokens !== undefined
+      && tokenCounts.nonReasoningOutputTokens > 0
+    ) {
+      result.nonReasoningOutputTokens = tokenCounts.nonReasoningOutputTokens;
+    }
+    if (tokenCounts.reasoningTokens !== undefined && tokenCounts.reasoningTokens > 0) {
+      result.reasoningTokens = tokenCounts.reasoningTokens;
+    }
     if (
       result.modelRequestCount === undefined
-      && result.firstResponseLatencyMs === undefined
-      && result.outputDurationMs === undefined
-      && result.thinkingDurationMs === undefined
+      && result.nonReasoningOutputTokens === undefined
+      && result.reasoningTokens === undefined
     ) {
       return undefined;
     }
@@ -193,45 +134,6 @@ export class TurnTimingAccumulator {
     }
   }
 
-  private recordSpeeds(event: ModelTimingEvent): void {
-    if (event.outputTokens !== undefined) {
-      const nonReasoningOutputTokens = Math.max(
-        0,
-        event.outputTokens - (event.reasoningOutputTokens ?? 0),
-      );
-      if (nonReasoningOutputTokens > 0) {
-        this.outputSpeedSampleCount += 1;
-        if (event.outputDurationMs !== undefined && event.outputDurationMs > 0) {
-          this.outputSpeedTimedCount += 1;
-          this.timedNonReasoningOutputTokens += nonReasoningOutputTokens;
-          this.timedOutputDurationMs += event.outputDurationMs;
-        }
-      }
-      if (event.outputTokens > 0) {
-        this.generationSpeedSampleCount += 1;
-        if (
-          event.generationDurationMs !== undefined
-          && event.generationDurationMs > 0
-        ) {
-          this.generationSpeedTimedCount += 1;
-          this.timedGenerationOutputTokens += event.outputTokens;
-          this.timedGenerationDurationMs += event.generationDurationMs;
-        }
-      }
-    }
-    if (
-      event.reasoningOutputTokens !== undefined
-      && event.reasoningOutputTokens > 0
-    ) {
-      this.thinkingSpeedSampleCount += 1;
-      if (event.thinkingDurationMs !== undefined && event.thinkingDurationMs > 0) {
-        this.thinkingSpeedTimedCount += 1;
-        this.timedReasoningOutputTokens += event.reasoningOutputTokens;
-        this.timedThinkingDurationMs += event.thinkingDurationMs;
-      }
-    }
-  }
-
   private appendModelRequestSummary(result: TurnOutputTiming): void {
     if (this.modelRequestCount === 0) return;
     result.modelRequestCount = this.modelRequestCount;
@@ -250,7 +152,6 @@ export class TurnTimingAccumulator {
     if (this.reasoningUsageCount > 0) {
       result.reasoningRequestCount = this.reasoningRequestCount;
     }
-    result.modelRequestDurationMs = this.modelRequestDurationMs;
     if (this.modelInputTokens !== undefined) {
       result.requestInputTokens = this.modelInputTokens;
     }
@@ -280,32 +181,6 @@ export class TurnTimingAccumulator {
     }
   }
 
-  private appendOutputDuration(result: TurnOutputTiming): void {
-    if (this.modelOutputDurationMs !== undefined) {
-      result.outputDurationMs = this.modelOutputDurationMs;
-      return;
-    }
-    if (this.finalItemDeltas.size > 0) {
-      let totalOutputDurationMs = 0;
-      for (const itemTiming of this.finalItemDeltas.values()) {
-        if (itemTiming.lastAtMs >= itemTiming.firstAtMs) {
-          totalOutputDurationMs += itemTiming.lastAtMs - itemTiming.firstAtMs;
-        }
-      }
-      if (totalOutputDurationMs > 0) {
-        result.outputDurationMs = totalOutputDurationMs;
-      }
-      return;
-    }
-    if (
-      this.firstAnyDeltaAtMs !== undefined
-      && this.lastAnyDeltaAtMs !== undefined
-      && this.lastAnyDeltaAtMs >= this.firstAnyDeltaAtMs
-    ) {
-      result.outputDurationMs = this.lastAnyDeltaAtMs - this.firstAnyDeltaAtMs;
-    }
-  }
-
   private outputTokenCounts(fallbackUsage?: FallbackUsage): {
     nonReasoningOutputTokens?: number;
     reasoningTokens?: number;
@@ -328,66 +203,5 @@ export class TurnTimingAccumulator {
       ),
       reasoningTokens: Math.max(0, fallbackUsage.reasoningOutputTokens),
     };
-  }
-
-  private appendSpeeds(
-    result: TurnOutputTiming,
-    tokenCounts: {
-      nonReasoningOutputTokens?: number;
-      reasoningTokens?: number;
-    },
-    detailedTiming: boolean,
-  ): void {
-    if (
-      this.outputSpeedTimedCount > 0
-      && this.timedNonReasoningOutputTokens > 0
-      && this.timedOutputDurationMs > 0
-    ) {
-      result.outputTokensPerSecond =
-        this.timedNonReasoningOutputTokens / (this.timedOutputDurationMs / 1_000);
-      result.outputSpeedSampleCount = this.outputSpeedSampleCount;
-      result.outputSpeedTimedCount = this.outputSpeedTimedCount;
-    } else if (
-      this.modelRequestCount === 0
-      && tokenCounts.nonReasoningOutputTokens !== undefined
-      && tokenCounts.nonReasoningOutputTokens > 0
-      && result.outputDurationMs !== undefined
-      && result.outputDurationMs > 0
-    ) {
-      result.outputTokensPerSecond =
-        tokenCounts.nonReasoningOutputTokens / (result.outputDurationMs / 1_000);
-    }
-    if (
-      tokenCounts.nonReasoningOutputTokens !== undefined
-      && tokenCounts.nonReasoningOutputTokens > 0
-    ) {
-      result.nonReasoningOutputTokens = tokenCounts.nonReasoningOutputTokens;
-    }
-    if (tokenCounts.reasoningTokens !== undefined && tokenCounts.reasoningTokens > 0) {
-      result.reasoningTokens = tokenCounts.reasoningTokens;
-    }
-    if (
-      detailedTiming
-      && this.thinkingSpeedTimedCount > 0
-      && this.timedReasoningOutputTokens > 0
-      && this.timedThinkingDurationMs > 0
-    ) {
-      result.thinkingTokensPerSecond =
-        this.timedReasoningOutputTokens / (this.timedThinkingDurationMs / 1_000);
-      result.thinkingDurationMs = this.timedThinkingDurationMs;
-      result.thinkingSpeedSampleCount = this.thinkingSpeedSampleCount;
-      result.thinkingSpeedTimedCount = this.thinkingSpeedTimedCount;
-    }
-    if (
-      detailedTiming
-      && this.generationSpeedTimedCount > 0
-      && this.timedGenerationOutputTokens > 0
-      && this.timedGenerationDurationMs > 0
-    ) {
-      result.generationTokensPerSecond =
-        this.timedGenerationOutputTokens / (this.timedGenerationDurationMs / 1_000);
-      result.generationSpeedSampleCount = this.generationSpeedSampleCount;
-      result.generationSpeedTimedCount = this.generationSpeedTimedCount;
-    }
   }
 }

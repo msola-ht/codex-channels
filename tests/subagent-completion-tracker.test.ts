@@ -263,18 +263,24 @@ describe("SubagentCompletionTracker", () => {
     tracker.handleInput(completedActivity());
     await vi.advanceTimersByTimeAsync(20);
 
-    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+    expect(publish).toHaveBeenCalledWith({
       type: "subagent.completed",
+      target,
+      parentThreadId: "parent-1",
       agentThreadId: "agent-1",
+      agentPath: "/root/review",
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
       status: "completed",
       metricsStatus: "available",
+      requestCount: 2,
+      unsuccessfulRequestCount: 0,
+      inputTokens: 1_000,
       cachedInputTokens: 500,
+      outputTokens: 100,
       reasoningOutputTokens: 0,
       reasoningEffort: "medium",
-      outputTokensPerSecond: 10,
-      outputSpeedSampleCount: 1,
-      outputSpeedTimedCount: 1,
-    }));
+    });
     tracker.close();
     vi.useRealTimers();
   });
@@ -307,7 +313,6 @@ describe("SubagentCompletionTracker", () => {
       type: "subagent.completed",
       agentThreadId: "agent-1",
       status: "completed",
-      elapsedMs: 12_365,
     }));
     tracker.close();
     vi.useRealTimers();

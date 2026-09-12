@@ -23,7 +23,7 @@
   Provider 装配模型指标组件，不持有模型转发数据通路；通过 `request-metrics-query-adapter.ts`
   把同一指标库的精确 Thread 查询映射为 Application `/metrics` 窄端口，并为 OpenAI `/limits`
   提供当前周窗口的精确 Provider 聚合；
-  Core 根据编译期 Provider 能力决定哪些详细计时可以进入完成事件；计划任务的内部组件、恢复顺序和
+  计划任务的内部组件、恢复顺序和
   Store 生命周期委托给 `scheduled-task-composition.ts`。
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
   Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
@@ -34,16 +34,16 @@
   有界装配 DeepSeek、OpenCode Go 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
-  既有计时端口。所有脱敏请求样本都会持久化；具备 Thread、Turn 与 Token 窗口的样本按 Turn 聚合
+  模型请求统计端口。所有脱敏请求样本都会持久化；具备 Thread 与 Turn 关联的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
-  既有 Core 计时。优先使用代理指标携带的 WebSocket `reasoning.effort` 或私有第三方角色路径标注，
+  Core 统计。优先使用代理指标携带的 WebSocket `reasoning.effort` 或私有第三方角色路径标注，
   普通 Thread 仅在缺失时
   由可选 `resolveModelSettings` 按 Thread 关联回填路由层维护的思考等级；代理、Core 和数据库
   View 都不读取请求正文、设置文件或价格目录。
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
-- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、速度与压缩统计，
-  同时保留只能实时观测的响应延迟；若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
+- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token 与压缩统计；
+  若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。
 - `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 发给发起父 Turn 的
   `subAgentActivity.completed` 作为成功终态，并以父 Thread、父 Turn、子 Thread 和代理路径精确

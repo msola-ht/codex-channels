@@ -50,11 +50,9 @@ describe("JsonRpcClient timing", () => {
   it("initializes once and routes notifications", async () => {
     const transport = new TimingTransport();
     const client = new JsonRpcClient(transport);
-    const methods: string[] = [];
-    const receivedTimes: Array<number | undefined> = [];
+    const notifications: unknown[] = [];
     client.onNotification((notification) => {
-      methods.push(notification.method);
-      receivedTimes.push(notification.receivedAtMs);
+      notifications.push(notification);
     });
 
     const initialized = await client.connect();
@@ -74,7 +72,6 @@ describe("JsonRpcClient timing", () => {
         },
       },
     });
-    expect(methods).toEqual(["warning"]);
-    expect(receivedTimes).toEqual([expect.any(Number)]);
+    expect(notifications).toEqual([{ method: "warning", params: { message: "test" } }]);
   });
 });

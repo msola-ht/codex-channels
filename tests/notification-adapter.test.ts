@@ -274,20 +274,17 @@ describe("Notification adapter", () => {
     });
   });
 
-  it("propagates the receipt timestamp for turn start and text deltas", () => {
+  it("maps turn start and text deltas without local receipt timing", () => {
     expect(toConversationInputEvent({
       method: "turn/started",
-      receivedAtMs: 123,
       params: { threadId: "thread-1", turn: { id: "turn-1" } },
     })).toEqual({
       type: "turn.started",
       threadId: "thread-1",
       turnId: "turn-1",
-      receivedAtMs: 123,
     });
     expect(toConversationInputEvent({
       method: "item/agentMessage/delta",
-      receivedAtMs: 456,
       params: {
         threadId: "thread-1",
         turnId: "turn-1",
@@ -300,7 +297,6 @@ describe("Notification adapter", () => {
       turnId: "turn-1",
       itemId: "item-1",
       text: "OK",
-      receivedAtMs: 456,
     });
   });
 
