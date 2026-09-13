@@ -25,6 +25,7 @@ export function GatewaySettingsCard({ management }: { management: GatewaySetting
 
   if (managedSettings === null) return null
   const disabled = management.saving || management.pendingSetting !== null
+  const identityDefaults = managedSettings.system.officialTuiIdentity.defaults
   const saveIdentity = () => {
     void management.previewSetting("system.official-tui-identity", {
       clientIdentity: {
@@ -57,13 +58,13 @@ export function GatewaySettingsCard({ management }: { management: GatewaySetting
 
       <Separator />
       <section className="flex flex-col gap-3">
-        <div><h3 className="font-medium">官方 TUI 请求身份</h3><p className="text-xs text-muted-foreground">客户端身份和上游 User-Agent 作为一组写入；全部留空会恢复 App Server 原生透传。</p></div>
+        <div><h3 className="font-medium">官方 TUI 请求身份</h3><p className="text-xs text-muted-foreground">客户端身份和上游 User-Agent 作为一组写入；全部留空使用默认官方 TUI 身份 {identityDefaults.name} / {identityDefaults.version} 并跟随 Codex CLI 升级，填写后写死为显式覆盖。</p></div>
         <FieldGroup className="grid gap-3 md:grid-cols-3">
-          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-name">名称</FieldLabel><Input id="tui-identity-name" value={identityName} disabled={disabled} maxLength={64} onChange={(event) => setIdentityName(event.target.value)} placeholder="codex-tui" /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-name">名称</FieldLabel><Input id="tui-identity-name" value={identityName} disabled={disabled} maxLength={64} onChange={(event) => setIdentityName(event.target.value)} placeholder={identityDefaults.name} /></Field>
           <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-title">标题</FieldLabel><Input id="tui-identity-title" value={identityTitle} disabled={disabled} maxLength={128} onChange={(event) => setIdentityTitle(event.target.value)} placeholder="可选" /></Field>
-          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-version">版本</FieldLabel><Input id="tui-identity-version" value={identityVersion} disabled={disabled} maxLength={64} onChange={(event) => setIdentityVersion(event.target.value)} placeholder="0.154.0" /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-version">版本</FieldLabel><Input id="tui-identity-version" value={identityVersion} disabled={disabled} maxLength={64} onChange={(event) => setIdentityVersion(event.target.value)} placeholder={identityDefaults.version} /></Field>
         </FieldGroup>
-        <Field data-disabled={disabled}><FieldLabel htmlFor="tui-upstream-user-agent">上游 User-Agent</FieldLabel><Input id="tui-upstream-user-agent" value={upstreamUserAgent} disabled={disabled} maxLength={512} onChange={(event) => setUpstreamUserAgent(event.target.value)} placeholder="留空恢复原生透传" /></Field>
+        <Field data-disabled={disabled}><FieldLabel htmlFor="tui-upstream-user-agent">上游 User-Agent</FieldLabel><Input id="tui-upstream-user-agent" value={upstreamUserAgent} disabled={disabled} maxLength={512} onChange={(event) => setUpstreamUserAgent(event.target.value)} placeholder="留空透传官方 TUI UA" /></Field>
         <Button className="self-start" variant="outline" disabled={disabled} onClick={saveIdentity}>保存请求身份</Button>
       </section>
     </CardContent>

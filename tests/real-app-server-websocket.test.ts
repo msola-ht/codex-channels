@@ -151,7 +151,7 @@ suite("real Codex App Server over Unix WebSocket", () => {
   });
 
   it("reports the upstream user agent used by Codex", () => {
-    expect(upstreamUserAgent).toContain("codex_connect/");
+    expect(upstreamUserAgent).toContain("codex-tui/");
   });
 
   it("reads account rate-limit snapshots without starting a turn", async () => {

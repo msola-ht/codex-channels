@@ -622,7 +622,7 @@ contractSuite("real supervised App Server provider", () => {
           { sandbox: "read-only" },
         );
         const initialized = await client.connect();
-        expect(initialized.userAgent).toContain("codex_connect/");
+        expect(initialized.userAgent).toContain("codex-tui/");
 
         await expect(ensureAppServerProvider(socketPath, "ocg-main"))
           .rejects.toThrow("模型 Provider App Server 启动失败：ocg-main（exit=1）");
@@ -645,7 +645,7 @@ contractSuite("real supervised App Server provider", () => {
           { sandbox: "read-only" },
         );
         const openCodeInitialized = await openCodeClient.connect();
-        expect(openCodeInitialized.userAgent).toContain("codex_connect/");
+        expect(openCodeInitialized.userAgent).toContain("codex-tui/");
         const providerLease = await acquireAppServerProviderLease(socketPath, "ocg-main");
         try {
           expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
@@ -679,7 +679,7 @@ contractSuite("real supervised App Server provider", () => {
           { sandbox: "read-only" },
         );
         await expect(client.connect()).resolves.toMatchObject({
-          userAgent: expect.stringContaining("codex_connect/"),
+          userAgent: expect.stringContaining("codex-tui/"),
         });
       } finally {
         try {

@@ -8,8 +8,7 @@ import type {
   InitializeResponse,
   RequestId,
 } from "../codex-protocol/index.js";
-import gatewayMetadata from "../version.json" with { type: "json" };
-import { codexConnectIntegrationId } from "./protocol-info.js";
+import { codexCliVersion, codexTuiClientName } from "./protocol-info.js";
 import type { CodexTransport } from "./transport.js";
 
 const envelopeSchema = z.object({
@@ -105,10 +104,12 @@ export class JsonRpcClient {
       const response = await this.request<InitializeResponse>({
         method: "initialize",
         params: {
+          // 默认与官方 `codex --remote` 一致：声明 codex-tui 与当前锁定 Codex CLI 版本，
+          // App Server 据此生成 codex-tui 形态的进程级 User-Agent；升级 CLI 后自动跟随。
           clientInfo: {
-            name: this.clientInfo?.name ?? codexConnectIntegrationId,
-            title: this.clientInfo?.title ?? "Codex Connect Gateway",
-            version: this.clientInfo?.version ?? gatewayMetadata.version,
+            name: this.clientInfo?.name ?? codexTuiClientName,
+            title: this.clientInfo?.title ?? null,
+            version: this.clientInfo?.version ?? codexCliVersion,
           },
           capabilities: {
             experimentalApi: true,

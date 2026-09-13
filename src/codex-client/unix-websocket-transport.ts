@@ -40,7 +40,7 @@ export class UnixWebSocketTransport extends BaseTransport {
       handshakeTimeout: this.connectTimeoutMs,
       maxPayload: this.maxPayloadBytes,
       // 与原生 `codex --remote` 一致，只发送标准 WebSocket Upgrade 头；
-      // clientInfo 在 initialize 中标识本集成，不用 HTTP User-Agent 冒充 TUI。
+      // 客户端身份只在 initialize 的 clientInfo 中声明，不额外设置 HTTP User-Agent。
       createConnection: () => createConnection(this.socketPath),
     };
     const socket = new WebSocket("ws://localhost/", options);

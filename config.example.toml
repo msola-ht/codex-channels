@@ -34,9 +34,9 @@ socket_path = "runtime/codex-app-server.sock"
 # 仅覆盖当前主 Provider；模型必须存在于该 Provider 的目录中。
 default_model = ""
 sandbox = "workspace-write"
-# 模型上游 User-Agent 与 App Server 客户端身份请用
-# codexc config → 系统设置 → 一键设为官方 TUI 身份 生成并原子写入；
-# 自定义值也可直接编辑：
+# 默认以官方 codex-tui 身份连接 App Server，模型上游 User-Agent 由 App Server 按当前锁定
+# Codex CLI 版本生成，升级后自动跟随；下面两个字段缺省即使用默认值，仅在需要覆盖时填写，
+# 覆盖后不再跟随升级，可用 codexc config → 系统设置 → 一键设为官方 TUI 身份 重新生成：
 # upstream_user_agent = "Mozilla/5.0 MyClient/1.0"
 # [codex.client_identity]
 # name = "my_client"

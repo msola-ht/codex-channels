@@ -63,7 +63,7 @@ describe("JsonRpcClient timing", () => {
     expect(transport.sent[1]).toEqual({ method: "initialized" });
     expect(transport.sent[0]).toMatchObject({
       params: {
-        clientInfo: { name: "codex_connect", title: "Codex Connect Gateway" },
+        clientInfo: { name: "codex-tui", title: null },
         capabilities: {
           experimentalApi: true,
           requestAttestation: false,

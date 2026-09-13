@@ -99,7 +99,6 @@ import type {
   ThreadSnapshot,
 } from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
-import { codexConnectIntegrationId } from "./protocol-info.js";
 import {
   PINNED_THREAD_SECTION_ID,
   toThreadSession,
@@ -263,7 +262,6 @@ export class CodexAppServerClient implements
         cwd,
         historyMode: "paginated",
         approvalPolicy: options.approvalPolicy ?? "on-request",
-        serviceName: codexConnectIntegrationId,
         ...(options.permissions !== undefined
           ? { permissions: options.permissions }
           : { sandbox: options.sandbox ?? this.defaults.sandbox }),

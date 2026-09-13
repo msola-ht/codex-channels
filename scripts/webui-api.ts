@@ -329,6 +329,7 @@ export interface ManagementSettingsResponse {
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
       upstreamUserAgent: string | null
+      defaults: { name: string; version: string }
     }
     workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null }>
   }

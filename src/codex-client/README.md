@@ -20,8 +20,8 @@
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；通知不附加本地接收时间戳。
   初始化期间
-  通过组合根注入 `clientInfo`，`[codex].client_identity` 可自定义 name/title/version，缺省保持
-  `codex_connect`；
+  通过组合根注入 `clientInfo`；缺省声明官方 `codex --remote` 的 `codex-tui` 与当前锁定 Codex CLI
+  版本，`[codex].client_identity` 可按字段覆盖 name/title/version；
   已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、

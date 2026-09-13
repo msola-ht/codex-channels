@@ -51,7 +51,7 @@ import {
   CodexAppServerClient,
   createAppServerTransport,
   ProviderRoutingClient,
-  gatewayVersion,
+  codexCliVersion,
   handleApprovalServerRequest,
   JsonRpcError,
   loadManagedModelOptions,
@@ -818,7 +818,7 @@ export class GatewayApplication {
       ...(scheduledTaskUseCases === undefined ? {} : { scheduledTasks: scheduledTaskUseCases }),
       bindings: this.bindings,
       logger,
-      gatewayVersion,
+      gatewayVersion: codexCliVersion,
       codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
       openAiConnectivity: () => this.openAiConnectivity,
       onFatal: (surface, accountId, error) => this.handleSurfaceFatal(
