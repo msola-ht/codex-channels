@@ -8,7 +8,7 @@
 固定版本源码已按 [`本地上游源码工作流`](upstream-sources.md) 保存；本地基线存在且匹配时优先
 查阅本地仓库，不重复联网读取相同提交。
 
-项目精确锁定 `@larksuiteoapi/node-sdk@1.73.0`。本页记录资料、实现和验证入口；当前真实平台
+项目精确锁定 `@larksuiteoapi/node-sdk@1.73.3`。本页记录资料、实现和验证入口；当前真实平台
 验收状态只以 [`通讯渠道验收矩阵`](channel-acceptance-matrix.md) 为准。
 
 ## 资料优先级
@@ -29,11 +29,11 @@
 
 | 项目 | 当前记录 |
 | --- | --- |
-| 查阅日期 | 2026-08-16 |
+| 查阅日期 | 2026-09-13 |
 | npm 包 | `@larksuiteoapi/node-sdk` |
-| npm 当日采用正式版 | `1.73.0` |
-| 项目锁定版本 | `1.73.0` |
-| 固定官方源码 | [`f54b49f`](https://github.com/larksuite/node-sdk/tree/f54b49f3566c52b54c598194b7ed3015e3e24224) |
+| npm 当日采用正式版 | `1.73.3` |
+| 项目锁定版本 | `1.73.3` |
+| 固定官方源码 | [`af41737`](https://github.com/larksuite/node-sdk/tree/af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513) |
 | 项目依赖状态 | 已安装并由 `package-lock.json` 精确锁定 |
 | 目标应用类型 | 飞书企业自建应用 |
 | 当前传输 | WebSocket 长连接 |
@@ -41,16 +41,17 @@
 | Lark 海外版 | 未支持 |
 
 依赖升级时不得只修改版本数字；还要复核下方资料、已知约束、支持矩阵、实现映射和验证结果。
-`1.73.0` 相对 `1.71.1` 只重新生成官方 OpenAPI 代码（3 个 code-gen 提交，2026-07-30 与
-2026-08-07）；SDK 运行时、依赖以及本项目使用的符号与端点保持不变。
+`1.73.3` 在 `1.73.0` 的 OpenAPI 代码基础上只修改 SDK 运行时：取消应用注册后不再继续轮询，
+关闭连接中的 WebSocket 时不再遗留错误、重连或定时器，自定义 Domain 保留显式端口，畸形入站帧
+会经过分片校验和受控错误处理。公开类型、生成 API、依赖范围以及本项目使用的符号与端点保持不变。
 
 ## 官方资料
 
 | 查询目标 | 官方资料 | 当前用途 |
 | --- | --- | --- |
 | SDK 包与版本 | [npm 包版本](https://www.npmjs.com/package/@larksuiteoapi/node-sdk?activeTab=versions) | 发现正式版本，不作为锁定证据 |
-| SDK 源码 | [固定 `1.73.0` 提交](https://github.com/larksuite/node-sdk/tree/f54b49f3566c52b54c598194b7ed3015e3e24224) | 当前实现和测试的源码基线 |
-| Client、事件和长连接示例 | [固定版本中文说明](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/README.zh.md) | 核对 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
+| SDK 源码 | [固定 `1.73.3` 提交](https://github.com/larksuite/node-sdk/tree/af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513) | 当前实现和测试的源码基线 |
+| Client、事件和长连接示例 | [固定版本中文说明](https://github.com/larksuite/node-sdk/blob/af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513/README.zh.md) | 核对 `Client`、`WSClient`、`EventDispatcher` 和 `registerApp()` |
 | 官方 OpenClaw 飞书插件 | [固定提交 `dde0be3`](https://github.com/larksuite/openclaw-lark/tree/dde0be3680d6fd5443cab426c8f4b3216266346a) | 参考手动凭据输入、保留已有配置、Bot 身份探测和允许名单交互；不引入其 OpenClaw 运行时或宽权限工具 |
 | OpenClaw Doctor | [`doctor.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/commands/doctor.ts) | 参考通过/警告/失败分组、已有应用权限检查和缺失 Scope 精确申请链接；不复制其面向完整工具集的长报告与用户权限表 |
 | OpenClaw 应用权限查询 | [`app-scope-checker.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/app-scope-checker.ts) | 区分应用 Scope 与用户 OAuth，并确认完整远端 Scope 查询需要额外自管理权限 |
@@ -58,9 +59,9 @@
 | OpenClaw Device Flow | [`device-flow.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/device-flow.ts)、[`oauth.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/tools/oauth.ts) | 核对现有 Token 与 Scope 覆盖检测、缺失 Scope 增量授权、飞书端点、`offline_access`、有限轮询、账号校验、取消和卡片结果更新 |
 | OpenClaw OAuth 卡片 | [`oauth-cards.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/tools/oauth-cards.ts) | 核对 Device Flow 地址通过飞书 AppLink 在客户端侧边栏打开，不把外部 URL 直接作为普通文本 |
 | OpenClaw Token Store | [`token-store.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/core/token-store.ts) | 参考 macOS Keychain 和 Linux AES-256-GCM 分离后端；项目使用自己的 Gateway 数据目录和严格载荷验证 |
-| WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/f54b49f3566c52b54c598194b7ed3015e3e24224/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
-| 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
-| SDK 原生流式实现 | [`card-stream.ts`](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/channel/outbound/streaming/card-stream.ts)、[`markdown-stream.ts`](https://github.com/larksuite/node-sdk/blob/f54b49f3566c52b54c598194b7ed3015e3e24224/channel/outbound/streaming/markdown-stream.ts) | 核对 CardKit 2.0 实体创建、消息引用、元素增量、递增序列、UUID、结束设置和滚动语义；终态正文完整性另对照固定 OpenClaw 插件的 `card.update` 全量终态更新；项目只复用低层协议，不采用整套 Channel |
+| WebSocket 生命周期 | [固定版本 `ws-client`](https://github.com/larksuite/node-sdk/tree/af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513/ws-client) | 核对 `onReady`、错误、重连、关闭和状态语义 |
+| 高层 Channel | [固定版本 Channel 说明](https://github.com/larksuite/node-sdk/blob/af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513/docs/channel.zh.md) | 识别其策略、去重、串行、重试、媒体和卡片职责 |
+| SDK 原生流式实现 | [`card-stream.ts`](https://github.com/larksuite/node-sdk/blob/af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513/channel/outbound/streaming/card-stream.ts)、[`markdown-stream.ts`](https://github.com/larksuite/node-sdk/blob/af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513/channel/outbound/streaming/markdown-stream.ts) | 核对 CardKit 2.0 实体创建、消息引用、元素增量、递增序列、UUID、结束设置和滚动语义；终态正文完整性另对照固定 OpenClaw 插件的 `card.update` 全量终态更新；项目只复用低层协议，不采用整套 Channel |
 | 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
 | 文本消息发送 | [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create) | 核对 `chat_id` 接收目标、文本消息体和机器人可用性 |
@@ -139,7 +140,7 @@ EventDispatcher`。
 当前 SDK `main` 的 Channel 会在缺少 `open_id` 时向 `user_id` 或 `union_id` 回退；本项目当前实现不
 采用该回退，只接受明确的 `sender.open_id`。
 
-锁定 SDK `1.73.0` 的 `registerApp()` 已确认返回应用凭据和可选的扫码用户 `open_id`，并支持
+锁定 SDK `1.73.3` 的 `registerApp()` 已确认返回应用凭据和可选的扫码用户 `open_id`，并支持
 `addons.preset = false` 的最小机器人基座。Setup 提供手动输入和扫码授权两种方式；扫码时不传
 `createOnly` 或 `appId`，由飞书授权页让用户选择新建或已有企业自建应用，只增量声明
 `application:application:self_manage`、`application:application:patch`、
@@ -158,7 +159,7 @@ EventDispatcher`。
 
 | 能力 | 官方入口 | 项目状态 | 当前边界 |
 | --- | --- | --- | --- |
-| Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.73.0` | 研究基线 |
+| Node SDK | npm 包、固定官方源码 | 已精确锁定 `1.73.3` | 研究基线 |
 | WebSocket 握手和重连 | `WSClient` | 生命周期封装、统一 HTTP/HTTPS 代理注入、离线合同和真实首次握手已完成；真实断线恢复与代理待验证 | 已接入 |
 | 消息事件字段裁剪 | `im.message.receive_v1` | 稳定字段映射、畸形输入失败关闭和一条真实私聊文本事件已验证 | 已接入 |
 | 私聊文本事件 | `im.message.receive_v1` | 普通 `text`、由官方 `text`/`a` 元素组成的纯文字 `post`、`code_block` 代码块与 `md` Markdown 富文本均经过平台本地筛选、有界入队、Access Policy 和 Application 提交；富文本链接保留可见文字与目标 URL，`code_block`/`md` 抽取文本内容，其余未知元素失败关闭并提示用户。真实普通文本与纯文字富文本主路径已通过，代码块与 Markdown 富文本待真实验收 | 已接入 |
