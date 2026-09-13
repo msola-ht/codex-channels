@@ -187,7 +187,8 @@
   `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
 - MCP 查询按当前 Thread 读取项目级配置：概览使用精简清单分页，详情映射工具、资源和模板；七种
   官方运行状态原样进入稳定端口，`null` 显示为未知，畸形或缺失状态失败关闭；健康摘要区分需认证、
-  失败、取消、未启动、连接中与禁用，不把只读状态查询当作主动探测；
+  失败、取消、工具发现失败、未启动、连接中与禁用，不把只读状态查询当作主动探测；工具发现错误
+  只保留是否存在，不把上游错误正文传入 Application 或 Surface；
   详情说明允许官方返回的多行文本，归一化空白并限为 2,000 字符；共享命令按工具、资源或模板
   提供每页 8 项的分页与搜索，页面输出包含稳定的前后页命令；
   OAuth 和资源读取使用精简清单解析目标，不受无关 Server 的完整资源发现阻塞；OAuth 只接受
@@ -371,7 +372,7 @@ RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
 活动 busy、指定条目启动、中断保留、自动派发和 App Server 重启后的冷恢复；跳过或环境拒绝都不计为通过。
 
 该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 测试配置和本地测试 MCP 进程，验证
-App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 完整详情、只读资源、OAuth PKCE 回调及完成通知、
+App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 完整详情、工具发现失败、只读资源、OAuth PKCE 回调及完成通知、
 Thread 运行状态的已连接、进程退出失败与显式配置刷新后重连、
 工具审批元数据及 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的模型、思考等级、Fast、`multi_agent_v2` 与 agents 用户设置能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证

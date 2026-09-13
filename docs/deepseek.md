@@ -87,7 +87,7 @@ Profile 与共享子代理角色切回目录默认模型 `deepseek-flash`，并�
 
 ## 网页搜索
 
-DeepSeek（官方目录中的模型 + Codex 0.153.4）支持网页搜索，且不依赖 OpenAI：
+DeepSeek（官方目录中的模型 + Codex 0.154.0）支持网页搜索，且不依赖 OpenAI：
 
 - DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
   回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的

@@ -21,7 +21,7 @@ title   = Codex Connect Gateway
 version = 当前 Gateway 版本
 ```
 
-当前锁定的 Codex 0.153.4 使用进程级全局 UA 状态：首个会改变全局身份的普通客户端
+当前锁定的 Codex 0.154.0 使用进程级全局 UA 状态：首个会改变全局身份的普通客户端
 `initialize` 设置 originator 前缀（进程已设置或存在 `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`
 时不再覆盖），之后每次普通客户端 `initialize` 更新 `clientInfo.name; clientInfo.version`
 组成的 UA 后缀。因此原生 TUI 与 Gateway 同时连接时，返回的 UA 可能是“前缀来自先连接
@@ -29,10 +29,10 @@ version = 当前 Gateway 版本
 下面示例按单个普通客户端（Gateway 默认身份）描述模型请求的原始 UA 结构：
 
 ```text
-codex_connect/0.153.4 (<系统与架构>) <终端标识> (codex_connect; <Gateway 版本>)
+codex_connect/0.154.0 (<系统与架构>) <终端标识> (codex_connect; <Gateway 版本>)
 ```
 
-第一个 `0.153.4` 来自 App Server 的真实构建版本，不等于 `clientInfo.version`。Provider Proxy
+第一个 `0.154.0` 来自 App Server 的真实构建版本，不等于 `clientInfo.version`。Provider Proxy
 收到该原始 Header 后，移除 Hop-by-hop Header 和私有 Turn 元数据；配置了 `upstream_user_agent`
 时在该层覆盖整条 `User-Agent`，缺省则原样转发到上游。HTTP/SSE 与 WebSocket 遵循相同规则。
 
@@ -88,7 +88,7 @@ Gateway -> App Server initialize
   clientInfo = my_client / My Codex Client / 1.0.0
 
 App Server -> 本地 Provider Proxy
-  User-Agent = my_client/0.153.4 (<系统与架构>) <终端标识> (my_client; 1.0.0)
+  User-Agent = my_client/0.154.0 (<系统与架构>) <终端标识> (my_client; 1.0.0)
 
 本地 Provider Proxy -> 模型上游
   User-Agent = Mozilla/5.0 MyClient/1.0

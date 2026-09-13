@@ -112,6 +112,7 @@ export function appServerMcpStatus(
     pluginId: null,
     serverInfo: null,
     tools: { search: {} },
+    toolsError: null,
     resources: [],
     resourceTemplates: [],
     authStatus: "unsupported",

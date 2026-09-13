@@ -462,6 +462,7 @@ describe("shared surface copy contract", () => {
           pluginId: null,
           authStatus: "oAuth",
           toolCount: 2,
+          toolDiscoveryFailed: false,
         }],
       },
       {
@@ -485,6 +486,7 @@ describe("shared surface copy contract", () => {
           pluginId: null,
           authStatus: "oAuth",
           toolCount: 1,
+          toolDiscoveryFailed: false,
           serverTitle: "Docs",
           serverVersion: "1.0.0",
           serverDescription: null,

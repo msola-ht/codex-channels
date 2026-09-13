@@ -55,6 +55,12 @@ export const defaultUpgradeValidationStages = [
     args: ["run", "build"],
   },
   {
+    id: "webui-build",
+    name: "WebUI 构建",
+    command: "npm",
+    args: ["--prefix", "webui", "run", "build"],
+  },
+  {
     id: "package-test",
     name: "npm 打包与源码安装冒烟",
     command: "npm",

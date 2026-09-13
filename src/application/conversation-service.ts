@@ -1472,6 +1472,13 @@ export class ConversationService implements ConversationUseCases {
             selector,
           }];
         }
+        if (server.toolDiscoveryFailed) {
+          return [{
+            type: "toolDiscoveryFailed" as const,
+            server: server.name,
+            selector,
+          }];
+        }
         return [];
       }),
       notices: servers.flatMap((server, index) => [
@@ -1486,6 +1493,7 @@ export class ConversationService implements ConversationUseCases {
         ...(server.runtimeStatus === "connected"
           && server.authStatus !== "notLoggedIn"
           && server.authStatus !== "unknown"
+          && !server.toolDiscoveryFailed
           && server.tools.length === 0
           && server.resources.length === 0
           && server.resourceTemplates.length === 0

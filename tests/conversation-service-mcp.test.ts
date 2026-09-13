@@ -61,6 +61,7 @@ describe("ConversationService MCP operations", () => {
         pluginId: null,
         authStatus: "oAuth" as const,
         toolCount: 2,
+        toolDiscoveryFailed: false,
       },
     ]);
     const service = new ConversationService(
@@ -80,6 +81,7 @@ describe("ConversationService MCP operations", () => {
         pluginId: null,
         authStatus: "oAuth",
         toolCount: 2,
+        toolDiscoveryFailed: false,
       },
     ]);
     expect(listMcpServers).toHaveBeenCalledWith("thread-1");
@@ -92,6 +94,7 @@ describe("ConversationService MCP operations", () => {
       pluginId: null,
       authStatus: "notLoggedIn" as const,
       toolCount: 1,
+      toolDiscoveryFailed: false,
       serverTitle: "Project Tools",
       serverVersion: "1.0.0",
       serverDescription: null,
@@ -111,6 +114,7 @@ describe("ConversationService MCP operations", () => {
       pluginId: server.pluginId,
       authStatus: server.authStatus,
       toolCount: server.toolCount,
+      toolDiscoveryFailed: server.toolDiscoveryFailed,
     };
     const listMcpServers = vi.fn(async () => [summary]);
     const listMcpServerDetails = vi.fn(async () => [server]);
@@ -171,6 +175,7 @@ describe("ConversationService MCP operations", () => {
       pluginId: null,
       authStatus: "notLoggedIn" as const,
       toolCount: 0,
+      toolDiscoveryFailed: false,
       serverTitle: null,
       serverVersion: null,
       serverDescription: null,
@@ -183,6 +188,7 @@ describe("ConversationService MCP operations", () => {
       pluginId: null,
       authStatus: "unknown" as const,
       toolCount: 1,
+      toolDiscoveryFailed: false,
       serverTitle: null,
       serverVersion: null,
       serverDescription: null,
@@ -195,6 +201,7 @@ describe("ConversationService MCP operations", () => {
       pluginId: null,
       authStatus: "unsupported" as const,
       toolCount: 0,
+      toolDiscoveryFailed: false,
       serverTitle: null,
       serverVersion: null,
       serverDescription: null,
@@ -207,6 +214,7 @@ describe("ConversationService MCP operations", () => {
       pluginId: null,
       authStatus: "unsupported" as const,
       toolCount: 0,
+      toolDiscoveryFailed: false,
       serverTitle: null,
       serverVersion: null,
       serverDescription: null,
@@ -219,6 +227,20 @@ describe("ConversationService MCP operations", () => {
       pluginId: null,
       authStatus: "unsupported" as const,
       toolCount: 0,
+      toolDiscoveryFailed: false,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+    }, {
+      name: "broken tools",
+      runtimeStatus: "connected" as const,
+      pluginId: null,
+      authStatus: "unsupported" as const,
+      toolCount: 0,
+      toolDiscoveryFailed: true,
       serverTitle: null,
       serverVersion: null,
       serverDescription: null,
@@ -236,13 +258,14 @@ describe("ConversationService MCP operations", () => {
     );
 
     await expect(service.mcpHealth(target)).resolves.toEqual({
-      serverCount: 5,
+      serverCount: 6,
       toolCount: 1,
       resourceCount: 0,
       resourceTemplateCount: 0,
       actions: [
         { type: "loginRequired", server: "oauth tools", selector: "1" },
         { type: "reconnectRecommended", server: "failed", selector: "4" },
+        { type: "toolDiscoveryFailed", server: "broken tools", selector: "6" },
       ],
       notices: [
         { type: "authUnknown", server: "unknown auth", selector: "2" },
@@ -263,6 +286,7 @@ describe("ConversationService MCP operations", () => {
         pluginId: null,
         authStatus: "unsupported" as const,
         toolCount: 0,
+        toolDiscoveryFailed: false,
       }])
       .mockResolvedValueOnce([{
         name: "token-tools",
@@ -270,6 +294,7 @@ describe("ConversationService MCP operations", () => {
         pluginId: null,
         authStatus: "bearerToken" as const,
         toolCount: 0,
+        toolDiscoveryFailed: false,
       }]);
     const startMcpOAuthLogin = vi.fn();
     const readMcpResource = vi.fn();
@@ -301,6 +326,7 @@ describe("ConversationService MCP operations", () => {
       pluginId: null,
       authStatus: "notLoggedIn" as const,
       toolCount: 0,
+      toolDiscoveryFailed: false,
     }]);
     const startMcpOAuthLogin = vi.fn();
     const service = new ConversationService(

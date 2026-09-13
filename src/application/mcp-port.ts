@@ -25,6 +25,7 @@ export interface McpServerSummary {
   pluginId: string | null;
   authStatus: McpAuthStatus;
   toolCount: number;
+  toolDiscoveryFailed: boolean;
 }
 
 export interface McpToolSummary {
@@ -65,7 +66,7 @@ export interface McpHealthReport {
   resourceCount: number;
   resourceTemplateCount: number;
   actions: Array<{
-    type: "loginRequired" | "reconnectRecommended";
+    type: "loginRequired" | "reconnectRecommended" | "toolDiscoveryFailed";
     server: string;
     selector: string;
   }>;

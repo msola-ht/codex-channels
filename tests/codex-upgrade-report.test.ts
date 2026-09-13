@@ -63,6 +63,30 @@ describe("Codex release upgrade preview", () => {
     });
   });
 
+  it("builds WebUI before the package smoke test", () => {
+    const webuiBuild = defaultUpgradeValidationStages.findIndex(
+      (stage: { id: string }) => stage.id === "webui-build",
+    );
+    const packageTest = defaultUpgradeValidationStages.findIndex(
+      (stage: { id: string }) => stage.id === "package-test",
+    );
+
+    expect(webuiBuild).toBeGreaterThan(-1);
+    expect(packageTest).toBeGreaterThan(webuiBuild);
+    expect(defaultUpgradeValidationStages[webuiBuild]).toMatchObject({
+      command: "npm",
+      args: ["--prefix", "webui", "run", "build"],
+    });
+    const workflow = readFileSync(
+      join(process.cwd(), ".github/workflows/codex-upgrade-preview.yml"),
+      "utf8",
+    );
+    const installWebui = workflow.indexOf("npm ci --ignore-scripts --prefix webui");
+    const validate = workflow.indexOf("npm run codex:upgrade:validate");
+    expect(installWebui).toBeGreaterThan(-1);
+    expect(validate).toBeGreaterThan(installWebui);
+  });
+
   it("accepts only the requested official stable release", () => {
     expect(validateOfficialRelease({
       tag_name: "rust-v0.146.0",

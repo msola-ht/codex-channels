@@ -44,7 +44,7 @@
   `CODEX_HOME` 的受管模型目录；目录里声明什么就开放什么，相同模型 ID 仍按 Provider 独立映射；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
 - `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
-  稳定摘要；接受当前 0.150.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
+  稳定摘要；接受当前 0.154.0 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
   使用稳定 `SkillMetadata.pluginId` 排除系统与 Plugin 所有项，不从安装路径猜测来源；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
@@ -55,7 +55,8 @@
   授权 URL，将说明字段的多行空白归一化并限为 2,000 字符，并把资源响应限为前 8 项、文本展示
   合计 8,000 字符且隐藏常见凭据，二进制裁剪为元数据；保留可空、长度受限且符合固定上游
   `<plugin>@<marketplace>` 字符规则的 `pluginId`，
-  仅供 `/mcp` 详情展示来源 Plugin，不传播工具 Schema 或 Base64 正文。
+  仅供 `/mcp` 详情展示来源 Plugin；工具发现错误只归约为布尔状态，不传播上游错误正文、工具 Schema
+  或 Base64 正文。
 - `plugin-adapter.ts`：只映射已安装 Plugin，校验 Plugin ID、Marketplace、启用与管理员可用状态，
   裁剪版本、来源类型、安装时间、开发者、分类、能力、认证时机、不可用原因和适用套餐标识，
   不传播来源路径或 URL；保留 Marketplace 加载失败计数，
@@ -75,7 +76,8 @@
   Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，
   `writeStdin` 与未知种类在没有独立预览合同前安全拒绝；其中按固定版本的空对象 Schema 与
   `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
-  精确编码为当前官方响应；畸形请求安全拒绝，未知请求返回明确 JSON-RPC 方法错误。实验
+  精确编码为当前官方响应；未协商的 `openai/userVerification` 模式显式取消，畸形请求安全拒绝，
+  未知请求返回明确 JSON-RPC 方法错误。实验
   `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。

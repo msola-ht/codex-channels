@@ -937,15 +937,20 @@ export function formatConversationMcpHealth(
     ...(visibleActions.length > 0
       ? [
           "需要处理：",
-          ...visibleActions.flatMap((action) => action.type === "loginRequired"
-            ? [
+          ...visibleActions.flatMap((action) => {
+            if (action.type === "loginRequired") {
+              return [
                 `- ${action.server}：尚未登录`,
                 `  - 处理：/mcp login ${action.selector}`,
-              ]
-            : [
-                `- ${action.server}：连接失败或已取消`,
-                "  - 处理：/mcp reload",
-              ]),
+              ];
+            }
+            return [
+              action.type === "toolDiscoveryFailed"
+                ? `- ${action.server}：工具目录读取失败`
+                : `- ${action.server}：连接失败或已取消`,
+              "  - 处理：/mcp reload",
+            ];
+          }),
         ]
       : []),
     ...(visibleNotices.length > 0 || omittedFindings > 0

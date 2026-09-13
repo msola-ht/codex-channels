@@ -604,6 +604,7 @@ describe("Feishu output renderer", () => {
         pluginId: null,
         authStatus: "oAuth",
         toolCount: 2,
+        toolDiscoveryFailed: false,
       }],
     })).toContain("1. docs · 运行：已连接 · 认证：OAuth · 工具：2");
     expect(renderFeishuCommandResult({

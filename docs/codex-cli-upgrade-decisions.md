@@ -17,6 +17,47 @@
 - 生成协议出现类型或 RPC 不代表项目支持。公开能力仍以 [`docs/index.md`](index.md) 的支持矩阵、
   受控导出、业务入口和验证共同为准。
 
+## 0.154.0
+
+- 官方 Release：[`rust-v0.154.0`](https://github.com/openai/codex/releases/tag/rust-v0.154.0)
+- 项目决策：以 `0.154.0` 作为新的开发基线；重新生成协议类型并按现有公开边界完成适配，不保留旧 CLI 兼容层。
+- 评估范围：用户验证 RPC 与 elicitation、MCP 工具发现错误、应用网络要求、Thread 环境与来源、账户额度字段、配置更新 Item、Astra 模型目录，以及 Plugin、MCP OAuth、Guardian、远程会话和 TUI 修复。
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| `0.154.0` 精确协议基线 | 让 Gateway、App Server 和生成类型使用同一正式版本 | 采用官方正式版并重新生成协议；不保留旧 CLI 兼容分支，继续由受控导出和支持矩阵限制公开能力 | [`src/codex-protocol/`](../src/codex-protocol/README.md)、`npm run codex:upgrade -- 0.154.0`、`npm run protocol:check`、`npm run check` |
+| MCP 工具发现失败状态 | 让管理员区分“Server 没有工具”和“工具目录读取失败” | 采用 `McpServerStatus.toolsError` 的存在性，但不传播可能含敏感信息的错误正文；`/mcp health` 将失败列为需处理项并建议显式刷新 | [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`conversation-service.ts`](../src/application/conversation-service.ts)、[`conversation-command-format.ts`](../src/surfaces/conversation-command-format.ts)、[`json-rpc-mcp.test.ts`](../tests/json-rpc-mcp.test.ts) |
+| Astra 模型目录与上游运行时修复 | 让原生 Codex 与 Gateway 从当前 App Server 获得更新后的官方模型目录，并改善 Plugin 刷新、MCP OAuth、远程会话恢复和审批上下文 | 模型仍由现有 `model/list` 稳定适配器读取；其余修复随锁定 App Server 自动获得，不在 Gateway 复制目录、凭据刷新、恢复或审批实现 | [`model-adapter.ts`](../src/codex-client/model-adapter.ts)、真实 App Server 合同 |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| 用户验证状态、登记、删除、校验 RPC 与 `openai/userVerification` elicitation | 使用设备绑定凭据或生物识别证明用户身份 | 这是新的高权限输入与设备签名边界；Gateway 没有跨三渠道的凭据所有权、挑战预览和响应合同，因此不声明该初始化扩展、不从受控协议层导出四个 Client RPC，收到该 elicitation 时显式取消 |
+| 应用网络要求与 Browser WebMCP 配置 | 让受管应用声明网络资源或浏览器 MCP 权限 | 当前 Workspace 权限、网络审批和 MCP 配置已有明确边界；直接接入会扩大网络与浏览器能力，且没有对应 Surface 授权合同 |
+| Thread 环境、来源与 Daybreak 元数据 | 让其他宿主记录会话运行环境和来源分类 | Gateway 路由只依赖已支持的 Workspace、Provider、Thread 来源和状态；这些字段不参与当前授权或恢复语义，保留在生成层 |
+| Luna Reserve 与新增额度语义 | 让客户端请求或展示特定储备额度、常规模型可用性和标准模型名称 | Gateway 不自动切换模型、不推断储备额度，也不把未建立显示合同的字段加入 `/limits`；现有额度端口保持不变 |
+| `configuration_update` Response Item | 在模型响应中表示一次配置更新 | 当前 Core 不消费该原始 Item，也没有把模型输出当作配置写入的授权路径；不会据此修改 Gateway 或 Codex 配置 |
+
+### 待评估
+
+| 候选能力 | 它是做什么的 | 对项目可能有什么用 | 实施边界与重新评估条件 |
+| --- | --- | --- | --- |
+
+### 纯上游变化
+
+- 实验 Worktree、异步行内提问、Vim 替换模式、复制显示增强和 Windows 共享守护进程属于原生 Codex 客户端或平台运行时，Gateway 不新增对应渠道入口。
+- Plugin 工具、Skill、Hook 刷新，MCP OAuth 并发刷新与登录挑战，Guardian 审批上下文、压缩与信任/沙箱加固随锁定 App Server 自动获得；Gateway 不建立平行状态或绕过现有审批。
+- 已移除的 `codex mcp-server` 不影响本项目；Gateway 只运行官方 `app-server` 并通过私有 Unix WebSocket 连接。
+
+### App Server 维护决策
+
+- 新增的四个用户验证 Client Request 和相关类型只保留在生成层；初始化仍只声明已经实现的 `openai/form`，未知或未协商的高权限请求失败关闭。
+- `toolsError` 仅转换为稳定布尔状态；上游原始错误不进入 Application、Surface、日志或持久化。
+- 协议、版本、类型、Lint、文档、全量测试、真实 App Server 合同、构建与打包均由正式升级验证和提交门禁覆盖。
+
 ## 0.153.4
 
 - 官方 Release：[`rust-v0.153.4`](https://github.com/openai/codex/releases/tag/rust-v0.153.4)

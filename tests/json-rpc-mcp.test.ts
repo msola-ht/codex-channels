@@ -38,6 +38,7 @@ describe("JsonRpcClient MCP", () => {
           pluginId: null,
           authStatus: "oAuth",
           toolCount: 2,
+          toolDiscoveryFailed: false,
         },
         {
           name: "user-tools",
@@ -45,6 +46,7 @@ describe("JsonRpcClient MCP", () => {
           pluginId: null,
           authStatus: "bearerToken",
           toolCount: 0,
+          toolDiscoveryFailed: false,
         },
       ]);
       expect(
@@ -84,8 +86,57 @@ describe("JsonRpcClient MCP", () => {
           pluginId: null,
           authStatus: "unknown",
           toolCount: 1,
+          toolDiscoveryFailed: false,
         },
       ]);
+    });
+
+    it("reports MCP tool discovery failures without exposing the upstream error", async () => {
+      const transport = new FakeTransport();
+      transport.mcpPages = [{
+        data: [appServerMcpStatus({
+          runtimeStatus: "connected",
+          tools: {},
+          toolsError: "Authorization: Bearer secret-token",
+        })],
+        nextCursor: null,
+      }];
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "workspace-write",
+      });
+      await client.connect();
+
+      const servers = await client.listMcpServers();
+      expect(servers).toEqual([{
+        name: "local-tools",
+        runtimeStatus: "connected",
+        pluginId: null,
+        authStatus: "unsupported",
+        toolCount: 0,
+        toolDiscoveryFailed: true,
+      }]);
+      expect(JSON.stringify(servers)).not.toContain("secret-token");
+    });
+
+    it.each([
+      { name: "missing", value: undefined },
+      { name: "wrong type", value: 1 },
+    ])("fails closed for a $name MCP toolsError", async ({ value }) => {
+      const transport = new FakeTransport();
+      const status = appServerMcpStatus();
+      if (value === undefined) {
+        delete status.toolsError;
+      } else {
+        status.toolsError = value;
+      }
+      transport.mcpPages = [{ data: [status], nextCursor: null }];
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "workspace-write",
+      });
+      await client.connect();
+
+      await expect(client.listMcpServers())
+        .rejects.toThrow("Codex 响应缺少有效 MCP server toolsError");
     });
 
     it.each([
@@ -221,6 +272,7 @@ describe("JsonRpcClient MCP", () => {
         pluginId: "github@local",
         authStatus: "notLoggedIn",
         toolCount: 1,
+        toolDiscoveryFailed: false,
         serverTitle: "Project Tools",
         serverVersion: "1.2.3",
         serverDescription: "Project MCP server",

@@ -204,6 +204,9 @@ function decodeElicitationRequest(
   request: RpcServerRequest,
 ): Extract<ApprovalRequest, { type: "elicitation" }> | undefined {
   const params = asRecord(request.params);
+  if (params?.mode === "openai/userVerification") {
+    return undefined;
+  }
   const threadId = nonEmptyString(params?.threadId);
   const turnId = strictNullableString(params?.turnId);
   const serverName = nonEmptyString(params?.serverName);
