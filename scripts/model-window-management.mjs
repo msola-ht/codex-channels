@@ -111,7 +111,7 @@ function buildPlan(input, models) {
     model,
     windowPercent,
     contextWindow,
-    willChange: model.windowPercent !== windowPercent,
+    willChange: model.windowPercent !== windowPercent || overridden.length > 0,
     conflicts: model.conflicts === true,
     overridden,
   };

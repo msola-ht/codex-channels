@@ -145,6 +145,7 @@ describe("managed model Provider default management", () => {
 
   it("keeps the new catalog when the config write succeeded but its response was lost", async () => {
     const writeCatalogSettings = vi.fn().mockReturnValue({ model: "deepseek-v4-flash" });
+    const readCatalogContent = vi.fn(() => '{"models":[]}\n');
     const readConfigSnapshot = vi.fn()
       .mockResolvedValueOnce({ config: { model: "deepseek-v4-flash" }, version: "v1" })
       .mockResolvedValueOnce({ config: { model: "deepseek-v4-pro" }, version: "v2" });
@@ -158,6 +159,7 @@ describe("managed model Provider default management", () => {
       environment: {},
       loadProviders: exclusiveProviders,
       writeCatalogSettings,
+      readCatalogContent,
       readConfigSnapshot,
       writeConfigEdits: vi.fn(async () => { throw new Error("response lost"); }),
       withFileLock: withoutFileLock,
@@ -167,6 +169,7 @@ describe("managed model Provider default management", () => {
 
   it("does not roll back the catalog when the config write result cannot be confirmed", async () => {
     const writeCatalogSettings = vi.fn().mockReturnValue({ model: "deepseek-v4-flash" });
+    const readCatalogContent = vi.fn(() => '{"models":[]}\n');
     const readConfigSnapshot = vi.fn()
       .mockResolvedValueOnce({ config: { model: "deepseek-v4-flash" }, version: "v1" })
       .mockRejectedValueOnce(new Error("confirmation unavailable"));
@@ -180,6 +183,7 @@ describe("managed model Provider default management", () => {
       environment: {},
       loadProviders: exclusiveProviders,
       writeCatalogSettings,
+      readCatalogContent,
       readConfigSnapshot,
       writeConfigEdits: vi.fn(async () => { throw new Error("response lost"); }),
       withFileLock: withoutFileLock,

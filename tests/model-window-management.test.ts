@@ -49,7 +49,7 @@ describe("model window management", () => {
   it("exposes conflicting per-Provider values and the overridden targets before applying", () => {
     const result = previewModelWindowChange({
       model: "deepseek-v4-flash",
-      windowPercent: 50,
+      windowPercent: 40,
     }, {
       environment: {},
       loadWindow: () => [
@@ -57,8 +57,8 @@ describe("model window management", () => {
       ],
     });
     expect(result.conflicts).toBe(true);
+    expect(result.willChange).toBe(true);
     expect(result.overridden).toEqual([
-      { provider: "deepseek", previousPercent: 40 },
       { provider: "opencode-go", previousPercent: 60 },
     ]);
   });
