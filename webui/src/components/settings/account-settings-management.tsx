@@ -26,8 +26,8 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   const [accountReconfigure, setAccountReconfigure] = useState(false)
   const [deepseekMode, setDeepseekMode] = useState<"switching" | "exclusive">(settings.deepseek.mode ?? "switching")
   const [deepseekKey, setDeepseekKey] = useState("")
-  const [autoCompactPercent, setAutoCompactPercent] = useState("60")
-  const [autoCompactError, setAutoCompactError] = useState<string | null>(null)
+  const [windowPercent, setWindowPercent] = useState("100")
+  const [windowError, setWindowError] = useState<string | null>(null)
   const pending = management.pendingPreview
 
   useEffect(() => {
@@ -46,17 +46,17 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     })
   }
   const configureDeepseek = async () => {
-    const parsedPercent = Number(autoCompactPercent)
-    if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 90) {
-      setAutoCompactError("自动压缩百分比必须是 10–90 的整数")
+    const parsedPercent = Number(windowPercent)
+    if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 100) {
+      setWindowError("窗口占比（%）必须是 10–100 的整数")
       return
     }
-    setAutoCompactError(null)
+    setWindowError(null)
     await management.mutate({
       operation: "deepseek.configure",
       mode: deepseekMode,
       apiKey: deepseekKey,
-      autoCompactPercent: parsedPercent,
+      windowPercent: parsedPercent,
     })
   }
   const confirmPending = async () => {
@@ -97,7 +97,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
       <Separator />
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3"><div><h3 className="font-medium">DeepSeek</h3><p className="text-xs text-muted-foreground">配置官方模型目录和独立 Profile；固定模式会修改并备份 Codex 主配置。</p></div><Badge variant="outline">{settings.deepseek.configured ? `已配置 · ${settings.deepseek.mode ?? "未知模式"}` : "未配置"}</Badge></div>
-        <FieldGroup className="grid gap-3 md:grid-cols-3"><ManagedSelect label="运行模式" value={deepseekMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setDeepseekMode(value as "switching" | "exclusive")} /><Field data-invalid={autoCompactError !== null} data-disabled={disabled}><FieldLabel htmlFor="deepseek-compression-percent">自动压缩百分比</FieldLabel><Input id="deepseek-compression-percent" aria-invalid={autoCompactError !== null} aria-describedby={autoCompactError === null ? undefined : "deepseek-compression-percent-error"} type="number" min={10} max={90} value={autoCompactPercent} disabled={disabled} onChange={(event) => { setAutoCompactPercent(event.target.value); setAutoCompactError(null) }} placeholder="10–90" /><FieldError id="deepseek-compression-percent-error">{autoCompactError}</FieldError></Field><Field data-disabled={disabled}><FieldLabel htmlFor="deepseek-api-key">DeepSeek API Key</FieldLabel><Input id="deepseek-api-key" type="password" autoComplete="new-password" placeholder="仅写入，不会回显" value={deepseekKey} disabled={disabled} onChange={(event) => setDeepseekKey(event.target.value)} /></Field></FieldGroup>
+        <FieldGroup className="grid gap-3 md:grid-cols-3"><ManagedSelect label="运行模式" value={deepseekMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setDeepseekMode(value as "switching" | "exclusive")} /><Field data-invalid={windowError !== null} data-disabled={disabled}><FieldLabel htmlFor="deepseek-window-percent">窗口占比（%）</FieldLabel><Input id="deepseek-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "deepseek-window-percent-error"} type="number" min={10} max={100} value={windowPercent} disabled={disabled} onChange={(event) => { setWindowPercent(event.target.value); setWindowError(null) }} placeholder="10–100" /><FieldError id="deepseek-window-percent-error">{windowError}</FieldError></Field><Field data-disabled={disabled}><FieldLabel htmlFor="deepseek-api-key">DeepSeek API Key</FieldLabel><Input id="deepseek-api-key" type="password" autoComplete="new-password" placeholder="仅写入，不会回显" value={deepseekKey} disabled={disabled} onChange={(event) => setDeepseekKey(event.target.value)} /></Field></FieldGroup>
         <div className="flex flex-wrap gap-2"><Button disabled={disabled || deepseekKey.trim() === ""} onClick={() => void configureDeepseek()}>{settings.deepseek.configured ? "重新配置 DeepSeek" : "配置 DeepSeek"}</Button>{settings.deepseek.restoreAvailable ? <Button variant="destructive" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.restore" })}>恢复安装前配置</Button> : null}</div>
       </section>
       {pending !== null ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}

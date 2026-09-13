@@ -69,7 +69,7 @@ export function applyDeepseekConfiguration(
   input: {
     mode?: "switching" | "exclusive";
     apiKey: string;
-    autoCompactPercent?: number;
+    windowPercent?: number;
     confirmExclusiveConfigChange?: boolean;
   },
   options?: {
@@ -124,9 +124,9 @@ export function createManagedDeepseekCatalog(
   previousModels?: Array<{
     model: string;
     reasoningEffort: string;
-    autoCompactPercent?: number;
+    windowPercent?: number;
   }>,
-  autoCompactPercent?: number | null,
+  windowPercent?: number | null,
 ): { models: Array<Record<string, unknown>> };
 export function refreshDeepseekCatalogForUpdate(
   environment?: NodeJS.ProcessEnv,

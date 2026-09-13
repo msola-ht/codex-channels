@@ -4,29 +4,29 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { runModelCompressionSetup } from "../scripts/model-compression-setup.mjs";
+import { runModelWindowSetup } from "../scripts/model-window-setup.mjs";
 import {
   securePrivateDirectorySync,
   securePrivateFileSync,
 } from "../runtime/private-file.mjs";
 
-describe("managed model compression setup", () => {
-  it("updates the compression by model name globally across providers", async () => {
+describe("managed model window setup", () => {
+  it("updates the context window by model name globally across providers", async () => {
     const codexHome = providerFixture();
     const output = { write: vi.fn() };
 
-    await expect(runModelCompressionSetup({
+    await expect(runModelWindowSetup({
       environment: testEnvironment(codexHome),
       output,
       prompter: {
         selectModel: async () => "deepseek-v4-flash",
-        selectAutoCompactPercent: async () => 75,
+        selectWindowPercent: async () => 75,
       },
     })).resolves.toEqual({
       action: "configured",
       model: "deepseek-v4-flash",
-      autoCompactPercent: 75,
-      autoCompactLimit: 786_432,
+      windowPercent: 75,
+      contextWindow: 786_432,
       providers: ["deepseek"],
       activation: "restart-app-server",
       activationResult: {
@@ -42,21 +42,22 @@ describe("managed model compression setup", () => {
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
       slug: "deepseek-v4-flash",
-      auto_compact_token_limit: 786_432,
+      context_window: 786_432,
+      auto_compact_token_limit: null,
     }));
     expect(catalog.models).toContainEqual(expect.objectContaining({
       slug: "deepseek-v4-pro",
-      auto_compact_token_limit: 629_146,
+      context_window: 629_146,
     }));
     expect(output.write).toHaveBeenCalledWith(
-      expect.stringContaining("DeepSeek V4 Flash 自动压缩阈值：75%"),
+      expect.stringContaining("DeepSeek V4 Flash 上下文窗口：75%"),
     );
   });
 
   it("fails clearly when no managed third-party model is configured", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-model-compression-empty-"));
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-model-window-empty-"));
 
-    await expect(runModelCompressionSetup({
+    await expect(runModelWindowSetup({
       environment: testEnvironment(codexHome),
       output: { write: vi.fn() },
     })).rejects.toThrow("尚未配置受管第三方模型");
@@ -69,7 +70,7 @@ describe("managed model compression setup", () => {
       text: vi.fn(),
       isCancel: () => false,
     };
-    const result = await runModelCompressionSetup({
+    const result = await runModelWindowSetup({
       environment: testEnvironment(codexHome),
       output: { write: vi.fn() },
       prompts,
@@ -80,7 +81,7 @@ describe("managed model compression setup", () => {
 });
 
 function providerFixture() {
-  const codexHome = mkdtempSync(join(tmpdir(), "codexc-model-compression-"));
+  const codexHome = mkdtempSync(join(tmpdir(), "codexc-model-window-"));
   const providerDirectory = join(
     codexHome,
     ".codex-connect",
@@ -111,17 +112,18 @@ function providerFixture() {
   if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "managed.toml"));
   writeFileSync(catalogPath, JSON.stringify({
     models: [
-      { slug: "deepseek-v4-flash", display_name: "DeepSeek V4 Flash", context_window: 1_048_576 },
-      { slug: "deepseek-v4-pro", display_name: "DeepSeek V4 Pro", context_window: 1_048_576 },
+      { slug: "deepseek-v4-flash", display_name: "DeepSeek V4 Flash", context_window: 629_146 },
+      { slug: "deepseek-v4-pro", display_name: "DeepSeek V4 Pro", context_window: 629_146 },
     ].map((entry) => ({
       ...entry,
+      max_context_window: 1_048_576,
       default_reasoning_level: "high",
       supported_reasoning_levels: [
         { effort: "low", description: "Low" },
         { effort: "high", description: "High" },
         { effort: "max", description: "Max" },
       ],
-      auto_compact_token_limit: 629_146,
+      auto_compact_token_limit: null,
     })),
   }), { mode: 0o600 });
   if (process.platform === "win32") securePrivateFileSync(catalogPath);

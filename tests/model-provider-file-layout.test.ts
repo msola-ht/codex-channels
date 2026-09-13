@@ -292,12 +292,12 @@ describe.skipIf(process.platform === "win32")("managed model provider file layou
     const openCodePro = openCodeCatalog.models.find(
       ({ slug }: { slug: string }) => slug === "deepseek-v4-pro",
     );
-    expect(deepseekFlash.auto_compact_token_limit).toBe(419_430);
-    expect(deepseekFlash.context_window).toBe(1_048_576);
+    expect(deepseekFlash.auto_compact_token_limit).toBeNull();
+    expect(deepseekFlash.context_window).toBe(419_430);
     expect(deepseekPro.auto_compact_token_limit).toBeNull();
     expect(openCodeFlash.auto_compact_token_limit).toBeNull();
-    expect(openCodePro.auto_compact_token_limit).toBe(629_146);
-    expect(openCodePro.context_window).toBe(900_000);
+    expect(openCodePro.auto_compact_token_limit).toBeNull();
+    expect(openCodePro.context_window).toBe(629_146);
     for (const [provider, catalogPath, profileFileName] of [
       ["deepseek", sharedCatalog, "sf-deepseek.config.toml"],
       ["ocg-work", openCodeCatalogPath, "sf-ocg-work.config.toml"],

@@ -31,10 +31,10 @@ export interface ManagedProviderManagementEntry {
     id: string;
     displayName: string;
     contextWindow: number;
+    maxContextWindow: number;
     reasoningEffort: string;
     reasoningEfforts: Array<{ effort: string; description: string }>;
-    autoCompactLimit?: number;
-    autoCompactPercent?: number;
+    windowPercent?: number;
   }>;
 }
 
@@ -76,10 +76,10 @@ export function loadModelProviderManagementState(options?: {
       model: string;
       displayName: string;
       contextWindow: number;
+      maxContextWindow: number;
       reasoningEffort: string;
       reasoningEfforts: Array<{ effort: string; description: string }>;
-      autoCompactLimit?: number;
-      autoCompactPercent?: number;
+      windowPercent?: number;
     }>;
   }>;
   loadCustomSwitchingProviders?: (environment: NodeJS.ProcessEnv) => Array<{

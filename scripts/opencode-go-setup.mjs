@@ -18,7 +18,7 @@ import {
 } from "./opencode-go-account-management.mjs";
 import {
   applyOpencodeGoAccountConfiguration,
-  configuredCompressionByModel,
+  configuredWindowPercentByModel,
   previewOpencodeGoAccountConfiguration,
   readOpencodeGoDefaultModelMigration,
   readOpencodeGoOptionalJson,
@@ -69,7 +69,6 @@ import {
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
 const definition = opencodeGoProviderDefinition;
-const defaultAutoCompactPercent = 60;
 const maximumPrivateConfigBytes = 2_097_152;
 
 class OpenCodeGoSetupCancelled extends Error {}
@@ -412,8 +411,7 @@ export async function refreshOpencodeGoCatalogForUpdate(
     : downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch));
   const managedCatalog = createManagedProviderCatalog(downloaded.catalog, definition, {
     previousModels: previousSettings[0]?.models,
-    autoCompactPercent: defaultAutoCompactPercent,
-    modelCompressionPercentByModel: configuredCompressionByModel(environment),
+    modelWindowPercentByModel: configuredWindowPercentByModel(environment),
   });
   const defaultModel = resolveManagedCatalogModel(managedCatalog, definition);
   const catalogSlugs = new Set(

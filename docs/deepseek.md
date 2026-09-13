@@ -31,16 +31,18 @@ Gateway 运行配置。
 Setup 不强制改变 Codex 登录方式。切换模式不会覆盖 OpenAI 登录信息；固定模式直接使用配置中的
 DeepSeek Provider。
 
-### 自动压缩阈值
+### 上下文窗口
 
-安装流程在填写 API Key 后会为初始 `deepseek-flash` 模型询问自动压缩阈值。后续有两种入口：`codexc setup`
+安装流程在填写 API Key 后会为初始 `deepseek-flash` 模型询问上下文窗口占比。后续有两种入口：`codexc setup`
 中选择“模型与提供商 → 第三方 Provider → DeepSeek 官方 → 修改模型设置（思考等级）”，或选择
 “模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → DeepSeek”选择默认思考等级；如需按模型名
-统一设置自动压缩，使用“模型与提供商 → 第三方 Provider → 模型自动压缩”，按模型名选择百分比（10–90%），
-同名模型在所有 Provider 共用同一值。该百分比按模型自己的 `context_window` 换算为模型目录中的
-`auto_compact_token_limit`，不会再用 Profile 顶层配置覆盖其他模型；切换模式 Profile 顶层只镜像
-所选模型的默认思考等级（校验必须与模型目录一致），上下文与自动压缩仍只由模型目录声明。
-选择模型默认值时使用 Codex 的 90% 上下文窗口阈值。修改后 Gateway 会自动检测设置文件变化，
+统一设置窗口，使用“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名选择占比（10–100%，
+100% 为模型官方窗口），同名模型在所有 Provider 共用同一值。该占比按模型目录的
+`max_context_window` 换算成 `context_window` 写入模型目录；旧目录缺少最大窗口时，首次修改会保留原始窗口作为最大值。
+未改窗口时不写模型目录，压缩阈值也不再由
+本机设置，旧版遗留的非空阈值会在改窗口时清掉，压缩回落到上游按当前窗口推导的默认值（90%）。切换模式
+Profile 顶层只镜像所选模型的默认思考等级
+（校验必须与模型目录一致），上下文窗口只由模型目录声明。修改后 Gateway 会自动检测设置文件变化，
 校验通过并在无活动 Turn 时自动重启 App Server 生效；如需立即生效，可在终端手动运行
 `codexc service restart app-server`。
 
@@ -57,23 +59,24 @@ DeepSeek Provider。
 
 Profile 位于 Codex 用户目录（原生 `--profile` 只识别这里），模型目录与管理标记位于 Gateway 数据
 目录 `~/.codex-connect/providers/`，均不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或
-切换模式，并保留仍受支持的默认模型及逐模型思考、自动压缩设置；上下文窗口采用新目录值，压缩阈值
-按原百分比重新计算。
+切换模式，并保留仍受支持的默认模型及逐模型思考、窗口设置；重新配置时明确选择的初始模型窗口占比优先于旧值，
+选择“模型官方窗口”恢复为 100%。目录刷新时按原窗口占比和新的最大窗口
+重新计算 `context_window`，压缩阈值继续使用上游默认。
 恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
 的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
 OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或修改任一 Provider 不影响另一方设置。
 从旧版文件布局升级时，运行 `codexc update` 会在核心服务停止期间把受管模型目录、清单、管理标记
 和备份迁移到 `~/.codex-connect/providers/deepseek/`；新旧文件同时存在时不会猜测覆盖关系，而是
-明确报错。旧版 Profile 顶层的思考等级和自动压缩阈值会迁移进对应模型目录，切换模式 Profile 再
-镜像所选模型的默认思考等级；迁移不保留旧的 `body_after_prefix` 压缩作用域，升级后统一按
-`total` 作用域应用。迁移后同一命令会下载并校验最新官方模型目录，保留仍存在的模型及其思考等级与
-自动压缩百分比。旧模型名不再出现在官方目录时（例如 Flash Vision Exp），`codexc update` 会把
+明确报错。旧版 Profile 顶层的思考等级会迁移进对应模型目录；旧版根级或目录里的自动压缩阈值按同一
+基准折算为 `context_window` 并清空 `auto_compact_token_limit`，切换模式 Profile 再镜像所选模型的
+默认思考等级；迁移不保留旧的 `body_after_prefix` 压缩作用域。迁移后同一命令会下载并校验最新官方
+模型目录，保留仍存在的模型及其思考等级与窗口占比。旧模型名不再出现在官方目录时（例如 Flash Vision Exp），`codexc update` 会把
 Profile 与共享子代理角色切回目录默认模型 `deepseek-flash`，并在 `models.manifest.json` 记录
 `from`/`to`；仍存在于目录中的模型（例如 `deepseek-v4-pro`）保留用户选择。
 
 当前 DeepSeek 官方目录声明 `deepseek-flash` 与 `deepseek-v4-pro`，两者都可通过 `/model` 选择；
 新安装默认使用 `deepseek-flash`。之后可在 `codexc setup` 的“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置”
-中按模型设置 DeepSeek 新会话的默认模型与思考等级；自动压缩阈值走“模型自动压缩”按模型名统一设置。
+中按模型设置 DeepSeek 新会话的默认模型与思考等级；上下文窗口走“模型上下文窗口”按模型名统一设置。
 历史 Thread 仍保留自身模型。
 可选模型以下载的官方目录为准：目录里声明什么就显示什么，没有的模型不出现在 `/model` 与 Setup
 选项中。旧模型名 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 仍可由 DeepSeek 接受，

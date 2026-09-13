@@ -275,7 +275,10 @@ function applyLegacyRootSettings(catalog, document, definition, configPath) {
   if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
     throw new Error(`${definition.displayName} 模型上下文窗口无效：${configPath}`);
   }
-  model.context_window = contextWindow;
+  const maxContextWindow = Number.isSafeInteger(model.max_context_window)
+    && model.max_context_window > 0
+    ? model.max_context_window
+    : contextWindow;
   const configuredLimit = document.model_auto_compact_token_limit;
   if (
     configuredLimit !== undefined
@@ -284,11 +287,22 @@ function applyLegacyRootSettings(catalog, document, definition, configPath) {
     throw new Error(`${definition.displayName} 自动压缩阈值无效：${configPath}`);
   }
   model.default_reasoning_level = reasoning;
-  if (configuredLimit !== undefined) {
-    model.auto_compact_token_limit = Math.min(
-      configuredLimit,
-      Math.floor(contextWindow * 0.9),
-    );
+  // 旧版本把压缩阈值写进目录；现在压缩由上游按窗口推导，阈值按同一基准折算成窗口。
+  const legacyThreshold = configuredLimit ?? (
+    Number.isSafeInteger(model.auto_compact_token_limit)
+    && model.auto_compact_token_limit > 0
+      ? model.auto_compact_token_limit
+      : undefined
+  );
+  model.context_window = legacyThreshold === undefined
+    ? Math.min(contextWindow, maxContextWindow)
+    : Math.min(legacyThreshold, maxContextWindow);
+  // 只清掉旧版本写进目录的压缩阈值；下载目录本身没有该字段时不新增。
+  if (
+    Number.isSafeInteger(model.auto_compact_token_limit)
+    && model.auto_compact_token_limit > 0
+  ) {
+    model.auto_compact_token_limit = null;
   }
 }
 

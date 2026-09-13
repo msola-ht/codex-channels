@@ -91,6 +91,6 @@ export function readOpencodeGoDefaultModelMigration(
   manifest: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined;
 
-export function configuredCompressionByModel(
+export function configuredWindowPercentByModel(
   environment?: NodeJS.ProcessEnv,
 ): Record<string, number>;

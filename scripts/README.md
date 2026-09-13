@@ -217,21 +217,22 @@
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
-  默认模型与思考等级的无终端校验、预览与执行接口；写默认模型时保留模型目录中已有的自动压缩阈值，
-  压缩值由「模型自动压缩」按模型名统一管理；切换模式更新私有 Profile，固定模式与切换模式共用统一
+  默认模型与思考等级的无终端校验、预览与执行接口；写默认模型时保留模型目录中已有的上下文窗口，
+  窗口由「模型上下文窗口」按模型名统一管理；切换模式更新私有 Profile，固定模式与切换模式共用统一
   Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读确认写入结果，仅在确认未生效
   时恢复模型目录，结果明确返回 App Server 重启动作。
-- `model-compression-management.mjs` / `model-compression-management.d.mts`：提供受管模型自动压缩的无终端
-  校验、预览与执行接口；按模型 slug 去重，同名模型跨 Provider 共享同一压缩百分比，写入经
-  `writeManagedModelCompressionGlobal` 广播到所有提供该模型的 Provider，并复用统一 Provider 管理事务；
-  同名模型在跨 Provider 压缩值或上下文窗口不一致时，预览暴露冲突与被覆盖值，窗口不一致失败关闭，
+- `model-window-management.mjs` / `model-window-management.d.mts`：提供受管模型上下文窗口的无终端
+  校验、预览与执行接口；按模型 slug 去重，同名模型跨 Provider 共享同一窗口占比，写入经
+  `writeManagedModelWindowGlobal` 在各 Provider 的 `max_context_window` 一致时换算 `context_window`
+  并广播到所有提供该模型的 Provider，并复用统一 Provider 管理事务；
+  同名模型在跨 Provider 窗口占比或最大窗口不一致时，预览暴露冲突与被覆盖值，最大窗口不一致失败关闭，
   结果明确返回 App Server 重启动作。
-- `model-compression-setup.mjs` / `model-compression-setup.d.mts`：`codexc setup` 的“模型自动压缩”入口；
-  按模型名选择受管模型并设置自动压缩百分比，写入复用 `model-compression-management.mjs` 的全局广播，
-  同名模型在所有 Provider 共用同一值，结果返回 App Server 重启动作。
+- `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 的“模型上下文窗口”入口；
+  按模型名选择受管模型并设置窗口占比（10–100%，100% 为模型官方窗口），写入复用
+  `model-window-management.mjs` 的全局广播，同名模型在所有 Provider 共用同一值，结果返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
-  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。自动压缩不在本流程，转到
-  `model-compression-setup.mjs`；历史 Thread 仍保留创建时的模型。
+  Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。上下文窗口不在本流程，转到
+  `model-window-setup.mjs`；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
   受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
@@ -288,12 +289,13 @@
   首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
   确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
   生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改，并保留仍受支持的默认模型、
-  逐模型思考等级和自动压缩百分比；目录上下文更新时按原百分比重算阈值。退出固定模式时只还原 Setup
-  管理的字段（含自动压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
+  逐模型思考等级和上下文窗口占比；目录上下文更新时按原占比在新基准上重算窗口。退出固定模式时只还原 Setup
+  管理的字段（含模型目录里的上下文窗口与压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
   安装事务按写入阶段更新并发保护快照，失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
-  安装时为初始模型设置自动压缩阈值；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
-  模型设置”按模型维护 10–90% 阈值，写入模型目录的 `auto_compact_token_limit`，不再使用会覆盖
-  全部模型的 Profile 顶层阈值。`codexc update` 刷新官方目录后，若所选模型已不在目录中（例如
+  安装时为初始模型设置上下文窗口；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
+  模型设置”按模型维护 10–100% 窗口占比，只有明确改窗口时才写入模型目录的 `context_window`，
+  未请求窗口变更时目录条目保持原样，让压缩使用上游默认，不再使用会覆盖
+  全部模型的 Profile 顶层字段。`codexc update` 刷新官方目录后，若所选模型已不在目录中（例如
   Flash Vision Exp），会把 Profile 与同 Provider 共享子代理切到目录默认模型，并把
   `from`/`to`/`appliedAt` 迁移记录写入模型目录清单；仍在目录中的模型保留用户选择。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
@@ -311,7 +313,7 @@
   删除最后一个账户会清理共享模型目录，固定模式账户还会恢复安装前 Codex 主配置。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
   账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、首次备份、Key 写入、切换/固定模式配置和多文件事务回滚。
-  生成模型目录时继承已配置 Provider 的同名模型全局自动压缩值，避免新账户回落到 OCG 默认 60%。
+  生成模型目录时继承已配置 Provider 的同名模型全局窗口占比，避免新账户回落到 OCG 默认值。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
   （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
@@ -321,8 +323,9 @@
   默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
   Pro 的账户保持不变。
 - `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一
-  `~/.codex-connect/providers/<id>/` 布局，并把 Provider 根级上下文、思考等级和自动压缩阈值
-  迁入各自模型目录，切换模式 Profile 再镜像所选模型的默认思考等级。
+  `~/.codex-connect/providers/<id>/` 布局，并把 Provider 根级上下文、思考等级迁入各自模型目录；
+  旧版根级或目录里的自动压缩阈值按同一基准折算成 `context_window` 后清空阈值，切换模式 Profile
+  再镜像所选模型的默认思考等级。
 - `backup-provider-migration.mjs` / `backup-provider-migration.d.mts`：在迁移前把旧布局文件、
   现有新布局 Provider 目录与被改写引用文件完整复制到 `~/.codex-connect/backups/` 下带时间戳的
   备份目录，再执行文件布局与模型设置迁移；遇到新旧并存时先把现有 Provider 目录移到备份内

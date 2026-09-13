@@ -111,14 +111,12 @@ function safeManagedProvider(provider) {
       id: model.model,
       displayName: model.displayName,
       contextWindow: model.contextWindow,
+      maxContextWindow: model.maxContextWindow,
       reasoningEffort: model.reasoningEffort,
       reasoningEfforts: model.reasoningEfforts.map((entry) => ({ ...entry })),
-      ...(model.autoCompactLimit === undefined
+      ...(model.windowPercent === undefined
         ? {}
-        : { autoCompactLimit: model.autoCompactLimit }),
-      ...(model.autoCompactPercent === undefined
-        ? {}
-        : { autoCompactPercent: model.autoCompactPercent }),
+        : { windowPercent: model.windowPercent }),
     })),
   };
 }

@@ -13,7 +13,7 @@ describe("managed model Provider default management", () => {
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 75,
+      windowPercent: 75,
     }, {
       environment: {},
       loadProviders: switchingProviders,
@@ -22,11 +22,12 @@ describe("managed model Provider default management", () => {
       model: {
         id: "deepseek-v4-pro",
         displayName: "DeepSeek V4 Pro",
-        contextWindow: 1_048_576,
+        contextWindow: 629_146,
+        maxContextWindow: 1_048_576,
       },
       reasoningEffort: "max",
-      autoCompactPercent: 75,
-      autoCompactLimit: 786_432,
+      windowPercent: 75,
+      contextWindow: 786_432,
       willChange: true,
       activation: "restart-app-server",
     });
@@ -34,19 +35,19 @@ describe("managed model Provider default management", () => {
 
   it.each([
     [
-      { provider: "deepseek", model: "missing", reasoningEffort: "high", autoCompactPercent: 60 },
+      { provider: "deepseek", model: "missing", reasoningEffort: "high", windowPercent: 60 },
       "model-not-supported",
       "model",
     ],
     [
-      { provider: "deepseek", model: "deepseek-v4-pro", reasoningEffort: "ultra", autoCompactPercent: 60 },
+      { provider: "deepseek", model: "deepseek-v4-pro", reasoningEffort: "ultra", windowPercent: 60 },
       "reasoning-effort-not-supported",
       "reasoningEffort",
     ],
     [
-      { provider: "deepseek", model: "deepseek-v4-pro", reasoningEffort: "max", autoCompactPercent: 91 },
-      "invalid-auto-compact-percent",
-      "autoCompactPercent",
+      { provider: "deepseek", model: "deepseek-v4-pro", reasoningEffort: "max", windowPercent: 101 },
+      "invalid-window-percent",
+      "windowPercent",
     ],
   ])("returns stable validation errors for managed Provider defaults", (input, code, field) => {
     try {
@@ -66,7 +67,7 @@ describe("managed model Provider default management", () => {
       provider: "deepseek" as const,
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactLimit: 786_432,
+      contextWindow: 786_432,
       mode: "switching" as const,
     }));
 
@@ -74,7 +75,7 @@ describe("managed model Provider default management", () => {
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 75,
+      windowPercent: 75,
     }, {
       environment: {},
       loadProviders: switchingProviders,
@@ -85,32 +86,24 @@ describe("managed model Provider default management", () => {
     expect(result).toMatchObject({
       action: "updated",
       activation: "restart-app-server",
-      autoCompactLimit: 786_432,
+      contextWindow: 786_432,
     });
     expect(writeProfileDefault).toHaveBeenCalledWith(
       "deepseek",
       {
         model: "deepseek-v4-pro",
         reasoningEffort: "max",
-        autoCompactLimit: 786_432,
+        contextWindow: 786_432,
       },
       {},
     );
   });
 
   it("restores the catalog when an exclusive config transaction fails", async () => {
-    const previous = {
-      model: "deepseek-v4-flash",
-      displayName: "DeepSeek V4 Flash",
-      contextWindow: 1_048_576,
-      reasoningEffort: "high",
-      reasoningEfforts: [{ effort: "high", description: "High" }],
-      autoCompactLimit: 629_146,
-      autoCompactPercent: 60,
-    };
-    const writeCatalogSettings = vi.fn()
-      .mockReturnValueOnce(previous)
-      .mockReturnValueOnce(previous);
+    const originalCatalog = '{"models":[{"slug":"deepseek-v4-flash"}]}\n';
+    const writeCatalogSettings = vi.fn();
+    const readCatalogContent = vi.fn(() => originalCatalog);
+    const restoreCatalogContent = vi.fn();
     const readConfigSnapshot = vi.fn(async () => ({
       config: { model: "deepseek-v4-flash" },
       version: "v1",
@@ -121,11 +114,13 @@ describe("managed model Provider default management", () => {
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 75,
+      windowPercent: 75,
     }, {
       environment: {},
       loadProviders: exclusiveProviders,
       writeCatalogSettings,
+      readCatalogContent,
+      restoreCatalogContent,
       readConfigSnapshot,
       writeConfigEdits,
       withFileLock: withoutFileLock,
@@ -134,12 +129,13 @@ describe("managed model Provider default management", () => {
       field: "action",
       message: "version conflict",
     });
-    expect(writeCatalogSettings).toHaveBeenNthCalledWith(
-      2,
+    // 回滚按原始目录内容逐字节写回，不用派生设置重写条目。
+    expect(restoreCatalogContent).toHaveBeenCalledWith(
       "deepseek",
-      previous,
+      originalCatalog,
       {},
     );
+    expect(writeCatalogSettings).toHaveBeenCalledTimes(1);
     expect(writeConfigEdits).toHaveBeenCalledWith(
       {},
       expect.any(Array),
@@ -157,7 +153,7 @@ describe("managed model Provider default management", () => {
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 75,
+      windowPercent: 75,
     }, {
       environment: {},
       loadProviders: exclusiveProviders,
@@ -179,7 +175,7 @@ describe("managed model Provider default management", () => {
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 75,
+      windowPercent: 75,
     }, {
       environment: {},
       loadProviders: exclusiveProviders,
@@ -215,6 +211,8 @@ describe("managed model Provider default management", () => {
       environment,
       loadProviders,
       writeCatalogSettings: vi.fn(() => exclusiveProviders()[0]!.models[0]!),
+      readCatalogContent: vi.fn(() => '{"models":[]}\n'),
+      restoreCatalogContent: vi.fn(),
       readConfigSnapshot: vi.fn(async () => ({
         config: { model: "deepseek-v4-flash" },
         version: "v1",
@@ -225,7 +223,7 @@ describe("managed model Provider default management", () => {
       provider: "deepseek",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactPercent: 75,
+      windowPercent: 75,
     };
 
     const first = applyManagedProviderDefaultChange(input, options);
@@ -265,14 +263,14 @@ function providers(mode: "switching" | "exclusive"): ManagedModelProviderSetting
     models: [{
       model: "deepseek-v4-pro",
       displayName: "DeepSeek V4 Pro",
-      contextWindow: 1_048_576,
+      contextWindow: 629_146,
+      maxContextWindow: 1_048_576,
       reasoningEffort: "high",
       reasoningEfforts: [
         { effort: "high", description: "High" },
         { effort: "max", description: "Max" },
       ],
-      autoCompactLimit: 629_146,
-      autoCompactPercent: 60,
+      windowPercent: 60,
     }],
   }];
 }

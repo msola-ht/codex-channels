@@ -58,7 +58,7 @@ Bearer 鉴权接入。未满足任务契约的高风险写入仍不开放。
 - [x] 将新增、编辑、切换、删除拆成校验、预览和执行；删除继续执行使用中保护。
   - [x] 自定义主 Provider 的新增、编辑、切换与删除已拆分，CLI 已复用。
   - [x] 共享第三方子代理的 Provider/模型选择、配置与停用已拆分，Setup 和直接 CLI 已复用。
-  - [x] 受管 Provider 的默认模型、思考等级与自动压缩设置已拆分，DeepSeek/OpenCode Go Setup 已复用。
+  - [x] 受管 Provider 的默认模型、思考等级与上下文窗口设置已拆分，DeepSeek/OpenCode Go Setup 已复用。
   - [x] OpenCode Go 默认账户切换、运行实例停止与账户删除已拆分，Setup 和账户 CLI 已复用。
   - [x] OpenCode Go 账户新增已拆分为脱敏预览、明确输入与凭据隔离事务，Setup 和账户 CLI 已复用。
   - [x] DeepSeek/OpenCode Go 恢复已拆分为脱敏预览、明确确认与无终端执行，现有 Setup 已复用。

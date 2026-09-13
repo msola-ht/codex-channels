@@ -8,7 +8,7 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import {
-  loadManagedModelCompression,
+  loadManagedModelWindow,
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
@@ -51,7 +51,6 @@ import {
 } from "./opencode-go-account-files.mjs";
 
 const definition = opencodeGoProviderDefinition;
-const defaultAutoCompactPercent = 60;
 const maximumPrivateConfigBytes = 2_097_152;
 
 export class OpenCodeGoAccountProvisioningError extends Error {
@@ -138,9 +137,9 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   } catch (error) {
     throw normalize("provider-state-unavailable", "accountId", error);
   }
-  let compressionByModel;
+  let windowPercentByModel;
   try {
-    compressionByModel = configuredCompressionByModel(environment);
+    windowPercentByModel = configuredWindowPercentByModel(environment);
   } catch (error) {
     throw normalize("provider-state-unavailable", "accountId", error);
   }
@@ -151,8 +150,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       definition,
       {
         previousModels: previous?.models,
-        autoCompactPercent: defaultAutoCompactPercent,
-        modelCompressionPercentByModel: compressionByModel,
+        modelWindowPercentByModel: windowPercentByModel,
       },
     );
   } catch (error) {
@@ -555,11 +553,11 @@ function normalize(code, field, error) {
   );
 }
 
-export function configuredCompressionByModel(environment) {
+export function configuredWindowPercentByModel(environment) {
   return Object.fromEntries(
-    loadManagedModelCompression(environment)
-      .filter((entry) => entry.autoCompactPercent !== undefined)
-      .map((entry) => [entry.model, entry.autoCompactPercent]),
+    loadManagedModelWindow(environment)
+      .filter((entry) => entry.windowPercent !== undefined)
+      .map((entry) => [entry.model, entry.windowPercent]),
   );
 }
 

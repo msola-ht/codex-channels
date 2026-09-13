@@ -31,7 +31,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 - OpenAI 兼容 base URL 与认证方式；
 - wire API 的请求/响应/流式事件文档，以及 `/responses/compact` 等压缩接口是否可用；
 - 模型目录来源（`/models` 响应或官方目录 JSON），包含模型名、显示名、上下文窗口、
-  支持思考等级、默认思考等级、输入能力、压缩阈值字段；
+  最大上下文窗口、支持思考等级、默认思考等级与输入能力；
 - 账户接口文档：余额或用量窗口（窗口周期、重置时间、已用百分比）；
 - 限流与错误语义（429/5xx/重试），以及是否有 Key 预检接口。
 
@@ -63,7 +63,8 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 - 在 `~/.codex-connect/providers/<id>/` 生成 `models.json`，schema 与现有目录一致：每个模型必须有
   `context_window`、非空 `supported_reasoning_levels`、合法 `default_reasoning_level`、
-  `auto_compact_token_limit`、`display_name` 与输入能力；
+  `display_name` 与输入能力；`max_context_window` 存在时作为窗口占比的换算基准，上下文窗口
+  只由「模型上下文窗口」按模型名统一写入，其余字段保持下载原样，压缩使用上游默认；
 - 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间，以及需要跨版本执行一次的
   默认模型迁移记录；Profile（切换模式）与固定
   基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；

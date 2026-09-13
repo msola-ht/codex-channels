@@ -27,7 +27,7 @@ import {
   loadManagedModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
-  loadManagedModelCompression,
+  loadManagedModelWindow,
   readCodexConfigModelOverride,
   managedProviderDirectory,
   providerAppServerSocketPath,
@@ -1524,10 +1524,11 @@ export class GatewayApplication {
     model: string | null | undefined,
   ): number | null {
     if (!model) return null;
-    const entry = loadManagedModelCompression(process.env).find(
-      (candidate: { model: string; autoCompactPercent?: number }) => candidate.model === model,
+    // 受管第三方 Provider 只配置模型窗口，压缩阈值由上游按窗口推导。
+    const managed = loadManagedModelWindow(process.env).some(
+      (candidate: { model: string }) => candidate.model === model,
     );
-    if (entry !== undefined) return entry.autoCompactPercent ?? null;
+    if (managed) return null;
     const override = readCodexConfigModelOverride(process.env);
     if (
       override.contextWindow !== null

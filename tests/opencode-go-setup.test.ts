@@ -34,7 +34,10 @@ import {
   refreshOpencodeGoCatalogForUpdate,
   runOpenCodeGoSetup,
 } from "../scripts/opencode-go-setup.mjs";
-import { writeManagedModelProviderProfileDefault } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadManagedModelWindow,
+  writeManagedModelProviderProfileDefault,
+} from "../runtime/model-provider-runtime.mjs";
 
 describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
   afterEach(() => {
@@ -149,6 +152,9 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
       slug: "deepseek-v4-pro",
+      default_reasoning_level: "max",
+      // 只改默认思考等级时不动窗口：目录里下载的字段保持原样。
+      context_window: 1_048_576,
       auto_compact_token_limit: 629_146,
     }));
   });
@@ -200,8 +206,12 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
         slug: "deepseek-flash",
         input_modalities: ["text", "image"],
         default_reasoning_level: "high",
-        auto_compact_token_limit: 600_000,
+        context_window: 1_000_000,
       });
+      // 下载目录没有压缩阈值时不新增该字段。
+      expect(catalog.models.find((model: { slug?: string }) =>
+        model.slug === "deepseek-flash"
+      ).auto_compact_token_limit).toBeUndefined();
       expect(parse(readFileSync(
         join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "work", "managed.toml"),
         "utf8",
@@ -213,7 +223,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     },
   );
 
-  it("inherits model-name compression from existing DeepSeek when adding an OpenCode Go account", async () => {
+  it("inherits the model window from existing DeepSeek when adding an OpenCode Go account", async () => {
     const codexHome = deepseekFixture();
     const environment = {
       CODEX_HOME: codexHome,
@@ -234,8 +244,48 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
       slug: "deepseek-flash",
-      auto_compact_token_limit: 400_000,
+      context_window: 400_000,
     }));
+    expect(catalog.models.find((model: { slug?: string }) =>
+      model.slug === "deepseek-flash"
+    ).auto_compact_token_limit).toBeUndefined();
+  });
+
+  it("reports divergent per-Provider window ratios without blocking the unified window", async () => {
+    const codexHome = deepseekFixture();
+    const environment = {
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+    };
+
+    await addOpencodeGoAccount("main", {
+      mode: "switching",
+      environment,
+      output: { write: vi.fn() },
+      prompter: prompt("switching"),
+      downloadCatalog: successfulCatalog,
+    });
+    const catalogPath = join(
+      codexHome,
+      ".codex-connect",
+      "providers",
+      "opencode-go",
+      "models.json",
+    );
+    const catalog = JSON.parse(readFileSync(catalogPath, "utf8"));
+    const flash = catalog.models.find(
+      (model: { slug?: string }) => model.slug === "deepseek-flash",
+    );
+    flash.context_window = 600_000;
+    writeFileSync(catalogPath, `${JSON.stringify(catalog)}\n`, { mode: 0o600 });
+
+    const entry = loadManagedModelWindow(environment).find(
+      (model) => model.model === "deepseek-flash",
+    );
+    expect(entry?.perProvider).toEqual({ deepseek: 40, "ocg-main": 60 });
+    expect(entry?.conflicts).toBe(true);
+    // 最大窗口一致时不阻断统一设置；占比差异由 conflicts 单独暴露。
+    expect(entry?.windowConflict).toBe(false);
   });
 
   it("moves from fixed mode back to switching without losing unrelated config", async () => {
@@ -394,7 +444,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     writeManagedModelProviderProfileDefault("ocg-main", {
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactLimit: 750_000,
+      contextWindow: 750_000,
     }, environment);
     await runOpenCodeGoSetup({
       environment,
@@ -416,10 +466,12 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       model.slug === "deepseek-v4-pro"
     )).toMatchObject({
       slug: "deepseek-v4-pro",
-      context_window: 2_000_000,
+      context_window: 1_500_000,
       default_reasoning_level: "max",
-      auto_compact_token_limit: 1_500_000,
     });
+    expect(catalog.models.find((model: { slug?: string }) =>
+      model.slug === "deepseek-v4-pro"
+    ).auto_compact_token_limit).toBeUndefined();
     expect(existsSync(join(codexHome, "sf-agent.config.toml"))).toBe(false);
   });
 
@@ -525,7 +577,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     writeManagedModelProviderProfileDefault("ocg-main", {
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactLimit: 750_000,
+      contextWindow: 750_000,
     }, environment);
 
     const result = await refreshOpencodeGoCatalogForUpdate(environment, {
@@ -761,6 +813,7 @@ function updatedCatalog(contextWindow: number) {
           ? ["text", "image"]
           : ["text"],
         context_window: contextWindow,
+        max_context_window: contextWindow,
         default_reasoning_level: "high",
         supported_reasoning_levels: [
           { effort: "high", description: "High" },
