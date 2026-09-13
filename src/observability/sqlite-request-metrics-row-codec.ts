@@ -44,6 +44,7 @@ export interface MetricRow {
   weekly_resets_at: number | null;
   weekly_quota_plan_type: string | null;
   quota_windows: string | null;
+  user_agent: string | null;
   request_duration_ms: number | null;
   ttft_ms: number | null;
   thinking_duration_ms: number | null;
@@ -135,6 +136,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     operation: row.operation,
     threadId: row.thread_id,
     turnId: row.turn_id,
+    userAgent: row.user_agent,
     model: row.model,
     serviceTier: row.service_tier,
     reasoningEffort: row.reasoning_effort,

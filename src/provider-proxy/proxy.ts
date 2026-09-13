@@ -63,6 +63,8 @@ export interface ProviderProxyMetrics {
   reasoningEffort: string | null;
   status: "completed" | "failed" | "incomplete" | "unknown";
   httpStatus: number | null;
+  /** 本次请求实际发往模型上游的完整 User-Agent；无法确定时为 null。 */
+  userAgent: string | null;
   errorType: string | null;
   errorCode: string | null;
   errorMessage: string | null;
@@ -279,6 +281,7 @@ export class ProviderProxy {
       Date.now(),
       "http",
       responseOperation(account.path, turnMetadata.operation),
+      effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
     );
     if (account.externalRole) {
       metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
@@ -549,6 +552,7 @@ export class ProviderProxy {
               sanitized.requestStartedAtMs ?? Date.now(),
               "websocket",
               sanitized.metadata.operation,
+              effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
             );
         if (activeMetrics) {
           activeMetrics.model = sanitized.model ?? null;
@@ -591,6 +595,7 @@ export class ProviderProxy {
           receivedAtMs,
           "websocket",
           "response",
+          effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
         );
         if (account?.externalRole) {
           fallback.reasoningEffort = this.externalRoleReasoningEffort ?? null;
@@ -751,12 +756,14 @@ function createMetricsState(
   startedAtMs: number,
   transport: ProviderProxyMetrics["transport"],
   operation: ProviderProxyMetrics["operation"],
+  userAgent: string | null,
 ): MetricsState {
   return {
     ...metadata,
     transport,
     responseFormat: transport === "websocket" ? "websocket" : "unknown",
     operation,
+    userAgent,
     model: null,
     serviceTier: null,
     reasoningEffort: null,
@@ -783,6 +790,17 @@ function createMetricsState(
     weeklyQuota: null,
     quotaWindows: null,
   };
+}
+
+/** 实际发往上游的 UA：配置覆盖优先，否则用 App Server 发来的原始 UA。 */
+function effectiveUpstreamUserAgent(
+  headers: IncomingHttpHeaders,
+  override: string | undefined,
+): string | null {
+  const value = override ?? headers["user-agent"];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed.slice(0, 512);
 }
 
 function weeklyQuotaFromHeaders(

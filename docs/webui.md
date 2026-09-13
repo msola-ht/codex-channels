@@ -76,7 +76,7 @@ codexc service stop webui        # 停止
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/api-providers`（直接 API Provider 预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
+| 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/api-providers`（直接 API Provider 预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的 UTC 日聚合，供控制台热力图和趋势图使用。设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
@@ -167,11 +167,17 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与
-缓存列悬浮显示明细；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
+缓存列悬浮显示明细；请求明细的 `User-Agent` 列展示该请求实际发往模型上游的 UA（截断显示，
+悬浮查看完整值，Schema v13 起入库，历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
 分页，每页条数支持 10–500。Threads 的“开始时间”表示指标库中该 Thread 首个请求的
 开始时间，不等同于 App Server 中 Thread 对象的创建时间；Threads 的“类型”列把已由
 Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，其余显示“主会话”，
 子代理标记与请求统计一同持久化在指标库中。
+
+设置页的“官方 TUI 请求身份”分区显示当前生效 UA 与取值来源（显式覆盖或 App Server 生成），
+并用最近一条请求记录实际发出的 UA 判断配置是否已生效：两者一致显示“已生效”；在显式覆盖下
+不一致时提示“配置已保存，重启后生效”；没有覆盖时不判断是否重启，只显示“与最近一次请求
+不一致”。还没有请求样本时不做判断。
 
 部署：仓库根目录 `npm run install:global` 会自动安装 webui 依赖并构建
 `webui/dist/`，产物随 npm 包发布，由 `codexc webui` 托管。

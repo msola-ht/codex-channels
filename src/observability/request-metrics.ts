@@ -16,6 +16,8 @@ export interface ModelRequestMetricSample {
   reasoningEffort: string | null;
   status: ModelRequestStatus;
   httpStatus: number | null;
+  /** 本次请求实际发往模型上游的完整 User-Agent；未采集时为 null。 */
+  userAgent?: string | null;
   errorType: string | null;
   errorCode: string | null;
   errorMessage: string | null;

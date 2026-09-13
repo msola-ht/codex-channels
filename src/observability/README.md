@@ -22,14 +22,14 @@
   旧锁继续失败关闭。
 - `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
   Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v12 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v13 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 继续持有初始化事务，停机升级继续由指标脚本管理。
-- `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage 和
-  额度快照写入独立 `request-metrics.sqlite3`。新采集请求不再解析上游时间戳或流式阶段时间戳；
+- `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
+  逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不再解析上游时间戳或流式阶段时间戳；
   现有计时列与派生 View 暂时保留，用于读取历史数据并避免本次精简引入 Schema 迁移。当前 Thread
   的独立 API 查询只选择调用适配器产生的
   HTTP JSON 记录，不能把缺少 Turn 元数据的 Codex WebSocket/SSE 代理请求误分类。数据库使用
-  严格 Schema v12、Unix `0600` / Windows 当前 SID 私有文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
+  严格 Schema v13、Unix `0600` / Windows 当前 SID 私有文件权限，只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式，以及每页最多
   500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录默认保留
@@ -82,10 +82,11 @@
 WebUI 还通过同一只读 Store 按 UTC 日聚合指定范围的请求；热力图固定展示最近 90 天，趋势图跟随
 控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。Schema v3/v4/v5/v6/v7/v8/v9/v10 可在停止 Gateway 后用
-`codexc update` 统一预检，并先创建 `0600` 备份再逐版本事务升级到 v12 并保留原记录；v8 升级
+HTTP API 复用相同查询，不向本模块写入状态。Schema v3/v4/v5/v6/v7/v8/v9/v10/v11/v12 可在停止 Gateway 后用
+`codexc update` 统一预检，并先创建 `0600` 备份再逐版本事务升级到 v13 并保留原记录；v8 升级
 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为 `subagent_threads` 新增可空
-`parent_turn_id`，v10 升级 v11 新增运行级 `subagent_turns`，v11 升级 v12 新增账户源与账户快照表。历史 NULL 和 v10 以前不存在的运行关系
+`parent_turn_id`，v10 升级 v11 新增运行级 `subagent_turns`，v11 升级 v12 新增账户源与账户快照表，
+v12 升级 v13 新增记录实际发往模型上游 `User-Agent` 的可空 `user_agent` 列。历史 NULL 和 v10 以前不存在的运行关系
 均不按时间推断；递归会话累计继续使用显式父 Thread 关系，父 Turn 任务合计只使用 v11 起记录的
 精确父子 Turn 关系。单库排障可用
 `codexc metrics upgrade`。未知版本继续失败关闭，

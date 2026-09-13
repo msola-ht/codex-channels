@@ -182,7 +182,8 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 
 指标库 Schema v8 与 v9 曾为价格快照新增 `pricing_bucket` 与 `quota_windows` 列，Schema v10
 为 `subagent_threads` 新增可空 `parent_turn_id`，Schema v11 新增按子 Thread + Turn 记录精确父 Turn
-归属的 `subagent_turns`，Schema v12 新增官方账户快照表；旧库由 `codexc metrics upgrade`
+归属的 `subagent_turns`，Schema v12 新增官方账户快照表，Schema v13 为每个请求新增记录实际发往
+模型上游 `User-Agent` 的 `user_agent` 列；旧库由 `codexc metrics upgrade`
 显式备份迁移，历史运行归属不按时间猜测。价格相关遗留列不再写入或读取，保留它们只为避免破坏性
 schema 迁移；`quota_windows` 继续用于 OpenCode Go 本地 Token 的窗口归属。
 

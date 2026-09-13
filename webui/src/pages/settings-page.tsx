@@ -22,9 +22,9 @@ import { useManagementTasks } from "@/hooks/use-management-tasks"
 import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
 import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
-import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary } from "@/lib/api"
+import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary, fetchUpstreamUserAgent } from "@/lib/api"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
-import type { ManagementProvidersResponse, ManagementServicesResponse, SettingsSummaryResponse } from "@/lib/types"
+import type { ManagementProvidersResponse, ManagementServicesResponse, SettingsSummaryResponse, UpstreamUserAgentResponse } from "@/lib/types"
 import type { AccountSettingsController, CodexSettingsController, GatewaySettingsController, ManagementTaskController, ProviderSettingsController } from "@/lib/settings-management"
 
 type SettingsRefreshSource = "gateway" | "codex" | "provider" | "account"
@@ -35,6 +35,7 @@ export function SettingsPage() {
   const summary = useApi(fetchSettingsSummary, [])
   const services = useApi(fetchManagementServices, [])
   const providers = useApi(fetchManagementProviders, [])
+  const upstreamAgent = useApi(fetchUpstreamUserAgent, [])
   const management = useSettingsManagement()
   const codexManagement = useCodexSettingsManagement()
   const tasks = useManagementTasks()
@@ -45,6 +46,7 @@ export function SettingsPage() {
   const refetchSummary = summary.refetch
   const refetchServices = services.refetch
   const refetchProviders = providers.refetch
+  const refetchUpstreamAgent = upstreamAgent.refetch
   const refetchManagedSettings = management.refetch
   const refetchCodexSettings = codexManagement.refetch
   const refetchProviderSettings = providerSettings.refetch
@@ -55,11 +57,12 @@ export function SettingsPage() {
     refetchSummary()
     refetchServices()
     refetchProviders()
+    refetchUpstreamAgent()
     if (source !== "gateway") refetchManagedSettings()
     if (source !== "codex") refetchCodexSettings()
     if (source !== "provider") refetchProviderSettings()
     if (source !== "account") refetchAccountSettings()
-  }, [refetchAccountSettings, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSummary])
+  }, [refetchAccountSettings, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSummary, refetchUpstreamAgent])
 
   useEffect(() => {
     if (!tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))) return undefined
@@ -108,6 +111,7 @@ export function SettingsPage() {
       summary={summary.data}
       services={services}
       providers={providers}
+      upstreamAgent={upstreamAgent}
       management={management}
       codexManagement={codexManagement}
       tasks={tasks}
@@ -125,6 +129,7 @@ interface SettingsContentProps {
   summary: SettingsSummaryResponse
   services: UseApiState<ManagementServicesResponse> & { refetch: () => void }
   providers: UseApiState<ManagementProvidersResponse> & { refetch: () => void }
+  upstreamAgent: UseApiState<UpstreamUserAgentResponse> & { refetch: () => void }
   management: GatewaySettingsController
   codexManagement: CodexSettingsController
   tasks: ManagementTaskController
@@ -136,7 +141,7 @@ interface SettingsContentProps {
   onCopy: (id: string, command: string) => Promise<void>
 }
 
-function SettingsContent({ summary, services, providers, management, codexManagement, tasks, providerSettings, accountSettings, onSettingsChanged, copiedCommand, copyError, onCopy }: SettingsContentProps) {
+function SettingsContent({ summary, services, providers, upstreamAgent, management, codexManagement, tasks, providerSettings, accountSettings, onSettingsChanged, copiedCommand, copyError, onCopy }: SettingsContentProps) {
   const confirmGatewaySetting = async () => {
     if (await management.confirmSetting()) onSettingsChanged("gateway")
   }
@@ -151,7 +156,7 @@ function SettingsContent({ summary, services, providers, management, codexManage
     <AccountSettingsManagement management={accountSettings} onChanged={() => onSettingsChanged("account")} />
     <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmGatewaySetting()} onCancel={management.cancelSetting} />
     {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
-    <GatewaySettingsCard management={management} />
+    <GatewaySettingsCard management={management} upstreamAgent={upstreamAgent} />
     <WorkspaceSettingsCard management={management} />
     <WebuiDataSettingsCard management={management} />
     <ChannelStatusCard channels={summary.gateway.channels} />

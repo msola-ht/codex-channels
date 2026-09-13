@@ -176,6 +176,7 @@ export interface RequestRecord {
   responseFormat: string
   serviceTier: string | null
   reasoningEffort: string | null
+  userAgent: string | null
   threadId: string | null
   turnId: string | null
   inputTokens: number | null
@@ -290,6 +291,16 @@ export interface ManagementServicesResponse {
   platform: "systemd" | "launchd" | "windows" | null
   healthy: boolean | null
   entries: ManagementServiceEntry[]
+}
+
+export interface UpstreamUserAgentResponse {
+  observedAt: string
+  configuredUserAgent: string | null
+  appServerUserAgent: string | null
+  effectiveUserAgent: string | null
+  source: "override" | "app-server" | "unavailable"
+  recentRequestUserAgent: string | null
+  recentRequestAtMs: number | null
 }
 
 export interface ManagementProviderEntry {

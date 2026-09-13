@@ -10,7 +10,7 @@ import {
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { userDataDir } from "./runtime-config.mjs";
+import { runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import {
   assertWebuiHost,
   parseWebuiCliArgs,
@@ -19,6 +19,8 @@ import {
   readGatewayConfig,
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
+import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import { readAppServerUserAgent } from "../runtime/app-server-read.mjs";
 import {
   GatewayAccountRefreshError,
   requestGatewayAccountRefresh,
@@ -124,6 +126,7 @@ const GATEWAY_VERSION = PACKAGE_VERSION ?? SOURCE_GATEWAY_VERSION;
 const CODEX_CLI_VERSION = (readJsonMetadata(join(PACKAGE_DIR, "src", "codex-protocol", "version.json"))?.codexCli ?? null)
   ?.replace(/^codex-cli\s+/u, "") ?? null;
 const highRiskCodexSettingKinds = new Set(["permissions"]);
+const appServerUserAgentCacheTtlMs = 5_000;
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -304,6 +307,7 @@ function createManagementState(
     // 管理请求始终只接受回环连接；即使 WebUI 绑定 0.0.0.0，也允许通过 SSH
     // 隧道访问 127.0.0.1，再由下面的 socket 检查拒绝公网直连管理接口。
     origin: configuredOrigin ?? `http://${originHost}:${port}`,
+    appServerUserAgentCache: { expiresAtMs: 0, value: null },
     serviceStatusCache,
     providerStateCache,
     loadProviderState,
@@ -868,6 +872,10 @@ async function routeManagement(environment, url, request, response, state, token
     await handleManagementServices(environment, response, state.serviceStatusCache);
     return;
   }
+  if (path === "/upstream-user-agent" && request.method === "GET") {
+    await handleUpstreamUserAgent(environment, response, state.appServerUserAgentCache);
+    return;
+  }
   if (path === "/providers" && request.method === "GET") {
     await handleManagementProviders(environment, response, state.providerStateCache, state.loadProviderState);
     return;
@@ -1011,6 +1019,82 @@ async function handleManagementServices(environment, response, serviceStatusCach
     healthy: platform === null ? null : entries.every((service) => service.running),
     entries,
   });
+}
+
+/**
+ * 模型上游实际收到的 User-Agent：配置了 `[codex].upstream_user_agent` 时以配置为准且不探测
+ * App Server，否则以短缓存读取 App Server 生成的进程级 UA。应答同时携带最近一条指标记录实际
+ * 发出的 UA，供界面判断配置是否已在运行中的服务里生效。App Server 未运行时不视为接口失败。
+ */
+async function handleUpstreamUserAgent(environment, response, cache) {
+  const paths = runtimeConfig(environment);
+  const document = readGatewayConfig(paths.configPath);
+  const codex = document.codex;
+  const configured = typeof codex.upstream_user_agent === "string"
+    ? codex.upstream_user_agent
+    : null;
+  const appServerUserAgent = configured !== null
+    ? null
+    : await cachedAppServerUserAgent(document, paths.dataDir, cache);
+  const effectiveUserAgent = configured ?? appServerUserAgent;
+  const recentRequest = latestRecordedUserAgent(environment);
+  sendManagementJson(response, 200, {
+    observedAt: new Date().toISOString(),
+    configuredUserAgent: configured,
+    appServerUserAgent,
+    effectiveUserAgent,
+    source: configured !== null ? "override" : (appServerUserAgent === null ? "unavailable" : "app-server"),
+    recentRequestUserAgent: recentRequest?.userAgent ?? null,
+    recentRequestAtMs: recentRequest?.recordedAtMs ?? null,
+  });
+}
+
+/**
+ * 探测 App Server 生成的进程级 UA 并复用短 TTL 结果（含失败），避免多标签页或连续刷新
+ * 重复握手。探测使用官方非全局客户端身份，不改变 App Server 的 originator 或 UA 后缀。
+ */
+async function cachedAppServerUserAgent(document, dataDir, cache) {
+  if (cache.expiresAtMs > Date.now()) return cache.value;
+  const value = await readAppServerUserAgent({
+    socketPath: resolvePrimaryAppServerSocketPath(document, dataDir),
+    codexBinary: document.codex.binary,
+    clientInfo: {
+      name: "codex_app_server_daemon",
+      title: "Codex Connect WebUI",
+      version: GATEWAY_VERSION,
+    },
+  }).catch(() => null);
+  cache.value = value;
+  cache.expiresAtMs = Date.now() + appServerUserAgentCacheTtlMs;
+  return value;
+}
+
+/** 最近一条模型请求实际发往上游的 UA；指标库不可用或还没有请求时返回 null。 */
+function latestRecordedUserAgent(environment) {
+  let store;
+  try {
+    store = openMetricsStore(environment);
+    const range = metricsRange("all", Date.now());
+    const page = store.page({
+      startAtMs: range.startAtMs,
+      endAtMs: range.endAtMs,
+      offset: 0,
+      limit: 1,
+      sortKey: "recordedAtMs",
+      sortDirection: "desc",
+    });
+    const record = page.records[0];
+    return record === undefined
+      ? null
+      : {
+          userAgent: record.userAgent ?? null,
+          recordedAtMs: record.recordedAtMs ?? null,
+        };
+  } catch {
+    return null;
+  } finally {
+    store?.close();
+  }
 }
 
 async function handleManagementProviders(environment, response, providerStateCache, loadProviderState) {

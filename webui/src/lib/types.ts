@@ -25,6 +25,7 @@ export type {
   ManagementSettingsResponse,
   ManagementServicesResponse,
   ManagementProvidersResponse,
+  UpstreamUserAgentResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,
   CodexUserSettingsResponse,

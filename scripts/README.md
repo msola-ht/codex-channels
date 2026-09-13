@@ -64,10 +64,11 @@
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
   `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
   派生上下文压缩模型、请求数与 Token 摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v11 备份后
-  逐版本事务升级到 v12（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v12 备份后
+  逐版本事务升级到 v13（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
   `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
-  `subagent_turns`，v11 升级 v12 新增官方账户快照表；历史运行归属不猜测），
+  `subagent_turns`，v11 升级 v12 新增官方账户快照表，v12 升级 v13 新增记录实际发往模型上游
+  `User-Agent` 的 `user_agent` 列；历史运行归属不猜测），
   reset 要求 Gateway 停止、检查点回写、`0600` 备份后移除旧库，不迁移或覆盖原指标记录。
   服务状态无法确认、处于非停止状态或前台 Gateway
   指标 Socket 仍可连接时均拒绝 reset。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
@@ -95,6 +96,10 @@
   复用 Config 脱敏投影与跨平台服务状态查询，只返回配置修订、非凭据字段和 Secret 配置状态；
   `/api/v1/management/services` 在回环访问约束和可选 WebUI Bearer 鉴权下提供受管服务状态、版本和受限的最近错误摘要；
   `/api/v1/management/providers` 提供不含 URL、Profile 或凭据的 Provider 安全概览。
+  `/api/v1/management/upstream-user-agent` 返回模型上游实际使用的 User-Agent 与取值来源：配置了
+  `[codex].upstream_user_agent` 时以配置为准且不探测 App Server，否则用官方非全局客户端身份读取
+  App Server 生成的进程级 UA，结果按 5 秒 TTL 复用，App Server 未运行时降级为不可用状态而不是让
+  接口失败；同一应答附带最近一条指标记录实际发往上游的 UA，供设置页判断配置是否已生效。
   `POST /api/v1/management/accounts/refresh` 通过私有 Gateway IPC 按需刷新单个 DeepSeek 或
   OpenCode Go 账户并返回统一快照，不由 WebUI 读取 Provider 凭据或直接请求官方接口；管理设置接口
   始终保留真实回环连接、精确 Origin、JSON 请求约束、限速和审计；WebUI 配置令牌时复用 `Authorization: Bearer` 鉴权。

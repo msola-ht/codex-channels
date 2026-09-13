@@ -165,7 +165,7 @@ export function upgradeMetricsDatabase(
     if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11/v12 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
     checkpoint(status.databasePath);
@@ -208,6 +208,14 @@ export function upgradeMetricsDatabase(
       if (previousSchemaVersion < 9) {
         statements.push(`
           ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
+        `);
+      }
+      if (
+        previousSchemaVersion < 13
+        && !databaseHasColumn(database, "model_request_metrics", "user_agent")
+      ) {
+        statements.push(`
+          ALTER TABLE model_request_metrics ADD COLUMN user_agent TEXT;
         `);
       }
       if (previousSchemaVersion < 12) {
@@ -715,7 +723,7 @@ function requireMigratedMetricsColumns(database) {
     "thread_id", "turn_id", "request_started_at_ms", "response_completed_at_ms",
     "recorded_at_ms", "weekly_quota_limit_id", "weekly_used_percent_millionths",
     "weekly_resets_at", "weekly_quota_plan_type", "error_message", "pricing_bucket",
-    "quota_windows",
+    "quota_windows", "user_agent",
   ];
   const missingMetrics = required.filter((column) => !columns.includes(column));
   if (missingMetrics.length > 0) {

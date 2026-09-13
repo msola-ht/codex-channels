@@ -6,9 +6,14 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { ManagedInputRow, ManagedSelect, SettingsRow } from "@/components/settings/settings-controls"
+import type { UseApiState } from "@/hooks/use-api"
 import type { GatewaySettingsController } from "@/lib/settings-management"
+import type { UpstreamUserAgentResponse } from "@/lib/types"
 
-export function GatewaySettingsCard({ management }: { management: GatewaySettingsController }) {
+export function GatewaySettingsCard({ management, upstreamAgent }: {
+  management: GatewaySettingsController
+  upstreamAgent: UseApiState<UpstreamUserAgentResponse>
+}) {
   const managedSettings = management.managedSettings
   const [identityName, setIdentityName] = useState("")
   const [identityTitle, setIdentityTitle] = useState("")
@@ -26,6 +31,25 @@ export function GatewaySettingsCard({ management }: { management: GatewaySetting
   if (managedSettings === null) return null
   const disabled = management.saving || management.pendingSetting !== null
   const identityDefaults = managedSettings.system.officialTuiIdentity.defaults
+  const effectiveUserAgent = upstreamAgent.data?.effectiveUserAgent ?? null
+  const recentRequestUserAgent = upstreamAgent.data?.recentRequestUserAgent ?? null
+  const upstreamAgentValue = upstreamAgent.error !== null
+    ? `读取失败：${upstreamAgent.error}`
+    : upstreamAgent.data === null
+      ? "读取中…"
+      : effectiveUserAgent ?? "不可用：App Server 未运行，且未配置覆盖"
+  const upstreamAgentSource = upstreamAgent.error !== null || upstreamAgent.data === null
+    ? null
+    : upstreamAgent.data.source === "override"
+      ? "显式覆盖"
+      : upstreamAgent.data.source === "app-server" ? "App Server 生成" : null
+  const upstreamAgentState = effectiveUserAgent === null || recentRequestUserAgent === null
+    ? null
+    : recentRequestUserAgent === effectiveUserAgent
+      ? "已生效（与最近一次请求一致）"
+      : upstreamAgent.data?.source === "override"
+        ? "配置已保存，重启后生效"
+        : "与最近一次请求不一致"
   const saveIdentity = () => {
     void management.previewSetting("system.official-tui-identity", {
       clientIdentity: {
@@ -66,6 +90,14 @@ export function GatewaySettingsCard({ management }: { management: GatewaySetting
         </FieldGroup>
         <Field data-disabled={disabled}><FieldLabel htmlFor="tui-upstream-user-agent">上游 User-Agent</FieldLabel><Input id="tui-upstream-user-agent" value={upstreamUserAgent} disabled={disabled} maxLength={512} onChange={(event) => setUpstreamUserAgent(event.target.value)} placeholder="留空透传官方 TUI UA" /></Field>
         <Button className="self-start" variant="outline" disabled={disabled} onClick={saveIdentity}>保存请求身份</Button>
+        <SettingsRow label="当前模型上游 User-Agent" value={upstreamAgentValue} code />
+        {upstreamAgentSource === null ? null : <SettingsRow label="UA 取值来源" value={upstreamAgentSource} />}
+        <SettingsRow
+          label="最近一次请求实际使用"
+          value={recentRequestUserAgent ?? "无请求样本"}
+          code={recentRequestUserAgent !== null}
+        />
+        {upstreamAgentState === null ? null : <SettingsRow label="生效状态" value={upstreamAgentState} />}
       </section>
     </CardContent>
   </Card>

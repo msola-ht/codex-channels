@@ -214,6 +214,7 @@ function metrics(): ProviderProxyMetrics {
     reasoningEffort: null,
     status: "completed",
     httpStatus: 200,
+    userAgent: "codex-tui/0.154.0 (Mac OS 15.7.9; arm64) unknown (codex-tui; 0.154.0)",
     errorType: null,
     errorCode: null,
     errorMessage: null,

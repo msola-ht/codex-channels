@@ -117,9 +117,10 @@ WebSocket 请求时。内部指标、Thread、Turn 和 App Server 协议版本�
 - `upstream_user_agent`：1–512 个可显示 ASCII 字符，不允许首尾空白、CR、LF、Tab 或其他控制
   字符；验证通过后按原值写入 Header，不再修剪或改写。
 
-该能力只允许修改 `User-Agent`，不扩展为任意 Header 配置，也不接受凭据插值。配置值不进入请求
-指标、完成卡片或普通日志；Doctor 和 Setup 只显示“默认/已自定义”状态，避免把用户可能误填的
-内容复制到渠道或诊断输出。
+该能力只允许修改 `User-Agent`，不扩展为任意 Header 配置，也不接受凭据插值。生效 UA 会随每条
+请求写入本地 `model_request_metrics.user_agent` 并只在本机 WebUI 展示；不进入渠道消息、完成
+卡片或普通日志，Doctor 和 Setup 仍只显示“默认/已自定义”状态，避免把用户可能误填的内容复制到
+渠道或诊断输出。
 
 ## Setup 与命令体验
 
@@ -179,7 +180,8 @@ Provider ID 字符串插值到全局 UA。
   直接读取配置。`thread/start` 不再携带 `serviceName`，与官方 TUI 传入 `None` 的行为一致，
   避免在 App Server 会话遥测中保留 Gateway 标识。
 - `src/provider-proxy`：由 `bin/codexc.mjs` 注入可选完整 UA，在 HTTP 和 WebSocket 出站请求头的
-  统一函数中覆盖；不得修改入站 Header 或指标载荷。
+  统一函数中覆盖；不修改入站 Header，但把该请求实际发往上游的 UA 一并写入指标记录
+  `model_request_metrics.user_agent`（Schema v13，限长 512），供 WebUI 请求明细逐条展示。
 - `bin/codexc.mjs`：App Server 服务进程启动每个 Provider Proxy 时统一读取
   `[codex].upstream_user_agent`，主代理、按需 Provider 代理和 OpenCode Go 共享代理复用同一值。
 - `scripts/config-management.mjs`、`scripts/config-system-menu.mjs`：通过 `codexc config` 的
@@ -190,6 +192,9 @@ Provider ID 字符串插值到全局 UA。
   供 CLI 与 WebUI 显示未配置时实际生效的身份，界面不把默认值写回配置。
 - `runtime/app-server-read.mjs`：连接本机 App Server 完成一次 `initialize` 握手并返回完整
   `User-Agent`，供 Doctor 以 `codex_app_server_daemon` 非全局身份复用，不打印或缓存完整值。
+- `scripts/webui-server.mjs`：`/api/v1/management/upstream-user-agent` 返回模型上游实际使用的
+  `User-Agent` 与取值来源；配置覆盖优先，否则用同一非全局身份读取 App Server 生成的 UA，
+  App Server 未运行时返回不可用状态而不是让接口失败。
 - `codexc doctor`：只显示「默认/已自定义」状态，不发送探测请求，不打印完整值。
 
 不修改 Codex `~/.codex/config.toml`、Provider Profile、API Key 文件、数据库 Schema、指标协议或

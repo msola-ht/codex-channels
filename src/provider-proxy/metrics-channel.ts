@@ -236,6 +236,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableString(record.serviceTier)
     || !oneOf(record.status, ["completed", "failed", "incomplete", "unknown"])
     || !nullableHttpStatus(record.httpStatus)
+    || (record.userAgent !== undefined && !nullableUserAgent(record.userAgent))
     || !nullableString(record.errorType)
     || !nullableString(record.errorCode)
     || (record.errorMessage !== undefined && !nullableMessage(record.errorMessage))
@@ -266,8 +267,10 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     return undefined;
   }
   const quota = weeklyQuota as Record<string, unknown> | null | undefined;
+  const userAgent = record.userAgent;
   return {
     ...record,
+    userAgent: typeof userAgent === "string" ? userAgent : null,
     reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
     errorMessage: typeof record.errorMessage === "string"
       ? record.errorMessage
@@ -363,6 +366,11 @@ function nullableString(value: unknown): boolean {
 function nullableMessage(value: unknown): boolean {
   return value === null
     || (typeof value === "string" && value.length > 0 && value.length <= 500);
+}
+
+function nullableUserAgent(value: unknown): boolean {
+  return value === null
+    || (typeof value === "string" && value.length > 0 && value.length <= 512);
 }
 
 function finiteNumber(value: unknown): boolean {
