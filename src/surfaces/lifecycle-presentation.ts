@@ -602,6 +602,15 @@ export function createTurnCompletedPresentation(
     ];
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
+  if (event.durationMs !== undefined) {
+    runFields.push({
+      title: "性能",
+      fields: [{
+        label: "总耗时",
+        value: formatElapsedDuration(event.durationMs),
+      }],
+    });
+  }
   if (Object.hasOwn(event, "gitBranch")) {
     sessionFields.push({
       label: "Git 分支",
