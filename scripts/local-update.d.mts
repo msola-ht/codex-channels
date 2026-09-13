@@ -45,11 +45,13 @@ export interface CoreServiceReadinessOptions {
 
 export interface CoreServiceInstallation {
   installed: boolean;
+  obsoleteServices?: string[];
 }
 
 export type LocalUpdateStage =
   | "inspect"
   | "stop-services"
+  | "obsolete-services"
   | "provider-files"
   | "provider-catalogs"
   | "config"
@@ -94,6 +96,31 @@ export function inspectCoreServiceInstallation(
   environment?: LocalUpdateEnvironment,
   platform?: NodeJS.Platform,
 ): CoreServiceInstallation;
+
+export function inspectObsoleteServiceInstallations(
+  environment?: LocalUpdateEnvironment,
+  platform?: NodeJS.Platform,
+): string[];
+
+export function removeObsoleteServiceInstallations(
+  environment?: LocalUpdateEnvironment,
+  options?: {
+    installed?: string[];
+    platform?: NodeJS.Platform;
+    pwshExecutable?: string;
+    spawnCommand?: (
+      command: string,
+      args: string[],
+      options: Record<string, unknown>,
+    ) => {
+      error?: Error;
+      status: number | null;
+      stderr?: string;
+      stdout?: string;
+    };
+    uid?: number;
+  },
+): { changed: boolean; removedServices: string[] };
 
 export function inspectDatabaseUpdates(
   environment?: LocalUpdateEnvironment,
@@ -186,6 +213,7 @@ export function updateLocalInstallation(
       services: CoreServiceInstallation;
     }) => void;
     onProgress?: (progress: LocalUpdateProgress) => void;
+    removeObsoleteServices?: () => unknown;
     startServices?: () => void;
     stopServices?: () => void;
     updateProviderFiles?: () => unknown;
@@ -198,6 +226,7 @@ export function updateLocalInstallation(
 ): Promise<{
   config: unknown;
   databases: unknown;
+  obsoleteServices?: unknown;
   providerCatalogs: unknown;
   servicesRestored: boolean;
 }>;

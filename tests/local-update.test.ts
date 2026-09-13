@@ -30,6 +30,7 @@ import {
   inspectCoreServiceInstallation,
   inspectGatewayConfiguration,
   inspectLocalUpdatePlan,
+  removeObsoleteServiceInstallations,
   refreshManagedProviderCatalogsForUpdate,
   updateDatabases,
   updateGatewayConfiguration,
@@ -104,10 +105,40 @@ describe("local update", () => {
 
     const unitsDirectory = join(home, ".config", "systemd", "user");
     mkdirSync(unitsDirectory, { recursive: true });
+    writeFileSync(join(unitsDirectory, "codex-connect-center.service"), "unit");
+    expect(inspectCoreServiceInstallation(environment, "linux")).toEqual({
+      installed: false,
+      obsoleteServices: ["metrics-center"],
+    });
+    rmSync(join(unitsDirectory, "codex-connect-center.service"));
     writeFileSync(join(unitsDirectory, "codex-connect-app-server.service"), "unit");
     expect(() => inspectCoreServiceInstallation(environment, "linux")).toThrow(
       "核心后台服务安装不完整",
     );
+  });
+
+  it("stops and removes the obsolete Linux metrics center service", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-local-update-obsolete-service-"));
+    temporaryDirectories.push(home);
+    const environment = { ...process.env, HOME: home, XDG_CONFIG_HOME: "" };
+    const unit = join(home, ".config", "systemd", "user", "codex-connect-center.service");
+    mkdirSync(dirname(unit), { recursive: true });
+    writeFileSync(unit, "unit");
+    const spawnCommand = vi.fn((command: string, args: string[]) => {
+      void command;
+      void args;
+      return { status: 0, stderr: "", stdout: "" };
+    });
+
+    expect(removeObsoleteServiceInstallations(environment, {
+      platform: "linux",
+      spawnCommand,
+    })).toEqual({ changed: true, removedServices: ["metrics-center"] });
+    expect(existsSync(unit)).toBe(false);
+    expect(spawnCommand.mock.calls.map((call) => call[1])).toEqual([
+      ["--user", "disable", "--now", "codex-connect-center.service"],
+      ["--user", "daemon-reload"],
+    ]);
   });
 
   it("recognizes installed macOS launchd plist definitions", () => {
@@ -120,6 +151,34 @@ describe("local update", () => {
 
     expect(inspectCoreServiceInstallation({ ...process.env, HOME: home }, "darwin"))
       .toEqual({ installed: true });
+  });
+
+  it("unloads and removes the obsolete macOS metrics center service", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-local-update-obsolete-launchd-"));
+    temporaryDirectories.push(home);
+    const plist = join(
+      home,
+      "Library",
+      "LaunchAgents",
+      "com.hegenai.codex-center.plist",
+    );
+    mkdirSync(dirname(plist), { recursive: true });
+    writeFileSync(plist, "plist");
+    const spawnCommand = vi.fn((command: string, args: string[]) => {
+      void command;
+      void args;
+      return { status: 0, stderr: "", stdout: "" };
+    });
+
+    expect(removeObsoleteServiceInstallations(
+      { ...process.env, HOME: home },
+      { platform: "darwin", spawnCommand, uid: 501 },
+    )).toEqual({ changed: true, removedServices: ["metrics-center"] });
+    expect(existsSync(plist)).toBe(false);
+    expect(spawnCommand.mock.calls.map((call) => call[1])).toEqual([
+      ["print", "gui/501/com.hegenai.codex-center"],
+      ["bootout", "gui/501/com.hegenai.codex-center"],
+    ]);
   });
 
   it("recognizes installed Windows Scheduled Task definitions", () => {
@@ -135,6 +194,36 @@ describe("local update", () => {
       ...environment,
       USERPROFILE: dataDir,
     }, "win32")).toEqual({ installed: true });
+  });
+
+  it("unregisters and removes the obsolete Windows metrics center task", () => {
+    const { dataDir, environment } = fixture();
+    const definitionsDirectory = join(dataDir, "services");
+    const definition = join(definitionsDirectory, "center.json");
+    const launcher = join(definitionsDirectory, "center.vbs");
+    mkdirSync(definitionsDirectory, { recursive: true });
+    writeFileSync(definition, "{}");
+    writeFileSync(launcher, "");
+    const spawnCommand = vi.fn((command: string, args: string[]) => {
+      void command;
+      void args;
+      return { status: 0, stderr: "", stdout: "" };
+    });
+
+    expect(removeObsoleteServiceInstallations({
+      ...environment,
+      USERPROFILE: dataDir,
+    }, {
+      platform: "win32",
+      pwshExecutable: "pwsh.exe",
+      spawnCommand,
+    })).toEqual({ changed: true, removedServices: ["metrics-center"] });
+    expect(existsSync(definition)).toBe(false);
+    expect(existsSync(launcher)).toBe(false);
+    expect(spawnCommand.mock.calls.map((call) => {
+      const args = call[1] as string[];
+      return args[args.indexOf("-Action") + 1];
+    })).toEqual(["stop", "unregister"]);
   });
 
   it("materializes only missing safe config defaults and keeps a private backup", () => {
@@ -183,6 +272,33 @@ describe("local update", () => {
     expect(result.removedPaths).toEqual(["vision"]);
     expect(result.backupPath).not.toBeNull();
     expect((readGatewayConfig(configPath) as Record<string, unknown>).vision).toBeUndefined();
+  });
+
+  it("backs up and removes obsolete remote metrics config during update", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.metrics = {};
+    const metrics = document.metrics as typeof document;
+    metrics.sync = { enabled: true };
+    metrics.center = { enabled: true };
+    metrics.view = { enabled: true };
+    writeGatewayConfig(configPath, document);
+
+    expect(inspectGatewayConfiguration(environment)).toMatchObject({
+      removedPaths: ["metrics.sync", "metrics.center", "metrics.view"],
+    });
+    const result = updateGatewayConfiguration(environment);
+
+    expect(result.changed).toBe(true);
+    expect(result.removedPaths).toEqual([
+      "metrics.sync",
+      "metrics.center",
+      "metrics.view",
+    ]);
+    expect(result.backupPath).not.toBeNull();
+    expect(readGatewayConfig(configPath).metrics).not.toHaveProperty("sync");
+    expect(readGatewayConfig(configPath).metrics).not.toHaveProperty("center");
+    expect(readGatewayConfig(configPath).metrics).not.toHaveProperty("view");
   });
 
   it("restores the obsolete vision config when config validation fails", () => {
@@ -339,9 +455,16 @@ describe("local update", () => {
         calls.push("inspect-databases");
         return { state: {}, metrics: {} };
       },
-      inspectServices: () => ({ installed: true }),
+      inspectServices: () => ({
+        installed: true,
+        obsoleteServices: ["metrics-center"],
+      }),
       stopServices: () => {
         calls.push("stop");
+      },
+      removeObsoleteServices: () => {
+        calls.push("remove-obsolete-services");
+        return "obsolete-services";
       },
       updateProviderFiles: () => {
         calls.push("update-provider-files");
@@ -375,6 +498,7 @@ describe("local update", () => {
       "inspect-config",
       "inspect-databases",
       "stop",
+      "remove-obsolete-services",
       "update-provider-files",
       "update-provider-catalogs",
       "update-config",
@@ -386,6 +510,7 @@ describe("local update", () => {
     expect(result).toEqual({
       config: "config",
       databases: "databases",
+      obsoleteServices: "obsolete-services",
       providerCatalogs: "provider-catalogs",
       servicesRestored: true,
     });
@@ -394,6 +519,8 @@ describe("local update", () => {
       ["inspect", "completed"],
       ["stop-services", "started"],
       ["stop-services", "completed"],
+      ["obsolete-services", "started"],
+      ["obsolete-services", "completed"],
       ["provider-files", "started"],
       ["provider-files", "completed"],
       ["provider-catalogs", "started"],

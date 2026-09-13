@@ -28,6 +28,7 @@ import {
   gatewayOwnerIsReady,
 } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { resolveExecutable } from "../runtime/executable.mjs";
 import { securePrivateFileSync } from "../runtime/private-file.mjs";
 import {
   assertManagedModelProviderCapabilities,
@@ -58,6 +59,7 @@ import {
   upgradeStateDatabase,
   validateStateDatabaseStructure,
 } from "./upgrade-state.mjs";
+import { packageDir } from "./package-path.mjs";
 import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 import { backupAndMigrateProviderFiles } from "./backup-provider-migration.mjs";
 import {
@@ -68,6 +70,15 @@ import { refreshOpencodeGoCatalogForUpdate } from "./opencode-go-setup.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 const sessionDisplayCacheSchemaVersion = 1;
+const obsoleteServiceDefinitions = Object.freeze([
+  Object.freeze({
+    id: "metrics-center",
+    target: "center",
+    systemd: "codex-connect-center.service",
+    launchd: "com.hegenai.codex-center",
+    windows: "Codex Connect Metrics Center",
+  }),
+]);
 
 export function inspectSessionDisplayCache(environment = process.env) {
   const databasePath = resolveSessionDisplayCachePath(environment);
@@ -253,10 +264,16 @@ export async function updateLocalInstallation(environment = process.env, options
 
   let config;
   let databases;
+  let obsoleteServices;
   let providerCatalogs;
   let updateError;
   let updateFailureStage;
   try {
+    if ((serviceInspection.obsoleteServices?.length ?? 0) > 0) {
+      obsoleteServices = await runStage("obsolete-services", () =>
+        (options.removeObsoleteServices
+          ?? (() => removeObsoleteServiceInstallations(environment)))());
+    }
     await runStage("provider-files", () =>
       (options.updateProviderFiles
         ?? (() => backupAndMigrateProviderFiles(environment, { apply: true })))());
@@ -316,6 +333,7 @@ export async function updateLocalInstallation(environment = process.env, options
   return {
     config,
     databases,
+    ...(obsoleteServices === undefined ? {} : { obsoleteServices }),
     providerCatalogs,
     servicesRestored: serviceInspection.installed,
   };
@@ -353,6 +371,7 @@ export async function inspectLocalUpdatePlan(
   const steps = [
     "inspect",
     ...(services.installed ? ["stop-services"] : []),
+    ...((services.obsoleteServices?.length ?? 0) > 0 ? ["obsolete-services"] : []),
     "provider-files",
     "provider-catalogs",
     "config",
@@ -365,7 +384,8 @@ export async function inspectLocalUpdatePlan(
     config,
     databases,
     services,
-    requiresServiceInterruption: services.installed,
+    requiresServiceInterruption:
+      services.installed || (services.obsoleteServices?.length ?? 0) > 0,
     steps,
   };
   return {
@@ -448,6 +468,15 @@ function removeObsoleteGatewayConfig(document) {
       }
     }
   }
+  const metrics = document.metrics;
+  if (metrics !== null && typeof metrics === "object" && !Array.isArray(metrics)) {
+    for (const key of ["sync", "center", "view"]) {
+      if (Object.hasOwn(metrics, key)) {
+        delete metrics[key];
+        removedPaths.push(`metrics.${key}`);
+      }
+    }
+  }
   return removedPaths;
 }
 
@@ -455,25 +484,10 @@ export function inspectCoreServiceInstallation(
   environment = process.env,
   platform = process.platform,
 ) {
-  const home = platform === "win32" ? environment.USERPROFILE : environment.HOME;
-  if (!home) {
-    throw new Error(`无法检查后台服务安装状态：${platform === "win32" ? "USERPROFILE" : "HOME"} 未设置`);
-  }
-  let definitionsDirectory;
-  let identifierKey;
-  if (platform === "linux") {
-    const configHome = environment.XDG_CONFIG_HOME?.trim() || join(home, ".config");
-    definitionsDirectory = join(configHome, "systemd", "user");
-    identifierKey = "systemd";
-  } else if (platform === "darwin") {
-    definitionsDirectory = join(home, "Library", "LaunchAgents");
-    identifierKey = "launchd";
-  } else if (platform === "win32") {
-    definitionsDirectory = join(requireUserConfig(environment).dataDir, "services");
-    identifierKey = "windows";
-  } else {
-    throw new Error("codexc update 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
-  }
+  const { definitionsDirectory, identifierKey } = serviceDefinitionContext(
+    environment,
+    platform,
+  );
   const paths = serviceDefinitionsForTarget("all").flatMap((definition) => {
     const definitionPath = join(
       definitionsDirectory,
@@ -488,13 +502,197 @@ export function inspectCoreServiceInstallation(
       : [definitionPath];
   });
   const existingPaths = paths.filter((path) => existsSync(path));
+  const obsoleteServices = inspectObsoleteServiceInstallations(
+    environment,
+    platform,
+  );
   if (existingPaths.length === 0) {
-    return { installed: false };
+    return obsoleteServices.length === 0
+      ? { installed: false }
+      : { installed: false, obsoleteServices };
   }
   if (existingPaths.length !== paths.length) {
     throw new Error("核心后台服务安装不完整；请先运行 codexc service install");
   }
-  return { installed: true };
+  return obsoleteServices.length === 0
+    ? { installed: true }
+    : { installed: true, obsoleteServices };
+}
+
+export function inspectObsoleteServiceInstallations(
+  environment = process.env,
+  platform = process.platform,
+) {
+  const context = serviceDefinitionContext(environment, platform);
+  return obsoleteServiceDefinitions
+    .filter((definition) => obsoleteServicePaths(definition, context, platform)
+      .some((path) => existsSync(path)))
+    .map((definition) => definition.id);
+}
+
+export function removeObsoleteServiceInstallations(
+  environment = process.env,
+  options = {},
+) {
+  const platform = options.platform ?? process.platform;
+  const context = serviceDefinitionContext(environment, platform);
+  const installed = options.installed
+    ?? inspectObsoleteServiceInstallations(environment, platform);
+  const definitions = obsoleteServiceDefinitions.filter((definition) =>
+    installed.includes(definition.id));
+  if (definitions.length === 0) return { changed: false, removedServices: [] };
+
+  for (const definition of definitions) {
+    removeObsoleteService(definition, context, environment, platform, options);
+  }
+  return {
+    changed: true,
+    removedServices: definitions.map((definition) => definition.id),
+  };
+}
+
+function serviceDefinitionContext(environment, platform) {
+  const home = platform === "win32" ? environment.USERPROFILE : environment.HOME;
+  if (!home) {
+    throw new Error(`无法检查后台服务安装状态：${platform === "win32" ? "USERPROFILE" : "HOME"} 未设置`);
+  }
+  if (platform === "linux") {
+    const configHome = environment.XDG_CONFIG_HOME?.trim() || join(home, ".config");
+    return {
+      definitionsDirectory: join(configHome, "systemd", "user"),
+      identifierKey: "systemd",
+    };
+  }
+  if (platform === "darwin") {
+    return {
+      definitionsDirectory: join(home, "Library", "LaunchAgents"),
+      identifierKey: "launchd",
+    };
+  }
+  if (platform === "win32") {
+    return {
+      definitionsDirectory: join(requireUserConfig(environment).dataDir, "services"),
+      identifierKey: "windows",
+    };
+  }
+  throw new Error("codexc update 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+}
+
+function obsoleteServicePaths(definition, context, platform) {
+  if (platform === "linux") {
+    return [join(context.definitionsDirectory, definition.systemd)];
+  }
+  if (platform === "darwin") {
+    return [join(context.definitionsDirectory, `${definition.launchd}.plist`)];
+  }
+  return [
+    join(context.definitionsDirectory, `${definition.target}.json`),
+    join(context.definitionsDirectory, `${definition.target}.vbs`),
+  ];
+}
+
+function removeObsoleteService(definition, context, environment, platform, options) {
+  if (platform === "linux") {
+    runObsoleteServiceCommand(
+      environment.SYSTEMCTL_BINARY || "systemctl",
+      ["--user", "disable", "--now", definition.systemd],
+      environment,
+      options,
+      definition.id,
+    );
+    removeObsoleteServiceFiles(definition, context, platform);
+    runObsoleteServiceCommand(
+      environment.SYSTEMCTL_BINARY || "systemctl",
+      ["--user", "daemon-reload"],
+      environment,
+      options,
+      definition.id,
+    );
+    return;
+  }
+  if (platform === "darwin") {
+    const launchctl = environment.LAUNCHCTL_BINARY || "launchctl";
+    const uid = options.uid
+      ?? (typeof process.getuid === "function" ? process.getuid() : 0);
+    const domainTarget = `gui/${uid}/${definition.launchd}`;
+    const inspection = spawnObsoleteServiceCommand(
+      launchctl,
+      ["print", domainTarget],
+      environment,
+      options,
+    );
+    if (inspection.status === 0) {
+      runObsoleteServiceCommand(
+        launchctl,
+        ["bootout", domainTarget],
+        environment,
+        options,
+        definition.id,
+      );
+    }
+    removeObsoleteServiceFiles(definition, context, platform);
+    return;
+  }
+
+  const pwsh = options.pwshExecutable ?? resolveExecutable("pwsh.exe", environment);
+  const taskScript = join(packageDir, "scripts", "windows-scheduled-task.ps1");
+  for (const action of ["stop", "unregister"]) {
+    runObsoleteServiceCommand(
+      pwsh,
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        taskScript,
+        "-Action",
+        action,
+        "-TaskName",
+        definition.windows,
+      ],
+      environment,
+      options,
+      definition.id,
+    );
+  }
+  removeObsoleteServiceFiles(definition, context, platform);
+}
+
+function removeObsoleteServiceFiles(definition, context, platform) {
+  for (const path of obsoleteServicePaths(definition, context, platform)) {
+    if (existsSync(path)) unlinkSync(path);
+  }
+}
+
+function spawnObsoleteServiceCommand(command, args, environment, options) {
+  const runCommand = options.spawnCommand ?? spawnSync;
+  const result = runCommand(command, args, {
+    encoding: "utf8",
+    env: environment,
+    windowsHide: true,
+  });
+  if (result.error) throw result.error;
+  return result;
+}
+
+function runObsoleteServiceCommand(
+  command,
+  args,
+  environment,
+  options,
+  serviceId,
+) {
+  const result = spawnObsoleteServiceCommand(command, args, environment, options);
+  if (result.status === 0) return;
+  const detail = String(result.stderr ?? result.stdout ?? "")
+    .split(/\r?\n/u)
+    .find((line) => line.trim())
+    ?.trim();
+  throw new Error(
+    `旧后台服务移除失败：${serviceId}${detail ? `（${detail}）` : ""}`,
+  );
 }
 
 export function inspectDatabaseUpdates(environment = process.env, options = {}) {
@@ -739,6 +937,7 @@ function annotateLocalUpdateFailure(error, details) {
   const target = error instanceof Error ? error : new Error(String(error));
   if (target.localUpdateFailure) return target;
   const mutationStages = [
+    "obsolete-services",
     "provider-files",
     "provider-catalogs",
     "config",
@@ -747,9 +946,12 @@ function annotateLocalUpdateFailure(error, details) {
   ];
   const completedMutationStages = mutationStages.filter((stage) =>
     details.completedStages.includes(stage));
+  const completedAllRegularMutationStages = mutationStages
+    .filter((stage) => stage !== "obsolete-services")
+    .every((stage) => details.completedStages.includes(stage));
   const changes = completedMutationStages.length === 0
     ? "unchanged"
-    : completedMutationStages.length === mutationStages.length
+    : completedAllRegularMutationStages
       ? "applied"
       : "partial";
   Object.defineProperty(target, "localUpdateFailure", {
@@ -875,9 +1077,27 @@ if (
         if (config.removedPaths.length > 0) {
           console.log(`待移除旧配置：${config.removedPaths.join("、")}`);
         }
-        if (!services.installed) {
-          writeCliMessage("note", "核心后台服务未安装，本次只离线更新配置与数据库。");
+        if ((services.obsoleteServices?.length ?? 0) > 0) {
+          console.log(`待移除旧后台服务：${services.obsoleteServices.join("、")}`);
         }
+        if (!services.installed) {
+          writeCliMessage(
+            "note",
+            (services.obsoleteServices?.length ?? 0) > 0
+              ? "核心后台服务未安装；本次会移除旧后台服务，并离线更新配置与数据库。"
+              : "核心后台服务未安装，本次只离线更新配置与数据库。",
+          );
+        }
+      },
+      removeObsoleteServices: () => {
+        const result = removeObsoleteServiceInstallations(process.env);
+        if (result.changed) {
+          writeCliMessage(
+            "success",
+            `旧后台服务已移除：${result.removedServices.join("、")}。`,
+          );
+        }
+        return result;
       },
       updateConfig: () => {
         const result = updateGatewayConfiguration(process.env);
