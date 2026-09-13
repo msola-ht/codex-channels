@@ -421,27 +421,56 @@ export function writeManagedModelWindowGlobal(
     throw new Error(`同名模型在不同 Provider 的最大上下文窗口不一致：${model}`);
   }
   const contextWindow = Math.round(base * windowPercent / 100);
+  const previousCatalogs = new Map(matches.map((provider) => [
+    provider.provider,
+    readManagedModelProviderCatalogContent(provider.provider, environment),
+  ]));
+  const writtenProviders = [];
   const overridden = [];
-  for (const provider of matches) {
-    const modelEntry = provider.models.find((entry) => entry.model === model);
-    if (
-      modelEntry?.windowPercent !== undefined
-      && modelEntry.windowPercent !== windowPercent
-    ) {
-      overridden.push({
-        provider: provider.provider,
-        previousPercent: modelEntry.windowPercent,
-      });
+  try {
+    for (const provider of matches) {
+      const modelEntry = provider.models.find((entry) => entry.model === model);
+      if (
+        modelEntry?.windowPercent !== undefined
+        && modelEntry.windowPercent !== windowPercent
+      ) {
+        overridden.push({
+          provider: provider.provider,
+          previousPercent: modelEntry.windowPercent,
+        });
+      }
+      writeManagedModelProviderCatalogSettings(
+        provider.provider,
+        {
+          model,
+          reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
+          contextWindow,
+        },
+        environment,
+      );
+      writtenProviders.push(provider.provider);
     }
-    writeManagedModelProviderCatalogSettings(
-      provider.provider,
-      {
-        model,
-        reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
-        contextWindow,
-      },
-      environment,
-    );
+  } catch (error) {
+    const rollbackErrors = [];
+    for (const provider of writtenProviders.reverse()) {
+      try {
+        restoreManagedModelProviderCatalogContent(
+          provider,
+          previousCatalogs.get(provider),
+          environment,
+        );
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "模型上下文窗口写入失败，且未能恢复全部 Provider 模型目录",
+        { cause: error },
+      );
+    }
+    throw error;
   }
   return {
     model,

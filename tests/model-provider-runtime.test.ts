@@ -977,6 +977,35 @@ describe("model provider runtime topology", () => {
     }
   });
 
+  it("restores earlier Provider catalogs when a global window write fails", async () => {
+    const codexHome = await configuredHome("switching");
+    configureOpenCodeGo(codexHome);
+    const environment = testEnvironment(codexHome);
+    const deepseekCatalogPath = providerCatalogPath(codexHome);
+    const opencodeGoCatalogPath = join(
+      connectHomeFor(codexHome),
+      "providers",
+      "opencode-go",
+      "models.json",
+    );
+    const deepseekCatalog = readFileSync(deepseekCatalogPath, "utf8");
+    const opencodeGoCatalog = readFileSync(opencodeGoCatalogPath, "utf8");
+    runtimeFileFailures.atomicWritePath = opencodeGoCatalogPath;
+
+    try {
+      expect(() => writeManagedModelWindowGlobal({
+        model: "deepseek-v4-flash",
+        windowPercent: 40,
+        environment,
+      })).toThrow("injected registry rollback failure");
+    } finally {
+      runtimeFileFailures.atomicWritePath = undefined;
+    }
+
+    expect(readFileSync(deepseekCatalogPath, "utf8")).toBe(deepseekCatalog);
+    expect(readFileSync(opencodeGoCatalogPath, "utf8")).toBe(opencodeGoCatalog);
+  });
+
   it("writes and removes the DeepSeek subagent role configuration without the API key", async () => {
     const codexHome = await configuredHome("switching");
     const environment = testEnvironment(codexHome);
