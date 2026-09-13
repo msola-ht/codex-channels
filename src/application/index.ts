@@ -110,6 +110,15 @@ export {
   type OfficialModelCatalogProvider,
 } from "./model-selection-service.js";
 export {
+  lunaReserveModel,
+  type LunaReservePort,
+  type LunaReserveThreadSettings,
+} from "./luna-reserve-port.js";
+export {
+  LunaReserveService,
+  type LunaReserveServiceOptions,
+} from "./luna-reserve-service.js";
+export {
   type ModelInputModality,
   type ModelMultiAgentVersion,
   type ModelOption,

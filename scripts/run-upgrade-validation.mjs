@@ -45,8 +45,21 @@ export const defaultUpgradeValidationStages = [
     id: "contract-tests",
     name: "真实 App Server 合同",
     command: "npm",
-    args: ["test", "--", "--run", "tests/real-app-server.test.ts"],
-    environment: { RUN_CODEX_CONTRACT: "1" },
+    args: [
+      "test",
+      "--",
+      "--run",
+      "tests/real-app-server.test.ts",
+      "tests/real-app-server-isolated-state.test.ts",
+      "tests/real-app-server-queue.test.ts",
+      "tests/real-app-server-supervised-provider.test.ts",
+      "tests/real-app-server-supervised-thread-state.test.ts",
+      "tests/real-app-server-supervised-tools.test.ts",
+    ],
+    environment: {
+      RUN_CODEX_CONTRACT: "1",
+      ...(process.platform === "win32" ? {} : { TMPDIR: "/tmp" }),
+    },
   },
   {
     id: "build",

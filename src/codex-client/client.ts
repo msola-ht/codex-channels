@@ -1,3 +1,4 @@
+import { lunaReserveModel } from "../application/index.js";
 import type {
   ReviewTarget,
   ThreadGoal,
@@ -35,6 +36,8 @@ import type {
   ThreadTurnsListOptions,
   ThreadTurnsPage,
   ThreadRevertResult,
+  LunaReservePort,
+  LunaReserveThreadSettings,
 } from "../application/index.js";
 import type {
   ConfigReadParams,
@@ -43,6 +46,7 @@ import type {
   GetAccountTokenUsageParams,
   GetAccountTokenUsageResponse,
   GetAccountRateLimitsResponse,
+  GetAccountRateLimitsParams,
   InitializeResponse,
   ListMcpServerStatusResponse,
   McpResourceReadResponse,
@@ -152,6 +156,7 @@ export class CodexAppServerClient implements
   TurnExecutionPort,
   ModelSelectionPort,
   AccountQueryPort,
+  LunaReservePort,
   CollaborationModeQueryPort,
   SkillQueryPort,
   McpQueryPort,
@@ -574,17 +579,29 @@ export class CodexAppServerClient implements
   }
 
   async listModels(): Promise<ModelOption[]> {
+    return this.listModelCatalog(false);
+  }
+
+  async lunaReserveModel(): Promise<ModelOption | null> {
+    const models = await this.listModelCatalog(true, true);
+    return models.find((model) => model.model === lunaReserveModel) ?? null;
+  }
+
+  private async listModelCatalog(
+    includeHidden: boolean,
+    hiddenOnly = false,
+  ): Promise<ModelOption[]> {
     const models: ModelOption[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
     do {
       const result: ModelListResponse = await this.rpc.request<ModelListResponse>({
         method: "model/list",
-        params: { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) },
+        params: { limit: 100, includeHidden, ...(cursor ? { cursor } : {}) },
       }, { retryOverload: true });
       for (const model of result.data) {
-        const mapped = toModelOption(model);
-        if (mapped) {
+        const mapped = toModelOption(model, includeHidden);
+        if (mapped && (!hiddenOnly || model.hidden)) {
           models.push(mapped);
         }
       }
@@ -866,12 +883,41 @@ export class CodexAppServerClient implements
     return toAccountThreadUsage(response, threadId);
   }
 
-  async accountRateLimits(): Promise<AccountRateLimits> {
+  async accountRateLimits(
+    options: { background?: boolean } = {},
+  ): Promise<AccountRateLimits> {
+    const params = {
+      supportsLunaReserve: true,
+      ...(options.background ? { excludeResetCreditDetails: true } : {}),
+    } satisfies GetAccountRateLimitsParams;
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
       method: "account/rateLimits/read",
-      params: undefined,
+      params,
     }, { retryOverload: true });
     return toAccountRateLimits(response);
+  }
+
+  async updateLunaReserveThreadSettings(
+    threadId: string,
+    settings: LunaReserveThreadSettings,
+  ): Promise<void> {
+    await this.rpc.request({
+      method: "thread/settings/update",
+      params: {
+        threadId,
+        model: settings.model,
+        effort: settings.effort,
+        serviceTier: settings.serviceTier,
+        collaborationMode: {
+          mode: settings.collaborationMode,
+          settings: {
+            model: settings.model,
+            reasoning_effort: settings.effort,
+            developer_instructions: null,
+          },
+        },
+      },
+    }, { retryOverload: false });
   }
 
   async listPermissionProfiles(cwd: string): Promise<PermissionProfileOption[]> {

@@ -149,4 +149,11 @@ jobs:
         run: npm run protocol:check
 
       - name: Run isolated App Server contract
-        run: RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
+        run: >-
+          TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run
+          tests/real-app-server.test.ts
+          tests/real-app-server-isolated-state.test.ts
+          tests/real-app-server-queue.test.ts
+          tests/real-app-server-supervised-provider.test.ts
+          tests/real-app-server-supervised-thread-state.test.ts
+          tests/real-app-server-supervised-tools.test.ts

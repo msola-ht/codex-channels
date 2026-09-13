@@ -87,6 +87,27 @@ describe("Codex release upgrade preview", () => {
     expect(validate).toBeGreaterThan(installWebui);
   });
 
+  it("runs every isolated real App Server contract during upgrade validation", () => {
+    const contract = defaultUpgradeValidationStages.find(
+      (stage: { id: string }) => stage.id === "contract-tests",
+    );
+
+    expect(contract).toMatchObject({
+      environment: {
+        RUN_CODEX_CONTRACT: "1",
+        ...(process.platform === "win32" ? {} : { TMPDIR: "/tmp" }),
+      },
+      args: expect.arrayContaining([
+        "tests/real-app-server.test.ts",
+        "tests/real-app-server-isolated-state.test.ts",
+        "tests/real-app-server-queue.test.ts",
+        "tests/real-app-server-supervised-provider.test.ts",
+        "tests/real-app-server-supervised-thread-state.test.ts",
+        "tests/real-app-server-supervised-tools.test.ts",
+      ]),
+    });
+  });
+
   it("accepts only the requested official stable release", () => {
     expect(validateOfficialRelease({
       tag_name: "rust-v0.146.0",

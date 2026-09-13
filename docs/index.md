@@ -7,7 +7,8 @@
 
 当前索引对应 [`src/codex-protocol/version.json`](../src/codex-protocol/version.json) 锁定的
 `codex-cli 0.154.0`。生成时启用实验类型，但业务只采用固定版本官方 Plan 模式所需的
-`collaborationMode/list`、`turn/start.collaborationMode`、原生 Thread Queue 六请求与
+`collaborationMode/list`、`turn/start.collaborationMode`、Luna Reserve 自动切换保持当前模式所需的
+`thread/settings/update.collaborationMode`、原生 Thread Queue 六请求与
 `thread/queue/changed`、Thread 分页历史与 Revert 所需的
 `thread/turns/list`、`thread/revert`、`thread/reverted`。此外，配置开关控制的开发中 Plugin
 调试使用稳定 `plugin/installed` 与 Turn `mention` 输入；其他生成类型不表示已支持。
@@ -22,8 +23,8 @@
 | 83 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
 | 11 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
 | 1 | 客户端发给 App Server 的 Notification，即 `initialized` | [`ClientNotification.ts`](../src/codex-protocol/generated/ClientNotification.ts) |
-| 64 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
-| 41 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
+| 65 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
+| 42 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`bootstrap/scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) |
 | 15 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
 
@@ -87,6 +88,7 @@
 | 账户测试 | [`account.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/tests/suite/v2/account.rs) | 用量读取、认证与错误合同 |
 | Thread 用量测试 | [`account_thread_usage.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/tests/suite/v2/account_thread_usage.rs) | `account/usage/read.threadId` 与估算用量合同；本项目按当前精确 Thread 采用，不递归合计子代理 |
 | 额度测试 | [`rate_limits.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/tests/suite/v2/rate_limits.rs) | 单桶、多桶、消费控制与重置券合同 |
+| Luna Reserve | [`luna_reserve.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/tests/suite/v2/luna_reserve.rs)、[`backend_banner_fallback.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/tui/src/app/backend_banner_fallback.rs)、[`luna_reserve_recovery_tests.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/tui/src/app/tests/luna_reserve_recovery_tests.rs) | `supportsLunaReserve` / 轻量额度读取、隐藏 `gpt-reserve`、Thread 设置切换与同账户恢复合同 |
 | Skill 列表测试 | [`skills_list.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/tests/suite/v2/skills_list.rs) | CWD、Scope、缓存、Plugin Skill 与变更通知合同 |
 | MCP 请求处理 | [`mcp_processor.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/src/request_processors/mcp_processor.rs) | Thread 配置上下文、精简清单、排序与分页 |
 | Plugin 请求处理 | [`plugins.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/src/request_processors/plugins.rs) | 已安装 Plugin 的 Workspace 发现、启用与可用状态 |
@@ -125,6 +127,7 @@ CLI 参数，未显式覆盖时失败关闭。
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |
+| Luna Reserve 自动回退 | `error.codexErrorInfo = usageLimitExceeded`、`account/rateLimits/read` 的 `supportsLunaReserve` / `excludeResetCreditDetails` 与账户、普通用量、后端 Banner 字段，`model/list.includeHidden`、`thread/settings/update` 及实验 `thread/settings/update.collaborationMode` | [`luna-reserve-port.ts`](../src/application/luna-reserve-port.ts) 与 [`luna-reserve-service.ts`](../src/application/luna-reserve-service.ts) 只把最终用量错误与同一 Turn 的完成事件配对，再验证同一 OpenAI 账户、受限模型和精确隐藏 `gpt-reserve`，以不重试的写请求切换当前 Thread；观察到活动 Turn 时延后写入，同一账户的 Reserve Thread 每轮共享一次轻量额度读取，失效期间的新触发在旧操作结束后续跑。只有权威普通额度明确恢复且无未知 Banner、消费控制或限额阻断时切回仍可用的原模型。待生效设置、手工改模、账户切换、Thread 关闭、归档、删除或 Gateway 关闭会取消状态；不可取消的设置写入若在账户失效后完成，只发出确认当前模型的告警，不执行可能覆盖后续选择的补偿写入。原模型仅保存在进程内，Gateway 不保存或重放失败消息，也不建立第二套 Queue；回退完成前由 App Server 自动开始的 Queue 消息仍可能失败并需重发。三个渠道复用稳定 warning 通知，并区分普通用量与 Reserve 自身用量耗尽；[`account-adapter.ts`](../src/codex-client/account-adapter.ts)、[`model-adapter.ts`](../src/codex-client/model-adapter.ts)、[`client.ts`](../src/codex-client/client.ts)、[`app.ts`](../src/bootstrap/app.ts)、[`luna-reserve-service.test.ts`](../tests/luna-reserve-service.test.ts)、[`json-rpc-account.test.ts`](../tests/json-rpc-account.test.ts)、[`json-rpc-models.test.ts`](../tests/json-rpc-models.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、真实 Thread 设置合同 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts) 与条件式真实账户/模型合同 [`real-app-server-websocket.test.ts`](../tests/real-app-server-websocket.test.ts) |
 | 结构化 Turn 策略错误 | `error`、`turn/completed` 中的 `TurnError.codexErrorInfo = misalignmentPolicyViolation` | Client 只识别该精确枚举并传递窄分类；Core 将错误文本与代码作为整体归约并保留 `willRetry=false` 与 `failed` 终态，三个 Surface 的完成卡片使用固定脱敏中文提示，Turn 指标保存独立分类与协议代码；[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`core.ts`](../src/conversation-core/core.ts)、[`turn-error-metrics.ts`](../src/bootstrap/turn-error-metrics.ts)、[`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`conversation-core.test.ts`](../tests/conversation-core.test.ts)、[`turn-error-metrics.test.ts`](../tests/turn-error-metrics.test.ts)、[`lifecycle-presentation.test.ts`](../tests/lifecycle-presentation.test.ts)、条件式真实策略错误合同 [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | MCP Plugin 来源 | `mcpServerStatus/list` 的 `McpServerStatus.pluginId` | Client 只保留可空、长度受限且符合固定上游 `<plugin>@<marketplace>` 字符规则的 ID；仅 `/mcp` 详情显示来源 Plugin，不用于授权、审批、命令/脚本来源推断或 OAuth 参数；[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`conversation-command-format.ts`](../src/surfaces/conversation-command-format.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-command-format.test.ts`](../tests/conversation-command-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | MCP 工具发现状态 | `mcpServerStatus/list` 的 `McpServerStatus.toolsError` | Client 只把错误是否存在映射为稳定布尔值，不向 Application、Surface 或日志传播上游错误正文；`/mcp health` 将工具发现失败列为需处理项并建议显式刷新，不把空工具集误报为“未公开能力”；[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`conversation-service.ts`](../src/application/conversation-service.ts)、[`conversation-command-format.ts`](../src/surfaces/conversation-command-format.ts)、[`json-rpc-mcp.test.ts`](../tests/json-rpc-mcp.test.ts)、[`conversation-service-mcp.test.ts`](../tests/conversation-service-mcp.test.ts) |

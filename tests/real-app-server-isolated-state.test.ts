@@ -827,7 +827,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
-  it("broadcasts peer model, effort and Fast changes across a peer reconnect", async () => {
+  it("broadcasts peer model, effort, Fast and Plan changes across a peer reconnect", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
     const observedSettings: Array<{
@@ -844,21 +844,18 @@ contractSuite("isolated Codex App Server state contract", () => {
       observedSettings.push(event.settings);
     });
     try {
-      await peerRpc.request({
-        method: "thread/settings/update",
-        params: {
-          threadId,
-          model: "gpt-5.6-sol",
-          effort: "high",
-          serviceTier: "priority",
-        },
-        // 仅用于固定版本真实合同，不进入业务公开接口。
-      } as never);
+      await peerClient.updateLunaReserveThreadSettings(threadId, {
+        model: "gpt-5.6-sol",
+        effort: "high",
+        serviceTier: "priority",
+        collaborationMode: "plan",
+      });
       await waitFor(
         () => observedSettings.some((settings) =>
           settings.model === "gpt-5.6-sol"
           && settings.effort === "high"
-          && settings.serviceTier === "priority"),
+          && settings.serviceTier === "priority"
+          && settings.collaborationMode === "plan"),
         2_000,
       );
 

@@ -104,7 +104,8 @@ Surface -> Application/Core <- Codex Client
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
 - 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.154.0` 只允许三类
   受控协议例外。官方 Plan 模式只允许使用
-  `collaborationMode/list` 和 `turn/start.collaborationMode`，必须通过
+  `collaborationMode/list` 和 `turn/start.collaborationMode`；Luna Reserve 自动回退为原样保留当前
+  Default/Plan 模式，还允许 `thread/settings/update.collaborationMode`。这些字段必须通过
   `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
   合同测试覆盖。原生 Thread Queue 只允许使用
   `thread/queue/add|list|update|delete|reorder|start` 与 `thread/queue/changed`，必须通过

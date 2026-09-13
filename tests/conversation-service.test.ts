@@ -194,6 +194,7 @@ describe("ConversationService model selection", () => {
     const estimate = estimateWeeklyLimit({
       limitId: "codex",
       limitName: null,
+      normalModelSlug: null,
       primary: { usedPercent: 30, windowDurationMins: 300, resetsAt: 2_000_000 },
       secondary: { usedPercent: 20, windowDurationMins: 10_080, resetsAt: 2_000_000 },
       credits: null,
@@ -231,6 +232,7 @@ describe("ConversationService model selection", () => {
     const limit = {
       limitId: "codex",
       limitName: null,
+      normalModelSlug: null,
       primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 2_000_000 },
       secondary: null,
       credits: null,
@@ -278,6 +280,7 @@ describe("ConversationService model selection", () => {
             limits: [{
               limitId: "codex",
               limitName: null,
+              normalModelSlug: null,
               primary: null,
               secondary: {
                 usedPercent: 10,
@@ -292,6 +295,7 @@ describe("ConversationService model selection", () => {
             }, {
               limitId: "codex-other",
               limitName: "Other",
+              normalModelSlug: null,
               primary: null,
               secondary: {
                 usedPercent: 5,
@@ -304,7 +308,27 @@ describe("ConversationService model selection", () => {
               planType: null,
               rateLimitReachedType: null,
             }],
+            ordinaryUsageLimit: {
+              limitId: "codex",
+              limitName: null,
+              normalModelSlug: null,
+              primary: null,
+              secondary: {
+                usedPercent: 10,
+                windowDurationMins: 10_080,
+                resetsAt: 2_000_000,
+              },
+              credits: null,
+              individualLimit: null,
+              spendControlReached: null,
+              planType: "plus" as const,
+              rateLimitReachedType: null,
+            },
             resetCreditsAvailable: null,
+            accountId: null,
+            ordinaryUsageAllowed: null,
+            lunaReserve: null,
+            unsupportedUpsellPresent: false,
           },
         })),
       },

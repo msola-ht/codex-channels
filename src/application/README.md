@@ -45,6 +45,13 @@
   含内联图片或本地音频的输入在创建或追加 Turn 前必须分别通过当前模型的 `image` 或 `audio` 能力检查；
   Fast 只允许当前模型目录明确声明支持时切换，并通过模型窄端口保存用户级默认层级；第三方模型
   不得借关闭 Fast 改写 OpenAI 默认设置。
+- `luna-reserve-port.ts`：定义账户额度读取、隐藏 Reserve 模型解析和 Thread 设置更新的窄端口；
+  Application 不接收生成协议类型。
+- `luna-reserve-service.ts`：在同一 Conversation 锁内处理最终用量错误后的后端授权切换，并按 Thread
+  在进程内保存原模型；活动 Turn 完成前延后设置写入，同一账户的多个 Reserve Thread 共用每轮额度读取，
+  失效期间的新触发会在旧操作结束后继续；账户、Thread 生命周期与关闭均有取消路径，设置写入失败不重试，
+  账户失效前已被 App Server 接受的写入会提示用户确认当前模型，不执行可能覆盖后续选择的补偿写入；
+  失败消息不在 Gateway 重放。
 - `collaboration-mode-port.ts`：定义 Default/Plan 预设的稳定查询边界，不向 Application
   暴露完整实验协议。
 - `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；
@@ -53,7 +60,8 @@
   Codex 多代理运行时与可选模型替代提示，以及
   Fast 默认值窄端口；CLI Setup 的全局模型默认值不进入会话 Application 边界。
   Application 和 Surface 不接收完整官方模型对象。
-- `account-port.ts`：分别定义 OpenAI 账户 Token/额度、当前 Thread 官方估算、第三方余额和未支持状态的可辨识结果，
+- `account-port.ts`：分别定义 OpenAI 账户 Token/额度、当前 Thread 官方估算、账户 ID、普通用量权限、
+  Luna Reserve 后端授权摘要、第三方余额和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
 - `account-snapshot-service.ts`：提供跨 WebUI 与渠道复用的最新官方账户快照查询入口。

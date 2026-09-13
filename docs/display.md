@@ -50,6 +50,26 @@ OpenAI `/usage` 先展示账户活动摘要；当前账户选择和 Conversation
 - 没有当前 Thread 时不发起官方 Thread 查询；DeepSeek、OpenCode Go 和其他第三方 Provider 保持自身账户余额或额度口径。
 - 官方估算可能在 Turn 完成后延迟结算；本地请求明细与子代理累计继续使用 `/metrics`，两类金额不得相减或合并为真实账单。
 
+## Luna Reserve 自动回退
+
+OpenAI App Server 对当前 ChatGPT 账户明确返回 Luna Reserve 权益，并且最终 `turn.error` 分类为
+`usageLimitExceeded` 时，Gateway 会在该 Turn 完成后读取一次完整额度状态。权益、账户 ID、受限模型
+和隐藏的 `gpt-reserve` 目录项一致时，当前 Thread 的模型、思考等级、服务层级及 Default/Plan 模式
+通过 `thread/settings/update` 一次性切换；写请求失败不重试，也不会先改本地显示状态。
+
+切换成功后三个渠道都会提示重新发送失败消息。Gateway 不保存或重放消息正文；已经进入 App Server
+原生 Queue 的下一 Turn 仍由 App Server 管理，可能在回退请求完成前自动开始并再次遇到额度错误。
+Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已启动 Turn 误报为 Reserve。切入后每分钟
+按账户执行一次共享的轻量额度读取；只有同一账户明确
+恢复普通用量、权威普通额度桶没有剩余消费控制或限额阻断、没有未知后端权益 Banner、当前模型仍是
+`gpt-reserve`，且原模型仍在可用目录中时才自动切回。用户手工改模、切换账户、关闭、归档或删除 Thread
+会取消自动切回。原模型只保存在当前 Gateway 进程内，因此 Gateway 在 Reserve 期间重启后不会猜测
+切回目标。
+
+已经由 App Server 接受的设置写入无法撤销。若写入完成前账户发生变化，Gateway 不会把该结果认作
+当前账户的自动切换，也不会用补偿写入覆盖新账户或原生 TUI 的后续选择；三个渠道会提示用户确认
+当前 Session 模型，并说明自动切回已取消。Reserve 自身用量耗尽时，完成卡片会与普通用量耗尽明确区分。
+
 ## /metrics 命令
 
 `/metrics` 可查看当前 Thread 最近 Turn 的运行聚合、递归包含全部显式子代理后代的 Thread 会话累计及最近

@@ -1076,6 +1076,8 @@ function client() {
     setThreadPinned: vi.fn(),
     compactThread: vi.fn(),
     listModels: vi.fn(),
+    lunaReserveModel: vi.fn(),
+    updateLunaReserveThreadSettings: vi.fn(),
     writeDefaultFastMode: vi.fn(),
     readDefaultReasoningEffort: vi.fn(),
     readDefaultServiceTier: vi.fn(),

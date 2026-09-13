@@ -1,10 +1,12 @@
 import {
   isFastServiceTier,
+  lunaReserveModel,
   type ConversationStatus,
 } from "../application/index.js";
 import type {
   OutputEvent,
   ThreadGoal,
+  TurnErrorCode,
   TurnStartIdentity,
 } from "../conversation-core/index.js";
 import { usesOpenAiAccount } from "../conversation-core/index.js";
@@ -342,10 +344,18 @@ function subagentTaskName(agentPath: string): string {
 
 function formatTurnErrorMessage(
   value: string,
-  errorCode?: "misalignmentPolicyViolation",
+  errorCode?: TurnErrorCode,
+  modelProvider?: string,
+  model?: string,
 ): string {
   if (errorCode === "misalignmentPolicyViolation") {
     return "请求因安全策略不一致而终止，请调整请求内容或目标后重试。";
+  }
+  if (errorCode === "usageLimitExceeded" && usesOpenAiAccount(modelProvider)) {
+    if (model === lunaReserveModel) {
+      return "Luna Reserve 用量已用尽。";
+    }
+    return "OpenAI 普通用量已用尽。";
   }
   return formatOpenAiErrorMessage(value);
 }
@@ -376,7 +386,12 @@ export function createTurnCompletedPresentation(
   if (event.error) {
     runFields.push({
       label: "错误",
-      value: formatTurnErrorMessage(event.error, event.errorCode),
+      value: formatTurnErrorMessage(
+        event.error,
+        event.errorCode,
+        event.modelProvider,
+        event.model,
+      ),
     });
   }
   if (event.missingFinalResponse) {

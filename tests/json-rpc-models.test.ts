@@ -79,6 +79,83 @@ describe("JsonRpcClient models", () => {
       }]);
     });
 
+    it("resolves only the exact hidden Luna Reserve model for automatic fallback", async () => {
+      const transport = new FakeTransport();
+      transport.modelListData = [
+        appServerModel(),
+        appServerModel({
+          id: "gpt-reserve",
+          model: "gpt-reserve",
+          displayName: "Luna Reserve",
+          hidden: true,
+        }),
+      ];
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "workspace-write",
+      });
+      await client.connect();
+
+      await expect(client.listModels()).resolves.toHaveLength(1);
+      await expect(client.lunaReserveModel()).resolves.toMatchObject({
+        model: "gpt-reserve",
+        displayName: "Luna Reserve",
+      });
+      expect(transport.sent.filter((message) => message.method === "model/list"))
+        .toEqual([
+          expect.objectContaining({ params: expect.objectContaining({ includeHidden: false }) }),
+          expect.objectContaining({ params: expect.objectContaining({ includeHidden: true }) }),
+        ]);
+    });
+
+    it("does not accept a visible model as the Luna Reserve fallback", async () => {
+      const transport = new FakeTransport();
+      transport.modelListData = [appServerModel({
+        id: "gpt-reserve",
+        model: "gpt-reserve",
+        displayName: "Visible reserve alias",
+        hidden: false,
+      })];
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "workspace-write",
+      });
+      await client.connect();
+
+      await expect(client.lunaReserveModel()).resolves.toBeNull();
+    });
+
+    it("updates Luna Reserve thread settings without retrying the write", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "workspace-write",
+      });
+      await client.connect();
+
+      await client.updateLunaReserveThreadSettings("thread-1", {
+        model: "gpt-reserve",
+        effort: "medium",
+        serviceTier: null,
+        collaborationMode: "plan",
+      });
+
+      expect(transport.sent.find((message) => message.method === "thread/settings/update"))
+        .toEqual(expect.objectContaining({
+          params: {
+            threadId: "thread-1",
+            model: "gpt-reserve",
+            effort: "medium",
+            serviceTier: null,
+            collaborationMode: {
+              mode: "plan",
+              settings: {
+                model: "gpt-reserve",
+                reasoning_effort: "medium",
+                developer_instructions: null,
+              },
+            },
+          },
+        }));
+    });
+
     it("fails closed for invalid model lifecycle metadata", async () => {
       const transport = new FakeTransport();
       transport.modelListData = [appServerModel({ multiAgentVersion: "v3" })];

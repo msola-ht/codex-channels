@@ -38,12 +38,14 @@
   不传播完整输入、命令参数或本地路径。
 - `model-adapter.ts`：把当前版本官方模型目录裁剪为 Application 拥有的模型选项和
   `text/image/audio` 输入能力、Codex 多代理运行时及结构化替代模型/退役时间，过滤不可见项；
+  只有 Luna Reserve 内部窄入口会请求隐藏目录并精确解析 `gpt-reserve`，公开模型列表仍过滤隐藏项；
   官方迁移 Markdown、链接和自由文案不越过 Client 边界，
   并在缺少模型选择必需字段时失败关闭。
 - `model-provider-catalog.ts`：按 Bootstrap 注入的 Provider 定义读取 Setup 下载到用户
   `CODEX_HOME` 的受管模型目录；目录里声明什么就开放什么，相同模型 ID 仍按 Provider 独立映射；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
-- `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度与重置券数量映射为 Application
+- `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度、重置券数量、账户 ID、普通用量权限及
+  有界 Luna Reserve 授权摘要映射为 Application
   稳定摘要；接受当前 0.154.0 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
@@ -66,7 +68,7 @@
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
   拥有的稳定事件；校验 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP OAuth 完成、warning 与 Thread
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
-  只识别 `misalignmentPolicyViolation` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
+  只识别 `misalignmentPolicyViolation` 与 Luna Reserve 触发所需的 `usageLimitExceeded` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
   `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
@@ -99,6 +101,9 @@
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
+  OpenAI 额度读取声明 Luna Reserve 客户端能力，后台恢复轮询省略独立重置券详情；自动切换只解析
+  精确隐藏模型 `gpt-reserve`，并用不重试的 `thread/settings/update` 同步 Thread 模型与当前协作模式，
+  不写用户级默认设置。
 - `provider-routing-client.ts` 不暴露自定义 Thread 分区 RPC；固定状态仍通过官方 Pinned 分区移动实现。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，

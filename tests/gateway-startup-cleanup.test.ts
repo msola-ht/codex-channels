@@ -27,6 +27,7 @@ function emptyRateLimits(): AccountRateLimits {
     limits: [{
       limitId: "codex",
       limitName: null,
+      normalModelSlug: null,
       primary: null,
       secondary: null,
       credits: null,
@@ -35,7 +36,23 @@ function emptyRateLimits(): AccountRateLimits {
       planType: null,
       rateLimitReachedType: null,
     }],
+    ordinaryUsageLimit: {
+      limitId: "codex",
+      limitName: null,
+      normalModelSlug: null,
+      primary: null,
+      secondary: null,
+      credits: null,
+      individualLimit: null,
+      spendControlReached: null,
+      planType: null,
+      rateLimitReachedType: null,
+    },
     resetCreditsAvailable: null,
+    accountId: null,
+    ordinaryUsageAllowed: null,
+    lunaReserve: null,
+    unsupportedUpsellPresent: false,
   };
 }
 

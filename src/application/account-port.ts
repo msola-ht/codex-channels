@@ -70,6 +70,7 @@ export interface AccountRateLimitWindow {
 export interface AccountRateLimit {
   limitId: string;
   limitName: string | null;
+  normalModelSlug: string | null;
   primary: AccountRateLimitWindow | null;
   secondary: AccountRateLimitWindow | null;
   credits: {
@@ -90,7 +91,16 @@ export interface AccountRateLimit {
 
 export interface AccountRateLimits {
   limits: AccountRateLimit[];
+  ordinaryUsageLimit: AccountRateLimit;
   resetCreditsAvailable: AccountMetric | null;
+  accountId: string | null;
+  ordinaryUsageAllowed: boolean | null;
+  lunaReserve: {
+    blockedModelSlug: string | null;
+    title: string;
+    description: string;
+  } | null;
+  unsupportedUpsellPresent: boolean;
 }
 
 export interface AccountWeeklyLimitEstimate {
@@ -116,7 +126,7 @@ export interface AccountWeeklyLimitEstimate {
 
 export interface AccountQueryPort {
   accountUsage(): Promise<AccountUsage>;
-  accountRateLimits(): Promise<AccountRateLimits>;
+  accountRateLimits(options?: { background?: boolean }): Promise<AccountRateLimits>;
   accountThreadUsage(threadId: string): Promise<AccountThreadUsage>;
 }
 

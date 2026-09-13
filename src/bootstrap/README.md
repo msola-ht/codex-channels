@@ -25,6 +25,8 @@
   提供当前周窗口的精确 Provider 聚合；
   计划任务的内部组件、恢复顺序和
   Store 生命周期委托给 `scheduled-task-composition.ts`。
+  同一组合根还把 Luna Reserve 状态机接到最终 `usageLimitExceeded`、Thread/账户生命周期和关闭顺序；
+  切换通知复用平台无关输出事件，不让 App Server Reader 等待额度 RPC 或渠道网络。
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
   Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
   Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
