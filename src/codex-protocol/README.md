@@ -13,7 +13,8 @@
   从精确目标 CLI 自动刷新，合同检查同时约束用户设置审批值，禁止用内部协议枚举扩展公开入口。
 - `generated/`：由 `codex app-server generate-ts --experimental` 生成的类型，禁止手工修改，
   也不在其内部维护手写索引文档。业务层只允许使用锁定版本官方 Plan 模式所需的
-  `collaborationMode/list`、`turn/start.collaborationMode`、Thread Queue、分页历史与 Revert，
+  `collaborationMode/list`、`turn/start.collaborationMode`、Luna Reserve 保留当前模式所需的
+  `thread/settings/update.collaborationMode`、Thread Queue、分页历史与 Revert，
   以及受默认关闭配置开关约束的 `plugin/installed` 和 Turn `mention` 调试；其余实验类型不构成支持能力。
 
 升级协议时先阅读 [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)，在工作区干净且

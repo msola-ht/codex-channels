@@ -95,6 +95,10 @@ import {
 } from "./thread-queue-service.js";
 import { ThreadRevertService } from "./thread-revert-service.js";
 import type { SessionDisplayCachePort } from "../conversation-core/index.js";
+import {
+  LunaReserveService,
+  type LunaReserveServiceOptions,
+} from "./luna-reserve-service.js";
 
 const sessionListPageSize = 20;
 const sessionTurnCountCacheTtlMs = 5 * 60_000;
@@ -348,6 +352,7 @@ export class ConversationService implements ConversationUseCases {
   private readonly locks = new ConversationLockCoordinator();
   private readonly queueUseCases: ThreadQueueService;
   private readonly revertUseCases: ThreadRevertService;
+  private readonly lunaReserve: LunaReserveService | undefined;
   private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
   private idleReleaseEnabled = true;
@@ -381,6 +386,10 @@ export class ConversationService implements ConversationUseCases {
     private readonly threadHistory?: ThreadHistoryPort,
     private readonly hasPendingSubagentRuns?: (parentThreadId: string) => boolean,
     private readonly sessionDisplayCache?: SessionDisplayCachePort,
+    lunaReserveOptions?: Omit<
+      LunaReserveServiceOptions,
+      "router" | "models" | "collaborationModes" | "activity" | "locks"
+    >,
   ) {
     this.queueUseCases = new ThreadQueueService(
       this.locks,
@@ -395,6 +404,38 @@ export class ConversationService implements ConversationUseCases {
       threadQueue,
       this.threadHistory,
     );
+    this.lunaReserve = lunaReserveOptions
+      ? new LunaReserveService({
+          ...lunaReserveOptions,
+          router,
+          models,
+          ...(collaborationModes ? { collaborationModes } : {}),
+          activity: {
+            hasActiveTurn: (threadId) => core.activeTurnForThread(threadId) !== undefined,
+          },
+          locks: this.locks,
+        })
+      : undefined;
+  }
+
+  markLunaReserveUsageLimit(threadId: string, turnId: string): void {
+    this.lunaReserve?.markUsageLimit(threadId, turnId);
+  }
+
+  recoverLunaReserveAfterTurn(threadId: string, turnId: string): void {
+    this.lunaReserve?.recoverAfterTurn(threadId, turnId);
+  }
+
+  clearLunaReserveThread(threadId: string): void {
+    this.lunaReserve?.clearThread(threadId);
+  }
+
+  clearLunaReserveAccountState(): void {
+    this.lunaReserve?.clearAccountState();
+  }
+
+  closeLunaReserve(): Promise<void> {
+    return this.lunaReserve?.close() ?? Promise.resolve();
   }
 
   releaseThread(
@@ -1472,6 +1513,13 @@ export class ConversationService implements ConversationUseCases {
             selector,
           }];
         }
+        if (server.toolDiscoveryFailed) {
+          return [{
+            type: "toolDiscoveryFailed" as const,
+            server: server.name,
+            selector,
+          }];
+        }
         return [];
       }),
       notices: servers.flatMap((server, index) => [
@@ -1486,6 +1534,7 @@ export class ConversationService implements ConversationUseCases {
         ...(server.runtimeStatus === "connected"
           && server.authStatus !== "notLoggedIn"
           && server.authStatus !== "unknown"
+          && !server.toolDiscoveryFailed
           && server.tools.length === 0
           && server.resources.length === 0
           && server.resourceTemplates.length === 0

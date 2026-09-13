@@ -63,6 +63,51 @@ describe("Codex release upgrade preview", () => {
     });
   });
 
+  it("builds WebUI before the package smoke test", () => {
+    const webuiBuild = defaultUpgradeValidationStages.findIndex(
+      (stage: { id: string }) => stage.id === "webui-build",
+    );
+    const packageTest = defaultUpgradeValidationStages.findIndex(
+      (stage: { id: string }) => stage.id === "package-test",
+    );
+
+    expect(webuiBuild).toBeGreaterThan(-1);
+    expect(packageTest).toBeGreaterThan(webuiBuild);
+    expect(defaultUpgradeValidationStages[webuiBuild]).toMatchObject({
+      command: "npm",
+      args: ["--prefix", "webui", "run", "build"],
+    });
+    const workflow = readFileSync(
+      join(process.cwd(), ".github/workflows/codex-upgrade-preview.yml"),
+      "utf8",
+    );
+    const installWebui = workflow.indexOf("npm ci --ignore-scripts --prefix webui");
+    const validate = workflow.indexOf("npm run codex:upgrade:validate");
+    expect(installWebui).toBeGreaterThan(-1);
+    expect(validate).toBeGreaterThan(installWebui);
+  });
+
+  it("runs every isolated real App Server contract during upgrade validation", () => {
+    const contract = defaultUpgradeValidationStages.find(
+      (stage: { id: string }) => stage.id === "contract-tests",
+    );
+
+    expect(contract).toMatchObject({
+      environment: {
+        RUN_CODEX_CONTRACT: "1",
+        ...(process.platform === "win32" ? {} : { TMPDIR: "/tmp" }),
+      },
+      args: expect.arrayContaining([
+        "tests/real-app-server.test.ts",
+        "tests/real-app-server-isolated-state.test.ts",
+        "tests/real-app-server-queue.test.ts",
+        "tests/real-app-server-supervised-provider.test.ts",
+        "tests/real-app-server-supervised-thread-state.test.ts",
+        "tests/real-app-server-supervised-tools.test.ts",
+      ]),
+    });
+  });
+
   it("accepts only the requested official stable release", () => {
     expect(validateOfficialRelease({
       tag_name: "rust-v0.146.0",

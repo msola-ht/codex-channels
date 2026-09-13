@@ -92,6 +92,7 @@ export function appServerRateLimit(
   return {
     limitId: "codex",
     limitName: null,
+    normalModelSlug: null,
     primary: null,
     secondary: null,
     credits: null,
@@ -112,6 +113,7 @@ export function appServerMcpStatus(
     pluginId: null,
     serverInfo: null,
     tools: { search: {} },
+    toolsError: null,
     resources: [],
     resourceTemplates: [],
     authStatus: "unsupported",
@@ -177,9 +179,12 @@ export class FakeTransport extends BaseTransport {
     dailyUsageBuckets: null,
   };
   accountRateLimitsResult: Record<string, unknown> = {
+    ordinaryUsageAllowed: null,
     rateLimits: appServerRateLimit(),
     rateLimitsByLimitId: null,
     rateLimitResetCredits: null,
+    accountId: null,
+    rateLimitUpsell: null,
   };
   skillsResult: Record<string, unknown> = { data: [] };
   pluginInstalledResult: Record<string, unknown> = {
@@ -524,6 +529,7 @@ export class FakeTransport extends BaseTransport {
       decoded.method === "turn/interrupt"
       || decoded.method === "thread/name/set"
       || decoded.method === "thread/compact/start"
+      || decoded.method === "thread/settings/update"
     ) {
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),

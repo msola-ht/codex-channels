@@ -1334,6 +1334,32 @@ describe("ApprovalCoordinator", () => {
     });
   });
 
+  it("cancels unsupported OpenAI user verification elicitation", async () => {
+    const interaction = new FakeInteraction({
+      type: "elicitation",
+      action: "accept",
+      content: { proof: "untrusted" },
+    });
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+
+    const response = await handleRaw(coordinator, {
+      id: "request-user-verification",
+      method: "mcpServer/elicitation/request",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        serverName: "codex_apps",
+        mode: "openai/userVerification",
+        title: "Verify identity",
+        description: "Use a device-bound credential",
+        challenge: "untrusted-challenge",
+      },
+    });
+
+    expect(response).toEqual({ action: "cancel", content: null, _meta: null });
+    expect(interaction.requests).toEqual([]);
+  });
+
   it("maps an MCP tool approval to a session decision without asking for JSON", async () => {
     const interaction = new FakeInteraction({
       type: "elicitation",

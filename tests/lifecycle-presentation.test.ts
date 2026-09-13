@@ -184,6 +184,67 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("untrusted upstream policy text");
   });
 
+  it("uses a fixed message for the Luna Reserve usage-limit trigger", () => {
+    const rendered = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "app-1",
+          conversationId: "chat-1",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "failed",
+        error: "untrusted upstream usage text",
+        errorCode: "usageLimitExceeded",
+      }),
+    );
+
+    expect(rendered).toContain("错误：OpenAI 普通用量已用尽。");
+    expect(rendered).not.toContain("untrusted upstream usage text");
+
+    const reserve = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "app-1",
+          conversationId: "chat-1",
+        },
+        threadId: "thread-reserve",
+        turnId: "turn-reserve",
+        status: "failed",
+        error: "untrusted reserve usage text",
+        errorCode: "usageLimitExceeded",
+        model: "gpt-reserve",
+        modelProvider: "openai",
+      }),
+    );
+    expect(reserve).toContain("错误：Luna Reserve 用量已用尽。");
+    expect(reserve).not.toContain("OpenAI 普通用量已用尽");
+    expect(reserve).not.toContain("untrusted reserve usage text");
+
+    const thirdParty = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "app-1",
+          conversationId: "chat-1",
+        },
+        threadId: "thread-2",
+        turnId: "turn-2",
+        status: "failed",
+        error: "DeepSeek usage limit reached",
+        errorCode: "usageLimitExceeded",
+        modelProvider: "deepseek",
+      }),
+    );
+    expect(thirdParty).toContain("错误：DeepSeek usage limit reached");
+    expect(thirdParty).not.toContain("OpenAI 普通用量已用尽");
+  });
+
     it("uses one startup field order for every Surface renderer", () => {
     const rendered = renderPlainLifecyclePresentation(
       createStartupPresentation(
@@ -408,6 +469,8 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
+      "性能",
+      "  总耗时：1分5秒",
       "",
       "当前 Session 累计：",
       "当前工作区：Main (main)",

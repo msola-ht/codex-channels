@@ -1,6 +1,6 @@
 # Thread Queue 与 Revert 开发设计
 
-本文定义 Codex CLI `0.148.0` 引入、并在当前锁定 `0.150.1` 复核的实验 `thread/queue/*`、`thread/queue/changed`、
+本文定义 Codex CLI `0.148.0` 引入、并在当前锁定 `0.154.0` 复核的实验 `thread/queue/*`、`thread/queue/changed`、
 `thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的采用方案。
 它是实施合同；当前项目已完成第一阶段原生 Queue 替换，并已接入第二阶段分页历史与 Revert。
 Queue/Revert 联合真实合同仍是条件门禁：

@@ -542,7 +542,7 @@ describe("Notification adapter", () => {
     });
   });
 
-  it("only exposes the exact structured misalignment policy error code", () => {
+  it("only exposes structured error codes with supported Gateway behavior", () => {
     expect(toConversationInputEvent({
       method: "error",
       params: {
@@ -562,6 +562,48 @@ describe("Notification adapter", () => {
       message: "upstream policy text do not expose this as a category",
       willRetry: false,
       errorCode: "misalignmentPolicyViolation",
+    });
+    expect(toConversationInputEvent({
+      method: "error",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-usage",
+        willRetry: false,
+        error: {
+          message: "usage exhausted",
+          codexErrorInfo: "usageLimitExceeded",
+          additionalDetails: null,
+        },
+      },
+    })).toEqual({
+      type: "turn.error",
+      threadId: "thread-1",
+      turnId: "turn-usage",
+      message: "usage exhausted",
+      willRetry: false,
+      errorCode: "usageLimitExceeded",
+    });
+    expect(toConversationInputEvent({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-usage",
+          status: "failed",
+          error: {
+            message: "usage exhausted",
+            codexErrorInfo: "usageLimitExceeded",
+            additionalDetails: null,
+          },
+        },
+      },
+    })).toEqual({
+      type: "turn.completed",
+      threadId: "thread-1",
+      turnId: "turn-usage",
+      status: "failed",
+      error: "usage exhausted",
+      errorCode: "usageLimitExceeded",
     });
     expect(toConversationInputEvent({
       method: "turn/completed",

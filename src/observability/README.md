@@ -37,7 +37,8 @@
   最多短暂超出 99 条。每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
   `model_request_metrics_enriched` View 继续为历史记录派生旧计时字段，并统一派生缓存与不含推理的
-  Token、缓存命中率；人类可读 CLI、渠道卡片和 WebUI 页面不再展示总耗时、首段回复延迟或生成速度。内部读取限制为每次
+  Token、缓存命中率；人类可读 CLI、渠道卡片和 WebUI 页面不再展示模型请求聚合耗时、首段回复
+  延迟或生成速度，完成卡片的官方 Turn 总耗时不来自本指标库。内部读取限制为每次
   最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合、指标库保留范围内的 Thread 会话累计和最近一条无 Turn 的直接 API 请求分开返回，由
   Bootstrap 映射到 Application 的 `/metrics` 只读端口；会话归纳（模型、思考等级与 Token）
@@ -59,7 +60,7 @@
   旧版 `/responses/compact` 与普通 `/responses` 上由受控元数据标记的 remote compaction v2
   都以 `operation = 'compact'` 独立分类，但其请求、Usage 与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或
-  复制持久化数据。当前锁定 Codex 0.153.4 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
+  复制持久化数据。当前锁定 Codex 0.154.0 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
   连接预热而非模型推理，Provider Proxy 不将其写入本指标库，因此不会扩大请求、Token 或
   错误率分母。所有合计仍在 SQLite 内完成，不把缺失缓存字段当成零。
   查询时还会把旧库中 HTTP 200、响应格式未知且没有模型或 Usage 的普通响应历史“完成”记录归一为

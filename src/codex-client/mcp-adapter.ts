@@ -226,12 +226,16 @@ function toServerSummary(
   if (typeof server.tools !== "object" || server.tools === null || Array.isArray(server.tools)) {
     throw new Error("Codex 响应缺少有效 MCP server tools");
   }
+  if (server.toolsError !== null && typeof server.toolsError !== "string") {
+    throw new Error("Codex 响应缺少有效 MCP server toolsError");
+  }
   return {
     name,
     runtimeStatus: requiredMcpRuntimeStatus(server.runtimeStatus),
     pluginId: requiredNullablePluginId(server.pluginId),
     authStatus: server.authStatus,
     toolCount: Object.keys(server.tools).length,
+    toolDiscoveryFailed: server.toolsError !== null,
   };
 }
 

@@ -141,9 +141,18 @@ npm run check
 npm run lint
 npm run docs:check
 npm test
-RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
+TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run \
+  tests/real-app-server.test.ts \
+  tests/real-app-server-isolated-state.test.ts \
+  tests/real-app-server-queue.test.ts \
+  tests/real-app-server-supervised-provider.test.ts \
+  tests/real-app-server-supervised-thread-state.test.ts \
+  tests/real-app-server-supervised-tools.test.ts
 npm run verify:commit
 ```
+
+非 Windows 升级验证使用短临时根 `/tmp`，避免 macOS 默认临时目录使真实合同的 Unix Socket
+超过 `SUN_LEN`；各合同仍创建独立随机子目录。
 
 真实合同测试需要目标版本 Codex CLI，但不调用模型。全部检查通过并经差异审查后，才可以按用户
 明确指示提交、推送、重新全局安装并重建服务。

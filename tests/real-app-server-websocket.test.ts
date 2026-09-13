@@ -155,11 +155,16 @@ suite("real Codex App Server over Unix WebSocket", () => {
   });
 
   it("reads account rate-limit snapshots without starting a turn", async () => {
-    const result = await client.accountRateLimits();
+    const result = await client.accountRateLimits({ background: true });
 
     expect(result.limits.length).toBeGreaterThan(0);
     expect(result.limits[0]?.primary === null
       || typeof result.limits[0]?.primary?.usedPercent === "number").toBe(true);
+    expect(result.accountId === null || typeof result.accountId === "string").toBe(true);
+    expect(result.ordinaryUsageAllowed === null
+      || typeof result.ordinaryUsageAllowed === "boolean").toBe(true);
+    expect(result.lunaReserve === null
+      || typeof result.lunaReserve.title === "string").toBe(true);
   });
 
   it("reads the current account's estimate for one exact Thread", async () => {
@@ -179,9 +184,11 @@ suite("real Codex App Server over Unix WebSocket", () => {
 
   it("lists models with their supported reasoning efforts", async () => {
     const models = await client.listModels();
+    const reserve = await client.lunaReserveModel();
 
     expect(models.length).toBeGreaterThan(0);
     expect(models.every((model) => model.supportedReasoningEfforts.length > 0)).toBe(true);
+    expect(reserve === null || reserve.model === "gpt-reserve").toBe(true);
   });
 
   it("lists directly installed Skills through the stable query result", async () => {

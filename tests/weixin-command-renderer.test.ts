@@ -224,7 +224,26 @@ describe("Weixin command renderer", () => {
         result: {
           kind: "rate-limits",
           provider: "openai",
-          limits: { limits: [], resetCreditsAvailable: null },
+          limits: {
+            limits: [],
+            ordinaryUsageLimit: {
+              limitId: "codex",
+              limitName: null,
+              normalModelSlug: null,
+              primary: null,
+              secondary: null,
+              credits: null,
+              individualLimit: null,
+              spendControlReached: null,
+              planType: null,
+              rateLimitReachedType: null,
+            },
+            resetCreditsAvailable: null,
+            accountId: null,
+            ordinaryUsageAllowed: null,
+            lunaReserve: null,
+            unsupportedUpsellPresent: false,
+          },
         },
       },
       { kind: "permissions", profiles: [] },
@@ -370,7 +389,7 @@ describe("Weixin command renderer", () => {
     expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
     expect(rendered).toContain("上下文压缩：2 次");
     expect(rendered).toContain("Git 分支：feature/weixin-surface");
-    expect(rendered).not.toContain("耗时");
+    expect(rendered).toContain("总耗时：1分5秒");
     expect(rendered).not.toContain("延迟");
     expect(rendered).not.toContain("速度");
   });

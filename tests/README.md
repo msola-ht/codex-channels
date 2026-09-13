@@ -32,6 +32,12 @@
   官方 `Turn.durationMs` 校验、三渠道统一结束汇报耗时字段、可重试错误隔离、Thread/全局警告路由，
   以及 Client 边界的操作摘要、Turn/warning/MCP 错误
   脱敏限长与敏感文本清洗。
+- Luna Reserve 权益参数、账户 ID、普通用量权限与隐藏 `gpt-reserve` 目录映射；仅最终
+  `usageLimitExceeded` 与同一 Turn 完成事件配对后触发、同账户切入与恢复、思考等级/服务层级/Plan
+  模式保持、活动 Turn 完成后再切换、失效期间的新触发续跑、账户级共享恢复轮询、待生效选择与手工改模
+  不覆盖、未知权益或普通额度仍阻断时不恢复、设置写入不重试、账户失效写入告警，以及
+  Thread/账户/服务关闭清理
+  （[`luna-reserve-service.test.ts`](luna-reserve-service.test.ts)）。
 - 命令、文件修改、临时权限、用户输入和 MCP 审批的归属信息、优先于等待中非关键输出的
   Surface 交互投递、脱敏收到/送达/失败/安全拒绝日志、一次/会话批准、命令前缀及网络
   规则持久授权、网络专用请求、目标主机一致性、拒绝、无法路由、协议能力约束、一次性回调、
@@ -187,7 +193,8 @@
   `/skill <名称或序号> <任务>`，不维护渠道私有选择状态。
 - MCP 查询按当前 Thread 读取项目级配置：概览使用精简清单分页，详情映射工具、资源和模板；七种
   官方运行状态原样进入稳定端口，`null` 显示为未知，畸形或缺失状态失败关闭；健康摘要区分需认证、
-  失败、取消、未启动、连接中与禁用，不把只读状态查询当作主动探测；
+  失败、取消、工具发现失败、未启动、连接中与禁用，不把只读状态查询当作主动探测；工具发现错误
+  只保留是否存在，不把上游错误正文传入 Application 或 Surface；
   详情说明允许官方返回的多行文本，归一化空白并限为 2,000 字符；共享命令按工具、资源或模板
   提供每页 8 项的分页与搜索，页面输出包含稳定的前后页命令；
   OAuth 和资源读取使用精简清单解析目标，不受无关 Server 的完整资源发现阻塞；OAuth 只接受
@@ -364,18 +371,28 @@ Content-Length 校验、流式超限取消、缺失正文策略和 Buffer 返回
 CI 中的隔离 App Server 合同测试要求安装受支持的 Codex CLI，但不需要登录，也不会调用模型：
 
 ```bash
-RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
+TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run \
+  tests/real-app-server.test.ts \
+  tests/real-app-server-isolated-state.test.ts \
+  tests/real-app-server-queue.test.ts \
+  tests/real-app-server-supervised-provider.test.ts \
+  tests/real-app-server-supervised-thread-state.test.ts \
+  tests/real-app-server-supervised-tools.test.ts
 ```
+
+非 Windows 门禁把临时根固定为短路径 `/tmp`，避免 macOS 默认临时目录使 Unix Socket 超过
+`SUN_LEN`；每个合同仍在该目录下创建独立随机子目录。
 
 其中原生 Thread Queue 合同使用该门禁变量，验证真实握手、100/101 容量、CRUD、25/100 分页、
 活动 busy、指定条目启动、中断保留、自动派发和 App Server 重启后的冷恢复；跳过或环境拒绝都不计为通过。
 
 该合同测试使用临时 `CODEX_HOME`、provider-only DeepSeek 测试配置和本地测试 MCP 进程，验证
-App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 完整详情、只读资源、OAuth PKCE 回调及完成通知、
+App Server 不依赖 CLI Profile 即可初始化，并验证 MCP 完整详情、工具发现失败、只读资源、OAuth PKCE 回调及完成通知、
 Thread 运行状态的已连接、进程退出失败与显式配置刷新后重连、
 工具审批元数据及 `_meta.persist` 通过真实 App Server 往返；同时验证一个 Client 写入的模型、思考等级、Fast、`multi_agent_v2` 与 agents 用户设置能被另一个 Client
 读取，之后新建 Thread 的运行时 `serviceTier` 按 `default → priority → default` 变化，并验证
-第二个 Client 修改共享 Thread 的模型、思考等级和 Fast 设置时，订阅方收到完整的
+第二个 Client 通过 Luna Reserve 使用的设置更新入口修改共享 Thread 的模型、思考等级、Fast 与
+Plan 模式时，订阅方收到完整的
 `thread/settings/updated`；第二个 Client 重连后再次修改仍会广播。合同还会启动并立即清理一个
 不等待模型结果的 Plan Turn，验证 Default/Plan 预设、Plan 设置通知、稳定 Turn ID、中断后的
 官方非负 `durationMs`、Skill、MCP、Plugin 与 Permission Profile 查询摘要，以及已安装本地 Plugin

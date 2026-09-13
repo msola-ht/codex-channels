@@ -61,7 +61,7 @@ export function GatewaySettingsCard({ management }: { management: GatewaySetting
         <FieldGroup className="grid gap-3 md:grid-cols-3">
           <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-name">名称</FieldLabel><Input id="tui-identity-name" value={identityName} disabled={disabled} maxLength={64} onChange={(event) => setIdentityName(event.target.value)} placeholder="codex-tui" /></Field>
           <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-title">标题</FieldLabel><Input id="tui-identity-title" value={identityTitle} disabled={disabled} maxLength={128} onChange={(event) => setIdentityTitle(event.target.value)} placeholder="可选" /></Field>
-          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-version">版本</FieldLabel><Input id="tui-identity-version" value={identityVersion} disabled={disabled} maxLength={64} onChange={(event) => setIdentityVersion(event.target.value)} placeholder="0.153.4" /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-version">版本</FieldLabel><Input id="tui-identity-version" value={identityVersion} disabled={disabled} maxLength={64} onChange={(event) => setIdentityVersion(event.target.value)} placeholder="0.154.0" /></Field>
         </FieldGroup>
         <Field data-disabled={disabled}><FieldLabel htmlFor="tui-upstream-user-agent">上游 User-Agent</FieldLabel><Input id="tui-upstream-user-agent" value={upstreamUserAgent} disabled={disabled} maxLength={512} onChange={(event) => setUpstreamUserAgent(event.target.value)} placeholder="留空恢复原生透传" /></Field>
         <Button className="self-start" variant="outline" disabled={disabled} onClick={saveIdentity}>保存请求身份</Button>

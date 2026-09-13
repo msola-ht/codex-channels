@@ -3781,7 +3781,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       section: "扩展能力",
       kind: "note",
       name: "Plugin API",
-      detail: expect.stringContaining("Codex 0.153.4"),
+      detail: expect.stringContaining("Codex 0.154.0"),
     }));
     expect(diagnosed.stdout).not.toContain(secret);
     expect(diagnosed.stdout).not.toContain("Codex Connect Doctor\n");

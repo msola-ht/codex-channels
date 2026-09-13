@@ -163,6 +163,7 @@ export class GatewayApplication {
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
+  private readonly conversations: ConversationService;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
@@ -593,7 +594,18 @@ export class GatewayApplication {
       (parentThreadId) =>
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
       this.sessionDisplayCache,
+      {
+        port: this.codex,
+        output: this.output,
+        onError: (error, threadId) => {
+          this.logger.warn(
+            { err: error, threadId },
+            "Luna Reserve 自动切换状态刷新失败",
+          );
+        },
+      },
     );
+    this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
     if (config.idleReleaseMinutes > 0) {
       this.conversationIdleReleaser = new ConversationIdleReleaser({
@@ -925,6 +937,32 @@ export class GatewayApplication {
           // and must not leak into the next direct Turn after that dispatch.
           service.clearPendingSelectionsForThread(coreEvent.threadId);
         }
+        if (
+          coreEvent.type === "turn.error"
+          && !coreEvent.willRetry
+          && coreEvent.errorCode === "usageLimitExceeded"
+        ) {
+          service.markLunaReserveUsageLimit(coreEvent.threadId, coreEvent.turnId);
+        }
+        if (
+          coreEvent.type === "turn.completed"
+          && coreEvent.errorCode === "usageLimitExceeded"
+        ) {
+          service.markLunaReserveUsageLimit(coreEvent.threadId, coreEvent.turnId);
+        }
+        if (
+          coreEvent.type === "thread.closed"
+          || coreEvent.type === "thread.archived"
+          || coreEvent.type === "thread.deleted"
+        ) {
+          service.clearLunaReserveThread(coreEvent.threadId);
+        }
+        if (
+          coreEvent.type === "account.updated"
+          && (coreEvent.modelProvider ?? "openai") === "openai"
+        ) {
+          service.clearLunaReserveAccountState();
+        }
         if (coreEvent.type === "thread.status.changed" && coreEvent.status !== "active") {
           // A completion can race the native idle contributor. Retry only a
           // marked background release, without making the App Server reader
@@ -954,6 +992,9 @@ export class GatewayApplication {
           });
         }
         this.core.handle(coreEvent);
+        if (coreEvent.type === "turn.completed") {
+          service.recoverLunaReserveAfterTurn(coreEvent.threadId, coreEvent.turnId);
+        }
         if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
           const modelSettings = this.router.modelSettingsForThread(coreEvent.threadId);
           recordTurnErrorMetric(
@@ -1187,6 +1228,7 @@ export class GatewayApplication {
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
       ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
+      ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
@@ -1502,7 +1544,7 @@ export class GatewayApplication {
     let timeout: NodeJS.Timeout | undefined;
     try {
       const result = await Promise.race([
-        this.codex.accountRateLimits(),
+        this.codex.accountRateLimits({ background: true }),
         new Promise<never>((_resolve, reject) => {
           timeout = setTimeout(() => reject(new Error("读取 Codex 周限超时")), 5_000);
           timeout.unref();

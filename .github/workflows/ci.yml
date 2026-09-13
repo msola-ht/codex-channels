@@ -47,7 +47,7 @@ jobs:
         run: npm ci --ignore-scripts --prefix webui
 
       - name: Install locked Codex CLI
-        run: npm install --global @openai/codex@0.153.4
+        run: npm install --global @openai/codex@0.154.0
 
       - name: Add npm global bin to PATH
         shell: bash
@@ -123,7 +123,7 @@ jobs:
           tests/executable.test.ts
 
   app-server-contract:
-    name: Codex 0.153.4 App Server contract
+    name: Codex 0.154.0 App Server contract
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -143,10 +143,17 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Install locked Codex CLI
-        run: npm install --global @openai/codex@0.153.4
+        run: npm install --global @openai/codex@0.154.0
 
       - name: Check protocol version
         run: npm run protocol:check
 
       - name: Run isolated App Server contract
-        run: RUN_CODEX_CONTRACT=1 npm test -- --run tests/real-app-server.test.ts
+        run: >-
+          TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run
+          tests/real-app-server.test.ts
+          tests/real-app-server-isolated-state.test.ts
+          tests/real-app-server-queue.test.ts
+          tests/real-app-server-supervised-provider.test.ts
+          tests/real-app-server-supervised-thread-state.test.ts
+          tests/real-app-server-supervised-tools.test.ts

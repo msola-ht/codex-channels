@@ -698,8 +698,11 @@ function sanitizeTurnErrorText(value: string): string {
 }
 
 function parseTurnErrorCode(value: unknown): TurnErrorCode | undefined {
-  return value === ("misalignmentPolicyViolation" satisfies CodexErrorInfo)
-    ? "misalignmentPolicyViolation"
+  if (value === ("misalignmentPolicyViolation" satisfies CodexErrorInfo)) {
+    return "misalignmentPolicyViolation";
+  }
+  return value === ("usageLimitExceeded" satisfies CodexErrorInfo)
+    ? "usageLimitExceeded"
     : undefined;
 }
 

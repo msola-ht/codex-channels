@@ -44,6 +44,7 @@ export type { ModelListResponse } from "./generated/v2/ModelListResponse.js";
 export type { GetAccountTokenUsageParams } from "./generated/v2/GetAccountTokenUsageParams.js";
 export type { GetAccountTokenUsageResponse } from "./generated/v2/GetAccountTokenUsageResponse.js";
 export type { GetAccountRateLimitsResponse } from "./generated/v2/GetAccountRateLimitsResponse.js";
+export type { GetAccountRateLimitsParams } from "./generated/v2/GetAccountRateLimitsParams.js";
 export type { ListMcpServerStatusResponse } from "./generated/v2/ListMcpServerStatusResponse.js";
 export type { McpResourceReadResponse } from "./generated/v2/McpResourceReadResponse.js";
 export type { McpServerOauthLoginResponse } from "./generated/v2/McpServerOauthLoginResponse.js";

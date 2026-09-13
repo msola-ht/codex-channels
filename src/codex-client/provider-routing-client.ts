@@ -37,6 +37,8 @@ type ProviderClientMethod =
   | "setThreadPinned"
   | "compactThread"
   | "listModels"
+  | "lunaReserveModel"
+  | "updateLunaReserveThreadSettings"
   | "writeDefaultFastMode"
   | "readDefaultReasoningEffort"
   | "readDefaultServiceTier"
@@ -648,6 +650,21 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["accountRateLimits"]>
   ): ReturnType<ProviderClientInstance["accountRateLimits"]> {
     return this.withPrimaryActivity((client) => client.accountRateLimits(...args));
+  }
+
+  lunaReserveModel(
+    ...args: Parameters<ProviderClientInstance["lunaReserveModel"]>
+  ): ReturnType<ProviderClientInstance["lunaReserveModel"]> {
+    return this.withPrimaryActivity((client) => client.lunaReserveModel(...args));
+  }
+
+  updateLunaReserveThreadSettings(
+    ...args: Parameters<ProviderClientInstance["updateLunaReserveThreadSettings"]>
+  ): ReturnType<ProviderClientInstance["updateLunaReserveThreadSettings"]> {
+    return this.callForThread(
+      args[0],
+      (client) => client.updateLunaReserveThreadSettings(...args),
+    );
   }
 
   listPermissionProfiles(

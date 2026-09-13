@@ -4,6 +4,7 @@ import {
   ProviderAccountService,
   createOpenAiAccountAdapter,
   type AccountQueryPort,
+  type AccountRateLimits,
 } from "../src/application/index.js";
 
 describe("ProviderAccountService", () => {
@@ -15,7 +16,7 @@ describe("ProviderAccountService", () => {
       currentStreakDays: 2,
       longestStreakDays: 3,
     }, daily: [] };
-    const limits = { limits: [], resetCreditsAvailable: null };
+    const limits = emptyRateLimits();
     const query = {
       accountUsage: vi.fn(async () => usage),
       accountRateLimits: vi.fn(async () => limits),
@@ -128,7 +129,7 @@ describe("ProviderAccountService", () => {
     const service = new ProviderAccountService([
       createOpenAiAccountAdapter({
         accountUsage: async () => usage,
-        accountRateLimits: async () => ({ limits: [], resetCreditsAvailable: null }),
+        accountRateLimits: async () => emptyRateLimits(),
         accountThreadUsage,
       }),
     ]);
@@ -148,7 +149,7 @@ describe("ProviderAccountService", () => {
     const service = new ProviderAccountService([
       createOpenAiAccountAdapter({
         accountUsage: async () => Promise.reject(accountFailure),
-        accountRateLimits: async () => ({ limits: [], resetCreditsAvailable: null }),
+        accountRateLimits: async () => emptyRateLimits(),
         accountThreadUsage,
       }),
     ]);
@@ -171,7 +172,7 @@ describe("ProviderAccountService", () => {
           },
           daily: [],
         }),
-        accountRateLimits: async () => ({ limits: [], resetCreditsAvailable: null }),
+        accountRateLimits: async () => emptyRateLimits(),
         accountThreadUsage,
       }),
     ]);
@@ -205,3 +206,26 @@ describe("ProviderAccountService", () => {
     expect(accountThreadUsage).not.toHaveBeenCalled();
   });
 });
+
+function emptyRateLimits(): AccountRateLimits {
+  return {
+    limits: [],
+    ordinaryUsageLimit: {
+      limitId: "codex",
+      limitName: null,
+      normalModelSlug: null,
+      primary: null,
+      secondary: null,
+      credits: null,
+      individualLimit: null,
+      spendControlReached: null,
+      planType: null,
+      rateLimitReachedType: null,
+    },
+    resetCreditsAvailable: null,
+    accountId: null,
+    ordinaryUsageAllowed: null,
+    lunaReserve: null,
+    unsupportedUpsellPresent: false,
+  };
+}

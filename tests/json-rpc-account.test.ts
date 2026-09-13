@@ -10,9 +10,17 @@ describe("JsonRpcClient account", () => {
     it("reads account rate limits through the stable App Server method", async () => {
       const transport = new FakeTransport();
       transport.accountRateLimitsResult = {
+        ordinaryUsageAllowed: false,
         rateLimits: appServerRateLimit({ planType: "ent26" }),
         rateLimitsByLimitId: null,
         rateLimitResetCredits: null,
+        accountId: "account-1",
+        rateLimitUpsell: {
+          banner_type: "luna_reserve",
+          blocked_model_slug: "gpt-5.4",
+          title: "Continue with Luna",
+          description: "Use reserve capacity while ordinary usage is unavailable.",
+        },
       };
       const rpc = new JsonRpcClient(transport);
       const client = new CodexAppServerClient(rpc, {
@@ -23,7 +31,41 @@ describe("JsonRpcClient account", () => {
       const result = await client.accountRateLimits();
 
       expect(result.limits[0]?.planType).toBe("ent26");
+      expect(result).toMatchObject({
+        accountId: "account-1",
+        ordinaryUsageAllowed: false,
+        unsupportedUpsellPresent: false,
+        lunaReserve: {
+          blockedModelSlug: "gpt-5.4",
+          title: "Continue with Luna",
+        },
+      });
       expect(transport.sent.some((message) => message.method === "account/rateLimits/read")).toBe(true);
+    });
+
+    it("keeps an unknown backend upsell as a recovery blocker", async () => {
+      const transport = new FakeTransport();
+      transport.accountRateLimitsResult = {
+        ordinaryUsageAllowed: true,
+        rateLimits: appServerRateLimit(),
+        rateLimitsByLimitId: null,
+        rateLimitResetCredits: null,
+        accountId: "account-1",
+        rateLimitUpsell: {
+          banner_type: "future_offer",
+          title: "A future offer",
+          description: "Unsupported by this Gateway version.",
+        },
+      };
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "workspace-write",
+      });
+      await client.connect();
+
+      await expect(client.accountRateLimits()).resolves.toMatchObject({
+        lunaReserve: null,
+        unsupportedUpsellPresent: true,
+      });
     });
 
     it.each([
@@ -34,9 +76,12 @@ describe("JsonRpcClient account", () => {
     ] as const)("accepts the Codex 0.150.1 plan type %s", async (planType) => {
       const transport = new FakeTransport();
       transport.accountRateLimitsResult = {
+        ordinaryUsageAllowed: null,
         rateLimits: appServerRateLimit({ planType }),
         rateLimitsByLimitId: null,
         rateLimitResetCredits: null,
+        accountId: null,
+        rateLimitUpsell: null,
       };
       const client = new CodexAppServerClient(new JsonRpcClient(transport), {
         sandbox: "workspace-write",
@@ -61,6 +106,7 @@ describe("JsonRpcClient account", () => {
         dailyUsageBuckets: [{ startDate: "2026-07-25", tokens: 9 }],
       };
       transport.accountRateLimitsResult = {
+        ordinaryUsageAllowed: true,
         rateLimits: appServerRateLimit(),
         rateLimitsByLimitId: {
           codex: appServerRateLimit({
@@ -69,6 +115,8 @@ describe("JsonRpcClient account", () => {
           other: appServerRateLimit({ limitId: "other", limitName: "Other", planType: null }),
         },
         rateLimitResetCredits: { availableCount: 2, credits: null },
+        accountId: "account-1",
+        rateLimitUpsell: null,
       };
       const client = new CodexAppServerClient(new JsonRpcClient(transport), {
         sandbox: "workspace-write",
@@ -305,9 +353,12 @@ describe("JsonRpcClient account", () => {
 
       const limitsTransport = new FakeTransport();
       limitsTransport.accountRateLimitsResult = {
+        ordinaryUsageAllowed: null,
         rateLimits: appServerRateLimit({ planType: "future-plan" }),
         rateLimitsByLimitId: null,
         rateLimitResetCredits: null,
+        accountId: null,
+        rateLimitUpsell: null,
       };
       const limitsClient = new CodexAppServerClient(new JsonRpcClient(limitsTransport), {
         sandbox: "workspace-write",
@@ -317,7 +368,7 @@ describe("JsonRpcClient account", () => {
         .rejects.toThrow("Codex 响应缺少有效 planType");
     });
 
-    it("omits params for App Server methods whose generated request has no params", async () => {
+    it("sends Luna Reserve capability only on the rate-limit read", async () => {
       const transport = new FakeTransport();
       const rpc = new JsonRpcClient(transport);
       const client = new CodexAppServerClient(rpc, {
@@ -333,6 +384,17 @@ describe("JsonRpcClient account", () => {
       expect(transport.sent.find((message) => message.method === "account/usage/read"))
         .not.toHaveProperty("params");
       expect(transport.sent.find((message) => message.method === "account/rateLimits/read"))
-        .not.toHaveProperty("params");
+        .toEqual(expect.objectContaining({
+          params: { supportsLunaReserve: true },
+        }));
+
+      await client.accountRateLimits({ background: true });
+      expect(transport.sent.filter((message) => message.method === "account/rateLimits/read").at(-1))
+        .toEqual(expect.objectContaining({
+          params: {
+            supportsLunaReserve: true,
+            excludeResetCreditDetails: true,
+          },
+        }));
     });
 });

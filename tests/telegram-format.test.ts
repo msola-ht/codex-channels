@@ -345,6 +345,7 @@ describe("formatLimits", () => {
       limits: [{
         limitId: "codex",
         limitName: "Codex",
+        normalModelSlug: null,
         primary: { usedPercent: 31, windowDurationMins: 300, resetsAt: 1_784_700_000 },
         secondary: { usedPercent: 42, windowDurationMins: 10_080, resetsAt: 1_785_000_000 },
         credits: { hasCredits: true, unlimited: true, balance: null },
@@ -353,7 +354,23 @@ describe("formatLimits", () => {
         planType: "pro",
         rateLimitReachedType: null,
       }],
+      ordinaryUsageLimit: {
+        limitId: "codex",
+        limitName: "Codex",
+        normalModelSlug: null,
+        primary: { usedPercent: 31, windowDurationMins: 300, resetsAt: 1_784_700_000 },
+        secondary: { usedPercent: 42, windowDurationMins: 10_080, resetsAt: 1_785_000_000 },
+        credits: { hasCredits: true, unlimited: true, balance: null },
+        individualLimit: null,
+        spendControlReached: false,
+        planType: "pro",
+        rateLimitReachedType: null,
+      },
       resetCreditsAvailable: 2n,
+      accountId: null,
+      ordinaryUsageAllowed: null,
+      lunaReserve: null,
+      unsupportedUpsellPresent: false,
     });
 
     expect(text).toContain("套餐：Pro");

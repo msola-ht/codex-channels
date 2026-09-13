@@ -125,6 +125,7 @@ function toAccountThreadUsageGroup(
 export function toAccountRateLimits(
   response: GetAccountRateLimitsResponse,
 ): AccountRateLimits {
+  const upsell = toLunaReserveOffer(response.rateLimitUpsell);
   const configured = response.rateLimitsByLimitId
     ? Object.entries(response.rateLimitsByLimitId).filter(
         (entry): entry is [string, RateLimitSnapshot] => entry[1] !== undefined,
@@ -135,12 +136,23 @@ export function toAccountRateLimits(
     : [[response.rateLimits.limitId ?? "codex", response.rateLimits] as const];
   return {
     limits: entries.map(([fallbackId, snapshot]) => toAccountRateLimit(snapshot, fallbackId)),
+    ordinaryUsageLimit: toAccountRateLimit(
+      response.rateLimits,
+      response.rateLimits.limitId ?? "codex",
+    ),
     resetCreditsAvailable: response.rateLimitResetCredits
       ? requiredMetric(
           response.rateLimitResetCredits.availableCount,
           "rate limit reset credits availableCount",
         )
       : null,
+    accountId: optionalBoundedString(response.accountId, "rate limit accountId"),
+    ordinaryUsageAllowed: optionalBoolean(
+      response.ordinaryUsageAllowed,
+      "ordinaryUsageAllowed",
+    ),
+    lunaReserve: upsell.offer,
+    unsupportedUpsellPresent: upsell.unsupported,
   };
 }
 
@@ -152,6 +164,10 @@ function toAccountRateLimit(snapshot: RateLimitSnapshot, fallbackId: string): Ac
   return {
     limitId: id,
     limitName: optionalString(snapshot.limitName, "rate limit name"),
+    normalModelSlug: optionalBoundedString(
+      snapshot.normalModelSlug,
+      "rate limit normalModelSlug",
+    ),
     primary: toWindow(snapshot.primary, "primary"),
     secondary: toWindow(snapshot.secondary, "secondary"),
     credits: snapshot.credits
@@ -183,6 +199,63 @@ function toAccountRateLimit(snapshot: RateLimitSnapshot, fallbackId: string): Ac
       "rateLimitReachedType",
     ),
   };
+}
+
+function toLunaReserveOffer(value: unknown): {
+  offer: AccountRateLimits["lunaReserve"];
+  unsupported: boolean;
+} {
+  if (value === undefined) {
+    throw new Error("Codex 响应缺少有效 rateLimitUpsell");
+  }
+  if (value === null) return { offer: null, unsupported: false };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { offer: null, unsupported: true };
+  }
+  const record = value as Record<string, unknown>;
+  if (record.banner_type !== "luna_reserve") {
+    return { offer: null, unsupported: true };
+  }
+  const title = boundedBannerText(record.title, 1_024, 3);
+  const description = boundedBannerText(record.description, 4_096, 12);
+  const blockedModelSlug = safeOptionalModelSlug(record.blocked_model_slug);
+  if (title === null || description === null || blockedModelSlug === undefined) {
+    return { offer: null, unsupported: true };
+  }
+  return {
+    offer: { blockedModelSlug, title, description },
+    unsupported: false,
+  };
+}
+
+function boundedBannerText(
+  value: unknown,
+  maximumLength: number,
+  maximumLines: number,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = [...value.trim()]
+    .filter((character) => character === "\n" || !containsControlCharacter(character))
+    .join("");
+  if (
+    normalized.length === 0
+    || normalized.length > maximumLength
+    || normalized.split("\n").length > maximumLines
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+function safeOptionalModelSlug(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0
+      && normalized.length <= 256
+      && !containsControlCharacter(normalized)
+    ? normalized
+    : undefined;
 }
 
 function toWindow(
