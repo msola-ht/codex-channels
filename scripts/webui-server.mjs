@@ -56,13 +56,7 @@ import {
   updateCodexUserSetting,
 } from "./codex-user-settings-management.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
-import {
-  deleteApiProvider,
-  listApiProviders,
-  saveApiProvider,
-} from "./api-provider-management.mjs";
 import { WebuiManagementTaskRunner } from "./webui-management-tasks.mjs";
-import { apiProviderResourceStateFromList, redactApiProviderResult } from "./webui-management-providers.mjs";
 import { managementTaskResourceState, normalizeTaskRequestShape } from "./webui-management-task-resource.mjs";
 import {
   isHighRiskManagedSetting,
@@ -70,15 +64,12 @@ import {
   redactManagedSettings,
 } from "./webui-management-settings.mjs";
 import {
-  apiProviderResourceState,
   assertManagedSetting,
   codexManagementError,
   isHighRiskManagementPath,
   loadProviderManagementSummary,
   invalidateProviderManagementSummary,
   ManagementOperationError,
-  normalizeApiProviderMutation,
-  previewApiProviderOperation,
 } from "./webui-management-operations.mjs";
 import {
   applyProviderSettingsMutation,
@@ -518,100 +509,6 @@ async function routeManagement(environment, url, request, response, state, token
       ...(current === null ? { consistency: "unknown" } : {}),
       auditStatus,
     });
-    return;
-  }
-  if (path === "/api-providers" && request.method === "GET") {
-    try {
-      const state = listApiProviders(environment);
-      sendManagementJson(response, 200, {
-        observedAt: new Date().toISOString(),
-        providers: state.providers.map((provider) => ({
-          id: provider.id,
-          name: provider.name,
-          protocol: provider.protocol,
-          endpoint: provider.endpoint,
-          hasApiKey: provider.hasApiKey,
-        })),
-      });
-    } catch {
-      throw new ApiError(503, "api_provider_state_unavailable", "直接 API Provider 配置暂不可用");
-    }
-    return;
-  }
-  if (path === "/api-providers/preview" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    const input = normalizeApiProviderMutation(body, environment);
-    const preview = previewApiProviderOperation(input, environment);
-    const inputFingerprint = fingerprintManagementValue(input);
-    const resourceState = apiProviderResourceState(environment);
-    const resourceRevision = fingerprintManagementValue(resourceState);
-    const issued = state.confirmations.issue({
-      sessionId: principalId,
-      operation: "api-provider.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(preview),
-    });
-    sendManagementJson(response, 200, {
-      preview,
-      resourceRevision,
-      confirmationToken: issued.token,
-      confirmationExpiresAt: issued.expiresAt,
-    });
-    return;
-  }
-  if (path === "/api-providers" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.confirmationToken !== "string") {
-      throw new ApiError(400, "invalid_json", "Provider 写入请求必须包含 confirmationToken");
-    }
-    const input = normalizeApiProviderMutation(body, environment);
-    const operation = input.operation === "delete" ? "delete" : "save";
-    const inputFingerprint = fingerprintManagementValue(input);
-    const current = listApiProviders(environment);
-    const resourceState = apiProviderResourceStateFromList(current.providers);
-    const resourceRevision = fingerprintManagementValue(resourceState);
-    const preview = previewApiProviderOperation(input, environment);
-    state.confirmations.consume(body.confirmationToken, {
-      sessionId: principalId,
-      operation: "api-provider.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(preview),
-    });
-    let result;
-    try {
-      state.audit.assertWritable();
-      result = operation === "delete"
-        ? deleteApiProvider(input.id, { environment, expectedState: resourceState })
-        : saveApiProvider({ ...input.provider, operation: preview.operation }, { environment, expectedState: resourceState });
-    } catch (error) {
-      if (error?.code === "stale-revision") {
-        throw new ApiError(409, "stale-revision", "Provider 配置已变化，请重新预览后重试");
-      }
-      throw new ApiError(400, "api_provider_write_failed", error instanceof Error ? error.message : "Provider 写入失败");
-    }
-    invalidateProviderManagementSummary(state.providerStateCache);
-    let auditStatus = "recorded";
-    try {
-      state.audit.record({
-        sessionId: principalId,
-        source: "webui",
-        operation: "api-provider.write",
-        target: String(operation === "delete" ? input.id : input.provider?.id ?? "unknown"),
-        inputFingerprint,
-        revision: resourceRevision,
-        previewId: fingerprintManagementValue(preview),
-        confirmationId: fingerprintManagementValue(body.confirmationToken),
-        phase: "completed",
-        resultCode: result.action,
-        recovery: "none",
-      });
-    } catch (error) {
-      auditStatus = "degraded";
-      console.error("Provider 已写入，但审计记录失败", error);
-    }
-    sendManagementJson(response, 200, { ...redactApiProviderResult(result), auditStatus });
     return;
   }
   if (path === "/provider-settings" && request.method === "GET") {

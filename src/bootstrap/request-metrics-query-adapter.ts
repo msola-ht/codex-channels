@@ -11,23 +11,15 @@ import type { SqliteModelRequestMetricsStore } from "../observability/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 
 export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
-  private readonly providerNames: ReadonlyMap<string, string>;
-
   constructor(
     private readonly store: SqliteModelRequestMetricsStore,
     private readonly router: Pick<SessionRouter, "modelSettingsForThread">,
-    providers: ReadonlyArray<{ id: string; name: string }>,
     private readonly now: () => number = Date.now,
-  ) {
-    this.providerNames = new Map(providers.map((provider) => [provider.id, provider.name]));
-  }
+  ) {}
 
   forThread(threadId: string): ThreadRequestMetricsSummary {
     const summary = this.store.threadSummary(threadId);
     const direct = summary.latestDirectApi;
-    const providerName = direct === null
-      ? undefined
-      : this.providerNames.get(direct.provider);
     return {
       threadId: summary.threadId,
       modelProvider: this.router.modelSettingsForThread(threadId)
@@ -38,7 +30,6 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
         ? null
         : {
             provider: direct.provider,
-            ...(providerName === undefined ? {} : { providerName }),
             model: direct.model,
             status: direct.status,
             httpStatus: direct.httpStatus,
@@ -76,17 +67,11 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
       startAtMs: report.startAtMs,
       endAtMs: report.endAtMs,
       aggregate: report.aggregate,
-      groups: report.groups.map((group) => {
-        const providerName = group.provider === null
-          ? undefined
-          : this.providerNames.get(group.provider);
-        return {
-          provider: group.provider,
-          ...(providerName === undefined ? {} : { providerName }),
-          model: group.model,
-          aggregate: group.aggregate,
-        };
-      }),
+      groups: report.groups.map((group) => ({
+        provider: group.provider,
+        model: group.model,
+        aggregate: group.aggregate,
+      })),
       totalGroupCount: report.totalGroupCount,
     };
   }
@@ -104,20 +89,16 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
       endAtMs: report.endAtMs,
       requestCount: report.requestCount,
       unsuccessfulRequestCount: report.unsuccessfulRequestCount,
-      groups: report.groups.map((group) => {
-        const providerName = this.providerNames.get(group.provider);
-        return {
-          provider: group.provider,
-          ...(providerName === undefined ? {} : { providerName }),
-          model: group.model,
-          status: group.status,
-          httpStatus: group.httpStatus,
-          errorType: group.errorType,
-          lastErrorMessage: group.lastErrorMessage,
-          requestCount: group.requestCount,
-          lastOccurredAtMs: group.lastOccurredAtMs,
-        };
-      }),
+      groups: report.groups.map((group) => ({
+        provider: group.provider,
+        model: group.model,
+        status: group.status,
+        httpStatus: group.httpStatus,
+        errorType: group.errorType,
+        lastErrorMessage: group.lastErrorMessage,
+        requestCount: group.requestCount,
+        lastOccurredAtMs: group.lastOccurredAtMs,
+      })),
       totalGroupCount: report.totalGroupCount,
     };
   }

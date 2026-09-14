@@ -72,13 +72,6 @@ plugin_api = false
 # Gateway 计划任务默认关闭；启用后使用独立私有数据库并由 App Server 执行 Turn。
 enabled = false
 
-# 预留给直接 API 功能的第三方 Responses 提供商：
-# [[api_providers]]
-# id = "responses-relay"
-# name = "Responses 中转"
-# protocol = "responses"
-# endpoint = "https://example.com/v1/responses"
-
 [storage]
 database_path = "data/gateway.sqlite3"
 

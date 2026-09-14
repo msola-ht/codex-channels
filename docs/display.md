@@ -74,7 +74,7 @@ Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已
 ## /metrics 命令
 
 `/metrics` 可查看当前 Thread 最近 Turn 的运行聚合、递归包含全部显式子代理后代的 Thread 会话累计及最近
-一次视觉等直接 API 请求。`/metrics global|providers|models <范围>` 把 Codex Provider 与
+一次无 Turn 关联的历史直接 API 请求。`/metrics global|providers|models <范围>` 把 Codex Provider 与
 直接 API 请求按同一口径汇总，并显示请求、Token、缓存、压缩和错误统计；
 `/metrics errors` 按提供商、模型、状态、HTTP 状态和错误类型汇总异常请求，显示异常率与最近
 发生时间。它不会替代 `/status` 的 App Server 上下文统计。

@@ -7,10 +7,7 @@ import {
   formatPercent,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import {
-  formatCodexProviderLabel,
-  formatProviderLabel,
-} from "./provider-format.js";
+import { formatCodexProviderLabel } from "./provider-format.js";
 import {
   formatCacheHitRate,
   formatTokenCount,
@@ -86,7 +83,7 @@ export function formatConversationMetrics(
     lines.push(
       "",
       "### 最近直接 API",
-      `API 提供商：${formatProviderLabel(direct.providerName ?? direct.provider)}`,
+      `API 提供商：${formatCodexProviderLabel(direct.provider)}`,
       `调用模型：${direct.model ?? "未知"}`,
       `状态：${formatRequestStatus(direct.status)}${direct.httpStatus === null ? "" : ` · HTTP ${direct.httpStatus}`}`,
       ...(direct.inputTokens === null && direct.outputTokens === null
@@ -140,9 +137,7 @@ function formatErrorMetricsReport(
     "",
     "### 异常明细",
     ...report.groups.map((group, index) => {
-      const provider = group.providerName
-        ? formatProviderLabel(group.providerName)
-        : formatCodexProviderLabel(group.provider);
+      const provider = formatCodexProviderLabel(group.provider);
       const status = formatRequestStatus(group.status);
       const httpStatus = group.httpStatus === null
         ? ""
@@ -283,18 +278,15 @@ function formatMetricsAggregate(
 function formatMetricsGroup(
   group: {
     provider: string | null;
-    providerName?: string;
     model: string | null;
     aggregate: Parameters<typeof formatMetricsAggregate>[0];
   },
   index: number,
   view: "providers" | "models",
 ): string {
-  const provider = group.providerName
-    ? formatProviderLabel(group.providerName)
-    : group.provider === null
-      ? "未知提供商"
-      : formatCodexProviderLabel(group.provider);
+  const provider = group.provider === null
+    ? "未知提供商"
+    : formatCodexProviderLabel(group.provider);
   const label = view === "models"
     ? `${provider} / ${group.model ?? "未知模型"}`
     : provider;

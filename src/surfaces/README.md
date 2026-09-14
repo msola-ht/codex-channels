@@ -111,7 +111,7 @@ Turn、Thread 或 Surface 关闭时清理。
 指标读取失败时只显示“统计暂不可用”。
 原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与
 OpenAI 周限；配置的自定义主模型 Provider 追加“ · 自定义”标识（例如“OpenAI · 自定义”），
-直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
+历史直接 API 指标按记录中的稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
 `elapsed-duration.ts` 只把已确认的 Turn、操作、推理状态等毫秒值或账户用量秒数格式化为三个 Surface

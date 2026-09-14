@@ -53,12 +53,6 @@ export interface GatewayConfigDocument {
   };
   experimental: { plugin_api: boolean };
   scheduled_tasks: { enabled: boolean };
-  api_providers: Array<{
-    id: string;
-    name: string;
-    protocol: "responses";
-    endpoint: string;
-  }>;
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
   webui?: {

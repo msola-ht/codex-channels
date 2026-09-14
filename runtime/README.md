@@ -145,9 +145,6 @@
 - `private-file-lock.mjs` / `private-file-lock.d.mts`：为跨越异步配置事务的私有文件更新提供
   PID 所有权、陈旧锁回收和替换锁保护，锁目录与锁文件同样使用当前平台私有权限，供 Provider 管理与
   微信配置/凭据事务串行写入。
-- `api-provider-credential.mjs` / `api-provider-credential.d.mts`：按第三方 API 提供商 ID 隔离
-  API Key，严格校验私有目录、文件所有者、权限与符号链接；macOS/Linux 保留现有私有文件格式，
-  Windows 使用当前用户 DPAPI 主密钥和 AES-256-GCM 记录，不在磁盘保存明文 Key。
 - `windows-dpapi.mjs` / `windows-dpapi.d.mts` / `windows-dpapi.ps1`：通过 PowerShell 7 调用
   `ProtectedData` 的 `CurrentUser` 作用域保护和解保护小型二进制主密钥；只接受 Base64 JSON stdin/stdout，
   不把输入或底层异常写入日志。

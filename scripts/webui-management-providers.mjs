@@ -1,26 +1,3 @@
-export function apiProviderResourceStateFromList(providers) {
-  return providers.map(({ id, name, protocol, endpoint, hasApiKey }) => ({
-    id,
-    name,
-    protocol,
-    endpoint,
-    hasApiKey: hasApiKey === true,
-  }))
-}
-
-export function redactApiProviderResult(result) {
-  if (!result || typeof result !== "object") return { action: "completed" }
-  const provider = result.provider && typeof result.provider === "object"
-    ? { id: result.provider.id, name: result.provider.name, protocol: result.provider.protocol, endpoint: result.provider.endpoint, hasApiKey: result.provider.hasApiKey }
-    : result.provider
-  return {
-    action: result.action,
-    ...(provider === undefined ? {} : { provider }),
-    activation: result.activation,
-    activationResult: result.activationResult,
-  }
-}
-
 export function projectProviderManagementState(state) {
   const providers = []
   const addProvider = (provider) => {

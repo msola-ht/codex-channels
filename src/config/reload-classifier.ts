@@ -118,11 +118,6 @@ function restartRequiredReasons(
     ],
     [configChange("observability.log-level"), current.logLevel, next.logLevel],
     [
-      configChange("api.providers"),
-      JSON.stringify(current.apiProviders),
-      JSON.stringify(next.apiProviders),
-    ],
-    [
       configChange("metrics.storage"),
       JSON.stringify(current.metricsStorage),
       JSON.stringify(next.metricsStorage),

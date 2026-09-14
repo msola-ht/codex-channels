@@ -43,7 +43,6 @@ import {
   resolveProxyEnvironment,
   selectHttpProxyUrl,
 } from "../runtime/network-proxy.mjs";
-import { readApiProviderKey } from "../runtime/api-provider-credential.mjs";
 import {
   assertPrivateDirectoryAccessSync,
   assertPrivateFileAccessSync,
@@ -324,25 +323,6 @@ if (document) {
   }
 
   setSection("扩展能力");
-  const apiProviders = Array.isArray(document.api_providers)
-    ? document.api_providers.map(table)
-    : [];
-  for (const provider of apiProviders) {
-    try {
-      readApiProviderKey(join(dataDir, "credentials"), provider.id);
-      record(
-        `第三方 API ${typeof provider.name === "string" ? provider.name : provider.id}`,
-        true,
-        "Responses 配置与私有凭据有效（内容已隐藏）",
-      );
-    } catch {
-      record(
-        `第三方 API ${typeof provider.name === "string" ? provider.name : provider.id}`,
-        false,
-        "私有凭据不存在或权限无效；请重新运行 codexc setup",
-      );
-    }
-  }
   const experimental = table(document.experimental);
   const pluginApiEnabled = experimental.plugin_api === true;
   note(

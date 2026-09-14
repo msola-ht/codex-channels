@@ -87,15 +87,6 @@ const weixinSetupSchema = z.strictObject({
   ),
 });
 
-const apiProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
-
-const apiProviderSchema = z.strictObject({
-  id: apiProviderIdSchema,
-  name: z.string().trim().min(1).max(64),
-  protocol: z.literal("responses"),
-  endpoint: z.url(),
-});
-
 const webuiSchema = z.strictObject({
   host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(8787),
@@ -212,10 +203,6 @@ const gatewayDocumentSchema = z.strictObject({
   scheduled_tasks: z.strictObject({
     enabled: z.boolean().default(false),
   }).default({ enabled: false }),
-  api_providers: z.array(apiProviderSchema).refine(
-    (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
-    "api_providers 不能包含重复 ID",
-  ).default([]),
   storage: z.strictObject({
     database_path: z.string().min(1).default("data/gateway.sqlite3"),
   }).default({ database_path: "data/gateway.sqlite3" }),

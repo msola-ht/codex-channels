@@ -82,6 +82,7 @@ Codex 用户配置：
 ```
 
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
+旧配置若包含已移除的 `api_providers`，升级前需按[使用指导](docs/user-guide.md#5-后台服务与更新)手工删除。
 
 ## 专题文档
 

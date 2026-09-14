@@ -1598,7 +1598,6 @@ describe("provider-aware conversation command formatting", () => {
         },
         latestDirectApi: {
           provider: "bltcy",
-          providerName: "BLTCY",
           model: "gpt-5.6-luna",
           status: "completed",
           httpStatus: 200,
@@ -1626,7 +1625,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("Turn：8 次");
     expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
     expect(rendered).toContain("### 最近直接 API");
-    expect(rendered).toContain("API 提供商：BLTCY");
+    expect(rendered).toContain("API 提供商：bltcy");
     expect(rendered).toContain("调用模型：gpt-5.6-luna");
     expect(rendered).toContain("状态：已完成 · HTTP 200");
     expect(rendered).not.toContain("耗时");
@@ -1716,7 +1715,6 @@ describe("provider-aware conversation command formatting", () => {
           aggregate,
         }, {
           provider: "custom",
-          providerName: "第三方中转",
           model: "gpt-5.6-luna",
           aggregate: { ...aggregate, requestCount: 3 },
         }],
@@ -1727,7 +1725,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("请求指标 · 按模型");
     expect(rendered).toContain("范围：最近 7 天");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
-    expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
+    expect(rendered).toContain("custom / gpt-5.6-luna");
     expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
     expect(rendered).not.toContain("耗时");
     expect(rendered).not.toContain("延迟");
@@ -1755,7 +1753,6 @@ describe("provider-aware conversation command formatting", () => {
           lastOccurredAtMs: 1_785_640_800_000,
         }, {
           provider: "custom",
-          providerName: "第三方中转",
           model: "gpt-5.6-luna",
           status: "incomplete",
           httpStatus: 429,
@@ -1772,7 +1769,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("异常率：3%");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("WebSocket 提前关闭 · 失败 · 2 次");
-    expect(rendered).toContain("第三方中转 / gpt-5.6-luna");
+    expect(rendered).toContain("custom / gpt-5.6-luna");
     expect(rendered).toContain("rate_limit_error · 未完成 · HTTP 429 · 1 次");
     expect(rendered).toContain("最近发生：");
   });

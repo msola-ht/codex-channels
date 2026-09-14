@@ -73,12 +73,6 @@ export interface GatewayConfig {
   reasoningEnabled: boolean;
   pluginApiEnabled: boolean;
   scheduledTasksEnabled: boolean;
-  apiProviders: ReadonlyArray<{
-    id: string;
-    name: string;
-    protocol: "responses";
-    endpoint: string;
-  }>;
   credentialsDirectory: string;
   stateDatabasePath: string;
   approvalTimeoutMs: number;
@@ -286,7 +280,6 @@ function loadValidatedConfigDocument(
     reasoningEnabled: raw.display.reasoning,
     pluginApiEnabled: raw.experimental.plugin_api,
     scheduledTasksEnabled: raw.scheduled_tasks.enabled,
-    apiProviders: raw.api_providers.map(toApiProviderConfig),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,
@@ -298,34 +291,6 @@ function loadValidatedConfigDocument(
       maxRows: raw.metrics.storage.max_rows,
     },
   };
-}
-
-function toApiProviderConfig(
-  raw: GatewayConfigDocument["api_providers"][number],
-): GatewayConfig["apiProviders"][number] {
-  return {
-    ...raw,
-    endpoint: validateApiEndpoint(raw.endpoint, `api_providers.${raw.id}.endpoint`),
-  };
-}
-
-function validateApiEndpoint(value: string, field: string): string {
-  let endpoint: URL;
-  try {
-    endpoint = new URL(value);
-  } catch {
-    throw new ConfigurationError(`${field} 必须是有效 URL`);
-  }
-  const loopback = endpoint.hostname === "localhost"
-    || endpoint.hostname === "127.0.0.1"
-    || endpoint.hostname === "[::1]";
-  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
-    throw new ConfigurationError(`${field} 必须使用 HTTPS；本机回环地址可以使用 HTTP`);
-  }
-  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
-    throw new ConfigurationError(`${field} 不能包含凭据、Query 或 URL Fragment`);
-  }
-  return endpoint.toString();
 }
 
 function validateWorkspaces(

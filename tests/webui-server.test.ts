@@ -354,39 +354,19 @@ describe("webui server", () => {
     });
   });
 
-  it("manages direct API Providers with a one-time confirmation token and no key echo", async () => {
+  it("does not expose the removed direct API Provider management route", async () => {
     const fixture = createFixture();
-    const configPath = join(fixture.home, "config.toml");
-    const document = readGatewayConfig(configPath);
-    document.api_providers = [];
-    writeGatewayConfig(configPath, document);
     const { origin } = await startServer(fixture.environment, undefined, {
       token: "webui-token",
       managementOrigin: "http://127.0.0.1:0",
     });
-    const headers = { authorization: "Bearer webui-token", origin: "http://127.0.0.1:0", "content-type": "application/json" };
-    const preview = await fetch(`${origin}/api/v1/management/api-providers/preview`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ operation: "create", provider: { id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" } }),
+
+    const response = await fetch(`${origin}/api/v1/management/api-providers`, {
+      headers: { authorization: "Bearer webui-token" },
     });
-    expect(preview.status).toBe(200);
-    const previewBody = await preview.json() as { confirmationToken: string; preview: { provider: { apiKeyChange: boolean } } };
-    expect(previewBody.preview.provider.apiKeyChange).toBe(true);
-    expect(JSON.stringify(previewBody)).not.toContain("secret-key");
-    const apply = await fetch(`${origin}/api/v1/management/api-providers`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ operation: "save", provider: { operation: "create", id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" }, confirmationToken: previewBody.confirmationToken }),
-    });
-    expect(apply.status).toBe(200);
-    expect(JSON.stringify(await apply.json())).not.toContain("secret-key");
-    const replay = await fetch(`${origin}/api/v1/management/api-providers`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ operation: "save", provider: { operation: "create", id: "relay", name: "Relay", endpoint: "https://relay.example/v1", apiKey: "secret-key" }, confirmationToken: previewBody.confirmationToken }),
-    });
-    expect(replay.status).toBe(409);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
   });
 
   it("manages unified Provider settings with the shared token and one-time confirmation", async () => {

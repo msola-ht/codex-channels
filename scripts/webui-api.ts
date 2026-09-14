@@ -442,54 +442,6 @@ export interface ManagementTaskPreview {
   requiresConfirmation: true
 }
 
-export type ManagementApiProviderMutationInput =
-  | {
-      operation: "save"
-      provider: { id: string; name: string; endpoint: string; apiKey?: string }
-    }
-  | { operation: "delete"; id: string }
-
-export interface ManagementApiProvider {
-  id: string
-  name: string
-  protocol: "responses"
-  endpoint: string
-  hasApiKey: boolean
-}
-
-export interface ManagementApiProviderActivation {
-  status: string
-  target: string
-  commands: readonly string[]
-}
-
-export interface ManagementApiProviderPreview {
-  operation: "create" | "update" | "delete"
-  provider: {
-    id: string
-    name: string
-    protocol?: "responses"
-    endpoint?: string
-    apiKeyChange?: boolean
-  }
-  activation: ManagementApiProviderActivation
-}
-
-export interface ManagementApiProviderPreviewResponse {
-  preview: ManagementApiProviderPreview
-  resourceRevision: string
-  confirmationToken: string
-  confirmationExpiresAt: number
-}
-
-export interface ManagementApiProviderMutationResponse {
-  action: string
-  provider?: ManagementApiProvider | { id: string; name: string } | string
-  activation?: string
-  activationResult?: ManagementApiProviderActivation
-  auditStatus?: "recorded" | "degraded"
-}
-
 export interface ManagementProviderSettingsResponse {
   observedAt: string
   resourceRevision: string

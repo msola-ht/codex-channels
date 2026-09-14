@@ -7,7 +7,6 @@ import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
-import { runApiProviderSetup } from "./api-provider-setup.mjs";
 import { runSkillSetup } from "./skill-setup.mjs";
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
@@ -29,7 +28,6 @@ export async function runSetup({
   deepseekSetup = runDeepseekSetup,
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
-  apiProviderSetup = runApiProviderSetup,
   skillSetup = runSkillSetup,
   codexDefaultsSetup = runCodexDefaultsSetup,
   codexUserSettingsSetup = runCodexUserSettingsSetup,
@@ -124,7 +122,6 @@ export async function runSetup({
           output,
           prompts,
           deepseekSetup,
-          apiProviderSetup,
           openCodeGoSetup,
           modelProviderDefaultSetup,
           modelWindowSetup,
@@ -161,7 +158,6 @@ async function runModelSetup({
   output,
   prompts,
   deepseekSetup,
-  apiProviderSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   modelWindowSetup,
@@ -204,7 +200,6 @@ async function runModelSetup({
         output,
         prompts,
         deepseekSetup,
-        apiProviderSetup,
         openCodeGoSetup,
         modelProviderDefaultSetup,
         modelWindowSetup,
@@ -254,7 +249,6 @@ async function runThirdPartyModelSetup({
   output,
   prompts,
   deepseekSetup,
-  apiProviderSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   modelWindowSetup,
@@ -296,11 +290,6 @@ async function runThirdPartyModelSetup({
           label: "共享第三方子代理",
           hint: "选择已配置 Provider 与模型，或停用 agents.external",
         },
-        {
-          value: "api_provider",
-          label: "直接 API Provider（预留）",
-          hint: "只保存未来直接 API 注册；不进入 App Server 或 /model",
-        },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
     });
@@ -318,8 +307,6 @@ async function runThirdPartyModelSetup({
       result = await modelWindowSetup({ input, output, prompts, allowBack: true });
     } else if (module === "agents") {
       result = await agentsSetup({ input, output, prompts, allowBack: true });
-    } else if (module === "api_provider") {
-      result = await apiProviderSetup({ input, output, prompts });
     } else {
       throw new Error(`未知第三方设置：${String(module)}`);
     }
@@ -419,7 +406,6 @@ function setupFallbackActivation(module, result) {
     "opencode-go": "restart-all",
     provider_default: "restart-app-server",
     agents: "restart-all",
-    api_provider: "restart-gateway",
   }[module];
 }
 

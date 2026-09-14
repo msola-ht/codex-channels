@@ -13,14 +13,13 @@ describe("RequestMetricsQueryAdapter", () => {
     const adapter = new RequestMetricsQueryAdapter(
       store,
       { modelSettingsForThread: () => undefined } as never,
-      [],
     );
 
     expect(adapter.threadTurnCount("thread-1")).toBe(4);
     expect(threadTurnCount).toHaveBeenCalledWith("thread-1");
   });
 
-  it("maps provider labels without leaking Store pricing rows", () => {
+  it("maps request metrics without leaking Store pricing rows", () => {
     const aggregate = vi.fn(() => ({
       startAtMs: 1,
       endAtMs: 2,
@@ -70,7 +69,6 @@ describe("RequestMetricsQueryAdapter", () => {
     const adapter = new RequestMetricsQueryAdapter(
       store,
       { modelSettingsForThread: () => ({ modelProvider: "custom" }) } as never,
-      [{ id: "custom", name: "Custom API" }],
       () => 2,
     );
 
@@ -78,16 +76,13 @@ describe("RequestMetricsQueryAdapter", () => {
       modelProvider: "custom",
       latestDirectApi: {
         provider: "custom",
-        providerName: "Custom API",
       },
     });
     expect(adapter.aggregate("providers", "all").groups[0]).toMatchObject({
       provider: "custom",
-      providerName: "Custom API",
     });
     expect(adapter.errors("all").groups[0]).toMatchObject({
       provider: "custom",
-      providerName: "Custom API",
     });
     expect(aggregate).toHaveBeenCalledWith({
       dimension: "provider",

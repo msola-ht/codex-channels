@@ -107,12 +107,12 @@
   始终保留真实回环连接、精确 Origin、JSON 请求约束、限速和审计；WebUI 配置令牌时复用 `Authorization: Bearer` 鉴权。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
-- `webui-management-providers.mjs`：Provider 管理结果脱敏、资源修订快照和 Provider 状态投影；不读取或返回凭据正文。
+- `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
 - `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek Setup 的配置、默认切换、停止、删除与恢复接口，为 WebUI 提供账户资源投影、统一预览、确认后写入和结果脱敏；不返回凭据正文。
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
-- `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置与 Provider 的输入校验、预览投影、缓存查询，以及
+- `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
   WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务只负责路由和领域处理。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标维护和源码更新异步任务；
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消。
@@ -135,7 +135,7 @@
   写入 stderr，并按每行一个事件把脱敏结果写入 stdout；默认 `codexc setup` 仍保持纯交互文本输出。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
-  共享第三方子代理、直接 API Provider 数量、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
+  共享第三方子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
   允许名单、代理值或 Provider URL。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
   新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
@@ -280,12 +280,6 @@
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 系统设置中的调试快捷开关使用 `debug` / `info`，
   高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
-- `api-provider-management.mjs` / `api-provider-management.d.mts`：提供不依赖终端交互的直接 API
-  Provider 脱敏列表、输入校验、增改和删除事务；返回值只包含 `hasApiKey`，不返回凭据，供 Setup
-  与受保护的管理 API 复用；当前 WebUI 设置页不展示这个没有运行时调用方的预留注册表。
-- `api-provider-setup.mjs` / `api-provider-setup.d.mts`：编排多个 Responses 兼容直接 API Provider
-  的新增、编辑、删除 prompts，并调用共享管理用例；当前没有运行时调用方，保留给后续明确设计的
-  直接 API 功能。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；安装与恢复均提供脱敏预览、明确确认和无终端事务接口，CLI 只负责询问与展示；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小与 JSON 结构后写入

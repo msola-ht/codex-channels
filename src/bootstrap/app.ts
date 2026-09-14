@@ -562,7 +562,7 @@ export class GatewayApplication {
         },
       },
       this.providerAccounts,
-      new RequestMetricsQueryAdapter(metricsStore, this.router, config.apiProviders),
+      new RequestMetricsQueryAdapter(metricsStore, this.router),
       this.workspacePermissions,
       {
         recordTurnError: (record) => {

@@ -206,6 +206,11 @@ codexc doctor
 
 更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断计划清单工具与实验性上下文管理。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
 
+从包含直接 API Provider 预留注册表的旧版升级前，先备份 `~/.codex-connect/config.toml`，并删除
+顶层 `api_providers = []` 或全部 `[[api_providers]]` 表。当前严格 Schema 不再接受该字段，也不会
+隐式迁移。历史 `~/.codex-connect/credentials/api-providers/` 文件不会再被读取，也不会自动删除；
+确认不再需要后可自行处理。
+
 从仍包含远程指标中心的旧源码直接更新时，`codexc update` 会在候选预检中识别
 `[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]`，切换后先停止并注销旧的本机指标中心
 后台服务，再备份 `config.toml` 并移除这些旧配置段。更新不会删除旧的中心 SQLite 或同步水位文件；

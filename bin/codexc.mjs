@@ -164,7 +164,7 @@ const helpText = {
 常用入口：
   codexc setup → Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 计划清单工具 / 实验性上下文管理 / 沙盒、审批与网络
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
-  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）
+  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 项目技能（安装或卸载项目技能）
 

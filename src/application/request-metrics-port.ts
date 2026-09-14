@@ -45,7 +45,6 @@ export interface ThreadRequestMetricsAggregate {
 
 export interface DirectApiRequestMetricsSummary {
   provider: string;
-  providerName?: string;
   model: string | null;
   status: "completed" | "failed" | "incomplete" | "unknown";
   httpStatus: number | null;
@@ -115,7 +114,6 @@ export interface RequestMetricsAggregate {
 
 export interface RequestMetricsGroup {
   provider: string | null;
-  providerName?: string;
   model: string | null;
   aggregate: RequestMetricsAggregate;
 }
@@ -132,7 +130,6 @@ export interface RequestMetricsAggregateReport {
 
 export interface RequestMetricsErrorGroup {
   provider: string;
-  providerName?: string;
   model: string | null;
   status: "failed" | "incomplete" | "unknown";
   httpStatus: number | null;

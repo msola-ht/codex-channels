@@ -158,8 +158,7 @@ Files API 或其他图片入口。图片 Token 由 DeepSeek 按尺寸换算并�
 Pro 仍为文字模型，收到图片时会在 Turn 前明确拒绝；需要看图时使用 `/model` 切换到
 `deepseek-flash`。Gateway 不再把图片转交给另一套外部视觉 API。
 
-旧版 `[vision]` 配置已删除；`codexc update` 会先创建私有备份，再自动移除该配置段。通用 `api_providers`
-注册表及其隔离 API Key 仍保留给未来明确设计的直接 API 功能，现阶段没有运行时调用方；旧的
+旧版 `[vision]` 配置已删除；`codexc update` 会先创建私有备份，再自动移除该配置段。旧的
 `credentials/vision/` 单视觉凭据不再读取，也不会自动删除。
 
 固定模式下，DeepSeek 代理服务于主 App Server；切换模式按需启动，若共享 `agents.external`
