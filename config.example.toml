@@ -42,6 +42,10 @@ sandbox = "workspace-write"
 # name = "my_client"
 # title = "My Codex Client"
 # version = "1.0.0"
+# App Server 由服务进程启动、自身没有终端，模型上游 UA 的终端标识缺省为 unknown；
+# 取值由运行 `codexc config`、安装或更新服务的命令按其终端自动探测后写入，
+# 也可以直接填写「终端名」或「终端名/版本」；重启服务后生效：
+# terminal_identity = "iTerm.app/3.5.14"
 
 [approval]
 timeout_seconds = 900

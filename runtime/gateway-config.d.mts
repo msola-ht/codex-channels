@@ -42,6 +42,7 @@ export interface GatewayConfigDocument {
       version?: string;
     };
     upstream_user_agent?: string;
+    terminal_identity?: string;
   };
   approval: { timeout_seconds: number };
   conversation: { idle_release_minutes: number };
@@ -84,6 +85,7 @@ export interface GatewayConfigDocument {
 export class GatewayConfigConflictError extends Error {}
 
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
+export const terminalIdentityPattern: RegExp;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;
 export function validateCodexConfigDocument(document: unknown): GatewayConfigDocument["codex"];

@@ -38,7 +38,9 @@
   App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2 以及可重建的会话展示缓存），离线复核
   后启动并通过 Socket 与监管拓扑确认核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线
   更新，不擅自安装或启动，检测到
-  `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。公开服务命令复用同一按
+  `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。真正重启核心服务前，
+  若 `[codex].terminal_identity` 未配置且运行更新命令的终端可探测，则按该终端补入该配置并提示
+  一次，使值随下一次 App Server 启动生效；其余服务命令不改写该配置。公开服务命令复用同一按
   目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
   源码已经切换后刷新全局命令或本地更新失败时仍保留新源码与旧源码备份，并先尝试恢复核心服务；
   服务恢复也失败时同时报告两个错误；失败对象另附失败阶段、已完成阶段、已应用改动范围、服务恢复状态
@@ -249,11 +251,14 @@
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
-  设置脱敏读取与明确修改接口；只接受受控的显示、系统（含一键官方 TUI 身份）、自动化、网络、
+  设置脱敏读取与明确修改接口；只接受受控的显示、系统（含一键官方 TUI 身份与模型上游终端标识）、自动化、网络、
   高级、Telegram 格式、WebUI、指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，
   凭据和网络读取只显示是否已配置；
   读取同时返回原始文件修订，修改必须携带并在应用前复核；最终提交复用 Gateway Config 的共享写锁
-  和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置。
+  和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置；`applyTerminalIdentityFromEnvironment`
+  在 `[codex].terminal_identity` 未配置且运行命令的终端可探测时按该终端补入，供
+  `codexc service install` 与 `codexc update` 复用；`codexc config` 与 WebUI 改用同一探测
+  结果预填，由用户确认后写入。
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
@@ -261,8 +266,10 @@
   开发中的 Plugin API；完整日志等级与系统设置中的调试快捷开关共用 `debug-setup.mjs` 的唯一写入入口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
-- `config-system-menu.mjs`：独立管理调试快捷开关、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace 和
-  Gateway 新 Thread 模型覆盖；快捷开关只在 `info` / `debug` 间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`。
+- `config-system-menu.mjs`：独立管理调试快捷开关、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
+  Gateway 新 Thread 模型覆盖、一键官方 TUI 身份与模型上游终端标识；快捷开关只在 `info` / `debug`
+  间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；终端标识预填运行该
+  命令的终端探测结果并允许编辑，留空即删除配置。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；

@@ -17,6 +17,7 @@ import {
   validateGatewayConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { applyTerminalIdentityFromEnvironment } from "./config-management.mjs";
 import {
   appServerSocketAcceptsWebSocket,
   inspectAppServerSupervisorState,
@@ -240,7 +241,10 @@ export async function updateLocalInstallation(environment = process.env, options
   const stopServices = options.stopServices
     ?? (() => runCoreServiceAction("stop", environment));
   const startServices = options.startServices
-    ?? (() => runCoreServiceAction("start", environment));
+    ?? (() => {
+      recordTerminalIdentityBeforeServiceRestart(environment);
+      return runCoreServiceAction("start", environment);
+    });
   const waitForServices = options.waitForServices
     ?? (() => waitForCoreServices(environment));
   const databaseOptions = {
@@ -896,6 +900,26 @@ async function stopCoreServices(stopServices, startServices, waitForServices) {
     }
     throw stopError;
   }
+}
+
+/**
+ * 本地更新真正重启核心服务之前，按运行更新命令的终端补入缺失的 `[codex].terminal_identity`，
+ * 使记录下来的值在下一次 App Server 启动时立即生效。已配置或探测不到终端时不做修改；补入失败
+ * 只提示并继续，不阻塞更新恢复服务。
+ */
+function recordTerminalIdentityBeforeServiceRestart(environment) {
+  let terminalIdentity;
+  try {
+    terminalIdentity = applyTerminalIdentityFromEnvironment(environment);
+  } catch (error) {
+    writeCliMessage(
+      "failure",
+      `未写入模型上游终端标识，更新继续：${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+  if (terminalIdentity === null) return;
+  writeCliMessage("note", `已按当前终端记录模型上游终端标识：${terminalIdentity}`);
 }
 
 function runCoreServiceAction(action, environment) {

@@ -50,6 +50,7 @@ import {
   sharedProviderProxyKey,
 } from "../runtime/opencode-go-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "../runtime/opencode-go-quota-windows.mjs";
+import { applyTerminalIdentityFromEnvironment } from "../scripts/config-management.mjs";
 import { createProxyFetch } from "../dist/bootstrap/proxy-fetch.js";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import {
@@ -603,6 +604,7 @@ async function runServiceAppServer(args) {
     throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
   }
   runtime.environment.CODEX_CONNECT_SERVICE_ROLE = "app-server";
+  applyAppServerTerminalIdentity(runtime.environment, validatedCodex.terminal_identity);
   const { defaultWorkspace } = readWorkspaceConfig(runtime.document);
   const appServerRuntime = resolveAppServerRuntime(
     runtime.document,
@@ -1108,6 +1110,44 @@ async function runServiceAppServer(args) {
   }
 }
 
+/**
+ * 把 `[codex].terminal_identity` 翻译成 Codex 终端探测读取的环境变量，供 App Server 进程在
+ * 模型上游 User-Agent 中上报终端标识。App Server 由服务进程启动、自身没有终端，未配置时保持
+ * 环境原样，由 App Server 自行探测。
+ */
+function applyAppServerTerminalIdentity(environment, terminalIdentity) {
+  if (terminalIdentity === undefined) return;
+  const separator = terminalIdentity.indexOf("/");
+  if (separator < 0) {
+    environment.TERM_PROGRAM = terminalIdentity;
+    delete environment.TERM_PROGRAM_VERSION;
+    return;
+  }
+  environment.TERM_PROGRAM = terminalIdentity.slice(0, separator);
+  environment.TERM_PROGRAM_VERSION = terminalIdentity.slice(separator + 1);
+}
+
+/**
+ * 安装服务时按运行命令的终端补入缺失的 `[codex].terminal_identity`：App Server 由服务进程
+ * 启动、自身没有终端，只有用户直接运行的安装命令能探测到其实际使用的终端。已配置或探测不到终端
+ * 时保持配置原样；补入失败只提示并继续，不阻塞安装。更新与配置时机分别由 `local-update.mjs`
+ * 与 `config-system-menu.mjs` 处理。
+ */
+function recordInstalledTerminalIdentity(environment) {
+  let terminalIdentity;
+  try {
+    terminalIdentity = applyTerminalIdentityFromEnvironment(environment);
+  } catch (error) {
+    printCliMessage(
+      "failure",
+      `未写入模型上游终端标识，服务操作继续：${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+  if (terminalIdentity === null) return;
+  printCliMessage("note", `已按当前终端记录模型上游终端标识：${terminalIdentity}`);
+}
+
 function withoutManagedProviderApiKeys(environment) {
   const childEnvironment = { ...environment };
   const managedKeys = new Set(
@@ -1222,6 +1262,7 @@ async function service(args) {
   }
   if (action === "install") {
     const runtime = configuredEnvironment();
+    recordInstalledTerminalIdentity(runtime.environment);
     const { prepareServiceInstall } = await import(
       "../scripts/service-install-management.mjs"
     );

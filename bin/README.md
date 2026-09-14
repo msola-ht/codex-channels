@@ -67,7 +67,12 @@ Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）�
 再次使用自动启动。代理指标通过私有 Unix Socket
 发送给 Gateway，Gateway 生命周期不再控制模型数据通路。入口持有独立 `0600` 监管 Socket，
 用于跨进程互斥和向前台启动器证明精确 Provider 拓扑；它同时集中拒绝已被裸进程占用的 App
-Server Socket。
+Server Socket。启动主 App Server 与 Provider App Server 前，入口把 `[codex].terminal_identity`
+写入子进程的 `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，供 Codex 在模型上游 `User-Agent` 中上报
+终端标识；未配置时保持环境原样，由 Codex 自行探测。`codexc service install` 在生成服务定义
+前、本地更新真正重启核心服务前，若该值未配置且运行命令的终端可探测，则按该终端补入配置并
+提示一次；已配置或探测不到终端时保持配置不变；补入失败只提示原因并继续当前命令。`start`、
+`restart`、`reload`、`stop`、`status`、`logs` 与 `uninstall` 不改写该配置。
 
 所有公开命令和子命令都支持 `-h` / `--help`；`gateway` 与 `service-app-server` 仅作为服务模板的
 内部进程入口，不出现在公开命令列表。CLI 只负责参数校验、环境装配和进程分发，不保存

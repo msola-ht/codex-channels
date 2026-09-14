@@ -130,6 +130,18 @@ const upstreamUserAgentSchema = z.string().min(1).max(512).refine(
   "upstream_user_agent 必须是 1–512 个可显示 ASCII 字符，且不允许首尾空白或其他控制字符",
 );
 
+/** `[codex].terminal_identity` 的字面格式：`终端名` 或 `终端名/版本`。 */
+export const terminalIdentityPattern =
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/u;
+
+const terminalIdentitySchema = z.string().max(
+  64,
+  "terminal_identity 长度不能超过 64 个字符",
+).regex(
+  terminalIdentityPattern,
+  "terminal_identity 必须是「终端名」或「终端名/版本」，字符限字母、数字、.、_、-，且以字母或数字开头",
+);
+
 function containsControlCharacter(value) {
   for (const character of value) {
     const code = character.codePointAt(0);
@@ -163,6 +175,7 @@ const codexSchema = z.strictObject({
   sandbox: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
   client_identity: clientIdentitySchema.optional(),
   upstream_user_agent: upstreamUserAgentSchema.optional(),
+  terminal_identity: terminalIdentitySchema.optional(),
 });
 
 const gatewayDocumentSchema = z.strictObject({

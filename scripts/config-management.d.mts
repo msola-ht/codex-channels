@@ -37,6 +37,7 @@ export interface GatewaySettings {
         version: string | null;
       };
       upstreamUserAgent: string | null;
+      terminalIdentity: string | null;
       defaults: {
         name: string;
         version: string;
@@ -97,6 +98,7 @@ export type GatewaySettingInput =
           version?: string;
         } | null;
         upstreamUserAgent: string | null;
+        terminalIdentity: string | null;
       };
     }
   | { kind: "automation.scheduled-tasks"; value: boolean }
@@ -130,6 +132,10 @@ export type GatewaySettingInput =
     };
 
 export function loadGatewaySettings(environment?: NodeJS.ProcessEnv): GatewaySettings;
+
+export function applyTerminalIdentityFromEnvironment(
+  environment?: NodeJS.ProcessEnv,
+): string | null;
 
 export function validateNetworkProxyValue(
   field: "http_proxy" | "https_proxy" | "all_proxy" | "no_proxy" | string,
