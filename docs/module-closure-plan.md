@@ -242,5 +242,6 @@ Doctor、飞书与微信 Setup 共 9 个定向测试文件通过（62 项通过�
 批次五已完成；Provider Runtime 已按受管设置、自定义 Provider、启动/凭据/角色拆分，App Server
 与 Gateway 进程生命周期已移入 `runtime`，服务子命令实现已移入 `scripts`，WebUI 管理接口已按
 Codex 设置、Gateway 设置、Provider/账户、计划任务、服务与状态五组资源路由拆分；运行时目录依赖
-门禁已接入 `npm run check`，npm 包只发布显式列出的运行时脚本、声明与平台控制文件。下一步为批次六，
-高风险数据与代理边界需按其中的独立确认条件实施。
+门禁已接入 `npm run check`，npm 包只发布显式列出的运行时脚本、声明与平台控制文件。批次六已完成
+纯响应指标观察器提取和指标 Store 窄端口拆分，尚未勾选完成；下一步是需要单独确认数据处理与回滚
+方案的 SQLite Schema 清理。

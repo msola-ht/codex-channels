@@ -320,7 +320,7 @@ export interface StoredModelRequestMetricsErrorReport {
   totalGroupCount: number;
 }
 
-export interface ModelRequestMetricsStore {
+export interface ModelRequestMetricsWriteStore {
   record(sample: ModelRequestMetricSample): void;
   recordBatch?(samples: readonly ModelRequestMetricSample[]): void;
   recordSubagentThread(details: {
@@ -336,52 +336,117 @@ export interface ModelRequestMetricsStore {
     parentTurnId: string;
     agentPath: string;
   }): void;
+  close(): void;
+}
+
+export interface ProviderTokenMetricQuery {
+  provider: string;
+  startAtMs: number;
+  endAtMs: number;
+}
+
+export interface StoredProviderTokenMetric {
+  requestStartedAtMs: number;
+  recordedAtMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  quotaWindows: ReadonlyArray<{
+    windowId: string;
+    resetsAt: number | null;
+    usedPercentMillionths: number | null;
+    status: string | null;
+  }> | null;
+}
+
+export interface ModelRequestMetricsRequestQueryStore {
   requestRowsAfter(afterLocalId: number, limit: number): StoredModelRequestMetric[];
+  recent(limit: number): StoredModelRequestMetric[];
+  page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage;
+  aggregate(
+    query: ModelRequestMetricsAggregationQuery,
+  ): StoredModelRequestMetricsReport;
+  daily(query: {
+    startAtMs: number;
+    endAtMs: number;
+  }): StoredModelRequestMetricsDailyRow[];
+  errors(
+    query: ModelRequestMetricsErrorQuery,
+  ): StoredModelRequestMetricsErrorReport;
+  forEachProviderTokenMetric(
+    query: ProviderTokenMetricQuery,
+    visit: (metric: StoredProviderTokenMetric) => void,
+  ): void;
+  count(): number;
+}
+
+export interface ModelRequestMetricsThreadQueryStore {
   subagentThreadsAfter(
     recordedAtMs: number,
     afterThreadId?: string,
   ): StoredSubagentThreadRecord[];
-  recent(limit: number): StoredModelRequestMetric[];
-  aggregate(
-    query: ModelRequestMetricsAggregationQuery,
-  ): StoredModelRequestMetricsReport;
-  errors(
-    query: ModelRequestMetricsErrorQuery,
-  ): StoredModelRequestMetricsErrorReport;
-  quotaHistory?(query: QuotaHistoryQuery): StoredQuotaPeriod[];
-  upsertAccountSnapshot?(snapshot: {
-    sourceId: string;
-    provider: string;
-    accountId: string | null;
-    displayName: string;
-    enabled: boolean;
-    observedAtMs: number;
-    available: boolean;
-    usage: unknown;
-    limits: unknown;
-  }): void;
-  latestAccountSnapshot?(provider: string, accountId?: string): {
-    provider: string;
-    accountId: string | null;
-    observedAtMs: number;
-    available: boolean;
-    usage: unknown;
-    limits: unknown;
-  } | null;
-  latestAccountSnapshots?(): Array<{
-    provider: string;
-    accountId: string | null;
-    observedAtMs: number;
-    available: boolean;
-    usage: unknown;
-    limits: unknown;
-  }>;
+  threadSummary(threadId: string): StoredThreadRequestMetricsSummary;
   threadTurnTaskSummary(
     threadId: string,
     turnId: string,
   ): StoredTurnRequestMetricsSummary | null;
-  count(): number;
-  close(): void;
+  threadTurnSummary(
+    threadId: string,
+    turnId: string,
+  ): StoredTurnRequestMetricsSummary | null;
+  threadTurnSummaries(threadId: string): StoredThreadTurnSummary[];
+  threadTurnCount(threadId: string): number | null;
+  threadList(): StoredThreadListItem[];
+  subagentThread(threadId: string): {
+    agentPath: string | null;
+    parentThreadId: string | null;
+    parentTurnId: string | null;
+  };
+}
+
+export interface ModelRequestAccountSnapshotInput {
+  sourceId: string;
+  provider: string;
+  accountId: string | null;
+  displayName: string;
+  enabled: boolean;
+  observedAtMs: number;
+  available: boolean;
+  usage: unknown;
+  limits: unknown;
+}
+
+export interface StoredModelRequestAccountSnapshot {
+  provider: string;
+  accountId: string | null;
+  observedAtMs: number;
+  available: boolean;
+  usage: unknown;
+  limits: unknown;
+}
+
+export interface ModelRequestMetricsQuotaAccountStore {
+  weeklyQuotaEstimate(
+    query: WeeklyQuotaEstimateQuery,
+  ): StoredWeeklyQuotaEstimate | null;
+  latestWeeklyQuota(
+    provider: string,
+    nowMs?: number,
+  ): StoredWeeklyQuotaWindow | null;
+  quotaHistory(query: QuotaHistoryQuery): StoredQuotaPeriod[];
+  upsertAccountSnapshot(snapshot: ModelRequestAccountSnapshotInput): void;
+  latestAccountSnapshot(
+    provider: string,
+    accountId?: string,
+  ): StoredModelRequestAccountSnapshot | null;
+  latestAccountSnapshots(): StoredModelRequestAccountSnapshot[];
+}
+
+export interface ModelRequestMetricsStore
+  extends ModelRequestMetricsWriteStore,
+    ModelRequestMetricsRequestQueryStore,
+    ModelRequestMetricsThreadQueryStore,
+    ModelRequestMetricsQuotaAccountStore {
 }
 
 export interface ModelRequestMetricsWriter {

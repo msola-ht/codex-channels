@@ -5,7 +5,7 @@
 
 ## 文件
 
-- `proxy.ts`：HTTP/SSE 与 WebSocket 转发和指标观测实现。监听自动分配的回环地址，把精确
+- `proxy.ts`：HTTP/SSE 与 WebSocket 转发、背压和连接生命周期协调。监听自动分配的回环地址，把精确
   `/responses`、HTTP `/responses/compact` 与只读 `/models` 路径转发到上游；官方 OpenAI
   主代理还按当前锁定 Codex 0.154.0 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
@@ -54,11 +54,15 @@
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
   携带账户标识供服务侧按 `ocg-<账户>` Socket 上报；私有 `/role/external` 请求归属
   `agents.external` 选择的默认账户并在转发前剥离该前缀。
+- `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
+  归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
+  平台输出。普通增量只扫描事件类型，需要终态正文的事件才解析 JSON；错误消息、标识符和
+  `User-Agent` 继续执行既有限长与字符约束。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
   其中 `forwardedRequestHeaders` / `forwardedWebSocketHeaders` 在配置了
   `[codex].upstream_user_agent` 时覆盖出站 `User-Agent`，缺省则原样透传 App Server 生成的 UA；
-  不影响私有元数据；该请求实际发往上游的 UA 另由 `proxy.ts` 写入指标记录，供 WebUI 请求明细读取。
+  不影响私有元数据；该请求实际发往上游的 UA 由响应指标观察器写入指标记录，供 WebUI 请求明细读取。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的当前用户私有 IPC；Unix 使用
   `0600` Socket，Windows 使用共享运行时提供的认证命名管道。接收端归约后返回确认，保证短回复的
   Turn 完成事件不会抢先清理请求统计状态；Gateway 不在线时指标直接丢弃并继续模型响应。接收端拒绝

@@ -7,12 +7,24 @@ import type {
   ThreadRequestMetricsSummary,
   WeeklyQuotaMetricsObservation,
 } from "../application/index.js";
-import type { SqliteModelRequestMetricsStore } from "../observability/index.js";
+import type {
+  ModelRequestMetricsQuotaAccountStore,
+  ModelRequestMetricsRequestQueryStore,
+  ModelRequestMetricsThreadQueryStore,
+} from "../observability/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
+
+type RequestMetricsQueryStore =
+  & Pick<ModelRequestMetricsRequestQueryStore, "aggregate" | "errors">
+  & Pick<
+    ModelRequestMetricsThreadQueryStore,
+    "threadSummary" | "threadTurnCount"
+  >
+  & Pick<ModelRequestMetricsQuotaAccountStore, "weeklyQuotaEstimate">;
 
 export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
   constructor(
-    private readonly store: SqliteModelRequestMetricsStore,
+    private readonly store: RequestMetricsQueryStore,
     private readonly router: Pick<SessionRouter, "modelSettingsForThread">,
     private readonly now: () => number = Date.now,
   ) {}

@@ -8,6 +8,7 @@ import {
 import {
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
+import type { ModelRequestMetricsRequestQueryStore } from "../observability/index.js";
 import { readBoundedFetchBody } from "./bounded-fetch-body.js";
 
 import type {
@@ -202,7 +203,7 @@ function quotaWindowRange(
 }
 
 function readOpencodeGoTokens(
-  store: SqliteModelRequestMetricsStore,
+  store: Pick<ModelRequestMetricsRequestQueryStore, "forEachProviderTokenMetric">,
   ranges: ReadonlyArray<readonly [string, number | null, number, number]>,
   provider: string,
   totals: Map<string, number>,
