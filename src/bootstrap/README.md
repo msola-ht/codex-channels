@@ -74,8 +74,8 @@
   决定是否启用，飞书和微信使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
   解析收件人，不要求当时已有 Thread 绑定。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
-- `proxy-fetch.ts`：把共享 HTTP(S) 代理选择适配到微信使用的 Fetch 接口；命中 `NO_PROXY`
-  时使用直连 Fetch，否则通过按代理 URL 复用的 Undici Dispatcher 发出请求。
+- `proxy-fetch.ts`：向 Bootstrap 组合代码转发 Runtime 共享的代理 Fetch 接口；代理选择与
+  Dispatcher 复用由 `runtime/proxy-fetch.mjs` 实现。
 - `openai-connectivity.ts`：在 OpenAI Provider 启动时复用同一代理做一次有界、无凭据的 HTTP
   传输探测；官方双目标全部不可达时生成脱敏状态供渠道上线通知使用，单目标失败只记录日志，
   均不阻断 Gateway；自定义 `openai_base_url` 只探测该地址。

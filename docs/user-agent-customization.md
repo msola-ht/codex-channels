@@ -53,8 +53,8 @@ codex-tui/0.154.0 (<系统与架构>) <终端标识> (codex-tui; 0.154.0)
 App Server 后模型上游 UA 即带该标识。该值由 `codexc config`、`codexc service install` 或
 `codexc update` 按运行命令的终端探测后写入，也可以直接编辑 TOML。
 
-模型数据通路在本机由 `codexc` 的 App Server 服务进程自建回环 Provider Proxy（`codexc.mjs`
-通过 `ProviderProxy` 创建并监听回环地址），App Server 子进程通过 `model_provider` 指向该回环
+模型数据通路在本机由 `codexc` 的 App Server 服务进程自建回环 Provider Proxy
+（`runtime/app-server-service-runtime.mjs` 通过 `ProviderProxy` 创建并监听回环地址），App Server 子进程通过 `model_provider` 指向该回环
 端点。Provider Proxy 持有模型转发和指标采集，因此上游 UA 覆盖发生在 `codexc` 服务进程内，
 不能通过仅重启 Gateway 生效；必须重启 App Server 服务。
 
@@ -213,18 +213,18 @@ Provider ID 字符串插值到全局 UA。
   `src/codex-protocol/version.json` 派生的 `codex-tui` 与锁定 Codex CLI 版本；不得从 TOML
   直接读取配置。`thread/start` 不再携带 `serviceName`，与官方 TUI 传入 `None` 的行为一致，
   避免在 App Server 会话遥测中保留 Gateway 标识。
-- `src/provider-proxy`：由 `bin/codexc.mjs` 注入可选完整 UA，在 HTTP 和 WebSocket 出站请求头的
+- `src/provider-proxy`：由 `runtime/app-server-service-runtime.mjs` 注入可选完整 UA，在 HTTP 和 WebSocket 出站请求头的
   统一函数中覆盖；不修改入站 Header，但把该请求实际发往上游的 UA 一并写入指标记录
   `model_request_metrics.user_agent`（Schema v13，限长 512），供 WebUI 请求明细逐条展示。
 - `runtime/terminal-identity.mjs`：按当前锁定 Codex CLI 的探测顺序从进程环境推导终端标识；
   `detectTerminalUserAgentToken` 复现官方取值供 UA 文本预填使用，`detectTerminalIdentity`
   只在结果可作为 `terminal_identity` 记录时返回，探不到终端或只探测到 `dumb` 时返回 `null`。
-- `bin/codexc.mjs`：App Server 服务进程启动每个 Provider Proxy 时统一读取
+- `runtime/app-server-service-runtime.mjs`：App Server 服务进程启动每个 Provider Proxy 时统一读取
   `[codex].upstream_user_agent`，主代理、按需 Provider 代理和 OpenCode Go 共享代理复用同一值；
   启动主 App Server 与 Provider App Server 前把 `[codex].terminal_identity` 写入子进程的
   `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，未配置时保持环境原样；`codexc service install`
   在生成服务定义前、`codexc update` 在重启服务前，若 `terminal_identity` 未配置且运行命令的
-  终端可探测，则按该终端补入配置；其余服务命令不改写该配置。
+  终端可探测，则由 `scripts/service-command.mjs` 按该终端补入配置；其余服务命令不改写该配置。
 - `scripts/config-management.mjs`、`scripts/config-system-menu.mjs`：通过 `codexc config` 的
   「系统设置 → 一键设为官方 TUI 身份」用当前系统与终端信息生成官方格式 `User-Agent`，
   在单次受 revision 保护的原子写入中同时保存 `codex-tui` 客户端身份与上游 UA，给出
@@ -235,7 +235,7 @@ Provider ID 字符串插值到全局 UA。
   默认值写回配置。
 - `runtime/app-server-read.mjs`：连接本机 App Server 完成一次 `initialize` 握手并返回完整
   `User-Agent`，供 Doctor 以 `codex_app_server_daemon` 非全局身份复用，不打印或缓存完整值。
-- `scripts/webui-server.mjs`：`/api/v1/management/upstream-user-agent` 返回模型上游实际使用的
+- `scripts/webui-management-status-route.mjs`：`/api/v1/management/upstream-user-agent` 返回模型上游实际使用的
   `User-Agent` 与取值来源；配置覆盖优先，否则用同一非全局身份读取 App Server 生成的 UA，
   App Server 未运行时返回不可用状态而不是让接口失败。
 - `codexc doctor`：只显示「默认/已自定义」状态，不发送探测请求，不打印完整值。

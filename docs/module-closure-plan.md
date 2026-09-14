@@ -158,7 +158,7 @@
 
 ### 批次五：运行时、CLI 与 WebUI 管理边界
 
-状态：待前四批稳定。
+状态：已完成（2026-09-14）。
 
 范围：
 
@@ -168,9 +168,15 @@
    `bin` 只保留帮助、参数解析和分派。
 3. 将 `webui-server.mjs` 的 `routeManagement()` 按 Codex 设置、Gateway 设置、Provider/账户、计划任务、
    服务与状态拆分，认证、Origin、限速、锁和统一错误响应仍由主 server 管理。
-4. 为 `runtime`、`scripts`、`bin` 增加依赖方向检查，避免它们通过相对导入绕过 `src` 一级模块边界。
+4. 为 `runtime`、`scripts`、`bin` 增加依赖方向检查，并按调用方限制可访问的精确 `dist` 入口，
+   避免它们通过相对导入绕过 `src` 模块边界或加载无关模块图。
 5. 盘点 npm 运行时真实需要的脚本，把 `package.json.files` 从整个 `scripts/` 目录改为显式清单；
    开发探针和发布工具不进入用户安装包。
+
+验证记录：WebUI 管理、安全和任务共 7 个定向测试文件通过（89 项）；目录边界、代理 Fetch、指标格式、
+Doctor、飞书与微信 Setup 共 9 个定向测试文件通过（62 项通过、3 项跳过）；`npm run check`（含新增
+运行时目录依赖检查）、`npm run lint`、`npm run docs:check`、`git diff --check` 和完整
+`npm run test:package` 通过，tarball 安装与干净源码全局安装冒烟均通过。
 
 验收：
 
@@ -230,7 +236,11 @@
 - [x] 批次二：删除直接 API Provider 预留纵切面。
 - [x] 批次三：缩窄 Application 能力合同。
 - [x] 批次四：Surface 格式器与 Bootstrap 组合收口。
-- [ ] 批次五：运行时、CLI 与 WebUI 管理边界。
+- [x] 批次五：运行时、CLI 与 WebUI 管理边界。
 - [ ] 批次六：高风险数据与代理边界。
 
-批次四已完成；下一步从批次五的 Provider 运行时职责拆分开始。
+批次五已完成；Provider Runtime 已按受管设置、自定义 Provider、启动/凭据/角色拆分，App Server
+与 Gateway 进程生命周期已移入 `runtime`，服务子命令实现已移入 `scripts`，WebUI 管理接口已按
+Codex 设置、Gateway 设置、Provider/账户、计划任务、服务与状态五组资源路由拆分；运行时目录依赖
+门禁已接入 `npm run check`，npm 包只发布显式列出的运行时脚本、声明与平台控制文件。下一步为批次六，
+高风险数据与代理边界需按其中的独立确认条件实施。

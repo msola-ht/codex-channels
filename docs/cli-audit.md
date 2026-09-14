@@ -57,7 +57,7 @@
 ### 入口与参数
 
 - 公开入口：`codexc service uninstall`，不接受位置参数。
-- `bin/codexc.mjs` 对该动作允许使用不完整或无效的 Gateway 配置，以便配置损坏时仍能卸载服务。
+- `scripts/service-command.mjs` 对该动作使用最小服务控制环境，以便 Gateway 配置损坏时仍能卸载服务。
 - 按平台委派给 launchd、systemd 或 Windows 计划任务控制器。
 
 ### 状态变化

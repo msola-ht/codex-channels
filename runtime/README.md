@@ -16,6 +16,9 @@
   `NO_PROXY`。系统自动发现只覆盖 macOS 和 GNOME；Windows 明确不读取 WinINET/WinHTTP，使用 TOML
   或标准代理环境变量。渠道显式代理优先于共享代理和 `NO_PROXY`。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
+- `proxy-fetch.mjs` / `proxy-fetch.d.mts`：把共享 HTTP(S) 代理选择适配为 Fetch；命中
+  `NO_PROXY` 时直连，否则按代理 URL 复用 Undici Dispatcher，供 Gateway 与 App Server 服务 Runtime
+  共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 OpenCode
@@ -34,25 +37,23 @@
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照；按最早 `resetsAt` 失效前缓存，失败时短时
   退避后重试，缺失或已过期的重置时间同样短时退避，避免每个模型请求重复查询；接受代理生命周期
   取消信号，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
-- `model-provider-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
-  判定切换/固定模式的主 Provider、派生私有 Provider Socket，并向 DeepSeek 账户适配器提供同源
-  凭据；自定义主 Provider 的私有候选备份按普通私有文件同样校验类型、属主、权限、大小和符号链接；
-  自定义切换模式使用显式私有注册表和逐 Provider 的 `sf-custom-<id>` 私有 Profile，仅接受 Codex
-  官方模型目录来源，并严格限制为单个目标 Provider 块和直接 API Key 字段；服务启动时通过配置的
-  Codex CLI 执行 `debug models --bundled`，把官方目录原子写入
-  `~/.codex-connect/providers/custom/official-models.json`（0600），并以 `model_catalog_json`
-  注入固定/切换自定义实例和自定义子代理角色，第三方 `/models` 不参与目录刷新；注册表与 Profile 的增删改
-  共用私有文件锁并支持执行前快照保护，Provider 块与 Key 不进入主配置；Remote TUI
-  与原生 Codex 统一使用同一个 `sf-custom-<id>` Profile 名称；后台 App Server 则使用加载器生成的非敏感 `-c`
-  覆盖（包括全部第三方 Provider 的统一有限重试边界），并只把 Key 注入目标子进程环境，因为锁定版 App Server 不接受 `--profile`；
-  读取并校验用户已有的 OpenAI 上游地址，并为 App Server 提供本机统计代理地址的参数替换。
-  切换模式为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，固定模式从基础配置读取；
-  共享第三方子代理支持受管与自定义 Provider，只把当前选择 Provider 的 Key 注入主 App Server 子进程；每个受管 Provider 使用独立
-  模型目录，并按模型读取当前上下文、最大上下文与默认思考等级；历史目录中的自动压缩阈值只用于
-  迁移为上下文窗口，当前目录不再管理压缩阈值，自动压缩由上游按窗口推导；受管 Profile 镜像所选
-  模型的默认思考等级，校验必须与模型目录一致；Profile 与共享角色使用 `~/.codex` 下的 `sf-` 前缀文件，
-  模型目录、清单与管理标记存放在 `~/.codex-connect/providers/<id>/`。
-- `model-provider-runtime.d.mts`：声明受控模型 Provider 运行时接口。
+- `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定
+  导出门面与 TypeScript 接口，不承载具体读取、写入或启动逻辑。
+- `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
+  管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
+  历史目录中的自动压缩阈值只用于迁移为上下文窗口，当前目录不再管理压缩阈值；受管 Profile 必须
+  镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录、清单与管理标记位于
+  `~/.codex-connect/providers/<id>/`。
+- `model-provider-custom-runtime.mjs`：拥有自定义主 Provider 候选备份和切换模式注册表，逐 Provider
+  管理 `sf-custom-<id>` 私有 Profile；仅接受 Codex 官方模型目录来源，并严格限制为单个目标 Provider
+  块和直接 API Key 字段。服务启动时通过配置的 Codex CLI 执行 `debug models --bundled`，把官方目录
+  原子写入 `~/.codex-connect/providers/custom/official-models.json`（0600）；注册表与 Profile 的增删改
+  共用私有文件锁并支持执行前快照保护，Provider 块与 Key 不进入主配置。
+- `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
+  为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标
+  子进程环境；读取并校验已有 OpenAI 上游地址，为统计代理替换 Provider 地址，同时统一 DeepSeek、
+  OpenCode Go 与共享第三方子代理的凭据和角色配置读取。全部第三方 Provider 沿用一次 HTTP 重试、
+  零次流重连的固定边界。
 - `app-server-read.mjs`：连接本机 Codex App Server 并完成 `initialize` 握手，返回 App Server
   生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
   传输，其余平台走私有 Unix WebSocket，不承担会话业务。Doctor 以官方非全局客户端身份
@@ -64,7 +65,12 @@
   记录时返回，供安装、更新服务的命令与 `codexc config` 复用。
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
-  和服务安装入口复用，避免各入口独立解释运行拓扑。
+  和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
+- `app-server-service-runtime.mjs`：持有内部 App Server 服务入口的 Provider 统计代理、主实例与隔离
+  实例子进程、按需启动/释放、Supervisor 和退出清理生命周期；CLI 与脚本只负责准备已校验的运行环境
+  和默认 Workspace。
+- `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
+  启动前的 App Server 就绪等待由服务命令脚本注入。
 - `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、App Server Supervisor 和 Provider
   Metrics 提供共享的当前用户私有 IPC。Unix 保留 `0600` Socket、属主和 inode 清理合同；Windows
   使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机
@@ -81,9 +87,6 @@
   留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出，同时等待已经开始的 Provider 生命周期操作收尾且拒绝启动排队操作。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
-- `app-server-runtime.mjs` / `app-server-runtime.d.mts`：解析主实例与受管 Provider 的 App Server Socket
-  拓扑；Windows 在启动 App Server、Gateway 或 Remote TUI 前校验最终 UDS 路径小于 108 UTF-8 字节，
-  并提示通过 `codex.socket_path` 缩短基础路径，不隐式搬移端点。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
   建立与应用就绪使用不同状态，应用开始停止时立即撤销就绪；公开同源健康探针供本地更新确认

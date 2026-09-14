@@ -7,6 +7,9 @@
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
   独立项目命令提供不修改配置权限的必需/可选路径定位，可选定位只把文件不存在视为未初始化，
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
+- `runtime-environment.mjs`：在已定位的用户配置上统一装配 Gateway、App Server 与管理脚本使用的
+  `CODEX_CONNECT_HOME`、配置路径、Codex 可执行文件和代理环境；需要在配置损坏时仍可运行的服务恢复
+  命令使用独立的最小控制环境。
 - `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
   源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
   版本不匹配；交互终端遇到不匹配时以默认确认的 `Y/n` 询问是否全局安装精确 Codex CLI 版本，确认
@@ -94,17 +97,15 @@
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
-- `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务与共享 API 类型；设置摘要接口
-  复用 Config 脱敏投影与跨平台服务状态查询，只返回配置修订、非凭据字段和 Secret 配置状态；
-  `/api/v1/management/services` 在回环访问约束和可选 WebUI Bearer 鉴权下提供受管服务状态、版本和受限的最近错误摘要；
-  `/api/v1/management/providers` 提供不含 URL、Profile 或凭据的 Provider 安全概览。
-  `/api/v1/management/upstream-user-agent` 返回模型上游实际使用的 User-Agent 与取值来源：配置了
-  `[codex].upstream_user_agent` 时以配置为准且不探测 App Server，否则用官方非全局客户端身份读取
-  App Server 生成的进程级 UA，结果按 5 秒 TTL 复用，App Server 未运行时降级为不可用状态而不是让
-  接口失败；同一应答附带最近一条指标记录实际发往上游的 UA，供设置页判断配置是否已生效。
-  `POST /api/v1/management/accounts/refresh` 通过私有 Gateway IPC 按需刷新单个 DeepSeek 或
-  OpenCode Go 账户并返回统一快照，不由 WebUI 读取 Provider 凭据或直接请求官方接口；管理设置接口
-  始终保留真实回环连接、精确 Origin、JSON 请求约束、限速和审计；WebUI 配置令牌时复用 `Authorization: Bearer` 鉴权。
+- `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务、共享 API 类型与管理路由组合入口；
+  主服务托管静态前端和只读指标 API，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
+  约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由。
+- `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
+  `webui-management-provider-route.mjs` / `webui-management-task-route.mjs` /
+  `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
+  服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
+  Provider 与账户路由通过私有 Gateway IPC 刷新账户，不读取 Provider 凭据或直接请求官方接口；状态
+  路由返回受管服务安全摘要，并按 5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
@@ -113,7 +114,8 @@
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
-  WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务只负责路由和领域处理。
+  WebUI HTTP 响应、JSON 请求体、令牌鉴权和回环地址校验；主服务组合共享访问与错误边界并完成分派，
+  具体资源处理留在对应管理路由。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标维护和源码更新异步任务；
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
@@ -454,6 +456,8 @@
   媒体正文、上传地址、参数、key、Token、游标或完整身份，不注册常驻 Surface。
 - `check-gateway-version.mjs`：校验 npm 包与 Gateway 运行时版本一致，并要求正式版本、`-rc.N`
   候选版或 `-fixN` 修复版使用与 Codex CLI 协议相同的基础版本。
+- `check-runtime-boundaries.mjs`：校验 `runtime <- scripts <- bin` 的目录依赖方向，并要求三者访问已编译
+  `src` 能力时只使用按调用方列明的精确入口；该检查由 `npm run check` 执行。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根 `index.md` 文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `codex-rules.mjs`：向 CLI 重新导出 `runtime/project-rules.mjs` 的项目定位、规则生成与检查能力。
@@ -505,7 +509,7 @@
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `install-launchd.mjs` / `install-systemd.mjs`：保留可直接生成平台服务定义的兼容脚本，实际模板计划、
-  转义与原子写入统一复用服务安装管理接口；代理仍由 CLI 服务入口在每次启动时解析。
+  转义与原子写入统一复用服务安装管理接口；代理仍由 App Server 服务 Runtime 在每次启动时解析。
 - `service-install-context.mjs` / `service-install-context.d.mts`：systemd 与 launchd 安装器共用的配置、
   默认 Workspace、主 Socket、Codex/Node 可执行文件及服务 PATH 解析；读取计划不修改磁盘，执行时才把
   运行目录创建为 `0700`。
@@ -513,6 +517,9 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、旧 Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 明确失败关闭。
+- `service-command.mjs`：实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
+  服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
+  检查。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用，不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
