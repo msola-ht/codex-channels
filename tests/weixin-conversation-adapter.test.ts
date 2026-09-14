@@ -6,12 +6,17 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 
 import {
   conversationCommandNames,
-  type ConversationUseCases,
 } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import {
-  WeixinConversationAdapter,
+  WeixinConversationAdapter as ProductionWeixinConversationAdapter,
 } from "../src/surfaces/weixin/index.js";
+import {
+  conversationCommandExecutor,
+  conversationInputUseCases,
+  conversationStatus,
+  type ConversationMethodOverrides,
+} from "./conversation-command-fixture.js";
 
 const target: ConversationTarget = {
   surface: "weixin",
@@ -25,6 +30,31 @@ const message = {
   kind: "text" as const,
   text: "继续开发",
 };
+
+type WeixinAdapterArguments = ConstructorParameters<
+  typeof ProductionWeixinConversationAdapter
+>;
+
+class WeixinConversationAdapter extends ProductionWeixinConversationAdapter {
+  constructor(
+    conversations: ConversationMethodOverrides,
+    outbox: WeixinAdapterArguments[1],
+    images?: WeixinAdapterArguments[3],
+    inputOptions?: WeixinAdapterArguments[4],
+    files?: WeixinAdapterArguments[5],
+    audios?: WeixinAdapterArguments[6],
+  ) {
+    super(
+      conversationInputUseCases(conversations),
+      outbox,
+      conversationCommandExecutor(conversations),
+      images,
+      inputOptions,
+      files,
+      audios,
+    );
+  }
+}
 
 const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-weixin-images-"));
 const pngImagePath = join(imageFixtureDirectory, "image.png");
@@ -575,22 +605,12 @@ describe("WeixinConversationAdapter", () => {
   });
 
   it("uses shared status, new, and stop command semantics", async () => {
-    const status = vi.fn(() => ({
-      workspaceId: "main",
-      workspaceName: "Main",
-      cwd: "/workspace",
+    const status = vi.fn(() => conversationStatus({
       gitBranch: "feature/weixin-surface",
       threadId: "thread",
-      turnId: null,
       model: "gpt-test",
       modelProvider: "openai",
       effort: "medium",
-      serviceTier: null,
-      modelPending: false,
-      effortPending: false,
-      fastModePending: false,
-      collaborationMode: "default",
-      collaborationModePending: false,
     }));
     const newSession = vi.fn(async () => ({
       previousThreadId: "thread",
@@ -648,20 +668,10 @@ describe("WeixinConversationAdapter", () => {
     ).getTime();
     const adapter = new WeixinConversationAdapter(
       serviceFixture({
-        status: vi.fn(() => ({
-          workspaceId: "main",
-          workspaceName: "Main",
-          cwd: "/workspace",
+        status: vi.fn(() => conversationStatus({
           threadId: "thread",
-          turnId: null,
           model: "gpt-test",
           effort: "medium",
-          serviceTier: null,
-          modelPending: false,
-          effortPending: false,
-          fastModePending: false,
-          collaborationMode: "default",
-          collaborationModePending: false,
         })),
       }),
       { notifyText },
@@ -726,7 +736,7 @@ describe("WeixinConversationAdapter", () => {
 
   it("uses the shared service for commands beyond the initial basic set", async () => {
     const listSessions = vi.fn(async () => []);
-    const status = vi.fn(() => ({ threadId: undefined }));
+    const status = vi.fn(() => conversationStatus());
     const notifyText = vi.fn(() => true);
     const adapter = new WeixinConversationAdapter(
       serviceFixture({ listSessions, status }),
@@ -824,7 +834,7 @@ describe("WeixinConversationAdapter", () => {
 });
 
 function serviceFixture(
-  methods: Partial<Record<keyof ConversationUseCases, unknown>>,
-): ConversationUseCases {
-  return methods as ConversationUseCases;
+  methods: ConversationMethodOverrides,
+): ConversationMethodOverrides {
+  return methods;
 }

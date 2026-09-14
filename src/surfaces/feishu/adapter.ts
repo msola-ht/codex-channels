@@ -1,13 +1,12 @@
 import {
-  ConversationCommandService,
   fastServiceTierId,
   isConversationCommandName,
   isFastServiceTier,
   listProviders,
+  type ConversationCommandExecutor,
   type ConversationCommandResult,
-  type ConversationUseCases,
+  type ConversationTurnUseCases,
   type ScheduledTaskConfirmation,
-  type ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -51,8 +50,6 @@ import {
   type FeishuAudioPort,
 } from "./audio.js";
 import type { FeishuOutbox } from "./outbox.js";
-import type {
-} from "../../application/index.js";
 import type { FeishuOAuthControllerPort } from "./oauth.js";
 import {
   renderFeishuDoctor,
@@ -80,12 +77,14 @@ const unsupportedMessageLinkText = [
 ].join("\n");
 
 export class FeishuConversationAdapter {
-  private readonly commands: ConversationCommandService;
   private readonly inputs: SurfaceInputCoalescer;
   private nextInputSequence = 0;
 
   constructor(
-    private readonly conversations: ConversationUseCases,
+    private readonly conversations: Pick<
+      ConversationTurnUseCases,
+      "touchActivity" | "submit"
+    >,
     private readonly outbox:
       & Pick<FeishuOutbox, "notifyMarkdown" | "notifyText">
       & Partial<Pick<
@@ -97,6 +96,7 @@ export class FeishuConversationAdapter {
         | "replyToTurn"
       >>,
     private readonly images: Pick<FeishuImagePort, "download">,
+    private readonly commands: ConversationCommandExecutor,
     private readonly permissionStatus: () => FeishuPermissionRuntimeStatus =
       () => ({
         connectionReady: false,
@@ -120,13 +120,8 @@ export class FeishuConversationAdapter {
       onQuotedTextError?(error: unknown): void;
       now?: () => number;
       debugEnabled?: boolean;
-      scheduledTasks?: ScheduledTaskUseCases;
     } = { quietWindowMs: 0 },
   ) {
-    this.commands = new ConversationCommandService(
-      conversations,
-      inputOptions.scheduledTasks,
-    );
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
       inputOptions,

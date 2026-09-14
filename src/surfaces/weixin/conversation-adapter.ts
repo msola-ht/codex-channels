@@ -1,8 +1,7 @@
 import {
-  ConversationCommandService,
   isConversationCommandName,
-  type ConversationUseCases,
-  type ScheduledTaskUseCases,
+  type ConversationCommandExecutor,
+  type ConversationTurnUseCases,
 } from "../../application/index.js";
 import {
   conversationTargetKey,
@@ -28,8 +27,6 @@ import {
   renderWeixinIdentity,
   renderWeixinUserFacingError,
 } from "./command-renderer.js";
-import type {
-} from "../../application/index.js";
 import {
   WeixinFileInputError,
   type WeixinFilePort,
@@ -91,14 +88,17 @@ export type WeixinConversationMessage =
     };
 
 export class WeixinConversationAdapter {
-  private readonly commands: ConversationCommandService;
   private readonly inputs: SurfaceInputCoalescer;
   private readonly handlingLocks = new Map<string, Promise<void>>();
   private nextSequence = 0;
 
   constructor(
-    private readonly conversations: ConversationUseCases,
+    private readonly conversations: Pick<
+      ConversationTurnUseCases,
+      "touchActivity" | "submit"
+    >,
     private readonly outbox: Pick<WeixinOutbox, "notifyText">,
+    private readonly commands: ConversationCommandExecutor,
     private readonly images?: Pick<WeixinImagePort, "download">,
     private readonly inputOptions: {
       quietWindowMs?: number;
@@ -106,15 +106,10 @@ export class WeixinConversationAdapter {
       doctor?: WeixinDoctor;
       now?: () => number;
       debugEnabled?: boolean;
-      scheduledTasks?: ScheduledTaskUseCases;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
   ) {
-    this.commands = new ConversationCommandService(
-      conversations,
-      inputOptions.scheduledTasks,
-    );
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
       inputOptions,

@@ -7,15 +7,24 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 
 import {
   conversationCommandNames,
-  type ConversationUseCases,
   type ScheduledTaskConfirmation,
+  type ScheduledTaskUseCases,
 } from "../src/application/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
 import {
-  FeishuConversationAdapter,
+  FeishuConversationAdapter as ProductionFeishuConversationAdapter,
   FeishuOutbox,
   type FeishuInboxMessage,
 } from "../src/surfaces/feishu/index.js";
+import {
+  conversationCommandExecutor,
+  conversationInputUseCases,
+  conversationSession,
+  conversationStatus,
+  modelOption,
+  modelSelectionState,
+  type ConversationMethodOverrides,
+} from "./conversation-command-fixture.js";
 
 const message: FeishuInboxMessage = {
   target: {
@@ -34,6 +43,40 @@ const message: FeishuInboxMessage = {
 const imagePort = {
   download: vi.fn(),
 };
+
+type FeishuAdapterArguments = ConstructorParameters<
+  typeof ProductionFeishuConversationAdapter
+>;
+
+class FeishuConversationAdapter extends ProductionFeishuConversationAdapter {
+  constructor(
+    conversations: ConversationMethodOverrides,
+    outbox: FeishuAdapterArguments[1],
+    images: FeishuAdapterArguments[2],
+    permissionStatus?: FeishuAdapterArguments[4],
+    oauth?: FeishuAdapterArguments[5],
+    commandCenter?: FeishuAdapterArguments[6],
+    applicationSetup?: FeishuAdapterArguments[7],
+    interactions?: FeishuAdapterArguments[8],
+    inputOptions: FeishuAdapterArguments[9] & {
+      scheduledTasks?: ScheduledTaskUseCases;
+    } = {},
+  ) {
+    const { scheduledTasks, ...options } = inputOptions;
+    super(
+      conversationInputUseCases(conversations),
+      outbox,
+      images,
+      conversationCommandExecutor(conversations, scheduledTasks),
+      permissionStatus,
+      oauth,
+      commandCenter,
+      applicationSetup,
+      interactions,
+      options,
+    );
+  }
+}
 
 const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-feishu-images-"));
 const pngImagePath = join(imageFixtureDirectory, "image.png");
@@ -94,23 +137,12 @@ describe("Feishu conversation adapter", () => {
   it("uses rich posts for command results but keeps failures as plain text", async () => {
     const notifyMarkdown = vi.fn(() => true);
     const notifyText = vi.fn(() => true);
-    const status = vi.fn(() => ({
-      workspaceId: "main",
-      workspaceName: "Main",
-      cwd: "/workspace",
-      threadId: null,
-      turnId: null,
+    const status = vi.fn(() => conversationStatus({
       model: "gpt-test",
       effort: "medium",
-      serviceTier: null,
-      modelPending: false,
-      effortPending: false,
-      fastModePending: false,
-      collaborationMode: "default",
-      collaborationModePending: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { status } as unknown as ConversationUseCases,
+      { status },
       { notifyMarkdown, notifyText } as unknown as FeishuOutbox,
       imagePort,
     );
@@ -143,7 +175,7 @@ describe("Feishu conversation adapter", () => {
     const submit = vi.fn();
     const touchActivity = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit, touchActivity } as unknown as ConversationUseCases,
+      { submit, touchActivity },
       fixture.outbox,
       imagePort,
     );
@@ -176,7 +208,7 @@ describe("Feishu conversation adapter", () => {
     const stop = vi.fn(async () => true);
     const stopForActor = vi.fn(() => true);
     const adapter = new FeishuConversationAdapter(
-      { stop } as unknown as ConversationUseCases,
+      { stop },
       fixture.outbox,
       imagePort,
       undefined,
@@ -200,7 +232,7 @@ describe("Feishu conversation adapter", () => {
     const stop = vi.fn(async () => true);
     const stopForActor = vi.fn(() => false);
     const adapter = new FeishuConversationAdapter(
-      { stop } as unknown as ConversationUseCases,
+      { stop },
       fixture.outbox,
       imagePort,
       undefined,
@@ -224,7 +256,7 @@ describe("Feishu conversation adapter", () => {
     const open = vi.fn(async () => {});
     const openResponse = vi.fn(async () => {});
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       undefined,
@@ -276,7 +308,7 @@ describe("Feishu conversation adapter", () => {
       task,
     }));
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
+      {},
       fixture.outbox,
       imagePort,
       undefined,
@@ -314,7 +346,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const openResponse = vi.fn(async () => {});
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
+      {},
       fixture.outbox,
       imagePort,
       undefined,
@@ -351,7 +383,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const submit = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       () => ({
@@ -397,7 +429,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const openDoctor = vi.fn(async () => {});
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
+      {},
       fixture.outbox,
       imagePort,
       () => ({
@@ -442,8 +474,8 @@ describe("Feishu conversation adapter", () => {
 
   it("returns clickable choices for selectable command-card actions", async () => {
     const fixture = createOutbox();
-    const modelState = vi.fn(async () => ({
-      models: [{
+    const modelState = vi.fn(async () => modelSelectionState({
+      models: [modelOption({
         id: "gpt-a",
         model: "gpt-a",
         displayName: "GPT A",
@@ -455,7 +487,7 @@ describe("Feishu conversation adapter", () => {
         serviceTiers: [{ id: "priority", name: "Fast" }],
         defaultServiceTier: "default",
         isDefault: true,
-      }],
+      })],
       model: "gpt-a",
       modelProvider: "openai",
       providerFilter: "openai",
@@ -481,7 +513,7 @@ describe("Feishu conversation adapter", () => {
         modelState,
         selectModel,
         selectEffort,
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );
@@ -529,9 +561,9 @@ describe("Feishu conversation adapter", () => {
 
   it("renders provider choices before any provider is chosen", async () => {
     const fixture = createOutbox();
-    const modelState = vi.fn(async () => ({
+    const modelState = vi.fn(async () => modelSelectionState({
       models: [
-        {
+        modelOption({
           id: "gpt-test",
           model: "gpt-test",
           provider: "openai",
@@ -541,9 +573,8 @@ describe("Feishu conversation adapter", () => {
           serviceTiers: [{ id: "priority", name: "Fast" }],
           defaultServiceTier: "priority",
           isDefault: true,
-          inputModalities: ["text"],
-        },
-        {
+        }),
+        modelOption({
           id: "deepseek-v4",
           model: "deepseek-v4",
           provider: "deepseek",
@@ -553,8 +584,7 @@ describe("Feishu conversation adapter", () => {
           serviceTiers: [],
           defaultServiceTier: null,
           isDefault: false,
-          inputModalities: ["text"],
-        },
+        }),
       ],
       model: "gpt-test",
       modelProvider: "openai",
@@ -567,7 +597,7 @@ describe("Feishu conversation adapter", () => {
     }));
     const clearModelBrowse = vi.fn(async () => (await modelState()));
     const adapter = new FeishuConversationAdapter(
-      { modelState, clearModelBrowse } as unknown as ConversationUseCases,
+      { modelState, clearModelBrowse },
       fixture.outbox,
       imagePort,
     );
@@ -596,8 +626,8 @@ describe("Feishu conversation adapter", () => {
   it("opens a reasoning-effort card after a directly typed model selection", async () => {
     const fixture = createOutbox();
     const openResponse = vi.fn(async () => {});
-    const selectModel = vi.fn(async () => ({
-      models: [{
+    const selectModel = vi.fn(async () => modelSelectionState({
+      models: [modelOption({
         id: "gpt-test",
         model: "gpt-test",
         displayName: "GPT Test",
@@ -609,8 +639,7 @@ describe("Feishu conversation adapter", () => {
         serviceTiers: [],
         defaultServiceTier: null,
         isDefault: true,
-        inputModalities: ["text"],
-      }],
+      })],
       model: "gpt-test",
       modelProvider: "openai",
       effort: "medium",
@@ -620,8 +649,11 @@ describe("Feishu conversation adapter", () => {
       effortPending: true,
       serviceTierPending: false,
     }));
+    const modelState = vi.fn(async () => modelSelectionState({
+      providerFilter: "openai",
+    }));
     const adapter = new FeishuConversationAdapter(
-      { selectModel } as unknown as ConversationUseCases,
+      { modelState, selectModel },
       fixture.outbox,
       imagePort,
       undefined,
@@ -642,8 +674,8 @@ describe("Feishu conversation adapter", () => {
 
   it("opens the provider model choices card after selecting a provider", async () => {
     const fixture = createOutbox();
-    const modelState = vi.fn(async () => ({
-      models: [{
+    const modelState = vi.fn(async () => modelSelectionState({
+      models: [modelOption({
         id: "deepseek-v4",
         model: "deepseek-v4",
         provider: "deepseek",
@@ -653,8 +685,7 @@ describe("Feishu conversation adapter", () => {
         serviceTiers: [],
         defaultServiceTier: null,
         isDefault: true,
-        inputModalities: ["text" as const],
-      }],
+      })],
       model: "deepseek-v4",
       modelProvider: "deepseek",
       providerFilter: "deepseek",
@@ -670,7 +701,7 @@ describe("Feishu conversation adapter", () => {
     });
     const browseProviderModels = vi.fn(async () => modelState());
     const adapter = new FeishuConversationAdapter(
-      { modelState, selectModel, browseProviderModels } as unknown as ConversationUseCases,
+      { modelState, selectModel, browseProviderModels },
       fixture.outbox,
       imagePort,
     );
@@ -701,24 +732,13 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
       {
-        status: vi.fn(() => ({
-          workspaceId: "main",
-          workspaceName: "Main",
-          cwd: "/workspace",
+        status: vi.fn(() => conversationStatus({
           threadId: "thread-1",
-          turnId: null,
           model: "gpt-test",
           modelProvider: "openai",
           effort: "medium",
-          serviceTier: null,
-          modelPending: false,
-          effortPending: false,
-          fastModePending: false,
-          collaborationMode: "default",
-          collaborationModePending: false,
-          gitBranch: null,
         })),
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );
@@ -758,7 +778,7 @@ describe("Feishu conversation adapter", () => {
       {
         listSkills,
         invokeSkill,
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );
@@ -791,19 +811,19 @@ describe("Feishu conversation adapter", () => {
       id: "codex-connect",
       name: "Workspace",
       cwd: "/workspace",
-      approvalPolicy: "never",
+      approvalPolicy: "never" as const,
     }));
     const adapter = new FeishuConversationAdapter(
       {
-        status: () => ({ workspaceId: "codex-connect" }),
+        status: () => conversationStatus({ workspaceId: "codex-connect" }),
         listWorkspaces: () => [{
           id: "codex-connect",
           name: "Workspace",
           cwd: "/workspace",
-          sandbox: "read-only",
+          sandbox: "read-only" as const,
         }],
         updateWorkspacePermissions,
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );
@@ -867,13 +887,18 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
       {
-        status: () => ({ workspaceId: "codex-connect" }),
+        status: () => conversationStatus({ workspaceId: "codex-connect" }),
+        listWorkspaces: () => [{
+          id: "codex-connect",
+          name: "Workspace",
+          cwd: "/workspace",
+        }],
         listPermissionProfiles: async () => [{
           id: ":workspace",
           description: "允许工作区写入",
           allowed: true,
         }],
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );
@@ -899,33 +924,27 @@ describe("Feishu conversation adapter", () => {
 
   it("turns active and archived session results into exact card choices", async () => {
     const fixture = createOutbox();
-    const sessions = [{
+    const sessions = [conversationSession({
       id: "thread-active",
       name: "当前会话",
-      preview: "",
-      cwd: "/workspace",
-      updatedAt: 1,
       model: "gpt-test",
-    }];
-    const archived = [{
+    })];
+    const archived = [conversationSession({
       id: "thread-archived",
       name: "旧会话",
-      preview: "",
-      cwd: "/workspace",
-      updatedAt: 1,
       model: "gpt-test",
-    }];
+    })];
     const adapter = new FeishuConversationAdapter(
       {
         listSessions: vi.fn(async (
           _target: typeof message.target,
           options?: { archived?: boolean },
         ) => options?.archived ? archived : sessions),
-        status: vi.fn(() => ({
+        status: vi.fn(() => conversationStatus({
           threadId: "thread-active",
           workspaceId: "workspace",
         })),
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );
@@ -973,21 +992,18 @@ describe("Feishu conversation adapter", () => {
 
   it("keeps session search inside cards and returns clickable results", async () => {
     const fixture = createOutbox();
-    const listSessions = vi.fn(async () => [{
+    const listSessions = vi.fn(async () => [conversationSession({
       id: "thread-auth",
       name: "认证修复",
-      preview: "",
-      cwd: "/workspace",
-      updatedAt: 1,
-    }]);
+    })]);
     const adapter = new FeishuConversationAdapter(
       {
         listSessions,
-        status: vi.fn(() => ({
+        status: vi.fn(() => conversationStatus({
           threadId: "thread-current",
           workspaceId: "workspace",
         })),
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );
@@ -1021,15 +1037,12 @@ describe("Feishu conversation adapter", () => {
 
   it("keeps archived-session search inside cards", async () => {
     const fixture = createOutbox();
-    const listSessions = vi.fn(async () => [{
+    const listSessions = vi.fn(async () => [conversationSession({
       id: "thread-archived",
       name: "历史认证修复",
-      preview: "",
-      cwd: "/workspace",
-      updatedAt: 1,
-    }]);
+    })]);
     const adapter = new FeishuConversationAdapter(
-      { listSessions } as unknown as ConversationUseCases,
+      { listSessions },
       fixture.outbox,
       imagePort,
     );
@@ -1091,7 +1104,7 @@ describe("Feishu conversation adapter", () => {
     }));
     const queueDelete = vi.fn(async () => ({ deleted: true }));
     const adapter = new FeishuConversationAdapter(
-      { queueList, queueAdd, queueDelete } as unknown as ConversationUseCases,
+      { queueList, queueAdd, queueDelete },
       fixture.outbox,
       imagePort,
     );
@@ -1229,7 +1242,7 @@ describe("Feishu conversation adapter", () => {
       })),
     };
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
+      {},
       fixture.outbox,
       imagePort,
       undefined,
@@ -1316,7 +1329,7 @@ describe("Feishu conversation adapter", () => {
       rulesPath: "/workspace/.codex/rules/default.rules",
     }));
     const adapter = new FeishuConversationAdapter(
-      { checkProjectRules } as unknown as ConversationUseCases,
+      { checkProjectRules },
       fixture.outbox,
       imagePort,
     );
@@ -1352,7 +1365,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { review } as unknown as ConversationUseCases,
+      { review },
       fixture.outbox,
       imagePort,
     );
@@ -1405,11 +1418,12 @@ describe("Feishu conversation adapter", () => {
       status: "active" as const,
       tokenBudget: null,
       tokensUsed: 0,
+      timeUsedSeconds: 0,
       createdAt: 1,
       updatedAt: 1,
     }));
     const adapter = new FeishuConversationAdapter(
-      { setGoal } as unknown as ConversationUseCases,
+      { setGoal },
       fixture.outbox,
       imagePort,
     );
@@ -1456,7 +1470,7 @@ describe("Feishu conversation adapter", () => {
     const status = vi.fn(async () => "valid" as const);
     const revoke = vi.fn(async () => true);
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
+      {},
       fixture.outbox,
       imagePort,
       () => ({
@@ -1497,7 +1511,7 @@ describe("Feishu conversation adapter", () => {
   it("renders an in-progress Feishu user authorization", async () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
+      {},
       fixture.outbox,
       imagePort,
       () => ({
@@ -1521,7 +1535,7 @@ describe("Feishu conversation adapter", () => {
   it("fails closed when permission runtime status is not composed", async () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
-      {} as ConversationUseCases,
+      {},
       fixture.outbox,
       imagePort,
     );
@@ -1545,7 +1559,7 @@ describe("Feishu conversation adapter", () => {
       };
     });
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
     );
@@ -1578,23 +1592,15 @@ describe("Feishu conversation adapter", () => {
       turnId: "turn-1",
       steered: false,
     }));
-    const status = vi.fn(() => ({
-      workspaceId: "main",
-      workspaceName: "Main",
-      cwd: "/workspace",
+    const status = vi.fn(() => conversationStatus({
       threadId: "thread-1",
       turnId: "turn-1",
       model: "gpt-test",
       effort: "medium",
       serviceTier: "priority",
-      modelPending: false,
-      effortPending: false,
-      fastModePending: false,
-      collaborationMode: "default",
-      collaborationModePending: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit, status } as unknown as ConversationUseCases,
+      { submit, status },
       fixture.outbox,
       imagePort,
     );
@@ -1638,7 +1644,7 @@ describe("Feishu conversation adapter", () => {
       editable: true,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit, queueAdd } as unknown as ConversationUseCases,
+      { submit, queueAdd },
       fixture.outbox,
       imagePort,
     );
@@ -1661,7 +1667,7 @@ describe("Feishu conversation adapter", () => {
     const newSession = vi.fn(async () => ({}));
     const notifyText = vi.fn(() => false);
     const adapter = new FeishuConversationAdapter(
-      { newSession } as unknown as ConversationUseCases,
+      { newSession },
       { notifyText } as unknown as FeishuOutbox,
       imagePort,
     );
@@ -1682,7 +1688,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
     );
@@ -1699,7 +1705,7 @@ describe("Feishu conversation adapter", () => {
     const submit = vi.fn();
     const readQuotedText = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       undefined,
@@ -1740,7 +1746,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
     );
@@ -1771,7 +1777,7 @@ describe("Feishu conversation adapter", () => {
     }));
     const readQuotedText = vi.fn(async () => "原始消息");
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       undefined,
@@ -1809,7 +1815,7 @@ describe("Feishu conversation adapter", () => {
     const error = new Error("private upstream detail");
     const onQuotedTextError = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       undefined,
@@ -1854,7 +1860,7 @@ describe("Feishu conversation adapter", () => {
       bytes: 8,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       { download },
     );
@@ -1888,7 +1894,7 @@ describe("Feishu conversation adapter", () => {
       })),
     };
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       undefined,
@@ -1930,7 +1936,7 @@ describe("Feishu conversation adapter", () => {
       })),
     };
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       undefined,
@@ -1961,7 +1967,7 @@ describe("Feishu conversation adapter", () => {
       steered: false,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       undefined,
@@ -2005,7 +2011,7 @@ describe("Feishu conversation adapter", () => {
     const submit = vi.fn();
     const download = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       imagePort,
       undefined,
@@ -2043,7 +2049,7 @@ describe("Feishu conversation adapter", () => {
       bytes: 8,
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       { download },
     );
@@ -2083,7 +2089,7 @@ describe("Feishu conversation adapter", () => {
         bytes: 9,
       });
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       { download },
     );
@@ -2132,7 +2138,7 @@ describe("Feishu conversation adapter", () => {
         bytes: 9,
       });
     const adapter = new FeishuConversationAdapter(
-      { submit } as unknown as ConversationUseCases,
+      { submit },
       fixture.outbox,
       { download },
     );
@@ -2161,7 +2167,7 @@ describe("Feishu conversation adapter", () => {
     const fixture = createOutbox();
     const download = vi.fn();
     const adapter = new FeishuConversationAdapter(
-      { submit: vi.fn() } as unknown as ConversationUseCases,
+      { submit: vi.fn() },
       fixture.outbox,
       { download },
     );
@@ -2191,7 +2197,7 @@ describe("Feishu conversation adapter", () => {
           turnId: "turn-1",
           steered: true,
         }),
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       {
         download: async () => ({
@@ -2222,7 +2228,7 @@ describe("Feishu conversation adapter", () => {
           turnId: "turn-1",
           steered: true,
         }),
-      } as unknown as ConversationUseCases,
+      },
       {
         notifyMarkdown: vi.fn(() => true),
         notifyText: vi.fn(() => true),
@@ -2252,7 +2258,7 @@ describe("Feishu conversation adapter", () => {
         submit: async () => {
           throw failure;
         },
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );
@@ -2275,7 +2281,7 @@ describe("Feishu conversation adapter", () => {
         submit: async () => {
           throw failure;
         },
-      } as unknown as ConversationUseCases,
+      },
       fixture.outbox,
       imagePort,
     );

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 
 import {
-  estimateWeeklyLimit,
   type RequestMetricsQueryPort,
   type RequestMetricsCommandQuery,
   type RequestMetricsResult,
@@ -17,25 +16,21 @@ import type {
   ProviderAccountQueryPort,
   ProviderAccountUsage,
 } from "./account-port.js";
-import type { InstalledSkill, SkillQueryPort } from "./skill-port.js";
+import type { InstalledSkill } from "./skill-port.js";
 import type {
   McpLoginResult,
   McpHealthReport,
-  McpQueryPort,
   McpResourceReadResult,
   McpServerDetail,
   McpServerSummary,
 } from "./mcp-port.js";
-import { supportsMcpOAuthLogin } from "./mcp-port.js";
 import type {
   InstalledPlugin,
   InstalledPluginCatalog,
   PluginHealthReport,
-  PluginQueryPort,
 } from "./plugin-port.js";
 import type {
   PermissionProfileOption,
-  PermissionQueryPort,
 } from "./permission-port.js";
 import type {
   SessionRouter,
@@ -99,6 +94,11 @@ import {
   LunaReserveService,
   type LunaReserveServiceOptions,
 } from "./luna-reserve-service.js";
+import { ConversationAccountMetricsService } from "./conversation-account-metrics-service.js";
+import {
+  ConversationExtensionQueryService,
+  type ConversationExtensionQueryPort,
+} from "./conversation-extension-query-service.js";
 
 const sessionListPageSize = 20;
 const sessionTurnCountCacheTtlMs = 5 * 60_000;
@@ -181,10 +181,7 @@ export type ConversationIdleReleaseResult =
 
 export type ConversationQueryPort =
   & AccountQueryPort
-  & SkillQueryPort
-  & McpQueryPort
-  & PluginQueryPort
-  & PermissionQueryPort;
+  & ConversationExtensionQueryPort;
 
 export interface AgentRoleEntry {
   name: string;
@@ -226,10 +223,25 @@ export interface ConversationStatus {
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
 }
 
-/** Stable application boundary consumed by commands and external Surfaces. */
-export interface ConversationUseCases {
+/** Stable Turn and user-input lifecycle boundary. */
+export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission>;
+  stop(target: ConversationTarget): Promise<boolean>;
+  rename(target: ConversationTarget, name: string): Promise<void>;
+  setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean>;
+  compact(target: ConversationTarget): Promise<void>;
+  fork(target: ConversationTarget): Promise<string>;
+  togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState>;
+  startPlan(target: ConversationTarget, prompt: string): Promise<Submission>;
+  review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission>;
+  getGoal(target: ConversationTarget): Promise<ThreadGoal | null>;
+  setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal>;
+  clearGoal(target: ConversationTarget): Promise<void>;
+}
+
+/** Stable model and installed-extension boundary. */
+export interface ConversationExtensionUseCases {
   invokeSkill(
     target: ConversationTarget,
     selector: string,
@@ -246,6 +258,32 @@ export interface ConversationUseCases {
     selector: string,
     task: string,
   ): Promise<Submission & { roleName: string }>;
+  modelState(target: ConversationTarget): Promise<ModelSelectionState>;
+  clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState>;
+  browseProviderModels(target: ConversationTarget, provider: string): Promise<ModelSelectionState>;
+  clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState>;
+  selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
+  selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
+  selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
+  listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
+  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
+  mcpServerDetail(target: ConversationTarget, selector: string): Promise<McpServerDetail>;
+  mcpHealth(target: ConversationTarget): Promise<McpHealthReport>;
+  reloadMcpServers(target: ConversationTarget): Promise<void>;
+  loginMcpServer(target: ConversationTarget, selector: string): Promise<McpLoginResult>;
+  readMcpResource(
+    target: ConversationTarget,
+    selector: string,
+    uri: string,
+  ): Promise<McpResourceReadResult>;
+  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog>;
+  pluginHealth(target: ConversationTarget): Promise<PluginHealthReport>;
+  pluginDetail(target: ConversationTarget, selector: string): Promise<InstalledPlugin>;
+  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
+}
+
+/** Stable native Queue and paginated Revert boundary. */
+export interface ConversationQueueRevertUseCases {
   queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem>;
   queueList(target: ConversationTarget, page?: number): Promise<ThreadQueueListResult>;
   queueUpdate(
@@ -271,6 +309,10 @@ export interface ConversationUseCases {
     token: string,
     actorId?: string,
   ): Promise<{ threadId: string; beforeTurnId: string }>;
+}
+
+/** Stable Session, Workspace and local project boundary. */
+export interface ConversationSessionUseCases {
   listSessions(
     target: ConversationTarget,
     options?: ConversationSessionQuery,
@@ -292,49 +334,8 @@ export interface ConversationUseCases {
     target: ConversationTarget,
     update: WorkspacePermissionUpdate,
   ): Promise<Workspace>;
-  stop(target: ConversationTarget): Promise<boolean>;
-  rename(target: ConversationTarget, name: string): Promise<void>;
-  setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean>;
-  compact(target: ConversationTarget): Promise<void>;
-  fork(target: ConversationTarget): Promise<string>;
-  togglePlanMode(target: ConversationTarget): Promise<CollaborationModeState>;
-  startPlan(target: ConversationTarget, prompt: string): Promise<Submission>;
-  review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission>;
-  modelState(target: ConversationTarget): Promise<ModelSelectionState>;
-  clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState>;
-  browseProviderModels(target: ConversationTarget, provider: string): Promise<ModelSelectionState>;
-  clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState>;
-  selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
-  selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
-  selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
-  listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
-  listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]>;
-  mcpServerDetail(target: ConversationTarget, selector: string): Promise<McpServerDetail>;
-  mcpHealth(target: ConversationTarget): Promise<McpHealthReport>;
-  reloadMcpServers(target: ConversationTarget): Promise<void>;
-  loginMcpServer(target: ConversationTarget, selector: string): Promise<McpLoginResult>;
-  readMcpResource(
-    target: ConversationTarget,
-    selector: string,
-    uri: string,
-  ): Promise<McpResourceReadResult>;
-  listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog>;
-  pluginHealth(target: ConversationTarget): Promise<PluginHealthReport>;
-  pluginDetail(target: ConversationTarget, selector: string): Promise<InstalledPlugin>;
-  accountUsage(): Promise<AccountUsage>;
-  accountRateLimits(): Promise<AccountRateLimits>;
-  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
-  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits>;
-  requestMetrics(
-    target: ConversationTarget,
-    query?: RequestMetricsCommandQuery,
-  ): RequestMetricsResult | null;
-  listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]>;
   initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
   checkProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
-  getGoal(target: ConversationTarget): Promise<ThreadGoal | null>;
-  setGoal(target: ConversationTarget, objective: string): Promise<ThreadGoal>;
-  clearGoal(target: ConversationTarget): Promise<void>;
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
@@ -348,10 +349,29 @@ export interface ConversationUseCases {
   ): ConversationStatus;
 }
 
-export class ConversationService implements ConversationUseCases {
+/** Stable account and local request-metrics boundary. */
+export interface ConversationAccountMetricsUseCases {
+  accountUsage(): Promise<AccountUsage>;
+  accountRateLimits(): Promise<AccountRateLimits>;
+  providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage>;
+  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits>;
+  requestMetrics(
+    target: ConversationTarget,
+    query?: RequestMetricsCommandQuery,
+  ): RequestMetricsResult | null;
+}
+
+export class ConversationService implements
+  ConversationTurnUseCases,
+  ConversationSessionUseCases,
+  ConversationQueueRevertUseCases,
+  ConversationExtensionUseCases,
+  ConversationAccountMetricsUseCases {
   private readonly locks = new ConversationLockCoordinator();
   private readonly queueUseCases: ThreadQueueService;
   private readonly revertUseCases: ThreadRevertService;
+  private readonly extensionQueries: ConversationExtensionQueryService;
+  private readonly accountMetrics: ConversationAccountMetricsService;
   private readonly lunaReserve: LunaReserveService | undefined;
   private readonly pendingBackgroundReleases = new Set<string>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
@@ -373,12 +393,12 @@ export class ConversationService implements ConversationUseCases {
     private readonly workspaceStatus?: WorkspaceStatusPort,
     private readonly collaborationModes?: CollaborationModeSelectionService,
     private readonly transfers?: ConversationTransferPort,
-    private readonly providerAccounts?: ProviderAccountQueryPort,
+    providerAccounts?: ProviderAccountQueryPort,
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
     private readonly workspacePermissions?: WorkspacePermissionPort,
     private readonly turnErrorRecorder?: TurnErrorRecorder,
     private readonly agentRoles?: AgentRolePort,
-    private readonly experimentalFeatures: { pluginApiEnabled: boolean } = {
+    experimentalFeatures: { pluginApiEnabled: boolean } = {
       pluginApiEnabled: false,
     },
     private readonly threadOccupancy?: ThreadOccupancyPort,
@@ -391,6 +411,19 @@ export class ConversationService implements ConversationUseCases {
       "router" | "models" | "collaborationModes" | "activity" | "locks"
     >,
   ) {
+    this.extensionQueries = new ConversationExtensionQueryService(
+      router,
+      models,
+      queries,
+      experimentalFeatures.pluginApiEnabled,
+    );
+    this.accountMetrics = new ConversationAccountMetricsService(
+      queries,
+      router,
+      models,
+      providerAccounts,
+      requestMetricsQuery,
+    );
     this.queueUseCases = new ThreadQueueService(
       this.locks,
       router,
@@ -511,18 +544,7 @@ export class ConversationService implements ConversationUseCases {
     target: ConversationTarget,
     query: RequestMetricsCommandQuery = { view: "session" },
   ): RequestMetricsResult | null {
-    if (!this.requestMetricsQuery) return null;
-    if (query.view === "errors") {
-      return this.requestMetricsQuery.errors(query.range ?? "24h");
-    }
-    if (query.view !== "session") {
-      return this.requestMetricsQuery.aggregate(
-        query.view,
-        query.range ?? "24h",
-      );
-    }
-    const threadId = this.router.current(target)?.threadId;
-    return threadId ? this.requestMetricsQuery.forThread(threadId) : null;
+    return this.accountMetrics.requestMetrics(target, query);
   }
 
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
@@ -555,7 +577,7 @@ export class ConversationService implements ConversationUseCases {
     }
     return this.locked(target, async () => {
       const workspace = this.router.workspace(target);
-      const skillName = await this.resolveSkillName(
+      const skillName = await this.extensionQueries.resolveSkillName(
         workspace.cwd,
         normalizedSelector,
       );
@@ -586,7 +608,7 @@ export class ConversationService implements ConversationUseCases {
     selector: string,
     task: string,
   ): Promise<Submission & { pluginName: string }> {
-    this.requirePluginApiEnabled();
+    this.extensionQueries.assertPluginApiEnabled();
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
     if (!normalizedSelector || !normalizedTask) {
@@ -603,7 +625,7 @@ export class ConversationService implements ConversationUseCases {
         );
       }
       const workspace = this.router.workspace(target);
-      const plugin = await this.resolvePlugin(
+      const plugin = await this.extensionQueries.resolvePlugin(
         workspace.cwd,
         normalizedSelector,
       );
@@ -1386,21 +1408,19 @@ export class ConversationService implements ConversationUseCases {
   }
 
   modelState(target: ConversationTarget): Promise<ModelSelectionState> {
-    return this.models.state(target);
+    return this.extensionQueries.modelState(target);
   }
 
   clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState> {
-    this.models.clearProviderBrowse(target);
-    return this.models.state(target);
+    return this.extensionQueries.clearModelBrowse(target);
   }
 
   browseProviderModels(target: ConversationTarget, provider: string): Promise<ModelSelectionState> {
-    return this.models.browseProvider(target, provider);
+    return this.extensionQueries.browseProviderModels(target, provider);
   }
 
   clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState> {
-    this.models.clear(target);
-    return this.models.state(target);
+    return this.extensionQueries.clearModelSelection(target);
   }
 
   selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
@@ -1458,319 +1478,77 @@ export class ConversationService implements ConversationUseCases {
   }
 
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]> {
-    return this.queries.listSkills(this.router.workspace(target).cwd);
-  }
-
-  private async resolveSkillName(
-    cwd: string,
-    selector: string,
-  ): Promise<string> {
-    if (!/^[1-9]\d*$/u.test(selector)) {
-      return selector;
-    }
-    const index = Number(selector);
-    if (!Number.isSafeInteger(index)) {
-      throw new UserFacingError("skill.not-found", "Skill 序号不存在");
-    }
-    const skill = (await this.queries.listSkills(cwd))[index - 1];
-    if (!skill) {
-      throw new UserFacingError("skill.not-found", "Skill 序号不存在");
-    }
-    return skill.name;
+    return this.extensionQueries.listSkills(target);
   }
 
   listMcpServers(target: ConversationTarget): Promise<McpServerSummary[]> {
-    return this.queries.listMcpServers(this.router.current(target)?.threadId);
+    return this.extensionQueries.listMcpServers(target);
   }
 
-  async mcpHealth(target: ConversationTarget): Promise<McpHealthReport> {
-    const servers = await this.queries.listMcpServerDetails(
-      this.router.current(target)?.threadId,
-    );
-    return {
-      serverCount: servers.length,
-      toolCount: servers.reduce((total, server) => total + server.tools.length, 0),
-      resourceCount: servers.reduce(
-        (total, server) => total + server.resources.length,
-        0,
-      ),
-      resourceTemplateCount: servers.reduce(
-        (total, server) => total + server.resourceTemplates.length,
-        0,
-      ),
-      actions: servers.flatMap<McpHealthReport["actions"][number]>((server, index) => {
-        const selector = String(index + 1);
-        if (
-          server.runtimeStatus === "authenticationRequired"
-          || server.authStatus === "notLoggedIn"
-        ) {
-          return [{ type: "loginRequired" as const, server: server.name, selector }];
-        }
-        if (server.runtimeStatus === "failed" || server.runtimeStatus === "cancelled") {
-          return [{
-            type: "reconnectRecommended" as const,
-            server: server.name,
-            selector,
-          }];
-        }
-        if (server.toolDiscoveryFailed) {
-          return [{
-            type: "toolDiscoveryFailed" as const,
-            server: server.name,
-            selector,
-          }];
-        }
-        return [];
-      }),
-      notices: servers.flatMap((server, index) => [
-        ...(server.authStatus === "unknown"
-          && server.runtimeStatus !== "authenticationRequired"
-          ? [{
-              type: "authUnknown" as const,
-              server: server.name,
-              selector: String(index + 1),
-            }]
-          : []),
-        ...(server.runtimeStatus === "connected"
-          && server.authStatus !== "notLoggedIn"
-          && server.authStatus !== "unknown"
-          && !server.toolDiscoveryFailed
-          && server.tools.length === 0
-          && server.resources.length === 0
-          && server.resourceTemplates.length === 0
-          ? [{
-              type: "noCapabilities" as const,
-              server: server.name,
-              selector: String(index + 1),
-            }]
-          : []),
-        ...(server.runtimeStatus === "notStarted"
-          ? [{ type: "notStarted" as const, server: server.name, selector: String(index + 1) }]
-          : []),
-        ...(server.runtimeStatus === "starting"
-          ? [{ type: "starting" as const, server: server.name, selector: String(index + 1) }]
-          : []),
-        ...(server.runtimeStatus === "disabled"
-          ? [{ type: "disabled" as const, server: server.name, selector: String(index + 1) }]
-          : []),
-      ]),
-    };
+  mcpHealth(target: ConversationTarget): Promise<McpHealthReport> {
+    return this.extensionQueries.mcpHealth(target);
   }
 
   reloadMcpServers(target: ConversationTarget): Promise<void> {
     void target;
-    return this.queries.reloadMcpServers();
+    return this.extensionQueries.reloadMcpServers();
   }
 
-  async mcpServerDetail(
+  mcpServerDetail(
     target: ConversationTarget,
     selector: string,
   ): Promise<McpServerDetail> {
-    const threadId = this.router.current(target)?.threadId;
-    return resolveMcpServer(
-      selector,
-      await this.queries.listMcpServerDetails(threadId),
-    );
+    return this.extensionQueries.mcpServerDetail(target, selector);
   }
 
-  async loginMcpServer(
+  loginMcpServer(
     target: ConversationTarget,
     selector: string,
   ): Promise<McpLoginResult> {
-    const threadId = this.router.current(target)?.threadId;
-    const server = resolveMcpServer(
-      selector,
-      await this.queries.listMcpServers(threadId),
-    );
-    if (server.authStatus === "bearerToken") {
-      return {
-        type: "bearerToken",
-        server: server.name,
-      };
-    }
-    if (!supportsMcpOAuthLogin(server.authStatus)) {
-      throw new UserFacingError(
-        "mcp.oauth.unsupported",
-        "该 MCP Server 不支持 OAuth 登录",
-      );
-    }
-    if (!threadId) {
-      throw new UserFacingError(
-        "mcp.thread.required",
-        "请先发送消息创建 Session，或使用 /resume 恢复 Session 后再登录 MCP Server",
-      );
-    }
-    return {
-      type: "oauth",
-      ...await this.queries.startMcpOAuthLogin(server.name, threadId),
-    };
+    return this.extensionQueries.loginMcpServer(target, selector);
   }
 
-  async readMcpResource(
+  readMcpResource(
     target: ConversationTarget,
     selector: string,
     uri: string,
   ): Promise<McpResourceReadResult> {
-    const normalizedUri = uri.trim();
-    if (
-      normalizedUri.length === 0
-      || normalizedUri.length > 4_096
-      || hasControlCharacters(normalizedUri)
-    ) {
-      throw new UserFacingError("mcp.resource.usage", "需要提供有效的 MCP Resource URI");
-    }
-    const threadId = this.router.current(target)?.threadId;
-    const server = resolveMcpServer(
-      selector,
-      await this.queries.listMcpServers(threadId),
-    );
-    return this.queries.readMcpResource(
-      server.name,
-      normalizedUri,
-      threadId,
-    );
+    return this.extensionQueries.readMcpResource(target, selector, uri);
   }
 
   listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
-    this.requirePluginApiEnabled();
-    return this.queries.listPlugins(this.router.workspace(target).cwd);
+    return this.extensionQueries.listPlugins(target);
   }
 
-  async pluginHealth(target: ConversationTarget): Promise<PluginHealthReport> {
-    const catalog = await this.listPlugins(target);
-    const issues: PluginHealthReport["issues"] = [];
-    catalog.plugins.forEach((plugin, index) => {
-      if (!plugin.available) {
-        issues.push({
-          type: "unavailable",
-          plugin: plugin.displayName,
-          selector: String(index + 1),
-          reason: plugin.disabledReason,
-        });
-      } else if (!plugin.enabled) {
-        issues.push({
-          type: "notEnabled",
-          plugin: plugin.displayName,
-          selector: String(index + 1),
-          reason: null,
-        });
-      }
-    });
-    return {
-      installedCount: catalog.plugins.length,
-      enabledCount: catalog.plugins.filter((plugin) => plugin.enabled).length,
-      callableCount: catalog.plugins.filter((plugin) =>
-        plugin.enabled && plugin.available
-      ).length,
-      marketplaceLoadErrorCount: catalog.loadErrorCount,
-      issues,
-    };
+  pluginHealth(target: ConversationTarget): Promise<PluginHealthReport> {
+    return this.extensionQueries.pluginHealth(target);
   }
 
   pluginDetail(
     target: ConversationTarget,
     selector: string,
   ): Promise<InstalledPlugin> {
-    this.requirePluginApiEnabled();
-    return this.resolvePlugin(this.router.workspace(target).cwd, selector);
-  }
-
-  private async resolvePlugin(
-    cwd: string,
-    selector: string,
-  ): Promise<InstalledPlugin> {
-    const { plugins } = await this.queries.listPlugins(cwd);
-    if (/^[1-9]\d*$/u.test(selector)) {
-      const index = Number(selector);
-      const plugin = Number.isSafeInteger(index) ? plugins[index - 1] : undefined;
-      if (!plugin) {
-        throw new UserFacingError("plugin.not-found", "Plugin 序号不存在");
-      }
-      return plugin;
-    }
-    const normalized = selector.toLowerCase();
-    const matches = plugins.filter((plugin) =>
-      plugin.id.toLowerCase() === normalized
-      || plugin.name.toLowerCase() === normalized
-      || plugin.displayName.toLowerCase() === normalized
-    );
-    if (matches.length !== 1) {
-      throw new UserFacingError(
-        matches.length === 0 ? "plugin.not-found" : "plugin.ambiguous",
-        matches.length === 0
-          ? "指定的 Plugin 不存在"
-          : "Plugin 名称不唯一，请使用序号或完整 ID",
-      );
-    }
-    return matches[0]!;
-  }
-
-  private requirePluginApiEnabled(): void {
-    if (!this.experimentalFeatures.pluginApiEnabled) {
-      throw new UserFacingError(
-        "plugin.disabled",
-        "开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway",
-      );
-    }
+    return this.extensionQueries.pluginDetail(target, selector);
   }
 
   accountUsage(): Promise<AccountUsage> {
-    return this.queries.accountUsage();
+    return this.accountMetrics.accountUsage();
   }
 
   accountRateLimits(): Promise<AccountRateLimits> {
-    return this.queries.accountRateLimits();
+    return this.accountMetrics.accountRateLimits();
   }
 
   providerAccountUsage(target: ConversationTarget): Promise<ProviderAccountUsage> {
-    const binding = this.router.current(target);
-    const model = this.models.status(target);
-    const provider = model.modelProvider ?? "openai";
-    const threadProvider = binding
-      ? this.router.modelSettings(target)?.modelProvider ?? provider
-      : undefined;
-    const threadId = usesOpenAiAccount(provider) && usesOpenAiAccount(threadProvider)
-      ? binding?.threadId
-      : undefined;
-    if (!this.providerAccounts) {
-      return Promise.resolve({ kind: "unsupported", provider });
-    }
-    return threadId === undefined
-      ? this.providerAccounts.accountUsage(provider)
-      : this.providerAccounts.accountUsage(provider, threadId);
+    return this.accountMetrics.providerAccountUsage(target);
   }
 
-  async providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits> {
-    const provider = this.models.status(target).modelProvider ?? "openai";
-    const resolved: ProviderAccountLimits = this.providerAccounts
-      ? await this.providerAccounts.accountLimits(provider)
-      : { kind: "unsupported", provider };
-    if (resolved.kind !== "rate-limits" || !this.requestMetricsQuery) {
-      return resolved;
-    }
-    const nowMs = Date.now();
-    const weeklyEstimates = resolved.limits.limits.flatMap((limit) => {
-      if (limit.limitId !== "codex") return [];
-      const window = [limit.primary, limit.secondary].find(
-        (candidate) => candidate?.windowDurationMins === 10_080,
-      );
-      if (!window || window.resetsAt === null) return [];
-      const observation = this.requestMetricsQuery?.weeklyQuotaEstimate(
-        "openai",
-        limit.limitId,
-        window.resetsAt,
-        nowMs,
-      ) ?? null;
-      const estimate = estimateWeeklyLimit(limit, observation);
-      return estimate === null ? [] : [estimate];
-    });
-    return weeklyEstimates.length === 0
-      ? resolved
-      : { ...resolved, weeklyEstimates };
+  providerAccountLimits(target: ConversationTarget): Promise<ProviderAccountLimits> {
+    return this.accountMetrics.providerAccountLimits(target);
   }
 
   listPermissionProfiles(target: ConversationTarget): Promise<PermissionProfileOption[]> {
-    return this.queries.listPermissionProfiles(this.router.workspace(target).cwd);
+    return this.extensionQueries.listPermissionProfiles(target);
   }
 
   async initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult> {
@@ -2287,32 +2065,4 @@ export function turnErrorMessage(error: unknown): string | null {
   const message = error.message.replace(/\s+/gu, " ").trim();
   if (message.length === 0) return null;
   return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
-}
-
-function resolveMcpServer<T extends McpServerSummary>(
-  selector: string,
-  servers: readonly T[],
-): T {
-  const normalizedSelector = selector.trim();
-  if (!normalizedSelector) {
-    throw new UserFacingError("mcp.server.usage", "需要提供 MCP Server 名称或序号");
-  }
-  if (/^[1-9]\d*$/u.test(normalizedSelector)) {
-    const index = Number(normalizedSelector);
-    const server = Number.isSafeInteger(index) ? servers[index - 1] : undefined;
-    if (server) return server;
-  } else {
-    const server = servers.find((candidate) =>
-      candidate.name.toLowerCase() === normalizedSelector.toLowerCase()
-    );
-    if (server) return server;
-  }
-  throw new UserFacingError("mcp.server.not-found", "指定的 MCP Server 不存在");
-}
-
-function hasControlCharacters(value: string): boolean {
-  return [...value].some((character) => {
-    const code = character.codePointAt(0);
-    return code !== undefined && (code <= 0x1f || code === 0x7f);
-  });
 }

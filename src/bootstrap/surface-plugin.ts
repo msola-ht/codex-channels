@@ -1,8 +1,10 @@
 import type { Logger } from "pino";
 
 import type {
-  ConversationUseCases,
-  ScheduledTaskUseCases,
+  ConversationCommandExecutor,
+  ConversationExtensionUseCases,
+  ConversationSessionUseCases,
+  ConversationTurnUseCases,
 } from "../application/index.js";
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
 import type { ConversationTarget } from "../conversation-core/index.js";
@@ -21,8 +23,8 @@ export interface SurfaceRuntimeModule {
 
 export interface SurfacePluginContext {
   config: GatewayConfig;
-  service: ConversationUseCases;
-  scheduledTasks?: ScheduledTaskUseCases;
+  service: SurfaceConversationUseCases;
+  commands: ConversationCommandExecutor;
   bindings: BindingStore;
   logger: Logger;
   gatewayVersion: string;
@@ -34,6 +36,11 @@ export interface SurfacePluginContext {
     model: string | null | undefined,
   ) => number | null;
 }
+
+export type SurfaceConversationUseCases =
+  & Pick<ConversationTurnUseCases, "touchActivity" | "submit">
+  & Pick<ConversationSessionUseCases, "status" | "listWorkspaces">
+  & Pick<ConversationExtensionUseCases, "modelState" | "listPlugins">;
 
 export interface BuiltInSurfacePlugin {
   readonly id: string;

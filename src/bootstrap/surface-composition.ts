@@ -116,8 +116,8 @@ function createWeixinModule(
   const adapter = createWeixinSurface({
     accountId: config.accountId,
     service: options.service,
+    commands: options.commands,
     access,
-    ...(options.scheduledTasks === undefined ? {} : { scheduledTasks: options.scheduledTasks }),
     actorRegistry: options.bindings,
     credentialDirectory: join(
       options.config.credentialsDirectory,
@@ -205,8 +205,8 @@ function createFeishuModule(
     appId: config.appId,
     appSecret: config.appSecret,
     service: options.service,
+    commands: options.commands,
     access,
-    ...(options.scheduledTasks === undefined ? {} : { scheduledTasks: options.scheduledTasks }),
     logger: options.logger,
     uploadsDirectory: join(
       dirname(options.config.stateDatabasePath),
@@ -320,8 +320,8 @@ function createTelegramModule(
     token: config.telegramBotToken,
     ...(proxyUrl === undefined ? {} : { proxyUrl }),
     service: options.service,
+    commands: options.commands,
     access,
-    ...(options.scheduledTasks === undefined ? {} : { scheduledTasks: options.scheduledTasks }),
     startupRecipients: config.telegramAllowedUserIds,
     workspaces: config.workspaces,
     uploadsDirectory: join(dirname(config.stateDatabasePath), "uploads"),

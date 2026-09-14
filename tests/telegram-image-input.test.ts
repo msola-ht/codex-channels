@@ -6,17 +6,18 @@ import { join } from "node:path";
 import pino from "pino";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationUseCases } from "../src/application/conversation-service.js";
 import type {
+  ConversationTurnUseCases,
   ScheduledTaskConfirmation,
   ScheduledTaskUseCases,
-} from "../src/application/scheduled-task-service.js";
+} from "../src/application/index.js";
 import { UserFacingError, type OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import { TelegramAccessPolicy } from "../src/policy/telegram-access.js";
 import {
   TelegramSurface,
   type TelegramAudioPort,
+  type TelegramConversationUseCases,
   type TelegramImagePort,
 } from "../src/surfaces/telegram/bot.js";
 import { telegramModelSelectionToken } from "../src/surfaces/telegram/command-renderer.js";
@@ -24,6 +25,11 @@ import {
   maximumTelegramTextFileBytes,
   type TelegramTextFilePort,
 } from "../src/surfaces/telegram/file-input.js";
+import {
+  conversationCommandExecutor,
+  conversationStatus,
+  type ConversationMethodOverrides,
+} from "./conversation-command-fixture.js";
 
 const directories: string[] = [];
 const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-telegram-images-"));
@@ -593,7 +599,10 @@ describe("Telegram image input", () => {
           name: "Main",
           cwd: "/workspace",
         }],
-        status: () => ({ model: "gpt-test", modelProvider: "openai" }),
+        status: () => conversationStatus({
+          model: "gpt-test",
+          modelProvider: "openai",
+        }),
         selectWorkspace,
         resume,
       },
@@ -754,7 +763,10 @@ describe("Telegram image input", () => {
           name: "Docs",
           cwd: "/workspace/docs",
         }],
-        status: () => ({ model: "gpt-test", modelProvider: "openai" }),
+        status: () => conversationStatus({
+          model: "gpt-test",
+          modelProvider: "openai",
+        }),
         selectWorkspace,
       },
     );
@@ -1224,9 +1236,9 @@ function scheduledTaskPreview(): ScheduledTaskConfirmation {
 }
 
 function createSurface(
-  submit: ReturnType<typeof vi.fn>,
+  submit: ConversationTurnUseCases["submit"],
   download: ReturnType<typeof vi.fn>,
-  serviceOverrides: Record<string, unknown> = {},
+  serviceOverrides: Omit<ConversationMethodOverrides, "submit"> = {},
   downloadTextFile: ReturnType<typeof vi.fn> = vi.fn(),
   downloadAudio: ReturnType<typeof vi.fn> = vi.fn(),
   now?: () => number,
@@ -1262,6 +1274,7 @@ function createSurface(
   directories.push(directory);
   const surfaceOptions = {
     gatewayVersion: "0.146.0",
+    commands: conversationCommandExecutor({ submit, ...serviceOverrides }, scheduledTasks),
     inputQuietWindowMs: 0,
     imageStore,
     audioStore,
@@ -1274,12 +1287,15 @@ function createSurface(
     },
     ...(now === undefined ? {} : { now }),
     debugEnabled,
-    ...(scheduledTasks === undefined ? {} : { scheduledTasks }),
   };
+  const conversations = telegramConversationUseCases({
+    submit,
+    ...serviceOverrides,
+  });
   const surface = new TelegramSurface(
     "123:token",
     undefined,
-    { submit, ...serviceOverrides } as unknown as ConversationUseCases,
+    conversations,
     new TelegramAccessPolicy(new Set([123]), "default"),
     new Set(),
     [{ id: "main", name: "Main", cwd: "/workspace" }],
@@ -1336,6 +1352,24 @@ function createSurface(
     apiPayloads,
     rememberActor,
   };
+}
+
+function missingTelegramCapability(): never {
+  throw new Error("测试未实现 Telegram 会话能力");
+}
+
+function telegramConversationUseCases(
+  overrides: ConversationMethodOverrides,
+): TelegramConversationUseCases {
+  return new Proxy(overrides, {
+    get(target, property, receiver) {
+      if (Reflect.has(target, property)) {
+        return Reflect.get(target, property, receiver);
+      }
+      if (property === "touchActivity") return undefined;
+      return missingTelegramCapability;
+    },
+  }) as TelegramConversationUseCases;
 }
 
 function telegramUser() {

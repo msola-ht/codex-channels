@@ -1,23 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  ConversationCommandService,
+  ConversationCommandService as ProductionConversationCommandService,
   conversationCommandNames,
   isConversationCommandName,
-  type ConversationUseCases,
   type InstalledPlugin,
+  type ScheduledTaskUseCases,
 } from "../src/application/index.js";
 import { parseThreadQueueOperation } from "../src/application/conversation-command-parser.js";
 import {
   UserFacingError,
   type ConversationTarget,
 } from "../src/conversation-core/index.js";
+import {
+  conversationCommandUseCases,
+  conversationSession,
+  conversationStatus,
+  modelOption,
+  modelSelectionState,
+  type ConversationMethodOverrides,
+} from "./conversation-command-fixture.js";
 
 const target: ConversationTarget = {
   surface: "telegram",
   accountId: "default",
   conversationId: "100",
 };
+
+class ConversationCommandService extends ProductionConversationCommandService {
+  constructor(
+    conversations: ConversationMethodOverrides,
+    scheduledTasks?: ScheduledTaskUseCases,
+  ) {
+    super(conversationCommandUseCases(conversations), scheduledTasks);
+  }
+}
 
 function installedPlugin(
   index: number,
@@ -87,7 +104,7 @@ describe("ConversationCommandService", () => {
     const releaseThread = vi.fn(async () => result);
     const commands = new ConversationCommandService({
       releaseThread,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "release")).resolves.toEqual({
       kind: "occupancy",
@@ -105,7 +122,7 @@ describe("ConversationCommandService", () => {
   it("rejects invalid release arguments", async () => {
     const commands = new ConversationCommandService({
       releaseThread: vi.fn(),
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "release", "bogus")).rejects.toMatchObject({
       code: "release.usage",
@@ -127,7 +144,7 @@ describe("ConversationCommandService", () => {
     const clearModelSelection = vi.fn(async () => state);
     const commands = new ConversationCommandService({
       clearModelSelection,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "model", "clear")).resolves.toEqual({
       kind: "models",
@@ -147,7 +164,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       initializeProjectRules,
       checkProjectRules,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "rules", "init")).resolves.toEqual({
       kind: "project-rules",
@@ -166,12 +183,12 @@ describe("ConversationCommandService", () => {
   });
 
   it("routes session search and returns typed presentation data", async () => {
-    const sessions = [{ id: "thread-1" }];
+    const sessions = [conversationSession({ id: "thread-1" })];
     const listSessions = vi.fn(async () => sessions);
     const conversations = {
       listSessions,
-      status: () => ({ threadId: "thread-1" }),
-    } as unknown as ConversationUseCases;
+      status: () => conversationStatus({ threadId: "thread-1" }),
+    };
     const commands = new ConversationCommandService(conversations);
 
     await expect(commands.execute(target, "sessions", " fix ")).resolves.toEqual({
@@ -197,11 +214,11 @@ describe("ConversationCommandService", () => {
   });
 
   it("keeps the resume picker fast by avoiding turn-history scans", async () => {
-    const listSessions = vi.fn(async () => [{ id: "thread-1" }]);
+    const listSessions = vi.fn(async () => [conversationSession({ id: "thread-1" })]);
     const commands = new ConversationCommandService({
       listSessions,
-      status: () => ({ threadId: "thread-1" }),
-    } as unknown as ConversationUseCases);
+      status: () => conversationStatus({ threadId: "thread-1" }),
+    });
 
     await expect(commands.execute(target, "resume")).resolves.toMatchObject({
       kind: "sessions",
@@ -216,12 +233,15 @@ describe("ConversationCommandService", () => {
   });
 
   it("parses session paging and filters while keeping the full matched count", async () => {
-    const sessions = Array.from({ length: 21 }, (_, index) => ({ id: `thread-${index + 1}` }));
+    const sessions = Array.from(
+      { length: 21 },
+      (_, index) => conversationSession({ id: `thread-${index + 1}` }),
+    );
     const listSessions = vi.fn(async () => sessions);
     const commands = new ConversationCommandService({
       listSessions,
-      status: () => ({}),
-    } as unknown as ConversationUseCases);
+      status: () => conversationStatus(),
+    });
 
     await expect(commands.execute(
       target,
@@ -249,7 +269,7 @@ describe("ConversationCommandService", () => {
   });
 
   it("reports archived session filter errors with the archived command usage", async () => {
-    const commands = new ConversationCommandService({} as ConversationUseCases);
+    const commands = new ConversationCommandService({});
 
     await expect(commands.execute(target, "archived", "filter running"))
       .rejects.toMatchObject({
@@ -263,17 +283,17 @@ describe("ConversationCommandService", () => {
       id: "main",
       name: "Main",
       cwd: "/workspace",
-      sandbox: "workspace-write",
+      sandbox: "workspace-write" as const,
     };
     const updateWorkspacePermissions = vi.fn(async () => ({
       ...workspace,
-      approvalPolicy: "never",
+      approvalPolicy: "never" as const,
     }));
     const commands = new ConversationCommandService({
-      status: () => ({ workspaceId: "main" }),
+      status: () => conversationStatus({ workspaceId: "main" }),
       listWorkspaces: () => [workspace],
       updateWorkspacePermissions,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "workspaceperm")).resolves.toEqual({
       kind: "workspace-permissions",
@@ -296,9 +316,9 @@ describe("ConversationCommandService", () => {
 
   it("rejects invalid workspace permission values", async () => {
     const commands = new ConversationCommandService({
-      status: () => ({ workspaceId: "main" }),
+      status: () => conversationStatus({ workspaceId: "main" }),
       listWorkspaces: () => [{ id: "main", name: "Main", cwd: "/workspace" }],
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "workspaceperm", "sandbox root"))
       .rejects.toMatchObject({ code: "workspace.permission.usage" });
@@ -308,7 +328,7 @@ describe("ConversationCommandService", () => {
     const requestMetrics = vi.fn(() => null);
     const commands = new ConversationCommandService({
       requestMetrics,
-    } as unknown as ConversationUseCases);
+    });
 
     await commands.execute(target, "metrics");
     await commands.execute(target, "metrics", "session");
@@ -357,11 +377,11 @@ describe("ConversationCommandService", () => {
         threadId: "thread-shared",
         transferredFrom: "weixin",
       })),
-      status: vi.fn(() => ({
+      status: vi.fn(() => conversationStatus({
         model: "gpt-5.6",
         modelProvider: "openai",
       })),
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "resume", "thread-shared"))
       .resolves.toEqual({
@@ -381,11 +401,11 @@ describe("ConversationCommandService", () => {
         threadId: "thread-cold-queue",
         queuePending: true,
       })),
-      status: vi.fn(() => ({
+      status: vi.fn(() => conversationStatus({
         model: "gpt-5.6",
         modelProvider: "openai",
       })),
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "resume", "thread-cold-queue"))
       .resolves.toMatchObject({
@@ -404,7 +424,7 @@ describe("ConversationCommandService", () => {
     }));
     const commands = new ConversationCommandService({
       review,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "review", "branch main")).resolves.toEqual({
       kind: "outcome",
@@ -445,7 +465,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       togglePlanMode,
       startPlan,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "plan")).resolves.toEqual({
       kind: "collaboration-mode",
@@ -466,12 +486,13 @@ describe("ConversationCommandService", () => {
       status: "active" as const,
       tokenBudget: null,
       tokensUsed: 0,
+      timeUsedSeconds: 0,
       createdAt: 1,
       updatedAt: 1,
     }));
     const commands = new ConversationCommandService({
       setGoal,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "goal", " set ship it ")).resolves.toEqual({
       kind: "outcome",
@@ -511,7 +532,7 @@ describe("ConversationCommandService", () => {
       queueDelete,
       queueReorder,
       queueStart,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "queue", "add next task")).resolves.toMatchObject({
       outcome: { type: "thread-queue.added", item },
@@ -542,7 +563,7 @@ describe("ConversationCommandService", () => {
 
   it("rejects the removed implicit Queue alias", async () => {
     const queueAdd = vi.fn();
-    const commands = new ConversationCommandService({ queueAdd } as unknown as ConversationUseCases);
+    const commands = new ConversationCommandService({ queueAdd });
 
     await expect(commands.execute(target, "queue", "下一轮检查测试"))
       .rejects.toMatchObject({ code: "queue.usage" });
@@ -578,15 +599,27 @@ describe("ConversationCommandService", () => {
     const selectModel = vi.fn(async () => state);
     const selectEffort = vi.fn(async () => state);
     const selectFastMode = vi.fn(async () => state);
-    const listSkills = vi.fn(async () => ["skill"]);
-    const listMcpServers = vi.fn(async () => ["mcp"]);
+    const skill = { name: "skill", description: "Skill" };
+    const listSkills = vi.fn(async () => [skill]);
+    const mcpServer = {
+      name: "mcp",
+      runtimeStatus: "connected" as const,
+      pluginId: null,
+      authStatus: "unsupported" as const,
+      toolCount: 0,
+      toolDiscoveryFailed: false,
+    };
+    const listMcpServers = vi.fn(async () => [mcpServer]);
     const listPlugins = vi.fn(async () => ({
       plugins: [],
       loadErrorCount: 0,
     }));
-    const providerAccountUsage = vi.fn(async () => ({ usage: "usage" }));
-    const providerAccountLimits = vi.fn(async () => ({ limits: "limits" }));
-    const listPermissionProfiles = vi.fn(async () => ["permissions"]);
+    const usage = { kind: "unsupported" as const, provider: "test" };
+    const limits = { kind: "unsupported" as const, provider: "test" };
+    const permission = { id: "permissions", description: null, allowed: true };
+    const providerAccountUsage = vi.fn(async () => usage);
+    const providerAccountLimits = vi.fn(async () => limits);
+    const listPermissionProfiles = vi.fn(async () => [permission]);
     const commands = new ConversationCommandService({
       modelState,
       selectModel,
@@ -598,7 +631,9 @@ describe("ConversationCommandService", () => {
       providerAccountUsage,
       providerAccountLimits,
       listPermissionProfiles,
-    } as unknown as ConversationUseCases);
+      status: () => conversationStatus(),
+      listWorkspaces: () => [{ id: "main", name: "Main", cwd: "/workspace" }],
+    });
 
     await expect(commands.execute(target, "model", "gpt-test")).resolves.toMatchObject({
       kind: "models",
@@ -630,11 +665,11 @@ describe("ConversationCommandService", () => {
     });
     await expect(commands.execute(target, "skill")).resolves.toEqual({
       kind: "skills",
-      entries: ["skill"],
+      entries: [skill],
     });
     await expect(commands.execute(target, "mcp")).resolves.toEqual({
       kind: "mcp",
-      servers: ["mcp"],
+      servers: [mcpServer],
     });
     await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
@@ -649,15 +684,16 @@ describe("ConversationCommandService", () => {
     });
     await expect(commands.execute(target, "usage")).resolves.toEqual({
       kind: "usage",
-      result: { usage: "usage" },
+      result: usage,
     });
     await expect(commands.execute(target, "limits")).resolves.toEqual({
       kind: "limits",
-      result: { limits: "limits" },
+      result: limits,
     });
     await expect(commands.execute(target, "permissions")).resolves.toEqual({
       kind: "permissions",
-      profiles: ["permissions"],
+      profiles: [permission],
+      workspace: { id: "main", name: "Main", cwd: "/workspace" },
     });
     expect(selectModel).toHaveBeenCalledWith(target, "gpt-test");
     expect(selectEffort).toHaveBeenCalledWith(target, "high");
@@ -673,7 +709,7 @@ describe("ConversationCommandService", () => {
     }));
     const commands = new ConversationCommandService({
       invokeSkill,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(
       target,
@@ -696,7 +732,20 @@ describe("ConversationCommandService", () => {
   });
 
   it("routes MCP health, reload, detail, login, and resource operations through the shared boundary", async () => {
-    const server = { name: "project-tools" };
+    const server = {
+      name: "project-tools",
+      runtimeStatus: "connected" as const,
+      pluginId: null,
+      authStatus: "unsupported" as const,
+      toolCount: 0,
+      toolDiscoveryFailed: false,
+      serverTitle: null,
+      serverVersion: null,
+      serverDescription: null,
+      tools: [],
+      resources: [],
+      resourceTemplates: [],
+    };
     const mcpServerDetail = vi.fn(async () => server);
     const loginMcpServer = vi.fn()
       .mockResolvedValueOnce({
@@ -729,7 +778,7 @@ describe("ConversationCommandService", () => {
       mcpServerDetail,
       loginMcpServer,
       readMcpResource,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "mcp", "health")).resolves.toEqual({
       kind: "mcp-health",
@@ -822,15 +871,16 @@ describe("ConversationCommandService", () => {
 
   it("rejects /skill without both selector and task", async () => {
     const commands = new ConversationCommandService(
-      {} as ConversationUseCases,
+      {},
     );
     await expect(commands.execute(target, "skill", "systematic-debugging"))
       .rejects.toMatchObject({ code: "skill.usage" });
   });
 
   it("lists and invokes Plugins through the shared command boundary", async () => {
+    const plugin = installedPlugin(1, { id: "github@local" });
     const listPlugins = vi.fn(async () => ({
-      plugins: [{ id: "github@local" }],
+      plugins: [plugin],
       loadErrorCount: 0,
     }));
     const invokePlugin = vi.fn(async () => ({
@@ -839,7 +889,7 @@ describe("ConversationCommandService", () => {
       steered: false,
       pluginName: "GitHub",
     }));
-    const pluginDetail = vi.fn(async () => ({ id: "github@local" }));
+    const pluginDetail = vi.fn(async () => plugin);
     const pluginHealth = vi.fn(async () => ({
       installedCount: 1,
       enabledCount: 1,
@@ -852,11 +902,11 @@ describe("ConversationCommandService", () => {
       pluginHealth,
       pluginDetail,
       invokePlugin,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "plugin")).resolves.toEqual({
       kind: "plugins",
-      plugins: [{ id: "github@local" }],
+      plugins: [plugin],
       selectors: ["1"],
       loadErrorCount: 0,
       totalPluginCount: 1,
@@ -873,7 +923,7 @@ describe("ConversationCommandService", () => {
     await expect(commands.execute(target, "plugin", "github@local"))
       .resolves.toEqual({
         kind: "plugin-detail",
-        plugin: { id: "github@local" },
+        plugin,
       });
     await expect(commands.execute(target, "plugin", "github@local 检查 PR"))
       .resolves.toEqual({
@@ -901,7 +951,7 @@ describe("ConversationCommandService", () => {
     const listPlugins = vi.fn(async () => ({ plugins, loadErrorCount: 0 }));
     const commands = new ConversationCommandService({
       listPlugins,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "plugin", "list 2"))
       .resolves.toMatchObject({
@@ -941,7 +991,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       listAgentRoles,
       invokeAgent,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "agents")).resolves.toEqual({
       kind: "agents",
@@ -965,14 +1015,14 @@ describe("ConversationCommandService", () => {
 
   it("rejects /agents without both role and task", async () => {
     const commands = new ConversationCommandService(
-      {} as ConversationUseCases,
+      {},
     );
     await expect(commands.execute(target, "agents", "ds"))
       .rejects.toMatchObject({ code: "agents.usage" });
   });
 
   it("reports the model that the next message will use after session and workspace switches", async () => {
-    const status = vi.fn(() => ({
+    const status = vi.fn(() => conversationStatus({
       workspaceId: "other",
       threadId: "thread-previous",
       model: "gpt-5.6",
@@ -985,7 +1035,7 @@ describe("ConversationCommandService", () => {
       })),
       selectWorkspace: vi.fn(async () => workspace),
       status,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "new")).resolves.toEqual({
       kind: "outcome",
@@ -1012,13 +1062,14 @@ describe("ConversationCommandService", () => {
       status: "active" as const,
       tokenBudget: null,
       tokensUsed: 0,
+      timeUsedSeconds: 0,
       createdAt: 1,
       updatedAt: 1,
     };
     const service = {
       resume: vi.fn(async () => ({ threadId: "thread-resumed" })),
       listSessions: vi.fn(async () => []),
-      status: vi.fn(() => ({
+      status: vi.fn(() => conversationStatus({
         workspaceId: "main",
         model: "gpt-test",
         modelProvider: "openai",
@@ -1082,30 +1133,22 @@ describe("ConversationCommandService", () => {
       rename: vi.fn(async () => undefined),
       compact: vi.fn(async () => undefined),
       fork: vi.fn(async () => "thread-forked"),
-      review: vi.fn(async () => ({ threadId: "review-thread", turnId: "review-turn" })),
-      selectModel: vi.fn(async () => ({
-        models: [{
-          id: "gpt-test",
-          model: "gpt-test",
-          displayName: "GPT Test",
-          supportedReasoningEfforts: [{ effort: "medium", description: "Medium" }],
-          defaultReasoningEffort: "medium",
-          serviceTiers: [],
-          defaultServiceTier: null,
-          isDefault: true,
-          inputModalities: ["text" as const],
-        }],
-        model: "gpt-test",
+      review: vi.fn(async () => ({
+        threadId: "review-thread",
+        turnId: "review-turn",
+        steered: false,
+      })),
+      modelState: vi.fn(async () => modelSelectionState({
         modelProvider: "openai",
-        effort: "medium",
-        serviceTier: null,
+      })),
+      selectModel: vi.fn(async () => modelSelectionState({
+        modelProvider: "openai",
         pending: true,
         modelPending: true,
         effortPending: true,
-        serviceTierPending: false,
       })),
-      selectEffort: vi.fn(async () => ({ model: "gpt-test" })),
-      selectFastMode: vi.fn(async () => ({ model: "gpt-test" })),
+      selectEffort: vi.fn(async () => modelSelectionState()),
+      selectFastMode: vi.fn(async () => modelSelectionState()),
       listSkills: vi.fn(async () => []),
       invokeSkill: vi.fn(async () => ({
         threadId: "thread-1",
@@ -1122,9 +1165,15 @@ describe("ConversationCommandService", () => {
         steered: false,
         pluginName: "plugin",
       })),
-      providerAccountUsage: vi.fn(async () => ({})),
+      providerAccountUsage: vi.fn(async () => ({
+        kind: "unsupported" as const,
+        provider: "test",
+      })),
       requestMetrics: vi.fn(() => null),
-      providerAccountLimits: vi.fn(async () => ({})),
+      providerAccountLimits: vi.fn(async () => ({
+        kind: "unsupported" as const,
+        provider: "test",
+      })),
       listPermissionProfiles: vi.fn(async () => []),
       initializeProjectRules: vi.fn(async () => ({
         projectRoot: "/workspace",
@@ -1134,7 +1183,7 @@ describe("ConversationCommandService", () => {
       togglePlanMode: vi.fn(async () => ({ mode: "plan" as const, pending: true })),
       setGoal: vi.fn(async () => goal),
       releaseThread: vi.fn(async () => ({
-        status: "free",
+        status: "free" as const,
         threadId: "thread-release",
       })),
       scheduleList: vi.fn(() => ({
@@ -1146,7 +1195,7 @@ describe("ConversationCommandService", () => {
       })),
     };
     const commands = new ConversationCommandService(
-      service as unknown as ConversationUseCases,
+      service,
       { list: service.scheduleList } as never,
     );
     const cases = [
@@ -1206,7 +1255,7 @@ describe("ConversationCommandService", () => {
       .mockResolvedValueOnce(false);
     const commands = new ConversationCommandService({
       setPinned,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "pin")).resolves.toEqual({
       kind: "outcome",
@@ -1224,7 +1273,7 @@ describe("ConversationCommandService", () => {
     const commands = new ConversationCommandService({
       getGoal,
       clearGoal,
-    } as unknown as ConversationUseCases);
+    });
 
     await expect(commands.execute(target, "goal")).resolves.toEqual({
       kind: "goal",
@@ -1240,7 +1289,7 @@ describe("ConversationCommandService", () => {
     const getGoal = vi.fn(async () => null);
     const commands = new ConversationCommandService({
       getGoal,
-    } as unknown as ConversationUseCases);
+    });
 
     for (const input of ["set", "clear extra", "unknown"]) {
       await expect(commands.execute(target, "goal", input)).rejects.toMatchObject({
@@ -1251,7 +1300,7 @@ describe("ConversationCommandService", () => {
   });
 
   it("falls back to provider browsing when /model does not resolve to a model", async () => {
-    const browseProviderModels = vi.fn(async () => ({
+    const browseProviderModels = vi.fn(async () => modelSelectionState({
       models: [],
       model: "gpt-main",
       modelProvider: "openai",
@@ -1263,13 +1312,20 @@ describe("ConversationCommandService", () => {
       effortPending: false,
       serviceTierPending: false,
     }));
+    const modelState = vi.fn(async () => modelSelectionState({
+      models: [],
+      model: "gpt-main",
+      modelProvider: "openai",
+      effort: null,
+    }));
     const selectModel = vi.fn(async () => {
       throw new UserFacingError("model.selector.not-found", "找不到指定模型");
     });
     const commands = new ConversationCommandService({
       browseProviderModels,
+      modelState,
       selectModel,
-    } as unknown as ConversationUseCases);
+    });
 
     const result = await commands.execute(target, "model", "deepseek");
     expect(result).toMatchObject({
@@ -1282,22 +1338,20 @@ describe("ConversationCommandService", () => {
   });
 
   it("keeps selecting a model directly when the selector matches a model", async () => {
-    const selectModel = vi.fn(async () => ({
+    const selectedState = modelSelectionState({
       models: [],
       model: "gpt-main",
       modelProvider: "openai",
       effort: null,
-      serviceTier: null,
-      pending: false,
-      modelPending: false,
-      effortPending: false,
-      serviceTierPending: false,
-    }));
-    const browseProviderModels = vi.fn(async () => ({}));
+    });
+    const selectModel = vi.fn(async () => selectedState);
+    const modelState = vi.fn(async () => selectedState);
+    const browseProviderModels = vi.fn(async () => selectedState);
     const commands = new ConversationCommandService({
       selectModel,
+      modelState,
       browseProviderModels,
-    } as unknown as ConversationUseCases);
+    });
 
     await commands.execute(target, "model", "gpt-main");
     expect(selectModel).toHaveBeenCalledWith(target, "gpt-main");
@@ -1305,10 +1359,10 @@ describe("ConversationCommandService", () => {
   });
 
   it("treats a numeric provider selector as provider browsing before model selection", async () => {
-    const modelState = vi.fn(async () => ({
+    const modelState = vi.fn(async () => modelSelectionState({
       models: [
-        { provider: "openai", model: "gpt-main", id: "gpt-main" },
-        { provider: "codeproxy-dev", model: "proxy-main", id: "proxy-main" },
+        modelOption({ provider: "openai", model: "gpt-main", id: "gpt-main" }),
+        modelOption({ provider: "codeproxy-dev", model: "proxy-main", id: "proxy-main" }),
       ],
       model: "gpt-main",
       modelProvider: "openai",
@@ -1319,8 +1373,12 @@ describe("ConversationCommandService", () => {
       effortPending: false,
       serviceTierPending: false,
     }));
-    const browseProviderModels = vi.fn(async () => ({
-      models: [{ provider: "codeproxy-dev", model: "proxy-main", id: "proxy-main" }],
+    const browseProviderModels = vi.fn(async () => modelSelectionState({
+      models: [modelOption({
+        provider: "codeproxy-dev",
+        model: "proxy-main",
+        id: "proxy-main",
+      })],
       model: "gpt-main",
       modelProvider: "openai",
       providerFilter: "codeproxy-dev",
@@ -1336,7 +1394,7 @@ describe("ConversationCommandService", () => {
       modelState,
       browseProviderModels,
       selectModel,
-    } as unknown as ConversationUseCases);
+    });
 
     const result = await commands.execute(target, "model", "2");
     expect(result).toMatchObject({ state: { providerFilter: "codeproxy-dev" } });

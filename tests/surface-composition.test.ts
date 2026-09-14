@@ -5,7 +5,6 @@ import { join } from "node:path";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationUseCases } from "../src/application/index.js";
 import type { InteractionPort } from "../src/approval/index.js";
 import {
   createFeishuRuntimeModule,
@@ -619,7 +618,14 @@ function options(
 ) {
   return {
     config: runtimeConfig,
-    service: {} as ConversationUseCases,
+    service: {
+      submit: vi.fn(),
+      status: vi.fn(),
+      listWorkspaces: vi.fn(),
+      modelState: vi.fn(),
+      listPlugins: vi.fn(),
+    },
+    commands: { execute: vi.fn() },
     bindings,
     logger: pino({ level: "silent" }),
     gatewayVersion: "0.146.0",

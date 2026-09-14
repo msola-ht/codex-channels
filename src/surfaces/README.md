@@ -185,8 +185,8 @@ Adapter 负责。
 三个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
-会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
-并渲染类型化结果。Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期确认，命令结果
+会话命令统一映射到 Bootstrap 注入的 Application `ConversationCommandExecutor`；Surface 只保留普通输入、状态或菜单实际需要的能力切片，并负责提取命令名、参数和渲染类型化结果。
+Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期确认，命令结果
 不重复发送启动提示；该事件保留具体扩展类型和名称，追加到活动 Turn 时仍渲染明确确认。普通文本、图片下载、平台帮助、身份查询和
 交互取消保留在平台边界。PNG/JPEG/WebP/非动画 GIF
 的大小限制与内容签名校验由 `managed-image-store.ts` 在 Surface 内复用；

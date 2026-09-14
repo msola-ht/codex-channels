@@ -73,6 +73,7 @@ import {
 } from "../config/index.js";
 import {
   CollaborationModeSelectionService,
+  ConversationCommandService,
   ConversationService,
   ModelSelectionService,
   ProviderAccountService,
@@ -812,10 +813,11 @@ export class GatewayApplication {
       : undefined;
     const scheduledTaskUseCases = this.scheduledTasks?.service;
     const scheduledTaskToolHandler = this.scheduledTasks?.toolHandler;
+    const commands = new ConversationCommandService(service, scheduledTaskUseCases);
     this.surfaceModules = createSurfaceModules({
       config,
       service,
-      ...(scheduledTaskUseCases === undefined ? {} : { scheduledTasks: scheduledTaskUseCases }),
+      commands,
       bindings: this.bindings,
       logger,
       gatewayVersion: codexCliVersion,

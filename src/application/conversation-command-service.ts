@@ -19,7 +19,13 @@ import {
   type PluginListView,
   type SessionListView,
 } from "./conversation-command-parser.js";
-import type { ConversationUseCases } from "./conversation-service.js";
+import type {
+  ConversationAccountMetricsUseCases,
+  ConversationExtensionUseCases,
+  ConversationQueueRevertUseCases,
+  ConversationSessionUseCases,
+  ConversationTurnUseCases,
+} from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
 import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
 import {
@@ -84,6 +90,19 @@ const conversationCommandNameSet = new Set<string>(conversationCommandNames);
 const maximumSessionListEntries = 20;
 const maximumPluginListEntries = 8;
 
+export type ConversationCommandUseCases =
+  & Omit<ConversationTurnUseCases, "submit">
+  & Omit<
+    ConversationSessionUseCases,
+    "invalidateSessionDisplayCache" | "releaseIdle"
+  >
+  & ConversationQueueRevertUseCases
+  & ConversationExtensionUseCases
+  & Pick<
+    ConversationAccountMetricsUseCases,
+    "providerAccountUsage" | "providerAccountLimits" | "requestMetrics"
+  >;
+
 export function isConversationCommandName(value: string): value is ConversationCommandName {
   return conversationCommandNameSet.has(value);
 }
@@ -92,7 +111,7 @@ export type ConversationCommandResult =
   | { kind: "outcome"; outcome: ConversationCommandOutcome }
   | {
       kind: "sessions";
-      sessions: Awaited<ReturnType<ConversationUseCases["listSessions"]>>;
+      sessions: Awaited<ReturnType<ConversationCommandUseCases["listSessions"]>>;
       currentThreadId?: string;
       backgroundThreadIds?: string[];
       archived: boolean;
@@ -103,51 +122,51 @@ export type ConversationCommandResult =
     }
   | {
       kind: "thread-queue";
-      result: Awaited<ReturnType<ConversationUseCases["queueList"]>>;
+      result: Awaited<ReturnType<ConversationCommandUseCases["queueList"]>>;
     }
   | {
       kind: "thread-revert";
-      result: Awaited<ReturnType<ConversationUseCases["revertList"]>>;
+      result: Awaited<ReturnType<ConversationCommandUseCases["revertList"]>>;
     }
   | {
       kind: "thread-revert-preview";
-      preview: Awaited<ReturnType<ConversationUseCases["revertPreview"]>>;
+      preview: Awaited<ReturnType<ConversationCommandUseCases["revertPreview"]>>;
     }
-  | { kind: "status"; status: ReturnType<ConversationUseCases["status"]> }
+  | { kind: "status"; status: ReturnType<ConversationCommandUseCases["status"]> }
   | {
       kind: "workspaces";
-      workspaces: ReturnType<ConversationUseCases["listWorkspaces"]>;
+      workspaces: ReturnType<ConversationCommandUseCases["listWorkspaces"]>;
       currentWorkspaceId: string;
     }
   | {
       kind: "workspace-permissions";
-      workspace: ReturnType<ConversationUseCases["listWorkspaces"]>[number];
+      workspace: ReturnType<ConversationCommandUseCases["listWorkspaces"]>[number];
     }
   | {
       kind: "models";
       view: "model" | "effort" | "fast";
       nextSelection?: "effort";
-      state: Awaited<ReturnType<ConversationUseCases["modelState"]>>;
+      state: Awaited<ReturnType<ConversationCommandUseCases["modelState"]>>;
     }
   | {
       kind: "collaboration-mode";
-      state: Awaited<ReturnType<ConversationUseCases["togglePlanMode"]>>;
+      state: Awaited<ReturnType<ConversationCommandUseCases["togglePlanMode"]>>;
     }
-  | { kind: "skills"; entries: Awaited<ReturnType<ConversationUseCases["listSkills"]>> }
-  | { kind: "mcp"; servers: Awaited<ReturnType<ConversationUseCases["listMcpServers"]>> }
-  | { kind: "mcp-health"; report: Awaited<ReturnType<ConversationUseCases["mcpHealth"]>> }
+  | { kind: "skills"; entries: Awaited<ReturnType<ConversationCommandUseCases["listSkills"]>> }
+  | { kind: "mcp"; servers: Awaited<ReturnType<ConversationCommandUseCases["listMcpServers"]>> }
+  | { kind: "mcp-health"; report: Awaited<ReturnType<ConversationCommandUseCases["mcpHealth"]>> }
   | { kind: "mcp-reload" }
   | {
       kind: "mcp-detail";
       selector: string;
-      server: Awaited<ReturnType<ConversationUseCases["mcpServerDetail"]>>;
+      server: Awaited<ReturnType<ConversationCommandUseCases["mcpServerDetail"]>>;
       view?: McpDetailView;
     }
-  | { kind: "mcp-login"; login: Awaited<ReturnType<ConversationUseCases["loginMcpServer"]>> }
-  | { kind: "mcp-resource"; resource: Awaited<ReturnType<ConversationUseCases["readMcpResource"]>> }
+  | { kind: "mcp-login"; login: Awaited<ReturnType<ConversationCommandUseCases["loginMcpServer"]>> }
+  | { kind: "mcp-resource"; resource: Awaited<ReturnType<ConversationCommandUseCases["readMcpResource"]>> }
   | {
       kind: "plugins";
-      plugins: Awaited<ReturnType<ConversationUseCases["listPlugins"]>>["plugins"];
+      plugins: Awaited<ReturnType<ConversationCommandUseCases["listPlugins"]>>["plugins"];
       selectors: string[];
       loadErrorCount: number;
       totalPluginCount: number;
@@ -156,18 +175,18 @@ export type ConversationCommandResult =
       pageCount: number;
       searchTerm: string | null;
     }
-  | { kind: "plugin-health"; report: Awaited<ReturnType<ConversationUseCases["pluginHealth"]>> }
+  | { kind: "plugin-health"; report: Awaited<ReturnType<ConversationCommandUseCases["pluginHealth"]>> }
   | {
       kind: "plugin-detail";
-      plugin: Awaited<ReturnType<ConversationUseCases["pluginDetail"]>>;
+      plugin: Awaited<ReturnType<ConversationCommandUseCases["pluginDetail"]>>;
     }
-  | { kind: "usage"; result: Awaited<ReturnType<ConversationUseCases["providerAccountUsage"]>> }
-  | { kind: "metrics"; summary: ReturnType<ConversationUseCases["requestMetrics"]> }
-  | { kind: "limits"; result: Awaited<ReturnType<ConversationUseCases["providerAccountLimits"]>> }
+  | { kind: "usage"; result: Awaited<ReturnType<ConversationCommandUseCases["providerAccountUsage"]>> }
+  | { kind: "metrics"; summary: ReturnType<ConversationCommandUseCases["requestMetrics"]> }
+  | { kind: "limits"; result: Awaited<ReturnType<ConversationCommandUseCases["providerAccountLimits"]>> }
   | {
       kind: "permissions";
-      profiles: Awaited<ReturnType<ConversationUseCases["listPermissionProfiles"]>>;
-      workspace?: Awaited<ReturnType<ConversationUseCases["listWorkspaces"]>>[number];
+      profiles: Awaited<ReturnType<ConversationCommandUseCases["listPermissionProfiles"]>>;
+      workspace?: Awaited<ReturnType<ConversationCommandUseCases["listWorkspaces"]>>[number];
     }
   | {
       kind: "project-rules";
@@ -178,10 +197,10 @@ export type ConversationCommandResult =
   | {
       kind: "artifacts";
       view: "diff";
-      artifacts: ReturnType<ConversationUseCases["artifacts"]>;
+      artifacts: ReturnType<ConversationCommandUseCases["artifacts"]>;
     }
   | { kind: "goal"; goal: ThreadGoal | null }
-  | { kind: "agents"; roles: Awaited<ReturnType<ConversationUseCases["listAgentRoles"]>> }
+  | { kind: "agents"; roles: Awaited<ReturnType<ConversationCommandUseCases["listAgentRoles"]>> }
   | {
       kind: "occupancy";
       result: ThreadOccupancyReleaseResult;
@@ -227,21 +246,21 @@ export type ConversationCommandOutcome =
   | { type: "thread.pin-updated"; pinned: boolean; changed: boolean }
   | {
       type: "workspace.selected";
-      workspace: Awaited<ReturnType<ConversationUseCases["selectWorkspace"]>>;
+      workspace: Awaited<ReturnType<ConversationCommandUseCases["selectWorkspace"]>>;
       nextModel: ConversationModelSummary;
     }
   | {
       type: "workspace.permissions-updated";
-      workspace: Awaited<ReturnType<ConversationUseCases["updateWorkspacePermissions"]>>;
+      workspace: Awaited<ReturnType<ConversationCommandUseCases["updateWorkspacePermissions"]>>;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
   | {
       type: "thread-queue.added";
-      item: Awaited<ReturnType<ConversationUseCases["queueAdd"]>>;
+      item: Awaited<ReturnType<ConversationCommandUseCases["queueAdd"]>>;
     }
   | {
       type: "thread-queue.updated";
-      item: Awaited<ReturnType<ConversationUseCases["queueUpdate"]>>;
+      item: Awaited<ReturnType<ConversationCommandUseCases["queueUpdate"]>>;
     }
   | {
       type: "thread-queue.deleted";
@@ -297,10 +316,19 @@ export type ConversationCommandOutcome =
       run: Awaited<ReturnType<ScheduledTaskUseCases["run"]>>;
     };
 
-export class ConversationCommandService {
+export interface ConversationCommandExecutor {
+  execute(
+    target: ConversationTarget,
+    command: ConversationCommandName,
+    input?: string,
+    actorId?: string,
+  ): Promise<ConversationCommandResult>;
+}
+
+export class ConversationCommandService implements ConversationCommandExecutor {
   private readonly scheduledTasks: ScheduledTaskUseCases | undefined;
   constructor(
-    private readonly conversations: ConversationUseCases,
+    private readonly conversations: ConversationCommandUseCases,
     scheduledTasks?: ScheduledTaskUseCases,
   ) {
     this.scheduledTasks = scheduledTasks;
@@ -470,93 +498,10 @@ export class ConversationCommandService {
           outcome: { type: "turn.stop-requested", stopped },
         };
       }
-      case "queue": {
-        const operation = parseThreadQueueOperation(argumentsText);
-        if (operation.type === "list") {
-          return {
-            kind: "thread-queue",
-            result: await this.conversations.queueList(target, operation.page),
-          };
-        }
-        if (operation.type === "add") {
-          return {
-            kind: "outcome",
-            outcome: {
-              type: "thread-queue.added",
-              item: await this.conversations.queueAdd(target, operation.text),
-            },
-          };
-        }
-        if (operation.type === "update") {
-          return {
-            kind: "outcome",
-            outcome: {
-              type: "thread-queue.updated",
-              item: await this.conversations.queueUpdate(
-                target,
-                operation.selector,
-                operation.text,
-              ),
-            },
-          };
-        }
-        if (operation.type === "delete") {
-          const result = await this.conversations.queueDelete(target, operation.selector);
-          return {
-            kind: "outcome",
-            outcome: { type: "thread-queue.deleted", deleted: result.deleted },
-          };
-        }
-        if (operation.type === "reorder") {
-          const result = await this.conversations.queueReorder(
-            target,
-            operation.selector,
-            operation.position,
-          );
-          return {
-            kind: "outcome",
-            outcome: {
-              type: "thread-queue.reordered",
-              itemId: result.itemId,
-              position: result.position,
-              totalItemCount: result.totalItemCount,
-            },
-          };
-        }
-        const result = await this.conversations.queueStart(target, operation.selector);
-        return {
-          kind: "outcome",
-          outcome: { type: "thread-queue.started", turnId: result.turnId },
-        };
-      }
-      case "revert": {
-        const operation = parseThreadRevertOperation(argumentsText);
-        if (operation.type === "list") {
-          return {
-            kind: "thread-revert",
-            result: await this.conversations.revertList(target, operation.page),
-          };
-        }
-        if (operation.type === "preview") {
-          return {
-            kind: "thread-revert-preview",
-            preview: await this.conversations.revertPreview(
-              target,
-              operation.selector,
-              actorId,
-            ),
-          };
-        }
-        const result = await this.conversations.revertConfirm(target, operation.token, actorId);
-        return {
-          kind: "outcome",
-          outcome: {
-            type: "thread.reverted",
-            threadId: result.threadId,
-            beforeTurnId: result.beforeTurnId,
-          },
-        };
-      }
+      case "queue":
+        return this.executeQueueCommand(target, argumentsText);
+      case "revert":
+        return this.executeRevertCommand(target, argumentsText, actorId);
       case "rename":
         await this.conversations.rename(target, argumentsText);
         return {
@@ -596,21 +541,19 @@ export class ConversationCommandService {
               : await this.conversations.clearModelBrowse(target),
             };
         }
-        if (typeof this.conversations.modelState === "function") {
-          const browseState = await this.conversations.modelState(target);
-          if (
-            browseState.providerFilter === undefined
-            && (/^\d+$/u.test(argumentsText)
-              || resolveProvider(browseState.models, argumentsText) !== undefined)
-          ) {
-            return {
-              kind: "models",
-              view: "model",
-              state: await this.conversations.browseProviderModels(target, argumentsText),
-            };
-          }
+        const browseState = await this.conversations.modelState(target);
+        if (
+          browseState.providerFilter === undefined
+          && (/^\d+$/u.test(argumentsText)
+            || resolveProvider(browseState.models, argumentsText) !== undefined)
+        ) {
+          return {
+            kind: "models",
+            view: "model",
+            state: await this.conversations.browseProviderModels(target, argumentsText),
+          };
         }
-        let state: Awaited<ReturnType<ConversationUseCases["selectModel"]>>;
+        let state: Awaited<ReturnType<ConversationCommandUseCases["selectModel"]>>;
         try {
           state = await this.conversations.selectModel(target, argumentsText);
         } catch (error) {
@@ -700,80 +643,10 @@ export class ConversationCommandService {
           },
         };
       }
-      case "mcp": {
-        if (!argumentsText) {
-          return {
-            kind: "mcp",
-            servers: await this.conversations.listMcpServers(target),
-          };
-        }
-        const operation = parseMcpOperation(argumentsText);
-        if (operation.type === "health") {
-          return {
-            kind: "mcp-health",
-            report: await this.conversations.mcpHealth(target),
-          };
-        }
-        if (operation.type === "reload") {
-          await this.conversations.reloadMcpServers(target);
-          return { kind: "mcp-reload" };
-        }
-        if (operation.type === "detail") {
-          return {
-            kind: "mcp-detail",
-            selector: operation.selector,
-            server: await this.conversations.mcpServerDetail(target, operation.selector),
-            ...(operation.view ? { view: operation.view } : {}),
-          };
-        }
-        if (operation.type === "login") {
-          return {
-            kind: "mcp-login",
-            login: await this.conversations.loginMcpServer(target, operation.selector),
-          };
-        }
-        return {
-          kind: "mcp-resource",
-          resource: await this.conversations.readMcpResource(
-            target,
-            operation.selector,
-            operation.uri,
-          ),
-        };
-      }
-      case "plugin": {
-        const operation = parsePluginOperation(argumentsText);
-        if (operation.type === "list") {
-          const catalog = await this.conversations.listPlugins(target);
-          return pluginListResult(catalog, operation.view);
-        }
-        if (operation.type === "health") {
-          return {
-            kind: "plugin-health",
-            report: await this.conversations.pluginHealth(target),
-          };
-        }
-        if (operation.type === "detail") {
-          return {
-            kind: "plugin-detail",
-            plugin: await this.conversations.pluginDetail(target, operation.selector),
-          };
-        }
-        const submission = await this.conversations.invokePlugin(
-          target,
-          operation.selector,
-          operation.task,
-        );
-        return {
-          kind: "outcome",
-          outcome: {
-            type: "plugin.started",
-            pluginName: submission.pluginName,
-            turnId: submission.turnId,
-            steered: submission.steered,
-          },
-        };
-      }
+      case "mcp":
+        return this.executeMcpCommand(target, argumentsText);
+      case "plugin":
+        return this.executePluginCommand(target, argumentsText);
       case "usage":
         return {
           kind: "usage",
@@ -794,12 +667,10 @@ export class ConversationCommandService {
         };
       case "permissions":
         {
-          const status = typeof this.conversations.status === "function"
-            ? this.conversations.status(target)
-            : undefined;
-          const workspace = status && typeof this.conversations.listWorkspaces === "function"
-            ? this.conversations.listWorkspaces().find((entry) => entry.id === status.workspaceId)
-            : undefined;
+          const status = this.conversations.status(target);
+          const workspace = this.conversations.listWorkspaces().find(
+            (entry) => entry.id === status.workspaceId,
+          );
           return {
             kind: "permissions",
             profiles: await this.conversations.listPermissionProfiles(target),
@@ -850,98 +721,290 @@ export class ConversationCommandService {
           result: await this.conversations.releaseThread(target, force),
         };
       }
-      case "schedule": {
-        const scheduled = this.scheduledTasks;
-        if (!scheduled) {
-          throw new UserFacingError(
-            "scheduled-task.state.invalid",
-            "Gateway 计划任务功能未启用",
-          );
-        }
-        if (!actorId) {
-          throw new UserFacingError(
-            "scheduled-task.forbidden",
-            "无法确认当前渠道用户身份",
-          );
-        }
-        const operation = parseScheduledTaskOperation(argumentsText);
-        switch (operation.type) {
-          case "natural":
-            return {
-              kind: "scheduled-confirmation",
-              preview: scheduled.previewNaturalLanguage(target, actorId, operation.description),
-            };
-          case "create":
-            return {
-              kind: "scheduled-confirmation",
-              preview: scheduled.previewCreate(target, actorId, operation.request),
-            };
-          case "list":
-            return { kind: "scheduled-tasks", result: scheduled.list(target, actorId, operation.page) };
-          case "runs":
-            return {
-              kind: "scheduled-runs",
-              result: scheduled.runs(target, actorId, operation.selector, operation.page),
-            };
-          case "rename":
-            return {
-              kind: "outcome",
-              outcome: {
-                type: "scheduled-task.renamed",
-                task: scheduled.rename(target, actorId, operation.selector, operation.name),
-              },
-            };
-          case "pause":
-          case "resume": {
-            const task = scheduled[operation.type](target, actorId, operation.selector);
-            return {
-              kind: "outcome",
-              outcome: {
-                type: operation.type === "pause"
-                  ? "scheduled-task.paused"
-                  : "scheduled-task.resumed",
-                task,
-              },
-            };
-          }
-          case "run":
-          case "retry": {
-            const run = await scheduled[operation.type](target, actorId, operation.selector);
-            return {
-              kind: "outcome",
-              outcome: {
-                type: operation.type === "run"
-                  ? "scheduled-task.run-requested"
-                  : "scheduled-task.retry-requested",
-                run,
-              },
-            };
-          }
-          case "delete":
-            return {
-              kind: "scheduled-confirmation",
-              preview: scheduled.previewDelete(target, actorId, operation.selector),
-            };
-          case "confirm": {
-            const confirmed = scheduled.confirm(target, actorId, operation.token);
-            return {
-              kind: "outcome",
-              outcome: {
-                type: confirmed.action === "created"
-                  ? "scheduled-task.created"
-                  : "scheduled-task.deleted",
-                task: confirmed.task,
-              },
-            };
-          }
-        }
-      }
+      case "schedule":
+        return this.executeScheduledTaskCommand(target, argumentsText, actorId);
     }
     throw new UserFacingError(
       "command.unsupported",
       `不支持的会话命令：${String(command)}`,
       { command: String(command) },
     );
+  }
+
+  private async executeQueueCommand(
+    target: ConversationTarget,
+    input: string,
+  ): Promise<ConversationCommandResult> {
+    const operation = parseThreadQueueOperation(input);
+    if (operation.type === "list") {
+      return {
+        kind: "thread-queue",
+        result: await this.conversations.queueList(target, operation.page),
+      };
+    }
+    if (operation.type === "add") {
+      return {
+        kind: "outcome",
+        outcome: {
+          type: "thread-queue.added",
+          item: await this.conversations.queueAdd(target, operation.text),
+        },
+      };
+    }
+    if (operation.type === "update") {
+      return {
+        kind: "outcome",
+        outcome: {
+          type: "thread-queue.updated",
+          item: await this.conversations.queueUpdate(
+            target,
+            operation.selector,
+            operation.text,
+          ),
+        },
+      };
+    }
+    if (operation.type === "delete") {
+      const result = await this.conversations.queueDelete(target, operation.selector);
+      return {
+        kind: "outcome",
+        outcome: { type: "thread-queue.deleted", deleted: result.deleted },
+      };
+    }
+    if (operation.type === "reorder") {
+      const result = await this.conversations.queueReorder(
+        target,
+        operation.selector,
+        operation.position,
+      );
+      return {
+        kind: "outcome",
+        outcome: {
+          type: "thread-queue.reordered",
+          itemId: result.itemId,
+          position: result.position,
+          totalItemCount: result.totalItemCount,
+        },
+      };
+    }
+    const result = await this.conversations.queueStart(target, operation.selector);
+    return {
+      kind: "outcome",
+      outcome: { type: "thread-queue.started", turnId: result.turnId },
+    };
+  }
+
+  private async executeRevertCommand(
+    target: ConversationTarget,
+    input: string,
+    actorId?: string,
+  ): Promise<ConversationCommandResult> {
+    const operation = parseThreadRevertOperation(input);
+    if (operation.type === "list") {
+      return {
+        kind: "thread-revert",
+        result: await this.conversations.revertList(target, operation.page),
+      };
+    }
+    if (operation.type === "preview") {
+      return {
+        kind: "thread-revert-preview",
+        preview: await this.conversations.revertPreview(
+          target,
+          operation.selector,
+          actorId,
+        ),
+      };
+    }
+    const result = await this.conversations.revertConfirm(
+      target,
+      operation.token,
+      actorId,
+    );
+    return {
+      kind: "outcome",
+      outcome: {
+        type: "thread.reverted",
+        threadId: result.threadId,
+        beforeTurnId: result.beforeTurnId,
+      },
+    };
+  }
+
+  private async executeMcpCommand(
+    target: ConversationTarget,
+    input: string,
+  ): Promise<ConversationCommandResult> {
+    if (!input) {
+      return {
+        kind: "mcp",
+        servers: await this.conversations.listMcpServers(target),
+      };
+    }
+    const operation = parseMcpOperation(input);
+    if (operation.type === "health") {
+      return {
+        kind: "mcp-health",
+        report: await this.conversations.mcpHealth(target),
+      };
+    }
+    if (operation.type === "reload") {
+      await this.conversations.reloadMcpServers(target);
+      return { kind: "mcp-reload" };
+    }
+    if (operation.type === "detail") {
+      return {
+        kind: "mcp-detail",
+        selector: operation.selector,
+        server: await this.conversations.mcpServerDetail(target, operation.selector),
+        ...(operation.view ? { view: operation.view } : {}),
+      };
+    }
+    if (operation.type === "login") {
+      return {
+        kind: "mcp-login",
+        login: await this.conversations.loginMcpServer(target, operation.selector),
+      };
+    }
+    return {
+      kind: "mcp-resource",
+      resource: await this.conversations.readMcpResource(
+        target,
+        operation.selector,
+        operation.uri,
+      ),
+    };
+  }
+
+  private async executePluginCommand(
+    target: ConversationTarget,
+    input: string,
+  ): Promise<ConversationCommandResult> {
+    const operation = parsePluginOperation(input);
+    if (operation.type === "list") {
+      const catalog = await this.conversations.listPlugins(target);
+      return pluginListResult(catalog, operation.view);
+    }
+    if (operation.type === "health") {
+      return {
+        kind: "plugin-health",
+        report: await this.conversations.pluginHealth(target),
+      };
+    }
+    if (operation.type === "detail") {
+      return {
+        kind: "plugin-detail",
+        plugin: await this.conversations.pluginDetail(target, operation.selector),
+      };
+    }
+    const submission = await this.conversations.invokePlugin(
+      target,
+      operation.selector,
+      operation.task,
+    );
+    return {
+      kind: "outcome",
+      outcome: {
+        type: "plugin.started",
+        pluginName: submission.pluginName,
+        turnId: submission.turnId,
+        steered: submission.steered,
+      },
+    };
+  }
+
+  private async executeScheduledTaskCommand(
+    target: ConversationTarget,
+    input: string,
+    actorId?: string,
+  ): Promise<ConversationCommandResult> {
+    const scheduled = this.scheduledTasks;
+    if (!scheduled) {
+      throw new UserFacingError(
+        "scheduled-task.state.invalid",
+        "Gateway 计划任务功能未启用",
+      );
+    }
+    if (!actorId) {
+      throw new UserFacingError(
+        "scheduled-task.forbidden",
+        "无法确认当前渠道用户身份",
+      );
+    }
+    const operation = parseScheduledTaskOperation(input);
+    switch (operation.type) {
+      case "natural":
+        return {
+          kind: "scheduled-confirmation",
+          preview: scheduled.previewNaturalLanguage(target, actorId, operation.description),
+        };
+      case "create":
+        return {
+          kind: "scheduled-confirmation",
+          preview: scheduled.previewCreate(target, actorId, operation.request),
+        };
+      case "list":
+        return {
+          kind: "scheduled-tasks",
+          result: scheduled.list(target, actorId, operation.page),
+        };
+      case "runs":
+        return {
+          kind: "scheduled-runs",
+          result: scheduled.runs(target, actorId, operation.selector, operation.page),
+        };
+      case "rename":
+        return {
+          kind: "outcome",
+          outcome: {
+            type: "scheduled-task.renamed",
+            task: scheduled.rename(target, actorId, operation.selector, operation.name),
+          },
+        };
+      case "pause":
+      case "resume": {
+        const task = scheduled[operation.type](target, actorId, operation.selector);
+        return {
+          kind: "outcome",
+          outcome: {
+            type: operation.type === "pause"
+              ? "scheduled-task.paused"
+              : "scheduled-task.resumed",
+            task,
+          },
+        };
+      }
+      case "run":
+      case "retry": {
+        const run = await scheduled[operation.type](target, actorId, operation.selector);
+        return {
+          kind: "outcome",
+          outcome: {
+            type: operation.type === "run"
+              ? "scheduled-task.run-requested"
+              : "scheduled-task.retry-requested",
+            run,
+          },
+        };
+      }
+      case "delete":
+        return {
+          kind: "scheduled-confirmation",
+          preview: scheduled.previewDelete(target, actorId, operation.selector),
+        };
+      case "confirm": {
+        const confirmed = scheduled.confirm(target, actorId, operation.token);
+        return {
+          kind: "outcome",
+          outcome: {
+            type: confirmed.action === "created"
+              ? "scheduled-task.created"
+              : "scheduled-task.deleted",
+            task: confirmed.task,
+          },
+        };
+      }
+    }
   }
 
   private async goal(
@@ -974,7 +1037,7 @@ export class ConversationCommandService {
 }
 
 function toConversationModelSummary(
-  status: ReturnType<ConversationUseCases["status"]>,
+  status: ReturnType<ConversationCommandUseCases["status"]>,
 ): ConversationModelSummary {
   return {
     model: status.model,
@@ -983,7 +1046,7 @@ function toConversationModelSummary(
 }
 
 function sessionListResult(
-  sessions: Awaited<ReturnType<ConversationUseCases["listSessions"]>>,
+  sessions: Awaited<ReturnType<ConversationCommandUseCases["listSessions"]>>,
   view: SessionListView,
   metadata: {
     archived: boolean;
@@ -1011,7 +1074,7 @@ function sessionListResult(
 }
 
 function pluginListResult(
-  catalog: Awaited<ReturnType<ConversationUseCases["listPlugins"]>>,
+  catalog: Awaited<ReturnType<ConversationCommandUseCases["listPlugins"]>>,
   view: PluginListView,
 ): Extract<ConversationCommandResult, { kind: "plugins" }> {
   const normalizedSearch = view.searchTerm?.toLowerCase() ?? null;

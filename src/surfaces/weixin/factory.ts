@@ -1,8 +1,8 @@
 import type { Logger } from "pino";
 
 import type {
-  ConversationUseCases,
-  ScheduledTaskUseCases,
+  ConversationCommandExecutor,
+  ConversationTurnUseCases,
 } from "../../application/index.js";
 import type {
   ConversationActorRegistry,
@@ -24,9 +24,9 @@ import { FileWeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 
 export interface CreateWeixinSurfaceOptions {
   accountId: string;
-  service: ConversationUseCases;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
+  commands: ConversationCommandExecutor;
   access: SurfaceAccessPolicy;
-  scheduledTasks?: ScheduledTaskUseCases;
   actorRegistry: ConversationActorRegistry;
   credentialDirectory: string;
   replyContextDirectory: string;
@@ -66,10 +66,8 @@ export function createWeixinSurface(
     typingClient: client,
     cursorStore: new FileWeixinUpdatesCursorStore(options.cursorDirectory),
     service: options.service,
+    commands: options.commands,
     access: options.access,
-    ...(options.scheduledTasks === undefined
-      ? {}
-      : { scheduledTasks: options.scheduledTasks }),
     actorRegistry: options.actorRegistry,
     credentialStore,
     replyContextPersistence: createWeixinReplyContextPersistence(
