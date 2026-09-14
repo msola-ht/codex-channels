@@ -86,8 +86,8 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
 Markdown、Telegram HTML、微信结构化字段渲染列表。
 `/sessions` 和 `/archived` 共用可复制的分页/筛选命令，仅支持运行状态、固定状态、Provider 和关键词。
-自定义会话分区入口及其管理员权限已移除；`/section` 只返回移除提示。内置 Pinned 在三渠道统一复用
-`/pin` 与 `/unpin`，渠道只提交选择，不保存分区状态。
+自定义会话分区入口及其管理员权限已移除。内置 Pinned 在三渠道统一复用 `/pin` 与 `/unpin`，
+渠道只提交选择，不保存分区状态。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
 Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，
 Turn、Thread 或 Surface 关闭时清理。
@@ -128,6 +128,8 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 字段完整时的 Token 汇总和最多 8 个明细组，官方估算不可用或查询失败时只追加稳定提示；DeepSeek `/usage` 显示余额，
 未支持的 Provider 明确说明能力缺失。计划任务确认、列表、运行记录和命令结果格式也通过本目录
 `index.ts` 供 Bootstrap 动态工具回调复用。
+`conversation-command-renderer.ts` 把完整 `ConversationCommandResult` 穷尽映射为共享纯文本结果；
+飞书与微信直接复用该映射，Telegram 继续在自己的交互式渲染器中处理按钮和键盘。
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
 `/mcp`、`/mcp health`、`/mcp reload`、`/mcp <名称或序号>`、工具/资源/模板分页搜索、`/mcp login ...` 与

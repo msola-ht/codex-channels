@@ -143,8 +143,6 @@ export interface ProviderQuotaWindow {
   usedPercent: number;
   resetsAt: number | null;
   status: string | null;
-  /** 窗口总额度（USD），如 OpenCode Go 5 小时 $12、7 天 $30、月度 $60。 */
-  totalUsd?: number;
   localTokens?: number | null;
 }
 
@@ -197,9 +195,4 @@ export interface OfficialAccountSnapshot {
   available: boolean;
   usage: ProviderAccountUsage;
   limits: ProviderAccountLimits;
-}
-
-export interface OfficialAccountSnapshotQueryPort {
-  latestOfficialAccountSnapshot(provider: string, accountId?: string): Promise<OfficialAccountSnapshot | null>;
-  latestOfficialAccountSnapshots?(): Promise<OfficialAccountSnapshot[]>;
 }

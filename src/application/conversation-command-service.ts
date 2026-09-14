@@ -35,7 +35,6 @@ export {
   sessionCommandUsageText,
   threadQueueCommandUsageText,
   threadRevertCommandUsageText,
-  threadSectionCommandUsageText,
   type McpDetailView,
   type PluginListView,
   type SessionListView,
@@ -51,7 +50,6 @@ export const conversationCommandNames = [
   "unarchive",
   "pin",
   "unpin",
-  "section",
   "status",
   "workspace",
   "workspaceperm",
@@ -422,9 +420,6 @@ export class ConversationCommandService {
             outcome: { type: "thread.pin-updated", pinned: false, changed },
           };
         }
-      case "section": {
-        throw new UserFacingError("thread-section.removed", "会话分区功能已移除；请使用 /pin、/unpin 和 /rename");
-      }
       case "status":
         return {
           kind: "status",

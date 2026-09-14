@@ -93,7 +93,6 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | `thread.takeover.busy` | 原渠道或当前渠道仍有任务，暂不能接管 | 接管运行中的 Thread |
 | `thread.takeover.workspace` | 只能接管当前 Workspace 中的 Thread | 跨 Workspace 接管 |
 | `thread.takeover.changed` | 会话绑定刚刚发生变化，请重新打开会话列表后再试 | 接管期间绑定变更 |
-| `thread-section.removed` | 会话分区功能已移除；请使用 /pin、/unpin 和 /rename | 使用已移除的 /section 命令 |
 | `workspace.missing` | Workspace 不存在或未获授权 | 配置的 Workspace 缺失 |
 | `workspace.selector.required` | /workspace 用法提示 | 未提供 Workspace 选择参数 |
 | `workspace.selector.ambiguous` | Workspace 选择不唯一 | 选择器匹配多个 Workspace |

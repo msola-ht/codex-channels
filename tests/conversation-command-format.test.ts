@@ -1394,7 +1394,6 @@ describe("provider-aware conversation command formatting", () => {
             usedPercent: 0,
             resetsAt: 1_784_800_000,
             status: "ok",
-            totalUsd: 12,
             localTokens: 123_400,
           },
           {
@@ -1403,7 +1402,6 @@ describe("provider-aware conversation command formatting", () => {
             usedPercent: 12.5,
             resetsAt: null,
             status: "ok",
-            totalUsd: 60,
           },
         ],
       },

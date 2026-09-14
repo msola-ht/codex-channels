@@ -31,7 +31,7 @@
 
 ## 协议与设计
 
-- [`docs/architecture-optimization.md`](docs/architecture-optimization.md)：全项目链路审查、结构性优化原则、实施顺序与进度。
+- [`docs/module-closure-plan.md`](docs/module-closure-plan.md)：链路闭环后的模块结构收口批次、依赖、验收标准与停止条件。
 - [`docs/management-interfaces-development.md`](docs/management-interfaces-development.md)：Setup、Config、安装和更新命令面向未来本机可视化的结构化接口演进计划与进度。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
 - [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 原生支持的

@@ -72,6 +72,7 @@ describe("ConversationCommandService", () => {
     expect(isConversationCommandName("status")).toBe(true);
     expect(isConversationCommandName("plugins")).toBe(false);
     expect(isConversationCommandName("plugin")).toBe(true);
+    expect(isConversationCommandName("section")).toBe(false);
     expect(isConversationCommandName("whoami")).toBe(false);
   });
 
@@ -247,18 +248,6 @@ describe("ConversationCommandService", () => {
     });
   });
 
-  it("rejects removed Thread Section filters", async () => {
-    const listSessions = vi.fn(async () => []);
-    const commands = new ConversationCommandService({
-      listSessions,
-      status: () => ({}),
-    } as unknown as ConversationUseCases);
-
-    await expect(commands.execute(target, "sessions", "section 项目"))
-      .rejects.toMatchObject({ code: "sessions.usage" });
-    expect(listSessions).not.toHaveBeenCalled();
-  });
-
   it("reports archived session filter errors with the archived command usage", async () => {
     const commands = new ConversationCommandService({} as ConversationUseCases);
 
@@ -266,16 +255,6 @@ describe("ConversationCommandService", () => {
       .rejects.toMatchObject({
         code: "archived-sessions.usage",
         message: "用法：/archived [页码] [filter <all|pinned>] [provider <名称>] [search <关键词>]",
-      });
-  });
-
-  it("rejects the removed Thread Section command", async () => {
-    const commands = new ConversationCommandService({} as ConversationUseCases);
-
-    await expect(commands.execute(target, "section", "list"))
-      .rejects.toMatchObject({
-        code: "thread-section.removed",
-        message: "会话分区功能已移除；请使用 /pin、/unpin 和 /rename",
       });
   });
 
@@ -1208,16 +1187,12 @@ describe("ConversationCommandService", () => {
       ["schedule", "", "scheduleList"],
     ] as const;
 
-    expect(cases.map(([command]) => command)).toEqual(
-      conversationCommandNames.filter((command) => command !== "section"),
-    );
+    expect(cases.map(([command]) => command)).toEqual(conversationCommandNames);
     for (const [command, input, method] of cases) {
       const before = service[method].mock.calls.length;
       await expect(commands.execute(target, command, input, "actor-1")).resolves.toHaveProperty("kind");
       expect(service[method].mock.calls.length).toBeGreaterThan(before);
     }
-    await expect(commands.execute(target, "section", "", "actor-1"))
-      .rejects.toMatchObject({ code: "thread-section.removed" });
     expect(service.status).toHaveBeenCalledWith(target, {
       includeGitBranch: true,
     });

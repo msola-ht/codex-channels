@@ -28,11 +28,6 @@ const windowLabels: Readonly<Record<string, string>> = Object.freeze({
   weekly: "7天",
   monthly: "月度",
 });
-const windowTotalUsd: Readonly<Record<string, number>> = Object.freeze({
-  rolling: 12,
-  weekly: 30,
-  monthly: 60,
-});
 
 export function createOpencodeGoAccountAdapter(
   options: OpencodeGoAccountAdapterOptions = {},
@@ -343,9 +338,6 @@ function parseUsageResponse(value: unknown, provider: string): ProviderAccountUs
       usedPercent: window.percent,
       resetsAt: null,
       status: typeof window.status === "string" ? window.status : null,
-      ...(windowTotalUsd[windowId] === undefined
-        ? {}
-        : { totalUsd: windowTotalUsd[windowId] }),
     };
     if (typeof window.resetsAt === "string") {
       const resetsAt = Date.parse(window.resetsAt);

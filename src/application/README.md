@@ -64,7 +64,6 @@
   Luna Reserve 后端授权摘要、第三方余额和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
-- `account-snapshot-service.ts`：提供跨 WebUI 与渠道复用的最新官方账户快照查询入口。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
   查询结果可通过快照写入端口落入统一读模型；按需刷新只接受已注册 Provider，查询失败保留最后
@@ -140,8 +139,8 @@ Turn、steer、停止、重命名、固定、压缩、Review 和 Goal 只依赖 
 `codex-client` 负责映射。停止直接读取 Core 中精确的活动 Thread/Turn 并发送中断，不进入同一
 Conversation 的普通操作互斥区，因此不会被尚未返回的 steer 阻塞。Goal set/clear 请求成功后，Application 使用已确认结果立即更新 Core；
 App Server 通知继续处理其他客户端修改与恢复后的状态校正。
-自定义 Thread 分区的 Application 命令和管理员权限已移除；`/section` 仅返回移除提示。内置 Pinned
-仍由 `/pin` 与 `/unpin` 提供会话级快捷入口。
+自定义 Thread 分区的 Application 命令和管理员权限已移除。内置 Pinned 仍由 `/pin` 与 `/unpin`
+提供会话级快捷入口。
 模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪，以及目标
 Provider App Server 的有效思考等级与服务层级读取均由 `codex-client` 统一处理。CLI Setup 直接依赖
 具体 Client 的全局默认值读写，不扩大 Surface 可用的会话端口。
