@@ -1730,10 +1730,7 @@ export function formatConversationUsage(
               || window.localTokens === null
               ? ""
               : ` · 本地 Token 约 ${formatTokenCount(window.localTokens)}`;
-            const totalUsd = window.totalUsd === undefined || window.totalUsd === null
-              ? ""
-              : ` · 总额 $${window.totalUsd.toFixed(2)}`;
-            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)}${totalUsd}${localTokens} · 重置 ${reset}`;
+            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)}${localTokens} · 重置 ${reset}`;
           })),
     ].join("\n"));
   }
