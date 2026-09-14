@@ -39,14 +39,7 @@ export interface ProviderProxyMetrics {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   totalTokens: number | null;
-  upstreamCreatedAt: number | null;
-  upstreamCompletedAt: number | null;
   requestStartedAtMs: number;
-  firstTokenAtMs: number | null;
-  firstReasoningDeltaAtMs: number | null;
-  lastReasoningDeltaAtMs: number | null;
-  firstOutputDeltaAtMs: number | null;
-  lastOutputDeltaAtMs: number | null;
   responseCompletedAtMs: number;
   weeklyQuota: ProviderWeeklyQuotaSnapshot | null;
   /** 请求完成时对应的官方配额窗口快照（如 OpenCode Go 5h/7d/月），缺省为 null。 */
@@ -90,14 +83,7 @@ export function createMetricsState(
     outputTokens: null,
     reasoningOutputTokens: null,
     totalTokens: null,
-    upstreamCreatedAt: null,
-    upstreamCompletedAt: null,
     requestStartedAtMs: startedAtMs,
-    firstTokenAtMs: null,
-    firstReasoningDeltaAtMs: null,
-    lastReasoningDeltaAtMs: null,
-    firstOutputDeltaAtMs: null,
-    lastOutputDeltaAtMs: null,
     responseCompletedAtMs: startedAtMs,
     weeklyQuota: null,
     quotaWindows: null,

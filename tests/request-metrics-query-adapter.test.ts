@@ -49,18 +49,6 @@ describe("RequestMetricsQueryAdapter", () => {
         threadId: "thread-1",
         latestTurn: null,
         threadAggregate: null,
-        latestDirectApi: {
-          provider: "custom",
-          model: "model-1",
-          status: "completed",
-          httpStatus: 200,
-          requestDurationMs: 10,
-          inputTokens: 1,
-          cachedInputTokens: 0,
-          outputTokens: 2,
-          reasoningOutputTokens: 0,
-          totalTokens: 3,
-        },
       }),
       aggregate,
       errors,
@@ -74,9 +62,8 @@ describe("RequestMetricsQueryAdapter", () => {
 
     expect(adapter.forThread("thread-1")).toMatchObject({
       modelProvider: "custom",
-      latestDirectApi: {
-        provider: "custom",
-      },
+      latestTurn: null,
+      threadAggregate: null,
     });
     expect(adapter.aggregate("providers", "all").groups[0]).toMatchObject({
       provider: "custom",

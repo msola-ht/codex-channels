@@ -2,15 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   csvCell,
-  formatDuration,
   formatLocalTime,
   isRecord,
 } from "../scripts/metrics-export-format.mjs";
 
 describe("metrics export display helpers", () => {
-  it("keeps duration and local time output stable", () => {
-    expect(formatDuration(null)).toBe("未知");
-    expect(formatDuration(7_418)).toBe("7418ms");
+  it("keeps local time output stable", () => {
     const local = formatLocalTime(1_785_900_000_000);
     expect(local).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/u);
   });

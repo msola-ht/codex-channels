@@ -29,14 +29,7 @@ export interface MetricRow {
   output_tokens: number | null;
   reasoning_output_tokens: number | null;
   total_tokens: number | null;
-  upstream_created_at: number | null;
-  upstream_completed_at: number | null;
   request_started_at_ms: number;
-  first_token_at_ms: number | null;
-  first_reasoning_delta_at_ms: number | null;
-  last_reasoning_delta_at_ms: number | null;
-  first_output_delta_at_ms: number | null;
-  last_output_delta_at_ms: number | null;
   response_completed_at_ms: number;
   recorded_at_ms: number;
   weekly_quota_limit_id: "codex" | null;
@@ -45,19 +38,6 @@ export interface MetricRow {
   weekly_quota_plan_type: string | null;
   quota_windows: string | null;
   user_agent: string | null;
-  request_duration_ms: number | null;
-  ttft_ms: number | null;
-  thinking_duration_ms: number | null;
-  output_duration_ms: number | null;
-  generation_duration_ms: number | null;
-  completion_gap_ms: number | null;
-  upstream_duration_ms: number | null;
-  uncached_input_tokens: number | null;
-  non_reasoning_output_tokens: number | null;
-  cache_hit_rate: number | null;
-  thinking_tokens_per_second: number | null;
-  output_tokens_per_second: number | null;
-  generation_tokens_per_second: number | null;
 }
 
 export interface CompactSummaryRow {
@@ -80,26 +60,17 @@ export interface TurnSummaryRow extends CompactSummaryRow {
   turn_count: number;
   request_count: number;
   unsuccessful_request_count: number;
-  request_duration_ms: number | null;
   input_tokens: number | null;
   cached_input_tokens: number | null;
   input_token_count: number;
   cached_input_token_count: number;
   output_tokens: number | null;
   reasoning_output_tokens: number | null;
-  non_reasoning_output_tokens: number | null;
-  output_duration_ms: number | null;
-  output_speed_sample_count: number;
-  output_speed_timed_count: number;
 }
 
 export interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count"> {
   provider: string | null;
   model: string | null;
-  ttft_average_ms: number | null;
-  ttft_p50_ms: number | null;
-  ttft_p95_ms: number | null;
-  ttft_sample_count: number;
   total_group_count: number;
 }
 
@@ -153,14 +124,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     outputTokens: row.output_tokens,
     reasoningOutputTokens: row.reasoning_output_tokens,
     totalTokens: row.total_tokens,
-    upstreamCreatedAt: row.upstream_created_at,
-    upstreamCompletedAt: row.upstream_completed_at,
     requestStartedAtMs: row.request_started_at_ms,
-    firstTokenAtMs: row.first_token_at_ms,
-    firstReasoningDeltaAtMs: row.first_reasoning_delta_at_ms,
-    lastReasoningDeltaAtMs: row.last_reasoning_delta_at_ms,
-    firstOutputDeltaAtMs: row.first_output_delta_at_ms,
-    lastOutputDeltaAtMs: row.last_output_delta_at_ms,
     responseCompletedAtMs: row.response_completed_at_ms,
     weeklyQuota: row.weekly_quota_limit_id === null
       || row.weekly_used_percent_millionths === null
@@ -174,25 +138,20 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
         },
     quotaWindows: parseQuotaWindows(row.quota_windows),
     recordedAtMs: row.recorded_at_ms,
-    requestDurationMs: row.request_duration_ms,
-    ttftMs: row.ttft_ms,
-    thinkingDurationMs: row.thinking_duration_ms,
-    outputDurationMs: row.output_duration_ms,
-    generationDurationMs: row.generation_duration_ms,
-    completionGapMs: row.completion_gap_ms,
-    upstreamDurationMs: row.upstream_duration_ms,
-    uncachedInputTokens: row.uncached_input_tokens,
-    nonReasoningOutputTokens: row.non_reasoning_output_tokens,
-    cacheHitRate: row.cache_hit_rate,
-    thinkingTokensPerSecond: row.thinking_tokens_per_second,
-    outputTokensPerSecond: row.output_tokens_per_second,
-    generationTokensPerSecond: row.generation_tokens_per_second,
+    uncachedInputTokens: row.input_tokens !== null
+      && row.cached_input_tokens !== null
+      && row.input_tokens >= row.cached_input_tokens
+      ? row.input_tokens - row.cached_input_tokens
+      : null,
+    cacheHitRate: row.input_tokens !== null
+      && row.input_tokens > 0
+      && row.cached_input_tokens !== null
+      ? row.cached_input_tokens / row.input_tokens
+      : null,
   };
 }
 
 export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
-  const outputDurationMs = row.output_duration_ms ?? 0;
-  const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
   return {
     provider: row.provider ?? null,
     model: row.model ?? null,
@@ -200,7 +159,6 @@ export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetri
     turnId: row.turn_id!,
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
-    requestDurationMs: row.request_duration_ms ?? 0,
     inputTokens: row.input_tokens ?? 0,
     cachedInputTokens: row.input_token_count > 0
       && row.cached_input_token_count === row.input_token_count
@@ -208,11 +166,6 @@ export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetri
       : null,
     outputTokens: row.output_tokens ?? 0,
     reasoningOutputTokens: row.reasoning_output_tokens ?? 0,
-    outputTokensPerSecond: outputDurationMs > 0 && nonReasoningOutputTokens > 0
-      ? nonReasoningOutputTokens / (outputDurationMs / 1_000)
-      : null,
-    outputSpeedSampleCount: row.output_speed_sample_count,
-    outputSpeedTimedCount: row.output_speed_timed_count,
     compact: toStoredCompactSummary(row),
   };
 }
@@ -229,14 +182,10 @@ export function toStoredThreadAggregate(
     turnCount: row.turn_count,
     requestCount: summary.requestCount,
     unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
-    requestDurationMs: summary.requestDurationMs,
     inputTokens: summary.inputTokens,
     cachedInputTokens: summary.cachedInputTokens,
     outputTokens: summary.outputTokens,
     reasoningOutputTokens: summary.reasoningOutputTokens,
-    outputTokensPerSecond: summary.outputTokensPerSecond,
-    outputSpeedSampleCount: summary.outputSpeedSampleCount,
-    outputSpeedTimedCount: summary.outputSpeedTimedCount,
     compact: summary.compact,
   };
 }
@@ -250,12 +199,9 @@ export function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetri
 }
 
 export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
-  const outputDurationMs = row.output_duration_ms ?? 0;
-  const nonReasoningOutputTokens = row.non_reasoning_output_tokens ?? 0;
   return {
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
-    requestDurationMs: row.request_duration_ms ?? 0,
     inputTokens: row.input_tokens ?? 0,
     cachedInputTokens: row.input_token_count > 0
       && row.cached_input_token_count === row.input_token_count
@@ -263,15 +209,6 @@ export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestM
       : null,
     outputTokens: row.output_tokens ?? 0,
     reasoningOutputTokens: row.reasoning_output_tokens ?? 0,
-    outputTokensPerSecond: outputDurationMs > 0 && nonReasoningOutputTokens > 0
-      ? nonReasoningOutputTokens / (outputDurationMs / 1_000)
-      : null,
-    outputSpeedSampleCount: row.output_speed_sample_count,
-    outputSpeedTimedCount: row.output_speed_timed_count,
-    ttftAverageMs: row.ttft_average_ms,
-    ttftP50Ms: row.ttft_p50_ms,
-    ttftP95Ms: row.ttft_p95_ms,
-    ttftSampleCount: row.ttft_sample_count,
     compact: toStoredCompactSummary(row),
   };
 }

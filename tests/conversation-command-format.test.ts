@@ -1546,7 +1546,7 @@ describe("provider-aware conversation command formatting", () => {
     }
   });
 
-  it("renders latest Turn aggregation and direct API metrics separately", () => {
+  it("renders latest Turn and Thread aggregates", () => {
     const rendered = formatConversationMetrics({
       kind: "metrics",
       summary: {
@@ -1556,14 +1556,10 @@ describe("provider-aware conversation command formatting", () => {
           turnId: "turn-1",
           requestCount: 3,
           unsuccessfulRequestCount: 1,
-          requestDurationMs: 65_000,
           inputTokens: 30_000,
           cachedInputTokens: 24_000,
           outputTokens: 900,
           reasoningOutputTokens: 300,
-          outputTokensPerSecond: 60.25,
-          outputSpeedSampleCount: 3,
-          outputSpeedTimedCount: 2,
           compact: {
             model: "gpt-5.6-sol",
             hasMixedModels: false,
@@ -1578,14 +1574,10 @@ describe("provider-aware conversation command formatting", () => {
           turnCount: 8,
           requestCount: 21,
           unsuccessfulRequestCount: 2,
-          requestDurationMs: 142_000,
           inputTokens: 180_000,
           cachedInputTokens: 174_000,
           outputTokens: 4_200,
           reasoningOutputTokens: 1_800,
-          outputTokensPerSecond: 58,
-          outputSpeedSampleCount: 21,
-          outputSpeedTimedCount: 20,
           compact: {
             model: "gpt-5.6-sol",
             hasMixedModels: false,
@@ -1596,18 +1588,6 @@ describe("provider-aware conversation command formatting", () => {
             outputTokens: 1_000,
           },
         },
-        latestDirectApi: {
-          provider: "bltcy",
-          model: "gpt-5.6-luna",
-          status: "completed",
-          httpStatus: 200,
-          requestDurationMs: 11_590,
-          inputTokens: 10_034,
-          cachedInputTokens: 0,
-          outputTokens: 343,
-          reasoningOutputTokens: 55,
-          totalTokens: 10_377,
-        },
       },
     });
 
@@ -1615,7 +1595,6 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("缓存命中率：80.00%");
     expect(rendered).toContain("其中推理输出：300");
     expect(rendered).toContain("其中推理输出：1.8 K");
-    expect(rendered).toContain("其中推理输出：55");
     expect(rendered).toContain("### 最近运行聚合");
     expect(rendered).toContain("**Token**：30.9 K");
     expect(rendered).toContain("  - 输入命中缓存：24 K");
@@ -1624,10 +1603,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("### 当前会话指标累计");
     expect(rendered).toContain("Turn：8 次");
     expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
-    expect(rendered).toContain("### 最近直接 API");
-    expect(rendered).toContain("API 提供商：bltcy");
-    expect(rendered).toContain("调用模型：gpt-5.6-luna");
-    expect(rendered).toContain("状态：已完成 · HTTP 200");
+    expect(rendered).not.toContain("最近直接 API");
     expect(rendered).not.toContain("耗时");
     expect(rendered).not.toContain("延迟");
     expect(rendered).not.toContain("速度");
@@ -1643,31 +1619,22 @@ describe("provider-aware conversation command formatting", () => {
           turnId: "turn-1",
           requestCount: 3,
           unsuccessfulRequestCount: 1,
-          requestDurationMs: 65_000,
           inputTokens: 30_000,
           cachedInputTokens: 24_000,
           outputTokens: 900,
           reasoningOutputTokens: 300,
-          outputTokensPerSecond: 60.25,
-          outputSpeedSampleCount: 3,
-          outputSpeedTimedCount: 2,
           compact: null,
         },
         threadAggregate: {
           turnCount: 8,
           requestCount: 21,
           unsuccessfulRequestCount: 2,
-          requestDurationMs: 142_000,
           inputTokens: 180_000,
           cachedInputTokens: 174_000,
           outputTokens: 4_200,
           reasoningOutputTokens: 1_800,
-          outputTokensPerSecond: 58,
-          outputSpeedSampleCount: 21,
-          outputSpeedTimedCount: 20,
           compact: null,
         },
-        latestDirectApi: null,
       },
     });
 
@@ -1679,18 +1646,10 @@ describe("provider-aware conversation command formatting", () => {
     const aggregate = {
       requestCount: 12,
       unsuccessfulRequestCount: 1,
-      requestDurationMs: 60_000,
       inputTokens: 120_000,
       cachedInputTokens: 96_000,
       outputTokens: 2_400,
       reasoningOutputTokens: 600,
-      outputTokensPerSecond: 75,
-      outputSpeedSampleCount: 12,
-      outputSpeedTimedCount: 10,
-      ttftAverageMs: 1_200,
-      ttftP50Ms: 800,
-      ttftP95Ms: 2_500,
-      ttftSampleCount: 9,
       compact: {
         model: "gpt-5.6-sol",
         hasMixedModels: false,

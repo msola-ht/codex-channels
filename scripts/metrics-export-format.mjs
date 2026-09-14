@@ -15,10 +15,6 @@ export function formatLocalTime(ms) {
   ].join(" ");
 }
 
-export function formatDuration(value) {
-  return value === null ? "未知" : `${Math.round(value)}ms`;
-}
-
 export function markdownCell(value) {
   return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
 }

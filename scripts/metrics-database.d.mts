@@ -29,7 +29,7 @@ export interface MetricsCompactSummary {
 
 export interface MetricsReportDocument {
   format: "codex-connect-request-metrics-report";
-  version: 2;
+  version: 3;
   generatedAt: string;
   range: { name: string; startAtMs: number; endAtMs: number };
   report: {
@@ -46,7 +46,7 @@ export interface MetricsReportDocument {
 
 export interface MetricsExportDocument {
   format: "codex-connect-request-metrics-export";
-  version: 2;
+  version: 3;
   generatedAt: string;
   range: { name: string; startAtMs: number; endAtMs: number };
   records: unknown[];
@@ -55,12 +55,11 @@ export interface MetricsExportDocument {
 
 export interface MetricsRunDocument {
   format: "codex-connect-request-metrics-run";
-  version: 1;
+  version: 2;
   generatedAt: string;
   threadId: string;
   latestTurn: unknown;
   threadAggregate: unknown;
-  latestDirectApi: unknown;
 }
 
 export interface MetricsThreadsDocument {
@@ -83,7 +82,7 @@ export interface MetricsThreadsDocument {
 
 export interface MetricsTurnsDocument {
   format: "codex-connect-request-metrics-turns";
-  version: 1;
+  version: 2;
   generatedAt: string;
   threadId: string;
   turns: Array<Record<string, unknown> & { recordedAtMs: number }>;

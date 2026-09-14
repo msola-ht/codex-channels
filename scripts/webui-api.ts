@@ -23,17 +23,10 @@ export interface CompactSummary {
 export interface Aggregate {
   requestCount: number
   unsuccessfulRequestCount: number
-  requestDurationMs: number
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
   reasoningOutputTokens: number
-  outputTokensPerSecond: number | null
-  outputSpeedSampleCount: number
-  outputSpeedTimedCount: number
-  ttftAverageMs: number | null
-  ttftP50Ms: number | null
-  ttftP95Ms: number | null
   compact: CompactSummary | null
 }
 
@@ -135,12 +128,10 @@ export interface TurnSummary {
   turnId: string
   requestCount: number
   unsuccessfulRequestCount: number
-  requestDurationMs: number
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
   reasoningOutputTokens: number
-  outputTokensPerSecond: number | null
   compact: CompactSummary | null
   recordedAtMs?: number
 }
@@ -153,7 +144,6 @@ export interface ThreadRunResponse {
   parentTurnId: string | null
   latestTurn: TurnSummary | null
   threadAggregate: (Aggregate & { turnCount: number }) | null
-  latestDirectApi: RequestRecord | null
 }
 
 export interface ThreadTurnsResponse {
@@ -184,13 +174,7 @@ export interface RequestRecord {
   outputTokens: number | null
   reasoningOutputTokens: number | null
   totalTokens: number | null
-  requestDurationMs: number | null
-  ttftMs: number | null
-  thinkingDurationMs: number | null
-  outputDurationMs: number | null
-  generationDurationMs: number | null
   cacheHitRate: number | null
-  outputTokensPerSecond: number | null
   recordedAtMs: number
 }
 
@@ -205,9 +189,6 @@ export type RequestSortKey =
   | "input"
   | "output"
   | "reasoningOutput"
-  | "speed"
-  | "ttft"
-  | "duration"
 
 export type RequestSortDirection = "asc" | "desc"
 

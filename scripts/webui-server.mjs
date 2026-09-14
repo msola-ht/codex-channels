@@ -86,9 +86,6 @@ const requestSortKeys = {
   input: "inputTokens",
   output: "outputTokens",
   reasoningOutput: "reasoningOutputTokens",
-  speed: "outputTokensPerSecond",
-  ttft: "ttftMs",
-  duration: "requestDurationMs",
 };
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGE_VERSION = readJsonMetadata(join(PACKAGE_DIR, "package.json"))?.version ?? null;
@@ -562,7 +559,6 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
         parentTurnId: subagent.parentTurnId,
         latestTurn: summary.latestTurn,
         threadAggregate: summary.threadAggregate,
-        latestDirectApi: summary.latestDirectApi,
       });
       return;
     }

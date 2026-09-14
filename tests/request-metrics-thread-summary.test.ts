@@ -15,7 +15,7 @@ describe("request metrics Thread summary", () => {
     directories.push(directory);
     const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"));
     store.record(sample());
-    store.record({ ...sample(), turnId: "turn-2", requestStartedAtMs: 2_000, firstTokenAtMs: 2_100, firstReasoningDeltaAtMs: 2_100, lastReasoningDeltaAtMs: 2_300, firstOutputDeltaAtMs: 2_400, lastOutputDeltaAtMs: 2_600, responseCompletedAtMs: 2_650 });
+    store.record({ ...sample(), turnId: "turn-2", requestStartedAtMs: 2_000, responseCompletedAtMs: 2_650 });
     const summary = store.threadSummary("thread-1");
     expect(summary.latestTurn).toMatchObject({ turnId: "turn-2", requestCount: 1 });
     expect(summary.threadAggregate).toMatchObject({ turnCount: 2, requestCount: 2 });

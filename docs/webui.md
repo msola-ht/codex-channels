@@ -84,8 +84,8 @@ codexc service stop webui        # 停止
 `this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
 WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
-`model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`、
-`speed`、`ttft`、`duration`；后三项只为兼容现有 API 调用保留，不在 WebUI 页面显示。
+`model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`。
+已删除的 `speed`、`ttft`、`duration` 不再接受，传入时返回 400。
 默认按 `time desc` 查询整个时间范围后再分页。请求接口
 还支持 `filter` 关键字（最多 128 字符），在 Provider、模型、操作、状态、错误类型、错误码与
 错误消息中全库匹配后再分页，响应 `total` 为筛选后的匹配总数。
@@ -168,7 +168,7 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与
 缓存列悬浮显示明细；请求明细的 `User-Agent` 列展示该请求实际发往模型上游的 UA（截断显示，
-悬浮查看完整值，Schema v13 起入库，历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
+悬浮查看完整值，Schema v13 起入库，当前 Schema v14 继续保留，早期历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
 分页，每页条数支持 10–500。Threads 的“开始时间”表示指标库中该 Thread 首个请求的
 开始时间，不等同于 App Server 中 Thread 对象的创建时间；Threads 的“类型”列把已由
 Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，其余显示“主会话”，

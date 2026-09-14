@@ -76,8 +76,8 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
 不写入自身日志或独立存储，也不向 App Server 发送本地路径，不在 Surface 维护另一套识图会话或重试队列。
 三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
-并单独列出最近直接 API 请求；`global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
-把 Codex Provider 和直接 API 按同一请求口径聚合，最多展示请求量最高的 20 组；`errors` 用同一
+`global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
+按同一请求口径聚合指标库记录，最多展示请求量最高的 20 组；`errors` 用同一
 范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
 不把请求累计输入误写成上下文占用；聚合中的上下文压缩摘要单列请求数与 Token，不显示模型请求
 聚合耗时、首段回复延迟、生成速度、本地价格或费用。信息类聊天指令（`/status`、`/usage`、
@@ -111,7 +111,7 @@ Turn、Thread 或 Surface 关闭时清理。
 指标读取失败时只显示“统计暂不可用”。
 原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与
 OpenAI 周限；配置的自定义主模型 Provider 追加“ · 自定义”标识（例如“OpenAI · 自定义”），
-历史直接 API 指标按记录中的稳定 Provider ID 展示；各 Surface 只保留 HTML、
+历史无 Turn 指标只在通用明细和时间范围聚合中按稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
 `elapsed-duration.ts` 只把已确认的 Turn、操作、推理状态等毫秒值或账户用量秒数格式化为三个 Surface

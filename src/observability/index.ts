@@ -16,7 +16,6 @@ export type {
   ModelRequestMetricsThreadQueryStore,
   ModelRequestMetricsWriteStore,
   ModelRequestMetricsWriter,
-  ModelBillingMode,
   ModelRequestOperation,
   ModelResponseFormat,
   ModelRequestStatus,
@@ -58,3 +57,10 @@ export {
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "./sqlite-request-metrics-store.js";
+export {
+  metricStorageColumns,
+  metricStorageColumnsSql,
+  modelRequestMetricsIndexesSql,
+  modelRequestMetricsTableSql,
+  requireCurrentModelRequestMetricsSchema,
+} from "./sqlite-request-metrics-schema.js";

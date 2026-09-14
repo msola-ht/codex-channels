@@ -78,37 +78,6 @@ export function formatConversationMetrics(
         : []),
     );
   }
-  if (summary.latestDirectApi) {
-    const direct = summary.latestDirectApi;
-    lines.push(
-      "",
-      "### 最近直接 API",
-      `API 提供商：${formatCodexProviderLabel(direct.provider)}`,
-      `调用模型：${direct.model ?? "未知"}`,
-      `状态：${formatRequestStatus(direct.status)}${direct.httpStatus === null ? "" : ` · HTTP ${direct.httpStatus}`}`,
-      ...(direct.inputTokens === null && direct.outputTokens === null
-        ? []
-        : [
-            `- **Token**：${formatTokenCount(
-              direct.totalTokens ?? (direct.inputTokens ?? 0) + (direct.outputTokens ?? 0),
-            )}`,
-            ...(direct.cachedInputTokens === null
-              ? direct.inputTokens === null
-                ? []
-                : [`  - 输入：${formatTokenCount(direct.inputTokens)}`]
-              : [
-                  `  - 输入命中缓存：${formatTokenCount(direct.cachedInputTokens)}`,
-                  `  - 输入未命中缓存：${formatTokenCount(Math.max(0, (direct.inputTokens ?? 0) - direct.cachedInputTokens))}`,
-                ]),
-            ...(direct.outputTokens === null
-              ? []
-              : [`  - 输出：${formatTokenCount(direct.outputTokens)}`]),
-            ...(direct.reasoningOutputTokens === null || direct.reasoningOutputTokens === 0
-              ? []
-              : [`  - 其中推理输出：${formatTokenCount(direct.reasoningOutputTokens)}`]),
-          ]),
-    );
-  }
   return toStructuredMarkdownList(lines.join("\n"));
 }
 
@@ -240,18 +209,10 @@ function formatMetricsAggregate(
   aggregate: {
   requestCount: number;
   unsuccessfulRequestCount: number;
-  requestDurationMs: number;
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
-  outputTokensPerSecond: number | null;
-  outputSpeedSampleCount: number;
-  outputSpeedTimedCount: number;
-  ttftAverageMs: number | null;
-  ttftP50Ms: number | null;
-  ttftP95Ms: number | null;
-  ttftSampleCount: number;
   compact?: Parameters<typeof formatCompactMetricsValue>[0] | null;
   },
 ): string[] {

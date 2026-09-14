@@ -168,7 +168,6 @@ export {
 } from "./permission-port.js";
 export {
   estimateWeeklyLimit,
-  type DirectApiRequestMetricsSummary,
   type RequestMetricsAggregate,
   type RequestMetricsAggregateReport,
   type RequestMetricsAggregateView,

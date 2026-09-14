@@ -181,12 +181,13 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 窗口与本机 Token，不展示价格或费用。
 按需启动、初始化与模型列表流程由 Codex 0.154.0 真实 App Server 合同测试覆盖。
 
-指标库 Schema v8 与 v9 曾为价格快照新增 `pricing_bucket` 与 `quota_windows` 列，Schema v10
+指标库 Schema v8 曾为价格快照新增 `pricing_bucket`，Schema v9 为官方额度窗口快照新增
+`quota_windows` 列，Schema v10
 为 `subagent_threads` 新增可空 `parent_turn_id`，Schema v11 新增按子 Thread + Turn 记录精确父 Turn
 归属的 `subagent_turns`，Schema v12 新增官方账户快照表，Schema v13 为每个请求新增记录实际发往
-模型上游 `User-Agent` 的 `user_agent` 列；旧库由 `codexc metrics upgrade`
-显式备份迁移，历史运行归属不按时间猜测。价格相关遗留列不再写入或读取，保留它们只为避免破坏性
-schema 迁移；`quota_windows` 继续用于 OpenCode Go 本地 Token 的窗口归属。
+模型上游 `User-Agent` 的 `user_agent` 列；Schema v14 删除价格、成本、旧计时列与派生 View，只保留
+当前采集和展示合同。旧库由 `codexc metrics upgrade` 在停机、检查点和私有备份后事务重建，保留请求、
+子代理关系与账户快照，历史运行归属不按时间猜测；`quota_windows` 继续用于 OpenCode Go 本地 Token 的窗口归属。
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。

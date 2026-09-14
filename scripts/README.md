@@ -68,9 +68,12 @@
   组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
   `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
-  派生上下文压缩模型、请求数与 Token 摘要，JSON/CSV 同时保留可视化字段；`export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v12 备份后
-  逐版本事务升级到 v13（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
+  派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
+  report/export v3、run/turns v2，未改变结构的 threads 保持 v1；JSON/CSV 同时保留可视化字段；
+  `export` CSV 用独立类型行区分请求历史额度快照
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v13
+  检查点回写、私有备份后，在单一事务中重建为 v14；模型请求记录只复制当前保留字段，删除旧价格、
+  成本、计时列和派生 View（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
   `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
   `subagent_turns`，v11 升级 v12 新增官方账户快照表，v12 升级 v13 新增记录实际发往模型上游
   `User-Agent` 的 `user_agent` 列；历史运行归属不猜测），

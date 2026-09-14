@@ -70,9 +70,9 @@
   查询结果可通过快照写入端口落入统一读模型；按需刷新只接受已注册 Provider，查询失败保留最后
   一次成功快照，不以 `unsupported` 覆盖有效余额或额度。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
-  指标累计、最近直接 API 请求，以及自然日/周/月、24 小时至 365 天滚动窗口或全部保留历史的全局/提供商/模型聚合和异常请求
+  指标累计，以及自然日/周/月、24 小时至 365 天滚动窗口或全部保留历史的全局/提供商/模型聚合和异常请求
   只读摘要；聚合中的上下文压缩摘要单列实际请求模型、请求数与 Token；
-  直接 API 只保留指标记录中的稳定 Provider ID；不向 Application 暴露 SQLite 或请求正文。
+  历史无 Turn 指标只参与通用明细和时间范围聚合；不向 Application 暴露 SQLite 或请求正文。
 - `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
 - `mcp-port.ts`：定义 MCP Server 概览、当前 Thread 的未启动/连接中/已连接/需认证/失败/取消/禁用或未知运行状态、可空 Plugin 来源、只表示工具发现是否失败的布尔状态、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth

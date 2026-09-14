@@ -31,27 +31,12 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
 
   forThread(threadId: string): ThreadRequestMetricsSummary {
     const summary = this.store.threadSummary(threadId);
-    const direct = summary.latestDirectApi;
     return {
       threadId: summary.threadId,
       modelProvider: this.router.modelSettingsForThread(threadId)
         ?.modelProvider ?? "openai",
       latestTurn: summary.latestTurn,
       threadAggregate: summary.threadAggregate,
-      latestDirectApi: direct === null
-        ? null
-        : {
-            provider: direct.provider,
-            model: direct.model,
-            status: direct.status,
-            httpStatus: direct.httpStatus,
-            requestDurationMs: direct.requestDurationMs,
-            inputTokens: direct.inputTokens,
-            cachedInputTokens: direct.cachedInputTokens,
-            outputTokens: direct.outputTokens,
-            reasoningOutputTokens: direct.reasoningOutputTokens,
-            totalTokens: direct.totalTokens,
-          },
     };
   }
 

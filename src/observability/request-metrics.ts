@@ -2,8 +2,6 @@ export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
-export type ModelBillingMode = "api" | "subscription" | "unknown";
-
 export interface ModelRequestMetricSample {
   provider: string;
   transport: ModelRequestTransport;
@@ -27,14 +25,7 @@ export interface ModelRequestMetricSample {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   totalTokens: number | null;
-  upstreamCreatedAt: number | null;
-  upstreamCompletedAt: number | null;
   requestStartedAtMs: number;
-  firstTokenAtMs: number | null;
-  firstReasoningDeltaAtMs: number | null;
-  lastReasoningDeltaAtMs: number | null;
-  firstOutputDeltaAtMs: number | null;
-  lastOutputDeltaAtMs: number | null;
   responseCompletedAtMs: number;
   /** 记录入库时刻（毫秒）；缺省为写入时的 Date.now()，测试可显式指定以保证窗口确定性。 */
   recordedAtMs?: number;
@@ -113,19 +104,8 @@ export interface StoredQuotaPeriod {
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   id: number;
   recordedAtMs: number;
-  requestDurationMs: number | null;
-  ttftMs: number | null;
-  thinkingDurationMs: number | null;
-  outputDurationMs: number | null;
-  generationDurationMs: number | null;
-  completionGapMs: number | null;
-  upstreamDurationMs: number | null;
   uncachedInputTokens: number | null;
-  nonReasoningOutputTokens: number | null;
   cacheHitRate: number | null;
-  thinkingTokensPerSecond: number | null;
-  outputTokensPerSecond: number | null;
-  generationTokensPerSecond: number | null;
 }
 
 export interface StoredCompactRequestMetricsSummary {
@@ -145,14 +125,10 @@ export interface StoredTurnRequestMetricsSummary {
   turnId: string;
   requestCount: number;
   unsuccessfulRequestCount: number;
-  requestDurationMs: number;
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
-  outputTokensPerSecond: number | null;
-  outputSpeedSampleCount: number;
-  outputSpeedTimedCount: number;
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
@@ -161,14 +137,10 @@ export interface StoredThreadRequestMetricsAggregate {
   turnCount: number;
   requestCount: number;
   unsuccessfulRequestCount: number;
-  requestDurationMs: number;
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
-  outputTokensPerSecond: number | null;
-  outputSpeedSampleCount: number;
-  outputSpeedTimedCount: number;
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
@@ -176,7 +148,6 @@ export interface StoredThreadRequestMetricsSummary {
   threadId: string;
   latestTurn: StoredTurnRequestMetricsSummary | null;
   threadAggregate: StoredThreadRequestMetricsAggregate | null;
-  latestDirectApi: StoredModelRequestMetric | null;
 }
 
 export interface StoredThreadTurnSummary extends StoredTurnRequestMetricsSummary {
@@ -222,18 +193,10 @@ export interface ModelRequestMetricsAggregationQuery {
 export interface StoredModelRequestMetricsAggregate {
   requestCount: number;
   unsuccessfulRequestCount: number;
-  requestDurationMs: number;
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
-  outputTokensPerSecond: number | null;
-  outputSpeedSampleCount: number;
-  outputSpeedTimedCount: number;
-  ttftAverageMs: number | null;
-  ttftP50Ms: number | null;
-  ttftP95Ms: number | null;
-  ttftSampleCount: number;
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
@@ -287,10 +250,7 @@ export type ModelRequestMetricsSortKey =
   | "error"
   | "inputTokens"
   | "outputTokens"
-  | "reasoningOutputTokens"
-  | "outputTokensPerSecond"
-  | "ttftMs"
-  | "requestDurationMs";
+  | "reasoningOutputTokens";
 
 export interface StoredModelRequestMetricsPage {
   startAtMs: number;

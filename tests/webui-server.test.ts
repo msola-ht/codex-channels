@@ -1030,10 +1030,10 @@ describe("webui server", () => {
     expect(secondBody.records.map((record) => record.outputTokens)).toEqual([100]);
     expect(secondBody.nextOffset).toBeNull();
 
-    const timingSort = await fetch(
+    const removedTimingSort = await fetch(
       `${origin}/api/v1/requests?range=24h&limit=2&sort=duration&direction=desc`,
     );
-    expect(timingSort.status).toBe(200);
+    expect(removedTimingSort.status).toBe(400);
 
     const filtered = await fetch(
       `${origin}/api/v1/requests?range=24h&limit=10&filter=http_error`,
@@ -1473,14 +1473,7 @@ function metricSample(): ModelRequestMetricSample {
     outputTokens: 100,
     reasoningOutputTokens: 40,
     totalTokens: 1_100,
-    upstreamCreatedAt: 1_785_640_800,
-    upstreamCompletedAt: 1_785_640_801,
     requestStartedAtMs: Date.now() - 60_000,
-    firstTokenAtMs: Date.now() - 59_000,
-    firstReasoningDeltaAtMs: Date.now() - 59_000,
-    lastReasoningDeltaAtMs: Date.now() - 58_000,
-    firstOutputDeltaAtMs: Date.now() - 57_000,
-    lastOutputDeltaAtMs: Date.now() - 56_000,
     responseCompletedAtMs: Date.now() - 55_000,
     weeklyQuota: null,
   };

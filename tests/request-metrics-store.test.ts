@@ -115,7 +115,8 @@ describe("SqliteModelRequestMetricsStore", () => {
     expect(store.count()).toBe(1);
     expect(store.recent(1)[0]).toMatchObject({
       ...sample(),
-      requestDurationMs: 650,
+      uncachedInputTokens: 100,
+      cacheHitRate: 0.9,
     });
     store.close();
     const inspection = new DatabaseSync(path, { readOnly: true });
@@ -151,26 +152,12 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
 
     const inspection = new DatabaseSync(path, { readOnly: true });
-    const derived = inspection.prepare(`
-      SELECT * FROM model_request_metrics_enriched ORDER BY id DESC LIMIT 1
-    `).get() as Record<string, unknown>;
+    const legacyView = inspection.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'view' AND name = 'model_request_metrics_enriched'
+    `).get();
     inspection.close();
-
-    expect(derived).toMatchObject({
-      request_duration_ms: 650,
-      ttft_ms: 100,
-      thinking_duration_ms: 200,
-      output_duration_ms: 200,
-      generation_duration_ms: 500,
-      completion_gap_ms: 50,
-      upstream_duration_ms: 1_000,
-      uncached_input_tokens: 100,
-      non_reasoning_output_tokens: 60,
-      cache_hit_rate: 0.9,
-      thinking_tokens_per_second: 200,
-      output_tokens_per_second: 300,
-      generation_tokens_per_second: 200,
-    });
+    expect(legacyView).toBeUndefined();
   });
 
   it("estimates one percent from adjacent weekly quota changes", () => {
@@ -612,7 +599,7 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
-  it("summarizes the latest Turn and latest direct API request for one Thread", () => {
+  it("summarizes the latest Turn and whole Thread without a direct API branch", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
       join(directory, "request-metrics.sqlite3"),
@@ -626,11 +613,6 @@ describe("SqliteModelRequestMetricsStore", () => {
       reasoningOutputTokens: 50,
       totalTokens: 2_200,
       requestStartedAtMs: 2_000,
-      firstTokenAtMs: 2_100,
-      firstReasoningDeltaAtMs: 2_100,
-      lastReasoningDeltaAtMs: 2_200,
-      firstOutputDeltaAtMs: 2_300,
-      lastOutputDeltaAtMs: 2_600,
       responseCompletedAtMs: 2_700,
     });
     store.record({
@@ -644,11 +626,6 @@ describe("SqliteModelRequestMetricsStore", () => {
       outputTokens: 300,
       reasoningOutputTokens: 50,
       totalTokens: 10_300,
-      firstTokenAtMs: null,
-      firstReasoningDeltaAtMs: null,
-      lastReasoningDeltaAtMs: null,
-      firstOutputDeltaAtMs: null,
-      lastOutputDeltaAtMs: null,
       requestStartedAtMs: 3_000,
       responseCompletedAtMs: 4_000,
     });
@@ -673,13 +650,10 @@ describe("SqliteModelRequestMetricsStore", () => {
         turnId: "turn-1",
         requestCount: 2,
         unsuccessfulRequestCount: 0,
-        requestDurationMs: 1_350,
         inputTokens: 3_000,
         cachedInputTokens: 2_500,
         outputTokens: 300,
         reasoningOutputTokens: 90,
-        outputSpeedSampleCount: 2,
-        outputSpeedTimedCount: 2,
       },
       threadAggregate: {
         turnCount: 1,
@@ -689,18 +663,9 @@ describe("SqliteModelRequestMetricsStore", () => {
         cachedInputTokens: 2_500,
         outputTokens: 300,
         reasoningOutputTokens: 90,
-        outputSpeedSampleCount: 2,
-        outputSpeedTimedCount: 2,
-      },
-      latestDirectApi: {
-        provider: "bltcy",
-        model: "gpt-5.6-luna",
-        requestDurationMs: 1_000,
-        totalTokens: 10_300,
       },
     });
-    expect(store.threadSummary("thread-1").latestTurn?.outputTokensPerSecond)
-      .toBeCloseTo(210 / 0.5);
+    expect(store.threadSummary("thread-1")).not.toHaveProperty("latestDirectApi");
     store.close();
   });
 

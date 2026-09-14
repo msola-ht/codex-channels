@@ -16,7 +16,6 @@ function summary() {
   return {
     threadId: "agent-1",
     modelProvider: "deepseek",
-    latestDirectApi: null,
     latestTurn: {
       provider: "deepseek",
       model: "deepseek-v4-flash",
@@ -24,14 +23,10 @@ function summary() {
       turnId: "agent-turn-1",
       requestCount: 2,
       unsuccessfulRequestCount: 0,
-      requestDurationMs: 1_500,
       inputTokens: 1_000,
       cachedInputTokens: 500,
       outputTokens: 100,
       reasoningOutputTokens: 0,
-      outputTokensPerSecond: 10,
-      outputSpeedSampleCount: 1,
-      outputSpeedTimedCount: 1,
       compact: null,
     },
     threadAggregate: {
@@ -39,14 +34,10 @@ function summary() {
       turnCount: 1,
       requestCount: 2,
       unsuccessfulRequestCount: 0,
-      requestDurationMs: 1_500,
       inputTokens: 1_000,
       cachedInputTokens: 500,
       outputTokens: 100,
       reasoningOutputTokens: 0,
-      outputTokensPerSecond: 10,
-      outputSpeedSampleCount: 1,
-      outputSpeedTimedCount: 1,
       compact: null,
     },
   };

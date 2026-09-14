@@ -5,6 +5,7 @@ import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   modelRequestMetricsSchemaVersion,
   requestMetricsDatabasePath,
+  requireCurrentModelRequestMetricsSchema,
   SqliteModelRequestMetricsStore,
 } from "../dist/observability/index.js";
 import {
@@ -17,8 +18,8 @@ import {
 } from "./metrics-command-options.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
-export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-const baseMetricsColumns = Object.freeze([
+export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+const legacyMetricsColumns = Object.freeze([
   "id", "provider", "billing_mode", "pricing_currency", "pricing_source",
   "pricing_effective_at_ms", "uncached_input_price_per_million_nanos",
   "cached_input_price_per_million_nanos", "output_price_per_million_nanos",
@@ -85,30 +86,25 @@ export function validateMetricsDatabaseStructure(
   }
   const database = new DatabaseSync(status.databasePath, { readOnly: true });
   try {
-    const requiredColumns = [
-      ...baseMetricsColumns,
-      ...(status.schemaVersion >= 4
-        ? ["weekly_quota_limit_id", "weekly_used_percent_millionths", "weekly_resets_at"]
-        : []),
-      ...(status.schemaVersion >= 5 ? ["weekly_quota_plan_type"] : []),
-      ...(status.schemaVersion >= 6 ? ["error_message"] : []),
-      ...(status.schemaVersion >= 8 ? ["pricing_bucket"] : []),
-      ...(status.schemaVersion >= 9 ? ["quota_windows"] : []),
-      ...(status.schemaVersion >= 13 ? ["user_agent"] : []),
-    ];
-    requireColumns(database, "model_request_metrics", requiredColumns);
     if (status.compatible) {
-      requireColumns(database, "subagent_threads", [
-        "thread_id", "parent_thread_id", "parent_turn_id", "agent_path", "recorded_at_ms",
-      ]);
-      requireColumns(database, "subagent_turns", [
-        "thread_id", "turn_id", "parent_thread_id", "parent_turn_id", "agent_path",
-        "recorded_at_ms",
-      ]);
+      requireCurrentModelRequestMetricsSchema(database);
+    } else {
+      const requiredColumns = [
+        ...legacyMetricsColumns,
+        ...(status.schemaVersion >= 4
+          ? ["weekly_quota_limit_id", "weekly_used_percent_millionths", "weekly_resets_at"]
+          : []),
+        ...(status.schemaVersion >= 5 ? ["weekly_quota_plan_type"] : []),
+        ...(status.schemaVersion >= 6 ? ["error_message"] : []),
+        ...(status.schemaVersion >= 8 ? ["pricing_bucket"] : []),
+        ...(status.schemaVersion >= 9 ? ["quota_windows"] : []),
+        ...(status.schemaVersion >= 13 ? ["user_agent"] : []),
+      ];
+      requireColumns(database, "model_request_metrics", requiredColumns);
+      database.prepare(`
+        SELECT id, total_cost_nanos FROM model_request_metrics_enriched LIMIT 0
+      `).all();
     }
-    database.prepare(`
-      SELECT id, total_cost_nanos FROM model_request_metrics_enriched LIMIT 0
-    `).all();
   } catch (error) {
     throw new Error(
       `指标数据库 Schema ${status.schemaVersion} 结构不完整，`
@@ -133,7 +129,7 @@ export function readMetricsReport(environment = process.env, options = {}) {
   try {
     return {
       format: "codex-connect-request-metrics-report",
-      version: 2,
+      version: 3,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
       weeklyQuota: readWeeklyQuota(store, range.endAtMs),
@@ -182,7 +178,7 @@ export function readMetricsExport(environment = process.env, options = {}) {
     } while (offset >= 0);
     return {
       format: "codex-connect-request-metrics-export",
-      version: 2,
+      version: 3,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
       weeklyQuota: readWeeklyQuota(store, range.endAtMs),
@@ -259,12 +255,11 @@ export function readMetricsRun(environment = process.env, threadId) {
     const summary = store.threadSummary(threadId);
     return {
       format: "codex-connect-request-metrics-run",
-      version: 1,
+      version: 2,
       generatedAt: new Date().toISOString(),
       threadId,
       latestTurn: summary.latestTurn,
       threadAggregate: summary.threadAggregate,
-      latestDirectApi: summary.latestDirectApi,
     };
   } finally {
     store.close();
@@ -300,7 +295,7 @@ export function readMetricsTurns(environment = process.env, threadId) {
   try {
     return {
       format: "codex-connect-request-metrics-turns",
-      version: 1,
+      version: 2,
       generatedAt: new Date().toISOString(),
       threadId,
       turns: store.threadTurnSummaries(threadId),
