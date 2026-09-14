@@ -37,6 +37,10 @@ export interface GatewaySettings {
         version: string | null;
       };
       upstreamUserAgent: string | null;
+      defaults: {
+        name: string;
+        version: string;
+      };
     };
     workspaces: Array<{ id: string; name: string }>;
   };

@@ -182,7 +182,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           ${metricStorageColumnsSql}
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
@@ -288,6 +288,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.quotaWindows === undefined || sample.quotaWindows === null
         ? null
         : JSON.stringify(sample.quotaWindows),
+      sample.userAgent ?? null,
     );
     return recordedAtMs;
   }

@@ -46,9 +46,10 @@ const providerId = deepseekProviderDefinition.id;
 const maximumScriptBytes = 2 * 1024 * 1024;
 const defaultDownloadAttempts = 3;
 const defaultDownloadTimeoutMs = 30_000;
-const defaultAutoCompactPercent = 60;
-const minimumAutoCompactPercent = 10;
-const maximumAutoCompactPercent = 90;
+// 上下文窗口占比按模型目录的 max_context_window 换算；压缩阈值不再写入目录。
+const defaultWindowPercent = 60;
+const minimumWindowPercent = 10;
+const maximumWindowPercent = 100;
 
 class DeepseekSetupCancelled extends Error {}
 
@@ -118,7 +119,7 @@ async function applyDeepseekConfigurationUnlocked(
   {
     mode = "switching",
     apiKey,
-    autoCompactPercent,
+    windowPercent,
     confirmExclusiveConfigChange = false,
   },
   {
@@ -143,15 +144,15 @@ async function applyDeepseekConfigurationUnlocked(
     throw managedSetupInvalid("invalid-api-key", "apiKey", "DeepSeek API Key 无效");
   }
   if (
-    autoCompactPercent !== undefined
-    && (!Number.isInteger(autoCompactPercent)
-      || autoCompactPercent < minimumAutoCompactPercent
-      || autoCompactPercent > maximumAutoCompactPercent)
+    windowPercent !== undefined
+    && (!Number.isInteger(windowPercent)
+      || windowPercent < minimumWindowPercent
+      || windowPercent > maximumWindowPercent)
   ) {
     throw managedSetupInvalid(
-      "invalid-auto-compact-percent",
-      "autoCompactPercent",
-      "DeepSeek 自动压缩百分比无效",
+      "invalid-window-percent",
+      "windowPercent",
+      "DeepSeek 上下文窗口百分比无效",
     );
   }
 
@@ -170,7 +171,7 @@ async function applyDeepseekConfigurationUnlocked(
     return await configureDeepseekInstallation({
       mode,
       apiKey,
-      autoCompactPercent,
+      windowPercent,
       downloaded,
       environment,
       preview,
@@ -296,11 +297,11 @@ export async function runDeepseekSetup({
       }
     }
     const apiKey = await askApiKey(prompt);
-    const autoCompactPercent = await askAutoCompact(prompt);
+    const windowPercent = await askWindowPercent(prompt);
     const result = await applyDeepseekConfiguration({
       mode,
       apiKey,
-      autoCompactPercent,
+      windowPercent,
       confirmExclusiveConfigChange: mode === "exclusive",
     }, {
       environment,
@@ -332,7 +333,7 @@ export async function runDeepseekSetup({
 async function configureDeepseekInstallation({
   mode,
   apiKey,
-  autoCompactPercent,
+  windowPercent,
   downloaded,
   environment,
   preview,
@@ -395,7 +396,7 @@ async function configureDeepseekInstallation({
     const managedCatalog = createManagedDeepseekCatalog(
       downloaded.catalog,
       previous?.models,
-      autoCompactPercent ?? null,
+      windowPercent ?? null,
     );
     const selectedModel = resolveManagedCatalogModel(
       managedCatalog,
@@ -585,21 +586,21 @@ export function extractDeepseekCatalog(script) {
 export function createManagedDeepseekCatalog(
   catalog,
   previousModels = [],
-  autoCompactPercent = defaultAutoCompactPercent,
+  windowPercent = null,
 ) {
-  if (autoCompactPercent !== null && (
-    !Number.isInteger(autoCompactPercent)
-    || autoCompactPercent < minimumAutoCompactPercent
-    || autoCompactPercent > maximumAutoCompactPercent
+  if (windowPercent !== null && (
+    !Number.isInteger(windowPercent)
+    || windowPercent < minimumWindowPercent
+    || windowPercent > maximumWindowPercent
   )) {
-    throw new Error("DeepSeek 自动压缩百分比无效");
+    throw new Error("DeepSeek 上下文窗口百分比无效");
   }
   return createManagedProviderCatalog(
     catalog,
     deepseekProviderDefinition,
     {
       previousModels,
-      autoCompactPercent,
+      windowPercent,
     },
   );
 }
@@ -1219,24 +1220,24 @@ async function askApiKey(prompt) {
   }
 }
 
-async function askAutoCompact(prompt) {
+async function askWindowPercent(prompt) {
   const choice = await askChoice(
     prompt,
-    "自动压缩阈值：1 模型默认（90%） · 2 60% · 3 自定义",
+    "上下文窗口：1 模型官方窗口 · 2 60% · 3 自定义百分比",
     3,
   );
-  if (choice === "1") return undefined;
-  if (choice === "2") return defaultAutoCompactPercent;
+  if (choice === "1") return 100;
+  if (choice === "2") return defaultWindowPercent;
   while (true) {
     const value = await prompt.text(
-      `自定义自动压缩百分比 [${minimumAutoCompactPercent}-${maximumAutoCompactPercent}]`,
+      `自定义窗口占比 [${minimumWindowPercent}-${maximumWindowPercent}]`,
     );
     if (!/^\d+$/u.test(value)) continue;
     const parsed = Number(value);
     if (
       Number.isInteger(parsed)
-      && parsed >= minimumAutoCompactPercent
-      && parsed <= maximumAutoCompactPercent
+      && parsed >= minimumWindowPercent
+      && parsed <= maximumWindowPercent
     ) {
       return parsed;
     }
@@ -1248,9 +1249,9 @@ function table(value) {
 }
 
 function createHiddenPrompter(prompts, { allowBack }) {
-  const autoCompactOptions = [
-    { value: "1", label: "使用模型默认（90%）" },
-    { value: "2", label: `按 ${defaultAutoCompactPercent}% 上下文窗口压缩` },
+  const windowOptions = [
+    { value: "1", label: "使用模型官方窗口" },
+    { value: "2", label: `窗口缩到 ${defaultWindowPercent}%` },
     { value: "3", label: "自定义百分比" },
   ];
   const installOptions = [
@@ -1262,10 +1263,10 @@ function createHiddenPrompter(prompts, { allowBack }) {
   ];
   return {
     ask: async (label) => {
-      const autoCompact = typeof label === "string" && label.startsWith("自动压缩");
+      const windowChoice = typeof label === "string" && label.startsWith("上下文窗口");
       const value = await prompts.select({
-        message: autoCompact ? "设置自动压缩阈值" : "选择 DeepSeek 安装模式",
-        options: autoCompact ? autoCompactOptions : installOptions,
+        message: windowChoice ? "设置上下文窗口" : "选择 DeepSeek 安装模式",
+        options: windowChoice ? windowOptions : installOptions,
       });
       return requirePromptValue(prompts, value);
     },

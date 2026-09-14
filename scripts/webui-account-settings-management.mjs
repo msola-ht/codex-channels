@@ -102,7 +102,7 @@ export function normalizeAccountSettingsMutation(input) {
         operation: input.operation,
         ...(input.mode === undefined ? {} : { mode: input.mode }),
         ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
-        ...(input.autoCompactPercent === undefined ? {} : { autoCompactPercent: input.autoCompactPercent }),
+        ...(input.windowPercent === undefined ? {} : { windowPercent: input.windowPercent }),
         ...(input.confirmExclusiveConfigChange === undefined
           ? {}
           : { confirmExclusiveConfigChange: input.confirmExclusiveConfigChange }),

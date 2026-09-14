@@ -19,12 +19,12 @@ import {
 } from "./agents.mjs";
 import { ManagementOperationError } from "./webui-management-operations.mjs";
 import {
-  applyModelCompressionChange,
-  previewModelCompressionChange,
-  projectModelCompression,
-} from "./model-compression-management.mjs";
+  applyModelWindowChange,
+  previewModelWindowChange,
+  projectModelWindow,
+} from "./model-window-management.mjs";
 import {
-  loadManagedModelCompression,
+  loadManagedModelWindow,
 } from "../runtime/model-provider-runtime.mjs";
 
 export async function loadProviderSettingsResource(
@@ -35,8 +35,8 @@ export async function loadProviderSettingsResource(
     const state = await loadProviderState({ environment });
     return {
       ...projectProviderSettings(state),
-      modelCompression: projectModelCompression(
-        loadManagedModelCompression(environment),
+      modelWindow: projectModelWindow(
+        loadManagedModelWindow(environment),
       ),
     };
   } catch {
@@ -83,15 +83,15 @@ export function normalizeProviderSettingsMutation(input) {
         provider: input.provider,
         model: input.model,
         reasoningEffort: input.reasoningEffort,
-        ...(input.autoCompactPercent === undefined
+        ...(input.windowPercent === undefined
           ? {}
-          : { autoCompactPercent: input.autoCompactPercent }),
+          : { windowPercent: input.windowPercent }),
       };
-    case "managed.compression":
+    case "managed.window":
       return {
         operation: input.operation,
         model: input.model,
-        autoCompactPercent: input.autoCompactPercent,
+        windowPercent: input.windowPercent,
       };
     case "external-agent":
       return {
@@ -131,7 +131,7 @@ export async function previewProviderSettingsMutation(input, environment) {
               provider: input.provider,
               model: input.model,
               reasoningEffort: input.reasoningEffort,
-              autoCompactPercent: input.autoCompactPercent,
+              windowPercent: input.windowPercent,
             },
             { environment },
           ),
@@ -145,13 +145,13 @@ export async function previewProviderSettingsMutation(input, environment) {
           },
           { environment },
         );
-      case "managed.compression":
+      case "managed.window":
         return {
-          operation: "managed.compression",
-          ...previewModelCompressionChange(
+          operation: "managed.window",
+          ...previewModelWindowChange(
             {
               model: input.model,
-              autoCompactPercent: input.autoCompactPercent,
+              windowPercent: input.windowPercent,
             },
             { environment },
           ),
@@ -185,7 +185,7 @@ export async function applyProviderSettingsMutation(input, environment, preview)
             provider: input.provider,
             model: input.model,
             reasoningEffort: input.reasoningEffort,
-            autoCompactPercent: input.autoCompactPercent,
+            windowPercent: input.windowPercent,
           },
           { environment },
         );
@@ -198,11 +198,11 @@ export async function applyProviderSettingsMutation(input, environment, preview)
           },
           { environment },
         );
-      case "managed.compression":
-        return await applyModelCompressionChange(
+      case "managed.window":
+        return await applyModelWindowChange(
           {
             model: input.model,
-            autoCompactPercent: input.autoCompactPercent,
+            windowPercent: input.windowPercent,
           },
           { environment },
         );
@@ -226,8 +226,8 @@ export function redactProviderSettingsResult(result) {
       ? { providers: result.providers.filter((value) => typeof value === "string") }
       : {}),
     ...(result.reasoningEffort !== undefined ? { reasoningEffort: result.reasoningEffort } : {}),
-    ...(result.autoCompactPercent !== undefined ? { autoCompactPercent: result.autoCompactPercent } : {}),
-    ...(result.autoCompactLimit !== undefined ? { autoCompactLimit: result.autoCompactLimit } : {}),
+    ...(result.windowPercent !== undefined ? { windowPercent: result.windowPercent } : {}),
+    ...(result.contextWindow !== undefined ? { contextWindow: result.contextWindow } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
     ...(result.credential && typeof result.credential === "object"
@@ -269,10 +269,10 @@ export function projectProviderSettings(state) {
         id: model.id,
         displayName: model.displayName ?? model.id,
         contextWindow: model.contextWindow ?? 0,
+        maxContextWindow: model.maxContextWindow ?? 0,
         reasoningEffort: model.reasoningEffort ?? "",
         reasoningEfforts: model.reasoningEfforts ?? [],
-        ...(model.autoCompactLimit === undefined ? {} : { autoCompactLimit: model.autoCompactLimit }),
-        ...(model.autoCompactPercent === undefined ? {} : { autoCompactPercent: model.autoCompactPercent }),
+        ...(model.windowPercent === undefined ? {} : { windowPercent: model.windowPercent }),
       })),
     })),
     customProviders: {

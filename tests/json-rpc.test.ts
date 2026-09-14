@@ -233,7 +233,8 @@ describe("JsonRpcClient", () => {
 
     const starts = transport.sent.filter((message) => message.method === "thread/start");
     expect(starts[0]?.params)
-      .toMatchObject({ model: "gpt-configured", serviceName: "codex_connect" });
+      .toMatchObject({ model: "gpt-configured" });
+    expect(starts[0]?.params).not.toHaveProperty("serviceName");
     expect(transport.sent.find((message) => message.method === "turn/start")?.params)
       .not.toHaveProperty("model");
   });

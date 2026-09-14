@@ -31,7 +31,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 - OpenAI 兼容 base URL 与认证方式；
 - wire API 的请求/响应/流式事件文档，以及 `/responses/compact` 等压缩接口是否可用；
 - 模型目录来源（`/models` 响应或官方目录 JSON），包含模型名、显示名、上下文窗口、
-  支持思考等级、默认思考等级、输入能力、压缩阈值字段；
+  最大上下文窗口、支持思考等级、默认思考等级与输入能力；
 - 账户接口文档：余额或用量窗口（窗口周期、重置时间、已用百分比）；
 - 限流与错误语义（429/5xx/重试），以及是否有 Key 预检接口。
 
@@ -63,7 +63,8 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 - 在 `~/.codex-connect/providers/<id>/` 生成 `models.json`，schema 与现有目录一致：每个模型必须有
   `context_window`、非空 `supported_reasoning_levels`、合法 `default_reasoning_level`、
-  `auto_compact_token_limit`、`display_name` 与输入能力；
+  `display_name` 与输入能力；`max_context_window` 存在时作为窗口占比的换算基准，上下文窗口
+  只由「模型上下文窗口」按模型名统一写入，其余字段保持下载原样，压缩使用上游默认；
 - 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间，以及需要跨版本执行一次的
   默认模型迁移记录；Profile（切换模式）与固定
   基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
@@ -89,7 +90,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
   5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
-  Schema v11，另含子代理运行级父子 Turn 关联），
+  Schema v13，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
   读取时优先按快照归属窗口，快照缺失或与当前官方窗口不一致时才回退到按请求开始时间判定。
   窗口总额度（如 OpenCode Go 5 小时 $12、7 天 $30、月度 $60）随窗口展示，用于按已用
   百分比换算金额；总额由 Provider 定义或套餐常量提供，不来自官方用量接口。

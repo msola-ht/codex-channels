@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   GatewayConfigConflictError,
@@ -24,7 +25,7 @@ import {
   applyWorkspaceSetting,
   projectWorkspaceSettings,
 } from "./config-workspace-management.mjs";
-import { requireUserConfig } from "./runtime-config.mjs";
+import { packageDir, requireUserConfig } from "./runtime-config.mjs";
 
 const operationUpdateValues = ["full", "compact", "hidden"];
 const sandboxValues = ["read-only", "workspace-write"];
@@ -90,6 +91,7 @@ export function loadGatewaySettings(environment = process.env) {
         upstreamUserAgent: typeof codex.upstream_user_agent === "string"
           ? codex.upstream_user_agent
           : null,
+        defaults: officialTuiIdentityDefaults(),
       },
       workspaces,
     },
@@ -414,6 +416,17 @@ function workspaceOptions(document) {
       id: stringValue(entry.id),
       name: stringValue(entry.name) || stringValue(entry.id),
     }));
+}
+
+/** 未配置 `[codex].client_identity` 时 Gateway 生效的官方 TUI 默认身份。 */
+function officialTuiIdentityDefaults() {
+  const protocolMetadata = JSON.parse(
+    readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
+  );
+  return {
+    name: "codex-tui",
+    version: String(protocolMetadata.codexCli).replace(/^codex-cli\s+/u, ""),
+  };
 }
 
 function validateProxyUrl(value) {

@@ -229,26 +229,27 @@ export function loadManagedModelProviderSettings(environment = process.env) {
   });
 }
 
-// 按模型 slug 聚合所有已配置 Provider 的自动压缩设置。
+// 按模型 slug 聚合所有已配置 Provider 的上下文窗口设置。
 // 同名模型在多个 Provider（如 DeepSeek 与 OpenCode Go 各账户）中存在时，
-// 只保留一份权威值：任一 Provider 设置了非空 autoCompactPercent 即作为全局值，
-// 全部未设置时省略该字段（由调用方套用默认值）。
-export function loadManagedModelCompression(environment = process.env) {
+// 只保留一份权威值：任一 Provider 设置了非空 windowPercent 即作为全局值，
+// 全部未设置时省略该字段（目录里的官方窗口保持不变）。
+export function loadManagedModelWindow(environment = process.env) {
   const providers = loadManagedModelProviderSettings(environment);
   const bySlug = new Map();
   for (const provider of providers) {
     for (const model of provider.models ?? []) {
       const slug = model.model;
       if (typeof slug !== "string" || slug === "") continue;
-      const percent = model.autoCompactPercent;
+      const percent = model.windowPercent;
       const existing = bySlug.get(slug);
       if (existing === undefined) {
         bySlug.set(slug, {
           model: slug,
           displayName: model.displayName ?? slug,
           contextWindow: model.contextWindow,
+          maxContextWindow: model.maxContextWindow,
           reasoningEfforts: model.reasoningEfforts ?? [],
-          autoCompactPercent: percent,
+          windowPercent: percent,
           providers: [provider.provider],
           perProvider: { [provider.provider]: percent },
           conflicts: false,
@@ -257,10 +258,10 @@ export function loadManagedModelCompression(environment = process.env) {
         continue;
       }
       if (
-        existing.autoCompactPercent === undefined
+        existing.windowPercent === undefined
         && percent !== undefined
       ) {
-        existing.autoCompactPercent = percent;
+        existing.windowPercent = percent;
       }
       if (!existing.providers.includes(provider.provider)) {
         existing.providers.push(provider.provider);
@@ -274,7 +275,9 @@ export function loadManagedModelCompression(environment = process.env) {
       ) {
         existing.conflicts = true;
       }
-      if (existing.contextWindow !== model.contextWindow) {
+      if (
+        existing.maxContextWindow !== model.maxContextWindow
+      ) {
         existing.windowConflict = true;
       }
     }
@@ -357,83 +360,134 @@ export function writeManagedModelProviderCatalogSettings(
   settings,
   environment = process.env,
 ) {
-  const definition = findManagedProviderDefinition(environment, provider);
-  if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+  const { definition, path } = managedProviderCatalogPath(provider, environment);
   validateManagedModelSettings(definition, settings);
-  const catalogPath = join(
-    managedProviderDirectory(environment, definition),
-    definition.catalogFileName,
-  );
-  const previousContent = readPrivateFile(catalogPath, maximumCatalogBytes);
+  const previousContent = readPrivateFile(path, maximumCatalogBytes);
   const previous = modelCatalogSetting(previousContent, definition, settings.model);
   writePrivateFileAtomicSync(
-    catalogPath,
+    path,
     updateModelCatalogSettings(previousContent, definition, settings),
   );
   return previous;
 }
 
-// 按模型 slug 全局写入自动压缩设置：把同一 autoCompactLimit 广播到所有
-// 提供该模型且已配置的 Provider 目录，避免同名模型在不同 Provider 各存一份。
-export function writeManagedModelCompressionGlobal(
-  { model, autoCompactPercent, environment = process.env } = {},
+// 读取受管 Provider 模型目录的原始内容，供配置事务在失败时按原样回滚。
+export function readManagedModelProviderCatalogContent(provider, environment = process.env) {
+  return readPrivateFile(managedProviderCatalogPath(provider, environment).path, maximumCatalogBytes);
+}
+
+// 把模型目录写回给定原始内容；只用于回滚，不解析也不改写内容。
+export function restoreManagedModelProviderCatalogContent(
+  provider,
+  content,
+  environment = process.env,
 ) {
-  validateAutoCompactPercent(autoCompactPercent);
+  writePrivateFileAtomicSync(managedProviderCatalogPath(provider, environment).path, content);
+}
+
+function managedProviderCatalogPath(provider, environment) {
+  const definition = findManagedProviderDefinition(environment, provider);
+  if (!definition) throw new Error(`未知第三方 Provider：${provider}`);
+  return {
+    definition,
+    path: join(
+      managedProviderDirectory(environment, definition),
+      definition.catalogFileName,
+    ),
+  };
+}
+
+// 按模型 slug 全局写入上下文窗口：百分比相对该模型的 max_context_window 换算，
+// 把同一 context_window 广播到所有提供该模型且已配置的 Provider 目录。
+// 自动压缩阈值不再写入目录，压缩由上游按窗口默认推导。
+export function writeManagedModelWindowGlobal(
+  { model, windowPercent, environment = process.env } = {},
+) {
+  validateWindowPercent(windowPercent);
   const providers = loadManagedModelProviderSettings(environment);
   const matches = providers.filter((provider) =>
     (provider.models ?? []).some((candidate) => candidate.model === model));
   if (matches.length === 0) {
     throw new Error(`未找到已配置模型：${model}`);
   }
-  const contextWindows = matches.map((provider) =>
-    provider.models.find((entry) => entry.model === model)?.contextWindow);
-  const firstContextWindow = contextWindows[0];
+  const bases = matches.map((provider) =>
+    provider.models.find((entry) => entry.model === model)?.maxContextWindow);
+  const base = bases[0];
   if (
-    !Number.isSafeInteger(firstContextWindow)
-    || firstContextWindow <= 0
-    || contextWindows.some((value) => value !== firstContextWindow)
+    !Number.isSafeInteger(base)
+    || base <= 0
+    || bases.some((value) => value !== base)
   ) {
-    throw new Error(`同名模型在不同 Provider 的上下文窗口不一致：${model}`);
+    throw new Error(`同名模型在不同 Provider 的最大上下文窗口不一致：${model}`);
   }
-  const autoCompactLimit = Math.round(firstContextWindow * autoCompactPercent / 100);
+  const contextWindow = Math.round(base * windowPercent / 100);
+  const previousCatalogs = new Map(matches.map((provider) => [
+    provider.provider,
+    readManagedModelProviderCatalogContent(provider.provider, environment),
+  ]));
+  const writtenProviders = [];
   const overridden = [];
-  for (const provider of matches) {
-    const modelEntry = provider.models.find((entry) => entry.model === model);
-    if (
-      modelEntry?.autoCompactPercent !== undefined
-      && modelEntry.autoCompactPercent !== autoCompactPercent
-    ) {
-      overridden.push({
-        provider: provider.provider,
-        previousPercent: modelEntry.autoCompactPercent,
-      });
+  try {
+    for (const provider of matches) {
+      const modelEntry = provider.models.find((entry) => entry.model === model);
+      if (
+        modelEntry?.windowPercent !== undefined
+        && modelEntry.windowPercent !== windowPercent
+      ) {
+        overridden.push({
+          provider: provider.provider,
+          previousPercent: modelEntry.windowPercent,
+        });
+      }
+      writeManagedModelProviderCatalogSettings(
+        provider.provider,
+        {
+          model,
+          reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
+          contextWindow,
+        },
+        environment,
+      );
+      writtenProviders.push(provider.provider);
     }
-    writeManagedModelProviderCatalogSettings(
-      provider.provider,
-      {
-        model,
-        reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
-        autoCompactLimit,
-      },
-      environment,
-    );
+  } catch (error) {
+    const rollbackErrors = [];
+    for (const provider of writtenProviders.reverse()) {
+      try {
+        restoreManagedModelProviderCatalogContent(
+          provider,
+          previousCatalogs.get(provider),
+          environment,
+        );
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "模型上下文窗口写入失败，且未能恢复全部 Provider 模型目录",
+        { cause: error },
+      );
+    }
+    throw error;
   }
   return {
     model,
-    autoCompactPercent,
-    autoCompactLimit,
+    windowPercent,
+    contextWindow,
     providers: matches.map((provider) => provider.provider),
     overridden,
   };
 }
 
-function validateAutoCompactPercent(autoCompactPercent) {
+function validateWindowPercent(windowPercent) {
   if (
-    !Number.isInteger(autoCompactPercent)
-    || autoCompactPercent < 10
-    || autoCompactPercent > 90
+    !Number.isInteger(windowPercent)
+    || windowPercent < 10
+    || windowPercent > 100
   ) {
-    throw new Error("模型自动压缩百分比无效");
+    throw new Error("模型上下文窗口百分比无效");
   }
 }
 
@@ -458,13 +512,13 @@ export function withPreservedManagedModelCatalogSettings(
     )
       ? previous.reasoningEffort
       : current.reasoningEffort;
-    const autoCompactLimit = previous.autoCompactPercent === undefined
+    const contextWindow = previous.windowPercent === undefined
       ? undefined
-      : Math.round(current.contextWindow * previous.autoCompactPercent / 100);
+      : Math.round(current.maxContextWindow * previous.windowPercent / 100);
     next = withManagedModelCatalogSettings(next, definition, {
       model: previous.model,
       reasoningEffort,
-      ...(autoCompactLimit === undefined ? {} : { autoCompactLimit }),
+      ...(contextWindow === undefined ? {} : { contextWindow }),
     });
   }
   return next;
@@ -1651,7 +1705,6 @@ function readProviderProfile(
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} API Key 缺失或无效`);
   }
-  const autoCompactLimit = selectedModel?.autoCompactLimit;
   return {
     provider: descriptor.id,
     model: document.model,
@@ -1665,12 +1718,6 @@ function readProviderProfile(
     apiKeyEnvironmentKey: descriptor.definition.apiKeyEnvironmentKey,
     supportsWebsockets: descriptor.definition.supportsWebsockets,
     apiKey,
-    ...(autoCompactLimit === undefined
-      ? {}
-      : {
-          autoCompactLimit,
-          autoCompactScope: "total",
-        }),
   };
 }
 
@@ -1792,6 +1839,8 @@ function modelCatalogSetting(content, definition, model) {
     : undefined;
   const document = record(candidate);
   const contextWindow = document.context_window;
+  const maxContextWindow = document.max_context_window;
+  const legacyThreshold = document.auto_compact_token_limit;
   const levels = Array.isArray(document.supported_reasoning_levels)
     ? document.supported_reasoning_levels
     : [];
@@ -1802,32 +1851,34 @@ function modelCatalogSetting(content, definition, model) {
       : [];
   });
   const reasoningEffort = document.default_reasoning_level;
-  const autoCompactLimit = document.auto_compact_token_limit;
   if (
     !Number.isSafeInteger(contextWindow)
     || contextWindow <= 0
     || reasoningEfforts.length === 0
     || typeof reasoningEffort !== "string"
     || !reasoningEfforts.some(({ effort }) => effort === reasoningEffort)
-    || (autoCompactLimit !== null && autoCompactLimit !== undefined
-      && (!Number.isSafeInteger(autoCompactLimit)
-        || autoCompactLimit <= 0
-        || autoCompactLimit > contextWindow))
+    || (maxContextWindow !== null && maxContextWindow !== undefined
+      && (!Number.isSafeInteger(maxContextWindow) || maxContextWindow <= 0))
+    || (legacyThreshold !== null && legacyThreshold !== undefined
+      && (!Number.isSafeInteger(legacyThreshold) || legacyThreshold <= 0))
   ) {
     throw new Error(`Codex ${definition.displayName} 模型目录无效`);
   }
+  const windowBase = maxContextWindow === null || maxContextWindow === undefined
+    ? contextWindow
+    : maxContextWindow;
+  // v2 之前的目录把百分比写成自动压缩阈值；阈值按同一基准折算为窗口。
+  const window = legacyThreshold === null || legacyThreshold === undefined
+    ? contextWindow
+    : Math.min(legacyThreshold, windowBase);
   return {
     model,
     displayName: typeof document.display_name === "string" ? document.display_name : model,
-    contextWindow,
+    contextWindow: window,
+    maxContextWindow: windowBase,
     reasoningEffort,
     reasoningEfforts,
-    ...(autoCompactLimit === null || autoCompactLimit === undefined
-      ? {}
-      : {
-          autoCompactLimit,
-          autoCompactPercent: Math.round(autoCompactLimit * 100 / contextWindow),
-        }),
+    windowPercent: Math.round(window * 100 / windowBase),
   };
 }
 
@@ -1846,20 +1897,30 @@ function updateModelCatalogSettings(content, definition, settings) {
     throw new Error(`${definition.displayName} 模型不支持思考等级：${settings.reasoningEffort}`);
   }
   if (
-    settings.autoCompactLimit !== undefined
-    && (!Number.isSafeInteger(settings.autoCompactLimit)
-      || settings.autoCompactLimit <= 0
-      || settings.autoCompactLimit > Math.floor(current.contextWindow * 0.9))
+    settings.contextWindow !== undefined
+    && (!Number.isSafeInteger(settings.contextWindow)
+      || settings.contextWindow <= 0
+      || settings.contextWindow > current.maxContextWindow)
   ) {
-    throw new Error(`${definition.displayName} 模型自动压缩阈值无效`);
+    throw new Error(`${definition.displayName} 模型上下文窗口无效`);
   }
-  const nextAutoCompactLimit = settings.autoCompactLimit === undefined
-    ? (current.autoCompactLimit ?? null)
-    : settings.autoCompactLimit;
+  const entry = record(models[index]);
   models[index] = {
-    ...record(models[index]),
+    ...entry,
     default_reasoning_level: settings.reasoningEffort,
-    auto_compact_token_limit: nextAutoCompactLimit,
+    // 只有明确请求窗口变更时才写 context_window；其余情况下目录条目保持原样。
+    ...(settings.contextWindow === undefined
+      ? {}
+      : {
+          context_window: settings.contextWindow,
+          // 缺少最大窗口的旧目录必须保留原始基准，避免下次按缩小后的窗口计算。
+          max_context_window: current.maxContextWindow,
+          // 旧版本写在目录里的压缩阈值会卡住新窗口，随窗口一并清掉。
+          ...(entry.auto_compact_token_limit === undefined
+            || entry.auto_compact_token_limit === null
+            ? {}
+            : { auto_compact_token_limit: null }),
+        }),
   };
   return `${JSON.stringify({ ...catalog, models }, null, 2)}\n`;
 }

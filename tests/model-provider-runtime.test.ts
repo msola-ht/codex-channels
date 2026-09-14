@@ -58,6 +58,7 @@ import {
   loadManagedModelProvider,
   loadManagedModelProviderRole,
   loadManagedModelProviderSettings,
+  writeManagedModelWindowGlobal,
   loadManagedModelProviders,
   loadManagedProviderAppServer,
   loadManagedProviderAppServers,
@@ -945,7 +946,7 @@ describe("model provider runtime topology", () => {
     expect(writeManagedModelProviderProfileDefault("deepseek", {
       model: "deepseek-v4-flash",
       reasoningEffort: "high",
-      autoCompactLimit: 629_146,
+      contextWindow: 629_146,
     }, environment)).toMatchObject({ mode: "switching" });
     expect(parse(readFileSync(
       join(codexHome, "sf-deepseek.config.toml"),
@@ -956,6 +957,53 @@ describe("model provider runtime topology", () => {
     });
     expect(validateConfiguredModelProvider(environment))
       .toEqual({ provider: "deepseek", mode: "switching" });
+  });
+
+  it.each([undefined, null])("retains the original window when max_context_window is %s", async (maximum) => {
+    const codexHome = await configuredHome("switching");
+    const environment = testEnvironment(codexHome);
+    const path = providerCatalogPath(codexHome);
+    const catalog = JSON.parse(readFileSync(path, "utf8"));
+    catalog.models[0].max_context_window = maximum;
+    writeFileSync(path, JSON.stringify(catalog), { mode: 0o600 });
+
+    for (const windowPercent of [60, 60, 100]) {
+      writeManagedModelWindowGlobal({ model: "deepseek-v4-flash", windowPercent, environment });
+      expect(loadManagedModelProviderSettings(environment)[0]?.models[0]).toMatchObject({
+        contextWindow: Math.round(1_048_576 * windowPercent / 100),
+        maxContextWindow: 1_048_576,
+        windowPercent,
+      });
+    }
+  });
+
+  it("restores earlier Provider catalogs when a global window write fails", async () => {
+    const codexHome = await configuredHome("switching");
+    configureOpenCodeGo(codexHome);
+    const environment = testEnvironment(codexHome);
+    const deepseekCatalogPath = providerCatalogPath(codexHome);
+    const opencodeGoCatalogPath = join(
+      connectHomeFor(codexHome),
+      "providers",
+      "opencode-go",
+      "models.json",
+    );
+    const deepseekCatalog = readFileSync(deepseekCatalogPath, "utf8");
+    const opencodeGoCatalog = readFileSync(opencodeGoCatalogPath, "utf8");
+    runtimeFileFailures.atomicWritePath = opencodeGoCatalogPath;
+
+    try {
+      expect(() => writeManagedModelWindowGlobal({
+        model: "deepseek-v4-flash",
+        windowPercent: 40,
+        environment,
+      })).toThrow("injected registry rollback failure");
+    } finally {
+      runtimeFileFailures.atomicWritePath = undefined;
+    }
+
+    expect(readFileSync(deepseekCatalogPath, "utf8")).toBe(deepseekCatalog);
+    expect(readFileSync(opencodeGoCatalogPath, "utf8")).toBe(opencodeGoCatalog);
   });
 
   it("writes and removes the DeepSeek subagent role configuration without the API key", async () => {
@@ -1190,6 +1238,21 @@ describe("model provider runtime topology", () => {
 
     expect(() => loadManagedModelProviderSettings(testEnvironment(codexHome)))
       .toThrow("包含无效模型名");
+  });
+
+  it("rejects a managed catalog with an invalid compression threshold", async () => {
+    const codexHome = await configuredHome("switching");
+    const catalogPath = providerCatalogPath(codexHome);
+    const catalog = JSON.parse(readFileSync(catalogPath, "utf8")) as {
+      models: Array<Record<string, unknown>>;
+    };
+    const [first] = catalog.models;
+    if (!first) throw new Error("测试目录缺少模型");
+    first.auto_compact_token_limit = 0;
+    writeFileSync(catalogPath, `${JSON.stringify(catalog)}\n`, { mode: 0o600 });
+
+    expect(() => loadManagedModelProviderSettings(testEnvironment(codexHome)))
+      .toThrow("模型目录无效");
   });
 
   it("rejects an exclusive configuration with a root reasoning override", async () => {

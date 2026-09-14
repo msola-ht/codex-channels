@@ -36,7 +36,7 @@ export interface SourceUpdatePlan {
 
 export interface PreparedSourceUpdatePlan extends SourceUpdatePlan {
   requiresServiceInterruption: boolean;
-  services: { installed: boolean };
+  services: { installed: boolean; obsoleteServices?: string[] };
   targetVersion: string;
 }
 
@@ -104,7 +104,7 @@ export interface SourceUpdateOptions {
   inspectStaged?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
-  ) => Promise<{ services: { installed: boolean } }>;
+  ) => Promise<{ services: { installed: boolean; obsoleteServices?: string[] } }>;
   stopServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,

@@ -15,7 +15,7 @@ export const metricStorageColumnsSql = `
   first_output_delta_at_ms, last_output_delta_at_ms,
   response_completed_at_ms, recorded_at_ms,
   weekly_quota_limit_id, weekly_used_percent_millionths, weekly_resets_at,
-  weekly_quota_plan_type, quota_windows
+  weekly_quota_plan_type, quota_windows, user_agent
 `;
 
 const schemaMetadataSql = `
@@ -129,6 +129,7 @@ const initialSchemaSql = `
     ),
     weekly_quota_plan_type TEXT,
     quota_windows TEXT,
+    user_agent TEXT,
     CHECK (
       (
         billing_mode IS NULL

@@ -42,15 +42,15 @@ function ProviderSettingsCard({
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [managedModel, setManagedModel] = useState(settings.managedProviders[0]?.model ?? "")
   const [managedReasoning, setManagedReasoning] = useState(settings.managedProviders[0]?.reasoningEffort ?? "")
-  const [compressionModel, setCompressionModel] = useState(settings.modelCompression[0]?.id ?? "")
-  const [compressionPercent, setCompressionPercent] = useState("60")
-  const [compressionError, setCompressionError] = useState<string | null>(null)
+  const [windowModel, setWindowModel] = useState(settings.modelWindow[0]?.id ?? "")
+  const [windowPercent, setWindowPercent] = useState("100")
+  const [windowError, setWindowError] = useState<string | null>(null)
   const [agentProvider, setAgentProvider] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.provider : settings.managedProviders[0]?.id ?? settings.customProviders.switchingProviders[0]?.id ?? "")
   const [agentModel, setAgentModel] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.model : settings.managedProviders[0]?.models[0]?.id ?? settings.customProviders.switchingProviders[0]?.model ?? "")
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const managedModelEntry = managed?.models.find((candidate) => candidate.id === managedModel) ?? managed?.models[0]
-  const compressionEntry = settings.modelCompression.find((candidate) => candidate.id === compressionModel) ?? settings.modelCompression[0]
+  const windowEntry = settings.modelWindow.find((candidate) => candidate.id === windowModel) ?? settings.modelWindow[0]
   const agentProviders = useMemo(() => {
     const providers = new Map<string, { id: string; displayName: string; models: Array<{ id: string; displayName: string }> }>()
     settings.managedProviders.forEach((provider) => {
@@ -96,10 +96,10 @@ function ProviderSettingsCard({
   }, [managed])
 
   useEffect(() => {
-    if (compressionEntry === undefined) return
-    setCompressionModel((current) => settings.modelCompression.some((candidate) => candidate.id === current) ? current : compressionEntry.id)
-    setCompressionPercent(String(compressionEntry.autoCompactPercent ?? 60))
-  }, [compressionEntry, settings.modelCompression])
+    if (windowEntry === undefined) return
+    setWindowModel((current) => settings.modelWindow.some((candidate) => candidate.id === current) ? current : windowEntry.id)
+    setWindowPercent(String(windowEntry.windowPercent ?? 100))
+  }, [windowEntry, settings.modelWindow])
 
   useEffect(() => {
     if (agentProviderEntry === undefined) return
@@ -172,21 +172,21 @@ function ProviderSettingsCard({
     })
   }
 
-  const updateCompression = async () => {
-    if (compressionEntry === undefined) return
-    const parsedPercent = Number(compressionPercent)
-    if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 90) {
-      setCompressionError("自动压缩百分比必须是 10–90 的整数")
+  const updateWindow = async () => {
+    if (windowEntry === undefined) return
+    const parsedPercent = Number(windowPercent)
+    if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 100) {
+      setWindowError("窗口占比（%）必须是 10–100 的整数")
       return
     }
-    setCompressionError(null)
+    setWindowError(null)
     const result = await management.mutate({
-      operation: "managed.compression",
-      model: compressionEntry.id,
-      autoCompactPercent: parsedPercent,
+      operation: "managed.window",
+      model: windowEntry.id,
+      windowPercent: parsedPercent,
     })
     if (result !== null) {
-      setCompressionPercent(String(result.autoCompactPercent ?? compressionPercent))
+      setWindowPercent(String(result.windowPercent ?? windowPercent))
     }
   }
 
@@ -219,7 +219,7 @@ function ProviderSettingsCard({
     <CardContent className="flex flex-col gap-6 text-sm">
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <div><h3 className="font-medium">托管 Provider 默认值</h3><p className="text-xs text-muted-foreground">修改模型目录中的默认模型与思考等级；自动压缩在下方「模型自动压缩」按模型名统一设置。</p></div>
+          <div><h3 className="font-medium">托管 Provider 默认值</h3><p className="text-xs text-muted-foreground">修改模型目录中的默认模型与思考等级；上下文窗口在下方「模型上下文窗口」按模型名统一设置。</p></div>
           <Badge variant="outline">{settings.managedProviders.length} 个</Badge>
         </div>
         {managed === undefined ? <SettingsEmpty>当前没有已配置的托管 Provider。</SettingsEmpty> : <>
@@ -234,17 +234,17 @@ function ProviderSettingsCard({
       <Separator />
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <div><h3 className="font-medium">模型自动压缩</h3><p className="text-xs text-muted-foreground">按模型名统一自动压缩阈值；同名模型在所有 Provider 共享同一值。</p></div>
-          <Badge variant="outline">{settings.modelCompression.length} 个模型</Badge>
+          <div><h3 className="font-medium">模型上下文窗口</h3><p className="text-xs text-muted-foreground">按模型名统一上下文窗口占比（相对模型最大窗口）；同名模型在所有 Provider 共享同一值，自动压缩使用上游默认。</p></div>
+          <Badge variant="outline">{settings.modelWindow.length} 个模型</Badge>
         </div>
-        {compressionEntry === undefined ? <SettingsEmpty>当前没有可设置的受管模型。</SettingsEmpty> : <>
+        {windowEntry === undefined ? <SettingsEmpty>当前没有可设置的受管模型。</SettingsEmpty> : <>
           <FieldGroup>
-            <ManagedSelect label="模型" value={compressionEntry.id} options={settings.modelCompression.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => { setCompressionModel(value); const next = settings.modelCompression.find((candidate) => candidate.id === value); if (next !== undefined) setCompressionPercent(String(next.autoCompactPercent ?? 60)) }} />
-            <Field orientation="responsive" data-invalid={compressionError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-compression-percent">自动压缩百分比</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-compression-percent" aria-invalid={compressionError !== null} aria-describedby={compressionError === null ? undefined : "provider-compression-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={90} value={compressionPercent} disabled={busy || pending !== null} onChange={(event) => { setCompressionPercent(event.target.value); setCompressionError(null) }} /><FieldError id="provider-compression-percent-error" className="sm:text-right">{compressionError}</FieldError></FieldContent></Field>
+            <ManagedSelect label="模型" value={windowEntry.id} options={settings.modelWindow.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => { setWindowModel(value); const next = settings.modelWindow.find((candidate) => candidate.id === value); if (next !== undefined) setWindowPercent(String(next.windowPercent ?? 100)) }} />
+            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-percent">窗口占比（%）</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={100} value={windowPercent} disabled={busy || pending !== null} onChange={(event) => { setWindowPercent(event.target.value); setWindowError(null) }} /><FieldError id="provider-window-percent-error" className="sm:text-right">{windowError}</FieldError></FieldContent></Field>
           </FieldGroup>
-          <p className="text-xs text-muted-foreground">应用 Provider：{compressionEntry.providers.join("、") || "无"} · 上下文窗口 {formatTokens(compressionEntry.contextWindow)} tokens</p>
-          {compressionEntry.conflicts === true ? <Alert><AlertTitle>压缩设置不一致</AlertTitle><AlertDescription>当前不同 Provider 的压缩值不一致：{Object.entries(compressionEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join("；") || "部分未设置"}；保存后将以本次输入统一。</AlertDescription></Alert> : null}
-          <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || compressionEntry === undefined} onClick={() => void updateCompression()}>保存模型自动压缩</Button>
+          <p className="text-xs text-muted-foreground">应用 Provider：{windowEntry.providers.join("、") || "无"} · 上下文窗口 {formatTokens(windowEntry.contextWindow)} / 最大 {formatTokens(windowEntry.maxContextWindow)} tokens</p>
+          {windowEntry.conflicts === true ? <Alert><AlertTitle>窗口占比不一致</AlertTitle><AlertDescription>当前不同 Provider 的窗口占比不一致：{Object.entries(windowEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join("；") || "部分未设置"}；保存后将以本次输入统一。</AlertDescription></Alert> : null}
+          <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || windowEntry === undefined} onClick={() => void updateWindow()}>保存模型上下文窗口</Button>
         </>}
       </section>
       <Separator />
@@ -302,10 +302,10 @@ function ProviderSettingsConfirmationDialog({
   if (pending.model !== undefined) lines.push(`模型：${pending.model.displayName}（${pending.model.id}）`)
   if (pending.providers !== undefined && pending.providers.length > 0) lines.push(`应用 Provider：${pending.providers.join("、")}`)
   if (pending.overridden !== undefined && pending.overridden.length > 0) lines.push(`将覆盖：${pending.overridden.map((entry) => `${entry.provider}（原 ${entry.previousPercent}%）`).join("、")}`)
-  if (pending.conflicts === true) lines.push(`提示：该模型在不同 Provider 的压缩值不一致，保存后统一为本次输入。`)
-  if (pending.windowConflict === true) lines.push(`提示：该模型在不同 Provider 的上下文窗口不一致，无法统一压缩设置。`)
+  if (pending.conflicts === true) lines.push(`提示：该模型在不同 Provider 的窗口占比不一致，保存后统一为本次输入。`)
+  if (pending.windowConflict === true) lines.push(`提示：该模型在不同 Provider 的最大窗口不一致，无法统一窗口设置。`)
   if (pending.reasoningEffort !== undefined) lines.push(`思考等级：${pending.reasoningEffort}`)
-  if (pending.autoCompactPercent !== undefined) lines.push(`自动压缩：${pending.autoCompactPercent}%`)
+  if (pending.windowPercent !== undefined) lines.push(`上下文窗口：${pending.windowPercent}%`)
   if (pending.credential?.action !== undefined) lines.push(`凭据：${pending.credential.action === "replace" ? "写入新 API Key" : "沿用已有 API Key"}`)
   if (pending.current !== undefined) lines.push(`当前：${pending.current.configured ? `${pending.current.provider ?? "未知"} / ${pending.current.model ?? "未知"}` : "未配置"}`)
   return <ManagementConfirmationDialog open saving={saving} title="确认 Provider 配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={pending.operation === "remove" || pending.operation === "disable" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>

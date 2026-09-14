@@ -1,49 +1,49 @@
 import {
-  loadManagedModelCompression,
-  writeManagedModelCompressionGlobal,
+  loadManagedModelWindow,
+  writeManagedModelWindowGlobal,
 } from "../runtime/model-provider-runtime.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
-export class ModelCompressionManagementError extends Error {
+export class ModelWindowManagementError extends Error {
   constructor(code, field, message, options) {
     super(message, options);
-    this.name = "ModelCompressionManagementError";
+    this.name = "ModelWindowManagementError";
     this.code = code;
     this.field = field;
   }
 }
 
-export function previewModelCompressionChange(
+export function previewModelWindowChange(
   input,
   {
     environment = process.env,
-    loadCompression = loadManagedModelCompression,
+    loadWindow = loadManagedModelWindow,
   } = {},
 ) {
-  return publicPreview(buildPlan(input, loadCompression(environment)));
+  return publicPreview(buildPlan(input, loadWindow(environment)));
 }
 
-export async function applyModelCompressionChange(
+export async function applyModelWindowChange(
   input,
   {
     environment = process.env,
-    loadCompression = loadManagedModelCompression,
-    writeCompression = writeManagedModelCompressionGlobal,
+    loadWindow = loadManagedModelWindow,
+    writeWindow = writeManagedModelWindowGlobal,
     withFileLock,
   } = {},
 ) {
   return withModelProviderManagementTransaction(
     environment,
     () => {
-      const plan = buildPlan(input, loadCompression(environment));
+      const plan = buildPlan(input, loadWindow(environment));
       try {
-        writeCompression({
+        writeWindow({
           model: plan.model.model,
-          autoCompactPercent: plan.autoCompactPercent,
+          windowPercent: plan.windowPercent,
           environment,
         });
       } catch (error) {
-        if (error instanceof ModelCompressionManagementError) throw error;
+        if (error instanceof ModelWindowManagementError) throw error;
         throw invalid(
           "operation-failed",
           "model",
@@ -65,7 +65,7 @@ function buildPlan(input, models) {
     throw invalid(
       "model-not-configured",
       "model",
-      "尚未配置受管第三方 Provider，无法设置模型自动压缩",
+      "尚未配置受管第三方 Provider，无法设置模型上下文窗口",
     );
   }
   const values = record(input);
@@ -82,36 +82,36 @@ function buildPlan(input, models) {
     throw invalid(
       "window-conflict",
       "model",
-      `同名模型在不同 Provider 的上下文窗口不一致：${model.displayName}`,
+      `同名模型在不同 Provider 的最大上下文窗口不一致：${model.displayName}`,
     );
   }
-  const autoCompactPercent = values.autoCompactPercent;
+  const windowPercent = values.windowPercent;
   if (
-    !Number.isInteger(autoCompactPercent)
-    || autoCompactPercent < 10
-    || autoCompactPercent > 90
+    !Number.isInteger(windowPercent)
+    || windowPercent < 10
+    || windowPercent > 100
   ) {
     throw invalid(
-      "invalid-auto-compact-percent",
-      "autoCompactPercent",
-      `模型自动压缩百分比无效：${model.displayName}`,
+      "invalid-window-percent",
+      "windowPercent",
+      `模型上下文窗口百分比无效：${model.displayName}`,
     );
   }
-  const autoCompactLimit = Math.round(
-    model.contextWindow * autoCompactPercent / 100,
+  const contextWindow = Math.round(
+    model.maxContextWindow * windowPercent / 100,
   );
   const overridden = Object.entries(model.perProvider ?? {}).flatMap(
     ([provider, value]) => (
-      value !== undefined && value !== autoCompactPercent
+      value !== undefined && value !== windowPercent
         ? [{ provider, previousPercent: value }]
         : []
     ),
   );
   return {
     model,
-    autoCompactPercent,
-    autoCompactLimit,
-    willChange: model.autoCompactPercent !== autoCompactPercent,
+    windowPercent,
+    contextWindow,
+    willChange: model.windowPercent !== windowPercent || overridden.length > 0,
     conflicts: model.conflicts === true,
     overridden,
   };
@@ -123,9 +123,10 @@ function publicPreview(plan) {
       id: plan.model.model,
       displayName: plan.model.displayName,
       contextWindow: plan.model.contextWindow,
+      maxContextWindow: plan.model.maxContextWindow,
     },
-    autoCompactPercent: plan.autoCompactPercent,
-    autoCompactLimit: plan.autoCompactLimit,
+    windowPercent: plan.windowPercent,
+    contextWindow: plan.contextWindow,
     providers: plan.model.providers,
     willChange: plan.willChange,
     conflicts: plan.conflicts,
@@ -146,7 +147,7 @@ function record(value) {
 }
 
 function invalid(code, field, message, cause) {
-  return new ModelCompressionManagementError(
+  return new ModelWindowManagementError(
     code,
     field,
     message,
@@ -154,15 +155,16 @@ function invalid(code, field, message, cause) {
   );
 }
 
-export function projectModelCompression(models) {
+export function projectModelWindow(models) {
   return models.map((model) => ({
     id: model.model,
     displayName: model.displayName,
     contextWindow: model.contextWindow,
+    maxContextWindow: model.maxContextWindow,
     providers: model.providers,
-    ...(model.autoCompactPercent === undefined
+    ...(model.windowPercent === undefined
       ? {}
-      : { autoCompactPercent: model.autoCompactPercent }),
+      : { windowPercent: model.windowPercent }),
     conflicts: model.conflicts === true,
     windowConflict: model.windowConflict === true,
     ...(model.perProvider === undefined

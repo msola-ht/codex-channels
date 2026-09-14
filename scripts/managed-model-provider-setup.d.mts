@@ -38,8 +38,8 @@ export function createManagedProviderCatalog(
   definition: ModelProviderDefinition,
   options?: {
     previousModels?: Array<Record<string, unknown>>;
-    autoCompactPercent?: number | null;
-    modelCompressionPercentByModel?: Record<string, number>;
+    windowPercent?: number | null;
+    modelWindowPercentByModel?: Record<string, number>;
   },
 ): { models: Array<Record<string, unknown>> };
 

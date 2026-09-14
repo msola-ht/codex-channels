@@ -41,13 +41,13 @@ codexc service restart all
 
 初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
 修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
-再按模型设置默认思考等级；自动压缩百分比走“模型与提供商 → 第三方 Provider → 模型自动压缩”，按模型名统一设置，
-每个模型按自己的上下文窗口计算阈值，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
-仍使用原模型。新增或刷新 OCG 模型目录时会继承 DeepSeek 等已配置 Provider 的同名模型全局压缩值，
-不会重新回落到 OCG 默认 60%。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
+再按模型设置默认思考等级；上下文窗口占比走“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名统一设置，
+每个模型按自己的 `max_context_window` 换算窗口，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
+仍使用原模型。新增或刷新 OCG 模型目录时会继承 DeepSeek 等已配置 Provider 的同名模型窗口占比，
+不会重新回落到 OCG 目录默认窗口。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
 所选模型已不在新目录中的账户，以及引用该模型的共享子代理，会切到目录默认模型 `deepseek-flash`，
 已选择仍在目录中的 Pro 的账户保持不变；仍存在于目录中的选择不会被后续更新覆盖。目录更新后
-的压缩阈值按原百分比和新上下文窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
+的窗口按原占比和新的最大窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
 时自动重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
 
 设置默认账户不会自动修改 `agents.external`，共享子代理仍使用配置时明确选择的账户；如需切换账户，
@@ -89,7 +89,7 @@ OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go
 `GET /zen/go/v1/usage` 查询 5 小时（$12）、7 天（$30）和月度（$60）三个配额窗口的已用百分比与
 重置时间，并在每个窗口旁展示本机指标库按请求归属窗口归集的本地 Token 用量（非官方账单）。
 本地 Token 与官方窗口使用同一周期口径：统计代理在每个模型请求发生时把官方三个窗口的
-`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v12 另保存子代理
+`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v13 另保存子代理
 运行级父子 Turn 关联），读取时优先按记录的
 窗口快照归属 Token；快照缺失，或快照的重置时间不晚于请求开始时间（请求开始时缓存已过期）时，
 按请求开始时间归集。请求开始时仍有效但属于其他周期的快照继续排除，避免跨重置点完成的旧请求

@@ -38,6 +38,7 @@ describe("model Provider management state", () => {
           model: "deepseek-v4-flash-vision-exp",
           displayName: "DeepSeek V4 Flash Vision",
           contextWindow: 1_000_000,
+          maxContextWindow: 1_000_000,
           reasoningEffort: "high",
           reasoningEfforts: [{ effort: "high", description: "高" }],
         }],

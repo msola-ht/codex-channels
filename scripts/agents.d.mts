@@ -30,10 +30,10 @@ export interface ThirdPartyAgentProvider {
     model: string;
     displayName: string;
     contextWindow: number;
+    maxContextWindow: number;
     reasoningEffort: string;
     reasoningEfforts: Array<{ effort: string; description: string }>;
-    autoCompactLimit?: number;
-    autoCompactPercent?: number;
+    windowPercent: number;
   }>;
 }
 

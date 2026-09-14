@@ -206,10 +206,10 @@ codexc doctor
 
 更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断计划清单工具与实验性上下文管理。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
 
-从仍包含远程指标中心的旧源码切换到当前版本前，先用旧版执行 `codexc service uninstall`，再从
-`config.toml` 删除 `[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]` 后更新并重新执行
-`codexc service install`。当前配置 Schema 不接受这些旧段；卸载服务和更新源码都不会删除旧的中心
-SQLite 或同步水位文件，如不再需要，可在确认备份后自行处理。
+从仍包含远程指标中心的旧源码直接更新时，`codexc update` 会在候选预检中识别
+`[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]`，切换后先停止并注销旧的本机指标中心
+后台服务，再备份 `config.toml` 并移除这些旧配置段。更新不会删除旧的中心 SQLite 或同步水位文件；
+如不再需要，可在确认备份后自行处理。
 
 仓库源码删除不会自动删除已经部署到外部平台的旧指标中心。曾使用项目历史 Cloudflare 示例时，
 还需在对应 Cloudflare 账户中分别退役 Worker `codex-metrics-sync`、Pages 项目

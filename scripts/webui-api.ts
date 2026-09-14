@@ -176,6 +176,7 @@ export interface RequestRecord {
   responseFormat: string
   serviceTier: string | null
   reasoningEffort: string | null
+  userAgent: string | null
   threadId: string | null
   turnId: string | null
   inputTokens: number | null
@@ -292,6 +293,16 @@ export interface ManagementServicesResponse {
   entries: ManagementServiceEntry[]
 }
 
+export interface UpstreamUserAgentResponse {
+  observedAt: string
+  configuredUserAgent: string | null
+  appServerUserAgent: string | null
+  effectiveUserAgent: string | null
+  source: "override" | "app-server" | "unavailable"
+  recentRequestUserAgent: string | null
+  recentRequestAtMs: number | null
+}
+
 export interface ManagementProviderEntry {
   id: string
   displayName: string
@@ -329,6 +340,7 @@ export interface ManagementSettingsResponse {
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
       upstreamUserAgent: string | null
+      defaults: { name: string; version: string }
     }
     workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null }>
   }
@@ -498,10 +510,10 @@ export interface ManagementProviderSettingsResponse {
       id: string
       displayName: string
       contextWindow: number
+      maxContextWindow: number
       reasoningEffort: string
       reasoningEfforts: Array<{ effort: string; description: string }>
-      autoCompactLimit?: number
-      autoCompactPercent?: number
+      windowPercent?: number
     }>
   }>
   customProviders: {
@@ -536,12 +548,13 @@ export interface ManagementProviderSettingsResponse {
   externalAgent:
     | { status: "configured"; provider: string; model: string }
     | { status: "unavailable" | "not-configured" }
-  modelCompression: Array<{
+  modelWindow: Array<{
     id: string
     displayName: string
     contextWindow: number
+    maxContextWindow: number
     providers: string[]
-    autoCompactPercent?: number
+    windowPercent?: number
     conflicts?: boolean
     perProvider?: Record<string, number>
   }>
@@ -569,18 +582,18 @@ export type ManagementProviderSettingsMutationInput =
       provider: string
       model: string
       reasoningEffort: string
-      autoCompactPercent?: number
+      windowPercent?: number
     }
   | {
-      operation: "managed.compression"
+      operation: "managed.window"
       model: string
-      autoCompactPercent: number
+      windowPercent: number
     }
   | { operation: "external-agent"; action: "configure"; provider: string; model?: string }
   | { operation: "external-agent"; action: "disable" }
 
 export interface ManagementProviderSettingsPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.compression" | "configure" | "disable"
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window" | "configure" | "disable"
   activation: string
   target?: {
     id: string
@@ -605,8 +618,8 @@ export interface ManagementProviderSettingsPreview {
   windowConflict?: boolean
   overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
-  autoCompactPercent?: number
-  autoCompactLimit?: number
+  windowPercent?: number
+  contextWindow?: number
   willChange?: boolean
   effects?: Record<string, boolean | string[] | string | null>
   credential?: {
@@ -636,8 +649,8 @@ export interface ManagementProviderSettingsMutationResponse {
   windowConflict?: boolean
   overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
-  autoCompactPercent?: number
-  autoCompactLimit?: number
+  windowPercent?: number
+  contextWindow?: number
   effects?: Record<string, boolean | string[] | string | null>
   warnings?: Array<{ code: string; providerId?: string }>
   activation?: string
@@ -689,7 +702,7 @@ export type ManagementAccountSettingsMutationInput =
       operation: "deepseek.configure"
       mode?: "switching" | "exclusive"
       apiKey: string
-      autoCompactPercent?: number
+      windowPercent?: number
       confirmExclusiveConfigChange?: boolean
     }
   | { operation: "deepseek.restore"; confirmRestore?: boolean }

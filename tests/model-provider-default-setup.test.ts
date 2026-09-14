@@ -53,21 +53,30 @@ describe("managed model provider default setup", () => {
       expect.objectContaining({
         slug: "deepseek-v4-flash",
         default_reasoning_level: "high",
+        context_window: 1_048_576,
         auto_compact_token_limit: 629_146,
       }),
       expect.objectContaining({
         slug: "deepseek-v4-flash-vision-exp",
         default_reasoning_level: "high",
+        context_window: 1_048_576,
         auto_compact_token_limit: 629_146,
       }),
       expect.objectContaining({
         slug: "deepseek-v4-pro",
         default_reasoning_level: "max",
+        // 只改默认思考等级时不动窗口：目录里下载的字段保持原样。
+        context_window: 1_048_576,
         auto_compact_token_limit: 629_146,
       }),
     ]));
     expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8")))
       .toMatchObject({ model: "gpt-5.6-sol", model_provider: "openai" });
+    const selected = catalog.models.find(
+      (entry: { slug?: string }) => entry.slug === "deepseek-v4-pro",
+    );
+    // 窗口写入只补 context_window；下载目录没有的字段不会被写回。
+    expect(selected.max_context_window).toBeUndefined();
     expect(output.write).toHaveBeenCalledWith(
       "DeepSeek 默认模型已设为 deepseek-v4-pro。\n",
     );
@@ -103,6 +112,30 @@ describe("managed model provider default setup", () => {
       ],
       { expectedVersion: "v1" },
     );
+  });
+
+  it("restores the exact catalog content when the exclusive config write fails", async () => {
+    const codexHome = providerFixture("exclusive");
+    const target = catalogPath(codexHome);
+    const before = readFileSync(target, "utf8");
+
+    await expect(runModelProviderDefaultSetup({
+      environment: testEnvironment(codexHome),
+      output: { write: vi.fn() },
+      prompter: {
+        selectProvider: async () => "deepseek",
+        selectModel: async () => "deepseek-v4-pro",
+        selectReasoningEffort: async () => "max",
+      },
+      readConfigSnapshot: vi.fn(async () => ({
+        config: { model: "deepseek-v4-flash" },
+        version: "v1",
+      })),
+      writeConfigEdits: vi.fn(async () => { throw new Error("version conflict"); }),
+    })).rejects.toMatchObject({ code: "operation-failed", message: "version conflict" });
+
+    // 回滚按原始内容写回模型目录，不把条目规范化。
+    expect(readFileSync(target, "utf8")).toBe(before);
   });
 
   it("fails clearly when no managed third-party Provider is configured", async () => {
@@ -145,6 +178,7 @@ describe("managed model provider default setup", () => {
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
       slug: "deepseek-v4-pro",
+      context_window: 1_048_576,
       auto_compact_token_limit: 629_146,
     }));
   });

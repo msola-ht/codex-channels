@@ -270,7 +270,7 @@ async function runOfficialTuiIdentity({ environment, output, prompts, writeConfi
   const identity = { name: "codex-tui", version: codexCliVersion };
   const value = await prompts.text({
     message: `官方 TUI 身份：客户端将设为 codex-tui / ${codexCliVersion}；请确认模型上游 User-Agent`
-      + "（留空则删除现有 upstream_user_agent，恢复 App Server 原生透传）",
+      + "（留空则删除现有 upstream_user_agent，改为透传 App Server 生成的官方 TUI UA）",
     initialValue: buildOfficialCodexUserAgent(codexCliVersion),
     validate: (input) => input.length <= 512 ? undefined : "User-Agent 过长",
   });

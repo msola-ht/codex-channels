@@ -75,10 +75,10 @@ export interface ManagedModelProviderSettings {
     model: string;
     displayName: string;
     contextWindow: number;
+    maxContextWindow: number;
     reasoningEffort: string;
     reasoningEfforts: Array<{ effort: string; description: string }>;
-    autoCompactLimit?: number;
-    autoCompactPercent?: number;
+    windowPercent: number;
   }>;
 }
 
@@ -86,20 +86,33 @@ export function loadManagedModelProviderSettings(
   environment?: NodeJS.ProcessEnv,
 ): ManagedModelProviderSettings[];
 
-export interface ManagedModelCompressionEntry {
+export interface ManagedModelWindowEntry {
   model: string;
   displayName: string;
   contextWindow: number;
-  autoCompactPercent?: number;
+  maxContextWindow: number;
+  windowPercent?: number;
   providers: string[];
   perProvider?: Record<string, number | undefined>;
   conflicts?: boolean;
   windowConflict?: boolean;
 }
 
-export function loadManagedModelCompression(
+export function loadManagedModelWindow(
   environment?: NodeJS.ProcessEnv,
-): ManagedModelCompressionEntry[];
+): ManagedModelWindowEntry[];
+
+export function writeManagedModelWindowGlobal(options: {
+  model: string;
+  windowPercent: number;
+  environment?: NodeJS.ProcessEnv;
+}): {
+  model: string;
+  windowPercent: number;
+  contextWindow: number;
+  providers: string[];
+  overridden: Array<{ provider: string; previousPercent: number }>;
+};
 
 export function readCodexConfigModelOverride(
   environment?: NodeJS.ProcessEnv,
@@ -119,14 +132,14 @@ export function writeManagedModelProviderProfileDefault(
   settings: {
     model: string;
     reasoningEffort: string;
-    autoCompactLimit?: number;
+    contextWindow?: number;
   },
   environment?: NodeJS.ProcessEnv,
 ): {
   provider: ManagedModelProviderId;
   model: string;
   reasoningEffort: string;
-  autoCompactLimit?: number;
+  contextWindow?: number;
   mode: "switching";
 };
 
@@ -135,18 +148,29 @@ export function writeManagedModelProviderCatalogSettings(
   settings: {
     model: string;
     reasoningEffort: string;
-    autoCompactLimit?: number;
+    contextWindow?: number;
   },
   environment?: NodeJS.ProcessEnv,
 ): {
   model: string;
   displayName: string;
   contextWindow: number;
+  maxContextWindow: number;
   reasoningEffort: string;
   reasoningEfforts: Array<{ effort: string; description: string }>;
-  autoCompactLimit?: number;
-  autoCompactPercent?: number;
+  windowPercent: number;
 };
+
+export function readManagedModelProviderCatalogContent(
+  provider: ManagedModelProviderId,
+  environment?: NodeJS.ProcessEnv,
+): string;
+
+export function restoreManagedModelProviderCatalogContent(
+  provider: ManagedModelProviderId,
+  content: string,
+  environment?: NodeJS.ProcessEnv,
+): void;
 
 export function withManagedModelCatalogSettings(
   catalog: Record<string, unknown>,
@@ -154,7 +178,7 @@ export function withManagedModelCatalogSettings(
   settings: {
     model: string;
     reasoningEffort: string;
-    autoCompactLimit?: number;
+    contextWindow?: number;
   },
 ): Record<string, unknown>;
 

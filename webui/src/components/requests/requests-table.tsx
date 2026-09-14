@@ -29,6 +29,7 @@ const COLUMN_LABELS: Record<string, string> = {
   time: "时间",
   provider: "Provider",
   model: "模型",
+  ua: "User-Agent",
   operation: "操作",
   status: "状态",
   http: "HTTP",
@@ -129,6 +130,30 @@ export function RequestsTable({
       cell: ({ row }) => (
         <span className="max-w-40 truncate">{row.original.model ?? "—"}</span>
       ),
+    },
+    {
+      id: "ua",
+      accessorFn: (record) => record.userAgent ?? "",
+      enableSorting: false,
+      header: () => (
+        <span className="-ml-2 inline-flex h-7 items-center px-1.5 text-muted-foreground">
+          User-Agent
+        </span>
+      ),
+      cell: ({ row }) => {
+        const userAgent = row.original.userAgent
+        if (!userAgent) return <span className="text-muted-foreground">—</span>
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="block max-w-40 truncate font-mono text-xs">{userAgent}</span>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-md">
+              <p className="break-all text-xs">{userAgent}</p>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
     },
     {
       id: "operation",

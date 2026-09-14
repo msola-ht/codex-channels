@@ -1,4 +1,6 @@
 import {
+  readManagedModelProviderCatalogContent,
+  restoreManagedModelProviderCatalogContent,
   loadManagedModelProviderSettings,
   writeManagedModelProviderCatalogSettings,
   writeManagedModelProviderProfileDefault,
@@ -48,6 +50,8 @@ async function applyManagedProviderDefaultChangeUnlocked(
     loadProviders = loadManagedModelProviderSettings,
     writeProfileDefault = writeManagedModelProviderProfileDefault,
     writeCatalogSettings = writeManagedModelProviderCatalogSettings,
+    readCatalogContent = readManagedModelProviderCatalogContent,
+    restoreCatalogContent = restoreManagedModelProviderCatalogContent,
     writeConfigEdits = writeCodexUserConfigEdits,
     readConfigSnapshot = readCodexUserConfigSnapshot,
   } = {},
@@ -59,7 +63,8 @@ async function applyManagedProviderDefaultChangeUnlocked(
     } else {
       const edits = exclusiveConfigEdits(plan.model.model);
       const snapshot = await readConfigSnapshot(environment);
-      const previous = writeCatalogSettings(plan.provider.provider, plan.settings, environment);
+      const previousContent = readCatalogContent(plan.provider.provider, environment);
+      writeCatalogSettings(plan.provider.provider, plan.settings, environment);
       try {
         await writeConfigEdits(environment, edits, { expectedVersion: snapshot.version });
       } catch (error) {
@@ -75,7 +80,7 @@ async function applyManagedProviderDefaultChangeUnlocked(
         }
         if (!areCodexUserConfigEditsApplied(current.config, edits)) {
           try {
-            writeCatalogSettings(plan.provider.provider, previous, environment);
+            restoreCatalogContent(plan.provider.provider, previousContent, environment);
           } catch (rollbackError) {
             throw new AggregateError(
               [error, rollbackError],
@@ -141,31 +146,32 @@ function buildPlan(input, configured) {
       `${model.displayName} 不支持思考等级：${reasoningEffort}`,
     );
   }
-  const autoCompactPercent = values.autoCompactPercent;
+  const windowPercent = values.windowPercent;
   if (
-    autoCompactPercent !== undefined
-    && (!Number.isInteger(autoCompactPercent)
-      || autoCompactPercent < 10
-      || autoCompactPercent > 90)
+    windowPercent !== undefined
+    && (!Number.isInteger(windowPercent)
+      || windowPercent < 10
+      || windowPercent > 100)
   ) {
     throw invalid(
-      "invalid-auto-compact-percent",
-      "autoCompactPercent",
-      `${provider.displayName} 模型自动压缩百分比无效`,
+      "invalid-window-percent",
+      "windowPercent",
+      `${provider.displayName} 模型上下文窗口百分比无效`,
     );
   }
-  const autoCompactLimit = autoCompactPercent === undefined
+  const contextWindow = windowPercent === undefined
     ? undefined
-    : Math.round(model.contextWindow * autoCompactPercent / 100);
+    : Math.round(model.maxContextWindow * windowPercent / 100);
   return {
     provider,
     model,
-    settings: autoCompactLimit === undefined
+    settings: contextWindow === undefined
       ? { model: model.model, reasoningEffort }
-      : { model: model.model, reasoningEffort, autoCompactLimit },
-    autoCompactPercent,
+      : { model: model.model, reasoningEffort, contextWindow },
+    windowPercent,
     willChange: provider.model !== model.model
-      || provider.reasoningEffort !== reasoningEffort,
+      || provider.reasoningEffort !== reasoningEffort
+      || (windowPercent !== undefined && model.windowPercent !== windowPercent),
   };
 }
 
@@ -180,14 +186,15 @@ function publicPreview(plan) {
       id: plan.model.model,
       displayName: plan.model.displayName,
       contextWindow: plan.model.contextWindow,
+      maxContextWindow: plan.model.maxContextWindow,
     },
     reasoningEffort: plan.settings.reasoningEffort,
-    ...(plan.autoCompactPercent === undefined
+    ...(plan.windowPercent === undefined
       ? {}
-      : { autoCompactPercent: plan.autoCompactPercent }),
-    ...(plan.settings.autoCompactLimit === undefined
+      : { windowPercent: plan.windowPercent }),
+    ...(plan.settings.contextWindow === undefined
       ? {}
-      : { autoCompactLimit: plan.settings.autoCompactLimit }),
+      : { contextWindow: plan.settings.contextWindow }),
     willChange: plan.willChange,
     activation: "restart-app-server",
   };

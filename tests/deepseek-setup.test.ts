@@ -45,7 +45,7 @@ import { writeManagedModelProviderProfileDefault } from "../runtime/model-provid
 
 const script = `#!/bin/sh
 cat > "$TMP_MODELS" <<'CODEX_MODELS_JSON'
-{"models":[{"slug":"deepseek-flash","display_name":"DeepSeek-Flash","input_modalities":["text","image"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-pro","display_name":"DeepSeek-V4-Pro","input_modalities":["text"],"context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]}]}
+{"models":[{"slug":"deepseek-flash","display_name":"DeepSeek-Flash","input_modalities":["text","image"],"context_window":1048576,"max_context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-pro","display_name":"DeepSeek-V4-Pro","input_modalities":["text"],"context_window":1048576,"max_context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]}]}
 CODEX_MODELS_JSON
 `;
 
@@ -130,10 +130,10 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     await expect(applyDeepseekConfiguration({
       mode: "switching",
       apiKey: "sk-secret",
-      autoCompactPercent: 9,
+      windowPercent: 9,
     }, { environment, downloadCatalog })).rejects.toMatchObject({
-      code: "invalid-auto-compact-percent",
-      field: "autoCompactPercent",
+      code: "invalid-window-percent",
+      field: "windowPercent",
     });
     expect(downloadCatalog).not.toHaveBeenCalled();
   });
@@ -148,7 +148,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     const result = await applyDeepseekConfiguration({
       mode: "switching",
       apiKey: "sk-structured-secret",
-      autoCompactPercent: 60,
+      windowPercent: 60,
     }, {
       environment,
       fetchImpl: successfulFetch,
@@ -265,15 +265,20 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
         slug: "deepseek-flash",
         input_modalities: ["text", "image"],
         default_reasoning_level: "max",
-        auto_compact_token_limit: 838_861,
+        context_window: 838_861,
       }),
       expect.objectContaining({
         slug: "deepseek-v4-pro",
         input_modalities: ["text"],
         default_reasoning_level: "high",
-        auto_compact_token_limit: 629_146,
+        context_window: 629_146,
       }),
     ]));
+    for (const slug of ["deepseek-flash", "deepseek-v4-pro"]) {
+      const model = updated.models.find((entry: { slug?: string }) => entry.slug === slug);
+      // 窗口写入只补 context_window；旧版压缩阈值折算进窗口后不再留在目录里。
+      expect(model.auto_compact_token_limit).toBeUndefined();
+    }
     expect(JSON.parse(readFileSync(
       join(connectHome, "providers", "deepseek", "models.manifest.json"),
       "utf8",
@@ -418,7 +423,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     writeManagedModelProviderProfileDefault("deepseek", {
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactLimit: 786_432,
+      contextWindow: 786_432,
     }, environment);
 
     const result = await refreshDeepseekCatalogForUpdate(environment, {
@@ -622,6 +627,9 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     ));
     expect(catalog.models).toContainEqual(expect.objectContaining({
       slug: "deepseek-v4-pro",
+      default_reasoning_level: "max",
+      // 只改默认思考等级时不动窗口：目录里下载的字段保持原样。
+      context_window: 1_048_576,
       auto_compact_token_limit: 629_146,
     }));
   });
@@ -730,7 +738,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     )).toMatchObject({
       slug: "deepseek-flash",
       default_reasoning_level: "high",
-      auto_compact_token_limit: 629_146,
+      context_window: 629_146,
     });
     expect(profile.preferred_auth_method).toBeUndefined();
     expect(profile.forced_login_method).toBeUndefined();
@@ -799,7 +807,7 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     writeManagedModelProviderProfileDefault("deepseek", {
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
-      autoCompactLimit: 786_432,
+      contextWindow: 786_432,
     }, environment);
 
     await runDeepseekSetup({
@@ -823,9 +831,28 @@ describe.skipIf(process.platform === "win32")("DeepSeek setup", () => {
     )).toMatchObject({
       slug: "deepseek-v4-pro",
       default_reasoning_level: "max",
-      auto_compact_token_limit: 786_432,
+      context_window: 786_432,
     });
     expect(existsSync(join(fixture.home, "sf-agent.config.toml"))).toBe(false);
+  });
+
+  it("uses an explicit window selection when reconfiguring DeepSeek", async () => {
+    const fixture = setupFixture('model = "gpt-5.4"\n');
+    const environment = { CODEX_HOME: fixture.home, CODEX_CONNECT_HOME: fixture.connectHome };
+    for (const windowPercent of [100, 60, 100]) {
+      await runDeepseekSetup({
+        environment,
+        output: fixture.output,
+        fetchImpl: successfulFetch,
+        prompter: prompter(["1", windowPercent === 100 ? "1" : "2"], ["sk-test"]),
+      });
+      const catalog = JSON.parse(readFileSync(
+        join(fixture.connectHome, "providers", "deepseek", "models.json"),
+        "utf8",
+      ));
+      expect(catalog.models.find((model: { slug: string }) => model.slug === "deepseek-flash"))
+        .toMatchObject({ context_window: Math.round(1_048_576 * windowPercent / 100) });
+    }
   });
 
   it("preserves a user-managed external role while installing DeepSeek", async () => {

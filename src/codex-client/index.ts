@@ -47,8 +47,7 @@ export {
   toOperationUpdate,
 } from "./operation-adapter.js";
 export {
-  codexConnectIntegrationId,
-  gatewayVersion,
+  codexCliVersion,
   supportedCodexCliVersion,
 } from "./protocol-info.js";
 export { loadManagedModelOptions } from "./model-provider-catalog.js";

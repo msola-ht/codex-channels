@@ -262,13 +262,15 @@ export async function updateManagedSourceInstallation(
       "inspect-candidate",
       () => (options.inspectStaged ?? inspectStagedInstallation)(stagedCheckout, environment),
     );
+    const candidateRequiresServiceInterruption = inspection.services.installed
+      || (inspection.services.obsoleteServices?.length ?? 0) > 0;
     notifySafely(options.onPrepared, withSourceUpdateRevision({
       ...plan,
       steps: inspection.services.installed
         ? plan.steps
         : plan.steps.filter((stage) => stage !== "stop-services"),
       services: inspection.services,
-      requiresServiceInterruption: inspection.services.installed,
+      requiresServiceInterruption: candidateRequiresServiceInterruption,
       targetVersion: candidate.targetVersion,
     }));
     const preparedCodex = await runStage(

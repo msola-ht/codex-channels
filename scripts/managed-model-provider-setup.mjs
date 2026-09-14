@@ -62,28 +62,27 @@ export function createSwitchingProviderProfile(definition, {
 
 export function createManagedProviderCatalog(catalog, definition, {
   previousModels = [],
-  autoCompactPercent = 60,
-  modelCompressionPercentByModel = {},
+  windowPercent = null,
+  modelWindowPercentByModel = {},
 } = {}) {
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
   const defaultEntry = selectCatalogDefaultModel(models, definition);
-  const contextWindow = defaultEntry.context_window;
   const defaultsApplied = withManagedModelCatalogSettings(catalog, definition, {
     model: defaultEntry.slug,
     reasoningEffort: definition.defaultReasoningEffort,
-    ...(autoCompactPercent === null
-      ? {}
-      : { autoCompactLimit: Math.round(contextWindow * autoCompactPercent / 100) }),
   });
   const preserved = withPreservedManagedModelCatalogSettings(
     defaultsApplied,
     definition,
     previousModels,
   );
-  return applyModelCompressionByModel(
+  return applyModelWindowByModel(
     preserved,
     definition,
-    modelCompressionPercentByModel,
+    {
+      ...modelWindowPercentByModel,
+      ...(windowPercent === null ? {} : { [defaultEntry.slug]: windowPercent }),
+    },
   );
 }
 
@@ -109,32 +108,43 @@ export function resolveManagedCatalogModel(catalog, definition, preferred) {
   return selectCatalogDefaultModel(models, definition).slug;
 }
 
-function applyModelCompressionByModel(catalog, definition, percents) {
+function applyModelWindowByModel(catalog, definition, percents) {
   let next = catalog;
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
   for (const candidate of models) {
     const slug = candidate?.slug;
     const percent = typeof slug === "string" ? percents[slug] : undefined;
     if (percent === undefined) continue;
-    if (!Number.isInteger(percent) || percent < 10 || percent > 90) {
-      throw new Error(`${definition.displayName} 模型自动压缩百分比无效：${slug}`);
+    if (!Number.isInteger(percent) || percent < 10 || percent > 100) {
+      throw new Error(`${definition.displayName} 模型上下文窗口百分比无效：${slug}`);
     }
-    const contextWindow = candidate?.context_window;
+    const windowBase = managedCatalogWindowBase(candidate);
     const reasoningEffort = candidate?.default_reasoning_level;
     if (
-      !Number.isSafeInteger(contextWindow)
-      || contextWindow <= 0
+      !Number.isSafeInteger(windowBase)
+      || windowBase <= 0
       || typeof reasoningEffort !== "string"
     ) {
-      throw new Error(`${definition.displayName} 模型目录缺少压缩所需字段：${slug}`);
+      throw new Error(`${definition.displayName} 模型目录缺少窗口所需字段：${slug}`);
     }
     next = withManagedModelCatalogSettings(next, definition, {
       model: slug,
       reasoningEffort,
-      autoCompactLimit: Math.round(contextWindow * percent / 100),
+      contextWindow: Math.round(windowBase * percent / 100),
     });
   }
   return next;
+}
+
+function managedCatalogWindowBase(entry) {
+  const maxContextWindow = record(entry).max_context_window;
+  return Number.isSafeInteger(maxContextWindow) && maxContextWindow > 0
+    ? maxContextWindow
+    : record(entry).context_window;
+}
+
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 export function applyExclusiveProviderConfig(current, definition, {

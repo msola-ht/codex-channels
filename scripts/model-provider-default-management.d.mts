@@ -5,7 +5,7 @@ export interface ManagedProviderDefaultChangeInput {
   provider: string;
   model: string;
   reasoningEffort: string;
-  autoCompactPercent?: number;
+  windowPercent?: number;
 }
 
 export interface ManagedProviderDefaultChangePreview {
@@ -14,10 +14,15 @@ export interface ManagedProviderDefaultChangePreview {
     displayName: string;
     mode: "switching" | "exclusive";
   };
-  model: { id: string; displayName: string; contextWindow: number };
+  model: {
+    id: string;
+    displayName: string;
+    contextWindow: number;
+    maxContextWindow: number;
+  };
   reasoningEffort: string;
-  autoCompactPercent?: number;
-  autoCompactLimit?: number;
+  windowPercent?: number;
+  contextWindow?: number;
   willChange: boolean;
   activation: "restart-app-server";
 }
@@ -29,6 +34,10 @@ export interface ManagedProviderDefaultChangeOptions {
     .writeManagedModelProviderProfileDefault;
   writeCatalogSettings?: typeof import("../runtime/model-provider-runtime.mjs")
     .writeManagedModelProviderCatalogSettings;
+  readCatalogContent?: typeof import("../runtime/model-provider-runtime.mjs")
+    .readManagedModelProviderCatalogContent;
+  restoreCatalogContent?: typeof import("../runtime/model-provider-runtime.mjs")
+    .restoreManagedModelProviderCatalogContent;
   writeConfigEdits?: (
     environment: NodeJS.ProcessEnv,
     edits: CodexUserConfigEdit[],

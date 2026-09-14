@@ -56,7 +56,7 @@ export async function runModelProviderDefaultSetup({
     output.write(`模型上下文：${selectedModel.contextWindow} tokens。\n`);
     output.write(`默认思考等级：${reasoningEffort}。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
-    output.write("自动压缩请在「模型自动压缩」中按模型名统一设置。\n");
+    output.write("上下文窗口请在「模型上下文窗口」中按模型名统一设置；自动压缩使用上游默认。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
     return {
       action: "configured",

@@ -402,13 +402,17 @@ if (document) {
   const clientIdentityConfigured = Object.keys(clientIdentity).length > 0;
   note(
     "App Server 客户端身份",
-    clientIdentityConfigured ? "已自定义" : "默认（codex_connect / Codex Connect Gateway）",
-    "运行 codexc config → 系统设置 → 一键设为官方 TUI 身份可修改，之后运行 codexc service restart all",
+    clientIdentityConfigured
+      ? "已自定义"
+      : `默认（codex-tui / ${requiredAppServerVersion}）`,
+    "默认即为官方 TUI 身份并跟随 Codex CLI 升级；需要覆盖时运行 codexc config → 系统设置 → "
+      + "一键设为官方 TUI 身份，之后运行 codexc service restart all",
   );
   note(
     "模型上游 User-Agent",
-    stringValue(codex.upstream_user_agent) ? "已自定义" : "默认（透传 App Server 生成的 UA）",
-    "运行 codexc config → 系统设置 → 一键设为官方 TUI 身份可修改，之后运行 codexc service restart all",
+    stringValue(codex.upstream_user_agent) ? "已自定义" : "默认（App Server 生成的官方 TUI UA）",
+    "默认由 App Server 按当前锁定版本生成并跟随升级；需要覆盖时运行 codexc config → 系统设置 → "
+      + "一键设为官方 TUI 身份，之后运行 codexc service restart all",
   );
 
   const contextManagement = readCodexContextManagementSetting(process.env);

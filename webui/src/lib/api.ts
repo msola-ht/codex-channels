@@ -11,6 +11,7 @@ import type {
   ManagementSettingsResponse,
   ManagementServicesResponse,
   ManagementProvidersResponse,
+  UpstreamUserAgentResponse,
   ManagementSettingInput,
   ManagementSettingMutationResponse,
   CodexUserSettingsResponse,
@@ -210,6 +211,10 @@ export function fetchSettingsSummary(signal?: AbortSignal): Promise<SettingsSumm
 
 export function fetchManagementServices(signal?: AbortSignal): Promise<ManagementServicesResponse> {
   return getJson<ManagementServicesResponse>(`${API_PREFIX}/management/services`, signal)
+}
+
+export function fetchUpstreamUserAgent(signal?: AbortSignal): Promise<UpstreamUserAgentResponse> {
+  return getJson<UpstreamUserAgentResponse>(`${API_PREFIX}/management/upstream-user-agent`, signal)
 }
 
 export function fetchManagementProviders(signal?: AbortSignal): Promise<ManagementProvidersResponse> {
