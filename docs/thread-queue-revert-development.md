@@ -132,9 +132,9 @@ Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread S
 - `codex-client/client.ts`：封装六个 RPC，只有 `list` 允许只读重试。
 - `codex-client/provider-routing-client.ts`：六个请求全部通过 `callForThread` 路由到 Thread 所属 Provider App Server。
 - `application/conversation-service.ts`：完成授权后编排命令，维护不含正文的短期选择快照，解析选择器和计算最新完整 reorder 排列。
-- `bootstrap/app.ts`：删除 `conversation-follow-up` 中由 Gateway 重放下一 Turn 的分支；后台 Thread 正常完成后的释放职责保留，并以一次原生 `thread/queue/start` 与权威 Thread 读取协调完成→自动派发竞争。Reader 回调只做本地失效并登记需要 RPC 的释放重试；组合根有界持有该任务，关闭时先停止接收新任务并限时等待，不在 Reader 回调内等待网络请求。
+- `bootstrap/gateway-component-graph.ts`：删除 `conversation-follow-up` 中由 Gateway 重放下一 Turn 的分支；后台 Thread 正常完成后的释放职责保留，并以一次原生 `thread/queue/start` 与权威 Thread 读取协调完成→自动派发竞争。Reader 回调只做本地失效并登记需要 RPC 的释放重试；组合根有界持有该任务，关闭时先停止接收新任务并限时等待，不在 Reader 回调内等待网络请求。
 - `codex-client/notification-adapter.ts` 与组合根：校验 `thread/queue/changed.threadId`，只触发选择快照和 Revert 确认失效，不同步读取 Queue，也不阻塞 App Server Reader。
-- `surfaces/conversation-command-format.ts` 与三个 Surface：只负责规范命令和平台文案，不保存 Queue 镜像。
+- `surfaces/conversation-session-command-format.ts` 与三个 Surface：只负责规范命令和平台文案，不保存 Queue 镜像。
 
 必须删除以下旧实现及其只针对内存语义的测试：
 

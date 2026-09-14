@@ -2,39 +2,47 @@ import type { ConversationCommandResult } from "../application/index.js";
 
 import {
   formatConversationAgents,
-  formatConversationArtifacts,
-  formatConversationCollaborationMode,
-  formatConversationCommandOutcome,
-  formatConversationGoal,
-  formatConversationLimits,
-  formatConversationMetrics,
   formatConversationMcp,
   formatConversationMcpDetail,
   formatConversationMcpHealth,
   formatConversationMcpLogin,
   formatConversationMcpReload,
   formatConversationMcpResource,
-  formatConversationModels,
-  formatConversationOccupancy,
-  formatConversationPermissions,
   formatConversationPluginDetail,
   formatConversationPluginHealth,
   formatConversationPlugins,
-  formatConversationProjectRules,
-  formatConversationScheduledConfirmation,
-  formatConversationScheduledRuns,
-  formatConversationScheduledTasks,
-  formatConversationSessions,
   formatConversationSkills,
-  formatConversationStatus,
+} from "./conversation-extension-command-format.js";
+import {
+  formatConversationLimits,
+  formatConversationModels,
+  formatConversationUsage,
+} from "./conversation-model-account-command-format.js";
+import {
+  formatConversationOccupancy,
+  formatConversationSessions,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
   formatConversationThreadRevertPreview,
-  formatConversationUsage,
+  isTurnLifecycleAcknowledgedOutcome,
+} from "./conversation-session-command-format.js";
+import {
+  formatConversationScheduledConfirmation,
+  formatConversationScheduledRuns,
+  formatConversationScheduledTasks,
+} from "./conversation-scheduled-task-command-format.js";
+import {
+  formatConversationArtifacts,
+  formatConversationCollaborationMode,
+  formatConversationGoal,
+  formatConversationPermissions,
+  formatConversationProjectRules,
+  formatConversationStatus,
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
-  isTurnLifecycleAcknowledgedOutcome,
-} from "./conversation-command-format.js";
+} from "./conversation-workspace-status-command-format.js";
+import { formatConversationCommandOutcome } from "./conversation-command-outcome-format.js";
+import { formatConversationMetrics } from "./metrics-format.js";
 
 export function renderConversationCommandResult(
   result: ConversationCommandResult,

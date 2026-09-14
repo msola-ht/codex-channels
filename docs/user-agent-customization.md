@@ -208,7 +208,7 @@ Provider ID 字符串插值到全局 UA。
   Gateway 重建；`upstream_user_agent` 不属于 Gateway 运行配置，只在 App Server 服务进程
   启动 Provider Proxy 时读取；`terminal_identity` 同样不属于 Gateway 运行配置，只在 App Server
   服务进程启动时读取并翻译成终端探测读取的环境变量。
-- `src/codex-client`：由组合根 `src/bootstrap/app.ts` 注入解析后的 `codexClientIdentity`（可缺省），
+- `src/codex-client`：由组合根 `src/bootstrap/gateway-component-graph.ts` 注入解析后的 `codexClientIdentity`（可缺省），
   在 `json-rpc.ts` 构造唯一一次 `initialize.clientInfo`；缺省字段取 `protocol-info.ts` 从
   `src/codex-protocol/version.json` 派生的 `codex-tui` 与锁定 Codex CLI 版本；不得从 TOML
   直接读取配置。`thread/start` 不再携带 `serviceName`，与官方 TUI 传入 `None` 的行为一致，

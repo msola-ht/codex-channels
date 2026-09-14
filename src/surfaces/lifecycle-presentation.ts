@@ -16,7 +16,7 @@ import {
   formatPercent,
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
-import { toStructuredMarkdownList } from "./conversation-command-format.js";
+import { toStructuredMarkdownList } from "./markdown-list.js";
 import {
   formatElapsedDuration,
 } from "./elapsed-duration.js";

@@ -1,0 +1,103 @@
+import type { ConversationCommandName } from "../application/index.js";
+
+export const conversationCommandDescriptions = {
+  resume: "列出或恢复 Codex 会话",
+  sessions: "搜索可恢复会话",
+  archived: "搜索已归档会话",
+  new: "下一条消息创建新会话",
+  archive: "归档当前会话",
+  unarchive: "恢复已归档会话",
+  pin: "固定当前会话",
+  unpin: "取消固定当前会话",
+  status: "查看当前状态",
+  workspace: "列出或切换 Workspace",
+  workspaceperm: "查看或修改当前工作区权限",
+  stop: "停止当前任务",
+  queue: "管理 App Server 持久队列",
+  revert: "回退当前 Session 的分页历史",
+  rename: "命名当前会话",
+  compact: "压缩当前上下文",
+  fork: "分叉当前会话",
+  review: "启动代码审查",
+  model: "查看或切换模型",
+  effort: "查看或切换思考等级",
+  fast: "查看或切换 Fast 模式",
+  skill: "查看或调用 Skill",
+  mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
+  plugin: "列出、查看或调用 Plugin（开发中）",
+  usage: "查看账号与当前 Session 用量",
+  metrics: "查看会话、聚合或异常请求指标",
+  limits: "查看套餐与额度",
+  permissions: "查看权限配置",
+  rules: "生成或检查项目规则",
+  diff: "查看当前 Turn Diff",
+  plan: "切换 Plan 模式或直接开始规划",
+  goal: "查看或管理 Goal",
+  agents: "查看或调用子代理",
+  release: "查看或释放被占用的 Codex 会话",
+  schedule: "管理 Gateway 计划任务",
+} satisfies Record<ConversationCommandName, string>;
+
+export const conversationCommandHelpSections = [
+  {
+    title: "会话：",
+    lines: [
+      "/resume [序号|名称|Session ID]",
+      "/sessions [页码] [filter all|running|pinned] [provider 名称] [search 搜索词]",
+      "/archived [页码] [filter all|pinned] [provider 名称] [search 搜索词]",
+      "/new · /archive · /unarchive <序号|名称|Session ID>",
+      "/pin · /unpin",
+      "/rename <名称> · /compact · /fork",
+    ],
+  },
+  {
+    title: "运行与项目：",
+    lines: [
+      "/status · /workspace [序号|ID|名称] · /workspaceperm",
+      "/stop · /queue add <文本> · /queue list [页码]",
+      "/queue update <完整 ID 或列表序号> <文本> · /queue delete <完整 ID 或列表序号>",
+      "/queue reorder <完整 ID 或列表序号> <目标位置> · /queue start [完整 ID 或列表序号]",
+      "/revert list [页码] · /revert <Turn ID 或列表序号> · /revert confirm <一次性令牌>",
+      "/review [branch <分支>|commit <SHA>|custom <说明>]",
+      "/rules <init|check> · /diff",
+      "/release · /release force",
+      "/schedule list · /schedule runs <任务> [页码]",
+      "/schedule add <interval|once|monthly|daily|weekdays|weekly> ... · /schedule pause|resume|run|delete <任务>",
+      "/plan [规划需求] · /goal [set <目标>|clear]",
+    ],
+  },
+  {
+    title: "模型与能力：",
+    lines: [
+      "/model [提供商序号或 ID|模型序号、ID 或名称|clear]",
+      "/effort [序号|档位] · /fast [on|off|status]",
+      "/skill · /skills [名称或序号 任务]",
+      "/agents [角色名称或序号 任务]",
+      "/mcp [名称或序号]",
+      "/mcp health · /mcp reload",
+      "/mcp <名称或序号> <tools|resources|templates> [页码] [search <关键词>]",
+      "/mcp login <名称或序号>",
+      "/mcp resource <名称或序号> <URI>",
+      "/plugin · /plugin health · /plugin list [页码] [search <关键词>]",
+      "/plugin <名称、完整 ID 或序号> [任务]",
+      "/usage · /limits · /permissions",
+      "/metrics session",
+      "/metrics <global|providers|models|errors> [24h|7d|30d]",
+    ],
+  },
+  {
+    title: "快捷命令：",
+    lines: [
+      "/h → /help",
+      "/work → /workspace",
+      "/r → /resume",
+    ],
+  },
+] as const;
+
+export const conversationCommandHelpLines = conversationCommandHelpSections
+  .flatMap((section) => [
+    section.title,
+    ...section.lines.map((line) => `- ${line}`),
+    "",
+  ]);

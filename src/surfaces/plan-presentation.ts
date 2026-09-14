@@ -2,7 +2,7 @@ import type {
   OutputEvent,
   TurnPlanStep,
 } from "../conversation-core/index.js";
-import { toStructuredMarkdownList } from "./conversation-command-format.js";
+import { toStructuredMarkdownList } from "./markdown-list.js";
 
 const maximumPlanSteps = 12;
 const maximumStepCharacters = 240;

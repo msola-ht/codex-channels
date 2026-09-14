@@ -4,7 +4,7 @@ import type {
   ConfigChangeScope,
 } from "../config/index.js";
 import type { Workspace } from "../policy/index.js";
-import { toStructuredMarkdownList } from "./conversation-command-format.js";
+import { toStructuredMarkdownList } from "./markdown-list.js";
 import type { SurfaceConfigurationChange } from "./types.js";
 
 export function formatWorkspacesAdded(

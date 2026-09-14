@@ -121,10 +121,13 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `provider-format.ts` 统一已知 Provider 显示名，并对后续 Provider 标识做有界展示。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
-`conversation-command-format.ts`
-统一 Telegram、飞书与微信共用的分组命令目录、有界会话列表、Workspace、Skill、MCP、Plugin、
-权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、Provider 感知的用量与额度等平台无关
-命令结果文案与状态文本；OpenAI `/usage` 以账户摘要为主，在当前 Thread 有效时追加有界的官方 Credits、可选美元、
+`conversation-command-format.ts` 只汇总稳定导出；纯格式化实现分别位于
+`conversation-command-help.ts`、`conversation-session-command-format.ts`、
+`conversation-scheduled-task-command-format.ts`、`conversation-extension-command-format.ts`、
+`conversation-model-account-command-format.ts`、`conversation-workspace-status-command-format.ts` 和
+`conversation-command-outcome-format.ts`，按帮助、会话、计划任务、Skill/MCP/Plugin、模型账户、
+Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与微信的平台无关命令文案，不导入平台 SDK，
+也不写入 Application 状态；OpenAI `/usage` 以账户摘要为主，在当前 Thread 有效时追加有界的官方 Credits、可选美元、
 字段完整时的 Token 汇总和最多 8 个明细组，官方估算不可用或查询失败时只追加稳定提示；DeepSeek `/usage` 显示余额，
 未支持的 Provider 明确说明能力缺失。计划任务确认、列表、运行记录和命令结果格式也通过本目录
 `index.ts` 供 Bootstrap 动态工具回调复用。

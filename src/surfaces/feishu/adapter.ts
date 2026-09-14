@@ -15,12 +15,16 @@ import {
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatDelayMinutes,
-  formatConversationStatus,
-  formatConversationPermissions,
   formatScheduledTaskStatusLabel,
+} from "../conversation-scheduled-task-command-format.js";
+import {
   formatSessionListCommand,
   formatThreadQueueInputTypeLabel,
-} from "../conversation-command-format.js";
+} from "../conversation-session-command-format.js";
+import {
+  formatConversationPermissions,
+  formatConversationStatus,
+} from "../conversation-workspace-status-command-format.js";
 import { formatCodexProviderLabel, formatProviderLabel } from "../provider-format.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {

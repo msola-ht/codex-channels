@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import {
   conversationCommandNames,
 } from "../../application/index.js";
-import { conversationCommandDescriptions } from "../conversation-command-format.js";
+import { conversationCommandDescriptions } from "../conversation-command-help.js";
 import { isEmergencyStopCommand } from "../slash-command.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";

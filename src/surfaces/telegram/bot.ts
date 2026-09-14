@@ -27,8 +27,8 @@ import type {
 } from "../types.js";
 import {
   conversationCommandHelpLines,
-  formatConversationScheduledConfirmation,
-} from "../conversation-command-format.js";
+} from "../conversation-command-help.js";
+import { formatConversationScheduledConfirmation } from "../conversation-scheduled-task-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatOperationFailure,

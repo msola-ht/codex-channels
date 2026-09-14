@@ -20,10 +20,10 @@ import {
 import {
   formatConversationLimits,
   formatConversationModels,
-  formatConversationSessions,
-  formatConversationStatus,
   formatConversationUsage,
-} from "../conversation-command-format.js";
+} from "../conversation-model-account-command-format.js";
+import { formatConversationSessions } from "../conversation-session-command-format.js";
+import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 

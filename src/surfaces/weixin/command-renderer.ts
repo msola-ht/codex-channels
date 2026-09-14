@@ -7,8 +7,8 @@ import type {
 } from "../../conversation-core/index.js";
 import {
   conversationCommandHelpLines,
-  toStructuredMarkdownList,
-} from "../conversation-command-format.js";
+} from "../conversation-command-help.js";
+import { toStructuredMarkdownList } from "../markdown-list.js";
 import {
   createStartupPresentation,
   createSubagentCompletedPresentation,

@@ -15,14 +15,6 @@ import { formatCodexProviderLabel, formatProviderLabel } from "../provider-forma
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import {
   formatConversationAgents,
-  formatConversationArtifacts,
-  formatConversationCollaborationMode,
-  formatConversationCommandOutcome,
-  formatConversationOccupancy,
-  isTurnLifecycleAcknowledgedOutcome,
-  formatConversationGoal,
-  formatConversationLimits,
-  formatConversationMetrics,
   formatConversationMcp,
   formatConversationMcpDetail,
   formatConversationMcpHealth,
@@ -32,22 +24,38 @@ import {
   formatConversationPluginDetail,
   formatConversationPluginHealth,
   formatConversationPlugins,
-  formatConversationModels,
-  formatConversationPermissions,
-  formatConversationProjectRules,
-  formatConversationSessions,
-  formatConversationScheduledConfirmation,
-  formatConversationScheduledRuns,
-  formatConversationScheduledTasks,
   formatConversationSkills,
+} from "../conversation-extension-command-format.js";
+import {
+  formatConversationLimits,
+  formatConversationModels,
+  formatConversationUsage,
+} from "../conversation-model-account-command-format.js";
+import {
+  formatConversationOccupancy,
+  formatConversationSessions,
   formatConversationThreadQueue,
   formatConversationThreadRevert,
   formatConversationThreadRevertPreview,
   formatThreadQueueInputTypeLabel,
-  formatConversationUsage,
+  isTurnLifecycleAcknowledgedOutcome,
+} from "../conversation-session-command-format.js";
+import {
+  formatConversationScheduledConfirmation,
+  formatConversationScheduledRuns,
+  formatConversationScheduledTasks,
+} from "../conversation-scheduled-task-command-format.js";
+import {
+  formatConversationArtifacts,
+  formatConversationCollaborationMode,
+  formatConversationGoal,
+  formatConversationPermissions,
+  formatConversationProjectRules,
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
-} from "../conversation-command-format.js";
+} from "../conversation-workspace-status-command-format.js";
+import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
+import { formatConversationMetrics } from "../metrics-format.js";
 import { formatStatus } from "./format.js";
 import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
 
