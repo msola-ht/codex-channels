@@ -55,9 +55,10 @@
   适配器执行，并按目录来源复用同一个下载 Promise。当前会刷新已配置 DeepSeek 与 OpenCode Go
   的受管模型目录并保留逐模型设置；所选模型已不在新目录中时（例如旧默认 Flash Vision Exp），
   把 OpenCode Go 账户与共享子代理切到目录默认模型，并把迁移记录写入目录清单；
-  更新过程中自动停止并注销已废弃的本机指标中心服务，在私有备份后移除 `[vision]`、
-  `[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]` 配置段；历史中心数据库、同步水位和
-  外部 Cloudflare 资源均保留。
+  更新过程中自动停止并注销已废弃的本机指标中心服务，在私有备份后移除旧 Schema 自动补入的空
+  `api_providers`、`[vision]`、`[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]` 配置段；
+  非空直接 API Provider 注册表仍失败关闭，历史 Provider 凭据、中心数据库、同步水位和外部
+  Cloudflare 资源均保留。
 - `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
   或 v4 升级到 v5，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口
   提供只读版本检查；不自动迁移未知版本。运行时由 SqliteBindingStore 和

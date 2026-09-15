@@ -84,8 +84,8 @@
 1. 删除 `api_providers` TOML Schema、Application 配置映射和示例配置。
 2. 删除 Setup 菜单、CLI 帮助、Doctor 检查、管理事务、WebUI 管理路由和相关类型。
 3. 删除只服务该注册表的凭据读写运行时；不主动删除用户磁盘上已有的凭据文件。
-4. 删除文档中“预留、未来明确设计、无运行时调用方”的描述，并在升级说明中明确旧配置需要先移除
-   `api_providers` 后才能通过严格 Schema 校验。
+4. 删除文档中“预留、未来明确设计、无运行时调用方”的描述；更新器只在备份后清理旧 Schema
+   自动补入的空 `api_providers`，非空旧配置仍需手工移除后才能通过严格 Schema 校验。
 5. 检查旧直接 API 指标标签是否仍有独立历史读取价值；没有消费者时随本批删除，有历史展示需求时只在
    Observability 查询边界保留只读标签，不保留配置和凭据管理能力。
 
@@ -94,7 +94,7 @@
 - `api_providers` 不再出现在配置 Schema、Setup、Doctor、WebUI 管理 API、CLI 帮助和公开文档。
 - Gateway 不再写入或读取直接 API Provider 凭据。
 - 当前 DeepSeek、OpenCode Go、自定义 Responses Provider 和受管 Provider 的运行路径不受影响。
-- 未执行自动凭据删除或隐式配置迁移。
+- 未执行自动凭据删除或非空 Provider 配置迁移；只清理旧 Schema 自动补入的空数组默认值。
 
 指标标签结论：旧 `providerName` 仅由运行时使用当前 `api_providers` 映射生成，并未持久化到指标库，
 不存在独立历史读取价值；本批删除该派生字段，继续保留指标记录中的原始 Provider ID。

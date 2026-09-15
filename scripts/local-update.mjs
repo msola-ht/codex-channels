@@ -459,6 +459,11 @@ export async function refreshManagedProviderCatalogsForUpdate(
 
 function removeObsoleteGatewayConfig(document) {
   const removedPaths = [];
+  // 旧 Schema 会由运行中的 Gateway 补入空数组；非空注册表仍交给严格校验拒绝。
+  if (Array.isArray(document.api_providers) && document.api_providers.length === 0) {
+    delete document.api_providers;
+    removedPaths.push("api_providers");
+  }
   if (Object.hasOwn(document, "vision")) {
     delete document.vision;
     removedPaths.push("vision");
