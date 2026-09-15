@@ -422,6 +422,36 @@ describe("TelegramOutbox", () => {
     expect(api.sent[0]).toContain("所有模型连接已空闲，空闲的 App Server 即将停止");
   });
 
+  it("renders an idle release as a compact recovery panel", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "conversation.idle.released",
+      target,
+      threadId: "thread-idle-123",
+      minutes: 15,
+    });
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([[
+      "<b>会话已自动解除占用</b>",
+      "",
+      "15 分钟内没有输入或输出。",
+      "",
+      "<b>恢复会话</b>",
+      "<code>/r thread-idle-123</code>",
+      "",
+      "直接发送消息将开始新会话。",
+    ].join("\n")]);
+    expect(api.sendOptions[0]).toMatchObject({
+      parse_mode: "HTML",
+      disable_notification: true,
+    });
+    expect(api.sent[0]).not.toContain("Session ID");
+  });
+
   it("sends completed generated images even when operation summaries are hidden", async () => {
     const api = new FakeTelegramApi();
     const image = Buffer.from("validated-image");

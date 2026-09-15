@@ -50,6 +50,19 @@ export function splitTelegramText(text: string, limit = 4_000): string[] {
   return chunks;
 }
 
+export function formatIdleReleaseNotification(minutes: number, threadId: string): string {
+  return [
+    "## 会话已自动解除占用",
+    "",
+    `${minutes} 分钟内没有输入或输出。`,
+    "",
+    "### 恢复会话",
+    `/r ${threadId}`,
+    "",
+    "直接发送消息将开始新会话。",
+  ].join("\n");
+}
+
 export function formatSessions(
   threads: ConversationSession[],
   currentThreadId?: string,

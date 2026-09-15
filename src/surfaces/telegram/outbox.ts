@@ -30,7 +30,6 @@ import {
   contentTruncatedText,
   emptyCodexResponseText,
   formatCodexWarning,
-  formatConversationIdleReleased,
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
@@ -49,6 +48,7 @@ import { TelegramApprovalOperationCoordinator } from "./approval-operation-coord
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
+  formatIdleReleaseNotification,
   renderTelegramLifecyclePresentation,
   renderTelegramSubagentCompleted,
   splitTelegramText,
@@ -517,7 +517,7 @@ export class TelegramOutbox {
         this.enqueue(chatId, async () => {
           await this.sendPanel(
             chatId,
-            formatConversationIdleReleased(event.minutes, event.threadId),
+            formatIdleReleaseNotification(event.minutes, event.threadId),
             undefined,
             true,
           );
