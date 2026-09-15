@@ -1414,7 +1414,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("累计 Tokens");
   });
 
-    it("fails closed for unregistered Provider account capabilities", () => {
+  it("fails closed for unregistered Provider account capabilities", () => {
     expect(formatConversationUsage({
       kind: "usage",
       result: { kind: "unsupported", provider: "future-provider" },
@@ -1642,7 +1642,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).toContain("其中推理输出：1.8 K");
   });
 
-          it("renders unified provider and model request aggregates", () => {
+  it("renders unified provider and model request aggregates", () => {
     const aggregate = {
       requestCount: 12,
       unsuccessfulRequestCount: 1,
@@ -1691,7 +1691,7 @@ describe("provider-aware conversation command formatting", () => {
     expect(rendered).not.toContain("速度");
   });
 
-    it("renders unsuccessful request groups and failure rate", () => {
+  it("renders unsuccessful request groups and failure rate", () => {
     const rendered = formatConversationMetrics({
       kind: "metrics",
       summary: {

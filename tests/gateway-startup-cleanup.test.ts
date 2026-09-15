@@ -17,6 +17,17 @@ import {
 
 const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
 
+type GatewayApplicationFixture = GatewayApplication & Record<string, unknown>;
+
+function createGatewayApplicationFixture(
+  properties: Record<string, unknown>,
+): GatewayApplicationFixture {
+  return Object.assign(
+    Object.create(GatewayApplication.prototype),
+    properties,
+  ) as GatewayApplicationFixture;
+}
+
 vi.mock("../runtime/thread-writer-lock.mjs", () => ({
   inspectThreadWriterLock: vi.fn(),
   terminateThreadWriterHolder: vi.fn(),
@@ -76,7 +87,6 @@ interface RestoredTestThread {
 }
 
 function createRestoreApplication(options: {
-  target: RestoreTestTarget;
   binding: RestoreTestBinding;
   published: unknown[];
   restoreSubscriptions: (
@@ -90,14 +100,14 @@ function createRestoreApplication(options: {
     ) => void,
   ) => Promise<unknown[]>;
   overrides?: Record<string, unknown>;
-}): Record<string, unknown> {
+}): GatewayApplicationFixture {
   const {
     binding,
     published,
     restoreSubscriptions,
     overrides = {},
   } = options;
-  return {
+  return createGatewayApplicationFixture({
     config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
     logger: pino({ level: "silent" }),
     transport: { kind: "unix-websocket" },
@@ -160,15 +170,12 @@ function createRestoreApplication(options: {
       close: () => undefined,
     },
     ...overrides,
-  };
+  });
 }
 
 describe("GatewayApplication startup cleanup", () => {
   it("skips idle release for a binding while its Provider is disconnected", () => {
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, {
+    const application = createGatewayApplicationFixture({
       codex: { knownProvider: () => "deepseek" },
       disconnectedProviders: new Set(["deepseek"]),
       pendingBindingRestores: new Map(),
@@ -180,12 +187,12 @@ describe("GatewayApplication startup cleanup", () => {
     ) as (this: GatewayApplication, threadId: string) => boolean;
 
     expect(isBindingRestoring.call(
-      application as unknown as GatewayApplication,
+      application,
       "thread-1",
     )).toBe(true);
-    (application.disconnectedProviders as Set<string>).delete("deepseek");
+    (application["disconnectedProviders"] as Set<string>).delete("deepseek");
     expect(isBindingRestoring.call(
-      application as unknown as GatewayApplication,
+      application,
       "thread-1",
     )).toBe(false);
   });
@@ -205,10 +212,7 @@ describe("GatewayApplication startup cleanup", () => {
     const recoverRunning = vi.fn(async () => undefined);
     let restoredOptions: unknown;
     let retained = false;
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, {
+    const application = createGatewayApplicationFixture({
       stopping: false,
       logger: pino({ level: "silent" }),
       surfaces: [{ surface: "feishu", accountId: "default" }],
@@ -253,7 +257,7 @@ describe("GatewayApplication startup cleanup", () => {
       "restoreBindings",
     ) as (this: GatewayApplication) => Promise<void>;
 
-    await restoreBindings.call(application as unknown as GatewayApplication);
+    await restoreBindings.call(application);
 
     expect(restoredOptions).toEqual({ modelProvider: "deepseek" });
     expect(retained).toBe(true);
@@ -262,10 +266,7 @@ describe("GatewayApplication startup cleanup", () => {
 
   it("reconciles scheduled Runs even when their persisted background binding is missing", async () => {
     const recoverRunning = vi.fn(async () => undefined);
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, {
+    const application = createGatewayApplicationFixture({
       stopping: false,
       surfaces: [],
       scheduledTasks: {
@@ -284,7 +285,7 @@ describe("GatewayApplication startup cleanup", () => {
       "restoreBindings",
     ) as (this: GatewayApplication) => Promise<void>;
 
-    await restoreBindings.call(application as unknown as GatewayApplication);
+    await restoreBindings.call(application);
 
     expect(recoverRunning).toHaveBeenCalledWith(new Set(["missing-thread"]));
   });
@@ -302,11 +303,7 @@ describe("GatewayApplication startup cleanup", () => {
       sessionId: "foreground-thread",
     };
     const calls: string[] = [];
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, createRestoreApplication({
-      target,
+    const application = createRestoreApplication({
       binding,
       published: [],
       restoreSubscriptions: async () => {
@@ -332,11 +329,10 @@ describe("GatewayApplication startup cleanup", () => {
           },
         },
       },
-    }));
-    const gateway = application as unknown as GatewayApplication;
+    });
 
-    await gateway.start();
-    await gateway.stop();
+    await application.start();
+    await application.stop();
 
     expect(calls.indexOf("runs:recovered")).toBeLessThan(calls.indexOf("bindings:restored"));
     expect(calls.indexOf("coordinator:prepared")).toBeLessThan(calls.indexOf("bindings:restored"));
@@ -363,11 +359,7 @@ describe("GatewayApplication startup cleanup", () => {
       threadId: "thread-1",
       sessionId: "session-1",
     };
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, createRestoreApplication({
-      target,
+    const application = createRestoreApplication({
       binding,
       published: [],
       restoreSubscriptions: async () => [],
@@ -385,10 +377,9 @@ describe("GatewayApplication startup cleanup", () => {
           },
         },
       },
-    }));
-    const gateway = application as unknown as GatewayApplication;
+    });
 
-    const stopping = gateway.stop();
+    const stopping = application.stop();
     await Promise.resolve();
     await Promise.resolve();
     expect(calls).toEqual([]);
@@ -404,10 +395,7 @@ describe("GatewayApplication startup cleanup", () => {
 
   it("delegates a Surface fatal error without stopping the Gateway", () => {
     const reportFatal = vi.fn();
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, {
+    const application = createGatewayApplicationFixture({
       stopping: false,
       surfaceManager: { reportFatal },
     });
@@ -423,7 +411,7 @@ describe("GatewayApplication startup cleanup", () => {
     const error = new Error("offline");
 
     handleSurfaceFatal.call(
-      application as unknown as GatewayApplication,
+      application,
       "telegram",
       "default",
       error,
@@ -434,91 +422,88 @@ describe("GatewayApplication startup cleanup", () => {
 
   it("closes every initialized component and preserves the startup error", async () => {
     const calls: string[] = [];
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, {
-        config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
-        logger: pino({ level: "silent" }),
-        transport: { kind: "unix-websocket" },
-        providerMetrics: {
-          start: async () => undefined,
-          close: async () => undefined,
+    const application = createGatewayApplicationFixture({
+      config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
+      logger: pino({ level: "silent" }),
+      transport: { kind: "unix-websocket" },
+      providerMetrics: {
+        start: async () => undefined,
+        close: async () => undefined,
+      },
+      stopping: false,
+      reconnecting: undefined,
+      codex: {
+        onNotification: () => {
+          calls.push("listen:notification");
+          return () => calls.push("remove:notification");
         },
-        stopping: false,
-        reconnecting: undefined,
-        codex: {
-          onNotification: () => {
-            calls.push("listen:notification");
-            return () => calls.push("remove:notification");
-          },
-          onDisconnect: () => {
-            calls.push("listen:disconnect");
-            return () => calls.push("remove:disconnect");
-          },
-          connect: async () => {
-            calls.push("connect:codex");
-            return {
-              userAgent: "test",
-              platformFamily: "unix",
-              platformOs: "linux",
-            };
-          },
-          accountRateLimits: async () => emptyRateLimits(),
-          close: async () => {
-            calls.push("close:codex");
-            throw new Error("codex close failed");
-          },
+        onDisconnect: () => {
+          calls.push("listen:disconnect");
+          return () => calls.push("remove:disconnect");
         },
-        inbound: {
-          publish: () => undefined,
-          close: async () => {
-            calls.push("close:inbound");
-          },
+        connect: async () => {
+          calls.push("connect:codex");
+          return {
+            userAgent: "test",
+            platformFamily: "unix",
+            platformOs: "linux",
+          };
         },
-        output: {
-          close: async () => {
-            calls.push("close:output");
-          },
+        accountRateLimits: async () => emptyRateLimits(),
+        close: async () => {
+          calls.push("close:codex");
+          throw new Error("codex close failed");
         },
-        interactions: {
-          cancelAll: () => undefined,
+      },
+      inbound: {
+        publish: () => undefined,
+        close: async () => {
+          calls.push("close:inbound");
         },
-        core: {
-          rememberRateLimits: () => undefined,
-          connectionLost: () => undefined,
+      },
+      output: {
+        close: async () => {
+          calls.push("close:output");
         },
-        router: {
-          restoreSubscriptions: async () => [],
-          allBindings: () => [],
+      },
+      interactions: {
+        cancelAll: () => undefined,
+      },
+      core: {
+        rememberRateLimits: () => undefined,
+        connectionLost: () => undefined,
+      },
+      router: {
+        restoreSubscriptions: async () => [],
+        allBindings: () => [],
+      },
+      surfaces: [],
+      surfaceManager: {
+        start: async () => {
+          calls.push("start:surface");
+          throw new Error("surface start failed");
         },
-        surfaces: [],
-        surfaceManager: {
-          start: async () => {
-            calls.push("start:surface");
-            throw new Error("surface start failed");
-          },
-          stop: async () => {
-            calls.push("close:surface");
-          },
+        stop: async () => {
+          calls.push("close:surface");
         },
-        channelImageSpool: {
-          start: async () => {
-            calls.push("start:channel-image-spool");
-          },
-          stop: async () => {
-            calls.push("close:channel-image-spool");
-          },
+      },
+      channelImageSpool: {
+        start: async () => {
+          calls.push("start:channel-image-spool");
         },
-        bindings: {
-          close: () => {
-            calls.push("close:bindings");
-          },
+        stop: async () => {
+          calls.push("close:channel-image-spool");
         },
-      });
+      },
+      bindings: {
+        close: () => {
+          calls.push("close:bindings");
+        },
+      },
+    });
 
     await expect(
-      (application as unknown as GatewayApplication).start(),
+      application.start(),
     ).rejects.toThrow("surface start failed");
 
     expect(calls).toEqual([
@@ -552,11 +537,7 @@ describe("GatewayApplication startup cleanup", () => {
     };
     const published: unknown[] = [];
     let restoreCalls = 0;
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, createRestoreApplication({
-      target,
+    const application = createRestoreApplication({
       binding,
       published,
       restoreSubscriptions: async (
@@ -590,11 +571,10 @@ describe("GatewayApplication startup cleanup", () => {
         });
         return [];
       },
-    }));
-    const gateway = application as unknown as GatewayApplication;
+    });
 
     try {
-      await expect(gateway.start()).resolves.toBeUndefined();
+      await expect(application.start()).resolves.toBeUndefined();
       expect(published).toContainEqual(expect.objectContaining({
         type: "thread.availability",
         availability: "occupied",
@@ -620,7 +600,7 @@ describe("GatewayApplication startup cleanup", () => {
         threadId: binding.threadId,
       }));
     } finally {
-      await gateway.stop();
+      await application.stop();
       vi.useRealTimers();
     }
   });
@@ -640,11 +620,7 @@ describe("GatewayApplication startup cleanup", () => {
     };
     const published: unknown[] = [];
     let restoreCalls = 0;
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, createRestoreApplication({
-      target,
+    const application = createRestoreApplication({
       binding,
       published,
       restoreSubscriptions: async (
@@ -670,8 +646,7 @@ describe("GatewayApplication startup cleanup", () => {
         });
         return [];
       },
-    }));
-    const gateway = application as unknown as GatewayApplication;
+    });
     const occupied = () => published.filter((event) =>
       typeof event === "object"
       && event !== null
@@ -680,7 +655,7 @@ describe("GatewayApplication startup cleanup", () => {
     );
 
     try {
-      await expect(gateway.start()).resolves.toBeUndefined();
+      await expect(application.start()).resolves.toBeUndefined();
       expect(restoreCalls).toBe(1);
       expect(occupied()).toHaveLength(0);
 
@@ -705,7 +680,7 @@ describe("GatewayApplication startup cleanup", () => {
         threadId: binding.threadId,
       }));
     } finally {
-      await gateway.stop();
+      await application.stop();
       vi.useRealTimers();
     }
   });
@@ -734,11 +709,7 @@ describe("GatewayApplication startup cleanup", () => {
       },
     });
     vi.mocked(terminateThreadWriterHolder).mockResolvedValue(true);
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, createRestoreApplication({
-      target,
+    const application = createRestoreApplication({
       binding,
       published,
       restoreSubscriptions: async () => {
@@ -764,7 +735,7 @@ describe("GatewayApplication startup cleanup", () => {
         ]),
         bindingRestoreAttempt: 1,
       },
-    }));
+    });
     const releaseThread = Reflect.get(
       GatewayApplication.prototype,
       "releaseThread",
@@ -775,7 +746,7 @@ describe("GatewayApplication startup cleanup", () => {
     ) => Promise<unknown>;
 
     const held = await releaseThread.call(
-      application as unknown as GatewayApplication,
+      application,
       target,
       false,
     );
@@ -793,7 +764,7 @@ describe("GatewayApplication startup cleanup", () => {
     expect(restoreCalls).toBe(0);
 
     const released = await releaseThread.call(
-      application as unknown as GatewayApplication,
+      application,
       target,
       true,
     );
@@ -821,11 +792,7 @@ describe("GatewayApplication startup cleanup", () => {
       threadId: "thread-release-states",
       sessionId: "thread-release-states",
     };
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, createRestoreApplication({
-      target,
+    const application = createRestoreApplication({
       binding,
       published: [],
       restoreSubscriptions: async () => [],
@@ -838,7 +805,7 @@ describe("GatewayApplication startup cleanup", () => {
           isBackgroundThread: () => false,
         },
       },
-    }));
+    });
     const releaseThread = Reflect.get(
       GatewayApplication.prototype,
       "releaseThread",
@@ -849,7 +816,7 @@ describe("GatewayApplication startup cleanup", () => {
     ) => Promise<unknown>;
 
     const unbound = await releaseThread.call(
-      application as unknown as GatewayApplication,
+      application,
       { ...target, conversationId: "chat-other" },
       true,
     );
@@ -857,7 +824,7 @@ describe("GatewayApplication startup cleanup", () => {
 
     vi.mocked(inspectThreadWriterLock).mockReturnValue({ held: false });
     const free = await releaseThread.call(
-      application as unknown as GatewayApplication,
+      application,
       target,
       true,
     );
@@ -865,7 +832,7 @@ describe("GatewayApplication startup cleanup", () => {
 
     vi.mocked(inspectThreadWriterLock).mockReturnValue({ held: true, holder: null });
     const unidentifiable = await releaseThread.call(
-      application as unknown as GatewayApplication,
+      application,
       target,
       true,
     );
@@ -880,7 +847,7 @@ describe("GatewayApplication startup cleanup", () => {
       holder: { pid: 555, command: "other-daemon --worker" },
     });
     const held = await releaseThread.call(
-      application as unknown as GatewayApplication,
+      application,
       target,
       true,
     );
@@ -898,7 +865,7 @@ describe("GatewayApplication startup cleanup", () => {
       holder: { pid: 556, command: "node /tmp/codex-helper.js --worker" },
     });
     const misleadingCommand = await releaseThread.call(
-      application as unknown as GatewayApplication,
+      application,
       target,
       true,
     );
@@ -921,7 +888,7 @@ describe("GatewayApplication startup cleanup", () => {
         holder: { pid: 557, command: "other-daemon --worker" },
       });
     const changedCommand = await releaseThread.call(
-      application as unknown as GatewayApplication,
+      application,
       target,
       true,
     );
@@ -949,10 +916,7 @@ describe("GatewayApplication startup cleanup", () => {
       surface: 0,
     };
     let surfaceStarts = 0;
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, {
+    const application = createGatewayApplicationFixture({
       config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
@@ -1024,11 +988,10 @@ describe("GatewayApplication startup cleanup", () => {
         },
       },
     });
-    const gateway = application as unknown as GatewayApplication;
 
-    const starting = gateway.start();
+    const starting = application.start();
     await Promise.resolve();
-    const stopping = gateway.stop();
+    const stopping = application.stop();
     resolveRateLimits(emptyRateLimits());
 
     await expect(starting).rejects.toThrow("Gateway 正在停止");
@@ -1049,10 +1012,7 @@ describe("GatewayApplication startup cleanup", () => {
     let reconnectAttempts = 0;
     let cancelAllCalls = 0;
     const cancelledThreadSets: ReadonlySet<string>[] = [];
-    const application = Object.create(
-      GatewayApplication.prototype,
-    ) as unknown as Record<string, unknown>;
-    Object.assign(application, {
+    const application = createGatewayApplicationFixture({
       config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
@@ -1124,14 +1084,13 @@ describe("GatewayApplication startup cleanup", () => {
         close: () => undefined,
       },
     });
-    const gateway = application as unknown as GatewayApplication;
-    await gateway.start();
+    await application.start();
 
     disconnect?.(new Error("connection lost"), "openai");
     await Promise.resolve();
     await Promise.resolve();
 
-    await expect(gateway.stop()).resolves.toBeUndefined();
+    await expect(application.stop()).resolves.toBeUndefined();
     expect(reconnectAttempts).toBe(1);
     expect(cancelAllCalls).toBe(0);
     expect(cancelledThreadSets).toEqual([new Set()]);
@@ -1167,9 +1126,7 @@ describe("GatewayApplication startup cleanup", () => {
       threadId: "thread-1",
       sessionId: "session-1",
     };
-    const application = Object.create(GatewayApplication.prototype);
-    Object.assign(application, createRestoreApplication({
-      target,
+    const application = createRestoreApplication({
       binding,
       published: [],
       restoreSubscriptions: async () => [],
@@ -1202,11 +1159,10 @@ describe("GatewayApplication startup cleanup", () => {
           connectionRestored: () => undefined,
         },
       },
-    }));
-    const gateway = application as GatewayApplication;
+    });
 
     try {
-      await gateway.start();
+      await application.start();
       await releaseAppServerProvider(socketPath, "opencode-go-b");
       disconnect?.(new Error("connection closed"), "opencode-go-b");
 
@@ -1217,7 +1173,7 @@ describe("GatewayApplication startup cleanup", () => {
         new Set(["thread-1"]),
       );
     } finally {
-      await gateway.stop();
+      await application.stop();
       await owner.close();
       rmSync(runtimeDir, { recursive: true, force: true });
     }
@@ -1229,8 +1185,7 @@ describe("GatewayApplication startup cleanup", () => {
       message: string;
       threadIds: ReadonlySet<string>;
     }> = [];
-    const application = Object.create(GatewayApplication.prototype);
-    Object.assign(application, {
+    const application = createGatewayApplicationFixture({
       config: { codexSocketPath: "/tmp/codex.sock", idleReleaseMinutes: 15 },
       logger: pino({ level: "silent" }),
       transport: { kind: "unix-websocket" },
@@ -1308,8 +1263,7 @@ describe("GatewayApplication startup cleanup", () => {
         close: () => undefined,
       },
     });
-    const gateway = application as unknown as GatewayApplication;
-    await gateway.start();
+    await application.start();
 
     disconnect?.(new Error("connection lost"), "openai");
     await vi.waitFor(() => {
@@ -1319,6 +1273,6 @@ describe("GatewayApplication startup cleanup", () => {
       }]);
     });
 
-    await expect(gateway.stop()).resolves.toBeUndefined();
+    await expect(application.stop()).resolves.toBeUndefined();
   });
 });
