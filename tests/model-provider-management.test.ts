@@ -31,12 +31,12 @@ describe("model Provider management state", () => {
       loadManagedProviders: () => [{
         provider: "deepseek",
         displayName: "DeepSeek",
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
         reasoningEffort: "high",
         mode: "switching",
         models: [{
-          model: "deepseek-v4-flash-vision-exp",
-          displayName: "DeepSeek V4 Flash Vision",
+          model: "deepseek-flash",
+          displayName: "DeepSeek Flash",
           contextWindow: 1_000_000,
           maxContextWindow: 1_000_000,
           reasoningEffort: "high",
@@ -56,7 +56,7 @@ describe("model Provider management state", () => {
       loadAgentStatus: () => ({
         externalRoleConfigured: true,
         provider: "deepseek",
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
       }),
     });
 

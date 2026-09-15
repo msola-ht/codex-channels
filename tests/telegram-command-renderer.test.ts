@@ -292,7 +292,7 @@ describe("Telegram command renderer", () => {
             nextRunAt: Date.parse("2026-08-24T02:33:00.000Z"),
             workspaceId: "main",
             modelProvider: "opencode-go",
-            model: "deepseek-v4-flash-vision-exp",
+            model: "deepseek-flash",
             reasoningEffort: "high",
             serviceTier: null,
             sandbox: "workspace-write",

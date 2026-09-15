@@ -941,7 +941,7 @@ describe("provider-aware conversation command formatting", () => {
           nextRunAt: Date.parse("2026-08-23T14:50:18.500Z"),
           workspaceId: "main",
           modelProvider: "deepseek",
-          model: "deepseek-v4-flash-vision-exp",
+          model: "deepseek-flash",
           reasoningEffort: "high",
           serviceTier: null,
           sandbox: "read-only",
@@ -1000,7 +1000,7 @@ describe("provider-aware conversation command formatting", () => {
         nextRunAt: Date.parse("2026-08-24T02:00:00.000Z"),
         workspaceId: "main",
         modelProvider: "deepseek",
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
         reasoningEffort: "high",
         serviceTier: null,
         sandbox: "workspace-write",
@@ -1009,7 +1009,7 @@ describe("provider-aware conversation command formatting", () => {
       },
     });
 
-    expect(rendered).toContain("模型：deepseek/deepseek-v4-flash-vision-exp");
+    expect(rendered).toContain("模型：deepseek/deepseek-flash");
     expect(rendered).toContain("思考等级：high");
     expect(rendered).toContain("计划：一次性 2026-08-24 10:00 · Asia/Shanghai");
     expect(rendered).toContain("下次运行：2026-08-24T02:00:00.000Z");

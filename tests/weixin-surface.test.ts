@@ -202,7 +202,7 @@ describe("WeixinSurface", () => {
     await surface.presentScheduledTaskConfirmation(target, actorId, preview);
 
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-      text: expect.stringMatching(/Workspace：main[\s\S]*模型：opencode-go\/deepseek-v4-flash-vision-exp[\s\S]*思考等级：high[\s\S]*\/schedule confirm 12345678-1234-1234-1234-123456789abc/u),
+      text: expect.stringMatching(/Workspace：main[\s\S]*模型：opencode-go\/deepseek-flash[\s\S]*思考等级：high[\s\S]*\/schedule confirm 12345678-1234-1234-1234-123456789abc/u),
     }), expect.any(AbortSignal));
     await surface.stop();
   });
@@ -970,7 +970,7 @@ function scheduledTaskView() {
     nextRunAt: Date.parse("2026-08-24T02:31:00.000Z"),
     workspaceId: "main",
     modelProvider: "opencode-go",
-    model: "deepseek-v4-flash-vision-exp",
+    model: "deepseek-flash",
     reasoningEffort: "high",
     serviceTier: null,
     sandbox: "workspace-write" as const,

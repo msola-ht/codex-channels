@@ -1,8 +1,7 @@
-# 计划任务开发设计
+# 计划任务设计
 
-本文定义在 Codex Connect Gateway 中实现计划任务的边界与分阶段方案。设计基于
-`codex-cli 0.150.1` 固定协议，以及 2026-08-22 可见的 OpenAI Scheduled 文档；本文是实施前合同，
-当前已完成存储、纯调度域、默认关闭的 App Server 执行/恢复层、三个 Surface 的统一管理命令，以及
+本文定义 Codex Connect Gateway 计划任务的当前边界。协议事实以[协议索引](index.md)记录的锁定版本
+为准；当前实现包括存储、纯调度域、默认关闭的 App Server 执行/恢复层、三个 Surface 的统一管理命令，以及
 基于实验 `thread/start.dynamicTools` 与 `item/tool/call` 的前台 Agent 计划任务工具；飞书同时提供
 绑定 Actor 的短期按钮与输入卡片。
 功能仍须显式开启并完成部署验收。
@@ -17,8 +16,8 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 从 ChatGPT Web 或桌面 App 创建和管理 Scheduled；CLI 与 IDE 扩展不提供管理界面。本地项目任务由
 桌面 App 在项目目录或隔离 Worktree 中运行，机器和 App 必须保持运行。
 
-固定版 App Server 没有 `automation/create|list|update|delete|run` 等请求，也不保存用户计划任务的
-启停状态、下次运行时间、RRULE 或运行目录。`0.150.1` 只提供以下相关能力：
+当前锁定版 App Server 没有 `automation/create|list|update|delete|run` 等请求，也不保存用户计划任务的
+启停状态、下次运行时间、RRULE 或运行目录。项目只采用以下相关能力：
 
 - `thread/start.threadSource` 可以把执行 Thread 标记为字符串 `automation`。
 - 实验 `thread/start.dynamicTools` 与 `item/tool/call` 可以让宿主提供计划任务管理工具，但工具调用
@@ -57,17 +56,17 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
   Chat 内任务、Worktree、模型、权限和 RRULE 的当前产品行为。
 - [OpenAI App Server 文档](https://learn.chatgpt.com/docs/app-server)：App Server 定位、JSON-RPC、
   Thread/Turn 与实验动态工具；官方建议自动化作业或 CI 使用 Codex SDK。
-- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
+- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
   `threadSource` 与实验 `dynamicTools`。
-- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
+- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
   实验 `additionalContext`。
-- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
+- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
   `ScheduledTaskSummary` 及其有限 Schedule 类型。
-- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.150.1/codex-rs/app-server/README.md)：
+- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/README.md)：
   `dynamicTools` 与 `item/tool/call` 的宿主回调合同。
 
-项目内 `upstream/openai-codex` 必须保持在 `rust-v0.150.1` 的提交
-`90854393966b21e9ebfd21b122334eb09a20c93d`。当前网页文档描述的新产品能力不能反向当作固定版
+项目内 `upstream/openai-codex` 必须保持在 `rust-v0.154.0` 的提交
+`6b9826e3aa83b1a5947db50f4332cb9c65f1b340`。当前网页文档描述的新产品能力不能反向当作固定版
 协议字段。
 
 ## 采用方案
@@ -248,7 +247,7 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 提示，不近似为其他计划。固定句式仍可在 Application 内确定性解析并直接创建预览，不依赖工具或模型。
 
 `create` 可选的 `model` 支持模型 ID 或 `provider/model` 复合串（如
-`deepseek/deepseek-v4-flash`）；不传时使用当前会话的模型与 Provider。显式指定的 Provider 未配置时
+`deepseek/deepseek-flash`）；不传时使用当前会话的模型与 Provider。显式指定的 Provider 未配置时
 直接返回可操作错误，确认预览把 Provider 与模型合并展示，避免创建后才发现跨 Provider 不匹配。
 
 官方 `dynamicTools` 只能在 `thread/start` 时注册，不能向已经存在的 Thread 注入。Gateway 不会为了

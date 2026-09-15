@@ -100,7 +100,7 @@ describe("codexc agents script", () => {
     const configureRole = vi.fn(async (provider: string, model?: string) => ({
       role: "external" as const,
       provider,
-      model: model ?? "deepseek-v4-flash-vision-exp",
+      model: model ?? "deepseek-flash",
     }));
     const configured = await applyThirdPartyAgentChange(
       { action: "configure", provider: "deepseek" },
@@ -115,11 +115,11 @@ describe("codexc agents script", () => {
       action: "configured",
       activation: "restart-all",
       previous: { configured: false, provider: null, model: null },
-      selection: { provider: "deepseek", model: "deepseek-v4-flash-vision-exp" },
+      selection: { provider: "deepseek", model: "deepseek-flash" },
     });
     expect(configureRole).toHaveBeenCalledWith(
       "deepseek",
-      "deepseek-v4-flash-vision-exp",
+      "deepseek-flash",
       {},
     );
 
@@ -164,12 +164,12 @@ describe("codexc agents script", () => {
       loadProviders: () => [{
         provider: "deepseek",
         displayName: "DeepSeek",
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
         reasoningEffort: "high",
         mode: "switching",
         models: [{
-          model: "deepseek-v4-flash-vision-exp",
-          displayName: "DeepSeek V4 Flash Vision",
+          model: "deepseek-flash",
+          displayName: "DeepSeek Flash",
           contextWindow: 1_048_576,
           maxContextWindow: 1_048_576,
           windowPercent: 100,
@@ -633,12 +633,12 @@ function managementProviders(): ThirdPartyAgentProvider[] {
   return [{
     provider: "deepseek",
     displayName: "DeepSeek",
-    model: "deepseek-v4-flash-vision-exp",
+    model: "deepseek-flash",
     reasoningEffort: "high",
     mode: "switching",
     models: [{
-      model: "deepseek-v4-flash-vision-exp",
-      displayName: "DeepSeek V4 Flash Vision",
+      model: "deepseek-flash",
+      displayName: "DeepSeek Flash",
       contextWindow: 1_048_576,
       maxContextWindow: 1_048_576,
       windowPercent: 100,

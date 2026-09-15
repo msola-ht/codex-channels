@@ -492,7 +492,7 @@ describe("Codex Connect setup", () => {
           id: "deepseek",
           displayName: "DeepSeek",
           kind: "managed",
-          model: "deepseek-v4-flash-vision-exp",
+          model: "deepseek-flash",
           reasoningEffort: "high",
           mode: "switching",
           models: [],
@@ -516,7 +516,7 @@ describe("Codex Connect setup", () => {
             id: "deepseek",
             displayName: "DeepSeek",
             kind: "managed",
-            model: "deepseek-v4-flash-vision-exp",
+            model: "deepseek-flash",
             reasoningEffort: "high",
             mode: "switching",
             models: [],
@@ -550,7 +550,7 @@ describe("Codex Connect setup", () => {
     });
     expect(rendered).toContain("Codex 全局默认值：gpt-5.6-sol · medium");
     expect(rendered).toContain("可切换 Provider：DeepSeek、Code Proxy Injected");
-    expect(rendered).toContain("DeepSeek · deepseek-v4-flash-vision-exp · high");
+    expect(rendered).toContain("DeepSeek · deepseek-flash · high");
     expect(rendered).toContain("通讯渠道：Telegram（已启用）");
     expect(rendered).toContain("用户技能目录：1 个技能");
     expect(rendered).toContain("共享第三方子代理：deepseek · deepseek-v4-pro");

@@ -194,9 +194,10 @@ Provider 操作或启动任务时，先向所有已知授权渠道发布一次�
 任务结束时关闭 Client 不会额外发送这条提示。
 
 `/mcp login` 在当前会话已绑定 Thread 时返回安全授权地址；浏览器流程结束后，Gateway 只把带有
-该 Thread 的官方 OAuth 完成通知显示为“MCP OAuth”成功或失败状态，无法关联 Thread 的通知不向
-渠道广播。失败原因在 Client 边界先脱敏，Telegram 失败通知会启用声音，成功通知保持静默；飞书
-使用 Markdown 卡片，微信使用结构化文本。
+该 Thread 的官方 OAuth 完成通知在 Telegram 和飞书显示为“MCP OAuth”成功或失败状态，无法关联
+Thread 的通知不向渠道广播。失败原因在 Client 边界先脱敏，Telegram 失败通知会启用声音，成功
+通知保持静默；飞书使用 Markdown 卡片。微信为保留单次回复窗口预算，不主动发送该运行时通知，
+仍可通过 `/mcp` 查询当前状态。
 
 `/agents` 无参数时列出内置角色（default/explorer/worker）与 `~/.codex/config.toml` 中
 配置的角色（如共享第三方角色 `agents.external`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
@@ -207,11 +208,11 @@ Provider 操作或启动任务时，先向所有已知授权渠道发布一次�
 显示“子代理 · <代理路径>”（如 `/root/ds_probe`），其余显示“主会话”。该标注持久化在
 指标库 `subagent_threads` 表中，`/metrics threads` 与 WebUI Threads 页面共用同一份数据。
 
-渠道开始通知：Gateway 在官方 `subAgentActivity.started` Item 完成后向父会话发送一次简短的
+Telegram 和飞书的渠道开始通知：Gateway 在官方 `subAgentActivity.started` Item 完成后向父会话发送一次简短的
 “子代理开始 · 任务名”，不展示子线程 ID；后续 `interacted` 显示为“子代理继续 · 任务名”，
 不改变正在运行的子代理存活状态；上一轮已经终止时会开启新一轮完成跟踪，`interrupted` 不会重复显示为开始。
 
-渠道完成通知：成功运行只以 App Server 发给发起父 Turn 的 `subAgentActivity.completed` 为事实
+Telegram 和飞书的渠道完成通知：成功运行只以 App Server 发给发起父 Turn 的 `subAgentActivity.completed` 为事实
 来源，并按父 Thread、父 Turn、子 Thread 与代理路径精确匹配；子线程自己的 `turn/completed` 和
 等待工具状态不再重复宣布成功。失败与中断仍使用子线程官方终态、中断活动或
 `collabAgentToolCall.agentsStates` 的异常状态。Gateway 不根据模型请求静默时间猜测完成。同一
@@ -227,9 +228,10 @@ Provider 操作或启动任务时，先向所有已知授权渠道发布一次�
 不把未知值冒充零。卡片展示任务名、模型、提供商、可可靠观测的思考等级、请求次数与 Token；
 正式模式保留 Token 总计，调试模式才展开输入缓存、未缓存输入、输出、推理输出和缓存命中率。
 
-`display.operation_updates = "compact"` 时，三个渠道仍展示子代理启动和失败，但不再为成功的
+`display.operation_updates = "compact"` 时，Telegram 和飞书仍展示子代理启动和失败，但不再为成功的
 `wait`、`sendInput`、`resumeAgent`、`closeAgent` 分别发送“已完成”卡片；`full` 保留这些操作详情，
-`hidden` 隐藏全部操作过程。该设置只控制过程展示，不改变官方终态和子代理完成统计。
+`hidden` 隐藏全部操作过程。该设置只控制这两个渠道的过程展示，不改变官方终态和子代理完成统计。
+微信不主动发送操作或子代理过程事件，以保留单次回复窗口预算。
 同一 Turn 的成功 MCP、动态工具等查询操作会延迟聚合：单项保留详情，多项按类别汇总次数，并
 展示最多 8 个去重后的查询详情及各自次数；超出时明确省略数量。飞书网页搜索仍在
 完成后立即显示，不进入该聚合。
@@ -249,11 +251,11 @@ Turn 的启动回复直接登记为 Thread 状态消息，后续 `active` 不再
 这张回复并保留扩展身份。
 
 Turn 推理期间，Gateway 消费官方 `item/reasoning/summaryTextDelta`、`summaryPartAdded` 与
-`textDelta` 通知，在渠道按顺序展示“思考中…”状态；连续思考只显示一次，操作打断后再次思考时
-重新显示一次。每段独立从 0 开始计时，超过 1 秒时附“耗时”字段并每秒流式原地更新；飞书
-使用每段一张的流式卡片，Telegram 原地编辑同一条面板，微信只在该段结束时发送一条“思考中+耗时”
-文本。`display.reasoning = false` 时三渠道都不显示思考状态；摘要与原始思维链内容不进入渠道；
-首个回复增量、Turn 错误或完成时结束本段。
+`textDelta` 通知。飞书和 Telegram 按顺序展示“思考中…”状态；连续思考只显示一次，操作打断后
+再次思考时重新显示一次。每段独立从 0 开始计时，超过 1 秒时附“耗时”字段并每秒流式原地更新；
+飞书使用每段一张的流式卡片，Telegram 原地编辑同一条面板。微信不主动发送推理状态，以保留单次
+回复窗口预算。`display.reasoning = false` 时关闭支持渠道的思考状态；摘要与原始思维链内容不进入
+渠道；首个回复增量、Turn 错误或完成时结束本段。
 
 Turn 的 `misalignmentPolicyViolation` 结构化错误只在边界和 Core 中保留窄分类，完成卡片统一显示
 “请求因安全策略不一致而终止，请调整请求内容或目标后重试。”；上游自由文本和额外细节不直接作为

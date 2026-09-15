@@ -10,13 +10,8 @@
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
-- [`docs/webui-settings-plan.md`](docs/webui-settings-plan.md)：WebUI 设置页、CLI 可视化边界、管理接口阶段与验收计划。
-- [`docs/webui-data-unification-plan.md`](docs/webui-data-unification-plan.md)：官方账户数据、Gateway 统计、计算结果、WebUI 与渠道卡片的统一数据链路和分阶段改造步骤。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
-- [`docs/cli-audit.md`](docs/cli-audit.md)：CLI 全链路逐命令审查记录与后续统一修复依据。
-- [`docs/config-unification-plan.md`](docs/config-unification-plan.md)：配置格式、交互文案、生命周期和 WebUI 的分阶段统一改造计划。
-- [`docs/module-chain-audit.md`](docs/module-chain-audit.md)：按一级模块逐个记录的链路审查结果与待审查顺序。
 
 ## 发行记录
 
@@ -33,11 +28,9 @@
 
 ## 协议与设计
 
-- [`docs/module-closure-plan.md`](docs/module-closure-plan.md)：链路闭环后的模块结构收口批次、依赖、验收标准与停止条件。
-- [`docs/management-interfaces-development.md`](docs/management-interfaces-development.md)：Setup、Config、安装和更新命令面向未来本机可视化的结构化接口演进计划与进度。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
-- [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 原生支持的
-  Transport、IPC、凭据、进程、服务、CI 分阶段计划与发布门槛。
+- [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 开发预览的
+  当前边界、实现入口、验证范围与正式发布门槛。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。
